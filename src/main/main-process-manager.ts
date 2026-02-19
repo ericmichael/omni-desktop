@@ -79,6 +79,7 @@ export class MainProcessManager {
         nodeIntegration: true,
         contextIsolation: true,
         devTools: true,
+        webviewTag: true,
       },
       autoHideMenuBar: true, // Hide the menu bar
       frame: true, // Keep window frame/chrome

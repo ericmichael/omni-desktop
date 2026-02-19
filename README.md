@@ -1,138 +1,87 @@
-# Launcher for Invoke Community Edition
+# Omni Code Launcher
 
-The launcher is a desktop application for Windows, macOS (Apple Silicon) and Linux.
+A desktop application for managing [Omni Code](https://github.com/emm/omni-code) installations and sandboxes on Windows, macOS (Apple Silicon) and Linux.
 
-It can install, update, reinstall and run Invoke Community Edition. It is self-contained, so you don't need to worry about having the right python version installed.
+The launcher handles installing the Omni Code runtime, managing Python environments, and launching Docker-based sandboxes with optional code-server and noVNC desktop access.
 
-## How to get the Launcher
+## Features
 
-Click the link for your system to download the latest version of the launcher.
+- **One-click install** of the Omni Code runtime (Python + venv managed automatically via `uv`)
+- **Sandbox management** — launch Docker containers with workspace mounting, env file support, and configurable services
+- **Embedded webviews** — access the Omni UI, code-server, and noVNC desktop directly in the launcher with tab/split layouts
+- **Dev console** — built-in terminal with automatic venv activation
+- **Auto-updates** — the launcher checks for updates on startup
 
-- [Download for Windows](https://github.com/invoke-ai/launcher/releases/latest/download/Invoke.Community.Edition.Setup.latest.exe)
-- [Download for macOS](https://github.com/invoke-ai/launcher/releases/latest/download/Invoke.Community.Edition-latest-arm64.dmg)
-- [Download for Linux](https://github.com/invoke-ai/launcher/releases/latest/download/Invoke.Community.Edition-latest.AppImage)
+## Requirements
 
-You can also download all releases, including prerelease versions, from this repo's [GitHub releases](https://github.com/invoke-ai/launcher/releases).
+- **Docker** must be installed and running on the host for sandbox functionality
+- Node **22+** for development
 
-<img width="912" alt="image" src="https://github.com/user-attachments/assets/cd676db3-b8e6-4dcc-b7a9-e442ed98a616" />
+## Getting Started
 
-## FAQ
+### Download
 
-### Using the launcher to update Invoke
+<!-- TODO: Update links when releases are published -->
+Download the latest release from [GitHub Releases](https://github.com/emm/omni-code-launcher/releases).
 
-You can install the latest stable release or latest prerelease versions of Invoke using the launcher.
+### Usage
 
-### Updating the launcher itself
+1. Open the launcher and click **Install** to set up the Omni Code runtime
+2. Select a **workspace directory** for your project
+3. Optionally select an **env file** and toggle code-server / desktop / Dockerfile.work
+4. Click **Start Sandbox** to launch
 
-The Launcher checks for updates once on startup and prompts you if one is available. It will update itself if you accept the update.
-
-### Problems while installing Invoke via Launcher
-
-If installation fails, retrying the install in Repair Mode may fix it. There's a checkbox to enable this on the Review step of the install flow.
-
-If that doesn't fix it, [clearing the `uv` cache](https://docs.astral.sh/uv/reference/cli/#uv-cache-clean) might do the trick:
-
-- Open and start the dev console (button at the bottom-left of the launcher).
-- Run `uv cache clean`.
-- Retry the installation. Enable Repair Mode for good measure.
-
-If you are still unable to install, try installing to a different location and see if that works.
-
-If you still have problems, ask for help on the Invoke [discord](https://discord.gg/ZmtBAhwWhy).
-
-### Compared to the "old" install/invoke scripts
-
-Like the install script, the launcher creates and manages a normal python virtual environment.
-
-> We suggest leaving the `venv` alone and letting the launcher manage it, but you can interact with it like you would any `venv` if you need to.
-
-Unlike the invoke script, the launcher provides a GUI to run the app.
-
-### What happens to the "old" install/invoke scripts?
-
-The "old" scripts will be phased out over time. The goal is to support 3 ways to install and run Invoke:
-
-- Launcher
-- Docker
-- Manual (e.g. create a `venv` manually, install the `invokeai` package, run it as a script)
-
-### Can I still use the "old" install/invoke scripts?
-
-Yes, but we won't keep them updated for too much longer. Theoretically, they should continue to work for some time, even without updates.
-
-## Technical Details
-
-The launcher is an [electron](https://github.com/electron/electron) application with [React](https://github.com/facebook/react) UI. We bundle [`uv`](https://github.com/astral-sh/uv) with the build and then call it to install python, create the app `venv`, and run the app.
-
-<details>
-
-<summary>Why Electron?</summary>
-
-There are a number of lighter-weight systems that enable cross-platform builds. [Tauri](https://tauri.app/) is probably the most popular, but there are others.
-
-These other systems use the OS-provided engine to render their UIs. That means on Windows uses WebView2 (Chromium), macOS uses WebKit (Safari), and Linux uses WebKitGTK (basically a Linux port of Safari), and the version of the engine depends on the computer.
-
-The result is an inconsistent user experience, and increased workload for devs to support the various rendering engines.
-
-Electron uses the same version of Chrome for all platforms. We only need to build for one rendering engine target, and we can be far more confident in a consistent, bug-free application.
-
-Electron uses about 10x more disk space than something like Tauri, but we're still only talking ~150MB max. You are going to install _many_ GB of models, right? The extra disk usage is a drop in the bucket and both devs and users have a much better experience.
-
-</details>
-
-## Contributing
-
-Contributions are welcome!
-
-If you want to contribute something more than a simple bug fix, please first check in with us on [discord](https://discord.gg/ZmtBAhwWhy). Ping @psychedelicious in the `dev-chat` or `installer-chat` forums.
+## Development
 
 ### Dev Environment
 
-This project uses node 22 and npm as its package manager.
+This project uses Node 22 and npm.
 
-- Run `npm i` to install all packages. See the next section to get `uv` set up.
-- Run `npm run start` to start the launcher in dev mode.
-- Run `npm run lint` to run code quality checks.
-
-### Build
-
-Building the launcher is very simple:
-
-- `npm i`: install dependencies
-- `npm run app:dist`: build for your system's platform
-
-As described in the next section, you do need to manually download the `uv` binary to get a functioning build.
+```sh
+npm i
+npm run download linux  # or: win, mac
+npm run dev
+```
 
 ### Getting `uv` for local dev
 
-The `uv` binary is required to build the project locally or run the launcher in development mode.
-
-To fetch the `uv` binary for your operating system, use the following script. Replace PLATFORM with one of the following options based on your system:
-
-- `linux` for Linux
-- `win` for Windows
-- `mac` for macOS
+The `uv` binary is required to build or run the launcher in development mode.
 
 ```sh
-npm run download PLATFORM
+npm run download PLATFORM  # linux | win | mac
 ```
 
-This will download the appropriate `uv` binary and place it in the `assets/bin/` directory, which matches the file structure expected by the build process.
-
-On macOS, you may need to remove the quarantine flag from the `uv` binary:
+This downloads `uv` into `assets/bin/`. On macOS, you may need to remove the quarantine flag:
 
 ```sh
-xattr -d 'com.apple.quarantine' assets/bin/uv`
+xattr -d 'com.apple.quarantine' assets/bin/uv
 ```
+
+### Build
+
+```sh
+npm i
+npm run build
+npm run package
+```
+
+### Useful commands
+
+- `npm run dev` — run in development with hot reload
+- `npm run lint` — run all checks (ESLint, Prettier, TypeScript, knip, dpdm)
+- `npm run fix` — auto-fix lint + format
+- `npm test` — run unit tests
 
 ### Code Signing
 
 Local builds may require you to manually allow them to run on Windows and macOS.
 
-Windows will prompt you to allow the app to run, but on macOS it may refuse, saying the app is damaged. Remove the quarantine flag from the `.app` package to resolve this:
+On macOS, remove the quarantine flag if the app is rejected:
 
-```zsh
-xattr -d 'com.apple.quarantine' /Applications/Invoke\ Community\ Edition.app
+```sh
+xattr -d 'com.apple.quarantine' /Applications/Omni\ Code.app
 ```
 
-Windows and macOS production builds built via the `.github/workflows/build-and-sign.yml` workflow are signed. Linux builds are never signed.
+## License
+
+Apache-2.0

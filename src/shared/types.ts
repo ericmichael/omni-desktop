@@ -45,13 +45,18 @@ export type WindowProps = {
 /**
  * Data stored in the electron store.
  */
+export type LayoutMode = 'work' | 'code' | 'desktop';
+
 export type StoreData = {
-  installDir?: string;
-  serverMode: boolean;
-  notifyForPrereleaseUpdates: boolean;
+  workspaceDir?: string;
+  envFilePath?: string;
+  enableCodeServer: boolean;
+  enableVnc: boolean;
+  useWorkDockerfile: boolean;
   launcherWindowProps?: WindowProps;
   appWindowProps?: WindowProps;
   optInToLauncherPrereleases: boolean;
+  layoutMode: LayoutMode;
 };
 
 // The electron store uses JSON schema to validate its data.
@@ -80,22 +85,34 @@ const winSizePropsSchema = {
  * JSON schema for the store data.
  */
 export const schema: Schema<StoreData> = {
-  installDir: {
+  workspaceDir: {
     type: 'string',
   },
-  serverMode: {
-    type: 'boolean',
-    default: false,
+  envFilePath: {
+    type: 'string',
   },
-  notifyForPrereleaseUpdates: {
+  enableCodeServer: {
     type: 'boolean',
-    default: false,
+    default: true,
+  },
+  enableVnc: {
+    type: 'boolean',
+    default: true,
+  },
+  useWorkDockerfile: {
+    type: 'boolean',
+    default: true,
   },
   launcherWindowProps: winSizePropsSchema,
   appWindowProps: winSizePropsSchema,
   optInToLauncherPrereleases: {
     type: 'boolean',
     default: false,
+  },
+  layoutMode: {
+    type: 'string',
+    enum: ['work', 'code', 'desktop'],
+    default: 'work',
   },
 };
 
@@ -127,52 +144,6 @@ export type OperatingSystem = 'Windows' | 'macOS' | 'Linux';
 type Namespaced<Prefix extends string, T, Sep extends string = ':'> = {
   [K in keyof T as `${Prefix}${Sep}${string & K}`]: T[K];
 };
-
-/**
- * Details about a candidate directory for installation.
- */
-export type DirDetails =
-  // Directory is installed and can be launched
-  | {
-      path: string;
-      isInstalled: true;
-      canInstall: true;
-      isDirectory: true;
-      isFirstRun: boolean;
-      version: string;
-      pythonVersion: string;
-      pythonPath: string;
-      invokeExecPath: string;
-      activateVenvPath: string;
-    }
-  // Directory is not installed but can be installed
-  | {
-      path: string;
-      isDirectory: true;
-      isInstalled: false;
-      canInstall: true;
-    }
-  // Directory is not installed and can not be installed
-  | {
-      path: string;
-      isDirectory: false;
-      isInstalled: false;
-      canInstall: false;
-    };
-
-/**
- * The type of installation to perform along with some context.
- */
-export type InstallType =
-  | {
-      type: 'fresh';
-      newVersion: string;
-    }
-  | {
-      type: 'reinstall' | 'upgrade' | 'downgrade' | 'manual';
-      newVersion: string;
-      installedVersion: string;
-    };
 
 /**
  * A status object that may optionally contain data. It represents an OK/good status.
@@ -207,51 +178,28 @@ type Status<State extends string> = OkStatus<State> | ErrorStatus;
  */
 export type MainProcessStatus = Status<'initializing' | 'idle' | 'exiting'>;
 
-/**
- * The various states the install process can be in.
- */
-export type InstallProcessStatus = Status<
+export type OmniInstallProcessStatus = Status<
   'uninitialized' | 'starting' | 'installing' | 'canceling' | 'exiting' | 'completed' | 'canceled'
 >;
 
-/**
- * The various states the invoke process can be in.
- */
-export type InvokeProcessStatus =
-  | Status<'uninitialized' | 'starting' | 'exiting' | 'exited'>
+export type SandboxProcessStatus =
+  | Status<'uninitialized' | 'starting' | 'stopping' | 'exiting' | 'exited'>
   | OkStatus<
       'running',
       {
-        /**
-         * The URL at which the server is running. The user can access the server from the host machine using this URL.
-         */
-        loopbackUrl: string;
-        /**
-         * The URL at which the server is running on the LAN. The user can access the server from other devices on the
-         * same network using this URL. This field is only present if the server is accessible on the LAN.
-         */
-        lanUrl?: string;
-        /**
-         * The URL at which the server is running as reported by uvicorn. It may have 0.0.0.0 as the host.
-         *
-         * You probably want to use `loopbackUrl` instead.
-         */
-        url: string;
-      }
-    >
-  | OkStatus<
-      'window-crashed',
-      {
-        /**
-         * The URL at which the server is still running. The process is alive but the window crashed.
-         */
-        loopbackUrl: string;
-        lanUrl?: string;
-        url: string;
-        /**
-         * The reason for the crash if available.
-         */
-        crashReason?: string;
+        sandboxUrl: string;
+        wsUrl: string;
+        uiUrl: string;
+        codeServerUrl?: string;
+        noVncUrl?: string;
+        containerId?: string;
+        containerName?: string;
+        ports: {
+          sandbox: number;
+          ui: number;
+          codeServer?: number;
+          vnc?: number;
+        };
       }
     >;
 
@@ -272,6 +220,17 @@ export type LogEntry = {
  * A type that adds a timestamp to an object.
  */
 export type WithTimestamp<T> = T & { timestamp: number };
+
+export type OmniRuntimeInfo =
+  | {
+      isInstalled: false;
+    }
+  | {
+      isInstalled: true;
+      version: string;
+      pythonVersion: string;
+      omniPath: string;
+    };
 
 /**
  * Store API. Main process handles these events, renderer process invokes them.
@@ -298,29 +257,28 @@ type MainProcessIpcEvents = Namespaced<
   }
 >;
 
-/**
- * Install Process API. Main process handles these events, renderer process invokes them.
- */
-type InstallProcessIpcEvents = Namespaced<
-  'install-process',
+type OmniInstallProcessIpcEvents = Namespaced<
+  'omni-install-process',
   {
-    'get-status': () => WithTimestamp<InstallProcessStatus>;
-    'start-install': (location: string, gpuType: GpuType, version: string, repair?: boolean) => void;
+    'get-status': () => WithTimestamp<OmniInstallProcessStatus>;
+    'start-install': (repair?: boolean) => void;
     'cancel-install': () => void;
     resize: (cols: number, rows: number) => void;
   }
 >;
 
-/**
- * Invoke Process API. Main process handles these events, renderer process invokes them.
- */
-type InvokeProcessIpcEvents = Namespaced<
-  'invoke-process',
+type SandboxProcessIpcEvents = Namespaced<
+  'sandbox-process',
   {
-    'get-status': () => WithTimestamp<InvokeProcessStatus>;
-    'start-invoke': (location: string) => void;
-    'exit-invoke': () => void;
-    'reopen-window': () => void;
+    'get-status': () => WithTimestamp<SandboxProcessStatus>;
+    start: (arg: {
+      workspaceDir: string;
+      envFilePath?: string;
+      enableCodeServer: boolean;
+      enableVnc: boolean;
+      useWorkDockerfile: boolean;
+    }) => void;
+    stop: () => void;
     resize: (cols: number, rows: number) => void;
   }
 >;
@@ -332,15 +290,21 @@ type UtilIpcEvents = Namespaced<
   'util',
   {
     'select-directory': (path?: string) => string | null;
+    'select-file': (path?: string) => string | null;
     'get-home-directory': () => string;
     'get-is-directory': (path: string) => boolean;
     'get-is-file': (path: string) => boolean;
     'get-path-exists': (path: string) => boolean;
     'get-os': () => OperatingSystem;
-    'get-dir-details': (path: string) => DirDetails;
     'get-default-install-dir': () => string;
+    'get-default-workspace-dir': () => string;
+    'get-default-env-file-path': () => string | null;
+    'ensure-directory': (path: string) => boolean;
     'open-directory': (path: string) => string;
     'get-launcher-version': () => string;
+    'get-omni-runtime-info': () => OmniRuntimeInfo;
+    'check-url': (url: string) => boolean;
+    'check-ws': (url: string) => boolean;
   }
 >;
 
@@ -362,8 +326,8 @@ type TerminalIpcEvents = Namespaced<
  * Intersection of all the events that the renderer can invoke and main process can handle.
  */
 export type IpcEvents = MainProcessIpcEvents &
-  InstallProcessIpcEvents &
-  InvokeProcessIpcEvents &
+  OmniInstallProcessIpcEvents &
+  SandboxProcessIpcEvents &
   UtilIpcEvents &
   TerminalIpcEvents &
   StoreIpcEvents;
@@ -399,27 +363,20 @@ type MainProcessIpcRendererEvents = Namespaced<
   }
 >;
 
-/**
- * Install process events. Main process emits these events, renderer process listens to them.
- */
-type InstallProcessIpcRendererEvents = Namespaced<
-  'install-process',
+type OmniInstallProcessIpcRendererEvents = Namespaced<
+  'omni-install-process',
   {
-    status: [WithTimestamp<InstallProcessStatus>];
+    status: [WithTimestamp<OmniInstallProcessStatus>];
     log: [WithTimestamp<LogEntry>];
     'raw-output': [string];
   }
 >;
 
-/**
- * Invoke process events. Main process emits these events, renderer process listens to them.
- */
-type InvokeProcessIpcRendererEvents = Namespaced<
-  'invoke-process',
+type SandboxProcessIpcRendererEvents = Namespaced<
+  'sandbox-process',
   {
-    status: [WithTimestamp<InvokeProcessStatus>];
+    status: [WithTimestamp<SandboxProcessStatus>];
     log: [WithTimestamp<LogEntry>];
-    'clear-logs': [];
     'raw-output': [string];
   }
 >;
@@ -439,7 +396,7 @@ type DevIpcRendererEvents = Namespaced<
  */
 export type IpcRendererEvents = TerminalIpcRendererEvents &
   MainProcessIpcRendererEvents &
-  InstallProcessIpcRendererEvents &
-  InvokeProcessIpcRendererEvents &
+  OmniInstallProcessIpcRendererEvents &
+  SandboxProcessIpcRendererEvents &
   DevIpcRendererEvents &
   StoreIpcRendererEvents;

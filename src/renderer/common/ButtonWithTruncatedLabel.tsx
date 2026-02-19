@@ -1,19 +1,20 @@
-import type { ButtonProps } from '@invoke-ai/ui-library';
-import { Box, Button } from '@invoke-ai/ui-library';
+import type { ReactNode } from 'react';
 
-export const ButtonWithTruncatedLabel = ({ children, ...buttonProps }: ButtonProps) => {
+import { Button, cn } from '@/renderer/ds';
+
+type ButtonWithTruncatedLabelProps = {
+  variant?: 'primary' | 'ghost' | 'destructive' | 'link';
+  size?: 'sm' | 'md' | 'lg';
+  isDisabled?: boolean;
+  className?: string;
+  onClick?: () => void;
+  children?: ReactNode;
+};
+
+export const ButtonWithTruncatedLabel = ({ children, ...buttonProps }: ButtonWithTruncatedLabelProps) => {
   return (
     <Button {...buttonProps}>
-      <Box
-        as="span"
-        noOfLines={1}
-        overflow="hidden"
-        wordBreak="break-all"
-        textOverflow="ellipsis"
-        whiteSpace="break-spaces"
-      >
-        {children}
-      </Box>
+      <span className={cn('overflow-hidden text-ellipsis whitespace-nowrap break-all line-clamp-1')}>{children}</span>
     </Button>
   );
 };

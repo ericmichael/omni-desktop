@@ -17,8 +17,8 @@ const getWindowsSigningOptions = (): Partial<WindowsConfiguration> => {
 };
 
 export default {
-  appId: 'com.invoke.invoke-community-edition',
-  productName: 'Invoke Community Edition',
+  appId: 'com.omni.omni-code',
+  productName: 'Omni Code',
   directories: {
     output: 'dist',
   },
@@ -39,8 +39,8 @@ export default {
   },
   publish: {
     provider: 'github',
-    owner: 'invoke-ai',
-    repo: 'launcher',
+    owner: 'emm',
+    repo: 'omni-code-launcher',
   },
   electronFuses: {
     runAsNode: false,

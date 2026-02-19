@@ -7,7 +7,7 @@ import path from 'path';
 import { promisify } from 'util';
 
 import { withResultAsync } from '@/lib/result';
-import type { DirDetails, GpuType, OperatingSystem, WindowProps } from '@/shared/types';
+import type { GpuType, OmniRuntimeInfo, OperatingSystem, WindowProps } from '@/shared/types';
 
 const execAsync = promisify(exec);
 
@@ -45,13 +45,22 @@ export const getUVExecutablePath = (): string => {
   return path.join(getBundledBinPath(), uvName);
 };
 
-/**
- * Gets the path to the invoke executable in the given installation location
- */
-const getInvokeExecPath = (installLocation: string): string => {
-  return process.platform === 'win32'
-    ? path.join(installLocation, '.venv', 'Scripts', 'invokeai-web.exe')
-    : path.join(installLocation, '.venv', 'bin', 'invokeai-web');
+export const getOmniRuntimeDir = (): string => {
+  return path.join(app.getPath('userData'), 'omni');
+};
+
+export const getOmniVenvPath = (): string => {
+  return path.join(getOmniRuntimeDir(), '.venv');
+};
+
+export const getOmniPythonPath = (): string => {
+  const venvPath = getOmniVenvPath();
+  return path.join(venvPath, process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+};
+
+export const getOmniCliPath = (): string => {
+  const venvPath = getOmniVenvPath();
+  return path.join(venvPath, process.platform === 'win32' ? 'Scripts/omni.exe' : 'bin/omni');
 };
 
 /**
@@ -93,6 +102,27 @@ export const getTorchPlatform = (gpuType: GpuType): 'cuda' | 'rocm' | 'cpu' => {
         // Default to cuda because in reality this is the most common gpu type at the moment
         return 'cuda';
     }
+  }
+};
+
+//#endregion
+
+//#region Convention defaults
+
+export const getDefaultWorkspaceDir = (): string => {
+  return path.join(app.getPath('home'), 'Omni', 'Workspace');
+};
+
+export const getDefaultEnvFilePath = (): string => {
+  return path.join(app.getPath('home'), 'Omni', '.env');
+};
+
+export const ensureDirectory = async (dirPath: string): Promise<boolean> => {
+  try {
+    await fs.mkdir(dirPath, { recursive: true });
+    return true;
+  } catch {
+    return false;
   }
 };
 
@@ -148,10 +178,6 @@ export const pathExists = async (path: string): Promise<boolean> => {
   }
 };
 
-const getPythonPathForVenv = (venvPath: string): string => {
-  return path.join(venvPath, process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
-};
-
 /**
  * Get the version of python at the provided path.
  *
@@ -186,66 +212,27 @@ const getPackageVersion = async (pythonPath: string, packageName: string): Promi
   return result.value.replace(/[\r\n]+/g, '');
 };
 
-/**
- * Check if an existing installation is present at the given location.
- *
- * We assume the path is an existing install if:
- * - It is a directory
- * - It contains a `.venv` directory
- * - It contains a `invokeai.yaml` file
- *
- * @param installLocation The location to check for an existing installation
- * @returns Whether an existing installation is present at the given location
- */
-export const getInstallationDetails = async (installLocation: string): Promise<DirDetails> => {
-  // Must be a directory
-  if (!(await isDirectory(installLocation))) {
-    return {
-      path: installLocation,
-      isInstalled: false,
-      isDirectory: false,
-      canInstall: false,
-    };
+export const getOmniRuntimeInfo = async (): Promise<OmniRuntimeInfo> => {
+  const omniPath = getOmniCliPath();
+  const pythonPath = getOmniPythonPath();
+
+  if (!(await isFile(omniPath)) || !(await isFile(pythonPath))) {
+    return { isInstalled: false };
   }
 
-  const venvPath = path.join(installLocation, '.venv');
-
-  // Must contain a `.venv` directory
-  if (!(await isDirectory(venvPath))) {
-    return {
-      path: installLocation,
-      isInstalled: false,
-      isDirectory: true,
-      canInstall: true,
-    };
-  }
-
-  const pythonPath = getPythonPathForVenv(venvPath);
-
-  const version = await getPackageVersion(pythonPath, 'invokeai');
+  const version = await getPackageVersion(pythonPath, 'omni-code');
 
   if (!version) {
-    return {
-      path: installLocation,
-      isDirectory: true,
-      isInstalled: false,
-      canInstall: true,
-    };
+    return { isInstalled: false };
   }
 
-  const isFirstRun = !(await isFile(path.join(installLocation, 'invokeai.yaml')));
+  const pythonVersion = await getPythonVersion(pythonPath);
 
   return {
-    path: installLocation,
     isInstalled: true,
-    isDirectory: true,
-    isFirstRun,
-    canInstall: true,
-    version: version.startsWith('v') ? version : `v${version}`, // Make it consistent w/ our tagging format
-    pythonVersion: await getPythonVersion(pythonPath),
-    pythonPath,
-    invokeExecPath: getInvokeExecPath(installLocation),
-    activateVenvPath: getActivateVenvPath(installLocation),
+    version,
+    pythonVersion,
+    omniPath,
   };
 };
 

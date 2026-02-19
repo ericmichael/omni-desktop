@@ -1,0 +1,152 @@
+@import 'tailwindcss';
+
+@font-face {
+  font-family: JetBrainsMonoNerdFont;
+  src: url(../assets/fonts/JetBrainsMonoNerdFont-Regular.ttf) format(truetype);
+  font-weight: normal;
+  font-style: normal;
+}
+
+@theme {
+  /* Surface colors */
+  --color-surface: #09090b;
+  --color-surface-raised: #18181b;
+  --color-surface-overlay: #27272a;
+  --color-surface-border: #3f3f46;
+
+  /* Foreground colors */
+  --color-fg: #fafafa;
+  --color-fg-muted: #a1a1aa;
+  --color-fg-subtle: #71717a;
+  --color-fg-error: #f87171;
+
+  /* Accent (indigo) palette */
+  --color-accent-50: #eef2ff;
+  --color-accent-100: #e0e7ff;
+  --color-accent-200: #c7d2fe;
+  --color-accent-300: #a5b4fc;
+  --color-accent-400: #818cf8;
+  --color-accent-500: #6366f1;
+  --color-accent-600: #4f46e5;
+  --color-accent-700: #4338ca;
+  --color-accent-800: #3730a3;
+  --color-accent-900: #312e81;
+  --color-accent-950: #1e1b4b;
+
+  /* Fonts */
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: JetBrainsMonoNerdFont, ui-monospace, monospace;
+
+  /* Animations */
+  --animate-ellipsis: ellipsis 1.4s infinite;
+  --animate-pulse-glow: pulse-glow 2s ease-in-out infinite;
+  --animate-spin-slow: spin 1.5s linear infinite;
+  --animate-jump-shake: jump-shake 0.4s ease-in-out;
+
+  @keyframes ellipsis {
+    0% {
+      content: '';
+    }
+    25% {
+      content: '.';
+    }
+    50% {
+      content: '..';
+    }
+    75% {
+      content: '...';
+    }
+  }
+
+  @keyframes pulse-glow {
+    0%,
+    100% {
+      box-shadow: 0 0 8px 0 rgb(99 102 241 / 0.3);
+    }
+    50% {
+      box-shadow: 0 0 20px 4px rgb(99 102 241 / 0.4);
+    }
+  }
+
+  @keyframes jump-shake {
+    0% {
+      transform: translateY(0);
+    }
+    25% {
+      transform: translateY(-3px) rotate(-2deg);
+    }
+    50% {
+      transform: translateY(0) rotate(2deg);
+    }
+    75% {
+      transform: translateY(-1px) rotate(-1deg);
+    }
+    100% {
+      transform: translateY(0);
+    }
+  }
+}
+
+/* XTerm CSS vars for terminal theming */
+:root {
+  --xterm-bg: transparent;
+  --xterm-fg: #fafafa;
+  --xterm-black: #fafafa;
+  --xterm-bright-black: #fafafa;
+  --xterm-white: #09090b;
+  --xterm-bright-white: #09090b;
+  --xterm-cursor: #fafafa;
+  --xterm-cursor-accent: #09090b;
+  --xterm-blue: #818cf8;
+  --xterm-bright-blue: #818cf8;
+  --xterm-cyan: #2dd4bf;
+  --xterm-bright-cyan: #2dd4bf;
+  --xterm-green: #4ade80;
+  --xterm-bright-green: #4ade80;
+  --xterm-yellow: #facc15;
+  --xterm-bright-yellow: #facc15;
+  --xterm-red: #f87171;
+  --xterm-bright-red: #f87171;
+  --xterm-magenta: #c084fc;
+  --xterm-bright-magenta: #c084fc;
+}
+
+/* Base styles */
+::selection {
+  background-color: rgb(99 102 241 / 0.3);
+}
+
+*:focus-visible {
+  outline: 2px solid rgb(99 102 241 / 0.5);
+  outline-offset: 2px;
+}
+
+/* Scrollbar styling */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f46 transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+}
+
+/* Prevent text selection on UI elements */
+button,
+[role='button'] {
+  user-select: none;
+}

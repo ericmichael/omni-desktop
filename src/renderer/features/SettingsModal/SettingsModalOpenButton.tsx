@@ -1,12 +1,11 @@
-import type { IconButtonProps } from '@invoke-ai/ui-library';
-import { IconButton } from '@invoke-ai/ui-library';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback } from 'react';
 import { PiGearFill } from 'react-icons/pi';
 
+import { IconButton } from '@/renderer/ds';
 import { $isSettingsOpen } from '@/renderer/features/SettingsModal/state';
 
-export const SettingsModalOpenButton = memo((props: Omit<IconButtonProps, 'aria-label'>) => {
+export const SettingsModalOpenButton = memo(({ className }: { className?: string }) => {
   const isOpen = useStore($isSettingsOpen);
   const onClick = useCallback(() => {
     $isSettingsOpen.set(true);
@@ -14,13 +13,10 @@ export const SettingsModalOpenButton = memo((props: Omit<IconButtonProps, 'aria-
   return (
     <IconButton
       aria-label="Settings"
-      variant="link"
-      minW={10}
-      minH={10}
       onClick={onClick}
       icon={<PiGearFill />}
       isDisabled={isOpen}
-      {...props}
+      className={className}
     />
   );
 });

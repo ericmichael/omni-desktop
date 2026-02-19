@@ -1,11 +1,7 @@
-import type { TextProps } from '@invoke-ai/ui-library';
-import { Text } from '@invoke-ai/ui-library';
 import type { PropsWithChildren } from 'react';
 
-export const Strong = ({ children, ...textProps }: PropsWithChildren<TextProps>) => {
-  return (
-    <Text fontSize="md" as="span" fontWeight="semibold" {...textProps}>
-      {children}
-    </Text>
-  );
+import { cn } from '@/renderer/ds';
+
+export const Strong = ({ children, className }: PropsWithChildren<{ className?: string }>) => {
+  return <span className={cn('font-semibold', className)}>{children}</span>;
 };

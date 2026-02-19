@@ -8,8 +8,8 @@ import {
   getActivateVenvCommand,
   getBundledBinPath,
   getHomeDirectory,
-  getInstallationDetails,
   getShell,
+  isDirectory,
 } from '@/main/util';
 import type { IpcEvents, IpcRendererEvents } from '@/shared/types';
 
@@ -92,17 +92,14 @@ export class ConsoleManager {
       this.consoleEntry.process.write(`export PATH="${getBundledBinPath()}:$PATH"\r`);
     }
 
-    if (cwd) {
-      const installDetails = await getInstallationDetails(cwd);
-      // If the cwd is a valid installation dir, we should activate the venv
-      if (installDetails.isInstalled) {
-        const activateVenvCmd = getActivateVenvCommand(installDetails.path);
+    if (cwd && (await isDirectory(cwd))) {
+      this.consoleEntry.process.write(`cd ${cwd}\r`);
+
+      // If the cwd contains a .venv, activate it
+      const venvPath = `${cwd}/.venv`;
+      if (await isDirectory(venvPath)) {
+        const activateVenvCmd = getActivateVenvCommand(cwd);
         this.consoleEntry.process.write(`${activateVenvCmd}\r`);
-      }
-      // If the cwd is a directory, we should cd into it, even if it is not a valid installation dir - the user may
-      // want to run commands there to fix something.
-      if (installDetails.isDirectory) {
-        this.consoleEntry.process.write(`cd ${cwd}\r`);
       }
     }
   }

@@ -1,6 +1,6 @@
-import { Button } from '@invoke-ai/ui-library';
 import { memo, useCallback } from 'react';
 
+import { Button } from '@/renderer/ds';
 import { $isSettingsOpen } from '@/renderer/features/SettingsModal/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 
@@ -10,7 +10,7 @@ export const SettingsModalResetButton = memo(() => {
     $isSettingsOpen.set(false);
   }, []);
   return (
-    <Button size="sm" aria-label="Settings" variant="link" onClick={onClick} colorScheme="error">
+    <Button size="sm" variant="destructive" onClick={onClick}>
       Reset Launcher Settings
     </Button>
   );

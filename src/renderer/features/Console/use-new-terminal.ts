@@ -2,14 +2,14 @@ import { useStore } from '@nanostores/react';
 import { useCallback } from 'react';
 
 import { initializeTerminal } from '@/renderer/features/Console/state';
-import { $installDirDetails } from '@/renderer/services/store';
+import { persistedStoreApi } from '@/renderer/services/store';
 
 export const useNewTerminal = () => {
-  const installDir = useStore($installDirDetails);
+  const store = useStore(persistedStoreApi.$atom);
   const newTerminal = useCallback(() => {
-    const cwd = installDir && installDir.isInstalled ? installDir.path : undefined;
+    const cwd = store.workspaceDir ?? undefined;
     initializeTerminal(cwd);
-  }, [installDir]);
+  }, [store.workspaceDir]);
 
   return newTerminal;
 };

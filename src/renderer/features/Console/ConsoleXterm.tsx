@@ -1,4 +1,3 @@
-import { Box } from '@invoke-ai/ui-library';
 import { debounce } from 'es-toolkit/compat';
 import { memo, useEffect, useRef } from 'react';
 import { assert } from 'tsafe';
@@ -44,17 +43,15 @@ export const ConsoleXterm = memo(({ terminal }: { terminal: TerminalState }) => 
     terminal.xterm.open(el);
     terminal.xterm.focus();
 
-    // Ensure we start with the correct size
     debouncedFitIfOpen();
 
     return () => {
-      // Disposal of the terminal is handled in the close/reset buttons - only need to unsub listeners here
       for (const unsubscribe of subscriptions) {
         unsubscribe();
       }
     };
   }, [terminal.fitAddon, terminal.id, terminal.xterm, theme]);
 
-  return <Box ref={ref} w="full" h="full" />;
+  return <div ref={ref} className="w-full h-full" />;
 });
 ConsoleXterm.displayName = 'ConsoleXterm';

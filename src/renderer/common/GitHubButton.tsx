@@ -1,19 +1,13 @@
-import { IconButton, Link } from '@invoke-ai/ui-library';
 import { memo } from 'react';
 import { PiGithubLogoFill } from 'react-icons/pi';
 
+import { IconButton } from '@/renderer/ds';
+
 export const GitHubButton = memo(() => {
   return (
-    <Link href="https://github.com/invoke-ai/InvokeAI" target="_blank">
-      <IconButton
-        variant="link"
-        minW={10}
-        minH={10}
-        colorScheme="base"
-        aria-label="GitHub"
-        icon={<PiGithubLogoFill />}
-      />
-    </Link>
+    <a href="https://github.com/emm/omni-code" target="_blank" rel="noopener noreferrer">
+      <IconButton aria-label="GitHub" icon={<PiGithubLogoFill />} />
+    </a>
   );
 });
 GitHubButton.displayName = 'GitHubButton';

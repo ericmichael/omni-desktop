@@ -1,47 +1,28 @@
-import type { FlexProps } from '@invoke-ai/ui-library';
-import { Flex } from '@invoke-ai/ui-library';
+import type { HTMLAttributes, PropsWithChildren } from 'react';
 import { memo } from 'react';
 
-/**
- * All content should use this value for the CSS property to ensure consistent spacing.
- * This is a theme spacing token.
- */
-const HEADER_HEIGHT = 48;
+import { cn } from '@/renderer/ds';
 
-/**
- * All footers should use this value for the CSS property to ensure consistent spacing.
- * This is a theme spacing token.
- */
-const FOOTER_HEIGHT = 10;
+type LayoutProps = PropsWithChildren<HTMLAttributes<HTMLDivElement>>;
 
-export const BodyContainer = memo((props: FlexProps) => {
+export const BodyContainer = memo(({ className, ...props }: LayoutProps) => {
   return (
-    <Flex
-      position="relative"
-      w="full"
-      h="full"
-      flexDir="column"
-      alignItems="center"
-      p={4}
-      gap={4}
-      minH={0}
-      {...props}
-    />
+    <div className={cn('relative flex w-full h-full flex-col items-center p-4 gap-4 min-h-0', className)} {...props} />
   );
 });
 BodyContainer.displayName = 'BodyContainer';
 
-export const BodyHeader = memo((props: FlexProps) => {
-  return <Flex w="full" h={HEADER_HEIGHT} flexDir="column" alignItems="center" gap={4} {...props} />;
+export const BodyHeader = memo(({ className, ...props }: LayoutProps) => {
+  return <div className={cn('flex w-full h-12 flex-col items-center gap-4', className)} {...props} />;
 });
 BodyHeader.displayName = 'BodyHeader';
 
-export const BodyContent = memo((props: FlexProps) => {
-  return <Flex w="full" h="full" flexDir="column" alignItems="center" gap={4} minH={0} {...props} />;
+export const BodyContent = memo(({ className, ...props }: LayoutProps) => {
+  return <div className={cn('flex w-full h-full flex-col items-center gap-4 min-h-0', className)} {...props} />;
 });
 BodyContent.displayName = 'BodyContent';
 
-export const BodyFooter = memo((props: FlexProps) => {
-  return <Flex w="full" h={FOOTER_HEIGHT} alignItems="center" justifyContent="flex-end" gap={4} {...props} />;
+export const BodyFooter = memo(({ className, ...props }: LayoutProps) => {
+  return <div className={cn('flex w-full h-10 items-center justify-end gap-4', className)} {...props} />;
 });
 BodyFooter.displayName = 'BodyFooter';

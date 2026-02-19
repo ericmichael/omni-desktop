@@ -1,7 +1,8 @@
-import { Button, Flex, Heading } from '@invoke-ai/ui-library';
 import { memo } from 'react';
 import type { FallbackProps } from 'react-error-boundary';
 import { AssertionError } from 'tsafe';
+
+import { Button, Heading } from '@/renderer/ds';
 
 const getMessage = (error: unknown) => {
   let errorMessage = '';
@@ -15,15 +16,15 @@ const getMessage = (error: unknown) => {
 
 export const ErrorBoundaryFallback = memo(({ error, resetErrorBoundary }: FallbackProps) => {
   return (
-    <Flex flexDir="column" w="full" h="full" alignItems="center" justifyContent="center" gap={4}>
+    <div className="flex flex-col w-full h-full items-center justify-center gap-4">
       <Heading>An error occurred.</Heading>
-      <Heading size="sm" color="error.300">
+      <Heading size="sm" className="text-fg-error">
         Error: {getMessage(error)}
       </Heading>
-      <Button onClick={resetErrorBoundary} colorScheme="invokeYellow" mt={8}>
+      <Button onClick={resetErrorBoundary} className="mt-8">
         Reset
       </Button>
-    </Flex>
+    </div>
   );
 });
 ErrorBoundaryFallback.displayName = 'ErrorBoundaryFallback';

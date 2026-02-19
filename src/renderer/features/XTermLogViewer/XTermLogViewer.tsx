@@ -1,6 +1,5 @@
 import '@xterm/xterm/css/xterm.css';
 
-import { Box, IconButton } from '@invoke-ai/ui-library';
 import { useStore } from '@nanostores/react';
 import { FitAddon } from '@xterm/addon-fit';
 import type { Terminal } from '@xterm/xterm';
@@ -11,6 +10,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { PiCaretDownBold } from 'react-icons/pi';
 
 import { $XTERM_THEME } from '@/renderer/constants';
+import { IconButton } from '@/renderer/ds';
 
 const getIsAtBottom: (terminal: Terminal) => boolean = (terminal) => {
   const viewport = terminal.buffer.active.viewportY;
@@ -29,7 +29,6 @@ export const XTermLogViewer = memo(({ children, $xterm }: PropsWithChildren<{ $x
     const parent = el?.parentElement;
 
     if (!el || !parent || !xterm) {
-      console.log('no el or parent');
       return;
     }
 
@@ -37,7 +36,6 @@ export const XTermLogViewer = memo(({ children, $xterm }: PropsWithChildren<{ $x
     xterm.loadAddon(fitAddon);
     xterm.options.theme = $XTERM_THEME.get();
 
-    // Use longer debounce to avoid interfering with progress bar updates
     const debouncedFit = debounce(
       () => {
         fitAddon.fit();
@@ -72,21 +70,19 @@ export const XTermLogViewer = memo(({ children, $xterm }: PropsWithChildren<{ $x
   }, [$xterm]);
 
   return (
-    <Box position="relative" w="full" h="full" borderWidth={1} borderRadius="base" overflow="hidden">
-      <Box ref={containerRef} position="absolute" inset={2} />
+    <div className="relative w-full h-full border border-surface-border rounded-lg overflow-hidden">
+      <div ref={containerRef} className="absolute inset-2" />
       {children}
       {!isAtBottom && (
         <IconButton
-          variant="ghost"
           aria-label="Scroll to Bottom"
           icon={<PiCaretDownBold />}
-          position="absolute"
-          bottom={2}
-          right={2}
           onClick={onClickScrollToBottom}
+          size="sm"
+          className="absolute bottom-2 right-2 bg-surface-raised/80"
         />
       )}
-    </Box>
+    </div>
   );
 });
 

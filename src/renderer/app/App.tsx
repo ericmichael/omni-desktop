@@ -1,45 +1,45 @@
-import { Box, Divider, Flex, useGlobalModifiersInit } from '@invoke-ai/ui-library';
+import '@/renderer/styles/tailwind.css';
+import '@fontsource-variable/inter';
+import '@xterm/xterm/css/xterm.css';
+
+import { useStore } from '@nanostores/react';
+import { useEffect } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 
 import { ErrorBoundaryFallback } from '@/renderer/app/ErrorBoundaryFallback';
 import { MainContent } from '@/renderer/app/MainContent';
-import { ThemeProvider } from '@/renderer/app/ThemeProvider';
-import { DiscordButton } from '@/renderer/common/DiscordButton';
-import { GitHubButton } from '@/renderer/common/GitHubButton';
+import { syncTheme } from '@/renderer/constants';
 import { SystemInfoLoadingGate, SystemInfoProvider } from '@/renderer/contexts/SystemInfoContext';
 import { Banner } from '@/renderer/features/Banner/Banner';
 import { Console } from '@/renderer/features/Console/Console';
-import { ConsoleOpenButton } from '@/renderer/features/Console/ConsoleOpenButton';
+import { $sandboxProcessStatus } from '@/renderer/features/Omni/state';
 import { SettingsModal } from '@/renderer/features/SettingsModal/SettingsModal';
 
 import { usePreloadTerminalFont } from './use-preload-terminal-font';
 
 export const App = () => {
-  useGlobalModifiersInit();
   usePreloadTerminalFont();
+  const sandboxStatus = useStore($sandboxProcessStatus);
+  const isSandboxRunning = sandboxStatus.type === 'running';
+
+  useEffect(() => {
+    syncTheme();
+  }, []);
 
   return (
-    <ThemeProvider>
-      <SystemInfoProvider>
-        <Box w="100dvw" h="100dvh" position="relative" overflow="hidden">
-          <ErrorBoundary FallbackComponent={ErrorBoundaryFallback}>
-            <SystemInfoLoadingGate>
-              <Flex w="full" h="full" flexDir="column" alignItems="center" minH={0}>
-                <Banner />
-                <Divider />
-                <MainContent />
-              </Flex>
-              <Flex position="absolute" insetBlockEnd={4} insetInlineStart={4}>
-                <ConsoleOpenButton />
-                <DiscordButton />
-                <GitHubButton />
-              </Flex>
-            </SystemInfoLoadingGate>
-            <SettingsModal />
-            <Console />
-          </ErrorBoundary>
-        </Box>
-      </SystemInfoProvider>
-    </ThemeProvider>
+    <SystemInfoProvider>
+      <div className="w-dvw h-dvh relative overflow-hidden bg-surface font-sans text-fg antialiased">
+        <ErrorBoundary FallbackComponent={ErrorBoundaryFallback}>
+          <SystemInfoLoadingGate>
+            <div className="flex w-full h-full flex-col items-center min-h-0">
+              {!isSandboxRunning && <Banner />}
+              <MainContent />
+            </div>
+          </SystemInfoLoadingGate>
+          <SettingsModal />
+          <Console />
+        </ErrorBoundary>
+      </div>
+    </SystemInfoProvider>
   );
 };

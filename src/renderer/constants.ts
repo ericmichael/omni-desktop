@@ -2,7 +2,7 @@ import type { ITerminalInitOnlyOptions, ITerminalOptions, ITheme } from '@xterm/
 import { atom } from 'nanostores';
 
 /**
- * The interval in milliseconds to poll the status of a process. Used for the main, install and invoke processes.
+ * The interval in milliseconds to poll the status of a process.
  */
 export const STATUS_POLL_INTERVAL_MS = 1_000;
 
@@ -18,15 +18,8 @@ export const DEFAULT_XTERM_OPTIONS: ITerminalOptions & ITerminalInitOnlyOptions 
   allowTransparency: true,
 };
 
-const getCssVar = (token: string): string => {
-  // given a token like 'base.300', return the CSS variable '--invoke-colors-base-300'
-  const [color, number] = token.split('.');
-  return `--invoke-colors-${color}-${number}`;
-};
-
-const getRawValue = (token: string): string => {
-  const cssVar = getCssVar(token);
-  return getComputedStyle(document.documentElement).getPropertyValue(cssVar);
+const getCssVar = (name: string): string => {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 };
 
 export const $XTERM_THEME = atom<ITheme>({});
@@ -34,24 +27,24 @@ export const $XTERM_THEME = atom<ITheme>({});
 export const syncTheme = () => {
   $XTERM_THEME.set({
     background: 'rgba(0, 0, 0, 0)',
-    foreground: getRawValue('base.100'),
-    black: getRawValue('base.100'),
-    brightBlack: getRawValue('base.100'),
-    white: getRawValue('base.950'),
-    brightWhite: getRawValue('base.950'),
-    cursor: getRawValue('base.100'),
-    cursorAccent: getRawValue('bas.e50'),
-    blue: getRawValue('invokeBlue.300'),
-    brightBlue: getRawValue('invokeBlue.300'),
-    cyan: getRawValue('teal.300'),
-    brightCyan: getRawValue('teal.300'),
-    green: getRawValue('invokeGreen.300'),
-    brightGreen: getRawValue('invokeGreen.300'),
-    yellow: getRawValue('invokeYellow.300'),
-    brightYellow: getRawValue('invokeYellow.300'),
-    red: getRawValue('invokeRed.300'),
-    brightRed: getRawValue('invokeRed.300'),
-    magenta: getRawValue('invokePurple.300'),
-    brightMagenta: getRawValue('invokePurple.300'),
+    foreground: getCssVar('--xterm-fg'),
+    black: getCssVar('--xterm-black'),
+    brightBlack: getCssVar('--xterm-bright-black'),
+    white: getCssVar('--xterm-white'),
+    brightWhite: getCssVar('--xterm-bright-white'),
+    cursor: getCssVar('--xterm-cursor'),
+    cursorAccent: getCssVar('--xterm-cursor-accent'),
+    blue: getCssVar('--xterm-blue'),
+    brightBlue: getCssVar('--xterm-bright-blue'),
+    cyan: getCssVar('--xterm-cyan'),
+    brightCyan: getCssVar('--xterm-bright-cyan'),
+    green: getCssVar('--xterm-green'),
+    brightGreen: getCssVar('--xterm-bright-green'),
+    yellow: getCssVar('--xterm-yellow'),
+    brightYellow: getCssVar('--xterm-bright-yellow'),
+    red: getCssVar('--xterm-red'),
+    brightRed: getCssVar('--xterm-bright-red'),
+    magenta: getCssVar('--xterm-magenta'),
+    brightMagenta: getCssVar('--xterm-bright-magenta'),
   });
 };

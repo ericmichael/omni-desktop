@@ -1,7 +1,7 @@
-import { Box, Divider, Flex, IconButton, Spacer, Text } from '@invoke-ai/ui-library';
 import { memo } from 'react';
 import { PiArrowCounterClockwiseBold, PiCaretDownBold, PiXBold } from 'react-icons/pi';
 
+import { Divider, IconButton } from '@/renderer/ds';
 import { ConsoleXterm } from '@/renderer/features/Console/ConsoleXterm';
 import { $isConsoleOpen, destroyTerminal, type TerminalState } from '@/renderer/features/Console/state';
 import { useNewTerminal } from '@/renderer/features/Console/use-new-terminal';
@@ -17,44 +17,31 @@ const closeConsole = () => {
 export const ConsoleStarted = memo(({ terminal }: Props) => {
   const newTerminal = useNewTerminal();
   return (
-    <Flex w="full" h="full" position="relative" flexDir="column" minH={0}>
-      <Flex w="full" h={10} alignItems="center" px={2}>
+    <div className="flex w-full h-full relative flex-col min-h-0">
+      <div className="flex w-full h-10 items-center px-2">
         <IconButton
           aria-label="Kill Console"
           onClick={destroyTerminal}
           size="sm"
-          variant="link"
-          alignSelf="stretch"
           icon={<PiXBold />}
-          colorScheme="error"
+          className="text-fg-error hover:bg-red-400/10"
         />
-        <Spacer />
-        <Text color="base.500" userSelect="none">
-          Dev Console
-        </Text>
-        <Spacer />
+        <div className="flex-1" />
+        <span className="text-fg-subtle select-none text-sm">Dev Console</span>
+        <div className="flex-1" />
         <IconButton
           aria-label="Restart Console"
           onClick={newTerminal}
           size="sm"
-          variant="link"
-          alignSelf="stretch"
           icon={<PiArrowCounterClockwiseBold />}
         />
-        <IconButton
-          aria-label="Hide Console"
-          onClick={closeConsole}
-          size="sm"
-          variant="link"
-          alignSelf="stretch"
-          icon={<PiCaretDownBold />}
-        />
-      </Flex>
+        <IconButton aria-label="Hide Console" onClick={closeConsole} size="sm" icon={<PiCaretDownBold />} />
+      </div>
       <Divider />
-      <Box w="full" h="full" p={2} minH={0}>
+      <div className="w-full h-full p-2 min-h-0">
         <ConsoleXterm terminal={terminal} />
-      </Box>
-    </Flex>
+      </div>
+    </div>
   );
 });
 ConsoleStarted.displayName = 'ConsoleStarted';

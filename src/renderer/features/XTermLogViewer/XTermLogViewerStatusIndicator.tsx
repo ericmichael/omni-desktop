@@ -1,19 +1,8 @@
-import type { BoxProps, SystemStyleObject } from '@invoke-ai/ui-library';
-import { Box, Text } from '@invoke-ai/ui-library';
 import Linkify from 'linkify-react';
 import type { Opts as LinkifyOpts } from 'linkifyjs';
+import type { HTMLAttributes, PropsWithChildren } from 'react';
 
-import { _afterEllipsisKeyframes } from '@/renderer/common/EllipsisLoadingText';
-
-const sx: SystemStyleObject = {
-  '&[data-loading="true"]:after': _afterEllipsisKeyframes,
-  a: {
-    fontWeight: 'semibold',
-  },
-  'a:hover': {
-    textDecoration: 'underline',
-  },
-};
+import { cn } from '@/renderer/ds';
 
 const linkifyOptions: LinkifyOpts = {
   target: '_blank',
@@ -23,24 +12,31 @@ const linkifyOptions: LinkifyOpts = {
 
 type Props = {
   isLoading: boolean;
-} & BoxProps;
+} & HTMLAttributes<HTMLDivElement>;
 
-export const XTermLogViewerStatusIndicator = ({ isLoading, children, ...boxProps }: Props) => {
+export const XTermLogViewerStatusIndicator = ({
+  isLoading,
+  children,
+  className,
+  ...rest
+}: PropsWithChildren<Props>) => {
   return (
-    <Box
-      bg="base.900"
-      borderRadius="base"
-      userSelect="none"
-      px={3}
-      py={1}
-      opacity={0.8}
-      borderWidth={1}
-      shadow="dark-lg"
-      {...boxProps}
+    <div
+      className={cn(
+        'bg-surface-raised rounded-lg select-none px-3 py-1 opacity-80 border border-surface-border shadow-lg',
+        className
+      )}
+      {...rest}
     >
-      <Text sx={sx} data-loading={isLoading}>
+      <span
+        data-loading={isLoading}
+        className={cn(
+          '[&_a]:font-semibold [&_a:hover]:underline',
+          'data-[loading=true]:after:inline-block data-[loading=true]:after:animate-ellipsis data-[loading=true]:after:content-["…"]'
+        )}
+      >
         <Linkify options={linkifyOptions}>{children}</Linkify>
-      </Text>
-    </Box>
+      </span>
+    </div>
   );
 };

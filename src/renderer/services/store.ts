@@ -2,12 +2,14 @@ import type { ReadableAtom } from 'nanostores';
 import { atom } from 'nanostores';
 
 import { emitter, ipc } from '@/renderer/services/ipc';
-import type { DirDetails, OperatingSystem, StoreData } from '@/shared/types';
+import type { OperatingSystem, StoreData } from '@/shared/types';
 
 const getDefaults = (): StoreData => ({
-  serverMode: false,
-  notifyForPrereleaseUpdates: true,
+  enableCodeServer: true,
+  enableVnc: true,
+  useWorkDockerfile: true,
   optInToLauncherPrereleases: false,
+  layoutMode: 'work',
 });
 
 /**
@@ -69,15 +71,19 @@ export const persistedStoreApi = {
   },
 };
 
-/**
- * A helper function to select the install directory. This will open a dialog for the user to select a directory and
- * update the store with the selected directory.
- */
-export const selectInstallDir = async () => {
-  const installDir = persistedStoreApi.getKey('installDir');
-  const newInstallDir = await emitter.invoke('util:select-directory', installDir);
-  if (newInstallDir) {
-    persistedStoreApi.setKey('installDir', newInstallDir);
+export const selectWorkspaceDir = async () => {
+  const workspaceDir = persistedStoreApi.getKey('workspaceDir');
+  const newWorkspaceDir = await emitter.invoke('util:select-directory', workspaceDir);
+  if (newWorkspaceDir) {
+    persistedStoreApi.setKey('workspaceDir', newWorkspaceDir);
+  }
+};
+
+export const selectEnvFilePath = async () => {
+  const envFilePath = persistedStoreApi.getKey('envFilePath');
+  const newEnvFilePath = await emitter.invoke('util:select-file', envFilePath);
+  if (newEnvFilePath) {
+    persistedStoreApi.setKey('envFilePath', newEnvFilePath);
   }
 };
 
@@ -88,39 +94,6 @@ export const selectInstallDir = async () => {
 export const $initialized = atom(false);
 
 /**
- * An atom that holds the details of the selected installation directory. This data is not persisted to the store but is
- * fetched from the main process whenever the selected installation directory changes.
- */
-export const $installDirDetails = atom<DirDetails | undefined>(undefined);
-
-/**
- * A helper function to force a sync of the details of the selected installation directory. This is useful after an
- * install or update operation to ensure the details are up-to-date.
- */
-export const syncInstallDirDetails = async () => {
-  const installDir = persistedStoreApi.$atom.get().installDir;
-  if (!installDir) {
-    return;
-  }
-  const newDirDetails = await emitter.invoke('util:get-dir-details', installDir);
-  $installDirDetails.set(newDirDetails);
-};
-
-persistedStoreApi.$atom.listen(async () => {
-  const installDir = persistedStoreApi.$atom.get().installDir;
-  const dirDetails = $installDirDetails.get();
-
-  if (!installDir) {
-    $installDirDetails.set(undefined);
-  } else if (installDir !== dirDetails?.path) {
-    const newDirDetails = await emitter.invoke('util:get-dir-details', installDir);
-    $installDirDetails.set(newDirDetails);
-  }
-
-  $initialized.set(true);
-});
-
-/**
  * An atom that holds the operating system of the user. This is fetched from the main process when the app starts.
  */
 export const $operatingSystem = atom<OperatingSystem | undefined>(undefined);
@@ -128,5 +101,29 @@ export const $operatingSystem = atom<OperatingSystem | undefined>(undefined);
 // Fetch the operating system from the main process and set it in the store when the app starts
 emitter.invoke('util:get-os').then($operatingSystem.set);
 
-// Sync the store with the main process when the app starts
-persistedStoreApi.sync();
+/**
+ * Initialize the store: sync with main process, apply convention defaults for any unset values, then mark as ready.
+ */
+const init = async () => {
+  await persistedStoreApi.sync();
+  const store = persistedStoreApi.get();
+
+  // Apply default workspace dir if user has never picked one
+  if (!store.workspaceDir) {
+    const defaultDir = await emitter.invoke('util:get-default-workspace-dir');
+    await emitter.invoke('util:ensure-directory', defaultDir);
+    await persistedStoreApi.setKey('workspaceDir', defaultDir);
+  }
+
+  // Apply default env file if user has never set one and the convention file exists
+  if (store.envFilePath === undefined) {
+    const defaultEnv = await emitter.invoke('util:get-default-env-file-path');
+    if (defaultEnv) {
+      await persistedStoreApi.setKey('envFilePath', defaultEnv);
+    }
+  }
+
+  $initialized.set(true);
+};
+
+init();

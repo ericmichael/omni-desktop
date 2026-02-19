@@ -1,11 +1,12 @@
-import { Flex, Spinner } from '@invoke-ai/ui-library';
 import { memo } from 'react';
+
+import { Spinner } from '@/renderer/ds';
 
 export const LoaderFullScreen = memo(() => {
   return (
-    <Flex position="absolute" inset={0} alignItems="center" justifyContent="center">
-      <Spinner size="xl" opacity={0.5} />
-    </Flex>
+    <div className="absolute inset-0 flex items-center justify-center">
+      <Spinner size="xl" className="opacity-50" />
+    </div>
   );
 });
 LoaderFullScreen.displayName = 'LoaderFullScreen';
