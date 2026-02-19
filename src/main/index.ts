@@ -1,5 +1,6 @@
 import { app, dialog, net, shell } from 'electron';
-import { join } from 'path';
+import { mkdir, readFile, writeFile } from 'fs/promises';
+import { dirname, join } from 'path';
 import { assert } from 'tsafe';
 
 import { createConsoleManager } from '@/main/console-manager';
@@ -208,4 +209,39 @@ main.ipc.handle('util:check-ws', async (_, url) => {
     return false;
   }
 });
+//#endregion
+
+//#region Config file I/O API
+
+const OMNI_CONFIG_DIR = join(app.getPath('home'), '.config', 'omni_code');
+
+main.ipc.handle('config:get-omni-config-dir', () => OMNI_CONFIG_DIR);
+
+main.ipc.handle('config:read-json-file', async (_, filePath) => {
+  try {
+    const content = await readFile(filePath, 'utf-8');
+    return JSON.parse(content) as unknown;
+  } catch {
+    return null;
+  }
+});
+
+main.ipc.handle('config:write-json-file', async (_, filePath, data) => {
+  await mkdir(dirname(filePath), { recursive: true });
+  await writeFile(filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf-8');
+});
+
+main.ipc.handle('config:read-text-file', async (_, filePath) => {
+  try {
+    return await readFile(filePath, 'utf-8');
+  } catch {
+    return null;
+  }
+});
+
+main.ipc.handle('config:write-text-file', async (_, filePath, content) => {
+  await mkdir(dirname(filePath), { recursive: true });
+  await writeFile(filePath, content, 'utf-8');
+});
+
 //#endregion

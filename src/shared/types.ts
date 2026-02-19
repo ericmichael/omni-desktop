@@ -332,6 +332,20 @@ type TerminalIpcEvents = Namespaced<
 >;
 
 /**
+ * Config file I/O API. Main process handles these events, renderer process invokes them.
+ */
+type ConfigIpcEvents = Namespaced<
+  'config',
+  {
+    'get-omni-config-dir': () => string;
+    'read-json-file': (path: string) => unknown | null;
+    'write-json-file': (path: string, data: unknown) => void;
+    'read-text-file': (path: string) => string | null;
+    'write-text-file': (path: string, content: string) => void;
+  }
+>;
+
+/**
  * Intersection of all the events that the renderer can invoke and main process can handle.
  */
 export type IpcEvents = MainProcessIpcEvents &
@@ -339,7 +353,8 @@ export type IpcEvents = MainProcessIpcEvents &
   SandboxProcessIpcEvents &
   UtilIpcEvents &
   TerminalIpcEvents &
-  StoreIpcEvents;
+  StoreIpcEvents &
+  ConfigIpcEvents;
 
 /**
  * Store events. Main process emits these events, renderer process listens to them.
@@ -409,3 +424,46 @@ export type IpcRendererEvents = TerminalIpcRendererEvents &
   SandboxProcessIpcRendererEvents &
   DevIpcRendererEvents &
   StoreIpcRendererEvents;
+
+// #region Config file types
+
+export type ModelEntry = {
+  model: string;
+  label?: string;
+  realtime?: boolean;
+  reasoning?: 'low' | 'medium' | 'high';
+  max_input_tokens?: number;
+  max_output_tokens?: number;
+  api_key?: string;
+  model_settings?: Record<string, unknown>;
+};
+
+export type ProviderEntry = {
+  type: 'openai' | 'azure' | 'openai-compatible' | 'litellm';
+  api_key?: string;
+  base_url?: string;
+  api_version?: string;
+  models: Record<string, ModelEntry>;
+};
+
+export type ModelsConfig = {
+  version: 3;
+  default: string | null;
+  voice_default: string | null;
+  providers: Record<string, ProviderEntry>;
+};
+
+export type McpServerEntry = {
+  type?: 'stdio' | 'sse' | 'http' | 'streamable_http';
+  command?: string;
+  args?: string[];
+  url?: string;
+  env?: Record<string, string>;
+  headers?: Record<string, string>;
+};
+
+export type McpConfig = {
+  mcpServers: Record<string, McpServerEntry>;
+};
+
+// #endregion

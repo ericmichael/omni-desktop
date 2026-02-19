@@ -106,7 +106,7 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
           <select
             value={store.theme ?? 'tokyo-night'}
             onChange={onChangeTheme}
-            className="h-8 px-2 text-xs rounded-md bg-transparent border border-surface-border/50 text-fg cursor-pointer outline-none focus:border-accent-500/50"
+            className="h-8 px-2 text-xs rounded-md bg-surface border border-surface-border/50 text-fg cursor-pointer outline-none focus:border-accent-500/50"
           >
             <option value="default">Default</option>
             <option value="tokyo-night">Tokyo Night</option>

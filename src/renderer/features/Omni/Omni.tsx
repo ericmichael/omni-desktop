@@ -199,7 +199,7 @@ const PHASE_LABELS: Partial<Record<AutoLaunchPhase, string>> = {
   checking: 'Checking runtime',
   installing: 'Installing runtime',
   ready: 'Preparing workspace',
-  starting: 'Starting sandbox',
+  starting: 'Starting services',
   waiting: 'Waiting for services',
 };
 
@@ -378,7 +378,7 @@ const OmniIdleView = memo(() => {
         >
           <motion.div variants={staggerItem}>
             <Heading size="lg" as="h1">
-              Omni Sandbox
+              Omni Code
             </Heading>
           </motion.div>
 
@@ -398,7 +398,7 @@ const OmniIdleView = memo(() => {
 
           <motion.div variants={staggerItem}>
             <Button size="lg" onClick={launch} isDisabled={!store.workspaceDir} className="animate-pulse-glow">
-              Launch Sandbox
+              Launch
             </Button>
           </motion.div>
 
@@ -596,7 +596,7 @@ const OmniRunningView = memo(
 
           <div className="flex items-center gap-1">
             <SettingsModalOpenButton />
-            <IconButton aria-label="Stop sandbox" icon={<PiStopFill />} size="sm" onClick={stopSandbox} />
+            <IconButton aria-label="Stop" icon={<PiStopFill />} size="sm" onClick={stopSandbox} />
           </div>
         </div>
 
