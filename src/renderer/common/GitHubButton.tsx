@@ -5,7 +5,7 @@ import { IconButton } from '@/renderer/ds';
 
 export const GitHubButton = memo(() => {
   return (
-    <a href="https://github.com/emm/omni-code" target="_blank" rel="noopener noreferrer">
+    <a href="https://github.com/ericmichael/omni-code" target="_blank" rel="noopener noreferrer">
       <IconButton aria-label="GitHub" icon={<PiGithubLogoFill />} />
     </a>
   );

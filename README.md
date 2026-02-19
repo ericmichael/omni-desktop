@@ -1,6 +1,6 @@
 # Omni Code Launcher
 
-A desktop application for managing [Omni Code](https://github.com/emm/omni-code) installations and sandboxes on Windows, macOS (Apple Silicon) and Linux.
+A desktop application for managing [Omni Code](https://github.com/ericmichael/omni-code) installations and sandboxes on Windows, macOS (Apple Silicon) and Linux.
 
 The launcher handles installing the Omni Code runtime, managing Python environments, and launching Docker-based sandboxes with optional code-server and noVNC desktop access.
 
@@ -22,7 +22,7 @@ The launcher handles installing the Omni Code runtime, managing Python environme
 ### Download
 
 <!-- TODO: Update links when releases are published -->
-Download the latest release from [GitHub Releases](https://github.com/emm/omni-code-launcher/releases).
+Download the latest release from [GitHub Releases](https://github.com/ericmichael/omni-desktop/releases).
 
 ### Usage
 

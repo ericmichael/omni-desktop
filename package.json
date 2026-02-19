@@ -9,7 +9,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git@github.com:emm/omni-code-launcher.git"
+    "url": "git@github.com:ericmichael/omni-desktop.git"
   },
   "scripts": {
     "dev": "electron-vite dev --watch",
