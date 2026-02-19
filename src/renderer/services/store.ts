@@ -10,6 +10,7 @@ const getDefaults = (): StoreData => ({
   useWorkDockerfile: true,
   optInToLauncherPrereleases: false,
   layoutMode: 'work',
+  theme: 'tokyo-night',
 });
 
 /**

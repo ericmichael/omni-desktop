@@ -238,6 +238,80 @@ export const getOmniRuntimeInfo = async (): Promise<OmniRuntimeInfo> => {
 
 //#endregion
 
+//#region CLI PATH symlink
+
+/**
+ * Get the directory where we install the `omni` symlink.
+ * - Linux/macOS: ~/.local/bin (XDG standard, typically on PATH)
+ * - Windows: not yet supported
+ */
+export const getCliSymlinkDir = (): string => {
+  return path.join(app.getPath('home'), '.local', 'bin');
+};
+
+/**
+ * Get the full path of the `omni` symlink that would be created.
+ */
+export const getCliSymlinkPath = (): string => {
+  const name = process.platform === 'win32' ? 'omni.exe' : 'omni';
+  return path.join(getCliSymlinkDir(), name);
+};
+
+/**
+ * Check if the `omni` CLI symlink is currently installed and points to our venv binary.
+ */
+export const isCliInstalledInPath = async (): Promise<boolean> => {
+  const symlinkPath = getCliSymlinkPath();
+  try {
+    const target = await fs.readlink(symlinkPath);
+    return target === getOmniCliPath();
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Install the `omni` CLI command to the user's PATH by creating a symlink
+ * from ~/.local/bin/omni to the venv binary.
+ */
+export const installCliToPath = async (): Promise<{ success: true; symlinkPath: string } | { success: false; error: string }> => {
+  const target = getOmniCliPath();
+  const symlinkPath = getCliSymlinkPath();
+  const symlinkDir = getCliSymlinkDir();
+
+  // Verify the omni binary actually exists
+  if (!(await isFile(target))) {
+    return { success: false, error: 'Omni runtime is not installed. Install it first.' };
+  }
+
+  // Ensure ~/.local/bin exists
+  try {
+    await fs.mkdir(symlinkDir, { recursive: true });
+  } catch (e) {
+    return { success: false, error: `Failed to create directory ${symlinkDir}: ${String(e)}` };
+  }
+
+  // Remove existing symlink/file if present
+  try {
+    const stat = await fs.lstat(symlinkPath);
+    if (stat.isSymbolicLink() || stat.isFile()) {
+      await fs.unlink(symlinkPath);
+    }
+  } catch {
+    // Does not exist — that's fine
+  }
+
+  // Create the symlink
+  try {
+    await fs.symlink(target, symlinkPath);
+    return { success: true, symlinkPath };
+  } catch (e) {
+    return { success: false, error: `Failed to create symlink: ${String(e)}` };
+  }
+};
+
+//#endregion
+
 //#region Process
 
 /**

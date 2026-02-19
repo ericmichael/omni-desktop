@@ -46,6 +46,7 @@ export type WindowProps = {
  * Data stored in the electron store.
  */
 export type LayoutMode = 'work' | 'code' | 'desktop';
+export type OmniTheme = 'default' | 'tokyo-night' | 'vscode-dark' | 'vscode-light';
 
 export type StoreData = {
   workspaceDir?: string;
@@ -57,6 +58,7 @@ export type StoreData = {
   appWindowProps?: WindowProps;
   optInToLauncherPrereleases: boolean;
   layoutMode: LayoutMode;
+  theme: OmniTheme;
 };
 
 // The electron store uses JSON schema to validate its data.
@@ -113,6 +115,11 @@ export const schema: Schema<StoreData> = {
     type: 'string',
     enum: ['work', 'code', 'desktop'],
     default: 'work',
+  },
+  theme: {
+    type: 'string',
+    enum: ['default', 'tokyo-night', 'vscode-dark', 'vscode-light'],
+    default: 'tokyo-night',
   },
 };
 
@@ -305,6 +312,8 @@ type UtilIpcEvents = Namespaced<
     'get-omni-runtime-info': () => OmniRuntimeInfo;
     'check-url': (url: string) => boolean;
     'check-ws': (url: string) => boolean;
+    'install-cli-to-path': () => { success: true; symlinkPath: string } | { success: false; error: string };
+    'get-cli-in-path-status': () => { installed: boolean; symlinkPath: string };
   }
 >;
 

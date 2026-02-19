@@ -7,11 +7,11 @@ import { AsciiLogo } from '@/renderer/common/AsciiLogo';
 import { EllipsisLoadingText } from '@/renderer/common/EllipsisLoadingText';
 import { BodyContainer, BodyContent } from '@/renderer/common/layout';
 import { Button, cn, Divider, Heading, IconButton, Spinner } from '@/renderer/ds';
-import { $isSettingsOpen } from '@/renderer/features/SettingsModal/state';
 import { SettingsModalOpenButton } from '@/renderer/features/SettingsModal/SettingsModalOpenButton';
+import { $isSettingsOpen } from '@/renderer/features/SettingsModal/state';
 import { XTermLogViewer } from '@/renderer/features/XTermLogViewer/XTermLogViewer';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
-import type { LayoutMode } from '@/shared/types';
+import type { LayoutMode, OmniTheme } from '@/shared/types';
 
 import {
   $omniInstallProcessXTerm,
@@ -434,7 +434,7 @@ const OmniRunningView = memo(
       codeServerUrl?: string;
       noVncUrl?: string;
     };
-    store: { enableCodeServer: boolean; enableVnc: boolean; layoutMode: LayoutMode };
+    store: { enableCodeServer: boolean; enableVnc: boolean; layoutMode: LayoutMode; theme: OmniTheme };
     phase: AutoLaunchPhase;
   }) => {
     const layoutMode = store.layoutMode ?? 'work';
@@ -449,7 +449,17 @@ const OmniRunningView = memo(
     const [vncPanelReady, setVncPanelReady] = useState(false);
 
     const canLoadWebviews = phase === 'running';
-    const uiSrc = canLoadWebviews ? sandboxUrls.uiUrl : undefined;
+    const theme = store.theme ?? 'tokyo-night';
+    const uiSrc = useMemo(() => {
+      if (!canLoadWebviews) {
+        return undefined;
+      }
+      const url = new URL(sandboxUrls.uiUrl);
+      if (theme !== 'default') {
+        url.searchParams.set('theme', theme);
+      }
+      return url.toString();
+    }, [canLoadWebviews, sandboxUrls.uiUrl, theme]);
     const codeServerSrc = canLoadWebviews ? sandboxUrls.codeServerUrl : undefined;
     const vncSrc = canLoadWebviews ? sandboxUrls.noVncUrl : undefined;
 
@@ -551,7 +561,7 @@ const OmniRunningView = memo(
       <div className="flex flex-col w-full h-full relative">
         {/* Toolbar */}
         <div className="flex items-center px-3 border-b border-surface-border shrink-0">
-          <AsciiLogo className="text-[6px]" />
+          <AsciiLogo className="text-[5px]" />
 
           <div className="flex-1 flex justify-center">
             {layoutMode === 'desktop' ? (

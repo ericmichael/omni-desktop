@@ -14,17 +14,25 @@ import { Banner } from '@/renderer/features/Banner/Banner';
 import { Console } from '@/renderer/features/Console/Console';
 import { $sandboxProcessStatus } from '@/renderer/features/Omni/state';
 import { SettingsModal } from '@/renderer/features/SettingsModal/SettingsModal';
+import { persistedStoreApi } from '@/renderer/services/store';
 
 import { usePreloadTerminalFont } from './use-preload-terminal-font';
 
 export const App = () => {
   usePreloadTerminalFont();
   const sandboxStatus = useStore($sandboxProcessStatus);
+  const store = useStore(persistedStoreApi.$atom);
   const isSandboxRunning = sandboxStatus.type === 'running';
 
   useEffect(() => {
+    const theme = store.theme ?? 'tokyo-night';
+    if (theme === 'default') {
+      document.documentElement.removeAttribute('data-theme');
+    } else {
+      document.documentElement.setAttribute('data-theme', theme);
+    }
     syncTheme();
-  }, []);
+  }, [store.theme]);
 
   return (
     <SystemInfoProvider>

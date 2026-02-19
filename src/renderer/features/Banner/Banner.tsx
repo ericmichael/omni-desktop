@@ -12,7 +12,7 @@ export const Banner = memo(() => {
     <div className="relative flex w-full items-center px-4 py-2 border-b border-surface-border shrink-0">
       <SettingsModalOpenButton className="absolute left-3" />
       <div className="flex-1 flex justify-center">
-        <AsciiLogo />
+        <AsciiLogo className="text-[5px]" />
       </div>
       {launcherVersion && (
         <span className="absolute right-3 text-[10px] text-fg-subtle bg-white/5 px-1.5 py-0.5 rounded-full select-none">

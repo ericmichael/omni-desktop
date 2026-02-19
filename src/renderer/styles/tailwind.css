@@ -109,22 +109,165 @@
   --xterm-bright-red: #f87171;
   --xterm-magenta: #c084fc;
   --xterm-bright-magenta: #c084fc;
+
+  --scrollbar-thumb: #3f3f46;
+  --scrollbar-thumb-hover: #52525b;
+  --selection-color: rgb(99 102 241 / 0.3);
+  --focus-ring-color: rgb(99 102 241 / 0.5);
+}
+
+/* ── Tokyo Night ── */
+[data-theme='tokyo-night'] {
+  --color-surface: #1a1b26;
+  --color-surface-raised: #1c1d29;
+  --color-surface-overlay: #292e42;
+  --color-surface-border: #3b4261;
+  --color-fg: #c0caf5;
+  --color-fg-muted: #a9b1d6;
+  --color-fg-subtle: #545c7e;
+  --color-fg-error: #f7768e;
+  --color-accent-50: #e8edfb;
+  --color-accent-100: #c5d0f5;
+  --color-accent-200: #9db2ef;
+  --color-accent-300: #7a9bf0;
+  --color-accent-400: #5d80e0;
+  --color-accent-500: #3d59a1;
+  --color-accent-600: #344d8a;
+  --color-accent-700: #2b4074;
+  --color-accent-800: #22335d;
+  --color-accent-900: #1a2747;
+  --color-accent-950: #111b30;
+  --xterm-fg: #c0caf5;
+  --xterm-black: #c0caf5;
+  --xterm-bright-black: #c0caf5;
+  --xterm-white: #1a1b26;
+  --xterm-bright-white: #1a1b26;
+  --xterm-cursor: #c0caf5;
+  --xterm-cursor-accent: #1a1b26;
+  --xterm-blue: #7aa2f7;
+  --xterm-bright-blue: #7aa2f7;
+  --xterm-cyan: #7dcfff;
+  --xterm-bright-cyan: #7dcfff;
+  --xterm-green: #9ece6a;
+  --xterm-bright-green: #9ece6a;
+  --xterm-yellow: #e0af68;
+  --xterm-bright-yellow: #e0af68;
+  --xterm-red: #f7768e;
+  --xterm-bright-red: #f7768e;
+  --xterm-magenta: #bb9af7;
+  --xterm-bright-magenta: #bb9af7;
+  --scrollbar-thumb: #3b4261;
+  --scrollbar-thumb-hover: #545c7e;
+  --selection-color: rgb(61 89 161 / 0.3);
+  --focus-ring-color: rgb(61 89 161 / 0.5);
+}
+
+/* ── VS Code Dark ── */
+[data-theme='vscode-dark'] {
+  --color-surface: #1f1f1f;
+  --color-surface-raised: #2b2b2b;
+  --color-surface-overlay: #313131;
+  --color-surface-border: #3c3c3c;
+  --color-fg: #cccccc;
+  --color-fg-muted: #bbbbbb;
+  --color-fg-subtle: #9d9d9d;
+  --color-fg-error: #f85149;
+  --color-accent-50: #e0f0ff;
+  --color-accent-100: #b3d9ff;
+  --color-accent-200: #80bfff;
+  --color-accent-300: #4da6ff;
+  --color-accent-400: #1a8cff;
+  --color-accent-500: #0078d4;
+  --color-accent-600: #0066b5;
+  --color-accent-700: #005496;
+  --color-accent-800: #004277;
+  --color-accent-900: #003058;
+  --color-accent-950: #001e3a;
+  --xterm-fg: #cccccc;
+  --xterm-black: #cccccc;
+  --xterm-bright-black: #cccccc;
+  --xterm-white: #1f1f1f;
+  --xterm-bright-white: #1f1f1f;
+  --xterm-cursor: #cccccc;
+  --xterm-cursor-accent: #1f1f1f;
+  --xterm-blue: #569cd6;
+  --xterm-bright-blue: #9cdcfe;
+  --xterm-cyan: #4ec9b0;
+  --xterm-bright-cyan: #4ec9b0;
+  --xterm-green: #0dbc79;
+  --xterm-bright-green: #0dbc79;
+  --xterm-yellow: #cca700;
+  --xterm-bright-yellow: #cca700;
+  --xterm-red: #f85149;
+  --xterm-bright-red: #f85149;
+  --xterm-magenta: #c586c0;
+  --xterm-bright-magenta: #c586c0;
+  --scrollbar-thumb: #3c3c3c;
+  --scrollbar-thumb-hover: #4f4f4f;
+  --selection-color: rgb(0 120 212 / 0.3);
+  --focus-ring-color: rgb(0 120 212 / 0.5);
+}
+
+/* ── VS Code Light ── */
+[data-theme='vscode-light'] {
+  --color-surface: #ffffff;
+  --color-surface-raised: #f3f3f3;
+  --color-surface-overlay: #e5e5e5;
+  --color-surface-border: #d4d4d4;
+  --color-fg: #1f1f1f;
+  --color-fg-muted: #3b3b3b;
+  --color-fg-subtle: #767676;
+  --color-fg-error: #f85149;
+  --color-accent-50: #e0f0ff;
+  --color-accent-100: #b3d9ff;
+  --color-accent-200: #80bfff;
+  --color-accent-300: #4da6ff;
+  --color-accent-400: #1a8cff;
+  --color-accent-500: #005fb8;
+  --color-accent-600: #00529e;
+  --color-accent-700: #004585;
+  --color-accent-800: #00386b;
+  --color-accent-900: #002b52;
+  --color-accent-950: #001e38;
+  --xterm-fg: #1f1f1f;
+  --xterm-black: #1f1f1f;
+  --xterm-bright-black: #1f1f1f;
+  --xterm-white: #ffffff;
+  --xterm-bright-white: #ffffff;
+  --xterm-cursor: #1f1f1f;
+  --xterm-cursor-accent: #ffffff;
+  --xterm-blue: #0451a5;
+  --xterm-bright-blue: #0451a5;
+  --xterm-cyan: #267f99;
+  --xterm-bright-cyan: #267f99;
+  --xterm-green: #2ea043;
+  --xterm-bright-green: #2ea043;
+  --xterm-yellow: #cca700;
+  --xterm-bright-yellow: #cca700;
+  --xterm-red: #f85149;
+  --xterm-bright-red: #f85149;
+  --xterm-magenta: #af00db;
+  --xterm-bright-magenta: #af00db;
+  --scrollbar-thumb: #d4d4d4;
+  --scrollbar-thumb-hover: #b0b0b0;
+  --selection-color: rgb(0 95 184 / 0.3);
+  --focus-ring-color: rgb(0 95 184 / 0.5);
 }
 
 /* Base styles */
 ::selection {
-  background-color: rgb(99 102 241 / 0.3);
+  background-color: var(--selection-color);
 }
 
 *:focus-visible {
-  outline: 2px solid rgb(99 102 241 / 0.5);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
 }
 
 /* Scrollbar styling */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #3f3f46 transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 ::-webkit-scrollbar {
@@ -137,12 +280,12 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3f3f46;
+  background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #52525b;
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* Prevent text selection on UI elements */

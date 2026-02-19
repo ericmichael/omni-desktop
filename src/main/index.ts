@@ -9,11 +9,14 @@ import { createSandboxManager } from '@/main/sandbox-manager';
 import { store } from '@/main/store';
 import {
   ensureDirectory,
+  getCliSymlinkPath,
   getDefaultEnvFilePath,
   getDefaultWorkspaceDir,
   getHomeDirectory,
   getOmniRuntimeInfo,
   getOperatingSystem,
+  installCliToPath,
+  isCliInstalledInPath,
   isDirectory,
   isFile,
   pathExists,
@@ -147,6 +150,11 @@ main.ipc.handle('util:get-os', () => getOperatingSystem());
 main.ipc.handle('util:open-directory', (_, path) => shell.openPath(path));
 main.ipc.handle('util:get-launcher-version', () => app.getVersion());
 main.ipc.handle('util:get-omni-runtime-info', async () => getOmniRuntimeInfo());
+main.ipc.handle('util:install-cli-to-path', () => installCliToPath());
+main.ipc.handle('util:get-cli-in-path-status', async () => {
+  const installed = await isCliInstalledInPath();
+  return { installed, symlinkPath: getCliSymlinkPath() };
+});
 main.ipc.handle('util:check-url', async (_, url) => {
   try {
     const response = await net.fetch(url, { method: 'GET' });
