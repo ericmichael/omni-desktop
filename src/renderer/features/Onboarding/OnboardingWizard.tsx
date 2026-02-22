@@ -77,6 +77,14 @@ export const OnboardingWizard = memo(() => {
     provider.models[modelKey] = {
       model: modelId.trim(),
       label,
+      max_input_tokens: 272000,
+      max_output_tokens: 128000,
+      model_settings: {
+        store: false,
+        extra_body: {
+          include: ['reasoning.encrypted_content'],
+        },
+      },
     };
 
     config.providers[providerName] = provider;

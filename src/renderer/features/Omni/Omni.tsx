@@ -24,10 +24,16 @@ import {
 import type { AutoLaunchPhase } from './use-auto-launch';
 import { $autoLaunchError, $autoLaunchPhase, useAutoLaunch } from './use-auto-launch';
 
+const stopPropagation = (e: React.MouseEvent) => {
+  e.stopPropagation();
+};
+
 const MIN_SIDEBAR_PERCENT = 20;
 const MAX_SIDEBAR_PERCENT = 50;
 const DEFAULT_SIDEBAR_PERCENT = 30;
-const DESKTOP_PANEL_EXPANDED_HEIGHT = 200;
+const DEFAULT_DESKTOP_PANEL_HEIGHT = 200;
+const MIN_DESKTOP_PANEL_HEIGHT = 80;
+const MAX_DESKTOP_PANEL_PERCENT = 0.6;
 const CONTENT_READY_TIMEOUT_MS = 10_000;
 
 const fadeVariants = {
@@ -401,7 +407,10 @@ const OmniRunningView = memo(
     const splitRef = useRef<HTMLDivElement>(null);
     const [sidebarWidthPercent, setSidebarWidthPercent] = useState(DEFAULT_SIDEBAR_PERCENT);
     const [desktopExpanded, setDesktopExpanded] = useState(false);
+    const [desktopHeight, setDesktopHeight] = useState(DEFAULT_DESKTOP_PANEL_HEIGHT);
     const [isDragging, setIsDragging] = useState(false);
+    const [isDesktopDragging, setIsDesktopDragging] = useState(false);
+    const sidebarRef = useRef<HTMLDivElement>(null);
     const [uiWorkReady, setUiWorkReady] = useState(false);
     const [uiSidebarReady, setUiSidebarReady] = useState(false);
     const [codeServerReady, setCodeServerReady] = useState(false);
@@ -506,6 +515,39 @@ const OmniRunningView = memo(
       };
     }, [isDragging]);
 
+    const handleDesktopDividerMouseDown = useCallback((e: React.MouseEvent) => {
+      e.preventDefault();
+      setIsDesktopDragging(true);
+    }, []);
+
+    useEffect(() => {
+      if (!isDesktopDragging) {
+        return;
+      }
+
+      const handleMouseMove = (e: MouseEvent) => {
+        if (!sidebarRef.current) {
+          return;
+        }
+        const rect = sidebarRef.current.getBoundingClientRect();
+        const height = rect.bottom - e.clientY;
+        const maxHeight = rect.height * MAX_DESKTOP_PANEL_PERCENT;
+        const clamped = Math.min(maxHeight, Math.max(MIN_DESKTOP_PANEL_HEIGHT, height));
+        setDesktopHeight(clamped);
+      };
+
+      const handleMouseUp = () => {
+        setIsDesktopDragging(false);
+      };
+
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+    }, [isDesktopDragging]);
+
     const availableModes = useMemo(() => {
       if (!store.enableCodeServer) {
         return modeOptions.filter((m) => m.value === 'work');
@@ -591,7 +633,10 @@ const OmniRunningView = memo(
           </div>
 
           <div className={cn('w-full h-full', layoutMode !== 'code' && 'hidden')}>
-            <div ref={splitRef} className={cn('relative flex w-full h-full', isDragging && 'select-none')}>
+            <div
+              ref={splitRef}
+              className={cn('relative flex w-full h-full', (isDragging || isDesktopDragging) && 'select-none')}
+            >
               {isDragging && <div className="absolute inset-0 z-20 cursor-col-resize" />}
 
               <div className="min-w-0" style={{ width: `${100 - sidebarWidthPercent}%` }}>
@@ -607,16 +652,28 @@ const OmniRunningView = memo(
                 onMouseDown={handleDividerMouseDown}
               />
 
-              <div className="flex flex-col min-w-0" style={{ width: `${sidebarWidthPercent}%` }}>
+              <div
+                ref={sidebarRef}
+                className="flex flex-col min-w-0"
+                style={{ width: `${sidebarWidthPercent}%` }}
+              >
+                {isDesktopDragging && <div className="absolute inset-0 z-20 cursor-row-resize" />}
                 <div className="flex-1 min-h-0">
                   <Webview src={uiSrc} onReady={handleUiSidebarReady} showUnavailable={false} />
                 </div>
 
                 {store.enableVnc && (
                   <>
-                    <div className="flex items-center justify-between px-2 h-8 shrink-0 border-t border-surface-border bg-surface-raised">
+                    <div
+                      className={cn(
+                        'flex items-center justify-between px-2 h-8 shrink-0 border-t border-surface-border bg-surface-raised',
+                        desktopExpanded && 'cursor-row-resize'
+                      )}
+                      onMouseDown={desktopExpanded ? handleDesktopDividerMouseDown : undefined}
+                    >
                       <button
                         onClick={toggleDesktop}
+                        onMouseDown={stopPropagation}
                         className="flex items-center gap-1 text-xs text-fg-muted hover:text-fg cursor-pointer select-none"
                       >
                         <PiCaretDownBold
@@ -627,6 +684,7 @@ const OmniRunningView = memo(
                       </button>
                       <button
                         onClick={handleExpandDesktop}
+                        onMouseDown={stopPropagation}
                         className="text-fg-muted hover:text-fg cursor-pointer p-1"
                         title="Expand Desktop to full screen"
                       >
@@ -634,14 +692,14 @@ const OmniRunningView = memo(
                       </button>
                     </div>
                     <div
-                      className={cn('shrink-0 transition-[height] overflow-hidden', !desktopExpanded && 'h-0')}
-                      style={{ height: desktopExpanded ? DESKTOP_PANEL_EXPANDED_HEIGHT : 0 }}
+                      className={cn(
+                        'shrink-0 overflow-hidden',
+                        !desktopExpanded && 'h-0',
+                        !isDesktopDragging && 'transition-[height]'
+                      )}
+                      style={{ height: desktopExpanded ? desktopHeight : 0 }}
                     >
-                      <Webview
-                        src={vncSrc}
-                        onReady={handleVncPanelReady}
-                        showUnavailable={false}
-                      />
+                      <Webview src={vncSrc} onReady={handleVncPanelReady} showUnavailable={false} />
                     </div>
                   </>
                 )}

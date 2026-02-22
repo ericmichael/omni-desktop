@@ -566,6 +566,49 @@ const ModelRow = memo(
       [providerName, modelId, onUpdate]
     );
 
+    const storeValue = (model.model_settings as Record<string, unknown> | undefined)?.store !== false;
+    const extraBody = (model.model_settings as Record<string, unknown> | undefined)?.extra_body as
+      | Record<string, unknown>
+      | undefined;
+    const includeArr = Array.isArray(extraBody?.include) ? (extraBody.include as string[]) : [];
+    const hasEncryptedReasoning = includeArr.includes('reasoning.encrypted_content');
+
+    const onChangeStore = useCallback(
+      (e: ChangeEvent<HTMLInputElement>) => {
+        const prev = (model.model_settings ?? {}) as Record<string, unknown>;
+        const next = e.target.checked ? { ...prev, store: undefined } : { ...prev, store: false };
+        // Clean up undefined keys
+        if (next.store === undefined) {
+          delete next.store;
+        }
+        onUpdate(providerName, modelId, 'model_settings', Object.keys(next).length > 0 ? next : undefined);
+      },
+      [providerName, modelId, model.model_settings, onUpdate]
+    );
+
+    const onChangeEncryptedReasoning = useCallback(
+      (e: ChangeEvent<HTMLInputElement>) => {
+        const prev = (model.model_settings ?? {}) as Record<string, unknown>;
+        const prevExtra = (prev.extra_body ?? {}) as Record<string, unknown>;
+        const prevInclude = Array.isArray(prevExtra.include) ? (prevExtra.include as string[]) : [];
+
+        let nextInclude: string[];
+        if (e.target.checked) {
+          nextInclude = [...prevInclude, 'reasoning.encrypted_content'];
+        } else {
+          nextInclude = prevInclude.filter((v) => v !== 'reasoning.encrypted_content');
+        }
+
+        const nextExtra = nextInclude.length > 0 ? { ...prevExtra, include: nextInclude } : undefined;
+        const next = { ...prev, extra_body: nextExtra };
+        if (next.extra_body === undefined) {
+          delete next.extra_body;
+        }
+        onUpdate(providerName, modelId, 'model_settings', Object.keys(next).length > 0 ? next : undefined);
+      },
+      [providerName, modelId, model.model_settings, onUpdate]
+    );
+
     return (
       <div className="bg-surface/50 rounded-md border border-surface-border/30">
         <div className="flex items-center gap-2 px-3 py-2">
@@ -619,6 +662,14 @@ const ModelRow = memo(
             <label className="flex items-center gap-2 text-xs text-fg cursor-pointer">
               <input type="checkbox" checked={model.realtime ?? false} onChange={onChangeRealtime} />
               Realtime model
+            </label>
+            <label className="flex items-center gap-2 text-xs text-fg cursor-pointer">
+              <input type="checkbox" checked={!storeValue} onChange={onChangeStore} />
+              Disable storage (store: false)
+            </label>
+            <label className="flex items-center gap-2 text-xs text-fg cursor-pointer">
+              <input type="checkbox" checked={hasEncryptedReasoning} onChange={onChangeEncryptedReasoning} />
+              Include encrypted reasoning content
             </label>
           </div>
         )}
