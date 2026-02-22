@@ -1,13 +1,12 @@
 import { useStore } from '@nanostores/react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PiArrowLeftBold, PiArrowsOutSimpleBold, PiCaretDownBold, PiStopFill, PiWarningCircleFill } from 'react-icons/pi';
+import { PiArrowsOutSimpleBold, PiCaretDownBold, PiWarningCircleFill } from 'react-icons/pi';
 
-import { AsciiLogo } from '@/renderer/common/AsciiLogo';
 import { EllipsisLoadingText } from '@/renderer/common/EllipsisLoadingText';
 import { BodyContainer, BodyContent } from '@/renderer/common/layout';
-import { Button, cn, Divider, Heading, IconButton, Spinner } from '@/renderer/ds';
-import { SettingsModalOpenButton } from '@/renderer/features/SettingsModal/SettingsModalOpenButton';
+import { Webview } from '@/renderer/common/Webview';
+import { Button, cn, Divider, Heading, Spinner } from '@/renderer/ds';
 import { $isSettingsOpen } from '@/renderer/features/SettingsModal/state';
 import { XTermLogViewer } from '@/renderer/features/XTermLogViewer/XTermLogViewer';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
@@ -19,7 +18,6 @@ import {
   $sandboxProcessStatus,
   $sandboxProcessXTerm,
   omniInstallApi,
-  sandboxApi,
 } from './state';
 import type { AutoLaunchPhase } from './use-auto-launch';
 import { $autoLaunchError, $autoLaunchPhase, useAutoLaunch } from './use-auto-launch';
@@ -49,116 +47,6 @@ const staggerContainer = {
 const staggerItem = {
   initial: { opacity: 0, y: 12 },
   animate: { opacity: 1, y: 0 },
-};
-
-const Webview = ({
-  src,
-  onReady,
-  showUnavailable = true,
-}: {
-  src?: string;
-  onReady?: () => void;
-  showUnavailable?: boolean;
-}) => {
-  const elementRef = useRef<Electron.WebviewTag | null>(null);
-  const cleanupRef = useRef<(() => void) | null>(null);
-  const onReadyRef = useRef(onReady);
-  const readyEmittedRef = useRef(false);
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const retryDelayRef = useRef(750);
-
-  useEffect(() => {
-    onReadyRef.current = onReady;
-  }, [onReady]);
-
-  const clearRetryTimer = useCallback(() => {
-    if (!retryTimerRef.current) {
-      return;
-    }
-    clearTimeout(retryTimerRef.current);
-    retryTimerRef.current = null;
-  }, []);
-
-  const scheduleRetry = useCallback(() => {
-    const el = elementRef.current;
-    if (!el) {
-      return;
-    }
-    clearRetryTimer();
-
-    const delay = retryDelayRef.current;
-    retryDelayRef.current = Math.min(15_000, Math.round(retryDelayRef.current * 1.4));
-    retryTimerRef.current = setTimeout(() => {
-      el.reload();
-    }, delay);
-  }, [clearRetryTimer]);
-
-  const callbackRef = useCallback(
-    (node: HTMLElement | null) => {
-      cleanupRef.current?.();
-      cleanupRef.current = null;
-      elementRef.current = null;
-      clearRetryTimer();
-      retryDelayRef.current = 750;
-      readyEmittedRef.current = false;
-
-      if (!node || !src) {
-        return;
-      }
-
-      const el = node as unknown as Electron.WebviewTag;
-      elementRef.current = el;
-
-      const onLoad = () => {
-        clearRetryTimer();
-        retryDelayRef.current = 750;
-
-        if (!readyEmittedRef.current) {
-          readyEmittedRef.current = true;
-          onReadyRef.current?.();
-        }
-      };
-
-      const onFailLoad = (...args: unknown[]) => {
-        const errorCode = typeof args[1] === 'number' ? (args[1] as number) : null;
-        const isMainFrame = typeof args[4] === 'boolean' ? (args[4] as boolean) : true;
-
-        if (!isMainFrame) {
-          return;
-        }
-        if (errorCode === -3) {
-          return;
-        }
-        if (readyEmittedRef.current) {
-          return;
-        }
-
-        scheduleRetry();
-      };
-
-      el.addEventListener('did-finish-load', onLoad);
-      el.addEventListener('did-fail-load', onFailLoad);
-
-      cleanupRef.current = () => {
-        el.removeEventListener('did-finish-load', onLoad);
-        el.removeEventListener('did-fail-load', onFailLoad);
-      };
-    },
-    [clearRetryTimer, scheduleRetry, src]
-  );
-
-  if (!src) {
-    if (!showUnavailable) {
-      return null;
-    }
-    return (
-      <div className="flex items-center justify-center w-full h-full border border-surface-border rounded-lg">
-        <span className="text-fg-muted">Not available</span>
-      </div>
-    );
-  }
-
-  return <webview ref={callbackRef} src={src} style={{ width: '100%', height: '100%' }} />;
 };
 
 const PHASE_LABELS: Partial<Record<AutoLaunchPhase, string>> = {
@@ -380,11 +268,6 @@ const OmniIdleView = memo(() => {
 });
 OmniIdleView.displayName = 'OmniIdleView';
 
-const modeOptions: { value: LayoutMode; label: string }[] = [
-  { value: 'work', label: 'Work' },
-  { value: 'code', label: 'Code' },
-];
-
 const setLayoutMode = (mode: LayoutMode) => {
   persistedStoreApi.setKey('layoutMode', mode);
 };
@@ -460,21 +343,6 @@ const OmniRunningView = memo(
       }
     }, [allReady, onReady]);
 
-    const stopSandbox = useCallback(() => {
-      sandboxApi.stop();
-    }, []);
-
-    const handleSetMode = useCallback(
-      (mode: LayoutMode) => () => {
-        setLayoutMode(mode);
-      },
-      []
-    );
-
-    const handleBackToCode = useCallback(() => {
-      setLayoutMode('code');
-    }, []);
-
     const handleExpandDesktop = useCallback(() => {
       setLayoutMode('desktop');
     }, []);
@@ -548,13 +416,6 @@ const OmniRunningView = memo(
       };
     }, [isDesktopDragging]);
 
-    const availableModes = useMemo(() => {
-      if (!store.enableCodeServer) {
-        return modeOptions.filter((m) => m.value === 'work');
-      }
-      return modeOptions;
-    }, [store.enableCodeServer]);
-
     const handleUiWorkReady = useCallback(() => {
       setUiWorkReady(true);
     }, []);
@@ -577,47 +438,6 @@ const OmniRunningView = memo(
 
     return (
       <div className="flex flex-col w-full h-full relative">
-        {/* Toolbar */}
-        <div className="flex items-center px-3 border-b border-surface-border shrink-0">
-          <AsciiLogo className="text-[5px]" />
-
-          <div className="flex-1 flex justify-center">
-            {layoutMode === 'desktop' ? (
-              <Button size="sm" variant="ghost" onClick={handleBackToCode}>
-                <PiArrowLeftBold size={14} />
-                <span className="ml-1">Back to Code</span>
-              </Button>
-            ) : (
-              <div className="flex bg-surface-raised rounded-lg p-0.5 gap-0.5">
-                {availableModes.map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={handleSetMode(opt.value)}
-                    className={cn(
-                      'relative px-3 py-1 text-xs rounded-md transition-colors cursor-pointer select-none',
-                      layoutMode === opt.value ? 'text-white' : 'text-fg-muted hover:text-fg'
-                    )}
-                  >
-                    {layoutMode === opt.value && (
-                      <motion.div
-                        layoutId="layout-indicator"
-                        className="absolute inset-0 bg-accent-600 rounded-md"
-                        transition={{ type: 'spring', duration: 0.3, bounce: 0.15 }}
-                      />
-                    )}
-                    <span className="relative z-10">{opt.label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center gap-1">
-            <SettingsModalOpenButton />
-            <IconButton aria-label="Stop" icon={<PiStopFill />} size="sm" onClick={stopSandbox} />
-          </div>
-        </div>
-
         {/* Content area */}
         <div className="flex-1 min-h-0 p-2 relative">
           <div className={cn('w-full h-full', layoutMode !== 'work' && 'hidden')}>
@@ -652,11 +472,7 @@ const OmniRunningView = memo(
                 onMouseDown={handleDividerMouseDown}
               />
 
-              <div
-                ref={sidebarRef}
-                className="flex flex-col min-w-0"
-                style={{ width: `${sidebarWidthPercent}%` }}
-              >
+              <div ref={sidebarRef} className="flex flex-col min-w-0" style={{ width: `${sidebarWidthPercent}%` }}>
                 {isDesktopDragging && <div className="absolute inset-0 z-20 cursor-row-resize" />}
                 <div className="flex-1 min-h-0">
                   <Webview src={uiSrc} onReady={handleUiSidebarReady} showUnavailable={false} />

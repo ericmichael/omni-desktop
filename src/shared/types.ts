@@ -45,7 +45,7 @@ export type WindowProps = {
 /**
  * Data stored in the electron store.
  */
-export type LayoutMode = 'work' | 'code' | 'desktop';
+export type LayoutMode = 'work' | 'code' | 'desktop' | 'fleet';
 export type OmniTheme = 'default' | 'tokyo-night' | 'vscode-dark' | 'vscode-light';
 
 export type StoreData = {
@@ -59,6 +59,8 @@ export type StoreData = {
   layoutMode: LayoutMode;
   theme: OmniTheme;
   onboardingComplete: boolean;
+  fleetProjects: FleetProject[];
+  fleetTasks: FleetTask[];
 };
 
 // The electron store uses JSON schema to validate its data.
@@ -110,7 +112,7 @@ export const schema: Schema<StoreData> = {
   },
   layoutMode: {
     type: 'string',
-    enum: ['work', 'code', 'desktop'],
+    enum: ['work', 'code', 'desktop', 'fleet'],
     default: 'work',
   },
   theme: {
@@ -121,6 +123,38 @@ export const schema: Schema<StoreData> = {
   onboardingComplete: {
     type: 'boolean',
     default: false,
+  },
+  fleetProjects: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        label: { type: 'string' },
+        workspaceDir: { type: 'string' },
+        createdAt: { type: 'number' },
+      },
+      required: ['id', 'label', 'workspaceDir', 'createdAt'],
+    },
+  },
+  fleetTasks: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        projectId: { type: 'string' },
+        taskDescription: { type: 'string' },
+        status: { type: 'object' },
+        createdAt: { type: 'number' },
+        branch: { type: 'string' },
+        worktreePath: { type: 'string' },
+        worktreeName: { type: 'string' },
+      },
+      required: ['id', 'projectId', 'taskDescription', 'status', 'createdAt'],
+    },
   },
 };
 
@@ -240,6 +274,38 @@ export type OmniRuntimeInfo =
       omniPath: string;
     };
 
+// #region Fleet types
+
+export type FleetProjectId = string;
+export type FleetTaskId = string;
+
+export type FleetProject = {
+  id: FleetProjectId;
+  label: string;
+  workspaceDir: string;
+  createdAt: number;
+};
+
+export type FleetTask = {
+  id: FleetTaskId;
+  projectId: FleetProjectId;
+  taskDescription: string;
+  status: WithTimestamp<SandboxProcessStatus>;
+  createdAt: number;
+  branch?: string;
+  worktreePath?: string;
+  worktreeName?: string;
+};
+
+export type FleetTaskSubmitOptions = {
+  branch?: string;
+  useWorktree?: boolean;
+};
+
+export type GitRepoInfo = { isGitRepo: true; branches: string[]; currentBranch: string } | { isGitRepo: false };
+
+// #endregion
+
 /**
  * Store API. Main process handles these events, renderer process invokes them.
  */
@@ -348,6 +414,23 @@ type ConfigIpcEvents = Namespaced<
 >;
 
 /**
+ * Fleet API. Main process handles these events, renderer process invokes them.
+ */
+type FleetIpcEvents = Namespaced<
+  'fleet',
+  {
+    'add-project': (project: Omit<FleetProject, 'id' | 'createdAt'>) => FleetProject;
+    'update-project': (id: FleetProjectId, patch: Partial<Omit<FleetProject, 'id' | 'createdAt'>>) => void;
+    'remove-project': (id: FleetProjectId) => void;
+    'check-git-repo': (workspaceDir: string) => GitRepoInfo;
+    'submit-task': (projectId: FleetProjectId, taskDescription: string, options: FleetTaskSubmitOptions) => FleetTask;
+    'get-tasks': () => FleetTask[];
+    'stop-task': (taskId: FleetTaskId) => void;
+    'remove-task': (taskId: FleetTaskId) => void;
+  }
+>;
+
+/**
  * Intersection of all the events that the renderer can invoke and main process can handle.
  */
 export type IpcEvents = MainProcessIpcEvents &
@@ -356,7 +439,8 @@ export type IpcEvents = MainProcessIpcEvents &
   UtilIpcEvents &
   TerminalIpcEvents &
   StoreIpcEvents &
-  ConfigIpcEvents;
+  ConfigIpcEvents &
+  FleetIpcEvents;
 
 /**
  * Store events. Main process emits these events, renderer process listens to them.
@@ -418,6 +502,18 @@ type DevIpcRendererEvents = Namespaced<
 >;
 
 /**
+ * Fleet events. Main process emits these events, renderer process listens to them.
+ */
+type FleetIpcRendererEvents = Namespaced<
+  'fleet',
+  {
+    'task-status': [FleetTaskId, WithTimestamp<SandboxProcessStatus>];
+    'task-log': [FleetTaskId, WithTimestamp<LogEntry>];
+    'task-raw-output': [FleetTaskId, string];
+  }
+>;
+
+/**
  * Intersection of all the events emitted by main process that the renderer can listen to.
  */
 export type IpcRendererEvents = TerminalIpcRendererEvents &
@@ -425,7 +521,8 @@ export type IpcRendererEvents = TerminalIpcRendererEvents &
   OmniInstallProcessIpcRendererEvents &
   SandboxProcessIpcRendererEvents &
   DevIpcRendererEvents &
-  StoreIpcRendererEvents;
+  StoreIpcRendererEvents &
+  FleetIpcRendererEvents;
 
 // #region Config file types
 

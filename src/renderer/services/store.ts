@@ -12,6 +12,8 @@ const getDefaults = (): StoreData => ({
   layoutMode: 'work',
   theme: 'tokyo-night',
   onboardingComplete: false,
+  fleetProjects: [],
+  fleetTasks: [],
 });
 
 /**

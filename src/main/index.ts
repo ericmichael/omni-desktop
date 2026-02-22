@@ -4,6 +4,7 @@ import { dirname, join } from 'path';
 import { assert } from 'tsafe';
 
 import { createConsoleManager } from '@/main/console-manager';
+import { createFleetManager } from '@/main/fleet-manager';
 import { MainProcessManager } from '@/main/main-process-manager';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
 import { createSandboxManager } from '@/main/sandbox-manager';
@@ -55,6 +56,11 @@ const [sandbox, cleanupSandbox] = createSandboxManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
 });
+const [, cleanupFleet] = createFleetManager({
+  ipc: main.ipc,
+  sendToWindow: main.sendToWindow,
+  store,
+});
 
 main.ipc.handle('main-process:get-status', () => main.getStatus());
 main.ipc.handle('omni-install-process:get-status', () => omniInstall.getStatus());
@@ -71,7 +77,7 @@ async function cleanup() {
   }
   isShuttingDown = true;
 
-  const results = await Promise.allSettled([cleanupConsole(), cleanupOmniInstall(), cleanupSandbox()]);
+  const results = await Promise.allSettled([cleanupConsole(), cleanupOmniInstall(), cleanupSandbox(), cleanupFleet()]);
   const errors = results
     .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
     .map((result) => result.reason);

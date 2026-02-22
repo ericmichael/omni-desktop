@@ -113,6 +113,10 @@ export const getDefaultWorkspaceDir = (): string => {
   return path.join(app.getPath('home'), 'Omni', 'Workspace');
 };
 
+export const getWorktreesDir = (): string => {
+  return path.join(app.getPath('home'), 'Omni', 'Worktrees');
+};
+
 export const ensureDirectory = async (dirPath: string): Promise<boolean> => {
   try {
     await fs.mkdir(dirPath, { recursive: true });
