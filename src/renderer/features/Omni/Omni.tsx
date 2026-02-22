@@ -141,14 +141,6 @@ const Webview = ({
     [clearRetryTimer, scheduleRetry, src]
   );
 
-  useEffect(() => {
-    return () => {
-      cleanupRef.current?.();
-      cleanupRef.current = null;
-      clearRetryTimer();
-    };
-  }, [clearRetryTimer]);
-
   if (!src) {
     if (!showUnavailable) {
       return null;
