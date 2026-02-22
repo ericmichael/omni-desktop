@@ -50,7 +50,6 @@ export type OmniTheme = 'default' | 'tokyo-night' | 'vscode-dark' | 'vscode-ligh
 
 export type StoreData = {
   workspaceDir?: string;
-  envFilePath?: string;
   enableCodeServer: boolean;
   enableVnc: boolean;
   useWorkDockerfile: boolean;
@@ -59,6 +58,7 @@ export type StoreData = {
   optInToLauncherPrereleases: boolean;
   layoutMode: LayoutMode;
   theme: OmniTheme;
+  onboardingComplete: boolean;
 };
 
 // The electron store uses JSON schema to validate its data.
@@ -90,9 +90,6 @@ export const schema: Schema<StoreData> = {
   workspaceDir: {
     type: 'string',
   },
-  envFilePath: {
-    type: 'string',
-  },
   enableCodeServer: {
     type: 'boolean',
     default: true,
@@ -120,6 +117,10 @@ export const schema: Schema<StoreData> = {
     type: 'string',
     enum: ['default', 'tokyo-night', 'vscode-dark', 'vscode-light'],
     default: 'tokyo-night',
+  },
+  onboardingComplete: {
+    type: 'boolean',
+    default: false,
   },
 };
 
@@ -280,7 +281,6 @@ type SandboxProcessIpcEvents = Namespaced<
     'get-status': () => WithTimestamp<SandboxProcessStatus>;
     start: (arg: {
       workspaceDir: string;
-      envFilePath?: string;
       enableCodeServer: boolean;
       enableVnc: boolean;
       useWorkDockerfile: boolean;
@@ -305,7 +305,6 @@ type UtilIpcEvents = Namespaced<
     'get-os': () => OperatingSystem;
     'get-default-install-dir': () => string;
     'get-default-workspace-dir': () => string;
-    'get-default-env-file-path': () => string | null;
     'ensure-directory': (path: string) => boolean;
     'open-directory': (path: string) => string;
     'get-launcher-version': () => string;
@@ -314,6 +313,8 @@ type UtilIpcEvents = Namespaced<
     'check-ws': (url: string) => boolean;
     'install-cli-to-path': () => { success: true; symlinkPath: string } | { success: false; error: string };
     'get-cli-in-path-status': () => { installed: boolean; symlinkPath: string };
+    'check-models-configured': () => boolean;
+    'test-model-connection': (modelRef?: string) => { success: boolean; output: string };
   }
 >;
 
@@ -338,6 +339,7 @@ type ConfigIpcEvents = Namespaced<
   'config',
   {
     'get-omni-config-dir': () => string;
+    'get-env-file-path': () => string;
     'read-json-file': (path: string) => unknown | null;
     'write-json-file': (path: string, data: unknown) => void;
     'read-text-file': (path: string) => string | null;

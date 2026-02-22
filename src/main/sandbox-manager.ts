@@ -1,10 +1,11 @@
 import type { ChildProcess } from 'node:child_process';
 import { execFile, spawn } from 'node:child_process';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { IpcListener } from '@electron-toolkit/typed-ipc/main';
 import c from 'ansi-colors';
-import { ipcMain, net } from 'electron';
+import { app, ipcMain, net } from 'electron';
 import { shellEnvSync } from 'shell-env';
 import { assert } from 'tsafe';
 
@@ -196,7 +197,6 @@ export class SandboxManager {
 
   start = async (arg: {
     workspaceDir: string;
-    envFilePath?: string;
     enableCodeServer: boolean;
     enableVnc: boolean;
     useWorkDockerfile: boolean;
@@ -228,11 +228,6 @@ export class SandboxManager {
 
     if (!(await isDirectory(arg.workspaceDir))) {
       this.updateStatus({ type: 'error', error: { message: `Workspace directory not found: ${arg.workspaceDir}` } });
-      return;
-    }
-
-    if (arg.envFilePath && !(await isFile(arg.envFilePath))) {
-      this.updateStatus({ type: 'error', error: { message: `Env file not found: ${arg.envFilePath}` } });
       return;
     }
 
@@ -268,8 +263,9 @@ export class SandboxManager {
       'json',
     ];
 
-    if (arg.envFilePath) {
-      args.push('--env-file', arg.envFilePath);
+    const envFilePath = join(app.getPath('home'), '.config', 'omni_code', '.env');
+    if (await isFile(envFilePath)) {
+      args.push('--env-file', envFilePath);
     }
 
     if (arg.enableCodeServer) {

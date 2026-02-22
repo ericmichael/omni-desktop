@@ -2,6 +2,7 @@ import { useStore } from '@nanostores/react';
 import { atom } from 'nanostores';
 import { useCallback, useEffect, useRef } from 'react';
 
+import { emitter } from '@/renderer/services/ipc';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
 
 import {
@@ -87,6 +88,8 @@ export const useAutoLaunch = () => {
   }, [phase, installStatus]);
 
   // Phase: ready → starting (auto-start sandbox)
+  // Checks model configuration before launching. If models aren't configured, resets onboarding
+  // so the wizard is shown instead of a cryptic runtime error.
   useEffect(() => {
     if (phase !== 'ready') {
       return;
@@ -104,17 +107,52 @@ export const useAutoLaunch = () => {
       return;
     }
 
-    hasAutoLaunched.current = true;
-    didTriggerStart.current = true;
-    lastStartTimestamp.current = Date.now();
-    sandboxApi.start({
-      workspaceDir: store.workspaceDir,
-      envFilePath: store.envFilePath,
-      enableCodeServer: store.enableCodeServer,
-      enableVnc: store.enableVnc,
-      useWorkDockerfile: store.useWorkDockerfile,
-    });
-    $autoLaunchPhase.set('starting');
+    let cancelled = false;
+
+    const startSandbox = async () => {
+      // Verify models are configured before attempting sandbox start.
+      // Reads models.json directly instead of using the CLI, so this works even if the runtime isn't installed yet.
+      try {
+        const configDir = await emitter.invoke('config:get-omni-config-dir');
+        const modelsConfig = (await emitter.invoke('config:read-json-file', `${configDir}/models.json`)) as {
+          providers?: Record<string, unknown>;
+        } | null;
+        const hasProviders = modelsConfig?.providers && Object.keys(modelsConfig.providers).length > 0;
+
+        if (cancelled) {
+          return;
+        }
+
+        if (!hasProviders) {
+          // Reset onboarding so the wizard is shown
+          await persistedStoreApi.setKey('onboardingComplete', false);
+          return;
+        }
+      } catch {
+        // If we can't read the file, proceed anyway and let the sandbox report the error
+      }
+
+      if (cancelled) {
+        return;
+      }
+
+      hasAutoLaunched.current = true;
+      didTriggerStart.current = true;
+      lastStartTimestamp.current = Date.now();
+      sandboxApi.start({
+        workspaceDir: store.workspaceDir!,
+        enableCodeServer: store.enableCodeServer,
+        enableVnc: store.enableVnc,
+        useWorkDockerfile: store.useWorkDockerfile,
+      });
+      $autoLaunchPhase.set('starting');
+    };
+
+    void startSandbox();
+
+    return () => {
+      cancelled = true;
+    };
   }, [phase, store]);
 
   // Phase: starting → running (CLI confirmed services up) or → error/idle

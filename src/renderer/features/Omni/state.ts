@@ -122,7 +122,6 @@ const teardownSandboxTerminal = () => {
 export const sandboxApi = {
   start: (arg: {
     workspaceDir: string;
-    envFilePath?: string;
     enableCodeServer: boolean;
     enableVnc: boolean;
     useWorkDockerfile: boolean;

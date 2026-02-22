@@ -113,10 +113,6 @@ export const getDefaultWorkspaceDir = (): string => {
   return path.join(app.getPath('home'), 'Omni', 'Workspace');
 };
 
-export const getDefaultEnvFilePath = (): string => {
-  return path.join(app.getPath('home'), 'Omni', '.env');
-};
-
 export const ensureDirectory = async (dirPath: string): Promise<boolean> => {
   try {
     await fs.mkdir(dirPath, { recursive: true });
@@ -274,7 +270,9 @@ export const isCliInstalledInPath = async (): Promise<boolean> => {
  * Install the `omni` CLI command to the user's PATH by creating a symlink
  * from ~/.local/bin/omni to the venv binary.
  */
-export const installCliToPath = async (): Promise<{ success: true; symlinkPath: string } | { success: false; error: string }> => {
+export const installCliToPath = async (): Promise<
+  { success: true; symlinkPath: string } | { success: false; error: string }
+> => {
   const target = getOmniCliPath();
   const symlinkPath = getCliSymlinkPath();
   const symlinkDir = getCliSymlinkDir();
@@ -307,6 +305,41 @@ export const installCliToPath = async (): Promise<{ success: true; symlinkPath: 
     return { success: true, symlinkPath };
   } catch (e) {
     return { success: false, error: `Failed to create symlink: ${String(e)}` };
+  }
+};
+
+//#endregion
+
+//#region Omni CLI commands
+
+/**
+ * Check if models are configured by running `omni model check`.
+ * Returns true if exit code is 0, false otherwise.
+ */
+export const checkModelsConfigured = async (): Promise<boolean> => {
+  const omniPath = getOmniCliPath();
+  try {
+    await execAsync(`"${omniPath}" model check`);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Test a model connection by running `omni model test [ref]`.
+ * Returns success/failure and the command output.
+ */
+export const testModelConnection = async (modelRef?: string): Promise<{ success: boolean; output: string }> => {
+  const omniPath = getOmniCliPath();
+  const cmd = modelRef ? `"${omniPath}" model test "${modelRef}"` : `"${omniPath}" model test`;
+  try {
+    const { stdout, stderr } = await execAsync(cmd, { timeout: 30_000 });
+    return { success: true, output: (stdout + stderr).trim() };
+  } catch (e) {
+    const err = e as { stdout?: string; stderr?: string; message?: string };
+    const output = ((err.stdout ?? '') + (err.stderr ?? '')).trim() || err.message || 'Unknown error';
+    return { success: false, output };
   }
 };
 

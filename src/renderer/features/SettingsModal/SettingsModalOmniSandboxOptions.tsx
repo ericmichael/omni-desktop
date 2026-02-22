@@ -5,7 +5,7 @@ import { memo, useCallback, useEffect, useState } from 'react';
 import { Button, FormField, Switch } from '@/renderer/ds';
 import { $omniInstallProcessStatus, $omniRuntimeInfo, omniInstallApi } from '@/renderer/features/Omni/state';
 import { emitter } from '@/renderer/services/ipc';
-import { persistedStoreApi, selectEnvFilePath, selectWorkspaceDir } from '@/renderer/services/store';
+import { persistedStoreApi, selectWorkspaceDir } from '@/renderer/services/store';
 import type { OmniTheme } from '@/shared/types';
 
 export const SettingsModalOmniSandboxOptions = memo(() => {
@@ -52,10 +52,6 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
     persistedStoreApi.setKey('useWorkDockerfile', checked);
   }, []);
 
-  const clearEnvFilePath = useCallback(() => {
-    persistedStoreApi.setKey('envFilePath', undefined);
-  }, []);
-
   const reinstallRuntime = useCallback(() => {
     omniInstallApi.startInstall(true);
   }, []);
@@ -73,17 +69,6 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
           <Button size="sm" variant="ghost" onClick={selectWorkspaceDir}>
             Change
           </Button>
-        </FormField>
-        <FormField label="Environment file">
-          <span className="text-xs text-fg-muted truncate max-w-[200px]">{store.envFilePath ?? 'None'}</span>
-          <Button size="sm" variant="ghost" onClick={selectEnvFilePath}>
-            Change
-          </Button>
-          {store.envFilePath && (
-            <Button size="sm" variant="ghost" onClick={clearEnvFilePath}>
-              Clear
-            </Button>
-          )}
         </FormField>
       </div>
 

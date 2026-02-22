@@ -55,7 +55,9 @@ export const SettingsModalModelsTab = memo(() => {
       if (data && typeof data === 'object' && 'version' in data) {
         setConfig(data as ModelsConfig);
       } else {
-        setConfig(null);
+        const newConfig = emptyConfig();
+        await configApi.writeJsonFile(`${dir}/models.json`, newConfig);
+        setConfig(newConfig);
       }
       setDirty(false);
       setError(null);
@@ -71,23 +73,6 @@ export const SettingsModalModelsTab = memo(() => {
   }, [load]);
 
   const modelKeys = useMemo(() => (config ? collectModelKeys(config) : []), [config]);
-
-  const createConfig = useCallback(async () => {
-    if (!filePath) {
-      return;
-    }
-    const newConfig = emptyConfig();
-    setSaving(true);
-    try {
-      await configApi.writeJsonFile(filePath, newConfig);
-      setConfig(newConfig);
-      setDirty(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create');
-    } finally {
-      setSaving(false);
-    }
-  }, [filePath]);
 
   const save = useCallback(async () => {
     if (!filePath || !config) {
@@ -281,11 +266,8 @@ export const SettingsModalModelsTab = memo(() => {
 
   if (!config) {
     return (
-      <div className="flex flex-col items-center gap-3 py-12">
-        <span className="text-sm text-fg-muted">No models.json found</span>
-        <Button size="sm" variant="primary" onClick={createConfig} isDisabled={saving}>
-          Create models.json
-        </Button>
+      <div className="flex items-center justify-center py-12">
+        <Spinner />
       </div>
     );
   }

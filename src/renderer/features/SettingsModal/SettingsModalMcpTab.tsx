@@ -37,7 +37,9 @@ export const SettingsModalMcpTab = memo(() => {
       if (data && typeof data === 'object' && 'mcpServers' in data) {
         setConfig(data as McpConfig);
       } else {
-        setConfig(null);
+        const newConfig = emptyConfig();
+        await configApi.writeJsonFile(`${dir}/mcp.json`, newConfig);
+        setConfig(newConfig);
       }
       setDirty(false);
       setError(null);
@@ -51,23 +53,6 @@ export const SettingsModalMcpTab = memo(() => {
   useEffect(() => {
     load();
   }, [load]);
-
-  const createConfig = useCallback(async () => {
-    if (!filePath) {
-      return;
-    }
-    const newConfig = emptyConfig();
-    setSaving(true);
-    try {
-      await configApi.writeJsonFile(filePath, newConfig);
-      setConfig(newConfig);
-      setDirty(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create');
-    } finally {
-      setSaving(false);
-    }
-  }, [filePath]);
 
   const save = useCallback(async () => {
     if (!filePath || !config) {
@@ -155,11 +140,8 @@ export const SettingsModalMcpTab = memo(() => {
 
   if (!config) {
     return (
-      <div className="flex flex-col items-center gap-3 py-12">
-        <span className="text-sm text-fg-muted">No mcp.json found</span>
-        <Button size="sm" variant="primary" onClick={createConfig} isDisabled={saving}>
-          Create mcp.json
-        </Button>
+      <div className="flex items-center justify-center py-12">
+        <Spinner />
       </div>
     );
   }

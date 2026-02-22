@@ -2,7 +2,7 @@ import type { ReadableAtom } from 'nanostores';
 import { atom } from 'nanostores';
 
 import { emitter, ipc } from '@/renderer/services/ipc';
-import type { OperatingSystem, StoreData } from '@/shared/types';
+import type { ModelsConfig, OperatingSystem, StoreData } from '@/shared/types';
 
 const getDefaults = (): StoreData => ({
   enableCodeServer: true,
@@ -11,6 +11,7 @@ const getDefaults = (): StoreData => ({
   optInToLauncherPrereleases: false,
   layoutMode: 'work',
   theme: 'tokyo-night',
+  onboardingComplete: false,
 });
 
 /**
@@ -80,14 +81,6 @@ export const selectWorkspaceDir = async () => {
   }
 };
 
-export const selectEnvFilePath = async () => {
-  const envFilePath = persistedStoreApi.getKey('envFilePath');
-  const newEnvFilePath = await emitter.invoke('util:select-file', envFilePath);
-  if (newEnvFilePath) {
-    persistedStoreApi.setKey('envFilePath', newEnvFilePath);
-  }
-};
-
 /**
  * An atom that holds the initialization state of the store. This is used to determine when the store is ready to be
  * consumed. The app should wait for this atom to be `true` before allowing user interaction.
@@ -116,11 +109,19 @@ const init = async () => {
     await persistedStoreApi.setKey('workspaceDir', defaultDir);
   }
 
-  // Apply default env file if user has never set one and the convention file exists
-  if (store.envFilePath === undefined) {
-    const defaultEnv = await emitter.invoke('util:get-default-env-file-path');
-    if (defaultEnv) {
-      await persistedStoreApi.setKey('envFilePath', defaultEnv);
+  // Existing-user migration: if onboardingComplete is not set, check if models.json already has providers
+  if (!store.onboardingComplete) {
+    try {
+      const configDir = await emitter.invoke('config:get-omni-config-dir');
+      const modelsConfig = (await emitter.invoke(
+        'config:read-json-file',
+        `${configDir}/models.json`
+      )) as ModelsConfig | null;
+      if (modelsConfig?.providers && Object.keys(modelsConfig.providers).length > 0) {
+        await persistedStoreApi.setKey('onboardingComplete', true);
+      }
+    } catch {
+      // If we can't read the config, just leave onboardingComplete as false
     }
   }
 

@@ -1,11 +1,9 @@
-import { useStore } from '@nanostores/react';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { PiPlusBold, PiTrashBold } from 'react-icons/pi';
 
 import { Button, IconButton } from '@/renderer/ds';
 import { configApi } from '@/renderer/services/config';
-import { persistedStoreApi, selectEnvFilePath } from '@/renderer/services/store';
 
 type EnvLine = { kind: 'entry'; key: string; value: string } | { kind: 'comment'; text: string } | { kind: 'blank' };
 
@@ -44,42 +42,37 @@ function serializeEnvLines(lines: EnvLine[]): string {
 }
 
 export const SettingsModalEnvironmentTab = memo(() => {
-  const { envFilePath } = useStore(persistedStoreApi.$atom);
+  const [envFilePath, setEnvFilePath] = useState<string | null>(null);
   const [lines, setLines] = useState<EnvLine[]>([]);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const loadedPathRef = useRef<string | undefined>(undefined);
-
-  const loadFile = useCallback(async (filePath: string | undefined) => {
-    if (!filePath) {
-      setLines([]);
-      setDirty(false);
-      return;
-    }
-    try {
-      const content = await configApi.readTextFile(filePath);
-      if (content !== null) {
-        setLines(parseEnvContent(content));
-      } else {
-        setLines([]);
-      }
-      setDirty(false);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to read file');
-    }
-  }, []);
+  const didInit = useRef(false);
 
   useEffect(() => {
-    if (envFilePath !== loadedPathRef.current) {
-      loadedPathRef.current = envFilePath;
-      loadFile(envFilePath);
+    if (didInit.current) {
+      return;
     }
-  }, [envFilePath, loadFile]);
+    didInit.current = true;
 
-  const clearEnvFilePath = useCallback(() => {
-    persistedStoreApi.setKey('envFilePath', undefined);
+    const init = async () => {
+      try {
+        const filePath = await configApi.getEnvFilePath();
+        setEnvFilePath(filePath);
+        const content = await configApi.readTextFile(filePath);
+        if (content === null) {
+          await configApi.writeTextFile(filePath, '');
+          setLines([]);
+        } else {
+          setLines(parseEnvContent(content));
+        }
+        setError(null);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to load environment file');
+      }
+    };
+
+    init();
   }, []);
 
   const updateEntry = useCallback((index: number, field: 'key' | 'value', newVal: string) => {
@@ -124,53 +117,39 @@ export const SettingsModalEnvironmentTab = memo(() => {
     <div className="flex flex-col gap-3">
       <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle">Environment File</span>
       <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-fg-muted truncate flex-1">{envFilePath ?? 'No file selected'}</span>
-          <Button size="sm" variant="ghost" onClick={selectEnvFilePath}>
-            Change
-          </Button>
-          {envFilePath && (
-            <Button size="sm" variant="ghost" onClick={clearEnvFilePath}>
-              Clear
-            </Button>
-          )}
-        </div>
+        <span className="text-xs text-fg-muted truncate">{envFilePath ?? 'Loading\u2026'}</span>
       </div>
 
-      {envFilePath && (
-        <>
-          <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">Variables</span>
-          <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-2">
-            {lines.map((line, i) => {
-              if (line.kind === 'blank') {
-                return null;
-              }
-              if (line.kind === 'comment') {
-                return (
-                  <div key={i} className="text-xs text-fg-subtle font-mono opacity-60">
-                    {line.text}
-                  </div>
-                );
-              }
-              return <EnvEntryRow key={i} index={i} line={line} onUpdate={updateEntry} onRemove={removeEntry} />;
-            })}
+      <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">Variables</span>
+      <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-2">
+        {lines.map((line, i) => {
+          if (line.kind === 'blank') {
+            return null;
+          }
+          if (line.kind === 'comment') {
+            return (
+              <div key={i} className="text-xs text-fg-subtle font-mono opacity-60">
+                {line.text}
+              </div>
+            );
+          }
+          return <EnvEntryRow key={i} index={i} line={line} onUpdate={updateEntry} onRemove={removeEntry} />;
+        })}
 
-            <Button size="sm" variant="ghost" onClick={addEntry} className="self-start mt-1">
-              <PiPlusBold className="mr-1" />
-              Add variable
-            </Button>
-          </div>
+        <Button size="sm" variant="ghost" onClick={addEntry} className="self-start mt-1">
+          <PiPlusBold className="mr-1" />
+          Add variable
+        </Button>
+      </div>
 
-          {error && <span className="text-xs text-red-400">{error}</span>}
+      {error && <span className="text-xs text-red-400">{error}</span>}
 
-          <div className="flex items-center gap-2 mt-1">
-            <Button size="sm" variant="primary" onClick={save} isDisabled={!dirty || saving}>
-              {saving ? 'Saving\u2026' : 'Save'}
-            </Button>
-            {dirty && <span className="text-xs text-fg-subtle">Unsaved changes</span>}
-          </div>
-        </>
-      )}
+      <div className="flex items-center gap-2 mt-1">
+        <Button size="sm" variant="primary" onClick={save} isDisabled={!dirty || saving}>
+          {saving ? 'Saving\u2026' : 'Save'}
+        </Button>
+        {dirty && <span className="text-xs text-fg-subtle">Unsaved changes</span>}
+      </div>
     </div>
   );
 });

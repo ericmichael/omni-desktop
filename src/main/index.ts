@@ -9,9 +9,9 @@ import { createOmniInstallManager } from '@/main/omni-install-manager';
 import { createSandboxManager } from '@/main/sandbox-manager';
 import { store } from '@/main/store';
 import {
+  checkModelsConfigured,
   ensureDirectory,
   getCliSymlinkPath,
-  getDefaultEnvFilePath,
   getDefaultWorkspaceDir,
   getHomeDirectory,
   getOmniRuntimeInfo,
@@ -21,6 +21,7 @@ import {
   isDirectory,
   isFile,
   pathExists,
+  testModelConnection,
 } from '@/main/util';
 
 // Configure Chrome/Electron flags for better memory management
@@ -112,10 +113,6 @@ app.on('before-quit', cleanup);
 
 main.ipc.handle('util:get-default-install-dir', () => join(getHomeDirectory(), 'omni'));
 main.ipc.handle('util:get-default-workspace-dir', () => getDefaultWorkspaceDir());
-main.ipc.handle('util:get-default-env-file-path', async () => {
-  const envPath = getDefaultEnvFilePath();
-  return (await isFile(envPath)) ? envPath : null;
-});
 main.ipc.handle('util:ensure-directory', (_, dirPath) => ensureDirectory(dirPath));
 main.ipc.handle('util:select-directory', async (_, path) => {
   const mainWindow = main.getWindow();
@@ -156,6 +153,8 @@ main.ipc.handle('util:get-cli-in-path-status', async () => {
   const installed = await isCliInstalledInPath();
   return { installed, symlinkPath: getCliSymlinkPath() };
 });
+main.ipc.handle('util:check-models-configured', () => checkModelsConfigured());
+main.ipc.handle('util:test-model-connection', (_, modelRef) => testModelConnection(modelRef));
 main.ipc.handle('util:check-url', async (_, url) => {
   try {
     const response = await net.fetch(url, { method: 'GET' });
@@ -216,6 +215,7 @@ main.ipc.handle('util:check-ws', async (_, url) => {
 const OMNI_CONFIG_DIR = join(app.getPath('home'), '.config', 'omni_code');
 
 main.ipc.handle('config:get-omni-config-dir', () => OMNI_CONFIG_DIR);
+main.ipc.handle('config:get-env-file-path', () => join(OMNI_CONFIG_DIR, '.env'));
 
 main.ipc.handle('config:read-json-file', async (_, filePath) => {
   try {
