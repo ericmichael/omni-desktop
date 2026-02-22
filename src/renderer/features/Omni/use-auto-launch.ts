@@ -2,7 +2,6 @@ import { useStore } from '@nanostores/react';
 import { atom } from 'nanostores';
 import { useCallback, useEffect, useRef } from 'react';
 
-import { emitter } from '@/renderer/services/ipc';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
 
 import {
@@ -14,7 +13,7 @@ import {
   sandboxApi,
 } from './state';
 
-export type AutoLaunchPhase = 'checking' | 'installing' | 'ready' | 'starting' | 'waiting' | 'running' | 'error' | 'idle';
+export type AutoLaunchPhase = 'checking' | 'installing' | 'ready' | 'starting' | 'running' | 'error' | 'idle';
 
 export const $autoLaunchPhase = atom<AutoLaunchPhase>('checking');
 export const $autoLaunchError = atom<string | null>(null);
@@ -24,6 +23,10 @@ export const $autoLaunchError = atom<string | null>(null);
  * - If runtime is not installed, auto-installs it
  * - Once installed and workspace is set, auto-starts the sandbox
  * - Transitions to 'idle' after manual stop (no auto-restart)
+ *
+ * Phase progression: checking → installing → ready → starting → running
+ * The CLI confirms services are up before emitting JSON, so we skip URL polling
+ * and go directly from 'starting' to 'running'.
  */
 export const useAutoLaunch = () => {
   const initialized = useStore($initialized);
@@ -39,6 +42,7 @@ export const useAutoLaunch = () => {
   const didTriggerInstall = useRef(false);
   // Track whether we triggered sandbox start ourselves
   const didTriggerStart = useRef(false);
+  const lastStartTimestamp = useRef<number | null>(null);
 
   // Phase: checking → installing (if not installed)
   useEffect(() => {
@@ -102,6 +106,7 @@ export const useAutoLaunch = () => {
 
     hasAutoLaunched.current = true;
     didTriggerStart.current = true;
+    lastStartTimestamp.current = Date.now();
     sandboxApi.start({
       workspaceDir: store.workspaceDir,
       envFilePath: store.envFilePath,
@@ -112,65 +117,31 @@ export const useAutoLaunch = () => {
     $autoLaunchPhase.set('starting');
   }, [phase, store]);
 
-  // Phase: starting → waiting (container up, wait for services) or → error
+  // Phase: starting → running (CLI confirmed services up) or → error/idle
   useEffect(() => {
     if (phase !== 'starting') {
       return;
     }
 
     if (sandboxStatus.type === 'running') {
-      $autoLaunchPhase.set('waiting');
+      $autoLaunchPhase.set('running');
       didTriggerStart.current = false;
     } else if (sandboxStatus.type === 'error') {
       $autoLaunchError.set(sandboxStatus.error.message);
       $autoLaunchPhase.set('error');
       didTriggerStart.current = false;
     } else if (sandboxStatus.type === 'exited') {
-      $autoLaunchPhase.set('idle');
-      didTriggerStart.current = false;
+      const startTs = lastStartTimestamp.current;
+      if (!startTs || sandboxStatus.timestamp > startTs) {
+        $autoLaunchPhase.set('idle');
+        didTriggerStart.current = false;
+      }
     }
   }, [phase, sandboxStatus]);
 
-  // Phase: waiting → running (poll all service URLs until they respond)
+  // Transition running → idle when sandbox stops (user clicked Stop)
   useEffect(() => {
-    if (phase !== 'waiting' || sandboxStatus.type !== 'running') {
-      return;
-    }
-
-    const { sandboxUrl, uiUrl, wsUrl, codeServerUrl, noVncUrl } = sandboxStatus.data;
-    const httpUrls = [sandboxUrl, uiUrl, codeServerUrl, noVncUrl].filter((u): u is string => Boolean(u));
-
-    let active = true;
-    let timer: ReturnType<typeof setTimeout>;
-
-    const checkAll = async () => {
-      const results = await Promise.all([
-        ...httpUrls.map((url) => emitter.invoke('util:check-url', url)),
-        emitter.invoke('util:check-ws', wsUrl),
-      ]);
-      if (!active) {
-        return;
-      }
-      if (results.every(Boolean)) {
-        $autoLaunchPhase.set('running');
-      } else {
-        timer = setTimeout(() => {
-          void checkAll();
-        }, 2000);
-      }
-    };
-
-    void checkAll();
-
-    return () => {
-      active = false;
-      clearTimeout(timer);
-    };
-  }, [phase, sandboxStatus]);
-
-  // Transition running/waiting → idle when sandbox stops (user clicked Stop)
-  useEffect(() => {
-    if (phase !== 'running' && phase !== 'waiting') {
+    if (phase !== 'running') {
       return;
     }
 

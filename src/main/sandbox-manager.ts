@@ -1,13 +1,13 @@
-import { execFile } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import type { IpcListener } from '@electron-toolkit/typed-ipc/main';
 import c from 'ansi-colors';
-import { ipcMain } from 'electron';
+import { ipcMain, net } from 'electron';
 import { shellEnvSync } from 'shell-env';
 import { assert } from 'tsafe';
 
-import { CommandRunner } from '@/lib/command-runner';
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
 import { getOmniCliPath, getOmniPythonPath, isDirectory, isFile, pathExists } from '@/main/util';
@@ -58,9 +58,7 @@ export class SandboxManager {
   private ipcRawOutput: (data: string) => void;
   private onStatusChange: (status: WithTimestamp<SandboxProcessStatus>) => void;
   private log: SimpleLogger;
-  private commandRunner: CommandRunner;
-  private cols: number | undefined;
-  private rows: number | undefined;
+  private childProcess: ChildProcess | null;
   private jsonBuffer: string;
   private jsonEmitted: boolean;
 
@@ -72,14 +70,12 @@ export class SandboxManager {
     this.ipcLogger = arg.ipcLogger;
     this.ipcRawOutput = arg.ipcRawOutput;
     this.onStatusChange = arg.onStatusChange;
-    this.commandRunner = new CommandRunner();
+    this.childProcess = null;
     this.status = { type: 'uninitialized', timestamp: Date.now() };
     this.log = new SimpleLogger((entry) => {
       this.ipcRawOutput(entry.message);
       console[entry.level](entry.message);
     });
-    this.cols = undefined;
-    this.rows = undefined;
     this.jsonBuffer = '';
     this.jsonEmitted = false;
   }
@@ -93,11 +89,7 @@ export class SandboxManager {
     this.onStatusChange(this.status);
   };
 
-  resizePty = (cols: number, rows: number): void => {
-    this.cols = cols;
-    this.rows = rows;
-    this.commandRunner.resize(cols, rows);
-  };
+  resizePty = (_cols: number, _rows: number): void => {};
 
   private tryParseJson = (line: string): void => {
     if (this.jsonEmitted) {
@@ -127,24 +119,68 @@ export class SandboxManager {
 
     const data = toSandboxStatusData(parsedResult);
     this.jsonEmitted = true;
+    this.log.info(c.cyan('Waiting for services to accept connections...\r\n'));
+    void this.waitForServices(data);
+  };
+
+  private waitForServices = async (
+    data: Extract<SandboxProcessStatus, { type: 'running' }>['data']
+  ): Promise<void> => {
+    const urls = [data.sandboxUrl, data.uiUrl, data.codeServerUrl, data.noVncUrl].filter(
+      (u): u is string => Boolean(u)
+    );
+
+    const checkUrl = async (url: string): Promise<boolean> => {
+      try {
+        const response = await net.fetch(url, { method: 'GET' });
+        return response.status < 500;
+      } catch {
+        return false;
+      }
+    };
+
+    for (let attempt = 0; attempt < 30; attempt++) {
+      if (this.status.type === 'stopping' || this.status.type === 'exiting') {
+        return;
+      }
+
+      const results = await Promise.all(urls.map(checkUrl));
+      if (results.every(Boolean)) {
+        break;
+      }
+
+      await new Promise<void>((r) => setTimeout(r, 1000));
+    }
+
+    if (this.status.type === 'stopping' || this.status.type === 'exiting') {
+      return;
+    }
+
     this.updateStatus({ type: 'running', data });
     this.log.info(c.green.bold('Sandbox started\r\n'));
   };
 
-  private handleData = (data: string): void => {
-    this.ipcRawOutput(data);
-    process.stdout.write(data);
+  private handleStdout = (data: Buffer): void => {
+    const str = data.toString();
+    this.ipcRawOutput(str);
+    process.stdout.write(str);
 
     if (this.jsonEmitted) {
       return;
     }
 
-    this.jsonBuffer += data;
+    this.jsonBuffer += str;
     const lines = this.jsonBuffer.split(/\r?\n/);
     this.jsonBuffer = lines.pop() ?? '';
     for (const line of lines) {
       this.tryParseJson(line);
     }
+  };
+
+  private handleStderr = (data: Buffer): void => {
+    const str = data.toString();
+    this.ipcRawOutput(str);
+    process.stderr.write(str);
   };
 
   private resolveWorkDockerfilePath = async (): Promise<string> => {
@@ -165,11 +201,17 @@ export class SandboxManager {
     enableVnc: boolean;
     useWorkDockerfile: boolean;
   }) => {
+    if (this.status.type === 'starting' || this.status.type === 'running') {
+      return;
+    }
+
     this.updateStatus({ type: 'starting' });
+
+    const env = { ...process.env, ...DEFAULT_ENV, ...shellEnvSync() } as Record<string, string>;
 
     const dockerCheck = await (async () => {
       try {
-        await execFileAsync('docker', ['version'], { encoding: 'utf8', timeout: 10_000 });
+        await execFileAsync('docker', ['version'], { encoding: 'utf8', timeout: 10_000, env });
         return true;
       } catch {
         return false;
@@ -201,8 +243,8 @@ export class SandboxManager {
       return;
     }
 
-    if (this.commandRunner.isRunning()) {
-      await this.commandRunner.kill();
+    if (this.childProcess) {
+      await this.killProcess();
     }
 
     this.jsonBuffer = '';
@@ -250,48 +292,85 @@ export class SandboxManager {
     this.log.info(c.cyan('Starting sandbox...\r\n'));
     this.log.info(`> ${omniCliPath} ${args.join(' ')}\r\n`);
 
-    const env = { ...process.env, ...DEFAULT_ENV, ...shellEnvSync() } as Record<string, string>;
+    try {
+      const child = spawn(omniCliPath, args, {
+        cwd: arg.workspaceDir,
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
 
-    this.commandRunner
-      .runCommand(
-        omniCliPath,
-        args,
-        {
-          cwd: arg.workspaceDir,
-          env,
-          rows: this.rows,
-          cols: this.cols,
-        },
-        {
-          onData: this.handleData,
-          onExit: (exitCode, signal) => {
-            if (this.status.type === 'exiting' || this.status.type === 'stopping') {
-              this.updateStatus({ type: 'exited' });
-              return;
-            }
+      this.childProcess = child;
 
-            if (exitCode === 0) {
-              this.updateStatus({ type: 'exited' });
-              return;
-            }
+      child.stdout.on('data', this.handleStdout);
+      child.stderr.on('data', this.handleStderr);
 
-            const reason = signal ? `signal ${signal}` : `code ${exitCode}`;
-            this.updateStatus({ type: 'error', error: { message: `Sandbox exited (${reason})` } });
-          },
+      child.on('error', (error: Error) => {
+        if (this.childProcess && this.childProcess !== child) {
+          return;
         }
-      )
-      .catch((error: Error) => {
+        this.childProcess = null;
         this.updateStatus({ type: 'error', error: { message: error.message } });
       });
+
+      child.on('close', (exitCode, signal) => {
+        if (this.childProcess && this.childProcess !== child) {
+          return;
+        }
+        this.childProcess = null;
+
+        if (this.status.type === 'exiting' || this.status.type === 'stopping') {
+          this.updateStatus({ type: 'exited' });
+          return;
+        }
+
+        if (exitCode === 0) {
+          this.updateStatus({ type: 'exited' });
+          return;
+        }
+
+        const reason = signal ? `signal ${signal}` : `code ${exitCode}`;
+        this.updateStatus({ type: 'error', error: { message: `Sandbox exited (${reason})` } });
+      });
+    } catch (error) {
+      this.childProcess = null;
+      this.updateStatus({ type: 'error', error: { message: (error as Error).message } });
+    }
+  };
+
+  private killProcess = (timeout = 10_000): Promise<void> => {
+    const child = this.childProcess;
+    if (!child || child.exitCode !== null) {
+      this.childProcess = null;
+      return Promise.resolve();
+    }
+
+    return new Promise<void>((resolve) => {
+      const onExit = (): void => {
+        clearTimeout(timer);
+        this.childProcess = null;
+        resolve();
+      };
+
+      child.once('close', onExit);
+
+      child.kill('SIGTERM');
+
+      const timer = setTimeout(() => {
+        child.removeListener('close', onExit);
+        child.kill('SIGKILL');
+        this.childProcess = null;
+        resolve();
+      }, timeout);
+    });
   };
 
   stop = async (): Promise<void> => {
-    if (!this.commandRunner.isRunning()) {
+    if (!this.childProcess) {
       return;
     }
 
     this.updateStatus({ type: 'stopping' });
-    await this.commandRunner.kill(10_000);
+    await this.killProcess();
     this.updateStatus({ type: 'exited' });
   };
 

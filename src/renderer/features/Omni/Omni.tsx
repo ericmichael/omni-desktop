@@ -28,6 +28,7 @@ const MIN_SIDEBAR_PERCENT = 20;
 const MAX_SIDEBAR_PERCENT = 50;
 const DEFAULT_SIDEBAR_PERCENT = 30;
 const DESKTOP_PANEL_EXPANDED_HEIGHT = 200;
+const CONTENT_READY_TIMEOUT_MS = 10_000;
 
 const fadeVariants = {
   initial: { opacity: 0, y: 8 },
@@ -46,12 +47,10 @@ const staggerItem = {
 
 const Webview = ({
   src,
-  isActive = true,
   onReady,
   showUnavailable = true,
 }: {
   src?: string;
-  isActive?: boolean;
   onReady?: () => void;
   showUnavailable?: boolean;
 }) => {
@@ -104,13 +103,7 @@ const Webview = ({
       const el = node as unknown as Electron.WebviewTag;
       elementRef.current = el;
 
-      let initialTimer: ReturnType<typeof setTimeout> | null = null;
-
       const onLoad = () => {
-        if (initialTimer) {
-          clearTimeout(initialTimer);
-          initialTimer = null;
-        }
         clearRetryTimer();
         retryDelayRef.current = 750;
 
@@ -140,38 +133,13 @@ const Webview = ({
       el.addEventListener('did-finish-load', onLoad);
       el.addEventListener('did-fail-load', onFailLoad);
 
-      initialTimer = setTimeout(() => {
-        if (!readyEmittedRef.current) {
-          el.reload();
-        }
-      }, 500);
-
       cleanupRef.current = () => {
-        if (initialTimer) {
-          clearTimeout(initialTimer);
-        }
         el.removeEventListener('did-finish-load', onLoad);
         el.removeEventListener('did-fail-load', onFailLoad);
       };
     },
     [clearRetryTimer, scheduleRetry, src]
   );
-
-  useEffect(() => {
-    if (!isActive || !src || readyEmittedRef.current) {
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      if (!readyEmittedRef.current) {
-        elementRef.current?.reload();
-      }
-    }, 250);
-
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [isActive, src]);
 
   useEffect(() => {
     return () => {
@@ -200,10 +168,10 @@ const PHASE_LABELS: Partial<Record<AutoLaunchPhase, string>> = {
   installing: 'Installing runtime',
   ready: 'Preparing workspace',
   starting: 'Starting services',
-  waiting: 'Waiting for services',
+  running: 'Loading interface',
 };
 
-const PHASE_ORDER: AutoLaunchPhase[] = ['checking', 'installing', 'ready', 'starting', 'waiting'];
+const PHASE_ORDER: AutoLaunchPhase[] = ['checking', 'installing', 'ready', 'starting', 'running'];
 
 const OmniProgressView = memo(() => {
   const phase = useStore($autoLaunchPhase);
@@ -427,7 +395,7 @@ const OmniRunningView = memo(
   ({
     sandboxUrls,
     store,
-    phase,
+    onReady,
   }: {
     sandboxUrls: {
       uiUrl: string;
@@ -435,7 +403,7 @@ const OmniRunningView = memo(
       noVncUrl?: string;
     };
     store: { enableCodeServer: boolean; enableVnc: boolean; layoutMode: LayoutMode; theme: OmniTheme };
-    phase: AutoLaunchPhase;
+    onReady: () => void;
   }) => {
     const layoutMode = store.layoutMode ?? 'work';
     const splitRef = useRef<HTMLDivElement>(null);
@@ -448,40 +416,32 @@ const OmniRunningView = memo(
     const [vncDesktopReady, setVncDesktopReady] = useState(false);
     const [vncPanelReady, setVncPanelReady] = useState(false);
 
-    const canLoadWebviews = phase === 'running';
     const theme = store.theme ?? 'tokyo-night';
     const uiSrc = useMemo(() => {
-      if (!canLoadWebviews) {
-        return undefined;
-      }
       const url = new URL(sandboxUrls.uiUrl);
       if (theme !== 'default') {
         url.searchParams.set('theme', theme);
       }
       return url.toString();
-    }, [canLoadWebviews, sandboxUrls.uiUrl, theme]);
-    const codeServerSrc = canLoadWebviews ? sandboxUrls.codeServerUrl : undefined;
-    const vncSrc = canLoadWebviews ? sandboxUrls.noVncUrl : undefined;
+    }, [sandboxUrls.uiUrl, theme]);
+    const codeServerSrc = sandboxUrls.codeServerUrl;
+    const vncSrc = sandboxUrls.noVncUrl;
 
-    const isOverlayVisible = useMemo(() => {
-      if (!canLoadWebviews) {
-        return true;
-      }
-
+    // Signal readiness to parent when all webviews for the current layout have loaded
+    const allReady = useMemo(() => {
       if (layoutMode === 'work') {
-        return !uiWorkReady;
+        return uiWorkReady;
       }
 
       if (layoutMode === 'desktop') {
-        return store.enableVnc ? !vncDesktopReady : false;
+        return store.enableVnc ? vncDesktopReady : true;
       }
 
       const codeReady = store.enableCodeServer ? codeServerReady : true;
       const uiReady = uiSidebarReady;
       const vncReady = store.enableVnc && desktopExpanded ? vncPanelReady : true;
-      return !(codeReady && uiReady && vncReady);
+      return codeReady && uiReady && vncReady;
     }, [
-      canLoadWebviews,
       codeServerReady,
       desktopExpanded,
       layoutMode,
@@ -492,6 +452,12 @@ const OmniRunningView = memo(
       vncDesktopReady,
       vncPanelReady,
     ]);
+
+    useEffect(() => {
+      if (allReady) {
+        onReady();
+      }
+    }, [allReady, onReady]);
 
     const stopSandbox = useCallback(() => {
       sandboxApi.stop();
@@ -555,7 +521,25 @@ const OmniRunningView = memo(
       return modeOptions;
     }, [store.enableCodeServer]);
 
-    const overlayLabel = canLoadWebviews ? 'Loading UI' : (PHASE_LABELS[phase] ?? 'Starting');
+    const handleUiWorkReady = useCallback(() => {
+      setUiWorkReady(true);
+    }, []);
+
+    const handleUiSidebarReady = useCallback(() => {
+      setUiSidebarReady(true);
+    }, []);
+
+    const handleCodeServerReady = useCallback(() => {
+      setCodeServerReady(true);
+    }, []);
+
+    const handleVncDesktopReady = useCallback(() => {
+      setVncDesktopReady(true);
+    }, []);
+
+    const handleVncPanelReady = useCallback(() => {
+      setVncPanelReady(true);
+    }, []);
 
     return (
       <div className="flex flex-col w-full h-full relative">
@@ -603,14 +587,13 @@ const OmniRunningView = memo(
         {/* Content area */}
         <div className="flex-1 min-h-0 p-2 relative">
           <div className={cn('w-full h-full', layoutMode !== 'work' && 'hidden')}>
-            <Webview src={uiSrc} isActive={layoutMode === 'work'} onReady={() => setUiWorkReady(true)} showUnavailable={false} />
+            <Webview src={uiSrc} onReady={handleUiWorkReady} showUnavailable={false} />
           </div>
 
           <div className={cn('w-full h-full', layoutMode !== 'desktop' && 'hidden')}>
             <Webview
               src={store.enableVnc ? vncSrc : undefined}
-              isActive={layoutMode === 'desktop'}
-              onReady={() => setVncDesktopReady(true)}
+              onReady={handleVncDesktopReady}
               showUnavailable={store.enableVnc}
             />
           </div>
@@ -622,8 +605,7 @@ const OmniRunningView = memo(
               <div className="min-w-0" style={{ width: `${100 - sidebarWidthPercent}%` }}>
                 <Webview
                   src={store.enableCodeServer ? codeServerSrc : undefined}
-                  isActive={layoutMode === 'code'}
-                  onReady={() => setCodeServerReady(true)}
+                  onReady={handleCodeServerReady}
                   showUnavailable={store.enableCodeServer}
                 />
               </div>
@@ -635,12 +617,7 @@ const OmniRunningView = memo(
 
               <div className="flex flex-col min-w-0" style={{ width: `${sidebarWidthPercent}%` }}>
                 <div className="flex-1 min-h-0">
-                  <Webview
-                    src={uiSrc}
-                    isActive={layoutMode === 'code'}
-                    onReady={() => setUiSidebarReady(true)}
-                    showUnavailable={false}
-                  />
+                  <Webview src={uiSrc} onReady={handleUiSidebarReady} showUnavailable={false} />
                 </div>
 
                 {store.enableVnc && (
@@ -670,8 +647,7 @@ const OmniRunningView = memo(
                     >
                       <Webview
                         src={vncSrc}
-                        isActive={layoutMode === 'code' && desktopExpanded}
-                        onReady={() => setVncPanelReady(true)}
+                        onReady={handleVncPanelReady}
                         showUnavailable={false}
                       />
                     </div>
@@ -680,15 +656,6 @@ const OmniRunningView = memo(
               </div>
             </div>
           </div>
-
-          {isOverlayVisible && (
-            <div className="absolute inset-0 z-30 flex items-center justify-center bg-surface/80 backdrop-blur-sm">
-              <div className="flex flex-col items-center gap-3">
-                <Spinner size="lg" />
-                <EllipsisLoadingText className="text-sm text-fg-muted">{overlayLabel}</EllipsisLoadingText>
-              </div>
-            </div>
-          )}
         </div>
       </div>
     );
@@ -701,6 +668,7 @@ export const Omni = memo(() => {
   const store = useStore(persistedStoreApi.$atom);
   const sandboxStatus = useStore($sandboxProcessStatus);
   const phase = useStore($autoLaunchPhase);
+  const [contentReady, setContentReady] = useState(false);
 
   useAutoLaunch();
 
@@ -711,53 +679,80 @@ export const Omni = memo(() => {
     return sandboxStatus.data;
   }, [sandboxStatus]);
 
+  // Reset when sandbox stops
+  useEffect(() => {
+    if (!sandboxUrls) {
+      setContentReady(false);
+    }
+  }, [sandboxUrls]);
+
+  // Safety timeout: force-show content after 10s even if webviews haven't reported ready
+  useEffect(() => {
+    if (!sandboxUrls || contentReady) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      setContentReady(true);
+    }, CONTENT_READY_TIMEOUT_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [sandboxUrls, contentReady]);
+
+  const handleContentReady = useCallback(() => {
+    setContentReady(true);
+  }, []);
+
   if (!initialized) {
     return null;
   }
 
-  if (sandboxUrls) {
-    return <OmniRunningView sandboxUrls={sandboxUrls} store={store} phase={phase} />;
-  }
-
+  // Render structure: running view behind, overlay content on top.
+  // OmniRunningView mounts as soon as we have URLs so webviews start loading,
+  // while the progress overlay stays visible until webviews are ready.
   return (
-    <AnimatePresence mode="wait">
-      {phase === 'error' && (
-        <motion.div
-          key="error"
-          variants={fadeVariants}
-          initial="initial"
-          animate="animate"
-          exit="exit"
-          className="w-full h-full"
-        >
-          <OmniErrorView />
-        </motion.div>
-      )}
-      {phase === 'idle' && (
-        <motion.div
-          key="idle"
-          variants={fadeVariants}
-          initial="initial"
-          animate="animate"
-          exit="exit"
-          className="w-full h-full"
-        >
-          <OmniIdleView />
-        </motion.div>
-      )}
-      {phase !== 'error' && phase !== 'idle' && (
-        <motion.div
-          key="progress"
-          variants={fadeVariants}
-          initial="initial"
-          animate="animate"
-          exit="exit"
-          className="w-full h-full"
-        >
-          <OmniProgressView />
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <div className="w-full h-full relative">
+      {sandboxUrls && <OmniRunningView sandboxUrls={sandboxUrls} store={store} onReady={handleContentReady} />}
+
+      <AnimatePresence mode="wait">
+        {phase === 'error' && !sandboxUrls && (
+          <motion.div
+            key="error"
+            variants={fadeVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            className="absolute inset-0 z-40"
+          >
+            <OmniErrorView />
+          </motion.div>
+        )}
+        {phase === 'idle' && !sandboxUrls && (
+          <motion.div
+            key="idle"
+            variants={fadeVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            className="absolute inset-0 z-40"
+          >
+            <OmniIdleView />
+          </motion.div>
+        )}
+        {!contentReady && phase !== 'error' && phase !== 'idle' && (
+          <motion.div
+            key="progress"
+            variants={fadeVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            className="absolute inset-0 z-40 bg-surface"
+          >
+            <OmniProgressView />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 });
 

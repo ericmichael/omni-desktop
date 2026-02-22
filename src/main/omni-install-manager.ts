@@ -2,6 +2,7 @@ import type { IpcListener } from '@electron-toolkit/typed-ipc/main';
 import c from 'ansi-colors';
 import { ipcMain } from 'electron';
 import fs from 'fs/promises';
+import path from 'path';
 import { serializeError } from 'serialize-error';
 import { shellEnvSync } from 'shell-env';
 
@@ -9,7 +10,7 @@ import { CommandRunner } from '@/lib/command-runner';
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { withResultAsync } from '@/lib/result';
 import { SimpleLogger } from '@/lib/simple-logger';
-import { getOmniRuntimeDir, getOmniVenvPath, getUVExecutablePath, isFile } from '@/main/util';
+import { getOmniRuntimeDir, getOmniVenvPath, getUVExecutablePath, isFile, pathExists } from '@/main/util';
 import type { IpcEvents, IpcRendererEvents, LogEntry, OmniInstallProcessStatus, WithTimestamp } from '@/shared/types';
 
 const PYTHON_VERSION = '3.11';
@@ -103,6 +104,156 @@ export class OmniInstallManager {
     this.onStatusChange(this.status);
   };
 
+  private installPython = async (
+    uvPath: string,
+    options: { cwd: string; env: Record<string, string> },
+    repair?: boolean
+  ): Promise<'success' | 'canceled' | 'error'> => {
+    const pythonInstallArgs = ['python', 'install', PYTHON_VERSION, '--python-preference', 'only-managed'];
+
+    this.log.info(c.cyan(`Installing Python ${PYTHON_VERSION}...\r\n`));
+    this.log.info(`> ${uvPath} ${pythonInstallArgs.join(' ')}\r\n`);
+
+    const result = await withResultAsync(() => this.runCommand(uvPath, pythonInstallArgs, options));
+
+    if (result.isOk()) {
+      return result.value;
+    }
+
+    if (repair) {
+      this.log.error(c.red(`Failed to install Python: ${result.error.message}\r\n`));
+      this.updateStatus({
+        type: 'error',
+        error: { message: 'Failed to install Python', context: serializeError(result.error) },
+      });
+      return 'error';
+    }
+
+    this.log.warn(c.yellow('Python install failed, retrying with --reinstall...\r\n'));
+
+    const retryArgs = [...pythonInstallArgs, '--reinstall'];
+
+    this.log.info(`> ${uvPath} ${retryArgs.join(' ')}\r\n`);
+
+    const retryResult = await withResultAsync(() => this.runCommand(uvPath, retryArgs, options));
+
+    if (retryResult.isOk()) {
+      return retryResult.value;
+    }
+
+    this.log.error(c.red(`Failed to install Python: ${retryResult.error.message}\r\n`));
+    this.updateStatus({
+      type: 'error',
+      error: { message: 'Failed to install Python', context: serializeError(retryResult.error) },
+    });
+    return 'error';
+  };
+
+  private cleanVenvDir = async (venvPath: string, force: boolean): Promise<void> => {
+    if (force) {
+      await fs.rm(venvPath, { recursive: true, force: true }).catch(() => undefined);
+      return;
+    }
+
+    const activatePath = path.join(venvPath, process.platform === 'win32' ? 'Scripts' : 'bin', 'activate');
+    const isValidVenv = await isFile(activatePath);
+    if (!isValidVenv && (await pathExists(venvPath))) {
+      await fs.rm(venvPath, { recursive: true, force: true }).catch(() => undefined);
+    }
+  };
+
+  private createVenv = async (
+    uvPath: string,
+    venvPath: string,
+    options: { cwd: string; env: Record<string, string> },
+    repair?: boolean
+  ): Promise<'success' | 'canceled' | 'error'> => {
+    await this.cleanVenvDir(venvPath, !!repair);
+
+    const venvArgs = [
+      'venv',
+      '--relocatable',
+      '--prompt',
+      'omni',
+      '--python',
+      PYTHON_VERSION,
+      '--python-preference',
+      'only-managed',
+      venvPath,
+    ];
+
+    this.log.info(c.cyan('Creating virtual environment...\r\n'));
+    this.log.info(`> ${uvPath} ${venvArgs.join(' ')}\r\n`);
+
+    const result = await withResultAsync(() => this.runCommand(uvPath, venvArgs, options));
+
+    if (result.isOk()) {
+      return result.value;
+    }
+
+    if (repair) {
+      this.log.error(c.red(`Failed to create virtual environment: ${result.error.message}\r\n`));
+      this.updateStatus({
+        type: 'error',
+        error: { message: 'Failed to create virtual environment', context: serializeError(result.error) },
+      });
+      return 'error';
+    }
+
+    this.log.warn(c.yellow('Venv creation failed, retrying with a clean directory...\r\n'));
+    await this.cleanVenvDir(venvPath, true);
+
+    this.log.info(`> ${uvPath} ${venvArgs.join(' ')}\r\n`);
+
+    const retryResult = await withResultAsync(() => this.runCommand(uvPath, venvArgs, options));
+
+    if (retryResult.isOk()) {
+      return retryResult.value;
+    }
+
+    this.log.error(c.red(`Failed to create virtual environment: ${retryResult.error.message}\r\n`));
+    this.updateStatus({
+      type: 'error',
+      error: { message: 'Failed to create virtual environment', context: serializeError(retryResult.error) },
+    });
+    return 'error';
+  };
+
+  private installOmniCode = async (
+    uvPath: string,
+    options: { cwd: string; env: Record<string, string> },
+    repair?: boolean
+  ): Promise<'success' | 'canceled' | 'error'> => {
+    const installArgs = [
+      'pip',
+      'install',
+      '--python',
+      PYTHON_VERSION,
+      '--python-preference',
+      'only-managed',
+      '--extra-index-url',
+      EXTRA_INDEX_URL,
+      ...(repair ? ['--force-reinstall'] : []),
+      `omni-code==${OMNI_CODE_VERSION}`,
+    ];
+
+    this.log.info(c.cyan('Installing omni-code...\r\n'));
+    this.log.info(`> ${uvPath} ${installArgs.join(' ')}\r\n`);
+
+    const result = await withResultAsync(() => this.runCommand(uvPath, installArgs, options));
+
+    if (result.isOk()) {
+      return result.value;
+    }
+
+    this.log.error(c.red(`Failed to install omni-code: ${result.error.message}\r\n`));
+    this.updateStatus({
+      type: 'error',
+      error: { message: 'Failed to install omni-code', context: serializeError(result.error) },
+    });
+    return 'error';
+  };
+
   startInstall = async (repair?: boolean) => {
     this.isCancellationRequested = false;
     this.updateStatus({ type: 'starting' });
@@ -138,103 +289,39 @@ export class OmniInstallManager {
 
     this.updateStatus({ type: 'installing' });
 
-    const pythonInstallArgs = [
-      'python',
-      'install',
-      PYTHON_VERSION,
-      '--python-preference',
-      'only-managed',
-      ...(repair ? ['--reinstall'] : []),
-    ];
+    const pythonInstallResult = await this.installPython(uvPath, runProcessOptions, repair);
 
-    this.log.info(c.cyan(`Installing Python ${PYTHON_VERSION}...\r\n`));
-    this.log.info(`> ${uvPath} ${pythonInstallArgs.join(' ')}\r\n`);
-
-    const pythonInstallResult = await withResultAsync(() => this.runCommand(uvPath, pythonInstallArgs, runProcessOptions));
-
-    if (pythonInstallResult.isErr()) {
-      this.log.error(c.red(`Failed to install Python: ${pythonInstallResult.error.message}\r\n`));
-      this.updateStatus({
-        type: 'error',
-        error: { message: 'Failed to install Python', context: serializeError(pythonInstallResult.error) },
-      });
+    if (pythonInstallResult === 'error') {
       return;
     }
 
-    if (pythonInstallResult.value === 'canceled') {
+    if (pythonInstallResult === 'canceled') {
       this.log.warn(c.yellow('Installation canceled\r\n'));
       this.updateStatus({ type: 'canceled' });
       return;
     }
 
     const venvPath = getOmniVenvPath();
+    const venvResult = await this.createVenv(uvPath, venvPath, runProcessOptions, repair);
 
-    if (repair) {
-      await fs.rm(venvPath, { recursive: true, force: true }).catch(() => undefined);
-    }
-
-    const venvArgs = [
-      'venv',
-      '--relocatable',
-      '--prompt',
-      'omni',
-      '--python',
-      PYTHON_VERSION,
-      '--python-preference',
-      'only-managed',
-      venvPath,
-    ];
-
-    this.log.info(c.cyan('Creating virtual environment...\r\n'));
-    this.log.info(`> ${uvPath} ${venvArgs.join(' ')}\r\n`);
-
-    const venvResult = await withResultAsync(() => this.runCommand(uvPath, venvArgs, runProcessOptions));
-
-    if (venvResult.isErr()) {
-      this.log.error(c.red(`Failed to create virtual environment: ${venvResult.error.message}\r\n`));
-      this.updateStatus({
-        type: 'error',
-        error: { message: 'Failed to create virtual environment', context: serializeError(venvResult.error) },
-      });
+    if (venvResult === 'error') {
       return;
     }
 
-    if (venvResult.value === 'canceled') {
+    if (venvResult === 'canceled') {
       this.log.warn(c.yellow('Installation canceled\r\n'));
       this.updateStatus({ type: 'canceled' });
       return;
     }
 
     runProcessOptions.env.VIRTUAL_ENV = venvPath;
+    const installResult = await this.installOmniCode(uvPath, runProcessOptions, repair);
 
-    const installArgs = [
-      'pip',
-      'install',
-      '--python',
-      PYTHON_VERSION,
-      '--python-preference',
-      'only-managed',
-      '--extra-index-url',
-      EXTRA_INDEX_URL,
-      ...(repair ? ['--force-reinstall'] : []),
-      `omni-code==${OMNI_CODE_VERSION}`,
-    ];
-
-    this.log.info(c.cyan('Installing omni-code...\r\n'));
-    this.log.info(`> ${uvPath} ${installArgs.join(' ')}\r\n`);
-
-    const installResult = await withResultAsync(() => this.runCommand(uvPath, installArgs, runProcessOptions));
-
-    if (installResult.isErr()) {
-      this.log.error(c.red(`Failed to install omni-code: ${installResult.error.message}\r\n`));
-      this.updateStatus({
-        type: 'error',
-        error: { message: 'Failed to install omni-code', context: serializeError(installResult.error) },
-      });
+    if (installResult === 'error') {
       return;
     }
 
-    if (installResult.value === 'canceled') {
+    if (installResult === 'canceled') {
       this.log.warn(c.yellow('Installation canceled\r\n'));
       this.updateStatus({ type: 'canceled' });
       return;
