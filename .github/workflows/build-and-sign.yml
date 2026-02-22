@@ -176,6 +176,85 @@ jobs:
             dist/*.yaml
           retention-days: 90
 
+  build-macos-x64:
+    if: github.event_name == 'push' || github.event.inputs.build_macos == 'true'
+    runs-on: macos-13
+    environment: code-signing
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Generate lockfile hash without version
+        id: lockfile-hash
+        run: echo "hash=$(node .github/scripts/generate-lockfile-hash.js)" >> $GITHUB_OUTPUT
+
+      - name: Cache node modules
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            ~/.electron
+            ~/.electron-gyp
+          key: ${{ runner.os }}-x64-node-${{ env.NODE_VERSION }}-modules-${{ steps.lockfile-hash.outputs.hash }}
+
+      - name: Install dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - name: Get UV hash
+        id: uv-hash
+        run: |
+          echo "hash=$(node -e "console.log(require('./package.json').uv['mac-x64'].sha256)")" >> $GITHUB_OUTPUT
+
+      - name: Cache UV binaries
+        id: cache-uv
+        uses: actions/cache@v4
+        with:
+          path: assets/bin
+          key: ${{ runner.os }}-x64-uv-${{ steps.uv-hash.outputs.hash }}
+
+      - name: Download uv
+        if: steps.cache-uv.outputs.cache-hit != 'true'
+        run: npm run download mac-x64
+
+      - name: Import macOS certificates
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERT_FILE_B64 }}
+          p12-password: ${{ secrets.APPLE_CERT_FILE_PASSWORD }}
+
+      - name: Build and sign application
+        run: npm run publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: 'macos-x64-artifacts-signed'
+          path: |
+            dist/*.dmg
+            dist/*.DMG
+            dist/*.zip
+            dist/*.ZIP
+            dist/*.blockmap
+            dist/*.yml
+            dist/*.yaml
+          retention-days: 90
+
   build-windows:
     if: github.event_name == 'push' || github.event.inputs.build_windows == 'true'
     runs-on: windows-latest

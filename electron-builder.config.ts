@@ -30,6 +30,9 @@ export default {
       filter: 'uv*',
     },
   ],
+  mac: {
+    target: ['dmg'],
+  },
   win: {
     target: ['nsis'],
     ...getWindowsSigningOptions(),

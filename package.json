@@ -140,6 +140,10 @@
     "mac": {
       "url": "https://github.com/astral-sh/uv/releases/download/0.6.12/uv-aarch64-apple-darwin.tar.gz",
       "sha256": "fab8db5b62da1e945524b8d1a9d4946fcc6d9b77ec0cab423d953e82159967ac"
+    },
+    "mac-x64": {
+      "url": "https://github.com/astral-sh/uv/releases/download/0.6.12/uv-x86_64-apple-darwin.tar.gz",
+      "sha256": "5b6ee08766de11dc49ee9e292333e8b46ef2ceaaa3ebb0388467e114fca2ed8c"
     }
   }
 }

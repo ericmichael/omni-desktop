@@ -144,6 +144,68 @@ jobs:
             dist/*.yml
             dist/*.yaml
 
+  build-macos-x64:
+    runs-on: macos-13
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup nodejs
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Generate lockfile hash without version
+        id: lockfile-hash
+        run: echo "hash=$(node .github/scripts/generate-lockfile-hash.js)" >> $GITHUB_OUTPUT
+
+      - name: Cache node modules
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            ~/.electron
+            ~/.electron-gyp
+          key: ${{ runner.os }}-x64-node-${{ env.NODE_VERSION }}-modules-${{ steps.lockfile-hash.outputs.hash }}
+
+      - name: Install deps
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - name: Get UV hash
+        id: uv-hash
+        run: |
+          echo "hash=$(node -e "console.log(require('./package.json').uv['mac-x64'].sha256)")" >> $GITHUB_OUTPUT
+
+      - name: Cache UV binaries
+        id: cache-uv
+        uses: actions/cache@v4
+        with:
+          path: assets/bin
+          key: ${{ runner.os }}-x64-uv-${{ steps.uv-hash.outputs.hash }}
+
+      - name: Download uv
+        if: steps.cache-uv.outputs.cache-hit != 'true'
+        run: npm run download mac-x64
+
+      - name: Build
+        run: npm run package
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: 'macos-x64-artifacts-unsigned'
+          path: |
+            dist/*.dmg
+            dist/*.DMG
+            dist/*.zip
+            dist/*.ZIP
+            dist/*.blockmap
+            dist/*.yml
+            dist/*.yaml
+
   build-windows:
     runs-on: windows-latest
     steps:

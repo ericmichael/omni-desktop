@@ -11,9 +11,9 @@ import packageJson from './package.json';
 
 const destBasePath = path.resolve(__dirname, 'assets/bin/');
 
-type Platforms = 'linux' | 'win' | 'mac';
+type Platforms = 'linux' | 'win' | 'mac' | 'mac-x64';
 
-const validPlatforms: Platforms[] = ['linux', 'win', 'mac'];
+const validPlatforms: Platforms[] = ['linux', 'win', 'mac', 'mac-x64'];
 
 function isPlatform(value?: string): value is Platforms {
   return validPlatforms.includes(value as Platforms);
