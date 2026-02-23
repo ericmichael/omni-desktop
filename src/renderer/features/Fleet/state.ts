@@ -1,3 +1,4 @@
+import { objectEquals } from '@observ33r/object-equals';
 import { Terminal } from '@xterm/xterm';
 import { atom, map } from 'nanostores';
 
@@ -9,6 +10,9 @@ import type {
   FleetTask,
   FleetTaskId,
   FleetTaskSubmitOptions,
+  FleetTicket,
+  FleetTicketId,
+  FleetTicketLoopUpdate,
   GitRepoInfo,
 } from '@/shared/types';
 
@@ -18,10 +22,18 @@ import type {
 export const $fleetTasks = map<Record<FleetTaskId, FleetTask>>({});
 
 /**
- * Which fleet view is active: dashboard = no selection, project = project detail, task = task sandbox view.
+ * All fleet tickets for the current project, keyed by ticket ID.
+ */
+export const $fleetTickets = map<Record<FleetTicketId, FleetTicket>>({});
+
+/**
+ * Which fleet view is active: dashboard = no selection, project = project detail, task = task sandbox view, ticket = ticket detail.
  */
 export const $fleetView = atom<
-  { type: 'dashboard' } | { type: 'project'; projectId: FleetProjectId } | { type: 'task'; taskId: FleetTaskId }
+  | { type: 'dashboard' }
+  | { type: 'project'; projectId: FleetProjectId }
+  | { type: 'task'; taskId: FleetTaskId }
+  | { type: 'ticket'; ticketId: FleetTicketId }
 >({ type: 'dashboard' });
 
 /**
@@ -94,15 +106,83 @@ export const fleetApi = {
     }
   },
 
+  // Tickets
+  addTicket: async (
+    ticket: Omit<FleetTicket, 'id' | 'createdAt' | 'updatedAt' | 'status' | 'taskId'>
+  ): Promise<FleetTicket> => {
+    const created = await emitter.invoke('fleet:add-ticket', ticket);
+    $fleetTickets.setKey(created.id, created);
+    return created;
+  },
+  updateTicket: async (
+    id: FleetTicketId,
+    patch: Partial<Omit<FleetTicket, 'id' | 'projectId' | 'createdAt'>>
+  ): Promise<void> => {
+    await emitter.invoke('fleet:update-ticket', id, patch);
+    const existing = $fleetTickets.get()[id];
+    if (existing) {
+      $fleetTickets.setKey(id, { ...existing, ...patch, updatedAt: Date.now() });
+    }
+  },
+  removeTicket: async (ticketId: FleetTicketId): Promise<void> => {
+    await emitter.invoke('fleet:remove-ticket', ticketId);
+    const current = { ...$fleetTickets.get() };
+    delete current[ticketId];
+    $fleetTickets.set(current);
+    const view = $fleetView.get();
+    if (view.type === 'ticket' && view.ticketId === ticketId) {
+      $fleetView.set({ type: 'dashboard' });
+    }
+  },
+  fetchTickets: async (projectId: FleetProjectId): Promise<void> => {
+    const tickets = await emitter.invoke('fleet:get-tickets', projectId);
+    const newMap: Record<FleetTicketId, FleetTicket> = {};
+    for (const ticket of tickets) {
+      newMap[ticket.id] = ticket;
+    }
+    $fleetTickets.set(newMap);
+  },
+  getNextTicket: (projectId: FleetProjectId): Promise<FleetTicket | null> => {
+    return emitter.invoke('fleet:get-next-ticket', projectId);
+  },
+  submitTicketTask: async (ticketId: FleetTicketId, options: FleetTaskSubmitOptions = {}): Promise<FleetTask> => {
+    const task = await emitter.invoke('fleet:submit-ticket-task', ticketId, options);
+    initializeTaskTerminal(task.id);
+    $fleetTasks.setKey(task.id, task);
+    // Update the ticket in local state
+    const ticket = $fleetTickets.get()[ticketId];
+    if (ticket) {
+      const loopUpdate: Partial<FleetTicket> = { status: 'in_progress', taskId: task.id };
+      if (options.loop) {
+        loopUpdate.loopEnabled = true;
+        loopUpdate.loopMaxIterations = options.loopMaxIterations ?? 10;
+        loopUpdate.loopIteration = 1;
+        loopUpdate.loopStatus = 'running';
+      }
+      $fleetTickets.setKey(ticketId, { ...ticket, ...loopUpdate });
+    }
+    return task;
+  },
+  stopLoop: (ticketId: FleetTicketId): Promise<void> => {
+    return emitter.invoke('fleet:stop-loop', ticketId);
+  },
+  resumeLoop: (ticketId: FleetTicketId): Promise<void> => {
+    return emitter.invoke('fleet:resume-loop', ticketId);
+  },
+
   // Navigation
   goToDashboard: (): void => {
     $fleetView.set({ type: 'dashboard' });
   },
   goToProject: (projectId: FleetProjectId): void => {
     $fleetView.set({ type: 'project', projectId });
+    void fleetApi.fetchTickets(projectId);
   },
   goToTask: (taskId: FleetTaskId): void => {
     $fleetView.set({ type: 'task', taskId });
+  },
+  goToTicket: (ticketId: FleetTicketId): void => {
+    $fleetView.set({ type: 'ticket', ticketId });
   },
 };
 
@@ -117,9 +197,28 @@ const listen = () => {
     }
   });
 
+  ipc.on('fleet:task-session', (_, taskId, sessionId) => {
+    const existing = $fleetTasks.get()[taskId];
+    if (existing) {
+      $fleetTasks.setKey(taskId, { ...existing, sessionId });
+    }
+  });
+
   ipc.on('fleet:task-raw-output', (_, taskId, data) => {
     const xterm = $fleetTaskXTerms.get()[taskId];
     xterm?.write(data);
+  });
+
+  ipc.on('fleet:ticket-loop-update', (_, ticketId, update: FleetTicketLoopUpdate) => {
+    const existing = $fleetTickets.get()[ticketId];
+    if (existing) {
+      $fleetTickets.setKey(ticketId, {
+        ...existing,
+        loopIteration: update.iteration,
+        loopMaxIterations: update.maxIterations,
+        loopStatus: update.status,
+      });
+    }
   });
 
   const pollTasks = async () => {
@@ -128,10 +227,36 @@ const listen = () => {
     for (const task of tasks) {
       newMap[task.id] = task;
     }
-    $fleetTasks.set(newMap);
+    if (!objectEquals($fleetTasks.get(), newMap)) {
+      $fleetTasks.set(newMap);
+    }
+  };
+
+  const pollTickets = async () => {
+    // Re-fetch tickets for the current project view
+    const view = $fleetView.get();
+    if (view.type !== 'project' && view.type !== 'ticket') {
+      return;
+    }
+    const projectId =
+      view.type === 'project'
+        ? view.projectId
+        : $fleetTickets.get()[view.ticketId]?.projectId;
+    if (!projectId) {
+      return;
+    }
+    const tickets = await emitter.invoke('fleet:get-tickets', projectId);
+    const newMap: Record<FleetTicketId, FleetTicket> = {};
+    for (const ticket of tickets) {
+      newMap[ticket.id] = ticket;
+    }
+    if (!objectEquals($fleetTickets.get(), newMap)) {
+      $fleetTickets.set(newMap);
+    }
   };
 
   setInterval(pollTasks, STATUS_POLL_INTERVAL_MS);
+  setInterval(pollTickets, STATUS_POLL_INTERVAL_MS);
 };
 
 listen();

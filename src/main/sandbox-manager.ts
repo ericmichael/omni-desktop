@@ -53,6 +53,13 @@ const toSandboxStatusData = (payload: SandboxJsonPayload): Extract<SandboxProces
   };
 };
 
+type StartArg = {
+  workspaceDir: string;
+  enableCodeServer: boolean;
+  enableVnc: boolean;
+  useWorkDockerfile: boolean;
+};
+
 export class SandboxManager {
   private status: WithTimestamp<SandboxProcessStatus>;
   private ipcLogger: (entry: WithTimestamp<LogEntry>) => void;
@@ -62,6 +69,7 @@ export class SandboxManager {
   private childProcess: ChildProcess | null;
   private jsonBuffer: string;
   private jsonEmitted: boolean;
+  private lastStartArg: StartArg | null;
 
   constructor(arg: {
     ipcLogger: SandboxManager['ipcLogger'];
@@ -79,6 +87,7 @@ export class SandboxManager {
     });
     this.jsonBuffer = '';
     this.jsonEmitted = false;
+    this.lastStartArg = null;
   }
 
   getStatus = (): WithTimestamp<SandboxProcessStatus> => {
@@ -195,16 +204,12 @@ export class SandboxManager {
     return stdout.trim();
   };
 
-  start = async (arg: {
-    workspaceDir: string;
-    enableCodeServer: boolean;
-    enableVnc: boolean;
-    useWorkDockerfile: boolean;
-  }) => {
+  start = async (arg: StartArg, options?: { rebuild?: boolean }) => {
     if (this.status.type === 'starting' || this.status.type === 'running') {
       return;
     }
 
+    this.lastStartArg = arg;
     this.updateStatus({ type: 'starting' });
 
     const env = { ...process.env, ...DEFAULT_ENV, ...shellEnvSync() } as Record<string, string>;
@@ -283,6 +288,10 @@ export class SandboxManager {
       } catch (error) {
         this.log.warn(c.yellow(`Failed to resolve Dockerfile.work: ${(error as Error).message}\r\n`));
       }
+    }
+
+    if (options?.rebuild) {
+      args.push('--rebuild', '--no-cache');
     }
 
     this.log.info(c.cyan('Starting sandbox...\r\n'));
@@ -370,6 +379,12 @@ export class SandboxManager {
     this.updateStatus({ type: 'exited' });
   };
 
+  rebuild = async (fallbackArg: StartArg): Promise<void> => {
+    const arg = this.lastStartArg ?? fallbackArg;
+    await this.stop();
+    await this.start(arg, { rebuild: true });
+  };
+
   exit = async (): Promise<void> => {
     this.updateStatus({ type: 'exiting' });
     await this.stop();
@@ -379,8 +394,9 @@ export class SandboxManager {
 export const createSandboxManager = (arg: {
   ipc: IpcListener<IpcEvents>;
   sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
+  getStoreData: () => StartArg;
 }) => {
-  const { ipc, sendToWindow } = arg;
+  const { ipc, sendToWindow, getStoreData } = arg;
 
   const sandboxManager = new SandboxManager({
     ipcLogger: (entry) => {
@@ -400,6 +416,9 @@ export const createSandboxManager = (arg: {
   ipc.handle('sandbox-process:stop', async () => {
     await sandboxManager.stop();
   });
+  ipc.handle('sandbox-process:rebuild', async () => {
+    await sandboxManager.rebuild(getStoreData());
+  });
   ipc.handle('sandbox-process:resize', (_, cols, rows) => {
     sandboxManager.resizePty(cols, rows);
   });
@@ -408,6 +427,7 @@ export const createSandboxManager = (arg: {
     await sandboxManager.exit();
     ipcMain.removeHandler('sandbox-process:start');
     ipcMain.removeHandler('sandbox-process:stop');
+    ipcMain.removeHandler('sandbox-process:rebuild');
     ipcMain.removeHandler('sandbox-process:resize');
   };
 

@@ -5,6 +5,7 @@ import { PiStopFill } from 'react-icons/pi';
 
 import { AsciiLogo } from '@/renderer/common/AsciiLogo';
 import { cn, IconButton } from '@/renderer/ds';
+import { $launcherVersion } from '@/renderer/features/Banner/state';
 import { Fleet } from '@/renderer/features/Fleet/Fleet';
 import { Omni } from '@/renderer/features/Omni/Omni';
 import { $sandboxProcessStatus, sandboxApi } from '@/renderer/features/Omni/state';
@@ -35,6 +36,7 @@ const isFleetMode = (mode: LayoutMode) => mode === 'fleet';
 export const MainContent = memo(() => {
   const store = useStore(persistedStoreApi.$atom);
   const sandboxStatus = useStore($sandboxProcessStatus);
+  const launcherVersion = useStore($launcherVersion);
 
   const setMode = useCallback(
     (mode: LayoutMode) => () => {
@@ -58,7 +60,14 @@ export const MainContent = memo(() => {
     <div className="flex flex-col w-full h-full">
       {/* Single toolbar: logo, tabs, controls */}
       <div className="flex items-center px-3 py-1.5 border-b border-surface-border shrink-0 bg-surface">
-        <AsciiLogo className="text-[5px]" />
+        <div className="flex items-center gap-2">
+          <AsciiLogo className="text-[5px]" />
+          {launcherVersion && (
+            <span className="text-[10px] text-fg-subtle bg-white/5 px-1.5 py-0.5 rounded-full select-none">
+              v{launcherVersion}
+            </span>
+          )}
+        </div>
 
         <div className="flex-1 flex justify-center">
           <div className="flex bg-surface-raised rounded-lg p-0.5 gap-0.5">

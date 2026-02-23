@@ -3,7 +3,13 @@ import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
 import { Button, FormField, Switch } from '@/renderer/ds';
-import { $omniInstallProcessStatus, $omniRuntimeInfo, omniInstallApi } from '@/renderer/features/Omni/state';
+import {
+  $omniInstallProcessStatus,
+  $omniRuntimeInfo,
+  $sandboxProcessStatus,
+  omniInstallApi,
+  sandboxApi,
+} from '@/renderer/features/Omni/state';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi, selectWorkspaceDir } from '@/renderer/services/store';
 import type { OmniTheme } from '@/shared/types';
@@ -12,8 +18,10 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
   const store = useStore(persistedStoreApi.$atom);
   const runtimeInfo = useStore($omniRuntimeInfo);
   const installStatus = useStore($omniInstallProcessStatus);
+  const sandboxStatus = useStore($sandboxProcessStatus);
 
   const isInstalling = installStatus.type === 'starting' || installStatus.type === 'installing';
+  const isRebuilding = sandboxStatus.type === 'starting' || sandboxStatus.type === 'stopping';
 
   const [cliInPath, setCliInPath] = useState<{ installed: boolean; symlinkPath: string } | null>(null);
   const [cliInstalling, setCliInstalling] = useState(false);
@@ -52,6 +60,10 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
     persistedStoreApi.setKey('useWorkDockerfile', checked);
   }, []);
 
+  const rebuildDockerImage = useCallback(() => {
+    sandboxApi.rebuild();
+  }, []);
+
   const reinstallRuntime = useCallback(() => {
     omniInstallApi.startInstall(true);
   }, []);
@@ -82,6 +94,11 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
         </FormField>
         <FormField label="Use Dockerfile.work">
           <Switch checked={store.useWorkDockerfile} onCheckedChange={onChangeWorkDockerfile} />
+        </FormField>
+        <FormField label="Rebuild Docker image">
+          <Button size="sm" variant="ghost" onClick={rebuildDockerImage} isDisabled={isRebuilding}>
+            {isRebuilding ? 'Rebuilding\u2026' : 'Rebuild'}
+          </Button>
         </FormField>
       </div>
 

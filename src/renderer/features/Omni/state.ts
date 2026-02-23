@@ -133,6 +133,10 @@ export const sandboxApi = {
     await emitter.invoke('sandbox-process:stop');
     teardownSandboxTerminal();
   },
+  rebuild: () => {
+    initializeSandboxTerminal();
+    emitter.invoke('sandbox-process:rebuild');
+  },
 };
 
 const listen = () => {

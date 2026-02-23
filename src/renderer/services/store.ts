@@ -14,6 +14,7 @@ const getDefaults = (): StoreData => ({
   onboardingComplete: false,
   fleetProjects: [],
   fleetTasks: [],
+  fleetTickets: [],
 });
 
 /**

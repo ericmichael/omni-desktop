@@ -10,8 +10,20 @@ import { STATUS_COLORS } from './fleet-constants';
 import { FleetProjectForm } from './FleetProjectForm';
 import { $fleetTasks, $fleetView, fleetApi } from './state';
 
+// Ticket counts come from the persisted store since $fleetTickets only holds current project's tickets
+
 const SidebarProjectItem = memo(
-  ({ project, isActive, taskCount }: { project: FleetProject; isActive: boolean; taskCount: number }) => {
+  ({
+    project,
+    isActive,
+    taskCount,
+    ticketCount,
+  }: {
+    project: FleetProject;
+    isActive: boolean;
+    taskCount: number;
+    ticketCount: number;
+  }) => {
     const handleClick = useCallback(() => {
       fleetApi.goToProject(project.id);
     }, [project.id]);
@@ -33,6 +45,11 @@ const SidebarProjectItem = memo(
           <span className="text-sm truncate">{project.label}</span>
           <span className="text-[10px] text-fg-subtle truncate">{shortPath}</span>
         </div>
+        {ticketCount > 0 && (
+          <span className="shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-blue-400/10 text-blue-400">
+            {ticketCount}
+          </span>
+        )}
         {taskCount > 0 && (
           <span className="shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-green-400/10 text-green-400">
             {taskCount}
@@ -47,12 +64,8 @@ SidebarProjectItem.displayName = 'SidebarProjectItem';
 const SidebarTaskItem = memo(
   ({ task, isActive, projectPath }: { task: FleetTask; isActive: boolean; projectPath: string }) => {
     const handleClick = useCallback(() => {
-      if (task.status.type === 'running') {
-        fleetApi.goToTask(task.id);
-      } else {
-        fleetApi.goToProject(task.projectId);
-      }
-    }, [task.id, task.projectId, task.status.type]);
+      fleetApi.goToTask(task.id);
+    }, [task.id]);
 
     const shortPath = useMemo(() => {
       const segments = projectPath.split('/').filter(Boolean);
@@ -85,7 +98,7 @@ export const FleetSidebar = memo(() => {
   const [formOpen, setFormOpen] = useState(false);
 
   const projects = store.fleetProjects;
-  const allTasks = useMemo(() => Object.values(tasks), [tasks]);
+  const allTasks = useMemo(() => Object.values(tasks).sort((a, b) => b.createdAt - a.createdAt), [tasks]);
 
   const projectPathMap = useMemo(() => {
     const map: Record<string, string> = {};
@@ -104,6 +117,16 @@ export const FleetSidebar = memo(() => {
     }
     return counts;
   }, [allTasks]);
+
+  const openTicketCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const ticket of store.fleetTickets) {
+      if (ticket.status === 'open' || ticket.status === 'in_progress') {
+        counts[ticket.projectId] = (counts[ticket.projectId] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }, [store.fleetTickets]);
 
   const handleOpenForm = useCallback(() => {
     setFormOpen(true);
@@ -129,6 +152,7 @@ export const FleetSidebar = memo(() => {
               key={project.id}
               project={project}
               isActive={view.type === 'project' && view.projectId === project.id}
+              ticketCount={openTicketCounts[project.id] ?? 0}
               taskCount={activeTaskCounts[project.id] ?? 0}
             />
           ))

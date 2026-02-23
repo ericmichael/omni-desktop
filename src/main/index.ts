@@ -55,6 +55,12 @@ const [omniInstall, cleanupOmniInstall] = createOmniInstallManager({
 const [sandbox, cleanupSandbox] = createSandboxManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
+  getStoreData: () => ({
+    workspaceDir: store.get('workspaceDir') ?? '',
+    enableCodeServer: store.get('enableCodeServer'),
+    enableVnc: store.get('enableVnc'),
+    useWorkDockerfile: store.get('useWorkDockerfile'),
+  }),
 });
 const [, cleanupFleet] = createFleetManager({
   ipc: main.ipc,

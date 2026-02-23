@@ -4,23 +4,45 @@ import { PiTrashFill } from 'react-icons/pi';
 
 import { Button, Heading, IconButton, Switch } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { FleetProjectId, GitRepoInfo } from '@/shared/types';
+import type { FleetProjectId, FleetTicket, GitRepoInfo } from '@/shared/types';
 
 import { FleetTaskCard } from './FleetTaskCard';
-import { $fleetTasks, fleetApi } from './state';
+import { FleetTicketCard } from './FleetTicketCard';
+import { FleetTicketForm } from './FleetTicketForm';
+import { $fleetTasks, $fleetTickets, fleetApi } from './state';
 
 export const FleetProjectDetail = memo(({ projectId }: { projectId: FleetProjectId }) => {
   const store = useStore(persistedStoreApi.$atom);
   const tasks = useStore($fleetTasks);
+  const tickets = useStore($fleetTickets);
   const [taskDescription, setTaskDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [gitInfo, setGitInfo] = useState<GitRepoInfo | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<string>('');
   const [useWorktree, setUseWorktree] = useState(true);
+  const [ticketFormOpen, setTicketFormOpen] = useState(false);
 
   const project = useMemo(() => store.fleetProjects.find((p) => p.id === projectId), [store.fleetProjects, projectId]);
 
   const projectTasks = useMemo(() => Object.values(tasks).filter((t) => t.projectId === projectId), [tasks, projectId]);
+
+  const projectTickets = useMemo(
+    () =>
+      Object.values(tickets)
+        .filter((t) => t.projectId === projectId)
+        .sort((a, b) => a.createdAt - b.createdAt),
+    [tickets, projectId]
+  );
+
+  const isTicketBlocked = useCallback(
+    (ticket: FleetTicket): boolean => {
+      return ticket.blockedBy.some((blockerId) => {
+        const blocker = tickets[blockerId];
+        return blocker && blocker.status !== 'completed' && blocker.status !== 'closed';
+      });
+    },
+    [tickets]
+  );
 
   useEffect(() => {
     if (!project) {
@@ -37,10 +59,11 @@ export const FleetProjectDetail = memo(({ projectId }: { projectId: FleetProject
         setUseWorktree(true);
       }
     });
+    fleetApi.fetchTickets(projectId);
     return () => {
       cancelled = true;
     };
-  }, [project]);
+  }, [project, projectId]);
 
   const handleTaskDescriptionChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setTaskDescription(e.target.value);
@@ -70,6 +93,21 @@ export const FleetProjectDetail = memo(({ projectId }: { projectId: FleetProject
     }
   }, [taskDescription, isSubmitting, projectId, selectedBranch, useWorktree]);
 
+  const handleOpenTicketForm = useCallback(() => {
+    setTicketFormOpen(true);
+  }, []);
+
+  const handleCloseTicketForm = useCallback(() => {
+    setTicketFormOpen(false);
+  }, []);
+
+  const handleNextTicket = useCallback(async () => {
+    const next = await fleetApi.getNextTicket(projectId);
+    if (next) {
+      fleetApi.goToTicket(next.id);
+    }
+  }, [projectId]);
+
   const handleRemoveProject = useCallback(async () => {
     await fleetApi.removeProject(projectId);
     fleetApi.goToDashboard();
@@ -93,6 +131,31 @@ export const FleetProjectDetail = memo(({ projectId }: { projectId: FleetProject
 
       <div className="flex-1 min-h-0 overflow-y-auto p-6">
         <div className="flex flex-col gap-6 max-w-2xl">
+          {/* Tickets section */}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-fg">Tickets ({projectTickets.length})</span>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="ghost" onClick={handleNextTicket}>
+                  Next Ticket
+                </Button>
+                {!ticketFormOpen && (
+                  <Button size="sm" onClick={handleOpenTicketForm}>
+                    New Ticket
+                  </Button>
+                )}
+              </div>
+            </div>
+            {ticketFormOpen && <FleetTicketForm projectId={projectId} onClose={handleCloseTicketForm} />}
+            {projectTickets.length > 0 && (
+              <div className="flex flex-col gap-2">
+                {projectTickets.map((ticket) => (
+                  <FleetTicketCard key={ticket.id} ticket={ticket} isBlocked={isTicketBlocked(ticket)} />
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Task submission */}
           <div className="flex flex-col gap-3">
             <label className="text-sm font-medium text-fg">New Task</label>

@@ -61,6 +61,7 @@ export type StoreData = {
   onboardingComplete: boolean;
   fleetProjects: FleetProject[];
   fleetTasks: FleetTask[];
+  fleetTickets: FleetTicket[];
 };
 
 // The electron store uses JSON schema to validate its data.
@@ -152,8 +153,45 @@ export const schema: Schema<StoreData> = {
         branch: { type: 'string' },
         worktreePath: { type: 'string' },
         worktreeName: { type: 'string' },
+        sessionId: { type: 'string' },
+        ticketId: { type: 'string' },
+        iteration: { type: 'number' },
       },
       required: ['id', 'projectId', 'taskDescription', 'status', 'createdAt'],
+    },
+  },
+  fleetTickets: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        projectId: { type: 'string' },
+        title: { type: 'string' },
+        description: { type: 'string' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+        status: { type: 'string', enum: ['open', 'in_progress', 'completed', 'closed'] },
+        blockedBy: { type: 'array', items: { type: 'string' } },
+        taskId: { type: 'string' },
+        createdAt: { type: 'number' },
+        updatedAt: { type: 'number' },
+        loopEnabled: { type: 'boolean' },
+        loopMaxIterations: { type: 'number' },
+        loopIteration: { type: 'number' },
+        loopStatus: { type: 'string', enum: ['running', 'completed', 'stopped', 'error'] },
+      },
+      required: [
+        'id',
+        'projectId',
+        'title',
+        'description',
+        'priority',
+        'status',
+        'blockedBy',
+        'createdAt',
+        'updatedAt',
+      ],
     },
   },
 };
@@ -278,12 +316,34 @@ export type OmniRuntimeInfo =
 
 export type FleetProjectId = string;
 export type FleetTaskId = string;
+export type FleetTicketId = string;
+export type FleetTicketStatus = 'open' | 'in_progress' | 'completed' | 'closed';
+export type FleetTicketPriority = 'low' | 'medium' | 'high' | 'critical';
 
 export type FleetProject = {
   id: FleetProjectId;
   label: string;
   workspaceDir: string;
   createdAt: number;
+};
+
+export type FleetTicketLoopStatus = 'running' | 'completed' | 'stopped' | 'error';
+
+export type FleetTicket = {
+  id: FleetTicketId;
+  projectId: FleetProjectId;
+  title: string;
+  description: string;
+  priority: FleetTicketPriority;
+  status: FleetTicketStatus;
+  blockedBy: FleetTicketId[];
+  taskId?: FleetTaskId;
+  createdAt: number;
+  updatedAt: number;
+  loopEnabled?: boolean;
+  loopMaxIterations?: number;
+  loopIteration?: number;
+  loopStatus?: FleetTicketLoopStatus;
 };
 
 export type FleetTask = {
@@ -295,11 +355,16 @@ export type FleetTask = {
   branch?: string;
   worktreePath?: string;
   worktreeName?: string;
+  sessionId?: string;
+  ticketId?: FleetTicketId;
+  iteration?: number;
 };
 
 export type FleetTaskSubmitOptions = {
   branch?: string;
   useWorktree?: boolean;
+  loop?: boolean;
+  loopMaxIterations?: number;
 };
 
 export type GitRepoInfo = { isGitRepo: true; branches: string[]; currentBranch: string } | { isGitRepo: false };
@@ -352,6 +417,7 @@ type SandboxProcessIpcEvents = Namespaced<
       useWorkDockerfile: boolean;
     }) => void;
     stop: () => void;
+    rebuild: () => void;
     resize: (cols: number, rows: number) => void;
   }
 >;
@@ -427,6 +493,14 @@ type FleetIpcEvents = Namespaced<
     'get-tasks': () => FleetTask[];
     'stop-task': (taskId: FleetTaskId) => void;
     'remove-task': (taskId: FleetTaskId) => void;
+    'add-ticket': (ticket: Omit<FleetTicket, 'id' | 'createdAt' | 'updatedAt' | 'status' | 'taskId'>) => FleetTicket;
+    'update-ticket': (id: FleetTicketId, patch: Partial<Omit<FleetTicket, 'id' | 'projectId' | 'createdAt'>>) => void;
+    'remove-ticket': (id: FleetTicketId) => void;
+    'get-tickets': (projectId: FleetProjectId) => FleetTicket[];
+    'get-next-ticket': (projectId: FleetProjectId) => FleetTicket | null;
+    'submit-ticket-task': (ticketId: FleetTicketId, options: FleetTaskSubmitOptions) => FleetTask;
+    'stop-loop': (ticketId: FleetTicketId) => void;
+    'resume-loop': (ticketId: FleetTicketId) => void;
   }
 >;
 
@@ -504,12 +578,20 @@ type DevIpcRendererEvents = Namespaced<
 /**
  * Fleet events. Main process emits these events, renderer process listens to them.
  */
+export type FleetTicketLoopUpdate = {
+  iteration: number;
+  maxIterations: number;
+  status: FleetTicketLoopStatus;
+};
+
 type FleetIpcRendererEvents = Namespaced<
   'fleet',
   {
     'task-status': [FleetTaskId, WithTimestamp<SandboxProcessStatus>];
+    'task-session': [FleetTaskId, string];
     'task-log': [FleetTaskId, WithTimestamp<LogEntry>];
     'task-raw-output': [FleetTaskId, string];
+    'ticket-loop-update': [FleetTicketId, FleetTicketLoopUpdate];
   }
 >;
 

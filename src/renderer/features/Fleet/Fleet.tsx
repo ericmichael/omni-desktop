@@ -4,6 +4,7 @@ import { memo } from 'react';
 import { FleetProjectDetail } from './FleetProjectDetail';
 import { FleetSidebar } from './FleetSidebar';
 import { FleetTaskView } from './FleetTaskView';
+import { FleetTicketDetail } from './FleetTicketDetail';
 import { $fleetView } from './state';
 
 const FleetContent = memo(() => {
@@ -11,6 +12,10 @@ const FleetContent = memo(() => {
 
   if (view.type === 'task') {
     return <FleetTaskView taskId={view.taskId} />;
+  }
+
+  if (view.type === 'ticket') {
+    return <FleetTicketDetail ticketId={view.ticketId} />;
   }
 
   if (view.type === 'project') {
