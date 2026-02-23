@@ -1,6 +1,8 @@
 import '@/renderer/styles/tailwind.css';
 import '@fontsource-variable/inter';
 import '@xterm/xterm/css/xterm.css';
+import '@/renderer/features/Toast/ipc-toast-listener';
+import '@/renderer/features/Toast/status-toast-listener';
 
 import { useStore } from '@nanostores/react';
 import { useEffect } from 'react';
@@ -12,6 +14,7 @@ import { syncTheme } from '@/renderer/constants';
 import { SystemInfoLoadingGate, SystemInfoProvider } from '@/renderer/contexts/SystemInfoContext';
 import { Console } from '@/renderer/features/Console/Console';
 import { SettingsModal } from '@/renderer/features/SettingsModal/SettingsModal';
+import { ToastContainer } from '@/renderer/features/Toast/ToastContainer';
 import { persistedStoreApi } from '@/renderer/services/store';
 
 import { usePreloadTerminalFont } from './use-preload-terminal-font';
@@ -41,6 +44,7 @@ export const App = () => {
           </SystemInfoLoadingGate>
           <SettingsModal />
           <Console />
+          <ToastContainer />
         </ErrorBoundary>
       </div>
     </SystemInfoProvider>

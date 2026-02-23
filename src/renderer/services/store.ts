@@ -9,6 +9,7 @@ const getDefaults = (): StoreData => ({
   enableVnc: true,
   useWorkDockerfile: true,
   optInToLauncherPrereleases: false,
+  enableFleet: false,
   layoutMode: 'work',
   theme: 'tokyo-night',
   onboardingComplete: false,

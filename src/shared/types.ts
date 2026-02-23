@@ -56,6 +56,7 @@ export type StoreData = {
   launcherWindowProps?: WindowProps;
   appWindowProps?: WindowProps;
   optInToLauncherPrereleases: boolean;
+  enableFleet: boolean;
   layoutMode: LayoutMode;
   theme: OmniTheme;
   onboardingComplete: boolean;
@@ -108,6 +109,10 @@ export const schema: Schema<StoreData> = {
   launcherWindowProps: winSizePropsSchema,
   appWindowProps: winSizePropsSchema,
   optInToLauncherPrereleases: {
+    type: 'boolean',
+    default: false,
+  },
+  enableFleet: {
     type: 'boolean',
     default: false,
   },
@@ -576,6 +581,25 @@ type DevIpcRendererEvents = Namespaced<
 >;
 
 /**
+ * Toast notification level and payload pushed from main to renderer.
+ */
+export type ToastPayload = {
+  level: 'info' | 'success' | 'warning' | 'error';
+  title: string;
+  description?: string;
+};
+
+/**
+ * Toast events. Main process emits these events, renderer process listens to them.
+ */
+type ToastIpcRendererEvents = Namespaced<
+  'toast',
+  {
+    show: [ToastPayload];
+  }
+>;
+
+/**
  * Fleet events. Main process emits these events, renderer process listens to them.
  */
 export type FleetTicketLoopUpdate = {
@@ -604,7 +628,8 @@ export type IpcRendererEvents = TerminalIpcRendererEvents &
   SandboxProcessIpcRendererEvents &
   DevIpcRendererEvents &
   StoreIpcRendererEvents &
-  FleetIpcRendererEvents;
+  FleetIpcRendererEvents &
+  ToastIpcRendererEvents;
 
 // #region Config file types
 

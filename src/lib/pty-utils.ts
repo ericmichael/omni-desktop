@@ -110,7 +110,14 @@ export function killPtyProcessAsync(ptyProcess: pty.IPty, timeout: number = 5000
     ptyProcess.onExit(() => cleanup());
 
     timeoutId = setTimeout(() => {
-      console.warn(`PTY process did not exit within ${timeout}ms, continuing anyway`);
+      console.warn(`PTY process did not exit within ${timeout}ms after SIGTERM, escalating to SIGKILL`);
+      try {
+        if (process.platform !== 'win32') {
+          ptyProcess.kill('SIGKILL');
+        }
+      } catch {
+        // Process may already be dead
+      }
       cleanup();
     }, timeout);
 

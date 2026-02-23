@@ -4,6 +4,7 @@ import { dirname, join } from 'path';
 import { assert } from 'tsafe';
 
 import { createConsoleManager } from '@/main/console-manager';
+import { cleanupOrphanedContainers } from '@/main/docker-orphan-cleanup';
 import { createFleetManager } from '@/main/fleet-manager';
 import { MainProcessManager } from '@/main/main-process-manager';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
@@ -100,7 +101,24 @@ async function cleanup() {
  * This method will be called when Electron has finished initialization and is ready to create browser windows.
  * Some APIs can only be used after this event occurs.
  */
-app.on('ready', main.createWindow);
+app.on('ready', () => {
+  main.createWindow();
+
+  // Clean up orphaned Docker containers from previous sessions (non-blocking)
+  cleanupOrphanedContainers()
+    .then((cleaned) => {
+      if (cleaned > 0) {
+        main.sendToWindow('toast:show', {
+          level: 'info',
+          title: 'Cleaned up orphaned containers',
+          description: `Removed ${cleaned} Docker container${cleaned === 1 ? '' : 's'} from a previous session.`,
+        });
+      }
+    })
+    .catch((error) => {
+      console.warn('Failed to check for orphaned containers:', error);
+    });
+});
 
 /**
  * Quit when all windows are closed.
@@ -113,11 +131,27 @@ app.on('window-all-closed', () => {
 
 /**
  * When the launcher quits, cleanup any running processes.
- * TODO(psyche): cleanupProcesses uses SIGTERM to kill the processes. This allows processes to handle the signal and
- * perform cleanup, but we aren't waiting for the processes to exit before we quit the host application. Could this
- * result in orphaned or improperly cleaned up processes?
+ * We prevent the default quit, await all cleanup (which uses SIGTERM → SIGKILL internally),
+ * then force-exit the app. A hard 15s timeout ensures the app never hangs indefinitely.
  */
-app.on('before-quit', cleanup);
+app.on('before-quit', (event) => {
+  if (isShuttingDown) {
+    return;
+  }
+
+  event.preventDefault();
+
+  // Hard timeout: if cleanup hangs, force-exit the process
+  const forceExitTimer = setTimeout(() => {
+    console.error('Cleanup timed out after 15s, forcing exit');
+    app.exit(1);
+  }, 15_000);
+
+  cleanup().finally(() => {
+    clearTimeout(forceExitTimer);
+    app.exit(0);
+  });
+});
 
 //#endregion
 
@@ -159,7 +193,7 @@ main.ipc.handle('util:get-path-exists', (_, path) => pathExists(path));
 main.ipc.handle('util:get-os', () => getOperatingSystem());
 main.ipc.handle('util:open-directory', (_, path) => shell.openPath(path));
 main.ipc.handle('util:get-launcher-version', () => app.getVersion());
-main.ipc.handle('util:get-omni-runtime-info', async () => getOmniRuntimeInfo());
+main.ipc.handle('util:get-omni-runtime-info', () => getOmniRuntimeInfo());
 main.ipc.handle('util:install-cli-to-path', () => installCliToPath());
 main.ipc.handle('util:get-cli-in-path-status', async () => {
   const installed = await isCliInstalledInPath();

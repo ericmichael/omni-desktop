@@ -16,6 +16,16 @@ import type { IpcEvents, IpcRendererEvents, LogEntry, SandboxProcessStatus, With
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Patterns in Docker stderr that indicate a port conflict.
+ */
+const PORT_CONFLICT_PATTERNS = [
+  /port is already allocated/i,
+  /address already in use/i,
+  /bind: address already in use/i,
+  /port \d+ is in use/i,
+];
+
 type SandboxJsonPayload = {
   sandbox_url: string;
   ws_url: string;
@@ -70,6 +80,7 @@ export class SandboxManager {
   private jsonBuffer: string;
   private jsonEmitted: boolean;
   private lastStartArg: StartArg | null;
+  private stderrBuffer: string;
 
   constructor(arg: {
     ipcLogger: SandboxManager['ipcLogger'];
@@ -88,6 +99,7 @@ export class SandboxManager {
     this.jsonBuffer = '';
     this.jsonEmitted = false;
     this.lastStartArg = null;
+    this.stderrBuffer = '';
   }
 
   getStatus = (): WithTimestamp<SandboxProcessStatus> => {
@@ -159,7 +171,9 @@ export class SandboxManager {
         break;
       }
 
-      await new Promise<void>((r) => setTimeout(r, 1000));
+      await new Promise<void>((r) => {
+        setTimeout(r, 1000);
+      });
     }
 
     if (this.status.type === 'stopping' || this.status.type === 'exiting') {
@@ -189,8 +203,13 @@ export class SandboxManager {
 
   private handleStderr = (data: Buffer): void => {
     const str = data.toString();
+    this.stderrBuffer += str;
     this.ipcRawOutput(str);
     process.stderr.write(str);
+  };
+
+  private detectPortConflict = (): boolean => {
+    return PORT_CONFLICT_PATTERNS.some((pattern) => pattern.test(this.stderrBuffer));
   };
 
   private resolveWorkDockerfilePath = async (): Promise<string> => {
@@ -249,6 +268,7 @@ export class SandboxManager {
 
     this.jsonBuffer = '';
     this.jsonEmitted = false;
+    this.stderrBuffer = '';
 
     const args: string[] = [
       'sandbox',
@@ -330,6 +350,17 @@ export class SandboxManager {
 
         if (exitCode === 0) {
           this.updateStatus({ type: 'exited' });
+          return;
+        }
+
+        if (this.detectPortConflict()) {
+          this.updateStatus({
+            type: 'error',
+            error: {
+              message:
+                'A port required by the sandbox is already in use. Stop conflicting services or containers and try again.',
+            },
+          });
           return;
         }
 

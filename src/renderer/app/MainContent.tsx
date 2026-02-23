@@ -1,6 +1,6 @@
 import { useStore } from '@nanostores/react';
 import { motion } from 'framer-motion';
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useMemo } from 'react';
 import { PiStopFill } from 'react-icons/pi';
 
 import { AsciiLogo } from '@/renderer/common/AsciiLogo';
@@ -14,7 +14,7 @@ import { SettingsModalOpenButton } from '@/renderer/features/SettingsModal/Setti
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { LayoutMode } from '@/shared/types';
 
-const TOP_TABS: { value: LayoutMode; label: string }[] = [
+const ALL_TABS: { value: LayoutMode; label: string }[] = [
   { value: 'work', label: 'Work' },
   { value: 'code', label: 'Code' },
   { value: 'fleet', label: 'Fleet' },
@@ -49,6 +49,11 @@ export const MainContent = memo(() => {
     sandboxApi.stop();
   }, []);
 
+  const visibleTabs = useMemo(
+    () => (store.enableFleet ? ALL_TABS : ALL_TABS.filter((t) => t.value !== 'fleet')),
+    [store.enableFleet]
+  );
+
   if (!store.onboardingComplete) {
     return <OnboardingWizard />;
   }
@@ -71,7 +76,7 @@ export const MainContent = memo(() => {
 
         <div className="flex-1 flex justify-center">
           <div className="flex bg-surface-raised rounded-lg p-0.5 gap-0.5">
-            {TOP_TABS.map((tab) => {
+            {visibleTabs.map((tab) => {
               const isActive = activeTab === tab.value;
               return (
                 <button

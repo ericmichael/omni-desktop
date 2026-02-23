@@ -76,9 +76,9 @@ export class MainProcessManager {
       useContentSize: true,
       webPreferences: {
         preload: path.join(__dirname, '../preload/index.js'),
-        nodeIntegration: true,
+        nodeIntegration: false,
         contextIsolation: true,
-        devTools: true,
+        devTools: isDevelopment(),
         webviewTag: true,
       },
       autoHideMenuBar: true, // Hide the menu bar
@@ -97,6 +97,12 @@ export class MainProcessManager {
     window.webContents.setWindowOpenHandler((edata) => {
       shell.openExternal(edata.url);
       return { action: 'deny' };
+    });
+
+    // Harden webviews: enforce security settings on all embedded webviews
+    window.webContents.on('will-attach-webview', (_event, webPreferences) => {
+      webPreferences.nodeIntegration = false;
+      webPreferences.contextIsolation = true;
     });
 
     window.once('ready-to-show', () => {
