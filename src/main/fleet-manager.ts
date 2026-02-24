@@ -11,7 +11,7 @@ import type { FleetLoopCallbacks } from '@/main/fleet-loop';
 import { FleetLoopController } from '@/main/fleet-loop';
 import { buildNudgePrompt, interpolatePromptTemplate } from '@/main/fleet-prompt-builder';
 import { SandboxManager } from '@/main/sandbox-manager';
-import { getWorktreesDir } from '@/main/util';
+import { getOmniConfigDir, getWorktreesDir } from '@/main/util';
 import { DEFAULT_PIPELINE } from '@/shared/fleet-defaults';
 import type {
   FleetChecklistItem,
@@ -2093,9 +2093,7 @@ export class FleetManager {
 
   getSessionHistory = async (sessionId: string): Promise<FleetSessionMessage[]> => {
     const dbPath = path.join(
-      app.getPath('home'),
-      '.config',
-      'omni_code',
+      getOmniConfigDir(),
       'sandbox',
       'omniagents',
       'sessions',

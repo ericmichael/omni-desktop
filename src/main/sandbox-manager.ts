@@ -11,7 +11,7 @@ import { assert } from 'tsafe';
 
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
-import { getOmniCliPath, getOmniPythonPath, isDirectory, isFile, pathExists } from '@/main/util';
+import { getOmniCliPath, getOmniConfigDir, getOmniPythonPath, isDirectory, isFile, pathExists } from '@/main/util';
 import type { IpcEvents, IpcRendererEvents, LogEntry, SandboxProcessStatus, WithTimestamp } from '@/shared/types';
 
 const execFileAsync = promisify(execFile);
@@ -294,7 +294,7 @@ export class SandboxManager {
       'json',
     ];
 
-    const envFilePath = join(app.getPath('home'), '.config', 'omni_code', '.env');
+    const envFilePath = join(getOmniConfigDir(), '.env');
     if (await isFile(envFilePath)) {
       args.push('--env-file', envFilePath);
     }

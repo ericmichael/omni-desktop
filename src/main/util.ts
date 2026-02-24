@@ -109,6 +109,21 @@ export const getTorchPlatform = (gpuType: GpuType): 'cuda' | 'rocm' | 'cpu' => {
 
 //#region Convention defaults
 
+/**
+ * Get the omni-code config directory, matching the path logic in omni_code/config.py.
+ * Windows: %APPDATA%/OmniCode, Linux: ~/.config/omni_code
+ */
+export const getOmniConfigDir = (): string => {
+  if (process.platform === 'win32') {
+    return path.join(app.getPath('appData'), 'OmniCode');
+  }
+  const xdgConfig = process.env['XDG_CONFIG_HOME'];
+  if (xdgConfig) {
+    return path.join(xdgConfig, 'omni_code');
+  }
+  return path.join(app.getPath('home'), '.config', 'omni_code');
+};
+
 export const getDefaultWorkspaceDir = (): string => {
   return path.join(app.getPath('home'), 'Omni', 'Workspace');
 };

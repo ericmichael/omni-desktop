@@ -16,6 +16,7 @@ import {
   getCliSymlinkPath,
   getDefaultWorkspaceDir,
   getHomeDirectory,
+  getOmniConfigDir,
   getOmniRuntimeInfo,
   getOperatingSystem,
   installCliToPath,
@@ -268,7 +269,7 @@ main.ipc.handle('util:check-ws', async (_, url) => {
 
 //#region Config file I/O API
 
-const OMNI_CONFIG_DIR = join(app.getPath('home'), '.config', 'omni_code');
+const OMNI_CONFIG_DIR = getOmniConfigDir();
 
 main.ipc.handle('config:get-omni-config-dir', () => OMNI_CONFIG_DIR);
 main.ipc.handle('config:get-env-file-path', () => join(OMNI_CONFIG_DIR, '.env'));
