@@ -105,6 +105,10 @@ const init = async () => {
   await persistedStoreApi.sync();
   const store = persistedStoreApi.get();
 
+  if (!import.meta.env.DEV && store.layoutMode !== 'chat') {
+    await persistedStoreApi.setKey('layoutMode', 'chat');
+  }
+
   // Apply default workspace dir if user has never picked one
   if (!store.workspaceDir) {
     const defaultDir = await emitter.invoke('util:get-default-workspace-dir');

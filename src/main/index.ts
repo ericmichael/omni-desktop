@@ -5,7 +5,6 @@ import { assert } from 'tsafe';
 
 import { createChatManager } from '@/main/chat-manager';
 import { createConsoleManager } from '@/main/console-manager';
-import { cleanupOrphanedContainers } from '@/main/docker-orphan-cleanup';
 import { createFleetManager } from '@/main/fleet-manager';
 import { MainProcessManager } from '@/main/main-process-manager';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
@@ -114,9 +113,10 @@ async function cleanup() {
 app.on('ready', () => {
   main.createWindow();
 
-  // Clean up orphaned Docker containers from previous sessions (non-blocking)
-  cleanupOrphanedContainers()
-    .then((cleaned) => {
+  if (!app.isPackaged) {
+    void (async () => {
+      const { cleanupOrphanedContainers } = await import('@/main/docker-orphan-cleanup');
+      const cleaned = await cleanupOrphanedContainers();
       if (cleaned > 0) {
         main.sendToWindow('toast:show', {
           level: 'info',
@@ -124,10 +124,10 @@ app.on('ready', () => {
           description: `Removed ${cleaned} Docker container${cleaned === 1 ? '' : 's'} from a previous session.`,
         });
       }
-    })
-    .catch((error) => {
+    })().catch((error) => {
       console.warn('Failed to check for orphaned containers:', error);
     });
+  }
 });
 
 /**

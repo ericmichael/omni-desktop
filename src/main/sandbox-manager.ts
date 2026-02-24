@@ -226,6 +226,14 @@ export class SandboxManager {
       return;
     }
 
+    if (app.isPackaged) {
+      this.updateStatus({
+        type: 'error',
+        error: { message: 'Sandbox is not available in this build.' },
+      });
+      return;
+    }
+
     this.lastStartArg = arg;
     this.updateStatus({ type: 'starting' });
 
