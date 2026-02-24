@@ -25,11 +25,17 @@
       text-align: center;
     }
 
-    h1 {
-      font-size: 2.5rem;
-      font-weight: 700;
-      color: #fff;
-      margin-bottom: 0.5rem;
+    .ascii-logo {
+      font-family: monospace;
+      font-size: 14px;
+      line-height: 1;
+      white-space: pre;
+      background: linear-gradient(to right, #bb9af7, #7aa2f7);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      user-select: none;
+      margin-bottom: 0.75rem;
     }
 
     .tagline {
@@ -114,27 +120,29 @@
 </head>
 <body>
   <div class="container">
-    <h1>Omni Code</h1>
+    <pre class="ascii-logo">█▀█ █▀▄▀█ █▄ █ █ █▀▀ █▀█ █▀▄ █▀▀
+█ █ █ ▀ █ █ ▀█ █ █   █ █ █ █ █▀▀
+▀▀▀ ▀   ▀ ▀  ▀ ▀ ▀▀▀ ▀▀▀ ▀▀  ▀▀▀</pre>
     <p class="tagline">AI-powered development environment</p>
 
     <div class="downloads" id="downloads">
       <a class="download-btn" id="dl-linux"
-         href="https://github.com/emm/omni-code-launcher/releases/latest/download/Omni%20Code-latest.AppImage">
+         href="https://github.com/ericmichael/omni-desktop/releases/latest/download/Omni.Code-latest.AppImage">
         <span class="icon">&#128039;</span>
         <span class="label">Linux (AppImage)</span>
       </a>
       <a class="download-btn" id="dl-mac-arm"
-         href="https://github.com/emm/omni-code-launcher/releases/latest/download/Omni%20Code-latest-arm64.dmg">
-        <span class="icon">&#63743;</span>
+         href="https://github.com/ericmichael/omni-desktop/releases/latest/download/Omni.Code-latest-arm64.dmg">
+        <span class="icon">&#127822;</span>
         <span class="label">macOS Apple Silicon (dmg)</span>
       </a>
       <a class="download-btn" id="dl-mac-intel"
-         href="https://github.com/emm/omni-code-launcher/releases/latest/download/Omni%20Code-latest.dmg">
-        <span class="icon">&#63743;</span>
+         href="https://github.com/ericmichael/omni-desktop/releases/latest/download/Omni.Code-latest.dmg">
+        <span class="icon">&#127822;</span>
         <span class="label">macOS Intel (dmg)</span>
       </a>
       <a class="download-btn" id="dl-windows"
-         href="https://github.com/emm/omni-code-launcher/releases/latest/download/Omni%20Code%20Setup%20latest.exe">
+         href="https://github.com/ericmichael/omni-desktop/releases/latest/download/Omni.Code.Setup.latest.exe">
         <span class="icon">&#128187;</span>
         <span class="label">Windows (exe)</span>
       </a>
@@ -142,7 +150,7 @@
 
     <p class="note">
       These are unsigned builds. Your OS may show a security warning.<br>
-      View all releases on <a href="https://github.com/emm/omni-code-launcher/releases">GitHub</a>.
+      View all releases on <a href="https://github.com/ericmichael/omni-desktop/releases">GitHub</a>.
     </p>
   </div>
 
