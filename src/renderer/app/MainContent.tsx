@@ -55,7 +55,13 @@ export const MainContent = memo(() => {
     chatApi.stop();
   }, []);
 
-  const visibleTabs = useMemo(() => (import.meta.env.DEV ? ALL_TABS : ALL_TABS.filter((t) => t.value !== 'fleet')), []);
+  const visibleTabs = useMemo(
+    () =>
+      import.meta.env.DEV
+        ? ALL_TABS
+        : ALL_TABS.filter((t) => t.value !== 'fleet' && t.value !== 'work' && t.value !== 'code'),
+    []
+  );
 
   if (!store.onboardingComplete) {
     return <OnboardingWizard />;

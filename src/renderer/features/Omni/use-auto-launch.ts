@@ -31,7 +31,6 @@ export const $autoLaunchError = atom<string | null>(null);
  */
 export const useAutoLaunch = () => {
   const initialized = useStore($initialized);
-  const runtimeInfo = useStore($omniRuntimeInfo);
   const installStatus = useStore($omniInstallProcessStatus);
   const sandboxStatus = useStore($sandboxProcessStatus);
   const store = useStore(persistedStoreApi.$atom);
@@ -46,26 +45,32 @@ export const useAutoLaunch = () => {
   const lastStartTimestamp = useRef<number | null>(null);
 
   // Phase: checking → installing (if not installed)
+  // We must fetch fresh runtime info before deciding, because the $omniRuntimeInfo atom
+  // initializes as { isInstalled: false } and the module-level refresh may not have
+  // resolved yet, causing a spurious install on every launch.
   useEffect(() => {
     if (!initialized || phase !== 'checking') {
       return;
     }
 
-    if (runtimeInfo.isInstalled) {
-      // Already installed, move to ready
-      $autoLaunchPhase.set('ready');
-    } else if (!hasAutoLaunched.current) {
-      // Not installed, auto-trigger install
-      didTriggerInstall.current = true;
-      omniInstallApi.startInstall(false);
-      $autoLaunchPhase.set('installing');
-    } else {
-      // After a manual stop + retry, if still not installed, install again
-      didTriggerInstall.current = true;
-      omniInstallApi.startInstall(false);
-      $autoLaunchPhase.set('installing');
-    }
-  }, [initialized, phase, runtimeInfo.isInstalled]);
+    let cancelled = false;
+    refreshOmniRuntimeInfo().then(() => {
+      if (cancelled) {
+        return;
+      }
+      const info = $omniRuntimeInfo.get();
+      if (info.isInstalled) {
+        $autoLaunchPhase.set('ready');
+      } else {
+        didTriggerInstall.current = true;
+        omniInstallApi.startInstall(false);
+        $autoLaunchPhase.set('installing');
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialized, phase]);
 
   // Phase: installing → ready (when install completes) or → error
   useEffect(() => {

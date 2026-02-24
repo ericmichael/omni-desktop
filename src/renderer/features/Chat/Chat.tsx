@@ -52,7 +52,6 @@ const PHASE_ORDER: ChatPhase[] = ['checking', 'installing', 'ready', 'starting',
 
 const useChatAutoLaunch = () => {
   const initialized = useStore($initialized);
-  const runtimeInfo = useStore($omniRuntimeInfo);
   const installStatus = useStore($omniInstallProcessStatus);
   const chatStatus = useStore($chatProcessStatus);
   const store = useStore(persistedStoreApi.$atom);
@@ -66,19 +65,32 @@ const useChatAutoLaunch = () => {
   const lastStartTimestamp = useRef<number | null>(null);
 
   // Phase: checking → installing or ready
+  // We must fetch fresh runtime info before deciding, because the $omniRuntimeInfo atom
+  // initializes as { isInstalled: false } and the module-level refresh may not have
+  // resolved yet, causing a spurious install on every launch.
   useEffect(() => {
     if (!initialized || phase !== 'checking') {
       return;
     }
 
-    if (runtimeInfo.isInstalled) {
-      setPhase('ready');
-    } else {
-      didTriggerInstall.current = true;
-      omniInstallApi.startInstall(false);
-      setPhase('installing');
-    }
-  }, [initialized, phase, runtimeInfo.isInstalled]);
+    let cancelled = false;
+    refreshOmniRuntimeInfo().then(() => {
+      if (cancelled) {
+        return;
+      }
+      const info = $omniRuntimeInfo.get();
+      if (info.isInstalled) {
+        setPhase('ready');
+      } else {
+        didTriggerInstall.current = true;
+        omniInstallApi.startInstall(false);
+        setPhase('installing');
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialized, phase]);
 
   // Phase: installing → ready or error
   useEffect(() => {

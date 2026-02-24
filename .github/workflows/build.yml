@@ -266,3 +266,48 @@ jobs:
             dist/*.blockmap
             dist/*.yml
             dist/*.yaml
+
+  publish-release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [build-linux, build-macos, build-macos-x64, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from package.json
+        id: version
+        run: echo "version=$(node -e "console.log(require('./package.json').version)")" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List downloaded artifacts
+        run: ls -la artifacts/
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ steps.version.outputs.version }}"
+
+          # Delete existing release if it exists (for re-runs)
+          gh release delete "$TAG" --yes 2>/dev/null || true
+
+          # Delete existing tag if it exists
+          git tag -d "$TAG" 2>/dev/null || true
+          git push origin ":refs/tags/$TAG" 2>/dev/null || true
+
+          # Create new release
+          gh release create "$TAG" \
+            --title "Omni Code $TAG (unsigned)" \
+            --notes "Automated unsigned build from \`main\` branch.
+
+          > **Note:** These builds are not code-signed. Your OS may show a warning when running them." \
+            --latest \
+            artifacts/*

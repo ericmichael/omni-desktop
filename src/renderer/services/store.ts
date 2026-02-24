@@ -8,7 +8,7 @@ const getDefaults = (): StoreData => ({
   useWorkDockerfile: true,
   optInToLauncherPrereleases: false,
 
-  layoutMode: 'work',
+  layoutMode: 'chat',
   theme: 'tokyo-night',
   onboardingComplete: false,
   fleetProjects: [],

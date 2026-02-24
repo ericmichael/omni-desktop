@@ -78,17 +78,21 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
         </FormField>
       </div>
 
-      <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">Services</span>
-      <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
-        <FormField label="Use Dockerfile.work">
-          <Switch checked={store.useWorkDockerfile} onCheckedChange={onChangeWorkDockerfile} />
-        </FormField>
-        <FormField label="Rebuild Docker image">
-          <Button size="sm" variant="ghost" onClick={rebuildDockerImage} isDisabled={isRebuilding}>
-            {isRebuilding ? 'Rebuilding\u2026' : 'Rebuild'}
-          </Button>
-        </FormField>
-      </div>
+      {import.meta.env.DEV && (
+        <>
+          <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">Services</span>
+          <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
+            <FormField label="Use Dockerfile.work">
+              <Switch checked={store.useWorkDockerfile} onCheckedChange={onChangeWorkDockerfile} />
+            </FormField>
+            <FormField label="Rebuild Docker image">
+              <Button size="sm" variant="ghost" onClick={rebuildDockerImage} isDisabled={isRebuilding}>
+                {isRebuilding ? 'Rebuilding\u2026' : 'Rebuild'}
+              </Button>
+            </FormField>
+          </div>
+        </>
+      )}
 
       <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">Display</span>
       <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
