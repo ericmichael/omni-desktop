@@ -5,8 +5,12 @@ import { atom, map } from 'nanostores';
 import { DEFAULT_XTERM_OPTIONS, STATUS_POLL_INTERVAL_MS } from '@/renderer/constants';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import type {
+  FleetChecklistItem,
+  FleetColumnId,
+  FleetPipeline,
   FleetProject,
   FleetProjectId,
+  FleetSessionMessage,
   FleetTask,
   FleetTaskId,
   FleetTaskSubmitOptions,
@@ -25,6 +29,11 @@ export const $fleetTasks = map<Record<FleetTaskId, FleetTask>>({});
  * All fleet tickets for the current project, keyed by ticket ID.
  */
 export const $fleetTickets = map<Record<FleetTicketId, FleetTicket>>({});
+
+/**
+ * Cached pipeline for the current project.
+ */
+export const $fleetPipeline = atom<FleetPipeline | null>(null);
 
 /**
  * Which fleet view is active: dashboard = no selection, project = project detail, task = task sandbox view, ticket = ticket detail.
@@ -108,7 +117,10 @@ export const fleetApi = {
 
   // Tickets
   addTicket: async (
-    ticket: Omit<FleetTicket, 'id' | 'createdAt' | 'updatedAt' | 'status' | 'taskId'>
+    ticket: Omit<
+      FleetTicket,
+      'id' | 'createdAt' | 'updatedAt' | 'status' | 'taskId' | 'columnId' | 'currentPhaseId' | 'phases' | 'checklist'
+    >
   ): Promise<FleetTicket> => {
     const created = await emitter.invoke('fleet:add-ticket', ticket);
     $fleetTickets.setKey(created.id, created);
@@ -170,6 +182,48 @@ export const fleetApi = {
     return emitter.invoke('fleet:resume-loop', ticketId);
   },
 
+  // Pipeline & phase operations
+  getPipeline: async (projectId: FleetProjectId): Promise<FleetPipeline> => {
+    const pipeline = await emitter.invoke('fleet:get-pipeline', projectId);
+    $fleetPipeline.set(pipeline);
+    return pipeline;
+  },
+  advanceTicket: (ticketId: FleetTicketId): Promise<void> => {
+    return emitter.invoke('fleet:advance-ticket', ticketId);
+  },
+  moveTicketToColumn: (ticketId: FleetTicketId, columnId: FleetColumnId): Promise<void> => {
+    return emitter.invoke('fleet:move-ticket-to-column', ticketId, columnId);
+  },
+  kickbackTicket: (ticketId: FleetTicketId, targetColumnId: FleetColumnId, reviewNote?: string): Promise<void> => {
+    return emitter.invoke('fleet:kickback-ticket', ticketId, targetColumnId, reviewNote);
+  },
+  approvePhase: (ticketId: FleetTicketId, reviewNote?: string): Promise<void> => {
+    return emitter.invoke('fleet:approve-phase', ticketId, reviewNote);
+  },
+  rejectPhase: (ticketId: FleetTicketId, reviewNote: string): Promise<void> => {
+    return emitter.invoke('fleet:reject-phase', ticketId, reviewNote);
+  },
+  startPhase: (ticketId: FleetTicketId): Promise<void> => {
+    return emitter.invoke('fleet:start-phase', ticketId);
+  },
+  stopPhase: (ticketId: FleetTicketId): Promise<void> => {
+    return emitter.invoke('fleet:stop-phase', ticketId);
+  },
+  resumePhase: (ticketId: FleetTicketId): Promise<void> => {
+    return emitter.invoke('fleet:resume-phase', ticketId);
+  },
+  updateChecklist: (ticketId: FleetTicketId, columnId: FleetColumnId, checklist: FleetChecklistItem[]): Promise<void> => {
+    return emitter.invoke('fleet:update-checklist', ticketId, columnId, checklist);
+  },
+  toggleChecklistItem: (ticketId: FleetTicketId, columnId: FleetColumnId, itemId: string): Promise<void> => {
+    return emitter.invoke('fleet:toggle-checklist-item', ticketId, columnId, itemId);
+  },
+
+  // Session history
+  getSessionHistory: (sessionId: string): Promise<FleetSessionMessage[]> => {
+    return emitter.invoke('fleet:get-session-history', sessionId);
+  },
+
   // Navigation
   goToDashboard: (): void => {
     $fleetView.set({ type: 'dashboard' });
@@ -177,6 +231,7 @@ export const fleetApi = {
   goToProject: (projectId: FleetProjectId): void => {
     $fleetView.set({ type: 'project', projectId });
     void fleetApi.fetchTickets(projectId);
+    void fleetApi.getPipeline(projectId);
   },
   goToTask: (taskId: FleetTaskId): void => {
     $fleetView.set({ type: 'task', taskId });
@@ -187,10 +242,26 @@ export const fleetApi = {
 };
 
 const listen = () => {
+  // Eagerly fetch all tasks when we receive an event for an unknown task ID.
+  // This happens for tasks created by phase loops which bypass submitTask/submitTicketTask.
+  const fetchMissingTask = async (taskId: FleetTaskId) => {
+    const tasks = await emitter.invoke('fleet:get-tasks');
+    const newMap: Record<FleetTaskId, FleetTask> = {};
+    for (const task of tasks) {
+      newMap[task.id] = task;
+    }
+    if (!objectEquals($fleetTasks.get(), newMap)) {
+      $fleetTasks.set(newMap);
+    }
+    return newMap[taskId];
+  };
+
   ipc.on('fleet:task-status', (_, taskId, status) => {
     const existing = $fleetTasks.get()[taskId];
     if (existing) {
       $fleetTasks.setKey(taskId, { ...existing, status });
+    } else {
+      void fetchMissingTask(taskId);
     }
     if (status.type === 'exited') {
       teardownTaskTerminal(taskId);
@@ -201,12 +272,30 @@ const listen = () => {
     const existing = $fleetTasks.get()[taskId];
     if (existing) {
       $fleetTasks.setKey(taskId, { ...existing, sessionId });
+    } else {
+      void fetchMissingTask(taskId);
     }
   });
 
   ipc.on('fleet:task-raw-output', (_, taskId, data) => {
     const xterm = $fleetTaskXTerms.get()[taskId];
     xterm?.write(data);
+  });
+
+  ipc.on('fleet:phase-update', (_, ticketId, phase) => {
+    const existing = $fleetTickets.get()[ticketId];
+    if (existing) {
+      const updatedPhases = existing.phases.map((p) => (p.id === phase.id ? phase : p));
+      // If the phase is new (not found in existing phases), append it
+      if (!existing.phases.some((p) => p.id === phase.id)) {
+        updatedPhases.push(phase);
+      }
+      $fleetTickets.setKey(ticketId, {
+        ...existing,
+        phases: updatedPhases,
+        currentPhaseId: phase.id,
+      });
+    }
   });
 
   ipc.on('fleet:ticket-loop-update', (_, ticketId, update: FleetTicketLoopUpdate) => {
@@ -238,10 +327,7 @@ const listen = () => {
     if (view.type !== 'project' && view.type !== 'ticket') {
       return;
     }
-    const projectId =
-      view.type === 'project'
-        ? view.projectId
-        : $fleetTickets.get()[view.ticketId]?.projectId;
+    const projectId = view.type === 'project' ? view.projectId : $fleetTickets.get()[view.ticketId]?.projectId;
     if (!projectId) {
       return;
     }

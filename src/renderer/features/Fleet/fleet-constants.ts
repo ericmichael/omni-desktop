@@ -1,4 +1,4 @@
-import type { FleetTicketPriority, FleetTicketStatus, SandboxProcessStatus } from '@/shared/types';
+import type { FleetPhaseStatus, FleetTicketPriority, FleetTicketStatus, SandboxProcessStatus } from '@/shared/types';
 
 export const STATUS_LABELS: Partial<Record<SandboxProcessStatus['type'], string>> = {
   uninitialized: 'Idle',
@@ -46,4 +46,49 @@ export const TICKET_PRIORITY_COLORS: Record<FleetTicketPriority, string> = {
   medium: 'text-blue-400 bg-blue-400/10',
   high: 'text-orange-400 bg-orange-400/10',
   critical: 'text-red-400 bg-red-400/10',
+};
+
+export const COLUMN_COLORS: Record<string, string> = {
+  backlog: 'border-t-gray-500',
+  spec: 'border-t-purple-500',
+  implementation: 'border-t-blue-500',
+  review: 'border-t-orange-500',
+  pr: 'border-t-indigo-500',
+  completed: 'border-t-green-500',
+};
+
+export const COLUMN_BG_COLORS: Record<string, string> = {
+  backlog: 'bg-gray-500/5',
+  spec: 'bg-purple-500/5',
+  implementation: 'bg-blue-500/5',
+  review: 'bg-orange-500/5',
+  pr: 'bg-indigo-500/5',
+  completed: 'bg-green-500/5',
+};
+
+export const COLUMN_BADGE_COLORS: Record<string, string> = {
+  backlog: 'text-gray-400 bg-gray-400/10',
+  spec: 'text-purple-400 bg-purple-400/10',
+  implementation: 'text-blue-400 bg-blue-400/10',
+  review: 'text-orange-400 bg-orange-400/10',
+  pr: 'text-indigo-400 bg-indigo-400/10',
+  completed: 'text-green-400 bg-green-400/10',
+};
+
+export const PHASE_STATUS_LABELS: Record<FleetPhaseStatus, string> = {
+  pending: 'Pending',
+  running: 'Running',
+  completed: 'Completed',
+  blocked: 'Blocked',
+  rejected: 'Rejected',
+  skipped: 'Skipped',
+};
+
+export const PHASE_STATUS_COLORS: Record<FleetPhaseStatus, string> = {
+  pending: 'text-fg-muted bg-fg-muted/10',
+  running: 'text-green-400 bg-green-400/10',
+  completed: 'text-blue-400 bg-blue-400/10',
+  blocked: 'text-orange-400 bg-orange-400/10',
+  rejected: 'text-red-400 bg-red-400/10',
+  skipped: 'text-fg-subtle bg-fg-subtle/10',
 };

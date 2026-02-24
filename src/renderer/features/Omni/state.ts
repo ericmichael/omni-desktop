@@ -120,12 +120,7 @@ const teardownSandboxTerminal = () => {
 };
 
 export const sandboxApi = {
-  start: (arg: {
-    workspaceDir: string;
-    enableCodeServer: boolean;
-    enableVnc: boolean;
-    useWorkDockerfile: boolean;
-  }) => {
+  start: (arg: { workspaceDir: string; useWorkDockerfile: boolean }) => {
     initializeSandboxTerminal();
     emitter.invoke('sandbox-process:start', arg);
   },

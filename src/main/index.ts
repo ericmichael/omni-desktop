@@ -58,8 +58,6 @@ const [sandbox, cleanupSandbox] = createSandboxManager({
   sendToWindow: main.sendToWindow,
   getStoreData: () => ({
     workspaceDir: store.get('workspaceDir') ?? '',
-    enableCodeServer: store.get('enableCodeServer'),
-    enableVnc: store.get('enableVnc'),
     useWorkDockerfile: store.get('useWorkDockerfile'),
   }),
 });

@@ -8,6 +8,7 @@ import { Button, IconButton, Spinner } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { FleetTaskId } from '@/shared/types';
 
+import { FleetSessionHistory } from './FleetSessionHistory';
 import { $fleetTasks, fleetApi } from './state';
 
 export const FleetTaskView = memo(({ taskId }: { taskId: FleetTaskId }) => {
@@ -20,9 +21,12 @@ export const FleetTaskView = memo(({ taskId }: { taskId: FleetTaskId }) => {
   const sessionId = task?.sessionId;
   const projectId = task?.projectId;
   const runningData = task?.status.type === 'running' ? task.status.data : undefined;
-  const baseUiUrl = runningData?.uiUrl;
-  const codeServerUrl = runningData?.codeServerUrl;
-  const noVncUrl = runningData?.noVncUrl;
+  const baseUiUrl = runningData?.uiUrl ?? task?.lastUrls?.uiUrl;
+  const codeServerUrl = runningData?.codeServerUrl ?? task?.lastUrls?.codeServerUrl;
+  const noVncUrl = runningData?.noVncUrl ?? task?.lastUrls?.noVncUrl;
+
+  const isContainerLive = statusType === 'running' || statusType === 'starting';
+  const isExitedOrError = statusType === 'exited' || statusType === 'error' || statusType === 'uninitialized';
 
   const uiUrl = useMemo(() => {
     if (!baseUiUrl || !sessionId) {
@@ -52,6 +56,10 @@ export const FleetTaskView = memo(({ taskId }: { taskId: FleetTaskId }) => {
     return null;
   }
 
+  // Priority: live webview (running container) > session history from DB > fallback message
+  const showWebview = uiUrl && isContainerLive;
+  const showSessionHistory = !showWebview && isExitedOrError && sessionId;
+
   return (
     <div className="flex flex-col w-full h-full">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-surface-border shrink-0">
@@ -71,9 +79,13 @@ export const FleetTaskView = memo(({ taskId }: { taskId: FleetTaskId }) => {
         )}
       </div>
 
-      <div className="flex-1 min-h-0 p-2">
-        {uiUrl ? (
-          <CodeSplitLayout uiSrc={uiUrl} codeServerSrc={codeServerUrl} vncSrc={noVncUrl} />
+      <div className="flex-1 min-h-0">
+        {showWebview ? (
+          <div className="p-2 h-full">
+            <CodeSplitLayout uiSrc={uiUrl} codeServerSrc={codeServerUrl} vncSrc={noVncUrl} />
+          </div>
+        ) : showSessionHistory ? (
+          <FleetSessionHistory sessionId={sessionId} />
         ) : (
           <div className="flex flex-col items-center justify-center gap-3 w-full h-full">
             {(statusType === 'starting' || (statusType === 'running' && !task.sessionId)) && (

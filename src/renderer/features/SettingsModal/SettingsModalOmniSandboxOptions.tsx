@@ -25,6 +25,7 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
 
   const [cliInPath, setCliInPath] = useState<{ installed: boolean; symlinkPath: string } | null>(null);
   const [cliInstalling, setCliInstalling] = useState(false);
+  const [cliError, setCliError] = useState<string | null>(null);
 
   const checkCliStatus = useCallback(async () => {
     const status = await emitter.invoke('util:get-cli-in-path-status');
@@ -37,24 +38,17 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
 
   const installCliToPath = useCallback(async () => {
     setCliInstalling(true);
+    setCliError(null);
     try {
       const result = await emitter.invoke('util:install-cli-to-path');
       if (!result.success) {
-        console.error('Failed to install CLI to PATH:', result.error);
+        setCliError(result.error);
       }
       await checkCliStatus();
     } finally {
       setCliInstalling(false);
     }
   }, [checkCliStatus]);
-
-  const onChangeCodeServer = useCallback((checked: boolean) => {
-    persistedStoreApi.setKey('enableCodeServer', checked);
-  }, []);
-
-  const onChangeVnc = useCallback((checked: boolean) => {
-    persistedStoreApi.setKey('enableVnc', checked);
-  }, []);
 
   const onChangeWorkDockerfile = useCallback((checked: boolean) => {
     persistedStoreApi.setKey('useWorkDockerfile', checked);
@@ -86,12 +80,6 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
 
       <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">Services</span>
       <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
-        <FormField label="Enable code-server">
-          <Switch checked={store.enableCodeServer} onCheckedChange={onChangeCodeServer} />
-        </FormField>
-        <FormField label="Enable desktop (noVNC)">
-          <Switch checked={store.enableVnc} onCheckedChange={onChangeVnc} />
-        </FormField>
         <FormField label="Use Dockerfile.work">
           <Switch checked={store.useWorkDockerfile} onCheckedChange={onChangeWorkDockerfile} />
         </FormField>
@@ -145,6 +133,9 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
             </Button>
           )}
         </FormField>
+        {cliError && (
+          <div className="rounded-md border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300">{cliError}</div>
+        )}
       </div>
     </div>
   );

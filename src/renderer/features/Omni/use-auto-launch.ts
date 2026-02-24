@@ -141,8 +141,6 @@ export const useAutoLaunch = () => {
       lastStartTimestamp.current = Date.now();
       sandboxApi.start({
         workspaceDir: store.workspaceDir!,
-        enableCodeServer: store.enableCodeServer,
-        enableVnc: store.enableVnc,
         useWorkDockerfile: store.useWorkDockerfile,
       });
       $autoLaunchPhase.set('starting');

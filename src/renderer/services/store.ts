@@ -5,17 +5,16 @@ import { emitter, ipc } from '@/renderer/services/ipc';
 import type { ModelsConfig, OperatingSystem, StoreData } from '@/shared/types';
 
 const getDefaults = (): StoreData => ({
-  enableCodeServer: true,
-  enableVnc: true,
   useWorkDockerfile: true,
   optInToLauncherPrereleases: false,
-  enableFleet: false,
+
   layoutMode: 'work',
   theme: 'tokyo-night',
   onboardingComplete: false,
   fleetProjects: [],
   fleetTasks: [],
   fleetTickets: [],
+  fleetSchemaVersion: 0,
 });
 
 /**

@@ -50,19 +50,18 @@ export type OmniTheme = 'default' | 'tokyo-night' | 'vscode-dark' | 'vscode-ligh
 
 export type StoreData = {
   workspaceDir?: string;
-  enableCodeServer: boolean;
-  enableVnc: boolean;
   useWorkDockerfile: boolean;
   launcherWindowProps?: WindowProps;
   appWindowProps?: WindowProps;
   optInToLauncherPrereleases: boolean;
-  enableFleet: boolean;
+
   layoutMode: LayoutMode;
   theme: OmniTheme;
   onboardingComplete: boolean;
   fleetProjects: FleetProject[];
   fleetTasks: FleetTask[];
   fleetTickets: FleetTicket[];
+  fleetSchemaVersion: number;
 };
 
 // The electron store uses JSON schema to validate its data.
@@ -94,14 +93,6 @@ export const schema: Schema<StoreData> = {
   workspaceDir: {
     type: 'string',
   },
-  enableCodeServer: {
-    type: 'boolean',
-    default: true,
-  },
-  enableVnc: {
-    type: 'boolean',
-    default: true,
-  },
   useWorkDockerfile: {
     type: 'boolean',
     default: true,
@@ -112,10 +103,7 @@ export const schema: Schema<StoreData> = {
     type: 'boolean',
     default: false,
   },
-  enableFleet: {
-    type: 'boolean',
-    default: false,
-  },
+
   layoutMode: {
     type: 'string',
     enum: ['work', 'code', 'desktop', 'fleet'],
@@ -130,6 +118,10 @@ export const schema: Schema<StoreData> = {
     type: 'boolean',
     default: false,
   },
+  fleetSchemaVersion: {
+    type: 'number',
+    default: 0,
+  },
   fleetProjects: {
     type: 'array',
     default: [],
@@ -140,6 +132,7 @@ export const schema: Schema<StoreData> = {
         label: { type: 'string' },
         workspaceDir: { type: 'string' },
         createdAt: { type: 'number' },
+        pipeline: { type: 'object' },
       },
       required: ['id', 'label', 'workspaceDir', 'createdAt'],
     },
@@ -160,6 +153,8 @@ export const schema: Schema<StoreData> = {
         worktreeName: { type: 'string' },
         sessionId: { type: 'string' },
         ticketId: { type: 'string' },
+        phaseId: { type: 'string' },
+        columnId: { type: 'string' },
         iteration: { type: 'number' },
       },
       required: ['id', 'projectId', 'taskDescription', 'status', 'createdAt'],
@@ -178,9 +173,15 @@ export const schema: Schema<StoreData> = {
         priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
         status: { type: 'string', enum: ['open', 'in_progress', 'completed', 'closed'] },
         blockedBy: { type: 'array', items: { type: 'string' } },
-        taskId: { type: 'string' },
         createdAt: { type: 'number' },
         updatedAt: { type: 'number' },
+        // Kanban fields
+        columnId: { type: ['string', 'null'] },
+        currentPhaseId: { type: ['string', 'null'] },
+        phases: { type: 'array', default: [] },
+        checklist: { type: ['object', 'array'], default: {} },
+        // Legacy fields (kept for migration)
+        taskId: { type: 'string' },
         loopEnabled: { type: 'boolean' },
         loopMaxIterations: { type: 'number' },
         loopIteration: { type: 'number' },
@@ -319,20 +320,117 @@ export type OmniRuntimeInfo =
 
 // #region Fleet types
 
+// --- ID types ---
+
 export type FleetProjectId = string;
 export type FleetTaskId = string;
 export type FleetTicketId = string;
+export type FleetColumnId = string;
+export type FleetPhaseId = string;
+export type FleetChecklistItemId = string;
+
+// --- Enums ---
+
 export type FleetTicketStatus = 'open' | 'in_progress' | 'completed' | 'closed';
 export type FleetTicketPriority = 'low' | 'medium' | 'high' | 'critical';
+export type FleetTicketLoopStatus = 'running' | 'completed' | 'stopped' | 'error';
+export type FleetPhaseStatus = 'pending' | 'running' | 'completed' | 'blocked' | 'rejected' | 'skipped';
+
+/**
+ * Sentinel signals an agent can emit. Scoped per column via `validSentinels`.
+ */
+export type FleetSentinel = 'CHECKLIST_COMPLETE' | 'BLOCKED' | 'TESTS_FAILING' | 'NEEDS_REVIEW' | 'REJECTED';
+
+// --- Pipeline & columns ---
+
+/**
+ * A single column in the kanban pipeline. Defines the agent contract for that stage.
+ *
+ * Columns with `role: 'none'` and `maxIterations: 0` are passive (no agent loop).
+ */
+export type FleetColumn = {
+  id: FleetColumnId;
+  label: string;
+  /** Agent persona for this column (e.g. 'implementer', 'reviewer', 'none'). */
+  role: string;
+  /**
+   * System prompt template. Supports {{variable}} interpolation:
+   * {{ticket.title}}, {{ticket.description}}, {{checklist}}, {{phase.history}},
+   * {{iteration}}, {{column.label}}, {{sentinelInstructions}}
+   */
+  promptTemplate: string;
+  /** Which sentinels are valid exit signals for this column. */
+  validSentinels: FleetSentinel[];
+  /** Whether human approval is required before advancing to the next column. */
+  requiresApproval: boolean;
+  /** Whether the agent loop auto-starts when a ticket enters this column. */
+  autoStart: boolean;
+  /** Max loop iterations. 0 = no agent loop (passive column). */
+  maxIterations: number;
+  /** Default checklist items copied to a ticket when it enters this column. */
+  defaultChecklist: FleetChecklistItem[];
+};
+
+/**
+ * The pipeline definition for a project. Ordered list of columns.
+ */
+export type FleetPipeline = {
+  columns: FleetColumn[];
+};
+
+// --- Checklist ---
+
+export type FleetChecklistItem = {
+  id: FleetChecklistItemId;
+  text: string;
+  completed: boolean;
+};
+
+// --- Phase (per-column execution record) ---
+
+/**
+ * Loop state within a phase. Replaces the flat loop fields that were on FleetTicket.
+ */
+export type FleetPhaseLoop = {
+  enabled: boolean;
+  maxIterations: number;
+  currentIteration: number;
+  status: FleetTicketLoopStatus | null;
+};
+
+/**
+ * Tracks a ticket's execution within a specific column. Each time a ticket enters
+ * (or re-enters via kickback) a column, a new Phase is created.
+ */
+export type FleetPhase = {
+  id: FleetPhaseId;
+  ticketId: FleetTicketId;
+  columnId: FleetColumnId;
+  /** 1st time in this column = 1, after kickback = 2, etc. */
+  attempt: number;
+  status: FleetPhaseStatus;
+  /** IDs of tasks spawned during this phase. */
+  taskIds: FleetTaskId[];
+  /** Loop state for this phase. */
+  loop: FleetPhaseLoop;
+  /** The sentinel that ended this phase, if any. */
+  exitSentinel?: FleetSentinel;
+  /** Human-provided note when approving/rejecting at a gate. */
+  reviewNote?: string;
+  enteredAt: number;
+  exitedAt?: number;
+};
+
+// --- Core entities ---
 
 export type FleetProject = {
   id: FleetProjectId;
   label: string;
   workspaceDir: string;
   createdAt: number;
+  /** Pipeline configuration. If undefined, DEFAULT_PIPELINE is used. */
+  pipeline?: FleetPipeline;
 };
-
-export type FleetTicketLoopStatus = 'running' | 'completed' | 'stopped' | 'error';
 
 export type FleetTicket = {
   id: FleetTicketId;
@@ -340,14 +438,31 @@ export type FleetTicket = {
   title: string;
   description: string;
   priority: FleetTicketPriority;
-  status: FleetTicketStatus;
   blockedBy: FleetTicketId[];
-  taskId?: FleetTaskId;
   createdAt: number;
   updatedAt: number;
+
+  // Kanban state
+  /** Current column. null = not yet placed in pipeline. */
+  columnId: FleetColumnId | null;
+  /** Active phase for the current column. null when no agent work is happening. */
+  currentPhaseId: FleetPhaseId | null;
+  /** All phases for this ticket, ordered chronologically. */
+  phases: FleetPhase[];
+  /** Per-column checklist items. Keyed by column ID. */
+  checklist: Record<FleetColumnId, FleetChecklistItem[]>;
+
+  // Legacy (derived from columnId, kept for backwards compat during migration)
+  status: FleetTicketStatus;
+  /** @deprecated Use currentPhaseId + phase.taskIds instead. */
+  taskId?: FleetTaskId;
+  /** @deprecated Use phase.loop instead. */
   loopEnabled?: boolean;
+  /** @deprecated */
   loopMaxIterations?: number;
+  /** @deprecated */
   loopIteration?: number;
+  /** @deprecated */
   loopStatus?: FleetTicketLoopStatus;
 };
 
@@ -362,7 +477,25 @@ export type FleetTask = {
   worktreeName?: string;
   sessionId?: string;
   ticketId?: FleetTicketId;
+  /** Which phase spawned this task. */
+  phaseId?: FleetPhaseId;
+  /** Which column context this task ran in. */
+  columnId?: FleetColumnId;
   iteration?: number;
+  /** Snapshot of sandbox URLs from the last 'running' state, for replaying past sessions. */
+  lastUrls?: {
+    uiUrl: string;
+    codeServerUrl?: string;
+    noVncUrl?: string;
+  };
+};
+
+export type FleetSessionMessage = {
+  id: number;
+  role: 'user' | 'assistant' | 'tool_call' | 'tool_result';
+  content: string;
+  toolName?: string;
+  createdAt: string;
 };
 
 export type FleetTaskSubmitOptions = {
@@ -415,12 +548,7 @@ type SandboxProcessIpcEvents = Namespaced<
   'sandbox-process',
   {
     'get-status': () => WithTimestamp<SandboxProcessStatus>;
-    start: (arg: {
-      workspaceDir: string;
-      enableCodeServer: boolean;
-      enableVnc: boolean;
-      useWorkDockerfile: boolean;
-    }) => void;
+    start: (arg: { workspaceDir: string; useWorkDockerfile: boolean }) => void;
     stop: () => void;
     rebuild: () => void;
     resize: (cols: number, rows: number) => void;
@@ -498,7 +626,12 @@ type FleetIpcEvents = Namespaced<
     'get-tasks': () => FleetTask[];
     'stop-task': (taskId: FleetTaskId) => void;
     'remove-task': (taskId: FleetTaskId) => void;
-    'add-ticket': (ticket: Omit<FleetTicket, 'id' | 'createdAt' | 'updatedAt' | 'status' | 'taskId'>) => FleetTicket;
+    'add-ticket': (
+      ticket: Omit<
+        FleetTicket,
+        'id' | 'createdAt' | 'updatedAt' | 'status' | 'taskId' | 'columnId' | 'currentPhaseId' | 'phases' | 'checklist'
+      >
+    ) => FleetTicket;
     'update-ticket': (id: FleetTicketId, patch: Partial<Omit<FleetTicket, 'id' | 'projectId' | 'createdAt'>>) => void;
     'remove-ticket': (id: FleetTicketId) => void;
     'get-tickets': (projectId: FleetProjectId) => FleetTicket[];
@@ -506,6 +639,19 @@ type FleetIpcEvents = Namespaced<
     'submit-ticket-task': (ticketId: FleetTicketId, options: FleetTaskSubmitOptions) => FleetTask;
     'stop-loop': (ticketId: FleetTicketId) => void;
     'resume-loop': (ticketId: FleetTicketId) => void;
+    // Phase 2: Kanban pipeline operations
+    'advance-ticket': (ticketId: FleetTicketId) => void;
+    'move-ticket-to-column': (ticketId: FleetTicketId, columnId: FleetColumnId) => void;
+    'kickback-ticket': (ticketId: FleetTicketId, targetColumnId: FleetColumnId, reviewNote?: string) => void;
+    'approve-phase': (ticketId: FleetTicketId, reviewNote?: string) => void;
+    'reject-phase': (ticketId: FleetTicketId, reviewNote: string) => void;
+    'start-phase': (ticketId: FleetTicketId) => void;
+    'stop-phase': (ticketId: FleetTicketId) => void;
+    'resume-phase': (ticketId: FleetTicketId) => void;
+    'update-checklist': (ticketId: FleetTicketId, columnId: FleetColumnId, checklist: FleetChecklistItem[]) => void;
+    'toggle-checklist-item': (ticketId: FleetTicketId, columnId: FleetColumnId, itemId: FleetChecklistItemId) => void;
+    'get-pipeline': (projectId: FleetProjectId) => FleetPipeline;
+    'get-session-history': (sessionId: string) => FleetSessionMessage[];
   }
 >;
 
@@ -616,6 +762,7 @@ type FleetIpcRendererEvents = Namespaced<
     'task-log': [FleetTaskId, WithTimestamp<LogEntry>];
     'task-raw-output': [FleetTaskId, string];
     'ticket-loop-update': [FleetTicketId, FleetTicketLoopUpdate];
+    'phase-update': [FleetTicketId, FleetPhase];
   }
 >;
 

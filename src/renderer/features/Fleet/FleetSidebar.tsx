@@ -121,7 +121,10 @@ export const FleetSidebar = memo(() => {
   const openTicketCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const ticket of store.fleetTickets) {
-      if (ticket.status === 'open' || ticket.status === 'in_progress') {
+      // Count tickets not in the terminal column (completed)
+      const isTerminal = ticket.columnId === 'completed';
+      const isLegacyDone = !ticket.columnId && (ticket.status === 'completed' || ticket.status === 'closed');
+      if (!isTerminal && !isLegacyDone) {
         counts[ticket.projectId] = (counts[ticket.projectId] ?? 0) + 1;
       }
     }

@@ -238,32 +238,55 @@ export const getOmniRuntimeInfo = async (): Promise<OmniRuntimeInfo> => {
 
 //#endregion
 
-//#region CLI PATH symlink
+//#region CLI PATH install
 
 /**
- * Get the directory where we install the `omni` symlink.
+ * Get the directory where we install the `omni` CLI command.
  * - Linux/macOS: ~/.local/bin (XDG standard, typically on PATH)
- * - Windows: not yet supported
+ * - Windows: %LOCALAPPDATA%\omni (added to user PATH via registry)
  */
-export const getCliSymlinkDir = (): string => {
+export const getCliInstallDir = (): string => {
+  if (process.platform === 'win32') {
+    return path.join(app.getPath('appData'), '..', 'Local', 'omni');
+  }
   return path.join(app.getPath('home'), '.local', 'bin');
 };
 
 /**
- * Get the full path of the `omni` symlink that would be created.
+ * Get the full path of the installed `omni` command.
+ * - Linux/macOS: ~/.local/bin/omni (symlink)
+ * - Windows: %LOCALAPPDATA%\omni\omni.cmd (batch shim)
  */
-export const getCliSymlinkPath = (): string => {
-  const name = process.platform === 'win32' ? 'omni.exe' : 'omni';
-  return path.join(getCliSymlinkDir(), name);
+export const getCliInstalledPath = (): string => {
+  if (process.platform === 'win32') {
+    return path.join(getCliInstallDir(), 'omni.cmd');
+  }
+  return path.join(getCliInstallDir(), 'omni');
 };
 
+// Keep old names as aliases for backward compatibility with IPC callers
+export const getCliSymlinkDir = getCliInstallDir;
+export const getCliSymlinkPath = getCliInstalledPath;
+
 /**
- * Check if the `omni` CLI symlink is currently installed and points to our venv binary.
+ * Check if the `omni` CLI command is currently installed and points to our venv binary.
  */
 export const isCliInstalledInPath = async (): Promise<boolean> => {
-  const symlinkPath = getCliSymlinkPath();
+  const installedPath = getCliInstalledPath();
+
+  if (process.platform === 'win32') {
+    // On Windows, check that the .cmd shim exists and contains the correct target path
+    try {
+      const content = await fs.readFile(installedPath, 'utf-8');
+      return content.includes(getOmniCliPath());
+    } catch {
+      return false;
+    }
+  }
+
+  // On Unix, check that the symlink points to the correct binary
   try {
-    const target = await fs.readlink(symlinkPath);
+    const target = await fs.readlink(installedPath);
     return target === getOmniCliPath();
   } catch {
     return false;
@@ -271,45 +294,158 @@ export const isCliInstalledInPath = async (): Promise<boolean> => {
 };
 
 /**
- * Install the `omni` CLI command to the user's PATH by creating a symlink
- * from ~/.local/bin/omni to the venv binary.
+ * On macOS/Linux, ensure ~/.local/bin is in the user's shell PATH by appending an export line
+ * to the appropriate shell profile if it's not already present.
+ */
+const ensureUnixPathEntry = async (dir: string): Promise<void> => {
+  const home = app.getPath('home');
+  const exportLine = `export PATH="${dir}:$PATH"`;
+
+  // Determine which shell profiles to update
+  const profiles: string[] = [];
+  if (process.platform === 'darwin') {
+    // macOS defaults to zsh since Catalina
+    profiles.push(path.join(home, '.zshrc'));
+    // Also add to .bashrc in case user switches shells
+    profiles.push(path.join(home, '.bashrc'));
+  } else {
+    // Linux: check for both bash and zsh
+    profiles.push(path.join(home, '.bashrc'));
+    const zshrc = path.join(home, '.zshrc');
+    if (await pathExists(zshrc)) {
+      profiles.push(zshrc);
+    }
+  }
+
+  for (const profile of profiles) {
+    try {
+      let content = '';
+      try {
+        content = await fs.readFile(profile, 'utf-8');
+      } catch {
+        // File doesn't exist — we'll create it
+      }
+
+      // Skip if the directory is already referenced in PATH setup
+      if (content.includes(dir)) {
+        continue;
+      }
+
+      const addition = `\n# Added by Omni Code\n${exportLine}\n`;
+      await fs.appendFile(profile, addition);
+    } catch {
+      // Best-effort — don't fail the install if we can't modify a profile
+    }
+  }
+};
+
+/**
+ * On Windows, add a directory to the user-level PATH via the registry.
+ * This does not require admin privileges. Broadcasts WM_SETTINGCHANGE so
+ * running shells pick up the change.
+ */
+const ensureWindowsPathEntry = async (dir: string): Promise<void> => {
+  // Read current user PATH from registry
+  const { stdout: currentPath } = await execAsync(
+    'reg query "HKCU\\Environment" /v Path',
+    { timeout: 5000 }
+  ).catch(() => ({ stdout: '' }));
+
+  // Parse the value from reg query output (format: "    Path    REG_EXPAND_SZ    value")
+  const match = currentPath.match(/Path\s+REG_\w+\s+(.*)/i);
+  const existingPath = match?.[1]?.trim() ?? '';
+
+  // Check if our directory is already in PATH
+  const entries = existingPath.split(';').map((e) => e.trim().toLowerCase());
+  if (entries.includes(dir.toLowerCase())) {
+    return;
+  }
+
+  // Append our directory
+  const newPath = existingPath ? `${existingPath};${dir}` : dir;
+
+  // Write back to registry (user-level, no admin needed)
+  await execAsync(
+    `reg add "HKCU\\Environment" /v Path /t REG_EXPAND_SZ /d "${newPath}" /f`,
+    { timeout: 5000 }
+  );
+
+  // Broadcast WM_SETTINGCHANGE so running Explorer/shells pick up the change
+  // We use a small PowerShell snippet since there's no native Node way to do this
+  await execAsync(
+    'powershell -NoProfile -Command "[Environment]::SetEnvironmentVariable(\'__omni_noop\', $null, \'User\')"',
+    { timeout: 5000 }
+  ).catch(() => {
+    // Best-effort — the PATH is still updated, new terminals will pick it up
+  });
+};
+
+/**
+ * Install the `omni` CLI command to the user's PATH.
+ * - Linux/macOS: creates a symlink at ~/.local/bin/omni + ensures PATH entry in shell profile
+ * - Windows: creates a .cmd shim at %LOCALAPPDATA%\omni\omni.cmd + adds to user PATH via registry
  */
 export const installCliToPath = async (): Promise<
   { success: true; symlinkPath: string } | { success: false; error: string }
 > => {
   const target = getOmniCliPath();
-  const symlinkPath = getCliSymlinkPath();
-  const symlinkDir = getCliSymlinkDir();
+  const installedPath = getCliInstalledPath();
+  const installDir = getCliInstallDir();
 
   // Verify the omni binary actually exists
   if (!(await isFile(target))) {
     return { success: false, error: 'Omni runtime is not installed. Install it first.' };
   }
 
-  // Ensure ~/.local/bin exists
+  // Ensure install directory exists
   try {
-    await fs.mkdir(symlinkDir, { recursive: true });
+    await fs.mkdir(installDir, { recursive: true });
   } catch (e) {
-    return { success: false, error: `Failed to create directory ${symlinkDir}: ${String(e)}` };
+    return { success: false, error: `Failed to create directory ${installDir}: ${String(e)}` };
   }
 
-  // Remove existing symlink/file if present
-  try {
-    const stat = await fs.lstat(symlinkPath);
-    if (stat.isSymbolicLink() || stat.isFile()) {
-      await fs.unlink(symlinkPath);
+  if (process.platform === 'win32') {
+    // Windows: create a .cmd shim
+    const shimContent = `@echo off\r\n"${target}" %*\r\n`;
+    try {
+      await fs.writeFile(installedPath, shimContent, 'utf-8');
+    } catch (e) {
+      return { success: false, error: `Failed to create CLI shim: ${String(e)}` };
     }
-  } catch {
-    // Does not exist — that's fine
+
+    // Add install directory to user PATH
+    try {
+      await ensureWindowsPathEntry(installDir);
+    } catch (e) {
+      return { success: false, error: `CLI installed but failed to add to PATH: ${String(e)}` };
+    }
+  } else {
+    // Unix: create a symlink
+    // Remove existing symlink/file if present
+    try {
+      const stat = await fs.lstat(installedPath);
+      if (stat.isSymbolicLink() || stat.isFile()) {
+        await fs.unlink(installedPath);
+      }
+    } catch {
+      // Does not exist — that's fine
+    }
+
+    try {
+      await fs.symlink(target, installedPath);
+    } catch (e) {
+      return { success: false, error: `Failed to create symlink: ${String(e)}` };
+    }
+
+    // Ensure ~/.local/bin is in the user's shell PATH
+    try {
+      await ensureUnixPathEntry(installDir);
+    } catch {
+      // Best-effort — symlink is still created
+    }
   }
 
-  // Create the symlink
-  try {
-    await fs.symlink(target, symlinkPath);
-    return { success: true, symlinkPath };
-  } catch (e) {
-    return { success: false, error: `Failed to create symlink: ${String(e)}` };
-  }
+  return { success: true, symlinkPath: installedPath };
 };
 
 //#endregion

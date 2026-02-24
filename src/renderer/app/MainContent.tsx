@@ -50,8 +50,8 @@ export const MainContent = memo(() => {
   }, []);
 
   const visibleTabs = useMemo(
-    () => (store.enableFleet ? ALL_TABS : ALL_TABS.filter((t) => t.value !== 'fleet')),
-    [store.enableFleet]
+    () => (import.meta.env.DEV ? ALL_TABS : ALL_TABS.filter((t) => t.value !== 'fleet')),
+    []
   );
 
   if (!store.onboardingComplete) {

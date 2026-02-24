@@ -13,6 +13,7 @@ export const FleetTaskCard = memo(({ task }: { task: FleetTask }) => {
   const isStarting = statusType === 'starting';
   const canStop = isRunning || isStarting;
   const isDone = statusType === 'exited' || statusType === 'error';
+  const hasHistory = isDone && !!task.lastUrls?.uiUrl && !!task.sessionId;
 
   const handleStop = useCallback(() => {
     fleetApi.stopTask(task.id);
@@ -49,9 +50,9 @@ export const FleetTaskCard = memo(({ task }: { task: FleetTask }) => {
       )}
 
       <div className="flex items-center gap-1 shrink-0">
-        {isRunning && (
+        {(isRunning || hasHistory) && (
           <Button size="sm" variant="ghost" onClick={handleView}>
-            View
+            {hasHistory ? 'History' : 'View'}
           </Button>
         )}
         {canStop && <IconButton aria-label="Stop" icon={<PiStopFill />} size="sm" onClick={handleStop} />}

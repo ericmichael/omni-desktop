@@ -42,7 +42,9 @@ type SandboxJsonPayload = {
   };
 };
 
-const toSandboxStatusData = (payload: SandboxJsonPayload): Extract<SandboxProcessStatus, { type: 'running' }>['data'] => {
+const toSandboxStatusData = (
+  payload: SandboxJsonPayload
+): Extract<SandboxProcessStatus, { type: 'running' }>['data'] => {
   assert(payload.ui_url, 'Missing ui_url');
   assert(payload.ports.ui, 'Missing ui port');
 
@@ -65,8 +67,6 @@ const toSandboxStatusData = (payload: SandboxJsonPayload): Extract<SandboxProces
 
 type StartArg = {
   workspaceDir: string;
-  enableCodeServer: boolean;
-  enableVnc: boolean;
   useWorkDockerfile: boolean;
 };
 
@@ -145,11 +145,9 @@ export class SandboxManager {
     void this.waitForServices(data);
   };
 
-  private waitForServices = async (
-    data: Extract<SandboxProcessStatus, { type: 'running' }>['data']
-  ): Promise<void> => {
-    const urls = [data.sandboxUrl, data.uiUrl, data.codeServerUrl, data.noVncUrl].filter(
-      (u): u is string => Boolean(u)
+  private waitForServices = async (data: Extract<SandboxProcessStatus, { type: 'running' }>['data']): Promise<void> => {
+    const urls = [data.sandboxUrl, data.uiUrl, data.codeServerUrl, data.noVncUrl].filter((u): u is string =>
+      Boolean(u)
     );
 
     const checkUrl = async (url: string): Promise<boolean> => {
@@ -293,13 +291,8 @@ export class SandboxManager {
       args.push('--env-file', envFilePath);
     }
 
-    if (arg.enableCodeServer) {
-      args.push('--enable-code-server', '--code-server-port', '0');
-    }
-
-    if (arg.enableVnc) {
-      args.push('--enable-vnc', '--vnc-port', '0');
-    }
+    args.push('--enable-code-server', '--code-server-port', '0');
+    args.push('--enable-vnc', '--vnc-port', '0');
 
     if (arg.useWorkDockerfile) {
       try {

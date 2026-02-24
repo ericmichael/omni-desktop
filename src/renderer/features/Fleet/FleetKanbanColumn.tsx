@@ -1,0 +1,46 @@
+import { useDroppable } from '@dnd-kit/core';
+import { memo } from 'react';
+
+import { cn } from '@/renderer/ds';
+import type { FleetColumn, FleetTicket } from '@/shared/types';
+
+import { COLUMN_BADGE_COLORS, COLUMN_BG_COLORS, COLUMN_COLORS } from './fleet-constants';
+import { FleetKanbanCard } from './FleetKanbanCard';
+
+export const FleetKanbanColumn = memo(({ column, tickets }: { column: FleetColumn; tickets: FleetTicket[] }) => {
+  const { isOver, setNodeRef } = useDroppable({
+    id: column.id,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        'flex flex-col w-66 shrink-0 h-full rounded-lg border border-surface-border border-t-2 transition-colors',
+        COLUMN_COLORS[column.id] ?? 'border-t-fg-muted',
+        isOver ? 'bg-accent-500/10' : (COLUMN_BG_COLORS[column.id] ?? 'bg-surface/50')
+      )}
+    >
+      {/* Column header */}
+      <div className="flex items-center justify-between px-3 py-2 shrink-0">
+        <span className="text-sm font-medium text-fg">{column.label}</span>
+        <span
+          className={cn(
+            'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
+            COLUMN_BADGE_COLORS[column.id] ?? 'text-fg-muted bg-fg-muted/10'
+          )}
+        >
+          {tickets.length}
+        </span>
+      </div>
+
+      {/* Cards */}
+      <div className="flex-1 overflow-y-auto flex flex-col gap-2 px-2 pb-2">
+        {tickets.map((ticket) => (
+          <FleetKanbanCard key={ticket.id} ticket={ticket} column={column} />
+        ))}
+      </div>
+    </div>
+  );
+});
+FleetKanbanColumn.displayName = 'FleetKanbanColumn';

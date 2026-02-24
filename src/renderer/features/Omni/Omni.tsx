@@ -274,7 +274,7 @@ const OmniRunningView = memo(
       codeServerUrl?: string;
       noVncUrl?: string;
     };
-    store: { enableCodeServer: boolean; enableVnc: boolean; layoutMode: LayoutMode; theme: OmniTheme };
+    store: { layoutMode: LayoutMode; theme: OmniTheme };
     onReady: () => void;
   }) => {
     const layoutMode = store.layoutMode ?? 'work';
@@ -293,15 +293,17 @@ const OmniRunningView = memo(
     const codeServerSrc = sandboxUrls.codeServerUrl;
     const vncSrc = sandboxUrls.noVncUrl;
 
+    const hasVnc = Boolean(vncSrc);
+
     const allReady = useMemo(() => {
       if (layoutMode === 'work') {
         return uiWorkReady;
       }
       if (layoutMode === 'desktop') {
-        return store.enableVnc ? vncDesktopReady : true;
+        return hasVnc ? vncDesktopReady : true;
       }
       return codeLayoutReady;
-    }, [codeLayoutReady, layoutMode, store.enableVnc, uiWorkReady, vncDesktopReady]);
+    }, [codeLayoutReady, hasVnc, layoutMode, uiWorkReady, vncDesktopReady]);
 
     useEffect(() => {
       if (allReady) {
@@ -333,18 +335,14 @@ const OmniRunningView = memo(
           </div>
 
           <div className={cn('w-full h-full', layoutMode !== 'desktop' && 'hidden')}>
-            <Webview
-              src={store.enableVnc ? vncSrc : undefined}
-              onReady={handleVncDesktopReady}
-              showUnavailable={store.enableVnc}
-            />
+            <Webview src={vncSrc} onReady={handleVncDesktopReady} showUnavailable={hasVnc} />
           </div>
 
           <div className={cn('w-full h-full', layoutMode !== 'code' && 'hidden')}>
             <CodeSplitLayout
               uiSrc={uiSrc}
-              codeServerSrc={store.enableCodeServer ? codeServerSrc : undefined}
-              vncSrc={store.enableVnc ? vncSrc : undefined}
+              codeServerSrc={codeServerSrc}
+              vncSrc={vncSrc}
               onReady={handleCodeLayoutReady}
               expandDesktopButton={
                 <button
