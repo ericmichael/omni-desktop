@@ -178,7 +178,7 @@ jobs:
 
   build-macos-x64:
     if: github.event_name == 'push' || github.event.inputs.build_macos == 'true'
-    runs-on: macos-13
+    runs-on: macos-15-intel
     environment: code-signing
     timeout-minutes: 15
 
