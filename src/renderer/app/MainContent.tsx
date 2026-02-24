@@ -6,6 +6,8 @@ import { PiStopFill } from 'react-icons/pi';
 import { AsciiLogo } from '@/renderer/common/AsciiLogo';
 import { cn, IconButton } from '@/renderer/ds';
 import { $launcherVersion } from '@/renderer/features/Banner/state';
+import { Chat } from '@/renderer/features/Chat/Chat';
+import { $chatProcessStatus, chatApi } from '@/renderer/features/Chat/state';
 import { Fleet } from '@/renderer/features/Fleet/Fleet';
 import { Omni } from '@/renderer/features/Omni/Omni';
 import { $sandboxProcessStatus, sandboxApi } from '@/renderer/features/Omni/state';
@@ -15,6 +17,7 @@ import { persistedStoreApi } from '@/renderer/services/store';
 import type { LayoutMode } from '@/shared/types';
 
 const ALL_TABS: { value: LayoutMode; label: string }[] = [
+  { value: 'chat', label: 'Chat' },
   { value: 'work', label: 'Work' },
   { value: 'code', label: 'Code' },
   { value: 'fleet', label: 'Fleet' },
@@ -31,11 +34,10 @@ const activeTabForMode = (mode: LayoutMode): LayoutMode => {
   return mode;
 };
 
-const isFleetMode = (mode: LayoutMode) => mode === 'fleet';
-
 export const MainContent = memo(() => {
   const store = useStore(persistedStoreApi.$atom);
   const sandboxStatus = useStore($sandboxProcessStatus);
+  const chatStatus = useStore($chatProcessStatus);
   const launcherVersion = useStore($launcherVersion);
 
   const setMode = useCallback(
@@ -49,10 +51,11 @@ export const MainContent = memo(() => {
     sandboxApi.stop();
   }, []);
 
-  const visibleTabs = useMemo(
-    () => (import.meta.env.DEV ? ALL_TABS : ALL_TABS.filter((t) => t.value !== 'fleet')),
-    []
-  );
+  const stopChat = useCallback(() => {
+    chatApi.stop();
+  }, []);
+
+  const visibleTabs = useMemo(() => (import.meta.env.DEV ? ALL_TABS : ALL_TABS.filter((t) => t.value !== 'fleet')), []);
 
   if (!store.onboardingComplete) {
     return <OnboardingWizard />;
@@ -60,6 +63,7 @@ export const MainContent = memo(() => {
 
   const activeTab = activeTabForMode(store.layoutMode);
   const sandboxRunning = sandboxStatus.type === 'running';
+  const chatRunning = chatStatus.type === 'running';
 
   return (
     <div className="flex flex-col w-full h-full">
@@ -104,13 +108,16 @@ export const MainContent = memo(() => {
         <div className="flex items-center gap-1">
           <SettingsModalOpenButton />
           {sandboxRunning && (
-            <IconButton aria-label="Stop" icon={<PiStopFill />} size="sm" onClick={stopSandbox} />
+            <IconButton aria-label="Stop sandbox" icon={<PiStopFill />} size="sm" onClick={stopSandbox} />
           )}
+          {chatRunning && <IconButton aria-label="Stop chat" icon={<PiStopFill />} size="sm" onClick={stopChat} />}
         </div>
       </div>
 
       {/* Content */}
-      <div className="flex-1 min-h-0">{isFleetMode(store.layoutMode) ? <Fleet /> : <Omni />}</div>
+      <div className="flex-1 min-h-0">
+        {store.layoutMode === 'chat' ? <Chat /> : store.layoutMode === 'fleet' ? <Fleet /> : <Omni />}
+      </div>
     </div>
   );
 });

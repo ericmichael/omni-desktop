@@ -45,7 +45,7 @@ export type WindowProps = {
 /**
  * Data stored in the electron store.
  */
-export type LayoutMode = 'work' | 'code' | 'desktop' | 'fleet';
+export type LayoutMode = 'chat' | 'work' | 'code' | 'desktop' | 'fleet';
 export type OmniTheme = 'default' | 'tokyo-night' | 'vscode-dark' | 'vscode-light';
 
 export type StoreData = {
@@ -106,8 +106,8 @@ export const schema: Schema<StoreData> = {
 
   layoutMode: {
     type: 'string',
-    enum: ['work', 'code', 'desktop', 'fleet'],
-    default: 'work',
+    enum: ['chat', 'work', 'code', 'desktop', 'fleet'],
+    default: 'chat',
   },
   theme: {
     type: 'string',
@@ -288,6 +288,10 @@ export type SandboxProcessStatus =
         };
       }
     >;
+
+export type ChatProcessStatus =
+  | Status<'uninitialized' | 'starting' | 'stopping' | 'exiting' | 'exited'>
+  | OkStatus<'running', { uiUrl: string; port: number }>;
 
 /**
  * A logging level.
@@ -555,6 +559,15 @@ type SandboxProcessIpcEvents = Namespaced<
   }
 >;
 
+type ChatProcessIpcEvents = Namespaced<
+  'chat-process',
+  {
+    'get-status': () => WithTimestamp<ChatProcessStatus>;
+    start: (arg: { workspaceDir: string }) => void;
+    stop: () => void;
+  }
+>;
+
 /**
  * Utils API. Main process handles these events, renderer process invokes them.
  */
@@ -661,6 +674,7 @@ type FleetIpcEvents = Namespaced<
 export type IpcEvents = MainProcessIpcEvents &
   OmniInstallProcessIpcEvents &
   SandboxProcessIpcEvents &
+  ChatProcessIpcEvents &
   UtilIpcEvents &
   TerminalIpcEvents &
   StoreIpcEvents &
@@ -711,6 +725,15 @@ type SandboxProcessIpcRendererEvents = Namespaced<
   'sandbox-process',
   {
     status: [WithTimestamp<SandboxProcessStatus>];
+    log: [WithTimestamp<LogEntry>];
+    'raw-output': [string];
+  }
+>;
+
+type ChatProcessIpcRendererEvents = Namespaced<
+  'chat-process',
+  {
+    status: [WithTimestamp<ChatProcessStatus>];
     log: [WithTimestamp<LogEntry>];
     'raw-output': [string];
   }
@@ -773,6 +796,7 @@ export type IpcRendererEvents = TerminalIpcRendererEvents &
   MainProcessIpcRendererEvents &
   OmniInstallProcessIpcRendererEvents &
   SandboxProcessIpcRendererEvents &
+  ChatProcessIpcRendererEvents &
   DevIpcRendererEvents &
   StoreIpcRendererEvents &
   FleetIpcRendererEvents &

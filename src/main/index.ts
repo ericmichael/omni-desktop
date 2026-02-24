@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';
 import { assert } from 'tsafe';
 
+import { createChatManager } from '@/main/chat-manager';
 import { createConsoleManager } from '@/main/console-manager';
 import { cleanupOrphanedContainers } from '@/main/docker-orphan-cleanup';
 import { createFleetManager } from '@/main/fleet-manager';
@@ -61,6 +62,10 @@ const [sandbox, cleanupSandbox] = createSandboxManager({
     useWorkDockerfile: store.get('useWorkDockerfile'),
   }),
 });
+const [chat, cleanupChat] = createChatManager({
+  ipc: main.ipc,
+  sendToWindow: main.sendToWindow,
+});
 const [, cleanupFleet] = createFleetManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
@@ -70,6 +75,7 @@ const [, cleanupFleet] = createFleetManager({
 main.ipc.handle('main-process:get-status', () => main.getStatus());
 main.ipc.handle('omni-install-process:get-status', () => omniInstall.getStatus());
 main.ipc.handle('sandbox-process:get-status', () => sandbox.getStatus());
+main.ipc.handle('chat-process:get-status', () => chat.getStatus());
 
 //#region App lifecycle
 
@@ -82,7 +88,13 @@ async function cleanup() {
   }
   isShuttingDown = true;
 
-  const results = await Promise.allSettled([cleanupConsole(), cleanupOmniInstall(), cleanupSandbox(), cleanupFleet()]);
+  const results = await Promise.allSettled([
+    cleanupConsole(),
+    cleanupOmniInstall(),
+    cleanupSandbox(),
+    cleanupChat(),
+    cleanupFleet(),
+  ]);
   const errors = results
     .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
     .map((result) => result.reason);

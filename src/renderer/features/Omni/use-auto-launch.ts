@@ -90,8 +90,14 @@ export const useAutoLaunch = () => {
   // Phase: ready → starting (auto-start sandbox)
   // Checks model configuration before launching. If models aren't configured, resets onboarding
   // so the wizard is shown instead of a cryptic runtime error.
+  // Skipped when layoutMode is 'chat' — the Chat tab handles its own launch.
   useEffect(() => {
     if (phase !== 'ready') {
+      return;
+    }
+
+    if (store.layoutMode === 'chat') {
+      $autoLaunchPhase.set('idle');
       return;
     }
 
