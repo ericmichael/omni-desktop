@@ -49,31 +49,33 @@ export class ChatManager {
   };
 
   /**
-   * Parses stdout looking for the Gradio/web UI URL pattern.
-   * Common patterns:
-   *   "Running on local URL:  http://127.0.0.1:7860"
-   *   "Running on http://127.0.0.1:7860"
+   * Parses stdout looking for a JSON line with url/port from `--output json`.
+   * Expected format: {"url": "http://...", "port": 1234}
    */
-  private tryParseUrl = (line: string): void => {
+  private tryParseJson = (line: string): void => {
     if (this.urlEmitted) {
       return;
     }
 
-    const match = line.match(/https?:\/\/[\w.-]+:\d+/);
-    if (!match) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
       return;
     }
 
-    const url = match[0];
-    const portMatch = url.match(/:(\d+)$/);
-    if (!portMatch) {
+    let parsed: { url?: string; port?: number };
+    try {
+      parsed = JSON.parse(trimmed) as { url?: string; port?: number };
+    } catch {
       return;
     }
 
-    const port = Number(portMatch[1]);
+    if (typeof parsed.url !== 'string' || typeof parsed.port !== 'number') {
+      return;
+    }
+
     this.urlEmitted = true;
     this.log.info(c.cyan('Waiting for web UI to accept connections...\r\n'));
-    void this.waitForReady(url, port);
+    void this.waitForReady(parsed.url, parsed.port);
   };
 
   private waitForReady = async (uiUrl: string, port: number): Promise<void> => {
@@ -121,7 +123,7 @@ export class ChatManager {
     const lines = this.stdoutBuffer.split(/\r?\n/);
     this.stdoutBuffer = lines.pop() ?? '';
     for (const line of lines) {
-      this.tryParseUrl(line);
+      this.tryParseJson(line);
     }
   };
 
@@ -129,14 +131,6 @@ export class ChatManager {
     const str = data.toString();
     this.ipcRawOutput(str);
     process.stderr.write(str);
-
-    // Gradio often prints its URL to stderr as well
-    if (!this.urlEmitted) {
-      const lines = str.split(/\r?\n/);
-      for (const line of lines) {
-        this.tryParseUrl(line);
-      }
-    }
   };
 
   start = async (arg: { workspaceDir: string }) => {
@@ -150,9 +144,6 @@ export class ChatManager {
       ...process.env,
       ...DEFAULT_ENV,
       ...shellEnvSync(),
-      // Suppress auto browser open — we embed the UI in a webview
-      BROWSER: 'echo',
-      GRADIO_ANALYTICS_ENABLED: 'False',
     } as Record<string, string>;
 
     if (!(await isDirectory(arg.workspaceDir))) {
@@ -174,7 +165,7 @@ export class ChatManager {
     this.stdoutBuffer = '';
     this.urlEmitted = false;
 
-    const args: string[] = ['--mode', 'web', '--host', '127.0.0.1'];
+    const args: string[] = ['--embedded', '--mode', 'web', '--host', '127.0.0.1', '--output', 'json'];
 
     this.log.info(c.cyan('Starting chat web UI...\r\n'));
     this.log.info(`> ${omniCliPath} ${args.join(' ')}\r\n`);
