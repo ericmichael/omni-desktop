@@ -42,8 +42,8 @@ export default {
   },
   publish: {
     provider: 'github',
-    owner: 'emm',
-    repo: 'omni-code-launcher',
+    owner: 'ericmichael',
+    repo: 'omni-desktop',
   },
   electronFuses: {
     runAsNode: false,
