@@ -63,7 +63,7 @@ RUN npm install -g @playwright/cli@0.1.1
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 
 RUN mkdir -p "${PLAYWRIGHT_BROWSERS_PATH}" \
-    && python3 -m pip install --no-cache-dir playwright \
+    && python3 -m pip install --no-cache-dir --break-system-packages playwright \
     && python3 -m playwright install --with-deps chromium \
     && chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}" \
     && rm -rf /var/lib/apt/lists/*
