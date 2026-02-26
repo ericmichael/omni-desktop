@@ -46,7 +46,7 @@ export type WindowProps = {
  * Data stored in the electron store.
  */
 export type LayoutMode = 'chat' | 'work' | 'code' | 'desktop' | 'fleet';
-export type OmniTheme = 'default' | 'tokyo-night' | 'vscode-dark' | 'vscode-light';
+export type OmniTheme = 'default' | 'tokyo-night' | 'vscode-dark' | 'vscode-light' | 'utrgv';
 
 export type StoreData = {
   workspaceDir?: string;
@@ -111,7 +111,7 @@ export const schema: Schema<StoreData> = {
   },
   theme: {
     type: 'string',
-    enum: ['default', 'tokyo-night', 'vscode-dark', 'vscode-light'],
+    enum: ['default', 'tokyo-night', 'vscode-dark', 'vscode-light', 'utrgv'],
     default: 'tokyo-night',
   },
   onboardingComplete: {
@@ -841,6 +841,15 @@ export type McpServerEntry = {
 
 export type McpConfig = {
   mcpServers: Record<string, McpServerEntry>;
+};
+
+export type NetworkConfig = {
+  enabled: boolean;
+  presets: string[];
+  allowlist: string[];
+  denylist: string[];
+  allow_private_ips: boolean;
+  enable_socks5: boolean;
 };
 
 // #endregion

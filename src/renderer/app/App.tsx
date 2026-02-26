@@ -38,7 +38,7 @@ export const App = () => {
       <div className="w-dvw h-dvh relative overflow-hidden bg-surface font-sans text-fg antialiased">
         <ErrorBoundary FallbackComponent={ErrorBoundaryFallback}>
           <SystemInfoLoadingGate>
-            <div className="flex w-full h-full flex-col items-center min-h-0">
+            <div className="flex w-full h-full min-h-0">
               <MainContent />
             </div>
           </SystemInfoLoadingGate>

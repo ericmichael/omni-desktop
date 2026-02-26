@@ -33,6 +33,11 @@
   --color-accent-900: #312e81;
   --color-accent-950: #1e1b4b;
 
+  /* Header bar */
+  --color-header: var(--color-surface);
+  --color-header-fg: var(--color-fg);
+  --color-header-border: var(--color-surface-border);
+
   /* Fonts */
   --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
   --font-mono: JetBrainsMonoNerdFont, ui-monospace, monospace;
@@ -252,6 +257,66 @@
   --scrollbar-thumb-hover: #b0b0b0;
   --selection-color: rgb(0 95 184 / 0.3);
   --focus-ring-color: rgb(0 95 184 / 0.5);
+}
+
+/* ── UTRGV (Light) ── */
+[data-theme='utrgv'] {
+  --color-surface: #ffffff;
+  --color-surface-raised: #f7f7f8;
+  --color-surface-overlay: #efefef;
+  --color-surface-border: #d9d9dc;
+  --color-fg: #1a1a1e;
+  --color-fg-muted: #646469;
+  --color-fg-subtle: #8e8e93;
+  --color-fg-error: #dc2626;
+  --color-header: #c63727;
+  --color-header-fg: #ffffff;
+  --color-header-border: #a82e21;
+  --color-accent-50: #fef3f0;
+  --color-accent-100: #fde3dc;
+  --color-accent-200: #fcc5b5;
+  --color-accent-300: #f9a080;
+  --color-accent-400: #f47a4a;
+  --color-accent-500: #f05023;
+  --color-accent-600: #d4431b;
+  --color-accent-700: #b03617;
+  --color-accent-800: #8c2c15;
+  --color-accent-900: #6e2413;
+  --color-accent-950: #3d120a;
+  --xterm-fg: #1a1a1e;
+  --xterm-black: #1a1a1e;
+  --xterm-bright-black: #646469;
+  --xterm-white: #ffffff;
+  --xterm-bright-white: #f7f7f8;
+  --xterm-cursor: #f05023;
+  --xterm-cursor-accent: #ffffff;
+  --xterm-blue: #0451a5;
+  --xterm-bright-blue: #0065d1;
+  --xterm-cyan: #0e7c86;
+  --xterm-bright-cyan: #0e7c86;
+  --xterm-green: #1a7f37;
+  --xterm-bright-green: #1a7f37;
+  --xterm-yellow: #9a6700;
+  --xterm-bright-yellow: #9a6700;
+  --xterm-red: #dc2626;
+  --xterm-bright-red: #dc2626;
+  --xterm-magenta: #8b3fc7;
+  --xterm-bright-magenta: #8b3fc7;
+  --scrollbar-thumb: #d4d4d8;
+  --scrollbar-thumb-hover: #b0b0b5;
+  --selection-color: rgb(240 80 35 / 0.15);
+  --focus-ring-color: rgb(240 80 35 / 0.4);
+}
+
+/* UTRGV header: remap semantic colors so child components render white-on-orange */
+[data-theme='utrgv'] .bg-header {
+  --color-fg: #ffffff;
+  --color-fg-muted: rgb(255 255 255 / 0.75);
+  --color-fg-subtle: rgb(255 255 255 / 0.6);
+  --color-surface-raised: rgb(255 255 255 / 0.15);
+  --color-surface-border: rgb(255 255 255 / 0.2);
+  --color-header-border: rgb(255 255 255 / 0.15);
+  --color-accent-600: #a82e21;
 }
 
 /* Base styles */

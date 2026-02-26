@@ -81,7 +81,7 @@ export const FleetTaskView = memo(({ taskId }: { taskId: FleetTaskId }) => {
 
       <div className="flex-1 min-h-0">
         {showWebview ? (
-          <div className="p-2 h-full">
+          <div className="h-full">
             <CodeSplitLayout uiSrc={uiUrl} codeServerSrc={codeServerUrl} vncSrc={noVncUrl} />
           </div>
         ) : showSessionHistory ? (

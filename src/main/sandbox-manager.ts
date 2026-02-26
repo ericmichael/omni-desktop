@@ -1,5 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
 import { execFile, spawn } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -12,7 +13,14 @@ import { assert } from 'tsafe';
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
 import { getOmniCliPath, getOmniConfigDir, getOmniPythonPath, isDirectory, isFile, pathExists } from '@/main/util';
-import type { IpcEvents, IpcRendererEvents, LogEntry, SandboxProcessStatus, WithTimestamp } from '@/shared/types';
+import type {
+  IpcEvents,
+  IpcRendererEvents,
+  LogEntry,
+  NetworkConfig,
+  SandboxProcessStatus,
+  WithTimestamp,
+} from '@/shared/types';
 
 const execFileAsync = promisify(execFile);
 
@@ -294,9 +302,26 @@ export class SandboxManager {
       'json',
     ];
 
-    const envFilePath = join(getOmniConfigDir(), '.env');
+    const omniConfigDir = getOmniConfigDir();
+
+    const envFilePath = join(omniConfigDir, '.env');
     if (await isFile(envFilePath)) {
       args.push('--env-file', envFilePath);
+    }
+
+    try {
+      const networkJson = await readFile(join(omniConfigDir, 'network.json'), 'utf-8');
+      const networkConfig = JSON.parse(networkJson) as NetworkConfig;
+      if (networkConfig.enabled) {
+        // allowlist is pre-expanded at save time; fall back to old allowedHosts for transition
+        const hosts = networkConfig.allowlist ?? (networkConfig as Record<string, unknown>)['allowedHosts'] ?? [];
+        const allHosts = hosts as string[];
+        if (allHosts.length > 0) {
+          args.push('--network-allowlist', allHosts.join(','));
+        }
+      }
+    } catch {
+      // network.json missing or invalid — no isolation applied
     }
 
     args.push('--enable-code-server', '--code-server-port', '0');

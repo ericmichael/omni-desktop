@@ -477,7 +477,7 @@ export const Chat = memo(() => {
     <div className="w-full h-full relative">
       {uiUrl && (
         <div className="flex flex-col w-full h-full relative">
-          <div className="flex-1 min-h-0 p-2 relative">
+          <div className="flex-1 min-h-0 relative">
             <Webview src={uiUrl} onReady={handleContentReady} showUnavailable={false} />
           </div>
         </div>

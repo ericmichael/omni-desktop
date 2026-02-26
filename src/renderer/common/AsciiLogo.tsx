@@ -1,6 +1,9 @@
+import { useStore } from '@nanostores/react';
 import { memo, useMemo } from 'react';
 
+import utrgvLogo from '@/renderer/assets/logo-uthealthrgv.jpg';
 import { cn } from '@/renderer/ds';
+import { persistedStoreApi } from '@/renderer/services/store';
 
 const ASCII_CHARS: Record<string, [string, string, string]> = {
   ' ': ['   ', '   ', '   '],
@@ -61,7 +64,17 @@ function createASCIIArt(text: string): string[] {
 }
 
 export const AsciiLogo = memo(({ text = 'OMNI', className }: { text?: string; className?: string }) => {
+  const store = useStore(persistedStoreApi.$atom);
   const lines = useMemo(() => createASCIIArt(text), [text]);
+
+  if (store.theme === 'utrgv') {
+    return (
+      <div className={cn('flex items-center gap-3 select-none', className)}>
+        <img src={utrgvLogo} alt="UTHealth RGV" className="h-8" />
+        <pre className="leading-none text-[8px] font-mono text-white/70 translate-y-px">{lines.join('\n')}</pre>
+      </div>
+    );
+  }
 
   return (
     <pre
@@ -75,3 +88,24 @@ export const AsciiLogo = memo(({ text = 'OMNI', className }: { text?: string; cl
   );
 });
 AsciiLogo.displayName = 'AsciiLogo';
+
+const OMNI_LINES = createASCIIArt('OMNI');
+
+export const OmniLogo = memo(({ className }: { className?: string }) => {
+  const store = useStore(persistedStoreApi.$atom);
+
+  return (
+    <pre
+      className={cn(
+        'leading-none text-[6px] font-mono select-none',
+        store.theme === 'utrgv'
+          ? 'text-white/80'
+          : 'bg-gradient-to-r from-[#bb9af7] to-[#7aa2f7] bg-clip-text text-transparent',
+        className
+      )}
+    >
+      {OMNI_LINES.join('\n')}
+    </pre>
+  );
+});
+OmniLogo.displayName = 'OmniLogo';

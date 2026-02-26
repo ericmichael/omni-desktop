@@ -7,10 +7,11 @@ import { SettingsModalEnvironmentTab } from '@/renderer/features/SettingsModal/S
 import { SettingsModalGeneralTab } from '@/renderer/features/SettingsModal/SettingsModalGeneralTab';
 import { SettingsModalMcpTab } from '@/renderer/features/SettingsModal/SettingsModalMcpTab';
 import { SettingsModalModelsTab } from '@/renderer/features/SettingsModal/SettingsModalModelsTab';
+import { SettingsModalNetworkTab } from '@/renderer/features/SettingsModal/SettingsModalNetworkTab';
 import { SettingsModalResetButton } from '@/renderer/features/SettingsModal/SettingsModalResetButton';
 import { $isSettingsOpen } from '@/renderer/features/SettingsModal/state';
 
-const TABS = ['General', 'Environment', 'Models', 'MCP'] as const;
+const TABS = ['General', 'Environment', 'Models', 'MCP', 'Network'] as const;
 type Tab = (typeof TABS)[number];
 
 export const SettingsModal = memo(() => {
@@ -25,12 +26,14 @@ export const SettingsModal = memo(() => {
   const onClickEnvironment = useCallback(() => switchTab('Environment'), []);
   const onClickModels = useCallback(() => switchTab('Models'), []);
   const onClickMcp = useCallback(() => switchTab('MCP'), []);
+  const onClickNetwork = useCallback(() => switchTab('Network'), []);
 
   const tabClickHandlers: Record<Tab, () => void> = {
     General: onClickGeneral,
     Environment: onClickEnvironment,
     Models: onClickModels,
     MCP: onClickMcp,
+    Network: onClickNetwork,
   };
 
   return (
@@ -61,6 +64,7 @@ export const SettingsModal = memo(() => {
           {activeTab === 'Environment' && <SettingsModalEnvironmentTab />}
           {activeTab === 'Models' && <SettingsModalModelsTab />}
           {activeTab === 'MCP' && <SettingsModalMcpTab />}
+          {activeTab === 'Network' && <SettingsModalNetworkTab />}
         </DialogBody>
         {activeTab === 'General' && (
           <DialogFooter className="pt-4">

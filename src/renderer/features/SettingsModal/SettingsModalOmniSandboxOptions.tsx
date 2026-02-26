@@ -3,6 +3,7 @@ import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
 import { Button, FormField, Switch } from '@/renderer/ds';
+import { $launcherVersion } from '@/renderer/features/Banner/state';
 import {
   $omniInstallProcessStatus,
   $omniRuntimeInfo,
@@ -19,6 +20,7 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
   const runtimeInfo = useStore($omniRuntimeInfo);
   const installStatus = useStore($omniInstallProcessStatus);
   const sandboxStatus = useStore($sandboxProcessStatus);
+  const launcherVersion = useStore($launcherVersion);
 
   const isInstalling = installStatus.type === 'starting' || installStatus.type === 'installing';
   const isRebuilding = sandboxStatus.type === 'starting' || sandboxStatus.type === 'stopping';
@@ -106,6 +108,7 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
             <option value="tokyo-night">Tokyo Night</option>
             <option value="vscode-dark">VS Code Dark</option>
             <option value="vscode-light">VS Code Light</option>
+            <option value="utrgv">UTRGV</option>
           </select>
         </FormField>
       </div>
@@ -140,6 +143,13 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
         {cliError && (
           <div className="rounded-md border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300">{cliError}</div>
         )}
+      </div>
+
+      <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">About</span>
+      <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
+        <FormField label="Launcher version">
+          <span className="text-xs text-fg-muted">{launcherVersion ?? '—'}</span>
+        </FormField>
       </div>
     </div>
   );

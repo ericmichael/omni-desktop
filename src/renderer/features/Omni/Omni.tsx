@@ -1,13 +1,14 @@
 import { useStore } from '@nanostores/react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { PiArrowsOutSimpleBold, PiWarningCircleFill } from 'react-icons/pi';
+import { PiMonitorBold, PiWarningCircleFill } from 'react-icons/pi';
 
 import { CodeSplitLayout } from '@/renderer/common/CodeSplitLayout';
 import { EllipsisLoadingText } from '@/renderer/common/EllipsisLoadingText';
 import { BodyContainer, BodyContent } from '@/renderer/common/layout';
 import { Webview } from '@/renderer/common/Webview';
 import { Button, cn, Divider, Heading, Spinner } from '@/renderer/ds';
+import { FloatingWidget } from '@/renderer/features/Omni/FloatingWidget';
 import { $isSettingsOpen } from '@/renderer/features/SettingsModal/state';
 import { XTermLogViewer } from '@/renderer/features/XTermLogViewer/XTermLogViewer';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
@@ -259,10 +260,6 @@ const OmniIdleView = memo(() => {
 });
 OmniIdleView.displayName = 'OmniIdleView';
 
-const setLayoutMode = (mode: LayoutMode) => {
-  persistedStoreApi.setKey('layoutMode', mode);
-};
-
 const OmniRunningView = memo(
   ({
     sandboxUrls,
@@ -294,6 +291,15 @@ const OmniRunningView = memo(
     const vncSrc = sandboxUrls.noVncUrl;
 
     const hasVnc = Boolean(vncSrc);
+    const [vncOverlayOpen, setVncOverlayOpen] = useState(false);
+
+    const handleOpenVncOverlay = useCallback(() => {
+      setVncOverlayOpen(true);
+    }, []);
+
+    const handleCloseVncOverlay = useCallback(() => {
+      setVncOverlayOpen(false);
+    }, []);
 
     const allReady = useMemo(() => {
       if (layoutMode === 'work') {
@@ -311,10 +317,6 @@ const OmniRunningView = memo(
       }
     }, [allReady, onReady]);
 
-    const handleExpandDesktop = useCallback(() => {
-      setLayoutMode('desktop');
-    }, []);
-
     const handleUiWorkReady = useCallback(() => {
       setUiWorkReady(true);
     }, []);
@@ -329,31 +331,45 @@ const OmniRunningView = memo(
 
     return (
       <div className="flex flex-col w-full h-full relative">
-        <div className="flex-1 min-h-0 p-2 relative">
-          <div className={cn('w-full h-full', layoutMode !== 'work' && 'hidden')}>
+        <div className="flex-1 min-h-0 relative">
+          <div className={cn('w-full h-full relative', layoutMode !== 'work' && 'hidden')}>
             <Webview src={uiSrc} onReady={handleUiWorkReady} showUnavailable={false} />
+            {vncSrc && (
+              <FloatingWidget
+                src={vncSrc}
+                label="Omni's PC"
+                icon={PiMonitorBold}
+                overlayOpen={vncOverlayOpen}
+                onOpenOverlay={handleOpenVncOverlay}
+                onCloseOverlay={handleCloseVncOverlay}
+                className="top-[75%]"
+                resizable
+              />
+            )}
           </div>
 
           <div className={cn('w-full h-full', layoutMode !== 'desktop' && 'hidden')}>
             <Webview src={vncSrc} onReady={handleVncDesktopReady} showUnavailable={hasVnc} />
           </div>
 
-          <div className={cn('w-full h-full', layoutMode !== 'code' && 'hidden')}>
+          <div className={cn('w-full h-full relative', layoutMode !== 'code' && 'hidden')}>
             <CodeSplitLayout
               uiSrc={uiSrc}
               codeServerSrc={codeServerSrc}
-              vncSrc={vncSrc}
               onReady={handleCodeLayoutReady}
-              expandDesktopButton={
-                <button
-                  onClick={handleExpandDesktop}
-                  className="text-fg-muted hover:text-fg cursor-pointer p-1"
-                  title="Expand Desktop to full screen"
-                >
-                  <PiArrowsOutSimpleBold size={12} />
-                </button>
-              }
             />
+            {vncSrc && (
+              <FloatingWidget
+                src={vncSrc}
+                label="Omni's PC"
+                icon={PiMonitorBold}
+                overlayOpen={vncOverlayOpen}
+                onOpenOverlay={handleOpenVncOverlay}
+                onCloseOverlay={handleCloseVncOverlay}
+                className="top-[75%]"
+                resizable
+              />
+            )}
           </div>
         </div>
       </div>
