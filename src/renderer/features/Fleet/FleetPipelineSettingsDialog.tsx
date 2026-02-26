@@ -2,7 +2,16 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
 import { PiPlusBold, PiTrashFill } from 'react-icons/pi';
 
-import { AnimatedDialog, Button, cn, DialogBody, DialogContent, DialogFooter, DialogHeader, IconButton } from '@/renderer/ds';
+import {
+  AnimatedDialog,
+  Button,
+  cn,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  IconButton,
+} from '@/renderer/ds';
 import type { FleetColumn, FleetProjectId } from '@/shared/types';
 
 import { COLUMN_BADGE_COLORS } from './fleet-constants';
@@ -144,8 +153,10 @@ export const FleetPipelineSettingsDialog = memo(
       if (!editColumns || !pipeline) {
         return false;
       }
-      return JSON.stringify(editColumns.map((c) => c.defaultChecklist)) !==
-        JSON.stringify(pipeline.columns.map((c) => c.defaultChecklist));
+      return (
+        JSON.stringify(editColumns.map((c) => c.defaultChecklist)) !==
+        JSON.stringify(pipeline.columns.map((c) => c.defaultChecklist))
+      );
     }, [editColumns, pipeline]);
 
     const handleRemoveItem = useCallback((columnId: string, itemId: string) => {

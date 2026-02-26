@@ -23,7 +23,6 @@ export const FleetTaskView = memo(({ taskId }: { taskId: FleetTaskId }) => {
   const runningData = task?.status.type === 'running' ? task.status.data : undefined;
   const baseUiUrl = runningData?.uiUrl ?? task?.lastUrls?.uiUrl;
   const codeServerUrl = runningData?.codeServerUrl ?? task?.lastUrls?.codeServerUrl;
-  const noVncUrl = runningData?.noVncUrl ?? task?.lastUrls?.noVncUrl;
 
   const isContainerLive = statusType === 'running' || statusType === 'starting';
   const isExitedOrError = statusType === 'exited' || statusType === 'error' || statusType === 'uninitialized';
@@ -82,7 +81,7 @@ export const FleetTaskView = memo(({ taskId }: { taskId: FleetTaskId }) => {
       <div className="flex-1 min-h-0">
         {showWebview ? (
           <div className="h-full">
-            <CodeSplitLayout uiSrc={uiUrl} codeServerSrc={codeServerUrl} vncSrc={noVncUrl} />
+            <CodeSplitLayout uiSrc={uiUrl} codeServerSrc={codeServerUrl} />
           </div>
         ) : showSessionHistory ? (
           <FleetSessionHistory sessionId={sessionId} />

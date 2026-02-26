@@ -212,7 +212,11 @@ export const fleetApi = {
   resumePhase: (ticketId: FleetTicketId): Promise<void> => {
     return emitter.invoke('fleet:resume-phase', ticketId);
   },
-  updateChecklist: (ticketId: FleetTicketId, columnId: FleetColumnId, checklist: FleetChecklistItem[]): Promise<void> => {
+  updateChecklist: (
+    ticketId: FleetTicketId,
+    columnId: FleetColumnId,
+    checklist: FleetChecklistItem[]
+  ): Promise<void> => {
     return emitter.invoke('fleet:update-checklist', ticketId, columnId, checklist);
   },
   toggleChecklistItem: (ticketId: FleetTicketId, columnId: FleetColumnId, itemId: string): Promise<void> => {

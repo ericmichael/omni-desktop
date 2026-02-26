@@ -5,7 +5,7 @@ import { emitter, ipc } from '@/renderer/services/ipc';
 import type { ModelsConfig, OperatingSystem, StoreData } from '@/shared/types';
 
 const getDefaults = (): StoreData => ({
-  useWorkDockerfile: true,
+  sandboxVariant: 'work',
   optInToLauncherPrereleases: false,
 
   layoutMode: 'chat',

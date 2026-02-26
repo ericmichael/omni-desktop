@@ -928,7 +928,7 @@ export class FleetManager {
     if (!sandbox) {
       // Need to create a new sandbox
       sandbox = this.createPhaseSandbox(ticketId);
-      sandbox.start({ workspaceDir, useWorkDockerfile: true });
+      sandbox.start({ workspaceDir, sandboxVariant: 'work' });
     }
 
     const currentSbStatus = sandbox.getStatus();
@@ -1432,7 +1432,7 @@ export class FleetManager {
       this.updateTicket(ticketId, { phases });
     }
 
-    sandbox.start({ workspaceDir, useWorkDockerfile: true });
+    sandbox.start({ workspaceDir, sandboxVariant: 'work' });
   };
 
   // #endregion
@@ -1620,7 +1620,7 @@ export class FleetManager {
 
     sandbox.start({
       workspaceDir,
-      useWorkDockerfile: true,
+      sandboxVariant: 'work',
     });
 
     return firstTask;
@@ -2014,7 +2014,7 @@ export class FleetManager {
 
     sandbox.start({
       workspaceDir,
-      useWorkDockerfile: true,
+      sandboxVariant: 'work',
     });
 
     return task;
@@ -2144,7 +2144,7 @@ ${ticket.description || ''}
 
     sandbox.start({
       workspaceDir: project.workspaceDir,
-      useWorkDockerfile: true,
+      sandboxVariant: 'work',
     });
 
     return task;
@@ -2243,7 +2243,7 @@ If the user asks you to update the plan, write changes to this file.
 
     sandbox.start({
       workspaceDir: project.workspaceDir,
-      useWorkDockerfile: true,
+      sandboxVariant: 'work',
     });
 
     return task;

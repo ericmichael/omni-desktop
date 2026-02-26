@@ -65,7 +65,12 @@ export const FleetProjectDetail = memo(({ projectId }: { projectId: FleetProject
               New Ticket
             </Button>
           )}
-          <IconButton aria-label="Pipeline settings" icon={<PiGearSixBold />} size="sm" onClick={handleOpenPipelineSettings} />
+          <IconButton
+            aria-label="Pipeline settings"
+            icon={<PiGearSixBold />}
+            size="sm"
+            onClick={handleOpenPipelineSettings}
+          />
           <IconButton aria-label="Delete project" icon={<PiTrashFill />} size="sm" onClick={handleRemoveProject} />
         </div>
       </div>
@@ -77,7 +82,11 @@ export const FleetProjectDetail = memo(({ projectId }: { projectId: FleetProject
         </div>
       )}
 
-      <FleetPipelineSettingsDialog projectId={projectId} open={pipelineSettingsOpen} onClose={handleClosePipelineSettings} />
+      <FleetPipelineSettingsDialog
+        projectId={projectId}
+        open={pipelineSettingsOpen}
+        onClose={handleClosePipelineSettings}
+      />
 
       {/* Kanban Board */}
       <div className="flex-1 min-h-0">

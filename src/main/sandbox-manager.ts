@@ -1,24 +1,25 @@
 import type { ChildProcess } from 'node:child_process';
 import { execFile, spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { IpcListener } from '@electron-toolkit/typed-ipc/main';
 import c from 'ansi-colors';
-import { app, ipcMain, net } from 'electron';
+import { ipcMain, net } from 'electron';
 import { shellEnvSync } from 'shell-env';
 import { assert } from 'tsafe';
 
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
-import { getOmniCliPath, getOmniConfigDir, getOmniPythonPath, isDirectory, isFile, pathExists } from '@/main/util';
+import { getOmniCliPath, getOmniConfigDir, isDevelopment, isDirectory, isFile, pathExists } from '@/main/util';
 import type {
   IpcEvents,
   IpcRendererEvents,
   LogEntry,
   NetworkConfig,
   SandboxProcessStatus,
+  SandboxVariant,
   WithTimestamp,
 } from '@/shared/types';
 
@@ -75,7 +76,7 @@ const toSandboxStatusData = (
 
 type StartArg = {
   workspaceDir: string;
-  useWorkDockerfile: boolean;
+  sandboxVariant: SandboxVariant;
 };
 
 export class SandboxManager {
@@ -218,27 +219,8 @@ export class SandboxManager {
     return PORT_CONFLICT_PATTERNS.some((pattern) => pattern.test(this.stderrBuffer));
   };
 
-  private resolveWorkDockerfilePath = async (): Promise<string> => {
-    const pythonPath = getOmniPythonPath();
-    const script = [
-      'import omni_code',
-      'import pathlib',
-      'print(pathlib.Path(omni_code.__file__).resolve().parent / "sandbox" / "Dockerfile.work")',
-    ].join('; ');
-    const { stdout } = await execFileAsync(pythonPath, ['-c', script], { encoding: 'utf8' });
-    return stdout.trim();
-  };
-
   start = async (arg: StartArg, options?: { rebuild?: boolean }) => {
     if (this.status.type === 'starting' || this.status.type === 'running') {
-      return;
-    }
-
-    if (app.isPackaged) {
-      this.updateStatus({
-        type: 'error',
-        error: { message: 'Sandbox is not available in this build.' },
-      });
       return;
     }
 
@@ -327,13 +309,13 @@ export class SandboxManager {
     args.push('--enable-code-server', '--code-server-port', '0');
     args.push('--enable-vnc', '--vnc-port', '0');
 
-    if (arg.useWorkDockerfile) {
-      try {
-        const dockerfilePath = await this.resolveWorkDockerfilePath();
-        args.push('--dockerfile', dockerfilePath);
-      } catch (error) {
-        this.log.warn(c.yellow(`Failed to resolve Dockerfile.work: ${(error as Error).message}\r\n`));
-      }
+    const dockerfileName = arg.sandboxVariant === 'work' ? 'Dockerfile.work' : 'Dockerfile';
+    if (isDevelopment()) {
+      const dockerfilePath = resolve(__dirname, '../../docker/sandbox', dockerfileName);
+      args.push('--dockerfile', dockerfilePath);
+    } else {
+      const imageSuffix = arg.sandboxVariant === 'work' ? '-work' : '';
+      args.push('--image', `ghcr.io/ericmichael/omni-code-sandbox${imageSuffix}:latest`);
     }
 
     if (options?.rebuild) {
@@ -451,7 +433,7 @@ export class SandboxManager {
 export const createSandboxManager = (arg: {
   ipc: IpcListener<IpcEvents>;
   sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
-  getStoreData: () => StartArg;
+  getStoreData: () => Pick<StartArg, 'workspaceDir' | 'sandboxVariant'>;
 }) => {
   const { ipc, sendToWindow, getStoreData } = arg;
 

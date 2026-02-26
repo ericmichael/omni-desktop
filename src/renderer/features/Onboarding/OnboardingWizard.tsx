@@ -17,7 +17,9 @@ const FULL_STEP_ORDER: Step[] = ['provider', 'credentials', 'model', 'validate',
 const SHORT_STEP_ORDER: Step[] = ['cli'];
 
 const hasProviders = (config: ModelsConfig | null): boolean => {
-  if (!config || config.version !== 3) return false;
+  if (!config || config.version !== 3) {
+    return false;
+  }
   return Object.keys(config.providers).length > 0;
 };
 
@@ -127,7 +129,9 @@ export const OnboardingWizard = memo(() => {
     await persistedStoreApi.setKey('onboardingComplete', true);
   }, []);
 
-  if (!step) return null;
+  if (!step) {
+    return null;
+  }
 
   return (
     <div className="flex h-full items-center justify-center">
@@ -139,7 +143,7 @@ export const OnboardingWizard = memo(() => {
           <p className="text-sm text-fg-muted">
             {modelsExist
               ? 'Your model configuration is already set up. Just a couple more things.'
-              : "Let\u0027s set up your first model provider to get started."}
+              : 'Let\u0027s set up your first model provider to get started.'}
           </p>
         </div>
 

@@ -152,7 +152,7 @@ export const useAutoLaunch = () => {
       lastStartTimestamp.current = Date.now();
       sandboxApi.start({
         workspaceDir: store.workspaceDir!,
-        useWorkDockerfile: store.useWorkDockerfile,
+        sandboxVariant: store.sandboxVariant,
       });
       $autoLaunchPhase.set('starting');
     };

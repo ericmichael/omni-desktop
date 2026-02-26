@@ -61,7 +61,9 @@ export const getOmniPythonPath = (): string => {
 export const getOmniCliPath = (): string => {
   if (isDevelopment()) {
     const devPath = process.env.OMNI_CODE_DEV_PATH;
-    if (devPath) return devPath;
+    if (devPath) {
+      return devPath;
+    }
   }
   const venvPath = getOmniVenvPath();
   return path.join(venvPath, process.platform === 'win32' ? 'Scripts/omni.exe' : 'bin/omni');
@@ -365,10 +367,9 @@ const ensureUnixPathEntry = async (dir: string): Promise<void> => {
  */
 const ensureWindowsPathEntry = async (dir: string): Promise<void> => {
   // Read current user PATH from registry
-  const { stdout: currentPath } = await execAsync(
-    'reg query "HKCU\\Environment" /v Path',
-    { timeout: 5000 }
-  ).catch(() => ({ stdout: '' }));
+  const { stdout: currentPath } = await execAsync('reg query "HKCU\\Environment" /v Path', { timeout: 5000 }).catch(
+    () => ({ stdout: '' })
+  );
 
   // Parse the value from reg query output (format: "    Path    REG_EXPAND_SZ    value")
   const match = currentPath.match(/Path\s+REG_\w+\s+(.*)/i);
@@ -384,15 +385,12 @@ const ensureWindowsPathEntry = async (dir: string): Promise<void> => {
   const newPath = existingPath ? `${existingPath};${dir}` : dir;
 
   // Write back to registry (user-level, no admin needed)
-  await execAsync(
-    `reg add "HKCU\\Environment" /v Path /t REG_EXPAND_SZ /d "${newPath}" /f`,
-    { timeout: 5000 }
-  );
+  await execAsync(`reg add "HKCU\\Environment" /v Path /t REG_EXPAND_SZ /d "${newPath}" /f`, { timeout: 5000 });
 
   // Broadcast WM_SETTINGCHANGE so running Explorer/shells pick up the change
   // We use a small PowerShell snippet since there's no native Node way to do this
   await execAsync(
-    'powershell -NoProfile -Command "[Environment]::SetEnvironmentVariable(\'__omni_noop\', $null, \'User\')"',
+    "powershell -NoProfile -Command \"[Environment]::SetEnvironmentVariable('__omni_noop', $null, 'User')\"",
     { timeout: 5000 }
   ).catch(() => {
     // Best-effort — the PATH is still updated, new terminals will pick it up

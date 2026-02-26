@@ -396,7 +396,6 @@ export class FleetLoopController {
           }
         }
 
-
         if (data.method === 'run_end' && data.params) {
           const endReason = data.params.end_reason ?? 'completed';
           console.log(
@@ -465,7 +464,7 @@ export class FleetLoopController {
         console.log(
           `[FleetLoop] Nudge ${this.nudgeCount} ended with ${endReason}, treating as non-fatal — moving to next iteration`
         );
-        this.endIteration(endReason);
+        this.endIteration('continue');
         if (this.iteration >= this.maxIterations) {
           this.setStatus('completed');
           this.callbacks.onLoopComplete('CHECKLIST_COMPLETE');

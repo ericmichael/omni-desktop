@@ -22,6 +22,7 @@ The launcher handles installing the Omni Code runtime, managing Python environme
 ### Download
 
 <!-- TODO: Update links when releases are published -->
+
 Download the latest release from [GitHub Releases](https://github.com/ericmichael/omni-desktop/releases).
 
 ### Usage

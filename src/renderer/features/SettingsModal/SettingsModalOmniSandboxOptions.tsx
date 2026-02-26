@@ -2,7 +2,7 @@ import { useStore } from '@nanostores/react';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Button, FormField, Switch } from '@/renderer/ds';
+import { Button, FormField } from '@/renderer/ds';
 import { $launcherVersion } from '@/renderer/features/Banner/state';
 import {
   $omniInstallProcessStatus,
@@ -13,7 +13,7 @@ import {
 } from '@/renderer/features/Omni/state';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi, selectWorkspaceDir } from '@/renderer/services/store';
-import type { OmniTheme } from '@/shared/types';
+import type { OmniTheme, SandboxVariant } from '@/shared/types';
 
 export const SettingsModalOmniSandboxOptions = memo(() => {
   const store = useStore(persistedStoreApi.$atom);
@@ -52,8 +52,8 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
     }
   }, [checkCliStatus]);
 
-  const onChangeWorkDockerfile = useCallback((checked: boolean) => {
-    persistedStoreApi.setKey('useWorkDockerfile', checked);
+  const onChangeSandboxVariant = useCallback((e: ChangeEvent<HTMLSelectElement>) => {
+    persistedStoreApi.setKey('sandboxVariant', e.target.value as SandboxVariant);
   }, []);
 
   const rebuildDockerImage = useCallback(() => {
@@ -80,21 +80,26 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
         </FormField>
       </div>
 
-      {import.meta.env.DEV && (
-        <>
-          <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">Services</span>
-          <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
-            <FormField label="Use Dockerfile.work">
-              <Switch checked={store.useWorkDockerfile} onCheckedChange={onChangeWorkDockerfile} />
-            </FormField>
-            <FormField label="Rebuild Docker image">
-              <Button size="sm" variant="ghost" onClick={rebuildDockerImage} isDisabled={isRebuilding}>
-                {isRebuilding ? 'Rebuilding\u2026' : 'Rebuild'}
-              </Button>
-            </FormField>
-          </div>
-        </>
-      )}
+      <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">Sandbox</span>
+      <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
+        <FormField label="Sandbox variant">
+          <select
+            value={store.sandboxVariant ?? 'work'}
+            onChange={onChangeSandboxVariant}
+            className="h-8 px-2 text-xs rounded-md bg-surface border border-surface-border/50 text-fg cursor-pointer outline-none focus:border-accent-500/50"
+          >
+            <option value="work">Work</option>
+            <option value="standard">Standard</option>
+          </select>
+        </FormField>
+        {import.meta.env.DEV && (
+          <FormField label="Rebuild Docker image">
+            <Button size="sm" variant="ghost" onClick={rebuildDockerImage} isDisabled={isRebuilding}>
+              {isRebuilding ? 'Rebuilding\u2026' : 'Rebuild'}
+            </Button>
+          </FormField>
+        )}
+      </div>
 
       <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">Display</span>
       <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">

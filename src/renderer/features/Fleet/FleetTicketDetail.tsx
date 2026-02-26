@@ -29,10 +29,7 @@ import {
 import { FleetTaskCard } from './FleetTaskCard';
 import { $fleetPipeline, $fleetTasks, $fleetTickets, fleetApi } from './state';
 
-function checklistToMarkdown(
-  columns: FleetColumn[],
-  checklist: Record<string, FleetChecklistItem[]>
-): string {
+function checklistToMarkdown(columns: FleetColumn[], checklist: Record<string, FleetChecklistItem[]>): string {
   return columns
     .map((col) => {
       const items = checklist[col.id] ?? [];
@@ -42,10 +39,7 @@ function checklistToMarkdown(
     .join('\n\n');
 }
 
-function markdownToChecklist(
-  md: string,
-  columns: FleetColumn[]
-): Record<string, FleetChecklistItem[]> {
+function markdownToChecklist(md: string, columns: FleetColumn[]): Record<string, FleetChecklistItem[]> {
   const result: Record<string, FleetChecklistItem[]> = {};
   for (const col of columns) {
     result[col.id] = [];
@@ -249,14 +243,11 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
     setEditingDescription(false);
   }, [editDescription, ticket, ticketId]);
 
-  const handleDescriptionKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setEditingDescription(false);
-      }
-    },
-    []
-  );
+  const handleDescriptionKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      setEditingDescription(false);
+    }
+  }, []);
 
   const handleCancelEditDescription = useCallback(() => {
     setEditingDescription(false);
@@ -581,11 +572,7 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
                   <Button size="sm" onClick={handleSaveDescription}>
                     Save
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={handleCancelEditDescription}
-                  >
+                  <Button size="sm" variant="ghost" onClick={handleCancelEditDescription}>
                     Cancel
                   </Button>
                 </div>
@@ -1058,10 +1045,7 @@ const PhaseTimelineItem = memo(
               <span className="text-sm font-medium text-fg">{columnLabel}</span>
               {phase.attempt > 1 && <span className="text-[10px] text-fg-subtle">Attempt #{phase.attempt}</span>}
               <span
-                className={cn(
-                  'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
-                  PHASE_STATUS_COLORS[phase.status]
-                )}
+                className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-medium', PHASE_STATUS_COLORS[phase.status])}
               >
                 {PHASE_STATUS_LABELS[phase.status]}
               </span>
@@ -1097,11 +1081,9 @@ const PhaseTimelineItem = memo(
             {phase.taskIds.map((tid, i) => {
               const isLast = i === phase.taskIds.length - 1;
               const sentinel = isLast
-                ? phase.exitSentinel ?? (phase.status === 'blocked' ? 'BLOCKED' : undefined)
+                ? (phase.exitSentinel ?? (phase.status === 'blocked' ? 'BLOCKED' : undefined))
                 : undefined;
-              return (
-                <PhaseRunItem key={tid} taskId={tid} index={i} total={phase.taskIds.length} sentinel={sentinel} />
-              );
+              return <PhaseRunItem key={tid} taskId={tid} index={i} total={phase.taskIds.length} sentinel={sentinel} />;
             })}
           </div>
         )}

@@ -79,7 +79,16 @@ type FloatingWidgetProps = {
 };
 
 export const FloatingWidget = memo(
-  ({ src, label, icon: Icon, overlayOpen, onOpenOverlay, onCloseOverlay, className, resizable = false }: FloatingWidgetProps) => {
+  ({
+    src,
+    label,
+    icon: Icon,
+    overlayOpen,
+    onOpenOverlay,
+    onCloseOverlay,
+    className,
+    resizable = false,
+  }: FloatingWidgetProps) => {
     const [hovering, setHovering] = useState(false);
     const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const previewSizeRef = useRef<PreviewSize>(DEFAULT_PREVIEW_SIZE);

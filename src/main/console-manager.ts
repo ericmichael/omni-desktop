@@ -4,13 +4,7 @@ import { nanoid } from 'nanoid';
 
 import type { PtyCallbacks, PtyEntry } from '@/lib/pty-utils';
 import { createPtyBuffer, createPtyProcess, killPtyProcessAsync, setupPtyCallbacks } from '@/lib/pty-utils';
-import {
-  getActivateVenvCommand,
-  getBundledBinPath,
-  getHomeDirectory,
-  getShell,
-  isDirectory,
-} from '@/main/util';
+import { getActivateVenvCommand, getBundledBinPath, getHomeDirectory, getShell, isDirectory } from '@/main/util';
 import type { IpcEvents, IpcRendererEvents } from '@/shared/types';
 
 /**

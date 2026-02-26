@@ -69,10 +69,7 @@ export const CodeSplitLayout = memo(({ uiSrc, codeServerSrc, onReady }: CodeSpli
   }, []);
 
   return (
-    <div
-      ref={splitRef}
-      className={cn('relative flex w-full h-full', isDragging && 'select-none')}
-    >
+    <div ref={splitRef} className={cn('relative flex w-full h-full', isDragging && 'select-none')}>
       {isDragging && <div className="absolute inset-0 z-20 cursor-col-resize" />}
 
       <div className="min-w-0" style={{ width: `${100 - sidebarWidthPercent}%` }}>

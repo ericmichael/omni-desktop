@@ -4,7 +4,13 @@ import { atom } from 'nanostores';
 
 import { DEFAULT_XTERM_OPTIONS, STATUS_POLL_INTERVAL_MS } from '@/renderer/constants';
 import { emitter, ipc } from '@/renderer/services/ipc';
-import type { OmniInstallProcessStatus, OmniRuntimeInfo, SandboxProcessStatus, WithTimestamp } from '@/shared/types';
+import type {
+  OmniInstallProcessStatus,
+  OmniRuntimeInfo,
+  SandboxProcessStatus,
+  SandboxVariant,
+  WithTimestamp,
+} from '@/shared/types';
 
 export const $omniRuntimeInfo = atom<OmniRuntimeInfo>({ isInstalled: false });
 
@@ -120,7 +126,7 @@ const teardownSandboxTerminal = () => {
 };
 
 export const sandboxApi = {
-  start: (arg: { workspaceDir: string; useWorkDockerfile: boolean }) => {
+  start: (arg: { workspaceDir: string; sandboxVariant: SandboxVariant }) => {
     initializeSandboxTerminal();
     emitter.invoke('sandbox-process:start', arg);
   },

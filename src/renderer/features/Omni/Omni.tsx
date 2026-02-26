@@ -353,11 +353,7 @@ const OmniRunningView = memo(
           </div>
 
           <div className={cn('w-full h-full relative', layoutMode !== 'code' && 'hidden')}>
-            <CodeSplitLayout
-              uiSrc={uiSrc}
-              codeServerSrc={codeServerSrc}
-              onReady={handleCodeLayoutReady}
-            />
+            <CodeSplitLayout uiSrc={uiSrc} codeServerSrc={codeServerSrc} onReady={handleCodeLayoutReady} />
             {vncSrc && (
               <FloatingWidget
                 src={vncSrc}

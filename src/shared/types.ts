@@ -48,9 +48,11 @@ export type WindowProps = {
 export type LayoutMode = 'chat' | 'work' | 'code' | 'desktop' | 'fleet';
 export type OmniTheme = 'default' | 'tokyo-night' | 'vscode-dark' | 'vscode-light' | 'utrgv';
 
+export type SandboxVariant = 'standard' | 'work';
+
 export type StoreData = {
   workspaceDir?: string;
-  useWorkDockerfile: boolean;
+  sandboxVariant: SandboxVariant;
   launcherWindowProps?: WindowProps;
   appWindowProps?: WindowProps;
   optInToLauncherPrereleases: boolean;
@@ -93,9 +95,10 @@ export const schema: Schema<StoreData> = {
   workspaceDir: {
     type: 'string',
   },
-  useWorkDockerfile: {
-    type: 'boolean',
-    default: true,
+  sandboxVariant: {
+    type: 'string',
+    enum: ['standard', 'work'],
+    default: 'work',
   },
   launcherWindowProps: winSizePropsSchema,
   appWindowProps: winSizePropsSchema,
@@ -552,7 +555,7 @@ type SandboxProcessIpcEvents = Namespaced<
   'sandbox-process',
   {
     'get-status': () => WithTimestamp<SandboxProcessStatus>;
-    start: (arg: { workspaceDir: string; useWorkDockerfile: boolean }) => void;
+    start: (arg: { workspaceDir: string; sandboxVariant: SandboxVariant }) => void;
     stop: () => void;
     rebuild: () => void;
     resize: (cols: number, rows: number) => void;

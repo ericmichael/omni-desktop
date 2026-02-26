@@ -1,5 +1,4 @@
 if (process.env.NODE_ENV === 'development') {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('dotenv/config');
 }
 
@@ -64,7 +63,7 @@ const [sandbox, cleanupSandbox] = createSandboxManager({
   sendToWindow: main.sendToWindow,
   getStoreData: () => ({
     workspaceDir: store.get('workspaceDir') ?? '',
-    useWorkDockerfile: store.get('useWorkDockerfile'),
+    sandboxVariant: store.get('sandboxVariant'),
   }),
 });
 const [chat, cleanupChat] = createChatManager({
