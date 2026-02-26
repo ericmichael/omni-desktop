@@ -42,6 +42,11 @@ export const FleetTicketCard = memo(({ ticket, isBlocked }: { ticket: FleetTicke
     fleetApi.submitTicketTask(ticket.id);
   }, [ticket.id]);
 
+  const handlePlan = useCallback(async () => {
+    const task = await fleetApi.submitPlanTask(ticket.id);
+    fleetApi.goToTask(task.id);
+  }, [ticket.id]);
+
   return (
     <div className="flex items-center gap-3 p-3 rounded-lg border border-surface-border bg-surface-raised">
       {/* Status indicator: column badge or legacy dot */}
@@ -94,6 +99,11 @@ export const FleetTicketCard = memo(({ ticket, isBlocked }: { ticket: FleetTicke
         <Button size="sm" variant="ghost" onClick={handleView}>
           View
         </Button>
+        {isOpen && (
+          <Button size="sm" variant="ghost" onClick={handlePlan}>
+            Plan
+          </Button>
+        )}
         {isOpen && !isBlocked && !ticket.columnId && (
           <IconButton aria-label="Run task" icon={<PiPlayFill />} size="sm" onClick={handleRunTask} />
         )}

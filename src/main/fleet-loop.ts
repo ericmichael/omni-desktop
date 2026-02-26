@@ -393,6 +393,24 @@ export class FleetLoopController {
           }
         }
 
+        // Auto-approve tool approvals in autonomous mode
+        if (data.method === 'client_request') {
+          const params = data.params as { request_id?: string; function?: string } | undefined;
+          if (params?.function === 'ui.request_tool_approval' && params.request_id) {
+            ws.send(
+              JSON.stringify({
+                jsonrpc: '2.0',
+                method: 'client_response',
+                params: {
+                  request_id: params.request_id,
+                  ok: true,
+                  result: { approved: true, always_approve: true },
+                },
+              })
+            );
+          }
+        }
+
         if (data.method === 'run_end' && data.params) {
           const endReason = data.params.end_reason ?? 'completed';
           console.log(

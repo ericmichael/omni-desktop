@@ -1,3 +1,8 @@
+if (process.env.NODE_ENV === 'development') {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  require('dotenv/config');
+}
+
 import { app, dialog, net, shell } from 'electron';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';

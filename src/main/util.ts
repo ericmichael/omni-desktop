@@ -59,6 +59,10 @@ export const getOmniPythonPath = (): string => {
 };
 
 export const getOmniCliPath = (): string => {
+  if (isDevelopment()) {
+    const devPath = process.env.OMNI_CODE_DEV_PATH;
+    if (devPath) return devPath;
+  }
   const venvPath = getOmniVenvPath();
   return path.join(venvPath, process.platform === 'win32' ? 'Scripts/omni.exe' : 'bin/omni');
 };

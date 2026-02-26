@@ -665,6 +665,8 @@ type FleetIpcEvents = Namespaced<
     'toggle-checklist-item': (ticketId: FleetTicketId, columnId: FleetColumnId, itemId: FleetChecklistItemId) => void;
     'get-pipeline': (projectId: FleetProjectId) => FleetPipeline;
     'get-session-history': (sessionId: string) => FleetSessionMessage[];
+    'submit-plan-task': (ticketId: FleetTicketId) => FleetTask;
+    'submit-chat-task': (ticketId: FleetTicketId) => FleetTask;
   }
 >;
 

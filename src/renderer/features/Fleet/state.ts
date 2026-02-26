@@ -219,6 +219,19 @@ export const fleetApi = {
     return emitter.invoke('fleet:toggle-checklist-item', ticketId, columnId, itemId);
   },
 
+  submitPlanTask: async (ticketId: FleetTicketId): Promise<FleetTask> => {
+    const task = await emitter.invoke('fleet:submit-plan-task', ticketId);
+    initializeTaskTerminal(task.id);
+    $fleetTasks.setKey(task.id, task);
+    return task;
+  },
+  submitChatTask: async (ticketId: FleetTicketId): Promise<FleetTask> => {
+    const task = await emitter.invoke('fleet:submit-chat-task', ticketId);
+    initializeTaskTerminal(task.id);
+    $fleetTasks.setKey(task.id, task);
+    return task;
+  },
+
   // Session history
   getSessionHistory: (sessionId: string): Promise<FleetSessionMessage[]> => {
     return emitter.invoke('fleet:get-session-history', sessionId);

@@ -110,7 +110,15 @@ export const SettingsModalNetworkTab = memo(() => {
       setConfigDir(dir);
       const data = await configApi.readJsonFile(`${dir}/network.json`);
       if (data && typeof data === 'object') {
-        setConfig(migrateConfig(data as Record<string, unknown>));
+        const raw = data as Record<string, unknown>;
+        const migrated = migrateConfig(raw);
+        // Auto-save if the on-disk format is stale (e.g. allowedHosts instead of allowlist)
+        // so the Python proxy runtime can read the correct keys.
+        const needsMigration = 'allowedHosts' in raw || !('allowlist' in raw);
+        if (needsMigration) {
+          await configApi.writeJsonFile(`${dir}/network.json`, buildSavePayload(migrated));
+        }
+        setConfig(migrated);
       } else {
         const newConfig = emptyConfig();
         await configApi.writeJsonFile(`${dir}/network.json`, buildSavePayload(newConfig));

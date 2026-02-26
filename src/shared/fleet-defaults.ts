@@ -87,6 +87,10 @@ Description: {{ticket.description}}
 Title: {{ticket.title}}
 Description: {{ticket.description}}
 
+## Plan File
+Your plan and checklist are at: {{planFilePath}}
+Read this file for your current checklist. When you complete an item, edit the file to mark it as done (change \`- [ ]\` to \`- [x]\`).
+
 ## Checklist (your exit criteria)
 {{checklist}}
 
@@ -97,6 +101,7 @@ Description: {{ticket.description}}
 - If progress.txt exists, read it for context from previous iterations.
 - Append a brief summary of what you accomplished to progress.txt before finishing.
 - Make incremental progress. It's fine to not finish everything — another iteration will continue.
+- Update the plan file as you complete checklist items.
 
 {{sentinelInstructions}}`,
       validSentinels: ['CHECKLIST_COMPLETE', 'BLOCKED', 'TESTS_FAILING'],
@@ -117,6 +122,10 @@ Description: {{ticket.description}}
 Title: {{ticket.title}}
 Description: {{ticket.description}}
 
+## Plan File
+The plan and checklist are at: {{planFilePath}}
+Read this file for the full checklist. Mark review items as done when verified (change \`- [ ]\` to \`- [x]\`).
+
 ## Checklist
 {{checklist}}
 
@@ -129,6 +138,7 @@ Description: {{ticket.description}}
 - Do NOT add new features or make implementation changes beyond minor fixes.
 - If all checklist items pass verification, signal CHECKLIST_COMPLETE.
 - If items fail verification, signal REJECTED with a clear explanation of what needs fixing.
+- Update the plan file as you verify checklist items.
 
 {{sentinelInstructions}}`,
       validSentinels: ['CHECKLIST_COMPLETE', 'REJECTED', 'BLOCKED'],
@@ -152,6 +162,9 @@ Description: {{ticket.description}}
 ## Ticket
 Title: {{ticket.title}}
 Description: {{ticket.description}}
+
+## Plan File
+The plan and checklist are at: {{planFilePath}}
 
 ## Checklist
 {{checklist}}

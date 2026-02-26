@@ -64,6 +64,20 @@ export const FleetKanbanCard = memo(
       }
     }, [ticket.id, rejectNote]);
 
+    const handlePlan = useCallback(async () => {
+      const task = await fleetApi.submitPlanTask(ticket.id);
+      fleetApi.goToTask(task.id);
+    }, [ticket.id]);
+
+    const handleChat = useCallback(async () => {
+      const task = await fleetApi.submitChatTask(ticket.id);
+      fleetApi.goToTask(task.id);
+    }, [ticket.id]);
+
+    const handleAuto = useCallback(() => {
+      fleetApi.startPhase(ticket.id);
+    }, [ticket.id]);
+
     const handleCancelReject = useCallback(() => {
       setShowRejectInput(false);
       setRejectNote('');
@@ -130,6 +144,25 @@ export const FleetKanbanCard = memo(
             </span>
           )}
         </div>
+
+        {/* Action buttons */}
+        {!showGateActions && !currentPhase?.loop.status && (
+          <div className="flex justify-end gap-1 mt-2">
+            {!checklistProgress && (
+              <Button size="sm" variant="ghost" className="text-accent-400 hover:bg-accent-400/10" onClick={handlePlan}>
+                Plan
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" className="text-accent-400 hover:bg-accent-400/10" onClick={handleChat}>
+              Chat
+            </Button>
+            {checklistProgress && (
+              <Button size="sm" variant="ghost" className="text-accent-400 hover:bg-accent-400/10" onClick={handleAuto}>
+                Auto
+              </Button>
+            )}
+          </div>
+        )}
 
         {/* Checklist progress */}
         {checklistProgress && (

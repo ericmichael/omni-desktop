@@ -262,6 +262,33 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
     setEditingDescription(false);
   }, []);
 
+  const hasChecklist = useMemo(() => {
+    if (!ticket) {
+      return false;
+    }
+    return Object.values(ticket.checklist).some((items) => items.length > 0);
+  }, [ticket]);
+
+  const handlePlan = useCallback(async () => {
+    if (!ticket) {
+      return;
+    }
+    const task = await fleetApi.submitPlanTask(ticket.id);
+    fleetApi.goToTask(task.id);
+  }, [ticket]);
+
+  const handleChat = useCallback(async () => {
+    if (!ticket) {
+      return;
+    }
+    const task = await fleetApi.submitChatTask(ticket.id);
+    fleetApi.goToTask(task.id);
+  }, [ticket]);
+
+  const handleAuto = useCallback(() => {
+    fleetApi.startPhase(ticketId);
+  }, [ticketId]);
+
   const handleDelete = useCallback(() => {
     fleetApi.removeTicket(ticketId);
   }, [ticketId]);
@@ -489,6 +516,19 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
             </span>
           </div>
         </div>
+        {!hasChecklist && (
+          <Button size="sm" variant="ghost" onClick={handlePlan}>
+            Plan
+          </Button>
+        )}
+        <Button size="sm" variant="ghost" onClick={handleChat}>
+          Chat
+        </Button>
+        {hasChecklist && (
+          <Button size="sm" variant="ghost" onClick={handleAuto}>
+            Auto
+          </Button>
+        )}
         <Button size="sm" variant="ghost" onClick={handleDelete}>
           Delete
         </Button>
