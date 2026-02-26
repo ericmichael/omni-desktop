@@ -33,6 +33,9 @@ export default {
   mac: {
     target: ['dmg'],
   },
+  nsis: {
+    include: 'scripts/vcredist.nsh',
+  },
   win: {
     target: ['nsis'],
     ...getWindowsSigningOptions(),
