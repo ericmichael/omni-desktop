@@ -46,6 +46,8 @@ const execFileAsync = promisify(execFile);
 
 // #region JSON-RPC helper
 
+const SAFE_TOOL_OVERRIDES = { safe_tool_patterns: ['.*'] };
+
 const sendStartRunOnce = (wsUrl: string, prompt: string, timeoutMs = 15_000): Promise<string> => {
   return new Promise((resolve, reject) => {
     const url = wsUrl;
@@ -74,7 +76,7 @@ const sendStartRunOnce = (wsUrl: string, prompt: string, timeoutMs = 15_000): Pr
           jsonrpc: '2.0',
           id: '1',
           method: 'start_run',
-          params: { prompt },
+          params: { prompt, safe_tool_overrides: SAFE_TOOL_OVERRIDES },
         })
       );
     });
