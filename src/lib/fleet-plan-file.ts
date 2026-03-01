@@ -6,6 +6,7 @@ import type { FleetChecklistItem, FleetPipeline, FleetTicket, FleetTicketPriorit
 
 const FLEET_DIR = 'fleet/tickets';
 const PLAN_FILENAME = 'PLAN.md';
+const ARTIFACTS_DIR = 'artifacts';
 
 /** Host-side directory for a ticket's plan file. Caller must supply the config dir. */
 export const getPlanDir = (configDir: string, ticketId: string): string => {
@@ -15,6 +16,16 @@ export const getPlanDir = (configDir: string, ticketId: string): string => {
 /** Host-side full path to a ticket's PLAN.md. */
 export const getPlanPath = (configDir: string, ticketId: string): string => {
   return path.join(getPlanDir(configDir, ticketId), PLAN_FILENAME);
+};
+
+/** Host-side directory for a ticket's artifacts. */
+export const getArtifactsDir = (configDir: string, ticketId: string): string => {
+  return path.join(getPlanDir(configDir, ticketId), ARTIFACTS_DIR);
+};
+
+/** Container-side path to a ticket's artifacts directory. */
+export const getContainerArtifactsDir = (ticketId: string): string => {
+  return path.posix.join('/home/user/.config/omni_code', FLEET_DIR, ticketId, ARTIFACTS_DIR);
 };
 
 /** Container-side path visible to agents inside Docker. */
@@ -213,6 +224,110 @@ export const parsePlanMd = (content: string, pipeline: FleetPipeline): ParsedPla
     priority,
     checklist,
   };
+};
+
+// #endregion
+
+// #region In-place checkbox updater
+
+/**
+ * Update checkbox states in an existing PLAN.md without destroying rich content.
+ *
+ * Walks the file line-by-line, tracks the current column via `## Label` headings,
+ * and rewrites only `- [x]`/`- [ ]` lines to match the ticket's checklist state.
+ * All other content (prose, file manifests, sub-headings, code blocks) passes through unchanged.
+ *
+ * If a column has checklist items in the ticket but no `## Label` section in the file,
+ * a new section is appended at the end.
+ */
+export const updatePlanMdCheckboxes = (
+  existingContent: string,
+  ticket: FleetTicket,
+  pipeline: FleetPipeline
+): string => {
+  const lines = existingContent.split('\n');
+
+  // Build label → column ID lookup (case-insensitive)
+  const labelToId = new Map<string, string>();
+  for (const col of pipeline.columns) {
+    labelToId.set(col.label.trim().toLowerCase(), col.id);
+  }
+
+  // Track which columns we've seen in the file and per-column checkbox index
+  const seenColumns = new Set<string>();
+  let currentColId: string | null = null;
+  let checkboxIndex = 0;
+
+  const result: string[] = [];
+
+  for (const line of lines) {
+    // Detect ## column headings
+    const headingMatch = /^## (.+)$/.exec(line);
+    if (headingMatch) {
+      const label = (headingMatch[1] ?? '').trim().toLowerCase();
+      const colId = labelToId.get(label) ?? null;
+      if (colId) {
+        currentColId = colId;
+        seenColumns.add(colId);
+        checkboxIndex = 0;
+      } else {
+        currentColId = null;
+      }
+      result.push(line);
+      continue;
+    }
+
+    // If we're in a known column section and hit a checkbox line, update its state
+    if (currentColId) {
+      const itemMatch = /^- \[([ xX])\] (.+)$/.exec(line);
+      if (itemMatch) {
+        const items = ticket.checklist[currentColId] ?? [];
+        const item = items[checkboxIndex];
+        if (item) {
+          result.push(`- [${item.completed ? 'x' : ' '}] ${item.text}`);
+        } else {
+          // More checkboxes in file than in ticket — preserve as-is
+          result.push(line);
+        }
+        checkboxIndex++;
+        continue;
+      }
+
+      // Bare list items that look like checklist items (no checkbox syntax)
+      const bareMatch = /^- (.+)$/.exec(line);
+      if (bareMatch) {
+        const items = ticket.checklist[currentColId] ?? [];
+        const item = items[checkboxIndex];
+        if (item) {
+          // Upgrade bare items to checkbox syntax using ticket state
+          result.push(`- [${item.completed ? 'x' : ' '}] ${item.text}`);
+        } else {
+          result.push(line);
+        }
+        checkboxIndex++;
+        continue;
+      }
+    }
+
+    // Everything else passes through unchanged
+    result.push(line);
+  }
+
+  // Append sections for columns that have checklist items but no ## heading in the file
+  for (const col of pipeline.columns) {
+    const items = ticket.checklist[col.id];
+    if (!items || items.length === 0 || seenColumns.has(col.id)) {
+      continue;
+    }
+
+    result.push('');
+    result.push(`## ${col.label}`);
+    for (const item of items) {
+      result.push(`- [${item.completed ? 'x' : ' '}] ${item.text}`);
+    }
+  }
+
+  return result.join('\n');
 };
 
 // #endregion

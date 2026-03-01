@@ -3,7 +3,14 @@ import { watch } from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
 
-import { getPlanDir, getPlanPath, parsePlanMd, serializePlanMd } from '@/lib/fleet-plan-file';
+import {
+  getArtifactsDir,
+  getPlanDir,
+  getPlanPath,
+  parsePlanMd,
+  serializePlanMd,
+  updatePlanMdCheckboxes,
+} from '@/lib/fleet-plan-file';
 import { getOmniConfigDir } from '@/main/util';
 import type { FleetChecklistItem, FleetPipeline, FleetTicket, FleetTicketId } from '@/shared/types';
 
@@ -25,11 +32,11 @@ export class FleetPlanSync {
     this.configDir = getOmniConfigDir();
   }
 
-  /** Write PLAN.md to disk, creating directories as needed. */
+  /** Write PLAN.md to disk, creating directories as needed.
+   *  If the file already exists, performs an in-place checkbox update to preserve rich content. */
   async writePlan(ticket: FleetTicket, pipeline: FleetPipeline): Promise<void> {
     const dir = getPlanDir(this.configDir, ticket.id);
     const filePath = getPlanPath(this.configDir, ticket.id);
-    const content = serializePlanMd(ticket, pipeline);
 
     // Set ignore flag before writing to prevent watcher feedback loop
     const entry = this.watchers.get(ticket.id);
@@ -38,6 +45,18 @@ export class FleetPlanSync {
     }
 
     await fs.mkdir(dir, { recursive: true });
+    await fs.mkdir(getArtifactsDir(this.configDir, ticket.id), { recursive: true });
+
+    // If the file already exists, update checkboxes in-place to preserve rich content
+    let content: string;
+    try {
+      const existing = await fs.readFile(filePath, 'utf-8');
+      content = updatePlanMdCheckboxes(existing, ticket, pipeline);
+    } catch {
+      // File doesn't exist yet — generate from scratch
+      content = serializePlanMd(ticket, pipeline);
+    }
+
     await fs.writeFile(filePath, content, 'utf-8');
   }
 

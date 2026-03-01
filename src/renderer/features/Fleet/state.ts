@@ -1,12 +1,15 @@
 import { objectEquals } from '@observ33r/object-equals';
 import { Terminal } from '@xterm/xterm';
-import { atom, map } from 'nanostores';
+import { atom, computed, map } from 'nanostores';
 
 import { DEFAULT_XTERM_OPTIONS, STATUS_POLL_INTERVAL_MS } from '@/renderer/constants';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import type {
+  ArtifactFileContent,
+  ArtifactFileEntry,
   FleetChecklistItem,
   FleetColumnId,
+  FleetPhase,
   FleetPipeline,
   FleetProject,
   FleetProjectId,
@@ -49,6 +52,47 @@ export const $fleetView = atom<
  * Per-task xterm instances for log output.
  */
 export const $fleetTaskXTerms = map<Record<FleetTaskId, Terminal>>({});
+
+export type ActiveTicketEntry = {
+  ticket: FleetTicket;
+  hasLiveTask: boolean;
+  currentPhase: FleetPhase | undefined;
+};
+
+const ACTIVE_COLUMNS = new Set(['spec', 'implementation', 'review', 'pr']);
+
+/**
+ * Active tickets for the current project: not in backlog, not completed.
+ * Sorted: tickets with live tasks first, then by updatedAt desc.
+ */
+export const $activeTickets = computed([$fleetTickets, $fleetTasks], (ticketMap, taskMap) => {
+  const tasks = Object.values(taskMap);
+  const liveTaskTicketIds = new Set(
+    tasks
+      .filter((t) => t.ticketId && (t.status.type === 'running' || t.status.type === 'starting'))
+      .map((t) => t.ticketId!)
+  );
+
+  const entries: ActiveTicketEntry[] = [];
+  for (const ticket of Object.values(ticketMap)) {
+    if (!ticket.columnId || !ACTIVE_COLUMNS.has(ticket.columnId)) {
+      continue;
+    }
+    const currentPhase = ticket.currentPhaseId ? ticket.phases.find((p) => p.id === ticket.currentPhaseId) : undefined;
+    entries.push({
+      ticket,
+      hasLiveTask: liveTaskTicketIds.has(ticket.id),
+      currentPhase,
+    });
+  }
+
+  return entries.sort((a, b) => {
+    if (a.hasLiveTask !== b.hasLiveTask) {
+      return a.hasLiveTask ? -1 : 1;
+    }
+    return b.ticket.updatedAt - a.ticket.updatedAt;
+  });
+});
 
 const initializeTaskTerminal = (id: FleetTaskId): Terminal => {
   const existing = $fleetTaskXTerms.get()[id];
@@ -239,6 +283,17 @@ export const fleetApi = {
   // Session history
   getSessionHistory: (sessionId: string): Promise<FleetSessionMessage[]> => {
     return emitter.invoke('fleet:get-session-history', sessionId);
+  },
+
+  // Artifacts
+  listArtifacts: (ticketId: FleetTicketId, dirPath?: string): Promise<ArtifactFileEntry[]> => {
+    return emitter.invoke('fleet:list-artifacts', ticketId, dirPath);
+  },
+  readArtifact: (ticketId: FleetTicketId, relativePath: string): Promise<ArtifactFileContent> => {
+    return emitter.invoke('fleet:read-artifact', ticketId, relativePath);
+  },
+  openArtifactExternal: (ticketId: FleetTicketId, relativePath: string): Promise<void> => {
+    return emitter.invoke('fleet:open-artifact-external', ticketId, relativePath);
   },
 
   // Navigation

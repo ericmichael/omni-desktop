@@ -1,28 +1,27 @@
 import { useStore } from '@nanostores/react';
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { PiPlusBold } from 'react-icons/pi';
 
 import { cn, IconButton } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { FleetProject, FleetTask } from '@/shared/types';
+import type { FleetProject } from '@/shared/types';
 
-import { STATUS_COLORS } from './fleet-constants';
+import { COLUMN_BADGE_COLORS, COLUMN_SHORT_LABELS } from './fleet-constants';
 import { FleetProjectForm } from './FleetProjectForm';
-import { $fleetTasks, $fleetView, fleetApi } from './state';
+import type { ActiveTicketEntry } from './state';
+import { $activeTickets, $fleetView, fleetApi } from './state';
 
-// Ticket counts come from the persisted store since $fleetTickets only holds current project's tickets
+const ACTIVE_COLUMN_IDS = new Set(['spec', 'implementation', 'review', 'pr']);
 
 const SidebarProjectItem = memo(
   ({
     project,
     isActive,
-    taskCount,
-    ticketCount,
+    activeTicketCount,
   }: {
     project: FleetProject;
     isActive: boolean;
-    taskCount: number;
-    ticketCount: number;
+    activeTicketCount: number;
   }) => {
     const handleClick = useCallback(() => {
       fleetApi.goToProject(project.id);
@@ -45,14 +44,9 @@ const SidebarProjectItem = memo(
           <span className="text-sm truncate">{project.label}</span>
           <span className="text-[10px] text-fg-subtle truncate">{shortPath}</span>
         </div>
-        {ticketCount > 0 && (
+        {activeTicketCount > 0 && (
           <span className="shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-blue-400/10 text-blue-400">
-            {ticketCount}
-          </span>
-        )}
-        {taskCount > 0 && (
-          <span className="shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-green-400/10 text-green-400">
-            {taskCount}
+            {activeTicketCount}
           </span>
         )}
       </button>
@@ -61,70 +55,54 @@ const SidebarProjectItem = memo(
 );
 SidebarProjectItem.displayName = 'SidebarProjectItem';
 
-const SidebarTaskItem = memo(
-  ({ task, isActive, projectPath }: { task: FleetTask; isActive: boolean; projectPath: string }) => {
-    const handleClick = useCallback(() => {
-      fleetApi.goToTask(task.id);
-    }, [task.id]);
+const SidebarActiveTicketItem = memo(({ entry, isActive }: { entry: ActiveTicketEntry; isActive: boolean }) => {
+  const { ticket, hasLiveTask, currentPhase } = entry;
 
-    const shortPath = useMemo(() => {
-      const segments = projectPath.split('/').filter(Boolean);
-      return segments.slice(-2).join('/');
-    }, [projectPath]);
+  const handleClick = useCallback(() => {
+    fleetApi.goToTicket(ticket.id);
+  }, [ticket.id]);
 
-    return (
-      <button
-        onClick={handleClick}
-        className={cn(
-          'flex items-center gap-2 w-full px-3 py-1.5 text-left transition-colors cursor-pointer',
-          isActive ? 'bg-accent-600/20 text-fg' : 'text-fg-muted hover:bg-white/5 hover:text-fg'
-        )}
-      >
-        <div className={cn('size-2 rounded-full shrink-0 mt-1 self-start', STATUS_COLORS[task.status.type])} />
-        <div className="flex flex-col flex-1 min-w-0">
-          <span className="text-sm truncate">{task.taskDescription}</span>
-          <span className="text-[10px] text-fg-subtle truncate">{shortPath}</span>
-        </div>
-      </button>
-    );
-  }
-);
-SidebarTaskItem.displayName = 'SidebarTaskItem';
+  const columnLabel = ticket.columnId ? (COLUMN_SHORT_LABELS[ticket.columnId] ?? ticket.columnId) : null;
+  const columnBadgeColor = ticket.columnId ? (COLUMN_BADGE_COLORS[ticket.columnId] ?? '') : '';
+
+  const loopRunning = currentPhase?.loop?.status === 'running';
+  const loopLabel = loopRunning ? `${currentPhase.loop.currentIteration}/${currentPhase.loop.maxIterations}` : null;
+
+  return (
+    <button
+      onClick={handleClick}
+      className={cn(
+        'flex items-center gap-2 w-full px-3 py-1.5 text-left transition-colors cursor-pointer',
+        isActive ? 'bg-accent-600/20 text-fg' : 'text-fg-muted hover:bg-white/5 hover:text-fg'
+      )}
+    >
+      {columnLabel && (
+        <span className={cn('shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium', columnBadgeColor)}>
+          {columnLabel}
+        </span>
+      )}
+      <span className="text-sm truncate flex-1 min-w-0">{ticket.title}</span>
+      <div className="flex items-center gap-1.5 shrink-0">
+        {loopLabel && <span className="text-[10px] font-mono text-fg-subtle">{loopLabel}</span>}
+        {hasLiveTask && <span className="size-2 rounded-full bg-green-400 animate-pulse shrink-0" />}
+      </div>
+    </button>
+  );
+});
+SidebarActiveTicketItem.displayName = 'SidebarActiveTicketItem';
 
 export const FleetSidebar = memo(() => {
   const store = useStore(persistedStoreApi.$atom);
-  const tasks = useStore($fleetTasks);
+  const activeTickets = useStore($activeTickets);
   const view = useStore($fleetView);
   const [formOpen, setFormOpen] = useState(false);
 
   const projects = store.fleetProjects;
-  const allTasks = useMemo(() => Object.values(tasks).sort((a, b) => b.createdAt - a.createdAt), [tasks]);
 
-  const projectPathMap = useMemo(() => {
-    const map: Record<string, string> = {};
-    for (const p of projects) {
-      map[p.id] = p.workspaceDir;
-    }
-    return map;
-  }, [projects]);
-
-  const activeTaskCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const task of allTasks) {
-      if (task.status.type === 'running' || task.status.type === 'starting') {
-        counts[task.projectId] = (counts[task.projectId] ?? 0) + 1;
-      }
-    }
-    return counts;
-  }, [allTasks]);
-
-  const openTicketCounts = useMemo(() => {
+  const activeTicketCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const ticket of store.fleetTickets) {
-      // Count tickets not in the terminal column (completed)
-      const isTerminal = ticket.columnId === 'completed';
-      const isLegacyDone = !ticket.columnId && (ticket.status === 'completed' || ticket.status === 'closed');
-      if (!isTerminal && !isLegacyDone) {
+      if (ticket.columnId && ACTIVE_COLUMN_IDS.has(ticket.columnId)) {
         counts[ticket.projectId] = (counts[ticket.projectId] ?? 0) + 1;
       }
     }
@@ -138,6 +116,25 @@ export const FleetSidebar = memo(() => {
   const handleCloseForm = useCallback(() => {
     setFormOpen(false);
   }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) {
+        return;
+      }
+      const num = parseInt(e.key, 10);
+      if (num >= 1 && num <= 9) {
+        const entry = activeTickets[num - 1];
+        if (entry) {
+          e.preventDefault();
+          fleetApi.goToTicket(entry.ticket.id);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeTickets]);
 
   return (
     <div className="flex flex-col h-full w-60 border-r border-surface-border bg-surface shrink-0">
@@ -155,28 +152,26 @@ export const FleetSidebar = memo(() => {
               key={project.id}
               project={project}
               isActive={view.type === 'project' && view.projectId === project.id}
-              ticketCount={openTicketCounts[project.id] ?? 0}
-              taskCount={activeTaskCounts[project.id] ?? 0}
+              activeTicketCount={activeTicketCounts[project.id] ?? 0}
             />
           ))
         )}
       </div>
 
-      {/* Tasks section */}
+      {/* Active Tickets section */}
       <div className="flex items-center justify-between px-3 py-2 border-t border-b border-surface-border">
-        <span className="text-xs font-semibold text-fg-muted uppercase tracking-wider">Tasks</span>
-        {allTasks.length > 0 && <span className="text-xs text-fg-subtle">{allTasks.length}</span>}
+        <span className="text-xs font-semibold text-fg-muted uppercase tracking-wider">Active Tickets</span>
+        {activeTickets.length > 0 && <span className="text-xs text-fg-subtle">{activeTickets.length}</span>}
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto py-1">
-        {allTasks.length === 0 ? (
-          <p className="px-3 py-2 text-xs text-fg-subtle">No tasks yet</p>
+        {activeTickets.length === 0 ? (
+          <p className="px-3 py-2 text-xs text-fg-subtle">No active tickets</p>
         ) : (
-          allTasks.map((task) => (
-            <SidebarTaskItem
-              key={task.id}
-              task={task}
-              isActive={view.type === 'task' && view.taskId === task.id}
-              projectPath={projectPathMap[task.projectId] ?? ''}
+          activeTickets.map((entry) => (
+            <SidebarActiveTicketItem
+              key={entry.ticket.id}
+              entry={entry}
+              isActive={view.type === 'ticket' && view.ticketId === entry.ticket.id}
             />
           ))
         )}

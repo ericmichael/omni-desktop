@@ -497,6 +497,21 @@ export type FleetTask = {
   };
 };
 
+export type ArtifactFileEntry = {
+  relativePath: string;
+  name: string;
+  isDirectory: boolean;
+  size: number;
+  modifiedAt: number;
+};
+
+export type ArtifactFileContent = {
+  relativePath: string;
+  mimeType: string;
+  textContent: string | null;
+  size: number;
+};
+
 export type FleetSessionMessage = {
   id: number;
   role: 'user' | 'assistant' | 'tool_call' | 'tool_result';
@@ -670,6 +685,9 @@ type FleetIpcEvents = Namespaced<
     'get-session-history': (sessionId: string) => FleetSessionMessage[];
     'submit-plan-task': (ticketId: FleetTicketId) => FleetTask;
     'submit-chat-task': (ticketId: FleetTicketId) => FleetTask;
+    'list-artifacts': (ticketId: FleetTicketId, dirPath?: string) => ArtifactFileEntry[];
+    'read-artifact': (ticketId: FleetTicketId, relativePath: string) => ArtifactFileContent;
+    'open-artifact-external': (ticketId: FleetTicketId, relativePath: string) => void;
   }
 >;
 

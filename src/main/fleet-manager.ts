@@ -1,13 +1,14 @@
 import type { IpcListener } from '@electron-toolkit/typed-ipc/main';
 import { execFile } from 'child_process';
-import { ipcMain } from 'electron';
+import { ipcMain, shell } from 'electron';
 import type Store from 'electron-store';
 import fs from 'fs/promises';
 import { nanoid } from 'nanoid';
 import path from 'path';
 import { promisify } from 'util';
 
-import { getContainerPlanPath } from '@/lib/fleet-plan-file';
+import { getArtifactsDir, getContainerArtifactsDir, getContainerPlanPath } from '@/lib/fleet-plan-file';
+import { getMimeType, isTextMime } from '@/lib/mime-types';
 import type { FleetLoopCallbacks } from '@/main/fleet-loop';
 import { FleetLoopController } from '@/main/fleet-loop';
 import { FleetPlanSync } from '@/main/fleet-plan-sync';
@@ -16,6 +17,8 @@ import { SandboxManager } from '@/main/sandbox-manager';
 import { getOmniConfigDir, getWorktreesDir } from '@/main/util';
 import { DEFAULT_PIPELINE } from '@/shared/fleet-defaults';
 import type {
+  ArtifactFileContent,
+  ArtifactFileEntry,
   FleetChecklistItem,
   FleetChecklistItemId,
   FleetColumn,
@@ -609,6 +612,81 @@ export class FleetManager {
 
   // #endregion
 
+  // #region Artifacts
+
+  private getArtifactsRoot = (ticketId: FleetTicketId): string => {
+    const configDir = getOmniConfigDir();
+    return getArtifactsDir(configDir, ticketId);
+  };
+
+  private validateArtifactPath = (ticketId: FleetTicketId, relativePath: string): string => {
+    const root = this.getArtifactsRoot(ticketId);
+    const fullPath = path.resolve(root, relativePath);
+    if (!fullPath.startsWith(root)) {
+      throw new Error('Path traversal detected');
+    }
+    return fullPath;
+  };
+
+  listArtifacts = async (ticketId: FleetTicketId, dirPath?: string): Promise<ArtifactFileEntry[]> => {
+    const root = this.getArtifactsRoot(ticketId);
+    const targetDir = dirPath ? this.validateArtifactPath(ticketId, dirPath) : root;
+
+    try {
+      const entries = await fs.readdir(targetDir, { withFileTypes: true });
+      const results: ArtifactFileEntry[] = [];
+
+      for (const entry of entries) {
+        const relPath = dirPath ? path.join(dirPath, entry.name) : entry.name;
+        const fullPath = path.join(targetDir, entry.name);
+        try {
+          const stat = await fs.stat(fullPath);
+          results.push({
+            relativePath: relPath,
+            name: entry.name,
+            isDirectory: entry.isDirectory(),
+            size: stat.size,
+            modifiedAt: stat.mtimeMs,
+          });
+        } catch {
+          // Skip entries we can't stat
+        }
+      }
+
+      // Sort: directories first, then alphabetical
+      results.sort((a, b) => {
+        if (a.isDirectory !== b.isDirectory) {
+          return a.isDirectory ? -1 : 1;
+        }
+        return a.name.localeCompare(b.name);
+      });
+
+      return results;
+    } catch {
+      return [];
+    }
+  };
+
+  readArtifact = async (ticketId: FleetTicketId, relativePath: string): Promise<ArtifactFileContent> => {
+    const fullPath = this.validateArtifactPath(ticketId, relativePath);
+    const stat = await fs.stat(fullPath);
+    const mimeType = getMimeType(relativePath);
+
+    if (isTextMime(mimeType) && stat.size <= 512_000) {
+      const textContent = await fs.readFile(fullPath, 'utf-8');
+      return { relativePath, mimeType, textContent, size: stat.size };
+    }
+
+    return { relativePath, mimeType, textContent: null, size: stat.size };
+  };
+
+  openArtifactExternal = async (ticketId: FleetTicketId, relativePath: string): Promise<void> => {
+    const fullPath = this.validateArtifactPath(ticketId, relativePath);
+    await shell.openPath(fullPath);
+  };
+
+  // #endregion
+
   // #region Phase lifecycle
 
   private createPhase = (ticket: FleetTicket, column: FleetColumn): FleetPhase => {
@@ -907,6 +985,7 @@ export class FleetManager {
 
     // Build column-aware prompt
     const planFilePath = getContainerPlanPath(ticketId);
+    const artifactsDir = getContainerArtifactsDir(ticketId);
     const buildPromptFn = (iteration: number): string => {
       const freshTicket = this.getTicketById(ticketId);
       return interpolatePromptTemplate(column.promptTemplate, {
@@ -919,6 +998,7 @@ export class FleetManager {
         phaseHistory: freshTicket?.phases.filter((p) => p.id !== phaseId) ?? [],
         iteration,
         planFilePath,
+        artifactsDir,
       });
     };
 
@@ -1033,6 +1113,7 @@ export class FleetManager {
     const phaseId = phase.id;
     const maxIterations = column.maxIterations;
     const phasePlanPath = getContainerPlanPath(ticketId);
+    const phaseArtifactsDir = getContainerArtifactsDir(ticketId);
     const buildPromptFn = (iteration: number): string => {
       const freshTicket = this.getTicketById(ticketId);
       return interpolatePromptTemplate(column.promptTemplate, {
@@ -1045,6 +1126,7 @@ export class FleetManager {
         phaseHistory: freshTicket?.phases.filter((p) => p.id !== phaseId) ?? [],
         iteration,
         planFilePath: phasePlanPath,
+        artifactsDir: phaseArtifactsDir,
       });
     };
 
@@ -1168,14 +1250,14 @@ export class FleetManager {
         this.stopPlanWatcher(ticketId);
         this.loops.delete(ticketId);
       },
-      onLoopBlocked: (sentinel: FleetSentinel) => {
+      onLoopBlocked: (sentinel: FleetSentinel, context?: string) => {
         if (sentinel === 'REJECTED') {
           // Auto-kickback to implementation column
           this.updatePhaseLoop(ticketId, phaseId, { status: 'completed' });
           this.stopPlanWatcher(ticketId);
           this.loops.delete(ticketId);
           setTimeout(() => {
-            void this.kickbackTicket(ticketId, 'implementation');
+            void this.kickbackTicket(ticketId, 'implementation', context);
           }, 0);
           return;
         }
@@ -1392,6 +1474,7 @@ export class FleetManager {
     const phaseId = ticket.currentPhaseId;
     const maxIterations = column.maxIterations;
     const resumePlanPath = getContainerPlanPath(ticketId);
+    const resumeArtifactsDir = getContainerArtifactsDir(ticketId);
 
     const buildPromptFn = (iteration: number): string => {
       const freshTicket = this.getTicketById(ticketId);
@@ -1405,6 +1488,7 @@ export class FleetManager {
         phaseHistory: freshTicket?.phases.filter((p) => p.id !== phaseId) ?? [],
         iteration,
         planFilePath: resumePlanPath,
+        artifactsDir: resumeArtifactsDir,
       });
     };
 
@@ -2033,6 +2117,7 @@ export class FleetManager {
 
     const pipeline = this.getPipeline(ticket.projectId);
     const containerPlanPath = getContainerPlanPath(ticketId);
+    const containerArtifacts = getContainerArtifactsDir(ticketId);
     const columnLabels = pipeline.columns.map((c) => c.label).join(', ');
 
     // Build existing checklist text across all columns
@@ -2057,7 +2142,11 @@ ${checklistText}
 ## Plan File
 Write the final plan to: ${containerPlanPath}
 
-The file MUST use this exact format:
+## Artifacts Directory
+You have a persistent artifacts directory at: ${containerArtifacts}
+Use this to store any scratch work, research notes, or other files that should persist across phases.
+
+The file MUST use this format:
 ---
 id: ${ticketId}
 title: ${ticket.title}
@@ -2070,18 +2159,37 @@ column: ${pipeline.columns.find((c) => c.id === ticket.columnId)?.label ?? pipel
 ${ticket.description || ''}
 
 ## Spec
-- [ ] Item 1
-- [ ] Item 2
+Summary of what this phase covers.
+
+- [ ] Acceptance criterion 1
+- [ ] Acceptance criterion 2
 
 ## Implementation
-- [ ] Item 1
-...
+Description of the implementation approach.
+
+### Files
+- \`src/models/example.ts\` — new model
+- \`src/routes/example.ts\` — new route
+
+- [ ] Create data model with validation
+- [ ] Add API endpoints
+- [ ] Write unit tests
+
+## Review
+- [ ] All tests pass
+- [ ] No lint errors
 
 (Use these column names: ${columnLabels})
 
+IMPORTANT format rules:
+- Each \`## Column\` heading MUST exactly match one of the column names above (case-insensitive)
+- Checklist items MUST use \`- [ ] text\` or \`- [x] text\` syntax — these are tracked by the system
+- You CAN add rich content (prose, file lists, sub-headings like \`###\`, code blocks) anywhere in a section — it will be preserved but only checklist items are tracked
+- Make checklist items concrete and testable — each one is an exit criterion for that phase
+
 ## Instructions
 1. Ask the user clarifying questions about requirements and scope
-2. Propose a structured checklist organized by pipeline column
+2. Propose a structured plan organized by pipeline column, with detailed context and concrete checklist items
 3. Iterate with the user until they approve the plan
 4. Write the final PLAN.md file to the path above
 5. Confirm the file has been written`;
@@ -2163,6 +2271,7 @@ ${ticket.description || ''}
 
     const pipeline = this.getPipeline(ticket.projectId);
     const containerPlanPath = getContainerPlanPath(ticketId);
+    const containerArtifacts = getContainerArtifactsDir(ticketId);
 
     // Build existing checklist text across all columns
     const allChecklistItems: FleetChecklistItem[] = [];
@@ -2186,6 +2295,10 @@ ${checklistText}
 ## Plan File
 The plan file is at: ${containerPlanPath}
 If the user asks you to update the plan, write changes to this file.
+
+## Artifacts Directory
+Persistent artifacts are at: ${containerArtifacts}
+You can read or write files here for research notes, scratch work, or other persistent context.
 
 ## Instructions
 1. Research the codebase and gather relevant information about this ticket
@@ -2589,6 +2702,13 @@ export const createFleetManager = (arg: {
   ipc.handle('fleet:get-pipeline', (_, projectId) => fleetManager.getPipeline(projectId));
   ipc.handle('fleet:get-session-history', (_, sessionId) => fleetManager.getSessionHistory(sessionId));
 
+  // Artifact handlers
+  ipc.handle('fleet:list-artifacts', (_, ticketId, dirPath) => fleetManager.listArtifacts(ticketId, dirPath));
+  ipc.handle('fleet:read-artifact', (_, ticketId, relativePath) => fleetManager.readArtifact(ticketId, relativePath));
+  ipc.handle('fleet:open-artifact-external', (_, ticketId, relativePath) =>
+    fleetManager.openArtifactExternal(ticketId, relativePath)
+  );
+
   const cleanup = async () => {
     await fleetManager.exit();
     // Existing handlers
@@ -2623,6 +2743,9 @@ export const createFleetManager = (arg: {
     ipcMain.removeHandler('fleet:toggle-checklist-item');
     ipcMain.removeHandler('fleet:get-pipeline');
     ipcMain.removeHandler('fleet:get-session-history');
+    ipcMain.removeHandler('fleet:list-artifacts');
+    ipcMain.removeHandler('fleet:read-artifact');
+    ipcMain.removeHandler('fleet:open-artifact-external');
   };
 
   return [fleetManager, cleanup] as const;

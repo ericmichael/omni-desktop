@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import type { ComponentType } from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { PiXBold } from 'react-icons/pi';
+import { PiSidebarBold, PiXBold } from 'react-icons/pi';
 
 import { Webview } from '@/renderer/common/Webview';
 import { cn } from '@/renderer/ds';
@@ -74,8 +74,12 @@ type FloatingWidgetProps = {
   overlayOpen: boolean;
   onOpenOverlay: () => void;
   onCloseOverlay: () => void;
+  onClick?: () => void;
   className?: string;
   resizable?: boolean;
+  defaultPreviewSize?: PreviewSize;
+  onToggleSplit?: () => void;
+  splitOpen?: boolean;
 };
 
 export const FloatingWidget = memo(
@@ -86,17 +90,24 @@ export const FloatingWidget = memo(
     overlayOpen,
     onOpenOverlay,
     onCloseOverlay,
+    onClick,
     className,
     resizable = false,
+    defaultPreviewSize = DEFAULT_PREVIEW_SIZE,
+    onToggleSplit,
+    splitOpen = false,
   }: FloatingWidgetProps) => {
     const [hovering, setHovering] = useState(false);
+    const [hoveringSplitBtn, setHoveringSplitBtn] = useState(false);
     const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const previewSizeRef = useRef<PreviewSize>(DEFAULT_PREVIEW_SIZE);
-    const [previewSize, setPreviewSize] = useState<PreviewSize>(DEFAULT_PREVIEW_SIZE);
+    const previewSizeRef = useRef<PreviewSize>(defaultPreviewSize);
+    const [previewSize, setPreviewSize] = useState<PreviewSize>(defaultPreviewSize);
     const [isResizing, setIsResizing] = useState(false);
     const previewRef = useRef<HTMLDivElement>(null);
     const startRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
     const edgeRef = useRef<'top' | 'left' | 'top-left' | null>(null);
+
+    const handlePillClick = onClick ?? onOpenOverlay;
 
     const handleMouseEnter = useCallback(() => {
       if (isResizing) {
@@ -178,7 +189,10 @@ export const FloatingWidget = memo(
       }
     }, [hovering]);
 
-    const showPreview = (hovering || isResizing) && !overlayOpen;
+    const handleSplitBtnEnter = useCallback(() => setHoveringSplitBtn(true), []);
+    const handleSplitBtnLeave = useCallback(() => setHoveringSplitBtn(false), []);
+
+    const showPreview = (hovering || isResizing) && !overlayOpen && !splitOpen && !hoveringSplitBtn;
 
     return (
       <>
@@ -208,7 +222,7 @@ export const FloatingWidget = memo(
                     isResizing && 'select-none cursor-default'
                   )}
                   style={{ width: previewSize.width, height: previewSize.height }}
-                  onClick={isResizing ? undefined : onOpenOverlay}
+                  onClick={isResizing ? undefined : handlePillClick}
                 >
                   {resizable && (
                     <>
@@ -231,20 +245,42 @@ export const FloatingWidget = memo(
               )}
             </AnimatePresence>
 
-            <motion.button
-              onClick={onOpenOverlay}
-              className={cn(
-                'flex items-center gap-2 px-3 py-1.5',
-                'bg-surface-raised border border-surface-border rounded-full',
-                'text-sm text-fg-muted hover:text-fg',
-                'shadow-lg cursor-pointer transition-colors'
+            <div className="flex items-center gap-1.5">
+              {onToggleSplit && hovering && (
+                <motion.button
+                  onClick={onToggleSplit}
+                  onMouseEnter={handleSplitBtnEnter}
+                  onMouseLeave={handleSplitBtnLeave}
+                  className={cn(
+                    'flex items-center justify-center size-7',
+                    'border rounded-full',
+                    'shadow-lg cursor-pointer transition-colors',
+                    splitOpen
+                      ? 'bg-accent-600 border-accent-500 text-white'
+                      : 'bg-surface-raised border-surface-border text-fg-muted hover:text-fg'
+                  )}
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                >
+                  <PiSidebarBold size={13} />
+                </motion.button>
               )}
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.97 }}
-            >
-              <Icon size={14} />
-              <span>{label}</span>
-            </motion.button>
+
+              <motion.button
+                onClick={handlePillClick}
+                className={cn(
+                  'flex items-center gap-2 px-3 py-1.5',
+                  'bg-surface-raised border border-surface-border rounded-full',
+                  'text-sm text-fg-muted hover:text-fg',
+                  'shadow-lg cursor-pointer transition-colors'
+                )}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+              >
+                <Icon size={14} />
+                <span>{label}</span>
+              </motion.button>
+            </div>
           </div>
         )}
       </>

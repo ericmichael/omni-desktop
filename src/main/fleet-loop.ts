@@ -162,7 +162,7 @@ export type FleetLoopCallbacks = {
   onSessionStart: (taskId: FleetTaskId, sessionId: string) => void;
   onLoopComplete: (sentinel: FleetSentinel) => void;
   onLoopError: (error: Error) => void;
-  onLoopBlocked: (sentinel: FleetSentinel) => void;
+  onLoopBlocked: (sentinel: FleetSentinel, context?: string) => void;
   onStatusChange: (status: FleetTicketLoopStatus, iteration: number) => void;
 };
 
@@ -204,6 +204,7 @@ export class FleetLoopController {
   private pendingDecision = false;
   private runEndHandled = false;
   private nudgeCount = 0;
+  private lastHistory: Array<Record<string, unknown>> = [];
 
   wsUrl: string;
   private workspaceDir: string;
@@ -530,6 +531,7 @@ export class FleetLoopController {
       );
       return;
     }
+    this.lastHistory = history;
     const signal = detectSignal(history, this.markerMap);
     console.log(
       `[FleetLoop] Signal detected from history: ${signal.type === 'sentinel' ? signal.sentinel : 'continue'}`
@@ -563,7 +565,8 @@ export class FleetLoopController {
         this.endIteration(sentinel);
         console.log(`[FleetLoop] Task signaled ${sentinel} (blocking), stopping loop`);
         this.setStatus('stopped');
-        this.callbacks.onLoopBlocked(sentinel);
+        const context = this.extractLastAssistantMessage();
+        this.callbacks.onLoopBlocked(sentinel, context);
         return;
       }
     }
@@ -600,6 +603,19 @@ export class FleetLoopController {
         this.startIteration();
       }
     }, BETWEEN_ITERATION_DELAY_MS);
+  }
+
+  private extractLastAssistantMessage(): string | undefined {
+    for (let i = this.lastHistory.length - 1; i >= 0; i--) {
+      const msg = this.lastHistory[i];
+      if (msg?.role === 'assistant') {
+        const text = extractText(msg.content);
+        if (text) {
+          return text;
+        }
+      }
+    }
+    return undefined;
   }
 
   private endIteration(signal: FleetSentinel | 'continue'): void {

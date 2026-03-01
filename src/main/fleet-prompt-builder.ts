@@ -10,6 +10,7 @@ type PromptContext = {
   phaseHistory: FleetPhase[];
   iteration: number;
   planFilePath?: string;
+  artifactsDir?: string;
 };
 
 // #endregion
@@ -66,6 +67,7 @@ export const interpolatePromptTemplate = (template: string, ctx: PromptContext):
     'column.label': ctx.column.label,
     sentinelInstructions,
     planFilePath: ctx.planFilePath ?? '',
+    artifactsDir: ctx.artifactsDir ?? '',
   };
 
   return template.replace(/\{\{(\w[\w.]*)\}\}/g, (match, key: string) => {

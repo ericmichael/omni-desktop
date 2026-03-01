@@ -576,9 +576,10 @@ const ModelRow = memo(
     const onChangeStore = useCallback(
       (e: ChangeEvent<HTMLInputElement>) => {
         const prev = (model.model_settings ?? {}) as Record<string, unknown>;
-        const next = e.target.checked ? { ...prev, store: undefined } : { ...prev, store: false };
-        // Clean up undefined keys
-        if (next.store === undefined) {
+        // Checkbox label is "Disable storage" — checked means store: false
+        const next = e.target.checked ? { ...prev, store: false } : { ...prev };
+        // Clean up: remove store key when re-enabling (default is true)
+        if (!e.target.checked) {
           delete next.store;
         }
         onUpdate(providerName, modelId, 'model_settings', Object.keys(next).length > 0 ? next : undefined);

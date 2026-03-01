@@ -20,6 +20,26 @@ export const STATUS_COLORS: Partial<Record<SandboxProcessStatus['type'], string>
   error: 'bg-red-400',
 };
 
+export const STATUS_TEXT_COLORS: Partial<Record<SandboxProcessStatus['type'], string>> = {
+  uninitialized: 'text-fg-subtle',
+  starting: 'text-yellow-500 animate-pulse',
+  running: 'text-green-500',
+  stopping: 'text-yellow-500',
+  exiting: 'text-yellow-500',
+  exited: 'text-fg-subtle',
+  error: 'text-red-500',
+};
+
+export const STATUS_BOX_COLORS: Partial<Record<SandboxProcessStatus['type'], string>> = {
+  uninitialized: 'bg-surface-overlay/50 border-surface-border text-fg-subtle',
+  starting: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-500 animate-pulse',
+  running: 'bg-green-500/10 border-green-500/30 text-green-500',
+  stopping: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-500',
+  exiting: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-500',
+  exited: 'bg-surface-overlay/50 border-surface-border text-fg-subtle',
+  error: 'bg-red-500/10 border-red-500/30 text-red-500',
+};
+
 export const TICKET_STATUS_LABELS: Record<FleetTicketStatus, string> = {
   open: 'Open',
   in_progress: 'In Progress',
@@ -82,6 +102,15 @@ export const PHASE_STATUS_LABELS: Record<FleetPhaseStatus, string> = {
   blocked: 'Blocked',
   rejected: 'Rejected',
   skipped: 'Skipped',
+};
+
+export const COLUMN_SHORT_LABELS: Record<string, string> = {
+  backlog: 'Backlog',
+  spec: 'Spec',
+  implementation: 'Impl',
+  review: 'Rev',
+  pr: 'PR',
+  completed: 'Done',
 };
 
 export const PHASE_STATUS_COLORS: Record<FleetPhaseStatus, string> = {

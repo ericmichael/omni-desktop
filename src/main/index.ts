@@ -2,11 +2,13 @@ if (process.env.NODE_ENV === 'development') {
   require('dotenv/config');
 }
 
-import { app, dialog, net, shell } from 'electron';
+import { app, dialog, net, protocol, shell } from 'electron';
 import { mkdir, readFile, writeFile } from 'fs/promises';
-import { dirname, join } from 'path';
+import { dirname, join, resolve } from 'path';
 import { assert } from 'tsafe';
+import { pathToFileURL } from 'url';
 
+import { getArtifactsDir } from '@/lib/fleet-plan-file';
 import { createChatManager } from '@/main/chat-manager';
 import { createConsoleManager } from '@/main/console-manager';
 import { createFleetManager } from '@/main/fleet-manager';
@@ -31,6 +33,19 @@ import {
   testModelConnection,
 } from '@/main/util';
 
+// Register artifact: protocol as privileged before app is ready
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'artifact',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      bypassCSP: true,
+    },
+  },
+]);
+
 // Configure Chrome/Electron flags for better memory management
 
 // Windows-specific, disables some fancy desktop window effects that can use a lot of memory
@@ -46,6 +61,7 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding');
 // windows open at a time so this should have no effect. But just in case, we disable the limit.
 app.commandLine.appendSwitch('disable-backing-store-limit');
 
+const OMNI_CONFIG_DIR = getOmniConfigDir();
 const main = new MainProcessManager({ store });
 let isShuttingDown = false;
 
@@ -116,6 +132,36 @@ async function cleanup() {
  * Some APIs can only be used after this event occurs.
  */
 app.on('ready', () => {
+  // Register artifact: protocol handler for serving ticket artifact files
+  // URL format: artifact://file/{ticketId}/{relativePath}
+  // We use a dummy hostname ("file") because URL spec lowercases hostnames,
+  // which corrupts case-sensitive ticket IDs like nanoid.
+  protocol.handle('artifact', async (request) => {
+    try {
+      const url = new URL(request.url);
+      // pathname = /file/{ticketId}/{relativePath...}  or  /{ticketId}/{relativePath...}
+      const segments = decodeURIComponent(url.pathname)
+        .split('/')
+        .filter(Boolean);
+      // Skip the dummy hostname segment if present
+      const startIdx = segments[0] === 'file' ? 1 : 0;
+      const ticketId = segments[startIdx];
+      const relativePath = segments.slice(startIdx + 1).join('/');
+      if (!ticketId || !relativePath) {
+        return new Response('Bad request', { status: 400 });
+      }
+      const artifactsRoot = getArtifactsDir(OMNI_CONFIG_DIR, ticketId);
+      const fullPath = resolve(artifactsRoot, relativePath);
+      // Path traversal protection
+      if (!fullPath.startsWith(artifactsRoot)) {
+        return new Response('Forbidden', { status: 403 });
+      }
+      return await net.fetch(pathToFileURL(fullPath).toString());
+    } catch {
+      return new Response('Not found', { status: 404 });
+    }
+  });
+
   main.createWindow();
 
   if (!app.isPackaged) {
@@ -272,8 +318,6 @@ main.ipc.handle('util:check-ws', async (_, url) => {
 //#endregion
 
 //#region Config file I/O API
-
-const OMNI_CONFIG_DIR = getOmniConfigDir();
 
 main.ipc.handle('config:get-omni-config-dir', () => OMNI_CONFIG_DIR);
 main.ipc.handle('config:get-env-file-path', () => join(OMNI_CONFIG_DIR, '.env'));
