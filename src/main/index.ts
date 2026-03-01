@@ -81,10 +81,12 @@ const [sandbox, cleanupSandbox] = createSandboxManager({
     workspaceDir: store.get('workspaceDir') ?? '',
     sandboxVariant: store.get('sandboxVariant'),
   }),
+  fetchFn: (input, init) => net.fetch(input as string, init),
 });
 const [chat, cleanupChat] = createChatManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
+  fetchFn: (input, init) => net.fetch(input as string, init),
 });
 const [, cleanupFleet] = createFleetManager({
   ipc: main.ipc,
@@ -140,9 +142,7 @@ app.on('ready', () => {
     try {
       const url = new URL(request.url);
       // pathname = /file/{ticketId}/{relativePath...}  or  /{ticketId}/{relativePath...}
-      const segments = decodeURIComponent(url.pathname)
-        .split('/')
-        .filter(Boolean);
+      const segments = decodeURIComponent(url.pathname).split('/').filter(Boolean);
       // Skip the dummy hostname segment if present
       const startIdx = segments[0] === 'file' ? 1 : 0;
       const ticketId = segments[startIdx];

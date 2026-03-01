@@ -42,7 +42,7 @@ export const Sidebar = memo(() => {
 
   const visibleTabs = useMemo(
     () =>
-      import.meta.env.DEV
+      import.meta.env.MODE === 'development'
         ? ALL_TABS
         : ALL_TABS.filter((t) => t.value !== 'fleet' && t.value !== 'work' && t.value !== 'code'),
     []

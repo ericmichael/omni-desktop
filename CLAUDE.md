@@ -4,76 +4,91 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Electron desktop app ("Omni Code Launcher") that manages Omni Code runtime installation (via `uv` + pip) and Docker-based sandbox lifecycle, with embedded webviews for Omni UI, code-server, and noVNC.
+Omni Code Launcher — an Electron + React desktop app for managing Omni Code installations and sandboxes. Also supports a browser/server mode via WebSocket transport.
 
 ## Commands
 
 ```bash
-npm run dev            # electron-vite dev --watch (hot reload)
-npm run build          # electron-vite build
-npm run start          # build + preview
-npm run lint           # all checks in parallel (eslint, prettier, tsc, knip, dpdm)
-npm run fix            # eslint --fix + prettier --write
-npm test               # vitest (watch mode, rebuilds node-pty first)
-npm run test:no-watch  # vitest single run
-npm run download linux # download uv binary to assets/bin/ (required before dev)
-npm run rebuild        # rebuild node-pty for Electron (runs automatically on postinstall)
+npm i                      # Install deps + rebuild native modules (node-pty)
+npm run download linux     # Download uv binary (linux|win|mac)
+npm run dev                # Electron dev server with hot reload
+npm run build              # Build production bundles to out/
+npm run package            # Package into dist/ (creates installers)
+npm run lint               # ESLint + Prettier + TSC + knip + dpdm
+npm run fix                # Auto-fix lint + formatting
+npm test                   # Vitest (jsdom environment)
+npm run test:ui            # Vitest with UI and coverage
+
+# Browser/server mode (no Electron)
+npm run dev:server         # Dev: builds browser + server, runs server
+npm run build:server       # Prod: builds both
+npm run start:server       # Run server from out/server/index.mjs
 ```
 
 ## Architecture
 
-**Three Electron processes:**
+### Process Model (Electron)
 
-- **Main** (`src/main/`): Node.js — process management, IPC handlers, OS operations
-- **Preload** (`src/preload/`): thin bridge via `@electron-toolkit/preload`
-- **Renderer** (`src/renderer/`): React 18 + Vite SWC — all UI
+- **Main process** (`src/main/index.ts`): Window creation, IPC handler registration, manager lifecycle
+- **Preload** (`src/preload/index.ts`): Exposes Electron API via context bridge
+- **Renderer** (`src/renderer/main.tsx`): React SPA
 
-**Shared code:**
+### Transport Abstraction
 
-- `src/shared/types.ts` — all IPC event type contracts, shared between main and renderer
-- `src/lib/` — process-agnostic utilities (command runner, pty helpers, logger, Result type)
+IPC uses a `TransportEmitter`/`TransportListener` interface (`src/shared/transport.ts`) with two implementations:
+- `ElectronTransportEmitter/Listener` (`src/renderer/transport/electron-transport.ts`) — wraps @electron-toolkit/typed-ipc
+- `WsTransportEmitter/Listener` (`src/renderer/transport/ws-transport.ts`) — WebSocket for browser mode
 
-### IPC Communication (Fully Typed)
+`src/renderer/services/ipc.ts` auto-selects the correct transport based on environment. All IPC channel types are defined in `src/shared/types.ts`.
 
-All IPC events are defined in `src/shared/types.ts` using `Namespaced<Prefix, T>`. Two directions:
+### Manager Pattern (Main Process)
 
-- **Renderer → Main** (`IpcEvents`): store CRUD, process control, utilities
-- **Main → Renderer** (`IpcRendererEvents`): status updates, log output, store changes
+Each major feature has a manager class in `src/main/`:
+- `ConsoleManager` — PTY terminal management
+- `SandboxManager` — Docker container orchestration
+- `ChatManager` — Chat service process
+- `OmniInstallManager` — Runtime installation (Python + venv via uv)
+- `FleetManager` — Project/task management
 
-Uses `@electron-toolkit/typed-ipc` for type-safe `.handle()`/`.invoke()`/`.send()`/`.on()`.
-
-### Main Process Manager Pattern
-
-Each subsystem is a class (`OmniInstallManager`, `SandboxManager`, `ConsoleManager`) instantiated via factory functions returning `[manager, cleanupFn]`. Cleanup functions run on app quit via `Promise.allSettled`.
+Managers expose `getStatus()` returning timestamped status and register IPC handlers.
 
 ### State Management
 
-- **nanostores** atoms as module-level singletons, prefixed with `$` (e.g., `$omniInstallProcessStatus`)
-- React reads via `useStore($atom)` from `@nanostores/react`
-- Persisted settings use `electron-store` backed through IPC — main emits `store:changed`, renderer syncs its local atom
-- Status polling at 1000ms intervals as a reliability fallback alongside push events
+- **Nanostores** atoms (`$store`, `$fleetTasks`, etc.) — lightweight reactive state
+- **Persisted store**: electron-store in Electron, file-based in server mode
+- **Sync**: Main process broadcasts `store:changed`; renderer syncs its atom
 
-### Path Alias
+### Renderer Structure
 
-`@/` resolves to `src/` — used everywhere instead of relative imports.
+- `src/renderer/features/` — Feature modules (Chat, Fleet, Omni, Console, SettingsModal, etc.) each with collocated `state.ts`, components, and utilities
+- `src/renderer/ds/` — Design system components (Button, Switch, Dialog, etc.)
+- `src/renderer/services/` — Core services (ipc, store, status polling, config)
+- `src/renderer/common/` — Shared UI components (Webview, layouts)
+- Layout modes: `chat`, `fleet`, `work`, `code`, `desktop` — routed in `MainContent.tsx`
 
-## Code Style Rules (Enforced by ESLint)
+### Fleet System
 
-- **No relative imports** — always use `@/` alias
-- **No inline arrow functions in JSX** — use `useCallback` (`react/jsx-no-bind` is error)
-- **`react-hooks/exhaustive-deps`** is error, not warn
-- **Type imports required** — use `import type` (consistent-type-imports)
-- **Imports auto-sorted** by `simple-import-sort`
-- **No `lodash-es`** — use `es-toolkit` instead
-- **No `isEqual`** from any source — use `@observ33r/object-equals`
-- **No `@ts-ignore` or `@ts-nocheck`** — only `@ts-expect-error` with description (min 10 chars)
-- **Renderer cannot import from `@/main/`** and vice versa (ESLint boundary enforcement)
-- Prettier: single quotes, 120 char width, trailing commas (es5), semicolons
+Projects → Tickets → Phases → Tasks data model. State stored in electron-store. Includes a kanban board (dnd-kit), AI task loop (`fleet-loop.ts`), and YAML plan file sync.
 
-## Build & Packaging
+## Code Conventions
 
-- `electron-vite` wraps Vite for all three processes; `node-pty` is externalized
-- `electron-builder` targets: Windows NSIS, Linux AppImage
-- `uv` binary bundled from `assets/bin/` into `resources/bin/` as extra resource
-- TypeScript: `strict: true`, `noUncheckedIndexedAccess: true`, `isolatedModules: true`
-- Node 22+ required
+- **Path aliases**: Use `@/` imports (e.g., `import '@/main/util'`), never relative imports
+- **Type imports**: Separate with `import type { Foo }`
+- **Store atoms**: `$`-prefixed (e.g., `$store`, `$initialized`)
+- **Error handling**: Custom `Result<T, E>` type in `src/lib/result.ts`; `OkStatus | ErrorStatus` for process states
+- **Boundary enforcement**: ESLint prevents `@/main` imports in renderer and vice versa
+- **Formatting**: Prettier with 120 char width, single quotes, trailing commas (es5), 2-space indent
+- **TypeScript**: Strict mode, `noImplicitAny`, ESNext target
+
+## Build System
+
+- `electron-vite` for Electron builds (main + preload + renderer)
+- `vite.browser.config.ts` for browser-only SPA build (shims Electron APIs)
+- `vite.server.config.ts` for Fastify server build (Node 22 target)
+- `electron-builder` for packaging (DMG/NSIS/AppImage)
+- `node-pty` is a native module — externalized from bundles
+
+## Testing
+
+- Vitest with jsdom, tests in `src/lib/*.test.ts`
+- Run a single test: `npx vitest run src/lib/result.test.ts`

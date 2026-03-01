@@ -107,14 +107,14 @@ const doWithTerminal = (id: string, fn: (terminal: TerminalState) => void) => {
   fn(terminal);
 };
 
-ipc.on('terminal:exited', (_, id, exitCode) => {
+ipc.on('terminal:exited', (id, exitCode) => {
   doWithTerminal(id, (terminal) => {
     terminal.xterm.options.disableStdin = true;
     $terminal.set({ ...terminal, isRunning: false, exitCode, hasNewOutput: !$isConsoleOpen.get() });
   });
 });
 
-ipc.on('terminal:output', (_, id, data) => {
+ipc.on('terminal:output', (id, data) => {
   doWithTerminal(id, (terminal) => {
     terminal.xterm.write(data);
     if (!$isConsoleOpen.get()) {

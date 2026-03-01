@@ -39,7 +39,7 @@ const initializeOmniInstallTerminal = (): Terminal => {
   xterm = new Terminal({ ...DEFAULT_XTERM_OPTIONS, disableStdin: true });
 
   omniInstallTerminalSubscriptions.add(
-    ipc.on('omni-install-process:raw-output', (_, data) => {
+    ipc.on('omni-install-process:raw-output', (data) => {
       xterm.write(data);
     })
   );
@@ -96,7 +96,7 @@ const initializeSandboxTerminal = (): Terminal => {
   xterm = new Terminal({ ...DEFAULT_XTERM_OPTIONS, disableStdin: true });
 
   sandboxTerminalSubscriptions.add(
-    ipc.on('sandbox-process:raw-output', (_, data) => {
+    ipc.on('sandbox-process:raw-output', (data) => {
       xterm.write(data);
     })
   );
@@ -141,7 +141,7 @@ export const sandboxApi = {
 };
 
 const listen = () => {
-  ipc.on('omni-install-process:status', (_, status) => {
+  ipc.on('omni-install-process:status', (status) => {
     $omniInstallProcessStatus.set(status);
     if (status.type === 'completed') {
       refreshOmniRuntimeInfo();
@@ -149,7 +149,7 @@ const listen = () => {
     }
   });
 
-  ipc.on('sandbox-process:status', (_, status) => {
+  ipc.on('sandbox-process:status', (status) => {
     $sandboxProcessStatus.set(status);
     if (status.type === 'exited') {
       teardownSandboxTerminal();

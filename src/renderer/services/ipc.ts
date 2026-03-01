@@ -1,12 +1,34 @@
-import { IpcEmitter, IpcListener } from '@electron-toolkit/typed-ipc/renderer';
+import { ElectronTransportEmitter, ElectronTransportListener } from '@/renderer/transport/electron-transport';
+import { WsTransportEmitter, WsTransportListener } from '@/renderer/transport/ws-transport';
+import type { TransportEmitter, TransportListener } from '@/shared/transport';
 
-import type { IpcEvents, IpcRendererEvents } from '@/shared/types';
+const isElectron = typeof window !== 'undefined' && 'electron' in window;
+
+const createTransport = (): { emitter: TransportEmitter; ipc: TransportListener } => {
+  if (isElectron) {
+    return {
+      emitter: new ElectronTransportEmitter(),
+      ipc: new ElectronTransportListener(),
+    };
+  }
+
+  const wsEmitter = new WsTransportEmitter();
+  return {
+    emitter: wsEmitter,
+    ipc: new WsTransportListener(wsEmitter),
+  };
+};
+
+const transport = createTransport();
 
 /**
- * A typed IPC listener for the renderer process.
+ * A typed transport listener for the renderer process.
+ * In Electron: backed by IPC. In browser: backed by WebSocket.
  */
-export const ipc = new IpcListener<IpcRendererEvents>();
+export const ipc: TransportListener = transport.ipc;
+
 /**
- * A typed IPC emitter for the renderer process.
+ * A typed transport emitter for the renderer process.
+ * In Electron: backed by IPC. In browser: backed by WebSocket.
  */
-export const emitter = new IpcEmitter<IpcEvents>();
+export const emitter: TransportEmitter = transport.emitter;

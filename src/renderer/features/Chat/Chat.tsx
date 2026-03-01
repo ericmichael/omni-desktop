@@ -438,7 +438,7 @@ export const Chat = memo(() => {
     if (chatStatus.type !== 'running') {
       return null;
     }
-    const url = new URL(chatStatus.data.uiUrl);
+    const url = new URL(chatStatus.data.uiUrl, window.location.origin);
     if (theme !== 'default') {
       url.searchParams.set('theme', theme);
     }

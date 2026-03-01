@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 
+const isElectron = typeof window !== 'undefined' && 'electron' in window;
+
 export const Webview = ({
   src,
   onReady,
@@ -9,7 +11,7 @@ export const Webview = ({
   onReady?: () => void;
   showUnavailable?: boolean;
 }) => {
-  const elementRef = useRef<Electron.WebviewTag | null>(null);
+  const elementRef = useRef<HTMLElement | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
   const onReadyRef = useRef(onReady);
   const readyEmittedRef = useRef(false);
@@ -38,7 +40,12 @@ export const Webview = ({
     const delay = retryDelayRef.current;
     retryDelayRef.current = Math.min(15_000, Math.round(retryDelayRef.current * 1.4));
     retryTimerRef.current = setTimeout(() => {
-      el.reload();
+      if (isElectron) {
+        (el as unknown as Electron.WebviewTag).reload();
+      } else {
+        // Reload iframe by resetting src
+        (el as HTMLIFrameElement).src = (el as HTMLIFrameElement).src;
+      }
     }, delay);
   }, [clearRetryTimer]);
 
@@ -55,43 +62,74 @@ export const Webview = ({
         return;
       }
 
-      const el = node as unknown as Electron.WebviewTag;
-      elementRef.current = el;
+      elementRef.current = node;
 
-      const onLoad = () => {
-        clearRetryTimer();
-        retryDelayRef.current = 750;
+      if (isElectron) {
+        const el = node as unknown as Electron.WebviewTag;
 
-        if (!readyEmittedRef.current) {
-          readyEmittedRef.current = true;
-          onReadyRef.current?.();
-        }
-      };
+        const onLoad = () => {
+          clearRetryTimer();
+          retryDelayRef.current = 750;
 
-      const onFailLoad = (...args: unknown[]) => {
-        const errorCode = typeof args[1] === 'number' ? (args[1] as number) : null;
-        const isMainFrame = typeof args[4] === 'boolean' ? (args[4] as boolean) : true;
+          if (!readyEmittedRef.current) {
+            readyEmittedRef.current = true;
+            onReadyRef.current?.();
+          }
+        };
 
-        if (!isMainFrame) {
-          return;
-        }
-        if (errorCode === -3) {
-          return;
-        }
-        if (readyEmittedRef.current) {
-          return;
-        }
+        const onFailLoad = (...args: unknown[]) => {
+          const errorCode = typeof args[1] === 'number' ? (args[1] as number) : null;
+          const isMainFrame = typeof args[4] === 'boolean' ? (args[4] as boolean) : true;
 
-        scheduleRetry();
-      };
+          if (!isMainFrame) {
+            return;
+          }
+          if (errorCode === -3) {
+            return;
+          }
+          if (readyEmittedRef.current) {
+            return;
+          }
 
-      el.addEventListener('did-finish-load', onLoad);
-      el.addEventListener('did-fail-load', onFailLoad);
+          scheduleRetry();
+        };
 
-      cleanupRef.current = () => {
-        el.removeEventListener('did-finish-load', onLoad);
-        el.removeEventListener('did-fail-load', onFailLoad);
-      };
+        el.addEventListener('did-finish-load', onLoad);
+        el.addEventListener('did-fail-load', onFailLoad);
+
+        cleanupRef.current = () => {
+          el.removeEventListener('did-finish-load', onLoad);
+          el.removeEventListener('did-fail-load', onFailLoad);
+        };
+      } else {
+        // Browser mode: use iframe events
+        const iframe = node as HTMLIFrameElement;
+
+        const onLoad = () => {
+          clearRetryTimer();
+          retryDelayRef.current = 750;
+
+          if (!readyEmittedRef.current) {
+            readyEmittedRef.current = true;
+            onReadyRef.current?.();
+          }
+        };
+
+        const onError = () => {
+          if (readyEmittedRef.current) {
+            return;
+          }
+          scheduleRetry();
+        };
+
+        iframe.addEventListener('load', onLoad);
+        iframe.addEventListener('error', onError);
+
+        cleanupRef.current = () => {
+          iframe.removeEventListener('load', onLoad);
+          iframe.removeEventListener('error', onError);
+        };
+      }
     },
     [clearRetryTimer, scheduleRetry, src]
   );
@@ -107,5 +145,16 @@ export const Webview = ({
     );
   }
 
-  return <webview ref={callbackRef} src={src} style={{ width: '100%', height: '100%' }} />;
+  if (isElectron) {
+    return <webview ref={callbackRef} src={src} style={{ width: '100%', height: '100%' }} />;
+  }
+
+  return (
+    <iframe
+      ref={callbackRef as React.RefCallback<HTMLIFrameElement>}
+      src={src}
+      style={{ width: '100%', height: '100%', border: 'none' }}
+      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+    />
+  );
 };

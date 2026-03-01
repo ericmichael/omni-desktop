@@ -8,7 +8,7 @@ const DURATION_MAP = {
   error: 10000,
 } as const;
 
-ipc.on('toast:show', (_, payload) => {
+ipc.on('toast:show', (payload) => {
   addToast({
     level: payload.level,
     title: payload.title,

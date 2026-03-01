@@ -24,7 +24,7 @@ const initializeChatTerminal = (): Terminal => {
   xterm = new Terminal({ ...DEFAULT_XTERM_OPTIONS, disableStdin: true });
 
   chatTerminalSubscriptions.add(
-    ipc.on('chat-process:raw-output', (_, data) => {
+    ipc.on('chat-process:raw-output', (data) => {
       xterm.write(data);
     })
   );
@@ -59,7 +59,7 @@ export const chatApi = {
 };
 
 const listen = () => {
-  ipc.on('chat-process:status', (_, status) => {
+  ipc.on('chat-process:status', (status) => {
     $chatProcessStatus.set(status);
     if (status.type === 'exited') {
       teardownChatTerminal();

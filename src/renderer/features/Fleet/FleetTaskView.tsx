@@ -44,7 +44,7 @@ export const FleetTaskView = memo(({ taskId }: { taskId: FleetTaskId }) => {
     if (!baseUiUrl || !sessionId) {
       return undefined;
     }
-    const url = new URL(baseUiUrl);
+    const url = new URL(baseUiUrl, window.location.origin);
     url.searchParams.set('session', sessionId);
     if (theme !== 'default') {
       url.searchParams.set('theme', theme);

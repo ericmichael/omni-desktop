@@ -17,7 +17,7 @@ const $mainProcessStatus = atom<WithTimestamp<MainProcessStatus>>({
  * Listen for main process status updates and poll for updates.
  */
 const listen = () => {
-  ipc.on('main-process:status', (_, data) => {
+  ipc.on('main-process:status', (data) => {
     $mainProcessStatus.set(data);
   });
 

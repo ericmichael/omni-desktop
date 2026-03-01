@@ -3,11 +3,12 @@ import { spawn } from 'node:child_process';
 
 import type { IpcListener } from '@electron-toolkit/typed-ipc/main';
 import c from 'ansi-colors';
-import { ipcMain, net } from 'electron';
+import { ipcMain } from 'electron';
 import { shellEnvSync } from 'shell-env';
 
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
+import type { FetchFn } from '@/main/sandbox-manager';
 import { getOmniCliPath, isDirectory, pathExists } from '@/main/util';
 import type { ChatProcessStatus, IpcEvents, IpcRendererEvents, LogEntry, WithTimestamp } from '@/shared/types';
 
@@ -20,15 +21,18 @@ export class ChatManager {
   private childProcess: ChildProcess | null;
   private urlEmitted: boolean;
   private stdoutBuffer: string;
+  private fetchFn: FetchFn;
 
   constructor(arg: {
     ipcLogger: ChatManager['ipcLogger'];
     ipcRawOutput: ChatManager['ipcRawOutput'];
     onStatusChange: ChatManager['onStatusChange'];
+    fetchFn?: FetchFn;
   }) {
     this.ipcLogger = arg.ipcLogger;
     this.ipcRawOutput = arg.ipcRawOutput;
     this.onStatusChange = arg.onStatusChange;
+    this.fetchFn = arg.fetchFn ?? globalThis.fetch;
     this.childProcess = null;
     this.status = { type: 'uninitialized', timestamp: Date.now() };
     this.log = new SimpleLogger((entry) => {
@@ -81,7 +85,7 @@ export class ChatManager {
   private waitForReady = async (uiUrl: string, port: number): Promise<void> => {
     const checkUrl = async (): Promise<boolean> => {
       try {
-        const response = await net.fetch(uiUrl, { method: 'GET' });
+        const response = await this.fetchFn(uiUrl, { method: 'GET' });
         return response.status < 500;
       } catch {
         return false;
@@ -261,8 +265,9 @@ export class ChatManager {
 export const createChatManager = (arg: {
   ipc: IpcListener<IpcEvents>;
   sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
+  fetchFn?: FetchFn;
 }) => {
-  const { ipc, sendToWindow } = arg;
+  const { ipc, sendToWindow, fetchFn } = arg;
 
   const chatManager = new ChatManager({
     ipcLogger: (entry) => {
@@ -274,6 +279,7 @@ export const createChatManager = (arg: {
     onStatusChange: (status) => {
       sendToWindow('chat-process:status', status);
     },
+    fetchFn,
   });
 
   ipc.handle('chat-process:start', (_, startArg) => {

@@ -92,7 +92,7 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
             <option value="standard">Standard</option>
           </select>
         </FormField>
-        {import.meta.env.DEV && (
+        {import.meta.env.MODE === 'development' && (
           <FormField label="Rebuild Docker image">
             <Button size="sm" variant="ghost" onClick={rebuildDockerImage} isDisabled={isRebuilding}>
               {isRebuilding ? 'Rebuilding\u2026' : 'Rebuild'}

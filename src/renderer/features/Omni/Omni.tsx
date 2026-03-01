@@ -281,7 +281,7 @@ const OmniRunningView = memo(
 
     const theme = store.theme ?? 'tokyo-night';
     const uiSrc = useMemo(() => {
-      const url = new URL(sandboxUrls.uiUrl);
+      const url = new URL(sandboxUrls.uiUrl, window.location.origin);
       if (theme !== 'default') {
         url.searchParams.set('theme', theme);
       }

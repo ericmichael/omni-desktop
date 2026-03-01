@@ -328,7 +328,7 @@ const listen = () => {
     return newMap[taskId];
   };
 
-  ipc.on('fleet:task-status', (_, taskId, status) => {
+  ipc.on('fleet:task-status', (taskId, status) => {
     const existing = $fleetTasks.get()[taskId];
     if (existing) {
       $fleetTasks.setKey(taskId, { ...existing, status });
@@ -340,7 +340,7 @@ const listen = () => {
     }
   });
 
-  ipc.on('fleet:task-session', (_, taskId, sessionId) => {
+  ipc.on('fleet:task-session', (taskId, sessionId) => {
     const existing = $fleetTasks.get()[taskId];
     if (existing) {
       $fleetTasks.setKey(taskId, { ...existing, sessionId });
@@ -349,12 +349,12 @@ const listen = () => {
     }
   });
 
-  ipc.on('fleet:task-raw-output', (_, taskId, data) => {
+  ipc.on('fleet:task-raw-output', (taskId, data) => {
     const xterm = $fleetTaskXTerms.get()[taskId];
     xterm?.write(data);
   });
 
-  ipc.on('fleet:phase-update', (_, ticketId, phase) => {
+  ipc.on('fleet:phase-update', (ticketId, phase) => {
     const existing = $fleetTickets.get()[ticketId];
     if (existing) {
       const updatedPhases = existing.phases.map((p) => (p.id === phase.id ? phase : p));
@@ -370,7 +370,7 @@ const listen = () => {
     }
   });
 
-  ipc.on('fleet:ticket-loop-update', (_, ticketId, update: FleetTicketLoopUpdate) => {
+  ipc.on('fleet:ticket-loop-update', (ticketId, update: FleetTicketLoopUpdate) => {
     const existing = $fleetTickets.get()[ticketId];
     if (existing) {
       $fleetTickets.setKey(ticketId, {

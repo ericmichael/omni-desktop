@@ -1,0 +1,82 @@
+import fastifyStatic from '@fastify/static';
+import fastifyWebsocket from '@fastify/websocket';
+import Fastify from 'fastify';
+import { existsSync } from 'fs';
+import { join, resolve } from 'path';
+
+// Server mode always runs as "development" so util.ts resolves paths from project root
+process.env.NODE_ENV = process.env.NODE_ENV || 'development';
+
+import { ServerIpcAdapter } from '@/server/ipc-adapter';
+import { wireManagers } from '@/server/managers';
+import { setupProxyRewriter } from '@/server/proxy-rewriter';
+import { ServerStore } from '@/server/store';
+import { WsHandler } from '@/server/ws-handler';
+
+const PORT = parseInt(process.env['PORT'] ?? '3000', 10);
+const HOST = process.env['HOST'] ?? '0.0.0.0';
+
+const main = async () => {
+  const fastify = Fastify({ logger: true });
+
+  // WebSocket plugin
+  await fastify.register(fastifyWebsocket);
+
+  // Serve the built browser renderer as static files
+  const staticDir = resolve(__dirname, '../browser');
+  if (existsSync(staticDir)) {
+    await fastify.register(fastifyStatic, {
+      root: staticDir,
+      prefix: '/',
+    });
+  } else {
+    fastify.log.warn(`Static dir not found: ${staticDir}. Renderer will not be served.`);
+  }
+
+  // WebSocket handler
+  const wsHandler = new WsHandler();
+  const ipc = new ServerIpcAdapter(wsHandler);
+  const store = new ServerStore();
+
+  // Set up reverse proxy URL rewriting for internal services (chat, sandbox, etc.)
+  setupProxyRewriter(fastify, wsHandler);
+
+  // Wire all managers and IPC handlers
+  const cleanup = wireManagers({ wsHandler, ipc, store });
+
+  // WebSocket route — must be inside a plugin registration per @fastify/websocket docs
+  await fastify.register(async function wsRoutes(f) {
+    f.get('/ws', { websocket: true }, (socket) => {
+      wsHandler.addClient(socket);
+    });
+  });
+
+  // SPA fallback: serve index.html for non-API, non-WS routes
+  fastify.setNotFoundHandler((_request, reply) => {
+    const indexPath = join(staticDir, 'index.html');
+    if (existsSync(indexPath)) {
+      return reply.sendFile('index.html');
+    }
+    return reply.code(404).send({ error: 'Not found' });
+  });
+
+  // Graceful shutdown
+  const shutdown = async () => {
+    fastify.log.info('Shutting down...');
+    await cleanup();
+    await fastify.close();
+    process.exit(0);
+  };
+
+  process.on('SIGTERM', () => void shutdown());
+  process.on('SIGINT', () => void shutdown());
+
+  // Start
+  await fastify.listen({ port: PORT, host: HOST });
+  fastify.log.info(`Server listening on http://${HOST}:${PORT}`);
+};
+
+main().catch((err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});

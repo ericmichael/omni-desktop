@@ -22,7 +22,7 @@ const getDefaults = (): StoreData => ({
  */
 const _$store = atom<StoreData>(getDefaults());
 
-ipc.on('store:changed', (_, data) => {
+ipc.on('store:changed', (data) => {
   _$store.set(data ?? getDefaults());
 });
 
@@ -105,7 +105,7 @@ const init = async () => {
   await persistedStoreApi.sync();
   const store = persistedStoreApi.get();
 
-  if (!import.meta.env.DEV && store.layoutMode !== 'chat') {
+  if (import.meta.env.MODE !== 'development' && store.layoutMode !== 'chat') {
     await persistedStoreApi.setKey('layoutMode', 'chat');
   }
 

@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 
 import type { IpcListener } from '@electron-toolkit/typed-ipc/main';
 import c from 'ansi-colors';
-import { ipcMain, net } from 'electron';
+import { ipcMain } from 'electron';
 import { shellEnvSync } from 'shell-env';
 import { assert } from 'tsafe';
 
@@ -79,6 +79,8 @@ type StartArg = {
   sandboxVariant: SandboxVariant;
 };
 
+export type FetchFn = typeof globalThis.fetch;
+
 export class SandboxManager {
   private status: WithTimestamp<SandboxProcessStatus>;
   private ipcLogger: (entry: WithTimestamp<LogEntry>) => void;
@@ -90,15 +92,18 @@ export class SandboxManager {
   private jsonEmitted: boolean;
   private lastStartArg: StartArg | null;
   private stderrBuffer: string;
+  private fetchFn: FetchFn;
 
   constructor(arg: {
     ipcLogger: SandboxManager['ipcLogger'];
     ipcRawOutput: SandboxManager['ipcRawOutput'];
     onStatusChange: SandboxManager['onStatusChange'];
+    fetchFn?: FetchFn;
   }) {
     this.ipcLogger = arg.ipcLogger;
     this.ipcRawOutput = arg.ipcRawOutput;
     this.onStatusChange = arg.onStatusChange;
+    this.fetchFn = arg.fetchFn ?? globalThis.fetch;
     this.childProcess = null;
     this.status = { type: 'uninitialized', timestamp: Date.now() };
     this.log = new SimpleLogger((entry) => {
@@ -161,7 +166,7 @@ export class SandboxManager {
 
     const checkUrl = async (url: string): Promise<boolean> => {
       try {
-        const response = await net.fetch(url, { method: 'GET' });
+        const response = await this.fetchFn(url, { method: 'GET' });
         return response.status < 500;
       } catch {
         return false;
@@ -434,8 +439,9 @@ export const createSandboxManager = (arg: {
   ipc: IpcListener<IpcEvents>;
   sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   getStoreData: () => Pick<StartArg, 'workspaceDir' | 'sandboxVariant'>;
+  fetchFn?: FetchFn;
 }) => {
-  const { ipc, sendToWindow, getStoreData } = arg;
+  const { ipc, sendToWindow, getStoreData, fetchFn } = arg;
 
   const sandboxManager = new SandboxManager({
     ipcLogger: (entry) => {
@@ -447,6 +453,7 @@ export const createSandboxManager = (arg: {
     onStatusChange: (status) => {
       sendToWindow('sandbox-process:status', status);
     },
+    fetchFn,
   });
 
   ipc.handle('sandbox-process:start', (_, startArg) => {
