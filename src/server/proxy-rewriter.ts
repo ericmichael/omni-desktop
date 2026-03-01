@@ -55,6 +55,16 @@ export const setupProxyRewriter = (fastify: FastifyInstance, wsHandler: WsHandle
       }
     }
 
+    // Code tab sandbox status: args are [tabId, status]
+    if (channel === 'code:sandbox-status') {
+      const tabId = args[0] as string;
+      const status = args[1] as Record<string, unknown> | undefined;
+      if (status && status.type === 'running' && status.data) {
+        const data = status.data as Record<string, string | undefined>;
+        rewriteStatusUrls(data, `code-${tabId}`);
+      }
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (originalSendToClient as any)(channel, ...args);
   }) as typeof wsHandler.sendToClient;
@@ -78,6 +88,23 @@ export const setupProxyRewriter = (fastify: FastifyInstance, wsHandler: WsHandle
 
   wrapStatusHandler('sandbox-process:get-status', 'sandbox');
   wrapStatusHandler('chat-process:get-status', 'chat');
+
+  // Code tab: wrap get-sandbox-status to rewrite URLs using tabId-based proxy names.
+  // The handler receives [tabId] and returns status, so we derive the proxy name from the tabId arg.
+  setTimeout(() => {
+    const origHandleMethod = wsHandler['handlers'] as Map<string, (...args: unknown[]) => unknown>;
+    const existingHandler = origHandleMethod.get('code:get-sandbox-status');
+    if (existingHandler) {
+      origHandleMethod.set('code:get-sandbox-status', async (...handlerArgs: unknown[]) => {
+        const tabId = handlerArgs[0] as string;
+        const result = (await existingHandler(...handlerArgs)) as Record<string, unknown> | undefined;
+        if (result && result.type === 'running' && result.data) {
+          rewriteStatusUrls(result.data as Record<string, string | undefined>, `code-${tabId}`);
+        }
+        return result;
+      });
+    }
+  }, 0);
 };
 
 /**

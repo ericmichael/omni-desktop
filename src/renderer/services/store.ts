@@ -15,6 +15,8 @@ const getDefaults = (): StoreData => ({
   fleetTasks: [],
   fleetTickets: [],
   fleetSchemaVersion: 0,
+  codeTabs: [],
+  activeCodeTabId: null,
 });
 
 /**

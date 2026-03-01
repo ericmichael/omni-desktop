@@ -10,6 +10,7 @@ import { pathToFileURL } from 'url';
 
 import { getArtifactsDir } from '@/lib/fleet-plan-file';
 import { createChatManager } from '@/main/chat-manager';
+import { createCodeManager } from '@/main/code-manager';
 import { createConsoleManager } from '@/main/console-manager';
 import { createFleetManager } from '@/main/fleet-manager';
 import { MainProcessManager } from '@/main/main-process-manager';
@@ -88,6 +89,11 @@ const [chat, cleanupChat] = createChatManager({
   sendToWindow: main.sendToWindow,
   fetchFn: (input, init) => net.fetch(input as string, init),
 });
+const [, cleanupCode] = createCodeManager({
+  ipc: main.ipc,
+  sendToWindow: main.sendToWindow,
+  fetchFn: (input, init) => net.fetch(input as string, init),
+});
 const [, cleanupFleet] = createFleetManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
@@ -115,6 +121,7 @@ async function cleanup() {
     cleanupOmniInstall(),
     cleanupSandbox(),
     cleanupChat(),
+    cleanupCode(),
     cleanupFleet(),
   ]);
   const errors = results

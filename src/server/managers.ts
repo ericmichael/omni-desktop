@@ -5,6 +5,7 @@ import { dirname, join } from 'path';
 import { WebSocket as WsWebSocket } from 'ws';
 
 import { createChatManager } from '@/main/chat-manager';
+import { createCodeManager } from '@/main/code-manager';
 import { createConsoleManager } from '@/main/console-manager';
 import { createFleetManager } from '@/main/fleet-manager';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
@@ -81,6 +82,12 @@ export const wireManagers = (arg: { wsHandler: WsHandler; ipc: ServerIpcAdapter;
   });
 
   const [chat, cleanupChat] = createChatManager({
+    ipc: ipc as any,
+    sendToWindow,
+    fetchFn: globalThis.fetch,
+  });
+
+  const [, cleanupCode] = createCodeManager({
     ipc: ipc as any,
     sendToWindow,
     fetchFn: globalThis.fetch,
@@ -217,6 +224,7 @@ export const wireManagers = (arg: { wsHandler: WsHandler; ipc: ServerIpcAdapter;
       cleanupOmniInstall(),
       cleanupSandbox(),
       cleanupChat(),
+      cleanupCode(),
       cleanupFleet(),
     ]);
     const errors = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected').map((r) => r.reason);

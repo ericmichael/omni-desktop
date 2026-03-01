@@ -64,6 +64,8 @@ export type StoreData = {
   fleetTasks: FleetTask[];
   fleetTickets: FleetTicket[];
   fleetSchemaVersion: number;
+  codeTabs: CodeTab[];
+  activeCodeTabId: CodeTabId | null;
 };
 
 // The electron store uses JSON schema to validate its data.
@@ -124,6 +126,23 @@ export const schema: Schema<StoreData> = {
   fleetSchemaVersion: {
     type: 'number',
     default: 0,
+  },
+  codeTabs: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        projectId: { type: ['string', 'null'] },
+        createdAt: { type: 'number' },
+      },
+      required: ['id', 'createdAt'],
+    },
+  },
+  activeCodeTabId: {
+    type: ['string', 'null'],
+    default: null,
   },
   fleetProjects: {
     type: 'array',
@@ -324,6 +343,18 @@ export type OmniRuntimeInfo =
       pythonVersion: string;
       omniPath: string;
     };
+
+// #region Code Tab types
+
+export type CodeTabId = string;
+
+export type CodeTab = {
+  id: CodeTabId;
+  projectId: FleetProjectId | null;
+  createdAt: number;
+};
+
+// #endregion
 
 // #region Fleet types
 
@@ -644,6 +675,23 @@ type ConfigIpcEvents = Namespaced<
 >;
 
 /**
+ * Code Tab API. Main process handles these events, renderer process invokes them.
+ */
+type CodeIpcEvents = Namespaced<
+  'code',
+  {
+    'start-sandbox': (tabId: CodeTabId, arg: { workspaceDir: string; sandboxVariant: SandboxVariant }) => void;
+    'stop-sandbox': (tabId: CodeTabId) => void;
+    'rebuild-sandbox': (
+      tabId: CodeTabId,
+      fallbackArg: { workspaceDir: string; sandboxVariant: SandboxVariant }
+    ) => void;
+    'resize-sandbox': (tabId: CodeTabId, cols: number, rows: number) => void;
+    'get-sandbox-status': (tabId: CodeTabId) => WithTimestamp<SandboxProcessStatus>;
+  }
+>;
+
+/**
  * Fleet API. Main process handles these events, renderer process invokes them.
  */
 type FleetIpcEvents = Namespaced<
@@ -702,6 +750,7 @@ export type IpcEvents = MainProcessIpcEvents &
   TerminalIpcEvents &
   StoreIpcEvents &
   ConfigIpcEvents &
+  CodeIpcEvents &
   FleetIpcEvents;
 
 /**
@@ -792,6 +841,17 @@ type ToastIpcRendererEvents = Namespaced<
 >;
 
 /**
+ * Code Tab events. Main process emits these events, renderer process listens to them.
+ */
+type CodeIpcRendererEvents = Namespaced<
+  'code',
+  {
+    'sandbox-status': [CodeTabId, WithTimestamp<SandboxProcessStatus>];
+    'sandbox-raw-output': [CodeTabId, string];
+  }
+>;
+
+/**
  * Fleet events. Main process emits these events, renderer process listens to them.
  */
 export type FleetTicketLoopUpdate = {
@@ -822,6 +882,7 @@ export type IpcRendererEvents = TerminalIpcRendererEvents &
   ChatProcessIpcRendererEvents &
   DevIpcRendererEvents &
   StoreIpcRendererEvents &
+  CodeIpcRendererEvents &
   FleetIpcRendererEvents &
   ToastIpcRendererEvents;
 
