@@ -323,6 +323,13 @@ export class SandboxManager {
       args.push('--image', `ghcr.io/ericmichael/omni-code-sandbox${imageSuffix}:latest`);
     }
 
+    if (arg.sandboxVariant === 'work') {
+      args.push('--persist-volume', 'omni-azure:/home/user/.azure');
+      args.push('--persist-volume', 'omni-gitconfig:/home/user/.gitconfig');
+      args.push('--persist-volume', 'omni-ssh:/home/user/.ssh');
+      args.push('--persist-volume', 'omni-npm:/home/user/.npmrc');
+    }
+
     if (options?.rebuild) {
       args.push('--rebuild', '--no-cache');
     }

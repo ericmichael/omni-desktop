@@ -1,8 +1,9 @@
 import { useStore } from '@nanostores/react';
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Button } from '@/renderer/ds';
-import type { FleetProjectId, FleetTicketPriority } from '@/shared/types';
+import { Button, Switch } from '@/renderer/ds';
+import { persistedStoreApi } from '@/renderer/services/store';
+import type { FleetProjectId, FleetTicketPriority, GitRepoInfo } from '@/shared/types';
 
 import { $fleetTickets, fleetApi } from './state';
 
@@ -12,12 +13,28 @@ export const FleetTicketForm = memo(({ projectId, onClose }: { projectId: FleetP
   const [priority, setPriority] = useState<FleetTicketPriority>('medium');
   const [blockedBy, setBlockedBy] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [gitInfo, setGitInfo] = useState<GitRepoInfo | null>(null);
+  const [branch, setBranch] = useState('');
+  const [useWorktree, setUseWorktree] = useState(false);
+
+  const store = useStore(persistedStoreApi.$atom);
+  const project = useMemo(() => store.fleetProjects.find((p) => p.id === projectId), [store.fleetProjects, projectId]);
 
   const tickets = useStore($fleetTickets);
   const projectTickets = useMemo(
     () => Object.values(tickets).filter((t) => t.projectId === projectId),
     [tickets, projectId]
   );
+
+  useEffect(() => {
+    if (!project) return;
+    fleetApi.checkGitRepo(project.workspaceDir).then((info) => {
+      setGitInfo(info);
+      if (info.isGitRepo) {
+        setBranch(info.currentBranch);
+      }
+    });
+  }, [project]);
 
   const handleTitleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setTitle(e.target.value);
@@ -48,16 +65,18 @@ export const FleetTicketForm = memo(({ projectId, onClose }: { projectId: FleetP
         description: description.trim(),
         priority,
         blockedBy,
+        ...(gitInfo?.isGitRepo && { branch, useWorktree }),
       });
       setTitle('');
       setDescription('');
       setPriority('medium');
       setBlockedBy([]);
+      setUseWorktree(false);
       onClose();
     } finally {
       setIsSubmitting(false);
     }
-  }, [title, description, priority, blockedBy, isSubmitting, projectId, onClose]);
+  }, [title, description, priority, blockedBy, branch, useWorktree, gitInfo, isSubmitting, projectId, onClose]);
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-surface-border bg-surface-overlay/50 p-4">
@@ -106,6 +125,28 @@ export const FleetTicketForm = memo(({ projectId, onClose }: { projectId: FleetP
           </div>
         )}
       </div>
+      {gitInfo?.isGitRepo && (
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium text-fg-subtle">Branch</label>
+            <select
+              value={branch}
+              onChange={(e) => setBranch(e.target.value)}
+              className="rounded-md border border-surface-border bg-surface px-2 py-1.5 text-sm text-fg focus:outline-none focus:border-accent-500"
+            >
+              {gitInfo.branches.map((b) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium text-fg-subtle">Worktree</label>
+            <Switch checked={useWorktree} onCheckedChange={setUseWorktree} />
+          </div>
+        </div>
+      )}
       <div className="flex items-center gap-2">
         <Button onClick={handleSubmit} isDisabled={!title.trim() || isSubmitting}>
           Create Ticket

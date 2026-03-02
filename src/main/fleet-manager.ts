@@ -18,6 +18,8 @@ import { DEFAULT_PIPELINE } from '@/shared/fleet-defaults';
 import type {
   ArtifactFileContent,
   ArtifactFileEntry,
+  DiffResponse,
+  FileDiff,
   FleetChecklistItem,
   FleetChecklistItemId,
   FleetColumnId,
@@ -28,7 +30,6 @@ import type {
   FleetSupervisorStatus,
   FleetTask,
   FleetTaskId,
-  FleetTaskSubmitOptions,
   FleetTicket,
   FleetTicketId,
   FleetTicketPriority,
@@ -134,20 +135,119 @@ const sendStartRun = async (wsUrl: string, prompt: string, maxRetries = 10, retr
 // #region Name generator
 
 const ADJECTIVES = [
-  'bold', 'calm', 'cool', 'dark', 'deep', 'dry', 'fast', 'firm', 'flat', 'free',
-  'full', 'glad', 'gold', 'good', 'gray', 'hale', 'keen', 'kind', 'last', 'lean',
-  'long', 'loud', 'mild', 'neat', 'pale', 'pure', 'rare', 'rich', 'ripe', 'safe',
-  'slim', 'soft', 'sure', 'tall', 'tame', 'tidy', 'tiny', 'true', 'vast', 'warm',
-  'wide', 'wild', 'wise', 'aged', 'airy', 'apt', 'bare', 'blue', 'busy', 'cold',
+  'bold',
+  'calm',
+  'cool',
+  'dark',
+  'deep',
+  'dry',
+  'fast',
+  'firm',
+  'flat',
+  'free',
+  'full',
+  'glad',
+  'gold',
+  'good',
+  'gray',
+  'hale',
+  'keen',
+  'kind',
+  'last',
+  'lean',
+  'long',
+  'loud',
+  'mild',
+  'neat',
+  'pale',
+  'pure',
+  'rare',
+  'rich',
+  'ripe',
+  'safe',
+  'slim',
+  'soft',
+  'sure',
+  'tall',
+  'tame',
+  'tidy',
+  'tiny',
+  'true',
+  'vast',
+  'warm',
+  'wide',
+  'wild',
+  'wise',
+  'aged',
+  'airy',
+  'apt',
+  'bare',
+  'blue',
+  'busy',
+  'cold',
 ];
 
 const NOUNS = [
-  'ant', 'ape', 'bat', 'bear', 'bee', 'bird', 'boar', 'buck', 'bull', 'calf',
-  'cat', 'clam', 'cod', 'colt', 'crab', 'crow', 'deer', 'dog', 'dove', 'duck',
-  'eagle', 'eel', 'elk', 'fawn', 'finch', 'fish', 'flea', 'fly', 'fox', 'frog',
-  'goat', 'goose', 'gull', 'hare', 'hawk', 'hen', 'hog', 'horse', 'jay', 'lark',
-  'lion', 'lynx', 'mare', 'mink', 'mole', 'moth', 'mule', 'newt', 'owl', 'ox',
-  'pike', 'pony', 'puma', 'ram', 'rat', 'rook', 'seal', 'slug', 'snail', 'swan',
+  'ant',
+  'ape',
+  'bat',
+  'bear',
+  'bee',
+  'bird',
+  'boar',
+  'buck',
+  'bull',
+  'calf',
+  'cat',
+  'clam',
+  'cod',
+  'colt',
+  'crab',
+  'crow',
+  'deer',
+  'dog',
+  'dove',
+  'duck',
+  'eagle',
+  'eel',
+  'elk',
+  'fawn',
+  'finch',
+  'fish',
+  'flea',
+  'fly',
+  'fox',
+  'frog',
+  'goat',
+  'goose',
+  'gull',
+  'hare',
+  'hawk',
+  'hen',
+  'hog',
+  'horse',
+  'jay',
+  'lark',
+  'lion',
+  'lynx',
+  'mare',
+  'mink',
+  'mole',
+  'moth',
+  'mule',
+  'newt',
+  'owl',
+  'ox',
+  'pike',
+  'pony',
+  'puma',
+  'ram',
+  'rat',
+  'rook',
+  'seal',
+  'slug',
+  'snail',
+  'swan',
 ];
 
 const generateWorktreeName = (): string => {
@@ -400,14 +500,12 @@ export class FleetManager {
     return this.getTickets().find((t) => t.id === ticketId);
   };
 
-  addTicket = (
-    input: Omit<FleetTicket, 'id' | 'createdAt' | 'updatedAt' | 'columnId' | 'checklist'>
-  ): FleetTicket => {
+  addTicket = (input: Omit<FleetTicket, 'id' | 'createdAt' | 'updatedAt' | 'columnId' | 'checklist'>): FleetTicket => {
     const now = Date.now();
     const ticket: FleetTicket = {
       ...input,
       id: nanoid(),
-      columnId: null,
+      columnId: 'backlog',
       checklist: {},
       createdAt: now,
       updatedAt: now,
@@ -466,10 +564,7 @@ export class FleetManager {
       });
     };
 
-    // Candidates: tickets not in any column (backlog) or in backlog column
-    const candidates = tickets.filter(
-      (t) => (t.columnId === null || t.columnId === 'backlog') && !isBlocked(t)
-    );
+    const candidates = tickets.filter((t) => t.columnId === 'backlog' && !isBlocked(t));
     candidates.sort((a, b) => {
       const priorityDiff = FleetManager.PRIORITY_ORDER[a.priority] - FleetManager.PRIORITY_ORDER[b.priority];
       if (priorityDiff !== 0) {
@@ -554,6 +649,191 @@ export class FleetManager {
   openArtifactExternal = async (ticketId: FleetTicketId, relativePath: string): Promise<void> => {
     const fullPath = this.validateArtifactPath(ticketId, relativePath);
     await shell.openPath(fullPath);
+  };
+
+  // #endregion
+
+  // #region Files changed (git diff)
+
+  getFilesChanged = async (ticketId: FleetTicketId): Promise<DiffResponse> => {
+    const empty: DiffResponse = { totalFiles: 0, totalAdditions: 0, totalDeletions: 0, hasChanges: false, files: [] };
+
+    const ticket = this.getTicketById(ticketId);
+    if (!ticket) {
+      return empty;
+    }
+
+    // Find the task associated with this ticket (via supervisorTaskId or ticketId on task)
+    let task: FleetTask | undefined;
+    if (ticket.supervisorTaskId) {
+      task = this.tasks.get(ticket.supervisorTaskId)?.task;
+    }
+    if (!task) {
+      // Fallback: search all tasks for one matching this ticketId
+      for (const [, entry] of this.tasks) {
+        if (entry.task.ticketId === ticketId) {
+          task = entry.task;
+          break;
+        }
+      }
+    }
+    if (!task) {
+      // Also check persisted tasks in the store
+      const storedTasks = this.store.get('fleetTasks') ?? [];
+      task = storedTasks.find((t) => t.ticketId === ticketId);
+    }
+
+    // Determine the git directory and merge base reference.
+    // Case 1: task has a worktree → diff worktree against its base branch
+    // Case 2: no worktree (supervisor mode) → diff project workspaceDir against upstream tracking branch
+    let gitDir: string;
+    let mergeBase: string;
+
+    if (task?.worktreePath && task.branch) {
+      gitDir = task.worktreePath;
+      try {
+        await fs.access(gitDir);
+      } catch {
+        return empty;
+      }
+      try {
+        const { stdout } = await execFileAsync('git', ['-C', gitDir, 'merge-base', task.branch, 'HEAD'], {
+          timeout: 10_000,
+        });
+        mergeBase = stdout.trim();
+      } catch {
+        mergeBase = task.branch;
+      }
+    } else {
+      // Supervisor mode: no worktree, diff the project workspace against its upstream
+      const project = this.getProjects().find((p) => p.id === ticket.projectId);
+      if (!project) {
+        return empty;
+      }
+      gitDir = project.workspaceDir;
+      try {
+        await fs.access(gitDir);
+      } catch {
+        return empty;
+      }
+      // Try to find the upstream tracking branch as the base ref
+      try {
+        const { stdout } = await execFileAsync(
+          'git',
+          ['-C', gitDir, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
+          { timeout: 10_000 }
+        );
+        const upstream = stdout.trim();
+        if (upstream && upstream !== '@{upstream}') {
+          // Use merge-base between upstream and HEAD
+          try {
+            const { stdout: mb } = await execFileAsync('git', ['-C', gitDir, 'merge-base', upstream, 'HEAD'], {
+              timeout: 10_000,
+            });
+            mergeBase = mb.trim();
+          } catch {
+            mergeBase = upstream;
+          }
+        } else {
+          // No upstream, diff against HEAD (show uncommitted changes only)
+          mergeBase = 'HEAD';
+        }
+      } catch {
+        // No upstream tracking branch — show all uncommitted + staged changes
+        mergeBase = 'HEAD';
+      }
+    }
+
+    try {
+      // Only show committed changes (HEAD vs merge-base), not unstaged/untracked work
+      const { stdout: diffOutput } = await execFileAsync(
+        'git',
+        ['-C', gitDir, 'diff', '--name-status', '-M', '-C', mergeBase, 'HEAD'],
+        { timeout: 10_000 }
+      );
+
+      const files: FileDiff[] = [];
+
+      for (const line of diffOutput.split('\n')) {
+        if (!line.trim()) {
+          continue;
+        }
+        const parts = line.split('\t');
+        const statusChar = parts[0]?.charAt(0);
+        const filePath = parts[parts.length === 3 ? 2 : 1] ?? '';
+        const oldPath = parts.length === 3 ? parts[1] : undefined;
+
+        let status: FileDiff['status'];
+        switch (statusChar) {
+          case 'A':
+            status = 'added';
+            break;
+          case 'M':
+            status = 'modified';
+            break;
+          case 'D':
+            status = 'deleted';
+            break;
+          case 'R':
+            status = 'renamed';
+            break;
+          case 'C':
+            status = 'copied';
+            break;
+          default:
+            status = 'modified';
+        }
+
+        files.push({ path: filePath, oldPath, status, additions: 0, deletions: 0, isBinary: false });
+      }
+
+      // Get per-file patches and stats
+      let totalAdditions = 0;
+      let totalDeletions = 0;
+
+      for (const file of files) {
+        try {
+          const { stdout: patch } = await execFileAsync(
+            'git',
+            ['-C', gitDir, 'diff', '--unified=8', '--inter-hunk-context=4', mergeBase, 'HEAD', '--', file.path],
+            { timeout: 5_000 }
+          );
+          file.patch = patch;
+
+          // Count additions/deletions from the patch
+          if (file.patch) {
+            for (const patchLine of file.patch.split('\n')) {
+              if (patchLine.startsWith('+') && !patchLine.startsWith('+++')) {
+                file.additions++;
+              } else if (patchLine.startsWith('-') && !patchLine.startsWith('---')) {
+                file.deletions++;
+              }
+            }
+          }
+
+          // Detect binary
+          if (file.patch?.includes('Binary files')) {
+            file.isBinary = true;
+            file.patch = undefined;
+          }
+
+          totalAdditions += file.additions;
+          totalDeletions += file.deletions;
+        } catch {
+          // If we can't get the patch for a file, just skip it
+        }
+      }
+
+      return {
+        totalFiles: files.length,
+        totalAdditions,
+        totalDeletions,
+        hasChanges: files.length > 0,
+        files,
+      };
+    } catch {
+      return empty;
+    }
   };
 
   // #endregion
@@ -644,21 +924,29 @@ export class FleetManager {
       }
     }
 
-    if (!ticket.columnId) {
-      this.moveTicketToColumn(ticketId, 'backlog');
-    }
-
     this.updateTicket(ticketId, { supervisorStatus: 'running' });
     this.sendToWindow('fleet:supervisor-status', ticketId, 'running');
 
     // Create or reuse sandbox
     let sandbox: SandboxManager;
     let supervisorEntry = this.supervisors.get(ticketId);
+    let workspaceDir = project.workspaceDir;
 
     if (supervisorEntry) {
       sandbox = supervisorEntry.sandbox;
     } else {
       const taskId = nanoid();
+
+      // Create worktree if configured on the ticket
+      let worktreePath: string | undefined;
+      let worktreeName: string | undefined;
+
+      if (ticket.useWorktree && ticket.branch) {
+        worktreeName = generateWorktreeName();
+        worktreePath = await createWorktree(project.workspaceDir, ticket.branch, worktreeName);
+        workspaceDir = worktreePath;
+      }
+
       const task: FleetTask = {
         id: taskId,
         projectId: ticket.projectId,
@@ -666,17 +954,16 @@ export class FleetManager {
         status: { type: 'starting', timestamp: Date.now() },
         createdAt: Date.now(),
         ticketId,
+        branch: ticket.branch,
+        worktreePath,
+        worktreeName,
       };
 
       let readyFired = false;
 
       sandbox = new SandboxManager({
-        ipcLogger: (entry) => {
-          this.sendToWindow('fleet:task-log', taskId, entry);
-        },
-        ipcRawOutput: (data) => {
-          this.sendToWindow('fleet:task-raw-output', taskId, data);
-        },
+        ipcLogger: () => {},
+        ipcRawOutput: () => {},
         onStatusChange: (status) => {
           const taskEntry = this.tasks.get(taskId);
           if (taskEntry) {
@@ -731,7 +1018,7 @@ export class FleetManager {
 
     // Start sandbox if not already running
     if (!supervisorEntry) {
-      sandbox.start({ workspaceDir: project.workspaceDir, sandboxVariant: 'work' });
+      sandbox.start({ workspaceDir, sandboxVariant: 'work' });
     } else {
       // Already running — ensure session exists, then fire onReady
       const sbStatus = sandbox.getStatus();
@@ -817,21 +1104,18 @@ export class FleetManager {
       return;
     }
 
-    void entry.supervisor
-      .startRun(prompt, { sessionId: opts?.sessionId, variables: opts?.variables })
-      .then(
-        (result) => {
-          this.updateTicket(ticketId, {
-            supervisorSessionId: result.sessionId,
-            supervisorRunId: result.runId,
-          });
-        },
-        (error) => {
-          console.error(`[FleetManager] Supervisor start failed for ${ticketId}:`, error);
-          this.updateTicket(ticketId, { supervisorStatus: 'error' });
-          this.sendToWindow('fleet:supervisor-status', ticketId, 'error');
-        }
-      );
+    void entry.supervisor.startRun(prompt, { sessionId: opts?.sessionId, variables: opts?.variables }).then(
+      (result) => {
+        this.updateTicket(ticketId, {
+          supervisorSessionId: result.sessionId,
+        });
+      },
+      (error) => {
+        console.error(`[FleetManager] Supervisor start failed for ${ticketId}:`, error);
+        this.updateTicket(ticketId, { supervisorStatus: 'error' });
+        this.sendToWindow('fleet:supervisor-status', ticketId, 'error');
+      }
+    );
   };
 
   stopSupervisor = async (ticketId: FleetTicketId): Promise<void> => {
@@ -842,7 +1126,7 @@ export class FleetManager {
 
     await entry.supervisor.stop();
     this.stopPlanWatcher(ticketId);
-    this.updateTicket(ticketId, { supervisorStatus: 'idle', supervisorRunId: undefined });
+    this.updateTicket(ticketId, { supervisorStatus: 'idle' });
     this.sendToWindow('fleet:supervisor-status', ticketId, 'idle');
   };
 
@@ -872,7 +1156,6 @@ export class FleetManager {
     const newSessionId = await entry.supervisor.createSession(variables);
     this.updateTicket(ticketId, {
       supervisorSessionId: newSessionId,
-      supervisorRunId: undefined,
       supervisorStatus: 'idle',
     });
     this.sendToWindow('fleet:supervisor-status', ticketId, 'idle');
@@ -892,7 +1175,7 @@ export class FleetManager {
 
     const status = entry.supervisor.getStatus();
 
-    if (status === 'waiting' || status === 'idle' || status === 'error') {
+    if (status === 'idle' || status === 'error') {
       await this.sendUserRunMessage(ticketId, message);
     } else if (status === 'running') {
       // Inject message into running session
@@ -938,9 +1221,8 @@ export class FleetManager {
     try {
       await entry.supervisor.startRun(message, { sessionId, variables });
       const sid = entry.supervisor.getSessionId();
-      const rid = entry.supervisor.getRunId();
       if (sid) {
-        this.updateTicket(ticketId, { supervisorSessionId: sid, supervisorRunId: rid ?? undefined });
+        this.updateTicket(ticketId, { supervisorSessionId: sid });
       }
     } catch (error) {
       console.error(`[FleetManager] Supervisor message failed for ${ticketId}:`, error);
@@ -998,7 +1280,7 @@ export class FleetManager {
     const patched = tickets.map((ticket) => {
       if (ticket.supervisorStatus === 'running') {
         dirty = true;
-        return { ...ticket, supervisorStatus: 'idle' as const, supervisorRunId: undefined };
+        return { ...ticket, supervisorStatus: 'idle' as const };
       }
       return ticket;
     });
@@ -1030,90 +1312,7 @@ export class FleetManager {
 
   // #region Tasks (in-memory sandboxes + persisted records)
 
-  submitTask = async (
-    projectId: FleetProjectId,
-    taskDescription: string,
-    options: FleetTaskSubmitOptions
-  ): Promise<FleetTask> => {
-    const project = this.getProjects().find((p) => p.id === projectId);
-    if (!project) {
-      throw new Error(`Project not found: ${projectId}`);
-    }
-
-    const taskId = nanoid();
-    let workspaceDir = project.workspaceDir;
-    let worktreePath: string | undefined;
-    let worktreeName: string | undefined;
-
-    if (options.useWorktree && options.branch) {
-      worktreeName = generateWorktreeName();
-      worktreePath = await createWorktree(project.workspaceDir, options.branch, worktreeName);
-      workspaceDir = worktreePath;
-    }
-
-    const task: FleetTask = {
-      id: taskId,
-      projectId,
-      taskDescription,
-      status: { type: 'starting', timestamp: Date.now() },
-      createdAt: Date.now(),
-      branch: options.branch,
-      worktreePath,
-      worktreeName,
-    };
-
-    const sandbox = new SandboxManager({
-      ipcLogger: (entry) => {
-        this.sendToWindow('fleet:task-log', taskId, entry);
-      },
-      ipcRawOutput: (data) => {
-        this.sendToWindow('fleet:task-raw-output', taskId, data);
-      },
-      onStatusChange: (status) => {
-        const existing = this.tasks.get(taskId);
-        if (existing) {
-          const patch: Partial<FleetTask> = { status };
-          if (status.type === 'running') {
-            patch.lastUrls = {
-              uiUrl: status.data.uiUrl,
-              codeServerUrl: status.data.codeServerUrl,
-              noVncUrl: status.data.noVncUrl,
-            };
-          }
-          existing.task = { ...existing.task, ...patch };
-          this.persistTask(existing.task);
-        }
-        this.sendToWindow('fleet:task-status', taskId, status);
-
-        if (status.type === 'running') {
-          void this.initializeTaskSession(taskId, status.data.wsUrl, taskDescription);
-        }
-      },
-    });
-
-    this.tasks.set(taskId, { task, sandbox });
-    this.persistTask(task);
-
-    sandbox.start({
-      workspaceDir,
-      sandboxVariant: 'work',
-    });
-
-    return task;
-  };
-
-  getTasks = (): FleetTask[] => {
-    const merged = new Map<FleetTaskId, FleetTask>();
-    for (const task of this.getPersistedTasks()) {
-      merged.set(task.id, task);
-    }
-    for (const [id, entry] of this.tasks) {
-      merged.set(id, entry.task);
-    }
-    return [...merged.values()];
-  };
-
-  stopTask = async (taskId: FleetTaskId): Promise<void> => {
+  private stopTask = async (taskId: FleetTaskId): Promise<void> => {
     const entry = this.tasks.get(taskId);
     if (!entry) {
       return;
@@ -1130,7 +1329,7 @@ export class FleetManager {
     await entry.sandbox.stop();
   };
 
-  removeTask = async (taskId: FleetTaskId): Promise<void> => {
+  private removeTask = async (taskId: FleetTaskId): Promise<void> => {
     const entry = this.tasks.get(taskId);
     if (!entry) {
       return;
@@ -1188,13 +1387,13 @@ export class FleetManager {
         blockedBy: (raw.blockedBy as FleetTicketId[]) ?? [],
         createdAt: (raw.createdAt as number) ?? Date.now(),
         updatedAt: (raw.updatedAt as number) ?? Date.now(),
-        columnId: (raw.columnId as FleetColumnId | null) ?? null,
+        columnId: (raw.columnId as FleetColumnId) ?? 'backlog',
         checklist: (raw.checklist as Record<FleetColumnId, FleetChecklistItem[]>) ?? {},
       };
 
       // Handle legacy checklist format (array → record)
       if (Array.isArray(ticket.checklist)) {
-        const targetColumn = ticket.columnId ?? 'backlog';
+        const targetColumn = ticket.columnId;
         const oldChecklist = ticket.checklist as unknown as FleetChecklistItem[];
         ticket.checklist = oldChecklist.length > 0 ? { [targetColumn]: oldChecklist } : {};
       }
@@ -1351,14 +1550,6 @@ export const createFleetManager = (arg: {
   ipc.handle('fleet:remove-project', (_, id) => fleetManager.removeProject(id));
   ipc.handle('fleet:check-git-repo', (_, workspaceDir) => checkGitRepo(workspaceDir));
 
-  // Task handlers
-  ipc.handle('fleet:submit-task', (_, projectId, taskDescription, options) =>
-    fleetManager.submitTask(projectId, taskDescription, options)
-  );
-  ipc.handle('fleet:get-tasks', () => fleetManager.getTasks());
-  ipc.handle('fleet:stop-task', (_, taskId) => fleetManager.stopTask(taskId));
-  ipc.handle('fleet:remove-task', (_, taskId) => fleetManager.removeTask(taskId));
-
   // Ticket handlers
   ipc.handle('fleet:add-ticket', (_, ticket) => fleetManager.addTicket(ticket));
   ipc.handle('fleet:update-ticket', (_, id, patch) => fleetManager.updateTicket(id, patch));
@@ -1387,6 +1578,7 @@ export const createFleetManager = (arg: {
   ipc.handle('fleet:open-artifact-external', (_, ticketId, relativePath) =>
     fleetManager.openArtifactExternal(ticketId, relativePath)
   );
+  ipc.handle('fleet:get-files-changed', (_, ticketId) => fleetManager.getFilesChanged(ticketId));
 
   // Supervisor handlers
   ipc.handle('fleet:ensure-supervisor-infra', async (_, ticketId) => {
@@ -1397,9 +1589,7 @@ export const createFleetManager = (arg: {
   ipc.handle('fleet:send-supervisor-message', (_, ticketId, message) =>
     fleetManager.sendSupervisorMessage(ticketId, message)
   );
-  ipc.handle('fleet:reset-supervisor-session', (_, ticketId) =>
-    fleetManager.resetSupervisorSession(ticketId)
-  );
+  ipc.handle('fleet:reset-supervisor-session', (_, ticketId) => fleetManager.resetSupervisorSession(ticketId));
 
   const cleanup = async () => {
     await fleetManager.exit();
@@ -1407,10 +1597,6 @@ export const createFleetManager = (arg: {
     ipcMain.removeHandler('fleet:update-project');
     ipcMain.removeHandler('fleet:remove-project');
     ipcMain.removeHandler('fleet:check-git-repo');
-    ipcMain.removeHandler('fleet:submit-task');
-    ipcMain.removeHandler('fleet:get-tasks');
-    ipcMain.removeHandler('fleet:stop-task');
-    ipcMain.removeHandler('fleet:remove-task');
     ipcMain.removeHandler('fleet:add-ticket');
     ipcMain.removeHandler('fleet:update-ticket');
     ipcMain.removeHandler('fleet:remove-ticket');
@@ -1424,6 +1610,7 @@ export const createFleetManager = (arg: {
     ipcMain.removeHandler('fleet:list-artifacts');
     ipcMain.removeHandler('fleet:read-artifact');
     ipcMain.removeHandler('fleet:open-artifact-external');
+    ipcMain.removeHandler('fleet:get-files-changed');
     ipcMain.removeHandler('fleet:ensure-supervisor-infra');
     ipcMain.removeHandler('fleet:start-supervisor');
     ipcMain.removeHandler('fleet:stop-supervisor');

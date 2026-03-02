@@ -10,14 +10,12 @@ import { fleetApi } from './state';
 
 const SUPERVISOR_STATUS_COLORS: Record<string, string> = {
   running: 'text-green-400 bg-green-400/10',
-  waiting: 'text-blue-400 bg-blue-400/10',
   error: 'text-red-400 bg-red-400/10',
   idle: 'text-fg-muted bg-fg-muted/10',
 };
 
 const SUPERVISOR_STATUS_LABELS: Record<string, string> = {
   running: 'Running',
-  waiting: 'Waiting',
   error: 'Error',
   idle: 'Idle',
 };

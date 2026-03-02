@@ -1,12 +1,12 @@
 import { objectEquals } from '@observ33r/object-equals';
-import { Terminal } from '@xterm/xterm';
 import { atom, computed, map } from 'nanostores';
 
-import { DEFAULT_XTERM_OPTIONS, STATUS_POLL_INTERVAL_MS } from '@/renderer/constants';
+import { STATUS_POLL_INTERVAL_MS } from '@/renderer/constants';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import type {
   ArtifactFileContent,
   ArtifactFileEntry,
+  DiffResponse,
   FleetChecklistItem,
   FleetColumnId,
   FleetPipeline,
@@ -16,7 +16,6 @@ import type {
   FleetSupervisorStatus,
   FleetTask,
   FleetTaskId,
-  FleetTaskSubmitOptions,
   FleetTicket,
   FleetTicketId,
   GitRepoInfo,
@@ -38,19 +37,11 @@ export const $fleetTickets = map<Record<FleetTicketId, FleetTicket>>({});
 export const $fleetPipeline = atom<FleetPipeline | null>(null);
 
 /**
- * Which fleet view is active: dashboard = no selection, project = project detail, task = task sandbox view, ticket = ticket detail.
+ * Which fleet view is active: dashboard = no selection, project = project detail, ticket = ticket detail.
  */
 export const $fleetView = atom<
-  | { type: 'dashboard' }
-  | { type: 'project'; projectId: FleetProjectId }
-  | { type: 'task'; taskId: FleetTaskId }
-  | { type: 'ticket'; ticketId: FleetTicketId }
+  { type: 'dashboard' } | { type: 'project'; projectId: FleetProjectId } | { type: 'ticket'; ticketId: FleetTicketId }
 >({ type: 'dashboard' });
-
-/**
- * Per-task xterm instances for log output.
- */
-export const $fleetTaskXTerms = map<Record<FleetTaskId, Terminal>>({});
 
 /**
  * Supervisor chat messages, keyed by ticket ID.
@@ -95,27 +86,6 @@ export const $activeTickets = computed([$fleetTickets, $fleetTasks], (ticketMap,
   });
 });
 
-const initializeTaskTerminal = (id: FleetTaskId): Terminal => {
-  const existing = $fleetTaskXTerms.get()[id];
-  if (existing) {
-    return existing;
-  }
-  const xterm = new Terminal({ ...DEFAULT_XTERM_OPTIONS, disableStdin: true });
-  $fleetTaskXTerms.setKey(id, xterm);
-  return xterm;
-};
-
-const teardownTaskTerminal = (id: FleetTaskId): void => {
-  const xterm = $fleetTaskXTerms.get()[id];
-  if (!xterm) {
-    return;
-  }
-  xterm.dispose();
-  const current = { ...$fleetTaskXTerms.get() };
-  delete current[id];
-  $fleetTaskXTerms.set(current);
-};
-
 export const fleetApi = {
   // Projects
   addProject: (project: Omit<FleetProject, 'id' | 'createdAt'>): Promise<FleetProject> => {
@@ -131,33 +101,6 @@ export const fleetApi = {
   // Git
   checkGitRepo: (workspaceDir: string): Promise<GitRepoInfo> => {
     return emitter.invoke('fleet:check-git-repo', workspaceDir);
-  },
-
-  // Tasks
-  submitTask: async (
-    projectId: FleetProjectId,
-    taskDescription: string,
-    options: FleetTaskSubmitOptions = {}
-  ): Promise<FleetTask> => {
-    const task = await emitter.invoke('fleet:submit-task', projectId, taskDescription, options);
-    initializeTaskTerminal(task.id);
-    $fleetTasks.setKey(task.id, task);
-    return task;
-  },
-  stopTask: (taskId: FleetTaskId): Promise<void> => {
-    return emitter.invoke('fleet:stop-task', taskId);
-  },
-  removeTask: async (taskId: FleetTaskId): Promise<void> => {
-    await emitter.invoke('fleet:remove-task', taskId);
-    teardownTaskTerminal(taskId);
-    const current = { ...$fleetTasks.get() };
-    delete current[taskId];
-    $fleetTasks.set(current);
-    // If viewing this task, go back
-    const view = $fleetView.get();
-    if (view.type === 'task' && view.taskId === taskId) {
-      $fleetView.set({ type: 'dashboard' });
-    }
   },
 
   // Tickets
@@ -265,6 +208,9 @@ export const fleetApi = {
   openArtifactExternal: (ticketId: FleetTicketId, relativePath: string): Promise<void> => {
     return emitter.invoke('fleet:open-artifact-external', ticketId, relativePath);
   },
+  getFilesChanged: (ticketId: FleetTicketId): Promise<DiffResponse> => {
+    return emitter.invoke('fleet:get-files-changed', ticketId);
+  },
 
   // Navigation
   goToDashboard: (): void => {
@@ -275,37 +221,16 @@ export const fleetApi = {
     void fleetApi.fetchTickets(projectId);
     void fleetApi.getPipeline(projectId);
   },
-  goToTask: (taskId: FleetTaskId): void => {
-    $fleetView.set({ type: 'task', taskId });
-  },
   goToTicket: (ticketId: FleetTicketId): void => {
     $fleetView.set({ type: 'ticket', ticketId });
   },
 };
 
 const listen = () => {
-  // Eagerly fetch all tasks when we receive an event for an unknown task ID.
-  const fetchMissingTask = async (taskId: FleetTaskId) => {
-    const tasks = await emitter.invoke('fleet:get-tasks');
-    const newMap: Record<FleetTaskId, FleetTask> = {};
-    for (const task of tasks) {
-      newMap[task.id] = task;
-    }
-    if (!objectEquals($fleetTasks.get(), newMap)) {
-      $fleetTasks.set(newMap);
-    }
-    return newMap[taskId];
-  };
-
   ipc.on('fleet:task-status', (taskId, status) => {
     const existing = $fleetTasks.get()[taskId];
     if (existing) {
       $fleetTasks.setKey(taskId, { ...existing, status });
-    } else {
-      void fetchMissingTask(taskId);
-    }
-    if (status.type === 'exited') {
-      teardownTaskTerminal(taskId);
     }
   });
 
@@ -313,14 +238,7 @@ const listen = () => {
     const existing = $fleetTasks.get()[taskId];
     if (existing) {
       $fleetTasks.setKey(taskId, { ...existing, sessionId });
-    } else {
-      void fetchMissingTask(taskId);
     }
-  });
-
-  ipc.on('fleet:task-raw-output', (taskId, data) => {
-    const xterm = $fleetTaskXTerms.get()[taskId];
-    xterm?.write(data);
   });
 
   ipc.on('fleet:supervisor-status', (ticketId, status: FleetSupervisorStatus) => {
@@ -334,17 +252,6 @@ const listen = () => {
     const existing = $supervisorMessages.get()[ticketId] ?? [];
     $supervisorMessages.setKey(ticketId, [...existing, message]);
   });
-
-  const pollTasks = async () => {
-    const tasks = await emitter.invoke('fleet:get-tasks');
-    const newMap: Record<FleetTaskId, FleetTask> = {};
-    for (const task of tasks) {
-      newMap[task.id] = task;
-    }
-    if (!objectEquals($fleetTasks.get(), newMap)) {
-      $fleetTasks.set(newMap);
-    }
-  };
 
   const pollTickets = async () => {
     // Re-fetch tickets for the current project view
@@ -366,7 +273,6 @@ const listen = () => {
     }
   };
 
-  setInterval(pollTasks, STATUS_POLL_INTERVAL_MS);
   setInterval(pollTickets, STATUS_POLL_INTERVAL_MS);
 };
 

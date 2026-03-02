@@ -4,31 +4,33 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   PiArrowLeftBold,
   PiArrowsClockwiseBold,
-  PiPlusBold,
+  PiCodeBold,
   PiMonitorBold,
   PiPencilSimpleBold,
   PiPlayFill,
+  PiGitBranchBold,
+  PiPlusBold,
+  PiRobotBold,
   PiStopFill,
   PiTrashBold,
 } from 'react-icons/pi';
 
+import { CodeSplitLayout } from '@/renderer/common/CodeSplitLayout';
 import { Webview } from '@/renderer/common/Webview';
 import { cn, IconButton, Spinner } from '@/renderer/ds';
+import { FloatingWidget } from '@/renderer/features/Omni/FloatingWidget';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { FleetTicketId } from '@/shared/types';
 
-import {
-  COLUMN_BADGE_COLORS,
-  TICKET_PRIORITY_COLORS,
-  TICKET_PRIORITY_LABELS,
-} from './fleet-constants';
+import { COLUMN_BADGE_COLORS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './fleet-constants';
 import { FleetTicketArtifactsTab } from './FleetTicketArtifactsTab';
 import { FleetTicketOverviewTab } from './FleetTicketOverviewTab';
 import { FleetTicketPlanTab } from './FleetTicketPlanTab';
+import { FleetTicketPRTab } from './FleetTicketPRTab';
 import { $fleetPipeline, $fleetTasks, $fleetTickets, fleetApi } from './state';
 
-type TicketTab = 'Chat' | 'Overview' | 'Plan' | 'Artifacts';
-const TABS: TicketTab[] = ['Chat', 'Overview', 'Plan', 'Artifacts'];
+type TicketTab = 'Chat' | 'Overview' | 'Plan' | 'PR' | 'Artifacts';
+const TABS: TicketTab[] = ['Chat', 'Overview', 'Plan', 'PR', 'Artifacts'];
 
 export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }) => {
   const tickets = useStore($fleetTickets);
@@ -55,31 +57,45 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
     return t?.status.type === 'running' || t?.status.type === 'starting' ? t : undefined;
   }, [ticket, tasks]);
 
-  const supervisorUiUrl = useMemo(() => {
+  const supervisorTask = useMemo(() => {
     if (!ticket?.supervisorTaskId) {
       return undefined;
     }
-    const task = tasks[ticket.supervisorTaskId];
-    // Only use the URL when the sandbox is actively running — the omniagents
-    // server inside the container must be alive for the UI to load.
-    if (task?.status.type !== 'running') {
-      return undefined;
-    }
-    const baseUrl = task.status.data.uiUrl;
+    return tasks[ticket.supervisorTaskId];
+  }, [ticket, tasks]);
+
+  const runningData = supervisorTask?.status.type === 'running' ? supervisorTask.status.data : undefined;
+  const isContainerLive = supervisorTask?.status.type === 'running' || supervisorTask?.status.type === 'starting';
+
+  const theme = store.theme ?? 'tokyo-night';
+
+  const supervisorUiUrl = useMemo(() => {
+    const baseUrl = runningData?.uiUrl;
     if (!baseUrl) {
       return undefined;
     }
     const url = new URL(baseUrl, window.location.origin);
-    if (ticket.supervisorSessionId) {
+    if (ticket?.supervisorSessionId) {
       url.searchParams.set('session', ticket.supervisorSessionId);
     }
-    const theme = store.theme ?? 'tokyo-night';
     if (theme !== 'default') {
       url.searchParams.set('theme', theme);
     }
     url.searchParams.set('minimal', 'true');
     return url.toString();
-  }, [ticket, tasks, store.theme]);
+  }, [runningData, ticket?.supervisorSessionId, theme]);
+
+  const codeServerUrl = useMemo(() => {
+    const baseUrl = runningData?.codeServerUrl ?? supervisorTask?.lastUrls?.codeServerUrl;
+    if (!baseUrl) {
+      return undefined;
+    }
+    const url = new URL(baseUrl, window.location.origin);
+    url.searchParams.set('folder', '/home/user/workspace');
+    return url.toString();
+  }, [runningData, supervisorTask?.lastUrls?.codeServerUrl]);
+
+  const noVncUrl = runningData?.noVncUrl ?? supervisorTask?.lastUrls?.noVncUrl;
 
   const handleBack = useCallback(() => {
     if (ticket) {
@@ -88,12 +104,6 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
       fleetApi.goToDashboard();
     }
   }, [ticket]);
-
-  const handleOpenSandbox = useCallback(() => {
-    if (activeTask) {
-      fleetApi.goToTask(activeTask.id);
-    }
-  }, [activeTask]);
 
   const handleStartEditTitle = useCallback(() => {
     if (ticket) {
@@ -170,7 +180,6 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
 
   const supervisorStatus = ticket.supervisorStatus;
   const isRunning = supervisorStatus === 'running';
-  const isWaiting = supervisorStatus === 'waiting';
   const isError = supervisorStatus === 'error';
   const isIdle = !supervisorStatus || supervisorStatus === 'idle';
 
@@ -224,17 +233,19 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
             {TICKET_PRIORITY_LABELS[ticket.priority]}
           </span>
 
+          {ticket.branch && (
+            <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 text-purple-400 bg-purple-400/10">
+              <PiGitBranchBold size={10} />
+              {ticket.branch}
+              {ticket.useWorktree && ' (worktree)'}
+            </span>
+          )}
+
           {/* Inline supervisor status */}
           {isRunning && (
             <span className="flex items-center gap-1 text-[10px] text-green-400 font-medium shrink-0">
               <PiArrowsClockwiseBold size={10} className="animate-spin" />
               Running
-            </span>
-          )}
-          {isWaiting && (
-            <span className="flex items-center gap-1 text-[10px] text-blue-400 font-medium shrink-0">
-              <span className="size-1.5 rounded-full bg-blue-400" />
-              Waiting
             </span>
           )}
           {isError && (
@@ -247,28 +258,13 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
 
         {/* Actions */}
         {activeTask && (
-          <IconButton
-            aria-label="New Chat"
-            icon={<PiPlusBold />}
-            size="sm"
-            onClick={handleResetSession}
-          />
-        )}
-        {activeTask && (
-          <IconButton
-            aria-label="Open Sandbox"
-            icon={<PiMonitorBold />}
-            size="sm"
-            onClick={handleOpenSandbox}
-          />
+          <IconButton aria-label="New Chat" icon={<PiPlusBold />} size="sm" onClick={handleResetSession} />
         )}
         {isIdle && (
           <IconButton aria-label="Start Supervisor" icon={<PiPlayFill />} size="sm" onClick={handleStartSupervisor} />
         )}
-        {isError && (
-          <IconButton aria-label="Retry" icon={<PiPlayFill />} size="sm" onClick={handleStartSupervisor} />
-        )}
-        {(isRunning || isWaiting) && (
+        {isError && <IconButton aria-label="Retry" icon={<PiPlayFill />} size="sm" onClick={handleStartSupervisor} />}
+        {isRunning && (
           <IconButton aria-label="Stop Supervisor" icon={<PiStopFill />} size="sm" onClick={handleStopSupervisor} />
         )}
         <IconButton aria-label="Delete ticket" icon={<PiTrashBold />} size="sm" onClick={handleDelete} />
@@ -297,24 +293,13 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
 
       {/* Tab content */}
       {activeTab === 'Chat' && (
-        <div className="flex-1 min-h-0 relative">
-          {supervisorUiUrl ? (
-            <Webview src={supervisorUiUrl} showUnavailable={false} />
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full gap-4">
-              {isRunning ? (
-                <>
-                  <Spinner size="md" />
-                  <p className="text-sm text-fg-muted">Loading chat interface...</p>
-                </>
-              ) : (
-                <p className="text-sm text-fg-muted">
-                  {isWaiting ? 'Supervisor is waiting — click play to resume.' : 'Start the supervisor to begin chatting.'}
-                </p>
-              )}
-            </div>
-          )}
-        </div>
+        <FleetTicketChatTab
+          supervisorUiUrl={supervisorUiUrl}
+          codeServerUrl={codeServerUrl}
+          noVncUrl={noVncUrl}
+          isContainerLive={!!isContainerLive}
+          isRunning={isRunning}
+        />
       )}
       {activeTab === 'Plan' && (
         <div className="flex-1 min-h-0 overflow-y-auto p-6">
@@ -326,6 +311,11 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
           <FleetTicketOverviewTab ticket={ticket} pipeline={pipeline} />
         </div>
       )}
+      {activeTab === 'PR' && (
+        <div className="flex-1 min-h-0">
+          <FleetTicketPRTab ticketId={ticketId} />
+        </div>
+      )}
       {activeTab === 'Artifacts' && (
         <div className="flex-1 min-h-0">
           <FleetTicketArtifactsTab ticketId={ticketId} />
@@ -335,3 +325,106 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
   );
 });
 FleetTicketDetail.displayName = 'FleetTicketDetail';
+
+type MainView = 'agent' | 'code' | 'vnc';
+
+type ChatTabProps = {
+  supervisorUiUrl: string | undefined;
+  codeServerUrl: string | undefined;
+  noVncUrl: string | undefined;
+  isContainerLive: boolean;
+  isRunning: boolean;
+};
+
+const FleetTicketChatTab = memo(
+  ({ supervisorUiUrl, codeServerUrl, noVncUrl, isContainerLive, isRunning }: ChatTabProps) => {
+    const [mainView, setMainView] = useState<MainView>('agent');
+    const [splitSrc, setSplitSrc] = useState<string | null>(null);
+
+    const views = useMemo(
+      () => [
+        { key: 'agent' as const, label: 'Agent', icon: PiRobotBold, src: supervisorUiUrl },
+        { key: 'code' as const, label: 'VS Code', icon: PiCodeBold, src: codeServerUrl },
+        { key: 'vnc' as const, label: "Omni's PC", icon: PiMonitorBold, src: noVncUrl },
+      ],
+      [supervisorUiUrl, codeServerUrl, noVncUrl]
+    );
+
+    const switchTo = useCallback(
+      (view: MainView) => {
+        const src = views.find((v) => v.key === view)?.src;
+        setSplitSrc((prev) => (prev && prev === src ? null : prev));
+        setMainView(view);
+      },
+      [views]
+    );
+
+    const handleSetAgent = useCallback(() => switchTo('agent'), [switchTo]);
+    const handleSetCode = useCallback(() => switchTo('code'), [switchTo]);
+    const handleSetVnc = useCallback(() => switchTo('vnc'), [switchTo]);
+
+    const setters: Record<MainView, () => void> = useMemo(
+      () => ({ agent: handleSetAgent, code: handleSetCode, vnc: handleSetVnc }),
+      [handleSetAgent, handleSetCode, handleSetVnc]
+    );
+
+    const handleToggleSplit = useCallback((src: string | undefined) => {
+      if (!src) {
+        return;
+      }
+      setSplitSrc((prev) => (prev === src ? null : src));
+    }, []);
+
+    const [overlayKey, setOverlayKey] = useState<string | null>(null);
+    const handleOpenOverlay = useCallback((key: string) => () => setOverlayKey(key), []);
+    const handleCloseOverlay = useCallback(() => setOverlayKey(null), []);
+
+    const currentView = views.find((v) => v.key === mainView);
+    const mainSrc = currentView?.src;
+    const pills = views.filter((v) => v.key !== mainView && v.src);
+    const showWebview = mainSrc && isContainerLive;
+
+    return (
+      <div className="flex-1 min-h-0 relative">
+        {showWebview ? (
+          <div className="h-full relative">
+            {splitSrc && mainSrc ? (
+              <CodeSplitLayout codeServerSrc={mainSrc} uiSrc={splitSrc} />
+            ) : (
+              <Webview src={mainSrc} showUnavailable={false} />
+            )}
+            {pills.map((pill, i) => (
+              <FloatingWidget
+                key={pill.key}
+                src={pill.src!}
+                label={pill.label}
+                icon={pill.icon}
+                overlayOpen={overlayKey === pill.key}
+                onOpenOverlay={handleOpenOverlay(pill.key)}
+                onCloseOverlay={handleCloseOverlay}
+                onClick={setters[pill.key]}
+                className={i === 0 ? 'top-[82%]' : 'top-[88%]'}
+                defaultPreviewSize={pill.key === 'code' ? { width: 560, height: 380 } : undefined}
+                resizable
+                onToggleSplit={handleToggleSplit.bind(null, pill.src)}
+                splitOpen={splitSrc === pill.src}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full gap-4">
+            {isContainerLive ? (
+              <>
+                <Spinner size="md" />
+                <p className="text-sm text-fg-muted">Loading sandbox...</p>
+              </>
+            ) : (
+              <p className="text-sm text-fg-muted">Start the supervisor to begin chatting.</p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+);
+FleetTicketChatTab.displayName = 'FleetTicketChatTab';

@@ -198,7 +198,7 @@ export const schema: Schema<StoreData> = {
         createdAt: { type: 'number' },
         updatedAt: { type: 'number' },
         // Kanban fields
-        columnId: { type: ['string', 'null'] },
+        columnId: { type: 'string' },
         currentPhaseId: { type: ['string', 'null'] },
         phases: { type: 'array', default: [] },
         checklist: { type: ['object', 'array'], default: {} },
@@ -371,7 +371,7 @@ export type FleetChecklistItemId = string;
 export type FleetTicketPriority = 'low' | 'medium' | 'high' | 'critical';
 
 /** Supervisor agent state for a ticket. */
-export type FleetSupervisorStatus = 'idle' | 'running' | 'waiting' | 'error';
+export type FleetSupervisorStatus = 'idle' | 'running' | 'error';
 
 // --- Pipeline & columns ---
 
@@ -422,17 +422,21 @@ export type FleetTicket = {
   updatedAt: number;
 
   // Kanban state
-  /** Current column. null = not yet placed in pipeline. */
-  columnId: FleetColumnId | null;
+  /** Current column in the kanban pipeline. */
+  columnId: FleetColumnId;
   /** Per-column checklist items. Keyed by column ID. */
   checklist: Record<FleetColumnId, FleetChecklistItem[]>;
+
+  // Git settings
+  /** Git branch to work on. If set with useWorktree, a worktree is created from this branch. */
+  branch?: string;
+  /** Whether to create an isolated git worktree for this ticket's sandbox. */
+  useWorktree?: boolean;
 
   // Supervisor state
   /** Persistent supervisor session ID (survives across start_run calls). */
   supervisorSessionId?: string;
-  /** Current run_id for the active supervisor run (null when idle). */
-  supervisorRunId?: string;
-  /** Supervisor state: idle (no run), running (active run), waiting (run ended, awaiting user). */
+  /** Supervisor state: idle (no run), running (active run), error. */
   supervisorStatus?: FleetSupervisorStatus;
   /** Task ID for the supervisor's sandbox. */
   supervisorTaskId?: FleetTaskId;
@@ -472,17 +476,30 @@ export type ArtifactFileContent = {
   size: number;
 };
 
+export type FileDiff = {
+  path: string;
+  oldPath?: string;
+  status: 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'untracked';
+  additions: number;
+  deletions: number;
+  isBinary: boolean;
+  patch?: string;
+};
+
+export type DiffResponse = {
+  totalFiles: number;
+  totalAdditions: number;
+  totalDeletions: number;
+  hasChanges: boolean;
+  files: FileDiff[];
+};
+
 export type FleetSessionMessage = {
   id: number;
   role: 'user' | 'assistant' | 'tool_call' | 'tool_result';
   content: string;
   toolName?: string;
   createdAt: string;
-};
-
-export type FleetTaskSubmitOptions = {
-  branch?: string;
-  useWorktree?: boolean;
 };
 
 export type GitRepoInfo = { isGitRepo: true; branches: string[]; currentBranch: string } | { isGitRepo: false };
@@ -628,10 +645,6 @@ type FleetIpcEvents = Namespaced<
     'update-project': (id: FleetProjectId, patch: Partial<Omit<FleetProject, 'id' | 'createdAt'>>) => void;
     'remove-project': (id: FleetProjectId) => void;
     'check-git-repo': (workspaceDir: string) => GitRepoInfo;
-    'submit-task': (projectId: FleetProjectId, taskDescription: string, options: FleetTaskSubmitOptions) => FleetTask;
-    'get-tasks': () => FleetTask[];
-    'stop-task': (taskId: FleetTaskId) => void;
-    'remove-task': (taskId: FleetTaskId) => void;
     'add-ticket': (
       ticket: Omit<FleetTicket, 'id' | 'createdAt' | 'updatedAt' | 'columnId' | 'checklist'>
     ) => FleetTicket;
@@ -647,6 +660,7 @@ type FleetIpcEvents = Namespaced<
     'list-artifacts': (ticketId: FleetTicketId, dirPath?: string) => ArtifactFileEntry[];
     'read-artifact': (ticketId: FleetTicketId, relativePath: string) => ArtifactFileContent;
     'open-artifact-external': (ticketId: FleetTicketId, relativePath: string) => void;
+    'get-files-changed': (ticketId: FleetTicketId) => DiffResponse;
     // Supervisor operations
     'ensure-supervisor-infra': (ticketId: FleetTicketId) => void;
     'start-supervisor': (ticketId: FleetTicketId) => void;
@@ -776,8 +790,6 @@ type FleetIpcRendererEvents = Namespaced<
   {
     'task-status': [FleetTaskId, WithTimestamp<SandboxProcessStatus>];
     'task-session': [FleetTaskId, string];
-    'task-log': [FleetTaskId, WithTimestamp<LogEntry>];
-    'task-raw-output': [FleetTaskId, string];
     'supervisor-status': [FleetTicketId, FleetSupervisorStatus];
     'supervisor-message': [FleetTicketId, FleetSessionMessage];
   }

@@ -15,7 +15,7 @@ import type { IpcEvents, IpcRendererEvents, LogEntry, OmniInstallProcessStatus, 
 
 const PYTHON_VERSION = '3.11';
 const EXTRA_INDEX_URL = 'https://pypi.fury.io/ericmichael/';
-const OMNI_CODE_VERSION = '0.4.31';
+const OMNI_CODE_VERSION = '0.4.32';
 
 export class OmniInstallManager {
   private status: WithTimestamp<OmniInstallProcessStatus>;

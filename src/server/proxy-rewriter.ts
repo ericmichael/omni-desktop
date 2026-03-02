@@ -115,32 +115,6 @@ export const setupProxyRewriter = (fastify: FastifyInstance, wsHandler: WsHandle
       });
     }
   }, 0);
-
-  // Fleet tasks: wrap get-tasks to rewrite URLs in all returned tasks.
-  setTimeout(() => {
-    const origHandleMethod = wsHandler['handlers'] as Map<string, (...args: unknown[]) => unknown>;
-    const existingHandler = origHandleMethod.get('fleet:get-tasks');
-    if (existingHandler) {
-      origHandleMethod.set('fleet:get-tasks', async (...handlerArgs: unknown[]) => {
-        const result = (await existingHandler(...handlerArgs)) as Array<Record<string, unknown>> | undefined;
-        if (Array.isArray(result)) {
-          for (const task of result) {
-            const taskId = task.id as string;
-            const status = task.status as Record<string, unknown> | undefined;
-            if (status && status.type === 'running' && status.data) {
-              rewriteStatusUrls(status.data as Record<string, string | undefined>, `fleet-${taskId}`);
-            }
-            // Also rewrite lastUrls if present
-            const lastUrls = task.lastUrls as Record<string, string | undefined> | undefined;
-            if (lastUrls) {
-              rewriteStatusUrls(lastUrls, `fleet-${taskId}`);
-            }
-          }
-        }
-        return result;
-      });
-    }
-  }, 0);
 };
 
 /**
@@ -261,7 +235,11 @@ function handleWsProxy(
       const safeCode = code !== undefined && code >= 1000 && code <= 4999 ? code : 1000;
       socket.close(safeCode, reason);
     } catch {
-      try { socket.terminate(); } catch { /* ignore */ }
+      try {
+        socket.terminate();
+      } catch {
+        /* ignore */
+      }
     }
   };
 

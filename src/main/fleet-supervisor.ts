@@ -125,7 +125,7 @@ export class FleetSupervisor {
       throw new Error('Supervisor has been disposed');
     }
 
-    if (this.status === 'waiting' || this.status === 'idle' || this.status === 'error') {
+    if (this.status === 'idle' || this.status === 'error') {
       // Start a new run continuing the session
       await this.startRun(message, { sessionId: this.sessionId ?? undefined });
       return;
@@ -331,7 +331,7 @@ export class FleetSupervisor {
       if (parsed.method === 'run_end') {
         const reason = (parsed.params?.reason as string) ?? 'completed';
         this.runId = null;
-        this.setStatus('waiting');
+        this.setStatus('idle');
         this.opts.onRunEnd(reason);
         return;
       }
