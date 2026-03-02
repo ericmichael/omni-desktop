@@ -56,7 +56,7 @@ const SidebarProjectItem = memo(
 SidebarProjectItem.displayName = 'SidebarProjectItem';
 
 const SidebarActiveTicketItem = memo(({ entry, isActive }: { entry: ActiveTicketEntry; isActive: boolean }) => {
-  const { ticket, hasLiveTask, currentPhase } = entry;
+  const { ticket, hasLiveTask } = entry;
 
   const handleClick = useCallback(() => {
     fleetApi.goToTicket(ticket.id);
@@ -65,8 +65,7 @@ const SidebarActiveTicketItem = memo(({ entry, isActive }: { entry: ActiveTicket
   const columnLabel = ticket.columnId ? (COLUMN_SHORT_LABELS[ticket.columnId] ?? ticket.columnId) : null;
   const columnBadgeColor = ticket.columnId ? (COLUMN_BADGE_COLORS[ticket.columnId] ?? '') : '';
 
-  const loopRunning = currentPhase?.loop?.status === 'running';
-  const loopLabel = loopRunning ? `${currentPhase.loop.currentIteration}/${currentPhase.loop.maxIterations}` : null;
+  const isRunning = ticket.supervisorStatus === 'running';
 
   return (
     <button
@@ -83,8 +82,7 @@ const SidebarActiveTicketItem = memo(({ entry, isActive }: { entry: ActiveTicket
       )}
       <span className="text-sm truncate flex-1 min-w-0">{ticket.title}</span>
       <div className="flex items-center gap-1.5 shrink-0">
-        {loopLabel && <span className="text-[10px] font-mono text-fg-subtle">{loopLabel}</span>}
-        {hasLiveTask && <span className="size-2 rounded-full bg-green-400 animate-pulse shrink-0" />}
+        {(isRunning || hasLiveTask) && <span className="size-2 rounded-full bg-green-400 animate-pulse shrink-0" />}
       </div>
     </button>
   );

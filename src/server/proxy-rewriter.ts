@@ -65,6 +65,16 @@ export const setupProxyRewriter = (fastify: FastifyInstance, wsHandler: WsHandle
       }
     }
 
+    // Fleet task status: args are [taskId, status]
+    if (channel === 'fleet:task-status') {
+      const taskId = args[0] as string;
+      const status = args[1] as Record<string, unknown> | undefined;
+      if (status && status.type === 'running' && status.data) {
+        const data = status.data as Record<string, string | undefined>;
+        rewriteStatusUrls(data, `fleet-${taskId}`);
+      }
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (originalSendToClient as any)(channel, ...args);
   }) as typeof wsHandler.sendToClient;
@@ -100,6 +110,32 @@ export const setupProxyRewriter = (fastify: FastifyInstance, wsHandler: WsHandle
         const result = (await existingHandler(...handlerArgs)) as Record<string, unknown> | undefined;
         if (result && result.type === 'running' && result.data) {
           rewriteStatusUrls(result.data as Record<string, string | undefined>, `code-${tabId}`);
+        }
+        return result;
+      });
+    }
+  }, 0);
+
+  // Fleet tasks: wrap get-tasks to rewrite URLs in all returned tasks.
+  setTimeout(() => {
+    const origHandleMethod = wsHandler['handlers'] as Map<string, (...args: unknown[]) => unknown>;
+    const existingHandler = origHandleMethod.get('fleet:get-tasks');
+    if (existingHandler) {
+      origHandleMethod.set('fleet:get-tasks', async (...handlerArgs: unknown[]) => {
+        const result = (await existingHandler(...handlerArgs)) as Array<Record<string, unknown>> | undefined;
+        if (Array.isArray(result)) {
+          for (const task of result) {
+            const taskId = task.id as string;
+            const status = task.status as Record<string, unknown> | undefined;
+            if (status && status.type === 'running' && status.data) {
+              rewriteStatusUrls(status.data as Record<string, string | undefined>, `fleet-${taskId}`);
+            }
+            // Also rewrite lastUrls if present
+            const lastUrls = task.lastUrls as Record<string, string | undefined> | undefined;
+            if (lastUrls) {
+              rewriteStatusUrls(lastUrls, `fleet-${taskId}`);
+            }
+          }
         }
         return result;
       });
@@ -199,7 +235,7 @@ function handleWsProxy(
 
   clientSocket.on('message', (data, isBinary) => {
     // Preserve frame type: binary for VNC/noVNC, text for JSON-RPC chat
-    const msg = isBinary ? data : String(data);
+    const msg: string | Buffer = isBinary ? Buffer.from(data as ArrayBuffer) : String(data);
     if (upstreamSocket.readyState === WsWebSocket.OPEN) {
       upstreamSocket.send(msg);
     } else {

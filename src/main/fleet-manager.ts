@@ -9,10 +9,9 @@ import { promisify } from 'util';
 
 import { getArtifactsDir, getContainerArtifactsDir, getContainerPlanPath } from '@/lib/fleet-plan-file';
 import { getMimeType, isTextMime } from '@/lib/mime-types';
-import type { FleetLoopCallbacks } from '@/main/fleet-loop';
-import { FleetLoopController } from '@/main/fleet-loop';
 import { FleetPlanSync } from '@/main/fleet-plan-sync';
-import { buildNudgePrompt, formatChecklist, interpolatePromptTemplate } from '@/main/fleet-prompt-builder';
+import { FleetSupervisor } from '@/main/fleet-supervisor';
+import { buildSupervisorPrompt } from '@/main/fleet-supervisor-prompt';
 import { SandboxManager } from '@/main/sandbox-manager';
 import { getOmniConfigDir, getWorktreesDir } from '@/main/util';
 import { DEFAULT_PIPELINE } from '@/shared/fleet-defaults';
@@ -21,27 +20,21 @@ import type {
   ArtifactFileEntry,
   FleetChecklistItem,
   FleetChecklistItemId,
-  FleetColumn,
   FleetColumnId,
-  FleetPhase,
-  FleetPhaseId,
-  FleetPhaseStatus,
   FleetPipeline,
   FleetProject,
   FleetProjectId,
-  FleetSentinel,
   FleetSessionMessage,
+  FleetSupervisorStatus,
   FleetTask,
   FleetTaskId,
   FleetTaskSubmitOptions,
   FleetTicket,
   FleetTicketId,
   FleetTicketPriority,
-  FleetTicketStatus,
   GitRepoInfo,
   IpcEvents,
   IpcRendererEvents,
-  SandboxProcessStatus,
   StoreData,
 } from '@/shared/types';
 
@@ -141,119 +134,20 @@ const sendStartRun = async (wsUrl: string, prompt: string, maxRetries = 10, retr
 // #region Name generator
 
 const ADJECTIVES = [
-  'bold',
-  'calm',
-  'cool',
-  'dark',
-  'deep',
-  'dry',
-  'fast',
-  'firm',
-  'flat',
-  'free',
-  'full',
-  'glad',
-  'gold',
-  'good',
-  'gray',
-  'hale',
-  'keen',
-  'kind',
-  'last',
-  'lean',
-  'long',
-  'loud',
-  'mild',
-  'neat',
-  'pale',
-  'pure',
-  'rare',
-  'rich',
-  'ripe',
-  'safe',
-  'slim',
-  'soft',
-  'sure',
-  'tall',
-  'tame',
-  'tidy',
-  'tiny',
-  'true',
-  'vast',
-  'warm',
-  'wide',
-  'wild',
-  'wise',
-  'aged',
-  'airy',
-  'apt',
-  'bare',
-  'blue',
-  'busy',
-  'cold',
+  'bold', 'calm', 'cool', 'dark', 'deep', 'dry', 'fast', 'firm', 'flat', 'free',
+  'full', 'glad', 'gold', 'good', 'gray', 'hale', 'keen', 'kind', 'last', 'lean',
+  'long', 'loud', 'mild', 'neat', 'pale', 'pure', 'rare', 'rich', 'ripe', 'safe',
+  'slim', 'soft', 'sure', 'tall', 'tame', 'tidy', 'tiny', 'true', 'vast', 'warm',
+  'wide', 'wild', 'wise', 'aged', 'airy', 'apt', 'bare', 'blue', 'busy', 'cold',
 ];
 
 const NOUNS = [
-  'ant',
-  'ape',
-  'bat',
-  'bear',
-  'bee',
-  'bird',
-  'boar',
-  'buck',
-  'bull',
-  'calf',
-  'cat',
-  'clam',
-  'cod',
-  'colt',
-  'crab',
-  'crow',
-  'deer',
-  'dog',
-  'dove',
-  'duck',
-  'eagle',
-  'eel',
-  'elk',
-  'fawn',
-  'finch',
-  'fish',
-  'flea',
-  'fly',
-  'fox',
-  'frog',
-  'goat',
-  'goose',
-  'gull',
-  'hare',
-  'hawk',
-  'hen',
-  'hog',
-  'horse',
-  'jay',
-  'lark',
-  'lion',
-  'lynx',
-  'mare',
-  'mink',
-  'mole',
-  'moth',
-  'mule',
-  'newt',
-  'owl',
-  'ox',
-  'pike',
-  'pony',
-  'puma',
-  'ram',
-  'rat',
-  'rook',
-  'seal',
-  'slug',
-  'snail',
-  'swan',
+  'ant', 'ape', 'bat', 'bear', 'bee', 'bird', 'boar', 'buck', 'bull', 'calf',
+  'cat', 'clam', 'cod', 'colt', 'crab', 'crow', 'deer', 'dog', 'dove', 'duck',
+  'eagle', 'eel', 'elk', 'fawn', 'finch', 'fish', 'flea', 'fly', 'fox', 'frog',
+  'goat', 'goose', 'gull', 'hare', 'hawk', 'hen', 'hog', 'horse', 'jay', 'lark',
+  'lion', 'lynx', 'mare', 'mink', 'mole', 'moth', 'mule', 'newt', 'owl', 'ox',
+  'pike', 'pony', 'puma', 'ram', 'rat', 'rook', 'seal', 'slug', 'snail', 'swan',
 ];
 
 const generateWorktreeName = (): string => {
@@ -338,32 +232,9 @@ const removeWorktree = async (workspaceDir: string, worktreePath: string, worktr
 
 // #endregion
 
-// #region Status mapping
-
-/**
- * Map column position to legacy FleetTicketStatus for backwards compat.
- */
-const deriveStatusFromColumn = (columnId: FleetColumnId, pipeline: FleetPipeline): FleetTicketStatus => {
-  const columns = pipeline.columns;
-  const idx = columns.findIndex((c) => c.id === columnId);
-  if (idx === -1) {
-    return 'open';
-  }
-  // First column = open, last column = completed, anything else = in_progress
-  if (idx === 0) {
-    return 'open';
-  }
-  if (idx === columns.length - 1) {
-    return 'completed';
-  }
-  return 'in_progress';
-};
-
-// #endregion
-
 export class FleetManager {
   private tasks = new Map<FleetTaskId, { task: FleetTask; sandbox: SandboxManager }>();
-  private loops = new Map<FleetTicketId, { controller: FleetLoopController; sandbox: SandboxManager }>();
+  private supervisors = new Map<FleetTicketId, { supervisor: FleetSupervisor; sandbox: SandboxManager }>();
   private store: Store<StoreData>;
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   private planSync: FleetPlanSync;
@@ -396,14 +267,14 @@ export class FleetManager {
 
     this.planSync.watchTicket(
       ticketId,
-      (parsedChecklist) => {
+      (event) => {
         const freshTicket = this.getTicketById(ticketId);
         if (!freshTicket) {
           return;
         }
 
         // Diff each column and only update if changed
-        for (const [columnId, items] of Object.entries(parsedChecklist)) {
+        for (const [columnId, items] of Object.entries(event.checklist)) {
           const existing = freshTicket.checklist[columnId] ?? [];
 
           // Quick check: did completion states change?
@@ -425,6 +296,18 @@ export class FleetManager {
               };
             });
             this.updateChecklist(ticketId, columnId, merged);
+          }
+        }
+
+        // Handle column change from frontmatter
+        if (event.column) {
+          const labelToId = new Map<string, string>();
+          for (const col of pipeline.columns) {
+            labelToId.set(col.label.trim().toLowerCase(), col.id);
+          }
+          const newColumnId = labelToId.get(event.column.trim().toLowerCase());
+          if (newColumnId && newColumnId !== freshTicket.columnId) {
+            this.moveTicketToColumn(ticketId, newColumnId);
           }
         }
       },
@@ -495,27 +378,9 @@ export class FleetManager {
     return project?.pipeline ?? DEFAULT_PIPELINE;
   };
 
-  private getColumn = (projectId: FleetProjectId, columnId: FleetColumnId): FleetColumn | undefined => {
+  private getColumn = (projectId: FleetProjectId, columnId: FleetColumnId) => {
     const pipeline = this.getPipeline(projectId);
     return pipeline.columns.find((c) => c.id === columnId);
-  };
-
-  private getNextColumn = (projectId: FleetProjectId, columnId: FleetColumnId): FleetColumn | undefined => {
-    const pipeline = this.getPipeline(projectId);
-    const idx = pipeline.columns.findIndex((c) => c.id === columnId);
-    if (idx === -1 || idx >= pipeline.columns.length - 1) {
-      return undefined;
-    }
-    return pipeline.columns[idx + 1];
-  };
-
-  private getPreviousColumn = (projectId: FleetProjectId, columnId: FleetColumnId): FleetColumn | undefined => {
-    const pipeline = this.getPipeline(projectId);
-    const idx = pipeline.columns.findIndex((c) => c.id === columnId);
-    if (idx <= 0) {
-      return undefined;
-    }
-    return pipeline.columns[idx - 1];
   };
 
   // #endregion
@@ -536,19 +401,13 @@ export class FleetManager {
   };
 
   addTicket = (
-    input: Omit<
-      FleetTicket,
-      'id' | 'createdAt' | 'updatedAt' | 'status' | 'taskId' | 'columnId' | 'currentPhaseId' | 'phases' | 'checklist'
-    >
+    input: Omit<FleetTicket, 'id' | 'createdAt' | 'updatedAt' | 'columnId' | 'checklist'>
   ): FleetTicket => {
     const now = Date.now();
     const ticket: FleetTicket = {
       ...input,
       id: nanoid(),
-      status: 'open',
       columnId: null,
-      currentPhaseId: null,
-      phases: [],
       checklist: {},
       createdAt: now,
       updatedAt: now,
@@ -571,6 +430,14 @@ export class FleetManager {
   };
 
   removeTicket = (id: FleetTicketId): void => {
+    // Stop supervisor if running
+    const supervisorEntry = this.supervisors.get(id);
+    if (supervisorEntry) {
+      void supervisorEntry.supervisor.dispose();
+      void supervisorEntry.sandbox.exit();
+      this.supervisors.delete(id);
+    }
+
     const tickets = this.getTickets().filter((t) => t.id !== id);
     this.setTickets(tickets);
     void this.planSync.removePlan(id);
@@ -594,11 +461,15 @@ export class FleetManager {
     const isBlocked = (ticket: FleetTicket): boolean => {
       return ticket.blockedBy.some((blockerId) => {
         const blocker = ticketMap.get(blockerId);
-        return blocker && blocker.status !== 'completed' && blocker.status !== 'closed';
+        // A ticket is blocked if the blocker is not in the completed column
+        return blocker && blocker.columnId !== 'completed';
       });
     };
 
-    const candidates = tickets.filter((t) => t.status === 'open' && !isBlocked(t));
+    // Candidates: tickets not in any column (backlog) or in backlog column
+    const candidates = tickets.filter(
+      (t) => (t.columnId === null || t.columnId === 'backlog') && !isBlocked(t)
+    );
     candidates.sort((a, b) => {
       const priorityDiff = FleetManager.PRIORITY_ORDER[a.priority] - FleetManager.PRIORITY_ORDER[b.priority];
       if (priorityDiff !== 0) {
@@ -687,162 +558,7 @@ export class FleetManager {
 
   // #endregion
 
-  // #region Phase lifecycle
-
-  private createPhase = (ticket: FleetTicket, column: FleetColumn): FleetPhase => {
-    const existingAttempts = ticket.phases.filter((p) => p.columnId === column.id).length;
-    const phase: FleetPhase = {
-      id: nanoid(),
-      ticketId: ticket.id,
-      columnId: column.id,
-      attempt: existingAttempts + 1,
-      status: 'pending',
-      taskIds: [],
-      loop: {
-        enabled: column.maxIterations > 0,
-        maxIterations: column.maxIterations,
-        currentIteration: 0,
-        status: null,
-      },
-      enteredAt: Date.now(),
-    };
-
-    const pipeline = this.getPipeline(ticket.projectId);
-    const legacyStatus = deriveStatusFromColumn(column.id, pipeline);
-
-    // Seed per-column checklist from column defaults if this column key doesn't exist yet
-    let checklist = ticket.checklist;
-    if (!(column.id in checklist) && column.defaultChecklist.length > 0) {
-      checklist = {
-        ...checklist,
-        [column.id]: column.defaultChecklist.map((item) => ({ ...item, id: `chk-${nanoid()}` })),
-      };
-    }
-
-    this.updateTicket(ticket.id, {
-      columnId: column.id,
-      currentPhaseId: phase.id,
-      phases: [...ticket.phases, phase],
-      checklist,
-      status: legacyStatus,
-      // Sync legacy loop fields
-      loopEnabled: phase.loop.enabled,
-      loopMaxIterations: phase.loop.maxIterations,
-      loopIteration: 0,
-      loopStatus: undefined,
-    });
-
-    // Re-read ticket after update to get fresh data for the event
-    const updated = this.getTicketById(ticket.id);
-    const updatedPhase = updated?.phases.find((p) => p.id === phase.id);
-    if (updatedPhase) {
-      this.sendToWindow('fleet:phase-update', ticket.id, updatedPhase);
-    }
-
-    this.syncPlanFile(ticket.id);
-    return phase;
-  };
-
-  private closeCurrentPhase = (
-    ticket: FleetTicket,
-    status: FleetPhaseStatus,
-    reviewNote?: string,
-    exitSentinel?: FleetSentinel
-  ): void => {
-    if (!ticket.currentPhaseId) {
-      return;
-    }
-    const phases = [...ticket.phases];
-    const idx = phases.findIndex((p) => p.id === ticket.currentPhaseId);
-    if (idx === -1) {
-      return;
-    }
-    phases[idx] = {
-      ...phases[idx]!,
-      status,
-      exitedAt: Date.now(),
-      ...(reviewNote !== undefined && { reviewNote }),
-      ...(exitSentinel !== undefined && { exitSentinel }),
-    };
-    this.updateTicket(ticket.id, { phases, currentPhaseId: null });
-
-    this.sendToWindow('fleet:phase-update', ticket.id, phases[idx]!);
-  };
-
-  private updatePhaseLoop = (
-    ticketId: FleetTicketId,
-    phaseId: FleetPhaseId,
-    loopPatch: Partial<FleetPhase['loop']>
-  ): void => {
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket) {
-      return;
-    }
-    const phases = [...ticket.phases];
-    const idx = phases.findIndex((p) => p.id === phaseId);
-    if (idx === -1) {
-      return;
-    }
-    const phase = phases[idx]!;
-    phases[idx] = {
-      ...phase,
-      loop: { ...phase.loop, ...loopPatch },
-    };
-
-    // Sync legacy fields
-    const updatedLoop = phases[idx]!.loop;
-    this.updateTicket(ticketId, {
-      phases,
-      loopStatus: updatedLoop.status ?? undefined,
-      loopIteration: updatedLoop.currentIteration,
-      loopMaxIterations: updatedLoop.maxIterations,
-    });
-
-    // Emit legacy loop update for backwards compat
-    this.sendToWindow('fleet:ticket-loop-update', ticketId, {
-      iteration: updatedLoop.currentIteration,
-      maxIterations: updatedLoop.maxIterations,
-      status: updatedLoop.status ?? 'running',
-    });
-  };
-
-  // #endregion
-
-  // #region Column transitions
-
-  advanceTicket = (ticketId: FleetTicketId): void => {
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket || !ticket.columnId) {
-      return;
-    }
-
-    const nextColumn = this.getNextColumn(ticket.projectId, ticket.columnId);
-    if (!nextColumn) {
-      // Already at terminal column
-      return;
-    }
-
-    // Close current phase if open
-    const freshTicket = this.getTicketById(ticketId)!;
-    if (freshTicket.currentPhaseId) {
-      this.closeCurrentPhase(freshTicket, 'completed');
-    }
-
-    // Re-read after close
-    const ticketAfterClose = this.getTicketById(ticketId)!;
-    const phase = this.createPhase(ticketAfterClose, nextColumn);
-
-    // Auto-start if column supports it
-    if (nextColumn.autoStart && nextColumn.maxIterations > 0) {
-      // Use setTimeout(0) to prevent re-entrancy from callback chains
-      setTimeout(() => {
-        void this.startPhase(ticketId);
-      }, 0);
-    } else {
-      // Passive or gate column — just emit the phase
-      this.sendToWindow('fleet:phase-update', ticketId, phase);
-    }
-  };
+  // #region Column movement
 
   moveTicketToColumn = (ticketId: FleetTicketId, columnId: FleetColumnId): void => {
     const ticket = this.getTicketById(ticketId);
@@ -855,474 +571,17 @@ export class FleetManager {
       return;
     }
 
-    // Stop any running loop
-    this.stopLoopIfRunning(ticketId);
-
-    // Skip current phase
-    const freshTicket = this.getTicketById(ticketId)!;
-    if (freshTicket.currentPhaseId) {
-      this.closeCurrentPhase(freshTicket, 'skipped');
+    // Seed checklist from column defaults if this column key doesn't exist yet
+    let checklist = ticket.checklist;
+    if (!(columnId in checklist) && column.defaultChecklist.length > 0) {
+      checklist = {
+        ...checklist,
+        [columnId]: column.defaultChecklist.map((item) => ({ ...item, id: `chk-${nanoid()}` })),
+      };
     }
 
-    // Create new phase in target column
-    const ticketAfterClose = this.getTicketById(ticketId)!;
-    this.createPhase(ticketAfterClose, column);
-  };
-
-  kickbackTicket = (ticketId: FleetTicketId, targetColumnId: FleetColumnId, reviewNote?: string): void => {
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket) {
-      return;
-    }
-
-    const targetColumn = this.getColumn(ticket.projectId, targetColumnId);
-    if (!targetColumn) {
-      return;
-    }
-
-    // Stop any running loop
-    this.stopLoopIfRunning(ticketId);
-
-    // Close current phase as rejected
-    const freshTicket = this.getTicketById(ticketId)!;
-    if (freshTicket.currentPhaseId) {
-      this.closeCurrentPhase(freshTicket, 'rejected', reviewNote);
-    }
-
-    // Create new phase in target column
-    const ticketAfterClose = this.getTicketById(ticketId)!;
-    const phase = this.createPhase(ticketAfterClose, targetColumn);
-
-    // Auto-start if the target column supports it
-    if (targetColumn.autoStart && targetColumn.maxIterations > 0) {
-      setTimeout(() => {
-        void this.startPhase(ticketId);
-      }, 0);
-    } else {
-      this.sendToWindow('fleet:phase-update', ticketId, phase);
-    }
-  };
-
-  approvePhase = (ticketId: FleetTicketId, reviewNote?: string): void => {
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket || !ticket.currentPhaseId) {
-      return;
-    }
-
-    this.closeCurrentPhase(ticket, 'completed', reviewNote);
-    this.advanceTicket(ticketId);
-  };
-
-  rejectPhase = (ticketId: FleetTicketId, reviewNote: string): void => {
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket || !ticket.columnId) {
-      return;
-    }
-
-    const prevColumn = this.getPreviousColumn(ticket.projectId, ticket.columnId);
-    if (!prevColumn) {
-      // Can't kickback from first column
-      return;
-    }
-
-    this.kickbackTicket(ticketId, prevColumn.id, reviewNote);
-  };
-
-  // #endregion
-
-  // #region Phase agent loop
-
-  startPhase = (ticketId: FleetTicketId): void => {
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket || !ticket.columnId || !ticket.currentPhaseId) {
-      return;
-    }
-
-    const column = this.getColumn(ticket.projectId, ticket.columnId);
-    if (!column || column.maxIterations === 0) {
-      return;
-    }
-
-    // Spec column is handled by the Plan button — skip it and advance to next column
-    if (column.role === 'specifier') {
-      this.advanceTicket(ticketId);
-      return;
-    }
-
-    // Block autonomous loops until a plan exists
-    const hasChecklist = Object.values(ticket.checklist).some((items) => items.length > 0);
-    if (!hasChecklist) {
-      return;
-    }
-
-    const project = this.getProjects().find((p) => p.id === ticket.projectId);
-    if (!project) {
-      return;
-    }
-
-    // Reuse existing sandbox if alive
-    let sandbox: SandboxManager | undefined;
-    let workspaceDir = project.workspaceDir;
-    const existingLoop = this.loops.get(ticketId);
-    if (existingLoop) {
-      const sbStatus = existingLoop.sandbox.getStatus();
-      if (sbStatus?.type === 'running') {
-        sandbox = existingLoop.sandbox;
-        // Find workspace from any existing task
-        for (const [, entry] of this.tasks) {
-          if (entry.task.ticketId === ticketId && entry.task.worktreePath) {
-            workspaceDir = entry.task.worktreePath;
-            break;
-          }
-        }
-      }
-      existingLoop.controller.stop();
-      this.loops.delete(ticketId);
-    }
-
-    const phaseId = ticket.currentPhaseId;
-    const maxIterations = column.maxIterations;
-
-    // Build column-aware prompt
-    const planFilePath = getContainerPlanPath(ticketId);
-    const artifactsDir = getContainerArtifactsDir(ticketId);
-    const buildPromptFn = (iteration: number): string => {
-      const freshTicket = this.getTicketById(ticketId);
-      return interpolatePromptTemplate(column.promptTemplate, {
-        ticket: {
-          title: freshTicket?.title ?? ticket.title,
-          description: freshTicket?.description ?? ticket.description,
-        },
-        column: { label: column.label, validSentinels: column.validSentinels },
-        checklist: freshTicket?.checklist[column.id] ?? [],
-        phaseHistory: freshTicket?.phases.filter((p) => p.id !== phaseId) ?? [],
-        iteration,
-        planFilePath,
-        artifactsDir,
-      });
-    };
-
-    const nudgePrompt = buildNudgePrompt(column.validSentinels);
-    const callbacks = this.buildPhaseLoopCallbacks(ticketId, phaseId, column);
-
-    if (!sandbox) {
-      // Need to create a new sandbox
-      sandbox = this.createPhaseSandbox(ticketId);
-      sandbox.start({ workspaceDir, sandboxVariant: 'work' });
-    }
-
-    const currentSbStatus = sandbox.getStatus();
-    const controller = new FleetLoopController({
-      wsUrl: currentSbStatus?.type === 'running' ? currentSbStatus.data.wsUrl : '',
-      workspaceDir,
-      maxIterations,
-      validSentinels: column.validSentinels,
-      buildPrompt: buildPromptFn,
-      nudgePrompt,
-      ticketTitle: ticket.title,
-      callbacks,
-    });
-
-    this.loops.set(ticketId, { controller, sandbox });
-
-    // Write PLAN.md and start watching for external edits
+    this.updateTicket(ticketId, { columnId, checklist });
     this.syncPlanFile(ticketId);
-    this.startPlanWatcher(ticketId);
-
-    // Update phase status
-    const phases = [...ticket.phases];
-    const phaseIdx = phases.findIndex((p) => p.id === phaseId);
-    if (phaseIdx !== -1) {
-      phases[phaseIdx] = { ...phases[phaseIdx]!, status: 'running' };
-      this.updateTicket(ticketId, { phases, loopStatus: 'running' });
-    }
-
-    // If sandbox is already running, start the controller immediately
-    const currentStatus = sandbox.getStatus();
-    if (currentStatus?.type === 'running') {
-      controller.wsUrl = currentStatus.data.wsUrl;
-      controller.start();
-    }
-    // Otherwise, the sandbox onStatusChange callback will start it when ready
-  };
-
-  stopPhase = (ticketId: FleetTicketId): void => {
-    this.stopPlanWatcher(ticketId);
-    this.stopLoop(ticketId);
-  };
-
-  resumePhase = async (ticketId: FleetTicketId): Promise<void> => {
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket || !ticket.columnId || !ticket.currentPhaseId) {
-      // Fall back to legacy resume if no phase info
-      await this.resumeLoop(ticketId);
-      return;
-    }
-
-    const column = this.getColumn(ticket.projectId, ticket.columnId);
-    if (!column) {
-      return;
-    }
-
-    const phase = ticket.phases.find((p) => p.id === ticket.currentPhaseId);
-    if (!phase) {
-      return;
-    }
-
-    // Stop existing controller
-    const existingLoop = this.loops.get(ticketId);
-    if (existingLoop) {
-      existingLoop.controller.stop();
-      this.loops.delete(ticketId);
-    }
-
-    const resumeIteration = (phase.loop.currentIteration ?? 0) + 1;
-    if (resumeIteration > column.maxIterations) {
-      this.updatePhaseLoop(ticketId, phase.id, { status: 'completed' });
-      return;
-    }
-
-    // Reuse existing sandbox if alive
-    let sandbox: SandboxManager | undefined;
-    let workspaceDir = this.getProjects().find((p) => p.id === ticket.projectId)?.workspaceDir ?? '';
-
-    if (existingLoop) {
-      const sbStatus = existingLoop.sandbox.getStatus();
-      if (sbStatus?.type === 'running') {
-        sandbox = existingLoop.sandbox;
-      }
-    }
-
-    if (!sandbox && ticket.taskId) {
-      const taskEntry = this.tasks.get(ticket.taskId);
-      if (taskEntry) {
-        const sbStatus = taskEntry.sandbox.getStatus();
-        if (sbStatus?.type === 'running') {
-          sandbox = taskEntry.sandbox;
-          workspaceDir = taskEntry.task.worktreePath ?? workspaceDir;
-        }
-      }
-    }
-
-    if (!sandbox) {
-      // Restart the full phase
-      this.startPhase(ticketId);
-      return;
-    }
-
-    const phaseId = phase.id;
-    const maxIterations = column.maxIterations;
-    const phasePlanPath = getContainerPlanPath(ticketId);
-    const phaseArtifactsDir = getContainerArtifactsDir(ticketId);
-    const buildPromptFn = (iteration: number): string => {
-      const freshTicket = this.getTicketById(ticketId);
-      return interpolatePromptTemplate(column.promptTemplate, {
-        ticket: {
-          title: freshTicket?.title ?? ticket.title,
-          description: freshTicket?.description ?? ticket.description,
-        },
-        column: { label: column.label, validSentinels: column.validSentinels },
-        checklist: freshTicket?.checklist[column.id] ?? [],
-        phaseHistory: freshTicket?.phases.filter((p) => p.id !== phaseId) ?? [],
-        iteration,
-        planFilePath: phasePlanPath,
-        artifactsDir: phaseArtifactsDir,
-      });
-    };
-
-    const nudgePrompt = buildNudgePrompt(column.validSentinels);
-    const callbacks = this.buildPhaseLoopCallbacks(ticketId, phaseId, column);
-
-    const sbStatus = sandbox.getStatus();
-    const controller = new FleetLoopController({
-      wsUrl: sbStatus?.type === 'running' ? sbStatus.data.wsUrl : '',
-      workspaceDir,
-      maxIterations,
-      startFromIteration: resumeIteration,
-      validSentinels: column.validSentinels,
-      buildPrompt: buildPromptFn,
-      nudgePrompt,
-      ticketTitle: ticket.title,
-      callbacks,
-    });
-
-    this.loops.set(ticketId, { controller, sandbox });
-    this.updatePhaseLoop(ticketId, phaseId, { status: 'running', currentIteration: resumeIteration });
-    controller.start();
-  };
-
-  // #endregion
-
-  // #region Phase loop callbacks
-
-  private buildPhaseLoopCallbacks = (
-    ticketId: FleetTicketId,
-    phaseId: FleetPhaseId,
-    column: FleetColumn
-  ): FleetLoopCallbacks => {
-    return {
-      onIterationStart: (iteration) => {
-        const ticket = this.getTicketById(ticketId);
-        const taskId = nanoid();
-        const task: FleetTask = {
-          id: taskId,
-          projectId: ticket?.projectId ?? '',
-          taskDescription: ticket?.description || ticket?.title || '',
-          status: { type: 'running', timestamp: Date.now(), data: this.getLoopSandboxData(ticketId) },
-          createdAt: Date.now(),
-          ticketId,
-          phaseId,
-          columnId: column.id,
-          iteration,
-        };
-
-        const loopEntry = this.loops.get(ticketId);
-        if (loopEntry) {
-          this.tasks.set(taskId, { task, sandbox: loopEntry.sandbox });
-        }
-        this.persistTask(task);
-        this.sendToWindow('fleet:task-status', taskId, task.status);
-
-        // Update ticket and phase
-        this.updateTicket(ticketId, { taskId: taskId, loopIteration: iteration });
-        this.updatePhaseLoop(ticketId, phaseId, { currentIteration: iteration, status: 'running' });
-
-        // Add task to phase's taskIds
-        const freshTicket = this.getTicketById(ticketId);
-        if (freshTicket) {
-          const phases = [...freshTicket.phases];
-          const phaseIdx = phases.findIndex((p) => p.id === phaseId);
-          if (phaseIdx !== -1) {
-            const phase = phases[phaseIdx]!;
-            phases[phaseIdx] = { ...phase, taskIds: [...phase.taskIds, taskId] };
-            this.updateTicket(ticketId, { phases });
-          }
-        }
-
-        return { taskId };
-      },
-      onIterationEnd: (taskId, endReason) => {
-        const entry = this.tasks.get(taskId);
-        if (entry) {
-          const status =
-            endReason === 'error'
-              ? { type: 'error' as const, error: { message: `Run ended: ${endReason}` }, timestamp: Date.now() }
-              : { type: 'exited' as const, timestamp: Date.now() };
-          entry.task = { ...entry.task, status };
-          this.persistTask(entry.task);
-          this.sendToWindow('fleet:task-status', taskId, status);
-        }
-      },
-      onSessionStart: (taskId, sessionId) => {
-        const entry = this.tasks.get(taskId);
-        if (entry) {
-          entry.task = { ...entry.task, sessionId };
-          this.persistTask(entry.task);
-          this.sendToWindow('fleet:task-session', taskId, sessionId);
-        }
-      },
-      onLoopComplete: (sentinel: FleetSentinel) => {
-        this.updatePhaseLoop(ticketId, phaseId, { status: 'completed' });
-        const ticket = this.getTicketById(ticketId);
-
-        // Close the phase
-        if (ticket) {
-          this.closeCurrentPhase(ticket, 'completed', undefined, sentinel);
-        }
-
-        this.stopPlanWatcher(ticketId);
-        this.loops.delete(ticketId);
-
-        // Decision: advance or wait for approval?
-        if (column.requiresApproval) {
-          // Gate column — stop and wait for human approve/reject
-          return;
-        }
-
-        // Auto-advance to next column
-        setTimeout(() => {
-          void this.advanceTicket(ticketId);
-        }, 0);
-      },
-      onLoopError: (error) => {
-        console.warn(`Loop error for ticket ${ticketId}: ${error.message}`);
-        this.updatePhaseLoop(ticketId, phaseId, { status: 'error' });
-        this.stopPlanWatcher(ticketId);
-        this.loops.delete(ticketId);
-      },
-      onLoopBlocked: (sentinel: FleetSentinel, context?: string) => {
-        if (sentinel === 'REJECTED') {
-          // Auto-kickback to implementation column
-          this.updatePhaseLoop(ticketId, phaseId, { status: 'completed' });
-          this.stopPlanWatcher(ticketId);
-          this.loops.delete(ticketId);
-          setTimeout(() => {
-            void this.kickbackTicket(ticketId, 'implementation', context);
-          }, 0);
-          return;
-        }
-
-        // BLOCKED or TESTS_FAILING — mark phase as blocked, emit update
-        this.updatePhaseLoop(ticketId, phaseId, { status: 'stopped' });
-        const ticket = this.getTicketById(ticketId);
-        if (ticket) {
-          const phases = [...ticket.phases];
-          const phaseIdx = phases.findIndex((p) => p.id === phaseId);
-          if (phaseIdx !== -1) {
-            phases[phaseIdx] = { ...phases[phaseIdx]!, status: 'blocked', exitSentinel: sentinel };
-            this.updateTicket(ticketId, { phases });
-            this.sendToWindow('fleet:phase-update', ticketId, phases[phaseIdx]!);
-          }
-        }
-      },
-      onStatusChange: (status, iteration) => {
-        this.updatePhaseLoop(ticketId, phaseId, { status, currentIteration: iteration });
-      },
-    };
-  };
-
-  private createPhaseSandbox = (ticketId: FleetTicketId): SandboxManager => {
-    return new SandboxManager({
-      ipcLogger: (entry) => {
-        const currentTaskId = this.getCurrentLoopTaskId(ticketId);
-        if (currentTaskId) {
-          this.sendToWindow('fleet:task-log', currentTaskId, entry);
-        }
-      },
-      ipcRawOutput: (data) => {
-        const currentTaskId = this.getCurrentLoopTaskId(ticketId);
-        if (currentTaskId) {
-          this.sendToWindow('fleet:task-raw-output', currentTaskId, data);
-        }
-      },
-      onStatusChange: (status) => {
-        const currentTaskId = this.getCurrentLoopTaskId(ticketId);
-        if (currentTaskId) {
-          const existing = this.tasks.get(currentTaskId);
-          if (existing) {
-            const patch: Partial<FleetTask> = { status };
-            if (status.type === 'running') {
-              patch.lastUrls = {
-                uiUrl: status.data.uiUrl,
-                codeServerUrl: status.data.codeServerUrl,
-                noVncUrl: status.data.noVncUrl,
-              };
-            }
-            existing.task = { ...existing.task, ...patch };
-            this.persistTask(existing.task);
-          }
-          this.sendToWindow('fleet:task-status', currentTaskId, status);
-        }
-
-        if (status.type === 'running') {
-          const loopEntry = this.loops.get(ticketId);
-          if (loopEntry && loopEntry.controller.getStatus() === 'idle') {
-            loopEntry.controller.wsUrl = status.data.wsUrl;
-            loopEntry.controller.start();
-          }
-        }
-      },
-    });
   };
 
   // #endregion
@@ -1353,229 +612,74 @@ export class FleetManager {
 
   // #endregion
 
-  // #region Legacy backwards compat: submitTicketTask bridges to phase system
+  // #region Supervisor lifecycle
 
-  submitTicketTask = async (ticketId: FleetTicketId, options: FleetTaskSubmitOptions): Promise<FleetTask> => {
+  /**
+   * Ensure sandbox + supervisor infrastructure exists for a ticket.
+   * Does NOT send any prompt — just gets the sandbox running and supervisor wired up.
+   * When the sandbox becomes ready, fires onReady with the wsUrl.
+   */
+  ensureSupervisorInfra = async (
+    ticketId: FleetTicketId,
+    onReady?: (wsUrl: string) => void
+  ): Promise<{ supervisor: FleetSupervisor; sandbox: SandboxManager }> => {
     const ticket = this.getTicketById(ticketId);
     if (!ticket) {
       throw new Error(`Ticket not found: ${ticketId}`);
     }
 
-    // If loop mode requested and ticket already has a columnId, use new phase system
-    if (options.loop && ticket.columnId) {
-      return this.submitTicketTaskViaPhase(ticketId, ticket, options);
-    }
-
-    // If loop mode requested but no column, place in implementation column first
-    if (options.loop && !ticket.columnId) {
-      const implColumn = this.getColumn(ticket.projectId, 'implementation');
-      if (implColumn) {
-        const freshTicket = this.getTicketById(ticketId)!;
-        this.createPhase(freshTicket, implColumn);
-        return this.submitTicketTaskViaPhase(ticketId, this.getTicketById(ticketId)!, options);
-      }
-      // Fall through to legacy if no implementation column
-    }
-
-    // Non-loop: use legacy path
-    if (!options.loop) {
-      const task = await this.submitTask(ticket.projectId, ticket.description || ticket.title, options);
-      const tasks = this.getPersistedTasks();
-      const taskIndex = tasks.findIndex((t) => t.id === task.id);
-      if (taskIndex !== -1) {
-        tasks[taskIndex] = { ...tasks[taskIndex]!, ticketId };
-        this.setPersistedTasks(tasks);
-      }
-      const entry = this.tasks.get(task.id);
-      if (entry) {
-        entry.task = { ...entry.task, ticketId };
-      }
-      this.updateTicket(ticketId, { status: 'in_progress', taskId: task.id });
-      return { ...task, ticketId };
-    }
-
-    // Legacy loop path (fallback)
-    return this.submitTicketTaskWithLoop(ticketId, ticket, options);
-  };
-
-  /**
-   * Bridge: submit ticket task via the new phase system.
-   * Creates or reuses the current phase's loop to start work.
-   */
-  private submitTicketTaskViaPhase = async (
-    ticketId: FleetTicketId,
-    ticket: FleetTicket,
-    options: FleetTaskSubmitOptions
-  ): Promise<FleetTask> => {
     const project = this.getProjects().find((p) => p.id === ticket.projectId);
     if (!project) {
       throw new Error(`Project not found: ${ticket.projectId}`);
     }
 
-    // If ticket needs a worktree, set it up
-    let workspaceDir = project.workspaceDir;
-    let worktreePath: string | undefined;
-    let worktreeName: string | undefined;
-
-    if (options.useWorktree && options.branch) {
-      worktreeName = generateWorktreeName();
-      worktreePath = await createWorktree(project.workspaceDir, options.branch, worktreeName);
-      workspaceDir = worktreePath;
+    // Stop existing supervisor if any
+    const existing = this.supervisors.get(ticketId);
+    if (existing) {
+      await existing.supervisor.dispose();
+      const sbStatus = existing.sandbox.getStatus();
+      if (sbStatus?.type !== 'running') {
+        await existing.sandbox.exit();
+        this.supervisors.delete(ticketId);
+      }
     }
 
-    // Create a placeholder task to return immediately
-    const taskId = nanoid();
-    const firstTask: FleetTask = {
-      id: taskId,
-      projectId: ticket.projectId,
-      taskDescription: ticket.description || ticket.title,
-      status: { type: 'starting', timestamp: Date.now() },
-      createdAt: Date.now(),
-      branch: options.branch,
-      worktreePath,
-      worktreeName,
-      ticketId,
-      phaseId: ticket.currentPhaseId ?? undefined,
-      columnId: ticket.columnId ?? undefined,
-      iteration: 1,
-    };
-
-    // Create sandbox
-    const sandbox = this.createPhaseSandbox(ticketId);
-    this.tasks.set(taskId, { task: firstTask, sandbox });
-    this.persistTask(firstTask);
-
-    this.updateTicket(ticketId, {
-      status: 'in_progress',
-      taskId,
-      loopEnabled: true,
-      loopMaxIterations: options.loopMaxIterations ?? 10,
-      loopIteration: 1,
-      loopStatus: 'running',
-    });
-
-    // Start the phase loop
-    this.startPhaseWithSandbox(ticketId, sandbox, workspaceDir);
-
-    return firstTask;
-  };
-
-  private startPhaseWithSandbox = (ticketId: FleetTicketId, sandbox: SandboxManager, workspaceDir: string): void => {
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket || !ticket.columnId || !ticket.currentPhaseId) {
-      return;
+    if (!ticket.columnId) {
+      this.moveTicketToColumn(ticketId, 'backlog');
     }
 
-    const column = this.getColumn(ticket.projectId, ticket.columnId);
-    if (!column) {
-      return;
-    }
+    this.updateTicket(ticketId, { supervisorStatus: 'running' });
+    this.sendToWindow('fleet:supervisor-status', ticketId, 'running');
 
-    const phaseId = ticket.currentPhaseId;
-    const maxIterations = column.maxIterations;
-    const resumePlanPath = getContainerPlanPath(ticketId);
-    const resumeArtifactsDir = getContainerArtifactsDir(ticketId);
+    // Create or reuse sandbox
+    let sandbox: SandboxManager;
+    let supervisorEntry = this.supervisors.get(ticketId);
 
-    const buildPromptFn = (iteration: number): string => {
-      const freshTicket = this.getTicketById(ticketId);
-      return interpolatePromptTemplate(column.promptTemplate, {
-        ticket: {
-          title: freshTicket?.title ?? ticket.title,
-          description: freshTicket?.description ?? ticket.description,
+    if (supervisorEntry) {
+      sandbox = supervisorEntry.sandbox;
+    } else {
+      const taskId = nanoid();
+      const task: FleetTask = {
+        id: taskId,
+        projectId: ticket.projectId,
+        taskDescription: `Supervisor for: ${ticket.title}`,
+        status: { type: 'starting', timestamp: Date.now() },
+        createdAt: Date.now(),
+        ticketId,
+      };
+
+      let readyFired = false;
+
+      sandbox = new SandboxManager({
+        ipcLogger: (entry) => {
+          this.sendToWindow('fleet:task-log', taskId, entry);
         },
-        column: { label: column.label, validSentinels: column.validSentinels },
-        checklist: freshTicket?.checklist[column.id] ?? [],
-        phaseHistory: freshTicket?.phases.filter((p) => p.id !== phaseId) ?? [],
-        iteration,
-        planFilePath: resumePlanPath,
-        artifactsDir: resumeArtifactsDir,
-      });
-    };
-
-    const nudgePrompt = buildNudgePrompt(column.validSentinels);
-    const callbacks = this.buildPhaseLoopCallbacks(ticketId, phaseId, column);
-
-    const controller = new FleetLoopController({
-      wsUrl: '',
-      workspaceDir,
-      maxIterations,
-      validSentinels: column.validSentinels,
-      buildPrompt: buildPromptFn,
-      nudgePrompt,
-      ticketTitle: ticket.title,
-      callbacks,
-    });
-
-    this.loops.set(ticketId, { controller, sandbox });
-
-    // Update phase to running
-    const phases = [...ticket.phases];
-    const phaseIdx = phases.findIndex((p) => p.id === phaseId);
-    if (phaseIdx !== -1) {
-      phases[phaseIdx] = { ...phases[phaseIdx]!, status: 'running' };
-      this.updateTicket(ticketId, { phases });
-    }
-
-    sandbox.start({ workspaceDir, sandboxVariant: 'work' });
-  };
-
-  // #endregion
-
-  // #region Legacy loop mode (kept for backwards compat)
-
-  private submitTicketTaskWithLoop = async (
-    ticketId: FleetTicketId,
-    ticket: FleetTicket,
-    options: FleetTaskSubmitOptions
-  ): Promise<FleetTask> => {
-    const project = this.getProjects().find((p) => p.id === ticket.projectId);
-    if (!project) {
-      throw new Error(`Project not found: ${ticket.projectId}`);
-    }
-
-    const maxIterations = options.loopMaxIterations ?? 10;
-    let workspaceDir = project.workspaceDir;
-    let worktreePath: string | undefined;
-    let worktreeName: string | undefined;
-
-    if (options.useWorktree && options.branch) {
-      worktreeName = generateWorktreeName();
-      worktreePath = await createWorktree(project.workspaceDir, options.branch, worktreeName);
-      workspaceDir = worktreePath;
-    }
-
-    const firstTaskId = nanoid();
-    const firstTask: FleetTask = {
-      id: firstTaskId,
-      projectId: ticket.projectId,
-      taskDescription: ticket.description || ticket.title,
-      status: { type: 'starting', timestamp: Date.now() },
-      createdAt: Date.now(),
-      branch: options.branch,
-      worktreePath,
-      worktreeName,
-      ticketId,
-      iteration: 1,
-    };
-
-    const sandbox = new SandboxManager({
-      ipcLogger: (entry) => {
-        const currentTaskId = this.getCurrentLoopTaskId(ticketId);
-        if (currentTaskId) {
-          this.sendToWindow('fleet:task-log', currentTaskId, entry);
-        }
-      },
-      ipcRawOutput: (data) => {
-        const currentTaskId = this.getCurrentLoopTaskId(ticketId);
-        if (currentTaskId) {
-          this.sendToWindow('fleet:task-raw-output', currentTaskId, data);
-        }
-      },
-      onStatusChange: (status) => {
-        const currentTaskId = this.getCurrentLoopTaskId(ticketId);
-        if (currentTaskId) {
-          const existing = this.tasks.get(currentTaskId);
-          if (existing) {
+        ipcRawOutput: (data) => {
+          this.sendToWindow('fleet:task-raw-output', taskId, data);
+        },
+        onStatusChange: (status) => {
+          const taskEntry = this.tasks.get(taskId);
+          if (taskEntry) {
             const patch: Partial<FleetTask> = { status };
             if (status.type === 'running') {
               patch.lastUrls = {
@@ -1584,205 +688,86 @@ export class FleetManager {
                 noVncUrl: status.data.noVncUrl,
               };
             }
-            existing.task = { ...existing.task, ...patch };
-            this.persistTask(existing.task);
+            taskEntry.task = { ...taskEntry.task, ...patch };
+            this.persistTask(taskEntry.task);
           }
-          this.sendToWindow('fleet:task-status', currentTaskId, status);
-        }
+          this.sendToWindow('fleet:task-status', taskId, status);
 
-        if (status.type === 'running') {
-          const loopEntry = this.loops.get(ticketId);
-          if (loopEntry && loopEntry.controller.getStatus() === 'idle') {
-            loopEntry.controller.wsUrl = status.data.wsUrl;
-            loopEntry.controller.start();
+          if (status.type === 'running' && !readyFired) {
+            readyFired = true;
+            const entry = this.supervisors.get(ticketId);
+            if (entry) {
+              entry.supervisor.setWsUrl(status.data.wsUrl);
+              void this.ensureSession(ticketId).then(() => onReady?.(status.data.wsUrl));
+            }
           }
-        }
+        },
+      });
+
+      this.tasks.set(taskId, { task, sandbox });
+      this.persistTask(task);
+      this.updateTicket(ticketId, { supervisorTaskId: taskId });
+    }
+
+    // Create supervisor
+    const supervisor = new FleetSupervisor({
+      wsUrl: '',
+      onStatusChange: (status: FleetSupervisorStatus) => {
+        this.updateTicket(ticketId, { supervisorStatus: status });
+        this.sendToWindow('fleet:supervisor-status', ticketId, status);
+      },
+      onMessage: (msg: FleetSessionMessage) => {
+        this.sendToWindow('fleet:supervisor-message', ticketId, msg);
+      },
+      onRunEnd: (reason: string) => {
+        console.log(`[FleetManager] Supervisor run ended for ${ticketId}: ${reason}`);
       },
     });
 
-    this.tasks.set(firstTaskId, { task: firstTask, sandbox });
-    this.persistTask(firstTask);
+    this.supervisors.set(ticketId, { supervisor, sandbox });
 
-    const controller = new FleetLoopController({
-      wsUrl: '',
-      workspaceDir,
-      ticketTitle: ticket.title,
-      ticketDescription: ticket.description || ticket.title,
-      maxIterations,
-      callbacks: {
-        onIterationStart: (iteration) => {
-          if (iteration === 1) {
-            return { taskId: firstTaskId };
-          }
-          const taskId = nanoid();
-          const task: FleetTask = {
-            id: taskId,
-            projectId: ticket.projectId,
-            taskDescription: ticket.description || ticket.title,
-            status: { type: 'running', timestamp: Date.now(), data: this.getLoopSandboxData(ticketId) },
-            createdAt: Date.now(),
-            branch: options.branch,
-            worktreePath,
-            worktreeName,
-            ticketId,
-            iteration,
-          };
-          this.tasks.set(taskId, { task, sandbox });
-          this.persistTask(task);
-          this.sendToWindow('fleet:task-status', taskId, task.status);
-          this.updateTicket(ticketId, { taskId: taskId, loopIteration: iteration });
-          return { taskId };
-        },
-        onIterationEnd: (taskId, endReason) => {
-          const entry = this.tasks.get(taskId);
-          if (entry) {
-            const status =
-              endReason === 'error'
-                ? { type: 'error' as const, error: { message: `Run ended: ${endReason}` }, timestamp: Date.now() }
-                : { type: 'exited' as const, timestamp: Date.now() };
-            entry.task = { ...entry.task, status };
-            this.persistTask(entry.task);
-            this.sendToWindow('fleet:task-status', taskId, status);
-          }
-        },
-        onSessionStart: (taskId, sessionId) => {
-          const entry = this.tasks.get(taskId);
-          if (entry) {
-            entry.task = { ...entry.task, sessionId };
-            this.persistTask(entry.task);
-            this.sendToWindow('fleet:task-session', taskId, sessionId);
-          }
-        },
-        onLoopComplete: () => {
-          this.updateTicket(ticketId, { loopStatus: 'completed' });
-          this.sendToWindow('fleet:ticket-loop-update', ticketId, {
-            iteration: maxIterations,
-            maxIterations,
-            status: 'completed',
-          });
-          this.loops.delete(ticketId);
-        },
-        onLoopError: (error) => {
-          console.warn(`Loop error for ticket ${ticketId}: ${error.message}`);
-          this.updateTicket(ticketId, { loopStatus: 'error' });
-          this.sendToWindow('fleet:ticket-loop-update', ticketId, {
-            iteration: controller.getIteration(),
-            maxIterations,
-            status: 'error',
-          });
-          this.loops.delete(ticketId);
-        },
-        onLoopBlocked: () => {
-          this.updateTicket(ticketId, { loopStatus: 'stopped' });
-          this.sendToWindow('fleet:ticket-loop-update', ticketId, {
-            iteration: controller.getIteration(),
-            maxIterations,
-            status: 'stopped',
-          });
-        },
-        onStatusChange: (status, iteration) => {
-          this.updateTicket(ticketId, { loopStatus: status, loopIteration: iteration });
-          this.sendToWindow('fleet:ticket-loop-update', ticketId, {
-            iteration,
-            maxIterations,
-            status,
-          });
-        },
-      },
-    });
+    this.syncPlanFile(ticketId);
+    this.startPlanWatcher(ticketId);
 
-    this.loops.set(ticketId, { controller, sandbox });
-
-    this.updateTicket(ticketId, {
-      status: 'in_progress',
-      taskId: firstTaskId,
-      loopEnabled: true,
-      loopMaxIterations: maxIterations,
-      loopIteration: 1,
-      loopStatus: 'running',
-    });
-
-    sandbox.start({
-      workspaceDir,
-      sandboxVariant: 'work',
-    });
-
-    return firstTask;
-  };
-
-  private getCurrentLoopTaskId = (ticketId: FleetTicketId): FleetTaskId | null => {
-    const ticket = this.getTicketById(ticketId);
-    return ticket?.taskId ?? null;
-  };
-
-  private getLoopSandboxData = (
-    ticketId: FleetTicketId
-  ): Extract<SandboxProcessStatus, { type: 'running' }>['data'] => {
-    const loopEntry = this.loops.get(ticketId);
-    if (!loopEntry) {
-      return {
-        sandboxUrl: '',
-        wsUrl: '',
-        uiUrl: '',
-        ports: { sandbox: 0, ui: 0 },
-      };
+    // Start sandbox if not already running
+    if (!supervisorEntry) {
+      sandbox.start({ workspaceDir: project.workspaceDir, sandboxVariant: 'work' });
+    } else {
+      // Already running — ensure session exists, then fire onReady
+      const sbStatus = sandbox.getStatus();
+      if (sbStatus?.type === 'running') {
+        supervisor.setWsUrl(sbStatus.data.wsUrl);
+        void this.ensureSession(ticketId).then(() => onReady?.(sbStatus.data.wsUrl));
+      }
     }
-    // Get status directly from the sandbox manager — this is always up-to-date,
-    // even before a task has been created for the current iteration.
-    const sandboxStatus = loopEntry.sandbox.getStatus();
-    if (sandboxStatus.type === 'running') {
-      return sandboxStatus.data;
-    }
-    return {
-      sandboxUrl: '',
-      wsUrl: '',
-      uiUrl: '',
-      ports: { sandbox: 0, ui: 0 },
-    };
+
+    return { supervisor, sandbox };
   };
 
-  private stopLoopIfRunning = (ticketId: FleetTicketId): void => {
-    const loopEntry = this.loops.get(ticketId);
-    if (loopEntry) {
-      loopEntry.controller.stop();
-      this.loops.delete(ticketId);
-    }
-  };
-
-  stopLoop = (ticketId: FleetTicketId): void => {
-    const loopEntry = this.loops.get(ticketId);
-    if (!loopEntry) {
-      return;
-    }
-    loopEntry.controller.stop();
-    this.updateTicket(ticketId, { loopStatus: 'stopped' });
-    this.sendToWindow('fleet:ticket-loop-update', ticketId, {
-      iteration: loopEntry.controller.getIteration(),
-      maxIterations: loopEntry.controller.getMaxIterations(),
-      status: 'stopped',
-    });
-  };
-
-  resumeLoop = async (ticketId: FleetTicketId): Promise<void> => {
+  /**
+   * Ensure a session exists for the ticket. If no supervisorSessionId is set,
+   * calls session.ensure via RPC to create one with variables and persists it.
+   */
+  private ensureSession = async (ticketId: FleetTicketId): Promise<void> => {
     const ticket = this.getTicketById(ticketId);
     if (!ticket) {
       return;
     }
 
-    // If ticket has phase info, use new phase-based resume
-    if (ticket.columnId && ticket.currentPhaseId) {
-      return this.resumePhase(ticketId);
+    // Already have a session — just make sure the supervisor knows about it
+    if (ticket.supervisorSessionId) {
+      const entry = this.supervisors.get(ticketId);
+      if (entry && !entry.supervisor.getSessionId()) {
+        // Supervisor instance was recreated but ticket has a session — restore it
+        // We can't restore directly, so create a new session
+      } else {
+        return;
+      }
     }
 
-    // Legacy resume path
-    if (!ticket.loopEnabled) {
+    const entry = this.supervisors.get(ticketId);
+    if (!entry) {
       return;
-    }
-
-    const existingLoop = this.loops.get(ticketId);
-    if (existingLoop) {
-      existingLoop.controller.stop();
-      this.loops.delete(ticketId);
     }
 
     const project = this.getProjects().find((p) => p.id === ticket.projectId);
@@ -1790,131 +775,176 @@ export class FleetManager {
       return;
     }
 
-    const maxIterations = ticket.loopMaxIterations ?? 10;
-    const resumeIteration = (ticket.loopIteration ?? 0) + 1;
+    const pipeline = this.getPipeline(ticket.projectId);
+    const supervisorPrompt = buildSupervisorPrompt(ticket, project, pipeline);
+    const variables = { additional_instructions: supervisorPrompt };
 
-    if (resumeIteration > maxIterations) {
-      this.updateTicket(ticketId, { loopStatus: 'completed' });
+    try {
+      console.log(`[FleetManager] Creating session for ticket ${ticketId} with variables:`, Object.keys(variables));
+      const sessionId = await entry.supervisor.createSession(variables);
+      console.log(`[FleetManager] Session created: ${sessionId} for ticket ${ticketId}`);
+      this.updateTicket(ticketId, { supervisorSessionId: sessionId, supervisorStatus: 'idle' });
+      this.sendToWindow('fleet:supervisor-status', ticketId, 'idle');
+    } catch (error) {
+      console.error(`[FleetManager] Failed to create session for ${ticketId}:`, error);
+    }
+  };
+
+  /**
+   * Start the autonomous supervisor — sends the full supervisor prompt as the user turn.
+   * Triggered by the Play button.
+   */
+  startSupervisor = async (ticketId: FleetTicketId): Promise<void> => {
+    const ticket = this.getTicketById(ticketId)!;
+    const project = this.getProjects().find((p) => p.id === ticket.projectId)!;
+    const pipeline = this.getPipeline(ticket.projectId);
+    const supervisorPrompt = buildSupervisorPrompt(ticket, project, pipeline);
+    const sessionId = ticket.supervisorSessionId;
+    const variables = { additional_instructions: supervisorPrompt };
+
+    await this.ensureSupervisorInfra(ticketId, () => {
+      this.startSupervisorRun(ticketId, 'Begin working on this ticket.', { sessionId, variables });
+    });
+  };
+
+  private startSupervisorRun = (
+    ticketId: FleetTicketId,
+    prompt: string,
+    opts?: { sessionId?: string; variables?: Record<string, unknown> }
+  ): void => {
+    const entry = this.supervisors.get(ticketId);
+    if (!entry) {
       return;
     }
 
-    let sandbox: SandboxManager | undefined;
-    let workspaceDir = project.workspaceDir;
+    void entry.supervisor
+      .startRun(prompt, { sessionId: opts?.sessionId, variables: opts?.variables })
+      .then(
+        (result) => {
+          this.updateTicket(ticketId, {
+            supervisorSessionId: result.sessionId,
+            supervisorRunId: result.runId,
+          });
+        },
+        (error) => {
+          console.error(`[FleetManager] Supervisor start failed for ${ticketId}:`, error);
+          this.updateTicket(ticketId, { supervisorStatus: 'error' });
+          this.sendToWindow('fleet:supervisor-status', ticketId, 'error');
+        }
+      );
+  };
 
-    if (ticket.taskId) {
-      const taskEntry = this.tasks.get(ticket.taskId);
-      if (taskEntry) {
-        sandbox = taskEntry.sandbox;
-        workspaceDir = taskEntry.task.worktreePath ?? project.workspaceDir;
-      }
+  stopSupervisor = async (ticketId: FleetTicketId): Promise<void> => {
+    const entry = this.supervisors.get(ticketId);
+    if (!entry) {
+      return;
     }
 
-    const sandboxStatus = sandbox?.getStatus();
-    if (!sandbox || !sandboxStatus || sandboxStatus.type !== 'running') {
-      await this.submitTicketTaskWithLoop(ticketId, ticket, {
-        loop: true,
-        loopMaxIterations: maxIterations,
+    await entry.supervisor.stop();
+    this.stopPlanWatcher(ticketId);
+    this.updateTicket(ticketId, { supervisorStatus: 'idle', supervisorRunId: undefined });
+    this.sendToWindow('fleet:supervisor-status', ticketId, 'idle');
+  };
+
+  resetSupervisorSession = async (ticketId: FleetTicketId): Promise<void> => {
+    const entry = this.supervisors.get(ticketId);
+    if (!entry) {
+      return;
+    }
+
+    // Stop current run if active
+    await entry.supervisor.stop();
+
+    // Build fresh variables
+    const ticket = this.getTicketById(ticketId)!;
+    const project = this.getProjects().find((p) => p.id === ticket.projectId)!;
+    const pipeline = this.getPipeline(ticket.projectId);
+    const supervisorPrompt = buildSupervisorPrompt(ticket, project, pipeline);
+    const variables = { additional_instructions: supervisorPrompt };
+
+    // Ensure WS is connected
+    const sbStatus = entry.sandbox.getStatus();
+    if (sbStatus?.type === 'running') {
+      entry.supervisor.setWsUrl(sbStatus.data.wsUrl);
+    }
+
+    // Create a new session with variables (no user message sent)
+    const newSessionId = await entry.supervisor.createSession(variables);
+    this.updateTicket(ticketId, {
+      supervisorSessionId: newSessionId,
+      supervisorRunId: undefined,
+      supervisorStatus: 'idle',
+    });
+    this.sendToWindow('fleet:supervisor-status', ticketId, 'idle');
+  };
+
+  sendSupervisorMessage = async (ticketId: FleetTicketId, message: string): Promise<void> => {
+    const entry = this.supervisors.get(ticketId);
+    if (!entry) {
+      // No active supervisor — spin up sandbox, then send the user's message
+      // as the prompt with ticket context as system instructions
+      await this.ensureSupervisorInfra(ticketId, () => {
+        // Sandbox is ready — send the user's message now
+        void this.sendUserRunMessage(ticketId, message);
       });
       return;
     }
 
-    const controller = new FleetLoopController({
-      wsUrl: sandboxStatus.data.wsUrl,
-      workspaceDir,
-      ticketTitle: ticket.title,
-      ticketDescription: ticket.description || ticket.title,
-      maxIterations,
-      startFromIteration: resumeIteration,
-      callbacks: this.buildLegacyLoopCallbacks(ticketId, ticket, sandbox, maxIterations),
-    });
+    const status = entry.supervisor.getStatus();
 
-    this.loops.set(ticketId, { controller, sandbox });
-    this.updateTicket(ticketId, { loopStatus: 'running', loopIteration: resumeIteration });
-    controller.start();
+    if (status === 'waiting' || status === 'idle' || status === 'error') {
+      await this.sendUserRunMessage(ticketId, message);
+    } else if (status === 'running') {
+      // Inject message into running session
+      try {
+        await entry.supervisor.sendMessage(message);
+      } catch (error) {
+        console.error(`[FleetManager] Supervisor send_user_message failed for ${ticketId}:`, error);
+      }
+    }
   };
 
-  private buildLegacyLoopCallbacks = (
-    ticketId: FleetTicketId,
-    ticket: FleetTicket,
-    sandbox: SandboxManager,
-    maxIterations: number
-  ): FleetLoopCallbacks => {
-    return {
-      onIterationStart: (iteration) => {
-        const taskId = nanoid();
-        const task: FleetTask = {
-          id: taskId,
-          projectId: ticket.projectId,
-          taskDescription: ticket.description || ticket.title,
-          status: { type: 'running', timestamp: Date.now(), data: this.getLoopSandboxData(ticketId) },
-          createdAt: Date.now(),
-          ticketId,
-          iteration,
-        };
-        this.tasks.set(taskId, { task, sandbox });
-        this.persistTask(task);
-        this.sendToWindow('fleet:task-status', taskId, task.status);
-        this.updateTicket(ticketId, { taskId, loopIteration: iteration });
-        return { taskId };
-      },
-      onIterationEnd: (taskId, endReason) => {
-        const entry = this.tasks.get(taskId);
-        if (entry) {
-          const status =
-            endReason === 'error'
-              ? { type: 'error' as const, error: { message: `Run ended: ${endReason}` }, timestamp: Date.now() }
-              : { type: 'exited' as const, timestamp: Date.now() };
-          entry.task = { ...entry.task, status };
-          this.persistTask(entry.task);
-          this.sendToWindow('fleet:task-status', taskId, status);
-        }
-      },
-      onSessionStart: (taskId, sessionId) => {
-        const entry = this.tasks.get(taskId);
-        if (entry) {
-          entry.task = { ...entry.task, sessionId };
-          this.persistTask(entry.task);
-          this.sendToWindow('fleet:task-session', taskId, sessionId);
-        }
-      },
-      onLoopComplete: () => {
-        this.updateTicket(ticketId, { loopStatus: 'completed' });
-        this.sendToWindow('fleet:ticket-loop-update', ticketId, {
-          iteration: maxIterations,
-          maxIterations,
-          status: 'completed',
-        });
-        this.loops.delete(ticketId);
-      },
-      onLoopError: (error) => {
-        console.warn(`Loop error for ticket ${ticketId}: ${error.message}`);
-        this.updateTicket(ticketId, { loopStatus: 'error' });
-        const loopEntry = this.loops.get(ticketId);
-        this.sendToWindow('fleet:ticket-loop-update', ticketId, {
-          iteration: loopEntry?.controller.getIteration() ?? 0,
-          maxIterations,
-          status: 'error',
-        });
-        this.loops.delete(ticketId);
-      },
-      onLoopBlocked: () => {
-        const loopEntry = this.loops.get(ticketId);
-        this.updateTicket(ticketId, { loopStatus: 'stopped' });
-        this.sendToWindow('fleet:ticket-loop-update', ticketId, {
-          iteration: loopEntry?.controller.getIteration() ?? 0,
-          maxIterations,
-          status: 'stopped',
-        });
-      },
-      onStatusChange: (status, iteration) => {
-        this.updateTicket(ticketId, { loopStatus: status, loopIteration: iteration });
-        this.sendToWindow('fleet:ticket-loop-update', ticketId, {
-          iteration,
-          maxIterations,
-          status,
-        });
-      },
-    };
+  /**
+   * Start a run with the user's message as the prompt.
+   * On the first message (no existing session), ticket context is prepended.
+   * On follow-ups (existing session), just the user's message is sent since the
+   * agent already has context from the conversation history.
+   */
+  private sendUserRunMessage = async (ticketId: FleetTicketId, message: string): Promise<void> => {
+    const entry = this.supervisors.get(ticketId);
+    if (!entry) {
+      return;
+    }
+
+    this.updateTicket(ticketId, { supervisorStatus: 'running' });
+    this.sendToWindow('fleet:supervisor-status', ticketId, 'running');
+
+    const sbStatus = entry.sandbox.getStatus();
+    if (sbStatus?.type === 'running') {
+      entry.supervisor.setWsUrl(sbStatus.data.wsUrl);
+    }
+
+    const sessionId = entry.supervisor.getSessionId() ?? undefined;
+
+    // Always pass fresh ticket context via variables so instructions stay current
+    let variables: Record<string, unknown> | undefined;
+    const ticket = this.getTicketById(ticketId);
+    const project = ticket ? this.getProjects().find((p) => p.id === ticket.projectId) : undefined;
+    if (ticket && project) {
+      const supervisorPrompt = buildSupervisorPrompt(ticket, project, this.getPipeline(ticket.projectId));
+      variables = { additional_instructions: supervisorPrompt };
+    }
+
+    try {
+      await entry.supervisor.startRun(message, { sessionId, variables });
+      const sid = entry.supervisor.getSessionId();
+      const rid = entry.supervisor.getRunId();
+      if (sid) {
+        this.updateTicket(ticketId, { supervisorSessionId: sid, supervisorRunId: rid ?? undefined });
+      }
+    } catch (error) {
+      console.error(`[FleetManager] Supervisor message failed for ${ticketId}:`, error);
+    }
   };
 
   // #endregion
@@ -1958,51 +988,19 @@ export class FleetManager {
     }
     this.setPersistedTasks(updated);
 
-    // Reset stale running states on tickets — no controllers survive a restart
+    // Reset stale supervisor states on tickets
     this.resetStaleTicketStates();
   };
 
-  /**
-   * After a restart, any ticket whose loop/phase was 'running' no longer has a
-   * backing controller. Reset those to 'stopped' so the UI shows "Resume" instead
-   * of a phantom "Running" spinner.
-   */
   private resetStaleTicketStates = (): void => {
     const tickets = this.getTickets();
     let dirty = false;
     const patched = tickets.map((ticket) => {
-      let changed = false;
-      let t = ticket;
-
-      // Legacy loop status
-      if (t.loopStatus === 'running') {
-        t = { ...t, loopStatus: 'stopped' };
-        changed = true;
-      }
-
-      // Phase-based statuses
-      const phasesNeedPatch = t.phases.some((p) => p.loop.status === 'running' || p.status === 'running');
-      if (phasesNeedPatch) {
-        t = {
-          ...t,
-          phases: t.phases.map((p) => {
-            if (p.loop.status !== 'running' && p.status !== 'running') {
-              return p;
-            }
-            return {
-              ...p,
-              status: p.status === 'running' ? 'pending' : p.status,
-              loop: p.loop.status === 'running' ? { ...p.loop, status: 'stopped' } : p.loop,
-            };
-          }),
-        };
-        changed = true;
-      }
-
-      if (changed) {
+      if (ticket.supervisorStatus === 'running') {
         dirty = true;
+        return { ...ticket, supervisorStatus: 'idle' as const, supervisorRunId: undefined };
       }
-      return changed ? t : ticket;
+      return ticket;
     });
 
     if (dirty) {
@@ -2104,264 +1102,6 @@ export class FleetManager {
     return task;
   };
 
-  submitPlanTask = (ticketId: FleetTicketId): FleetTask => {
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket) {
-      throw new Error(`Ticket not found: ${ticketId}`);
-    }
-
-    const project = this.getProjects().find((p) => p.id === ticket.projectId);
-    if (!project) {
-      throw new Error(`Project not found: ${ticket.projectId}`);
-    }
-
-    const pipeline = this.getPipeline(ticket.projectId);
-    const containerPlanPath = getContainerPlanPath(ticketId);
-    const containerArtifacts = getContainerArtifactsDir(ticketId);
-    const columnLabels = pipeline.columns.map((c) => c.label).join(', ');
-
-    // Build existing checklist text across all columns
-    const allChecklistItems: FleetChecklistItem[] = [];
-    for (const col of pipeline.columns) {
-      const items = ticket.checklist[col.id];
-      if (items && items.length > 0) {
-        allChecklistItems.push(...items);
-      }
-    }
-    const checklistText = formatChecklist(allChecklistItems);
-
-    const planPrompt = `You are a planning assistant. Your goal is to have a conversation with the user to understand the requirements for this ticket, then write a comprehensive plan file.
-
-## Ticket
-Title: ${ticket.title}
-Description: ${ticket.description || '(no description)'}
-
-## Existing Checklist
-${checklistText}
-
-## Plan File
-Write the final plan to: ${containerPlanPath}
-
-## Artifacts Directory
-You have a persistent artifacts directory at: ${containerArtifacts}
-Use this to store any scratch work, research notes, or other files that should persist across phases.
-
-The file MUST use this format:
----
-id: ${ticketId}
-title: ${ticket.title}
-priority: ${ticket.priority}
-column: ${pipeline.columns.find((c) => c.id === ticket.columnId)?.label ?? pipeline.columns[0]?.label ?? 'Backlog'}
----
-
-# ${ticket.title}
-
-${ticket.description || ''}
-
-## Spec
-Summary of what this phase covers.
-
-- [ ] Acceptance criterion 1
-- [ ] Acceptance criterion 2
-
-## Implementation
-Description of the implementation approach.
-
-### Files
-- \`src/models/example.ts\` — new model
-- \`src/routes/example.ts\` — new route
-
-- [ ] Create data model with validation
-- [ ] Add API endpoints
-- [ ] Write unit tests
-
-## Review
-- [ ] All tests pass
-- [ ] No lint errors
-
-(Use these column names: ${columnLabels})
-
-IMPORTANT format rules:
-- Each \`## Column\` heading MUST exactly match one of the column names above (case-insensitive)
-- Checklist items MUST use \`- [ ] text\` or \`- [x] text\` syntax — these are tracked by the system
-- You CAN add rich content (prose, file lists, sub-headings like \`###\`, code blocks) anywhere in a section — it will be preserved but only checklist items are tracked
-- Make checklist items concrete and testable — each one is an exit criterion for that phase
-
-## Instructions
-1. Ask the user clarifying questions about requirements and scope
-2. Propose a structured plan organized by pipeline column, with detailed context and concrete checklist items
-3. Iterate with the user until they approve the plan
-4. Write the final PLAN.md file to the path above
-5. Confirm the file has been written`;
-
-    const taskId = nanoid();
-    const task: FleetTask = {
-      id: taskId,
-      projectId: ticket.projectId,
-      taskDescription: planPrompt,
-      status: { type: 'starting', timestamp: Date.now() },
-      createdAt: Date.now(),
-      ticketId,
-    };
-
-    const sandbox = new SandboxManager({
-      ipcLogger: (entry) => {
-        this.sendToWindow('fleet:task-log', taskId, entry);
-      },
-      ipcRawOutput: (data) => {
-        this.sendToWindow('fleet:task-raw-output', taskId, data);
-      },
-      onStatusChange: (status) => {
-        const existing = this.tasks.get(taskId);
-        if (existing) {
-          const patch: Partial<FleetTask> = { status };
-          if (status.type === 'running') {
-            patch.lastUrls = {
-              uiUrl: status.data.uiUrl,
-              codeServerUrl: status.data.codeServerUrl,
-              noVncUrl: status.data.noVncUrl,
-            };
-          }
-          existing.task = { ...existing.task, ...patch };
-          this.persistTask(existing.task);
-        }
-        this.sendToWindow('fleet:task-status', taskId, status);
-
-        if (status.type === 'running') {
-          // Start plan watcher so PLAN.md changes sync back to store
-          this.syncPlanFile(ticketId);
-          this.startPlanWatcher(ticketId);
-          void this.initializeTaskSession(taskId, status.data.wsUrl, planPrompt);
-        }
-
-        if (status.type === 'exited' || status.type === 'error') {
-          this.stopPlanWatcher(ticketId);
-        }
-      },
-    });
-
-    this.tasks.set(taskId, { task, sandbox });
-    this.persistTask(task);
-
-    // Place ticket in the Spec column if not already in a column
-    const specColumn = this.getColumn(ticket.projectId, 'spec');
-    if (specColumn && !ticket.columnId) {
-      this.createPhase(ticket, specColumn);
-    }
-    this.updateTicket(ticketId, { status: 'in_progress', taskId });
-
-    sandbox.start({
-      workspaceDir: project.workspaceDir,
-      sandboxVariant: 'work',
-    });
-
-    return task;
-  };
-
-  submitChatTask = (ticketId: FleetTicketId): FleetTask => {
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket) {
-      throw new Error(`Ticket not found: ${ticketId}`);
-    }
-
-    const project = this.getProjects().find((p) => p.id === ticket.projectId);
-    if (!project) {
-      throw new Error(`Project not found: ${ticket.projectId}`);
-    }
-
-    const pipeline = this.getPipeline(ticket.projectId);
-    const containerPlanPath = getContainerPlanPath(ticketId);
-    const containerArtifacts = getContainerArtifactsDir(ticketId);
-
-    // Build existing checklist text across all columns
-    const allChecklistItems: FleetChecklistItem[] = [];
-    for (const col of pipeline.columns) {
-      const items = ticket.checklist[col.id];
-      if (items && items.length > 0) {
-        allChecklistItems.push(...items);
-      }
-    }
-    const checklistText = formatChecklist(allChecklistItems);
-
-    const chatPrompt = `You are a research and discussion assistant. Your goal is to help the user explore, understand, and discuss this ticket. Have a back-and-forth conversation.
-
-## Ticket
-Title: ${ticket.title}
-Description: ${ticket.description || '(no description)'}
-
-## Current Checklist
-${checklistText}
-
-## Plan File
-The plan file is at: ${containerPlanPath}
-If the user asks you to update the plan, write changes to this file.
-
-## Artifacts Directory
-Persistent artifacts are at: ${containerArtifacts}
-You can read or write files here for research notes, scratch work, or other persistent context.
-
-## Instructions
-1. Research the codebase and gather relevant information about this ticket
-2. Answer the user's questions and discuss implementation approaches
-3. If asked, update the plan file with any agreed-upon changes
-4. Be collaborative — this is a conversation, not an autonomous task`;
-
-    const taskId = nanoid();
-    const task: FleetTask = {
-      id: taskId,
-      projectId: ticket.projectId,
-      taskDescription: chatPrompt,
-      status: { type: 'starting', timestamp: Date.now() },
-      createdAt: Date.now(),
-      ticketId,
-    };
-
-    const sandbox = new SandboxManager({
-      ipcLogger: (entry) => {
-        this.sendToWindow('fleet:task-log', taskId, entry);
-      },
-      ipcRawOutput: (data) => {
-        this.sendToWindow('fleet:task-raw-output', taskId, data);
-      },
-      onStatusChange: (status) => {
-        const existing = this.tasks.get(taskId);
-        if (existing) {
-          const patch: Partial<FleetTask> = { status };
-          if (status.type === 'running') {
-            patch.lastUrls = {
-              uiUrl: status.data.uiUrl,
-              codeServerUrl: status.data.codeServerUrl,
-              noVncUrl: status.data.noVncUrl,
-            };
-          }
-          existing.task = { ...existing.task, ...patch };
-          this.persistTask(existing.task);
-        }
-        this.sendToWindow('fleet:task-status', taskId, status);
-
-        if (status.type === 'running') {
-          this.startPlanWatcher(ticketId);
-          void this.initializeTaskSession(taskId, status.data.wsUrl, chatPrompt);
-        }
-
-        if (status.type === 'exited' || status.type === 'error') {
-          this.stopPlanWatcher(ticketId);
-        }
-      },
-    });
-
-    this.tasks.set(taskId, { task, sandbox });
-    this.persistTask(task);
-    this.updateTicket(ticketId, { status: 'in_progress', taskId });
-
-    sandbox.start({
-      workspaceDir: project.workspaceDir,
-      sandboxVariant: 'work',
-    });
-
-    return task;
-  };
-
   getTasks = (): FleetTask[] => {
     const merged = new Map<FleetTaskId, FleetTask>();
     for (const task of this.getPersistedTasks()) {
@@ -2379,10 +1119,11 @@ You can read or write files here for research notes, scratch work, or other pers
       return;
     }
 
+    // If this task belongs to a supervisor, stop the supervisor too
     if (entry.task.ticketId) {
-      const loopEntry = this.loops.get(entry.task.ticketId);
-      if (loopEntry) {
-        this.stopLoop(entry.task.ticketId);
+      const supervisorEntry = this.supervisors.get(entry.task.ticketId);
+      if (supervisorEntry) {
+        await this.stopSupervisor(entry.task.ticketId);
       }
     }
 
@@ -2395,11 +1136,12 @@ You can read or write files here for research notes, scratch work, or other pers
       return;
     }
 
+    // If this task belongs to a supervisor, clean up the supervisor
     if (entry.task.ticketId) {
-      const loopEntry = this.loops.get(entry.task.ticketId);
-      if (loopEntry) {
-        this.stopLoop(entry.task.ticketId);
-        this.loops.delete(entry.task.ticketId);
+      const supervisorEntry = this.supervisors.get(entry.task.ticketId);
+      if (supervisorEntry) {
+        await supervisorEntry.supervisor.dispose();
+        this.supervisors.delete(entry.task.ticketId);
       }
     }
 
@@ -2421,113 +1163,58 @@ You can read or write files here for research notes, scratch work, or other pers
   // #region Migration
 
   /**
-   * Migrate existing tickets to kanban schema (version 0 → 1).
-   * Called once from createFleetManager before manager instantiation.
+   * Migrate existing tickets to supervisor schema (version 2 → 3).
+   * Strips legacy phase/loop fields and normalizes to new structure.
    */
-  static migrateToKanban(store: Store<StoreData>): void {
+  static migrateToSupervisor(store: Store<StoreData>): void {
     const version = store.get('fleetSchemaVersion', 0);
-    if (version >= 1) {
+    if (version >= 3) {
       return;
     }
 
-    console.log('[FleetManager] Migrating to kanban schema (v0 → v1)');
+    console.log('[FleetManager] Migrating to supervisor schema (→ v3)');
 
-    const tickets = store.get('fleetTickets', []) as FleetTicket[];
+    const tickets = store.get('fleetTickets', []) as Record<string, unknown>[];
     const migrated: FleetTicket[] = [];
 
-    for (const ticket of tickets) {
-      // Skip if already migrated
-      if (ticket.columnId !== undefined && ticket.columnId !== null) {
-        migrated.push(ticket);
-        continue;
-      }
+    for (const raw of tickets) {
+      // Strip all legacy fields and normalize
+      const ticket: FleetTicket = {
+        id: (raw.id as string) ?? nanoid(),
+        projectId: (raw.projectId as string) ?? '',
+        title: (raw.title as string) ?? '',
+        description: (raw.description as string) ?? '',
+        priority: (raw.priority as FleetTicketPriority) ?? 'medium',
+        blockedBy: (raw.blockedBy as FleetTicketId[]) ?? [],
+        createdAt: (raw.createdAt as number) ?? Date.now(),
+        updatedAt: (raw.updatedAt as number) ?? Date.now(),
+        columnId: (raw.columnId as FleetColumnId | null) ?? null,
+        checklist: (raw.checklist as Record<FleetColumnId, FleetChecklistItem[]>) ?? {},
+      };
 
-      // Map legacy status to column
-      let columnId: FleetColumnId;
-      switch (ticket.status) {
-        case 'in_progress':
-          columnId = 'implementation';
-          break;
-        case 'completed':
-        case 'closed':
-          columnId = 'completed';
-          break;
-        default:
-          columnId = 'backlog';
-          break;
-      }
-
-      // Create synthetic phase from existing loop fields
-      const phases: FleetPhase[] = [];
-      if (ticket.loopEnabled && ticket.taskId) {
-        const syntheticPhase: FleetPhase = {
-          id: nanoid(),
-          ticketId: ticket.id,
-          columnId,
-          attempt: 1,
-          status:
-            ticket.loopStatus === 'running' ? 'running' : ticket.loopStatus === 'completed' ? 'completed' : 'blocked',
-          taskIds: [ticket.taskId],
-          loop: {
-            enabled: true,
-            maxIterations: ticket.loopMaxIterations ?? 10,
-            currentIteration: ticket.loopIteration ?? 0,
-            status: ticket.loopStatus ?? null,
-          },
-          enteredAt: ticket.createdAt,
-          ...(ticket.loopStatus !== 'running' && { exitedAt: ticket.updatedAt }),
-        };
-        phases.push(syntheticPhase);
-      }
-
-      migrated.push({
-        ...ticket,
-        columnId,
-        currentPhaseId:
-          phases.length > 0 && phases[phases.length - 1]!.status === 'running' ? phases[phases.length - 1]!.id : null,
-        phases,
-        checklist: ticket.checklist ?? [],
-      });
-    }
-
-    store.set('fleetTickets', migrated);
-    store.set('fleetSchemaVersion', 1);
-    console.log(`[FleetManager] Migration complete: ${migrated.length} tickets migrated`);
-  }
-
-  /**
-   * Migrate checklist from flat array to per-column record (version 1 → 2).
-   */
-  static migrateChecklistToRecord(store: Store<StoreData>): void {
-    const version = store.get('fleetSchemaVersion', 0);
-    if (version >= 2) {
-      return;
-    }
-
-    console.log('[FleetManager] Migrating checklist to per-column record (v1 → v2)');
-
-    const tickets = store.get('fleetTickets', []) as FleetTicket[];
-    const pipeline = DEFAULT_PIPELINE;
-    const firstColumnId = pipeline.columns[0]?.id ?? 'backlog';
-    const migrated: FleetTicket[] = [];
-
-    for (const ticket of tickets) {
+      // Handle legacy checklist format (array → record)
       if (Array.isArray(ticket.checklist)) {
-        // Convert old flat array to a record keyed by the ticket's current column or first column
-        const targetColumn = ticket.columnId ?? firstColumnId;
+        const targetColumn = ticket.columnId ?? 'backlog';
         const oldChecklist = ticket.checklist as unknown as FleetChecklistItem[];
-        migrated.push({
-          ...ticket,
-          checklist: oldChecklist.length > 0 ? { [targetColumn]: oldChecklist } : {},
-        });
-      } else {
-        migrated.push(ticket);
+        ticket.checklist = oldChecklist.length > 0 ? { [targetColumn]: oldChecklist } : {};
       }
+
+      // Map legacy status to columnId if not set
+      if (!ticket.columnId) {
+        const status = raw.status as string;
+        if (status === 'in_progress') {
+          ticket.columnId = 'implementation';
+        } else if (status === 'completed' || status === 'closed') {
+          ticket.columnId = 'completed';
+        }
+      }
+
+      migrated.push(ticket);
     }
 
     store.set('fleetTickets', migrated);
-    store.set('fleetSchemaVersion', 2);
-    console.log(`[FleetManager] Checklist migration complete: ${migrated.length} tickets migrated`);
+    store.set('fleetSchemaVersion', 3);
+    console.log(`[FleetManager] Migration complete: ${migrated.length} tickets migrated`);
   }
 
   // #endregion
@@ -2633,9 +1320,10 @@ You can read or write files here for research notes, scratch work, or other pers
   exit = async (): Promise<void> => {
     this.planSync.dispose();
 
-    for (const [ticketId, loopEntry] of this.loops) {
-      loopEntry.controller.stop();
-      this.loops.delete(ticketId);
+    // Dispose all supervisors
+    for (const [ticketId, entry] of this.supervisors) {
+      await entry.supervisor.dispose();
+      this.supervisors.delete(ticketId);
     }
 
     const exits = [...this.tasks.values()].map((entry) => entry.sandbox.exit());
@@ -2651,48 +1339,37 @@ export const createFleetManager = (arg: {
 }) => {
   const { ipc, sendToWindow, store } = arg;
 
-  // Run migrations before creating the manager
-  FleetManager.migrateToKanban(store);
-  FleetManager.migrateChecklistToRecord(store);
+  // Run migration
+  FleetManager.migrateToSupervisor(store);
 
   const fleetManager = new FleetManager({ store, sendToWindow });
   fleetManager.restorePersistedTasks();
 
-  // Existing IPC handlers
+  // Project handlers
   ipc.handle('fleet:add-project', (_, project) => fleetManager.addProject(project));
   ipc.handle('fleet:update-project', (_, id, patch) => fleetManager.updateProject(id, patch));
   ipc.handle('fleet:remove-project', (_, id) => fleetManager.removeProject(id));
   ipc.handle('fleet:check-git-repo', (_, workspaceDir) => checkGitRepo(workspaceDir));
+
+  // Task handlers
   ipc.handle('fleet:submit-task', (_, projectId, taskDescription, options) =>
     fleetManager.submitTask(projectId, taskDescription, options)
   );
   ipc.handle('fleet:get-tasks', () => fleetManager.getTasks());
   ipc.handle('fleet:stop-task', (_, taskId) => fleetManager.stopTask(taskId));
   ipc.handle('fleet:remove-task', (_, taskId) => fleetManager.removeTask(taskId));
+
+  // Ticket handlers
   ipc.handle('fleet:add-ticket', (_, ticket) => fleetManager.addTicket(ticket));
   ipc.handle('fleet:update-ticket', (_, id, patch) => fleetManager.updateTicket(id, patch));
   ipc.handle('fleet:remove-ticket', (_, id) => fleetManager.removeTicket(id));
   ipc.handle('fleet:get-tickets', (_, projectId) => fleetManager.getTicketsByProject(projectId));
   ipc.handle('fleet:get-next-ticket', (_, projectId) => fleetManager.getNextTicket(projectId));
-  ipc.handle('fleet:submit-ticket-task', (_, ticketId, options) => fleetManager.submitTicketTask(ticketId, options));
-  ipc.handle('fleet:submit-plan-task', (_, ticketId) => fleetManager.submitPlanTask(ticketId));
-  ipc.handle('fleet:submit-chat-task', (_, ticketId) => fleetManager.submitChatTask(ticketId));
-  ipc.handle('fleet:stop-loop', (_, ticketId) => fleetManager.stopLoop(ticketId));
-  ipc.handle('fleet:resume-loop', (_, ticketId) => fleetManager.resumeLoop(ticketId));
 
-  // Phase 2: New IPC handlers
-  ipc.handle('fleet:advance-ticket', (_, ticketId) => fleetManager.advanceTicket(ticketId));
+  // Kanban & checklist
   ipc.handle('fleet:move-ticket-to-column', (_, ticketId, columnId) =>
     fleetManager.moveTicketToColumn(ticketId, columnId)
   );
-  ipc.handle('fleet:kickback-ticket', (_, ticketId, targetColumnId, reviewNote) =>
-    fleetManager.kickbackTicket(ticketId, targetColumnId, reviewNote)
-  );
-  ipc.handle('fleet:approve-phase', (_, ticketId, reviewNote) => fleetManager.approvePhase(ticketId, reviewNote));
-  ipc.handle('fleet:reject-phase', (_, ticketId, reviewNote) => fleetManager.rejectPhase(ticketId, reviewNote));
-  ipc.handle('fleet:start-phase', (_, ticketId) => fleetManager.startPhase(ticketId));
-  ipc.handle('fleet:stop-phase', (_, ticketId) => fleetManager.stopPhase(ticketId));
-  ipc.handle('fleet:resume-phase', (_, ticketId) => fleetManager.resumePhase(ticketId));
   ipc.handle('fleet:update-checklist', (_, ticketId, columnId, checklist) =>
     fleetManager.updateChecklist(ticketId, columnId, checklist)
   );
@@ -2700,18 +1377,32 @@ export const createFleetManager = (arg: {
     fleetManager.toggleChecklistItem(ticketId, columnId, itemId)
   );
   ipc.handle('fleet:get-pipeline', (_, projectId) => fleetManager.getPipeline(projectId));
+
+  // Session history
   ipc.handle('fleet:get-session-history', (_, sessionId) => fleetManager.getSessionHistory(sessionId));
 
-  // Artifact handlers
+  // Artifacts
   ipc.handle('fleet:list-artifacts', (_, ticketId, dirPath) => fleetManager.listArtifacts(ticketId, dirPath));
   ipc.handle('fleet:read-artifact', (_, ticketId, relativePath) => fleetManager.readArtifact(ticketId, relativePath));
   ipc.handle('fleet:open-artifact-external', (_, ticketId, relativePath) =>
     fleetManager.openArtifactExternal(ticketId, relativePath)
   );
 
+  // Supervisor handlers
+  ipc.handle('fleet:ensure-supervisor-infra', async (_, ticketId) => {
+    await fleetManager.ensureSupervisorInfra(ticketId);
+  });
+  ipc.handle('fleet:start-supervisor', (_, ticketId) => fleetManager.startSupervisor(ticketId));
+  ipc.handle('fleet:stop-supervisor', (_, ticketId) => fleetManager.stopSupervisor(ticketId));
+  ipc.handle('fleet:send-supervisor-message', (_, ticketId, message) =>
+    fleetManager.sendSupervisorMessage(ticketId, message)
+  );
+  ipc.handle('fleet:reset-supervisor-session', (_, ticketId) =>
+    fleetManager.resetSupervisorSession(ticketId)
+  );
+
   const cleanup = async () => {
     await fleetManager.exit();
-    // Existing handlers
     ipcMain.removeHandler('fleet:add-project');
     ipcMain.removeHandler('fleet:update-project');
     ipcMain.removeHandler('fleet:remove-project');
@@ -2725,20 +1416,7 @@ export const createFleetManager = (arg: {
     ipcMain.removeHandler('fleet:remove-ticket');
     ipcMain.removeHandler('fleet:get-tickets');
     ipcMain.removeHandler('fleet:get-next-ticket');
-    ipcMain.removeHandler('fleet:submit-ticket-task');
-    ipcMain.removeHandler('fleet:submit-plan-task');
-    ipcMain.removeHandler('fleet:submit-chat-task');
-    ipcMain.removeHandler('fleet:stop-loop');
-    ipcMain.removeHandler('fleet:resume-loop');
-    // Phase 2 handlers
-    ipcMain.removeHandler('fleet:advance-ticket');
     ipcMain.removeHandler('fleet:move-ticket-to-column');
-    ipcMain.removeHandler('fleet:kickback-ticket');
-    ipcMain.removeHandler('fleet:approve-phase');
-    ipcMain.removeHandler('fleet:reject-phase');
-    ipcMain.removeHandler('fleet:start-phase');
-    ipcMain.removeHandler('fleet:stop-phase');
-    ipcMain.removeHandler('fleet:resume-phase');
     ipcMain.removeHandler('fleet:update-checklist');
     ipcMain.removeHandler('fleet:toggle-checklist-item');
     ipcMain.removeHandler('fleet:get-pipeline');
@@ -2746,6 +1424,11 @@ export const createFleetManager = (arg: {
     ipcMain.removeHandler('fleet:list-artifacts');
     ipcMain.removeHandler('fleet:read-artifact');
     ipcMain.removeHandler('fleet:open-artifact-external');
+    ipcMain.removeHandler('fleet:ensure-supervisor-infra');
+    ipcMain.removeHandler('fleet:start-supervisor');
+    ipcMain.removeHandler('fleet:stop-supervisor');
+    ipcMain.removeHandler('fleet:send-supervisor-message');
+    ipcMain.removeHandler('fleet:reset-supervisor-session');
   };
 
   return [fleetManager, cleanup] as const;

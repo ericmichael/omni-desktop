@@ -1,23 +1,19 @@
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo } from 'react';
-import { PiArrowsClockwiseBold, PiPlayFill, PiTrashFill, PiXBold } from 'react-icons/pi';
+import { PiArrowsClockwiseBold, PiTrashFill } from 'react-icons/pi';
 
-import { Button, cn, IconButton } from '@/renderer/ds';
+import { Button, cn } from '@/renderer/ds';
 import type { FleetTicket } from '@/shared/types';
 
 import {
   COLUMN_BADGE_COLORS,
   TICKET_PRIORITY_COLORS,
   TICKET_PRIORITY_LABELS,
-  TICKET_STATUS_COLORS,
-  TICKET_STATUS_LABELS,
 } from './fleet-constants';
 import { $fleetPipeline, fleetApi } from './state';
 
 export const FleetTicketCard = memo(({ ticket, isBlocked }: { ticket: FleetTicket; isBlocked: boolean }) => {
   const pipeline = useStore($fleetPipeline);
-  const isOpen = ticket.status === 'open';
-  const isDone = ticket.status === 'completed' || ticket.status === 'closed';
 
   const columnLabel = useMemo(() => {
     if (!ticket.columnId || !pipeline) {
@@ -30,26 +26,15 @@ export const FleetTicketCard = memo(({ ticket, isBlocked }: { ticket: FleetTicke
     fleetApi.goToTicket(ticket.id);
   }, [ticket.id]);
 
-  const handleClose = useCallback(() => {
-    fleetApi.updateTicket(ticket.id, { status: 'closed' });
-  }, [ticket.id]);
-
   const handleRemove = useCallback(() => {
     fleetApi.removeTicket(ticket.id);
   }, [ticket.id]);
 
-  const handleRunTask = useCallback(() => {
-    fleetApi.submitTicketTask(ticket.id);
-  }, [ticket.id]);
-
-  const handlePlan = useCallback(async () => {
-    const task = await fleetApi.submitPlanTask(ticket.id);
-    fleetApi.goToTask(task.id);
-  }, [ticket.id]);
+  const supervisorStatus = ticket.supervisorStatus;
 
   return (
     <div className="flex items-center gap-3 p-3 rounded-lg border border-surface-border bg-surface-raised">
-      {/* Status indicator: column badge or legacy dot */}
+      {/* Column badge */}
       {ticket.columnId && columnLabel ? (
         <span
           className={cn(
@@ -60,13 +45,12 @@ export const FleetTicketCard = memo(({ ticket, isBlocked }: { ticket: FleetTicke
           {columnLabel}
         </span>
       ) : (
-        <div className={cn('size-2.5 rounded-full shrink-0', TICKET_STATUS_COLORS[ticket.status])} />
+        <div className="size-2.5 rounded-full shrink-0 bg-fg-muted/30" />
       )}
 
       <div className="flex-1 min-w-0">
         <p className="text-sm text-fg truncate">{ticket.title}</p>
         <div className="flex items-center gap-2 mt-0.5">
-          {!ticket.columnId && <span className="text-xs text-fg-muted">{TICKET_STATUS_LABELS[ticket.status]}</span>}
           <span
             className={cn(
               'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
@@ -80,16 +64,20 @@ export const FleetTicketCard = memo(({ ticket, isBlocked }: { ticket: FleetTicke
               Blocked
             </span>
           )}
-          {ticket.loopEnabled && ticket.loopStatus === 'running' && (
+          {supervisorStatus === 'running' && (
             <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium text-green-400 bg-green-400/10">
               <PiArrowsClockwiseBold size={10} className="animate-spin" />
-              {ticket.loopIteration}/{ticket.loopMaxIterations}
+              Running
             </span>
           )}
-          {ticket.loopEnabled && ticket.loopStatus && ticket.loopStatus !== 'running' && (
-            <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium text-fg-muted bg-fg-muted/10">
-              <PiArrowsClockwiseBold size={10} />
-              {ticket.loopIteration}/{ticket.loopMaxIterations}
+          {supervisorStatus === 'waiting' && (
+            <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium text-blue-400 bg-blue-400/10">
+              Waiting
+            </span>
+          )}
+          {supervisorStatus === 'error' && (
+            <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium text-red-400 bg-red-400/10">
+              Error
             </span>
           )}
         </div>
@@ -99,16 +87,9 @@ export const FleetTicketCard = memo(({ ticket, isBlocked }: { ticket: FleetTicke
         <Button size="sm" variant="ghost" onClick={handleView}>
           View
         </Button>
-        {isOpen && (
-          <Button size="sm" variant="ghost" onClick={handlePlan}>
-            Plan
-          </Button>
-        )}
-        {isOpen && !isBlocked && !ticket.columnId && (
-          <IconButton aria-label="Run task" icon={<PiPlayFill />} size="sm" onClick={handleRunTask} />
-        )}
-        {!isDone && <IconButton aria-label="Close ticket" icon={<PiXBold />} size="sm" onClick={handleClose} />}
-        {isDone && <IconButton aria-label="Delete ticket" icon={<PiTrashFill />} size="sm" onClick={handleRemove} />}
+        <Button size="sm" variant="ghost" onClick={handleRemove}>
+          <PiTrashFill size={12} />
+        </Button>
       </div>
     </div>
   );

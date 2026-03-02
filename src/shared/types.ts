@@ -364,47 +364,23 @@ export type FleetProjectId = string;
 export type FleetTaskId = string;
 export type FleetTicketId = string;
 export type FleetColumnId = string;
-export type FleetPhaseId = string;
 export type FleetChecklistItemId = string;
 
 // --- Enums ---
 
-export type FleetTicketStatus = 'open' | 'in_progress' | 'completed' | 'closed';
 export type FleetTicketPriority = 'low' | 'medium' | 'high' | 'critical';
-export type FleetTicketLoopStatus = 'running' | 'completed' | 'stopped' | 'error';
-export type FleetPhaseStatus = 'pending' | 'running' | 'completed' | 'blocked' | 'rejected' | 'skipped';
 
-/**
- * Sentinel signals an agent can emit. Scoped per column via `validSentinels`.
- */
-export type FleetSentinel = 'CHECKLIST_COMPLETE' | 'BLOCKED' | 'TESTS_FAILING' | 'NEEDS_REVIEW' | 'REJECTED';
+/** Supervisor agent state for a ticket. */
+export type FleetSupervisorStatus = 'idle' | 'running' | 'waiting' | 'error';
 
 // --- Pipeline & columns ---
 
 /**
- * A single column in the kanban pipeline. Defines the agent contract for that stage.
- *
- * Columns with `role: 'none'` and `maxIterations: 0` are passive (no agent loop).
+ * A single column in the kanban pipeline. Visual milestones for the supervisor.
  */
 export type FleetColumn = {
   id: FleetColumnId;
   label: string;
-  /** Agent persona for this column (e.g. 'implementer', 'reviewer', 'none'). */
-  role: string;
-  /**
-   * System prompt template. Supports {{variable}} interpolation:
-   * {{ticket.title}}, {{ticket.description}}, {{checklist}}, {{phase.history}},
-   * {{iteration}}, {{column.label}}, {{sentinelInstructions}}
-   */
-  promptTemplate: string;
-  /** Which sentinels are valid exit signals for this column. */
-  validSentinels: FleetSentinel[];
-  /** Whether human approval is required before advancing to the next column. */
-  requiresApproval: boolean;
-  /** Whether the agent loop auto-starts when a ticket enters this column. */
-  autoStart: boolean;
-  /** Max loop iterations. 0 = no agent loop (passive column). */
-  maxIterations: number;
   /** Default checklist items copied to a ticket when it enters this column. */
   defaultChecklist: FleetChecklistItem[];
 };
@@ -422,41 +398,6 @@ export type FleetChecklistItem = {
   id: FleetChecklistItemId;
   text: string;
   completed: boolean;
-};
-
-// --- Phase (per-column execution record) ---
-
-/**
- * Loop state within a phase. Replaces the flat loop fields that were on FleetTicket.
- */
-export type FleetPhaseLoop = {
-  enabled: boolean;
-  maxIterations: number;
-  currentIteration: number;
-  status: FleetTicketLoopStatus | null;
-};
-
-/**
- * Tracks a ticket's execution within a specific column. Each time a ticket enters
- * (or re-enters via kickback) a column, a new Phase is created.
- */
-export type FleetPhase = {
-  id: FleetPhaseId;
-  ticketId: FleetTicketId;
-  columnId: FleetColumnId;
-  /** 1st time in this column = 1, after kickback = 2, etc. */
-  attempt: number;
-  status: FleetPhaseStatus;
-  /** IDs of tasks spawned during this phase. */
-  taskIds: FleetTaskId[];
-  /** Loop state for this phase. */
-  loop: FleetPhaseLoop;
-  /** The sentinel that ended this phase, if any. */
-  exitSentinel?: FleetSentinel;
-  /** Human-provided note when approving/rejecting at a gate. */
-  reviewNote?: string;
-  enteredAt: number;
-  exitedAt?: number;
 };
 
 // --- Core entities ---
@@ -483,25 +424,18 @@ export type FleetTicket = {
   // Kanban state
   /** Current column. null = not yet placed in pipeline. */
   columnId: FleetColumnId | null;
-  /** Active phase for the current column. null when no agent work is happening. */
-  currentPhaseId: FleetPhaseId | null;
-  /** All phases for this ticket, ordered chronologically. */
-  phases: FleetPhase[];
   /** Per-column checklist items. Keyed by column ID. */
   checklist: Record<FleetColumnId, FleetChecklistItem[]>;
 
-  // Legacy (derived from columnId, kept for backwards compat during migration)
-  status: FleetTicketStatus;
-  /** @deprecated Use currentPhaseId + phase.taskIds instead. */
-  taskId?: FleetTaskId;
-  /** @deprecated Use phase.loop instead. */
-  loopEnabled?: boolean;
-  /** @deprecated */
-  loopMaxIterations?: number;
-  /** @deprecated */
-  loopIteration?: number;
-  /** @deprecated */
-  loopStatus?: FleetTicketLoopStatus;
+  // Supervisor state
+  /** Persistent supervisor session ID (survives across start_run calls). */
+  supervisorSessionId?: string;
+  /** Current run_id for the active supervisor run (null when idle). */
+  supervisorRunId?: string;
+  /** Supervisor state: idle (no run), running (active run), waiting (run ended, awaiting user). */
+  supervisorStatus?: FleetSupervisorStatus;
+  /** Task ID for the supervisor's sandbox. */
+  supervisorTaskId?: FleetTaskId;
 };
 
 export type FleetTask = {
@@ -515,11 +449,6 @@ export type FleetTask = {
   worktreeName?: string;
   sessionId?: string;
   ticketId?: FleetTicketId;
-  /** Which phase spawned this task. */
-  phaseId?: FleetPhaseId;
-  /** Which column context this task ran in. */
-  columnId?: FleetColumnId;
-  iteration?: number;
   /** Snapshot of sandbox URLs from the last 'running' state, for replaying past sessions. */
   lastUrls?: {
     uiUrl: string;
@@ -554,8 +483,6 @@ export type FleetSessionMessage = {
 export type FleetTaskSubmitOptions = {
   branch?: string;
   useWorktree?: boolean;
-  loop?: boolean;
-  loopMaxIterations?: number;
 };
 
 export type GitRepoInfo = { isGitRepo: true; branches: string[]; currentBranch: string } | { isGitRepo: false };
@@ -706,36 +633,26 @@ type FleetIpcEvents = Namespaced<
     'stop-task': (taskId: FleetTaskId) => void;
     'remove-task': (taskId: FleetTaskId) => void;
     'add-ticket': (
-      ticket: Omit<
-        FleetTicket,
-        'id' | 'createdAt' | 'updatedAt' | 'status' | 'taskId' | 'columnId' | 'currentPhaseId' | 'phases' | 'checklist'
-      >
+      ticket: Omit<FleetTicket, 'id' | 'createdAt' | 'updatedAt' | 'columnId' | 'checklist'>
     ) => FleetTicket;
     'update-ticket': (id: FleetTicketId, patch: Partial<Omit<FleetTicket, 'id' | 'projectId' | 'createdAt'>>) => void;
     'remove-ticket': (id: FleetTicketId) => void;
     'get-tickets': (projectId: FleetProjectId) => FleetTicket[];
     'get-next-ticket': (projectId: FleetProjectId) => FleetTicket | null;
-    'submit-ticket-task': (ticketId: FleetTicketId, options: FleetTaskSubmitOptions) => FleetTask;
-    'stop-loop': (ticketId: FleetTicketId) => void;
-    'resume-loop': (ticketId: FleetTicketId) => void;
-    // Phase 2: Kanban pipeline operations
-    'advance-ticket': (ticketId: FleetTicketId) => void;
     'move-ticket-to-column': (ticketId: FleetTicketId, columnId: FleetColumnId) => void;
-    'kickback-ticket': (ticketId: FleetTicketId, targetColumnId: FleetColumnId, reviewNote?: string) => void;
-    'approve-phase': (ticketId: FleetTicketId, reviewNote?: string) => void;
-    'reject-phase': (ticketId: FleetTicketId, reviewNote: string) => void;
-    'start-phase': (ticketId: FleetTicketId) => void;
-    'stop-phase': (ticketId: FleetTicketId) => void;
-    'resume-phase': (ticketId: FleetTicketId) => void;
     'update-checklist': (ticketId: FleetTicketId, columnId: FleetColumnId, checklist: FleetChecklistItem[]) => void;
     'toggle-checklist-item': (ticketId: FleetTicketId, columnId: FleetColumnId, itemId: FleetChecklistItemId) => void;
     'get-pipeline': (projectId: FleetProjectId) => FleetPipeline;
     'get-session-history': (sessionId: string) => FleetSessionMessage[];
-    'submit-plan-task': (ticketId: FleetTicketId) => FleetTask;
-    'submit-chat-task': (ticketId: FleetTicketId) => FleetTask;
     'list-artifacts': (ticketId: FleetTicketId, dirPath?: string) => ArtifactFileEntry[];
     'read-artifact': (ticketId: FleetTicketId, relativePath: string) => ArtifactFileContent;
     'open-artifact-external': (ticketId: FleetTicketId, relativePath: string) => void;
+    // Supervisor operations
+    'ensure-supervisor-infra': (ticketId: FleetTicketId) => void;
+    'start-supervisor': (ticketId: FleetTicketId) => void;
+    'stop-supervisor': (ticketId: FleetTicketId) => void;
+    'send-supervisor-message': (ticketId: FleetTicketId, message: string) => void;
+    'reset-supervisor-session': (ticketId: FleetTicketId) => void;
   }
 >;
 
@@ -854,12 +771,6 @@ type CodeIpcRendererEvents = Namespaced<
 /**
  * Fleet events. Main process emits these events, renderer process listens to them.
  */
-export type FleetTicketLoopUpdate = {
-  iteration: number;
-  maxIterations: number;
-  status: FleetTicketLoopStatus;
-};
-
 type FleetIpcRendererEvents = Namespaced<
   'fleet',
   {
@@ -867,8 +778,8 @@ type FleetIpcRendererEvents = Namespaced<
     'task-session': [FleetTaskId, string];
     'task-log': [FleetTaskId, WithTimestamp<LogEntry>];
     'task-raw-output': [FleetTaskId, string];
-    'ticket-loop-update': [FleetTicketId, FleetTicketLoopUpdate];
-    'phase-update': [FleetTicketId, FleetPhase];
+    'supervisor-status': [FleetTicketId, FleetSupervisorStatus];
+    'supervisor-message': [FleetTicketId, FleetSessionMessage];
   }
 >;
 

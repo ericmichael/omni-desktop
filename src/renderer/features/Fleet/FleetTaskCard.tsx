@@ -35,11 +35,6 @@ export const FleetTaskCard = memo(({ task }: { task: FleetTask }) => {
         <p className="text-sm text-fg truncate">{task.taskDescription}</p>
         <div className="flex items-center gap-2">
           <span className="text-xs text-fg-muted">{STATUS_LABELS[statusType] ?? statusType}</span>
-          {task.iteration !== undefined && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium text-accent-400 bg-accent-400/10">
-              Iter {task.iteration}
-            </span>
-          )}
         </div>
       </div>
 

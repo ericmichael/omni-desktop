@@ -1,42 +1,42 @@
 import { useStore } from '@nanostores/react';
 import { motion } from 'framer-motion';
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   PiArrowLeftBold,
   PiArrowsClockwiseBold,
-  PiCheckCircleBold,
+  PiPlusBold,
   PiMonitorBold,
   PiPencilSimpleBold,
   PiPlayFill,
   PiStopFill,
+  PiTrashBold,
 } from 'react-icons/pi';
 
-import { Button, cn, Heading, IconButton } from '@/renderer/ds';
+import { Webview } from '@/renderer/common/Webview';
+import { cn, IconButton, Spinner } from '@/renderer/ds';
+import { persistedStoreApi } from '@/renderer/services/store';
 import type { FleetTicketId } from '@/shared/types';
 
 import {
   COLUMN_BADGE_COLORS,
   TICKET_PRIORITY_COLORS,
   TICKET_PRIORITY_LABELS,
-  TICKET_STATUS_COLORS,
-  TICKET_STATUS_LABELS,
 } from './fleet-constants';
 import { FleetTicketArtifactsTab } from './FleetTicketArtifactsTab';
 import { FleetTicketOverviewTab } from './FleetTicketOverviewTab';
 import { FleetTicketPlanTab } from './FleetTicketPlanTab';
 import { $fleetPipeline, $fleetTasks, $fleetTickets, fleetApi } from './state';
 
-type TicketTab = 'Plan' | 'Overview' | 'Artifacts';
-const TABS: TicketTab[] = ['Plan', 'Overview', 'Artifacts'];
+type TicketTab = 'Chat' | 'Overview' | 'Plan' | 'Artifacts';
+const TABS: TicketTab[] = ['Chat', 'Overview', 'Plan', 'Artifacts'];
 
 export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }) => {
   const tickets = useStore($fleetTickets);
   const tasks = useStore($fleetTasks);
   const pipeline = useStore($fleetPipeline);
+  const store = useStore(persistedStoreApi.$atom);
   const ticket = tickets[ticketId];
-  const [activeTab, setTicketActiveTab] = useState<TicketTab>('Plan');
-  const [rejectNote, setRejectNote] = useState('');
-  const [showRejectInput, setShowRejectInput] = useState(false);
+  const [activeTab, setActiveTab] = useState<TicketTab>('Chat');
   const [editingTitle, setEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState('');
 
@@ -47,34 +47,39 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
     return pipeline.columns.find((c) => c.id === ticket.columnId);
   }, [ticket, pipeline]);
 
-  const currentPhase = useMemo(() => {
-    if (!ticket?.currentPhaseId) {
-      return undefined;
-    }
-    return ticket.phases.find((p) => p.id === ticket.currentPhaseId);
-  }, [ticket]);
-
-  // Phase task: find the latest task from the current phase
-  const phaseTask = useMemo(() => {
-    if (!currentPhase || currentPhase.taskIds.length === 0) {
-      return undefined;
-    }
-    const lastTaskId = currentPhase.taskIds[currentPhase.taskIds.length - 1];
-    return lastTaskId ? tasks[lastTaskId] : undefined;
-  }, [currentPhase, tasks]);
-
-  // Active running task (phase task or legacy linked task)
   const activeTask = useMemo(() => {
-    const t = phaseTask ?? (ticket?.taskId ? tasks[ticket.taskId] : undefined);
-    return t?.status.type === 'running' || t?.status.type === 'starting' ? t : undefined;
-  }, [phaseTask, ticket, tasks]);
-
-  const hasChecklist = useMemo(() => {
-    if (!ticket) {
-      return false;
+    if (!ticket?.supervisorTaskId) {
+      return undefined;
     }
-    return Object.values(ticket.checklist).some((items) => items.length > 0);
-  }, [ticket]);
+    const t = tasks[ticket.supervisorTaskId];
+    return t?.status.type === 'running' || t?.status.type === 'starting' ? t : undefined;
+  }, [ticket, tasks]);
+
+  const supervisorUiUrl = useMemo(() => {
+    if (!ticket?.supervisorTaskId) {
+      return undefined;
+    }
+    const task = tasks[ticket.supervisorTaskId];
+    // Only use the URL when the sandbox is actively running — the omniagents
+    // server inside the container must be alive for the UI to load.
+    if (task?.status.type !== 'running') {
+      return undefined;
+    }
+    const baseUrl = task.status.data.uiUrl;
+    if (!baseUrl) {
+      return undefined;
+    }
+    const url = new URL(baseUrl, window.location.origin);
+    if (ticket.supervisorSessionId) {
+      url.searchParams.set('session', ticket.supervisorSessionId);
+    }
+    const theme = store.theme ?? 'tokyo-night';
+    if (theme !== 'default') {
+      url.searchParams.set('theme', theme);
+    }
+    url.searchParams.set('minimal', 'true');
+    return url.toString();
+  }, [ticket, tasks, store.theme]);
 
   const handleBack = useCallback(() => {
     if (ticket) {
@@ -90,7 +95,6 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
     }
   }, [activeTask]);
 
-  // Inline title editing
   const handleStartEditTitle = useCallback(() => {
     if (ticket) {
       setEditTitle(ticket.title);
@@ -121,111 +125,39 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
     [handleSaveTitle]
   );
 
-  const handlePlan = useCallback(async () => {
-    if (!ticket) {
+  // Auto-start the sandbox (without sending a prompt) so the web UI loads
+  const infraStarted = useRef(false);
+  useEffect(() => {
+    if (activeTab !== 'Chat') {
       return;
     }
-    const task = await fleetApi.submitPlanTask(ticket.id);
-    fleetApi.goToTask(task.id);
-  }, [ticket]);
-
-  const handleChat = useCallback(async () => {
-    if (!ticket) {
-      return;
+    const status = ticket?.supervisorStatus;
+    const hasRunningTask = !!activeTask;
+    if (!hasRunningTask && (!status || status === 'idle') && !infraStarted.current) {
+      infraStarted.current = true;
+      void fleetApi.ensureSupervisorInfra(ticketId);
     }
-    const task = await fleetApi.submitChatTask(ticket.id);
-    fleetApi.goToTask(task.id);
-  }, [ticket]);
+  }, [activeTab, ticket?.supervisorStatus, activeTask, ticketId]);
 
-  const handleAuto = useCallback(() => {
-    fleetApi.startPhase(ticketId);
+  const handleStartSupervisor = useCallback(() => {
+    fleetApi.startSupervisor(ticketId);
+  }, [ticketId]);
+
+  const handleStopSupervisor = useCallback(() => {
+    fleetApi.stopSupervisor(ticketId);
+  }, [ticketId]);
+
+  const handleResetSession = useCallback(() => {
+    fleetApi.resetSupervisorSession(ticketId);
   }, [ticketId]);
 
   const handleDelete = useCallback(() => {
     fleetApi.removeTicket(ticketId);
   }, [ticketId]);
 
-  // Phase controls
-  const handleStartPhase = useCallback(() => {
-    fleetApi.startPhase(ticketId);
-  }, [ticketId]);
-
-  const handleStopPhase = useCallback(() => {
-    fleetApi.stopPhase(ticketId);
-  }, [ticketId]);
-
-  const handleResumePhase = useCallback(() => {
-    fleetApi.resumePhase(ticketId);
-  }, [ticketId]);
-
-  const handleApprove = useCallback(() => {
-    fleetApi.approvePhase(ticketId);
-  }, [ticketId]);
-
-  const handleShowReject = useCallback(() => {
-    setShowRejectInput(true);
-  }, []);
-
-  const handleRejectNoteChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setRejectNote(e.target.value);
-  }, []);
-
-  const handleReject = useCallback(() => {
-    if (rejectNote.trim()) {
-      fleetApi.rejectPhase(ticketId, rejectNote.trim());
-      setRejectNote('');
-      setShowRejectInput(false);
-    }
-  }, [ticketId, rejectNote]);
-
-  const handleCancelReject = useCallback(() => {
-    setShowRejectInput(false);
-    setRejectNote('');
-  }, []);
-
-  // Legacy loop controls (for tickets without columnId)
-  const handleStopLoop = useCallback(() => {
-    if (ticket) {
-      fleetApi.stopLoop(ticket.id);
-    }
-  }, [ticket]);
-
-  const handleResumeLoop = useCallback(() => {
-    if (ticket) {
-      fleetApi.resumeLoop(ticket.id);
-    }
-  }, [ticket]);
-
-  const handleRejectKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter') {
-        handleReject();
-      }
-    },
-    [handleReject]
-  );
-
-  // Tab click handlers
-  const handleTabPlan = useCallback(() => {
-    setTicketActiveTab('Plan');
-  }, []);
-
-  const handleTabOverview = useCallback(() => {
-    setTicketActiveTab('Overview');
-  }, []);
-
-  const handleTabArtifacts = useCallback(() => {
-    setTicketActiveTab('Artifacts');
-  }, []);
-
-  const tabClickHandlers = useMemo(
-    () =>
-      ({
-        Plan: handleTabPlan,
-        Overview: handleTabOverview,
-        Artifacts: handleTabArtifacts,
-      }) as Record<TicketTab, () => void>,
-    [handleTabPlan, handleTabOverview, handleTabArtifacts]
+  const tabHandlers = useMemo(
+    () => Object.fromEntries(TABS.map((t) => [t, () => setActiveTab(t)])) as Record<TicketTab, () => void>,
+    []
   );
 
   if (!ticket) {
@@ -236,40 +168,20 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
     );
   }
 
-  const hasColumnId = ticket.columnId !== null;
-
-  // Determine unified status bar state
-  const isLegacyLoop = !hasColumnId && ticket.loopEnabled && ticket.loopStatus;
-  const isAgentRunning = currentPhase?.loop.status === 'running' || (isLegacyLoop && ticket.loopStatus === 'running');
-  const isAwaitingApproval = hasColumnId && currentColumn?.requiresApproval && currentPhase?.status === 'completed';
-  const isBlocked =
-    (currentPhase?.status === 'blocked' || currentPhase?.loop.status === 'stopped') &&
-    currentPhase?.status !== 'completed';
-  const isPhasePending = currentPhase?.status === 'pending';
-  const isPhaseCompleted = currentPhase?.status === 'completed' && !isAwaitingApproval;
-  const isLegacyBlocked = isLegacyLoop && (ticket.loopStatus === 'stopped' || ticket.loopStatus === 'error');
-  const showStatusBar =
-    isAgentRunning ||
-    isAwaitingApproval ||
-    isBlocked ||
-    isPhasePending ||
-    isPhaseCompleted ||
-    isLegacyBlocked ||
-    !!activeTask;
-
-  // Iteration label for running loops
-  const iterationLabel = isLegacyLoop
-    ? `Iteration ${ticket.loopIteration ?? 0}/${ticket.loopMaxIterations ?? 0}`
-    : currentPhase?.loop.status === 'running'
-      ? `Iteration ${currentPhase.loop.currentIteration}/${currentPhase.loop.maxIterations}`
-      : null;
+  const supervisorStatus = ticket.supervisorStatus;
+  const isRunning = supervisorStatus === 'running';
+  const isWaiting = supervisorStatus === 'waiting';
+  const isError = supervisorStatus === 'error';
+  const isIdle = !supervisorStatus || supervisorStatus === 'idle';
 
   return (
     <div className="flex flex-col w-full h-full">
-      {/* Header */}
-      <div className="flex items-center gap-2 px-6 py-4 border-b border-surface-border shrink-0">
+      {/* Single compact header: back + title + badges + status + actions */}
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-surface-border shrink-0">
         <IconButton aria-label="Back" icon={<PiArrowLeftBold />} size="sm" onClick={handleBack} />
-        <div className="flex-1 min-w-0">
+
+        {/* Title (editable) + inline badges */}
+        <div className="flex items-center gap-2 flex-1 min-w-0">
           {editingTitle ? (
             <input
               type="text"
@@ -278,166 +190,97 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
               onBlur={handleSaveTitle}
               onKeyDown={handleTitleKeyDown}
               autoFocus
-              className="w-full rounded-md border border-accent-500 bg-surface px-2 py-1 text-base font-semibold text-fg focus:outline-none"
+              className="flex-1 min-w-0 rounded-md border border-accent-500 bg-surface px-2 py-0.5 text-sm font-semibold text-fg focus:outline-none"
             />
           ) : (
-            <div className="flex items-center gap-1.5 group/title">
-              <Heading size="md">{ticket.title}</Heading>
-              <IconButton
-                aria-label="Edit title"
-                icon={<PiPencilSimpleBold />}
-                size="sm"
-                onClick={handleStartEditTitle}
-                className="opacity-0 group-hover/title:opacity-100 transition-opacity"
+            <button
+              onClick={handleStartEditTitle}
+              className="flex items-center gap-1.5 min-w-0 group/title cursor-pointer"
+            >
+              <span className="text-sm font-semibold text-fg truncate">{ticket.title}</span>
+              <PiPencilSimpleBold
+                size={12}
+                className="shrink-0 text-fg-muted opacity-0 group-hover/title:opacity-100 transition-opacity"
               />
-            </div>
+            </button>
           )}
-          <div className="flex items-center gap-2 mt-1">
-            {hasColumnId && currentColumn ? (
-              <span
-                className={cn(
-                  'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
-                  COLUMN_BADGE_COLORS[currentColumn.id] ?? 'text-fg-muted bg-fg-muted/10'
-                )}
-              >
-                {currentColumn.label}
-              </span>
-            ) : (
-              <>
-                <div className={cn('size-2 rounded-full', TICKET_STATUS_COLORS[ticket.status])} />
-                <span className="text-xs text-fg-muted">{TICKET_STATUS_LABELS[ticket.status]}</span>
-              </>
-            )}
+
+          {currentColumn && (
             <span
               className={cn(
-                'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
-                TICKET_PRIORITY_COLORS[ticket.priority]
+                'text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0',
+                COLUMN_BADGE_COLORS[currentColumn.id] ?? 'text-fg-muted bg-fg-muted/10'
               )}
             >
-              {TICKET_PRIORITY_LABELS[ticket.priority]}
+              {currentColumn.label}
             </span>
-          </div>
+          )}
+          <span
+            className={cn(
+              'text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0',
+              TICKET_PRIORITY_COLORS[ticket.priority]
+            )}
+          >
+            {TICKET_PRIORITY_LABELS[ticket.priority]}
+          </span>
+
+          {/* Inline supervisor status */}
+          {isRunning && (
+            <span className="flex items-center gap-1 text-[10px] text-green-400 font-medium shrink-0">
+              <PiArrowsClockwiseBold size={10} className="animate-spin" />
+              Running
+            </span>
+          )}
+          {isWaiting && (
+            <span className="flex items-center gap-1 text-[10px] text-blue-400 font-medium shrink-0">
+              <span className="size-1.5 rounded-full bg-blue-400" />
+              Waiting
+            </span>
+          )}
+          {isError && (
+            <span className="flex items-center gap-1 text-[10px] text-red-400 font-medium shrink-0">
+              <span className="size-1.5 rounded-full bg-red-400" />
+              Error
+            </span>
+          )}
         </div>
-        {!hasChecklist && (
-          <Button size="sm" variant="ghost" onClick={handlePlan}>
-            Plan
-          </Button>
+
+        {/* Actions */}
+        {activeTask && (
+          <IconButton
+            aria-label="New Chat"
+            icon={<PiPlusBold />}
+            size="sm"
+            onClick={handleResetSession}
+          />
         )}
-        <Button size="sm" variant="ghost" onClick={handleChat}>
-          Chat
-        </Button>
-        {hasChecklist && (
-          <Button size="sm" variant="ghost" onClick={handleAuto}>
-            Auto
-          </Button>
+        {activeTask && (
+          <IconButton
+            aria-label="Open Sandbox"
+            icon={<PiMonitorBold />}
+            size="sm"
+            onClick={handleOpenSandbox}
+          />
         )}
-        <Button size="sm" variant="ghost" onClick={handleDelete}>
-          Delete
-        </Button>
+        {isIdle && (
+          <IconButton aria-label="Start Supervisor" icon={<PiPlayFill />} size="sm" onClick={handleStartSupervisor} />
+        )}
+        {isError && (
+          <IconButton aria-label="Retry" icon={<PiPlayFill />} size="sm" onClick={handleStartSupervisor} />
+        )}
+        {(isRunning || isWaiting) && (
+          <IconButton aria-label="Stop Supervisor" icon={<PiStopFill />} size="sm" onClick={handleStopSupervisor} />
+        )}
+        <IconButton aria-label="Delete ticket" icon={<PiTrashBold />} size="sm" onClick={handleDelete} />
       </div>
 
-      {/* Status Bar */}
-      {showStatusBar && (
-        <div className="flex items-center gap-3 px-6 py-3 border-b border-surface-border shrink-0">
-          {isAgentRunning && <div className="size-2.5 rounded-full bg-green-400 animate-pulse shrink-0" />}
-          {isAwaitingApproval && <div className="size-2.5 rounded-full bg-blue-400 shrink-0" />}
-          {(isBlocked || isLegacyBlocked) && <div className="size-2.5 rounded-full bg-orange-400 shrink-0" />}
-          {isPhasePending && <div className="size-2.5 rounded-full bg-fg-muted/30 shrink-0" />}
-          {isPhaseCompleted && <PiCheckCircleBold size={14} className="text-green-400 shrink-0" />}
-
-          <div className="flex items-center gap-2 flex-1 min-w-0">
-            {isAgentRunning && (
-              <>
-                <PiArrowsClockwiseBold size={14} className="text-green-400 animate-spin shrink-0" />
-                <span className="text-sm font-medium text-green-400">Running</span>
-                {iterationLabel && <span className="text-sm text-fg-muted">{iterationLabel}</span>}
-              </>
-            )}
-            {isAwaitingApproval && !showRejectInput && (
-              <span className="text-sm font-medium text-blue-400">Awaiting Approval</span>
-            )}
-            {isBlocked && (
-              <>
-                <span className="text-sm font-medium text-orange-400">
-                  {currentPhase?.status === 'blocked' ? 'Blocked' : 'Stopped'}
-                </span>
-                {currentPhase?.exitSentinel && (
-                  <span className="text-xs text-fg-muted">{currentPhase.exitSentinel}</span>
-                )}
-              </>
-            )}
-            {isLegacyBlocked && (
-              <span className="text-sm font-medium text-orange-400">
-                {ticket.loopStatus === 'error' ? 'Error' : 'Stopped'}
-              </span>
-            )}
-            {isPhasePending && <span className="text-sm text-fg-muted">Ready</span>}
-            {isPhaseCompleted && <span className="text-sm text-fg-muted">Completed</span>}
-          </div>
-
-          {isAwaitingApproval && showRejectInput && (
-            <div className="flex items-center gap-2 flex-1 min-w-0">
-              <input
-                type="text"
-                value={rejectNote}
-                onChange={handleRejectNoteChange}
-                placeholder="Rejection reason..."
-                autoFocus
-                className="flex-1 rounded-md border border-surface-border bg-surface px-2 py-1 text-sm text-fg placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500"
-                onKeyDown={handleRejectKeyDown}
-              />
-              <Button size="sm" onClick={handleReject} isDisabled={!rejectNote.trim()}>
-                Reject
-              </Button>
-              <Button size="sm" variant="ghost" onClick={handleCancelReject}>
-                Cancel
-              </Button>
-            </div>
-          )}
-
-          <div className="flex items-center gap-2 shrink-0">
-            {isAgentRunning && !isLegacyLoop && (
-              <IconButton aria-label="Stop" icon={<PiStopFill />} size="sm" onClick={handleStopPhase} />
-            )}
-            {isAgentRunning && isLegacyLoop && (
-              <IconButton aria-label="Stop" icon={<PiStopFill />} size="sm" onClick={handleStopLoop} />
-            )}
-            {activeTask && (
-              <Button size="sm" variant="ghost" onClick={handleOpenSandbox}>
-                <PiMonitorBold size={14} className="mr-1" />
-                Open Sandbox
-              </Button>
-            )}
-            {isAwaitingApproval && !showRejectInput && (
-              <>
-                <Button size="sm" onClick={handleApprove}>
-                  Approve
-                </Button>
-                <Button size="sm" variant="ghost" onClick={handleShowReject}>
-                  Reject
-                </Button>
-              </>
-            )}
-            {(isBlocked || isLegacyBlocked || isPhasePending) && (
-              <Button
-                size="sm"
-                onClick={isPhasePending ? handleStartPhase : isLegacyLoop ? handleResumeLoop : handleResumePhase}
-              >
-                <PiPlayFill size={12} className="mr-1" />
-                Go
-              </Button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Tab Bar */}
-      <div className="flex gap-1 px-6 py-2 border-b border-surface-border shrink-0">
+      {/* Tab bar */}
+      <div className="flex gap-1 px-4 py-1.5 border-b border-surface-border shrink-0">
         {TABS.map((tab) => (
           <button
             key={tab}
-            onClick={tabClickHandlers[tab]}
-            className="relative px-3 py-1.5 text-xs font-medium rounded-md cursor-pointer select-none transition-colors"
+            onClick={tabHandlers[tab]}
+            className="relative px-3 py-1 text-xs font-medium rounded-md cursor-pointer select-none transition-colors"
             style={{ color: activeTab === tab ? 'var(--color-fg)' : 'var(--color-fg-muted)' }}
           >
             {activeTab === tab && (
@@ -452,7 +295,27 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
         ))}
       </div>
 
-      {/* Tab Content */}
+      {/* Tab content */}
+      {activeTab === 'Chat' && (
+        <div className="flex-1 min-h-0 relative">
+          {supervisorUiUrl ? (
+            <Webview src={supervisorUiUrl} showUnavailable={false} />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full gap-4">
+              {isRunning ? (
+                <>
+                  <Spinner size="md" />
+                  <p className="text-sm text-fg-muted">Loading chat interface...</p>
+                </>
+              ) : (
+                <p className="text-sm text-fg-muted">
+                  {isWaiting ? 'Supervisor is waiting — click play to resume.' : 'Start the supervisor to begin chatting.'}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       {activeTab === 'Plan' && (
         <div className="flex-1 min-h-0 overflow-y-auto p-6">
           <FleetTicketPlanTab ticket={ticket} pipeline={pipeline} />

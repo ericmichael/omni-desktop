@@ -1,17 +1,26 @@
 import { useDraggable } from '@dnd-kit/core';
-import { memo, useCallback, useMemo, useState } from 'react';
-import { PiArrowsClockwiseBold, PiCheckCircleBold, PiDotsSixVerticalBold, PiXCircleBold } from 'react-icons/pi';
+import { memo, useCallback, useMemo } from 'react';
+import { PiArrowsClockwiseBold, PiDotsSixVerticalBold } from 'react-icons/pi';
 
-import { Button, cn } from '@/renderer/ds';
+import { cn } from '@/renderer/ds';
 import type { FleetColumn, FleetTicket } from '@/shared/types';
 
-import {
-  PHASE_STATUS_COLORS,
-  PHASE_STATUS_LABELS,
-  TICKET_PRIORITY_COLORS,
-  TICKET_PRIORITY_LABELS,
-} from './fleet-constants';
+import { TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './fleet-constants';
 import { fleetApi } from './state';
+
+const SUPERVISOR_STATUS_COLORS: Record<string, string> = {
+  running: 'text-green-400 bg-green-400/10',
+  waiting: 'text-blue-400 bg-blue-400/10',
+  error: 'text-red-400 bg-red-400/10',
+  idle: 'text-fg-muted bg-fg-muted/10',
+};
+
+const SUPERVISOR_STATUS_LABELS: Record<string, string> = {
+  running: 'Running',
+  waiting: 'Waiting',
+  error: 'Error',
+  idle: 'Idle',
+};
 
 export const FleetKanbanCard = memo(
   ({ ticket, column, isOverlay }: { ticket: FleetTicket; column: FleetColumn; isOverlay?: boolean }) => {
@@ -19,15 +28,6 @@ export const FleetKanbanCard = memo(
       id: ticket.id,
       disabled: isOverlay,
     });
-    const [rejectNote, setRejectNote] = useState('');
-    const [showRejectInput, setShowRejectInput] = useState(false);
-
-    const currentPhase = useMemo(() => {
-      if (!ticket.currentPhaseId) {
-        return undefined;
-      }
-      return ticket.phases.find((p) => p.id === ticket.currentPhaseId);
-    }, [ticket.currentPhaseId, ticket.phases]);
 
     const checklistProgress = useMemo(() => {
       const items = ticket.checklist[column.id];
@@ -38,59 +38,11 @@ export const FleetKanbanCard = memo(
       return { completed, total: items.length, pct: (completed / items.length) * 100 };
     }, [ticket.checklist, column.id]);
 
-    const showGateActions = column.requiresApproval && currentPhase?.status === 'completed';
-
     const handleClick = useCallback(() => {
       fleetApi.goToTicket(ticket.id);
     }, [ticket.id]);
 
-    const handleApprove = useCallback(() => {
-      fleetApi.approvePhase(ticket.id);
-    }, [ticket.id]);
-
-    const handleShowReject = useCallback(() => {
-      setShowRejectInput(true);
-    }, []);
-
-    const handleRejectNoteChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-      setRejectNote(e.target.value);
-    }, []);
-
-    const handleReject = useCallback(() => {
-      if (rejectNote.trim()) {
-        fleetApi.rejectPhase(ticket.id, rejectNote.trim());
-        setRejectNote('');
-        setShowRejectInput(false);
-      }
-    }, [ticket.id, rejectNote]);
-
-    const handlePlan = useCallback(async () => {
-      const task = await fleetApi.submitPlanTask(ticket.id);
-      fleetApi.goToTask(task.id);
-    }, [ticket.id]);
-
-    const handleChat = useCallback(async () => {
-      const task = await fleetApi.submitChatTask(ticket.id);
-      fleetApi.goToTask(task.id);
-    }, [ticket.id]);
-
-    const handleAuto = useCallback(() => {
-      fleetApi.startPhase(ticket.id);
-    }, [ticket.id]);
-
-    const handleCancelReject = useCallback(() => {
-      setShowRejectInput(false);
-      setRejectNote('');
-    }, []);
-
-    const handleRejectKeyDown = useCallback(
-      (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter') {
-          handleReject();
-        }
-      },
-      [handleReject]
-    );
+    const supervisorStatus = ticket.supervisorStatus;
 
     return (
       <div
@@ -127,42 +79,18 @@ export const FleetKanbanCard = memo(
           >
             {TICKET_PRIORITY_LABELS[ticket.priority]}
           </span>
-          {currentPhase && (
+          {supervisorStatus && supervisorStatus !== 'idle' && (
             <span
               className={cn(
-                'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
-                PHASE_STATUS_COLORS[currentPhase.status]
+                'flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full font-medium',
+                SUPERVISOR_STATUS_COLORS[supervisorStatus] ?? 'text-fg-muted bg-fg-muted/10'
               )}
             >
-              {PHASE_STATUS_LABELS[currentPhase.status]}
-            </span>
-          )}
-          {currentPhase?.loop.status === 'running' && (
-            <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full font-medium text-green-400 bg-green-400/10">
-              <PiArrowsClockwiseBold size={10} className="animate-spin" />
-              {currentPhase.loop.currentIteration}/{currentPhase.loop.maxIterations}
+              {supervisorStatus === 'running' && <PiArrowsClockwiseBold size={10} className="animate-spin" />}
+              {SUPERVISOR_STATUS_LABELS[supervisorStatus] ?? supervisorStatus}
             </span>
           )}
         </div>
-
-        {/* Action buttons */}
-        {!showGateActions && !currentPhase?.loop.status && (
-          <div className="flex justify-end gap-1 mt-2">
-            {!checklistProgress && (
-              <Button size="sm" variant="ghost" className="text-accent-400 hover:bg-accent-400/10" onClick={handlePlan}>
-                Plan
-              </Button>
-            )}
-            <Button size="sm" variant="ghost" className="text-accent-400 hover:bg-accent-400/10" onClick={handleChat}>
-              Chat
-            </Button>
-            {checklistProgress && (
-              <Button size="sm" variant="ghost" className="text-accent-400 hover:bg-accent-400/10" onClick={handleAuto}>
-                Auto
-              </Button>
-            )}
-          </div>
-        )}
 
         {/* Checklist progress */}
         {checklistProgress && (
@@ -177,40 +105,6 @@ export const FleetKanbanCard = memo(
                 className="h-full rounded-full bg-accent-500 transition-all"
                 style={{ width: `${checklistProgress.pct}%` }}
               />
-            </div>
-          </div>
-        )}
-
-        {/* Gate actions */}
-        {showGateActions && !showRejectInput && (
-          <div className="flex items-center gap-1 mt-2">
-            <Button size="sm" onClick={handleApprove}>
-              <PiCheckCircleBold size={12} className="mr-1" />
-              Approve
-            </Button>
-            <Button size="sm" variant="ghost" onClick={handleShowReject}>
-              <PiXCircleBold size={12} className="mr-1" />
-              Reject
-            </Button>
-          </div>
-        )}
-        {showRejectInput && (
-          <div className="flex flex-col gap-1 mt-2">
-            <input
-              type="text"
-              value={rejectNote}
-              onChange={handleRejectNoteChange}
-              placeholder="Rejection reason..."
-              className="w-full rounded-md border border-surface-border bg-surface px-2 py-1 text-xs text-fg placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500"
-              onKeyDown={handleRejectKeyDown}
-            />
-            <div className="flex items-center gap-1">
-              <Button size="sm" onClick={handleReject} isDisabled={!rejectNote.trim()}>
-                Reject
-              </Button>
-              <Button size="sm" variant="ghost" onClick={handleCancelReject}>
-                Cancel
-              </Button>
             </div>
           </div>
         )}

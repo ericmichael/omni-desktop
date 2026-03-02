@@ -41,11 +41,13 @@ export const FleetTaskView = memo(({ taskId }: { taskId: FleetTaskId }) => {
   const isExitedOrError = statusType === 'exited' || statusType === 'error' || statusType === 'uninitialized';
 
   const uiUrl = useMemo(() => {
-    if (!baseUiUrl || !sessionId) {
+    if (!baseUiUrl) {
       return undefined;
     }
     const url = new URL(baseUiUrl, window.location.origin);
-    url.searchParams.set('session', sessionId);
+    if (sessionId) {
+      url.searchParams.set('session', sessionId);
+    }
     if (theme !== 'default') {
       url.searchParams.set('theme', theme);
     }
@@ -129,11 +131,6 @@ export const FleetTaskView = memo(({ taskId }: { taskId: FleetTaskId }) => {
           <span className="ml-1">Back</span>
         </Button>
         <span className="text-sm text-fg truncate">{task.taskDescription}</span>
-        {task.iteration !== undefined && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium text-accent-400 bg-accent-400/10 shrink-0">
-            Iteration {task.iteration}
-          </span>
-        )}
         <div className="flex-1" />
         {(statusType === 'running' || statusType === 'starting') && (
           <IconButton aria-label="Stop" icon={<PiStopFill />} size="sm" onClick={handleStop} />
@@ -170,11 +167,11 @@ export const FleetTaskView = memo(({ taskId }: { taskId: FleetTaskId }) => {
           <FleetSessionHistory sessionId={sessionId} />
         ) : (
           <div className="flex flex-col items-center justify-center gap-3 w-full h-full">
-            {(statusType === 'starting' || (statusType === 'running' && !task.sessionId)) && (
+            {statusType === 'starting' && (
               <>
                 <Spinner size="lg" />
                 <EllipsisLoadingText className="text-sm text-fg-muted">
-                  {statusType === 'starting' ? 'Starting sandbox' : 'Initializing session'}
+                  Starting sandbox
                 </EllipsisLoadingText>
               </>
             )}

@@ -106,6 +106,8 @@ type ParsedPlanMd = {
   title: string;
   description: string;
   priority: FleetTicketPriority;
+  /** The column label from YAML frontmatter, if present. */
+  column?: string;
   checklist: Record<string, FleetChecklistItem[]>;
 };
 
@@ -123,6 +125,7 @@ export const parsePlanMd = (content: string, pipeline: FleetPipeline): ParsedPla
   // Parse YAML frontmatter
   let title = '';
   let priority: FleetTicketPriority = 'medium';
+  let column: string | undefined;
   let inFrontmatter = false;
   let frontmatterEnd = 0;
 
@@ -146,6 +149,9 @@ export const parsePlanMd = (content: string, pipeline: FleetPipeline): ParsedPla
         }
         if (key === 'priority' && VALID_PRIORITIES.has(value)) {
           priority = value as FleetTicketPriority;
+        }
+        if (key === 'column') {
+          column = value;
         }
       }
     }
@@ -222,6 +228,7 @@ export const parsePlanMd = (content: string, pipeline: FleetPipeline): ParsedPla
     title: title.trim(),
     description: description.trim(),
     priority,
+    column,
     checklist,
   };
 };

@@ -9,17 +9,16 @@ import type {
   ArtifactFileEntry,
   FleetChecklistItem,
   FleetColumnId,
-  FleetPhase,
   FleetPipeline,
   FleetProject,
   FleetProjectId,
   FleetSessionMessage,
+  FleetSupervisorStatus,
   FleetTask,
   FleetTaskId,
   FleetTaskSubmitOptions,
   FleetTicket,
   FleetTicketId,
-  FleetTicketLoopUpdate,
   GitRepoInfo,
 } from '@/shared/types';
 
@@ -53,10 +52,14 @@ export const $fleetView = atom<
  */
 export const $fleetTaskXTerms = map<Record<FleetTaskId, Terminal>>({});
 
+/**
+ * Supervisor chat messages, keyed by ticket ID.
+ */
+export const $supervisorMessages = map<Record<FleetTicketId, FleetSessionMessage[]>>({});
+
 export type ActiveTicketEntry = {
   ticket: FleetTicket;
   hasLiveTask: boolean;
-  currentPhase: FleetPhase | undefined;
 };
 
 const ACTIVE_COLUMNS = new Set(['spec', 'implementation', 'review', 'pr']);
@@ -78,11 +81,9 @@ export const $activeTickets = computed([$fleetTickets, $fleetTasks], (ticketMap,
     if (!ticket.columnId || !ACTIVE_COLUMNS.has(ticket.columnId)) {
       continue;
     }
-    const currentPhase = ticket.currentPhaseId ? ticket.phases.find((p) => p.id === ticket.currentPhaseId) : undefined;
     entries.push({
       ticket,
-      hasLiveTask: liveTaskTicketIds.has(ticket.id),
-      currentPhase,
+      hasLiveTask: liveTaskTicketIds.has(ticket.id) || ticket.supervisorStatus === 'running',
     });
   }
 
@@ -161,10 +162,7 @@ export const fleetApi = {
 
   // Tickets
   addTicket: async (
-    ticket: Omit<
-      FleetTicket,
-      'id' | 'createdAt' | 'updatedAt' | 'status' | 'taskId' | 'columnId' | 'currentPhaseId' | 'phases' | 'checklist'
-    >
+    ticket: Omit<FleetTicket, 'id' | 'createdAt' | 'updatedAt' | 'columnId' | 'checklist'>
   ): Promise<FleetTicket> => {
     const created = await emitter.invoke('fleet:add-ticket', ticket);
     $fleetTickets.setKey(created.id, created);
@@ -201,60 +199,15 @@ export const fleetApi = {
   getNextTicket: (projectId: FleetProjectId): Promise<FleetTicket | null> => {
     return emitter.invoke('fleet:get-next-ticket', projectId);
   },
-  submitTicketTask: async (ticketId: FleetTicketId, options: FleetTaskSubmitOptions = {}): Promise<FleetTask> => {
-    const task = await emitter.invoke('fleet:submit-ticket-task', ticketId, options);
-    initializeTaskTerminal(task.id);
-    $fleetTasks.setKey(task.id, task);
-    // Update the ticket in local state
-    const ticket = $fleetTickets.get()[ticketId];
-    if (ticket) {
-      const loopUpdate: Partial<FleetTicket> = { status: 'in_progress', taskId: task.id };
-      if (options.loop) {
-        loopUpdate.loopEnabled = true;
-        loopUpdate.loopMaxIterations = options.loopMaxIterations ?? 10;
-        loopUpdate.loopIteration = 1;
-        loopUpdate.loopStatus = 'running';
-      }
-      $fleetTickets.setKey(ticketId, { ...ticket, ...loopUpdate });
-    }
-    return task;
-  },
-  stopLoop: (ticketId: FleetTicketId): Promise<void> => {
-    return emitter.invoke('fleet:stop-loop', ticketId);
-  },
-  resumeLoop: (ticketId: FleetTicketId): Promise<void> => {
-    return emitter.invoke('fleet:resume-loop', ticketId);
-  },
 
-  // Pipeline & phase operations
+  // Pipeline
   getPipeline: async (projectId: FleetProjectId): Promise<FleetPipeline> => {
     const pipeline = await emitter.invoke('fleet:get-pipeline', projectId);
     $fleetPipeline.set(pipeline);
     return pipeline;
   },
-  advanceTicket: (ticketId: FleetTicketId): Promise<void> => {
-    return emitter.invoke('fleet:advance-ticket', ticketId);
-  },
   moveTicketToColumn: (ticketId: FleetTicketId, columnId: FleetColumnId): Promise<void> => {
     return emitter.invoke('fleet:move-ticket-to-column', ticketId, columnId);
-  },
-  kickbackTicket: (ticketId: FleetTicketId, targetColumnId: FleetColumnId, reviewNote?: string): Promise<void> => {
-    return emitter.invoke('fleet:kickback-ticket', ticketId, targetColumnId, reviewNote);
-  },
-  approvePhase: (ticketId: FleetTicketId, reviewNote?: string): Promise<void> => {
-    return emitter.invoke('fleet:approve-phase', ticketId, reviewNote);
-  },
-  rejectPhase: (ticketId: FleetTicketId, reviewNote: string): Promise<void> => {
-    return emitter.invoke('fleet:reject-phase', ticketId, reviewNote);
-  },
-  startPhase: (ticketId: FleetTicketId): Promise<void> => {
-    return emitter.invoke('fleet:start-phase', ticketId);
-  },
-  stopPhase: (ticketId: FleetTicketId): Promise<void> => {
-    return emitter.invoke('fleet:stop-phase', ticketId);
-  },
-  resumePhase: (ticketId: FleetTicketId): Promise<void> => {
-    return emitter.invoke('fleet:resume-phase', ticketId);
   },
   updateChecklist: (
     ticketId: FleetTicketId,
@@ -267,17 +220,34 @@ export const fleetApi = {
     return emitter.invoke('fleet:toggle-checklist-item', ticketId, columnId, itemId);
   },
 
-  submitPlanTask: async (ticketId: FleetTicketId): Promise<FleetTask> => {
-    const task = await emitter.invoke('fleet:submit-plan-task', ticketId);
-    initializeTaskTerminal(task.id);
-    $fleetTasks.setKey(task.id, task);
-    return task;
+  // Supervisor
+  ensureSupervisorInfra: (ticketId: FleetTicketId): Promise<void> => {
+    return emitter.invoke('fleet:ensure-supervisor-infra', ticketId);
   },
-  submitChatTask: async (ticketId: FleetTicketId): Promise<FleetTask> => {
-    const task = await emitter.invoke('fleet:submit-chat-task', ticketId);
-    initializeTaskTerminal(task.id);
-    $fleetTasks.setKey(task.id, task);
-    return task;
+  startSupervisor: (ticketId: FleetTicketId): Promise<void> => {
+    // Clear old messages when starting a fresh supervisor session
+    $supervisorMessages.setKey(ticketId, []);
+    return emitter.invoke('fleet:start-supervisor', ticketId);
+  },
+  stopSupervisor: (ticketId: FleetTicketId): Promise<void> => {
+    return emitter.invoke('fleet:stop-supervisor', ticketId);
+  },
+  sendSupervisorMessage: (ticketId: FleetTicketId, message: string): Promise<void> => {
+    // Optimistically add the user's message to the chat so it appears immediately
+    const userMsg: FleetSessionMessage = {
+      id: Date.now(),
+      role: 'user',
+      content: message,
+      createdAt: new Date().toISOString(),
+    };
+    const existing = $supervisorMessages.get()[ticketId] ?? [];
+    $supervisorMessages.setKey(ticketId, [...existing, userMsg]);
+
+    return emitter.invoke('fleet:send-supervisor-message', ticketId, message);
+  },
+  resetSupervisorSession: (ticketId: FleetTicketId): Promise<void> => {
+    $supervisorMessages.setKey(ticketId, []);
+    return emitter.invoke('fleet:reset-supervisor-session', ticketId);
   },
 
   // Session history
@@ -315,7 +285,6 @@ export const fleetApi = {
 
 const listen = () => {
   // Eagerly fetch all tasks when we receive an event for an unknown task ID.
-  // This happens for tasks created by phase loops which bypass submitTask/submitTicketTask.
   const fetchMissingTask = async (taskId: FleetTaskId) => {
     const tasks = await emitter.invoke('fleet:get-tasks');
     const newMap: Record<FleetTaskId, FleetTask> = {};
@@ -354,32 +323,16 @@ const listen = () => {
     xterm?.write(data);
   });
 
-  ipc.on('fleet:phase-update', (ticketId, phase) => {
+  ipc.on('fleet:supervisor-status', (ticketId, status: FleetSupervisorStatus) => {
     const existing = $fleetTickets.get()[ticketId];
     if (existing) {
-      const updatedPhases = existing.phases.map((p) => (p.id === phase.id ? phase : p));
-      // If the phase is new (not found in existing phases), append it
-      if (!existing.phases.some((p) => p.id === phase.id)) {
-        updatedPhases.push(phase);
-      }
-      $fleetTickets.setKey(ticketId, {
-        ...existing,
-        phases: updatedPhases,
-        currentPhaseId: phase.id,
-      });
+      $fleetTickets.setKey(ticketId, { ...existing, supervisorStatus: status });
     }
   });
 
-  ipc.on('fleet:ticket-loop-update', (ticketId, update: FleetTicketLoopUpdate) => {
-    const existing = $fleetTickets.get()[ticketId];
-    if (existing) {
-      $fleetTickets.setKey(ticketId, {
-        ...existing,
-        loopIteration: update.iteration,
-        loopMaxIterations: update.maxIterations,
-        loopStatus: update.status,
-      });
-    }
+  ipc.on('fleet:supervisor-message', (ticketId, message: FleetSessionMessage) => {
+    const existing = $supervisorMessages.get()[ticketId] ?? [];
+    $supervisorMessages.setKey(ticketId, [...existing, message]);
   });
 
   const pollTasks = async () => {

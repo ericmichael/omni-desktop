@@ -16,6 +16,12 @@ import type { FleetChecklistItem, FleetPipeline, FleetTicket, FleetTicketId } fr
 
 type ParsedChecklist = Record<string, FleetChecklistItem[]>;
 
+type PlanChangeEvent = {
+  checklist: ParsedChecklist;
+  /** Column label from frontmatter, if present. */
+  column?: string;
+};
+
 type WatcherEntry = {
   watcher: FSWatcher;
   debounceTimer: ReturnType<typeof setTimeout> | null;
@@ -72,8 +78,20 @@ export class FleetPlanSync {
     }
   }
 
+  /** Read and parse PLAN.md, returning both checklist and column info. */
+  async readPlanFull(ticketId: FleetTicketId, pipeline: FleetPipeline): Promise<PlanChangeEvent | null> {
+    const filePath = getPlanPath(this.configDir, ticketId);
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      const parsed = parsePlanMd(content, pipeline);
+      return { checklist: parsed.checklist, column: parsed.column };
+    } catch {
+      return null;
+    }
+  }
+
   /** Start watching a ticket's PLAN.md for external changes. */
-  watchTicket(ticketId: FleetTicketId, onChange: (checklist: ParsedChecklist) => void, pipeline: FleetPipeline): void {
+  watchTicket(ticketId: FleetTicketId, onChange: (event: PlanChangeEvent) => void, pipeline: FleetPipeline): void {
     // Don't double-watch
     if (this.watchers.has(ticketId)) {
       return;
@@ -116,9 +134,9 @@ export class FleetPlanSync {
 
         entry.debounceTimer = setTimeout(() => {
           entry.debounceTimer = null;
-          void this.readPlan(ticketId, pipeline).then((checklist) => {
-            if (checklist) {
-              onChange(checklist);
+          void this.readPlanFull(ticketId, pipeline).then((result) => {
+            if (result) {
+              onChange(result);
             }
           });
         }, DEBOUNCE_MS);

@@ -16,6 +16,8 @@ const DEFAULTS: StoreData = {
   fleetTasks: [],
   fleetTickets: [],
   fleetSchemaVersion: 0,
+  codeTabs: [],
+  activeCodeTabId: null,
 };
 
 type ChangeCallback = (data: StoreData | undefined) => void;
