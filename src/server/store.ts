@@ -9,6 +9,7 @@ const STORE_PATH = join(homedir(), '.config', 'Omni Code', 'config.json');
 const DEFAULTS: StoreData = {
   sandboxVariant: 'work',
   optInToLauncherPrereleases: false,
+  previewFeatures: false,
   layoutMode: 'chat',
   theme: 'tokyo-night',
   onboardingComplete: false,

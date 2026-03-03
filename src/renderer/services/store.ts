@@ -7,6 +7,7 @@ import type { ModelsConfig, OperatingSystem, StoreData } from '@/shared/types';
 const getDefaults = (): StoreData => ({
   sandboxVariant: 'work',
   optInToLauncherPrereleases: false,
+  previewFeatures: false,
 
   layoutMode: 'chat',
   theme: 'tokyo-night',
@@ -107,7 +108,7 @@ const init = async () => {
   await persistedStoreApi.sync();
   const store = persistedStoreApi.get();
 
-  if (import.meta.env.MODE !== 'development' && store.layoutMode !== 'chat') {
+  if (import.meta.env.MODE !== 'development' && !store.previewFeatures && store.layoutMode !== 'chat') {
     await persistedStoreApi.setKey('layoutMode', 'chat');
   }
 

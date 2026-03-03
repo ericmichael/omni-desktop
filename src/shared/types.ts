@@ -56,6 +56,7 @@ export type StoreData = {
   launcherWindowProps?: WindowProps;
   appWindowProps?: WindowProps;
   optInToLauncherPrereleases: boolean;
+  previewFeatures: boolean;
 
   layoutMode: LayoutMode;
   theme: OmniTheme;
@@ -105,6 +106,10 @@ export const schema: Schema<StoreData> = {
   launcherWindowProps: winSizePropsSchema,
   appWindowProps: winSizePropsSchema,
   optInToLauncherPrereleases: {
+    type: 'boolean',
+    default: false,
+  },
+  previewFeatures: {
     type: 'boolean',
     default: false,
   },
