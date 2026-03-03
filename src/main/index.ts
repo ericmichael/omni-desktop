@@ -3,7 +3,7 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 import { app, dialog, net, protocol, shell } from 'electron';
-import { mkdir, readFile, writeFile } from 'fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import { dirname, join, resolve } from 'path';
 import { assert } from 'tsafe';
 import { pathToFileURL } from 'url';
@@ -253,6 +253,18 @@ main.ipc.handle('util:select-file', async (_, path) => {
   });
 
   return result.filePaths[0] ?? null;
+});
+main.ipc.handle('util:list-directory', async (_, dirPath) => {
+  try {
+    const entries = await readdir(dirPath, { withFileTypes: true });
+    return entries
+      .filter((e) => !e.name.startsWith('.'))
+      .filter((e) => e.isDirectory())
+      .map((e) => ({ name: e.name, path: join(dirPath, e.name), isDirectory: true }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
 });
 main.ipc.handle('util:get-home-directory', () => getHomeDirectory());
 main.ipc.handle('util:get-is-directory', (_, path) => isDirectory(path));

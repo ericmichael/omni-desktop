@@ -591,6 +591,7 @@ type UtilIpcEvents = Namespaced<
     'get-cli-in-path-status': () => { installed: boolean; symlinkPath: string };
     'check-models-configured': () => boolean;
     'test-model-connection': (modelRef?: string) => { success: boolean; output: string };
+    'list-directory': (path: string) => { name: string; path: string; isDirectory: boolean }[];
   }
 >;
 

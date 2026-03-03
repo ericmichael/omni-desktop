@@ -231,6 +231,16 @@ const listen = () => {
     const existing = $fleetTasks.get()[taskId];
     if (existing) {
       $fleetTasks.setKey(taskId, { ...existing, status });
+    } else {
+      // Task was created on main process but renderer doesn't have it yet — bootstrap a minimal entry
+      // so the UI can track its status (e.g. show the webview once the sandbox is running).
+      $fleetTasks.setKey(taskId, {
+        id: taskId,
+        projectId: '',
+        taskDescription: '',
+        status,
+        createdAt: Date.now(),
+      });
     }
   });
 

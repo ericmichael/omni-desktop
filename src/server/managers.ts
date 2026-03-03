@@ -1,5 +1,5 @@
 import { readFileSync } from 'fs';
-import { mkdir, readFile, writeFile } from 'fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { WebSocket as WsWebSocket } from 'ws';
@@ -114,6 +114,18 @@ export const wireManagers = (arg: { wsHandler: WsHandler; ipc: ServerIpcAdapter;
   ipc.handle('util:select-file', () => null);
   ipc.handle('util:open-directory', () => '');
 
+  ipc.handle('util:list-directory', async (_, dirPath) => {
+    try {
+      const entries = await readdir(dirPath, { withFileTypes: true });
+      return entries
+        .filter((e) => !e.name.startsWith('.'))
+        .filter((e) => e.isDirectory())
+        .map((e) => ({ name: e.name, path: join(dirPath, e.name), isDirectory: true }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    } catch {
+      return [];
+    }
+  });
   ipc.handle('util:get-home-directory', () => homedir());
   ipc.handle('util:get-is-directory', (_, path) => isDirectory(path));
   ipc.handle('util:get-is-file', (_, path) => isFile(path));
