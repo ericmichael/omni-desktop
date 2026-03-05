@@ -5,7 +5,7 @@ import { PiArrowsClockwiseBold, PiTrashFill } from 'react-icons/pi';
 import { Button, cn } from '@/renderer/ds';
 import type { FleetTicket } from '@/shared/types';
 
-import { COLUMN_BADGE_COLORS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './fleet-constants';
+import { COLUMN_BADGE_COLORS, RUN_PHASE_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './fleet-constants';
 import { $fleetPipeline, fleetApi } from './state';
 
 export const FleetTicketCard = memo(({ ticket, isBlocked }: { ticket: FleetTicket; isBlocked: boolean }) => {
@@ -63,7 +63,7 @@ export const FleetTicketCard = memo(({ ticket, isBlocked }: { ticket: FleetTicke
           {supervisorStatus === 'running' && (
             <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium text-green-400 bg-green-400/10">
               <PiArrowsClockwiseBold size={10} className="animate-spin" />
-              Running
+              {(ticket.runPhase && RUN_PHASE_LABELS[ticket.runPhase]) ?? 'Running'}
             </span>
           )}
           {supervisorStatus === 'retrying' && (

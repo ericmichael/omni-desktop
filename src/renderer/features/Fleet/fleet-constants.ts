@@ -1,4 +1,4 @@
-import type { FleetTicketPriority, SandboxProcessStatus } from '@/shared/types';
+import type { FleetRunPhase, FleetTicketPriority, SandboxProcessStatus } from '@/shared/types';
 
 export const STATUS_TEXT_COLORS: Partial<Record<SandboxProcessStatus['type'], string>> = {
   uninitialized: 'text-fg-subtle',
@@ -68,4 +68,17 @@ export const COLUMN_SHORT_LABELS: Record<string, string> = {
   review: 'Rev',
   pr: 'PR',
   completed: 'Done',
+};
+
+/** Human-readable labels for granular run phases (shown when supervisor is running). */
+export const RUN_PHASE_LABELS: Partial<Record<FleetRunPhase, string>> = {
+  validating: 'Validating…',
+  loading_workflow: 'Loading workflow…',
+  preparing_workspace: 'Preparing workspace…',
+  initializing_session: 'Initializing session…',
+  building_prompt: 'Building prompt…',
+  starting_run: 'Starting run…',
+  streaming: 'Working…',
+  continuing: 'Continuing…',
+  finishing: 'Finishing…',
 };

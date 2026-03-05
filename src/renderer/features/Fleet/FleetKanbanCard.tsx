@@ -5,7 +5,7 @@ import { PiArrowsClockwiseBold, PiDotsSixVerticalBold } from 'react-icons/pi';
 import { cn } from '@/renderer/ds';
 import type { FleetColumn, FleetTicket } from '@/shared/types';
 
-import { TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './fleet-constants';
+import { RUN_PHASE_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './fleet-constants';
 import { fleetApi } from './state';
 
 const SUPERVISOR_STATUS_COLORS: Record<string, string> = {
@@ -87,7 +87,9 @@ export const FleetKanbanCard = memo(
               )}
             >
               {supervisorStatus === 'running' && <PiArrowsClockwiseBold size={10} className="animate-spin" />}
-              {SUPERVISOR_STATUS_LABELS[supervisorStatus] ?? supervisorStatus}
+              {supervisorStatus === 'running' && ticket.runPhase
+                ? (RUN_PHASE_LABELS[ticket.runPhase] ?? 'Running')
+                : (SUPERVISOR_STATUS_LABELS[supervisorStatus] ?? supervisorStatus)}
             </span>
           )}
         </div>

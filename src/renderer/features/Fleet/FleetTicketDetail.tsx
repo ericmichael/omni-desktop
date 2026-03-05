@@ -22,7 +22,7 @@ import { FloatingWidget } from '@/renderer/features/Omni/FloatingWidget';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { FleetTicketId } from '@/shared/types';
 
-import { COLUMN_BADGE_COLORS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './fleet-constants';
+import { COLUMN_BADGE_COLORS, RUN_PHASE_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './fleet-constants';
 import { FleetTicketArtifactsTab } from './FleetTicketArtifactsTab';
 import { FleetTicketOverviewTab } from './FleetTicketOverviewTab';
 import { FleetTicketPlanTab } from './FleetTicketPlanTab';
@@ -242,11 +242,11 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
             </span>
           )}
 
-          {/* Inline supervisor status */}
+          {/* Inline supervisor status with run phase detail */}
           {isRunning && (
             <span className="flex items-center gap-1 text-[10px] text-green-400 font-medium shrink-0">
               <PiArrowsClockwiseBold size={10} className="animate-spin" />
-              Running
+              {(ticket.runPhase && RUN_PHASE_LABELS[ticket.runPhase]) ?? 'Running'}
             </span>
           )}
           {isRetrying && (

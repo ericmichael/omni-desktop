@@ -378,6 +378,25 @@ export type FleetTicketPriority = 'low' | 'medium' | 'high' | 'critical';
 /** Supervisor agent state for a ticket. */
 export type FleetSupervisorStatus = 'idle' | 'running' | 'error' | 'retrying';
 
+/**
+ * Granular run phase for supervisor lifecycle observability.
+ * Tracks where in the dispatch→run→finish cycle a ticket currently is.
+ */
+export type FleetRunPhase =
+  | 'idle'
+  | 'validating' // dispatch preflight checks
+  | 'loading_workflow' // loading FLEET.md, running before_run hook
+  | 'preparing_workspace' // creating sandbox, worktree, after_create hook
+  | 'initializing_session' // creating supervisor session via RPC
+  | 'building_prompt' // rendering template + assembling prompt
+  | 'starting_run' // sending start_run RPC
+  | 'streaming' // supervisor is actively working
+  | 'continuing' // between continuation turns
+  | 'finishing' // run ended, running after_run hook
+  | 'succeeded' // run completed successfully
+  | 'failed' // run failed (error/stall/timeout)
+  | 'stopped'; // user-initiated stop
+
 /** Accumulated token usage for a supervisor session. */
 export type FleetTokenUsage = {
   inputTokens: number;
@@ -454,6 +473,8 @@ export type FleetTicket = {
   supervisorSessionId?: string;
   /** Supervisor state: idle (no run), running (active run), error. */
   supervisorStatus?: FleetSupervisorStatus;
+  /** Granular run phase for observability. */
+  runPhase?: FleetRunPhase;
   /** Task ID for the supervisor's sandbox. */
   supervisorTaskId?: FleetTaskId;
   /** Accumulated token usage across all supervisor runs. */
@@ -811,6 +832,7 @@ type FleetIpcRendererEvents = Namespaced<
     'task-status': [FleetTaskId, WithTimestamp<SandboxProcessStatus>];
     'task-session': [FleetTaskId, string];
     'supervisor-status': [FleetTicketId, FleetSupervisorStatus];
+    'run-phase': [FleetTicketId, FleetRunPhase];
     'supervisor-message': [FleetTicketId, FleetSessionMessage];
     'token-usage': [FleetTicketId, FleetTokenUsage];
   }

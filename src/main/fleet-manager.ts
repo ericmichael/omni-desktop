@@ -8,6 +8,8 @@ import path from 'path';
 import { promisify } from 'util';
 
 import { getArtifactsDir, getContainerArtifactsDir, getContainerPlanPath } from '@/lib/fleet-plan-file';
+import { hasTemplateExpressions, renderTemplate } from '@/lib/fleet-template';
+import type { TemplateVariables } from '@/lib/fleet-template';
 import { getMimeType, isTextMime } from '@/lib/mime-types';
 import { FleetPlanSync } from '@/main/fleet-plan-sync';
 import { FleetSupervisor } from '@/main/fleet-supervisor';
@@ -27,6 +29,7 @@ import type {
   FleetPipeline,
   FleetProject,
   FleetProjectId,
+  FleetRunPhase,
   FleetSessionMessage,
   FleetSupervisorStatus,
   FleetTask,
@@ -538,6 +541,12 @@ export class FleetManager {
     this.lastSupervisorActivity.set(ticketId, Date.now());
   };
 
+  /** Update the granular run phase for a ticket and broadcast to renderer. */
+  private setRunPhase = (ticketId: FleetTicketId, phase: FleetRunPhase): void => {
+    this.updateTicket(ticketId, { runPhase: phase });
+    this.sendToWindow('fleet:run-phase', ticketId, phase);
+  };
+
   // #endregion
 
   // #region Concurrency control (Symphony-inspired)
@@ -719,9 +728,11 @@ export class FleetManager {
       }
 
       // Run before_run hook (failure aborts this retry attempt)
+      this.setRunPhase(ticketId, 'loading_workflow');
       const hookOk = await this.workflowLoader.runHook(ticket.projectId, 'before_run', project.workspaceDir);
       if (!hookOk) {
         console.warn(`[FleetManager] before_run hook failed during retry for ${ticketId}. Scheduling another retry.`);
+        this.setRunPhase(ticketId, 'failed');
         this.scheduleRetry(ticketId, 'error', {
           attempt: attempt + 1,
           continuationTurn,
@@ -735,6 +746,7 @@ export class FleetManager {
       // Continuation retries (completed): session has full context, send lightweight prompt.
       // Error/stall retries: re-send full supervisor instructions since the session may be stale.
       const isContinuation = failureClass === 'completed';
+      this.setRunPhase(ticketId, isContinuation ? 'continuing' : 'building_prompt');
       const prompt = isContinuation
         ? 'Continue working on this ticket. Check the plan file for current state and remaining items.'
         : 'The previous run failed. Please review the current state and continue working on this ticket.';
@@ -744,7 +756,9 @@ export class FleetManager {
 
       this.recordSupervisorActivity(ticketId);
 
+      this.setRunPhase(ticketId, 'preparing_workspace');
       await this.ensureSupervisorInfra(ticketId, () => {
+        this.setRunPhase(ticketId, 'starting_run');
         this.startSupervisorRun(ticketId, prompt, { sessionId, variables });
       });
     } catch (error) {
@@ -1507,6 +1521,7 @@ export class FleetManager {
       },
       onRunEnd: (reason: string) => {
         console.log(`[FleetManager] Supervisor run ended for ${ticketId}: ${reason}`);
+        this.setRunPhase(ticketId, 'finishing');
 
         // Run after_run hook (best-effort, failure is logged and ignored)
         const runEndTicket = this.getTicketById(ticketId);
@@ -1521,6 +1536,7 @@ export class FleetManager {
 
         // User-initiated stops should not trigger retries
         if (failureClass === 'stopped') {
+          this.setRunPhase(ticketId, 'stopped');
           this.claimed.delete(ticketId);
           return;
         }
@@ -1528,6 +1544,7 @@ export class FleetManager {
         // Agent requested user input — stop and surface to user, don't retry
         if (failureClass === 'input_required') {
           console.log(`[FleetManager] Agent requires user input for ${ticketId}. Pausing.`);
+          this.setRunPhase(ticketId, 'idle');
           this.updateTicket(ticketId, { supervisorStatus: 'idle' });
           this.sendToWindow('fleet:supervisor-status', ticketId, 'idle');
           // Keep claimed so user can respond; release when they stop
@@ -1544,6 +1561,7 @@ export class FleetManager {
           // instead of scheduling a delayed retry
           if (runEndTicket && this.isTicketWorkComplete(runEndTicket)) {
             console.log(`[FleetManager] Ticket ${ticketId} work complete. Releasing.`);
+            this.setRunPhase(ticketId, 'succeeded');
             this.claimed.delete(ticketId);
             this.updateTicket(ticketId, { supervisorStatus: 'idle' });
             this.sendToWindow('fleet:supervisor-status', ticketId, 'idle');
@@ -1560,6 +1578,7 @@ export class FleetManager {
 
           if (nextTurn >= maxTurns) {
             console.log(`[FleetManager] Ticket ${ticketId} reached max continuation turns (${maxTurns}). Stopping.`);
+            this.setRunPhase(ticketId, 'succeeded');
             this.claimed.delete(ticketId);
             this.updateTicket(ticketId, { supervisorStatus: 'idle' });
             this.sendToWindow('fleet:supervisor-status', ticketId, 'idle');
@@ -1567,6 +1586,7 @@ export class FleetManager {
           }
 
           // Fire continuation immediately — no 3s delay
+          this.setRunPhase(ticketId, 'continuing');
           console.log(
             `[FleetManager] Continuing ticket ${ticketId} (turn ${nextTurn}/${maxTurns}). Immediate re-run.`
           );
@@ -1594,6 +1614,7 @@ export class FleetManager {
           }
         } else {
           // Error or stall — schedule exponential backoff retry
+          this.setRunPhase(ticketId, 'failed');
           this.scheduleRetry(ticketId, failureClass, {
             attempt: currentAttempt + 1,
             continuationTurn: currentTurn,
@@ -1658,6 +1679,7 @@ export class FleetManager {
     const variables = { additional_instructions: supervisorPrompt };
 
     try {
+      this.setRunPhase(ticketId, 'initializing_session');
       console.log(`[FleetManager] Creating session for ticket ${ticketId} with variables:`, Object.keys(variables));
       const sessionId = await entry.supervisor.createSession(variables);
       console.log(`[FleetManager] Session created: ${sessionId} for ticket ${ticketId}`);
@@ -1713,7 +1735,7 @@ export class FleetManager {
   /**
    * Build the full supervisor prompt, incorporating FLEET.md custom prompt if present.
    */
-  private buildFullSupervisorPrompt = (ticketId: FleetTicketId): string => {
+  private buildFullSupervisorPrompt = (ticketId: FleetTicketId, attempt: number | null = null): string => {
     const ticket = this.getTicketById(ticketId)!;
     const project = this.getProjects().find((p) => p.id === ticket.projectId)!;
     const pipeline = this.getPipeline(ticket.projectId);
@@ -1722,7 +1744,50 @@ export class FleetManager {
     const customPrompt = this.workflowLoader.getPromptTemplate(ticket.projectId);
 
     if (customPrompt) {
-      return `${basePrompt}\n\n## Project-Specific Instructions (from FLEET.md)\n\n${customPrompt}`;
+      let rendered = customPrompt;
+
+      // Render template variables if the prompt contains {{ }} expressions
+      if (hasTemplateExpressions(customPrompt)) {
+        const formatChecklist = (items: FleetChecklistItem[]): string =>
+          items.length === 0
+            ? '(none)'
+            : items.map((item) => `- [${item.completed ? 'x' : ' '}] ${item.text}`).join('\n');
+
+        const checklistMap: Record<string, string> = {};
+        for (const col of pipeline.columns) {
+          const items = ticket.checklist[col.id];
+          checklistMap[col.id] = items ? formatChecklist(items) : '(none)';
+        }
+
+        const vars: TemplateVariables = {
+          ticket: {
+            id: ticket.id,
+            title: ticket.title,
+            description: ticket.description || '(no description)',
+            priority: ticket.priority,
+            columnId: ticket.columnId,
+            branch: ticket.branch,
+          },
+          pipeline: {
+            columns: pipeline.columns.map((c) => c.label).join(' → '),
+          },
+          project: {
+            label: project.label,
+            workspaceDir: project.workspaceDir,
+          },
+          attempt,
+          checklist: checklistMap,
+        };
+
+        try {
+          rendered = renderTemplate(customPrompt, vars);
+        } catch (err) {
+          console.warn(`[FleetManager] Template render failed for ${ticketId}: ${(err as Error).message}. Using raw prompt.`);
+          rendered = customPrompt;
+        }
+      }
+
+      return `${basePrompt}\n\n## Project-Specific Instructions (from FLEET.md)\n\n${rendered}`;
     }
 
     return basePrompt;
@@ -1734,9 +1799,11 @@ export class FleetManager {
    */
   startSupervisor = async (ticketId: FleetTicketId): Promise<void> => {
     // Dispatch preflight validation
+    this.setRunPhase(ticketId, 'validating');
     const preflightError = this.validateDispatchPreflight(ticketId);
     if (preflightError) {
       console.warn(`[FleetManager] Dispatch preflight failed for ${ticketId}: ${preflightError}`);
+      this.setRunPhase(ticketId, 'failed');
       this.updateTicket(ticketId, { supervisorStatus: 'error' });
       this.sendToWindow('fleet:supervisor-status', ticketId, 'error');
       throw new Error(preflightError);
@@ -1749,6 +1816,7 @@ export class FleetManager {
     const project = this.getProjects().find((p) => p.id === ticket.projectId)!;
 
     // Load FLEET.md workflow for this project (also starts file watcher)
+    this.setRunPhase(ticketId, 'loading_workflow');
     await this.workflowLoader.load(ticket.projectId, project.workspaceDir);
 
     // Run before_run hook if configured
@@ -1756,11 +1824,13 @@ export class FleetManager {
     if (!hookOk) {
       console.warn(`[FleetManager] before_run hook failed for ${ticketId}. Aborting start.`);
       this.claimed.delete(ticketId);
+      this.setRunPhase(ticketId, 'failed');
       this.updateTicket(ticketId, { supervisorStatus: 'error' });
       this.sendToWindow('fleet:supervisor-status', ticketId, 'error');
       throw new Error('before_run hook failed');
     }
 
+    this.setRunPhase(ticketId, 'building_prompt');
     const supervisorPrompt = this.buildFullSupervisorPrompt(ticketId);
     const sessionId = ticket.supervisorSessionId;
     const variables = { additional_instructions: supervisorPrompt };
@@ -1768,7 +1838,9 @@ export class FleetManager {
     // Record initial activity timestamp so stall detection has a baseline
     this.recordSupervisorActivity(ticketId);
 
+    this.setRunPhase(ticketId, 'preparing_workspace');
     await this.ensureSupervisorInfra(ticketId, () => {
+      this.setRunPhase(ticketId, 'starting_run');
       this.startSupervisorRun(ticketId, 'Begin working on this ticket.', { sessionId, variables });
     });
   };
@@ -1785,12 +1857,14 @@ export class FleetManager {
 
     void entry.supervisor.startRun(prompt, { sessionId: opts?.sessionId, variables: opts?.variables }).then(
       (result) => {
+        this.setRunPhase(ticketId, 'streaming');
         this.updateTicket(ticketId, {
           supervisorSessionId: result.sessionId,
         });
       },
       (error) => {
         console.error(`[FleetManager] Supervisor start failed for ${ticketId}:`, error);
+        this.setRunPhase(ticketId, 'failed');
         this.updateTicket(ticketId, { supervisorStatus: 'error' });
         this.sendToWindow('fleet:supervisor-status', ticketId, 'error');
       }
@@ -1808,6 +1882,7 @@ export class FleetManager {
     await entry.supervisor.stop();
     this.stopPlanWatcher(ticketId);
     this.lastSupervisorActivity.delete(ticketId);
+    this.setRunPhase(ticketId, 'stopped');
     this.updateTicket(ticketId, { supervisorStatus: 'idle' });
     this.sendToWindow('fleet:supervisor-status', ticketId, 'idle');
   };

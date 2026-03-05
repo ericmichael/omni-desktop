@@ -13,6 +13,7 @@ import type {
   FleetProject,
   FleetProjectId,
   FleetSessionMessage,
+  FleetRunPhase,
   FleetSupervisorStatus,
   FleetTask,
   FleetTaskId,
@@ -262,6 +263,13 @@ const listen = () => {
     const existing = $fleetTickets.get()[ticketId];
     if (existing) {
       $fleetTickets.setKey(ticketId, { ...existing, supervisorStatus: status });
+    }
+  });
+
+  ipc.on('fleet:run-phase', (ticketId, phase: FleetRunPhase) => {
+    const existing = $fleetTickets.get()[ticketId];
+    if (existing) {
+      $fleetTickets.setKey(ticketId, { ...existing, runPhase: phase });
     }
   });
 
