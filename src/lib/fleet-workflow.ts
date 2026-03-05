@@ -30,6 +30,12 @@
 
 // #region Types
 
+export type FleetWorkflowColumnDef = {
+  id: string;
+  label: string;
+  checklist?: string[];
+};
+
 export type FleetWorkflowConfig = {
   supervisor?: {
     max_concurrent?: number;
@@ -39,6 +45,12 @@ export type FleetWorkflowConfig = {
     auto_dispatch?: boolean;
     /** Per-column concurrency limits. Keys are column IDs, values are positive integers. */
     max_concurrent_by_column?: Record<string, number>;
+    /** Custom continuation prompt template. Supports {{turn}}, {{maxTurns}} placeholders. */
+    continuation_prompt?: string;
+  };
+  /** Custom pipeline columns. Overrides the project's stored pipeline when present. */
+  pipeline?: {
+    columns: FleetWorkflowColumnDef[];
   };
   hooks?: {
     after_create?: string;
@@ -101,14 +113,32 @@ export const parseFleetWorkflow = (content: string): FleetWorkflow => {
  * Simple YAML-subset parser for FLEET.md frontmatter.
  * Supports top-level keys with nested object values (one level of indentation).
  * Also handles multiline string values using `|` (block scalar).
+ * The `pipeline` section uses a dedicated parser for array-of-objects syntax.
  */
 const parseFrontmatter = (lines: string[]): FleetWorkflowConfig => {
   const config: FleetWorkflowConfig = {};
 
   let currentSection: string | null = null;
   let collectingMultiline: { section: string; key: string; lines: string[] } | null = null;
+  // Accumulate lines for the pipeline section and parse them at the end
+  let pipelineLines: string[] | null = null;
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+
+    // If we're inside the pipeline section, accumulate lines until we hit a new top-level key
+    if (pipelineLines !== null) {
+      // Top-level key (no indentation) ends the pipeline section
+      if (/^\w+:\s*/.test(line)) {
+        config.pipeline = parsePipelineSection(pipelineLines);
+        pipelineLines = null;
+        // Fall through to parse this line normally
+      } else {
+        pipelineLines.push(line);
+        continue;
+      }
+    }
+
     // If we're collecting a multiline block scalar, check indentation
     if (collectingMultiline) {
       // Multiline continues while lines are indented (at least 4 spaces)
@@ -131,6 +161,10 @@ const parseFrontmatter = (lines: string[]): FleetWorkflowConfig => {
     const topMatch = /^(\w+):\s*$/.exec(line);
     if (topMatch) {
       currentSection = topMatch[1]!;
+      if (currentSection === 'pipeline') {
+        pipelineLines = [];
+        continue;
+      }
       continue;
     }
 
@@ -162,7 +196,98 @@ const parseFrontmatter = (lines: string[]): FleetWorkflowConfig => {
     applyValue(config, collectingMultiline.section, collectingMultiline.key, collectingMultiline.lines.join('\n').trim());
   }
 
+  // Flush any remaining pipeline section
+  if (pipelineLines !== null) {
+    config.pipeline = parsePipelineSection(pipelineLines);
+  }
+
   return config;
+};
+
+/**
+ * Parse the pipeline section from FLEET.md frontmatter.
+ *
+ * Expected format:
+ * ```yaml
+ *   columns:
+ *     - id: backlog
+ *       label: Backlog
+ *     - id: build
+ *       label: Build
+ *       checklist:
+ *         - All tests pass
+ *         - No lint errors
+ * ```
+ */
+const parsePipelineSection = (lines: string[]): FleetWorkflowConfig['pipeline'] => {
+  const columns: FleetWorkflowColumnDef[] = [];
+  let current: Partial<FleetWorkflowColumnDef> | null = null;
+  let collectingChecklist = false;
+
+  const flushColumn = () => {
+    if (current?.id && current.label) {
+      columns.push({
+        id: current.id,
+        label: current.label,
+        ...(current.checklist && current.checklist.length > 0 ? { checklist: current.checklist } : {}),
+      });
+    }
+    current = null;
+    collectingChecklist = false;
+  };
+
+  for (const line of lines) {
+    // Skip empty lines
+    if (line.trim() === '') {
+      continue;
+    }
+
+    // `  columns:` header — skip
+    if (/^ {2}columns:\s*$/.test(line)) {
+      continue;
+    }
+
+    // New column item: `    - id: value`
+    const itemStart = /^ {4}- (\w+):\s*(.+)$/.exec(line);
+    if (itemStart) {
+      flushColumn();
+      current = { [itemStart[1]!]: itemStart[2]!.trim() };
+      collectingChecklist = false;
+      continue;
+    }
+
+    // Column property: `      key: value`
+    const propMatch = /^ {6}(\w+):\s*(.*)$/.exec(line);
+    if (propMatch && current) {
+      const key = propMatch[1]!;
+      const value = propMatch[2]!.trim();
+
+      if (key === 'checklist' && !value) {
+        collectingChecklist = true;
+      } else if (key === 'id' || key === 'label') {
+        current[key] = value;
+      }
+      continue;
+    }
+
+    // Checklist item: `        - text`
+    const checklistItem = /^ {8}- (.+)$/.exec(line);
+    if (checklistItem && current && collectingChecklist) {
+      if (!current.checklist) {
+        current.checklist = [];
+      }
+      current.checklist.push(checklistItem[1]!.trim());
+      continue;
+    }
+  }
+
+  flushColumn();
+
+  if (columns.length === 0) {
+    return undefined;
+  }
+
+  return { columns };
 };
 
 const applyValue = (config: FleetWorkflowConfig, section: string, key: string, value: string): void => {
@@ -186,6 +311,9 @@ const applyValue = (config: FleetWorkflowConfig, section: string, key: string, v
         break;
       case 'auto_dispatch':
         config.supervisor.auto_dispatch = value === 'true';
+        break;
+      case 'continuation_prompt':
+        if (value) config.supervisor.continuation_prompt = value;
         break;
     }
   } else if (section === 'max_concurrent_by_column') {

@@ -347,8 +347,6 @@ const STALL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 /** How often to check for stalled supervisors. */
 const STALL_CHECK_INTERVAL_MS = 30_000; // 30 seconds
 
-/** Terminal column IDs — moving a ticket here should stop its supervisor. */
-const TERMINAL_COLUMN_IDS = new Set(['completed']);
 
 /** Short delay before a continuation retry after a normal run end. */
 const CONTINUATION_RETRY_DELAY_MS = 3_000;
@@ -687,7 +685,7 @@ export class FleetManager {
     }
 
     // Don't retry if ticket is now in a terminal column
-    if (TERMINAL_COLUMN_IDS.has(ticket.columnId)) {
+    if (this.isTerminalColumn(ticket.projectId, ticket.columnId)) {
       console.log(`[FleetManager] Retry fired for ${ticketId} but ticket is in terminal column. Releasing.`);
       this.claimed.delete(ticketId);
       this.updateTicket(ticketId, { supervisorStatus: 'idle' });
@@ -747,8 +745,9 @@ export class FleetManager {
       // Error/stall retries: re-send full supervisor instructions since the session may be stale.
       const isContinuation = failureClass === 'completed';
       this.setRunPhase(ticketId, isContinuation ? 'continuing' : 'building_prompt');
+      const maxTurns = this.getEffectiveMaxContinuationTurns(ticket.projectId);
       const prompt = isContinuation
-        ? 'Continue working on this ticket. Check the plan file for current state and remaining items.'
+        ? this.buildContinuationPrompt(ticketId, continuationTurn + 1, maxTurns)
         : 'The previous run failed. Please review the current state and continue working on this ticket.';
       const variables = isContinuation
         ? undefined
@@ -931,6 +930,21 @@ export class FleetManager {
   // #region Pipeline helpers
 
   getPipeline = (projectId: FleetProjectId): FleetPipeline => {
+    // Priority: FLEET.md pipeline → project.pipeline → DEFAULT_PIPELINE
+    const workflowPipeline = this.workflowLoader.getConfig(projectId).pipeline;
+    if (workflowPipeline && workflowPipeline.columns.length > 0) {
+      return {
+        columns: workflowPipeline.columns.map((col) => ({
+          id: col.id,
+          label: col.label,
+          defaultChecklist: (col.checklist ?? []).map((text, i) => ({
+            id: `wf-${col.id}-${i}`,
+            text,
+            completed: false,
+          })),
+        })),
+      };
+    }
     const project = this.getProjects().find((p) => p.id === projectId);
     return project?.pipeline ?? DEFAULT_PIPELINE;
   };
@@ -938,6 +952,28 @@ export class FleetManager {
   private getColumn = (projectId: FleetProjectId, columnId: FleetColumnId) => {
     const pipeline = this.getPipeline(projectId);
     return pipeline.columns.find((c) => c.id === columnId);
+  };
+
+  /** The first column in the pipeline (where new tickets land). */
+  private getFirstColumnId = (projectId: FleetProjectId): FleetColumnId => {
+    const pipeline = this.getPipeline(projectId);
+    return pipeline.columns[0]?.id ?? 'backlog';
+  };
+
+  /** The last column in the pipeline (terminal — stops supervisor). */
+  private getTerminalColumnId = (projectId: FleetProjectId): FleetColumnId => {
+    const pipeline = this.getPipeline(projectId);
+    return pipeline.columns[pipeline.columns.length - 1]?.id ?? 'completed';
+  };
+
+  /** Check if a column is the terminal (last) column for a project. */
+  private isTerminalColumn = (projectId: FleetProjectId, columnId: FleetColumnId): boolean => {
+    return columnId === this.getTerminalColumnId(projectId);
+  };
+
+  /** Check if a column is the first (backlog) column for a project. */
+  private isFirstColumn = (projectId: FleetProjectId, columnId: FleetColumnId): boolean => {
+    return columnId === this.getFirstColumnId(projectId);
   };
 
   // #endregion
@@ -962,7 +998,7 @@ export class FleetManager {
     const ticket: FleetTicket = {
       ...input,
       id: nanoid(),
-      columnId: 'backlog',
+      columnId: this.getFirstColumnId(input.projectId),
       checklist: {},
       createdAt: now,
       updatedAt: now,
@@ -1020,12 +1056,13 @@ export class FleetManager {
     const isBlocked = (ticket: FleetTicket): boolean => {
       return ticket.blockedBy.some((blockerId) => {
         const blocker = ticketMap.get(blockerId);
-        // A ticket is blocked if the blocker is not in the completed column
-        return blocker && blocker.columnId !== 'completed';
+        // A ticket is blocked if the blocker is not in the terminal column
+        return blocker && !this.isTerminalColumn(projectId, blocker.columnId);
       });
     };
 
-    const candidates = tickets.filter((t) => t.columnId === 'backlog' && !isBlocked(t));
+    const firstColumnId = this.getFirstColumnId(projectId);
+    const candidates = tickets.filter((t) => t.columnId === firstColumnId && !isBlocked(t));
     candidates.sort((a, b) => {
       const priorityDiff = FleetManager.PRIORITY_ORDER[a.priority] - FleetManager.PRIORITY_ORDER[b.priority];
       if (priorityDiff !== 0) {
@@ -1325,7 +1362,7 @@ export class FleetManager {
     this.syncPlanFile(ticketId);
 
     // Reconciliation: stop supervisor and clean up workspace when ticket moves to a terminal column
-    if (TERMINAL_COLUMN_IDS.has(columnId)) {
+    if (this.isTerminalColumn(ticket.projectId, columnId)) {
       const entry = this.supervisors.get(ticketId);
       if (entry) {
         console.log(`[FleetManager] Ticket ${ticketId} moved to terminal column "${columnId}" — stopping supervisor and cleaning up workspace.`);
@@ -1336,8 +1373,8 @@ export class FleetManager {
       }
     }
 
-    // Also stop if moving back to backlog (user is shelving the ticket)
-    if (columnId === 'backlog') {
+    // Also stop if moving back to the first column (user is shelving the ticket)
+    if (this.isFirstColumn(ticket.projectId, columnId)) {
       const entry = this.supervisors.get(ticketId);
       if (entry) {
         console.log(`[FleetManager] Ticket ${ticketId} moved to backlog — stopping supervisor.`);
@@ -1606,11 +1643,8 @@ export class FleetManager {
             const sessionId = supervisorEntry.supervisor.getSessionId() ?? undefined;
             // Continuation turns: session already has full context, so send only a lightweight
             // continuation prompt without re-sending the full supervisor instructions as variables.
-            this.startSupervisorRun(
-              ticketId,
-              'Continue working on this ticket. Check the plan file for current state and remaining items.',
-              { sessionId }
-            );
+            const continuationPrompt = this.buildContinuationPrompt(ticketId, nextTurn + 1, maxTurns);
+            this.startSupervisorRun(ticketId, continuationPrompt, { sessionId });
           }
         } else {
           // Error or stall — schedule exponential backoff retry
@@ -1709,7 +1743,7 @@ export class FleetManager {
       return `Project "${project.label}" has no workspace directory configured`;
     }
 
-    if (TERMINAL_COLUMN_IDS.has(ticket.columnId)) {
+    if (this.isTerminalColumn(ticket.projectId, ticket.columnId)) {
       return `Ticket is in terminal column "${ticket.columnId}" — cannot start supervisor`;
     }
 
@@ -1792,6 +1826,34 @@ export class FleetManager {
 
     return basePrompt;
   };
+
+  /**
+   * Build the continuation prompt for a supervisor run.
+   * Uses custom prompt from FLEET.md if configured, otherwise the default.
+   * Supports {{turn}} and {{maxTurns}} placeholders in custom prompts.
+   */
+  private buildContinuationPrompt(ticketId: FleetTicketId, turn: number, maxTurns: number): string {
+    const ticket = this.getTicketById(ticketId);
+    const customContinuation = ticket
+      ? this.workflowLoader.getConfig(ticket.projectId).supervisor?.continuation_prompt
+      : undefined;
+
+    if (customContinuation) {
+      return customContinuation.replace(/\{\{turn}}/g, String(turn)).replace(/\{\{maxTurns}}/g, String(maxTurns));
+    }
+
+    return [
+      'Continuation guidance:',
+      '',
+      `- The previous run completed normally, but the ticket still has incomplete checklist items.`,
+      `- This is continuation turn ${turn} of ${maxTurns}.`,
+      `- Resume from current workspace state — do not restart from scratch or re-read files you already have in context.`,
+      `- The original task instructions and prior context are already in this session, so do not restate them before acting.`,
+      `- Check the plan file for current state and remaining items.`,
+      `- Use your best judgement to move the work forward. You are working in an isolated sandbox, so it is safe to make changes freely. Do not ask for confirmation or escalate to the user unless you are truly blocked on something that requires human input. The human will review your work at a later stage.`,
+      `- Do not end the turn while checklist items remain unless you are truly blocked.`,
+    ].join('\n');
+  }
 
   /**
    * Start the autonomous supervisor — sends the full supervisor prompt as the user turn.
@@ -2132,7 +2194,7 @@ export class FleetManager {
         continue;
       }
 
-      if (TERMINAL_COLUMN_IDS.has(ticket.columnId)) {
+      if (this.isTerminalColumn(ticket.projectId, ticket.columnId)) {
         if (task.worktreePath && task.worktreeName) {
           const project = this.getProjects().find((p) => p.id === task.projectId);
           if (project) {
@@ -2439,9 +2501,11 @@ export class FleetManager {
         continue;
       }
 
-      // Move from backlog to spec (first active column) to start work
+      // Move from first column to second column (first active column) to start work
       const pipeline = this.getPipeline(project.id);
-      const firstActiveColumn = pipeline.columns.find((c) => c.id !== 'backlog' && !TERMINAL_COLUMN_IDS.has(c.id));
+      const firstColumnId = this.getFirstColumnId(project.id);
+      const terminalColumnId = this.getTerminalColumnId(project.id);
+      const firstActiveColumn = pipeline.columns.find((c) => c.id !== firstColumnId && c.id !== terminalColumnId);
       if (firstActiveColumn) {
         this.moveTicketToColumn(nextTicket.id, firstActiveColumn.id);
       }

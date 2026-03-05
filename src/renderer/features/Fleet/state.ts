@@ -55,13 +55,11 @@ export type ActiveTicketEntry = {
   hasLiveTask: boolean;
 };
 
-const ACTIVE_COLUMNS = new Set(['spec', 'implementation', 'review', 'pr']);
-
 /**
- * Active tickets for the current project: not in backlog, not completed.
+ * Active tickets for the current project: not in first column, not in last column.
  * Sorted: tickets with live tasks first, then by updatedAt desc.
  */
-export const $activeTickets = computed([$fleetTickets, $fleetTasks], (ticketMap, taskMap) => {
+export const $activeTickets = computed([$fleetTickets, $fleetTasks, $fleetPipeline], (ticketMap, taskMap, pipeline) => {
   const tasks = Object.values(taskMap);
   const liveTaskTicketIds = new Set(
     tasks
@@ -69,9 +67,14 @@ export const $activeTickets = computed([$fleetTickets, $fleetTasks], (ticketMap,
       .map((t) => t.ticketId!)
   );
 
+  // Derive first/last column IDs from the pipeline (active = everything in between)
+  const columns = pipeline?.columns ?? [];
+  const firstColumnId = columns[0]?.id;
+  const lastColumnId = columns[columns.length - 1]?.id;
+
   const entries: ActiveTicketEntry[] = [];
   for (const ticket of Object.values(ticketMap)) {
-    if (!ticket.columnId || !ACTIVE_COLUMNS.has(ticket.columnId)) {
+    if (!ticket.columnId || ticket.columnId === firstColumnId || ticket.columnId === lastColumnId) {
       continue;
     }
     entries.push({

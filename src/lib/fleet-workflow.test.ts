@@ -171,4 +171,84 @@ max_concurrent_by_column:
       pr: 2,
     });
   });
+
+  it('parses pipeline columns', () => {
+    const content = `---
+pipeline:
+  columns:
+    - id: todo
+      label: To Do
+    - id: doing
+      label: Doing
+    - id: done
+      label: Done
+---`;
+
+    const result = parseFleetWorkflow(content);
+    expect(result.config.pipeline).toEqual({
+      columns: [
+        { id: 'todo', label: 'To Do' },
+        { id: 'doing', label: 'Doing' },
+        { id: 'done', label: 'Done' },
+      ],
+    });
+  });
+
+  it('parses pipeline columns with checklists', () => {
+    const content = `---
+pipeline:
+  columns:
+    - id: backlog
+      label: Backlog
+    - id: build
+      label: Build
+      checklist:
+        - All tests pass
+        - No lint errors
+    - id: done
+      label: Done
+---`;
+
+    const result = parseFleetWorkflow(content);
+    expect(result.config.pipeline?.columns).toHaveLength(3);
+    expect(result.config.pipeline?.columns[1]).toEqual({
+      id: 'build',
+      label: 'Build',
+      checklist: ['All tests pass', 'No lint errors'],
+    });
+    expect(result.config.pipeline?.columns[0]).toEqual({ id: 'backlog', label: 'Backlog' });
+  });
+
+  it('parses pipeline alongside other sections', () => {
+    const content = `---
+supervisor:
+  max_concurrent: 2
+pipeline:
+  columns:
+    - id: todo
+      label: Todo
+    - id: done
+      label: Done
+hooks:
+  before_run: npm test
+---
+
+Custom prompt.`;
+
+    const result = parseFleetWorkflow(content);
+    expect(result.config.supervisor?.max_concurrent).toBe(2);
+    expect(result.config.pipeline?.columns).toHaveLength(2);
+    expect(result.config.hooks?.before_run).toBe('npm test');
+    expect(result.promptTemplate).toBe('Custom prompt.');
+  });
+
+  it('returns undefined pipeline for empty columns section', () => {
+    const content = `---
+pipeline:
+  columns:
+---`;
+
+    const result = parseFleetWorkflow(content);
+    expect(result.config.pipeline).toBeUndefined();
+  });
 });
