@@ -43,10 +43,9 @@ export const setupProxyRewriter = (fastify: FastifyInstance, wsHandler: WsHandle
 
   fastify.log.info('Proxy routes registered at /proxy/:proxyName/*');
 
-  // --- URL rewriting interceptors ---
-  const originalSendToClient = wsHandler.sendToClient.bind(wsHandler);
-
-  wsHandler.sendToClient = ((channel: string, ...args: unknown[]) => {
+  // --- URL rewriting via event interceptor ---
+  // Intercepts all outgoing events (both sendToAll and sendTo) to rewrite URLs.
+  wsHandler.addEventInterceptor((channel, args) => {
     if (channel === 'sandbox-process:status' || channel === 'chat-process:status') {
       const status = args[0] as Record<string, unknown> | undefined;
       if (status && status.type === 'running' && status.data) {
@@ -74,47 +73,33 @@ export const setupProxyRewriter = (fastify: FastifyInstance, wsHandler: WsHandle
         rewriteStatusUrls(data, `fleet-${taskId}`);
       }
     }
+  });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (originalSendToClient as any)(channel, ...args);
-  }) as typeof wsHandler.sendToClient;
-
-  const wrapStatusHandler = (handlerChannel: string, proxyName: string) => {
-    const origHandleMethod = wsHandler['handlers'] as Map<string, (...args: unknown[]) => unknown>;
-
-    setTimeout(() => {
-      const existingHandler = origHandleMethod.get(handlerChannel);
-      if (existingHandler) {
-        origHandleMethod.set(handlerChannel, async (...handlerArgs: unknown[]) => {
-          const result = (await existingHandler(...handlerArgs)) as Record<string, unknown> | undefined;
-          if (result && result.type === 'running' && result.data) {
-            rewriteStatusUrls(result.data as Record<string, string | undefined>, proxyName);
-          }
-          return result;
-        });
-      }
-    }, 0);
-  };
-
-  wrapStatusHandler('sandbox-process:get-status', 'sandbox');
-  wrapStatusHandler('chat-process:get-status', 'chat');
-
-  // Code tab: wrap get-sandbox-status to rewrite URLs using tabId-based proxy names.
-  // The handler receives [tabId] and returns status, so we derive the proxy name from the tabId arg.
-  setTimeout(() => {
-    const origHandleMethod = wsHandler['handlers'] as Map<string, (...args: unknown[]) => unknown>;
-    const existingHandler = origHandleMethod.get('code:get-sandbox-status');
-    if (existingHandler) {
-      origHandleMethod.set('code:get-sandbox-status', async (...handlerArgs: unknown[]) => {
-        const tabId = handlerArgs[0] as string;
-        const result = (await existingHandler(...handlerArgs)) as Record<string, unknown> | undefined;
-        if (result && result.type === 'running' && result.data) {
-          rewriteStatusUrls(result.data as Record<string, string | undefined>, `code-${tabId}`);
-        }
-        return result;
-      });
+  // --- URL rewriting for invoke responses via result wrappers ---
+  wsHandler.addResultWrapper('sandbox-process:get-status', (result) => {
+    const status = result as Record<string, unknown> | undefined;
+    if (status && status.type === 'running' && status.data) {
+      rewriteStatusUrls(status.data as Record<string, string | undefined>, 'sandbox');
     }
-  }, 0);
+    return result;
+  });
+
+  wsHandler.addResultWrapper('chat-process:get-status', (result) => {
+    const status = result as Record<string, unknown> | undefined;
+    if (status && status.type === 'running' && status.data) {
+      rewriteStatusUrls(status.data as Record<string, string | undefined>, 'chat');
+    }
+    return result;
+  });
+
+  wsHandler.addResultWrapper('code:get-sandbox-status', (result, args) => {
+    const tabId = args[0] as string;
+    const status = result as Record<string, unknown> | undefined;
+    if (status && status.type === 'running' && status.data) {
+      rewriteStatusUrls(status.data as Record<string, string | undefined>, `code-${tabId}`);
+    }
+    return result;
+  });
 };
 
 /**

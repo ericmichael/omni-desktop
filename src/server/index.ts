@@ -7,8 +7,7 @@ import { join, resolve } from 'path';
 // Server mode always runs as "development" so util.ts resolves paths from project root
 process.env.NODE_ENV = process.env.NODE_ENV || 'development';
 
-import { ServerIpcAdapter } from '@/server/ipc-adapter';
-import { wireManagers } from '@/server/managers';
+import { wireClientManagers, wireGlobalHandlers } from '@/server/managers';
 import { setupProxyRewriter } from '@/server/proxy-rewriter';
 import { ServerStore } from '@/server/store';
 import { WsHandler } from '@/server/ws-handler';
@@ -35,19 +34,25 @@ const main = async () => {
 
   // WebSocket handler
   const wsHandler = new WsHandler();
-  const ipc = new ServerIpcAdapter(wsHandler);
   const store = new ServerStore();
 
   // Set up reverse proxy URL rewriting for internal services (chat, sandbox, etc.)
   setupProxyRewriter(fastify, wsHandler);
 
-  // Wire all managers and IPC handlers
-  const cleanup = wireManagers({ wsHandler, ipc, store });
+  // Wire global (shared) IPC handlers — store, util, config
+  wireGlobalHandlers({ wsHandler, store });
 
-  // WebSocket route — must be inside a plugin registration per @fastify/websocket docs
+  // WebSocket route — each new connection gets its own manager instances
   await fastify.register(async function wsRoutes(f) {
     f.get('/ws', { websocket: true }, (socket) => {
-      wsHandler.addClient(socket);
+      wsHandler.addClient(socket, (session) => {
+        const cleanup = wireClientManagers({
+          handle: session.handle,
+          sendToWindow: session.sendToWindow,
+          store,
+        });
+        session.setCleanup(cleanup);
+      });
     });
   });
 
@@ -63,7 +68,6 @@ const main = async () => {
   // Graceful shutdown
   const shutdown = async () => {
     fastify.log.info('Shutting down...');
-    await cleanup();
     await fastify.close();
     process.exit(0);
   };

@@ -25,24 +25,27 @@ import {
   pathExists,
   testModelConnection,
 } from '@/main/util';
-import type { ServerIpcAdapter } from '@/server/ipc-adapter';
+import { ServerIpcAdapter } from '@/server/ipc-adapter';
 import type { ServerStore } from '@/server/store';
 import type { WsHandler } from '@/server/ws-handler';
+import type { IpcRendererEvents } from '@/shared/types';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+type SendToWindow = <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
+type HandleFn = (channel: string, handler: (...args: unknown[]) => unknown | Promise<unknown>) => void;
+
 /**
- * Wire up all managers and IPC handlers for server mode.
- * Mirrors the handler registration in src/main/index.ts.
+ * Wire up global (shared) IPC handlers — store, util, config, main-process.
+ * These are stateless or shared, safe for all clients to use.
  */
-export const wireManagers = (arg: { wsHandler: WsHandler; ipc: ServerIpcAdapter; store: ServerStore }) => {
-  const { wsHandler, ipc, store } = arg;
+export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerStore }) => {
+  const { wsHandler, store } = arg;
+  const ipc = new ServerIpcAdapter(wsHandler.handle.bind(wsHandler));
 
-  const sendToWindow: typeof wsHandler.sendToClient = wsHandler.sendToClient.bind(wsHandler);
-
-  // Store change notifications
+  // Store change notifications — broadcast to all clients
   store.onDidAnyChange((data) => {
-    sendToWindow('store:changed', data);
+    wsHandler.sendToAll('store:changed', data);
   });
 
   // Store handlers
@@ -59,50 +62,7 @@ export const wireManagers = (arg: { wsHandler: WsHandler; ipc: ServerIpcAdapter;
   // Main process status (simplified for server)
   const mainStatus = { type: 'idle' as const, timestamp: Date.now() };
   ipc.handle('main-process:get-status', () => mainStatus);
-
-  // Create managers — cast ipc to any since ServerIpcAdapter is duck-typed to match IpcListener
-  const [, cleanupConsole] = createConsoleManager({
-    ipc: ipc as any,
-    sendToWindow,
-  });
-
-  const [omniInstall, cleanupOmniInstall] = createOmniInstallManager({
-    ipc: ipc as any,
-    sendToWindow,
-  });
-
-  const [sandbox, cleanupSandbox] = createSandboxManager({
-    ipc: ipc as any,
-    sendToWindow,
-    getStoreData: () => ({
-      workspaceDir: store.get('workspaceDir') ?? '',
-      sandboxVariant: store.get('sandboxVariant'),
-    }),
-    fetchFn: globalThis.fetch,
-  });
-
-  const [chat, cleanupChat] = createChatManager({
-    ipc: ipc as any,
-    sendToWindow,
-    fetchFn: globalThis.fetch,
-  });
-
-  const [, cleanupCode] = createCodeManager({
-    ipc: ipc as any,
-    sendToWindow,
-    fetchFn: globalThis.fetch,
-  });
-
-  const [, cleanupFleet] = createFleetManager({
-    ipc: ipc as any,
-    sendToWindow,
-    store: store as any,
-  });
-
-  // Status getters
-  ipc.handle('omni-install-process:get-status', () => omniInstall.getStatus());
-  ipc.handle('sandbox-process:get-status', () => sandbox.getStatus());
-  ipc.handle('chat-process:get-status', () => chat.getStatus());
+  ipc.handle('main-process:exit', () => {});
 
   // Util handlers
   ipc.handle('util:get-default-install-dir', () => join(homedir(), 'omni'));
@@ -194,9 +154,6 @@ export const wireManagers = (arg: { wsHandler: WsHandler; ipc: ServerIpcAdapter;
     }
   });
 
-  // main-process:exit is a no-op in server mode
-  ipc.handle('main-process:exit', () => {});
-
   // Config file I/O
   const OMNI_CONFIG_DIR = getOmniConfigDir();
   ipc.handle('config:get-omni-config-dir', () => OMNI_CONFIG_DIR);
@@ -228,6 +185,64 @@ export const wireManagers = (arg: { wsHandler: WsHandler; ipc: ServerIpcAdapter;
     await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, content, 'utf-8');
   });
+};
+
+/**
+ * Wire up per-client managers (console, sandbox, chat, code, fleet, omni-install).
+ * Each client gets its own manager instances with a scoped sendToWindow.
+ * Returns a cleanup function for when the client disconnects.
+ */
+export const wireClientManagers = (arg: {
+  handle: HandleFn;
+  sendToWindow: SendToWindow;
+  store: ServerStore;
+}): (() => Promise<void>) => {
+  const { handle, sendToWindow, store } = arg;
+  const ipc = new ServerIpcAdapter(handle);
+
+  // Create managers — cast ipc to any since ServerIpcAdapter is duck-typed to match IpcListener
+  const [, cleanupConsole] = createConsoleManager({
+    ipc: ipc as any,
+    sendToWindow,
+  });
+
+  const [omniInstall, cleanupOmniInstall] = createOmniInstallManager({
+    ipc: ipc as any,
+    sendToWindow,
+  });
+
+  const [sandbox, cleanupSandbox] = createSandboxManager({
+    ipc: ipc as any,
+    sendToWindow,
+    getStoreData: () => ({
+      workspaceDir: store.get('workspaceDir') ?? '',
+      sandboxVariant: store.get('sandboxVariant'),
+    }),
+    fetchFn: globalThis.fetch,
+  });
+
+  const [chat, cleanupChat] = createChatManager({
+    ipc: ipc as any,
+    sendToWindow,
+    fetchFn: globalThis.fetch,
+  });
+
+  const [, cleanupCode] = createCodeManager({
+    ipc: ipc as any,
+    sendToWindow,
+    fetchFn: globalThis.fetch,
+  });
+
+  const [, cleanupFleet] = createFleetManager({
+    ipc: ipc as any,
+    sendToWindow,
+    store: store as any,
+  });
+
+  // Status getters (per-client since each client has its own manager instances)
+  ipc.handle('omni-install-process:get-status', () => omniInstall.getStatus());
+  ipc.handle('sandbox-process:get-status', () => sandbox.getStatus());
+  ipc.handle('chat-process:get-status', () => chat.getStatus());
 
   // Cleanup function
   const cleanup = async () => {
@@ -241,7 +256,7 @@ export const wireManagers = (arg: { wsHandler: WsHandler; ipc: ServerIpcAdapter;
     ]);
     const errors = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected').map((r) => r.reason);
     if (errors.length > 0) {
-      console.error('Error cleaning up processes:', errors);
+      console.error('Error cleaning up client session processes:', errors);
     }
   };
 
