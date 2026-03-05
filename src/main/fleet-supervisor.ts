@@ -1,4 +1,4 @@
-import type { FleetSessionMessage, FleetSupervisorStatus } from '@/shared/types';
+import type { FleetSessionMessage, FleetSupervisorStatus, FleetTokenUsage } from '@/shared/types';
 
 const SAFE_TOOL_OVERRIDES = { safe_tool_patterns: ['.*'] };
 const WS_CONNECT_TIMEOUT_MS = 15_000;
@@ -27,6 +27,7 @@ export type FleetSupervisorOpts = {
   onStatusChange: (status: FleetSupervisorStatus) => void;
   onMessage: (msg: FleetSessionMessage) => void;
   onRunEnd: (reason: string) => void;
+  onTokenUsage?: (usage: FleetTokenUsage) => void;
 };
 
 let rpcIdCounter = 0;
@@ -337,7 +338,12 @@ export class FleetSupervisor {
       }
 
       if (parsed.method === 'message_output') {
-        const params = parsed.params as { content?: string; role?: string; tool_name?: string } | undefined;
+        const params = parsed.params as {
+          content?: string;
+          role?: string;
+          tool_name?: string;
+          usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
+        } | undefined;
         if (params && params.content != null) {
           const role = params.role === 'user' ? 'user' : 'assistant';
           const msg: FleetSessionMessage = {
@@ -348,6 +354,32 @@ export class FleetSupervisor {
             createdAt: new Date().toISOString(),
           };
           this.opts.onMessage(msg);
+        }
+        // Extract token usage if present
+        if (params?.usage && this.opts.onTokenUsage) {
+          this.opts.onTokenUsage({
+            inputTokens: params.usage.input_tokens ?? 0,
+            outputTokens: params.usage.output_tokens ?? 0,
+            totalTokens: params.usage.total_tokens ?? 0,
+          });
+        }
+      }
+
+      // Handle token usage updates from dedicated events
+      if (parsed.method === 'token_usage' || parsed.method === 'thread/tokenUsage/updated') {
+        const params = parsed.params as {
+          input_tokens?: number;
+          output_tokens?: number;
+          total_tokens?: number;
+          total_token_usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
+        } | undefined;
+        if (params && this.opts.onTokenUsage) {
+          const usage = params.total_token_usage ?? params;
+          this.opts.onTokenUsage({
+            inputTokens: usage.input_tokens ?? 0,
+            outputTokens: usage.output_tokens ?? 0,
+            totalTokens: usage.total_tokens ?? 0,
+          });
         }
       }
     } catch {

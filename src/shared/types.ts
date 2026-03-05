@@ -376,7 +376,14 @@ export type FleetChecklistItemId = string;
 export type FleetTicketPriority = 'low' | 'medium' | 'high' | 'critical';
 
 /** Supervisor agent state for a ticket. */
-export type FleetSupervisorStatus = 'idle' | 'running' | 'error';
+export type FleetSupervisorStatus = 'idle' | 'running' | 'error' | 'retrying';
+
+/** Accumulated token usage for a supervisor session. */
+export type FleetTokenUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+};
 
 // --- Pipeline & columns ---
 
@@ -388,6 +395,8 @@ export type FleetColumn = {
   label: string;
   /** Default checklist items copied to a ticket when it enters this column. */
   defaultChecklist: FleetChecklistItem[];
+  /** Max concurrent supervisors allowed in this column. Unlimited if undefined. */
+  maxConcurrent?: number;
 };
 
 /**
@@ -414,6 +423,8 @@ export type FleetProject = {
   createdAt: number;
   /** Pipeline configuration. If undefined, DEFAULT_PIPELINE is used. */
   pipeline?: FleetPipeline;
+  /** When true, automatically dispatch tickets from backlog in priority order. */
+  autoDispatch?: boolean;
 };
 
 export type FleetTicket = {
@@ -445,6 +456,8 @@ export type FleetTicket = {
   supervisorStatus?: FleetSupervisorStatus;
   /** Task ID for the supervisor's sandbox. */
   supervisorTaskId?: FleetTaskId;
+  /** Accumulated token usage across all supervisor runs. */
+  tokenUsage?: FleetTokenUsage;
 };
 
 export type FleetTask = {
@@ -673,6 +686,7 @@ type FleetIpcEvents = Namespaced<
     'stop-supervisor': (ticketId: FleetTicketId) => void;
     'send-supervisor-message': (ticketId: FleetTicketId, message: string) => void;
     'reset-supervisor-session': (ticketId: FleetTicketId) => void;
+    'set-auto-dispatch': (projectId: FleetProjectId, enabled: boolean) => void;
   }
 >;
 
@@ -798,6 +812,7 @@ type FleetIpcRendererEvents = Namespaced<
     'task-session': [FleetTaskId, string];
     'supervisor-status': [FleetTicketId, FleetSupervisorStatus];
     'supervisor-message': [FleetTicketId, FleetSessionMessage];
+    'token-usage': [FleetTicketId, FleetTokenUsage];
   }
 >;
 

@@ -18,6 +18,7 @@ import type {
   FleetTaskId,
   FleetTicket,
   FleetTicketId,
+  FleetTokenUsage,
   GitRepoInfo,
 } from '@/shared/types';
 
@@ -74,7 +75,10 @@ export const $activeTickets = computed([$fleetTickets, $fleetTasks], (ticketMap,
     }
     entries.push({
       ticket,
-      hasLiveTask: liveTaskTicketIds.has(ticket.id) || ticket.supervisorStatus === 'running',
+      hasLiveTask:
+        liveTaskTicketIds.has(ticket.id) ||
+        ticket.supervisorStatus === 'running' ||
+        ticket.supervisorStatus === 'retrying',
     });
   }
 
@@ -192,6 +196,9 @@ export const fleetApi = {
     $supervisorMessages.setKey(ticketId, []);
     return emitter.invoke('fleet:reset-supervisor-session', ticketId);
   },
+  setAutoDispatch: (projectId: FleetProjectId, enabled: boolean): Promise<void> => {
+    return emitter.invoke('fleet:set-auto-dispatch', projectId, enabled);
+  },
 
   // Session history
   getSessionHistory: (sessionId: string): Promise<FleetSessionMessage[]> => {
@@ -261,6 +268,13 @@ const listen = () => {
   ipc.on('fleet:supervisor-message', (ticketId, message: FleetSessionMessage) => {
     const existing = $supervisorMessages.get()[ticketId] ?? [];
     $supervisorMessages.setKey(ticketId, [...existing, message]);
+  });
+
+  ipc.on('fleet:token-usage', (ticketId, usage: FleetTokenUsage) => {
+    const existing = $fleetTickets.get()[ticketId];
+    if (existing) {
+      $fleetTickets.setKey(ticketId, { ...existing, tokenUsage: usage });
+    }
   });
 
   const pollTickets = async () => {

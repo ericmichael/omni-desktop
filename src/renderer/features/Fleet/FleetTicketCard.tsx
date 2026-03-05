@@ -66,6 +66,12 @@ export const FleetTicketCard = memo(({ ticket, isBlocked }: { ticket: FleetTicke
               Running
             </span>
           )}
+          {supervisorStatus === 'retrying' && (
+            <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium text-yellow-400 bg-yellow-400/10">
+              <PiArrowsClockwiseBold size={10} className="animate-spin" />
+              Retrying…
+            </span>
+          )}
           {supervisorStatus === 'error' && (
             <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium text-red-400 bg-red-400/10">
               Error

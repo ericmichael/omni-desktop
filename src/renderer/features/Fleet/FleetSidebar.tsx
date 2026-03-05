@@ -65,7 +65,7 @@ const SidebarActiveTicketItem = memo(({ entry, isActive }: { entry: ActiveTicket
   const columnLabel = ticket.columnId ? (COLUMN_SHORT_LABELS[ticket.columnId] ?? ticket.columnId) : null;
   const columnBadgeColor = ticket.columnId ? (COLUMN_BADGE_COLORS[ticket.columnId] ?? '') : '';
 
-  const isRunning = ticket.supervisorStatus === 'running';
+  const isRunning = ticket.supervisorStatus === 'running' || ticket.supervisorStatus === 'retrying';
 
   return (
     <button

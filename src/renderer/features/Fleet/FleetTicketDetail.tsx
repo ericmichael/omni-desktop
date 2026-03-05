@@ -180,6 +180,7 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
 
   const supervisorStatus = ticket.supervisorStatus;
   const isRunning = supervisorStatus === 'running';
+  const isRetrying = supervisorStatus === 'retrying';
   const isError = supervisorStatus === 'error';
   const isIdle = !supervisorStatus || supervisorStatus === 'idle';
 
@@ -248,6 +249,12 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
               Running
             </span>
           )}
+          {isRetrying && (
+            <span className="flex items-center gap-1 text-[10px] text-yellow-400 font-medium shrink-0">
+              <PiArrowsClockwiseBold size={10} className="animate-spin" />
+              Retrying…
+            </span>
+          )}
           {isError && (
             <span className="flex items-center gap-1 text-[10px] text-red-400 font-medium shrink-0">
               <span className="size-1.5 rounded-full bg-red-400" />
@@ -264,7 +271,7 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
           <IconButton aria-label="Start Supervisor" icon={<PiPlayFill />} size="sm" onClick={handleStartSupervisor} />
         )}
         {isError && <IconButton aria-label="Retry" icon={<PiPlayFill />} size="sm" onClick={handleStartSupervisor} />}
-        {isRunning && (
+        {(isRunning || isRetrying) && (
           <IconButton aria-label="Stop Supervisor" icon={<PiStopFill />} size="sm" onClick={handleStopSupervisor} />
         )}
         <IconButton aria-label="Delete ticket" icon={<PiTrashBold />} size="sm" onClick={handleDelete} />
