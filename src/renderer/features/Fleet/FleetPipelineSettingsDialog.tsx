@@ -47,11 +47,13 @@ const ColumnChecklistEditor = memo(
     items,
     onRemove,
     onAdd,
+    onMaxConcurrentChange,
   }: {
     column: FleetColumn;
     items: DefaultChecklistItem[];
     onRemove: (columnId: string, itemId: string) => void;
     onAdd: (columnId: string, text: string) => void;
+    onMaxConcurrentChange: (columnId: string, value: number | undefined) => void;
   }) => {
     const [newText, setNewText] = useState('');
 
@@ -84,6 +86,14 @@ const ColumnChecklistEditor = memo(
       [column.id, onRemove]
     );
 
+    const handleMaxConcurrentChange = useCallback(
+      (e: React.ChangeEvent<HTMLInputElement>) => {
+        const raw = e.target.value.trim();
+        onMaxConcurrentChange(column.id, raw === '' ? undefined : Math.max(1, parseInt(raw, 10) || 1));
+      },
+      [column.id, onMaxConcurrentChange]
+    );
+
     return (
       <div className="rounded-lg border border-surface-border bg-surface-overlay/30 p-3">
         <div className="flex items-center gap-2 mb-2">
@@ -96,6 +106,17 @@ const ColumnChecklistEditor = memo(
             {column.label}
           </span>
           <span className="text-[10px] text-fg-muted">{items.length} items</span>
+          <div className="ml-auto flex items-center gap-1.5">
+            <label className="text-[10px] text-fg-muted">Max concurrent</label>
+            <input
+              type="number"
+              min={1}
+              value={column.maxConcurrent ?? ''}
+              onChange={handleMaxConcurrentChange}
+              placeholder="∞"
+              className="w-12 rounded border border-surface-border bg-surface px-1.5 py-0.5 text-xs text-fg text-center placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500"
+            />
+          </div>
         </div>
         {items.length > 0 && (
           <div className="flex flex-col gap-1 mb-2">
@@ -154,8 +175,8 @@ export const FleetPipelineSettingsDialog = memo(
         return false;
       }
       return (
-        JSON.stringify(editColumns.map((c) => c.defaultChecklist)) !==
-        JSON.stringify(pipeline.columns.map((c) => c.defaultChecklist))
+        JSON.stringify(editColumns.map((c) => ({ cl: c.defaultChecklist, mc: c.maxConcurrent }))) !==
+        JSON.stringify(pipeline.columns.map((c) => ({ cl: c.defaultChecklist, mc: c.maxConcurrent })))
       );
     }, [editColumns, pipeline]);
 
@@ -188,6 +209,20 @@ export const FleetPipelineSettingsDialog = memo(
       });
     }, []);
 
+    const handleMaxConcurrentChange = useCallback((columnId: string, value: number | undefined) => {
+      setEditColumns((prev) => {
+        if (!prev) {
+          return prev;
+        }
+        return prev.map((col) => {
+          if (col.id !== columnId) {
+            return col;
+          }
+          return { ...col, maxConcurrent: value };
+        });
+      });
+    }, []);
+
     const handleSave = useCallback(async () => {
       if (!editColumns) {
         return;
@@ -213,6 +248,7 @@ export const FleetPipelineSettingsDialog = memo(
                 items={col.defaultChecklist}
                 onRemove={handleRemoveItem}
                 onAdd={handleAddItem}
+                onMaxConcurrentChange={handleMaxConcurrentChange}
               />
             ))}
           </DialogBody>

@@ -173,6 +173,18 @@ export const FleetTicketOverviewTab = memo(({ ticket, pipeline }: FleetTicketOve
           </div>
         </div>
       )}
+
+      {/* Token usage */}
+      {ticket.tokenUsage && (
+        <div className="flex flex-col gap-2">
+          <span className="text-sm font-medium text-fg">Token Usage</span>
+          <div className="flex items-center gap-4 text-xs text-fg-muted">
+            <span>In: {ticket.tokenUsage.inputTokens.toLocaleString()}</span>
+            <span>Out: {ticket.tokenUsage.outputTokens.toLocaleString()}</span>
+            <span>Total: {ticket.tokenUsage.totalTokens.toLocaleString()}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 });

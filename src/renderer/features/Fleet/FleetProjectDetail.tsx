@@ -2,7 +2,7 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { PiGearSixBold, PiTrashFill } from 'react-icons/pi';
 
-import { Button, Heading, IconButton } from '@/renderer/ds';
+import { Button, Heading, IconButton, Switch } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { FleetProjectId } from '@/shared/types';
 
@@ -47,6 +47,13 @@ export const FleetProjectDetail = memo(({ projectId }: { projectId: FleetProject
     fleetApi.goToDashboard();
   }, [projectId]);
 
+  const handleToggleAutoDispatch = useCallback(
+    (checked: boolean) => {
+      void fleetApi.setAutoDispatch(projectId, checked);
+    },
+    [projectId]
+  );
+
   if (!project) {
     return null;
   }
@@ -60,6 +67,10 @@ export const FleetProjectDetail = memo(({ projectId }: { projectId: FleetProject
           <span className="text-xs text-fg-subtle truncate block">{project.workspaceDir}</span>
         </div>
         <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1.5 text-xs text-fg-muted cursor-pointer select-none">
+            <Switch checked={project.autoDispatch ?? false} onCheckedChange={handleToggleAutoDispatch} />
+            Auto-dispatch
+          </label>
           {!ticketFormOpen && (
             <Button size="sm" onClick={handleOpenTicketForm}>
               New Ticket
