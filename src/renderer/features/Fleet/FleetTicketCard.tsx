@@ -5,7 +5,7 @@ import { PiArrowsClockwiseBold, PiTrashFill } from 'react-icons/pi';
 import { Button, cn } from '@/renderer/ds';
 import type { FleetTicket } from '@/shared/types';
 
-import { COLUMN_BADGE_COLORS, RUN_PHASE_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './fleet-constants';
+import { COLUMN_BADGE_COLORS, PHASE_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './fleet-constants';
 import { $fleetPipeline, fleetApi } from './state';
 
 export const FleetTicketCard = memo(({ ticket, isBlocked }: { ticket: FleetTicket; isBlocked: boolean }) => {
@@ -26,7 +26,7 @@ export const FleetTicketCard = memo(({ ticket, isBlocked }: { ticket: FleetTicke
     fleetApi.removeTicket(ticket.id);
   }, [ticket.id]);
 
-  const supervisorStatus = ticket.supervisorStatus;
+  const phase = ticket.phase;
 
   return (
     <div className="flex items-center gap-3 p-3 rounded-lg border border-surface-border bg-surface-raised">
@@ -60,21 +60,18 @@ export const FleetTicketCard = memo(({ ticket, isBlocked }: { ticket: FleetTicke
               Blocked
             </span>
           )}
-          {supervisorStatus === 'running' && (
-            <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium text-green-400 bg-green-400/10">
-              <PiArrowsClockwiseBold size={10} className="animate-spin" />
-              {(ticket.runPhase && RUN_PHASE_LABELS[ticket.runPhase]) ?? 'Running'}
-            </span>
-          )}
-          {supervisorStatus === 'retrying' && (
-            <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium text-yellow-400 bg-yellow-400/10">
-              <PiArrowsClockwiseBold size={10} className="animate-spin" />
-              Retrying…
-            </span>
-          )}
-          {supervisorStatus === 'error' && (
-            <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium text-red-400 bg-red-400/10">
-              Error
+          {phase && phase !== 'idle' && phase !== 'completed' && (
+            <span className={cn(
+              'flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium',
+              phase === 'error' ? 'text-red-400 bg-red-400/10'
+                : phase === 'retrying' ? 'text-yellow-400 bg-yellow-400/10'
+                : phase === 'awaiting_input' ? 'text-blue-400 bg-blue-400/10'
+                : 'text-green-400 bg-green-400/10'
+            )}>
+              {(phase === 'running' || phase === 'continuing' || phase === 'provisioning' || phase === 'retrying') && (
+                <PiArrowsClockwiseBold size={10} className="animate-spin" />
+              )}
+              {PHASE_LABELS[phase] ?? phase}
             </span>
           )}
         </div>

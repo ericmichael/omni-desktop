@@ -26,6 +26,7 @@ export const DEFAULT_PIPELINE: FleetPipeline = {
     {
       id: 'review',
       label: 'Review',
+      gate: true,
       defaultChecklist: [
         { id: 'review-default-1', text: 'All tests pass', completed: false },
         { id: 'review-default-2', text: 'No lint errors', completed: false },

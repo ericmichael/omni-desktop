@@ -12,12 +12,13 @@ import { hasTemplateExpressions, renderTemplate } from '@/lib/fleet-template';
 import type { TemplateVariables } from '@/lib/fleet-template';
 import { getMimeType, isTextMime } from '@/lib/mime-types';
 import { FleetPlanSync } from '@/main/fleet-plan-sync';
-import { FleetSupervisor } from '@/main/fleet-supervisor';
 import { buildSupervisorPrompt } from '@/main/fleet-supervisor-prompt';
+import { TicketMachine } from '@/main/ticket-machine';
 import { FleetWorkflowLoader } from '@/main/fleet-workflow-loader';
 import { SandboxManager } from '@/main/sandbox-manager';
 import { getOmniConfigDir, getWorktreesDir } from '@/main/util';
 import { DEFAULT_PIPELINE } from '@/shared/fleet-defaults';
+import type { TicketPhase } from '@/shared/ticket-phase';
 import type {
   ArtifactFileContent,
   ArtifactFileEntry,
@@ -29,9 +30,7 @@ import type {
   FleetPipeline,
   FleetProject,
   FleetProjectId,
-  FleetRunPhase,
   FleetSessionMessage,
-  FleetSupervisorStatus,
   FleetTask,
   FleetTaskId,
   FleetTicket,
@@ -384,40 +383,18 @@ const classifyRunEndReason = (reason: string): FailureClass => {
   return 'error';
 };
 
-type RetryEntry = {
-  ticketId: FleetTicketId;
-  attempt: number;
-  continuationTurn: number;
-  failureClass: FailureClass;
-  timer: ReturnType<typeof setTimeout>;
-  error?: string;
-};
-
 export class FleetManager {
   private tasks = new Map<FleetTaskId, { task: FleetTask; sandbox: SandboxManager }>();
-  private supervisors = new Map<FleetTicketId, { supervisor: FleetSupervisor; sandbox: SandboxManager }>();
+  private machines = new Map<FleetTicketId, { machine: TicketMachine; sandbox: SandboxManager }>();
   private store: Store<StoreData>;
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   private planSync: FleetPlanSync;
 
-  /** Tracks the last time each ticket's supervisor produced a message (for stall detection). */
-  private lastSupervisorActivity = new Map<FleetTicketId, number>();
-
   /** Interval handle for periodic stall checks. */
   private stallCheckTimer: ReturnType<typeof setInterval> | null = null;
 
-  /** Pending retry entries keyed by ticket ID. */
-  private retryQueue = new Map<FleetTicketId, RetryEntry>();
-
   /** Workflow file loader (FLEET.md) per project. */
   private workflowLoader: FleetWorkflowLoader;
-
-  /**
-   * Claimed set — prevents duplicate dispatch of the same ticket.
-   * A ticket is claimed when dispatch starts and released when the supervisor fully stops
-   * or is explicitly released. Prevents race conditions from double-clicks or overlapping retries.
-   */
-  private claimed = new Set<FleetTicketId>();
 
   /** Interval handle for auto-dispatch polling. */
   private autoDispatchTimer: ReturnType<typeof setInterval> | null = null;
@@ -439,6 +416,123 @@ export class FleetManager {
     this.startStallDetection();
     this.startAutoDispatch();
   }
+
+  // #region Machine factory
+
+  private createMachine(ticketId: FleetTicketId): TicketMachine {
+    return new TicketMachine(ticketId, {
+      onPhaseChange: (tid: FleetTicketId, phase: TicketPhase) => {
+        this.updateTicket(tid, { phase });
+        this.sendToWindow('fleet:phase', tid, phase);
+      },
+      onMessage: (tid: FleetTicketId, msg: FleetSessionMessage) => {
+        this.sendToWindow('fleet:supervisor-message', tid, msg);
+      },
+      onRunEnd: (tid: FleetTicketId, reason: string) => {
+        this.handleMachineRunEnd(tid, reason);
+      },
+      onTokenUsage: (tid: FleetTicketId, usage) => {
+        const ticket = this.getTicketById(tid);
+        if (!ticket) return;
+        const prev = ticket.tokenUsage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+        const updated = {
+          inputTokens: Math.max(prev.inputTokens, usage.inputTokens),
+          outputTokens: Math.max(prev.outputTokens, usage.outputTokens),
+          totalTokens: Math.max(prev.totalTokens, usage.totalTokens),
+        };
+        if (updated.totalTokens !== prev.totalTokens) {
+          this.updateTicket(tid, { tokenUsage: updated });
+          this.sendToWindow('fleet:token-usage', tid, updated);
+        }
+      },
+    });
+  }
+
+  /**
+   * Get or create a machine for a ticket.
+   * If a machine already exists and is active, returns it (idempotent).
+   */
+  private getOrCreateMachine(ticketId: FleetTicketId): { machine: TicketMachine; sandbox: SandboxManager } | null {
+    return this.machines.get(ticketId) ?? null;
+  }
+
+  /**
+   * Handle a run_end notification from a machine. Decides whether to continue,
+   * retry, or stop based on the run end reason and ticket state.
+   */
+  private handleMachineRunEnd = (ticketId: FleetTicketId, reason: string): void => {
+    console.log(`[FleetManager] Machine run ended for ${ticketId}: ${reason}`);
+
+    const entry = this.machines.get(ticketId);
+    if (!entry) return;
+    const { machine } = entry;
+
+    // Run after_run hook (best-effort)
+    const ticket = this.getTicketById(ticketId);
+    if (ticket) {
+      const project = this.getProjects().find((p) => p.id === ticket.projectId);
+      if (project) {
+        void this.workflowLoader.runHook(ticket.projectId, 'after_run', project.workspaceDir);
+      }
+    }
+
+    const failureClass = classifyRunEndReason(reason);
+
+    // User-initiated stops
+    if (failureClass === 'stopped') {
+      machine.forcePhase('idle');
+      return;
+    }
+
+    // Agent requested user input
+    if (failureClass === 'input_required') {
+      console.log(`[FleetManager] Agent requires user input for ${ticketId}. Pausing.`);
+      machine.forcePhase('awaiting_input');
+      return;
+    }
+
+    if (failureClass === 'completed') {
+      // Check if all work is done
+      if (ticket && this.isTicketWorkComplete(ticket)) {
+        console.log(`[FleetManager] Ticket ${ticketId} work complete.`);
+        machine.forcePhase('completed');
+        return;
+      }
+
+      // More work remains — continue immediately
+      const nextTurn = machine.continuationTurn + 1;
+      const maxTurns = ticket
+        ? this.getEffectiveMaxContinuationTurns(ticket.projectId)
+        : MAX_CONTINUATION_TURNS;
+
+      if (nextTurn >= maxTurns) {
+        console.log(`[FleetManager] Ticket ${ticketId} reached max continuation turns (${maxTurns}). Stopping.`);
+        machine.forcePhase('completed');
+        return;
+      }
+
+      machine.continuationTurn = nextTurn;
+      machine.forcePhase('continuing');
+      machine.recordActivity();
+
+      console.log(
+        `[FleetManager] Continuing ticket ${ticketId} (turn ${nextTurn}/${maxTurns}). Immediate re-run.`
+      );
+
+      const sessionId = machine.getSessionId() ?? undefined;
+      const continuationPrompt = this.buildContinuationPrompt(ticketId, nextTurn + 1, maxTurns);
+      this.startMachineRun(ticketId, continuationPrompt, { sessionId });
+    } else {
+      // Error or stall — schedule exponential backoff retry
+      this.scheduleRetry(ticketId, failureClass, {
+        attempt: machine.retryAttempt + 1,
+        continuationTurn: machine.continuationTurn,
+        error: reason,
+      });
+    }
+  };
+
+  // #endregion
 
   // #region Effective config (FLEET.md overrides → defaults)
 
@@ -497,76 +591,48 @@ export class FleetManager {
   private checkForStalledSupervisors = (): void => {
     const now = Date.now();
 
-    for (const [ticketId, entry] of this.supervisors) {
-      if (entry.supervisor.getStatus() !== 'running') {
-        continue;
-      }
+    for (const [ticketId, entry] of this.machines) {
+      const { machine } = entry;
+      if (!machine.isStreaming()) continue;
 
-      const lastActivity = this.lastSupervisorActivity.get(ticketId);
-      if (lastActivity === undefined) {
-        continue;
-      }
-
-      // Use per-project stall timeout from FLEET.md if available
       const ticket = this.getTicketById(ticketId);
       const stallTimeout = ticket ? this.getEffectiveStallTimeout(ticket.projectId) : STALL_TIMEOUT_MS;
 
-      const elapsed = now - lastActivity;
+      const elapsed = now - machine.getLastActivity();
       if (elapsed > stallTimeout) {
         console.warn(
           `[FleetManager] Supervisor stalled for ticket ${ticketId} (${Math.round(elapsed / 1000)}s since last activity). Stopping and scheduling retry.`
         );
-        // Stop without triggering the normal onRunEnd flow (which would classify as 'stopped')
-        void entry.supervisor.stop();
+        void machine.stop();
         this.stopPlanWatcher(ticketId);
-        this.lastSupervisorActivity.delete(ticketId);
-
-        // Get existing retry state for attempt tracking
-        const existingRetry = this.retryQueue.get(ticketId);
-        const currentAttempt = existingRetry?.attempt ?? 0;
-        const currentTurn = existingRetry?.continuationTurn ?? 0;
 
         this.scheduleRetry(ticketId, 'stalled', {
-          attempt: currentAttempt + 1,
-          continuationTurn: currentTurn,
+          attempt: machine.retryAttempt + 1,
+          continuationTurn: machine.continuationTurn,
           error: `stalled for ${Math.round(elapsed / 1000)}s`,
         });
       }
     }
   };
 
-  private recordSupervisorActivity = (ticketId: FleetTicketId): void => {
-    this.lastSupervisorActivity.set(ticketId, Date.now());
-  };
-
-  /** Update the granular run phase for a ticket and broadcast to renderer. */
-  private setRunPhase = (ticketId: FleetTicketId, phase: FleetRunPhase): void => {
-    this.updateTicket(ticketId, { runPhase: phase });
-    this.sendToWindow('fleet:run-phase', ticketId, phase);
-  };
-
   // #endregion
 
   // #region Concurrency control (Symphony-inspired)
 
-  /** Returns the number of supervisors currently in 'running' status. */
+  /** Returns the number of supervisors currently active. */
   private getRunningSupervisorCount = (): number => {
     let count = 0;
-    for (const [, entry] of this.supervisors) {
-      if (entry.supervisor.getStatus() === 'running') {
-        count++;
-      }
+    for (const [, entry] of this.machines) {
+      if (entry.machine.isActive()) count++;
     }
     return count;
   };
 
-  /** Count running supervisors in a specific column for a project. */
+  /** Count active supervisors in a specific column for a project. */
   private getRunningSupervisorCountByColumn = (projectId: FleetProjectId, columnId: FleetColumnId): number => {
     let count = 0;
-    for (const [ticketId, entry] of this.supervisors) {
-      if (entry.supervisor.getStatus() !== 'running') {
-        continue;
-      }
+    for (const [ticketId, entry] of this.machines) {
+      if (!entry.machine.isActive()) continue;
       const ticket = this.getTicketById(ticketId);
       if (ticket && ticket.projectId === projectId && ticket.columnId === columnId) {
         count++;
@@ -604,11 +670,16 @@ export class FleetManager {
     failureClass: FailureClass,
     opts: { attempt?: number; continuationTurn?: number; error?: string }
   ): void => {
-    // Cancel any existing retry for this ticket
-    this.cancelRetry(ticketId);
+    const entry = this.machines.get(ticketId);
+    if (!entry) return;
+    const { machine } = entry;
 
     const attempt = opts.attempt ?? 0;
     const continuationTurn = opts.continuationTurn ?? 0;
+
+    // Update machine counters
+    machine.retryAttempt = attempt;
+    machine.continuationTurn = continuationTurn;
 
     // Get per-project limits from FLEET.md
     const ticket = this.getTicketById(ticketId);
@@ -622,17 +693,13 @@ export class FleetManager {
       console.log(
         `[FleetManager] Ticket ${ticketId} reached max continuation turns (${maxContinuationTurns}). Stopping.`
       );
-      this.claimed.delete(ticketId);
-      this.updateTicket(ticketId, { supervisorStatus: 'idle' });
-      this.sendToWindow('fleet:supervisor-status', ticketId, 'idle');
+      machine.forcePhase('idle');
       return;
     }
 
     if (failureClass !== 'completed' && attempt >= maxRetryAttempts) {
       console.log(`[FleetManager] Ticket ${ticketId} reached max retry attempts (${maxRetryAttempts}). Giving up.`);
-      this.claimed.delete(ticketId);
-      this.updateTicket(ticketId, { supervisorStatus: 'error' });
-      this.sendToWindow('fleet:supervisor-status', ticketId, 'error');
+      machine.forcePhase('error');
       return;
     }
 
@@ -650,21 +717,8 @@ export class FleetManager {
         (opts.error ? ` (reason: ${opts.error})` : '')
     );
 
-    this.updateTicket(ticketId, { supervisorStatus: 'retrying' });
-    this.sendToWindow('fleet:supervisor-status', ticketId, 'retrying');
-
-    const timer = setTimeout(() => {
-      this.retryQueue.delete(ticketId);
+    machine.scheduleRetryTimer(delayMs, () => {
       void this.handleRetryFired(ticketId, failureClass, attempt, continuationTurn);
-    }, delayMs);
-
-    this.retryQueue.set(ticketId, {
-      ticketId,
-      attempt,
-      continuationTurn,
-      failureClass,
-      timer,
-      error: opts.error,
     });
   };
 
@@ -678,33 +732,29 @@ export class FleetManager {
     continuationTurn: number
   ): Promise<void> => {
     const ticket = this.getTicketById(ticketId);
-    if (!ticket) {
-      console.log(`[FleetManager] Retry fired for ${ticketId} but ticket no longer exists. Releasing.`);
-      this.claimed.delete(ticketId);
+    const entry = this.machines.get(ticketId);
+    if (!ticket || !entry) {
+      console.log(`[FleetManager] Retry fired for ${ticketId} but ticket/machine no longer exists. Releasing.`);
       return;
     }
+    const { machine } = entry;
 
     // Don't retry if ticket is now in a terminal column
     if (this.isTerminalColumn(ticket.projectId, ticket.columnId)) {
       console.log(`[FleetManager] Retry fired for ${ticketId} but ticket is in terminal column. Releasing.`);
-      this.claimed.delete(ticketId);
-      this.updateTicket(ticketId, { supervisorStatus: 'idle' });
-      this.sendToWindow('fleet:supervisor-status', ticketId, 'idle');
+      machine.forcePhase('idle');
       return;
     }
 
     // For continuation retries: check if the work is actually done (all checklist items complete)
     if (failureClass === 'completed' && this.isTicketWorkComplete(ticket)) {
       console.log(`[FleetManager] Continuation check for ${ticketId}: all checklist items complete. Done.`);
-      this.claimed.delete(ticketId);
-      this.updateTicket(ticketId, { supervisorStatus: 'idle' });
-      this.sendToWindow('fleet:supervisor-status', ticketId, 'idle');
+      machine.forcePhase('completed');
       return;
     }
 
     // Check concurrency (including per-column limits)
     if (!this.canStartSupervisor(ticket.projectId, ticket.columnId)) {
-      // Requeue with incremented attempt
       console.log(`[FleetManager] No slots available for retry of ${ticketId}. Requeuing.`);
       this.scheduleRetry(ticketId, failureClass, {
         attempt: attempt + 1,
@@ -714,23 +764,18 @@ export class FleetManager {
       return;
     }
 
-    // Re-dispatch the supervisor
+    // Re-dispatch
     console.log(
       `[FleetManager] Retry firing for ${ticketId} (${failureClass}, attempt=${attempt}, turn=${continuationTurn}). Re-dispatching.`
     );
 
     try {
       const project = this.getProjects().find((p) => p.id === ticket.projectId);
-      if (!project) {
-        return;
-      }
+      if (!project) return;
 
-      // Run before_run hook (failure aborts this retry attempt)
-      this.setRunPhase(ticketId, 'loading_workflow');
       const hookOk = await this.workflowLoader.runHook(ticket.projectId, 'before_run', project.workspaceDir);
       if (!hookOk) {
         console.warn(`[FleetManager] before_run hook failed during retry for ${ticketId}. Scheduling another retry.`);
-        this.setRunPhase(ticketId, 'failed');
         this.scheduleRetry(ticketId, 'error', {
           attempt: attempt + 1,
           continuationTurn,
@@ -739,12 +784,8 @@ export class FleetManager {
         return;
       }
 
-      const sessionId = ticket.supervisorSessionId;
-
-      // Continuation retries (completed): session has full context, send lightweight prompt.
-      // Error/stall retries: re-send full supervisor instructions since the session may be stale.
+      const sessionId = ticket.supervisorSessionId ?? undefined;
       const isContinuation = failureClass === 'completed';
-      this.setRunPhase(ticketId, isContinuation ? 'continuing' : 'building_prompt');
       const maxTurns = this.getEffectiveMaxContinuationTurns(ticket.projectId);
       const prompt = isContinuation
         ? this.buildContinuationPrompt(ticketId, continuationTurn + 1, maxTurns)
@@ -753,12 +794,9 @@ export class FleetManager {
         ? undefined
         : { additional_instructions: this.buildFullSupervisorPrompt(ticketId) };
 
-      this.recordSupervisorActivity(ticketId);
-
-      this.setRunPhase(ticketId, 'preparing_workspace');
+      machine.recordActivity();
       await this.ensureSupervisorInfra(ticketId, () => {
-        this.setRunPhase(ticketId, 'starting_run');
-        this.startSupervisorRun(ticketId, prompt, { sessionId, variables });
+        this.startMachineRun(ticketId, prompt, { sessionId, variables });
       });
     } catch (error) {
       console.error(`[FleetManager] Retry dispatch failed for ${ticketId}:`, error);
@@ -785,18 +823,16 @@ export class FleetManager {
   };
 
   private cancelRetry = (ticketId: FleetTicketId): void => {
-    const entry = this.retryQueue.get(ticketId);
+    const entry = this.machines.get(ticketId);
     if (entry) {
-      clearTimeout(entry.timer);
-      this.retryQueue.delete(ticketId);
+      entry.machine.cancelRetryTimer();
     }
   };
 
   private cancelAllRetries = (): void => {
-    for (const [, entry] of this.retryQueue) {
-      clearTimeout(entry.timer);
+    for (const [, entry] of this.machines) {
+      entry.machine.cancelRetryTimer();
     }
-    this.retryQueue.clear();
   };
 
   // #endregion
@@ -857,12 +893,29 @@ export class FleetManager {
 
         // Handle column change from frontmatter
         if (event.column) {
+          // Agent cannot move a ticket out of a gated column — only a human can
+          const currentCol = pipeline.columns.find((c) => c.id === freshTicket.columnId);
+          if (currentCol?.gate) {
+            return;
+          }
+
           const labelToId = new Map<string, string>();
           for (const col of pipeline.columns) {
             labelToId.set(col.label.trim().toLowerCase(), col.id);
           }
-          const newColumnId = labelToId.get(event.column.trim().toLowerCase());
+          let newColumnId = labelToId.get(event.column.trim().toLowerCase());
           if (newColumnId && newColumnId !== freshTicket.columnId) {
+            // If moving forward, cap at the first gated column between current and target
+            const currentIdx = pipeline.columns.findIndex((c) => c.id === freshTicket.columnId);
+            const targetIdx = pipeline.columns.findIndex((c) => c.id === newColumnId);
+            if (targetIdx > currentIdx) {
+              for (let i = currentIdx + 1; i < targetIdx; i++) {
+                if (pipeline.columns[i]?.gate) {
+                  newColumnId = pipeline.columns[i]!.id;
+                  break;
+                }
+              }
+            }
             this.moveTicketToColumn(ticketId, newColumnId);
           }
         }
@@ -1021,16 +1074,12 @@ export class FleetManager {
   };
 
   removeTicket = (id: FleetTicketId): void => {
-    // Cancel any pending retry and release claim
-    this.cancelRetry(id);
-    this.claimed.delete(id);
-
-    // Stop supervisor if running
-    const supervisorEntry = this.supervisors.get(id);
-    if (supervisorEntry) {
-      void supervisorEntry.supervisor.dispose();
-      void supervisorEntry.sandbox.exit();
-      this.supervisors.delete(id);
+    // Stop machine if running
+    const machineEntry = this.machines.get(id);
+    if (machineEntry) {
+      void machineEntry.machine.dispose();
+      void machineEntry.sandbox.exit();
+      this.machines.delete(id);
     }
 
     const tickets = this.getTickets().filter((t) => t.id !== id);
@@ -1363,21 +1412,29 @@ export class FleetManager {
 
     // Reconciliation: stop supervisor and clean up workspace when ticket moves to a terminal column
     if (this.isTerminalColumn(ticket.projectId, columnId)) {
-      const entry = this.supervisors.get(ticketId);
+      const entry = this.machines.get(ticketId);
       if (entry) {
         console.log(`[FleetManager] Ticket ${ticketId} moved to terminal column "${columnId}" — stopping supervisor and cleaning up workspace.`);
         void this.stopSupervisor(ticketId).then(() => this.cleanupTicketWorkspace(ticketId));
       } else {
-        // No active supervisor, but there may be a persisted task with a stale container/worktree
         void this.cleanupTicketWorkspace(ticketId);
       }
     }
 
     // Also stop if moving back to the first column (user is shelving the ticket)
     if (this.isFirstColumn(ticket.projectId, columnId)) {
-      const entry = this.supervisors.get(ticketId);
+      const entry = this.machines.get(ticketId);
       if (entry) {
         console.log(`[FleetManager] Ticket ${ticketId} moved to backlog — stopping supervisor.`);
+        void this.stopSupervisor(ticketId);
+      }
+    }
+
+    // Stop supervisor (preserve workspace) when entering a gated column
+    if (column.gate) {
+      const entry = this.machines.get(ticketId);
+      if (entry) {
+        console.log(`[FleetManager] Ticket ${ticketId} entered gated column "${columnId}" — stopping supervisor.`);
         void this.stopSupervisor(ticketId);
       }
     }
@@ -1414,14 +1471,14 @@ export class FleetManager {
   // #region Supervisor lifecycle
 
   /**
-   * Ensure sandbox + supervisor infrastructure exists for a ticket.
-   * Does NOT send any prompt — just gets the sandbox running and supervisor wired up.
+   * Ensure sandbox + machine infrastructure exists for a ticket.
+   * Idempotent — if a machine is already provisioned with a running sandbox, no-ops.
    * When the sandbox becomes ready, fires onReady with the wsUrl.
    */
   ensureSupervisorInfra = async (
     ticketId: FleetTicketId,
     onReady?: (wsUrl: string) => void
-  ): Promise<{ supervisor: FleetSupervisor; sandbox: SandboxManager }> => {
+  ): Promise<{ machine: TicketMachine; sandbox: SandboxManager }> => {
     const ticket = this.getTicketById(ticketId);
     if (!ticket) {
       throw new Error(`Ticket not found: ${ticketId}`);
@@ -1432,27 +1489,27 @@ export class FleetManager {
       throw new Error(`Project not found: ${ticket.projectId}`);
     }
 
-    // Stop existing supervisor if any
-    const existing = this.supervisors.get(ticketId);
+    // Idempotent: if machine already exists with a running sandbox, just fire onReady
+    const existing = this.machines.get(ticketId);
     if (existing) {
-      await existing.supervisor.dispose();
       const sbStatus = existing.sandbox.getStatus();
-      if (sbStatus?.type !== 'running') {
-        await existing.sandbox.exit();
-        this.supervisors.delete(ticketId);
+      if (sbStatus?.type === 'running') {
+        existing.machine.setWsUrl(sbStatus.data.wsUrl);
+        void this.ensureSession(ticketId).then(() => onReady?.(sbStatus.data.wsUrl));
+        return existing;
       }
     }
 
-    this.updateTicket(ticketId, { supervisorStatus: 'running' });
-    this.sendToWindow('fleet:supervisor-status', ticketId, 'running');
+    // Create machine if needed
+    const machine = existing?.machine ?? this.createMachine(ticketId);
+    machine.transition('provisioning');
 
     // Create or reuse sandbox
     let sandbox: SandboxManager;
-    let supervisorEntry = this.supervisors.get(ticketId);
     let workspaceDir = project.workspaceDir;
 
-    if (supervisorEntry) {
-      sandbox = supervisorEntry.sandbox;
+    if (existing) {
+      sandbox = existing.sandbox;
     } else {
       const taskId = nanoid();
 
@@ -1469,12 +1526,10 @@ export class FleetManager {
       // Run after_create hook on first workspace creation (best-effort — failure aborts)
       const afterCreateOk = await this.workflowLoader.runHook(ticket.projectId, 'after_create', workspaceDir);
       if (!afterCreateOk) {
-        // Clean up the worktree we just created
         if (worktreePath && worktreeName) {
           await removeWorktree(project.workspaceDir, worktreePath, worktreeName);
         }
-        this.updateTicket(ticketId, { supervisorStatus: 'error' });
-        this.sendToWindow('fleet:supervisor-status', ticketId, 'error');
+        machine.transition('error');
         throw new Error('after_create hook failed');
       }
 
@@ -1513,9 +1568,9 @@ export class FleetManager {
 
           if (status.type === 'running' && !readyFired) {
             readyFired = true;
-            const entry = this.supervisors.get(ticketId);
+            const entry = this.machines.get(ticketId);
             if (entry) {
-              entry.supervisor.setWsUrl(status.data.wsUrl);
+              entry.machine.setWsUrl(status.data.wsUrl);
               void this.ensureSession(ticketId).then(() => onReady?.(status.data.wsUrl));
             }
           }
@@ -1527,155 +1582,17 @@ export class FleetManager {
       this.updateTicket(ticketId, { supervisorTaskId: taskId });
     }
 
-    // Create supervisor
-    const supervisor = new FleetSupervisor({
-      wsUrl: '',
-      onStatusChange: (status: FleetSupervisorStatus) => {
-        this.updateTicket(ticketId, { supervisorStatus: status });
-        this.sendToWindow('fleet:supervisor-status', ticketId, status);
-      },
-      onMessage: (msg: FleetSessionMessage) => {
-        this.recordSupervisorActivity(ticketId);
-        this.sendToWindow('fleet:supervisor-message', ticketId, msg);
-      },
-      onTokenUsage: (usage) => {
-        // Accumulate token usage on the ticket
-        const ticket = this.getTicketById(ticketId);
-        if (!ticket) {
-          return;
-        }
-        const prev = ticket.tokenUsage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
-        // Use the larger of current accumulated vs reported (absolute totals)
-        const updated = {
-          inputTokens: Math.max(prev.inputTokens, usage.inputTokens),
-          outputTokens: Math.max(prev.outputTokens, usage.outputTokens),
-          totalTokens: Math.max(prev.totalTokens, usage.totalTokens),
-        };
-        if (updated.totalTokens !== prev.totalTokens) {
-          this.updateTicket(ticketId, { tokenUsage: updated });
-          this.sendToWindow('fleet:token-usage', ticketId, updated);
-        }
-      },
-      onRunEnd: (reason: string) => {
-        console.log(`[FleetManager] Supervisor run ended for ${ticketId}: ${reason}`);
-        this.setRunPhase(ticketId, 'finishing');
-
-        // Run after_run hook (best-effort, failure is logged and ignored)
-        const runEndTicket = this.getTicketById(ticketId);
-        if (runEndTicket) {
-          const runEndProject = this.getProjects().find((p) => p.id === runEndTicket.projectId);
-          if (runEndProject) {
-            void this.workflowLoader.runHook(runEndTicket.projectId, 'after_run', runEndProject.workspaceDir);
-          }
-        }
-
-        const failureClass = classifyRunEndReason(reason);
-
-        // User-initiated stops should not trigger retries
-        if (failureClass === 'stopped') {
-          this.setRunPhase(ticketId, 'stopped');
-          this.claimed.delete(ticketId);
-          return;
-        }
-
-        // Agent requested user input — stop and surface to user, don't retry
-        if (failureClass === 'input_required') {
-          console.log(`[FleetManager] Agent requires user input for ${ticketId}. Pausing.`);
-          this.setRunPhase(ticketId, 'idle');
-          this.updateTicket(ticketId, { supervisorStatus: 'idle' });
-          this.sendToWindow('fleet:supervisor-status', ticketId, 'idle');
-          // Keep claimed so user can respond; release when they stop
-          return;
-        }
-
-        // Get current retry state for continuation tracking
-        const existingRetry = this.retryQueue.get(ticketId);
-        const currentTurn = existingRetry?.continuationTurn ?? 0;
-        const currentAttempt = existingRetry?.attempt ?? 0;
-
-        if (failureClass === 'completed') {
-          // In-worker turn loop: immediately check if more work remains
-          // instead of scheduling a delayed retry
-          if (runEndTicket && this.isTicketWorkComplete(runEndTicket)) {
-            console.log(`[FleetManager] Ticket ${ticketId} work complete. Releasing.`);
-            this.setRunPhase(ticketId, 'succeeded');
-            this.claimed.delete(ticketId);
-            this.updateTicket(ticketId, { supervisorStatus: 'idle' });
-            this.sendToWindow('fleet:supervisor-status', ticketId, 'idle');
-            return;
-          }
-
-          // More work remains — continue immediately on the same session
-          // (no delay, no full re-dispatch, just send a new run on the same supervisor)
-          const nextTurn = currentTurn + 1;
-          const ticket = this.getTicketById(ticketId);
-          const maxTurns = ticket
-            ? this.getEffectiveMaxContinuationTurns(ticket.projectId)
-            : MAX_CONTINUATION_TURNS;
-
-          if (nextTurn >= maxTurns) {
-            console.log(`[FleetManager] Ticket ${ticketId} reached max continuation turns (${maxTurns}). Stopping.`);
-            this.setRunPhase(ticketId, 'succeeded');
-            this.claimed.delete(ticketId);
-            this.updateTicket(ticketId, { supervisorStatus: 'idle' });
-            this.sendToWindow('fleet:supervisor-status', ticketId, 'idle');
-            return;
-          }
-
-          // Fire continuation immediately — no 3s delay
-          this.setRunPhase(ticketId, 'continuing');
-          console.log(
-            `[FleetManager] Continuing ticket ${ticketId} (turn ${nextTurn}/${maxTurns}). Immediate re-run.`
-          );
-          this.recordSupervisorActivity(ticketId);
-
-          // Track continuation state in retry queue for turn counting (but no timer)
-          this.retryQueue.set(ticketId, {
-            ticketId,
-            attempt: 0,
-            continuationTurn: nextTurn,
-            failureClass: 'completed',
-            timer: setTimeout(() => {}, 0), // dummy, not used
-          });
-
-          const supervisorEntry = this.supervisors.get(ticketId);
-          if (supervisorEntry) {
-            const sessionId = supervisorEntry.supervisor.getSessionId() ?? undefined;
-            // Continuation turns: session already has full context, so send only a lightweight
-            // continuation prompt without re-sending the full supervisor instructions as variables.
-            const continuationPrompt = this.buildContinuationPrompt(ticketId, nextTurn + 1, maxTurns);
-            this.startSupervisorRun(ticketId, continuationPrompt, { sessionId });
-          }
-        } else {
-          // Error or stall — schedule exponential backoff retry
-          this.setRunPhase(ticketId, 'failed');
-          this.scheduleRetry(ticketId, failureClass, {
-            attempt: currentAttempt + 1,
-            continuationTurn: currentTurn,
-            error: reason,
-          });
-        }
-      },
-    });
-
-    this.supervisors.set(ticketId, { supervisor, sandbox });
+    this.machines.set(ticketId, { machine, sandbox });
 
     this.syncPlanFile(ticketId);
     this.startPlanWatcher(ticketId);
 
     // Start sandbox if not already running
-    if (!supervisorEntry) {
+    if (!existing) {
       sandbox.start({ workspaceDir, sandboxVariant: 'work' });
-    } else {
-      // Already running — ensure session exists, then fire onReady
-      const sbStatus = sandbox.getStatus();
-      if (sbStatus?.type === 'running') {
-        supervisor.setWsUrl(sbStatus.data.wsUrl);
-        void this.ensureSession(ticketId).then(() => onReady?.(sbStatus.data.wsUrl));
-      }
     }
 
-    return { supervisor, sandbox };
+    return { machine, sandbox };
   };
 
   /**
@@ -1684,41 +1601,32 @@ export class FleetManager {
    */
   private ensureSession = async (ticketId: FleetTicketId): Promise<void> => {
     const ticket = this.getTicketById(ticketId);
-    if (!ticket) {
-      return;
-    }
+    if (!ticket) return;
 
-    // Already have a session — just make sure the supervisor knows about it
+    // Already have a session
     if (ticket.supervisorSessionId) {
-      const entry = this.supervisors.get(ticketId);
-      if (entry && !entry.supervisor.getSessionId()) {
-        // Supervisor instance was recreated but ticket has a session — restore it
-        // We can't restore directly, so create a new session
+      const entry = this.machines.get(ticketId);
+      if (entry && !entry.machine.getSessionId()) {
+        // Machine was recreated but ticket has a session — create fresh
       } else {
         return;
       }
     }
 
-    const entry = this.supervisors.get(ticketId);
-    if (!entry) {
-      return;
-    }
+    const entry = this.machines.get(ticketId);
+    if (!entry) return;
 
     const project = this.getProjects().find((p) => p.id === ticket.projectId);
-    if (!project) {
-      return;
-    }
+    if (!project) return;
 
     const supervisorPrompt = this.buildFullSupervisorPrompt(ticketId);
     const variables = { additional_instructions: supervisorPrompt };
 
     try {
-      this.setRunPhase(ticketId, 'initializing_session');
       console.log(`[FleetManager] Creating session for ticket ${ticketId} with variables:`, Object.keys(variables));
-      const sessionId = await entry.supervisor.createSession(variables);
+      const sessionId = await entry.machine.createSession(variables);
       console.log(`[FleetManager] Session created: ${sessionId} for ticket ${ticketId}`);
-      this.updateTicket(ticketId, { supervisorSessionId: sessionId, supervisorStatus: 'idle' });
-      this.sendToWindow('fleet:supervisor-status', ticketId, 'idle');
+      this.updateTicket(ticketId, { supervisorSessionId: sessionId });
     } catch (error) {
       console.error(`[FleetManager] Failed to create session for ${ticketId}:`, error);
     }
@@ -1747,9 +1655,10 @@ export class FleetManager {
       return `Ticket is in terminal column "${ticket.columnId}" — cannot start supervisor`;
     }
 
-    // Check claimed set to prevent duplicate dispatch
-    if (this.claimed.has(ticketId)) {
-      return `Ticket ${ticketId} is already claimed (dispatch in progress or retrying)`;
+    // Check machine to prevent duplicate dispatch
+    const machineEntry = this.machines.get(ticketId);
+    if (machineEntry && machineEntry.machine.isActive()) {
+      return `Ticket ${ticketId} is already active (phase: ${machineEntry.machine.getPhase()})`;
     }
 
     if (!this.canStartSupervisor(ticket.projectId, ticket.columnId)) {
@@ -1860,93 +1769,58 @@ export class FleetManager {
    * Triggered by the Play button.
    */
   startSupervisor = async (ticketId: FleetTicketId): Promise<void> => {
-    // Dispatch preflight validation
-    this.setRunPhase(ticketId, 'validating');
     const preflightError = this.validateDispatchPreflight(ticketId);
     if (preflightError) {
       console.warn(`[FleetManager] Dispatch preflight failed for ${ticketId}: ${preflightError}`);
-      this.setRunPhase(ticketId, 'failed');
-      this.updateTicket(ticketId, { supervisorStatus: 'error' });
-      this.sendToWindow('fleet:supervisor-status', ticketId, 'error');
       throw new Error(preflightError);
     }
-
-    // Claim the ticket to prevent duplicate dispatch
-    this.claimed.add(ticketId);
 
     const ticket = this.getTicketById(ticketId)!;
     const project = this.getProjects().find((p) => p.id === ticket.projectId)!;
 
     // Load FLEET.md workflow for this project (also starts file watcher)
-    this.setRunPhase(ticketId, 'loading_workflow');
     await this.workflowLoader.load(ticket.projectId, project.workspaceDir);
 
     // Run before_run hook if configured
     const hookOk = await this.workflowLoader.runHook(ticket.projectId, 'before_run', project.workspaceDir);
     if (!hookOk) {
       console.warn(`[FleetManager] before_run hook failed for ${ticketId}. Aborting start.`);
-      this.claimed.delete(ticketId);
-      this.setRunPhase(ticketId, 'failed');
-      this.updateTicket(ticketId, { supervisorStatus: 'error' });
-      this.sendToWindow('fleet:supervisor-status', ticketId, 'error');
       throw new Error('before_run hook failed');
     }
 
-    this.setRunPhase(ticketId, 'building_prompt');
     const supervisorPrompt = this.buildFullSupervisorPrompt(ticketId);
     const sessionId = ticket.supervisorSessionId;
     const variables = { additional_instructions: supervisorPrompt };
 
-    // Record initial activity timestamp so stall detection has a baseline
-    this.recordSupervisorActivity(ticketId);
-
-    this.setRunPhase(ticketId, 'preparing_workspace');
     await this.ensureSupervisorInfra(ticketId, () => {
-      this.setRunPhase(ticketId, 'starting_run');
-      this.startSupervisorRun(ticketId, 'Begin working on this ticket.', { sessionId, variables });
+      this.startMachineRun(ticketId, 'Begin working on this ticket.', { sessionId, variables });
     });
   };
 
-  private startSupervisorRun = (
+  private startMachineRun = (
     ticketId: FleetTicketId,
     prompt: string,
     opts?: { sessionId?: string; variables?: Record<string, unknown> }
   ): void => {
-    const entry = this.supervisors.get(ticketId);
-    if (!entry) {
-      return;
-    }
+    const entry = this.machines.get(ticketId);
+    if (!entry) return;
 
-    void entry.supervisor.startRun(prompt, { sessionId: opts?.sessionId, variables: opts?.variables }).then(
+    void entry.machine.startRun(prompt, { sessionId: opts?.sessionId, variables: opts?.variables }).then(
       (result) => {
-        this.setRunPhase(ticketId, 'streaming');
-        this.updateTicket(ticketId, {
-          supervisorSessionId: result.sessionId,
-        });
+        this.updateTicket(ticketId, { supervisorSessionId: result.sessionId });
       },
       (error) => {
-        console.error(`[FleetManager] Supervisor start failed for ${ticketId}:`, error);
-        this.setRunPhase(ticketId, 'failed');
-        this.updateTicket(ticketId, { supervisorStatus: 'error' });
-        this.sendToWindow('fleet:supervisor-status', ticketId, 'error');
+        console.error(`[FleetManager] Machine start failed for ${ticketId}:`, error);
       }
     );
   };
 
   stopSupervisor = async (ticketId: FleetTicketId): Promise<void> => {
-    const entry = this.supervisors.get(ticketId);
-    if (!entry) {
-      return;
-    }
+    const entry = this.machines.get(ticketId);
+    if (!entry) return;
 
-    this.cancelRetry(ticketId);
-    this.claimed.delete(ticketId);
-    await entry.supervisor.stop();
+    await entry.machine.stop();
     this.stopPlanWatcher(ticketId);
-    this.lastSupervisorActivity.delete(ticketId);
-    this.setRunPhase(ticketId, 'stopped');
-    this.updateTicket(ticketId, { supervisorStatus: 'idle' });
-    this.sendToWindow('fleet:supervisor-status', ticketId, 'idle');
   };
 
   /**
@@ -1989,11 +1863,11 @@ export class FleetManager {
       await this.workflowLoader.runHook(ticket.projectId, 'before_remove', workspaceDir);
     }
 
-    // Dispose supervisor if still registered
-    const supervisorEntry = this.supervisors.get(ticketId);
-    if (supervisorEntry) {
-      await supervisorEntry.supervisor.dispose();
-      this.supervisors.delete(ticketId);
+    // Dispose machine if still registered
+    const machineEntry = this.machines.get(ticketId);
+    if (machineEntry) {
+      await machineEntry.machine.dispose();
+      this.machines.delete(ticketId);
     }
 
     // Stop and exit the container
@@ -2012,39 +1886,30 @@ export class FleetManager {
   };
 
   resetSupervisorSession = async (ticketId: FleetTicketId): Promise<void> => {
-    const entry = this.supervisors.get(ticketId);
-    if (!entry) {
-      return;
-    }
+    const entry = this.machines.get(ticketId);
+    if (!entry) return;
 
-    // Release claim and stop current run
-    this.claimed.delete(ticketId);
-    this.cancelRetry(ticketId);
-    await entry.supervisor.stop();
+    await entry.machine.stop();
 
     // Build fresh variables (includes FLEET.md custom prompt if present)
     const supervisorPrompt = this.buildFullSupervisorPrompt(ticketId);
     const variables = { additional_instructions: supervisorPrompt };
 
-    // Ensure WS is connected
+    // Ensure WS URL is set
     const sbStatus = entry.sandbox.getStatus();
     if (sbStatus?.type === 'running') {
-      entry.supervisor.setWsUrl(sbStatus.data.wsUrl);
+      entry.machine.setWsUrl(sbStatus.data.wsUrl);
     }
 
     // Create a new session with variables (no user message sent)
-    const newSessionId = await entry.supervisor.createSession(variables);
-    this.updateTicket(ticketId, {
-      supervisorSessionId: newSessionId,
-      supervisorStatus: 'idle',
-    });
-    this.sendToWindow('fleet:supervisor-status', ticketId, 'idle');
+    const newSessionId = await entry.machine.createSession(variables);
+    this.updateTicket(ticketId, { supervisorSessionId: newSessionId });
   };
 
   sendSupervisorMessage = async (ticketId: FleetTicketId, message: string): Promise<void> => {
-    const entry = this.supervisors.get(ticketId);
+    const entry = this.machines.get(ticketId);
     if (!entry) {
-      // No active supervisor — check concurrency before spinning up (skip claimed check for user messages)
+      // No active machine — check concurrency before spinning up
       const ticket = this.getTicketById(ticketId);
       if (!ticket) {
         throw new Error(`Ticket not found: ${ticketId}`);
@@ -2053,52 +1918,39 @@ export class FleetManager {
         throw new Error('Concurrency limit reached');
       }
 
-      // Claim and spin up sandbox, then send the user's message as the prompt with ticket context
-      this.claimed.add(ticketId);
-      this.recordSupervisorActivity(ticketId);
       await this.ensureSupervisorInfra(ticketId, () => {
         void this.sendUserRunMessage(ticketId, message);
       });
       return;
     }
 
-    const status = entry.supervisor.getStatus();
+    const phase = entry.machine.getPhase();
 
-    if (status === 'idle' || status === 'error') {
+    if (phase === 'idle' || phase === 'error' || phase === 'ready' || phase === 'awaiting_input') {
       await this.sendUserRunMessage(ticketId, message);
-    } else if (status === 'running') {
-      // Inject message into running session
+    } else if (entry.machine.isStreaming()) {
       try {
-        await entry.supervisor.sendMessage(message);
+        await entry.machine.sendMessage(message);
       } catch (error) {
-        console.error(`[FleetManager] Supervisor send_user_message failed for ${ticketId}:`, error);
+        console.error(`[FleetManager] Machine send_user_message failed for ${ticketId}:`, error);
       }
     }
   };
 
   /**
    * Start a run with the user's message as the prompt.
-   * On the first message (no existing session), ticket context is prepended.
-   * On follow-ups (existing session), just the user's message is sent since the
-   * agent already has context from the conversation history.
    */
   private sendUserRunMessage = async (ticketId: FleetTicketId, message: string): Promise<void> => {
-    const entry = this.supervisors.get(ticketId);
-    if (!entry) {
-      return;
-    }
-
-    this.updateTicket(ticketId, { supervisorStatus: 'running' });
-    this.sendToWindow('fleet:supervisor-status', ticketId, 'running');
+    const entry = this.machines.get(ticketId);
+    if (!entry) return;
 
     const sbStatus = entry.sandbox.getStatus();
     if (sbStatus?.type === 'running') {
-      entry.supervisor.setWsUrl(sbStatus.data.wsUrl);
+      entry.machine.setWsUrl(sbStatus.data.wsUrl);
     }
 
-    const sessionId = entry.supervisor.getSessionId() ?? undefined;
+    const sessionId = entry.machine.getSessionId() ?? undefined;
 
-    // Always pass fresh ticket context via variables so instructions stay current
     let variables: Record<string, unknown> | undefined;
     const ticket = this.getTicketById(ticketId);
     if (ticket) {
@@ -2107,13 +1959,10 @@ export class FleetManager {
     }
 
     try {
-      await entry.supervisor.startRun(message, { sessionId, variables });
-      const sid = entry.supervisor.getSessionId();
-      if (sid) {
-        this.updateTicket(ticketId, { supervisorSessionId: sid });
-      }
+      const result = await entry.machine.startRun(message, { sessionId, variables });
+      this.updateTicket(ticketId, { supervisorSessionId: result.sessionId });
     } catch (error) {
-      console.error(`[FleetManager] Supervisor message failed for ${ticketId}:`, error);
+      console.error(`[FleetManager] Machine message failed for ${ticketId}:`, error);
     }
   };
 
@@ -2215,9 +2064,9 @@ export class FleetManager {
     const tickets = this.getTickets();
     let dirty = false;
     const patched = tickets.map((ticket) => {
-      if (ticket.supervisorStatus === 'running' || ticket.supervisorStatus === 'retrying') {
+      if (ticket.phase && ticket.phase !== 'idle' && ticket.phase !== 'error' && ticket.phase !== 'completed') {
         dirty = true;
-        return { ...ticket, supervisorStatus: 'idle' as const };
+        return { ...ticket, phase: 'idle' as const };
       }
       return ticket;
     });
@@ -2255,10 +2104,10 @@ export class FleetManager {
       return;
     }
 
-    // If this task belongs to a supervisor, stop the supervisor too
+    // If this task belongs to a machine, stop it too
     if (entry.task.ticketId) {
-      const supervisorEntry = this.supervisors.get(entry.task.ticketId);
-      if (supervisorEntry) {
+      const machineEntry = this.machines.get(entry.task.ticketId);
+      if (machineEntry) {
         await this.stopSupervisor(entry.task.ticketId);
       }
     }
@@ -2272,12 +2121,12 @@ export class FleetManager {
       return;
     }
 
-    // If this task belongs to a supervisor, clean up the supervisor
+    // If this task belongs to a machine, clean it up
     if (entry.task.ticketId) {
-      const supervisorEntry = this.supervisors.get(entry.task.ticketId);
-      if (supervisorEntry) {
-        await supervisorEntry.supervisor.dispose();
-        this.supervisors.delete(entry.task.ticketId);
+      const machineEntry = this.machines.get(entry.task.ticketId);
+      if (machineEntry) {
+        await machineEntry.machine.dispose();
+        this.machines.delete(entry.task.ticketId);
       }
     }
 
@@ -2304,7 +2153,22 @@ export class FleetManager {
    */
   static migrateToSupervisor(store: Store<StoreData>): void {
     const version = store.get('fleetSchemaVersion', 0);
-    if (version >= 3) {
+
+    // v3 → v4: replace supervisorStatus + runPhase with phase
+    if (version === 3) {
+      console.log('[FleetManager] Migrating to phase schema (→ v4)');
+      const tickets = store.get('fleetTickets', []) as Record<string, unknown>[];
+      const migrated = tickets.map((raw) => {
+        const { supervisorStatus, runPhase, ...rest } = raw;
+        return { ...rest, phase: 'idle' };
+      });
+      store.set('fleetTickets', migrated);
+      store.set('fleetSchemaVersion', 4);
+      console.log(`[FleetManager] v4 migration complete: ${migrated.length} tickets`);
+      return;
+    }
+
+    if (version >= 4) {
       return;
     }
 
@@ -2349,7 +2213,7 @@ export class FleetManager {
     }
 
     store.set('fleetTickets', migrated);
-    store.set('fleetSchemaVersion', 3);
+    store.set('fleetSchemaVersion', 4);
     console.log(`[FleetManager] Migration complete: ${migrated.length} tickets migrated`);
   }
 
@@ -2496,8 +2360,9 @@ export class FleetManager {
         continue;
       }
 
-      // Skip if already claimed
-      if (this.claimed.has(nextTicket.id)) {
+      // Skip if already active
+      const machineEntry = this.machines.get(nextTicket.id);
+      if (machineEntry && machineEntry.machine.isActive()) {
         continue;
       }
 
@@ -2533,15 +2398,13 @@ export class FleetManager {
       this.autoDispatchTimer = null;
     }
     this.cancelAllRetries();
-    this.claimed.clear();
-    this.lastSupervisorActivity.clear();
     this.workflowLoader.dispose();
     this.planSync.dispose();
 
-    // Dispose all supervisors
-    for (const [ticketId, entry] of this.supervisors) {
-      await entry.supervisor.dispose();
-      this.supervisors.delete(ticketId);
+    // Dispose all machines
+    for (const [ticketId, entry] of this.machines) {
+      await entry.machine.dispose();
+      this.machines.delete(ticketId);
     }
 
     const exits = [...this.tasks.values()].map((entry) => entry.sandbox.exit());

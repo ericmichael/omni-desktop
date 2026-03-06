@@ -169,7 +169,7 @@ export const FleetTicketOverviewTab = memo(({ ticket, pipeline }: FleetTicketOve
           <span className="text-sm font-medium text-fg">Supervisor</span>
           <div className="text-xs text-fg-muted">
             <p>Session: {ticket.supervisorSessionId}</p>
-            {ticket.supervisorStatus && <p>Status: {ticket.supervisorStatus}</p>}
+            {ticket.phase && <p>Phase: {ticket.phase}</p>}
           </div>
         </div>
       )}

@@ -13,14 +13,13 @@ import type {
   FleetProject,
   FleetProjectId,
   FleetSessionMessage,
-  FleetRunPhase,
-  FleetSupervisorStatus,
   FleetTask,
   FleetTaskId,
   FleetTicket,
   FleetTicketId,
   FleetTokenUsage,
   GitRepoInfo,
+  TicketPhase,
 } from '@/shared/types';
 
 /**
@@ -77,12 +76,11 @@ export const $activeTickets = computed([$fleetTickets, $fleetTasks, $fleetPipeli
     if (!ticket.columnId || ticket.columnId === firstColumnId || ticket.columnId === lastColumnId) {
       continue;
     }
+    const phase = ticket.phase;
+    const isActive = phase != null && phase !== 'idle' && phase !== 'error' && phase !== 'completed';
     entries.push({
       ticket,
-      hasLiveTask:
-        liveTaskTicketIds.has(ticket.id) ||
-        ticket.supervisorStatus === 'running' ||
-        ticket.supervisorStatus === 'retrying',
+      hasLiveTask: liveTaskTicketIds.has(ticket.id) || isActive,
     });
   }
 
@@ -262,17 +260,10 @@ const listen = () => {
     }
   });
 
-  ipc.on('fleet:supervisor-status', (ticketId, status: FleetSupervisorStatus) => {
+  ipc.on('fleet:phase', (ticketId, phase: TicketPhase) => {
     const existing = $fleetTickets.get()[ticketId];
     if (existing) {
-      $fleetTickets.setKey(ticketId, { ...existing, supervisorStatus: status });
-    }
-  });
-
-  ipc.on('fleet:run-phase', (ticketId, phase: FleetRunPhase) => {
-    const existing = $fleetTickets.get()[ticketId];
-    if (existing) {
-      $fleetTickets.setKey(ticketId, { ...existing, runPhase: phase });
+      $fleetTickets.setKey(ticketId, { ...existing, phase });
     }
   });
 

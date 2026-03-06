@@ -34,6 +34,7 @@ export type FleetWorkflowColumnDef = {
   id: string;
   label: string;
   checklist?: string[];
+  gate?: boolean;
 };
 
 export type FleetWorkflowConfig = {
@@ -230,6 +231,7 @@ const parsePipelineSection = (lines: string[]): FleetWorkflowConfig['pipeline'] 
         id: current.id,
         label: current.label,
         ...(current.checklist && current.checklist.length > 0 ? { checklist: current.checklist } : {}),
+        ...(current.gate ? { gate: true } : {}),
       });
     }
     current = null;
@@ -266,6 +268,8 @@ const parsePipelineSection = (lines: string[]): FleetWorkflowConfig['pipeline'] 
         collectingChecklist = true;
       } else if (key === 'id' || key === 'label') {
         current[key] = value;
+      } else if (key === 'gate') {
+        current.gate = value === 'true';
       }
       continue;
     }

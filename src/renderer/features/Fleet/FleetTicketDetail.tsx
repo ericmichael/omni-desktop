@@ -22,7 +22,7 @@ import { FloatingWidget } from '@/renderer/features/Omni/FloatingWidget';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { FleetTicketId } from '@/shared/types';
 
-import { COLUMN_BADGE_COLORS, RUN_PHASE_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './fleet-constants';
+import { COLUMN_BADGE_COLORS, PHASE_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './fleet-constants';
 import { FleetTicketArtifactsTab } from './FleetTicketArtifactsTab';
 import { FleetTicketOverviewTab } from './FleetTicketOverviewTab';
 import { FleetTicketPlanTab } from './FleetTicketPlanTab';
@@ -141,13 +141,13 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
     if (activeTab !== 'Chat') {
       return;
     }
-    const status = ticket?.supervisorStatus;
+    const phase = ticket?.phase;
     const hasRunningTask = !!activeTask;
-    if (!hasRunningTask && (!status || status === 'idle') && !infraStarted.current) {
+    if (!hasRunningTask && (!phase || phase === 'idle') && !infraStarted.current) {
       infraStarted.current = true;
       void fleetApi.ensureSupervisorInfra(ticketId);
     }
-  }, [activeTab, ticket?.supervisorStatus, activeTask, ticketId]);
+  }, [activeTab, ticket?.phase, activeTask, ticketId]);
 
   const handleStartSupervisor = useCallback(() => {
     fleetApi.startSupervisor(ticketId);
@@ -178,11 +178,13 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
     );
   }
 
-  const supervisorStatus = ticket.supervisorStatus;
-  const isRunning = supervisorStatus === 'running';
-  const isRetrying = supervisorStatus === 'retrying';
-  const isError = supervisorStatus === 'error';
-  const isIdle = !supervisorStatus || supervisorStatus === 'idle';
+  const phase = ticket.phase;
+  const isRunning = phase === 'running' || phase === 'continuing';
+  const isRetrying = phase === 'retrying';
+  const isError = phase === 'error';
+  const isIdle = !phase || phase === 'idle' || phase === 'completed';
+  const isProvisioning = phase === 'provisioning' || phase === 'connecting' || phase === 'session_creating';
+  const isAwaitingInput = phase === 'awaiting_input';
 
   return (
     <div className="flex flex-col w-full h-full">
@@ -242,17 +244,23 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
             </span>
           )}
 
-          {/* Inline supervisor status with run phase detail */}
-          {isRunning && (
+          {/* Inline phase status */}
+          {(isRunning || isProvisioning) && (
             <span className="flex items-center gap-1 text-[10px] text-green-400 font-medium shrink-0">
               <PiArrowsClockwiseBold size={10} className="animate-spin" />
-              {(ticket.runPhase && RUN_PHASE_LABELS[ticket.runPhase]) ?? 'Running'}
+              {(phase && PHASE_LABELS[phase]) ?? 'Running'}
             </span>
           )}
           {isRetrying && (
             <span className="flex items-center gap-1 text-[10px] text-yellow-400 font-medium shrink-0">
               <PiArrowsClockwiseBold size={10} className="animate-spin" />
               Retrying…
+            </span>
+          )}
+          {isAwaitingInput && (
+            <span className="flex items-center gap-1 text-[10px] text-blue-400 font-medium shrink-0">
+              <span className="size-1.5 rounded-full bg-blue-400" />
+              Awaiting input
             </span>
           )}
           {isError && (
@@ -267,11 +275,10 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
         {activeTask && (
           <IconButton aria-label="New Chat" icon={<PiPlusBold />} size="sm" onClick={handleResetSession} />
         )}
-        {isIdle && (
+        {(isIdle || isError) && (
           <IconButton aria-label="Start Supervisor" icon={<PiPlayFill />} size="sm" onClick={handleStartSupervisor} />
         )}
-        {isError && <IconButton aria-label="Retry" icon={<PiPlayFill />} size="sm" onClick={handleStartSupervisor} />}
-        {(isRunning || isRetrying) && (
+        {(isRunning || isRetrying || isProvisioning) && (
           <IconButton aria-label="Stop Supervisor" icon={<PiStopFill />} size="sm" onClick={handleStopSupervisor} />
         )}
         <IconButton aria-label="Delete ticket" icon={<PiTrashBold />} size="sm" onClick={handleDelete} />

@@ -5,22 +5,8 @@ import { PiArrowsClockwiseBold, PiDotsSixVerticalBold } from 'react-icons/pi';
 import { cn } from '@/renderer/ds';
 import type { FleetColumn, FleetTicket } from '@/shared/types';
 
-import { RUN_PHASE_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './fleet-constants';
+import { PHASE_COLORS, PHASE_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './fleet-constants';
 import { fleetApi } from './state';
-
-const SUPERVISOR_STATUS_COLORS: Record<string, string> = {
-  running: 'text-green-400 bg-green-400/10',
-  retrying: 'text-yellow-400 bg-yellow-400/10',
-  error: 'text-red-400 bg-red-400/10',
-  idle: 'text-fg-muted bg-fg-muted/10',
-};
-
-const SUPERVISOR_STATUS_LABELS: Record<string, string> = {
-  running: 'Running',
-  retrying: 'Retrying…',
-  error: 'Error',
-  idle: 'Idle',
-};
 
 export const FleetKanbanCard = memo(
   ({ ticket, column, isOverlay }: { ticket: FleetTicket; column: FleetColumn; isOverlay?: boolean }) => {
@@ -42,7 +28,7 @@ export const FleetKanbanCard = memo(
       fleetApi.goToTicket(ticket.id);
     }, [ticket.id]);
 
-    const supervisorStatus = ticket.supervisorStatus;
+    const phase = ticket.phase;
 
     return (
       <div
@@ -79,17 +65,17 @@ export const FleetKanbanCard = memo(
           >
             {TICKET_PRIORITY_LABELS[ticket.priority]}
           </span>
-          {supervisorStatus && supervisorStatus !== 'idle' && (
+          {phase && phase !== 'idle' && (
             <span
               className={cn(
                 'flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full font-medium',
-                SUPERVISOR_STATUS_COLORS[supervisorStatus] ?? 'text-fg-muted bg-fg-muted/10'
+                PHASE_COLORS[phase] ?? 'text-fg-muted bg-fg-muted/10'
               )}
             >
-              {supervisorStatus === 'running' && <PiArrowsClockwiseBold size={10} className="animate-spin" />}
-              {supervisorStatus === 'running' && ticket.runPhase
-                ? (RUN_PHASE_LABELS[ticket.runPhase] ?? 'Running')
-                : (SUPERVISOR_STATUS_LABELS[supervisorStatus] ?? supervisorStatus)}
+              {(phase === 'running' || phase === 'continuing' || phase === 'provisioning' || phase === 'connecting' || phase === 'session_creating') && (
+                <PiArrowsClockwiseBold size={10} className="animate-spin" />
+              )}
+              {PHASE_LABELS[phase] ?? phase}
             </span>
           )}
         </div>

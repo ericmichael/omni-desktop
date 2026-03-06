@@ -1,4 +1,4 @@
-import type { FleetRunPhase, FleetTicketPriority, SandboxProcessStatus } from '@/shared/types';
+import type { FleetTicketPriority, SandboxProcessStatus, TicketPhase } from '@/shared/types';
 
 export const STATUS_TEXT_COLORS: Partial<Record<SandboxProcessStatus['type'], string>> = {
   uninitialized: 'text-fg-subtle',
@@ -120,15 +120,30 @@ export const COLUMN_SHORT_LABELS: Record<string, string> = {
   completed: 'Done',
 };
 
-/** Human-readable labels for granular run phases (shown when supervisor is running). */
-export const RUN_PHASE_LABELS: Partial<Record<FleetRunPhase, string>> = {
-  validating: 'Validating…',
-  loading_workflow: 'Loading workflow…',
-  preparing_workspace: 'Preparing workspace…',
-  initializing_session: 'Initializing session…',
-  building_prompt: 'Building prompt…',
-  starting_run: 'Starting run…',
-  streaming: 'Working…',
+/** Human-readable labels for ticket phases. */
+export const PHASE_LABELS: Partial<Record<TicketPhase, string>> = {
+  provisioning: 'Preparing workspace…',
+  connecting: 'Connecting…',
+  session_creating: 'Initializing session…',
+  ready: 'Ready',
+  running: 'Working…',
   continuing: 'Continuing…',
-  finishing: 'Finishing…',
+  awaiting_input: 'Awaiting input',
+  retrying: 'Retrying…',
+  error: 'Error',
+  completed: 'Completed',
+};
+
+/** Phase colors for badges. */
+export const PHASE_COLORS: Partial<Record<TicketPhase, string>> = {
+  provisioning: 'text-yellow-400 bg-yellow-400/10',
+  connecting: 'text-yellow-400 bg-yellow-400/10',
+  session_creating: 'text-yellow-400 bg-yellow-400/10',
+  ready: 'text-fg-muted bg-fg-muted/10',
+  running: 'text-green-400 bg-green-400/10',
+  continuing: 'text-green-400 bg-green-400/10',
+  awaiting_input: 'text-blue-400 bg-blue-400/10',
+  retrying: 'text-yellow-400 bg-yellow-400/10',
+  error: 'text-red-400 bg-red-400/10',
+  completed: 'text-fg-muted bg-fg-muted/10',
 };
