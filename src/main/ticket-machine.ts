@@ -56,7 +56,6 @@ const nextRpcId = (): string => String(++rpcIdCounter);
  * Does NOT own:
  * - SandboxManager (passed in after provisioning)
  * - Ticket CRUD, pipeline logic, prompt building (FleetManager)
- * - Plan file sync (FleetPlanSync)
  */
 export class TicketMachine {
   readonly ticketId: FleetTicketId;
@@ -279,7 +278,7 @@ export class TicketMachine {
 
       // Notification: run_end
       if (parsed.method === 'run_end') {
-        const reason = (parsed.params?.reason as string) ?? 'completed';
+        const reason = (parsed.params?.end_reason as string) ?? 'completed';
         this.runId = null;
         // Don't set phase here — let FleetManager decide what comes next
         // (continue, retry, complete, or error) via the onRunEnd callback

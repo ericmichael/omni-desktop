@@ -3,6 +3,7 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 ARG CODE_SERVER_VERSION=4.109.2
+ARG LEAN_VERSION=4.27.0
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
@@ -22,6 +23,12 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     pandoc \
     imagemagick \
+    latexmk \
+    texlive-latex-base \
+    texlive-latex-recommended \
+    texlive-latex-extra \
+    texlive-fonts-recommended \
+    zstd \
     build-essential \
     pkg-config \
     libgit2-dev \
@@ -53,8 +60,23 @@ RUN ARCH="$(dpkg --print-architecture)" \
     && rm -f "code-server_${CODE_SERVER_VERSION}_${ARCH}.deb" \
     && rm -rf /var/lib/apt/lists/*
 
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+    > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y gh \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV PIPX_HOME=/opt/pipx
 ENV PIPX_BIN_DIR=/usr/local/bin
+ENV ELAN_HOME=/opt/elan
+ENV PATH="${ELAN_HOME}/bin:${PATH}"
+
+RUN curl -fsSL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+    | sh -s -- -y --default-toolchain "leanprover/lean4:v${LEAN_VERSION}" \
+    && elan --version \
+    && lean --version \
+    && lake --version
 
 RUN pipx install omni-code --pip-args='--extra-index-url https://pypi.fury.io/ericmichael/'
 

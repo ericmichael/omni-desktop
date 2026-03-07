@@ -111,14 +111,6 @@ export const COLUMN_BADGE_COLORS: Record<string, string> = new Proxy(COLUMN_BADG
     target[prop] ?? FALLBACK_BADGE_COLORS[stableIndex(prop, FALLBACK_BADGE_COLORS.length)],
 });
 
-export const COLUMN_SHORT_LABELS: Record<string, string> = {
-  backlog: 'Backlog',
-  spec: 'Spec',
-  implementation: 'Impl',
-  review: 'Rev',
-  pr: 'PR',
-  completed: 'Done',
-};
 
 /** Human-readable labels for ticket phases. */
 export const PHASE_LABELS: Partial<Record<TicketPhase, string>> = {

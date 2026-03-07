@@ -44,7 +44,7 @@ export const FleetKanbanColumn = memo(({ column, tickets }: { column: FleetColum
       {/* Cards */}
       <div className="flex-1 overflow-y-auto flex flex-col gap-2 px-2 pb-2">
         {tickets.map((ticket) => (
-          <FleetKanbanCard key={ticket.id} ticket={ticket} column={column} />
+          <FleetKanbanCard key={ticket.id} ticket={ticket} />
         ))}
       </div>
     </div>

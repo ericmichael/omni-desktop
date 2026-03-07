@@ -7,6 +7,7 @@ import { serializeError } from 'serialize-error';
 import { shellEnvSync } from 'shell-env';
 
 import { CommandRunner } from '@/lib/command-runner';
+import { OMNI_CODE_VERSION } from '@/lib/omni-version';
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { withResultAsync } from '@/lib/result';
 import { SimpleLogger } from '@/lib/simple-logger';
@@ -15,7 +16,6 @@ import type { IpcEvents, IpcRendererEvents, LogEntry, OmniInstallProcessStatus, 
 
 const PYTHON_VERSION = '3.11';
 const EXTRA_INDEX_URL = 'https://pypi.fury.io/ericmichael/';
-const OMNI_CODE_VERSION = '0.4.32';
 
 export class OmniInstallManager {
   private status: WithTimestamp<OmniInstallProcessStatus>;

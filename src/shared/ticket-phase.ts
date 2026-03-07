@@ -19,7 +19,7 @@ export type TicketPhase =
  * Valid phase transitions. Each key maps to the set of phases it can transition to.
  */
 const TRANSITIONS: Record<TicketPhase, readonly TicketPhase[]> = {
-  idle: ['provisioning'],
+  idle: ['provisioning', 'retrying'],
   provisioning: ['connecting', 'error', 'idle'],
   connecting: ['session_creating', 'error', 'idle'],
   session_creating: ['ready', 'error', 'idle'],
@@ -27,9 +27,9 @@ const TRANSITIONS: Record<TicketPhase, readonly TicketPhase[]> = {
   running: ['continuing', 'awaiting_input', 'retrying', 'completed', 'idle', 'error'],
   continuing: ['running', 'completed', 'retrying', 'idle', 'error'],
   awaiting_input: ['running', 'idle'],
-  retrying: ['running', 'error', 'idle'],
+  retrying: ['provisioning', 'running', 'completed', 'error', 'idle'],
   error: ['provisioning', 'idle'],
-  completed: ['idle'],
+  completed: ['idle', 'provisioning'],
 };
 
 /** Check if a phase transition is valid. */

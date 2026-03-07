@@ -7,7 +7,6 @@ import type {
   ArtifactFileContent,
   ArtifactFileEntry,
   DiffResponse,
-  FleetChecklistItem,
   FleetColumnId,
   FleetPipeline,
   FleetProject,
@@ -55,10 +54,9 @@ export type ActiveTicketEntry = {
 };
 
 /**
- * Active tickets for the current project: not in first column, not in last column.
- * Sorted: tickets with live tasks first, then by updatedAt desc.
+ * All tickets for the current project, sorted: live tasks first, then by updatedAt desc.
  */
-export const $activeTickets = computed([$fleetTickets, $fleetTasks, $fleetPipeline], (ticketMap, taskMap, pipeline) => {
+export const $activeTickets = computed([$fleetTickets, $fleetTasks], (ticketMap, taskMap) => {
   const tasks = Object.values(taskMap);
   const liveTaskTicketIds = new Set(
     tasks
@@ -66,16 +64,8 @@ export const $activeTickets = computed([$fleetTickets, $fleetTasks, $fleetPipeli
       .map((t) => t.ticketId!)
   );
 
-  // Derive first/last column IDs from the pipeline (active = everything in between)
-  const columns = pipeline?.columns ?? [];
-  const firstColumnId = columns[0]?.id;
-  const lastColumnId = columns[columns.length - 1]?.id;
-
   const entries: ActiveTicketEntry[] = [];
   for (const ticket of Object.values(ticketMap)) {
-    if (!ticket.columnId || ticket.columnId === firstColumnId || ticket.columnId === lastColumnId) {
-      continue;
-    }
     const phase = ticket.phase;
     const isActive = phase != null && phase !== 'idle' && phase !== 'error' && phase !== 'completed';
     entries.push({
@@ -111,7 +101,7 @@ export const fleetApi = {
 
   // Tickets
   addTicket: async (
-    ticket: Omit<FleetTicket, 'id' | 'createdAt' | 'updatedAt' | 'columnId' | 'checklist'>
+    ticket: Omit<FleetTicket, 'id' | 'createdAt' | 'updatedAt' | 'columnId'>
   ): Promise<FleetTicket> => {
     const created = await emitter.invoke('fleet:add-ticket', ticket);
     $fleetTickets.setKey(created.id, created);
@@ -158,17 +148,6 @@ export const fleetApi = {
   moveTicketToColumn: (ticketId: FleetTicketId, columnId: FleetColumnId): Promise<void> => {
     return emitter.invoke('fleet:move-ticket-to-column', ticketId, columnId);
   },
-  updateChecklist: (
-    ticketId: FleetTicketId,
-    columnId: FleetColumnId,
-    checklist: FleetChecklistItem[]
-  ): Promise<void> => {
-    return emitter.invoke('fleet:update-checklist', ticketId, columnId, checklist);
-  },
-  toggleChecklistItem: (ticketId: FleetTicketId, columnId: FleetColumnId, itemId: string): Promise<void> => {
-    return emitter.invoke('fleet:toggle-checklist-item', ticketId, columnId, itemId);
-  },
-
   // Supervisor
   ensureSupervisorInfra: (ticketId: FleetTicketId): Promise<void> => {
     return emitter.invoke('fleet:ensure-supervisor-infra', ticketId);
@@ -277,6 +256,10 @@ const listen = () => {
     if (existing) {
       $fleetTickets.setKey(ticketId, { ...existing, tokenUsage: usage });
     }
+  });
+
+  ipc.on('fleet:pipeline', (_projectId, pipeline: FleetPipeline) => {
+    $fleetPipeline.set(pipeline);
   });
 
   const pollTickets = async () => {

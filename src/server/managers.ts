@@ -36,12 +36,20 @@ type SendToWindow = <T extends keyof IpcRendererEvents>(channel: T, ...args: Ipc
 type HandleFn = (channel: string, handler: (...args: unknown[]) => unknown | Promise<unknown>) => void;
 
 /**
- * Wire up global (shared) IPC handlers — store, util, config, main-process.
+ * Wire up global (shared) IPC handlers — store, util, config, fleet, main-process.
  * These are stateless or shared, safe for all clients to use.
  */
 export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerStore }) => {
   const { wsHandler, store } = arg;
   const ipc = new ServerIpcAdapter(wsHandler.handle.bind(wsHandler));
+
+  // Fleet manager — shared across all clients so machines/sandboxes survive reconnections
+  const sendToAll: typeof wsHandler.sendToAll = wsHandler.sendToAll.bind(wsHandler);
+  const [, cleanupFleet] = createFleetManager({
+    ipc: ipc as any,
+    sendToWindow: sendToAll,
+    store: store as any,
+  });
 
   // Store change notifications — broadcast to all clients
   store.onDidAnyChange((data) => {
@@ -185,10 +193,12 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
     await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, content, 'utf-8');
   });
+
+  return { cleanupFleet };
 };
 
 /**
- * Wire up per-client managers (console, sandbox, chat, code, fleet, omni-install).
+ * Wire up per-client managers (console, sandbox, chat, code, omni-install).
  * Each client gets its own manager instances with a scoped sendToWindow.
  * Returns a cleanup function for when the client disconnects.
  */
@@ -233,18 +243,12 @@ export const wireClientManagers = (arg: {
     fetchFn: globalThis.fetch,
   });
 
-  const [, cleanupFleet] = createFleetManager({
-    ipc: ipc as any,
-    sendToWindow,
-    store: store as any,
-  });
-
   // Status getters (per-client since each client has its own manager instances)
   ipc.handle('omni-install-process:get-status', () => omniInstall.getStatus());
   ipc.handle('sandbox-process:get-status', () => sandbox.getStatus());
   ipc.handle('chat-process:get-status', () => chat.getStatus());
 
-  // Cleanup function
+  // Cleanup function — fleet is NOT cleaned up here (it's global/shared)
   const cleanup = async () => {
     const results = await Promise.allSettled([
       cleanupConsole(),
@@ -252,7 +256,6 @@ export const wireClientManagers = (arg: {
       cleanupSandbox(),
       cleanupChat(),
       cleanupCode(),
-      cleanupFleet(),
     ]);
     const errors = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected').map((r) => r.reason);
     if (errors.length > 0) {

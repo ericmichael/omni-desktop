@@ -39,8 +39,8 @@ const main = async () => {
   // Set up reverse proxy URL rewriting for internal services (chat, sandbox, etc.)
   setupProxyRewriter(fastify, wsHandler);
 
-  // Wire global (shared) IPC handlers — store, util, config
-  wireGlobalHandlers({ wsHandler, store });
+  // Wire global (shared) IPC handlers — store, util, config, fleet
+  const { cleanupFleet } = wireGlobalHandlers({ wsHandler, store });
 
   // WebSocket route — each new connection gets its own manager instances
   await fastify.register(async function wsRoutes(f) {
@@ -68,6 +68,7 @@ const main = async () => {
   // Graceful shutdown
   const shutdown = async () => {
     fastify.log.info('Shutting down...');
+    await cleanupFleet();
     await fastify.close();
     process.exit(0);
   };

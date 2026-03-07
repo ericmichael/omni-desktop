@@ -6,6 +6,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { promisify } from 'util';
 
+import { checkOmniVersion } from '@/lib/omni-version';
 import { withResultAsync } from '@/lib/result';
 import type { GpuType, OmniRuntimeInfo, OperatingSystem, WindowProps } from '@/shared/types';
 
@@ -248,10 +249,13 @@ export const getOmniRuntimeInfo = async (): Promise<OmniRuntimeInfo> => {
   }
 
   const pythonVersion = await getPythonVersion(pythonPath);
+  const versionCheck = checkOmniVersion(version);
 
   return {
     isInstalled: true,
     version,
+    expectedVersion: versionCheck.expectedVersion,
+    isOutdated: versionCheck.isOutdated,
     pythonVersion,
     omniPath,
   };

@@ -79,11 +79,11 @@ const useChatAutoLaunch = () => {
         return;
       }
       const info = $omniRuntimeInfo.get();
-      if (info.isInstalled) {
+      if (info.isInstalled && !info.isOutdated) {
         setPhase('ready');
       } else {
         didTriggerInstall.current = true;
-        omniInstallApi.startInstall(false);
+        omniInstallApi.startInstall(info.isInstalled && info.isOutdated);
         setPhase('installing');
       }
     });

@@ -6,12 +6,10 @@ import { cn, IconButton } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { FleetProject } from '@/shared/types';
 
-import { COLUMN_BADGE_COLORS, COLUMN_SHORT_LABELS } from './fleet-constants';
+import { COLUMN_BADGE_COLORS } from './fleet-constants';
 import { FleetProjectForm } from './FleetProjectForm';
 import type { ActiveTicketEntry } from './state';
-import { $activeTickets, $fleetView, fleetApi } from './state';
-
-const ACTIVE_COLUMN_IDS = new Set(['spec', 'implementation', 'review', 'pr']);
+import { $activeTickets, $fleetPipeline, $fleetView, fleetApi } from './state';
 
 const SidebarProjectItem = memo(
   ({
@@ -57,13 +55,15 @@ SidebarProjectItem.displayName = 'SidebarProjectItem';
 
 const SidebarActiveTicketItem = memo(({ entry, isActive }: { entry: ActiveTicketEntry; isActive: boolean }) => {
   const { ticket, hasLiveTask } = entry;
+  const pipeline = useStore($fleetPipeline);
 
   const handleClick = useCallback(() => {
     fleetApi.goToTicket(ticket.id);
   }, [ticket.id]);
 
-  const columnLabel = ticket.columnId ? (COLUMN_SHORT_LABELS[ticket.columnId] ?? ticket.columnId) : null;
-  const columnBadgeColor = ticket.columnId ? (COLUMN_BADGE_COLORS[ticket.columnId] ?? '') : '';
+  const pipelineColumn = pipeline?.columns.find((c) => c.id === ticket.columnId);
+  const columnLabel = pipelineColumn?.label ?? null;
+  const columnBadgeColor = pipelineColumn ? (COLUMN_BADGE_COLORS[pipelineColumn.id] ?? '') : '';
 
   const phase = ticket.phase;
   const isRunning = phase != null && phase !== 'idle' && phase !== 'error' && phase !== 'completed';
@@ -98,12 +98,10 @@ export const FleetSidebar = memo(() => {
 
   const projects = store.fleetProjects;
 
-  const activeTicketCounts = useMemo(() => {
+  const ticketCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const ticket of store.fleetTickets) {
-      if (ticket.columnId && ACTIVE_COLUMN_IDS.has(ticket.columnId)) {
-        counts[ticket.projectId] = (counts[ticket.projectId] ?? 0) + 1;
-      }
+      counts[ticket.projectId] = (counts[ticket.projectId] ?? 0) + 1;
     }
     return counts;
   }, [store.fleetTickets]);
@@ -151,7 +149,7 @@ export const FleetSidebar = memo(() => {
               key={project.id}
               project={project}
               isActive={view.type === 'project' && view.projectId === project.id}
-              activeTicketCount={activeTicketCounts[project.id] ?? 0}
+              activeTicketCount={ticketCounts[project.id] ?? 0}
             />
           ))
         )}

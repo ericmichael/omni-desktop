@@ -20,11 +20,6 @@ const makeVars = (overrides?: Partial<TemplateVariables>): TemplateVariables => 
     workspaceDir: '/home/user/project',
   },
   attempt: null,
-  checklist: {
-    spec: '- [x] Define API surface',
-    implementation: '- [ ] Create auth service\n- [ ] Add JWT validation',
-    review: '(none)',
-  },
   ...overrides,
 });
 
@@ -41,11 +36,6 @@ describe('renderTemplate', () => {
     );
     expect(result).toContain('Project: My Project at /home/user/project');
     expect(result).toContain('Pipeline: Backlog → Spec → Implementation');
-  });
-
-  it('replaces checklist variables by column ID', () => {
-    const result = renderTemplate('Spec checklist:\n{{ checklist.spec }}', makeVars());
-    expect(result).toBe('Spec checklist:\n- [x] Define API surface');
   });
 
   it('renders attempt as empty string when null', () => {

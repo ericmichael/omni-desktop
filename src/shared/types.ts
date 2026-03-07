@@ -206,7 +206,6 @@ export const schema: Schema<StoreData> = {
         columnId: { type: 'string' },
         currentPhaseId: { type: ['string', 'null'] },
         phases: { type: 'array', default: [] },
-        checklist: { type: ['object', 'array'], default: {} },
         // Legacy fields (kept for migration)
         taskId: { type: 'string' },
         loopEnabled: { type: 'boolean' },
@@ -345,6 +344,8 @@ export type OmniRuntimeInfo =
   | {
       isInstalled: true;
       version: string;
+      expectedVersion: string;
+      isOutdated: boolean;
       pythonVersion: string;
       omniPath: string;
     };
@@ -369,7 +370,6 @@ export type FleetProjectId = string;
 export type FleetTaskId = string;
 export type FleetTicketId = string;
 export type FleetColumnId = string;
-export type FleetChecklistItemId = string;
 
 // --- Enums ---
 
@@ -393,8 +393,6 @@ export type FleetTokenUsage = {
 export type FleetColumn = {
   id: FleetColumnId;
   label: string;
-  /** Default checklist items copied to a ticket when it enters this column. */
-  defaultChecklist: FleetChecklistItem[];
   /** Max concurrent supervisors allowed in this column. Unlimited if undefined. */
   maxConcurrent?: number;
   /** When true, the supervisor is stopped on entry and only a human can move the ticket out. */
@@ -406,14 +404,6 @@ export type FleetColumn = {
  */
 export type FleetPipeline = {
   columns: FleetColumn[];
-};
-
-// --- Checklist ---
-
-export type FleetChecklistItem = {
-  id: FleetChecklistItemId;
-  text: string;
-  completed: boolean;
 };
 
 // --- Core entities ---
@@ -442,14 +432,18 @@ export type FleetTicket = {
   // Kanban state
   /** Current column in the kanban pipeline. */
   columnId: FleetColumnId;
-  /** Per-column checklist items. Keyed by column ID. */
-  checklist: Record<FleetColumnId, FleetChecklistItem[]>;
 
   // Git settings
   /** Git branch to work on. If set with useWorktree, a worktree is created from this branch. */
   branch?: string;
   /** Whether to create an isolated git worktree for this ticket's sandbox. */
   useWorktree?: boolean;
+
+  // Worktree state (persisted so worktrees survive server restarts)
+  /** Path to the git worktree on disk. */
+  worktreePath?: string;
+  /** Name of the git worktree (used for branch naming fleet/<name>). */
+  worktreeName?: string;
 
   // Supervisor state
   /** Persistent supervisor session ID (survives across start_run calls). */
@@ -667,15 +661,13 @@ type FleetIpcEvents = Namespaced<
     'remove-project': (id: FleetProjectId) => void;
     'check-git-repo': (workspaceDir: string) => GitRepoInfo;
     'add-ticket': (
-      ticket: Omit<FleetTicket, 'id' | 'createdAt' | 'updatedAt' | 'columnId' | 'checklist'>
+      ticket: Omit<FleetTicket, 'id' | 'createdAt' | 'updatedAt' | 'columnId'>
     ) => FleetTicket;
     'update-ticket': (id: FleetTicketId, patch: Partial<Omit<FleetTicket, 'id' | 'projectId' | 'createdAt'>>) => void;
     'remove-ticket': (id: FleetTicketId) => void;
     'get-tickets': (projectId: FleetProjectId) => FleetTicket[];
     'get-next-ticket': (projectId: FleetProjectId) => FleetTicket | null;
     'move-ticket-to-column': (ticketId: FleetTicketId, columnId: FleetColumnId) => void;
-    'update-checklist': (ticketId: FleetTicketId, columnId: FleetColumnId, checklist: FleetChecklistItem[]) => void;
-    'toggle-checklist-item': (ticketId: FleetTicketId, columnId: FleetColumnId, itemId: FleetChecklistItemId) => void;
     'get-pipeline': (projectId: FleetProjectId) => FleetPipeline;
     'get-session-history': (sessionId: string) => FleetSessionMessage[];
     'list-artifacts': (ticketId: FleetTicketId, dirPath?: string) => ArtifactFileEntry[];
@@ -815,6 +807,7 @@ type FleetIpcRendererEvents = Namespaced<
     phase: [FleetTicketId, import('@/shared/ticket-phase').TicketPhase];
     'supervisor-message': [FleetTicketId, FleetSessionMessage];
     'token-usage': [FleetTicketId, FleetTokenUsage];
+    pipeline: [FleetProjectId, FleetPipeline];
   }
 >;
 

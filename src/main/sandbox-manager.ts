@@ -323,6 +323,8 @@ export class SandboxManager {
       args.push('--image', `ghcr.io/ericmichael/omni-code-sandbox${imageSuffix}:latest`);
     }
 
+    args.push('--persist-volume', 'omni-gh:/home/user/.config/gh');
+
     if (arg.sandboxVariant === 'work') {
       args.push('--persist-volume', 'omni-azure:/home/user/.azure');
       args.push('--persist-volume', 'omni-gitconfig:/home/user/.gitconfig');

@@ -59,11 +59,12 @@ export const useAutoLaunch = () => {
         return;
       }
       const info = $omniRuntimeInfo.get();
-      if (info.isInstalled) {
+      if (info.isInstalled && !info.isOutdated) {
         $autoLaunchPhase.set('ready');
       } else {
         didTriggerInstall.current = true;
-        omniInstallApi.startInstall(false);
+        // Use repair mode when upgrading an existing install
+        omniInstallApi.startInstall(info.isInstalled && info.isOutdated);
         $autoLaunchPhase.set('installing');
       }
     });

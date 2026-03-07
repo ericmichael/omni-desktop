@@ -113,7 +113,7 @@ export const FleetKanbanBoard = memo(({ projectId }: { projectId: FleetProjectId
         ))}
       </div>
       <DragOverlay dropAnimation={null}>
-        {activeTicket && <FleetKanbanCard ticket={activeTicket.ticket} column={activeTicket.column} isOverlay />}
+        {activeTicket && <FleetKanbanCard ticket={activeTicket.ticket} isOverlay />}
       </DragOverlay>
     </DndContext>
   );

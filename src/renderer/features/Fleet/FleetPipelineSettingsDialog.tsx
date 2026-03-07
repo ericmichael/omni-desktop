@@ -17,38 +17,11 @@ import type { FleetColumn, FleetProjectId } from '@/shared/types';
 import { COLUMN_BADGE_COLORS } from './fleet-constants';
 import { $fleetPipeline, fleetApi } from './state';
 
-type DefaultChecklistItem = { id: string; text: string };
-
-const DefaultChecklistRow = memo(
-  ({ item, onRemove }: { item: DefaultChecklistItem; onRemove: (id: string) => void }) => {
-    const handleRemove = useCallback(() => {
-      onRemove(item.id);
-    }, [item.id, onRemove]);
-
-    return (
-      <div className="flex items-center gap-2 group">
-        <span className="flex-1 text-sm text-fg">{item.text}</span>
-        <IconButton
-          aria-label="Remove item"
-          icon={<PiTrashFill />}
-          size="sm"
-          onClick={handleRemove}
-          className="opacity-0 group-hover:opacity-100 transition-opacity"
-        />
-      </div>
-    );
-  }
-);
-DefaultChecklistRow.displayName = 'DefaultChecklistRow';
-
 const ColumnEditor = memo(
   ({
     column,
     index,
     total,
-    items,
-    onRemove,
-    onAdd,
     onMaxConcurrentChange,
     onRename,
     onMoveUp,
@@ -59,9 +32,6 @@ const ColumnEditor = memo(
     column: FleetColumn;
     index: number;
     total: number;
-    items: DefaultChecklistItem[];
-    onRemove: (columnId: string, itemId: string) => void;
-    onAdd: (columnId: string, text: string) => void;
     onMaxConcurrentChange: (columnId: string, value: number | undefined) => void;
     onRename: (columnId: string, label: string) => void;
     onMoveUp: (index: number) => void;
@@ -69,38 +39,8 @@ const ColumnEditor = memo(
     onRemoveColumn: (columnId: string) => void;
     isRemovable: boolean;
   }) => {
-    const [newText, setNewText] = useState('');
     const [editing, setEditing] = useState(false);
     const [editLabel, setEditLabel] = useState(column.label);
-
-    const handleTextChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-      setNewText(e.target.value);
-    }, []);
-
-    const handleAdd = useCallback(() => {
-      const trimmed = newText.trim();
-      if (!trimmed) {
-        return;
-      }
-      onAdd(column.id, trimmed);
-      setNewText('');
-    }, [column.id, newText, onAdd]);
-
-    const handleKeyDown = useCallback(
-      (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter') {
-          handleAdd();
-        }
-      },
-      [handleAdd]
-    );
-
-    const handleRemoveItem = useCallback(
-      (itemId: string) => {
-        onRemove(column.id, itemId);
-      },
-      [column.id, onRemove]
-    );
 
     const handleMaxConcurrentChange = useCallback(
       (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -163,7 +103,6 @@ const ColumnEditor = memo(
               {column.label}
             </button>
           )}
-          <span className="text-[10px] text-fg-muted">{items.length} items</span>
 
           <div className="ml-auto flex items-center gap-1">
             <IconButton
@@ -194,7 +133,7 @@ const ColumnEditor = memo(
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 mb-2">
+        <div className="flex items-center gap-1.5">
           <label className="text-[10px] text-fg-muted">Max concurrent</label>
           <input
             type="number"
@@ -203,31 +142,6 @@ const ColumnEditor = memo(
             onChange={handleMaxConcurrentChange}
             placeholder="∞"
             className="w-12 rounded border border-surface-border bg-surface px-1.5 py-0.5 text-xs text-fg text-center placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500"
-          />
-        </div>
-
-        {items.length > 0 && (
-          <div className="flex flex-col gap-1 mb-2">
-            {items.map((item) => (
-              <DefaultChecklistRow key={item.id} item={item} onRemove={handleRemoveItem} />
-            ))}
-          </div>
-        )}
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            value={newText}
-            onChange={handleTextChange}
-            placeholder="Add default checklist item..."
-            className="flex-1 rounded-md border border-surface-border bg-surface px-2 py-1.5 text-sm text-fg placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500"
-            onKeyDown={handleKeyDown}
-          />
-          <IconButton
-            aria-label="Add item"
-            icon={<PiPlusBold />}
-            size="sm"
-            onClick={handleAdd}
-            isDisabled={!newText.trim()}
           />
         </div>
       </div>
@@ -264,35 +178,6 @@ export const FleetPipelineSettingsDialog = memo(
       }
       return JSON.stringify(editColumns) !== JSON.stringify(pipeline.columns);
     }, [editColumns, pipeline]);
-
-    const handleRemoveItem = useCallback((columnId: string, itemId: string) => {
-      setEditColumns((prev) => {
-        if (!prev) {
-          return prev;
-        }
-        return prev.map((col) => {
-          if (col.id !== columnId) {
-            return col;
-          }
-          return { ...col, defaultChecklist: col.defaultChecklist.filter((item) => item.id !== itemId) };
-        });
-      });
-    }, []);
-
-    const handleAddItem = useCallback((columnId: string, text: string) => {
-      setEditColumns((prev) => {
-        if (!prev) {
-          return prev;
-        }
-        return prev.map((col) => {
-          if (col.id !== columnId) {
-            return col;
-          }
-          const newItem = { id: `chk-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, text, completed: false };
-          return { ...col, defaultChecklist: [...col.defaultChecklist, newItem] };
-        });
-      });
-    }, []);
 
     const handleMaxConcurrentChange = useCallback((columnId: string, value: number | undefined) => {
       setEditColumns((prev) => {
@@ -368,7 +253,7 @@ export const FleetPipelineSettingsDialog = memo(
           return prev;
         }
         // Insert before the last column (terminal)
-        const newCol: FleetColumn = { id, label: trimmed, defaultChecklist: [] };
+        const newCol: FleetColumn = { id, label: trimmed };
         const copy = [...prev];
         copy.splice(copy.length - 1, 0, newCol);
         return copy;
@@ -413,9 +298,6 @@ export const FleetPipelineSettingsDialog = memo(
                 column={col}
                 index={i}
                 total={editColumns.length}
-                items={col.defaultChecklist}
-                onRemove={handleRemoveItem}
-                onAdd={handleAddItem}
                 onMaxConcurrentChange={handleMaxConcurrentChange}
                 onRename={handleRename}
                 onMoveUp={handleMoveUp}

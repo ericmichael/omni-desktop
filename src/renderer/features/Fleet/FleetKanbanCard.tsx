@@ -1,28 +1,19 @@
 import { useDraggable } from '@dnd-kit/core';
-import { memo, useCallback, useMemo } from 'react';
+import { memo, useCallback } from 'react';
 import { PiArrowsClockwiseBold, PiDotsSixVerticalBold } from 'react-icons/pi';
 
 import { cn } from '@/renderer/ds';
-import type { FleetColumn, FleetTicket } from '@/shared/types';
+import type { FleetTicket } from '@/shared/types';
 
 import { PHASE_COLORS, PHASE_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './fleet-constants';
 import { fleetApi } from './state';
 
 export const FleetKanbanCard = memo(
-  ({ ticket, column, isOverlay }: { ticket: FleetTicket; column: FleetColumn; isOverlay?: boolean }) => {
+  ({ ticket, isOverlay }: { ticket: FleetTicket; isOverlay?: boolean }) => {
     const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
       id: ticket.id,
       disabled: isOverlay,
     });
-
-    const checklistProgress = useMemo(() => {
-      const items = ticket.checklist[column.id];
-      if (!items || items.length === 0) {
-        return null;
-      }
-      const completed = items.filter((item) => item.completed).length;
-      return { completed, total: items.length, pct: (completed / items.length) * 100 };
-    }, [ticket.checklist, column.id]);
 
     const handleClick = useCallback(() => {
       fleetApi.goToTicket(ticket.id);
@@ -80,22 +71,6 @@ export const FleetKanbanCard = memo(
           )}
         </div>
 
-        {/* Checklist progress */}
-        {checklistProgress && (
-          <div className="mt-2">
-            <div className="flex items-center justify-between text-[10px] text-fg-muted mb-0.5">
-              <span>
-                {checklistProgress.completed}/{checklistProgress.total} completed
-              </span>
-            </div>
-            <div className="h-1 rounded-full bg-surface-border overflow-hidden">
-              <div
-                className="h-full rounded-full bg-accent-500 transition-all"
-                style={{ width: `${checklistProgress.pct}%` }}
-              />
-            </div>
-          </div>
-        )}
       </div>
     );
   }

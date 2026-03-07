@@ -9,7 +9,6 @@
  * - pipeline.columns (comma-separated column labels)
  * - project.label, project.workspaceDir
  * - attempt (number or null for first run)
- * - checklist.<columnId> (formatted checklist for a specific column)
  */
 
 export type TemplateVariables = {
@@ -29,7 +28,6 @@ export type TemplateVariables = {
     workspaceDir: string;
   };
   attempt: number | null;
-  checklist: Record<string, string>;
 };
 
 export class TemplateRenderError extends Error {

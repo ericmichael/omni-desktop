@@ -42,6 +42,10 @@ describe('isValidTransition', () => {
     expect(isValidTransition('continuing', 'running')).toBe(true);
   });
 
+  it('allows retrying → completed (work finished during retry wait)', () => {
+    expect(isValidTransition('retrying', 'completed')).toBe(true);
+  });
+
   it('allows error → provisioning (retry)', () => {
     expect(isValidTransition('error', 'provisioning')).toBe(true);
   });

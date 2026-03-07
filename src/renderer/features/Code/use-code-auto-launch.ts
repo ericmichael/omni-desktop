@@ -63,11 +63,11 @@ export const useCodeAutoLaunch = (tabId: CodeTabId, workspaceDir: string | null)
         return;
       }
       const info = $omniRuntimeInfo.get();
-      if (info.isInstalled) {
+      if (info.isInstalled && !info.isOutdated) {
         setPhase('ready');
       } else {
         didTriggerInstall.current = true;
-        omniInstallApi.startInstall(false);
+        omniInstallApi.startInstall(info.isInstalled && info.isOutdated);
         setPhase('installing');
       }
     });
