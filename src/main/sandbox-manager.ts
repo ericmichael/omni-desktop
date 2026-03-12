@@ -77,6 +77,8 @@ const toSandboxStatusData = (
 type StartArg = {
   workspaceDir: string;
   sandboxVariant: SandboxVariant;
+  /** Per-project sandbox override. When set, uses the specified image or Dockerfile instead of the default. */
+  sandboxConfig?: { image?: string; dockerfile?: string } | null;
 };
 
 export type FetchFn = typeof globalThis.fetch;
@@ -314,20 +316,27 @@ export class SandboxManager {
     args.push('--enable-code-server', '--code-server-port', '0');
     args.push('--enable-vnc', '--vnc-port', '0');
 
-    const dockerfileName = arg.sandboxVariant === 'work' ? 'Dockerfile.work' : 'Dockerfile';
-    if (isDevelopment()) {
-      const dockerfilePath = resolve(__dirname, '../../docker/sandbox', dockerfileName);
-      args.push('--dockerfile', dockerfilePath);
+    // Per-project sandbox config takes priority over variant-based defaults
+    if (arg.sandboxConfig?.image) {
+      args.push('--image', arg.sandboxConfig.image);
+    } else if (arg.sandboxConfig?.dockerfile) {
+      args.push('--dockerfile', resolve(arg.workspaceDir, arg.sandboxConfig.dockerfile));
     } else {
-      const imageSuffix = arg.sandboxVariant === 'work' ? '-work' : '';
-      args.push('--image', `ghcr.io/ericmichael/omni-code-sandbox${imageSuffix}:latest`);
+      const dockerfileName = arg.sandboxVariant === 'work' ? 'Dockerfile.work' : 'Dockerfile';
+      if (isDevelopment()) {
+        const dockerfilePath = resolve(__dirname, '../../docker/sandbox', dockerfileName);
+        args.push('--dockerfile', dockerfilePath);
+      } else {
+        const imageSuffix = arg.sandboxVariant === 'work' ? '-work' : '';
+        args.push('--image', `ghcr.io/ericmichael/omni-code-sandbox${imageSuffix}:latest`);
+      }
     }
 
     args.push('--persist-volume', 'omni-gh:/home/user/.config/gh');
 
     if (arg.sandboxVariant === 'work') {
       args.push('--persist-volume', 'omni-azure:/home/user/.azure');
-      args.push('--persist-volume', 'omni-gitconfig:/home/user/.gitconfig');
+      args.push('--persist-volume', 'omni-gitconfig:/home/user/.gitconfig.d');
       args.push('--persist-volume', 'omni-ssh:/home/user/.ssh');
       args.push('--persist-volume', 'omni-npm:/home/user/.npmrc');
     }

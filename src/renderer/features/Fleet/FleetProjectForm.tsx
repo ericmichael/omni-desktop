@@ -1,10 +1,24 @@
 import { memo, useCallback, useState } from 'react';
 
 import { AnimatedDialog, Button, DialogBody, DialogContent, DialogFooter, DialogHeader } from '@/renderer/ds';
-import type { FleetProject } from '@/shared/types';
+import type { FleetProject, FleetSandboxConfig } from '@/shared/types';
 
 import { DirectoryBrowserDialog } from './DirectoryBrowserDialog';
 import { fleetApi } from './state';
+
+type SandboxMode = 'default' | 'image' | 'dockerfile';
+
+function deriveSandboxMode(sandbox?: FleetSandboxConfig | null): SandboxMode {
+  if (sandbox?.image) return 'image';
+  if (sandbox?.dockerfile) return 'dockerfile';
+  return 'default';
+}
+
+function deriveSandboxValue(sandbox?: FleetSandboxConfig | null, mode?: SandboxMode): string {
+  if (mode === 'image') return sandbox?.image ?? '';
+  if (mode === 'dockerfile') return sandbox?.dockerfile ?? '';
+  return '';
+}
 
 type FleetProjectFormProps = {
   open: boolean;
@@ -17,6 +31,10 @@ export const FleetProjectForm = memo(({ open, onClose, editProject }: FleetProje
   const [workspaceDir, setWorkspaceDir] = useState(editProject?.workspaceDir ?? '');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [browseOpen, setBrowseOpen] = useState(false);
+
+  const initialSandboxMode = deriveSandboxMode(editProject?.sandbox);
+  const [sandboxMode, setSandboxMode] = useState<SandboxMode>(initialSandboxMode);
+  const [sandboxValue, setSandboxValue] = useState(deriveSandboxValue(editProject?.sandbox, initialSandboxMode));
 
   const isEdit = Boolean(editProject);
   const isValid = label.trim().length > 0 && workspaceDir.trim().length > 0;
@@ -39,28 +57,51 @@ export const FleetProjectForm = memo(({ open, onClose, editProject }: FleetProje
     [label]
   );
 
+  const handleSandboxModeChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    const mode = e.target.value as SandboxMode;
+    setSandboxMode(mode);
+    if (mode === 'default') setSandboxValue('');
+  }, []);
+
+  const handleSandboxValueChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setSandboxValue(e.target.value);
+  }, []);
+
   const handleSubmit = useCallback(async () => {
     if (!isValid || isSubmitting) {
       return;
     }
     setIsSubmitting(true);
+
+    const sandbox: FleetSandboxConfig | undefined =
+      sandboxMode === 'image' && sandboxValue.trim()
+        ? { image: sandboxValue.trim() }
+        : sandboxMode === 'dockerfile' && sandboxValue.trim()
+          ? { dockerfile: sandboxValue.trim() }
+          : undefined;
+
     try {
       if (isEdit && editProject) {
         await fleetApi.updateProject(editProject.id, {
           label: label.trim(),
           workspaceDir: workspaceDir.trim(),
+          sandbox: sandbox ?? null,
         });
       } else {
         await fleetApi.addProject({
           label: label.trim(),
           workspaceDir: workspaceDir.trim(),
+          sandbox: sandbox ?? null,
         });
       }
       onClose();
     } finally {
       setIsSubmitting(false);
     }
-  }, [isValid, isSubmitting, isEdit, editProject, label, workspaceDir, onClose]);
+  }, [isValid, isSubmitting, isEdit, editProject, label, workspaceDir, sandboxMode, sandboxValue, onClose]);
+
+  const inputClassName =
+    'w-full rounded-lg border border-surface-border bg-surface px-3 py-2 text-sm text-fg placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500';
 
   return (
     <>
@@ -75,7 +116,7 @@ export const FleetProjectForm = memo(({ open, onClose, editProject }: FleetProje
                 value={label}
                 onChange={handleLabelChange}
                 placeholder="my-project"
-                className="w-full rounded-lg border border-surface-border bg-surface px-3 py-2 text-sm text-fg placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500"
+                className={inputClassName}
               />
             </div>
 
@@ -89,6 +130,37 @@ export const FleetProjectForm = memo(({ open, onClose, editProject }: FleetProje
                   Browse
                 </Button>
               </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm text-fg">Sandbox</label>
+              <select
+                value={sandboxMode}
+                onChange={handleSandboxModeChange}
+                className={inputClassName}
+              >
+                <option value="default">Default</option>
+                <option value="image">Docker Image</option>
+                <option value="dockerfile">Dockerfile</option>
+              </select>
+              {sandboxMode === 'image' && (
+                <input
+                  type="text"
+                  value={sandboxValue}
+                  onChange={handleSandboxValueChange}
+                  placeholder="ubuntu:24.04"
+                  className={inputClassName}
+                />
+              )}
+              {sandboxMode === 'dockerfile' && (
+                <input
+                  type="text"
+                  value={sandboxValue}
+                  onChange={handleSandboxValueChange}
+                  placeholder="Dockerfile"
+                  className={inputClassName}
+                />
+              )}
             </div>
           </DialogBody>
           <DialogFooter className="gap-2 justify-end">

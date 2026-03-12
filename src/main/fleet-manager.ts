@@ -1610,7 +1610,7 @@ export class FleetManager {
 
     this.machines.set(ticketId, { machine, sandbox });
 
-    sandbox.start({ workspaceDir, sandboxVariant: 'work' });
+    sandbox.start({ workspaceDir, sandboxVariant: 'work', sandboxConfig: project.sandbox });
 
     // Await sandbox readiness
     let wsUrl: string;

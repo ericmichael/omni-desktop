@@ -26,6 +26,8 @@ if [[ -z "${existing_user_name}" ]]; then
   else
     useradd -m -u "${uid}" -g "${gid}" -s /bin/bash user
   fi
+elif [[ "${existing_user_name}" != "user" ]]; then
+  usermod -l user -d /home/user -m "${existing_user_name}" >/dev/null 2>&1 || true
 fi
 
 export HOME=/home/user
@@ -122,6 +124,19 @@ if [[ "${code_server_enabled}" == "1" || "${code_server_enabled}" == "true" ]]; 
 
   gosu "${uid}:${gid}" bash -lc "nohup code-server --bind-addr 0.0.0.0:${code_server_port} --auth ${code_server_auth} ${code_server_workspace} > '${code_server_log_dir}/omni-code.log' 2>&1 &" || true
 fi
+
+# Restore persisted gitconfig from volume directory
+if [[ -f "${HOME}/.gitconfig.d/gitconfig" ]]; then
+  cp "${HOME}/.gitconfig.d/gitconfig" "${HOME}/.gitconfig"
+  chown "${uid}:${gid}" "${HOME}/.gitconfig" >/dev/null 2>&1 || true
+fi
+
+# Ensure git trusts the bind-mounted workspace
+gosu "${uid}:${gid}" git config --global --add safe.directory /home/user/workspace
+
+# Persist gitconfig back to the volume for next restart
+mkdir -p "${HOME}/.gitconfig.d" >/dev/null 2>&1 || true
+cp "${HOME}/.gitconfig" "${HOME}/.gitconfig.d/gitconfig" 2>/dev/null || true
 
 # Apply network isolation rules (if OMNI_SANDBOX_NETWORK_ALLOWLIST is set)
 source /usr/local/bin/apply-network-isolation.sh

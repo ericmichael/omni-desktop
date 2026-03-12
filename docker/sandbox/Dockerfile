@@ -14,8 +14,6 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     python3-venv \
     pipx \
-    nodejs \
-    npm \
     ripgrep \
     fd-find \
     jq \
@@ -66,6 +64,15 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
+
+ENV NVM_DIR=/opt/nvm
+ENV NODE_VERSION=20.18.1
+
+RUN mkdir -p "${NVM_DIR}" \
+    && curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash \
+    && bash -lc "source ${NVM_DIR}/nvm.sh && nvm install ${NODE_VERSION} && nvm alias default ${NODE_VERSION} && npm install -g yarn@1.22.19"
+
+ENV PATH="/opt/nvm/versions/node/v${NODE_VERSION}/bin:${PATH}"
 
 ENV PIPX_HOME=/opt/pipx
 ENV PIPX_BIN_DIR=/usr/local/bin

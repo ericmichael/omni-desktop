@@ -1,20 +1,28 @@
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { PiGearSixBold, PiTrashFill } from 'react-icons/pi';
+import { PiGearSixBold, PiPencilSimpleBold, PiTrashFill } from 'react-icons/pi';
 
 import { Button, Heading, IconButton, Switch } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { FleetProjectId } from '@/shared/types';
+import type { FleetProjectId, FleetSandboxConfig } from '@/shared/types';
 
 import { FleetKanbanBoard } from './FleetKanbanBoard';
 import { FleetPipelineSettingsDialog } from './FleetPipelineSettingsDialog';
+import { FleetProjectForm } from './FleetProjectForm';
 import { FleetTicketForm } from './FleetTicketForm';
 import { fleetApi } from './state';
+
+function sandboxLabel(sandbox?: FleetSandboxConfig | null): string {
+  if (sandbox?.image) return `Image: ${sandbox.image}`;
+  if (sandbox?.dockerfile) return `Dockerfile: ${sandbox.dockerfile}`;
+  return 'Default';
+}
 
 export const FleetProjectDetail = memo(({ projectId }: { projectId: FleetProjectId }) => {
   const store = useStore(persistedStoreApi.$atom);
   const [ticketFormOpen, setTicketFormOpen] = useState(false);
   const [pipelineSettingsOpen, setPipelineSettingsOpen] = useState(false);
+  const [editFormOpen, setEditFormOpen] = useState(false);
 
   const project = useMemo(() => store.fleetProjects.find((p) => p.id === projectId), [store.fleetProjects, projectId]);
 
@@ -42,6 +50,14 @@ export const FleetProjectDetail = memo(({ projectId }: { projectId: FleetProject
     setPipelineSettingsOpen(false);
   }, []);
 
+  const handleOpenEditForm = useCallback(() => {
+    setEditFormOpen(true);
+  }, []);
+
+  const handleCloseEditForm = useCallback(() => {
+    setEditFormOpen(false);
+  }, []);
+
   const handleRemoveProject = useCallback(async () => {
     await fleetApi.removeProject(projectId);
     fleetApi.goToDashboard();
@@ -64,7 +80,10 @@ export const FleetProjectDetail = memo(({ projectId }: { projectId: FleetProject
       <div className="flex items-center gap-2 px-6 py-4 border-b border-surface-border shrink-0">
         <div className="flex-1 min-w-0">
           <Heading size="md">{project.label}</Heading>
-          <span className="text-xs text-fg-subtle truncate block">{project.workspaceDir}</span>
+          <div className="flex items-center gap-3 text-xs text-fg-subtle">
+            <span className="truncate">{project.workspaceDir}</span>
+            <span className="text-fg-muted">Sandbox: {sandboxLabel(project.sandbox)}</span>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-1.5 text-xs text-fg-muted cursor-pointer select-none">
@@ -76,6 +95,12 @@ export const FleetProjectDetail = memo(({ projectId }: { projectId: FleetProject
               New Ticket
             </Button>
           )}
+          <IconButton
+            aria-label="Edit project"
+            icon={<PiPencilSimpleBold />}
+            size="sm"
+            onClick={handleOpenEditForm}
+          />
           <IconButton
             aria-label="Pipeline settings"
             icon={<PiGearSixBold />}
@@ -98,6 +123,11 @@ export const FleetProjectDetail = memo(({ projectId }: { projectId: FleetProject
         open={pipelineSettingsOpen}
         onClose={handleClosePipelineSettings}
       />
+
+      {/* Edit project dialog */}
+      {editFormOpen && (
+        <FleetProjectForm open={editFormOpen} onClose={handleCloseEditForm} editProject={project} />
+      )}
 
       {/* Kanban Board */}
       <div className="flex-1 min-h-0">

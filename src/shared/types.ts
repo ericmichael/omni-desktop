@@ -160,6 +160,7 @@ export const schema: Schema<StoreData> = {
         workspaceDir: { type: 'string' },
         createdAt: { type: 'number' },
         pipeline: { type: 'object' },
+        sandbox: { type: ['object', 'null'] },
       },
       required: ['id', 'label', 'workspaceDir', 'createdAt'],
     },
@@ -406,6 +407,19 @@ export type FleetPipeline = {
   columns: FleetColumn[];
 };
 
+// --- Sandbox config ---
+
+/**
+ * Per-project sandbox configuration. When set, supervisors run inside a Docker container
+ * using the specified image or Dockerfile. When absent/null, the default sandbox is used.
+ */
+export type FleetSandboxConfig = {
+  /** Pre-built Docker image (e.g. "ubuntu:24.04"). */
+  image?: string;
+  /** Path to a Dockerfile (relative to workspace). */
+  dockerfile?: string;
+};
+
 // --- Core entities ---
 
 export type FleetProject = {
@@ -417,6 +431,8 @@ export type FleetProject = {
   pipeline?: FleetPipeline;
   /** When true, automatically dispatch tickets from backlog in priority order. */
   autoDispatch?: boolean;
+  /** Per-project sandbox configuration. When absent/null, the default sandbox image is used. */
+  sandbox?: FleetSandboxConfig | null;
 };
 
 export type FleetTicket = {
