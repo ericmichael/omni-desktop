@@ -8,6 +8,7 @@ import type { AutoLaunchPhase } from '@/renderer/features/Code/use-code-auto-lau
 import { emitter, ipc } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type {
+  CodeLayoutMode,
   CodeTab,
   CodeTabId,
   FleetProjectId,
@@ -121,6 +122,14 @@ export const codeApi = {
 
   setActiveTab: (tabId: CodeTabId) => {
     persistedStoreApi.setKey('activeCodeTabId', tabId);
+  },
+
+  setLayoutMode: (mode: CodeLayoutMode) => {
+    persistedStoreApi.setKey('codeLayoutMode', mode);
+  },
+
+  reorderTabs: async (nextTabs: CodeTab[]) => {
+    await persistedStoreApi.setKey('codeTabs', nextTabs);
   },
 
   setTabProject: async (tabId: CodeTabId, projectId: FleetProjectId) => {

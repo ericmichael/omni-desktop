@@ -4,19 +4,18 @@ import { AnimatePresence, motion } from 'framer-motion';
 import type { ReadableAtom } from 'nanostores';
 import { computed } from 'nanostores';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { PiMonitorBold, PiWarningCircleFill } from 'react-icons/pi';
+import { PiWarningCircleFill } from 'react-icons/pi';
 
-import { CodeSplitLayout } from '@/renderer/common/CodeSplitLayout';
 import { EllipsisLoadingText } from '@/renderer/common/EllipsisLoadingText';
 import { BodyContainer, BodyContent } from '@/renderer/common/layout';
 import { Button, cn, Heading, Spinner } from '@/renderer/ds';
-import { FloatingWidget } from '@/renderer/features/Omni/FloatingWidget';
 import { $omniInstallProcessXTerm } from '@/renderer/features/Omni/state';
 import { XTermLogViewer } from '@/renderer/features/XTermLogViewer/XTermLogViewer';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { CodeTab, CodeTabId } from '@/shared/types';
 
 import { CodeEmptyState } from './CodeEmptyState';
+import { CodeWorkspaceLayout } from './CodeWorkspaceLayout';
 import { $codeTabErrors, $codeTabPhases, $codeTabStatuses, $codeTabXTerms } from './state';
 import type { AutoLaunchPhase } from './use-code-auto-launch';
 import { useCodeAutoLaunch } from './use-code-auto-launch';
@@ -160,9 +159,13 @@ CodeErrorView.displayName = 'CodeErrorView';
 const CodeRunningView = memo(
   ({
     sandboxUrls,
+    overlayPane,
+    onCloseOverlay,
     onReady,
   }: {
     sandboxUrls: { uiUrl: string; codeServerUrl?: string; noVncUrl?: string };
+    overlayPane: 'none' | 'code' | 'vnc';
+    onCloseOverlay: () => void;
     onReady: () => void;
   }) => {
     const store = useStore(persistedStoreApi.$atom);
@@ -178,32 +181,17 @@ const CodeRunningView = memo(
     const codeServerSrc = sandboxUrls.codeServerUrl;
     const vncSrc = sandboxUrls.noVncUrl;
 
-    const [vncOverlayOpen, setVncOverlayOpen] = useState(false);
-
-    const handleOpenVncOverlay = useCallback(() => {
-      setVncOverlayOpen(true);
-    }, []);
-
-    const handleCloseVncOverlay = useCallback(() => {
-      setVncOverlayOpen(false);
-    }, []);
-
     return (
       <div className="flex flex-col w-full h-full relative">
         <div className="flex-1 min-h-0 relative">
-          <CodeSplitLayout uiSrc={uiSrc} codeServerSrc={codeServerSrc} onReady={onReady} />
-          {vncSrc && (
-            <FloatingWidget
-              src={vncSrc}
-              label="Omni's PC"
-              icon={PiMonitorBold}
-              overlayOpen={vncOverlayOpen}
-              onOpenOverlay={handleOpenVncOverlay}
-              onCloseOverlay={handleCloseVncOverlay}
-              className="top-[75%]"
-              resizable
-            />
-          )}
+          <CodeWorkspaceLayout
+            uiSrc={uiSrc}
+            codeServerSrc={codeServerSrc}
+            vncSrc={vncSrc}
+            overlayPane={overlayPane}
+            onCloseOverlay={onCloseOverlay}
+            onReady={onReady}
+          />
         </div>
       </div>
     );
@@ -213,10 +201,12 @@ CodeRunningView.displayName = 'CodeRunningView';
 
 type CodeTabContentProps = {
   tab: CodeTab;
-  isActive: boolean;
+  isVisible: boolean;
+  overlayPane?: 'none' | 'code' | 'vnc';
+  onCloseOverlay?: () => void;
 };
 
-export const CodeTabContent = memo(({ tab, isActive }: CodeTabContentProps) => {
+export const CodeTabContent = memo(({ tab, isVisible, overlayPane = 'none', onCloseOverlay }: CodeTabContentProps) => {
   const store = useStore(persistedStoreApi.$atom);
   const project = useMemo(
     () => store.fleetProjects.find((p) => p.id === tab.projectId) ?? null,
@@ -260,17 +250,28 @@ export const CodeTabContent = memo(({ tab, isActive }: CodeTabContentProps) => {
     setContentReady(true);
   }, []);
 
+  const handleCloseOverlay = useCallback(() => {
+    onCloseOverlay?.();
+  }, [onCloseOverlay]);
+
   if (!tab.projectId) {
     return (
-      <div className={cn('w-full h-full', !isActive && 'hidden')}>
+      <div className={cn('w-full h-full', !isVisible && 'hidden')}>
         <CodeEmptyState tabId={tab.id} />
       </div>
     );
   }
 
   return (
-    <div className={cn('w-full h-full relative', !isActive && 'hidden')}>
-      {sandboxUrls && <CodeRunningView sandboxUrls={sandboxUrls} onReady={handleContentReady} />}
+    <div className={cn('w-full h-full relative', !isVisible && 'hidden')}>
+      {sandboxUrls && (
+        <CodeRunningView
+          sandboxUrls={sandboxUrls}
+          overlayPane={overlayPane}
+          onCloseOverlay={handleCloseOverlay}
+          onReady={handleContentReady}
+        />
+      )}
 
       <AnimatePresence mode="wait">
         {phase === 'error' && !sandboxUrls && (

@@ -19,6 +19,7 @@ const DEFAULTS: StoreData = {
   fleetSchemaVersion: 0,
   codeTabs: [],
   activeCodeTabId: null,
+  codeLayoutMode: 'deck',
 };
 
 type ChangeCallback = (data: StoreData | undefined) => void;

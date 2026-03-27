@@ -12,7 +12,8 @@ import { assert } from 'tsafe';
 
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
-import { getOmniCliPath, getOmniConfigDir, isDevelopment, isDirectory, isFile, pathExists } from '@/main/util';
+import { OMNI_CODE_VERSION } from '@/lib/omni-version';
+import { getOmniCliPath, getOmniConfigDir, getSandboxDockerfilePath, isDevelopment, isDirectory, isFile, pathExists } from '@/main/util';
 import type {
   IpcEvents,
   IpcRendererEvents,
@@ -237,6 +238,25 @@ export class SandboxManager {
     return PORT_CONFLICT_PATTERNS.some((pattern) => pattern.test(this.stderrBuffer));
   };
 
+  private getActiveContainerRef = (): string | null => {
+    if (this.status.type !== 'running') {
+      return null;
+    }
+    return this.status.data.containerName ?? this.status.data.containerId ?? null;
+  };
+
+  private stopActiveContainer = async (env: Record<string, string>): Promise<void> => {
+    const containerRef = this.getActiveContainerRef();
+    if (!containerRef) {
+      return;
+    }
+    try {
+      await execFileAsync('docker', ['stop', containerRef], { encoding: 'utf8', timeout: 15_000, env });
+    } catch {
+      // ignore cleanup failures — the wrapper process may have already removed it
+    }
+  };
+
   start = async (arg: StartArg, options?: { rebuild?: boolean }) => {
     if (this.status.type === 'starting' || this.status.type === 'running') {
       return;
@@ -333,10 +353,11 @@ export class SandboxManager {
     } else if (arg.sandboxConfig?.dockerfile) {
       args.push('--dockerfile', resolve(arg.workspaceDir, arg.sandboxConfig.dockerfile));
     } else {
-      const dockerfileName = arg.sandboxVariant === 'work' ? 'Dockerfile.work' : 'Dockerfile';
-      if (isDevelopment()) {
-        const dockerfilePath = resolve(__dirname, '../../docker/sandbox', dockerfileName);
+      const dockerfilePath = getSandboxDockerfilePath(arg.sandboxVariant);
+      const shouldUseDockerfile = options?.rebuild || isDevelopment();
+      if (shouldUseDockerfile) {
         args.push('--dockerfile', dockerfilePath);
+        args.push('--build-arg', `OMNI_CODE_VERSION=${OMNI_CODE_VERSION}`);
       } else {
         const imageSuffix = arg.sandboxVariant === 'work' ? '-work' : '';
         args.push('--image', `ghcr.io/ericmichael/omni-code-sandbox${imageSuffix}:latest`);
@@ -353,7 +374,7 @@ export class SandboxManager {
     }
 
     if (options?.rebuild) {
-      args.push('--rebuild', '--no-cache');
+      args.push('--rebuild');
     }
 
     this.log.info(c.cyan('Starting sandbox...\r\n'));
@@ -444,11 +465,15 @@ export class SandboxManager {
 
   stop = async (): Promise<void> => {
     if (!this.childProcess) {
+      const env = { ...process.env, ...DEFAULT_ENV, ...shellEnvSync() } as Record<string, string>;
+      await this.stopActiveContainer(env);
       return;
     }
 
     this.updateStatus({ type: 'stopping' });
+    const env = { ...process.env, ...DEFAULT_ENV, ...shellEnvSync() } as Record<string, string>;
     await this.killProcess();
+    await this.stopActiveContainer(env);
     this.updateStatus({ type: 'exited' });
   };
 

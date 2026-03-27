@@ -29,6 +29,10 @@ export default {
       to: './bin',
       filter: 'uv*',
     },
+    {
+      from: 'docker/sandbox',
+      to: './sandbox',
+    },
   ],
   mac: {
     target: ['dmg'],

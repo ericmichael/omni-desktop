@@ -4,6 +4,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 ARG CODE_SERVER_VERSION=4.109.2
 ARG LEAN_VERSION=4.27.0
+ARG OMNI_CODE_VERSION=0.4.37
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
@@ -85,7 +86,7 @@ RUN curl -fsSL https://raw.githubusercontent.com/leanprover/elan/master/elan-ini
     && lean --version \
     && lake --version
 
-RUN pipx install omni-code --pip-args='--extra-index-url https://pypi.fury.io/ericmichael/'
+RUN pipx install "omni-code==${OMNI_CODE_VERSION}" --pip-args='--extra-index-url https://pypi.fury.io/ericmichael/'
 
 RUN npm install -g @playwright/cli@0.1.1
 

@@ -18,6 +18,7 @@ const getDefaults = (): StoreData => ({
   fleetSchemaVersion: 0,
   codeTabs: [],
   activeCodeTabId: null,
+  codeLayoutMode: 'deck',
 });
 
 /**

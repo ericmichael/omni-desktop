@@ -29,13 +29,25 @@ export const getOperatingSystem = (): OperatingSystem => {
  * resources are extracted at runtime and deleted when the app is closed - do not store anything important here.
  */
 export const getBundledBinPath = (): string => {
-  if (isDevelopment()) {
+  if (isDevelopment() || !app.isPackaged || !process.resourcesPath) {
     // In development, resolve from project root
     return path.resolve(path.join(__dirname, '..', '..', 'assets', 'bin'));
   } else {
     // In production, assets are copied to the resources directory
     return path.resolve(path.join(process.resourcesPath, 'bin'));
   }
+};
+
+export const getSandboxAssetsPath = (): string => {
+  if (isDevelopment() || !app.isPackaged || !process.resourcesPath) {
+    return path.resolve(path.join(__dirname, '..', '..', 'docker', 'sandbox'));
+  }
+  return path.resolve(path.join(process.resourcesPath, 'sandbox'));
+};
+
+export const getSandboxDockerfilePath = (sandboxVariant: 'work' | 'standard'): string => {
+  const dockerfileName = sandboxVariant === 'work' ? 'Dockerfile.work' : 'Dockerfile';
+  return path.join(getSandboxAssetsPath(), dockerfileName);
 };
 
 /**

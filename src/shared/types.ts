@@ -67,6 +67,7 @@ export type StoreData = {
   fleetSchemaVersion: number;
   codeTabs: CodeTab[];
   activeCodeTabId: CodeTabId | null;
+  codeLayoutMode: CodeLayoutMode;
 };
 
 // The electron store uses JSON schema to validate its data.
@@ -148,6 +149,11 @@ export const schema: Schema<StoreData> = {
   activeCodeTabId: {
     type: ['string', 'null'],
     default: null,
+  },
+  codeLayoutMode: {
+    type: 'string',
+    enum: ['deck', 'focus'],
+    default: 'deck',
   },
   fleetProjects: {
     type: 'array',
@@ -354,6 +360,8 @@ export type OmniRuntimeInfo =
 // #region Code Tab types
 
 export type CodeTabId = string;
+
+export type CodeLayoutMode = 'deck' | 'focus';
 
 export type CodeTab = {
   id: CodeTabId;
