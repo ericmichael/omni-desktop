@@ -1,6 +1,42 @@
+import type { ChildProcess } from 'child_process';
+import { spawn } from 'child_process';
 import { resolve } from 'path';
+import type { Plugin } from 'vite';
 import { defineConfig } from 'vite';
 import tsconfigPaths from 'vite-tsconfig-paths';
+
+/**
+ * Vite plugin that (re)starts a node process after each watch rebuild.
+ * Only active when Vite is running in watch mode (--watch flag).
+ */
+function serverRestart(entry: string): Plugin {
+  let proc: ChildProcess | null = null;
+
+  const kill = () => {
+    if (proc) {
+      proc.kill();
+      proc = null;
+    }
+  };
+
+  return {
+    name: 'server-restart',
+    apply: 'build',
+    closeBundle() {
+      // closeBundle fires in both one-shot and watch builds.
+      // In one-shot mode we don't want to spawn — the npm script handles it.
+      // Vite sets this.meta.watchMode in watch mode.
+      if (!(this as unknown as { meta: { watchMode: boolean } }).meta.watchMode) {
+        return;
+      }
+      kill();
+      proc = spawn('node', [entry], { stdio: 'inherit' });
+      proc.on('exit', () => {
+        proc = null;
+      });
+    },
+  };
+}
 
 /**
  * Vite config for building the server (Node.js target).
@@ -8,10 +44,11 @@ import tsconfigPaths from 'vite-tsconfig-paths';
  * Outputs ESM to avoid interop issues with ESM-only deps (ansi-regex, nanoid, etc.).
  */
 export default defineConfig({
-  plugins: [tsconfigPaths()],
+  plugins: [tsconfigPaths(), serverRestart('out/server/index.mjs')],
   build: {
     target: 'node22',
     outDir: 'out/server',
+    emptyOutDir: false,
     ssr: true,
     lib: {
       entry: resolve('src/server/index.ts'),

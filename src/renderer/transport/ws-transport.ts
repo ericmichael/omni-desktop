@@ -31,6 +31,17 @@ type PendingRequest = {
 const INITIAL_RECONNECT_DELAY = 500;
 const MAX_RECONNECT_DELAY = 10_000;
 
+const SESSION_ID_KEY = 'omni-session-id';
+
+function getOrCreateSessionId(): string {
+  let id = localStorage.getItem(SESSION_ID_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(SESSION_ID_KEY, id);
+  }
+  return id;
+}
+
 /**
  * WebSocket-based transport emitter for browser mode.
  * Sends JSON-RPC-like invoke messages and waits for responses.
@@ -43,6 +54,7 @@ export class WsTransportEmitter implements TransportEmitter {
   private reconnectDelay = INITIAL_RECONNECT_DELAY;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private messageQueue: string[] = [];
+  private sessionId = getOrCreateSessionId();
 
   constructor() {
     this.connect();
@@ -50,7 +62,7 @@ export class WsTransportEmitter implements TransportEmitter {
 
   private getWsUrl(): string {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${location.host}/ws`;
+    return `${protocol}//${location.host}/ws?sessionId=${encodeURIComponent(this.sessionId)}`;
   }
 
   private connect(): void {

@@ -11,10 +11,12 @@ type InvokeMessage = {
 
 type Handler = (...args: unknown[]) => unknown | Promise<unknown>;
 
-type ClientSession = {
-  ws: WebSocket;
+type PersistentSession = {
+  sessionId: string;
+  ws: WebSocket | null;
   handlers: Map<string, Handler>;
   cleanup?: () => Promise<void>;
+  sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
 };
 
 type EventInterceptor = (channel: string, args: unknown[]) => void;
@@ -26,11 +28,17 @@ type ResultWrapper = (result: unknown, args: unknown[]) => unknown;
  *
  * Supports two layers of handlers:
  * - Global handlers: shared across all clients (store, util, config)
- * - Per-session handlers: created per WebSocket connection (terminal, sandbox, etc.)
+ * - Per-session handlers: created per session, survive WebSocket reconnections
+ *
+ * Sessions persist until server restart. When a client disconnects and reconnects
+ * with the same session ID, it reattaches to its existing managers/containers.
  */
 export class WsHandler {
   private globalHandlers = new Map<string, Handler>();
-  private sessions = new Map<WebSocket, ClientSession>();
+  /** Active WebSocket → session ID mapping (for message routing) */
+  private wsSessions = new Map<WebSocket, PersistentSession>();
+  /** Session ID → persistent session (survives disconnections) */
+  private persistentSessions = new Map<string, PersistentSession>();
   private eventInterceptors: EventInterceptor[] = [];
   private resultWrappers = new Map<string, ResultWrapper>();
 
@@ -76,8 +84,8 @@ export class WsHandler {
   sendToAll<T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]): void {
     this.runEventInterceptors(channel, args);
     const message = JSON.stringify({ type: 'event', channel, args });
-    for (const session of this.sessions.values()) {
-      if (session.ws.readyState === 1 /* WebSocket.OPEN */) {
+    for (const session of this.wsSessions.values()) {
+      if (session.ws && session.ws.readyState === 1 /* WebSocket.OPEN */) {
         session.ws.send(message);
       }
     }
@@ -102,8 +110,10 @@ export class WsHandler {
 
   /**
    * Register a new WebSocket client connection.
-   * The onConnect callback receives per-session utilities for registering
-   * handlers and sending events scoped to this client.
+   *
+   * If a sessionId is provided and a persistent session exists for it, the WebSocket
+   * is reattached to the existing session (preserving managers/containers).
+   * Otherwise a new session is created via the onConnect callback.
    */
   addClient(
     ws: WebSocket,
@@ -111,26 +121,48 @@ export class WsHandler {
       handle: (channel: string, handler: Handler) => void;
       sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
       setCleanup: (cleanup: () => Promise<void>) => void;
-    }) => void
+    }) => void,
+    sessionId?: string
   ): void {
-    const session: ClientSession = {
-      ws,
-      handlers: new Map(),
-    };
-    this.sessions.set(ws, session);
+    const existingSession = sessionId ? this.persistentSessions.get(sessionId) : undefined;
 
-    if (onConnect) {
-      onConnect({
-        handle: (channel, handler) => {
-          session.handlers.set(channel, handler);
-        },
+    if (existingSession) {
+      // Reattach: close stale WS if any, then bind the new one
+      if (existingSession.ws) {
+        this.wsSessions.delete(existingSession.ws);
+      }
+      existingSession.ws = ws;
+      this.wsSessions.set(ws, existingSession);
+      console.log(`[ws-handler] Session ${sessionId} reattached`);
+    } else {
+      // New session
+      const id = sessionId ?? crypto.randomUUID();
+      const session: PersistentSession = {
+        sessionId: id,
+        ws,
+        handlers: new Map(),
         sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => {
-          this.sendTo(ws, channel, ...args);
+          // Always send to the session's current WS (follows reattachment)
+          if (session.ws && session.ws.readyState === 1) {
+            this.sendTo(session.ws, channel, ...args);
+          }
         },
-        setCleanup: (cleanup) => {
-          session.cleanup = cleanup;
-        },
-      });
+      };
+      this.wsSessions.set(ws, session);
+      this.persistentSessions.set(id, session);
+
+      if (onConnect) {
+        onConnect({
+          handle: (channel, handler) => {
+            session.handlers.set(channel, handler);
+          },
+          sendToWindow: session.sendToWindow,
+          setCleanup: (cleanup) => {
+            session.cleanup = cleanup;
+          },
+        });
+      }
+      console.log(`[ws-handler] New session ${id} created`);
     }
 
     ws.on('message', (raw) => {
@@ -138,12 +170,34 @@ export class WsHandler {
     });
 
     ws.on('close', () => {
-      const s = this.sessions.get(ws);
-      if (s?.cleanup) {
-        void s.cleanup();
+      const session = this.wsSessions.get(ws);
+      if (session) {
+        // Only detach the WS — do NOT cleanup managers.
+        // The session stays alive in persistentSessions for reconnection.
+        if (session.ws === ws) {
+          session.ws = null;
+        }
+        this.wsSessions.delete(ws);
+        console.log(`[ws-handler] Session ${session.sessionId} detached (WS closed)`);
       }
-      this.sessions.delete(ws);
     });
+  }
+
+  /**
+   * Clean up all persistent sessions. Called on server shutdown.
+   */
+  async cleanupAllSessions(): Promise<void> {
+    const results = await Promise.allSettled(
+      [...this.persistentSessions.values()]
+        .filter((s) => s.cleanup)
+        .map((s) => s.cleanup!())
+    );
+    const errors = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected').map((r) => r.reason);
+    if (errors.length > 0) {
+      console.error('Error cleaning up sessions:', errors);
+    }
+    this.persistentSessions.clear();
+    this.wsSessions.clear();
   }
 
   private async handleMessage(ws: WebSocket, raw: unknown): Promise<void> {
@@ -159,7 +213,7 @@ export class WsHandler {
     }
 
     // Check per-session handlers first, then fall back to global handlers
-    const session = this.sessions.get(ws);
+    const session = this.wsSessions.get(ws);
     const handler = session?.handlers.get(msg.channel) ?? this.globalHandlers.get(msg.channel);
 
     if (!handler) {

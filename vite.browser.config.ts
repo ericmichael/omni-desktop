@@ -9,7 +9,25 @@ import tsconfigPaths from 'vite-tsconfig-paths';
  * Vite config for building the browser renderer (no Electron dependencies).
  * Produces a standalone SPA that uses WebSocket transport.
  */
+const SERVER_PORT = parseInt(process.env['PORT'] ?? '3000', 10);
+
 export default defineConfig({
+  server: {
+    port: 5173,
+    strictPort: true,
+    allowedHosts: true,
+    // Dev server proxy — forwards WS and API calls to the Fastify backend
+    proxy: {
+      '/ws': {
+        target: `http://localhost:${SERVER_PORT}`,
+        ws: true,
+      },
+      '/proxy': {
+        target: `http://localhost:${SERVER_PORT}`,
+        ws: true,
+      },
+    },
+  },
   plugins: [
     tailwindcss(),
     react(),

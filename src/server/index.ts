@@ -42,17 +42,26 @@ const main = async () => {
   // Wire global (shared) IPC handlers — store, util, config, fleet
   const { cleanupFleet } = wireGlobalHandlers({ wsHandler, store });
 
-  // WebSocket route — each new connection gets its own manager instances
+  // WebSocket route — each new connection gets its own manager instances.
+  // Clients send a sessionId query param; if the server has an existing session
+  // for that ID the client reattaches to its running managers/containers.
   await fastify.register(async function wsRoutes(f) {
-    f.get('/ws', { websocket: true }, (socket) => {
-      wsHandler.addClient(socket, (session) => {
-        const cleanup = wireClientManagers({
-          handle: session.handle,
-          sendToWindow: session.sendToWindow,
-          store,
-        });
-        session.setCleanup(cleanup);
-      });
+    f.get('/ws', { websocket: true }, (socket, request) => {
+      const url = new URL(request.url, `http://${request.hostname}`);
+      const sessionId = url.searchParams.get('sessionId') ?? undefined;
+
+      wsHandler.addClient(
+        socket,
+        (session) => {
+          const cleanup = wireClientManagers({
+            handle: session.handle,
+            sendToWindow: session.sendToWindow,
+            store,
+          });
+          session.setCleanup(cleanup);
+        },
+        sessionId
+      );
     });
   });
 
@@ -65,9 +74,10 @@ const main = async () => {
     return reply.code(404).send({ error: 'Not found' });
   });
 
-  // Graceful shutdown
+  // Graceful shutdown — clean up all persistent sessions + fleet
   const shutdown = async () => {
     fastify.log.info('Shutting down...');
+    await wsHandler.cleanupAllSessions();
     await cleanupFleet();
     await fastify.close();
     process.exit(0);

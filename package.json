@@ -37,7 +37,7 @@
     "version": "npm version --message 'chore: bump version to v%s'",
     "build:browser": "vite build --config vite.browser.config.ts",
     "build:server": "vite build --config vite.server.config.ts && npm run build:browser",
-    "dev:server": "vite build --config vite.browser.config.ts --mode development && vite build --config vite.server.config.ts && node out/server/index.mjs",
+    "dev:server": "concurrently -k -n server,browser -c blue,magenta \"vite build --config vite.server.config.ts --watch\" \"vite --config vite.browser.config.ts --mode development --host 0.0.0.0\"",
     "start:server": "node out/server/index.mjs"
   },
   "devDependencies": {
