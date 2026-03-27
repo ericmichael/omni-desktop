@@ -171,21 +171,28 @@ app.on('ready', () => {
 
   main.createWindow();
 
-  if (!app.isPackaged) {
-    void (async () => {
-      const { cleanupOrphanedContainers } = await import('@/main/docker-orphan-cleanup');
-      const cleaned = await cleanupOrphanedContainers();
-      if (cleaned > 0) {
-        main.sendToWindow('toast:show', {
-          level: 'info',
-          title: 'Cleaned up orphaned containers',
-          description: `Removed ${cleaned} Docker container${cleaned === 1 ? '' : 's'} from a previous session.`,
-        });
-      }
-    })().catch((error) => {
-      console.warn('Failed to check for orphaned containers:', error);
-    });
-  }
+  void (async () => {
+    const { cleanupOrphanedContainers, pruneDockerResources } = await import('@/main/docker-orphan-cleanup');
+    const cleaned = await cleanupOrphanedContainers();
+    if (cleaned > 0) {
+      main.sendToWindow('toast:show', {
+        level: 'info',
+        title: 'Cleaned up orphaned containers',
+        description: `Removed ${cleaned} Docker container${cleaned === 1 ? '' : 's'} from a previous session.`,
+      });
+    }
+
+    const reclaimed = await pruneDockerResources();
+    if (reclaimed && reclaimed !== '0B') {
+      main.sendToWindow('toast:show', {
+        level: 'info',
+        title: 'Docker storage reclaimed',
+        description: `Pruned unused Docker resources, reclaimed ${reclaimed}.`,
+      });
+    }
+  })().catch((error) => {
+    console.warn('Failed to clean up Docker resources:', error);
+  });
 });
 
 /**

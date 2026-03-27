@@ -175,6 +175,7 @@ export class SandboxManager {
       }
     };
 
+    let allUp = false;
     for (let attempt = 0; attempt < 30; attempt++) {
       if (this.status.type === 'stopping' || this.status.type === 'exiting') {
         return;
@@ -182,6 +183,7 @@ export class SandboxManager {
 
       const results = await Promise.all(urls.map(checkUrl));
       if (results.every(Boolean)) {
+        allUp = true;
         break;
       }
 
@@ -191,6 +193,15 @@ export class SandboxManager {
     }
 
     if (this.status.type === 'stopping' || this.status.type === 'exiting') {
+      return;
+    }
+
+    if (!allUp) {
+      this.log.info(c.red.bold('Services did not become ready within 30 seconds\r\n'));
+      this.updateStatus({
+        type: 'error',
+        error: { message: 'Sandbox services did not become ready within 30 seconds. Check Docker logs.' },
+      });
       return;
     }
 

@@ -77,13 +77,16 @@ export const Webview = ({
           }
         };
 
-        const onFailLoad = (...args: unknown[]) => {
-          const errorCode = typeof args[1] === 'number' ? (args[1] as number) : null;
-          const isMainFrame = typeof args[4] === 'boolean' ? (args[4] as boolean) : true;
+        const onFailLoad = (event: unknown) => {
+          // Electron <webview> `did-fail-load` fires a DOM Event with properties on the event object.
+          const e = event as { errorCode?: number; isMainFrame?: boolean };
+          const errorCode = e.errorCode ?? null;
+          const isMainFrame = e.isMainFrame ?? true;
 
           if (!isMainFrame) {
             return;
           }
+          // -3 = ERR_ABORTED (e.g. navigation cancelled by a new load)
           if (errorCode === -3) {
             return;
           }

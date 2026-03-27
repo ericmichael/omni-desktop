@@ -75,3 +75,26 @@ export const cleanupOrphanedContainers = async (): Promise<number> => {
 
   return cleaned;
 };
+
+/**
+ * Prune unused Docker resources (stopped containers, dangling images, unused networks, build cache).
+ *
+ * Runs `docker system prune -f` which only removes resources not associated with any running container.
+ * Returns the reclaimed space string (e.g. "1.2GB"), or null if Docker is unavailable or prune fails.
+ */
+export const pruneDockerResources = async (): Promise<string | null> => {
+  const env = { ...process.env, ...DEFAULT_ENV, ...shellEnvSync() } as Record<string, string>;
+  const opts = { encoding: 'utf8' as const, timeout: 60_000, env };
+
+  try {
+    const { stdout } = await execFileAsync('docker', ['system', 'prune', '-f'], opts);
+    const match = stdout.match(/Total reclaimed space:\s*(.+)/);
+    const reclaimed = match?.[1]?.trim() ?? null;
+    if (reclaimed) {
+      console.debug(`Docker prune reclaimed: ${reclaimed}`);
+    }
+    return reclaimed;
+  } catch {
+    return null;
+  }
+};
