@@ -3,9 +3,9 @@ import { SortableContext, arrayMove, horizontalListSortingStrategy, useSortable,
 import { CSS } from '@dnd-kit/utilities';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { PiCodeBold, PiDotsSixVerticalBold, PiMonitorBold, PiPlusBold } from 'react-icons/pi';
+import { PiArrowsInBold, PiArrowsOutBold, PiCodeBold, PiDotsSixVerticalBold, PiDotsThreeOutline, PiMonitorBold, PiPlusBold } from 'react-icons/pi';
 
-import { Button, IconButton, cn } from '@/renderer/ds';
+import { Button, cn } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { CodeLayoutMode, CodeTab, CodeTabId } from '@/shared/types';
 
@@ -13,6 +13,7 @@ import { CodeTabContent } from './CodeTabContent';
 import { $codeTabStatuses, codeApi } from './state';
 
 const COLUMN_WIDTH = 480;
+const EXPANDED_COLUMN_WIDTH = 860;
 const COMPACT_WIDTH = 900;
 
 const CodeDeckHeader = memo(
@@ -53,7 +54,7 @@ const CodeDeckHeader = memo(
 CodeDeckHeader.displayName = 'CodeDeckHeader';
 
 const SessionActionButton = memo(
-  ({ icon, label, isDisabled, onClick }: { icon: React.ReactNode; label: string; isDisabled?: boolean; onClick?: () => void }) => {
+  ({ icon, label, isDisabled, onClick }: { icon: React.ReactNode; label: string; isDisabled?: boolean; onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void }) => {
     return (
       <button
         type="button"
@@ -77,28 +78,70 @@ SessionActionButton.displayName = 'SessionActionButton';
 const CodeSessionHeader = memo(
   ({
     label,
-    isRunning,
     actions,
     onClose,
     dragHandle,
   }: {
     label: string;
-    isRunning: boolean;
     actions?: React.ReactNode;
     onClose?: () => void;
     dragHandle?: React.ReactNode;
   }) => {
+    const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
+
+    useEffect(() => {
+      if (!menuPosition) return;
+      const handleClick = () => setMenuPosition(null);
+      const handleKey = (event: KeyboardEvent) => {
+        if (event.key === 'Escape') {
+          setMenuPosition(null);
+        }
+      };
+      window.addEventListener('click', handleClick);
+      window.addEventListener('keydown', handleKey);
+      return () => {
+        window.removeEventListener('click', handleClick);
+        window.removeEventListener('keydown', handleKey);
+      };
+    }, [menuPosition]);
+
     return (
-      <div className="flex items-center justify-between px-3 py-2 border-b border-surface-border bg-surface">
+      <div className="relative flex items-center justify-between px-3 py-2 border-b border-surface-border bg-surface">
         <div className="flex items-center gap-2 min-w-0">
-          <span className={cn('size-2 rounded-full', isRunning ? 'bg-green-400' : 'bg-surface-border')} />
+          {dragHandle}
           <span className="text-sm font-medium text-fg truncate">{label}</span>
         </div>
         <div className="flex items-center gap-1">
           {actions}
-          {onClose && <IconButton aria-label="Close session" icon={<PiPlusBold className="rotate-45" />} size="sm" onClick={onClose} />}
-          {dragHandle}
+          {onClose && (
+            <SessionActionButton
+              icon={<PiDotsThreeOutline size={16} />}
+              label="Session menu"
+              onClick={(event) => {
+                event.stopPropagation();
+                const rect = event.currentTarget.getBoundingClientRect();
+                setMenuPosition({ x: rect.right, y: rect.bottom + 6 });
+              }}
+            />
+          )}
         </div>
+        {menuPosition && onClose && (
+          <div
+            className="fixed z-50 min-w-[140px] rounded-md border border-surface-border bg-surface shadow-lg py-1"
+            style={{ left: menuPosition.x - 140, top: menuPosition.y }}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setMenuPosition(null);
+                onClose();
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs text-fg hover:bg-surface-hover transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -109,17 +152,21 @@ const DeckColumn = memo(
   ({
     tab,
     label,
-    isRunning,
     actions,
     onClose,
+    isExpanded,
+    onToggleExpand,
     children,
+    headerActionsSlot,
   }: {
     tab: CodeTab;
     label: string;
-    isRunning: boolean;
     actions?: React.ReactNode;
     onClose: (id: CodeTabId) => void;
+    isExpanded: boolean;
+    onToggleExpand: (id: CodeTabId) => void;
     children: React.ReactNode;
+    headerActionsSlot?: React.ReactNode;
   }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
     const style = {
@@ -135,8 +182,17 @@ const DeckColumn = memo(
       >
         <CodeSessionHeader
           label={label}
-          isRunning={isRunning}
-          actions={actions}
+          actions={
+            <div className="flex items-center gap-1">
+              {headerActionsSlot}
+              {actions}
+              <SessionActionButton
+                icon={isExpanded ? <PiArrowsInBold size={15} /> : <PiArrowsOutBold size={15} />}
+                label={isExpanded ? 'Collapse column' : 'Expand column'}
+                onClick={() => onToggleExpand(tab.id)}
+              />
+            </div>
+          }
           onClose={() => onClose(tab.id)}
           dragHandle={
             <button
@@ -161,27 +217,39 @@ const CodeSessionPane = memo(
   ({
     tab,
     label,
-    isRunning,
     actions,
     onClose,
     isVisible,
     overlayPane,
     onCloseOverlay,
+    uiMinimal,
+    headerActionsTargetId,
+    headerActionsCompact,
   }: {
     tab: CodeTab;
     label: string;
-    isRunning: boolean;
     actions?: React.ReactNode;
     onClose: (id: CodeTabId) => void;
     isVisible: boolean;
     overlayPane: 'none' | 'code' | 'vnc';
     onCloseOverlay: () => void;
+    uiMinimal?: boolean;
+    headerActionsTargetId?: string;
+    headerActionsCompact?: boolean;
   }) => {
     return (
       <div className={cn('w-full h-full flex flex-col bg-surface-raised', !isVisible && 'hidden')}>
-        <CodeSessionHeader label={label} isRunning={isRunning} actions={actions} onClose={() => onClose(tab.id)} />
+        <CodeSessionHeader label={label} actions={actions} onClose={() => onClose(tab.id)} />
         <div className="flex-1 min-h-0">
-          <CodeTabContent tab={tab} isVisible={isVisible} overlayPane={overlayPane} onCloseOverlay={onCloseOverlay} />
+          <CodeTabContent
+            tab={tab}
+            isVisible={isVisible}
+            overlayPane={overlayPane}
+            onCloseOverlay={onCloseOverlay}
+            uiMinimal={uiMinimal}
+            headerActionsTargetId={headerActionsTargetId}
+            headerActionsCompact={headerActionsCompact}
+          />
         </div>
       </div>
     );
@@ -190,48 +258,90 @@ const CodeSessionPane = memo(
 CodeSessionPane.displayName = 'CodeSessionPane';
 
 const FocusListItem = memo(
-  ({ tab, label, isActive, isRunning, onSelect, onClose }: { tab: CodeTab; label: string; isActive: boolean; isRunning: boolean; onSelect: (id: CodeTabId) => void; onClose: (id: CodeTabId) => void }) => {
+  ({ tab, label, subLabel, isActive, onSelect, onClose }: { tab: CodeTab; label: string; subLabel?: string | null; isActive: boolean; onSelect: (id: CodeTabId) => void; onClose: (id: CodeTabId) => void }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
+    const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
     const style = {
       transform: CSS.Transform.toString(transform),
       transition,
     };
 
-    return (
-      <div ref={setNodeRef} style={style} className={cn('group', isDragging && 'opacity-70')}>
+    useEffect(() => {
+      if (!menuPosition) return;
+      const handleClick = () => setMenuPosition(null);
+      const handleKey = (event: KeyboardEvent) => {
+        if (event.key === 'Escape') {
+          setMenuPosition(null);
+        }
+      };
+      window.addEventListener('click', handleClick);
+      window.addEventListener('keydown', handleKey);
+      return () => {
+        window.removeEventListener('click', handleClick);
+        window.removeEventListener('keydown', handleKey);
+      };
+    }, [menuPosition]);
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn('group relative', isDragging && 'opacity-70')}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        setMenuPosition({ x: event.clientX, y: event.clientY });
+      }}
+    >
+      <div
+        className={cn(
+          'flex items-center gap-3 w-full px-3 py-1.5 text-left transition-colors cursor-pointer',
+          isActive ? 'bg-accent-600/20 text-fg' : 'text-fg-muted hover:bg-white/5 hover:text-fg'
+        )}
+      >
         <button
           type="button"
-          onClick={() => onSelect(tab.id)}
-          className={cn(
-            'w-full text-left px-3 py-2 rounded-lg border transition-colors flex items-center justify-between gap-2',
-            isActive ? 'bg-surface border-accent-500/40 text-fg' : 'bg-surface-overlay border-transparent text-fg-muted hover:text-fg hover:border-surface-border'
-          )}
+          className="inline-flex items-center justify-center size-6 rounded-md text-fg-muted hover:text-fg hover:bg-white/5"
+          {...attributes}
+          {...listeners}
+          aria-label="Reorder"
         >
-          <div className="flex items-center gap-2 min-w-0">
-            <span className={cn('size-2 rounded-full', isRunning ? 'bg-green-400' : 'bg-surface-border')} />
-            <span className="text-xs font-medium truncate">{label}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <IconButton
-              aria-label="Close session"
-              icon={<PiPlusBold className="rotate-45" />}
-              size="sm"
-              onClick={() => onClose(tab.id)}
-              className={cn('!size-6', isActive ? 'opacity-80' : 'opacity-0 group-hover:opacity-80')}
-            />
-            <button
-              type="button"
-              className="inline-flex items-center justify-center size-6 rounded-md text-fg-muted hover:text-fg hover:bg-white/5"
-              {...attributes}
-              {...listeners}
-              aria-label="Reorder"
-            >
-              <PiDotsSixVerticalBold size={14} />
-            </button>
+          <PiDotsSixVerticalBold size={14} />
+        </button>
+        <button type="button" onClick={() => onSelect(tab.id)} className="flex-1 min-w-0 text-left">
+          <div className="flex flex-col min-w-0">
+            <span className="text-sm truncate">{label}</span>
+            {subLabel && <span className="text-[10px] text-fg-subtle truncate">{subLabel}</span>}
           </div>
         </button>
+        <SessionActionButton
+          icon={<PiDotsThreeOutline size={16} />}
+          label="Session menu"
+          onClick={(event) => {
+            event.stopPropagation();
+            const rect = event.currentTarget.getBoundingClientRect();
+            setMenuPosition({ x: rect.left, y: rect.bottom + 6 });
+          }}
+        />
       </div>
-    );
+      {menuPosition && (
+        <div
+          className="fixed z-50 min-w-[160px] rounded-md border border-surface-border bg-surface shadow-lg py-1"
+          style={{ left: menuPosition.x, top: menuPosition.y }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setMenuPosition(null);
+              onClose(tab.id);
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-fg hover:bg-surface-hover transition-colors"
+          >
+            Delete session
+          </button>
+        </div>
+      )}
+    </div>
+  );
   }
 );
 FocusListItem.displayName = 'FocusListItem';
@@ -244,6 +354,7 @@ export const CodeDeck = memo(() => {
   const activeTabId = store.activeCodeTabId ?? tabs[0]?.id ?? null;
   const [isCompact, setIsCompact] = useState(() => window.innerWidth < COMPACT_WIDTH);
   const [overlayTarget, setOverlayTarget] = useState<{ tabId: CodeTabId; pane: 'code' | 'vnc' } | null>(null);
+  const [expandedTabId, setExpandedTabId] = useState<CodeTabId | null>(null);
 
   useEffect(() => {
     if (tabs.length === 0) {
@@ -266,12 +377,18 @@ export const CodeDeck = memo(() => {
     return () => window.removeEventListener('resize', handler);
   }, []);
 
+  useEffect(() => {
+    if (expandedTabId && !tabs.some((tab) => tab.id === expandedTabId)) {
+      setExpandedTabId(null);
+    }
+  }, [expandedTabId, tabs]);
+
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   const projectMap = useMemo(() => {
-    const map = new Map<string, string>();
+    const map = new Map<string, { label: string; workspaceDir: string }>();
     for (const p of store.fleetProjects) {
-      map.set(p.id, p.label);
+      map.set(p.id, { label: p.label, workspaceDir: p.workspaceDir });
     }
     return map;
   }, [store.fleetProjects]);
@@ -279,7 +396,18 @@ export const CodeDeck = memo(() => {
   const resolveLabel = useCallback(
     (tab: CodeTab) => {
       if (!tab.projectId) return 'New Session';
-      return projectMap.get(tab.projectId) ?? 'Unknown';
+      return projectMap.get(tab.projectId)?.label ?? 'Unknown';
+    },
+    [projectMap]
+  );
+
+  const resolveSubLabel = useCallback(
+    (tab: CodeTab) => {
+      if (!tab.projectId) return null;
+      const workspaceDir = projectMap.get(tab.projectId)?.workspaceDir;
+      if (!workspaceDir) return null;
+      const segments = workspaceDir.split('/').filter(Boolean);
+      return segments.slice(-2).join('/');
     },
     [projectMap]
   );
@@ -299,8 +427,13 @@ export const CodeDeck = memo(() => {
     codeApi.setActiveTab(id);
   }, []);
 
+  const handleToggleExpand = useCallback((id: CodeTabId) => {
+    setExpandedTabId((current) => (current === id ? null : id));
+  }, []);
+
   const handleClose = useCallback((id: CodeTabId) => {
     setOverlayTarget((current) => (current?.tabId === id ? null : current));
+    setExpandedTabId((current) => (current === id ? null : current));
     codeApi.removeTab(id);
   }, []);
 
@@ -332,6 +465,22 @@ export const CodeDeck = memo(() => {
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0] ?? null;
   const derivedLayout: CodeLayoutMode | 'paged' = isCompact ? 'paged' : layoutMode;
 
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName?.toLowerCase();
+      const isEditable = target?.isContentEditable || tagName === 'input' || tagName === 'textarea' || tagName === 'select';
+      if (isEditable) return;
+      if (!activeTabId) return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'e') {
+        event.preventDefault();
+        setExpandedTabId((current) => (current === activeTabId ? null : activeTabId));
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [activeTabId]);
+
   const renderSessionActions = useCallback(
     (tab: CodeTab) => {
       const status = statuses[tab.id];
@@ -359,30 +508,37 @@ export const CodeDeck = memo(() => {
   );
 
   return (
-    <div className="flex flex-col w-full h-full">
+    <div className="flex flex-col w-full h-full min-h-0 overflow-hidden">
       <CodeDeckHeader layoutMode={layoutMode} onLayoutMode={handleLayoutMode} onNewSession={handleNewSession} />
       {derivedLayout === 'deck' && (
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
           <SortableContext items={tabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
-            <div className="flex-1 min-h-0 overflow-x-auto">
-              <div className="flex h-full min-w-max">
+            <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden">
+              <div className="flex h-full min-w-max overflow-y-hidden">
                 {tabs.map((tab) => {
-                  const status = statuses[tab.id];
-                  const isRunning = status?.type === 'running';
                   return (
-                    <div key={tab.id} style={{ width: COLUMN_WIDTH }} className="h-full flex-shrink-0">
+                    <div
+                      key={tab.id}
+                      style={{ width: expandedTabId === tab.id ? EXPANDED_COLUMN_WIDTH : COLUMN_WIDTH }}
+                      className="h-full flex-shrink-0"
+                    >
                       <DeckColumn
                         tab={tab}
                         label={resolveLabel(tab)}
-                        isRunning={isRunning}
                         actions={renderSessionActions(tab)}
                         onClose={handleClose}
+                        isExpanded={expandedTabId === tab.id}
+                        onToggleExpand={handleToggleExpand}
+                        headerActionsSlot={<div id={`code-deck-header-actions-${tab.id}`} />}
                       >
                         <CodeTabContent
                           tab={tab}
                           isVisible
                           overlayPane={overlayTarget?.tabId === tab.id ? overlayTarget.pane : 'none'}
                           onCloseOverlay={handleCloseOverlay}
+                          uiMinimal
+                          headerActionsTargetId={`code-deck-header-actions-${tab.id}`}
+                          headerActionsCompact
                         />
                       </DeckColumn>
                     </div>
@@ -397,36 +553,40 @@ export const CodeDeck = memo(() => {
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
           <SortableContext items={tabs.map((t) => t.id)} strategy={verticalListSortingStrategy}>
             <div className="flex-1 min-h-0 flex">
-              <div className="w-64 border-r border-surface-border bg-surface-raised px-3 py-3 flex flex-col gap-2">
-                {tabs.map((tab) => {
-                  const status = statuses[tab.id];
-                  const isRunning = status?.type === 'running';
-                  return (
+              <div className="flex flex-col h-full w-60 border-r border-surface-border bg-surface shrink-0">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-surface-border">
+                  <span className="text-xs font-semibold text-fg-muted uppercase tracking-wider">Sessions</span>
+                  {tabs.length > 0 && <span className="text-xs text-fg-subtle">{tabs.length}</span>}
+                </div>
+                <div className="flex-1 min-h-0 overflow-y-auto py-1">
+                  {tabs.map((tab) => (
                     <FocusListItem
                       key={tab.id}
                       tab={tab}
                       label={resolveLabel(tab)}
+                      subLabel={resolveSubLabel(tab)}
                       isActive={tab.id === activeTab?.id}
-                      isRunning={isRunning}
                       onSelect={handleSelect}
                       onClose={handleClose}
                     />
-                  );
-                })}
+                  ))}
+                </div>
               </div>
               <div className="flex-1 min-w-0 min-h-0">
                 {tabs.map((tab) => (
-                  <CodeSessionPane
-                    key={tab.id}
-                    tab={tab}
-                    label={resolveLabel(tab)}
-                    isRunning={statuses[tab.id]?.type === 'running'}
-                    actions={renderSessionActions(tab)}
-                    onClose={handleClose}
-                    isVisible={tab.id === activeTab?.id}
-                    overlayPane={overlayTarget?.tabId === tab.id ? overlayTarget.pane : 'none'}
-                    onCloseOverlay={handleCloseOverlay}
-                  />
+                    <CodeSessionPane
+                      key={tab.id}
+                      tab={tab}
+                      label={resolveLabel(tab)}
+                      actions={renderSessionActions(tab)}
+                      onClose={handleClose}
+                      isVisible={tab.id === activeTab?.id}
+                      overlayPane={overlayTarget?.tabId === tab.id ? overlayTarget.pane : 'none'}
+                      onCloseOverlay={handleCloseOverlay}
+                      uiMinimal={false}
+                      headerActionsTargetId={undefined}
+                      headerActionsCompact={false}
+                    />
                 ))}
               </div>
             </div>
@@ -483,17 +643,19 @@ export const CodeDeck = memo(() => {
           </div>
           <div className="flex-1 min-h-0">
             {tabs.map((tab) => (
-              <CodeSessionPane
-                key={tab.id}
-                tab={tab}
-                label={resolveLabel(tab)}
-                isRunning={statuses[tab.id]?.type === 'running'}
-                actions={renderSessionActions(tab)}
-                onClose={handleClose}
-                isVisible={tab.id === activeTab.id}
-                overlayPane={overlayTarget?.tabId === tab.id ? overlayTarget.pane : 'none'}
-                onCloseOverlay={handleCloseOverlay}
-              />
+                <CodeSessionPane
+                  key={tab.id}
+                  tab={tab}
+                  label={resolveLabel(tab)}
+                  actions={renderSessionActions(tab)}
+                  onClose={handleClose}
+                  isVisible={tab.id === activeTab.id}
+                  overlayPane={overlayTarget?.tabId === tab.id ? overlayTarget.pane : 'none'}
+                  onCloseOverlay={handleCloseOverlay}
+                  uiMinimal={false}
+                  headerActionsTargetId={undefined}
+                  headerActionsCompact={false}
+                />
             ))}
           </div>
         </div>

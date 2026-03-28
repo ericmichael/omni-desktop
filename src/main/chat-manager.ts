@@ -78,6 +78,7 @@ export class ChatManager {
     }
 
     this.urlEmitted = true;
+    this.updateStatus({ type: 'connecting', data: { uiUrl: parsed.url, port: parsed.port } });
     this.log.info(c.cyan('Waiting for web UI to accept connections...\r\n'));
     void this.waitForReady(parsed.url, parsed.port);
   };
@@ -138,7 +139,7 @@ export class ChatManager {
   };
 
   start = async (arg: { workspaceDir: string }) => {
-    if (this.status.type === 'starting' || this.status.type === 'running') {
+    if (this.status.type === 'starting' || this.status.type === 'connecting' || this.status.type === 'running') {
       return;
     }
 

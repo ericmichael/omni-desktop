@@ -68,6 +68,10 @@ export type StoreData = {
   codeTabs: CodeTab[];
   activeCodeTabId: CodeTabId | null;
   codeLayoutMode: CodeLayoutMode;
+  fleetLayoutMode: FleetLayoutMode;
+  fleetBoardOpen: boolean;
+  fleetOpenTicketIds: FleetTicketId[];
+  activeFleetTicketId: FleetTicketId | null;
 };
 
 // The electron store uses JSON schema to validate its data.
@@ -154,6 +158,24 @@ export const schema: Schema<StoreData> = {
     type: 'string',
     enum: ['deck', 'focus'],
     default: 'deck',
+  },
+  fleetLayoutMode: {
+    type: 'string',
+    enum: ['deck', 'focus'],
+    default: 'deck',
+  },
+  fleetBoardOpen: {
+    type: 'boolean',
+    default: false,
+  },
+  fleetOpenTicketIds: {
+    type: 'array',
+    default: [],
+    items: { type: 'string' },
+  },
+  activeFleetTicketId: {
+    type: ['string', 'null'],
+    default: null,
   },
   fleetProjects: {
     type: 'array',
@@ -301,30 +323,33 @@ export type OmniInstallProcessStatus = Status<
   'uninitialized' | 'starting' | 'installing' | 'canceling' | 'exiting' | 'completed' | 'canceled'
 >;
 
+export type SandboxStatusData = {
+  sandboxUrl: string;
+  wsUrl: string;
+  uiUrl: string;
+  codeServerUrl?: string;
+  noVncUrl?: string;
+  containerId?: string;
+  containerName?: string;
+  ports: {
+    sandbox: number;
+    ui: number;
+    codeServer?: number;
+    vnc?: number;
+  };
+};
+
 export type SandboxProcessStatus =
   | Status<'uninitialized' | 'starting' | 'stopping' | 'exiting' | 'exited'>
-  | OkStatus<
-      'running',
-      {
-        sandboxUrl: string;
-        wsUrl: string;
-        uiUrl: string;
-        codeServerUrl?: string;
-        noVncUrl?: string;
-        containerId?: string;
-        containerName?: string;
-        ports: {
-          sandbox: number;
-          ui: number;
-          codeServer?: number;
-          vnc?: number;
-        };
-      }
-    >;
+  | OkStatus<'connecting', SandboxStatusData>
+  | OkStatus<'running', SandboxStatusData>;
+
+export type ChatStatusData = { uiUrl: string; port: number };
 
 export type ChatProcessStatus =
   | Status<'uninitialized' | 'starting' | 'stopping' | 'exiting' | 'exited'>
-  | OkStatus<'running', { uiUrl: string; port: number }>;
+  | OkStatus<'connecting', ChatStatusData>
+  | OkStatus<'running', ChatStatusData>;
 
 /**
  * A logging level.
@@ -362,6 +387,7 @@ export type OmniRuntimeInfo =
 export type CodeTabId = string;
 
 export type CodeLayoutMode = 'deck' | 'focus';
+export type FleetLayoutMode = 'deck' | 'focus';
 
 export type CodeTab = {
   id: CodeTabId;
@@ -690,6 +716,7 @@ type FleetIpcEvents = Namespaced<
     'update-ticket': (id: FleetTicketId, patch: Partial<Omit<FleetTicket, 'id' | 'projectId' | 'createdAt'>>) => void;
     'remove-ticket': (id: FleetTicketId) => void;
     'get-tickets': (projectId: FleetProjectId) => FleetTicket[];
+    'get-tasks': () => FleetTask[];
     'get-next-ticket': (projectId: FleetProjectId) => FleetTicket | null;
     'move-ticket-to-column': (ticketId: FleetTicketId, columnId: FleetColumnId) => void;
     'get-pipeline': (projectId: FleetProjectId) => FleetPipeline;

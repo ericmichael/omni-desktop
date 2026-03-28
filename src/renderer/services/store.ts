@@ -19,6 +19,10 @@ const getDefaults = (): StoreData => ({
   codeTabs: [],
   activeCodeTabId: null,
   codeLayoutMode: 'deck',
+  fleetLayoutMode: 'deck',
+  fleetBoardOpen: false,
+  fleetOpenTicketIds: [],
+  activeFleetTicketId: null,
 });
 
 /**

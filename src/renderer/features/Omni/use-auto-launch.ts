@@ -172,7 +172,7 @@ export const useAutoLaunch = () => {
       return;
     }
 
-    if (sandboxStatus.type === 'running') {
+    if (sandboxStatus.type === 'running' || sandboxStatus.type === 'connecting') {
       $autoLaunchPhase.set('running');
       didTriggerStart.current = false;
     } else if (sandboxStatus.type === 'error') {

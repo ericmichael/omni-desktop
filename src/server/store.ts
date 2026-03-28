@@ -20,6 +20,10 @@ const DEFAULTS: StoreData = {
   codeTabs: [],
   activeCodeTabId: null,
   codeLayoutMode: 'deck',
+  fleetLayoutMode: 'deck',
+  fleetBoardOpen: false,
+  fleetOpenTicketIds: [],
+  activeFleetTicketId: null,
 };
 
 type ChangeCallback = (data: StoreData | undefined) => void;

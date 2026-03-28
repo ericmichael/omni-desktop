@@ -11,6 +11,7 @@ import { codeApi } from './state';
 
 type CodeEmptyStateProps = {
   tabId: CodeTabId;
+  embedded?: boolean;
 };
 
 const ProjectCard = memo(
@@ -35,7 +36,7 @@ const ProjectCard = memo(
 );
 ProjectCard.displayName = 'ProjectCard';
 
-export const CodeEmptyState = memo(({ tabId }: CodeEmptyStateProps) => {
+export const CodeEmptyState = memo(({ tabId, embedded = false }: CodeEmptyStateProps) => {
   const store = useStore(persistedStoreApi.$atom);
   const [showNewProject, setShowNewProject] = useState(false);
 
@@ -57,11 +58,13 @@ export const CodeEmptyState = memo(({ tabId }: CodeEmptyStateProps) => {
   }, []);
 
   return (
-    <div className="flex flex-col items-center justify-center h-full w-full gap-6 p-8">
-      <Heading size="md">Select a Project</Heading>
-      <p className="text-sm text-fg-muted text-center max-w-md">
-        Choose an existing project to open in this tab, or create a new one.
-      </p>
+    <div className={embedded ? 'flex flex-col items-center gap-6 w-full' : 'flex flex-col items-center justify-center h-full w-full gap-6 p-8'}>
+      {!embedded && <Heading size="md">Select a Project</Heading>}
+      {!embedded && (
+        <p className="text-sm text-fg-muted text-center max-w-md">
+          Choose an existing project to open in this tab, or create a new one.
+        </p>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg w-full max-h-[400px] overflow-y-auto">
         {projects.map((project) => (

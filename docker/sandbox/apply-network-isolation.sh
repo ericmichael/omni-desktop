@@ -27,6 +27,13 @@ iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
 iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
 
+# Allow traffic to the Docker host gateway (host.docker.internal) so the
+# container can reach host-side services like launcher MCP servers.
+host_gw="$(getent ahosts host.docker.internal 2>/dev/null | awk '{print $1}' | head -n1)" || true
+if [[ -n "${host_gw}" ]]; then
+  iptables -A OUTPUT -d "${host_gw}" -j ACCEPT
+fi
+
 # Process each entry in the allowlist
 IFS=',' read -ra ENTRIES <<< "${allowlist}"
 for entry in "${ENTRIES[@]}"; do

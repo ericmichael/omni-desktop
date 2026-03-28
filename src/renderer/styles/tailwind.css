@@ -21,6 +21,20 @@
   --color-fg-subtle: #71717a;
   --color-fg-error: #f87171;
 
+  /* Omniagents web UI palette */
+  --color-tweetBlue: rgb(var(--omni-tweetBlue));
+  --color-bgMain: rgb(var(--omni-bgMain));
+  --color-bgColumn: rgb(var(--omni-bgColumn));
+  --color-bgCard: rgb(var(--omni-bgCard));
+  --color-bgCardAlt: rgb(var(--omni-bgCardAlt));
+  --color-textSubtle: rgb(var(--omni-textSubtle));
+  --color-successGreen: rgb(var(--omni-successGreen));
+  --color-warningOrange: rgb(var(--omni-warningOrange));
+  --color-errorRed: rgb(var(--omni-errorRed));
+  --color-textPrimary: rgb(var(--omni-textPrimary));
+  --color-textHeading: rgb(var(--omni-textHeading));
+  --color-textSecondary: rgb(var(--omni-textSecondary));
+
   /* Accent (indigo) palette */
   --color-accent-50: #eef2ff;
   --color-accent-100: #e0e7ff;
@@ -41,6 +55,7 @@
 
   /* Fonts */
   --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-serif: Georgia, 'Times New Roman', ui-serif, serif;
   --font-mono: JetBrainsMonoNerdFont, ui-monospace, monospace;
 
   /* Animations */

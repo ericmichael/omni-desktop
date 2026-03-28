@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
 import { Webview } from '@/renderer/common/Webview';
+import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import { cn } from '@/renderer/ds';
 
 const MIN_SIDEBAR_PERCENT = 20;
@@ -10,10 +11,12 @@ const DEFAULT_SIDEBAR_PERCENT = 30;
 type CodeSplitLayoutProps = {
   uiSrc: string;
   codeServerSrc?: string;
+  uiMode?: 'webview' | 'omniagents';
+  codeServerMode?: 'webview' | 'omniagents';
   onReady?: () => void;
 };
 
-export const CodeSplitLayout = memo(({ uiSrc, codeServerSrc, onReady }: CodeSplitLayoutProps) => {
+export const CodeSplitLayout = memo(({ uiSrc, codeServerSrc, uiMode = 'webview', codeServerMode = 'webview', onReady }: CodeSplitLayoutProps) => {
   const splitRef = useRef<HTMLDivElement>(null);
   const [sidebarWidthPercent, setSidebarWidthPercent] = useState(DEFAULT_SIDEBAR_PERCENT);
   const [isDragging, setIsDragging] = useState(false);
@@ -73,7 +76,11 @@ export const CodeSplitLayout = memo(({ uiSrc, codeServerSrc, onReady }: CodeSpli
       {isDragging && <div className="absolute inset-0 z-20 cursor-col-resize" />}
 
       <div className="min-w-0" style={{ width: `${100 - sidebarWidthPercent}%` }}>
-        <Webview src={codeServerSrc} onReady={handleCodeServerReady} showUnavailable={Boolean(codeServerSrc)} />
+        {codeServerMode === 'omniagents' && codeServerSrc ? (
+          <OmniAgentsApp uiUrl={codeServerSrc} onReady={handleCodeServerReady} />
+        ) : (
+          <Webview src={codeServerSrc} onReady={handleCodeServerReady} showUnavailable={Boolean(codeServerSrc)} />
+        )}
       </div>
 
       <div
@@ -83,7 +90,11 @@ export const CodeSplitLayout = memo(({ uiSrc, codeServerSrc, onReady }: CodeSpli
 
       <div className="flex flex-col min-w-0" style={{ width: `${sidebarWidthPercent}%` }}>
         <div className="flex-1 min-h-0">
-          <Webview src={uiSrc} onReady={handleUiReady} showUnavailable={false} />
+          {uiMode === 'omniagents' ? (
+            <OmniAgentsApp uiUrl={uiSrc} onReady={handleUiReady} />
+          ) : (
+            <Webview src={uiSrc} onReady={handleUiReady} showUnavailable={false} />
+          )}
         </div>
       </div>
     </div>

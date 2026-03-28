@@ -168,7 +168,7 @@ export const FleetSidebar = memo(() => {
             <SidebarActiveTicketItem
               key={entry.ticket.id}
               entry={entry}
-              isActive={view.type === 'ticket' && view.ticketId === entry.ticket.id}
+              isActive={store.activeFleetTicketId === entry.ticket.id}
             />
           ))
         )}

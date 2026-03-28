@@ -1,28 +1,32 @@
 import { useStore } from '@nanostores/react';
 import { motion } from 'framer-motion';
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { memo, type MouseEvent as ReactMouseEvent,useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  PiArrowLeftBold,
   PiArrowsClockwiseBold,
+  PiArrowsInBold,
+  PiArrowsOutBold,
+  PiCaretDownBold,
   PiChatCircleBold,
+  PiCheckCircleBold,
   PiCodeBold,
+  PiDotsSixVerticalBold,
+  PiGitBranchBold,
   PiMonitorBold,
   PiPencilSimpleBold,
   PiPlayFill,
-  PiGitBranchBold,
   PiPlusBold,
   PiRobotBold,
   PiStopFill,
   PiTrashBold,
   PiWarningCircleBold,
-  PiCaretDownBold,
-  PiCheckCircleBold,
+  PiXBold,
 } from 'react-icons/pi';
 
 import { CodeSplitLayout } from '@/renderer/common/CodeSplitLayout';
 import { Webview } from '@/renderer/common/Webview';
 import { Button, cn, IconButton, Spinner } from '@/renderer/ds';
 import { FloatingWidget } from '@/renderer/features/Omni/FloatingWidget';
+import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { FleetTicketId, TicketPhase } from '@/shared/types';
 
@@ -35,7 +39,21 @@ import { $fleetPipeline, $fleetTasks, $fleetTickets, fleetApi } from './state';
 type TicketTab = 'Chat' | 'Overview' | 'PR' | 'Artifacts';
 const TABS: TicketTab[] = ['Chat', 'Overview', 'PR', 'Artifacts'];
 
-export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }) => {
+type DragHandleProps = {
+  attributes: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  listeners: Record<string, any> | undefined; // eslint-disable-line @typescript-eslint/no-explicit-any
+};
+
+type FleetTicketDetailProps = {
+  ticketId: FleetTicketId;
+  compact?: boolean;
+  onClose?: () => void;
+  dragHandleProps?: DragHandleProps;
+  isExpanded?: boolean;
+  onToggleExpand?: () => void;
+};
+
+export const FleetTicketDetail = memo(({ ticketId, compact, onClose, dragHandleProps, isExpanded, onToggleExpand }: FleetTicketDetailProps) => {
   const tickets = useStore($fleetTickets);
   const tasks = useStore($fleetTasks);
   const pipeline = useStore($fleetPipeline);
@@ -52,23 +70,22 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
     return pipeline.columns.find((c) => c.id === ticket.columnId);
   }, [ticket, pipeline]);
 
-  const activeTask = useMemo(() => {
-    if (!ticket?.supervisorTaskId) {
-      return undefined;
-    }
-    const t = tasks[ticket.supervisorTaskId];
-    return t?.status.type === 'running' || t?.status.type === 'starting' ? t : undefined;
-  }, [ticket, tasks]);
-
+  // Find the task for this ticket — prefer supervisorTaskId, fall back to scanning by ticketId
   const supervisorTask = useMemo(() => {
-    if (!ticket?.supervisorTaskId) {
-      return undefined;
+    if (ticket?.supervisorTaskId && tasks[ticket.supervisorTaskId]) {
+      return tasks[ticket.supervisorTaskId];
     }
-    return tasks[ticket.supervisorTaskId];
-  }, [ticket, tasks]);
+    return Object.values(tasks).find((t) => t.ticketId === ticketId);
+  }, [ticket, tasks, ticketId]);
 
-  const runningData = supervisorTask?.status.type === 'running' ? supervisorTask.status.data : undefined;
-  const isContainerLive = supervisorTask?.status.type === 'running' || supervisorTask?.status.type === 'starting';
+  const activeTask = useMemo(() => {
+    if (!supervisorTask) return undefined;
+    const { type } = supervisorTask.status;
+    return type === 'running' || type === 'connecting' || type === 'starting' ? supervisorTask : undefined;
+  }, [supervisorTask]);
+
+  const runningData = supervisorTask?.status.type === 'running' || supervisorTask?.status.type === 'connecting' ? supervisorTask.status.data : undefined;
+  const isContainerLive = supervisorTask?.status.type === 'running' || supervisorTask?.status.type === 'connecting' || supervisorTask?.status.type === 'starting';
 
   const theme = store.theme ?? 'tokyo-night';
 
@@ -100,14 +117,6 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
 
   const noVncUrl = runningData?.noVncUrl ?? supervisorTask?.lastUrls?.noVncUrl;
 
-  const handleBack = useCallback(() => {
-    if (ticket) {
-      fleetApi.goToProject(ticket.projectId);
-    } else {
-      fleetApi.goToDashboard();
-    }
-  }, [ticket]);
-
   const handleStartEditTitle = useCallback(() => {
     if (ticket) {
       setEditTitle(ticket.title);
@@ -138,10 +147,11 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
     [handleSaveTitle]
   );
 
-  // Auto-start the sandbox (without sending a prompt) so the web UI loads
+  // Auto-start the sandbox (without sending a prompt) so the web UI loads.
+  // Skip in compact/deck mode — don't spin up sandboxes for every visible column.
   const infraStarted = useRef(false);
   useEffect(() => {
-    if (activeTab !== 'Chat') {
+    if (compact || activeTab !== 'Chat') {
       return;
     }
     const phase = ticket?.phase;
@@ -150,10 +160,14 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
       infraStarted.current = true;
       void fleetApi.ensureSupervisorInfra(ticketId);
     }
-  }, [activeTab, ticket?.phase, activeTask, ticketId]);
+  }, [compact, activeTab, ticket?.phase, activeTask, ticketId]);
 
   const handleStartSupervisor = useCallback(() => {
     fleetApi.startSupervisor(ticketId);
+  }, [ticketId]);
+
+  const handleOpenManual = useCallback(() => {
+    fleetApi.ensureSupervisorInfra(ticketId);
   }, [ticketId]);
 
   const handleStopSupervisor = useCallback(() => {
@@ -186,7 +200,9 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
 
   // Close column menu on outside click
   useEffect(() => {
-    if (!columnMenuOpen) return;
+    if (!columnMenuOpen) {
+return;
+}
     const handleClickOutside = (e: Event) => {
       if (columnMenuRef.current && !columnMenuRef.current.contains(e.target as Node)) {
         setColumnMenuOpen(false);
@@ -210,12 +226,23 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
   }
 
   const phase = ticket.phase;
+  const showTabs = true;
 
   return (
     <div className="flex flex-col w-full h-full">
-      {/* Header: back + title + metadata badges + delete */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-surface-border shrink-0">
-        <IconButton aria-label="Back" icon={<PiArrowLeftBold />} size="sm" onClick={handleBack} />
+      {/* Header — includes phase indicator + actions in compact mode */}
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-surface-border shrink-0">
+        {dragHandleProps && (
+          <button
+            type="button"
+            className="inline-flex items-center justify-center size-7 rounded-md text-fg-muted hover:text-fg hover:bg-white/5 cursor-grab active:cursor-grabbing"
+            {...dragHandleProps.attributes}
+            {...dragHandleProps.listeners}
+            aria-label="Reorder"
+          >
+            <PiDotsSixVerticalBold size={14} />
+          </button>
+        )}
 
         <div className="flex items-center gap-2 flex-1 min-w-0">
           {editingTitle ? (
@@ -275,16 +302,18 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
               )}
             </div>
           )}
-          <span
-            className={cn(
-              'text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0',
-              TICKET_PRIORITY_COLORS[ticket.priority]
-            )}
-          >
-            {TICKET_PRIORITY_LABELS[ticket.priority]}
-          </span>
+          {!compact && (
+            <span
+              className={cn(
+                'text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0',
+                TICKET_PRIORITY_COLORS[ticket.priority]
+              )}
+            >
+              {TICKET_PRIORITY_LABELS[ticket.priority]}
+            </span>
+          )}
 
-          {ticket.branch && (
+          {!compact && ticket.branch && (
             <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 text-purple-400 bg-purple-400/10">
               <PiGitBranchBold size={10} />
               {ticket.branch}
@@ -293,34 +322,49 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
           )}
         </div>
 
-        <IconButton aria-label="Delete ticket" icon={<PiTrashBold />} size="sm" onClick={handleDelete} />
+        {/* Compact phase indicator — replaces ModeBar row */}
+        {compact && <CompactPhaseIndicator phase={phase} isContainerLive={!!isContainerLive} onStart={handleStartSupervisor} onOpenManual={handleOpenManual} onStop={handleStopSupervisor} onReset={handleResetSession} />}
+
+        {onToggleExpand && (
+          <IconButton
+            aria-label={isExpanded ? 'Collapse' : 'Expand'}
+            icon={isExpanded ? <PiArrowsInBold /> : <PiArrowsOutBold />}
+            size="sm"
+            onClick={onToggleExpand}
+          />
+        )}
+        {!compact && <IconButton aria-label="Delete ticket" icon={<PiTrashBold />} size="sm" onClick={handleDelete} />}
+        {onClose && <IconButton aria-label="Close" icon={<PiXBold />} size="sm" onClick={onClose} />}
       </div>
 
-      {/* Tab bar */}
-      <div className="flex gap-1 px-4 py-1.5 border-b border-surface-border shrink-0">
-        {TABS.map((tab) => (
-          <button
-            key={tab}
-            onClick={tabHandlers[tab]}
-            className="relative px-3 py-1 text-xs font-medium rounded-md cursor-pointer select-none transition-colors"
-            style={{ color: activeTab === tab ? 'var(--color-fg)' : 'var(--color-fg-muted)' }}
-          >
-            {activeTab === tab && (
-              <motion.div
-                layoutId="ticket-tab-indicator"
-                className="absolute inset-0 bg-white/10 rounded-md"
-                transition={{ type: 'spring', duration: 0.3, bounce: 0.15 }}
-              />
-            )}
-            <span className="relative z-10">{tab}</span>
-          </button>
-        ))}
-      </div>
+      {/* Tab bar — hidden in compact mode when idle */}
+      {showTabs && (
+        <div className="flex gap-1 px-4 py-1.5 border-b border-surface-border shrink-0">
+          {TABS.map((tab) => (
+            <button
+              key={tab}
+              onClick={tabHandlers[tab]}
+              className="relative px-3 py-1 text-xs font-medium rounded-md cursor-pointer select-none transition-colors"
+              style={{ color: activeTab === tab ? 'var(--color-fg)' : 'var(--color-fg-muted)' }}
+            >
+              {activeTab === tab && (
+                <motion.div
+                  layoutId={`ticket-tab-indicator-${ticketId}`}
+                  className="absolute inset-0 bg-white/10 rounded-md"
+                  transition={{ type: 'spring', duration: 0.3, bounce: 0.15 }}
+                />
+              )}
+              <span className="relative z-10">{tab}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Tab content */}
       {activeTab === 'Chat' && (
         <FleetTicketChatTab
           ticketId={ticketId}
+          compact={compact}
           phase={phase}
           supervisorUiUrl={supervisorUiUrl}
           codeServerUrl={codeServerUrl}
@@ -328,6 +372,7 @@ export const FleetTicketDetail = memo(({ ticketId }: { ticketId: FleetTicketId }
           isContainerLive={!!isContainerLive}
           hasActiveTask={!!activeTask}
           onStart={handleStartSupervisor}
+          onOpenManual={handleOpenManual}
           onStop={handleStopSupervisor}
           onReset={handleResetSession}
         />
@@ -354,16 +399,110 @@ FleetTicketDetail.displayName = 'FleetTicketDetail';
 
 // --- Mode bar: shows current session mode + contextual actions ---
 
+// --- Compact phase indicator (inline in header for deck mode) ---
+
+const CompactPhaseIndicator = memo(
+  ({ phase, isContainerLive, onStart, onOpenManual, onStop, onReset }: { phase: TicketPhase | undefined; isContainerLive: boolean; onStart: () => void; onOpenManual: () => void; onStop: () => void; onReset: () => void }) => {
+    const isAutonomous = phase === 'running' || phase === 'continuing';
+    const isProvisioning = phase === 'provisioning' || phase === 'connecting' || phase === 'session_creating';
+    const isRetrying = phase === 'retrying';
+    const isAwaitingInput = phase === 'awaiting_input';
+    const isError = phase === 'error';
+    const isCompleted = phase === 'completed';
+    const isManual = isContainerLive && !isAutonomous && !isProvisioning && !isRetrying && !isError && !isCompleted && !isAwaitingInput;
+
+    if (isAutonomous) {
+      return (
+        <div className="flex items-center gap-1.5 shrink-0">
+          <PiArrowsClockwiseBold size={10} className="text-green-400 animate-spin" />
+          <span className="text-[10px] text-green-400 font-medium">Working</span>
+          <IconButton aria-label="Stop" icon={<PiStopFill size={10} />} size="sm" onClick={onStop} />
+        </div>
+      );
+    }
+    if (isProvisioning) {
+      return (
+        <div className="flex items-center gap-1.5 shrink-0">
+          <Spinner size="sm" />
+        </div>
+      );
+    }
+    if (isAwaitingInput) {
+      return (
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="size-1.5 rounded-full bg-blue-400 animate-pulse" />
+          <span className="text-[10px] text-blue-400 font-medium">Needs input</span>
+          <IconButton aria-label="Stop" icon={<PiStopFill size={10} />} size="sm" onClick={onStop} />
+        </div>
+      );
+    }
+    if (isRetrying) {
+      return (
+        <div className="flex items-center gap-1.5 shrink-0">
+          <PiArrowsClockwiseBold size={10} className="text-yellow-400 animate-spin" />
+          <span className="text-[10px] text-yellow-400 font-medium">Retrying</span>
+          <IconButton aria-label="Stop" icon={<PiStopFill size={10} />} size="sm" onClick={onStop} />
+        </div>
+      );
+    }
+    if (isError) {
+      return (
+        <div className="flex items-center gap-1.5 shrink-0">
+          <PiWarningCircleBold size={12} className="text-red-400" />
+          <IconButton aria-label="New session" icon={<PiPlusBold size={10} />} size="sm" onClick={onReset} />
+          <Button size="sm" leftIcon={<PiPlayFill size={10} />} onClick={onStart}>
+            Retry
+          </Button>
+        </div>
+      );
+    }
+    if (isCompleted) {
+      return (
+        <div className="flex items-center gap-1.5 shrink-0">
+          <PiCheckCircleBold size={12} className="text-green-400" />
+          <span className="text-[10px] text-green-400 font-medium">Done</span>
+          <IconButton aria-label="New session" icon={<PiPlusBold size={10} />} size="sm" onClick={onReset} />
+        </div>
+      );
+    }
+    if (isManual) {
+      return (
+        <div className="flex items-center gap-1.5 shrink-0">
+          <IconButton aria-label="New session" icon={<PiPlusBold size={10} />} size="sm" onClick={onReset} />
+          <Button size="sm" leftIcon={<PiPlayFill size={10} />} onClick={onStart}>
+            Autopilot
+          </Button>
+        </div>
+      );
+    }
+    // Idle — nothing running
+    return (
+      <div className="flex items-center gap-1.5 shrink-0">
+        <Button size="sm" variant="ghost" onClick={onOpenManual}>
+          Chat
+        </Button>
+        <Button size="sm" leftIcon={<PiPlayFill size={10} />} onClick={onStart}>
+          Autopilot
+        </Button>
+      </div>
+    );
+  }
+);
+CompactPhaseIndicator.displayName = 'CompactPhaseIndicator';
+
+// --- ModeBar (full-width, used in non-compact/focus mode) ---
+
 type ModeBarProps = {
   phase: TicketPhase | undefined;
   isContainerLive: boolean;
   hasActiveTask: boolean;
   onStart: () => void;
+  onOpenManual: () => void;
   onStop: () => void;
   onReset: () => void;
 };
 
-const ModeBar = memo(({ phase, isContainerLive, hasActiveTask, onStart, onStop, onReset }: ModeBarProps) => {
+const ModeBar = memo(({ phase, isContainerLive, hasActiveTask, onStart, onOpenManual, onStop, onReset }: ModeBarProps) => {
   const isAutonomous = phase === 'running' || phase === 'continuing';
   const isProvisioning = phase === 'provisioning' || phase === 'connecting' || phase === 'session_creating';
   const isRetrying = phase === 'retrying';
@@ -378,21 +517,16 @@ const ModeBar = memo(({ phase, isContainerLive, hasActiveTask, onStart, onStop, 
       {isProvisioning && (
         <div className="flex items-center gap-2 flex-1">
           <Spinner size="sm" />
-          <span className="text-xs text-fg-muted">{PHASE_LABELS[phase!] ?? 'Preparing...'}</span>
         </div>
       )}
 
-      {/* Manual session */}
+      {/* Manual session — workspace open, no agent running */}
       {isManual && !isCompleted && !isAwaitingInput && (
         <div className="flex items-center gap-2 flex-1">
-          <PiChatCircleBold size={14} className="text-fg-muted shrink-0" />
-          <span className="text-xs text-fg-muted">Manual session</span>
           <div className="flex-1" />
-          {hasActiveTask && (
-            <IconButton aria-label="New session" icon={<PiPlusBold />} size="sm" onClick={onReset} />
-          )}
+          <IconButton aria-label="New session" icon={<PiPlusBold />} size="sm" onClick={onReset} />
           <Button size="sm" leftIcon={<PiPlayFill size={12} />} onClick={onStart}>
-            Start Autonomous Run
+            Autopilot
           </Button>
         </div>
       )}
@@ -458,20 +592,24 @@ const ModeBar = memo(({ phase, isContainerLive, hasActiveTask, onStart, onStop, 
           <PiCheckCircleBold size={14} className="text-green-400 shrink-0" />
           <span className="text-xs text-green-400 font-medium">Completed</span>
           <div className="flex-1" />
-          {hasActiveTask && (
-            <IconButton aria-label="New session" icon={<PiPlusBold />} size="sm" onClick={onReset} />
-          )}
+          <IconButton aria-label="New session" icon={<PiPlusBold />} size="sm" onClick={onReset} />
           <Button size="sm" leftIcon={<PiPlayFill size={12} />} onClick={onStart}>
             Run Again
           </Button>
         </div>
       )}
 
-      {/* Not started yet (no container) */}
+      {/* Idle — not started yet */}
       {!isContainerLive && !isProvisioning && !isError && !isCompleted && (
         <div className="flex items-center gap-2 flex-1">
-          <Spinner size="sm" />
-          <span className="text-xs text-fg-muted">Starting workspace...</span>
+          <span className="text-xs text-fg-muted">Ready to start</span>
+          <div className="flex-1" />
+          <Button size="sm" variant="ghost" onClick={onOpenManual}>
+            Chat
+          </Button>
+          <Button size="sm" leftIcon={<PiPlayFill size={12} />} onClick={onStart}>
+            Autopilot
+          </Button>
         </div>
       )}
     </div>
@@ -485,6 +623,7 @@ type MainView = 'agent' | 'code' | 'vnc';
 
 type ChatTabProps = {
   ticketId: FleetTicketId;
+  compact?: boolean;
   phase: TicketPhase | undefined;
   supervisorUiUrl: string | undefined;
   codeServerUrl: string | undefined;
@@ -492,12 +631,14 @@ type ChatTabProps = {
   isContainerLive: boolean;
   hasActiveTask: boolean;
   onStart: () => void;
+  onOpenManual: () => void;
   onStop: () => void;
   onReset: () => void;
 };
 
 const FleetTicketChatTab = memo(
   ({
+    compact: chatCompact,
     phase,
     supervisorUiUrl,
     codeServerUrl,
@@ -505,6 +646,7 @@ const FleetTicketChatTab = memo(
     isContainerLive,
     hasActiveTask,
     onStart,
+    onOpenManual,
     onStop,
     onReset,
   }: ChatTabProps) => {
@@ -553,22 +695,34 @@ const FleetTicketChatTab = memo(
     const mainSrc = currentView?.src;
     const pills = views.filter((v) => v.key !== mainView && v.src);
     const showWebview = mainSrc && isContainerLive;
+    const isSupervisorMain = mainView === 'agent' && !!supervisorUiUrl;
+    const isSupervisorSplit = splitSrc === supervisorUiUrl;
 
     return (
       <div className="flex-1 min-h-0 flex flex-col">
-        <ModeBar
-          phase={phase}
-          isContainerLive={isContainerLive}
-          hasActiveTask={hasActiveTask}
-          onStart={onStart}
-          onStop={onStop}
-          onReset={onReset}
-        />
+        {!chatCompact && (
+          <ModeBar
+            phase={phase}
+            isContainerLive={isContainerLive}
+            hasActiveTask={hasActiveTask}
+            onStart={onStart}
+            onOpenManual={onOpenManual}
+            onStop={onStop}
+            onReset={onReset}
+          />
+        )}
         <div className="flex-1 min-h-0 relative">
           {showWebview ? (
             <div className="h-full relative">
               {splitSrc && mainSrc ? (
-                <CodeSplitLayout codeServerSrc={mainSrc} uiSrc={splitSrc} />
+                <CodeSplitLayout
+                  codeServerSrc={mainSrc}
+                  uiSrc={splitSrc}
+                  codeServerMode={isSupervisorMain ? 'omniagents' : 'webview'}
+                  uiMode={isSupervisorSplit ? 'omniagents' : 'webview'}
+                />
+              ) : isSupervisorMain ? (
+                <OmniAgentsApp uiUrl={mainSrc ?? supervisorUiUrl} />
               ) : (
                 <Webview src={mainSrc} showUnavailable={false} />
               )}
@@ -590,10 +744,16 @@ const FleetTicketChatTab = memo(
                 />
               ))}
             </div>
+          ) : phase && phase !== 'idle' && phase !== 'completed' ? (
+            <div className="w-full h-full flex items-center justify-center">
+              <div className="inline-flex items-center gap-2 rounded-full bg-surface-raised px-4 py-2">
+                <Spinner size="sm" />
+                <span className="text-sm text-fg-muted">Connecting…</span>
+              </div>
+            </div>
           ) : (
-            <div className="flex flex-col items-center justify-center h-full gap-3">
-              <Spinner size="md" />
-              <p className="text-sm text-fg-muted">Starting workspace...</p>
+            <div className="w-full h-full flex items-center justify-center">
+              <span className="text-sm text-fg-subtle">Start a run to begin working on this ticket</span>
             </div>
           )}
         </div>

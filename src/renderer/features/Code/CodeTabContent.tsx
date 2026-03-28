@@ -3,21 +3,16 @@ import type { Terminal } from '@xterm/xterm';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { ReadableAtom } from 'nanostores';
 import { computed } from 'nanostores';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { PiWarningCircleFill } from 'react-icons/pi';
+import { memo, useCallback, useMemo } from 'react';
 
-import { EllipsisLoadingText } from '@/renderer/common/EllipsisLoadingText';
-import { BodyContainer, BodyContent } from '@/renderer/common/layout';
-import { Button, cn, Heading, Spinner } from '@/renderer/ds';
-import { $omniInstallProcessXTerm } from '@/renderer/features/Omni/state';
-import { XTermLogViewer } from '@/renderer/features/XTermLogViewer/XTermLogViewer';
+import { SessionStartupShell } from '@/renderer/common/SessionStartupShell';
+import { Button, cn } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { CodeTab, CodeTabId } from '@/shared/types';
 
 import { CodeEmptyState } from './CodeEmptyState';
 import { CodeWorkspaceLayout } from './CodeWorkspaceLayout';
-import { $codeTabErrors, $codeTabPhases, $codeTabStatuses, $codeTabXTerms } from './state';
-import type { AutoLaunchPhase } from './use-code-auto-launch';
+import { $codeTabErrors, $codeTabStatuses, $codeTabXTerms } from './state';
 import { useCodeAutoLaunch } from './use-code-auto-launch';
 
 /** Cache of per-tab computed atoms so we don't create new ones on every render. */
@@ -31,127 +26,20 @@ const getTabXTermAtom = (tabId: CodeTabId): ReadableAtom<Terminal | null> => {
   return atom;
 };
 
-const CONTENT_READY_TIMEOUT_MS = 10_000;
-
-const fadeVariants = {
-  initial: { opacity: 0, y: 8 },
-  animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -8 },
-};
-
-const PHASE_LABELS: Partial<Record<AutoLaunchPhase, string>> = {
-  checking: 'Checking runtime',
-  installing: 'Installing runtime',
-  ready: 'Preparing workspace',
-  starting: 'Starting services',
-  running: 'Loading interface',
-};
-
-const PHASE_ORDER: AutoLaunchPhase[] = ['checking', 'installing', 'ready', 'starting', 'running'];
-
-const CodeProgressView = memo(({ tabId }: { tabId: CodeTabId }) => {
-  const allPhases = useStore($codeTabPhases);
-  const phase = allPhases[tabId] ?? 'checking';
-  const omniInstallXTerm = useStore($omniInstallProcessXTerm);
-  const $tabXTerm = useMemo(() => getTabXTermAtom(tabId), [tabId]);
-  const sandboxXTerm = useStore($tabXTerm);
-  const [showLogs, setShowLogs] = useState(false);
-
-  const label = PHASE_LABELS[phase] ?? 'Starting';
-  const hasLogs = phase === 'installing' ? Boolean(omniInstallXTerm) : Boolean(sandboxXTerm);
-
-  const toggleLogs = useCallback(() => {
-    setShowLogs((prev) => !prev);
-  }, []);
-
-  const currentPhaseIndex = PHASE_ORDER.indexOf(phase);
-
-  return (
-    <BodyContainer>
-      <BodyContent className="justify-center items-center">
-        <motion.div
-          variants={fadeVariants}
-          initial="initial"
-          animate="animate"
-          exit="exit"
-          className="flex flex-col items-center gap-6 max-w-md"
-        >
-          <Spinner size="lg" />
-
-          <div className="flex items-center gap-3">
-            {PHASE_ORDER.map((p, i) => (
-              <div key={p} className="flex items-center gap-3">
-                <div
-                  className={cn(
-                    'size-2 rounded-full transition-colors',
-                    i < currentPhaseIndex && 'bg-accent-500',
-                    i === currentPhaseIndex && 'bg-accent-400 animate-pulse',
-                    i > currentPhaseIndex && 'bg-surface-overlay'
-                  )}
-                />
-                {i < PHASE_ORDER.length - 1 && <div className="w-6 h-px bg-surface-border" />}
-              </div>
-            ))}
-          </div>
-
-          <EllipsisLoadingText className="text-sm text-fg-muted">{label}</EllipsisLoadingText>
-
-          {hasLogs && (
-            <Button size="sm" variant="ghost" onClick={toggleLogs}>
-              {showLogs ? 'Hide details' : 'Show details'}
-            </Button>
-          )}
-
-          <AnimatePresence>
-            {showLogs && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 300, opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ type: 'spring', duration: 0.4, bounce: 0 }}
-                className="w-full min-w-[500px] overflow-hidden"
-              >
-                {phase === 'installing' ? (
-                  <XTermLogViewer $xterm={$omniInstallProcessXTerm} />
-                ) : (
-                  <XTermLogViewer $xterm={$tabXTerm} />
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </motion.div>
-      </BodyContent>
-    </BodyContainer>
-  );
-});
-CodeProgressView.displayName = 'CodeProgressView';
-
 const CodeErrorView = memo(({ tabId }: { tabId: CodeTabId }) => {
   const allErrors = useStore($codeTabErrors);
   const error = allErrors[tabId] ?? null;
   const { retry } = useCodeAutoLaunch(tabId, null);
 
   return (
-    <BodyContainer>
-      <BodyContent className="justify-center items-center">
-        <motion.div
-          variants={fadeVariants}
-          initial="initial"
-          animate="animate"
-          exit="exit"
-          className="flex flex-col items-center gap-6 max-w-md"
-        >
-          <PiWarningCircleFill className="text-fg-error" size={32} />
-          <Heading size="md">Something went wrong</Heading>
-
-          <div className="bg-red-400/5 border border-red-400/20 rounded-lg p-4 w-full">
-            <span className="text-fg-error text-sm text-center block">{error ?? 'An unexpected error occurred.'}</span>
-          </div>
-
+    <div className="w-full h-full flex items-center justify-center">
+      <div className="max-w-md text-center px-4">
+        <div className="text-lg font-medium text-fg">{error ?? 'Something went wrong'}</div>
+        <div className="mt-4">
           <Button onClick={retry}>Retry</Button>
-        </motion.div>
-      </BodyContent>
-    </BodyContainer>
+        </div>
+      </div>
+    </div>
   );
 });
 CodeErrorView.displayName = 'CodeErrorView';
@@ -162,11 +50,17 @@ const CodeRunningView = memo(
     overlayPane,
     onCloseOverlay,
     onReady,
+    uiMinimal,
+    headerActionsTargetId,
+    headerActionsCompact,
   }: {
     sandboxUrls: { uiUrl: string; codeServerUrl?: string; noVncUrl?: string };
     overlayPane: 'none' | 'code' | 'vnc';
     onCloseOverlay: () => void;
     onReady: () => void;
+    uiMinimal?: boolean;
+    headerActionsTargetId?: string;
+    headerActionsCompact?: boolean;
   }) => {
     const store = useStore(persistedStoreApi.$atom);
     const theme = store.theme ?? 'tokyo-night';
@@ -176,8 +70,11 @@ const CodeRunningView = memo(
       if (theme !== 'default') {
         url.searchParams.set('theme', theme);
       }
+      if (uiMinimal) {
+        url.searchParams.set('minimal', 'true');
+      }
       return url.toString();
-    }, [sandboxUrls.uiUrl, theme]);
+    }, [sandboxUrls.uiUrl, theme, uiMinimal]);
     const codeServerSrc = sandboxUrls.codeServerUrl;
     const vncSrc = sandboxUrls.noVncUrl;
 
@@ -191,6 +88,8 @@ const CodeRunningView = memo(
             overlayPane={overlayPane}
             onCloseOverlay={onCloseOverlay}
             onReady={onReady}
+            headerActionsTargetId={headerActionsTargetId}
+            headerActionsCompact={headerActionsCompact}
           />
         </div>
       </div>
@@ -204,9 +103,12 @@ type CodeTabContentProps = {
   isVisible: boolean;
   overlayPane?: 'none' | 'code' | 'vnc';
   onCloseOverlay?: () => void;
+  uiMinimal?: boolean;
+  headerActionsTargetId?: string;
+  headerActionsCompact?: boolean;
 };
 
-export const CodeTabContent = memo(({ tab, isVisible, overlayPane = 'none', onCloseOverlay }: CodeTabContentProps) => {
+export const CodeTabContent = memo(({ tab, isVisible, overlayPane = 'none', onCloseOverlay, uiMinimal, headerActionsTargetId, headerActionsCompact }: CodeTabContentProps) => {
   const store = useStore(persistedStoreApi.$atom);
   const project = useMemo(
     () => store.fleetProjects.find((p) => p.id === tab.projectId) ?? null,
@@ -220,97 +122,64 @@ export const CodeTabContent = memo(({ tab, isVisible, overlayPane = 'none', onCl
   const sandboxStatus = allStatuses[tab.id];
 
   const sandboxUrls = useMemo(() => {
-    if (!sandboxStatus || sandboxStatus.type !== 'running') {
+    if (!sandboxStatus || (sandboxStatus.type !== 'running' && sandboxStatus.type !== 'connecting')) {
       return null;
     }
     return sandboxStatus.data;
   }, [sandboxStatus]);
 
-  const [contentReady, setContentReady] = useState(false);
-
-  useEffect(() => {
-    if (!sandboxUrls) {
-      setContentReady(false);
-    }
-  }, [sandboxUrls]);
-
-  useEffect(() => {
-    if (!sandboxUrls || contentReady) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      setContentReady(true);
-    }, CONTENT_READY_TIMEOUT_MS);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [sandboxUrls, contentReady]);
-
-  const handleContentReady = useCallback(() => {
-    setContentReady(true);
-  }, []);
-
   const handleCloseOverlay = useCallback(() => {
     onCloseOverlay?.();
   }, [onCloseOverlay]);
 
+  // No project selected — show project picker
   if (!tab.projectId) {
     return (
       <div className={cn('w-full h-full', !isVisible && 'hidden')}>
-        <CodeEmptyState tabId={tab.id} />
+        <SessionStartupShell eyebrow="Workspace Setup" title="Choose a project" description="Open an existing project in this session or create a new one to start working.">
+          <CodeEmptyState tabId={tab.id} embedded />
+        </SessionStartupShell>
       </div>
     );
   }
 
+  const isConnecting = !sandboxUrls && phase !== 'error' && phase !== 'idle';
+
   return (
     <div className={cn('w-full h-full relative', !isVisible && 'hidden')}>
-      {sandboxUrls && (
+      {sandboxUrls ? (
         <CodeRunningView
           sandboxUrls={sandboxUrls}
           overlayPane={overlayPane}
           onCloseOverlay={handleCloseOverlay}
-          onReady={handleContentReady}
+          onReady={() => {}}
+          uiMinimal={uiMinimal}
+          headerActionsTargetId={headerActionsTargetId}
+          headerActionsCompact={headerActionsCompact}
         />
+      ) : phase === 'error' ? (
+        <CodeErrorView tabId={tab.id} />
+      ) : phase === 'idle' ? (
+        <SessionStartupShell eyebrow="Workspace Setup" title="Choose a project" description="Open an existing project in this session or create a new one to start working.">
+          <CodeEmptyState tabId={tab.id} embedded />
+        </SessionStartupShell>
+      ) : (
+        /* Connecting — show a subtle centered indicator */
+        <div className="w-full h-full flex items-center justify-center">
+          <motion.div
+            className="inline-flex items-center gap-2 rounded-full bg-surface-raised px-4 py-2"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, ease: 'easeOut' }}
+          >
+            <svg className="animate-spin h-4 w-4 text-fg-subtle" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+            <span className="text-sm text-fg-muted">Connecting…</span>
+          </motion.div>
+        </div>
       )}
-
-      <AnimatePresence mode="wait">
-        {phase === 'error' && !sandboxUrls && (
-          <motion.div
-            key="error"
-            variants={fadeVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            className="absolute inset-0 z-40"
-          >
-            <CodeErrorView tabId={tab.id} />
-          </motion.div>
-        )}
-        {phase === 'idle' && !sandboxUrls && (
-          <motion.div
-            key="idle"
-            variants={fadeVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            className="absolute inset-0 z-40"
-          >
-            <CodeEmptyState tabId={tab.id} />
-          </motion.div>
-        )}
-        {!contentReady && phase !== 'error' && phase !== 'idle' && sandboxUrls === null && (
-          <motion.div
-            key="progress"
-            variants={fadeVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            className="absolute inset-0 z-40 bg-surface"
-          >
-            <CodeProgressView tabId={tab.id} />
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 });

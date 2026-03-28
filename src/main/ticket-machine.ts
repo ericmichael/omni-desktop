@@ -30,11 +30,19 @@ type RpcNotification = {
 
 // --- Callback types ---
 
+export type ClientFunctionResponder = (ok: boolean, result?: Record<string, unknown>) => void;
+
 export type TicketMachineCallbacks = {
   onPhaseChange: (ticketId: FleetTicketId, phase: TicketPhase) => void;
   onMessage: (ticketId: FleetTicketId, msg: FleetSessionMessage) => void;
   onRunEnd: (ticketId: FleetTicketId, reason: string) => void;
   onTokenUsage?: (ticketId: FleetTicketId, usage: FleetTokenUsage) => void;
+  onClientRequest?: (
+    ticketId: FleetTicketId,
+    functionName: string,
+    args: Record<string, unknown>,
+    respond: ClientFunctionResponder
+  ) => void;
 };
 
 // --- RPC ID counter ---
@@ -332,6 +340,22 @@ export class TicketMachine {
           });
         }
       }
+
+      // Notification: client_request (agent calling a client function)
+      if (parsed.method === 'client_request') {
+        const params = parsed.params as {
+          function?: string;
+          request_id?: string;
+          args?: Record<string, unknown>;
+        } | undefined;
+        if (params?.function && params?.request_id && this.callbacks.onClientRequest) {
+          const requestId = params.request_id;
+          const respond: ClientFunctionResponder = (ok, result) => {
+            void this.sendRpc('client_response', { request_id: requestId, ok, result }).catch(() => {});
+          };
+          this.callbacks.onClientRequest(this.ticketId, params.function, params.args ?? {}, respond);
+        }
+      }
     } catch {
       // Ignore unparseable messages
     }
@@ -349,7 +373,9 @@ export class TicketMachine {
       await this.ensureWs();
 
       this.transition('session_creating');
-      const args: Record<string, unknown> = {};
+      const args: Record<string, unknown> = {
+        safe_tool_overrides: SAFE_TOOL_OVERRIDES,
+      };
       if (variables) {
         args.variables = variables;
       }
@@ -372,6 +398,7 @@ export class TicketMachine {
 
       this.sessionId = result.session_id;
       this.runId = null;
+
       this.transition('ready');
 
       return this.sessionId;

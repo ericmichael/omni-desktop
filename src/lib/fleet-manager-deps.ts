@@ -92,6 +92,12 @@ export type MachineCallbacks = {
   onMessage: (ticketId: FleetTicketId, msg: FleetSessionMessage) => void;
   onRunEnd: (ticketId: FleetTicketId, reason: string) => void;
   onTokenUsage: (ticketId: FleetTicketId, usage: FleetTokenUsage) => void;
+  onClientRequest?: (
+    ticketId: FleetTicketId,
+    functionName: string,
+    args: Record<string, unknown>,
+    respond: (ok: boolean, result?: Record<string, unknown>) => void
+  ) => void;
 };
 
 export interface IMachineFactory {

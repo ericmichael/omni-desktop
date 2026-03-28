@@ -7,8 +7,7 @@ import { nanoid } from 'nanoid';
 import path from 'path';
 import { promisify } from 'util';
 
-import { getArtifactsDir, getContainerTicketFilePath } from '@/lib/fleet-plan-file';
-import { FleetTicketFileSync } from '@/main/fleet-ticket-file-sync';
+import { getArtifactsDir } from '@/lib/fleet-plan-file';
 import type { FleetManagerDeps, IMachineFactory, ISandboxFactory, IWorkflowLoader } from '@/lib/fleet-manager-deps';
 import { classifyRunEndReason, decideRunEndAction } from '@/lib/fleet-run-end';
 import { decideWorktreeAction } from '@/lib/fleet-worktree';
@@ -19,6 +18,8 @@ import { getMimeType, isTextMime } from '@/lib/mime-types';
 import { buildSupervisorPrompt } from '@/main/fleet-supervisor-prompt';
 import { TicketMachine } from '@/main/ticket-machine';
 import { FleetWorkflowLoader } from '@/main/fleet-workflow-loader';
+import { FleetMcpServer } from '@/main/fleet-mcp-server';
+import type { FleetMcpDelegate } from '@/main/fleet-mcp-server';
 import { SandboxManager } from '@/main/sandbox-manager';
 import { getOmniConfigDir, getWorktreesDir } from '@/main/util';
 import { DEFAULT_PIPELINE } from '@/shared/fleet-defaults';
@@ -349,6 +350,7 @@ const STALL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const STALL_CHECK_INTERVAL_MS = 30_000; // 30 seconds
 
 
+
 /** Short delay before a continuation retry after a normal run end. */
 const CONTINUATION_RETRY_DELAY_MS = 3_000;
 
@@ -368,7 +370,7 @@ const MAX_CONTINUATION_TURNS = 10;
 
 export class FleetManager {
   private tasks = new Map<FleetTaskId, { task: FleetTask; sandbox: SandboxManager }>();
-  private machines = new Map<FleetTicketId, { machine: TicketMachine; sandbox: SandboxManager }>();
+  private machines = new Map<FleetTicketId, { machine: TicketMachine; sandbox: SandboxManager; mcpServers?: FleetMcpServer[] }>();
   private ticketLocks = new Map<FleetTicketId, Promise<void>>();
   private store: Store<StoreData>;
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
@@ -381,9 +383,6 @@ export class FleetManager {
   /** Interval handle for auto-dispatch polling. */
   private autoDispatchTimer: ReturnType<typeof setInterval> | null = null;
 
-  /** Ticket file sync — writes TICKET.yaml and watches for agent column changes. */
-  private ticketFileSync: FleetTicketFileSync;
-
   /** Injectable factories for testing. */
   private sandboxFactory?: ISandboxFactory;
   private machineFactory?: IMachineFactory;
@@ -394,34 +393,6 @@ export class FleetManager {
   ) {
     this.store = arg.store;
     this.sendToWindow = arg.sendToWindow;
-    this.ticketFileSync = new FleetTicketFileSync(getOmniConfigDir(), {
-      onColumnChange: (ticketId, columnId) => {
-        const ticket = this.getTicketById(ticketId);
-        if (!ticket || ticket.columnId === columnId) return;
-        console.log(`[FleetManager] Agent moved ticket ${ticketId} to column "${columnId}" via TICKET.yaml`);
-        this.moveTicketToColumn(ticketId, columnId);
-      },
-      onEscalation: (ticketId, message) => {
-        const ticket = this.getTicketById(ticketId);
-        if (!ticket) return;
-        console.log(`[FleetManager] Agent escalated ticket ${ticketId}: ${message}`);
-
-        // Show toast regardless of current screen
-        this.sendToWindow('toast:show', {
-          level: 'warning',
-          title: `Agent needs help: ${ticket.title}`,
-          description: message,
-        });
-
-        // Transition to awaiting_input so the agent pauses
-        const entry = this.machines.get(ticketId);
-        if (entry && entry.machine.isStreaming()) {
-          void entry.machine.stop().then(() => {
-            entry.machine.forcePhase('awaiting_input');
-          });
-        }
-      },
-    });
     this.workflowLoader = deps?.workflowLoader ?? new FleetWorkflowLoader({
       onChange: (projectId, workflow) => {
         console.log(
@@ -660,8 +631,10 @@ export class FleetManager {
       // executing long tool calls. We only detect stalls in phases where the
       // machine is stuck without progressing (e.g. provisioning, connecting).
       if (!machine.isActive() || machine.isStreaming()) continue;
-      // Skip phases that have their own timeouts or are waiting intentionally
-      if (phase === 'retrying' || phase === 'awaiting_input') continue;
+      // Skip phases that have their own timeouts or are waiting intentionally.
+      // 'ready' means the session exists but no autonomous run was started — the user
+      // may be using the workspace manually, so don't treat it as stalled.
+      if (phase === 'retrying' || phase === 'awaiting_input' || phase === 'ready') continue;
 
       const ticket = this.getTicketById(ticketId);
       const stallTimeout = ticket ? this.getEffectiveStallTimeout(ticket.projectId) : STALL_TIMEOUT_MS;
@@ -1073,6 +1046,7 @@ export class FleetManager {
     const machineEntry = this.machines.get(id);
     if (machineEntry) {
       void machineEntry.machine.dispose();
+      machineEntry.mcpServers?.forEach((s) => void s.stop());
       void machineEntry.sandbox.exit();
       this.machines.delete(id);
     }
@@ -1083,6 +1057,10 @@ export class FleetManager {
 
   getTicketsByProject = (projectId: FleetProjectId): FleetTicket[] => {
     return this.getTickets().filter((t) => t.projectId === projectId);
+  };
+
+  getTasks = (): FleetTask[] => {
+    return Array.from(this.tasks.values()).map((entry) => entry.task);
   };
 
   private static PRIORITY_ORDER: Record<FleetTicketPriority, number> = {
@@ -1384,7 +1362,7 @@ export class FleetManager {
 
   // #region Column movement
 
-  moveTicketToColumn = (ticketId: FleetTicketId, columnId: FleetColumnId, opts?: { skipSync?: boolean }): void => {
+  moveTicketToColumn = (ticketId: FleetTicketId, columnId: FleetColumnId): void => {
     const ticket = this.getTicketById(ticketId);
     if (!ticket) {
       return;
@@ -1396,13 +1374,6 @@ export class FleetManager {
     }
 
     this.updateTicket(ticketId, { columnId });
-
-    // Update TICKET.yaml so the agent sees the new column
-    const updatedTicket = this.getTicketById(ticketId);
-    if (updatedTicket) {
-      const pipeline = this.getPipeline(updatedTicket.projectId);
-      void this.ticketFileSync.updateColumn(updatedTicket, pipeline);
-    }
 
     // Reconciliation: stop supervisor and clean up workspace when ticket moves to a terminal column
     if (this.isTerminalColumn(ticket.projectId, columnId)) {
@@ -1500,6 +1471,7 @@ export class FleetManager {
       console.log(
         `[FleetManager] ensureSupervisorInfra: stale machine for ${ticketId} (sandbox status: ${sbStatus?.type ?? 'unknown'}, phase: ${existing.machine.getPhase()}). Cleaning up.`
       );
+      if (existing.mcpServers) await Promise.all(existing.mcpServers.map((s) => s.stop()));
       await existing.machine.dispose();
       this.machines.delete(ticketId);
     }
@@ -1608,9 +1580,52 @@ export class FleetManager {
     this.persistTask(task);
     this.updateTicket(ticketId, { supervisorTaskId: taskId });
 
-    this.machines.set(ticketId, { machine, sandbox });
+    // Start MCP server so the agent inside Docker can call fleet tools
+    const mcpDelegate: FleetMcpDelegate = {
+      getTicket: (tid) => {
+        const t = this.getTicketById(tid);
+        if (!t) return null;
+        return {
+          id: t.id,
+          title: t.title,
+          description: t.description || '',
+          priority: t.priority,
+          columnId: t.columnId,
+          projectId: t.projectId,
+        };
+      },
+      getPipeline: (pid) => this.getPipeline(pid),
+      moveTicketToColumn: (tid, colId) => this.moveTicketToColumn(tid, colId),
+      escalate: async (tid, message) => {
+        const t = this.getTicketById(tid);
+        if (t) {
+          this.sendToWindow('toast:show', {
+            level: 'warning',
+            title: `Agent needs help: ${t.title}`,
+            description: message,
+          });
+        }
+        const e = this.machines.get(tid);
+        if (e && e.machine.isStreaming()) {
+          await e.machine.stop();
+          e.machine.forcePhase('awaiting_input');
+        }
+      },
+    };
+    // Start launcher-provided MCP servers (agent reaches them via host.docker.internal)
+    const mcpServers: FleetMcpServer[] = [];
 
-    sandbox.start({ workspaceDir, sandboxVariant: 'work', sandboxConfig: project.sandbox });
+    const fleetMcp = new FleetMcpServer(ticketId, mcpDelegate);
+    await fleetMcp.start();
+    mcpServers.push(fleetMcp);
+
+    this.machines.set(ticketId, { machine, sandbox, mcpServers });
+
+    sandbox.start({
+      workspaceDir,
+      sandboxVariant: 'work',
+      sandboxConfig: project.sandbox,
+    });
 
     // Await sandbox readiness
     let wsUrl: string;
@@ -1651,7 +1666,20 @@ export class FleetManager {
     if (!project) return;
 
     const supervisorPrompt = this.buildFullSupervisorPrompt(ticketId);
-    const variables = { additional_instructions: supervisorPrompt };
+    const variables: Record<string, unknown> = { additional_instructions: supervisorPrompt };
+
+    // Pass MCP server URLs so the agent can connect to launcher-provided tools.
+    // The container reaches the host via host.docker.internal (gateway IP, always
+    // allowed by the network isolation script).
+    if (entry.mcpServers?.length) {
+      variables.mcp_servers = entry.mcpServers
+        .filter((s) => s.port != null)
+        .map((s, i) => ({
+          name: `launcher-${i}`,
+          type: 'streamable_http',
+          params: { url: s.containerUrl() },
+        }));
+    }
 
     try {
       console.log(`[FleetManager] Creating session for ticket ${ticketId} with variables:`, Object.keys(variables));
@@ -1772,7 +1800,6 @@ export class FleetManager {
     const pipeline = ticket ? this.getPipeline(ticket.projectId) : null;
     const columnLabels = pipeline?.columns.map((c) => c.label).join(', ') ?? '';
     const currentColumn = pipeline?.columns.find((c) => c.id === ticket?.columnId)?.label ?? ticket?.columnId ?? '';
-    const ticketFilePath = ticket ? getContainerTicketFilePath(ticket.id) : '';
 
     if (customContinuation) {
       return customContinuation.replace(/\{\{turn}}/g, String(turn)).replace(/\{\{maxTurns}}/g, String(maxTurns));
@@ -1786,8 +1813,8 @@ export class FleetManager {
       `- Resume from current workspace state — do not restart from scratch or re-read files you already have in context.`,
       `- The original task instructions and prior context are already in this session, so do not restate them before acting.`,
       `- Use your best judgement to move the work forward. You are working in an isolated sandbox, so it is safe to make changes freely. Do not ask for confirmation or escalate to the user unless you are truly blocked on something that requires human input. The human will review your work at a later stage.`,
-      `- Your ticket is currently in column "${currentColumn}". If you have completed the work for this column, update the column field in ${ticketFilePath} to advance the ticket. Valid columns: ${columnLabels}.`,
-      `- If you are truly blocked and need human help, add an \`escalation\` field to ${ticketFilePath}. This will pause your run and notify the human. Only use this when you cannot proceed without human input.`,
+      `- Your ticket is currently in column "${currentColumn}". If you have completed the work, call \`move_ticket\` to advance it. Valid columns: ${columnLabels}.`,
+      `- If you are truly blocked and need human help, call \`escalate\` with a message. This will pause your run and notify the human. Only use this when you cannot proceed without human input.`,
     ].join('\n');
   }
 
@@ -1822,16 +1849,6 @@ export class FleetManager {
       console.log(`[FleetManager] startSupervisor: ensureSupervisorInfra for ${ticketId}...`);
       const { machine } = await this.ensureSupervisorInfra(ticketId);
       console.log(`[FleetManager] startSupervisor: ensureSupervisorInfra done. Phase: ${machine.getPhase()}, sessionId: ${machine.getSessionId()}`);
-
-      // Write TICKET.yaml so the agent can read/update its column
-      try {
-        const pipeline = this.getPipeline(ticket.projectId);
-        await this.ticketFileSync.writeAndWatch(ticket, pipeline);
-        console.log(`[FleetManager] startSupervisor: writeAndWatch done for ${ticketId}`);
-      } catch (err) {
-        console.error(`[FleetManager] startSupervisor: writeAndWatch FAILED for ${ticketId}:`, err);
-        // Don't block the run — TICKET.yaml is nice-to-have
-      }
 
       // Use the session ID from the machine (may have been freshly created by ensureSupervisorInfra)
       const sessionId = machine.getSessionId() ?? undefined;
@@ -1880,8 +1897,6 @@ export class FleetManager {
    * and run the before_remove hook. Called when a ticket reaches a terminal column.
    */
   private cleanupTicketWorkspace = async (ticketId: FleetTicketId): Promise<void> => {
-    this.ticketFileSync.stopWatching(ticketId);
-
     const ticket = this.getTicketById(ticketId);
     if (!ticket) {
       return;
@@ -1899,6 +1914,7 @@ export class FleetManager {
     // Dispose machine if still registered
     const machineEntry = this.machines.get(ticketId);
     if (machineEntry) {
+      if (machineEntry.mcpServers) await Promise.all(machineEntry.mcpServers.map((s) => s.stop()));
       await machineEntry.machine.dispose();
       this.machines.delete(ticketId);
     }
@@ -1966,14 +1982,6 @@ export class FleetManager {
       const phase = entry.machine.getPhase();
 
       if (phase === 'idle' || phase === 'error' || phase === 'ready' || phase === 'awaiting_input') {
-        // Clear escalation by rewriting TICKET.yaml without it
-        if (phase === 'awaiting_input') {
-          const ticket = this.getTicketById(ticketId);
-          if (ticket) {
-            const pipeline = this.getPipeline(ticket.projectId);
-            void this.ticketFileSync.updateColumn(ticket, pipeline);
-          }
-        }
         await this.sendUserRunMessage(ticketId, message);
       } else if (entry.machine.isStreaming()) {
         try {
@@ -2116,7 +2124,11 @@ export class FleetManager {
     const tickets = this.getTickets();
     let dirty = false;
     const patched = tickets.map((ticket) => {
-      if (ticket.phase && ticket.phase !== 'idle' && ticket.phase !== 'error' && ticket.phase !== 'completed') {
+      // On startup, reset everything except 'idle' and 'completed' back to 'idle'.
+      // Error states from previous sessions are stale — the infrastructure is gone,
+      // so presenting old errors on fresh launch is confusing. Only 'completed'
+      // persists because the work is actually done.
+      if (ticket.phase && ticket.phase !== 'idle' && ticket.phase !== 'completed') {
         dirty = true;
         return { ...ticket, phase: 'idle' as const };
       }
@@ -2177,6 +2189,7 @@ export class FleetManager {
     if (entry.task.ticketId) {
       const machineEntry = this.machines.get(entry.task.ticketId);
       if (machineEntry) {
+        if (machineEntry.mcpServers) await Promise.all(machineEntry.mcpServers.map((s) => s.stop()));
         await machineEntry.machine.dispose();
         this.machines.delete(entry.task.ticketId);
       }
@@ -2453,10 +2466,10 @@ export class FleetManager {
     }
     this.cancelAllRetries();
     this.workflowLoader.dispose();
-    this.ticketFileSync.dispose();
 
     // Dispose all machines
     for (const [ticketId, entry] of this.machines) {
+      if (entry.mcpServers) await Promise.all(entry.mcpServers.map((s) => s.stop()));
       await entry.machine.dispose();
       this.machines.delete(ticketId);
     }
@@ -2491,6 +2504,7 @@ export const createFleetManager = (arg: {
   ipc.handle('fleet:update-ticket', (_, id, patch) => fleetManager.updateTicket(id, patch));
   ipc.handle('fleet:remove-ticket', (_, id) => fleetManager.removeTicket(id));
   ipc.handle('fleet:get-tickets', (_, projectId) => fleetManager.getTicketsByProject(projectId));
+  ipc.handle('fleet:get-tasks', () => fleetManager.getTasks());
   ipc.handle('fleet:get-next-ticket', (_, projectId) => fleetManager.getNextTicket(projectId));
 
   // Kanban

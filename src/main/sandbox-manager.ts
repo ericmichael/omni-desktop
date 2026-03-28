@@ -84,6 +84,19 @@ type StartArg = {
 
 export type FetchFn = typeof globalThis.fetch;
 
+type SandboxReadinessTarget =
+  | { label: 'ui'; url: string; protocol: 'http' }
+  | { label: 'ws'; url: string; protocol: 'ws' };
+
+export const getSandboxReadinessTargets = (
+  data: Extract<SandboxProcessStatus, { type: 'running' }>['data']
+): SandboxReadinessTarget[] => {
+  return [
+    { label: 'ui', url: data.uiUrl, protocol: 'http' },
+    { label: 'ws', url: data.wsUrl, protocol: 'ws' },
+  ];
+};
+
 export class SandboxManager {
   private status: WithTimestamp<SandboxProcessStatus>;
   private ipcLogger: (entry: WithTimestamp<LogEntry>) => void;
@@ -158,16 +171,15 @@ export class SandboxManager {
 
     const data = toSandboxStatusData(parsedResult);
     this.jsonEmitted = true;
+    this.updateStatus({ type: 'connecting', data });
     this.log.info(c.cyan('Waiting for services to accept connections...\r\n'));
     void this.waitForServices(data);
   };
 
   private waitForServices = async (data: Extract<SandboxProcessStatus, { type: 'running' }>['data']): Promise<void> => {
-    const urls = [data.sandboxUrl, data.uiUrl, data.codeServerUrl, data.noVncUrl].filter((u): u is string =>
-      Boolean(u)
-    );
+    const requiredUrls = getSandboxReadinessTargets(data);
 
-    const checkUrl = async (url: string): Promise<boolean> => {
+    const checkHttpUrl = async (url: string): Promise<boolean> => {
       try {
         const response = await this.fetchFn(url, { method: 'GET' });
         return response.status < 500;
@@ -176,14 +188,50 @@ export class SandboxManager {
       }
     };
 
+    const checkWsUrl = async (url: string): Promise<boolean> => {
+      try {
+        return await new Promise<boolean>((resolve) => {
+          let settled = false;
+          const socket = new WebSocket(url);
+          const finish = (result: boolean): void => {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            clearTimeout(timer);
+            try {
+              socket.close();
+            } catch {
+              // ignore
+            }
+            resolve(result);
+          };
+          const timer = setTimeout(() => finish(false), 2_000);
+          socket.onopen = () => finish(true);
+          socket.onerror = () => finish(false);
+          socket.onclose = () => finish(false);
+        });
+      } catch {
+        return false;
+      }
+    };
+
     let allUp = false;
+    let lastResults: Array<{ label: string; url: string; ok: boolean }> = [];
     for (let attempt = 0; attempt < 30; attempt++) {
       if (this.status.type === 'stopping' || this.status.type === 'exiting') {
         return;
       }
 
-      const results = await Promise.all(urls.map(checkUrl));
-      if (results.every(Boolean)) {
+      const results = await Promise.all(
+        requiredUrls.map(async ({ label, url, protocol }) => ({
+          label,
+          url,
+          ok: protocol === 'ws' ? await checkWsUrl(url) : await checkHttpUrl(url),
+        }))
+      );
+      lastResults = results;
+      if (results.every((result) => result.ok)) {
         allUp = true;
         break;
       }
@@ -198,6 +246,10 @@ export class SandboxManager {
     }
 
     if (!allUp) {
+      const failed = lastResults.filter((result) => !result.ok);
+      if (failed.length > 0) {
+        this.log.info(c.red(`Failed readiness checks: ${failed.map((result) => `${result.label}=${result.url}`).join(', ')}\r\n`));
+      }
       this.log.info(c.red.bold('Services did not become ready within 30 seconds\r\n'));
       this.updateStatus({
         type: 'error',
@@ -239,7 +291,7 @@ export class SandboxManager {
   };
 
   private getActiveContainerRef = (): string | null => {
-    if (this.status.type !== 'running') {
+    if (this.status.type !== 'running' && this.status.type !== 'connecting') {
       return null;
     }
     return this.status.data.containerName ?? this.status.data.containerId ?? null;
@@ -258,7 +310,7 @@ export class SandboxManager {
   };
 
   start = async (arg: StartArg, options?: { rebuild?: boolean }) => {
-    if (this.status.type === 'starting' || this.status.type === 'running') {
+    if (this.status.type === 'starting' || this.status.type === 'connecting' || this.status.type === 'running') {
       return;
     }
 
@@ -352,6 +404,7 @@ export class SandboxManager {
       args.push('--image', arg.sandboxConfig.image);
     } else if (arg.sandboxConfig?.dockerfile) {
       args.push('--dockerfile', resolve(arg.workspaceDir, arg.sandboxConfig.dockerfile));
+      args.push('--build-arg', `OMNI_CODE_VERSION=${OMNI_CODE_VERSION}`);
     } else {
       const dockerfilePath = getSandboxDockerfilePath(arg.sandboxVariant);
       const shouldUseDockerfile = options?.rebuild || isDevelopment();

@@ -3,6 +3,7 @@ import { memo, useCallback } from 'react';
 import { PiCodeBold, PiMonitorBold, PiXBold } from 'react-icons/pi';
 
 import { Webview } from '@/renderer/common/Webview';
+import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 
 type OverlayPane = 'none' | 'code' | 'vnc';
 
@@ -13,6 +14,8 @@ type CodeWorkspaceLayoutProps = {
   overlayPane?: OverlayPane;
   onCloseOverlay?: () => void;
   onReady?: () => void;
+  headerActionsTargetId?: string;
+  headerActionsCompact?: boolean;
 };
 
 const transition = { type: 'spring' as const, duration: 0.28, bounce: 0.08 };
@@ -65,7 +68,7 @@ const OverlayPaneView = memo(
 );
 OverlayPaneView.displayName = 'OverlayPaneView';
 
-export const CodeWorkspaceLayout = memo(({ uiSrc, codeServerSrc, vncSrc, overlayPane = 'none', onCloseOverlay, onReady }: CodeWorkspaceLayoutProps) => {
+export const CodeWorkspaceLayout = memo(({ uiSrc, codeServerSrc, vncSrc, overlayPane = 'none', onCloseOverlay, onReady, headerActionsTargetId, headerActionsCompact }: CodeWorkspaceLayoutProps) => {
   const overlaySrc = overlayPane === 'code' ? codeServerSrc : overlayPane === 'vnc' ? vncSrc : undefined;
 
   const handleUiReady = useCallback(() => {
@@ -80,7 +83,7 @@ export const CodeWorkspaceLayout = memo(({ uiSrc, codeServerSrc, vncSrc, overlay
     <div className="relative flex h-full w-full flex-col bg-surface">
       <div className="relative min-h-0 flex-1">
         <div className="h-full w-full min-w-0">
-          <Webview src={uiSrc} onReady={handleUiReady} showUnavailable={false} />
+          <OmniAgentsApp uiUrl={uiSrc} onReady={handleUiReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} />
         </div>
       </div>
 

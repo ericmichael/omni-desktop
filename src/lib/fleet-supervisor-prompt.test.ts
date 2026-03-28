@@ -63,10 +63,11 @@ describe('buildSupervisorPrompt', () => {
     expect(prompt).toContain('Current Column: Implementation');
   });
 
-  it('includes TICKET.yaml path and instructions', () => {
+  it('mentions tool names', () => {
     const prompt = buildSupervisorPrompt(makeTicket(), makeProject(), PIPELINE);
-    expect(prompt).toContain('/home/user/.config/omni_code/fleet/tickets/ticket-42/TICKET.yaml');
-    expect(prompt).toContain('edit the `column` field');
+    expect(prompt).toContain('move_ticket');
+    expect(prompt).toContain('escalate');
+    expect(prompt).toContain('get_ticket');
   });
 
   it('includes artifacts directory path', () => {
@@ -79,15 +80,14 @@ describe('buildSupervisorPrompt', () => {
     expect(prompt).toContain('Backlog → Spec → Implementation → Done');
   });
 
-  it('shows "(no description)" when description is empty', () => {
+  it('handles missing description gracefully', () => {
     const prompt = buildSupervisorPrompt(makeTicket({ description: '' }), makeProject(), PIPELINE);
-    expect(prompt).toContain('(no description)');
+    expect(prompt).toContain('title is your complete task specification');
   });
 
   it('includes worker dispatch guidelines', () => {
     const prompt = buildSupervisorPrompt(makeTicket(), makeProject(), PIPELINE);
     expect(prompt).toContain('spawn_worker');
-    expect(prompt).toContain('Goal');
-    expect(prompt).toContain('Boundaries');
+    expect(prompt).toContain('boundaries');
   });
 });

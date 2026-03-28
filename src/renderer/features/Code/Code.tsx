@@ -12,7 +12,7 @@ export const Code = memo(() => {
   }
 
   return (
-    <div className="flex flex-col w-full h-full">
+    <div className="flex flex-col w-full h-full min-h-0 overflow-hidden">
       <CodeDeck />
     </div>
   );

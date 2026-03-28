@@ -3,11 +3,14 @@ import { atom, computed, map } from 'nanostores';
 
 import { STATUS_POLL_INTERVAL_MS } from '@/renderer/constants';
 import { emitter, ipc } from '@/renderer/services/ipc';
+import { persistedStoreApi } from '@/renderer/services/store';
+import { isActivePhase } from '@/shared/ticket-phase';
 import type {
   ArtifactFileContent,
   ArtifactFileEntry,
   DiffResponse,
   FleetColumnId,
+  FleetLayoutMode,
   FleetPipeline,
   FleetProject,
   FleetProjectId,
@@ -37,11 +40,12 @@ export const $fleetTickets = map<Record<FleetTicketId, FleetTicket>>({});
 export const $fleetPipeline = atom<FleetPipeline | null>(null);
 
 /**
- * Which fleet view is active: dashboard = no selection, project = project detail, ticket = ticket detail.
+ * Which fleet view is active: dashboard = no selection, project = project detail.
+ * Ticket selection is handled by `activeFleetTicketId` in the persisted store.
  */
-export const $fleetView = atom<
-  { type: 'dashboard' } | { type: 'project'; projectId: FleetProjectId } | { type: 'ticket'; ticketId: FleetTicketId }
->({ type: 'dashboard' });
+export const $fleetView = atom<{ type: 'dashboard' } | { type: 'project'; projectId: FleetProjectId }>(
+  { type: 'dashboard' }
+);
 
 /**
  * Supervisor chat messages, keyed by ticket ID.
@@ -60,14 +64,14 @@ export const $activeTickets = computed([$fleetTickets, $fleetTasks], (ticketMap,
   const tasks = Object.values(taskMap);
   const liveTaskTicketIds = new Set(
     tasks
-      .filter((t) => t.ticketId && (t.status.type === 'running' || t.status.type === 'starting'))
+      .filter((t) => t.ticketId && (t.status.type === 'running' || t.status.type === 'connecting' || t.status.type === 'starting'))
       .map((t) => t.ticketId!)
   );
 
   const entries: ActiveTicketEntry[] = [];
   for (const ticket of Object.values(ticketMap)) {
     const phase = ticket.phase;
-    const isActive = phase != null && phase !== 'idle' && phase !== 'error' && phase !== 'completed';
+    const isActive = phase != null && isActivePhase(phase);
     entries.push({
       ticket,
       hasLiveTask: liveTaskTicketIds.has(ticket.id) || isActive,
@@ -122,10 +126,11 @@ export const fleetApi = {
     const current = { ...$fleetTickets.get() };
     delete current[ticketId];
     $fleetTickets.set(current);
-    const view = $fleetView.get();
-    if (view.type === 'ticket' && view.ticketId === ticketId) {
-      $fleetView.set({ type: 'dashboard' });
+    // Clear active ticket if it was the one removed
+    if (persistedStoreApi.$atom.get().activeFleetTicketId === ticketId) {
+      persistedStoreApi.setKey('activeFleetTicketId', null);
     }
+    fleetApi.closeTicketInDeck(ticketId);
   },
   fetchTickets: async (projectId: FleetProjectId): Promise<void> => {
     const tickets = await emitter.invoke('fleet:get-tickets', projectId);
@@ -134,6 +139,14 @@ export const fleetApi = {
       newMap[ticket.id] = ticket;
     }
     $fleetTickets.set(newMap);
+  },
+  fetchTasks: async (): Promise<void> => {
+    const tasks = await emitter.invoke('fleet:get-tasks');
+    const newMap: Record<FleetTaskId, FleetTask> = {};
+    for (const task of tasks) {
+      newMap[task.id] = task;
+    }
+    $fleetTasks.set(newMap);
   },
   getNextTicket: (projectId: FleetProjectId): Promise<FleetTicket | null> => {
     return emitter.invoke('fleet:get-next-ticket', projectId);
@@ -149,8 +162,15 @@ export const fleetApi = {
     return emitter.invoke('fleet:move-ticket-to-column', ticketId, columnId);
   },
   // Supervisor
-  ensureSupervisorInfra: (ticketId: FleetTicketId): Promise<void> => {
-    return emitter.invoke('fleet:ensure-supervisor-infra', ticketId);
+  ensureSupervisorInfra: async (ticketId: FleetTicketId): Promise<void> => {
+    await emitter.invoke('fleet:ensure-supervisor-infra', ticketId);
+    // Re-fetch tickets + tasks so the renderer picks up supervisorTaskId and task status
+    // immediately rather than waiting for the next poll interval.
+    const ticket = $fleetTickets.get()[ticketId];
+    if (ticket?.projectId) {
+      void fleetApi.fetchTickets(ticket.projectId);
+    }
+    void fleetApi.fetchTasks();
   },
   startSupervisor: (ticketId: FleetTicketId): Promise<void> => {
     // Clear old messages when starting a fresh supervisor session
@@ -210,7 +230,45 @@ export const fleetApi = {
     void fleetApi.getPipeline(projectId);
   },
   goToTicket: (ticketId: FleetTicketId): void => {
-    $fleetView.set({ type: 'ticket', ticketId });
+    const raw = persistedStoreApi.$atom.get().fleetLayoutMode;
+    const mode = raw === 'focus' ? 'focus' : 'deck';
+    // Close board overlay when navigating to a ticket
+    persistedStoreApi.setKey('fleetBoardOpen', false);
+    if (mode === 'deck') {
+      fleetApi.openTicketInDeck(ticketId);
+    } else {
+      persistedStoreApi.setKey('activeFleetTicketId', ticketId);
+    }
+  },
+
+  // Deck layout
+  setFleetLayoutMode: (mode: FleetLayoutMode): void => {
+    persistedStoreApi.setKey('fleetLayoutMode', mode);
+  },
+  openTicketInDeck: (ticketId: FleetTicketId): void => {
+    const store = persistedStoreApi.$atom.get();
+    const ids = store.fleetOpenTicketIds ?? [];
+    if (!ids.includes(ticketId)) {
+      persistedStoreApi.setKey('fleetOpenTicketIds', [...ids, ticketId]);
+    }
+    persistedStoreApi.setKey('activeFleetTicketId', ticketId);
+  },
+  closeTicketInDeck: (ticketId: FleetTicketId): void => {
+    const store = persistedStoreApi.$atom.get();
+    const ids = store.fleetOpenTicketIds ?? [];
+    const next = ids.filter((id) => id !== ticketId);
+    persistedStoreApi.setKey('fleetOpenTicketIds', next);
+    if (store.activeFleetTicketId === ticketId) {
+      const idx = ids.indexOf(ticketId);
+      const fallback = next[Math.min(idx, next.length - 1)] ?? null;
+      persistedStoreApi.setKey('activeFleetTicketId', fallback);
+    }
+  },
+  reorderOpenTickets: (ids: FleetTicketId[]): void => {
+    persistedStoreApi.setKey('fleetOpenTicketIds', ids);
+  },
+  setActiveFleetTicket: (ticketId: FleetTicketId): void => {
+    persistedStoreApi.setKey('activeFleetTicketId', ticketId);
   },
 };
 
@@ -262,13 +320,19 @@ const listen = () => {
     $fleetPipeline.set(pipeline);
   });
 
-  const pollTickets = async () => {
+  // Hydrate tasks on init so the renderer has current task state immediately
+  void fleetApi.fetchTasks();
+
+  const poll = async () => {
+    // Re-fetch tasks so the renderer stays in sync with the main process
+    void fleetApi.fetchTasks();
+
     // Re-fetch tickets for the current project view
     const view = $fleetView.get();
-    if (view.type !== 'project' && view.type !== 'ticket') {
+    if (view.type !== 'project') {
       return;
     }
-    const projectId = view.type === 'project' ? view.projectId : $fleetTickets.get()[view.ticketId]?.projectId;
+    const projectId = view.projectId;
     if (!projectId) {
       return;
     }
@@ -282,7 +346,7 @@ const listen = () => {
     }
   };
 
-  setInterval(pollTickets, STATUS_POLL_INTERVAL_MS);
+  setInterval(poll, STATUS_POLL_INTERVAL_MS);
 };
 
 listen();

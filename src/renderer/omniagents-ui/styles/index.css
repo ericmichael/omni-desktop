@@ -1,0 +1,176 @@
+:root {
+  --omni-tweetBlue: 29 161 242;
+  --omni-bgMain: 21 32 43;
+  --omni-bgColumn: 25 39 52;
+  --omni-bgCard: 30 39 50;
+  --omni-bgCardAlt: 37 51 65;
+  --omni-textSubtle: 136 153 166;
+  --omni-successGreen: 23 191 99;
+  --omni-warningOrange: 255 165 52;
+  --omni-errorRed: 224 36 94;
+  --omni-textPrimary: 243 244 246;
+  --omni-textHeading: 255 255 255;
+  --omni-textSecondary: 209 213 219;
+}
+
+[data-theme="tokyo-night"] {
+  --omni-tweetBlue: 61 89 161;       /* #3d59a1  button.background */
+  --omni-bgMain: 26 27 38;           /* #1a1b26  editor.background */
+  --omni-bgColumn: 22 22 30;         /* #16161e  sideBar.background */
+  --omni-bgCard: 28 29 41;           /* #1c1d29  list.inactiveSelectionBackground */
+  --omni-bgCardAlt: 41 46 66;        /* #292e42  bg_highlight */
+  --omni-textSubtle: 84 92 126;      /* #545c7e  disabledForeground */
+  --omni-successGreen: 158 206 106;  /* #9ece6a  green */
+  --omni-warningOrange: 224 175 104; /* #e0af68  yellow */
+  --omni-errorRed: 247 118 142;      /* #f7768e  terminal.ansiRed */
+  --omni-textPrimary: 169 177 214;   /* #a9b1d6  foreground */
+  --omni-textHeading: 192 202 245;   /* #c0caf5  editor.foreground */
+  --omni-textSecondary: 120 124 153; /* #787c99  comment */
+}
+
+[data-theme="vscode-dark"] {
+  --omni-tweetBlue: 0 120 212;       /* #0078D4  button.background */
+  --omni-bgMain: 31 31 31;           /* #1F1F1F  editor.background */
+  --omni-bgColumn: 24 24 24;         /* #181818  sideBar.background */
+  --omni-bgCard: 43 43 43;           /* #2B2B2B  panel.border */
+  --omni-bgCardAlt: 49 49 49;        /* #313131  input.background */
+  --omni-textSubtle: 157 157 157;    /* #9D9D9D  descriptionForeground */
+  --omni-successGreen: 13 188 121;   /* #0DBC79  terminal.ansiGreen */
+  --omni-warningOrange: 204 167 0;   /* #CCA700  list.warningForeground */
+  --omni-errorRed: 248 81 73;        /* #F85149  errorForeground */
+}
+
+[data-theme="vscode-light"] {
+  --omni-tweetBlue: 0 95 184;        /* #005FB8  button.background */
+  --omni-bgMain: 255 255 255;        /* #FFFFFF  editor.background */
+  --omni-bgColumn: 248 248 248;      /* #F8F8F8  sideBar.background */
+  --omni-bgCard: 243 243 243;        /* #F3F3F3  welcomePage.tileBackground */
+  --omni-bgCardAlt: 229 229 229;     /* #E5E5E5  sideBar.border */
+  --omni-textSubtle: 118 118 118;    /* #767676  input.placeholderForeground */
+  --omni-successGreen: 46 160 67;    /* #2EA043  editorGutter.addedBackground */
+  --omni-warningOrange: 204 167 0;   /* #CCA700  list.warningForeground */
+  --omni-errorRed: 248 81 73;        /* #F85149  errorForeground */
+  --omni-textPrimary: 59 59 59;      /* #3B3B3B  editor.foreground */
+  --omni-textHeading: 31 31 31;      /* #1F1F1F  foreground */
+  --omni-textSecondary: 97 97 97;    /* #616161  descriptionForeground */
+}
+
+[data-theme="utrgv"] {
+  --omni-tweetBlue: 240 80 35;         /* #F05023  UTRGV brand orange */
+  --omni-bgMain: 247 247 248;          /* #F7F7F8  soft off-white page */
+  --omni-bgColumn: 241 241 243;        /* #F1F1F3  sidebar */
+  --omni-bgCard: 255 255 255;          /* #FFFFFF  white cards */
+  --omni-bgCardAlt: 255 255 255;       /* #FFFFFF  white input/surfaces */
+  --omni-textSubtle: 142 142 147;      /* #8E8E93  subtle/placeholder text */
+  --omni-successGreen: 26 127 55;      /* #1A7F37  green */
+  --omni-warningOrange: 180 120 0;     /* #B47800  warm amber warning */
+  --omni-errorRed: 200 30 30;          /* #C81E1E  strong red */
+  --omni-textPrimary: 36 36 40;        /* #242428  body text */
+  --omni-textHeading: 26 26 30;        /* #1A1A1E  heading text */
+  --omni-textSecondary: 100 100 105;   /* #646469  UTRGV gray */
+}
+
+/* UTRGV: give the input container a visible border on the off-white page */
+[data-theme="utrgv"] .border-bgCardAlt {
+  border-color: rgb(210 210 215) !important;
+}
+
+/* UTRGV: fix white icons/text on white input — except on colored button backgrounds */
+[data-theme="utrgv"] .bg-bgCardAlt .text-white {
+  color: rgb(var(--omni-textSecondary)) !important;
+}
+[data-theme="utrgv"] .bg-bgCardAlt .bg-tweetBlue.text-white,
+[data-theme="utrgv"] .bg-bgCardAlt .bg-errorRed.text-white {
+  color: #ffffff !important;
+}
+[data-theme="utrgv"] .bg-bgCardAlt button:disabled {
+  background-color: rgb(230 230 233) !important;
+  color: rgb(160 160 168) !important;
+}
+
+[data-theme="utrgv"] .prose-invert {
+  --tw-prose-body: rgb(var(--omni-textPrimary));
+  --tw-prose-headings: rgb(var(--omni-textHeading));
+  --tw-prose-bold: rgb(var(--omni-textHeading));
+  --tw-prose-links: rgb(var(--omni-tweetBlue));
+  --tw-prose-code: rgb(var(--omni-textPrimary));
+  --tw-prose-pre-code: rgb(var(--omni-textPrimary));
+  --tw-prose-counters: rgb(var(--omni-textSecondary));
+  --tw-prose-bullets: rgb(var(--omni-textSecondary));
+  --tw-prose-hr: rgb(var(--omni-bgCardAlt));
+  --tw-prose-quotes: rgb(var(--omni-textPrimary));
+  --tw-prose-quote-borders: rgb(var(--omni-bgCardAlt));
+  --tw-prose-captions: rgb(var(--omni-textSecondary));
+  --tw-prose-th-borders: rgb(var(--omni-bgCardAlt));
+  --tw-prose-td-borders: rgb(var(--omni-bgCardAlt));
+}
+
+[data-theme="vscode-light"] .prose-invert {
+  --tw-prose-body: rgb(var(--omni-textPrimary));
+  --tw-prose-headings: rgb(var(--omni-textHeading));
+  --tw-prose-bold: rgb(var(--omni-textHeading));
+  --tw-prose-links: rgb(var(--omni-tweetBlue));
+  --tw-prose-code: rgb(var(--omni-textPrimary));
+  --tw-prose-pre-code: rgb(var(--omni-textPrimary));
+  --tw-prose-counters: rgb(var(--omni-textSecondary));
+  --tw-prose-bullets: rgb(var(--omni-textSecondary));
+  --tw-prose-hr: rgb(var(--omni-bgCardAlt));
+  --tw-prose-quotes: rgb(var(--omni-textPrimary));
+  --tw-prose-quote-borders: rgb(var(--omni-bgCardAlt));
+  --tw-prose-captions: rgb(var(--omni-textSecondary));
+  --tw-prose-th-borders: rgb(var(--omni-bgCardAlt));
+  --tw-prose-td-borders: rgb(var(--omni-bgCardAlt));
+}
+
+/* Basic layout */
+html, body, #root { height: 100%; overflow: hidden; }
+.app { height: 100%; display: flex; }
+
+.container-chat { width: 100%; margin-left: auto; margin-right: auto; }
+
+body.resizing {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+.prose pre code { background: transparent; }
+
+@keyframes shimmer-text {
+  0% { background-position: 200% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.text-shimmer {
+  background: linear-gradient(90deg, rgb(var(--omni-textSubtle)) 0%, #cbd5e1 50%, rgb(var(--omni-textSubtle)) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer-text 3s ease-in-out infinite;
+}
+
+/* Force prose content to inherit wrapper color (for orange preamble) */
+.prose-warning { color: rgb(var(--omni-warningOrange)); }
+.prose-warning {
+  --tw-prose-body: currentColor;
+  --tw-prose-headings: currentColor;
+  --tw-prose-lead: currentColor;
+  --tw-prose-links: currentColor;
+  --tw-prose-bold: currentColor;
+  --tw-prose-counters: currentColor;
+  --tw-prose-bullets: currentColor;
+  --tw-prose-hr: currentColor;
+  --tw-prose-quotes: currentColor;
+  --tw-prose-quote-borders: currentColor;
+  --tw-prose-captions: currentColor;
+  --tw-prose-code: currentColor;
+  --tw-prose-pre-code: currentColor;
+  --tw-prose-th-borders: currentColor;
+  --tw-prose-td-borders: currentColor;
+}
+.prose-warning :where(p, li, h1, h2, h3, h4, h5, h6, strong, em, code, a, blockquote, pre, th, td) {
+  color: inherit !important;
+}
+.prose-warning :where(ol > li::marker, ul > li::marker) {
+  color: inherit !important;
+}
