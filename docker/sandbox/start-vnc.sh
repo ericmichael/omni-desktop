@@ -11,6 +11,8 @@ display_height="${VNC_DISPLAY_HEIGHT:-768}"
 # XDG_CONFIG_HOME so XFCE uses the default ($HOME/.config) consistently.
 export HOME=$(getent passwd "$(id -u)" | cut -d: -f6)
 unset XDG_CONFIG_HOME
+# XFCE needs /etc/xdg in XDG_CONFIG_DIRS to find its session/failsafe config
+export XDG_CONFIG_DIRS="/etc/xdg${XDG_CONFIG_DIRS:+:$XDG_CONFIG_DIRS}"
 
 log_dir="${HOME}/.local/share/vnc"
 mkdir -p "${log_dir}"

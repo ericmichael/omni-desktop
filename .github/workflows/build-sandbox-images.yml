@@ -47,6 +47,12 @@ jobs:
             echo "tag=dev-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Extract omni-code version
+        id: omni_version
+        run: |
+          version=$(grep -oP "OMNI_CODE_VERSION = '\K[^']+" src/lib/omni-version.ts)
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
@@ -56,5 +62,7 @@ jobs:
           tags: |
             ${{ env.IMAGE_BASE }}${{ matrix.suffix }}:latest
             ${{ env.IMAGE_BASE }}${{ matrix.suffix }}:${{ steps.meta.outputs.tag }}
+          build-args: |
+            OMNI_CODE_VERSION=${{ steps.omni_version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
