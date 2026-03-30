@@ -2,10 +2,11 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { Button, Switch } from '@/renderer/ds';
+import { $initiatives } from '@/renderer/features/Initiatives/state';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { ProjectId, TicketPriority, GitRepoInfo } from '@/shared/types';
+import type { GitRepoInfo, InitiativeId, ProjectId, TicketPriority } from '@/shared/types';
 
-import { $tickets, ticketApi } from './state';
+import { $activeInitiativeId, $tickets, ticketApi } from './state';
 
 export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; onClose: () => void }) => {
   const [title, setTitle] = useState('');
@@ -19,6 +20,18 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
 
   const store = useStore(persistedStoreApi.$atom);
   const project = useMemo(() => store.projects.find((p) => p.id === projectId), [store.projects, projectId]);
+
+  const initiatives = useStore($initiatives);
+  const activeInitiativeId = useStore($activeInitiativeId);
+  const projectInitiatives = useMemo(
+    () => Object.values(initiatives).filter((i) => i.projectId === projectId),
+    [initiatives, projectId]
+  );
+  const defaultInitiativeId = useMemo(
+    () => (activeInitiativeId !== 'all' ? activeInitiativeId : projectInitiatives.find((i) => i.isDefault)?.id ?? ''),
+    [activeInitiativeId, projectInitiatives]
+  );
+  const [initiativeId, setInitiativeId] = useState<InitiativeId>(defaultInitiativeId);
 
   const tickets = useStore($tickets);
   const projectTickets = useMemo(
@@ -61,6 +74,7 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
     try {
       await ticketApi.addTicket({
         projectId,
+        initiativeId: initiativeId || undefined,
         title: title.trim(),
         description: description.trim(),
         priority,
@@ -93,7 +107,23 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
         rows={2}
         className="w-full rounded-md border border-surface-border bg-surface px-3 py-2 text-sm text-fg placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500 resize-none"
       />
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
+        {projectInitiatives.length > 1 && (
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium text-fg-subtle">Initiative</label>
+            <select
+              value={initiativeId}
+              onChange={(e) => setInitiativeId(e.target.value)}
+              className="rounded-md border border-surface-border bg-surface px-2 py-1.5 text-sm text-fg focus:outline-none focus:border-accent-500"
+            >
+              {projectInitiatives.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.title}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <label className="text-xs font-medium text-fg-subtle">Priority</label>
           <select

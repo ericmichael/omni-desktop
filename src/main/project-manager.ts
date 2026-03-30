@@ -28,9 +28,14 @@ import type { TicketPhase } from '@/shared/ticket-phase';
 import type {
   ArtifactFileContent,
   ArtifactFileEntry,
+  CodeTabId,
   DiffResponse,
   FileDiff,
   ColumnId,
+  InboxItem,
+  InboxItemId,
+  Initiative,
+  InitiativeId,
   Pipeline,
   Project,
   ProjectId,
@@ -40,6 +45,8 @@ import type {
   Ticket,
   TicketId,
   TicketPriority,
+  AgentProcessStatus,
+  WithTimestamp,
   GitRepoInfo,
   IpcEvents,
   IpcRendererEvents,
@@ -47,6 +54,25 @@ import type {
 } from '@/shared/types';
 
 const execFileAsync = promisify(execFile);
+
+const DEFAULT_BRIEF_TEMPLATE = `## Problem
+
+
+## Appetite
+
+
+## Solution direction
+
+
+## Open questions
+- [ ]
+
+## Decisions
+
+
+## Out of scope
+
+`;
 
 // #region JSON-RPC helper
 
@@ -398,6 +424,10 @@ export class ProjectManager {
     this.store = arg.store;
     this.sendToWindow = arg.sendToWindow;
     this.codeManager = arg.codeManager;
+    // Let CodeManager fall back to supervisor sandbox status for ticket-linked tabs
+    if (this.codeManager) {
+      this.codeManager.statusFallback = (tabId) => this.getSupervisorStatusForCodeTab(tabId);
+    }
     this.workflowLoader = deps?.workflowLoader ?? new WorkflowLoader({
       onChange: (projectId, workflow) => {
         console.log(
@@ -619,6 +649,7 @@ export class ProjectManager {
         }
         const newTicket = this.addTicket({
           projectId,
+          initiativeId: (toolArgs.initiative_id as string) || undefined,
           title,
           description: (toolArgs.description as string) ?? '',
           priority: (toolArgs.priority as TicketPriority) ?? 'medium',
@@ -1091,10 +1122,13 @@ export class ProjectManager {
       ...input,
       id: nanoid(),
       createdAt: Date.now(),
+      brief: input.brief ?? DEFAULT_BRIEF_TEMPLATE,
     };
     const projects = this.getProjects();
     projects.push(project);
     this.setProjects(projects);
+    // Create the default "General" initiative for the new project
+    this.createDefaultInitiative(project.id);
     // Eagerly load FLEET.md so pipeline is ready when the UI fetches it
     void this.workflowLoader.load(project.id, project.workspaceDir);
     return project;
@@ -1123,6 +1157,8 @@ export class ProjectManager {
     this.setPersistedTasks(remainingTasks);
     const remainingTickets = this.getTickets().filter((t) => t.projectId !== id);
     this.setTickets(remainingTickets);
+    const remainingInitiatives = this.getInitiatives().filter((i) => i.projectId !== id);
+    this.setInitiatives(remainingInitiatives);
   };
 
   // #endregion
@@ -1222,10 +1258,14 @@ export class ProjectManager {
     return this.getTickets().find((t) => t.id === ticketId);
   };
 
-  addTicket = (input: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'columnId'>): Ticket => {
+  addTicket = (
+    input: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'columnId' | 'initiativeId'> & { initiativeId?: InitiativeId }
+  ): Ticket => {
     const now = Date.now();
+    const initiativeId = input.initiativeId ?? this.getDefaultInitiativeId(input.projectId);
     const ticket: Ticket = {
       ...input,
+      initiativeId,
       id: nanoid(),
       columnId: this.getFirstColumnId(input.projectId),
       createdAt: now,
@@ -1298,6 +1338,134 @@ export class ProjectManager {
     });
 
     return candidates[0] ?? null;
+  };
+
+  // #endregion
+
+  // #region Inbox (persisted in electron-store)
+
+  private getInboxItems = (): InboxItem[] => {
+    return this.store.get('inboxItems') ?? [];
+  };
+
+  private setInboxItems = (items: InboxItem[]): void => {
+    this.store.set('inboxItems', items);
+    this.sendToWindow('store:changed', this.store.store);
+  };
+
+  addInboxItem = (input: Omit<InboxItem, 'id' | 'createdAt' | 'updatedAt'>): InboxItem => {
+    const now = Date.now();
+    const item: InboxItem = { ...input, id: nanoid(), createdAt: now, updatedAt: now };
+    const items = this.getInboxItems();
+    items.push(item);
+    this.setInboxItems(items);
+    return item;
+  };
+
+  updateInboxItem = (id: InboxItemId, patch: Partial<Omit<InboxItem, 'id' | 'createdAt'>>): void => {
+    const items = this.getInboxItems();
+    const index = items.findIndex((i) => i.id === id);
+    if (index === -1) return;
+    items[index] = { ...items[index]!, ...patch, updatedAt: Date.now() };
+    this.setInboxItems(items);
+  };
+
+  removeInboxItem = (id: InboxItemId): void => {
+    const items = this.getInboxItems().filter((i) => i.id !== id);
+    this.setInboxItems(items);
+  };
+
+  getInboxItemList = (): InboxItem[] => {
+    return this.getInboxItems();
+  };
+
+  // #endregion
+
+  // #region Initiatives (persisted in electron-store)
+
+  private getInitiatives = (): Initiative[] => {
+    return this.store.get('initiatives') ?? [];
+  };
+
+  private setInitiatives = (items: Initiative[]): void => {
+    this.store.set('initiatives', items);
+    this.sendToWindow('store:changed', this.store.store);
+  };
+
+  /** Get the default initiative ID for a project. Creates one if missing (defensive). */
+  getDefaultInitiativeId = (projectId: ProjectId): InitiativeId => {
+    const initiatives = this.getInitiatives();
+    const defaultInit = initiatives.find((i) => i.projectId === projectId && i.isDefault);
+    if (defaultInit) return defaultInit.id;
+    // Defensive: create one if somehow missing
+    const created = this.createDefaultInitiative(projectId);
+    return created.id;
+  };
+
+  /** Create the "General" default initiative for a project. */
+  private createDefaultInitiative = (projectId: ProjectId): Initiative => {
+    const now = Date.now();
+    const initiative: Initiative = {
+      id: nanoid(),
+      projectId,
+      title: 'General',
+      description: 'Default initiative',
+      status: 'active',
+      isDefault: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const initiatives = this.getInitiatives();
+    initiatives.push(initiative);
+    this.setInitiatives(initiatives);
+    return initiative;
+  };
+
+  getInitiativesByProject = (projectId: ProjectId): Initiative[] => {
+    return this.getInitiatives().filter((i) => i.projectId === projectId);
+  };
+
+  addInitiative = (input: Omit<Initiative, 'id' | 'createdAt' | 'updatedAt'>): Initiative => {
+    const now = Date.now();
+    const initiative: Initiative = { ...input, id: nanoid(), createdAt: now, updatedAt: now };
+    const initiatives = this.getInitiatives();
+    initiatives.push(initiative);
+    this.setInitiatives(initiatives);
+    return initiative;
+  };
+
+  updateInitiative = (id: InitiativeId, patch: Partial<Omit<Initiative, 'id' | 'projectId' | 'createdAt'>>): void => {
+    const initiatives = this.getInitiatives();
+    const index = initiatives.findIndex((i) => i.id === id);
+    if (index === -1) return;
+    initiatives[index] = { ...initiatives[index]!, ...patch, updatedAt: Date.now() };
+    this.setInitiatives(initiatives);
+  };
+
+  removeInitiative = (id: InitiativeId): void => {
+    const initiatives = this.getInitiatives();
+    const target = initiatives.find((i) => i.id === id);
+    if (!target || target.isDefault) return; // Cannot delete default initiative
+    // Reassign orphaned tickets to the default initiative
+    const defaultId = this.getDefaultInitiativeId(target.projectId);
+    const tickets = this.getTickets();
+    let ticketsChanged = false;
+    for (const ticket of tickets) {
+      if (ticket.initiativeId === id) {
+        ticket.initiativeId = defaultId;
+        ticket.updatedAt = Date.now();
+        ticketsChanged = true;
+      }
+    }
+    if (ticketsChanged) this.setTickets(tickets);
+    this.setInitiatives(initiatives.filter((i) => i.id !== id));
+  };
+
+  /** Resolve the effective branch for a ticket (ticket.branch ?? initiative.branch ?? undefined). */
+  resolveTicketBranch = (ticket: Ticket): string | undefined => {
+    if (ticket.branch) return ticket.branch;
+    const initiative = this.getInitiatives().find((i) => i.id === ticket.initiativeId);
+    return initiative?.branch;
   };
 
   // #endregion
@@ -1414,7 +1582,7 @@ export class ProjectManager {
     let mergeBase: string;
 
     const worktreePath = ticket.worktreePath ?? task?.worktreePath;
-    const worktreeBranch = ticket.branch ?? task?.branch;
+    const worktreeBranch = this.resolveTicketBranch(ticket) ?? task?.branch;
 
     if (worktreePath && worktreeBranch) {
       gitDir = worktreePath;
@@ -1567,6 +1735,16 @@ export class ProjectManager {
 
   // #region Column movement
 
+  resolveTicket = (ticketId: TicketId, resolution: import('@/shared/types').TicketResolution): void => {
+    const ticket = this.getTicketById(ticketId);
+    if (!ticket) return;
+    this.updateTicket(ticketId, { resolution });
+    const terminalColumnId = this.getTerminalColumnId(ticket.projectId);
+    if (ticket.columnId !== terminalColumnId) {
+      this.moveTicketToColumn(ticketId, terminalColumnId);
+    }
+  };
+
   moveTicketToColumn = (ticketId: TicketId, columnId: ColumnId): void => {
     const ticket = this.getTicketById(ticketId);
     if (!ticket) {
@@ -1579,6 +1757,12 @@ export class ProjectManager {
     }
 
     this.updateTicket(ticketId, { columnId });
+
+    // Clear resolution when moving away from terminal column (reopen)
+    const ticket2 = this.getTicketById(ticketId);
+    if (ticket2?.resolution && !this.isTerminalColumn(ticket.projectId, columnId)) {
+      this.updateTicket(ticketId, { resolution: undefined });
+    }
 
     // Reconciliation: stop supervisor and clean up workspace when ticket moves to a terminal column
     if (this.isTerminalColumn(ticket.projectId, columnId)) {
@@ -1744,7 +1928,7 @@ export class ProjectManager {
       console.log(`[ProjectManager] Reusing existing worktree "${worktreeName}" for ticket ${ticketId}`);
     } else if (wtAction.action === 'create') {
       worktreeName = generateWorktreeName();
-      worktreePath = await createWorktree(project.workspaceDir, ticket.branch!, worktreeName);
+      worktreePath = await createWorktree(project.workspaceDir, this.resolveTicketBranch(ticket)!, worktreeName);
       workspaceDir = worktreePath;
       // Persist worktree info on the ticket so it survives restarts
       this.updateTicket(ticketId, { worktreePath, worktreeName });
@@ -1770,7 +1954,7 @@ export class ProjectManager {
       status: { type: 'starting', timestamp: Date.now() },
       createdAt: Date.now(),
       ticketId,
-      branch: ticket.branch,
+      branch: this.resolveTicketBranch(ticket),
       worktreePath,
       worktreeName,
     };
@@ -1794,6 +1978,14 @@ export class ProjectManager {
           this.persistTask(taskEntry.task);
         }
         this.sendToWindow('project:task-status', taskId, status);
+
+        // Forward to linked Code tab so the UI connects to the supervisor's sandbox
+        // instead of launching a separate one.
+        const codeTabs = this.store.get('codeTabs', []) as Array<{ id: string; ticketId?: string }>;
+        const codeTab = codeTabs.find((t) => t.ticketId === ticketId);
+        if (codeTab) {
+          this.sendToWindow('code:sandbox-status', codeTab.id as CodeTabId, status);
+        }
 
         // Resolve/reject the startup promise (only effective on first call)
         if (status.type === 'running') {
@@ -1833,6 +2025,16 @@ export class ProjectManager {
 
     return { machine, sandbox };
   };
+
+  /** Return the supervisor sandbox status for a Code tab linked to a ticket. */
+  getSupervisorStatusForCodeTab(tabId: CodeTabId): WithTimestamp<AgentProcessStatus> | null {
+    const codeTabs = this.store.get('codeTabs', []) as Array<{ id: string; ticketId?: string }>;
+    const tab = codeTabs.find((t) => t.id === tabId);
+    if (!tab?.ticketId) return null;
+    const entry = this.machines.get(tab.ticketId as TicketId);
+    if (!entry?.sandbox) return null;
+    return entry.sandbox.getStatus();
+  }
 
   /** Check if a Code tab has a running sandbox for this ticket. */
   private getCodeTabWsUrl(ticketId: TicketId): string | null {
@@ -1952,7 +2154,7 @@ export class ProjectManager {
             description: ticket.description || '(no description)',
             priority: ticket.priority,
             columnId: ticket.columnId,
-            branch: ticket.branch,
+            branch: this.resolveTicketBranch(ticket),
           },
           pipeline: {
             columns: pipeline.columns.map((c) => c.label).join(' → '),
@@ -2450,21 +2652,60 @@ export class ProjectManager {
       store.set('tickets', migrated);
       store.set('schemaVersion', 4);
       console.log(`[ProjectManager] v4 migration complete: ${migrated.length} tickets`);
+      // Fall through to v4→v5 migration
+    }
+
+    // v4 → v5: create default initiatives per project, assign tickets
+    if (version === 4 || store.get('schemaVersion', 0) === 4) {
+      console.log('[ProjectManager] Migrating to initiative schema (→ v5)');
+      const projects = store.get('projects', []) as Array<{ id: string }>;
+      const tickets = store.get('tickets', []) as Record<string, unknown>[];
+
+      const initiatives: Initiative[] = [];
+      const projectToDefaultInitiative = new Map<string, string>();
+
+      for (const proj of projects) {
+        const initId = nanoid();
+        projectToDefaultInitiative.set(proj.id, initId);
+        const now = Date.now();
+        initiatives.push({
+          id: initId,
+          projectId: proj.id,
+          title: 'General',
+          description: 'Default initiative',
+          status: 'active',
+          isDefault: true,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+
+      const migratedTickets = tickets.map((raw) => ({
+        ...raw,
+        initiativeId: projectToDefaultInitiative.get(raw.projectId as string) ?? '',
+      }));
+
+      store.set('initiatives', initiatives);
+      store.set('tickets', migratedTickets);
+      store.set('schemaVersion', 5);
+      console.log(
+        `[ProjectManager] v5 migration complete: ${initiatives.length} initiatives, ${migratedTickets.length} tickets`
+      );
       return;
     }
 
-    if (version >= 4) {
+    if (version >= 5) {
       return;
     }
 
     console.log('[ProjectManager] Migrating to supervisor schema (→ v3)');
 
     const tickets = store.get('tickets', []) as Record<string, unknown>[];
-    const migrated: Ticket[] = [];
+    const migrated: Record<string, unknown>[] = [];
 
     for (const raw of tickets) {
-      // Strip all legacy fields and normalize
-      const ticket: Ticket = {
+      // Strip all legacy fields and normalize (initiativeId added in v5 migration)
+      const ticket: Record<string, unknown> = {
         id: (raw.id as string) ?? nanoid(),
         projectId: (raw.projectId as string) ?? '',
         title: (raw.title as string) ?? '',
@@ -2492,6 +2733,8 @@ export class ProjectManager {
     store.set('tickets', migrated);
     store.set('schemaVersion', 4);
     console.log(`[ProjectManager] Migration complete: ${migrated.length} tickets migrated`);
+    // Re-enter to run v4→v5 migration
+    ProjectManager.migrateToSupervisor(store);
   }
 
   // #endregion
@@ -2721,6 +2964,9 @@ export const createProjectManager = (arg: {
   ipc.handle('project:move-ticket-to-column', (_, ticketId, columnId) =>
     projectManager.moveTicketToColumn(ticketId, columnId)
   );
+  ipc.handle('project:resolve-ticket', (_, ticketId, resolution) =>
+    projectManager.resolveTicket(ticketId, resolution)
+  );
   ipc.handle('project:get-pipeline', async (_, projectId) => {
     await projectManager.ensureWorkflowLoaded(projectId);
     return projectManager.getPipeline(projectId);
@@ -2750,6 +2996,21 @@ export const createProjectManager = (arg: {
   ipc.handle('project:set-auto-dispatch', (_, projectId, enabled) =>
     projectManager.setAutoDispatch(projectId, enabled)
   );
+  ipc.handle('project:get-supervisor-sandbox-status', (_, tabId) =>
+    projectManager.getSupervisorStatusForCodeTab(tabId)
+  );
+
+  // Inbox handlers
+  ipc.handle('inbox:get-items', () => projectManager.getInboxItemList());
+  ipc.handle('inbox:add-item', (_, item) => projectManager.addInboxItem(item));
+  ipc.handle('inbox:update-item', (_, id, patch) => projectManager.updateInboxItem(id, patch));
+  ipc.handle('inbox:remove-item', (_, id) => projectManager.removeInboxItem(id));
+
+  // Initiatives
+  ipc.handle('initiative:get-items', (_, projectId) => projectManager.getInitiativesByProject(projectId));
+  ipc.handle('initiative:add-item', (_, item) => projectManager.addInitiative(item));
+  ipc.handle('initiative:update-item', (_, id, patch) => projectManager.updateInitiative(id, patch));
+  ipc.handle('initiative:remove-item', (_, id) => projectManager.removeInitiative(id));
 
   const cleanup = async () => {
     await projectManager.exit();
@@ -2775,6 +3036,15 @@ export const createProjectManager = (arg: {
     ipcMain.removeHandler('project:send-supervisor-message');
     ipcMain.removeHandler('project:reset-supervisor-session');
     ipcMain.removeHandler('project:set-auto-dispatch');
+    ipcMain.removeHandler('project:get-supervisor-sandbox-status');
+    ipcMain.removeHandler('inbox:get-items');
+    ipcMain.removeHandler('inbox:add-item');
+    ipcMain.removeHandler('inbox:update-item');
+    ipcMain.removeHandler('inbox:remove-item');
+    ipcMain.removeHandler('initiative:get-items');
+    ipcMain.removeHandler('initiative:add-item');
+    ipcMain.removeHandler('initiative:update-item');
+    ipcMain.removeHandler('initiative:remove-item');
   };
 
   return [projectManager, cleanup] as const;

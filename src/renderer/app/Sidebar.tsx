@@ -5,6 +5,7 @@ import { PiChatCircleFill, PiCodeBold, PiGearFill, PiRocketLaunchFill } from 're
 
 import { OmniLogo } from '@/renderer/common/AsciiLogo';
 import { cn, IconButton } from '@/renderer/ds';
+import { $inboxItems } from '@/renderer/features/Inbox/state';
 import { $isSettingsOpen } from '@/renderer/features/SettingsModal/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { LayoutMode } from '@/shared/types';
@@ -20,6 +21,11 @@ const springTransition = { type: 'spring', duration: 0.3, bounce: 0.15 } as cons
 export const Sidebar = memo(() => {
   const store = useStore(persistedStoreApi.$atom);
   const isSettingsOpen = useStore($isSettingsOpen);
+  const inboxItems = useStore($inboxItems);
+  const openInboxCount = useMemo(
+    () => Object.values(inboxItems).filter((i) => i.status === 'open').length,
+    [inboxItems]
+  );
 
   const setMode = useCallback(
     (mode: LayoutMode) => () => {
@@ -76,7 +82,14 @@ export const Sidebar = memo(() => {
                   transition={springTransition}
                 />
               )}
-              <span className="relative z-10">{tab.icon}</span>
+              <span className="relative z-10">
+                {tab.icon}
+                {tab.value === 'projects' && openInboxCount > 0 && (
+                  <span className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold leading-4 text-center bg-accent-600 text-white">
+                    {openInboxCount}
+                  </span>
+                )}
+              </span>
               <span className="relative z-10 text-[10px] leading-tight">{tab.label}</span>
             </button>
           );

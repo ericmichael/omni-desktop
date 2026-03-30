@@ -98,6 +98,23 @@ export const useCodeAutoLaunch = (tabId: CodeTabId, workspaceDir: string | null)
           if (cancelled) return;
         }
         if (cancelled) return;
+        // If a supervisor sandbox is already providing status for this tab
+        // (e.g. auto-pilot started the sandbox), skip launching a duplicate.
+        const existing = $codeTabStatuses.get()[tabIdRef.current];
+        if (existing && (existing.type === 'running' || existing.type === 'connecting' || existing.type === 'starting')) {
+          sendBack({ type: 'CONFIG_OK' });
+          return;
+        }
+        // Also check if the supervisor (ProjectManager) owns a sandbox for this tab's ticket
+        try {
+          const supervisorStatus = await emitter.invoke('project:get-supervisor-sandbox-status', tabIdRef.current);
+          if (!cancelled && supervisorStatus && (supervisorStatus.type === 'running' || supervisorStatus.type === 'connecting' || supervisorStatus.type === 'starting')) {
+            $codeTabStatuses.setKey(tabIdRef.current, supervisorStatus);
+            sendBack({ type: 'CONFIG_OK' });
+            return;
+          }
+        } catch { /* no supervisor sandbox — proceed normally */ }
+        if (cancelled) return;
         codeApi.startSandbox(tabIdRef.current, {
           workspaceDir: wd,
           sandboxVariant: storeRef.current.sandboxVariant,
@@ -118,6 +135,16 @@ export const useCodeAutoLaunch = (tabId: CodeTabId, workspaceDir: string | null)
       emitter.invoke('code:get-sandbox-status', tabIdRef.current).then((status) => {
         if (cancelled || !status || status.type === 'uninitialized') return;
         $codeTabStatuses.setKey(tabIdRef.current, status);
+      }).catch(() => {});
+      // Also check supervisor sandbox (ProjectManager) — in server mode the
+      // per-client CodeManager won't know about it.
+      emitter.invoke('project:get-supervisor-sandbox-status', tabIdRef.current).then((status) => {
+        if (cancelled || !status || status.type === 'uninitialized') return;
+        // Only set if the atom is still empty or uninitialized for this tab
+        const current = $codeTabStatuses.get()[tabIdRef.current];
+        if (!current || current.type === 'uninitialized') {
+          $codeTabStatuses.setKey(tabIdRef.current, status);
+        }
       }).catch(() => {});
 
       const unsub = $codeTabStatuses.subscribe((allStatuses) => {

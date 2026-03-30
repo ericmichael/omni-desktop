@@ -180,6 +180,10 @@ export class RealtimeRPCClient {
     }
   }
 
+  async sendText(sessionId: string, text: string): Promise<boolean> {
+    return this.call('send_text', { session_id: sessionId, text })
+  }
+
   async interrupt(sessionId: string): Promise<boolean> {
     return this.call('interrupt', { session_id: sessionId })
   }

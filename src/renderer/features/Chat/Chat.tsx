@@ -2,8 +2,10 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { PiMonitorBold } from 'react-icons/pi';
 
+import { buildInteractiveVariables } from '@/lib/client-tools';
 import { OmniAgentsApp, OmniAgentsHostApp } from '@/renderer/omniagents-ui';
 import { buildSandboxLabel } from '@/renderer/omniagents-ui/sandbox-label';
+import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { ChatShell } from '@/renderer/omniagents-ui/ChatShell';
 import { getGreeting } from '@/renderer/omniagents-ui/greeting';
 import { cn } from '@/renderer/ds';
@@ -80,7 +82,7 @@ const SandboxRunningView = memo(
       <div className="flex flex-col w-full h-full relative">
         <div className="flex-1 min-h-0 relative">
           <div className="w-full h-full relative">
-            <OmniAgentsApp uiUrl={uiSrc} greeting={greeting} sandboxLabel={sandboxLabel} />
+            <OmniAgentsApp uiUrl={uiSrc} greeting={greeting} sandboxLabel={sandboxLabel} variables={buildInteractiveVariables()} onClientToolCall={buildClientToolHandler()} />
             {vncSrc && (
               <FloatingWidget
                 src={vncSrc}
@@ -202,6 +204,8 @@ export const Chat = memo(() => {
   return (
     <div className="w-full h-full">
       <OmniAgentsHostApp
+        variables={buildInteractiveVariables()}
+        onClientToolCall={buildClientToolHandler()}
         state={
           localUiUrl
             ? { type: 'ready', uiUrl: localUiUrl }

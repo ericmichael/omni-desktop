@@ -15,6 +15,7 @@ import {
   buildInteractiveVariables,
   TICKET_CLIENT_TOOLS,
   PROJECT_CLIENT_TOOLS,
+  BRIEF_CLIENT_TOOLS,
 } from '@/lib/client-tools';
 import { TicketMachine } from '@/main/ticket-machine';
 import type { TicketMachineCallbacks, ClientFunctionResponder } from '@/main/ticket-machine';
@@ -551,7 +552,7 @@ describe('handleClientToolCall', () => {
 describe('client_tools shape', () => {
 
   it('every tool has name, description, and parameters', () => {
-    for (const tool of [...TICKET_CLIENT_TOOLS, ...PROJECT_CLIENT_TOOLS]) {
+    for (const tool of [...TICKET_CLIENT_TOOLS, ...PROJECT_CLIENT_TOOLS, ...BRIEF_CLIENT_TOOLS]) {
       expect(tool.name).toBeTypeOf('string');
       expect(tool.description).toBeTypeOf('string');
       expect(tool.parameters).toBeDefined();
@@ -566,19 +567,48 @@ describe('client_tools shape', () => {
     expect(names).toEqual(['get_ticket', 'move_ticket', 'escalate']);
   });
 
-  it('interactive variables contain ticket + project tools', () => {
-    const vars = buildInteractiveVariables() as { client_tools: { name: string }[] };
+  it('interactive variables contain project + brief + inbox tools (no ticket-scoped tools)', () => {
+    const vars = buildInteractiveVariables() as { client_tools: { name: string }[]; additional_instructions: string };
     const names = vars.client_tools.map((t) => t.name);
-    expect(names).toContain('get_ticket');
-    expect(names).toContain('move_ticket');
-    expect(names).toContain('escalate');
+    // Should NOT contain ticket-scoped tools
+    expect(names).not.toContain('get_ticket');
+    expect(names).not.toContain('move_ticket');
+    expect(names).not.toContain('escalate');
+    // Project tools
     expect(names).toContain('list_projects');
     expect(names).toContain('list_tickets');
     expect(names).toContain('create_ticket');
     expect(names).toContain('update_ticket');
     expect(names).toContain('start_ticket');
     expect(names).toContain('stop_ticket');
-    expect(names).toHaveLength(9);
+    // Brief tools
+    expect(names).toContain('read_brief');
+    expect(names).toContain('update_brief');
+    // Inbox tools
+    expect(names).toContain('list_inbox');
+    expect(names).toContain('create_inbox_item');
+    expect(names).toContain('update_inbox_item');
+    expect(names).toContain('delete_inbox_item');
+    expect(names).toContain('inbox_to_tickets');
+    // Initiative tools
+    expect(names).toContain('list_initiatives');
+    expect(names).toContain('create_initiative');
+    expect(names).toContain('update_initiative');
+    expect(names).toContain('read_initiative_brief');
+    expect(names).toHaveLength(17);
+    // Should include additional_instructions with project management guidance
+    expect(vars.additional_instructions).toContain('Inbox');
+    expect(vars.additional_instructions).toContain('Brief');
+    expect(vars.additional_instructions).toContain('Tickets');
+    expect(vars.additional_instructions).toContain('Initiatives');
+  });
+
+  it('interactive variables include project context when provided', () => {
+    const vars = buildInteractiveVariables({ projectId: 'proj-1', projectLabel: 'My Project' }) as {
+      additional_instructions: string;
+    };
+    expect(vars.additional_instructions).toContain('My Project');
+    expect(vars.additional_instructions).toContain('proj-1');
   });
 
   it('get_ticket takes no parameters', () => {

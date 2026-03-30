@@ -63,8 +63,10 @@ export type StoreData = {
   theme: OmniTheme;
   onboardingComplete: boolean;
   projects: Project[];
+  initiatives: Initiative[];
   tasks: Task[];
   tickets: Ticket[];
+  inboxItems: InboxItem[];
   schemaVersion: number;
   codeTabs: CodeTab[];
   activeCodeTabId: CodeTabId | null;
@@ -148,6 +150,8 @@ export const schema: Schema<StoreData> = {
         id: { type: 'string' },
         projectId: { type: ['string', 'null'] },
         ticketId: { type: 'string' },
+        sessionId: { type: 'string' },
+        ticketTitle: { type: 'string' },
         createdAt: { type: 'number' },
       },
       required: ['id', 'createdAt'],
@@ -182,6 +186,26 @@ export const schema: Schema<StoreData> = {
       required: ['id', 'label', 'workspaceDir', 'createdAt'],
     },
   },
+  initiatives: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        projectId: { type: 'string' },
+        title: { type: 'string' },
+        description: { type: 'string' },
+        branch: { type: 'string' },
+        brief: { type: 'string' },
+        status: { type: 'string', enum: ['active', 'completed', 'archived'] },
+        isDefault: { type: 'boolean' },
+        createdAt: { type: 'number' },
+        updatedAt: { type: 'number' },
+      },
+      required: ['id', 'projectId', 'title', 'description', 'status', 'createdAt', 'updatedAt'],
+    },
+  },
   tasks: {
     type: 'array',
     default: [],
@@ -213,6 +237,7 @@ export const schema: Schema<StoreData> = {
       properties: {
         id: { type: 'string' },
         projectId: { type: 'string' },
+        initiativeId: { type: 'string' },
         title: { type: 'string' },
         description: { type: 'string' },
         priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
@@ -242,6 +267,25 @@ export const schema: Schema<StoreData> = {
         'createdAt',
         'updatedAt',
       ],
+    },
+  },
+  inboxItems: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        title: { type: 'string' },
+        description: { type: 'string' },
+        attachments: { type: 'array', items: { type: 'string' } },
+        projectId: { type: ['string', 'null'] },
+        linkedTicketIds: { type: 'array', items: { type: 'string' } },
+        status: { type: 'string', enum: ['open', 'done', 'deferred'] },
+        createdAt: { type: 'number' },
+        updatedAt: { type: 'number' },
+      },
+      required: ['id', 'title', 'status', 'createdAt', 'updatedAt'],
     },
   },
 };
@@ -389,13 +433,17 @@ export type CodeTab = {
 // --- ID types ---
 
 export type ProjectId = string;
+export type InitiativeId = string;
 export type TaskId = string;
 export type TicketId = string;
 export type ColumnId = string;
+export type InboxItemId = string;
 
 // --- Enums ---
 
 export type TicketPriority = 'low' | 'medium' | 'high' | 'critical';
+export type TicketResolution = 'completed' | 'wont_do' | 'duplicate' | 'cancelled';
+export type InitiativeStatus = 'active' | 'completed' | 'archived';
 
 /** Re-export TicketPhase so renderer can import from shared/types. */
 export type { TicketPhase } from '@/shared/ticket-phase';
@@ -454,11 +502,30 @@ export type Project = {
   autoDispatch?: boolean;
   /** Per-project sandbox configuration. When absent/null, the default sandbox image is used. */
   sandbox?: SandboxConfig | null;
+  /** Project brief — a living document that captures problem, appetite, scope, and open questions. */
+  brief?: string;
+};
+
+export type Initiative = {
+  id: InitiativeId;
+  projectId: ProjectId;
+  title: string;
+  description: string;
+  /** Optional feature branch. Tickets inherit this unless they override with their own branch. */
+  branch?: string;
+  /** Initiative brief — describes the deliverable, goals, and scope. */
+  brief?: string;
+  status: InitiativeStatus;
+  /** True for the auto-created "General" initiative. Cannot be deleted. */
+  isDefault?: boolean;
+  createdAt: number;
+  updatedAt: number;
 };
 
 export type Ticket = {
   id: TicketId;
   projectId: ProjectId;
+  initiativeId: InitiativeId;
   title: string;
   description: string;
   priority: TicketPriority;
@@ -491,6 +558,25 @@ export type Ticket = {
   supervisorTaskId?: TaskId;
   /** Accumulated token usage across all supervisor runs. */
   tokenUsage?: TokenUsage;
+  /** Resolution reason when ticket is closed. Undefined means open. */
+  resolution?: TicketResolution;
+};
+
+// --- Inbox ---
+
+export type InboxItemStatus = 'open' | 'done' | 'deferred';
+
+export type InboxItem = {
+  id: InboxItemId;
+  title: string;
+  description?: string;
+  attachments?: string[];
+  projectId?: ProjectId;
+  linkedTicketIds?: TicketId[];
+  linkedInitiativeId?: InitiativeId;
+  status: InboxItemStatus;
+  createdAt: number;
+  updatedAt: number;
 };
 
 export type Task = {
@@ -698,7 +784,7 @@ type ProjectIpcEvents = Namespaced<
     'remove-project': (id: ProjectId) => void;
     'check-git-repo': (workspaceDir: string) => GitRepoInfo;
     'add-ticket': (
-      ticket: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'columnId'>
+      ticket: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'columnId' | 'initiativeId'> & { initiativeId?: InitiativeId }
     ) => Ticket;
     'update-ticket': (id: TicketId, patch: Partial<Omit<Ticket, 'id' | 'projectId' | 'createdAt'>>) => void;
     'remove-ticket': (id: TicketId) => void;
@@ -718,7 +804,38 @@ type ProjectIpcEvents = Namespaced<
     'stop-supervisor': (ticketId: TicketId) => void;
     'send-supervisor-message': (ticketId: TicketId, message: string) => void;
     'reset-supervisor-session': (ticketId: TicketId) => void;
+    'resolve-ticket': (ticketId: TicketId, resolution: TicketResolution) => void;
     'set-auto-dispatch': (projectId: ProjectId, enabled: boolean) => void;
+    'get-supervisor-sandbox-status': (tabId: CodeTabId) => WithTimestamp<AgentProcessStatus> | null;
+  }
+>;
+
+/**
+ * Inbox API. Main process handles these events, renderer process invokes them.
+ */
+type InboxIpcEvents = Namespaced<
+  'inbox',
+  {
+    'get-items': () => InboxItem[];
+    'add-item': (item: Omit<InboxItem, 'id' | 'createdAt' | 'updatedAt'>) => InboxItem;
+    'update-item': (id: InboxItemId, patch: Partial<Omit<InboxItem, 'id' | 'createdAt'>>) => void;
+    'remove-item': (id: InboxItemId) => void;
+  }
+>;
+
+/**
+ * Initiative API. Main process handles these events, renderer process invokes them.
+ */
+type InitiativeIpcEvents = Namespaced<
+  'initiative',
+  {
+    'get-items': (projectId: ProjectId) => Initiative[];
+    'add-item': (item: Omit<Initiative, 'id' | 'createdAt' | 'updatedAt'>) => Initiative;
+    'update-item': (
+      id: InitiativeId,
+      patch: Partial<Omit<Initiative, 'id' | 'projectId' | 'createdAt'>>
+    ) => void;
+    'remove-item': (id: InitiativeId) => void;
   }
 >;
 
@@ -734,7 +851,9 @@ export type IpcEvents = MainProcessIpcEvents &
   StoreIpcEvents &
   ConfigIpcEvents &
   CodeIpcEvents &
-  ProjectIpcEvents;
+  ProjectIpcEvents &
+  InboxIpcEvents &
+  InitiativeIpcEvents;
 
 /**
  * Store events. Main process emits these events, renderer process listens to them.

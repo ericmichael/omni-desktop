@@ -9,9 +9,11 @@ import {
   PiWarningCircleBold,
 } from 'react-icons/pi';
 
-import { Button, IconButton, Spinner } from '@/renderer/ds';
+import { Button, cn, IconButton, Spinner } from '@/renderer/ds';
 import { $pipeline, $tasks, $tickets, ticketApi } from '@/renderer/features/Tickets/state';
 import type { TicketId, TicketPhase } from '@/shared/types';
+
+import { RESOLUTION_COLORS, RESOLUTION_LABELS } from './ticket-constants';
 
 /** Shared hook for ticket automation state and handlers. */
 const useTicketAutomation = (ticketId: TicketId) => {
@@ -143,6 +145,26 @@ export const TicketBannerActions = memo(({ ticketId }: { ticketId: TicketId }) =
   );
 });
 TicketBannerActions.displayName = 'TicketBannerActions';
+
+/** Resolution badge — displays the resolution label when a ticket is resolved. */
+export const TicketResolutionBadge = memo(({ ticketId }: { ticketId: TicketId }) => {
+  const tickets = useStore($tickets);
+  const ticket = tickets[ticketId];
+
+  if (!ticket?.resolution) return null;
+
+  return (
+    <span
+      className={cn(
+        'text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0',
+        RESOLUTION_COLORS[ticket.resolution]
+      )}
+    >
+      {RESOLUTION_LABELS[ticket.resolution]}
+    </span>
+  );
+});
+TicketResolutionBadge.displayName = 'TicketResolutionBadge';
 
 /** Combined controls (legacy export). */
 export const CodeTicketControls = memo(({ ticketId }: { ticketId: TicketId }) => {

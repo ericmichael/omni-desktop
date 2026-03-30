@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
+import type { ClientToolCallHandler } from './App';
 import { ChatShell, type PendingMessage } from './ChatShell';
 import { getGreeting } from './greeting';
 import { OmniAgentsApp } from './LauncherApp';
@@ -12,13 +13,15 @@ type OmniAgentsHostState =
 
 type OmniAgentsHostAppProps = {
   state: OmniAgentsHostState;
+  variables?: Record<string, unknown>;
+  onClientToolCall?: ClientToolCallHandler;
   onReady?: () => void;
   headerActionsTargetId?: string;
   headerActionsCompact?: boolean;
 };
 
 export const OmniAgentsHostApp = memo(
-  ({ state, onReady, headerActionsTargetId, headerActionsCompact }: OmniAgentsHostAppProps) => {
+  ({ state, variables, onClientToolCall, onReady, headerActionsTargetId, headerActionsCompact }: OmniAgentsHostAppProps) => {
     const [greeting] = useState(getGreeting);
     const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([]);
     const pendingRef = useRef(pendingMessages);
@@ -91,6 +94,7 @@ export const OmniAgentsHostApp = memo(
           <div className="absolute inset-0 z-10">
             <OmniAgentsApp
               uiUrl={state.uiUrl}
+              variables={variables}
               greeting={greeting}
               onReady={() => {
                 handleAppMounted();
@@ -99,6 +103,7 @@ export const OmniAgentsHostApp = memo(
               headerActionsTargetId={headerActionsTargetId}
               headerActionsCompact={headerActionsCompact}
               pendingMessages={pendingForApp}
+              onClientToolCall={onClientToolCall}
             />
           </div>
         )}

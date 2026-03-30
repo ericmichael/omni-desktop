@@ -1,4 +1,4 @@
-import type { TicketPriority, SandboxProcessStatus, TicketPhase } from '@/shared/types';
+import type { TicketPriority, TicketResolution, SandboxProcessStatus, TicketPhase } from '@/shared/types';
 
 export const STATUS_TEXT_COLORS: Partial<Record<SandboxProcessStatus['type'], string>> = {
   uninitialized: 'text-fg-subtle',
@@ -111,6 +111,22 @@ export const COLUMN_BADGE_COLORS: Record<string, string> = new Proxy(COLUMN_BADG
     target[prop] ?? FALLBACK_BADGE_COLORS[stableIndex(prop, FALLBACK_BADGE_COLORS.length)],
 });
 
+
+/** Human-readable labels for ticket resolutions. */
+export const RESOLUTION_LABELS: Record<TicketResolution, string> = {
+  completed: 'Completed',
+  wont_do: "Won't do",
+  duplicate: 'Duplicate',
+  cancelled: 'Cancelled',
+};
+
+/** Badge colors for ticket resolutions. */
+export const RESOLUTION_COLORS: Record<TicketResolution, string> = {
+  completed: 'text-green-400 bg-green-400/10',
+  wont_do: 'text-fg-muted bg-fg-muted/10',
+  duplicate: 'text-yellow-400 bg-yellow-400/10',
+  cancelled: 'text-red-400 bg-red-400/10',
+};
 
 /** Human-readable labels for ticket phases. */
 export const PHASE_LABELS: Partial<Record<TicketPhase, string>> = {

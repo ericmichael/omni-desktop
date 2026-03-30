@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Orb from './Orb'
 import { RealtimeRPCClient } from '../rpc/realtime'
-import { VoiceNotificationCenter, type VoiceNotification } from './VoiceNotificationCenter'
+import type { VoiceNotification } from './VoiceNotificationCenter'
 import { useUiConfig } from '../ui-config'
 
 /**
@@ -42,6 +42,11 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
   const animationRafRef = useRef<number | null>(null)
   const [, forceUpdate] = useState({})
   const [notifications, setNotifications] = useState<VoiceNotification[]>([])
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const [transcripts, setTranscripts] = useState<Array<{ id: string; role: 'user' | 'assistant'; text: string; timestamp: number }>>([])
+  const [chatInput, setChatInput] = useState('')
+  const chatScrollRef = useRef<HTMLDivElement | null>(null)
   const activeAudioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set())
   const playbackCheckIntervalRef = useRef<number | null>(null)
   const toolUseEndTimeRef = useRef<number>(0)  // When the last tool finished
@@ -124,6 +129,22 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
       clearInterval(interval)
     }
   }, [isOpen, isUsingTool])
+
+  // Elapsed timer
+  useEffect(() => {
+    if (!isOpen) {
+      setElapsedSeconds(0)
+      return
+    }
+    const interval = setInterval(() => setElapsedSeconds(s => s + 1), 1000)
+    return () => clearInterval(interval)
+  }, [isOpen])
+
+  const formattedTime = useMemo(() => {
+    const m = Math.floor(elapsedSeconds / 60)
+    const s = elapsedSeconds % 60
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+  }, [elapsedSeconds])
 
   useEffect(() => {
     if (!isOpen) return
@@ -429,6 +450,19 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
         // Tool overlay will fade out automatically after linger period
       }
 
+      if (t === 'realtime_transcript') {
+        const role = p?.role === 'user' ? 'user' as const : 'assistant' as const
+        const text = String(p?.transcript || '')
+        if (text) {
+          setTranscripts(prev => [...prev, {
+            id: `tr_${p?.item_id || Date.now()}_${Date.now()}`,
+            role,
+            text,
+            timestamp: Date.now(),
+          }])
+        }
+      }
+
       // Agent events forwarded from the bridge channel
       if (t === 'agent_event') {
         const eventType = String(p?.event_type || '')
@@ -585,6 +619,8 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
       activeAudioSourcesRef.current.clear()
       setIsActuallyPlayingAudio(false)
       setNotifications([])
+      setTranscripts([])
+      setChatInput('')
     }
   }, [isOpen])
 
@@ -601,6 +637,40 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
   const handleDismissNotification = useCallback((id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id))
   }, [])
+
+  const handleSendText = useCallback((text: string) => {
+    const trimmed = text.trim()
+    if (!trimmed || !clientRef.current || !sessionIdRef.current) return
+    // Add user message to transcript immediately
+    setTranscripts(prev => [...prev, {
+      id: `user_${Date.now()}`,
+      role: 'user',
+      text: trimmed,
+      timestamp: Date.now(),
+    }])
+    clientRef.current.sendText(sessionIdRef.current, trimmed).catch(() => {})
+    setChatInput('')
+  }, [])
+
+  // Build unified sidebar timeline: interleave transcripts + notifications by timestamp
+  type SidebarItem =
+    | { kind: 'transcript'; id: string; role: 'user' | 'assistant'; text: string; timestamp: number }
+    | { kind: 'notification'; data: VoiceNotification; timestamp: number }
+
+  const sidebarItems = useMemo<SidebarItem[]>(() => {
+    const items: SidebarItem[] = []
+    for (const t of transcripts) items.push({ kind: 'transcript', ...t })
+    for (const n of notifications) items.push({ kind: 'notification', data: n, timestamp: n.timestamp })
+    items.sort((a, b) => a.timestamp - b.timestamp)
+    return items
+  }, [transcripts, notifications])
+
+  // Auto-scroll sidebar chat to bottom
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight
+    }
+  }, [sidebarItems])
 
   if (!isOpen) return null
 
@@ -745,209 +815,341 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-center">
-      {/* Notification center */}
-      <VoiceNotificationCenter
-        notifications={notifications}
-        onApprove={handleApprove}
-        onReject={handleReject}
-        onDismiss={handleDismissNotification}
-      />
-
-      {/* Center orb */}
-      <div className="flex-1 flex items-center justify-center w-full max-w-2xl px-8">
-        <div
-          className="w-full h-full max-h-[500px] transition-transform duration-300 ease-out"
-          style={{ transform: `scale(${scale})` }}
-        >
-          <Orb
-            hue={hue}
-            hoverIntensity={hoverIntensity}
-            rotateOnHover={rotateOnHover}
-            forceHoverState={forceHoverState}
-            noiseAmplitude={noiseAmplitude}
-            noiseScale={noiseScale}
-            innerRadius={innerRadius}
-            animationSpeed={animationSpeed}
-          />
+    <div className="fixed inset-0 z-50 bg-black flex flex-col">
+      {/* ── Top bar ── */}
+      <div
+        className="flex items-center justify-between px-5 py-3 border-b border-white/[0.06]"
+        style={{
+          background: 'rgba(36, 36, 40, 0.6)',
+          backdropFilter: 'blur(40px) saturate(1.4)',
+        }}
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-semibold text-white/90 tracking-tight">Omni Voice</span>
+          <span className="flex items-center gap-1.5 text-xs text-white/50">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+            </span>
+            Live
+          </span>
+          <span className="text-xs text-white/30 font-mono tabular-nums">{formattedTime}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Toggle sidebar */}
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(o => !o)}
+            className="h-7 w-7 rounded-md flex items-center justify-center text-white/40 hover:text-white/70 hover:bg-white/[0.06] transition-colors"
+            aria-label={sidebarOpen ? 'Hide activity' : 'Show activity'}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <line x1="15" y1="3" x2="15" y2="21" />
+            </svg>
+          </button>
+          {/* Close */}
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-7 w-7 rounded-md flex items-center justify-center text-white/40 hover:text-white/70 hover:bg-white/[0.06] transition-colors"
+            aria-label="Close voice mode"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
         </div>
       </div>
 
-      {/* Bottom controls */}
-      <div className="pb-12 flex flex-col items-center gap-4">
-        {/* Debug state indicator */}
-        {debugEnabled && (
-          <div className="flex flex-col items-center gap-3">
-            <div className="text-white/50 text-sm font-mono">
-              Base: {effectiveState} | Playing: {isActuallyPlayingAudio ? 'YES' : 'NO'} | Audio: {(audioLevel * 100).toFixed(0)}%
-              {toolOverlayActive && <span className="text-purple-400"> | Tool Overlay: ON</span>}
+      {/* ── Main content: stage + sidebar ── */}
+      <div className="flex-1 flex min-h-0">
+        {/* ── Main stage ── */}
+        <div className="flex-1 flex flex-col items-center justify-center min-w-0">
+          {/* Orb */}
+          <div className="flex-1 flex items-center justify-center w-full max-w-2xl px-8">
+            <div
+              className="w-full h-full max-h-[500px] transition-transform duration-300 ease-out"
+              style={{ transform: `scale(${scale})` }}
+            >
+              <Orb
+                hue={hue}
+                hoverIntensity={hoverIntensity}
+                rotateOnHover={rotateOnHover}
+                forceHoverState={forceHoverState}
+                noiseAmplitude={noiseAmplitude}
+                noiseScale={noiseScale}
+                innerRadius={innerRadius}
+                animationSpeed={animationSpeed}
+              />
             </div>
+          </div>
 
-            {/* Debug controls */}
-            <div className="flex flex-wrap gap-2 justify-center max-w-xl">
+          {/* Bottom controls — kept exactly as before */}
+          <div className="pb-12 flex flex-col items-center gap-4">
+            {/* Debug state indicator */}
+            {debugEnabled && (
+              <div className="flex flex-col items-center gap-3">
+                <div className="text-white/50 text-sm font-mono">
+                  Base: {effectiveState} | Playing: {isActuallyPlayingAudio ? 'YES' : 'NO'} | Audio: {(audioLevel * 100).toFixed(0)}%
+                  {toolOverlayActive && <span className="text-purple-400"> | Tool Overlay: ON</span>}
+                </div>
+                <div className="flex flex-wrap gap-2 justify-center max-w-xl">
+                  <button onClick={() => { setOrbState(OrbState.IDLE); setIsActuallyPlayingAudio(false); toolUseEndTimeRef.current = 0 }} className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded">→ IDLE</button>
+                  <button onClick={() => { setOrbState(OrbState.LISTENING); setIsMuted(false); isMutedRef.current = false; setIsActuallyPlayingAudio(false); toolUseEndTimeRef.current = 0 }} className="px-3 py-1 text-xs bg-green-700 hover:bg-green-600 text-white rounded">→ LISTENING</button>
+                  <button onClick={() => { setOrbState(OrbState.THINKING); setIsActuallyPlayingAudio(false); toolUseEndTimeRef.current = 0 }} className="px-3 py-1 text-xs bg-blue-700 hover:bg-blue-600 text-white rounded">→ THINKING</button>
+                  <button onClick={() => { setIsActuallyPlayingAudio(true); toolUseEndTimeRef.current = 0 }} className="px-3 py-1 text-xs bg-orange-700 hover:bg-orange-600 text-white rounded">→ SPEAKING (start)</button>
+                  <button onClick={() => { setIsActuallyPlayingAudio(false) }} className="px-3 py-1 text-xs bg-orange-900 hover:bg-orange-800 text-white rounded">SPEAKING (stop)</button>
+                  <button onClick={() => { setIsUsingTool(true); toolUseEndTimeRef.current = 0 }} className="px-3 py-1 text-xs bg-purple-700 hover:bg-purple-600 text-white rounded">Tool Overlay ON</button>
+                  <button onClick={() => { setIsUsingTool(true); toolUseEndTimeRef.current = Date.now() }} className="px-3 py-1 text-xs bg-purple-900 hover:bg-purple-800 text-white rounded">Tool Overlay (linger)</button>
+                  <button onClick={() => { setIsUsingTool(false); toolUseEndTimeRef.current = 0 }} className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded">Tool Overlay OFF</button>
+                  <button onClick={() => { const fluctuate = () => setAudioLevel(Math.random() * 0.8 + 0.2); const iv = setInterval(fluctuate, 100); setTimeout(() => { clearInterval(iv); setAudioLevel(0) }, 3000) }} className="px-3 py-1 text-xs bg-yellow-700 hover:bg-yellow-600 text-white rounded">Simulate Audio (3s)</button>
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center gap-6">
+              {/* Mute/Unmute button */}
               <button
-                onClick={() => {
-                  setOrbState(OrbState.IDLE)
-                  setIsActuallyPlayingAudio(false)
-                  toolUseEndTimeRef.current = 0
-                }}
-                className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded"
-              >
-                → IDLE
-              </button>
-              <button
-                onClick={() => {
-                  setOrbState(OrbState.LISTENING)
-                  setIsMuted(false)
-                  isMutedRef.current = false
-                  setIsActuallyPlayingAudio(false)
-                  toolUseEndTimeRef.current = 0
-                }}
-                className="px-3 py-1 text-xs bg-green-700 hover:bg-green-600 text-white rounded"
-              >
-                → LISTENING
-              </button>
-              <button
-                onClick={() => {
-                  setOrbState(OrbState.THINKING)
-                  setIsActuallyPlayingAudio(false)
-                  toolUseEndTimeRef.current = 0
-                }}
-                className="px-3 py-1 text-xs bg-blue-700 hover:bg-blue-600 text-white rounded"
-              >
-                → THINKING
-              </button>
-              <button
-                onClick={() => {
-                  setIsActuallyPlayingAudio(true)
-                  toolUseEndTimeRef.current = 0
-                }}
-                className="px-3 py-1 text-xs bg-orange-700 hover:bg-orange-600 text-white rounded"
-              >
-                → SPEAKING (start)
-              </button>
-              <button
-                onClick={() => {
-                  setIsActuallyPlayingAudio(false)
-                }}
-                className="px-3 py-1 text-xs bg-orange-900 hover:bg-orange-800 text-white rounded"
-              >
-                SPEAKING (stop)
-              </button>
-              <button
-                onClick={() => {
-                  console.log('[DEBUG Button] Activating Tool Overlay')
-                  setIsUsingTool(true)
-                  toolUseEndTimeRef.current = 0  // Active tool use
-                  console.log('[DEBUG Button] Tool overlay activated:', {
-                    isUsingTool: true,
-                    toolUseEndTime: 0,
-                  })
-                }}
-                className="px-3 py-1 text-xs bg-purple-700 hover:bg-purple-600 text-white rounded"
-              >
-                Tool Overlay ON
-              </button>
-              <button
-                onClick={() => {
-                  const now = Date.now()
-                  console.log('[DEBUG Button] Starting Tool Overlay Linger')
-                  setIsUsingTool(true)
-                  toolUseEndTimeRef.current = now  // Start linger countdown
-                  console.log('[DEBUG Button] Tool overlay linger started:', {
-                    isUsingTool: true,
-                    toolUseEndTime: now,
-                  })
-                }}
-                className="px-3 py-1 text-xs bg-purple-900 hover:bg-purple-800 text-white rounded"
-              >
-                Tool Overlay (linger)
-              </button>
-              <button
-                onClick={() => {
-                  console.log('[DEBUG Button] Deactivating Tool Overlay')
-                  setIsUsingTool(false)
-                  toolUseEndTimeRef.current = 0
-                  console.log('[DEBUG Button] Tool overlay deactivated')
-                }}
-                className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded"
-              >
-                Tool Overlay OFF
-              </button>
-              <button
-                onClick={() => {
-                  // Simulate audio level fluctuation
-                  const fluctuate = () => {
-                    const level = Math.random() * 0.8 + 0.2
-                    setAudioLevel(level)
+                type="button"
+                onClick={async () => {
+                  const next = !isMuted
+                  setIsMuted(next)
+                  isMutedRef.current = next
+                  if (next) {
+                    if (orbState !== OrbState.SPEAKING && orbState !== OrbState.THINKING) {
+                      setOrbState(OrbState.IDLE)
+                    }
+                  } else {
+                    setOrbState(OrbState.LISTENING)
+                    try { await audioContextRef.current?.resume() } catch {}
                   }
-                  // Run for 3 seconds
-                  const interval = setInterval(fluctuate, 100)
-                  setTimeout(() => {
-                    clearInterval(interval)
-                    setAudioLevel(0)
-                  }, 3000)
                 }}
-                className="px-3 py-1 text-xs bg-yellow-700 hover:bg-yellow-600 text-white rounded"
+                className="h-16 w-16 rounded-full bg-tweetBlue hover:brightness-110 flex items-center justify-center shadow-lg"
+                aria-label={isMuted ? 'Unmute' : 'Mute'}
               >
-                Simulate Audio (3s)
+                {isMuted ? (
+                  <svg width="24" height="24" viewBox="0 0 24 24" className="text-white" aria-hidden="true">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" fill="currentColor"/>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none"/>
+                    <line x1="2" y1="2" x2="22" y2="22" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                  </svg>
+                ) : (
+                  <svg width="24" height="24" viewBox="0 0 24 24" className="text-white" aria-hidden="true">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" fill="currentColor"/>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none"/>
+                  </svg>
+                )}
+              </button>
+
+              {/* Close button */}
+              <button
+                type="button"
+                onClick={onClose}
+                className="h-16 w-16 rounded-full bg-bgCardAlt hover:bg-bgCard flex items-center justify-center shadow-lg"
+                aria-label="Close voice mode"
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" className="text-white" aria-hidden="true">
+                  <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+                </svg>
               </button>
             </div>
           </div>
-        )}
+        </div>
 
-        <div className="flex items-center gap-6">
-        {/* Mute/Unmute button */}
-        <button
-          type="button"
-          onClick={async () => {
-            const next = !isMuted
-            setIsMuted(next)
-            isMutedRef.current = next
-
-            // Update orb state based on mute status
-            if (next) {
-              // Muting - go to idle unless actively speaking/thinking
-              if (orbState !== OrbState.SPEAKING && orbState !== OrbState.THINKING) {
-                setOrbState(OrbState.IDLE)
-              }
-              // Note: tool overlay remains active if it was on - it's independent of mute state
-            } else {
-              // Unmuting - go to listening
-              setOrbState(OrbState.LISTENING)
-              try { await audioContextRef.current?.resume() } catch {}
-            }
+        {/* ── Right sidebar: Chat + Activity ── */}
+        <div
+          className="border-l border-white/[0.06] flex flex-col transition-[width,opacity] duration-200 ease-out overflow-hidden"
+          style={{
+            width: sidebarOpen ? 340 : 0,
+            opacity: sidebarOpen ? 1 : 0,
+            background: 'rgba(36, 36, 40, 0.4)',
+            backdropFilter: 'blur(40px) saturate(1.4)',
           }}
-          className="h-16 w-16 rounded-full bg-tweetBlue hover:brightness-110 flex items-center justify-center shadow-lg"
-          aria-label={isMuted ? 'Unmute' : 'Mute'}
         >
-          {isMuted ? (
-            <svg width="24" height="24" viewBox="0 0 24 24" className="text-white" aria-hidden="true">
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" fill="currentColor"/>
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none"/>
-              <line x1="2" y1="2" x2="22" y2="22" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-            </svg>
-          ) : (
-            <svg width="24" height="24" viewBox="0 0 24 24" className="text-white" aria-hidden="true">
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" fill="currentColor"/>
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none"/>
-            </svg>
-          )}
-        </button>
+          {/* Sidebar header */}
+          <div className="px-4 py-3 border-b border-white/[0.06] flex-shrink-0">
+            <span className="text-xs font-semibold text-white/60 uppercase tracking-wider">Chat</span>
+          </div>
 
-        {/* Close button */}
-        <button
-          type="button"
-          onClick={onClose}
-          className="h-16 w-16 rounded-full bg-bgCardAlt hover:bg-bgCard flex items-center justify-center shadow-lg"
-          aria-label="Close voice mode"
-        >
-          <svg width="24" height="24" viewBox="0 0 24 24" className="text-white" aria-hidden="true">
-            <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-          </svg>
-        </button>
+          {/* Interleaved timeline: transcripts + tool activity */}
+          <div ref={chatScrollRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
+            {sidebarItems.length === 0 ? (
+              <div className="text-xs text-white/25 text-center pt-8">
+                Transcripts and activity will appear here
+              </div>
+            ) : (
+              sidebarItems.map(item => {
+                if (item.kind === 'transcript') {
+                  return (
+                    <SidebarTranscriptBubble
+                      key={item.id}
+                      role={item.role}
+                      text={item.text}
+                      timestamp={item.timestamp}
+                    />
+                  )
+                }
+                return (
+                  <SidebarActivityCard
+                    key={item.data.id}
+                    notification={item.data}
+                    onApprove={handleApprove}
+                    onReject={handleReject}
+                    onDismiss={handleDismissNotification}
+                  />
+                )
+              })
+            )}
+          </div>
+
+          {/* Text input */}
+          <div className="px-3 pb-3 pt-2 border-t border-white/[0.06] flex-shrink-0">
+            <form
+              onSubmit={e => { e.preventDefault(); handleSendText(chatInput) }}
+              className="flex gap-2"
+            >
+              <input
+                type="text"
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                placeholder="Type a message..."
+                className="flex-1 bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-white/90 placeholder-white/25 outline-none focus:border-white/20 transition-colors"
+              />
+              <button
+                type="submit"
+                disabled={!chatInput.trim()}
+                className="px-3 py-2 rounded-lg bg-tweetBlue text-white text-xs font-medium disabled:opacity-30 hover:brightness-110 transition-all flex-shrink-0"
+              >
+                Send
+              </button>
+            </form>
+          </div>
         </div>
       </div>
     </div>
+  )
+}
+
+/* ── Sidebar transcript bubble ── */
+
+function SidebarTranscriptBubble({ role, text, timestamp }: { role: 'user' | 'assistant'; text: string; timestamp: number }) {
+  const isUser = role === 'user'
+  return (
+    <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+      <div
+        className={`max-w-[85%] rounded-lg px-3 py-2 text-xs leading-relaxed ${
+          isUser
+            ? 'bg-tweetBlue/20 text-white/90 rounded-br-sm'
+            : 'bg-white/[0.06] text-white/80 rounded-bl-sm'
+        }`}
+      >
+        {text}
+      </div>
+      <span className="text-[10px] text-white/20 mt-0.5 px-1">
+        {new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+      </span>
+    </div>
+  )
+}
+
+/* ── Sidebar activity card ── */
+
+function SidebarActivityCard({ notification: n, onApprove, onReject, onDismiss }: {
+  notification: VoiceNotification
+  onApprove?: (id: string) => void
+  onReject?: (id: string) => void
+  onDismiss?: (id: string) => void
+}) {
+  const icon = n.type === 'tool_called'
+    ? <ToolActivityIcon type="running" />
+    : n.type === 'tool_result'
+    ? <ToolActivityIcon type="done" />
+    : <ToolActivityIcon type="approval" />
+
+  const truncate = (text: string | undefined, max: number): string => {
+    if (!text) return ''
+    const s = text.length > 200 ? text.slice(0, 200) : text
+    const lines = s.split('\n')
+    if (lines.length > 3) return lines.slice(0, 3).join('\n') + '\n...'
+    return s.length >= max ? s.slice(0, max) + '...' : s
+  }
+
+  return (
+    <div
+      className="rounded-lg border border-white/[0.06] px-3 py-2.5 transition-colors hover:bg-white/[0.03]"
+      style={{ background: 'rgba(255, 255, 255, 0.02)' }}
+      onClick={() => n.type !== 'tool_approval' && onDismiss?.(n.id)}
+    >
+      <div className="flex items-center gap-2 mb-0.5">
+        {icon}
+        <span className="text-xs font-medium text-white/80 truncate flex-1">
+          {n.type === 'tool_approval' ? 'Approve tool call?' : n.tool}
+        </span>
+        <span className="text-[10px] text-white/20 tabular-nums flex-shrink-0">
+          {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+        </span>
+      </div>
+
+      {n.type === 'tool_called' && n.input && (
+        <div className="text-[11px] text-white/40 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
+          {truncate(n.input, 120)}
+        </div>
+      )}
+
+      {n.type === 'tool_result' && n.output && (
+        <div className="text-[11px] text-white/40 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
+          {truncate(n.output, 120)}
+        </div>
+      )}
+
+      {n.type === 'tool_approval' && (
+        <>
+          <div className="text-xs text-white/60 font-medium mt-0.5">{n.tool}</div>
+          {n.input && (
+            <div className="text-[11px] text-white/40 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
+              {truncate(n.input, 120)}
+            </div>
+          )}
+          <div className="flex gap-2 mt-2.5">
+            <button
+              onClick={(e) => { e.stopPropagation(); onApprove?.(n.request_id!) }}
+              className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-green-500/20 text-green-400 hover:bg-green-500/30 border border-green-500/20 transition-colors"
+            >
+              Approve
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onReject?.(n.request_id!) }}
+              className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/20 transition-colors"
+            >
+              Reject
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function ToolActivityIcon({ type }: { type: 'running' | 'done' | 'approval' }) {
+  if (type === 'done') {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0 text-green-400">
+        <polyline points="20 6 9 17 4 12" />
+      </svg>
+    )
+  }
+  if (type === 'approval') {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0 text-yellow-400">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      </svg>
+    )
+  }
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0 text-white/50">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
   )
 }

@@ -7,7 +7,7 @@ import { openTicketInCode } from '@/renderer/services/navigation';
 import { isActivePhase } from '@/shared/ticket-phase';
 import type { Ticket, TicketPhase } from '@/shared/types';
 
-import { PHASE_COLORS, PHASE_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './ticket-constants';
+import { PHASE_COLORS, PHASE_LABELS, RESOLUTION_COLORS, RESOLUTION_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './ticket-constants';
 import { ticketApi } from './state';
 
 const canStart = (phase: TicketPhase | undefined) => !phase || !isActivePhase(phase);
@@ -26,6 +26,7 @@ export const KanbanCard = memo(
     const handleStart = useCallback(
       (e: React.MouseEvent) => {
         e.stopPropagation();
+        openTicketInCode(ticket.id);
         ticketApi.startSupervisor(ticket.id);
       },
       [ticket.id]
@@ -78,7 +79,17 @@ export const KanbanCard = memo(
             >
               {TICKET_PRIORITY_LABELS[ticket.priority]}
             </span>
-            {phase && phase !== 'idle' && (
+            {ticket.resolution && (
+              <span
+                className={cn(
+                  'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
+                  RESOLUTION_COLORS[ticket.resolution]
+                )}
+              >
+                {RESOLUTION_LABELS[ticket.resolution]}
+              </span>
+            )}
+            {phase && phase !== 'idle' && !ticket.resolution && (
               <span
                 className={cn(
                   'flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full font-medium',

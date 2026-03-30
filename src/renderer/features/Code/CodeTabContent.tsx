@@ -2,11 +2,11 @@ import { useStore } from '@nanostores/react';
 import { motion } from 'framer-motion';
 import { memo, useCallback, useMemo } from 'react';
 
-import { buildInteractiveVariables } from '@/lib/client-tools';
+import { buildAutopilotVariables, buildInteractiveVariables } from '@/lib/client-tools';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { SessionStartupShell } from '@/renderer/common/SessionStartupShell';
 import { Button, cn } from '@/renderer/ds';
-import { $tickets, ticketApi } from '@/renderer/features/Tickets/state';
+import { buildClientToolHandler, buildTicketToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { buildSandboxLabel, isCustomSandbox } from '@/renderer/omniagents-ui/sandbox-label';
 import type { CodeTab, CodeTabId, TicketId } from '@/shared/types';
@@ -148,52 +148,22 @@ export const CodeTabContent = memo(
       [tab.id]
     );
 
-    const handleClientToolCall: ClientToolCallHandler | undefined = useMemo(() => {
-      if (!tab.ticketId) return undefined;
-      const ticketId = tab.ticketId as TicketId;
-      return async (toolName: string, toolArgs: Record<string, unknown>) => {
-        const ticket = $tickets.get()[ticketId];
-        if (!ticket) return { ok: false, error: { message: 'Ticket not found' } };
-        const projectId = ticket.projectId ?? tab.projectId;
-        if (!projectId) return { ok: false, error: { message: 'No project for ticket' } };
-
-        switch (toolName) {
-          case 'get_ticket': {
-            const pipeline = await ticketApi.getPipeline(projectId);
-            const column = pipeline.columns.find((c) => c.id === ticket.columnId);
-            return {
-              ok: true,
-              result: {
-                id: ticket.id,
-                title: ticket.title,
-                description: ticket.description || '',
-                priority: ticket.priority,
-                column: column?.label ?? ticket.columnId,
-                pipeline: pipeline.columns.map((c) => c.label),
-              },
-            };
-          }
-          case 'move_ticket': {
-            const columnLabel = (toolArgs.column as string) ?? '';
-            const pipeline = await ticketApi.getPipeline(projectId);
-            const col = pipeline.columns.find((c) => c.label.toLowerCase() === columnLabel.toLowerCase());
-            if (!col) {
-              const valid = pipeline.columns.map((c) => c.label).join(', ');
-              return { ok: true, result: { error: `Unknown column: "${columnLabel}". Valid columns: ${valid}` } };
-            }
-            await ticketApi.moveTicketToColumn(ticketId, col.id);
-            return { ok: true, result: { ok: true, column: col.label } };
-          }
-          case 'escalate': {
-            const message = (toolArgs.message as string) ?? '';
-            if (!message) return { ok: true, result: { error: 'Empty escalation message' } };
-            return { ok: true, result: { ok: true, message: 'Escalated to human operator' } };
-          }
-          default:
-            return { ok: true, result: { error: `Unknown tool: ${toolName}` } };
-        }
-      };
+    const handleClientToolCall = useMemo(() => {
+      if (tab.ticketId && tab.projectId) {
+        return buildTicketToolHandler(tab.ticketId as TicketId, tab.projectId);
+      }
+      return buildClientToolHandler();
     }, [tab.ticketId, tab.projectId]);
+
+    const clientToolVariables = useMemo(
+      () =>
+        tab.ticketId
+          ? buildAutopilotVariables()
+          : buildInteractiveVariables(
+              project ? { projectId: project.id, projectLabel: project.label } : undefined
+            ),
+      [tab.ticketId, project]
+    );
 
     // No project selected — show project picker
     if (!tab.projectId) {
@@ -217,7 +187,7 @@ export const CodeTabContent = memo(
             sandboxUrls={sandboxUrls}
             sessionId={tab.sessionId}
             onSessionChange={handleSessionChange}
-            variables={tab.ticketId ? buildInteractiveVariables() : undefined}
+            variables={clientToolVariables}
             overlayPane={overlayPane}
             onCloseOverlay={handleCloseOverlay}
             onReady={() => {}}

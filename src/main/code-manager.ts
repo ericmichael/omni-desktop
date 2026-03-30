@@ -22,6 +22,9 @@ export class CodeManager {
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   private fetchFn: FetchFn;
 
+  /** Optional fallback for sandbox status — lets ProjectManager provide supervisor sandbox status. */
+  statusFallback?: (tabId: CodeTabId) => WithTimestamp<AgentProcessStatus> | null;
+
   constructor(arg: { sendToWindow: CodeManager['sendToWindow']; fetchFn?: FetchFn }) {
     this.sendToWindow = arg.sendToWindow;
     this.fetchFn = arg.fetchFn ?? globalThis.fetch;
@@ -73,8 +76,11 @@ export class CodeManager {
 
   getSandboxStatus = (tabId: CodeTabId): WithTimestamp<AgentProcessStatus> => {
     const proc = this.processes.get(tabId);
-    if (!proc) return { type: 'uninitialized', timestamp: Date.now() };
-    return proc.getStatus();
+    if (proc) return proc.getStatus();
+    // Check if a supervisor sandbox is providing status for this tab
+    const fallback = this.statusFallback?.(tabId);
+    if (fallback) return fallback;
+    return { type: 'uninitialized', timestamp: Date.now() };
   };
 
   resizePty = (tabId: CodeTabId, cols: number, rows: number): void => {

@@ -13,6 +13,7 @@ import { MainContent } from '@/renderer/app/MainContent';
 import { syncTheme } from '@/renderer/constants';
 import { SystemInfoLoadingGate, SystemInfoProvider } from '@/renderer/contexts/SystemInfoContext';
 import { Console } from '@/renderer/features/Console/Console';
+import { QuickCapture } from '@/renderer/features/Inbox/QuickCapture';
 import { SettingsModal } from '@/renderer/features/SettingsModal/SettingsModal';
 import { ToastContainer } from '@/renderer/features/Toast/ToastContainer';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -44,6 +45,7 @@ export const App = () => {
           </SystemInfoLoadingGate>
           <SettingsModal />
           <Console />
+          <QuickCapture />
           <ToastContainer />
         </ErrorBoundary>
       </div>

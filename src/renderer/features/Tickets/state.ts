@@ -6,11 +6,13 @@ import { projectsApi } from '@/renderer/features/Projects/state';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { isActivePhase } from '@/shared/ticket-phase';
+import { initiativeApi } from '@/renderer/features/Initiatives/state';
 import type {
   ArtifactFileContent,
   ArtifactFileEntry,
   ColumnId,
   DiffResponse,
+  InitiativeId,
   Pipeline,
   ProjectId,
   SessionMessage,
@@ -38,12 +40,17 @@ export const $tickets = map<Record<TicketId, Ticket>>({});
 export const $pipeline = atom<Pipeline | null>(null);
 
 /**
- * Which tickets view is active: dashboard = no selection, project = project detail.
+ * Which initiative is selected for kanban filtering. 'all' shows all initiatives.
+ */
+export const $activeInitiativeId = atom<InitiativeId | 'all'>('all');
+
+/**
+ * Which tickets view is active: dashboard = no selection, project = project detail, inbox = inbox view.
  * Ticket selection is handled by `activeTicketId` in the persisted store.
  */
-export const $ticketsView = atom<{ type: 'dashboard' } | { type: 'project'; projectId: ProjectId }>(
-  { type: 'dashboard' }
-);
+export const $ticketsView = atom<
+  { type: 'dashboard' } | { type: 'project'; projectId: ProjectId } | { type: 'inbox'; selectedItemId?: string }
+>({ type: 'dashboard' });
 
 /**
  * Supervisor chat messages, keyed by ticket ID.
@@ -95,7 +102,7 @@ export const ticketApi = {
 
   // Tickets
   addTicket: async (
-    ticket: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'columnId'>
+    ticket: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'columnId' | 'initiativeId'> & { initiativeId?: InitiativeId }
   ): Promise<Ticket> => {
     const created = await emitter.invoke('project:add-ticket', ticket);
     $tickets.setKey(created.id, created);
@@ -149,6 +156,13 @@ export const ticketApi = {
   },
   moveTicketToColumn: (ticketId: TicketId, columnId: ColumnId): Promise<void> => {
     return emitter.invoke('project:move-ticket-to-column', ticketId, columnId);
+  },
+  resolveTicket: async (ticketId: TicketId, resolution: import('@/shared/types').TicketResolution): Promise<void> => {
+    await emitter.invoke('project:resolve-ticket', ticketId, resolution);
+    const existing = $tickets.get()[ticketId];
+    if (existing) {
+      $tickets.setKey(ticketId, { ...existing, resolution, updatedAt: Date.now() });
+    }
   },
   // Supervisor
   ensureSupervisorInfra: async (ticketId: TicketId): Promise<void> => {
@@ -215,10 +229,15 @@ export const ticketApi = {
   goToDashboard: (): void => {
     $ticketsView.set({ type: 'dashboard' });
   },
+  goToInbox: (selectedItemId?: string): void => {
+    $ticketsView.set({ type: 'inbox', selectedItemId });
+  },
   goToProject: (projectId: ProjectId): void => {
     $ticketsView.set({ type: 'project', projectId });
+    $activeInitiativeId.set('all');
     void ticketApi.fetchTickets(projectId);
     void ticketApi.getPipeline(projectId);
+    void initiativeApi.fetchInitiatives(projectId);
   },
   setActiveTicket: (ticketId: TicketId): void => {
     persistedStoreApi.setKey('activeTicketId', ticketId);

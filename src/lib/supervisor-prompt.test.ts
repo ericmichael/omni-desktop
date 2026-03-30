@@ -17,6 +17,7 @@ const makePipeline = (columns: { id: string; label: string }[]): Pipeline => ({
 const makeTicket = (overrides: Partial<Ticket> = {}): Ticket => ({
   id: 'ticket-42',
   projectId: 'proj-1',
+  initiativeId: 'init-1',
   title: 'Add dark mode',
   description: 'Implement dark mode across the entire app.',
   priority: 'high',

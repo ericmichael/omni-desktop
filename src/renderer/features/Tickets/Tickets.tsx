@@ -1,13 +1,39 @@
 import { useStore } from '@nanostores/react';
-import { memo } from 'react';
+import { memo, useCallback } from 'react';
+
+import { InboxDetail } from '@/renderer/features/Inbox/InboxDetail';
+import { InboxList } from '@/renderer/features/Inbox/InboxList';
+import type { InboxItemId } from '@/shared/types';
 
 import { ProjectDetail } from './ProjectDetail';
 import { TicketsSidebar } from './Sidebar';
-import { $ticketsView } from './state';
+import { $ticketsView, ticketApi } from './state';
+
+const InboxView = memo(() => {
+  const view = useStore($ticketsView);
+  const selectedId = view.type === 'inbox' ? view.selectedItemId ?? null : null;
+
+  const handleSelect = useCallback((id: InboxItemId | null) => {
+    ticketApi.goToInbox(id ?? undefined);
+  }, []);
+
+  const handleBack = useCallback(() => {
+    ticketApi.goToInbox();
+  }, []);
+
+  if (selectedId) {
+    return <InboxDetail itemId={selectedId} onBack={handleBack} />;
+  }
+  return <InboxList selectedId={selectedId} onSelect={handleSelect} />;
+});
+InboxView.displayName = 'InboxView';
 
 const TicketsContent = memo(() => {
   const view = useStore($ticketsView);
 
+  if (view.type === 'inbox') {
+    return <InboxView />;
+  }
   if (view.type === 'project') {
     return <ProjectDetail projectId={view.projectId} />;
   }

@@ -14,19 +14,23 @@ import type { Column, ProjectId, Ticket, TicketId } from '@/shared/types';
 
 import { KanbanCard } from './KanbanCard';
 import { KanbanColumn } from './KanbanColumn';
-import { $pipeline, $tickets, ticketApi } from './state';
+import { $activeInitiativeId, $pipeline, $tickets, ticketApi } from './state';
 
 export const KanbanBoard = memo(({ projectId }: { projectId: ProjectId }) => {
   const pipeline = useStore($pipeline);
   const tickets = useStore($tickets);
+  const activeInitiativeId = useStore($activeInitiativeId);
 
   const [activeTicket, setActiveTicket] = useState<{ ticket: Ticket; column: Column } | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const projectTickets = useMemo(
-    () => Object.values(tickets).filter((t) => t.projectId === projectId),
-    [tickets, projectId]
+    () =>
+      Object.values(tickets).filter(
+        (t) => t.projectId === projectId && (activeInitiativeId === 'all' || t.initiativeId === activeInitiativeId)
+      ),
+    [tickets, projectId, activeInitiativeId]
   );
 
   const ticketsByColumn = useMemo(() => {

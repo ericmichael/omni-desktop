@@ -7,6 +7,7 @@ import {
   PiArrowsOutBold,
   PiCaretDownBold,
   PiChatCircleBold,
+  PiDotsThreeBold,
   PiCheckCircleBold,
   PiCodeBold,
   PiDotsSixVerticalBold,
@@ -28,10 +29,11 @@ import { Button, cn, IconButton, Spinner } from '@/renderer/ds';
 import { FloatingWidget } from '@/renderer/features/Omni/FloatingWidget';
 import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import { buildSandboxLabel, isCustomSandbox } from '@/renderer/omniagents-ui/sandbox-label';
+import { $initiatives } from '@/renderer/features/Initiatives/state';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { TicketId, TicketPhase } from '@/shared/types';
+import type { TicketId, TicketPhase, TicketResolution } from '@/shared/types';
 
-import { COLUMN_BADGE_COLORS, PHASE_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './ticket-constants';
+import { COLUMN_BADGE_COLORS, PHASE_LABELS, RESOLUTION_COLORS, RESOLUTION_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './ticket-constants';
 import { TicketArtifactsTab } from './TicketArtifactsTab';
 import { TicketOverviewTab } from './TicketOverviewTab';
 import { TicketPRTab } from './TicketPRTab';
@@ -58,8 +60,10 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, dragHandleProps,
   const tickets = useStore($tickets);
   const tasks = useStore($tasks);
   const pipeline = useStore($pipeline);
+  const initiatives = useStore($initiatives);
   const store = useStore(persistedStoreApi.$atom);
   const ticket = tickets[ticketId];
+  const initiative = ticket?.initiativeId ? initiatives[ticket.initiativeId] : undefined;
   const project = useMemo(
     () => store.projects.find((p) => p.id === ticket?.projectId) ?? null,
     [store.projects, ticket?.projectId]
@@ -221,6 +225,39 @@ return;
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [columnMenuOpen]);
 
+  const [resolveMenuOpen, setResolveMenuOpen] = useState(false);
+  const resolveMenuRef = useRef<HTMLDivElement>(null);
+
+  const isTerminalColumn = useMemo(() => {
+    if (!pipeline || !ticket) return false;
+    const terminalId = pipeline.columns[pipeline.columns.length - 1]?.id;
+    return ticket.columnId === terminalId;
+  }, [pipeline, ticket]);
+
+  const handleResolveClick = useCallback((e: ReactMouseEvent) => {
+    e.stopPropagation();
+    setResolveMenuOpen((prev) => !prev);
+  }, []);
+
+  const handleResolve = useCallback(
+    (resolution: TicketResolution) => {
+      ticketApi.resolveTicket(ticketId, resolution);
+      setResolveMenuOpen(false);
+    },
+    [ticketId]
+  );
+
+  useEffect(() => {
+    if (!resolveMenuOpen) return;
+    const handleClickOutside = (e: Event) => {
+      if (resolveMenuRef.current && !resolveMenuRef.current.contains(e.target as Node)) {
+        setResolveMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [resolveMenuOpen]);
+
   const tabHandlers = useMemo(
     () => Object.fromEntries(TABS.map((t) => [t, () => setActiveTab(t)])) as Record<TicketTab, () => void>,
     []
@@ -339,6 +376,48 @@ return;
             )}
           >
             {TICKET_PRIORITY_LABELS[ticket.priority]}
+          </span>
+        )}
+        {!compact && ticket.resolution && (
+          <span
+            className={cn(
+              'text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0',
+              RESOLUTION_COLORS[ticket.resolution]
+            )}
+          >
+            {RESOLUTION_LABELS[ticket.resolution]}
+          </span>
+        )}
+        {!compact && !ticket.resolution && !isTerminalColumn && (
+          <div className="relative shrink-0" ref={resolveMenuRef}>
+            <button
+              type="button"
+              aria-label="Ticket menu"
+              title="Ticket menu"
+              onClick={handleResolveClick}
+              className="inline-flex size-6 items-center justify-center rounded-md text-fg-muted hover:bg-white/5 hover:text-fg transition-colors"
+            >
+              <PiDotsThreeBold size={14} />
+            </button>
+            {resolveMenuOpen && (
+              <div className="absolute top-full right-0 mt-1 z-50 min-w-[140px] rounded-md border border-surface-border bg-surface shadow-lg py-1">
+                {(['completed', 'wont_do', 'duplicate', 'cancelled'] as TicketResolution[]).map((res) => (
+                  <button
+                    key={res}
+                    type="button"
+                    onClick={() => handleResolve(res)}
+                    className="w-full text-left px-3 py-1.5 text-xs text-fg hover:bg-surface-hover cursor-pointer transition-colors"
+                  >
+                    {RESOLUTION_LABELS[res]}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {!compact && initiative && !initiative.isDefault && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 text-sky-400 bg-sky-400/10">
+            {initiative.title}
           </span>
         )}
         {!compact && ticket.branch && (

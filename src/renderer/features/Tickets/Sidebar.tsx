@@ -3,9 +3,10 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { PiPlusBold } from 'react-icons/pi';
 
 import { cn, IconButton } from '@/renderer/ds';
+import { $inboxItems } from '@/renderer/features/Inbox/state';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { Project } from '@/shared/types';
+import type { InboxItem, InboxItemId, Project } from '@/shared/types';
 
 import { COLUMN_BADGE_COLORS } from './ticket-constants';
 import { ProjectForm } from './ProjectForm';
@@ -91,6 +92,25 @@ const SidebarActiveTicketItem = memo(({ entry, isActive }: { entry: ActiveTicket
 });
 SidebarActiveTicketItem.displayName = 'SidebarActiveTicketItem';
 
+const SidebarInboxItem = memo(
+  ({ item, isActive, onSelect }: { item: InboxItem; isActive: boolean; onSelect: (id: InboxItemId) => void }) => {
+    const handleClick = useCallback(() => onSelect(item.id), [item.id, onSelect]);
+
+    return (
+      <button
+        onClick={handleClick}
+        className={cn(
+          'flex items-center gap-2 w-full px-3 py-1.5 text-left transition-colors cursor-pointer',
+          isActive ? 'bg-accent-600/20 text-fg' : 'text-fg-muted hover:bg-white/5 hover:text-fg'
+        )}
+      >
+        <span className="text-sm truncate flex-1 min-w-0">{item.title}</span>
+      </button>
+    );
+  }
+);
+SidebarInboxItem.displayName = 'SidebarInboxItem';
+
 export const TicketsSidebar = memo(() => {
   const store = useStore(persistedStoreApi.$atom);
   const activeTickets = useStore($activeTickets);
@@ -134,10 +154,48 @@ export const TicketsSidebar = memo(() => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [activeTickets]);
 
+  const inboxItemsMap = useStore($inboxItems);
+  const openInboxItems = useMemo(
+    () =>
+      Object.values(inboxItemsMap)
+        .filter((i) => i.status === 'open')
+        .sort((a, b) => b.createdAt - a.createdAt),
+    [inboxItemsMap]
+  );
+
+  const handleSelectInboxItem = useCallback((id: InboxItemId) => {
+    ticketApi.goToInbox(id);
+  }, []);
+
+  const isInboxView = view.type === 'inbox';
+  const selectedInboxItemId = isInboxView ? view.selectedItemId : undefined;
+
   return (
     <div className="flex flex-col h-full w-60 border-r border-surface-border bg-surface shrink-0">
-      {/* Projects section */}
+      {/* Inbox section */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-surface-border">
+        <button onClick={() => ticketApi.goToInbox()} className="text-xs font-semibold text-fg-muted uppercase tracking-wider hover:text-fg transition-colors cursor-pointer">
+          Inbox
+        </button>
+        {openInboxItems.length > 0 && <span className="text-xs text-fg-subtle">{openInboxItems.length}</span>}
+      </div>
+      <div className="flex-1 min-h-0 overflow-y-auto py-1">
+        {openInboxItems.length === 0 ? (
+          <p className="px-3 py-2 text-xs text-fg-subtle">No open items</p>
+        ) : (
+          openInboxItems.map((item) => (
+            <SidebarInboxItem
+              key={item.id}
+              item={item}
+              isActive={isInboxView && selectedInboxItemId === item.id}
+              onSelect={handleSelectInboxItem}
+            />
+          ))
+        )}
+      </div>
+
+      {/* Projects section */}
+      <div className="flex items-center justify-between px-3 py-2 border-t border-b border-surface-border">
         <span className="text-xs font-semibold text-fg-muted uppercase tracking-wider">Projects</span>
         <IconButton aria-label="New project" icon={<PiPlusBold />} size="sm" onClick={handleOpenForm} />
       </div>

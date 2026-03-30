@@ -7,10 +7,12 @@ import { PiArrowsInBold, PiArrowsOutBold, PiCodeBold, PiDotsSixVerticalBold, PiD
 
 import { Button, cn } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { CodeLayoutMode, CodeTab, CodeTabId } from '@/shared/types';
+import type { CodeLayoutMode, CodeTab, CodeTabId, TicketId, TicketResolution } from '@/shared/types';
 
 import { CodeTabContent } from './CodeTabContent';
-import { TicketBannerActions, TicketColumnBadge } from '@/renderer/features/Tickets/TicketControls';
+import { TicketBannerActions, TicketColumnBadge, TicketResolutionBadge } from '@/renderer/features/Tickets/TicketControls';
+import { type TicketPanel, TicketPanelOverlay } from '@/renderer/features/Tickets/TicketPanelOverlay';
+import { ticketApi } from '@/renderer/features/Tickets/state';
 import { $codeTabStatuses, codeApi } from './state';
 
 const COLUMN_WIDTH = 480;
@@ -76,6 +78,15 @@ const SessionActionButton = memo(
 );
 SessionActionButton.displayName = 'SessionActionButton';
 
+const RESOLUTIONS: { value: TicketResolution; label: string }[] = [
+  { value: 'completed', label: 'Close as Completed' },
+  { value: 'wont_do', label: "Close as Won't do" },
+  { value: 'duplicate', label: 'Close as Duplicate' },
+  { value: 'cancelled', label: 'Close as Cancelled' },
+];
+
+const MENU_DIVIDER = <div className="my-1 border-t border-surface-border" />;
+
 const CodeSessionHeader = memo(
   ({
     label,
@@ -85,6 +96,8 @@ const CodeSessionHeader = memo(
     actions,
     onClose,
     dragHandle,
+    ticketId,
+    onOpenPanel,
   }: {
     label: string;
     ticketTitle?: string | null;
@@ -93,6 +106,8 @@ const CodeSessionHeader = memo(
     actions?: React.ReactNode;
     onClose?: () => void;
     dragHandle?: React.ReactNode;
+    ticketId?: TicketId;
+    onOpenPanel?: (panel: TicketPanel) => void;
   }) => {
     const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
 
@@ -111,6 +126,24 @@ const CodeSessionHeader = memo(
         window.removeEventListener('keydown', handleKey);
       };
     }, [menuPosition]);
+
+    const handleOpenPanel = useCallback(
+      (panel: TicketPanel) => {
+        setMenuPosition(null);
+        onOpenPanel?.(panel);
+      },
+      [onOpenPanel]
+    );
+
+    const handleResolve = useCallback(
+      (resolution: TicketResolution) => {
+        if (ticketId) {
+          ticketApi.resolveTicket(ticketId, resolution);
+        }
+        setMenuPosition(null);
+      },
+      [ticketId]
+    );
 
     return (
       <>
@@ -135,9 +168,38 @@ const CodeSessionHeader = memo(
           </div>
           {menuPosition && onClose && (
             <div
-              className="fixed z-50 min-w-[140px] rounded-md border border-surface-border bg-surface shadow-lg py-1"
-              style={{ left: menuPosition.x - 140, top: menuPosition.y }}
+              className="fixed z-50 min-w-[160px] rounded-md border border-surface-border bg-surface shadow-lg py-1"
+              style={{ left: menuPosition.x - 160, top: menuPosition.y }}
             >
+              {ticketId && onOpenPanel && (
+                <>
+                  <button type="button" onClick={() => handleOpenPanel('overview')} className="w-full text-left px-3 py-1.5 text-xs text-fg hover:bg-surface-hover transition-colors">
+                    Overview
+                  </button>
+                  <button type="button" onClick={() => handleOpenPanel('pr')} className="w-full text-left px-3 py-1.5 text-xs text-fg hover:bg-surface-hover transition-colors">
+                    PR
+                  </button>
+                  <button type="button" onClick={() => handleOpenPanel('artifacts')} className="w-full text-left px-3 py-1.5 text-xs text-fg hover:bg-surface-hover transition-colors">
+                    Artifacts
+                  </button>
+                  {MENU_DIVIDER}
+                </>
+              )}
+              {ticketId && (
+                <>
+                  {RESOLUTIONS.map((res) => (
+                    <button
+                      key={res.value}
+                      type="button"
+                      onClick={() => handleResolve(res.value)}
+                      className="w-full text-left px-3 py-1.5 text-xs text-fg hover:bg-surface-hover transition-colors"
+                    >
+                      {res.label}
+                    </button>
+                  ))}
+                  {MENU_DIVIDER}
+                </>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -146,7 +208,7 @@ const CodeSessionHeader = memo(
                 }}
                 className="w-full text-left px-3 py-1.5 text-xs text-fg hover:bg-surface-hover transition-colors"
               >
-                Close
+                Close session
               </button>
             </div>
           )}
@@ -198,6 +260,9 @@ const DeckColumn = memo(
       transition,
     };
 
+    const [activePanel, setActivePanel] = useState<TicketPanel | null>(null);
+    const handleClosePanel = useCallback(() => setActivePanel(null), []);
+
     return (
       <div
         ref={setNodeRef}
@@ -221,6 +286,8 @@ const DeckColumn = memo(
             </div>
           }
           onClose={() => onClose(tab.id)}
+          ticketId={tab.ticketId as TicketId | undefined}
+          onOpenPanel={tab.ticketId ? setActivePanel : undefined}
           dragHandle={
             <button
               type="button"
@@ -233,7 +300,12 @@ const DeckColumn = memo(
             </button>
           }
         />
-        <div className="flex-1 min-h-0">{children}</div>
+        <div className="flex-1 min-h-0 relative">
+          {children}
+          {tab.ticketId && (
+            <TicketPanelOverlay panel={activePanel} ticketId={tab.ticketId as TicketId} onClose={handleClosePanel} />
+          )}
+        </div>
       </div>
     );
   }
@@ -270,10 +342,22 @@ const CodeSessionPane = memo(
     headerActionsTargetId?: string;
     headerActionsCompact?: boolean;
   }) => {
+    const [activePanel, setActivePanel] = useState<TicketPanel | null>(null);
+    const handleClosePanel = useCallback(() => setActivePanel(null), []);
+
     return (
       <div className={cn('w-full h-full flex flex-col bg-surface-raised', !isVisible && 'hidden')}>
-        <CodeSessionHeader label={label} ticketTitle={ticketTitle} ticketColumnBadge={ticketColumnBadge} ticketActions={ticketActions} actions={actions} onClose={() => onClose(tab.id)} />
-        <div className="flex-1 min-h-0">
+        <CodeSessionHeader
+          label={label}
+          ticketTitle={ticketTitle}
+          ticketColumnBadge={ticketColumnBadge}
+          ticketActions={ticketActions}
+          actions={actions}
+          onClose={() => onClose(tab.id)}
+          ticketId={tab.ticketId as TicketId | undefined}
+          onOpenPanel={tab.ticketId ? setActivePanel : undefined}
+        />
+        <div className="flex-1 min-h-0 relative">
           <CodeTabContent
             tab={tab}
             isVisible={isVisible}
@@ -283,6 +367,9 @@ const CodeSessionPane = memo(
             headerActionsTargetId={headerActionsTargetId}
             headerActionsCompact={headerActionsCompact}
           />
+          {tab.ticketId && (
+            <TicketPanelOverlay panel={activePanel} ticketId={tab.ticketId as TicketId} onClose={handleClosePanel} />
+          )}
         </div>
       </div>
     );
@@ -537,9 +624,6 @@ export const CodeDeck = memo(() => {
           onClick={() => handleNewTabSession(tab)}
         />
       );
-      if (tab.ticketId) {
-        return newSessionBtn;
-      }
       const status = statuses[tab.id];
       const isRunning = status?.type === 'running';
       const codeServerUrl = isRunning ? status.data.codeServerUrl : undefined;
@@ -576,7 +660,12 @@ export const CodeDeck = memo(() => {
   const renderTicketBannerActions = useCallback(
     (tab: CodeTab) => {
       if (!tab.ticketId) return undefined;
-      return <TicketBannerActions ticketId={tab.ticketId} />;
+      return (
+        <>
+          <TicketBannerActions ticketId={tab.ticketId} />
+          <TicketResolutionBadge ticketId={tab.ticketId} />
+        </>
+      );
     },
     []
   );
