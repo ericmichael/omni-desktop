@@ -1,4 +1,4 @@
-import type { FleetSessionMessage, FleetTicketId, FleetTokenUsage } from '@/shared/types';
+import type { SessionMessage, TicketId, TokenUsage } from '@/shared/types';
 import type { TicketPhase } from '@/shared/ticket-phase';
 import { isValidTransition, isActivePhase, isStreamingPhase } from '@/shared/ticket-phase';
 
@@ -33,12 +33,12 @@ type RpcNotification = {
 export type ClientFunctionResponder = (ok: boolean, result?: Record<string, unknown>) => void;
 
 export type TicketMachineCallbacks = {
-  onPhaseChange: (ticketId: FleetTicketId, phase: TicketPhase) => void;
-  onMessage: (ticketId: FleetTicketId, msg: FleetSessionMessage) => void;
-  onRunEnd: (ticketId: FleetTicketId, reason: string) => void;
-  onTokenUsage?: (ticketId: FleetTicketId, usage: FleetTokenUsage) => void;
+  onPhaseChange: (ticketId: TicketId, phase: TicketPhase) => void;
+  onMessage: (ticketId: TicketId, msg: SessionMessage) => void;
+  onRunEnd: (ticketId: TicketId, reason: string) => void;
+  onTokenUsage?: (ticketId: TicketId, usage: TokenUsage) => void;
   onClientRequest?: (
-    ticketId: FleetTicketId,
+    ticketId: TicketId,
     functionName: string,
     args: Record<string, unknown>,
     respond: ClientFunctionResponder
@@ -63,10 +63,10 @@ const nextRpcId = (): string => String(++rpcIdCounter);
  *
  * Does NOT own:
  * - SandboxManager (passed in after provisioning)
- * - Ticket CRUD, pipeline logic, prompt building (FleetManager)
+ * - Ticket CRUD, pipeline logic, prompt building (ProjectManager)
  */
 export class TicketMachine {
-  readonly ticketId: FleetTicketId;
+  readonly ticketId: TicketId;
 
   private phase: TicketPhase = 'idle';
   private wsUrl: string = '';
@@ -90,7 +90,7 @@ export class TicketMachine {
   // Async operation mutex
   private opLock: Promise<void> = Promise.resolve();
 
-  constructor(ticketId: FleetTicketId, callbacks: TicketMachineCallbacks) {
+  constructor(ticketId: TicketId, callbacks: TicketMachineCallbacks) {
     this.ticketId = ticketId;
     this.callbacks = callbacks;
   }
@@ -288,7 +288,7 @@ export class TicketMachine {
       if (parsed.method === 'run_end') {
         const reason = (parsed.params?.end_reason as string) ?? 'completed';
         this.runId = null;
-        // Don't set phase here — let FleetManager decide what comes next
+        // Don't set phase here — let ProjectManager decide what comes next
         // (continue, retry, complete, or error) via the onRunEnd callback
         this.callbacks.onRunEnd(this.ticketId, reason);
         return;
@@ -305,7 +305,7 @@ export class TicketMachine {
         if (params && params.content != null) {
           this.recordActivity();
           const role = params.role === 'user' ? 'user' : 'assistant';
-          const msg: FleetSessionMessage = {
+          const msg: SessionMessage = {
             id: ++this.messageIdCounter,
             role: params.tool_name ? 'tool_call' : role,
             content: params.content,
@@ -365,9 +365,12 @@ export class TicketMachine {
 
   /**
    * Create a session via session.ensure RPC.
+   * If `sessionId` is provided, it is sent to the container so the session is
+   * created with that specific ID (allows the caller to set the ID on the ticket
+   * before the RPC completes, enabling progressive UI loading).
    * Transitions: connecting → session_creating → ready
    */
-  createSession(variables?: Record<string, unknown>): Promise<string> {
+  createSession(variables?: Record<string, unknown>, sessionId?: string): Promise<string> {
     return this.serialize(async () => {
       this.transition('connecting');
       await this.ensureWs();
@@ -376,6 +379,9 @@ export class TicketMachine {
       const args: Record<string, unknown> = {
         safe_tool_overrides: SAFE_TOOL_OVERRIDES,
       };
+      if (sessionId) {
+        args.session_id = sessionId;
+      }
       if (variables) {
         args.variables = variables;
       }
@@ -493,7 +499,7 @@ export class TicketMachine {
 
   /**
    * Full cleanup — stop run, close WebSocket.
-   * Does NOT dispose the sandbox (FleetManager owns that).
+   * Does NOT dispose the sandbox (ProjectManager owns that).
    */
   async dispose(): Promise<void> {
     this.cancelRetryTimer();

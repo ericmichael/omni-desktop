@@ -7,7 +7,7 @@ import { WebSocket as WsWebSocket } from 'ws';
 import { createChatManager } from '@/main/chat-manager';
 import { createCodeManager } from '@/main/code-manager';
 import { createConsoleManager } from '@/main/console-manager';
-import { createFleetManager } from '@/main/fleet-manager';
+import { createProjectManager } from '@/main/project-manager';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
 import { createSandboxManager } from '@/main/sandbox-manager';
 import {
@@ -36,16 +36,16 @@ type SendToWindow = <T extends keyof IpcRendererEvents>(channel: T, ...args: Ipc
 type HandleFn = (channel: string, handler: (...args: unknown[]) => unknown | Promise<unknown>) => void;
 
 /**
- * Wire up global (shared) IPC handlers — store, util, config, fleet, main-process.
+ * Wire up global (shared) IPC handlers — store, util, config, project, main-process.
  * These are stateless or shared, safe for all clients to use.
  */
 export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerStore }) => {
   const { wsHandler, store } = arg;
   const ipc = new ServerIpcAdapter(wsHandler.handle.bind(wsHandler));
 
-  // Fleet manager — shared across all clients so machines/sandboxes survive reconnections
+  // Project manager — shared across all clients so machines/sandboxes survive reconnections
   const sendToAll: typeof wsHandler.sendToAll = wsHandler.sendToAll.bind(wsHandler);
-  const [, cleanupFleet] = createFleetManager({
+  const [, cleanupProject] = createProjectManager({
     ipc: ipc as any,
     sendToWindow: sendToAll,
     store: store as any,
@@ -194,7 +194,7 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
     await writeFile(filePath, content, 'utf-8');
   });
 
-  return { cleanupFleet };
+  return { cleanupProject };
 };
 
 /**
@@ -248,7 +248,7 @@ export const wireClientManagers = (arg: {
   ipc.handle('sandbox-process:get-status', () => sandbox.getStatus());
   ipc.handle('chat-process:get-status', () => chat.getStatus());
 
-  // Cleanup function — fleet is NOT cleaned up here (it's global/shared)
+  // Cleanup function — project manager is NOT cleaned up here (it's global/shared)
   const cleanup = async () => {
     const results = await Promise.allSettled([
       cleanupConsole(),

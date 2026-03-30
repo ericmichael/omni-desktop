@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import type { RPCClient } from '../rpc/client'
+import { useRPCClient } from '../rpc-context'
 
 type DirEntry = {
   name: string
@@ -8,18 +8,17 @@ type DirEntry = {
 }
 
 export function WorkspacePicker({
-  client,
   sessionId,
   initialPath,
   onSelect,
   onClose,
 }: {
-  client: RPCClient
   sessionId?: string
   initialPath?: string
   onSelect: (path: string) => void
   onClose: () => void
 }) {
+  const client = useRPCClient()
   const [currentPath, setCurrentPath] = useState<string | null>(null)
   const [parentPath, setParentPath] = useState<string | null>(null)
   const [entries, setEntries] = useState<DirEntry[]>([])

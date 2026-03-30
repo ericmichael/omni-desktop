@@ -5,25 +5,10 @@ import { Sidebar } from '@/renderer/app/Sidebar';
 import { cn } from '@/renderer/ds';
 import { Chat } from '@/renderer/features/Chat/Chat';
 import { Code } from '@/renderer/features/Code/Code';
-import { Fleet } from '@/renderer/features/Fleet/Fleet';
-import { Omni } from '@/renderer/features/Omni/Omni';
+import { Tickets } from '@/renderer/features/Tickets/Tickets';
 import { OnboardingWizard } from '@/renderer/features/Onboarding/OnboardingWizard';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { LayoutMode } from '@/shared/types';
-
-/** Map layoutMode to the component key that handles it. work/desktop both use Omni. */
-const componentForMode = (mode: LayoutMode): string => {
-  if (mode === 'chat') {
-    return 'chat';
-  }
-  if (mode === 'fleet') {
-    return 'fleet';
-  }
-  if (mode === 'code') {
-    return 'code';
-  }
-  return 'omni'; // work, desktop
-};
 
 /**
  * Lazy-mount, never-unmount layout.
@@ -34,10 +19,10 @@ const componentForMode = (mode: LayoutMode): string => {
  */
 export const MainContent = memo(() => {
   const store = useStore(persistedStoreApi.$atom);
-  const active = componentForMode(store.layoutMode);
+  const active: LayoutMode = store.layoutMode;
 
   // Track which component keys have been visited so we mount lazily but never unmount.
-  const [mounted, setMounted] = useState<Set<string>>(() => new Set([active]));
+  const [mounted, setMounted] = useState<Set<LayoutMode>>(() => new Set([active]));
 
   useEffect(() => {
     setMounted((prev) => {
@@ -63,19 +48,14 @@ export const MainContent = memo(() => {
             <Chat />
           </div>
         )}
-        {mounted.has('omni') && (
-          <div className={cn('w-full h-full', active !== 'omni' && 'hidden')}>
-            <Omni />
-          </div>
-        )}
         {mounted.has('code') && (
           <div className={cn('w-full h-full', active !== 'code' && 'hidden')}>
             <Code />
           </div>
         )}
-        {mounted.has('fleet') && (
-          <div className={cn('w-full h-full', active !== 'fleet' && 'hidden')}>
-            <Fleet />
+        {mounted.has('projects') && (
+          <div className={cn('w-full h-full', active !== 'projects' && 'hidden')}>
+            <Tickets />
           </div>
         )}
       </div>

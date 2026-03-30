@@ -58,6 +58,11 @@ RUN ARCH="$(dpkg --print-architecture)" \
     && rm -f "code-server_${CODE_SERVER_VERSION}_${ARCH}.deb" \
     && rm -rf /var/lib/apt/lists/*
 
+# Rename the default ubuntu user (uid 1000) to "user" with home /home/user.
+# All mounts, entrypoints, and gosu calls assume /home/user.
+RUN usermod -l user -d /home/user -m ubuntu 2>/dev/null \
+    && groupmod -n user ubuntu 2>/dev/null || true
+
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \

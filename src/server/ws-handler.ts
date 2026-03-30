@@ -58,7 +58,8 @@ export class WsHandler {
 
   /**
    * Register an interceptor that runs before any event is sent (via sendTo or sendToAll).
-   * The interceptor can mutate the args array in-place to transform event data.
+   * Interceptors receive a structuredClone of the args, so mutations never affect
+   * the caller's original objects (e.g. SandboxManager status used by readiness checks).
    */
   addEventInterceptor(interceptor: EventInterceptor): void {
     this.eventInterceptors.push(interceptor);
@@ -82,8 +83,9 @@ export class WsHandler {
    * Send an event to all connected clients.
    */
   sendToAll<T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]): void {
-    this.runEventInterceptors(channel, args);
-    const message = JSON.stringify({ type: 'event', channel, args });
+    const wireArgs = structuredClone(args);
+    this.runEventInterceptors(channel, wireArgs);
+    const message = JSON.stringify({ type: 'event', channel, args: wireArgs });
     for (const session of this.wsSessions.values()) {
       if (session.ws && session.ws.readyState === 1 /* WebSocket.OPEN */) {
         session.ws.send(message);
@@ -95,9 +97,10 @@ export class WsHandler {
    * Send an event to a specific client.
    */
   sendTo<T extends keyof IpcRendererEvents>(ws: WebSocket, channel: T, ...args: IpcRendererEvents[T]): void {
-    this.runEventInterceptors(channel, args);
+    const wireArgs = structuredClone(args);
+    this.runEventInterceptors(channel, wireArgs);
     if (ws.readyState === 1 /* WebSocket.OPEN */) {
-      ws.send(JSON.stringify({ type: 'event', channel, args }));
+      ws.send(JSON.stringify({ type: 'event', channel, args: wireArgs }));
     }
   }
 
@@ -225,7 +228,7 @@ export class WsHandler {
       let result = await handler(...(msg.args ?? []));
       const wrapper = this.resultWrappers.get(msg.channel);
       if (wrapper) {
-        result = wrapper(result, msg.args ?? []);
+        result = wrapper(structuredClone(result), msg.args ?? []);
       }
       ws.send(JSON.stringify({ type: 'response', id: msg.id, result }));
     } catch (err) {

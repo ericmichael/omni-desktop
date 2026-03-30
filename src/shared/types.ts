@@ -45,13 +45,14 @@ export type WindowProps = {
 /**
  * Data stored in the electron store.
  */
-export type LayoutMode = 'chat' | 'work' | 'code' | 'desktop' | 'fleet';
+export type LayoutMode = 'chat' | 'code' | 'projects';
 export type OmniTheme = 'default' | 'tokyo-night' | 'vscode-dark' | 'vscode-light' | 'utrgv';
 
 export type SandboxVariant = 'standard' | 'work';
 
 export type StoreData = {
   workspaceDir?: string;
+  sandboxEnabled: boolean;
   sandboxVariant: SandboxVariant;
   launcherWindowProps?: WindowProps;
   appWindowProps?: WindowProps;
@@ -61,17 +62,14 @@ export type StoreData = {
   layoutMode: LayoutMode;
   theme: OmniTheme;
   onboardingComplete: boolean;
-  fleetProjects: FleetProject[];
-  fleetTasks: FleetTask[];
-  fleetTickets: FleetTicket[];
-  fleetSchemaVersion: number;
+  projects: Project[];
+  tasks: Task[];
+  tickets: Ticket[];
+  schemaVersion: number;
   codeTabs: CodeTab[];
   activeCodeTabId: CodeTabId | null;
   codeLayoutMode: CodeLayoutMode;
-  fleetLayoutMode: FleetLayoutMode;
-  fleetBoardOpen: boolean;
-  fleetOpenTicketIds: FleetTicketId[];
-  activeFleetTicketId: FleetTicketId | null;
+  activeTicketId: TicketId | null;
 };
 
 // The electron store uses JSON schema to validate its data.
@@ -103,6 +101,10 @@ export const schema: Schema<StoreData> = {
   workspaceDir: {
     type: 'string',
   },
+  sandboxEnabled: {
+    type: 'boolean',
+    default: false,
+  },
   sandboxVariant: {
     type: 'string',
     enum: ['standard', 'work'],
@@ -121,7 +123,7 @@ export const schema: Schema<StoreData> = {
 
   layoutMode: {
     type: 'string',
-    enum: ['chat', 'work', 'code', 'desktop', 'fleet'],
+    enum: ['chat', 'code', 'projects'],
     default: 'chat',
   },
   theme: {
@@ -133,7 +135,7 @@ export const schema: Schema<StoreData> = {
     type: 'boolean',
     default: false,
   },
-  fleetSchemaVersion: {
+  schemaVersion: {
     type: 'number',
     default: 0,
   },
@@ -145,6 +147,7 @@ export const schema: Schema<StoreData> = {
       properties: {
         id: { type: 'string' },
         projectId: { type: ['string', 'null'] },
+        ticketId: { type: 'string' },
         createdAt: { type: 'number' },
       },
       required: ['id', 'createdAt'],
@@ -159,25 +162,11 @@ export const schema: Schema<StoreData> = {
     enum: ['deck', 'focus'],
     default: 'deck',
   },
-  fleetLayoutMode: {
-    type: 'string',
-    enum: ['deck', 'focus'],
-    default: 'deck',
-  },
-  fleetBoardOpen: {
-    type: 'boolean',
-    default: false,
-  },
-  fleetOpenTicketIds: {
-    type: 'array',
-    default: [],
-    items: { type: 'string' },
-  },
-  activeFleetTicketId: {
+  activeTicketId: {
     type: ['string', 'null'],
     default: null,
   },
-  fleetProjects: {
+  projects: {
     type: 'array',
     default: [],
     items: {
@@ -193,7 +182,7 @@ export const schema: Schema<StoreData> = {
       required: ['id', 'label', 'workspaceDir', 'createdAt'],
     },
   },
-  fleetTasks: {
+  tasks: {
     type: 'array',
     default: [],
     items: {
@@ -216,7 +205,7 @@ export const schema: Schema<StoreData> = {
       required: ['id', 'projectId', 'taskDescription', 'status', 'createdAt'],
     },
   },
-  fleetTickets: {
+  tickets: {
     type: 'array',
     default: [],
     items: {
@@ -323,33 +312,28 @@ export type OmniInstallProcessStatus = Status<
   'uninitialized' | 'starting' | 'installing' | 'canceling' | 'exiting' | 'completed' | 'canceled'
 >;
 
-export type SandboxStatusData = {
-  sandboxUrl: string;
-  wsUrl: string;
+// Unified agent process data — superset of sandbox and local process data
+export type AgentProcessData = {
   uiUrl: string;
+  wsUrl?: string;
+  sandboxUrl?: string;
   codeServerUrl?: string;
   noVncUrl?: string;
   containerId?: string;
   containerName?: string;
-  ports: {
-    sandbox: number;
-    ui: number;
-    codeServer?: number;
-    vnc?: number;
-  };
+  port?: number;
 };
 
-export type SandboxProcessStatus =
+export type AgentProcessStatus =
   | Status<'uninitialized' | 'starting' | 'stopping' | 'exiting' | 'exited'>
-  | OkStatus<'connecting', SandboxStatusData>
-  | OkStatus<'running', SandboxStatusData>;
+  | OkStatus<'connecting', AgentProcessData>
+  | OkStatus<'running', AgentProcessData>;
 
-export type ChatStatusData = { uiUrl: string; port: number };
-
-export type ChatProcessStatus =
-  | Status<'uninitialized' | 'starting' | 'stopping' | 'exiting' | 'exited'>
-  | OkStatus<'connecting', ChatStatusData>
-  | OkStatus<'running', ChatStatusData>;
+// Legacy aliases — keep for backward compatibility during transition
+export type SandboxStatusData = AgentProcessData;
+export type SandboxProcessStatus = AgentProcessStatus;
+export type ChatStatusData = AgentProcessData;
+export type ChatProcessStatus = AgentProcessStatus;
 
 /**
  * A logging level.
@@ -387,34 +371,37 @@ export type OmniRuntimeInfo =
 export type CodeTabId = string;
 
 export type CodeLayoutMode = 'deck' | 'focus';
-export type FleetLayoutMode = 'deck' | 'focus';
+
 
 export type CodeTab = {
   id: CodeTabId;
-  projectId: FleetProjectId | null;
+  projectId: ProjectId | null;
+  ticketId?: TicketId;
+  sessionId?: string;
+  ticketTitle?: string;
   createdAt: number;
 };
 
 // #endregion
 
-// #region Fleet types
+// #region Project & Ticket types
 
 // --- ID types ---
 
-export type FleetProjectId = string;
-export type FleetTaskId = string;
-export type FleetTicketId = string;
-export type FleetColumnId = string;
+export type ProjectId = string;
+export type TaskId = string;
+export type TicketId = string;
+export type ColumnId = string;
 
 // --- Enums ---
 
-export type FleetTicketPriority = 'low' | 'medium' | 'high' | 'critical';
+export type TicketPriority = 'low' | 'medium' | 'high' | 'critical';
 
 /** Re-export TicketPhase so renderer can import from shared/types. */
 export type { TicketPhase } from '@/shared/ticket-phase';
 
 /** Accumulated token usage for a supervisor session. */
-export type FleetTokenUsage = {
+export type TokenUsage = {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
@@ -425,8 +412,8 @@ export type FleetTokenUsage = {
 /**
  * A single column in the kanban pipeline. Visual milestones for the supervisor.
  */
-export type FleetColumn = {
-  id: FleetColumnId;
+export type Column = {
+  id: ColumnId;
   label: string;
   /** Max concurrent supervisors allowed in this column. Unlimited if undefined. */
   maxConcurrent?: number;
@@ -437,8 +424,8 @@ export type FleetColumn = {
 /**
  * The pipeline definition for a project. Ordered list of columns.
  */
-export type FleetPipeline = {
-  columns: FleetColumn[];
+export type Pipeline = {
+  columns: Column[];
 };
 
 // --- Sandbox config ---
@@ -447,7 +434,7 @@ export type FleetPipeline = {
  * Per-project sandbox configuration. When set, supervisors run inside a Docker container
  * using the specified image or Dockerfile. When absent/null, the default sandbox is used.
  */
-export type FleetSandboxConfig = {
+export type SandboxConfig = {
   /** Pre-built Docker image (e.g. "ubuntu:24.04"). */
   image?: string;
   /** Path to a Dockerfile (relative to workspace). */
@@ -456,32 +443,32 @@ export type FleetSandboxConfig = {
 
 // --- Core entities ---
 
-export type FleetProject = {
-  id: FleetProjectId;
+export type Project = {
+  id: ProjectId;
   label: string;
   workspaceDir: string;
   createdAt: number;
   /** Pipeline configuration. If undefined, DEFAULT_PIPELINE is used. */
-  pipeline?: FleetPipeline;
+  pipeline?: Pipeline;
   /** When true, automatically dispatch tickets from backlog in priority order. */
   autoDispatch?: boolean;
   /** Per-project sandbox configuration. When absent/null, the default sandbox image is used. */
-  sandbox?: FleetSandboxConfig | null;
+  sandbox?: SandboxConfig | null;
 };
 
-export type FleetTicket = {
-  id: FleetTicketId;
-  projectId: FleetProjectId;
+export type Ticket = {
+  id: TicketId;
+  projectId: ProjectId;
   title: string;
   description: string;
-  priority: FleetTicketPriority;
-  blockedBy: FleetTicketId[];
+  priority: TicketPriority;
+  blockedBy: TicketId[];
   createdAt: number;
   updatedAt: number;
 
   // Kanban state
   /** Current column in the kanban pipeline. */
-  columnId: FleetColumnId;
+  columnId: ColumnId;
 
   // Git settings
   /** Git branch to work on. If set with useWorktree, a worktree is created from this branch. */
@@ -492,7 +479,7 @@ export type FleetTicket = {
   // Worktree state (persisted so worktrees survive server restarts)
   /** Path to the git worktree on disk. */
   worktreePath?: string;
-  /** Name of the git worktree (used for branch naming fleet/<name>). */
+  /** Name of the git worktree (used for branch naming). */
   worktreeName?: string;
 
   // Supervisor state
@@ -501,14 +488,14 @@ export type FleetTicket = {
   /** Current supervisor lifecycle phase. */
   phase?: import('@/shared/ticket-phase').TicketPhase;
   /** Task ID for the supervisor's sandbox. */
-  supervisorTaskId?: FleetTaskId;
+  supervisorTaskId?: TaskId;
   /** Accumulated token usage across all supervisor runs. */
-  tokenUsage?: FleetTokenUsage;
+  tokenUsage?: TokenUsage;
 };
 
-export type FleetTask = {
-  id: FleetTaskId;
-  projectId: FleetProjectId;
+export type Task = {
+  id: TaskId;
+  projectId: ProjectId;
   taskDescription: string;
   status: WithTimestamp<SandboxProcessStatus>;
   createdAt: number;
@@ -516,7 +503,7 @@ export type FleetTask = {
   worktreePath?: string;
   worktreeName?: string;
   sessionId?: string;
-  ticketId?: FleetTicketId;
+  ticketId?: TicketId;
   /** Snapshot of sandbox URLs from the last 'running' state, for replaying past sessions. */
   lastUrls?: {
     uiUrl: string;
@@ -558,7 +545,7 @@ export type DiffResponse = {
   files: FileDiff[];
 };
 
-export type FleetSessionMessage = {
+export type SessionMessage = {
   id: number;
   role: 'user' | 'assistant' | 'tool_call' | 'tool_result';
   content: string;
@@ -689,11 +676,11 @@ type ConfigIpcEvents = Namespaced<
 type CodeIpcEvents = Namespaced<
   'code',
   {
-    'start-sandbox': (tabId: CodeTabId, arg: { workspaceDir: string; sandboxVariant: SandboxVariant }) => void;
+    'start-sandbox': (tabId: CodeTabId, arg: { workspaceDir: string; sandboxVariant: SandboxVariant; local?: boolean }) => void;
     'stop-sandbox': (tabId: CodeTabId) => void;
     'rebuild-sandbox': (
       tabId: CodeTabId,
-      fallbackArg: { workspaceDir: string; sandboxVariant: SandboxVariant }
+      fallbackArg: { workspaceDir: string; sandboxVariant: SandboxVariant; local?: boolean }
     ) => void;
     'resize-sandbox': (tabId: CodeTabId, cols: number, rows: number) => void;
     'get-sandbox-status': (tabId: CodeTabId) => WithTimestamp<SandboxProcessStatus>;
@@ -701,37 +688,37 @@ type CodeIpcEvents = Namespaced<
 >;
 
 /**
- * Fleet API. Main process handles these events, renderer process invokes them.
+ * Project & Ticket API. Main process handles these events, renderer process invokes them.
  */
-type FleetIpcEvents = Namespaced<
-  'fleet',
+type ProjectIpcEvents = Namespaced<
+  'project',
   {
-    'add-project': (project: Omit<FleetProject, 'id' | 'createdAt'>) => FleetProject;
-    'update-project': (id: FleetProjectId, patch: Partial<Omit<FleetProject, 'id' | 'createdAt'>>) => void;
-    'remove-project': (id: FleetProjectId) => void;
+    'add-project': (project: Omit<Project, 'id' | 'createdAt'>) => Project;
+    'update-project': (id: ProjectId, patch: Partial<Omit<Project, 'id' | 'createdAt'>>) => void;
+    'remove-project': (id: ProjectId) => void;
     'check-git-repo': (workspaceDir: string) => GitRepoInfo;
     'add-ticket': (
-      ticket: Omit<FleetTicket, 'id' | 'createdAt' | 'updatedAt' | 'columnId'>
-    ) => FleetTicket;
-    'update-ticket': (id: FleetTicketId, patch: Partial<Omit<FleetTicket, 'id' | 'projectId' | 'createdAt'>>) => void;
-    'remove-ticket': (id: FleetTicketId) => void;
-    'get-tickets': (projectId: FleetProjectId) => FleetTicket[];
-    'get-tasks': () => FleetTask[];
-    'get-next-ticket': (projectId: FleetProjectId) => FleetTicket | null;
-    'move-ticket-to-column': (ticketId: FleetTicketId, columnId: FleetColumnId) => void;
-    'get-pipeline': (projectId: FleetProjectId) => FleetPipeline;
-    'get-session-history': (sessionId: string) => FleetSessionMessage[];
-    'list-artifacts': (ticketId: FleetTicketId, dirPath?: string) => ArtifactFileEntry[];
-    'read-artifact': (ticketId: FleetTicketId, relativePath: string) => ArtifactFileContent;
-    'open-artifact-external': (ticketId: FleetTicketId, relativePath: string) => void;
-    'get-files-changed': (ticketId: FleetTicketId) => DiffResponse;
+      ticket: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'columnId'>
+    ) => Ticket;
+    'update-ticket': (id: TicketId, patch: Partial<Omit<Ticket, 'id' | 'projectId' | 'createdAt'>>) => void;
+    'remove-ticket': (id: TicketId) => void;
+    'get-tickets': (projectId: ProjectId) => Ticket[];
+    'get-tasks': () => Task[];
+    'get-next-ticket': (projectId: ProjectId) => Ticket | null;
+    'move-ticket-to-column': (ticketId: TicketId, columnId: ColumnId) => void;
+    'get-pipeline': (projectId: ProjectId) => Pipeline;
+    'get-session-history': (sessionId: string) => SessionMessage[];
+    'list-artifacts': (ticketId: TicketId, dirPath?: string) => ArtifactFileEntry[];
+    'read-artifact': (ticketId: TicketId, relativePath: string) => ArtifactFileContent;
+    'open-artifact-external': (ticketId: TicketId, relativePath: string) => void;
+    'get-files-changed': (ticketId: TicketId) => DiffResponse;
     // Supervisor operations
-    'ensure-supervisor-infra': (ticketId: FleetTicketId) => void;
-    'start-supervisor': (ticketId: FleetTicketId) => void;
-    'stop-supervisor': (ticketId: FleetTicketId) => void;
-    'send-supervisor-message': (ticketId: FleetTicketId, message: string) => void;
-    'reset-supervisor-session': (ticketId: FleetTicketId) => void;
-    'set-auto-dispatch': (projectId: FleetProjectId, enabled: boolean) => void;
+    'ensure-supervisor-infra': (ticketId: TicketId) => void;
+    'start-supervisor': (ticketId: TicketId) => void;
+    'stop-supervisor': (ticketId: TicketId) => void;
+    'send-supervisor-message': (ticketId: TicketId, message: string) => void;
+    'reset-supervisor-session': (ticketId: TicketId) => void;
+    'set-auto-dispatch': (projectId: ProjectId, enabled: boolean) => void;
   }
 >;
 
@@ -747,7 +734,7 @@ export type IpcEvents = MainProcessIpcEvents &
   StoreIpcEvents &
   ConfigIpcEvents &
   CodeIpcEvents &
-  FleetIpcEvents;
+  ProjectIpcEvents;
 
 /**
  * Store events. Main process emits these events, renderer process listens to them.
@@ -848,17 +835,17 @@ type CodeIpcRendererEvents = Namespaced<
 >;
 
 /**
- * Fleet events. Main process emits these events, renderer process listens to them.
+ * Project events. Main process emits these events, renderer process listens to them.
  */
-type FleetIpcRendererEvents = Namespaced<
-  'fleet',
+type ProjectIpcRendererEvents = Namespaced<
+  'project',
   {
-    'task-status': [FleetTaskId, WithTimestamp<SandboxProcessStatus>];
-    'task-session': [FleetTaskId, string];
-    phase: [FleetTicketId, import('@/shared/ticket-phase').TicketPhase];
-    'supervisor-message': [FleetTicketId, FleetSessionMessage];
-    'token-usage': [FleetTicketId, FleetTokenUsage];
-    pipeline: [FleetProjectId, FleetPipeline];
+    'task-status': [TaskId, WithTimestamp<SandboxProcessStatus>];
+    'task-session': [TaskId, string];
+    phase: [TicketId, import('@/shared/ticket-phase').TicketPhase];
+    'supervisor-message': [TicketId, SessionMessage];
+    'token-usage': [TicketId, TokenUsage];
+    pipeline: [ProjectId, Pipeline];
   }
 >;
 
@@ -873,7 +860,7 @@ export type IpcRendererEvents = TerminalIpcRendererEvents &
   DevIpcRendererEvents &
   StoreIpcRendererEvents &
   CodeIpcRendererEvents &
-  FleetIpcRendererEvents &
+  ProjectIpcRendererEvents &
   ToastIpcRendererEvents;
 
 // #region Config file types

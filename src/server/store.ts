@@ -7,23 +7,21 @@ import type { StoreData } from '@/shared/types';
 const STORE_PATH = join(homedir(), '.config', 'Omni Code', 'config.json');
 
 const DEFAULTS: StoreData = {
+  sandboxEnabled: false,
   sandboxVariant: 'work',
   optInToLauncherPrereleases: false,
   previewFeatures: false,
   layoutMode: 'chat',
   theme: 'tokyo-night',
   onboardingComplete: false,
-  fleetProjects: [],
-  fleetTasks: [],
-  fleetTickets: [],
-  fleetSchemaVersion: 0,
+  projects: [],
+  tasks: [],
+  tickets: [],
+  schemaVersion: 0,
   codeTabs: [],
   activeCodeTabId: null,
   codeLayoutMode: 'deck',
-  fleetLayoutMode: 'deck',
-  fleetBoardOpen: false,
-  fleetOpenTicketIds: [],
-  activeFleetTicketId: null,
+  activeTicketId: null,
 };
 
 type ChangeCallback = (data: StoreData | undefined) => void;

@@ -10,19 +10,25 @@ import { ArtifactsPanel, type ArtifactItem } from './components/ArtifactsPanel'
 import { ResizableDivider } from './components/ResizableDivider'
 import { TerminalPanel } from './components/TerminalPanel'
 import { WorkspacePicker } from './components/WorkspacePicker'
-import { RPCClient } from './rpc/client'
 import type { PendingMessage } from './ChatShell'
+import { useRPCClient, useRPCConnected } from './rpc-context'
 import { useUiConfig } from './ui-config'
 import { OmniAgentsHeaderActionsPortal, OmniAgentsHeaderActionsProvider } from './header-actions'
 import { persistedStoreApi } from '@/renderer/services/store'
 
 type UIState = 'connecting' | 'resume' | 'chat' | 'error'
 
-export function App({ greeting, onReady, headerActionsTargetId, headerActionsCompact, pendingMessages }: { greeting?: string; onReady?: () => void; headerActionsTargetId?: string; headerActionsCompact?: boolean; pendingMessages?: PendingMessage[] }) {
+export type ClientToolCallHandler = (
+  toolName: string,
+  args: Record<string, unknown>,
+) => Promise<{ ok: boolean; result?: Record<string, unknown>; error?: Record<string, unknown> }>;
+
+export function App({ sessionId: sessionIdProp, onSessionChange, variables: variablesProp, greeting, onReady, headerActionsTargetId, headerActionsCompact, pendingMessages, sandboxLabel: sandboxLabelProp, onClientToolCall }: { sessionId?: string; onSessionChange?: (sessionId: string | undefined) => void; variables?: Record<string, unknown>; greeting?: string; onReady?: () => void; headerActionsTargetId?: string; headerActionsCompact?: boolean; pendingMessages?: PendingMessage[]; sandboxLabel?: string; onClientToolCall?: ClientToolCallHandler }) {
   const uiConfig = useUiConfig()
   const launcherStore = useStore(persistedStoreApi.$atom)
   const [ui, setUI] = useState<UIState>('connecting')
-  const [connected, setConnected] = useState(false)
+  const client = useRPCClient()
+  const connected = useRPCConnected()
   const [voiceEnabled, setVoiceEnabled] = useState(false)
   const [items, setItems] = useState<MessageItem[]>([])
   const [artifacts, setArtifacts] = useState<ArtifactItem[]>([])
@@ -48,7 +54,6 @@ export function App({ greeting, onReady, headerActionsTargetId, headerActionsCom
     return s.split(' ').map(w => w ? (w[0].toUpperCase() + w.slice(1).toLowerCase()) : '').join(' ').trim()
   }, [])
 
-  const client = useMemo(() => new RPCClient(uiConfig.wsBaseUrl, uiConfig.token), [uiConfig.token, uiConfig.wsBaseUrl])
   const [initialSent, setInitialSent] = useState(false)
   const preambleBufferRef = useRef<Array<{ content: string; timestamp: Date; superseded: boolean }>>([])
   const pendingApprovalsRef = useRef(new Map<string, (MessageItem & { session_id?: string })>())
@@ -81,6 +86,8 @@ export function App({ greeting, onReady, headerActionsTargetId, headerActionsCom
   }, [runId])
   const startingRunRef = useRef(false)
   const readyRef = useRef(false)
+  const onClientToolCallRef = useRef(onClientToolCall)
+  useEffect(() => { onClientToolCallRef.current = onClientToolCall }, [onClientToolCall])
   useEffect(() => {
     readyRef.current = false
   }, [uiConfig.uiUrl])
@@ -104,44 +111,36 @@ export function App({ greeting, onReady, headerActionsTargetId, headerActionsCom
   }, [client])
 
   useEffect(() => {
-      const connectWithRetry = async (maxAttempts = 15, delay = 2000): Promise<void> => {
-        for (let i = 0; i < maxAttempts; i++) {
-          try {
-            await client.connect()
-            return
-          } catch {
-            if (i < maxAttempts - 1) {
-              await new Promise<void>(r => setTimeout(r, delay))
-            }
-          }
-        }
-        throw new Error('Failed to connect after retries')
-      }
+      let cancelled = false
 
-      connectWithRetry()
+      client.connectAndWait()
         .then(async () => {
-          setConnected(true)
+        if (cancelled) return
         try { await client.clientFunctions(1, [{ name: 'ui.request_tool_approval' }, { name: 'ui.set_status' }, { name: 'ui.add_artifact' }]) } catch {}
+        if (cancelled) return
         try {
           const info = await client.getAgentInfo()
+          if (cancelled) return
           const agentName = normalizeAgentName(String(info?.name || 'OmniAgent'))
           setAgentName(agentName)
           const wt = info?.welcome_text ? String(info.welcome_text) : undefined
           setWelcomeText(wt)
           document.title = agentName
         } catch {}
+        if (cancelled) return
         try {
           const funcs = await client.listServerFunctions()
+          if (cancelled) return
           const names = new Set(funcs.map(f => f.name))
           if (names.has('fs_list_dir') && names.has('fs_get_workspace_root')) {
             setWorkspaceSupported(true)
-            // Get initial workspace (cwd)
             try {
               const res = await client.serverCall('fs_get_cwd') as any
-              if (res?.path) setWorkspacePath(res.path)
+              if (res?.path && !cancelled) setWorkspacePath(res.path)
             } catch {}
           }
         } catch {}
+        if (cancelled) return
         try {
           const { RealtimeRPCClient } = await import('./rpc/realtime')
           const rtc = new RealtimeRPCClient(uiConfig.wsRealtimeUrl, uiConfig.token)
@@ -155,22 +154,24 @@ export function App({ greeting, onReady, headerActionsTargetId, headerActionsCom
             }
           } finally { rtc.disconnect() }
         } catch { setVoiceEnabled(false) }
+        if (cancelled) return
         const resume = uiConfig.searchParams.get('resume') === 'true'
-        const sid = uiConfig.searchParams.get('session') || undefined
+        const sid = sessionIdProp || uiConfig.searchParams.get('session') || undefined
         if (resume && !sid) {
           try {
             const list = await client.listSessions()
+            if (cancelled) return
             setSessions(list)
             setUI('resume')
           } catch {
-            setUI('chat')
+            if (!cancelled) setUI('chat')
           }
         } else {
           if (sid) setSessionId(sid)
           setUI('chat')
         }
       })
-      .catch(() => setUI('error'))
+      .catch(() => { if (!cancelled) setUI('error') })
 
     const offMessageOutput = client.on('message_output', (p: any) => {
       const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
@@ -349,6 +350,25 @@ export function App({ greeting, onReady, headerActionsTargetId, headerActionsCom
         }
         return
       }
+      if (fn === 'tool.call') {
+        const request_id = String(p?.request_id ?? '')
+        if (!request_id) return
+        const args = (p?.args || {}) as Record<string, unknown>
+        const toolName = String(args.tool ?? '')
+        const toolArgs = (args.arguments ?? {}) as Record<string, unknown>
+        if (!onClientToolCallRef.current) {
+          client.clientResponse(request_id, false, undefined, { message: 'No client tool handler registered' }).catch(() => {})
+          return
+        }
+        onClientToolCallRef.current(toolName, toolArgs)
+          .then((res) => {
+            client.clientResponse(request_id, res.ok, res.result, res.error).catch(() => {})
+          })
+          .catch((err: Error) => {
+            client.clientResponse(request_id, false, undefined, { message: err.message }).catch(() => {})
+          })
+        return
+      }
     })
 
     const offClientRequestResolved = client.on('client_request_resolved', (p: any) => {
@@ -360,6 +380,7 @@ export function App({ greeting, onReady, headerActionsTargetId, headerActionsCom
     })
 
     return () => {
+      cancelled = true
       offMessageOutput(); offRunStarted(); offRunEnd(); offRunStatus(); offClientRequest(); offClientRequestResolved(); offToken(); offToolCalled(); offToolResult()
       client.disconnect()
     }
@@ -472,9 +493,12 @@ export function App({ greeting, onReady, headerActionsTargetId, headerActionsCom
         content = parts
       }
       setItems(prev => [...prev, { type: 'chat', role: 'user', content: text, attachments }])
-      // Always pass workspace_root as variables so the context factory picks it up
-      const variables = (workspacePath && workspaceSupported)
+      // Merge parent-provided variables (e.g. client_tools) with workspace variables
+      const workspaceVars = (workspacePath && workspaceSupported)
         ? { workspace_root: workspacePath }
+        : undefined
+      const variables = (variablesProp || workspaceVars)
+        ? { ...variablesProp, ...workspaceVars }
         : undefined
       await client.startRun(text, sessionId, variables, content)
       if (workspaceSupported) setWorkspaceLocked(true)
@@ -542,8 +566,14 @@ export function App({ greeting, onReady, headerActionsTargetId, headerActionsCom
     }
   }, [client])
 
-  const handleSelectSession = useCallback(async (id?: string) => {
-    setSessionId(id)
+  const handleSelectSession = useCallback(async (id?: string, opts?: { fromProp?: boolean }) => {
+    // When no id is provided (new chat), generate a fresh session id so the
+    // next startRun creates a brand-new session instead of reusing the last one.
+    const resolvedId = id ?? crypto.randomUUID()
+    setSessionId(resolvedId)
+    // Notify parent of session change (skip if the change originated from the prop)
+    if (!opts?.fromProp) onSessionChange?.(id === undefined ? resolvedId : id)
+    setItems([])
     setPreamble(undefined)
     preambleBufferRef.current = []
     // Reset UI state to prevent stale state from previous conversation
@@ -656,7 +686,7 @@ export function App({ greeting, onReady, headerActionsTargetId, headerActionsCom
       setItems([])
     }
     setUI('chat')
-  }, [client, appendPendingApprovals, workspaceSupported])
+  }, [client, appendPendingApprovals, workspaceSupported, onSessionChange])
 
   useEffect(() => {
     if (urlSessionHandledRef.current) return
@@ -685,6 +715,19 @@ export function App({ greeting, onReady, headerActionsTargetId, headerActionsCom
       }
     })()
   }, [connected, ui, handleSelectSession, initialSessionParam, client, initialSent, handleSubmit])
+
+  // React to controlled sessionId prop changes from parent
+  const prevSessionIdProp = useRef(sessionIdProp)
+  useEffect(() => {
+    if (sessionIdProp === prevSessionIdProp.current) return
+    prevSessionIdProp.current = sessionIdProp
+    if (!connected) return
+    if (sessionIdProp && sessionIdProp !== sessionIdRef.current) {
+      handleSelectSession(sessionIdProp, { fromProp: true })
+    } else if (!sessionIdProp && sessionIdRef.current) {
+      handleSelectSession(undefined, { fromProp: true })
+    }
+  }, [sessionIdProp, connected, handleSelectSession])
 
   useEffect(() => {
     if (!connected) return
@@ -725,7 +768,7 @@ export function App({ greeting, onReady, headerActionsTargetId, headerActionsCom
   }, [client, sessionId])
 
   const hasArtifacts = visibleArtifacts.length > 0
-  const sandboxLabel = launcherStore.sandboxVariant === 'standard' ? 'Standard' : 'Work'
+  const sandboxLabel = sandboxLabelProp ?? (launcherStore.sandboxEnabled ? (launcherStore.sandboxVariant === 'standard' ? 'Standard' : 'Work') : undefined)
   const headerActions = {
     showArtifactsButton: hasArtifacts,
     showTerminalButton: true,
@@ -851,7 +894,6 @@ export function App({ greeting, onReady, headerActionsTargetId, headerActionsCom
         )}
         <TerminalPanel
           open={terminalPanelOpen}
-          client={client}
           sessionId={sessionId}
           onSessionId={setSessionId}
           onClose={() => setTerminalPanelOpen(false)}
@@ -859,7 +901,6 @@ export function App({ greeting, onReady, headerActionsTargetId, headerActionsCom
         />
         {workspacePickerOpen && (
           <WorkspacePicker
-            client={client}
             sessionId={sessionId}
             initialPath={workspacePath || undefined}
             onSelect={(path) => {

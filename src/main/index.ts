@@ -8,11 +8,11 @@ import { dirname, join, resolve } from 'path';
 import { assert } from 'tsafe';
 import { pathToFileURL } from 'url';
 
-import { getArtifactsDir } from '@/lib/fleet-plan-file';
+import { getArtifactsDir } from '@/lib/artifacts';
 import { createChatManager } from '@/main/chat-manager';
 import { createCodeManager } from '@/main/code-manager';
 import { createConsoleManager } from '@/main/console-manager';
-import { createFleetManager } from '@/main/fleet-manager';
+import { createProjectManager } from '@/main/project-manager';
 import { MainProcessManager } from '@/main/main-process-manager';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
 import { createSandboxManager } from '@/main/sandbox-manager';
@@ -89,15 +89,16 @@ const [chat, cleanupChat] = createChatManager({
   sendToWindow: main.sendToWindow,
   fetchFn: (input, init) => net.fetch(input as string, init),
 });
-const [, cleanupCode] = createCodeManager({
+const [codeManager, cleanupCode] = createCodeManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
   fetchFn: (input, init) => net.fetch(input as string, init),
 });
-const [, cleanupFleet] = createFleetManager({
+const [, cleanupProject] = createProjectManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
   store,
+  codeManager,
 });
 
 main.ipc.handle('main-process:get-status', () => main.getStatus());
@@ -122,7 +123,7 @@ async function cleanup() {
     cleanupSandbox(),
     cleanupChat(),
     cleanupCode(),
-    cleanupFleet(),
+    cleanupProject(),
   ]);
   const errors = results
     .filter((result): result is PromiseRejectedResult => result.status === 'rejected')

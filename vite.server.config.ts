@@ -30,7 +30,10 @@ function serverRestart(entry: string): Plugin {
         return;
       }
       kill();
-      proc = spawn('node', [entry], { stdio: 'inherit' });
+      proc = spawn('node', [entry], {
+        stdio: 'inherit',
+        env: { ...process.env, NODE_ENV: 'development' },
+      });
       proc.on('exit', () => {
         proc = null;
       });

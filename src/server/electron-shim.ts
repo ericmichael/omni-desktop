@@ -60,7 +60,7 @@ export const protocol = {
   handle: () => {},
 };
 
-// Stub BrowserWindow (type-only in most cases, but fleet-manager may reference it)
+// Stub BrowserWindow (type-only in most cases, but project-manager may reference it)
 export class BrowserWindow {}
 
 export default {

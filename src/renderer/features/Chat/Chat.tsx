@@ -1,185 +1,28 @@
 import { useStore } from '@nanostores/react';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { PiMonitorBold } from 'react-icons/pi';
 
-import { OmniAgentsHostApp } from '@/renderer/omniagents-ui';
+import { OmniAgentsApp, OmniAgentsHostApp } from '@/renderer/omniagents-ui';
+import { buildSandboxLabel } from '@/renderer/omniagents-ui/sandbox-label';
+import { ChatShell } from '@/renderer/omniagents-ui/ChatShell';
+import { getGreeting } from '@/renderer/omniagents-ui/greeting';
+import { cn } from '@/renderer/ds';
 import {
-  $omniInstallProcessStatus,
   $omniInstallProcessXTerm,
-  $omniRuntimeInfo,
-  omniInstallApi,
-  refreshOmniRuntimeInfo,
+  $sandboxProcessStatus,
+  $sandboxProcessXTerm,
 } from '@/renderer/features/Omni/state';
+import { FloatingWidget } from '@/renderer/features/Omni/FloatingWidget';
 import { XTermLogViewer } from '@/renderer/features/XTermLogViewer/XTermLogViewer';
-import { emitter } from '@/renderer/services/ipc';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
 
-import { $chatProcessStatus, $chatProcessXTerm, chatApi } from './state';
+import { $chatProcessStatus, $chatProcessXTerm } from './state';
+import type { ChatAutoLaunchPhase } from './use-chat-auto-launch';
+import { useChatAutoLaunch } from './use-chat-auto-launch';
 
-type ChatPhase = 'checking' | 'installing' | 'ready' | 'starting' | 'running' | 'error' | 'idle';
-
-const useChatAutoLaunch = () => {
-  const initialized = useStore($initialized);
-  const installStatus = useStore($omniInstallProcessStatus);
-  const chatStatus = useStore($chatProcessStatus);
-  const store = useStore(persistedStoreApi.$atom);
-
-  const [phase, setPhase] = useState<ChatPhase>('checking');
-  const [error, setError] = useState<string | null>(null);
-
-  const hasAutoLaunched = useRef(false);
-  const didTriggerInstall = useRef(false);
-  const didTriggerStart = useRef(false);
-  const lastStartTimestamp = useRef<number | null>(null);
-
-  // Phase: checking → installing or ready
-  useEffect(() => {
-    if (!initialized || phase !== 'checking') {
-      return;
-    }
-
-    let cancelled = false;
-    refreshOmniRuntimeInfo().then(() => {
-      if (cancelled) {
-        return;
-      }
-      const info = $omniRuntimeInfo.get();
-      if (info.isInstalled && !info.isOutdated) {
-        setPhase('ready');
-      } else {
-        didTriggerInstall.current = true;
-        omniInstallApi.startInstall(info.isInstalled && info.isOutdated);
-        setPhase('installing');
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [initialized, phase]);
-
-  // Phase: installing → ready or error
-  useEffect(() => {
-    if (phase !== 'installing') {
-      return;
-    }
-
-    if (installStatus.type === 'completed') {
-      refreshOmniRuntimeInfo();
-      setPhase('ready');
-      didTriggerInstall.current = false;
-    } else if (installStatus.type === 'error') {
-      setError(installStatus.error.message);
-      setPhase('error');
-      didTriggerInstall.current = false;
-    } else if (installStatus.type === 'canceled') {
-      setPhase('idle');
-      didTriggerInstall.current = false;
-    }
-  }, [phase, installStatus]);
-
-  // Phase: ready → starting
-  useEffect(() => {
-    if (phase !== 'ready') {
-      return;
-    }
-
-    if (!store.workspaceDir) {
-      setError('No workspace directory configured.');
-      setPhase('error');
-      return;
-    }
-
-    if (hasAutoLaunched.current) {
-      setPhase('idle');
-      return;
-    }
-
-    let cancelled = false;
-
-    const startChat = async () => {
-      try {
-        const configDir = await emitter.invoke('config:get-omni-config-dir');
-        const modelsConfig = (await emitter.invoke('config:read-json-file', `${configDir}/models.json`)) as {
-          providers?: Record<string, unknown>;
-        } | null;
-        const hasProviders = modelsConfig?.providers && Object.keys(modelsConfig.providers).length > 0;
-
-        if (cancelled) {
-          return;
-        }
-
-        if (!hasProviders) {
-          await persistedStoreApi.setKey('onboardingComplete', false);
-          return;
-        }
-      } catch {
-        // proceed anyway
-      }
-
-      if (cancelled) {
-        return;
-      }
-
-      hasAutoLaunched.current = true;
-      didTriggerStart.current = true;
-      lastStartTimestamp.current = Date.now();
-      chatApi.start({ workspaceDir: store.workspaceDir! });
-      setPhase('starting');
-    };
-
-    void startChat();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [phase, store]);
-
-  // Phase: starting → running or error/idle
-  useEffect(() => {
-    if (phase !== 'starting') {
-      return;
-    }
-
-    if (chatStatus.type === 'running' || chatStatus.type === 'connecting') {
-      setPhase('running');
-      didTriggerStart.current = false;
-    } else if (chatStatus.type === 'error') {
-      setError(chatStatus.error.message);
-      setPhase('error');
-      didTriggerStart.current = false;
-    } else if (chatStatus.type === 'exited') {
-      const startTs = lastStartTimestamp.current;
-      if (!startTs || chatStatus.timestamp > startTs) {
-        setPhase('idle');
-        didTriggerStart.current = false;
-      }
-    }
-  }, [phase, chatStatus]);
-
-  // running → idle when chat stops
-  useEffect(() => {
-    if (phase !== 'running') {
-      return;
-    }
-
-    if (chatStatus.type === 'exited' || chatStatus.type === 'error') {
-      setPhase('idle');
-    }
-  }, [phase, chatStatus]);
-
-  const retry = useCallback(() => {
-    setError(null);
-    setPhase('checking');
-  }, []);
-
-  const launch = useCallback(() => {
-    if (!store.workspaceDir) {
-      return;
-    }
-    hasAutoLaunched.current = false;
-    setPhase('ready');
-  }, [store.workspaceDir]);
-
-  return { phase, error, retry, launch };
+const toShellPhase = (phase: ChatAutoLaunchPhase): 'checking' | 'installing' | 'starting' => {
+  if (phase === 'checking' || phase === 'installing') return phase;
+  return 'starting';
 };
 
 const InstallDetails = memo(() => {
@@ -196,15 +39,82 @@ const ChatLogDetails = memo(() => {
 });
 ChatLogDetails.displayName = 'ChatLogDetails';
 
+const SandboxLogDetails = memo(() => {
+  const sandboxXTerm = useStore($sandboxProcessXTerm);
+  if (!sandboxXTerm) return null;
+  return <XTermLogViewer $xterm={$sandboxProcessXTerm} />;
+});
+SandboxLogDetails.displayName = 'SandboxLogDetails';
+
+/** Running view when sandbox is enabled — shows OmniAgentsApp with VNC floating widget. */
+const SandboxRunningView = memo(
+  ({
+    sandboxUrls,
+    theme,
+    greeting,
+    sandboxLabel,
+  }: {
+    sandboxUrls: {
+      uiUrl: string;
+      codeServerUrl?: string;
+      noVncUrl?: string;
+    };
+    theme: string;
+    greeting?: string;
+    sandboxLabel?: string;
+  }) => {
+    const uiSrc = useMemo(() => {
+      const url = new URL(sandboxUrls.uiUrl, window.location.origin);
+      if (theme !== 'default') {
+        url.searchParams.set('theme', theme);
+      }
+      return url.toString();
+    }, [sandboxUrls.uiUrl, theme]);
+    const vncSrc = sandboxUrls.noVncUrl;
+
+    const [vncOverlayOpen, setVncOverlayOpen] = useState(false);
+    const handleOpenVncOverlay = useCallback(() => setVncOverlayOpen(true), []);
+    const handleCloseVncOverlay = useCallback(() => setVncOverlayOpen(false), []);
+
+    return (
+      <div className="flex flex-col w-full h-full relative">
+        <div className="flex-1 min-h-0 relative">
+          <div className="w-full h-full relative">
+            <OmniAgentsApp uiUrl={uiSrc} greeting={greeting} sandboxLabel={sandboxLabel} />
+            {vncSrc && (
+              <FloatingWidget
+                src={vncSrc}
+                label="Omni's PC"
+                icon={PiMonitorBold}
+                overlayOpen={vncOverlayOpen}
+                onOpenOverlay={handleOpenVncOverlay}
+                onCloseOverlay={handleCloseVncOverlay}
+                className="top-[75%]"
+                resizable
+              />
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+);
+SandboxRunningView.displayName = 'SandboxRunningView';
+
 export const Chat = memo(() => {
   const initialized = useStore($initialized);
   const chatStatus = useStore($chatProcessStatus);
+  const sandboxStatus = useStore($sandboxProcessStatus);
   const store = useStore(persistedStoreApi.$atom);
-  const { phase, error, retry, launch } = useChatAutoLaunch();
+  const { phase, error, retry, launch, sandboxEnabled } = useChatAutoLaunch();
+  const [greeting] = useState(getGreeting);
+  const [runningMounted, setRunningMounted] = useState(false);
 
   const theme = store.theme ?? 'tokyo-night';
+  const sandboxLabel = useMemo(() => (store.sandboxEnabled ? buildSandboxLabel(store.sandboxVariant) : undefined), [store.sandboxEnabled, store.sandboxVariant]);
 
-  const uiUrl = useMemo(() => {
+  // Derive uiUrl from whichever process is active
+  const localUiUrl = useMemo(() => {
     if (chatStatus.type !== 'running' && chatStatus.type !== 'connecting') {
       return null;
     }
@@ -215,23 +125,86 @@ export const Chat = memo(() => {
     return url.toString();
   }, [chatStatus, theme]);
 
+  const sandboxUrls = useMemo(() => {
+    if (sandboxStatus.type !== 'running' && sandboxStatus.type !== 'connecting') {
+      return null;
+    }
+    return sandboxStatus.data;
+  }, [sandboxStatus]);
+
+  // Reset when sandbox URLs go away
+  useEffect(() => {
+    if (!sandboxUrls) setRunningMounted(false);
+  }, [sandboxUrls]);
+
+  const handleRunningReady = useCallback(() => {
+    requestAnimationFrame(() => setRunningMounted(true));
+  }, []);
+
   if (!initialized) {
     return null;
   }
 
+  const details =
+    phase === 'installing' ? (
+      <InstallDetails />
+    ) : sandboxEnabled ? (
+      <SandboxLogDetails />
+    ) : (
+      <ChatLogDetails />
+    );
+
+  // When sandbox is enabled, use ChatShell + SandboxRunningView (like old Omni.tsx)
+  if (sandboxEnabled) {
+    const hasUrls = !!sandboxUrls;
+    const showShell = !hasUrls || !runningMounted;
+
+    const shellPhase =
+      phase === 'error' ? ('error' as const) : phase === 'idle' ? ('idle' as const) : toShellPhase(phase);
+
+    return (
+      <div className="w-full h-full relative">
+        {showShell && (
+          <div className="absolute inset-0 z-0">
+            <ChatShell
+              greeting={greeting}
+              phase={shellPhase}
+              error={phase === 'error' ? error : undefined}
+              onRetry={phase === 'error' ? retry : undefined}
+              onLaunch={phase === 'idle' ? launch : undefined}
+              launchDisabled={phase === 'idle' ? !store.workspaceDir : undefined}
+              details={details}
+            />
+          </div>
+        )}
+        {hasUrls && (
+          <div
+            className="absolute inset-0 z-10"
+            ref={(el) => {
+              if (el) handleRunningReady();
+            }}
+          >
+            <SandboxRunningView sandboxUrls={sandboxUrls} theme={theme} greeting={greeting} sandboxLabel={sandboxLabel} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // When sandbox is disabled, use OmniAgentsHostApp (like old Chat.tsx)
   const startingPhase =
     phase === 'checking' || phase === 'installing' || phase === 'ready' || phase === 'starting'
-      ? (phase === 'ready' ? 'starting' : phase)
+      ? phase === 'ready'
+        ? 'starting'
+        : phase
       : 'starting';
-
-  const details = phase === 'installing' ? <InstallDetails /> : <ChatLogDetails />;
 
   return (
     <div className="w-full h-full">
       <OmniAgentsHostApp
         state={
-          uiUrl
-            ? { type: 'ready', uiUrl }
+          localUiUrl
+            ? { type: 'ready', uiUrl: localUiUrl }
             : phase === 'idle'
               ? { type: 'idle', onLaunch: launch, disabled: !store.workspaceDir }
               : phase === 'error'

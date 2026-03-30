@@ -2,7 +2,7 @@ import { useStore } from '@nanostores/react';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Button, FormField } from '@/renderer/ds';
+import { Button, FormField, Switch } from '@/renderer/ds';
 import { $launcherVersion } from '@/renderer/features/Banner/state';
 import {
   $omniInstallProcessStatus,
@@ -52,6 +52,10 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
     }
   }, [checkCliStatus]);
 
+  const onToggleSandboxEnabled = useCallback((checked: boolean) => {
+    persistedStoreApi.setKey('sandboxEnabled', checked);
+  }, []);
+
   const onChangeSandboxVariant = useCallback((e: ChangeEvent<HTMLSelectElement>) => {
     persistedStoreApi.setKey('sandboxVariant', e.target.value as SandboxVariant);
   }, []);
@@ -82,11 +86,15 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
 
       <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">Sandbox</span>
       <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
+        <FormField label="Enable sandbox (Docker)">
+          <Switch checked={store.sandboxEnabled ?? false} onCheckedChange={onToggleSandboxEnabled} />
+        </FormField>
         <FormField label="Sandbox variant">
           <select
             value={store.sandboxVariant ?? 'work'}
             onChange={onChangeSandboxVariant}
-            className="h-8 px-2 text-xs rounded-md bg-surface border border-surface-border/50 text-fg cursor-pointer outline-none focus:border-accent-500/50"
+            disabled={!store.sandboxEnabled}
+            className="h-8 px-2 text-xs rounded-md bg-surface border border-surface-border/50 text-fg cursor-pointer outline-none focus:border-accent-500/50 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <option value="work">Work</option>
             <option value="standard">Standard</option>

@@ -3,9 +3,9 @@ import { memo, useCallback, useState } from 'react';
 import { PiFolderOpenBold, PiPlusBold } from 'react-icons/pi';
 
 import { Button, Heading } from '@/renderer/ds';
-import { FleetProjectForm } from '@/renderer/features/Fleet/FleetProjectForm';
+import { ProjectForm } from '@/renderer/features/Projects/ProjectForm';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { CodeTabId, FleetProject } from '@/shared/types';
+import type { CodeTabId, Project } from '@/shared/types';
 
 import { codeApi } from './state';
 
@@ -15,7 +15,7 @@ type CodeEmptyStateProps = {
 };
 
 const ProjectCard = memo(
-  ({ project, onSelect }: { project: FleetProject; onSelect: (project: FleetProject) => void }) => {
+  ({ project, onSelect }: { project: Project; onSelect: (project: Project) => void }) => {
     const handleClick = useCallback(() => {
       onSelect(project);
     }, [project, onSelect]);
@@ -40,10 +40,10 @@ export const CodeEmptyState = memo(({ tabId, embedded = false }: CodeEmptyStateP
   const store = useStore(persistedStoreApi.$atom);
   const [showNewProject, setShowNewProject] = useState(false);
 
-  const projects = store.fleetProjects;
+  const projects = store.projects;
 
   const handleSelectProject = useCallback(
-    (project: FleetProject) => {
+    (project: Project) => {
       codeApi.setTabProject(tabId, project.id);
     },
     [tabId]
@@ -77,7 +77,7 @@ export const CodeEmptyState = memo(({ tabId, embedded = false }: CodeEmptyStateP
         Create new project
       </Button>
 
-      <FleetProjectForm open={showNewProject} onClose={handleCloseNewProject} />
+      <ProjectForm open={showNewProject} onClose={handleCloseNewProject} />
     </div>
   );
 });

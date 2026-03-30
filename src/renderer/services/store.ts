@@ -5,6 +5,7 @@ import { emitter, ipc } from '@/renderer/services/ipc';
 import type { ModelsConfig, OperatingSystem, StoreData } from '@/shared/types';
 
 const getDefaults = (): StoreData => ({
+  sandboxEnabled: false,
   sandboxVariant: 'work',
   optInToLauncherPrereleases: false,
   previewFeatures: false,
@@ -12,17 +13,14 @@ const getDefaults = (): StoreData => ({
   layoutMode: 'chat',
   theme: 'tokyo-night',
   onboardingComplete: false,
-  fleetProjects: [],
-  fleetTasks: [],
-  fleetTickets: [],
-  fleetSchemaVersion: 0,
+  projects: [],
+  tasks: [],
+  tickets: [],
+  schemaVersion: 0,
   codeTabs: [],
   activeCodeTabId: null,
   codeLayoutMode: 'deck',
-  fleetLayoutMode: 'deck',
-  fleetBoardOpen: false,
-  fleetOpenTicketIds: [],
-  activeFleetTicketId: null,
+  activeTicketId: null,
 });
 
 /**
@@ -115,6 +113,14 @@ const init = async () => {
 
   if (import.meta.env.MODE !== 'development' && !store.previewFeatures && store.layoutMode !== 'chat') {
     await persistedStoreApi.setKey('layoutMode', 'chat');
+  }
+
+  // Migrate legacy layoutMode values to current valid modes
+  const lm = store.layoutMode as string;
+  if (lm === 'work' || lm === 'desktop') {
+    await persistedStoreApi.setKey('layoutMode', 'chat');
+  } else if (!['chat', 'code', 'projects'].includes(lm)) {
+    await persistedStoreApi.setKey('layoutMode', 'projects');
   }
 
   // Apply default workspace dir if user has never picked one

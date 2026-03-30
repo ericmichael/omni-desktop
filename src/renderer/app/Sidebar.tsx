@@ -1,7 +1,7 @@
 import { useStore } from '@nanostores/react';
 import { motion } from 'framer-motion';
 import { memo, useCallback, useMemo } from 'react';
-import { PiChatCircleFill, PiCodeBold, PiGearFill, PiHammerFill, PiRocketLaunchFill } from 'react-icons/pi';
+import { PiChatCircleFill, PiCodeBold, PiGearFill, PiRocketLaunchFill } from 'react-icons/pi';
 
 import { OmniLogo } from '@/renderer/common/AsciiLogo';
 import { cn, IconButton } from '@/renderer/ds';
@@ -11,17 +11,9 @@ import type { LayoutMode } from '@/shared/types';
 
 const ALL_TABS: { value: LayoutMode; label: string; icon: React.ReactNode }[] = [
   { value: 'chat', label: 'Chat', icon: <PiChatCircleFill size={20} /> },
-  { value: 'work', label: 'Work', icon: <PiHammerFill size={20} /> },
   { value: 'code', label: 'Code', icon: <PiCodeBold size={20} /> },
-  { value: 'fleet', label: 'Fleet', icon: <PiRocketLaunchFill size={20} /> },
+  { value: 'projects', label: 'Projects', icon: <PiRocketLaunchFill size={20} /> },
 ];
-
-const activeTabForMode = (mode: LayoutMode): LayoutMode => {
-  if (mode === 'desktop') {
-    return 'code';
-  }
-  return mode;
-};
 
 const springTransition = { type: 'spring', duration: 0.3, bounce: 0.15 } as const;
 
@@ -44,11 +36,11 @@ export const Sidebar = memo(() => {
     () =>
       import.meta.env.MODE === 'development' || store.previewFeatures
         ? ALL_TABS
-        : ALL_TABS.filter((t) => t.value !== 'fleet' && t.value !== 'work' && t.value !== 'code'),
+        : ALL_TABS.filter((t) => t.value === 'chat'),
     [store.previewFeatures]
   );
 
-  const activeTab = activeTabForMode(store.layoutMode);
+  const activeTab = store.layoutMode;
 
   return (
     <nav className="flex flex-col w-[68px] shrink-0 h-full bg-header border-r border-header-border">

@@ -9,6 +9,7 @@ import c from 'ansi-colors';
 import { ipcMain } from 'electron';
 import { shellEnvSync } from 'shell-env';
 import { assert } from 'tsafe';
+import { WebSocket as WsWebSocket } from 'ws';
 
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
@@ -66,12 +67,7 @@ const toSandboxStatusData = (
     noVncUrl: payload.novnc_url ?? undefined,
     containerId: payload.container_id ?? undefined,
     containerName: payload.container_name ?? undefined,
-    ports: {
-      sandbox: payload.ports.sandbox,
-      ui: payload.ports.ui,
-      codeServer: payload.ports.code_server ?? undefined,
-      vnc: payload.ports.vnc ?? undefined,
-    },
+    port: payload.ports.ui,
   };
 };
 
@@ -91,10 +87,13 @@ type SandboxReadinessTarget =
 export const getSandboxReadinessTargets = (
   data: Extract<SandboxProcessStatus, { type: 'running' }>['data']
 ): SandboxReadinessTarget[] => {
-  return [
+  const targets: SandboxReadinessTarget[] = [
     { label: 'ui', url: data.uiUrl, protocol: 'http' },
-    { label: 'ws', url: data.wsUrl, protocol: 'ws' },
   ];
+  if (data.wsUrl) {
+    targets.push({ label: 'ws', url: data.wsUrl, protocol: 'ws' });
+  }
+  return targets;
 };
 
 export class SandboxManager {
@@ -192,7 +191,7 @@ export class SandboxManager {
       try {
         return await new Promise<boolean>((resolve) => {
           let settled = false;
-          const socket = new WebSocket(url);
+          const socket = new WsWebSocket(url);
           const finish = (result: boolean): void => {
             if (settled) {
               return;
@@ -207,9 +206,9 @@ export class SandboxManager {
             resolve(result);
           };
           const timer = setTimeout(() => finish(false), 2_000);
-          socket.onopen = () => finish(true);
-          socket.onerror = () => finish(false);
-          socket.onclose = () => finish(false);
+          socket.on('open', () => finish(true));
+          socket.on('error', () => finish(false));
+          socket.on('close', () => finish(false));
         });
       } catch {
         return false;
@@ -218,7 +217,7 @@ export class SandboxManager {
 
     let allUp = false;
     let lastResults: Array<{ label: string; url: string; ok: boolean }> = [];
-    for (let attempt = 0; attempt < 30; attempt++) {
+    for (let attempt = 0; attempt < 120; attempt++) {
       if (this.status.type === 'stopping' || this.status.type === 'exiting') {
         return;
       }
@@ -250,10 +249,13 @@ export class SandboxManager {
       if (failed.length > 0) {
         this.log.info(c.red(`Failed readiness checks: ${failed.map((result) => `${result.label}=${result.url}`).join(', ')}\r\n`));
       }
-      this.log.info(c.red.bold('Services did not become ready within 30 seconds\r\n'));
+      this.log.info(c.red.bold('Services did not become ready within 120 seconds\r\n'));
+      // Stop the container so it doesn't leak
+      const env = { ...process.env, ...DEFAULT_ENV } as Record<string, string>;
+      void this.stopActiveContainer(env);
       this.updateStatus({
         type: 'error',
-        error: { message: 'Sandbox services did not become ready within 30 seconds. Check Docker logs.' },
+        error: { message: 'Sandbox services did not become ready within 120 seconds. Check Docker logs.' },
       });
       return;
     }

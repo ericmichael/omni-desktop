@@ -11,7 +11,8 @@ import type {
   CodeLayoutMode,
   CodeTab,
   CodeTabId,
-  FleetProjectId,
+  ProjectId,
+  TicketId,
   SandboxProcessStatus,
   SandboxVariant,
   WithTimestamp,
@@ -72,17 +73,30 @@ const teardownTabTerminal = (tabId: CodeTabId) => {
 };
 
 export const codeApi = {
-  startSandbox: (tabId: CodeTabId, arg: { workspaceDir: string; sandboxVariant: SandboxVariant }) => {
+  startSandbox: (tabId: CodeTabId, arg: { workspaceDir: string; sandboxVariant: SandboxVariant; local?: boolean }) => {
+    // Clear stale status so watchProcessStatus doesn't see old data from a previous run
+    // and immediately send a spurious SANDBOX_EXITED/SANDBOX_ERROR event.
+    const statuses = { ...$codeTabStatuses.get() };
+    delete statuses[tabId];
+    $codeTabStatuses.set(statuses);
+
     initializeTabTerminal(tabId);
     emitter.invoke('code:start-sandbox', tabId, arg);
   },
 
   stopSandbox: async (tabId: CodeTabId) => {
-    await emitter.invoke('code:stop-sandbox', tabId);
+    // Teardown terminal first so the push listener's `exited` event
+    // doesn't race with us and double-teardown.
     teardownTabTerminal(tabId);
+    await emitter.invoke('code:stop-sandbox', tabId);
   },
 
-  rebuildSandbox: (tabId: CodeTabId, fallbackArg: { workspaceDir: string; sandboxVariant: SandboxVariant }) => {
+  rebuildSandbox: (tabId: CodeTabId, fallbackArg: { workspaceDir: string; sandboxVariant: SandboxVariant; local?: boolean }) => {
+    // Clear stale status (same rationale as startSandbox).
+    const statuses = { ...$codeTabStatuses.get() };
+    delete statuses[tabId];
+    $codeTabStatuses.set(statuses);
+
     initializeTabTerminal(tabId);
     emitter.invoke('code:rebuild-sandbox', tabId, fallbackArg);
   },
@@ -132,40 +146,83 @@ export const codeApi = {
     await persistedStoreApi.setKey('codeTabs', nextTabs);
   },
 
-  setTabProject: async (tabId: CodeTabId, projectId: FleetProjectId) => {
+  setTabProject: async (tabId: CodeTabId, projectId: ProjectId) => {
     const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((t) => (t.id === tabId ? { ...t, projectId } : t));
     await persistedStoreApi.setKey('codeTabs', tabs);
-    // Trigger auto-launch by setting phase to checking
-    $codeTabPhases.setKey(tabId, 'checking');
+    // Auto-launch is triggered by the useCodeAutoLaunch effect reacting to workspaceDir becoming non-null.
+    // Do NOT write to $codeTabPhases here — it would desync the atom from the XState machine.
+  },
+
+  addTabForTicket: async (
+    ticketId: TicketId,
+    projectId: ProjectId,
+    opts?: { sessionId?: string; ticketTitle?: string }
+  ): Promise<CodeTab> => {
+    // Check if a tab for this ticket already exists
+    const existingTabs = persistedStoreApi.getKey('codeTabs') ?? [];
+    const existing = existingTabs.find((t) => t.ticketId === ticketId);
+    if (existing) {
+      await persistedStoreApi.setKey('activeCodeTabId', existing.id);
+      return existing;
+    }
+    const tab: CodeTab = {
+      id: nanoid(),
+      projectId,
+      ticketId,
+      sessionId: opts?.sessionId,
+      ticketTitle: opts?.ticketTitle,
+      createdAt: Date.now(),
+    };
+    const tabs = [...existingTabs, tab];
+    await persistedStoreApi.setKey('codeTabs', tabs);
+    await persistedStoreApi.setKey('activeCodeTabId', tab.id);
+    return tab;
+  },
+
+  setTabSessionId: async (tabId: CodeTabId, sessionId: string | undefined) => {
+    const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((t) =>
+      t.id === tabId ? { ...t, sessionId } : t
+    );
+    await persistedStoreApi.setKey('codeTabs', tabs);
   },
 };
 
 const listen = () => {
+  // Push events for real-time updates
   ipc.on('code:sandbox-status', (tabId, status) => {
+    // Guard: ignore events for tabs that have been removed. This prevents
+    // a late `exited` push from writing to atoms after removeTab() cleaned up.
+    const tabs = persistedStoreApi.getKey('codeTabs') ?? [];
+    if (!tabs.some((t) => t.id === tabId)) return;
+
     $codeTabStatuses.setKey(tabId, status);
     if (status.type === 'exited') {
       teardownTabTerminal(tabId);
     }
   });
 
-  // Poll sandbox statuses for all tabs that have a project
-  setInterval(async () => {
+  // Polling as fallback — catches statuses missed during reconnects / server restarts.
+  // Only polls tabs that don't already have a 'running' status to avoid overwriting fresh data.
+  const pollStatuses = async () => {
     const tabs = persistedStoreApi.getKey('codeTabs') ?? [];
     for (const tab of tabs) {
-      if (!tab.projectId) {
-        continue;
-      }
+      const current = $codeTabStatuses.get()[tab.id];
+      // Skip tabs already running — push events keep them up to date
+      if (current?.type === 'running') continue;
       try {
-        const oldStatus = $codeTabStatuses.get()[tab.id];
-        const newStatus = await emitter.invoke('code:get-sandbox-status', tab.id);
-        if (!objectEquals(oldStatus, newStatus)) {
-          $codeTabStatuses.setKey(tab.id, newStatus);
+        const status = await emitter.invoke('code:get-sandbox-status', tab.id);
+        if (!status || status.type === 'uninitialized') continue;
+        const old = $codeTabStatuses.get()[tab.id];
+        if (!objectEquals(old, status)) {
+          $codeTabStatuses.setKey(tab.id, status);
         }
       } catch {
-        // ignore polling errors
+        // ignore — server may not be ready
       }
     }
-  }, STATUS_POLL_INTERVAL_MS);
+  };
+
+  setInterval(pollStatuses, STATUS_POLL_INTERVAL_MS);
 };
 
 listen();

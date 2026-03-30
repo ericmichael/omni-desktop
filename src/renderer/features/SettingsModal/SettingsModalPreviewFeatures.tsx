@@ -28,7 +28,7 @@ export const SettingsModalPreviewFeatures = memo(() => {
         <Checkbox checked={previewFeatures} onCheckedChange={onChange} />
       </FormField>
       <span className="text-xs text-fg-subtle">
-        Unlock experimental features such as Fleet, Work, and Code tabs. These features are under active development and
+        Unlock experimental features such as Projects, Work, and Code tabs. These features are under active development and
         may be unstable or change without notice.
       </span>
     </div>

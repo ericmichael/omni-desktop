@@ -14,9 +14,10 @@ type CodeSplitLayoutProps = {
   uiMode?: 'webview' | 'omniagents';
   codeServerMode?: 'webview' | 'omniagents';
   onReady?: () => void;
+  sandboxLabel?: string;
 };
 
-export const CodeSplitLayout = memo(({ uiSrc, codeServerSrc, uiMode = 'webview', codeServerMode = 'webview', onReady }: CodeSplitLayoutProps) => {
+export const CodeSplitLayout = memo(({ uiSrc, codeServerSrc, uiMode = 'webview', codeServerMode = 'webview', onReady, sandboxLabel }: CodeSplitLayoutProps) => {
   const splitRef = useRef<HTMLDivElement>(null);
   const [sidebarWidthPercent, setSidebarWidthPercent] = useState(DEFAULT_SIDEBAR_PERCENT);
   const [isDragging, setIsDragging] = useState(false);
@@ -77,7 +78,7 @@ export const CodeSplitLayout = memo(({ uiSrc, codeServerSrc, uiMode = 'webview',
 
       <div className="min-w-0" style={{ width: `${100 - sidebarWidthPercent}%` }}>
         {codeServerMode === 'omniagents' && codeServerSrc ? (
-          <OmniAgentsApp uiUrl={codeServerSrc} onReady={handleCodeServerReady} />
+          <OmniAgentsApp uiUrl={codeServerSrc} onReady={handleCodeServerReady} sandboxLabel={sandboxLabel} />
         ) : (
           <Webview src={codeServerSrc} onReady={handleCodeServerReady} showUnavailable={Boolean(codeServerSrc)} />
         )}
@@ -91,7 +92,7 @@ export const CodeSplitLayout = memo(({ uiSrc, codeServerSrc, uiMode = 'webview',
       <div className="flex flex-col min-w-0" style={{ width: `${sidebarWidthPercent}%` }}>
         <div className="flex-1 min-h-0">
           {uiMode === 'omniagents' ? (
-            <OmniAgentsApp uiUrl={uiSrc} onReady={handleUiReady} />
+            <OmniAgentsApp uiUrl={uiSrc} onReady={handleUiReady} sandboxLabel={sandboxLabel} />
           ) : (
             <Webview src={uiSrc} onReady={handleUiReady} showUnavailable={false} />
           )}

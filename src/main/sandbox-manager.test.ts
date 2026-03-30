@@ -14,12 +14,7 @@ describe('getSandboxReadinessTargets', () => {
       noVncUrl: 'http://localhost:48405/vnc.html?autoconnect=true&resize=scale',
       containerId: 'container-id',
       containerName: undefined,
-      ports: {
-        sandbox: 42903,
-        ui: 41141,
-        codeServer: 39907,
-        vnc: 48405,
-      },
+      port: 41141,
     };
 
     expect(getSandboxReadinessTargets(data)).toEqual([
@@ -37,12 +32,7 @@ describe('getSandboxReadinessTargets', () => {
       noVncUrl: undefined,
       containerId: 'container-id',
       containerName: undefined,
-      ports: {
-        sandbox: 35587,
-        ui: 56373,
-        codeServer: undefined,
-        vnc: undefined,
-      },
+      port: 56373,
     };
 
     expect(getSandboxReadinessTargets(data)).toEqual([

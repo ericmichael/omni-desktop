@@ -4,11 +4,15 @@ import { PiCodeBold, PiMonitorBold, PiXBold } from 'react-icons/pi';
 
 import { Webview } from '@/renderer/common/Webview';
 import { OmniAgentsApp } from '@/renderer/omniagents-ui';
+import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 
 type OverlayPane = 'none' | 'code' | 'vnc';
 
 type CodeWorkspaceLayoutProps = {
   uiSrc: string;
+  sessionId?: string;
+  onSessionChange?: (sessionId: string | undefined) => void;
+  variables?: Record<string, unknown>;
   codeServerSrc?: string;
   vncSrc?: string;
   overlayPane?: OverlayPane;
@@ -16,6 +20,8 @@ type CodeWorkspaceLayoutProps = {
   onReady?: () => void;
   headerActionsTargetId?: string;
   headerActionsCompact?: boolean;
+  sandboxLabel?: string;
+  onClientToolCall?: ClientToolCallHandler;
 };
 
 const transition = { type: 'spring' as const, duration: 0.28, bounce: 0.08 };
@@ -68,7 +74,7 @@ const OverlayPaneView = memo(
 );
 OverlayPaneView.displayName = 'OverlayPaneView';
 
-export const CodeWorkspaceLayout = memo(({ uiSrc, codeServerSrc, vncSrc, overlayPane = 'none', onCloseOverlay, onReady, headerActionsTargetId, headerActionsCompact }: CodeWorkspaceLayoutProps) => {
+export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, variables, codeServerSrc, vncSrc, overlayPane = 'none', onCloseOverlay, onReady, headerActionsTargetId, headerActionsCompact, sandboxLabel, onClientToolCall }: CodeWorkspaceLayoutProps) => {
   const overlaySrc = overlayPane === 'code' ? codeServerSrc : overlayPane === 'vnc' ? vncSrc : undefined;
 
   const handleUiReady = useCallback(() => {
@@ -83,7 +89,7 @@ export const CodeWorkspaceLayout = memo(({ uiSrc, codeServerSrc, vncSrc, overlay
     <div className="relative flex h-full w-full flex-col bg-surface">
       <div className="relative min-h-0 flex-1">
         <div className="h-full w-full min-w-0">
-          <OmniAgentsApp uiUrl={uiSrc} onReady={handleUiReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} />
+          <OmniAgentsApp uiUrl={uiSrc} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables} onReady={handleUiReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} sandboxLabel={sandboxLabel} onClientToolCall={onClientToolCall} />
         </div>
       </div>
 

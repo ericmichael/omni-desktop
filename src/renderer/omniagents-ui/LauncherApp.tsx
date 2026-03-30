@@ -2,17 +2,24 @@ import type { ReactNode } from 'react';
 import { useEffect, useMemo } from 'react';
 
 import { App as OmniAgentsCore } from './App';
+import type { ClientToolCallHandler } from './App';
 import type { PendingMessage } from './ChatShell';
+import { RPCClientProvider } from './rpc-context';
 import './styles/index.css';
 import { UiConfigProvider, useUiConfig } from './ui-config';
 
 type OmniAgentsAppProps = {
   uiUrl: string;
+  sessionId?: string;
+  onSessionChange?: (sessionId: string | undefined) => void;
+  variables?: Record<string, unknown>;
   greeting?: string;
   onReady?: () => void;
   headerActionsTargetId?: string;
   headerActionsCompact?: boolean;
   pendingMessages?: PendingMessage[];
+  sandboxLabel?: string;
+  onClientToolCall?: ClientToolCallHandler;
 };
 
 const ThemeSync = ({ children }: { children: ReactNode }) => {
@@ -29,14 +36,16 @@ const ThemeSync = ({ children }: { children: ReactNode }) => {
   return <>{children}</>;
 };
 
-export const OmniAgentsApp = ({ uiUrl, greeting, onReady, headerActionsTargetId, headerActionsCompact, pendingMessages }: OmniAgentsAppProps) => {
+export const OmniAgentsApp = ({ uiUrl, sessionId, onSessionChange, variables, greeting, onReady, headerActionsTargetId, headerActionsCompact, pendingMessages, sandboxLabel, onClientToolCall }: OmniAgentsAppProps) => {
   const normalizedUrl = useMemo(() => new URL(uiUrl, window.location.origin).toString(), [uiUrl]);
 
   return (
     <UiConfigProvider uiUrl={normalizedUrl}>
-      <ThemeSync>
-        <OmniAgentsCore greeting={greeting} onReady={onReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} pendingMessages={pendingMessages} />
-      </ThemeSync>
+      <RPCClientProvider>
+        <ThemeSync>
+          <OmniAgentsCore sessionId={sessionId} onSessionChange={onSessionChange} variables={variables} greeting={greeting} onReady={onReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} pendingMessages={pendingMessages} sandboxLabel={sandboxLabel} onClientToolCall={onClientToolCall} />
+        </ThemeSync>
+      </RPCClientProvider>
     </UiConfigProvider>
   );
 };

@@ -231,7 +231,7 @@ describe('TicketMachine', () => {
       m.setWsUrl(wsUrl);
       await m.createSession();
 
-      // Simulate: after a run completes, FleetManager sets continuing
+      // Simulate: after a run completes, ProjectManager sets continuing
       m.forcePhase('continuing');
       const result = await m.startRun('continue');
       expect(result.runId).toBe('run-2');
@@ -313,7 +313,7 @@ describe('TicketMachine', () => {
 
       expect(m.getRunId()).toBeNull();
       expect(cb.runEnds).toEqual(['completed']);
-      // Phase is NOT changed by the machine — FleetManager decides
+      // Phase is NOT changed by the machine — ProjectManager decides
       expect(m.getPhase()).toBe('running');
     });
   });
@@ -581,11 +581,12 @@ describe('TicketMachine', () => {
   // #region Connection edge cases
 
   describe('connection edge cases', () => {
-    it('rejects createSession when in idle phase', async () => {
+    it('allows createSession from idle phase (e.g. after session reset)', async () => {
       const cb = makeCallbacks();
       const m = new TicketMachine('t1', cb);
-      m.setWsUrl('ws://127.0.0.1:1'); // won't matter, connect rejects early
-      await expect(m.createSession()).rejects.toThrow('Cannot connect in phase idle');
+      m.setWsUrl('ws://127.0.0.1:1');
+      // Should attempt to connect (not reject with phase error) — idle → connecting is valid
+      await expect(m.createSession()).rejects.toThrow(/WebSocket/);
     });
 
     it('rejects createSession when in error phase', async () => {

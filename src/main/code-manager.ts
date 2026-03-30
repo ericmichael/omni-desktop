@@ -1,13 +1,12 @@
 import type { IpcListener } from '@electron-toolkit/typed-ipc/main';
 import { ipcMain } from 'electron';
 
-import type { FetchFn } from '@/main/sandbox-manager';
-import { SandboxManager } from '@/main/sandbox-manager';
+import { AgentProcess, type AgentProcessMode, type FetchFn } from '@/main/agent-process';
 import type {
+  AgentProcessStatus,
   CodeTabId,
   IpcEvents,
   IpcRendererEvents,
-  SandboxProcessStatus,
   SandboxVariant,
   WithTimestamp,
 } from '@/shared/types';
@@ -15,10 +14,11 @@ import type {
 type StartArg = {
   workspaceDir: string;
   sandboxVariant: SandboxVariant;
+  local?: boolean;
 };
 
 export class CodeManager {
-  private sandboxes = new Map<CodeTabId, SandboxManager>();
+  private processes = new Map<CodeTabId, AgentProcess>();
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   private fetchFn: FetchFn;
 
@@ -27,14 +27,18 @@ export class CodeManager {
     this.fetchFn = arg.fetchFn ?? globalThis.fetch;
   }
 
-  private getOrCreateSandbox(tabId: CodeTabId): SandboxManager {
-    let sandbox = this.sandboxes.get(tabId);
-    if (sandbox) {
-      return sandbox;
+  private getOrCreate(tabId: CodeTabId, mode: AgentProcessMode): AgentProcess {
+    const existing = this.processes.get(tabId);
+    if (existing && existing.mode === mode) {
+      return existing;
+    }
+    // Mode changed or first creation — clean up old process if mode differs
+    if (existing) {
+      void existing.exit();
     }
 
-    sandbox = new SandboxManager({
-      ipcLogger: () => {},
+    const proc = new AgentProcess({
+      mode,
       ipcRawOutput: (data) => {
         this.sendToWindow('code:sandbox-raw-output', tabId, data);
       },
@@ -44,48 +48,61 @@ export class CodeManager {
       fetchFn: this.fetchFn,
     });
 
-    this.sandboxes.set(tabId, sandbox);
-    return sandbox;
+    this.processes.set(tabId, proc);
+    return proc;
   }
 
   startSandbox = (tabId: CodeTabId, arg: StartArg): void => {
-    const sandbox = this.getOrCreateSandbox(tabId);
-    sandbox.start(arg);
+    const mode: AgentProcessMode = arg.local ? 'local' : 'sandbox';
+    const proc = this.getOrCreate(tabId, mode);
+    proc.start(arg);
   };
 
   stopSandbox = async (tabId: CodeTabId): Promise<void> => {
-    const sandbox = this.sandboxes.get(tabId);
-    if (!sandbox) {
-      return;
-    }
-    await sandbox.stop();
-    this.sandboxes.delete(tabId);
+    const proc = this.processes.get(tabId);
+    if (!proc) return;
+    await proc.stop();
+    this.processes.delete(tabId);
   };
 
   rebuildSandbox = async (tabId: CodeTabId, fallbackArg: StartArg): Promise<void> => {
-    const sandbox = this.getOrCreateSandbox(tabId);
-    await sandbox.rebuild(fallbackArg);
+    const mode: AgentProcessMode = fallbackArg.local ? 'local' : 'sandbox';
+    const proc = this.getOrCreate(tabId, mode);
+    await proc.rebuild(fallbackArg);
   };
 
-  getSandboxStatus = (tabId: CodeTabId): WithTimestamp<SandboxProcessStatus> => {
-    const sandbox = this.sandboxes.get(tabId);
-    if (!sandbox) {
-      return { type: 'uninitialized', timestamp: Date.now() };
-    }
-    return sandbox.getStatus();
+  getSandboxStatus = (tabId: CodeTabId): WithTimestamp<AgentProcessStatus> => {
+    const proc = this.processes.get(tabId);
+    if (!proc) return { type: 'uninitialized', timestamp: Date.now() };
+    return proc.getStatus();
   };
 
   resizePty = (tabId: CodeTabId, cols: number, rows: number): void => {
-    const sandbox = this.sandboxes.get(tabId);
-    if (sandbox) {
-      sandbox.resizePty(cols, rows);
-    }
+    const proc = this.processes.get(tabId);
+    if (proc) proc.resizePty(cols, rows);
   };
 
+  /**
+   * Look up a running sandbox's WebSocket URL for a Code tab linked to the given ticketId.
+   * Used by ProjectManager to reuse an existing sandbox instead of creating a duplicate.
+   */
+  getRunningWsUrlForTicket(ticketId: string, codeTabs: Array<{ id: string; ticketId?: string }>): string | null {
+    for (const tab of codeTabs) {
+      if (tab.ticketId !== ticketId) continue;
+      const proc = this.processes.get(tab.id);
+      if (!proc) continue;
+      const status = proc.getStatus();
+      if (status.type === 'running' && status.data.wsUrl) {
+        return status.data.wsUrl;
+      }
+    }
+    return null;
+  }
+
   cleanup = async (): Promise<void> => {
-    const exits = Array.from(this.sandboxes.values()).map((s) => s.exit());
+    const exits = Array.from(this.processes.values()).map((p) => p.exit());
     await Promise.allSettled(exits);
-    this.sandboxes.clear();
+    this.processes.clear();
   };
 }
 

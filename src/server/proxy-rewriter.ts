@@ -48,37 +48,33 @@ export const setupProxyRewriter = (fastify: FastifyInstance, wsHandler: WsHandle
   wsHandler.addEventInterceptor((channel, args) => {
     if (channel === 'sandbox-process:status' || channel === 'chat-process:status') {
       const status = args[0] as Record<string, unknown> | undefined;
-      if (status && status.type === 'running' && status.data) {
-        const data = status.data as Record<string, string | undefined>;
-        rewriteStatusUrls(data, channel === 'chat-process:status' ? 'chat' : 'sandbox');
+      if (status && (status.type === 'running' || status.type === 'connecting') && status.data) {
+        rewriteStatusUrls(status.data as Record<string, string | undefined>, channel === 'chat-process:status' ? 'chat' : 'sandbox');
       }
     }
 
-    // Code tab sandbox status: args are [tabId, status]
     if (channel === 'code:sandbox-status') {
       const tabId = args[0] as string;
       const status = args[1] as Record<string, unknown> | undefined;
-      if (status && status.type === 'running' && status.data) {
-        const data = status.data as Record<string, string | undefined>;
-        rewriteStatusUrls(data, `code-${tabId}`);
+      if (status && (status.type === 'running' || status.type === 'connecting') && status.data) {
+        rewriteStatusUrls(status.data as Record<string, string | undefined>, `code-${tabId}`);
       }
     }
 
-    // Fleet task status: args are [taskId, status]
-    if (channel === 'fleet:task-status') {
+    if (channel === 'project:task-status') {
       const taskId = args[0] as string;
       const status = args[1] as Record<string, unknown> | undefined;
-      if (status && status.type === 'running' && status.data) {
-        const data = status.data as Record<string, string | undefined>;
-        rewriteStatusUrls(data, `fleet-${taskId}`);
+      if (status && (status.type === 'running' || status.type === 'connecting') && status.data) {
+        rewriteStatusUrls(status.data as Record<string, string | undefined>, `project-${taskId}`);
       }
     }
   });
 
   // --- URL rewriting for invoke responses via result wrappers ---
+  // Result wrappers receive a structuredClone from WsHandler, safe to mutate directly.
   wsHandler.addResultWrapper('sandbox-process:get-status', (result) => {
     const status = result as Record<string, unknown> | undefined;
-    if (status && status.type === 'running' && status.data) {
+    if (status && (status.type === 'running' || status.type === 'connecting') && status.data) {
       rewriteStatusUrls(status.data as Record<string, string | undefined>, 'sandbox');
     }
     return result;
@@ -86,7 +82,7 @@ export const setupProxyRewriter = (fastify: FastifyInstance, wsHandler: WsHandle
 
   wsHandler.addResultWrapper('chat-process:get-status', (result) => {
     const status = result as Record<string, unknown> | undefined;
-    if (status && status.type === 'running' && status.data) {
+    if (status && (status.type === 'running' || status.type === 'connecting') && status.data) {
       rewriteStatusUrls(status.data as Record<string, string | undefined>, 'chat');
     }
     return result;
@@ -95,8 +91,20 @@ export const setupProxyRewriter = (fastify: FastifyInstance, wsHandler: WsHandle
   wsHandler.addResultWrapper('code:get-sandbox-status', (result, args) => {
     const tabId = args[0] as string;
     const status = result as Record<string, unknown> | undefined;
-    if (status && status.type === 'running' && status.data) {
+    if (status && (status.type === 'running' || status.type === 'connecting') && status.data) {
       rewriteStatusUrls(status.data as Record<string, string | undefined>, `code-${tabId}`);
+    }
+    return result;
+  });
+
+  wsHandler.addResultWrapper('project:get-tasks', (result) => {
+    const tasks = result as Array<{ id: string; status: Record<string, unknown> }> | undefined;
+    if (Array.isArray(tasks)) {
+      for (const task of tasks) {
+        if (task.status && task.status.type === 'running' && task.status.data) {
+          rewriteStatusUrls(task.status.data as Record<string, string | undefined>, `project-${task.id}`);
+        }
+      }
     }
     return result;
   });
@@ -261,7 +269,7 @@ function wsRewriteScript(proxyName: string): string {
  * Rewrite localhost URLs in a status data object to relative proxy paths and register upstreams.
  */
 const rewriteStatusUrls = (data: Record<string, string | undefined>, proxyName: string): void => {
-  const urlFields = ['uiUrl', 'sandboxUrl', 'codeServerUrl', 'noVncUrl'];
+  const urlFields = ['uiUrl', 'wsUrl', 'sandboxUrl', 'codeServerUrl', 'noVncUrl'];
 
   for (const field of urlFields) {
     const url = data[field];
@@ -278,9 +286,7 @@ const rewriteStatusUrls = (data: Record<string, string | undefined>, proxyName: 
         const proxyKey = `${proxyName}-${field}`;
         const upstream = `${parsed.protocol}//${parsed.host}`;
 
-        if (!upstreamMap.has(proxyKey)) {
-          upstreamMap.set(proxyKey, upstream);
-        }
+        upstreamMap.set(proxyKey, upstream);
 
         data[field] = `/proxy/${proxyKey}${parsed.pathname}${parsed.search}`;
       }

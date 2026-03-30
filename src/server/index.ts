@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify from 'fastify';
@@ -39,8 +40,8 @@ const main = async () => {
   // Set up reverse proxy URL rewriting for internal services (chat, sandbox, etc.)
   setupProxyRewriter(fastify, wsHandler);
 
-  // Wire global (shared) IPC handlers — store, util, config, fleet
-  const { cleanupFleet } = wireGlobalHandlers({ wsHandler, store });
+  // Wire global (shared) IPC handlers — store, util, config, project
+  const { cleanupProject } = wireGlobalHandlers({ wsHandler, store });
 
   // WebSocket route — each new connection gets its own manager instances.
   // Clients send a sessionId query param; if the server has an existing session
@@ -74,11 +75,11 @@ const main = async () => {
     return reply.code(404).send({ error: 'Not found' });
   });
 
-  // Graceful shutdown — clean up all persistent sessions + fleet
+  // Graceful shutdown — clean up all persistent sessions + project manager
   const shutdown = async () => {
     fastify.log.info('Shutting down...');
     await wsHandler.cleanupAllSessions();
-    await cleanupFleet();
+    await cleanupProject();
     await fastify.close();
     process.exit(0);
   };

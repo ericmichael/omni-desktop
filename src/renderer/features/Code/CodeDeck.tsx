@@ -2,7 +2,7 @@ import { DndContext, PointerSensor, type DragEndEvent, useSensor, useSensors } f
 import { SortableContext, arrayMove, horizontalListSortingStrategy, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useStore } from '@nanostores/react';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PiArrowsInBold, PiArrowsOutBold, PiCodeBold, PiDotsSixVerticalBold, PiDotsThreeOutline, PiMonitorBold, PiPlusBold } from 'react-icons/pi';
 
 import { Button, cn } from '@/renderer/ds';
@@ -10,6 +10,7 @@ import { persistedStoreApi } from '@/renderer/services/store';
 import type { CodeLayoutMode, CodeTab, CodeTabId } from '@/shared/types';
 
 import { CodeTabContent } from './CodeTabContent';
+import { TicketBannerActions, TicketColumnBadge } from '@/renderer/features/Tickets/TicketControls';
 import { $codeTabStatuses, codeApi } from './state';
 
 const COLUMN_WIDTH = 480;
@@ -78,11 +79,17 @@ SessionActionButton.displayName = 'SessionActionButton';
 const CodeSessionHeader = memo(
   ({
     label,
+    ticketTitle,
+    ticketColumnBadge,
+    ticketActions,
     actions,
     onClose,
     dragHandle,
   }: {
     label: string;
+    ticketTitle?: string | null;
+    ticketColumnBadge?: React.ReactNode;
+    ticketActions?: React.ReactNode;
     actions?: React.ReactNode;
     onClose?: () => void;
     dragHandle?: React.ReactNode;
@@ -106,43 +113,54 @@ const CodeSessionHeader = memo(
     }, [menuPosition]);
 
     return (
-      <div className="relative flex items-center justify-between px-3 py-2 border-b border-surface-border bg-surface">
-        <div className="flex items-center gap-2 min-w-0">
-          {dragHandle}
-          <span className="text-sm font-medium text-fg truncate">{label}</span>
-        </div>
-        <div className="flex items-center gap-1">
-          {actions}
-          {onClose && (
-            <SessionActionButton
-              icon={<PiDotsThreeOutline size={16} />}
-              label="Session menu"
-              onClick={(event) => {
-                event.stopPropagation();
-                const rect = event.currentTarget.getBoundingClientRect();
-                setMenuPosition({ x: rect.right, y: rect.bottom + 6 });
-              }}
-            />
+      <>
+        <div className="relative flex items-center justify-between px-3 py-2 border-b border-surface-border bg-surface">
+          <div className="flex items-center gap-2 min-w-0">
+            {dragHandle}
+            <span className="text-sm font-medium text-fg truncate">{label}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            {actions}
+            {onClose && (
+              <SessionActionButton
+                icon={<PiDotsThreeOutline size={16} />}
+                label="Session menu"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  setMenuPosition({ x: rect.right, y: rect.bottom + 6 });
+                }}
+              />
+            )}
+          </div>
+          {menuPosition && onClose && (
+            <div
+              className="fixed z-50 min-w-[140px] rounded-md border border-surface-border bg-surface shadow-lg py-1"
+              style={{ left: menuPosition.x - 140, top: menuPosition.y }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuPosition(null);
+                  onClose();
+                }}
+                className="w-full text-left px-3 py-1.5 text-xs text-fg hover:bg-surface-hover transition-colors"
+              >
+                Close
+              </button>
+            </div>
           )}
         </div>
-        {menuPosition && onClose && (
-          <div
-            className="fixed z-50 min-w-[140px] rounded-md border border-surface-border bg-surface shadow-lg py-1"
-            style={{ left: menuPosition.x - 140, top: menuPosition.y }}
-          >
-            <button
-              type="button"
-              onClick={() => {
-                setMenuPosition(null);
-                onClose();
-              }}
-              className="w-full text-left px-3 py-1.5 text-xs text-fg hover:bg-surface-hover transition-colors"
-            >
-              Close
-            </button>
+        {ticketTitle && (
+          <div className="flex items-center justify-between px-5 py-1.5 border-b border-surface-border bg-surface-raised/50">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-[11px] text-fg-muted truncate">{ticketTitle}</span>
+              {ticketColumnBadge}
+            </div>
+            {ticketActions && <div className="flex items-center gap-1.5 shrink-0 ml-2">{ticketActions}</div>}
           </div>
         )}
-      </div>
+      </>
     );
   }
 );
@@ -152,6 +170,9 @@ const DeckColumn = memo(
   ({
     tab,
     label,
+    ticketTitle,
+    ticketColumnBadge,
+    ticketActions,
     actions,
     onClose,
     isExpanded,
@@ -161,6 +182,9 @@ const DeckColumn = memo(
   }: {
     tab: CodeTab;
     label: string;
+    ticketTitle?: string | null;
+    ticketColumnBadge?: React.ReactNode;
+    ticketActions?: React.ReactNode;
     actions?: React.ReactNode;
     onClose: (id: CodeTabId) => void;
     isExpanded: boolean;
@@ -182,6 +206,9 @@ const DeckColumn = memo(
       >
         <CodeSessionHeader
           label={label}
+          ticketTitle={ticketTitle}
+          ticketColumnBadge={ticketColumnBadge}
+          ticketActions={ticketActions}
           actions={
             <div className="flex items-center gap-1">
               {headerActionsSlot}
@@ -217,6 +244,9 @@ const CodeSessionPane = memo(
   ({
     tab,
     label,
+    ticketTitle,
+    ticketColumnBadge,
+    ticketActions,
     actions,
     onClose,
     isVisible,
@@ -228,6 +258,9 @@ const CodeSessionPane = memo(
   }: {
     tab: CodeTab;
     label: string;
+    ticketTitle?: string | null;
+    ticketColumnBadge?: React.ReactNode;
+    ticketActions?: React.ReactNode;
     actions?: React.ReactNode;
     onClose: (id: CodeTabId) => void;
     isVisible: boolean;
@@ -239,7 +272,7 @@ const CodeSessionPane = memo(
   }) => {
     return (
       <div className={cn('w-full h-full flex flex-col bg-surface-raised', !isVisible && 'hidden')}>
-        <CodeSessionHeader label={label} actions={actions} onClose={() => onClose(tab.id)} />
+        <CodeSessionHeader label={label} ticketTitle={ticketTitle} ticketColumnBadge={ticketColumnBadge} ticketActions={ticketActions} actions={actions} onClose={() => onClose(tab.id)} />
         <div className="flex-1 min-h-0">
           <CodeTabContent
             tab={tab}
@@ -356,9 +389,11 @@ export const CodeDeck = memo(() => {
   const [overlayTarget, setOverlayTarget] = useState<{ tabId: CodeTabId; pane: 'code' | 'vnc' } | null>(null);
   const [expandedTabId, setExpandedTabId] = useState<CodeTabId | null>(null);
 
+  const addingFirstTab = useRef(false);
   useEffect(() => {
-    if (tabs.length === 0) {
-      codeApi.addTab();
+    if (tabs.length === 0 && !addingFirstTab.current) {
+      addingFirstTab.current = true;
+      codeApi.addTab().finally(() => { addingFirstTab.current = false; });
     }
   }, [tabs.length]);
 
@@ -387,11 +422,11 @@ export const CodeDeck = memo(() => {
 
   const projectMap = useMemo(() => {
     const map = new Map<string, { label: string; workspaceDir: string }>();
-    for (const p of store.fleetProjects) {
+    for (const p of store.projects) {
       map.set(p.id, { label: p.label, workspaceDir: p.workspaceDir });
     }
     return map;
-  }, [store.fleetProjects]);
+  }, [store.projects]);
 
   const resolveLabel = useCallback(
     (tab: CodeTab) => {
@@ -399,6 +434,11 @@ export const CodeDeck = memo(() => {
       return projectMap.get(tab.projectId)?.label ?? 'Unknown';
     },
     [projectMap]
+  );
+
+  const resolveTicketTitle = useCallback(
+    (tab: CodeTab) => tab.ticketTitle ?? null,
+    []
   );
 
   const resolveSubLabel = useCallback(
@@ -481,14 +521,32 @@ export const CodeDeck = memo(() => {
     return () => window.removeEventListener('keydown', handler);
   }, [activeTabId]);
 
+  const handleNewTabSession = useCallback(
+    (tab: CodeTab) => {
+      codeApi.setTabSessionId(tab.id, crypto.randomUUID());
+    },
+    []
+  );
+
   const renderSessionActions = useCallback(
     (tab: CodeTab) => {
+      const newSessionBtn = (
+        <SessionActionButton
+          icon={<PiPlusBold size={13} />}
+          label="New session"
+          onClick={() => handleNewTabSession(tab)}
+        />
+      );
+      if (tab.ticketId) {
+        return newSessionBtn;
+      }
       const status = statuses[tab.id];
       const isRunning = status?.type === 'running';
       const codeServerUrl = isRunning ? status.data.codeServerUrl : undefined;
       const vncUrl = isRunning ? status.data.noVncUrl : undefined;
       return (
         <>
+          {newSessionBtn}
           <SessionActionButton
             icon={<PiCodeBold size={15} />}
             label="Expand VS Code"
@@ -504,7 +562,23 @@ export const CodeDeck = memo(() => {
         </>
       );
     },
-    [handleOpenOverlay, statuses]
+    [handleOpenOverlay, handleNewTabSession, statuses]
+  );
+
+  const renderTicketColumnBadge = useCallback(
+    (tab: CodeTab) => {
+      if (!tab.ticketId) return undefined;
+      return <TicketColumnBadge ticketId={tab.ticketId} />;
+    },
+    []
+  );
+
+  const renderTicketBannerActions = useCallback(
+    (tab: CodeTab) => {
+      if (!tab.ticketId) return undefined;
+      return <TicketBannerActions ticketId={tab.ticketId} />;
+    },
+    []
   );
 
   return (
@@ -525,6 +599,9 @@ export const CodeDeck = memo(() => {
                       <DeckColumn
                         tab={tab}
                         label={resolveLabel(tab)}
+                        ticketTitle={resolveTicketTitle(tab)}
+                        ticketColumnBadge={renderTicketColumnBadge(tab)}
+                        ticketActions={renderTicketBannerActions(tab)}
                         actions={renderSessionActions(tab)}
                         onClose={handleClose}
                         isExpanded={expandedTabId === tab.id}
@@ -564,7 +641,7 @@ export const CodeDeck = memo(() => {
                       key={tab.id}
                       tab={tab}
                       label={resolveLabel(tab)}
-                      subLabel={resolveSubLabel(tab)}
+                      subLabel={resolveTicketTitle(tab) ?? resolveSubLabel(tab)}
                       isActive={tab.id === activeTab?.id}
                       onSelect={handleSelect}
                       onClose={handleClose}
@@ -578,6 +655,9 @@ export const CodeDeck = memo(() => {
                       key={tab.id}
                       tab={tab}
                       label={resolveLabel(tab)}
+                      ticketTitle={resolveTicketTitle(tab)}
+                      ticketColumnBadge={renderTicketColumnBadge(tab)}
+                      ticketActions={renderTicketBannerActions(tab)}
                       actions={renderSessionActions(tab)}
                       onClose={handleClose}
                       isVisible={tab.id === activeTab?.id}
@@ -647,6 +727,8 @@ export const CodeDeck = memo(() => {
                   key={tab.id}
                   tab={tab}
                   label={resolveLabel(tab)}
+                  ticketTitle={resolveTicketTitle(tab)}
+                  ticketColumnBadge={renderTicketColumnBadge(tab)}
                   actions={renderSessionActions(tab)}
                   onClose={handleClose}
                   isVisible={tab.id === activeTab.id}

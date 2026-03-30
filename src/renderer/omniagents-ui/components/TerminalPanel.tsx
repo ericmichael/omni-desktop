@@ -1,10 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { createActor } from 'xstate'
 import '@xterm/xterm/css/xterm.css'
 
-import { RPCClient } from '../rpc/client'
+import { useRPCClient, useRPCConnected } from '../rpc-context'
 import { useUiConfig } from '../ui-config'
+import { createMachineLogger } from '@/shared/machines/machine-logger'
+import {
+  getTerminalConnectionStatus,
+  terminalTabMachine,
+  type TerminalTabActor,
+  type TerminalConnectionStatus,
+} from '@/shared/machines/terminal-tab.machine'
 
 function base64Encode(bytes: Uint8Array): string {
   let binary = ''
@@ -19,20 +27,10 @@ function base64Decode(value: string): Uint8Array {
   return bytes
 }
 
-type TerminalState = {
-  sessionId: string
-  terminalId: string
-  terminalToken: string
-  path: string
-  cwd?: string
-}
-
 type TerminalTabMeta = {
   id: string
   label: string
-  connecting: boolean
-  connected: boolean
-  exited: boolean
+  status: TerminalConnectionStatus
   exitCode?: number
   error?: string
   cwd?: string
@@ -43,7 +41,7 @@ type TerminalTabRuntime = {
   fit: FitAddon
   opened: boolean
   socket: WebSocket | null
-  state: TerminalState | null
+  actor: TerminalTabActor
   disposables: Array<{ dispose: () => void }>
 }
 
@@ -57,19 +55,19 @@ function makeTabId(): string {
 
 export function TerminalPanel({
   open,
-  client,
   sessionId,
   onSessionId,
   onClose,
   confined,
 }: {
   open: boolean
-  client: RPCClient
   sessionId?: string
   onSessionId?: (sid: string) => void
   onClose?: () => void
   confined?: boolean
 }) {
+  const client = useRPCClient()
+  const rpcConnected = useRPCConnected()
   const { token, wsOrigin, resolvePath } = useUiConfig()
   const runtimeRef = useRef(new Map<string, TerminalTabRuntime>())
   const containersRef = useRef(new Map<string, HTMLDivElement>())
@@ -82,23 +80,17 @@ export function TerminalPanel({
 
   const authToken = useMemo(() => token, [token])
 
+  // Cleanup all runtimes on unmount
   useEffect(() => {
     return () => {
       const ids = Array.from(runtimeRef.current.keys())
       ids.forEach((id) => {
         const rt = runtimeRef.current.get(id)
         if (!rt) return
-        try {
-          rt.socket?.close()
-        } catch {}
-        rt.disposables.forEach((d) => {
-          try {
-            d.dispose()
-          } catch {}
-        })
-        try {
-          rt.terminal.dispose()
-        } catch {}
+        rt.actor.stop()
+        try { rt.socket?.close() } catch {}
+        rt.disposables.forEach((d) => { try { d.dispose() } catch {} })
+        try { rt.terminal.dispose() } catch {}
       })
       runtimeRef.current.clear()
       containersRef.current.clear()
@@ -111,9 +103,7 @@ export function TerminalPanel({
     const res: any = await client.serverCall('session.ensure', {})
     const sid = String(res?.session_id || '').trim()
     if (!sid) throw new Error('Session unavailable')
-    try {
-      onSessionId?.(sid)
-    } catch {}
+    try { onSessionId?.(sid) } catch {}
     return sid
   }, [client, onSessionId, sessionId])
 
@@ -122,9 +112,7 @@ export function TerminalPanel({
     if (!rt) return
     const ws = rt.socket
     if (!ws || ws.readyState !== WebSocket.OPEN) return
-    try {
-      ws.send(JSON.stringify(payload))
-    } catch {}
+    try { ws.send(JSON.stringify(payload)) } catch {}
   }, [])
 
   const ensureRuntime = useCallback(
@@ -146,14 +134,39 @@ export function TerminalPanel({
       const fit = new FitAddon()
       terminal.loadAddon(fit)
 
+      const actor = createActor(terminalTabMachine, {
+        input: { tabId },
+        inspect: createMachineLogger('terminal', { tags: { tab: tabId } }),
+      })
+
       const rt: TerminalTabRuntime = {
         terminal,
         fit,
         opened: false,
         socket: null,
-        state: null,
+        actor,
         disposables: [],
       }
+
+      // Subscribe to machine state changes → update tab meta
+      const sub = actor.subscribe((snapshot) => {
+        const status = getTerminalConnectionStatus(snapshot.value as string)
+        const ctx = snapshot.context
+        setTabs((prev) =>
+          prev.map((t) =>
+            t.id === tabId
+              ? {
+                  ...t,
+                  status,
+                  error: ctx.error ?? undefined,
+                  exitCode: ctx.exitCode ?? undefined,
+                  cwd: ctx.cwd ?? undefined,
+                }
+              : t
+          )
+        )
+      })
+      rt.disposables.push({ dispose: () => sub.unsubscribe() })
 
       rt.disposables.push(
         terminal.onData((data) => {
@@ -170,6 +183,7 @@ export function TerminalPanel({
         })
       )
 
+      actor.start()
       runtimeRef.current.set(tabId, rt)
       return rt
     },
@@ -191,80 +205,68 @@ export function TerminalPanel({
     [ensureRuntime]
   )
 
+  /**
+   * Drive the terminal connection lifecycle by reacting to machine state.
+   * The machine enforces transitions and timeouts; this function provides
+   * the async side effects.
+   */
   const connectTab = useCallback(
     async (tabId: string) => {
       const rt = ensureRuntime(tabId)
-      if (rt.socket && rt.socket.readyState === WebSocket.OPEN) return
-      if (rt.state) return
+      const snap = rt.actor.getSnapshot()
+      const status = getTerminalConnectionStatus(snap.value as string)
 
-      setTabs((prev) => {
-        const tab = prev.find((t) => t.id === tabId)
-        if (tab?.exited) return prev
-        return prev.map((t) =>
-          t.id === tabId
-            ? { ...t, connecting: true, connected: false, error: undefined }
-            : t
-        )
-      })
+      // Only connect if disconnected
+      if (status !== 'disconnected') return
 
-      // Don't attempt to connect an exited tab
-      const meta = tabs.find((t) => t.id === tabId)
-      if (meta?.exited) return
+      // Tell machine we're starting
+      rt.actor.send({ type: 'CONNECT' })
 
       try {
+        // Step 1: Ensure session
         const sid = await ensureSession()
-
-        const baseUrl = wsOrigin
+        rt.actor.send({ type: 'SESSION_OK', sessionId: sid })
 
         openInContainer(tabId)
 
+        // Step 2: Create terminal via RPC
         const created: any = await client.serverCall(
           'terminal.create',
-          {
-            cols: rt.terminal.cols,
-            rows: rt.terminal.rows,
-          },
+          { cols: rt.terminal.cols, rows: rt.terminal.rows },
           sid
         )
 
         const terminalId = String(created?.terminal_id || '').trim()
-        const token = String(
-          (created?.terminal_token || created?.token) || ''
-        ).trim()
+        const terminalToken = String((created?.terminal_token || created?.token) || '').trim()
         const path = String(created?.path || '/ws/terminal').trim() || '/ws/terminal'
         const resolvedCwd = created?.cwd ? String(created.cwd) : undefined
 
-        if (!terminalId || !token) throw new Error('Terminal creation failed')
-
-        rt.state = {
-          sessionId: String(created?.session_id || sid),
-          terminalId,
-          terminalToken: token,
-          path,
-          cwd: resolvedCwd,
+        if (!terminalId || !terminalToken) {
+          rt.actor.send({ type: 'TERMINAL_CREATE_ERROR', error: 'Terminal creation failed — missing ID or token' })
+          return
         }
 
-        setTabs((prev) =>
-          prev.map((t) => (t.id === tabId ? { ...t, cwd: resolvedCwd } : t))
-        )
+        rt.actor.send({
+          type: 'TERMINAL_CREATED',
+          terminalId,
+          token: terminalToken,
+          path,
+          cwd: resolvedCwd,
+          sessionId: created?.session_id ? String(created.session_id) : undefined,
+        })
 
-        const url = new URL(baseUrl + resolvePath(path))
-        url.searchParams.set('session_id', rt.state.sessionId)
+        // Step 3: Connect WebSocket
+        const url = new URL(wsOrigin + resolvePath(path))
+        url.searchParams.set('session_id', created?.session_id || sid)
         url.searchParams.set('terminal_id', terminalId)
-        url.searchParams.set('terminal_token', token)
+        url.searchParams.set('terminal_token', terminalToken)
         if (authToken) url.searchParams.set('token', authToken)
 
         const ws = new WebSocket(url.toString())
         rt.socket = ws
 
         ws.onopen = () => {
-          setTabs((prev) =>
-            prev.map((t) =>
-              t.id === tabId
-                ? { ...t, connected: true, connecting: false }
-                : t
-            )
-          )
+          rt.actor.send({ type: 'WS_OPEN' })
           sendFrame(tabId, {
             type: 'resize',
             cols: rt.terminal.cols,
@@ -274,11 +276,7 @@ export function TerminalPanel({
 
         ws.onmessage = (ev) => {
           let msg: any = null
-          try {
-            msg = JSON.parse(String(ev.data))
-          } catch {
-            return
-          }
+          try { msg = JSON.parse(String(ev.data)) } catch { return }
           if (!msg || typeof msg !== 'object') return
           const type = String(msg.type || '')
           if (type === 'output') {
@@ -294,86 +292,50 @@ export function TerminalPanel({
           if (type === 'exit') {
             const code = msg.code
             try {
-              rt.terminal.writeln(
-                `\r\n[process exited${code == null ? '' : `: ${code}`}]`
-              )
+              rt.terminal.writeln(`\r\n[process exited${code == null ? '' : `: ${code}`}]`)
             } catch {}
-            setTabs((prev) =>
-              prev.map((t) =>
-                t.id === tabId
-                  ? {
-                      ...t,
-                      connected: false,
-                      connecting: false,
-                      exited: true,
-                      exitCode: typeof code === 'number' ? code : undefined,
-                    }
-                  : t
-              )
-            )
-            try {
-              rt.socket?.close()
-            } catch {}
+            rt.actor.send({ type: 'EXIT', code: typeof code === 'number' ? code : undefined })
+            try { rt.socket?.close() } catch {}
             rt.socket = null
             return
           }
         }
 
         ws.onerror = () => {
-          setTabs((prev) =>
-            prev.map((t) =>
-              t.id === tabId
-                ? {
-                    ...t,
-                    error: 'Terminal connection error',
-                    connected: false,
-                    connecting: false,
-                  }
-                : t
-            )
-          )
-          try {
-            rt.socket?.close()
-          } catch {}
+          rt.actor.send({ type: 'WS_ERROR', error: 'Terminal connection error' })
+          try { rt.socket?.close() } catch {}
           rt.socket = null
-          // Allow reconnection by clearing state — backend terminal is destroyed on WS close
-          rt.state = null
         }
 
         ws.onclose = () => {
-          const wasExited = rt.socket === null // exit handler already cleared socket
-          setTabs((prev) =>
-            prev.map((t) =>
-              t.id === tabId ? { ...t, connected: false, connecting: false } : t
-            )
-          )
+          const wasExited = rt.socket === null
           rt.socket = null
-          // If this wasn't a clean exit, allow reconnection by clearing state
           if (!wasExited) {
-            rt.state = null
+            rt.actor.send({ type: 'WS_CLOSE' })
           }
         }
       } catch (e: any) {
-        rt.state = null // Allow retry on failure
-        setTabs((prev) =>
-          prev.map((t) =>
-            t.id === tabId
-              ? {
-                  ...t,
-                  error: String(e?.message || e),
-                  connected: false,
-                  connecting: false,
-                }
-              : t
-          )
-        )
+        // Determine which phase failed and send the appropriate event
+        const snap = rt.actor.getSnapshot()
+        const state = snap.value as string
+        const errorMsg = String(e?.message || e)
+
+        if (state === 'ensuringSession') {
+          rt.actor.send({ type: 'SESSION_ERROR', error: errorMsg })
+        } else if (state === 'creatingTerminal') {
+          rt.actor.send({ type: 'TERMINAL_CREATE_ERROR', error: errorMsg })
+        } else if (state === 'connectingWs') {
+          rt.actor.send({ type: 'WS_ERROR', error: errorMsg })
+        } else {
+          // Fallback: if machine is in an unexpected state, try generic error
+          rt.actor.send({ type: 'WS_ERROR', error: errorMsg })
+        }
       }
     },
-    [authToken, client, ensureRuntime, ensureSession, openInContainer, resolvePath, sendFrame, tabs, wsOrigin]
+    [authToken, client, ensureRuntime, ensureSession, openInContainer, resolvePath, sendFrame, wsOrigin]
   )
 
   // Use refs for unstable callbacks to prevent the main effect from re-firing
-  // when sessionId changes propagate through the callback chain
   const connectTabRef = useRef(connectTab)
   useEffect(() => { connectTabRef.current = connectTab }, [connectTab])
 
@@ -389,9 +351,7 @@ export function TerminalPanel({
       {
         id,
         label,
-        connecting: false,
-        connected: false,
-        exited: false,
+        status: 'disconnected',
       },
     ])
     setActiveId(id)
@@ -401,50 +361,48 @@ export function TerminalPanel({
     async (tabId: string) => {
       const rt = runtimeRef.current.get(tabId)
       if (rt) {
-        try {
-          sendFrame(tabId, { type: 'close' })
-        } catch {}
-        try {
-          rt.socket?.close()
-        } catch {}
+        // Notify machine
+        rt.actor.send({ type: 'CLOSE' })
+        rt.actor.stop()
+
+        try { sendFrame(tabId, { type: 'close' }) } catch {}
+        try { rt.socket?.close() } catch {}
         rt.socket = null
-        if (rt.state) {
+
+        const snap = rt.actor.getSnapshot()
+        const ctx = snap.context
+        if (ctx.terminalId && ctx.sessionId) {
           try {
             await client.serverCall(
               'terminal.close',
-              { terminal_id: rt.state.terminalId },
-              rt.state.sessionId
+              { terminal_id: ctx.terminalId },
+              ctx.sessionId
             )
           } catch {}
         }
-        rt.disposables.forEach((d) => {
-          try {
-            d.dispose()
-          } catch {}
-        })
-        try {
-          rt.terminal.dispose()
-        } catch {}
+
+        rt.disposables.forEach((d) => { try { d.dispose() } catch {} })
+        try { rt.terminal.dispose() } catch {}
         runtimeRef.current.delete(tabId)
         containersRef.current.delete(tabId)
       }
 
       setTabs((prev) => {
         const idx = prev.findIndex((t) => t.id === tabId)
-        const next = prev.filter((t) => t.id !== tabId)
+        const nextTabs = prev.filter((t) => t.id !== tabId)
         setActiveId((current) => {
           if (current !== tabId) return current
-          if (!next.length) return undefined
+          if (!nextTabs.length) return undefined
           const pick = Math.max(0, idx - 1)
-          return next[pick]?.id || next[0].id
+          return nextTabs[pick]?.id || nextTabs[0].id
         })
-        return next
+        return nextTabs
       })
     },
     [client, sendFrame]
   )
 
-  // Auto-create first tab — stable deps, no spurious re-fires
+  // Auto-create first tab
   useEffect(() => {
     if (!tabs.length) addTab()
   }, [addTab, tabs.length])
@@ -453,19 +411,18 @@ export function TerminalPanel({
     return tabs.find((t) => t.id === activeId) || (tabs.length ? tabs[0] : undefined)
   }, [activeId, tabs])
 
-  // Main effect: only depends on activeTab identity (by id) and stable refs.
-  // Uses refs for connectTab/openInContainer to avoid re-firing when sessionId
-  // changes propagate through the callback dependency chain.
+  // Main effect: connect active tab when ready.
+  // Only attempt connection when the panel is open AND the RPC client is
+  // connected — avoids hammering WebSocket connections for invisible terminals
+  // while sandboxes are still starting up.
   const activeTabId = activeTab?.id
   useEffect(() => {
-    if (!activeTabId) return
+    if (!activeTabId || !open || !rpcConnected) return
     setActiveId(activeTabId)
     openInContainerRef.current(activeTabId)
     const rt = runtimeRef.current.get(activeTabId)
     if (rt && rt.opened) {
-      try {
-        rt.fit.fit()
-      } catch {}
+      try { rt.fit.fit() } catch {}
       sendFrame(activeTabId, {
         type: 'resize',
         cols: rt.terminal.cols,
@@ -473,7 +430,7 @@ export function TerminalPanel({
       })
     }
     connectTabRef.current(activeTabId)
-  }, [activeTabId, sendFrame])
+  }, [activeTabId, open, rpcConnected, sendFrame])
 
   useEffect(() => {
     const onWindowResize = () => {
@@ -482,9 +439,7 @@ export function TerminalPanel({
       if (!id) return
       const rt = runtimeRef.current.get(id)
       if (!rt || !rt.opened) return
-      try {
-        rt.fit.fit()
-      } catch {}
+      try { rt.fit.fit() } catch {}
       sendFrame(id, {
         type: 'resize',
         cols: rt.terminal.cols,
@@ -499,6 +454,17 @@ export function TerminalPanel({
     if (el) containersRef.current.set(tabId, el)
     else containersRef.current.delete(tabId)
   }, [])
+
+  const statusLabel = (tab: TerminalTabMeta) => {
+    switch (tab.status) {
+      case 'connected': return 'connected'
+      case 'connecting': return 'connecting'
+      case 'exited': return 'exited'
+      case 'error': return 'error'
+      case 'closed': return 'closed'
+      default: return 'disconnected'
+    }
+  }
 
   return (
     <div
@@ -523,13 +489,7 @@ export function TerminalPanel({
             <div className="text-base font-semibold text-textHeading">Terminal</div>
             {activeTab ? (
               <div className="text-xs text-textSecondary">
-                {activeTab.connected
-                  ? 'connected'
-                  : activeTab.connecting
-                    ? 'connecting'
-                    : activeTab.exited
-                      ? 'exited'
-                      : 'disconnected'}
+                {statusLabel(activeTab)}
               </div>
             ) : null}
             {activeTab?.cwd ? (

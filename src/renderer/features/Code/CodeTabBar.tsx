@@ -71,11 +71,11 @@ export const CodeTabBar = memo(({ tabs, activeTabId }: CodeTabBarProps) => {
 
   const projectMap = useMemo(() => {
     const m = new Map<string, string>();
-    for (const p of store.fleetProjects) {
+    for (const p of store.projects) {
       m.set(p.id, p.label);
     }
     return m;
-  }, [store.fleetProjects]);
+  }, [store.projects]);
 
   const handleSelect = useCallback((id: CodeTabId) => {
     codeApi.setActiveTab(id);
