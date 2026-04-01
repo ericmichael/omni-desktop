@@ -292,20 +292,10 @@ export const INBOX_CLIENT_TOOLS = [
   },
 ] as const;
 
-/** Autopilot sessions: ticket tools only. */
-export const buildAutopilotVariables = (): Record<string, unknown> => ({
-  client_tools: TICKET_CLIENT_TOOLS,
-});
-
-/** Human-interactive sessions: project + inbox + brief tools (no ticket-scoped tools). */
-export const buildInteractiveVariables = (opts?: {
+const buildProjectManagementInstructions = (opts?: {
   projectId?: string;
   projectLabel?: string;
-}): Record<string, unknown> => {
-  const vars: Record<string, unknown> = {
-    client_tools: [...PROJECT_CLIENT_TOOLS, ...INITIATIVE_CLIENT_TOOLS, ...BRIEF_CLIENT_TOOLS, ...INBOX_CLIENT_TOOLS],
-  };
-
+}): string => {
   const lines: string[] = [
     '## Project Management Tools',
     'You have tools to help with project management when asked. You can use them to inspect your current context or assist the user with organizing work.',
@@ -323,6 +313,42 @@ export const buildInteractiveVariables = (opts?: {
     );
   }
 
-  vars.additional_instructions = lines.join('\n');
+  return lines.join('\n');
+};
+
+/** Autopilot sessions: ticket tools only. */
+export const buildAutopilotVariables = (): Record<string, unknown> => ({
+  client_tools: TICKET_CLIENT_TOOLS,
+});
+
+/** Human-interactive sessions: project + inbox + brief tools (no ticket-scoped tools). */
+export const buildInteractiveVariables = (opts?: {
+  projectId?: string;
+  projectLabel?: string;
+}): Record<string, unknown> => {
+  const vars: Record<string, unknown> = {
+    client_tools: [...PROJECT_CLIENT_TOOLS, ...INITIATIVE_CLIENT_TOOLS, ...BRIEF_CLIENT_TOOLS, ...INBOX_CLIENT_TOOLS],
+  };
+
+  vars.additional_instructions = buildProjectManagementInstructions(opts);
+  return vars;
+};
+
+/** Ticket-scoped interactive sessions: ticket tools + project management tools. */
+export const buildTicketInteractiveVariables = (opts?: {
+  projectId?: string;
+  projectLabel?: string;
+}): Record<string, unknown> => {
+  const vars: Record<string, unknown> = {
+    client_tools: [
+      ...TICKET_CLIENT_TOOLS,
+      ...PROJECT_CLIENT_TOOLS,
+      ...INITIATIVE_CLIENT_TOOLS,
+      ...BRIEF_CLIENT_TOOLS,
+      ...INBOX_CLIENT_TOOLS,
+    ],
+  };
+
+  vars.additional_instructions = buildProjectManagementInstructions(opts);
   return vars;
 };

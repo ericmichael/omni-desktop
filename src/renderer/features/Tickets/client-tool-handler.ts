@@ -345,8 +345,8 @@ export function buildClientToolHandler(): ClientToolCallHandler {
 
 /**
  * Build a ClientToolCallHandler for a ticket-scoped session.
- * Only ticket tools (get_ticket, move_ticket, escalate) are available —
- * the agent is isolated to its own ticket.
+ * Ticket tools are available for the current ticket, and general project
+ * management tools are also available for broader context.
  */
 export function buildTicketToolHandler(
   ticketId: TicketId,
@@ -355,6 +355,15 @@ export function buildTicketToolHandler(
   return async (toolName: string, toolArgs: Record<string, unknown>) => {
     const ticketResult = await handleTicketTools(toolName, toolArgs, ticketId, projectId);
     if (ticketResult) return ticketResult;
+
+    const initiativeResult = await handleInitiativeTools(toolName, toolArgs);
+    if (initiativeResult) return initiativeResult;
+
+    const inboxResult = await handleInboxTools(toolName, toolArgs);
+    if (inboxResult) return inboxResult;
+
+    const projectResult = await handleProjectTools(toolName, toolArgs);
+    if (projectResult) return projectResult;
 
     return err(`Unknown tool: ${toolName}`);
   };

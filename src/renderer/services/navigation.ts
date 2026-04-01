@@ -19,10 +19,12 @@ export const openTicketInCode = async (ticketId: TicketId): Promise<void> => {
   // Pre-fetch all tickets for this project
   await ticketApi.fetchTickets(ticket.projectId);
   await ticketApi.fetchTasks();
+  const workspaceDir = await ticketApi.getTicketWorkspace(ticketId);
 
   await codeApi.addTabForTicket(ticketId, ticket.projectId, {
     sessionId: ticket.supervisorSessionId,
     ticketTitle: ticket.title,
+    workspaceDir,
   });
   await persistedStoreApi.setKey('layoutMode', 'code');
 };

@@ -146,17 +146,18 @@ export const schema: Schema<StoreData> = {
     default: [],
     items: {
       type: 'object',
-      properties: {
-        id: { type: 'string' },
-        projectId: { type: ['string', 'null'] },
-        ticketId: { type: 'string' },
-        sessionId: { type: 'string' },
-        ticketTitle: { type: 'string' },
-        createdAt: { type: 'number' },
+        properties: {
+          id: { type: 'string' },
+          projectId: { type: ['string', 'null'] },
+          ticketId: { type: 'string' },
+          sessionId: { type: 'string' },
+          ticketTitle: { type: 'string' },
+          workspaceDir: { type: 'string' },
+          createdAt: { type: 'number' },
+        },
+        required: ['id', 'createdAt'],
       },
-      required: ['id', 'createdAt'],
     },
-  },
   activeCodeTabId: {
     type: ['string', 'null'],
     default: null,
@@ -423,6 +424,7 @@ export type CodeTab = {
   ticketId?: TicketId;
   sessionId?: string;
   ticketTitle?: string;
+  workspaceDir?: string;
   createdAt: number;
 };
 
@@ -789,6 +791,7 @@ type ProjectIpcEvents = Namespaced<
     'update-ticket': (id: TicketId, patch: Partial<Omit<Ticket, 'id' | 'projectId' | 'createdAt'>>) => void;
     'remove-ticket': (id: TicketId) => void;
     'get-tickets': (projectId: ProjectId) => Ticket[];
+    'get-ticket-workspace': (ticketId: TicketId) => string;
     'get-tasks': () => Task[];
     'get-next-ticket': (projectId: ProjectId) => Ticket | null;
     'move-ticket-to-column': (ticketId: TicketId, columnId: ColumnId) => void;

@@ -156,14 +156,18 @@ export const codeApi = {
   addTabForTicket: async (
     ticketId: TicketId,
     projectId: ProjectId,
-    opts?: { sessionId?: string; ticketTitle?: string }
+    opts?: { sessionId?: string; ticketTitle?: string; workspaceDir?: string }
   ): Promise<CodeTab> => {
     // Check if a tab for this ticket already exists
     const existingTabs = persistedStoreApi.getKey('codeTabs') ?? [];
     const existing = existingTabs.find((t) => t.ticketId === ticketId);
     if (existing) {
+      if (opts?.workspaceDir && existing.workspaceDir !== opts.workspaceDir) {
+        const updated = existingTabs.map((t) => (t.id === existing.id ? { ...t, workspaceDir: opts.workspaceDir } : t));
+        await persistedStoreApi.setKey('codeTabs', updated);
+      }
       await persistedStoreApi.setKey('activeCodeTabId', existing.id);
-      return existing;
+      return { ...existing, ...(opts?.workspaceDir ? { workspaceDir: opts.workspaceDir } : {}) };
     }
     const tab: CodeTab = {
       id: nanoid(),
@@ -171,6 +175,7 @@ export const codeApi = {
       ticketId,
       sessionId: opts?.sessionId,
       ticketTitle: opts?.ticketTitle,
+      workspaceDir: opts?.workspaceDir,
       createdAt: Date.now(),
     };
     const tabs = [...existingTabs, tab];

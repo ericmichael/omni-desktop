@@ -1,6 +1,6 @@
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { PiGearSixBold, PiPencilSimpleBold, PiPlusBold, PiTrashFill } from 'react-icons/pi';
+import { PiGearSixBold, PiGitBranchBold, PiPencilSimpleBold, PiPlusBold, PiTrashFill } from 'react-icons/pi';
 
 import { Button, IconButton, Switch } from '@/renderer/ds';
 import { $initiatives, initiativeApi } from '@/renderer/features/Initiatives/state';
@@ -24,6 +24,7 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
   const [pipelineSettingsOpen, setPipelineSettingsOpen] = useState(false);
   const [editFormOpen, setEditFormOpen] = useState(false);
   const [initiativeFormOpen, setInitiativeFormOpen] = useState(false);
+  const [editingInitiativeId, setEditingInitiativeId] = useState<InitiativeId | null>(null);
   const initiatives = useStore($initiatives);
   const activeInitiativeId = useStore($activeInitiativeId);
 
@@ -31,6 +32,10 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
   const projectInitiatives = useMemo(
     () => Object.values(initiatives).filter((i) => i.projectId === projectId),
     [initiatives, projectId]
+  );
+  const activeInitiative = useMemo(
+    () => (activeInitiativeId === 'all' ? null : projectInitiatives.find((i) => i.id === activeInitiativeId) ?? null),
+    [activeInitiativeId, projectInitiatives]
   );
 
   useEffect(() => {
@@ -41,6 +46,12 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
     ticketApi.getPipeline(projectId);
   }, [project, projectId]);
 
+  useEffect(() => {
+    if (activeInitiativeId === 'all') {
+      setEditingInitiativeId(null);
+    }
+  }, [activeInitiativeId]);
+
   const handleOpenTicketForm = useCallback(() => setTicketFormOpen(true), []);
   const handleCloseTicketForm = useCallback(() => setTicketFormOpen(false), []);
   const handleOpenPipelineSettings = useCallback(() => setPipelineSettingsOpen(true), []);
@@ -49,6 +60,12 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
   const handleCloseEditForm = useCallback(() => setEditFormOpen(false), []);
   const handleOpenInitiativeForm = useCallback(() => setInitiativeFormOpen(true), []);
   const handleCloseInitiativeForm = useCallback(() => setInitiativeFormOpen(false), []);
+  const handleOpenInitiativeEdit = useCallback(() => {
+    if (activeInitiative) {
+      setEditingInitiativeId(activeInitiative.id);
+    }
+  }, [activeInitiative]);
+  const handleCloseInitiativeEdit = useCallback(() => setEditingInitiativeId(null), []);
   const handleSelectInitiative = useCallback((id: InitiativeId | 'all') => $activeInitiativeId.set(id), []);
 
   const handleRemoveProject = useCallback(async () => {
@@ -101,6 +118,17 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
             New Initiative
           </Button>
         )}
+        {activeInitiative && !editingInitiativeId && (
+          <Button size="sm" variant="ghost" onClick={handleOpenInitiativeEdit}>
+            Edit Initiative
+          </Button>
+        )}
+        {activeInitiative?.branch && (
+          <span className="flex items-center gap-1 rounded-full bg-purple-400/10 px-2 py-1 text-xs font-medium text-purple-400">
+            <PiGitBranchBold size={12} />
+            {activeInitiative.branch}
+          </span>
+        )}
         <IconButton aria-label="Edit project" icon={<PiPencilSimpleBold />} size="sm" onClick={handleOpenEditForm} />
         <IconButton
           aria-label="Pipeline settings"
@@ -131,6 +159,16 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
         </div>
       )}
 
+      {editingInitiativeId && activeInitiative && (
+        <div className="px-6 pt-4 shrink-0">
+          <InitiativeForm
+            projectId={projectId}
+            onClose={handleCloseInitiativeEdit}
+            editInitiative={activeInitiative}
+          />
+        </div>
+      )}
+
       {/* Initiative filter bar */}
       {view === 'board' && projectInitiatives.length > 1 && (
         <div className="flex items-center gap-1.5 px-4 py-1.5 border-b border-surface-border shrink-0">
@@ -157,6 +195,12 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
               {init.title}
             </button>
           ))}
+          {activeInitiative?.branch && (
+            <span className="ml-1 flex items-center gap-1 rounded-full bg-purple-400/10 px-2 py-0.5 text-[10px] font-medium text-purple-400">
+              <PiGitBranchBold size={10} />
+              {activeInitiative.branch}
+            </span>
+          )}
           <button
             className="px-1 py-0.5 rounded text-xs text-fg-muted hover:text-fg transition-colors"
             onClick={handleOpenInitiativeForm}

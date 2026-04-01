@@ -1903,39 +1903,13 @@ export class ProjectManager {
       rejectReady(new Error('Sandbox start timeout (120s)'));
     }, 120_000);
 
-    let workspaceDir = project.workspaceDir;
+    const resolvedWorkspace = await this.resolveTicketWorkspace(ticketId);
+    let workspaceDir = resolvedWorkspace.workspaceDir;
     const taskId = nanoid();
-
-    // Decide whether to reuse an existing worktree or create a new one
-    let worktreePath: string | undefined;
-    let worktreeName: string | undefined;
-
-    let worktreeExists = false;
-    if (ticket.worktreePath) {
-      try {
-        await fs.access(ticket.worktreePath);
-        worktreeExists = true;
-      } catch {
-        // Directory doesn't exist
-      }
-    }
-
-    const wtAction = decideWorktreeAction(ticket, worktreeExists);
-    if (wtAction.action === 'reuse') {
-      worktreePath = wtAction.worktreePath;
-      worktreeName = wtAction.worktreeName;
-      workspaceDir = worktreePath;
-      console.log(`[ProjectManager] Reusing existing worktree "${worktreeName}" for ticket ${ticketId}`);
-    } else if (wtAction.action === 'create') {
-      worktreeName = generateWorktreeName();
-      worktreePath = await createWorktree(project.workspaceDir, this.resolveTicketBranch(ticket)!, worktreeName);
-      workspaceDir = worktreePath;
-      // Persist worktree info on the ticket so it survives restarts
-      this.updateTicket(ticketId, { worktreePath, worktreeName });
-    }
+    const { worktreePath, worktreeName, action } = resolvedWorkspace;
 
     // Run after_create hook only when a new worktree was created (not on reuse)
-    if (wtAction.action === 'create') {
+    if (action === 'create') {
       const afterCreateOk = await this.workflowLoader.runHook(ticket.projectId, 'after_create', workspaceDir);
       if (!afterCreateOk) {
         clearTimeout(startTimeout);
@@ -2036,12 +2010,70 @@ export class ProjectManager {
     return entry.sandbox.getStatus();
   }
 
+  getTicketWorkspaceLocked = (ticketId: TicketId): Promise<string> => {
+    return this.withTicketLock(ticketId, async () => {
+      const resolved = await this.resolveTicketWorkspace(ticketId);
+      return resolved.workspaceDir;
+    });
+  };
+
   /** Check if a Code tab has a running sandbox for this ticket. */
   private getCodeTabWsUrl(ticketId: TicketId): string | null {
     if (!this.codeManager) return null;
     const codeTabs = this.store.get('codeTabs', []) as Array<{ id: string; ticketId?: string }>;
     return this.codeManager.getRunningWsUrlForTicket(ticketId, codeTabs);
   }
+
+  private resolveTicketWorkspace = async (ticketId: TicketId): Promise<{
+    workspaceDir: string;
+    worktreePath?: string;
+    worktreeName?: string;
+    action: 'reuse' | 'create' | 'none';
+  }> => {
+    const ticket = this.getTicketById(ticketId);
+    if (!ticket) {
+      throw new Error(`Ticket not found: ${ticketId}`);
+    }
+
+    const project = this.getProjects().find((p) => p.id === ticket.projectId);
+    if (!project) {
+      throw new Error(`Project not found: ${ticket.projectId}`);
+    }
+
+    let workspaceDir = project.workspaceDir;
+    let worktreePath: string | undefined;
+    let worktreeName: string | undefined;
+    const effectiveBranch = this.resolveTicketBranch(ticket);
+
+    let worktreeExists = false;
+    if (ticket.worktreePath) {
+      try {
+        await fs.access(ticket.worktreePath);
+        worktreeExists = true;
+      } catch {
+      }
+    }
+
+    const wtAction = decideWorktreeAction(ticket, worktreeExists, effectiveBranch);
+    if (wtAction.action === 'reuse') {
+      worktreePath = wtAction.worktreePath;
+      worktreeName = wtAction.worktreeName;
+      workspaceDir = worktreePath;
+      console.log(`[ProjectManager] Reusing existing worktree "${worktreeName}" for ticket ${ticketId}`);
+    } else if (wtAction.action === 'create') {
+      worktreeName = generateWorktreeName();
+      worktreePath = await createWorktree(project.workspaceDir, effectiveBranch!, worktreeName);
+      workspaceDir = worktreePath;
+      this.updateTicket(ticketId, { worktreePath, worktreeName });
+    }
+
+    return {
+      workspaceDir,
+      worktreePath,
+      worktreeName,
+      action: wtAction.action,
+    };
+  };
 
   /**
    * Ensure a session exists for the ticket. Generates the session ID upfront
@@ -2186,7 +2218,7 @@ export class ProjectManager {
    * can call project tools via the existing WebSocket connection.
    *
    * - 'autopilot': ticket tools only (automated runs, retries, continuations)
-   * - 'interactive': ticket + project tools (human-initiated sessions)
+   * - 'interactive': broader project-management tools for human-driven ticket sessions
    */
   private buildRunVariables = (ticketId: TicketId, mode: 'autopilot' | 'interactive' = 'autopilot'): Record<string, unknown> => {
     return {
@@ -2957,6 +2989,7 @@ export const createProjectManager = (arg: {
   ipc.handle('project:update-ticket', (_, id, patch) => projectManager.updateTicket(id, patch));
   ipc.handle('project:remove-ticket', (_, id) => projectManager.removeTicket(id));
   ipc.handle('project:get-tickets', (_, projectId) => projectManager.getTicketsByProject(projectId));
+  ipc.handle('project:get-ticket-workspace', (_, ticketId) => projectManager.getTicketWorkspaceLocked(ticketId));
   ipc.handle('project:get-tasks', () => projectManager.getTasks());
   ipc.handle('project:get-next-ticket', (_, projectId) => projectManager.getNextTicket(projectId));
 
@@ -3022,6 +3055,7 @@ export const createProjectManager = (arg: {
     ipcMain.removeHandler('project:update-ticket');
     ipcMain.removeHandler('project:remove-ticket');
     ipcMain.removeHandler('project:get-tickets');
+    ipcMain.removeHandler('project:get-ticket-workspace');
     ipcMain.removeHandler('project:get-next-ticket');
     ipcMain.removeHandler('project:move-ticket-to-column');
     ipcMain.removeHandler('project:get-pipeline');

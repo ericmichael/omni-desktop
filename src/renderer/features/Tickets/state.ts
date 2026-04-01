@@ -136,6 +136,9 @@ export const ticketApi = {
     }
     $tickets.set(newMap);
   },
+  getTicketWorkspace: (ticketId: TicketId): Promise<string> => {
+    return emitter.invoke('project:get-ticket-workspace', ticketId);
+  },
   fetchTasks: async (): Promise<void> => {
     const tasks = await emitter.invoke('project:get-tasks');
     const newMap: Record<TaskId, Task> = {};

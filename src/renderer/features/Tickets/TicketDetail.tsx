@@ -1,6 +1,6 @@
 import { useStore } from '@nanostores/react';
 import { motion } from 'framer-motion';
-import { memo, type MouseEvent as ReactMouseEvent,useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   PiArrowsClockwiseBold,
   PiArrowsInBold,
@@ -31,7 +31,7 @@ import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import { buildSandboxLabel, isCustomSandbox } from '@/renderer/omniagents-ui/sandbox-label';
 import { $initiatives } from '@/renderer/features/Initiatives/state';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { TicketId, TicketPhase, TicketResolution } from '@/shared/types';
+import type { GitRepoInfo, TicketId, TicketPhase, TicketResolution } from '@/shared/types';
 
 import { COLUMN_BADGE_COLORS, PHASE_LABELS, RESOLUTION_COLORS, RESOLUTION_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './ticket-constants';
 import { TicketArtifactsTab } from './TicketArtifactsTab';
@@ -75,6 +75,9 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, dragHandleProps,
   const [activeTab, setActiveTab] = useState<TicketTab>('Chat');
   const [editingTitle, setEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState('');
+  const [gitInfo, setGitInfo] = useState<GitRepoInfo | null>(null);
+  const [editingBranch, setEditingBranch] = useState(false);
+  const [editBranch, setEditBranch] = useState('');
 
   const currentColumn = useMemo(() => {
     if (!ticket?.columnId || !pipeline) {
@@ -101,6 +104,16 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, dragHandleProps,
   const isContainerLive = supervisorTask?.status.type === 'running' || supervisorTask?.status.type === 'connecting' || supervisorTask?.status.type === 'starting';
 
   const theme = store.theme ?? 'tokyo-night';
+
+  useEffect(() => {
+    if (!project?.workspaceDir) {
+      setGitInfo(null);
+      return;
+    }
+    ticketApi.checkGitRepo(project.workspaceDir).then((info) => {
+      setGitInfo(info);
+    });
+  }, [project?.workspaceDir]);
 
   const supervisorUiUrl = useMemo(() => {
     const baseUrl = runningData?.uiUrl;
@@ -148,6 +161,24 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, dragHandleProps,
     }
     setEditingTitle(false);
   }, [editTitle, ticket, ticketId]);
+
+  const handleStartEditBranch = useCallback(() => {
+    if (!ticket) return;
+    setEditBranch(ticket.branch ?? '');
+    setEditingBranch(true);
+  }, [ticket]);
+
+  const handleCancelEditBranch = useCallback(() => {
+    setEditingBranch(false);
+  }, []);
+
+  const handleSaveBranch = useCallback(() => {
+    if (!ticket) return;
+    void ticketApi.updateTicket(ticketId, {
+      branch: editBranch || undefined,
+    });
+    setEditingBranch(false);
+  }, [editBranch, ticket, ticketId]);
 
   const handleTitleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -420,14 +451,50 @@ return;
             {initiative.title}
           </span>
         )}
-        {!compact && ticket.branch && (
-          <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 text-purple-400 bg-purple-400/10">
+        {!compact && gitInfo?.isGitRepo && (
+          <button
+            type="button"
+            onClick={handleStartEditBranch}
+            className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 text-purple-400 bg-purple-400/10 hover:brightness-125 transition-all"
+          >
             <PiGitBranchBold size={10} />
-            {ticket.branch}
-            {ticket.useWorktree && ' (worktree)'}
-          </span>
+            {ticket.branch || initiative?.branch || 'Set branch'}
+            {!ticket.branch && initiative?.branch ? ' (inherited)' : ''}
+            <PiPencilSimpleBold size={10} />
+          </button>
         )}
       </div>
+
+      {editingBranch && gitInfo?.isGitRepo && (
+        <div className="flex items-center gap-3 px-3 py-2 border-b border-surface-border bg-surface-raised/30 shrink-0 flex-wrap">
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium text-fg-subtle">Branch</label>
+            <select
+              value={editBranch}
+              onChange={(e) => setEditBranch(e.target.value)}
+              className="rounded-md border border-surface-border bg-surface px-2 py-1.5 text-sm text-fg focus:outline-none focus:border-accent-500"
+            >
+              <option value="">{initiative?.branch ? `Inherit from initiative (${initiative.branch})` : 'None'}</option>
+              {gitInfo.branches.map((branch) => (
+                <option key={branch} value={branch}>
+                  {branch}
+                </option>
+              ))}
+            </select>
+          </div>
+          <span className="text-xs text-fg-muted">
+            Tickets with a branch open in an isolated workspace.
+          </span>
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={handleSaveBranch}>
+              Save
+            </Button>
+            <Button size="sm" variant="ghost" onClick={handleCancelEditBranch}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Tab bar — hidden in compact mode when idle */}
       {showTabs && (

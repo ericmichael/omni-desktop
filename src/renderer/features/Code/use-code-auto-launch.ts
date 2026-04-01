@@ -36,6 +36,7 @@ export const useCodeAutoLaunch = (tabId: CodeTabId, workspaceDir: string | null)
   tabIdRef.current = tabId;
   const workspaceDirRef = useRef(workspaceDir);
   workspaceDirRef.current = workspaceDir;
+  const previousWorkspaceDirRef = useRef(workspaceDir);
   const storeRef = useRef(store);
   storeRef.current = store;
 
@@ -188,6 +189,44 @@ export const useCodeAutoLaunch = (tabId: CodeTabId, workspaceDir: string | null)
       actor.send({ type: 'LAUNCH' });
     }
   }, [initialized, workspaceDir, actor]);
+
+  useEffect(() => {
+    const previousWorkspaceDir = previousWorkspaceDirRef.current;
+    previousWorkspaceDirRef.current = workspaceDir;
+
+    if (!initialized || !workspaceDir || !previousWorkspaceDir || previousWorkspaceDir === workspaceDir) {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const supervisorStatus = await emitter.invoke('project:get-supervisor-sandbox-status', tabId);
+        if (
+          !cancelled &&
+          supervisorStatus &&
+          (supervisorStatus.type === 'running' || supervisorStatus.type === 'connecting' || supervisorStatus.type === 'starting')
+        ) {
+          return;
+        }
+      } catch {
+      }
+
+      if (cancelled) {
+        return;
+      }
+
+      await codeApi.stopSandbox(tabId);
+      if (cancelled) {
+        return;
+      }
+      actor.send({ type: 'RESET' });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialized, workspaceDir, actor, tabId]);
 
   const retry = useCallback(() => {
     actor.send({ type: 'RETRY' });

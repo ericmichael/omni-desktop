@@ -15,15 +15,13 @@ export type WorktreeDecision =
  */
 export const decideWorktreeAction = (
   ticket: {
-    useWorktree?: boolean;
-    branch?: string;
     worktreePath?: string;
     worktreeName?: string;
   },
-  worktreeExists: boolean
+  worktreeExists: boolean,
+  effectiveBranch?: string
 ): WorktreeDecision => {
-  // Worktrees disabled or no branch configured
-  if (!ticket.useWorktree || !ticket.branch) {
+  if (!effectiveBranch) {
     return { action: 'none' };
   }
 

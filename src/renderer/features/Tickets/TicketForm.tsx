@@ -1,7 +1,7 @@
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Button, Switch } from '@/renderer/ds';
+import { Button } from '@/renderer/ds';
 import { $initiatives } from '@/renderer/features/Initiatives/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { GitRepoInfo, InitiativeId, ProjectId, TicketPriority } from '@/shared/types';
@@ -16,7 +16,6 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [gitInfo, setGitInfo] = useState<GitRepoInfo | null>(null);
   const [branch, setBranch] = useState('');
-  const [useWorktree, setUseWorktree] = useState(false);
 
   const store = useStore(persistedStoreApi.$atom);
   const project = useMemo(() => store.projects.find((p) => p.id === projectId), [store.projects, projectId]);
@@ -79,18 +78,17 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
         description: description.trim(),
         priority,
         blockedBy,
-        ...(gitInfo?.isGitRepo && { branch, useWorktree }),
+        ...(gitInfo?.isGitRepo && { branch }),
       });
       setTitle('');
       setDescription('');
       setPriority('medium');
       setBlockedBy([]);
-      setUseWorktree(false);
       onClose();
     } finally {
       setIsSubmitting(false);
     }
-  }, [title, description, priority, blockedBy, branch, useWorktree, gitInfo, isSubmitting, projectId, onClose]);
+  }, [title, description, priority, blockedBy, branch, gitInfo, isSubmitting, projectId, onClose]);
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-surface-border bg-surface-overlay/50 p-4">
@@ -170,10 +168,6 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
                 </option>
               ))}
             </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-medium text-fg-subtle">Worktree</label>
-            <Switch checked={useWorktree} onCheckedChange={setUseWorktree} />
           </div>
         </div>
       )}

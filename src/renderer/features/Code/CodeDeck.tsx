@@ -3,7 +3,7 @@ import { SortableContext, arrayMove, horizontalListSortingStrategy, useSortable,
 import { CSS } from '@dnd-kit/utilities';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PiArrowsInBold, PiArrowsOutBold, PiCodeBold, PiDotsSixVerticalBold, PiDotsThreeOutline, PiMonitorBold, PiPlusBold } from 'react-icons/pi';
+import { PiArrowsInBold, PiArrowsOutBold, PiCodeBold, PiDotsSixVerticalBold, PiDotsThreeOutline, PiGitBranchBold, PiMonitorBold, PiPlusBold } from 'react-icons/pi';
 
 import { Button, cn } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -92,6 +92,7 @@ const CodeSessionHeader = memo(
     label,
     ticketTitle,
     ticketColumnBadge,
+    ticketMetaBadge,
     ticketActions,
     actions,
     onClose,
@@ -102,6 +103,7 @@ const CodeSessionHeader = memo(
     label: string;
     ticketTitle?: string | null;
     ticketColumnBadge?: React.ReactNode;
+    ticketMetaBadge?: React.ReactNode;
     ticketActions?: React.ReactNode;
     actions?: React.ReactNode;
     onClose?: () => void;
@@ -218,6 +220,7 @@ const CodeSessionHeader = memo(
             <div className="flex items-center gap-2 min-w-0">
               <span className="text-[11px] text-fg-muted truncate">{ticketTitle}</span>
               {ticketColumnBadge}
+              {ticketMetaBadge}
             </div>
             {ticketActions && <div className="flex items-center gap-1.5 shrink-0 ml-2">{ticketActions}</div>}
           </div>
@@ -234,6 +237,7 @@ const DeckColumn = memo(
     label,
     ticketTitle,
     ticketColumnBadge,
+    ticketMetaBadge,
     ticketActions,
     actions,
     onClose,
@@ -246,6 +250,7 @@ const DeckColumn = memo(
     label: string;
     ticketTitle?: string | null;
     ticketColumnBadge?: React.ReactNode;
+    ticketMetaBadge?: React.ReactNode;
     ticketActions?: React.ReactNode;
     actions?: React.ReactNode;
     onClose: (id: CodeTabId) => void;
@@ -273,6 +278,7 @@ const DeckColumn = memo(
           label={label}
           ticketTitle={ticketTitle}
           ticketColumnBadge={ticketColumnBadge}
+          ticketMetaBadge={ticketMetaBadge}
           ticketActions={ticketActions}
           actions={
             <div className="flex items-center gap-1">
@@ -318,6 +324,7 @@ const CodeSessionPane = memo(
     label,
     ticketTitle,
     ticketColumnBadge,
+    ticketMetaBadge,
     ticketActions,
     actions,
     onClose,
@@ -332,6 +339,7 @@ const CodeSessionPane = memo(
     label: string;
     ticketTitle?: string | null;
     ticketColumnBadge?: React.ReactNode;
+    ticketMetaBadge?: React.ReactNode;
     ticketActions?: React.ReactNode;
     actions?: React.ReactNode;
     onClose: (id: CodeTabId) => void;
@@ -351,6 +359,7 @@ const CodeSessionPane = memo(
           label={label}
           ticketTitle={ticketTitle}
           ticketColumnBadge={ticketColumnBadge}
+          ticketMetaBadge={ticketMetaBadge}
           ticketActions={ticketActions}
           actions={actions}
           onClose={() => onClose(tab.id)}
@@ -670,6 +679,38 @@ export const CodeDeck = memo(() => {
     []
   );
 
+  const renderTicketMetaBadge = useCallback(
+    (tab: CodeTab) => {
+      if (!tab.ticketId) {
+        return undefined;
+      }
+
+      const ticket = store.tickets.find((item) => item.id === tab.ticketId);
+      if (!ticket) {
+        return undefined;
+      }
+
+      const initiative = store.initiatives.find((item) => item.id === ticket.initiativeId);
+      const effectiveBranch = ticket.branch ?? initiative?.branch;
+      const projectWorkspaceDir = tab.projectId ? projectMap.get(tab.projectId)?.workspaceDir : undefined;
+      const isIsolatedWorkspace = !!tab.workspaceDir && !!projectWorkspaceDir && tab.workspaceDir !== projectWorkspaceDir;
+
+      if (!effectiveBranch && !isIsolatedWorkspace) {
+        return undefined;
+      }
+
+      return (
+        <span className="flex items-center gap-1 rounded-full bg-purple-400/10 px-1.5 py-0.5 text-[10px] font-medium text-purple-400 shrink-0">
+          <PiGitBranchBold size={10} />
+          {effectiveBranch ?? 'Isolated workspace'}
+          {isIsolatedWorkspace ? ' · isolated' : ''}
+          {!ticket.branch && initiative?.branch ? ' · inherited' : ''}
+        </span>
+      );
+    },
+    [projectMap, store.initiatives, store.tickets]
+  );
+
   return (
     <div className="flex flex-col w-full h-full min-h-0 overflow-hidden">
       <CodeDeckHeader layoutMode={layoutMode} onLayoutMode={handleLayoutMode} onNewSession={handleNewSession} />
@@ -690,6 +731,7 @@ export const CodeDeck = memo(() => {
                         label={resolveLabel(tab)}
                         ticketTitle={resolveTicketTitle(tab)}
                         ticketColumnBadge={renderTicketColumnBadge(tab)}
+                        ticketMetaBadge={renderTicketMetaBadge(tab)}
                         ticketActions={renderTicketBannerActions(tab)}
                         actions={renderSessionActions(tab)}
                         onClose={handleClose}
@@ -746,6 +788,7 @@ export const CodeDeck = memo(() => {
                       label={resolveLabel(tab)}
                       ticketTitle={resolveTicketTitle(tab)}
                       ticketColumnBadge={renderTicketColumnBadge(tab)}
+                      ticketMetaBadge={renderTicketMetaBadge(tab)}
                       ticketActions={renderTicketBannerActions(tab)}
                       actions={renderSessionActions(tab)}
                       onClose={handleClose}
@@ -818,6 +861,7 @@ export const CodeDeck = memo(() => {
                   label={resolveLabel(tab)}
                   ticketTitle={resolveTicketTitle(tab)}
                   ticketColumnBadge={renderTicketColumnBadge(tab)}
+                  ticketMetaBadge={renderTicketMetaBadge(tab)}
                   actions={renderSessionActions(tab)}
                   onClose={handleClose}
                   isVisible={tab.id === activeTab.id}

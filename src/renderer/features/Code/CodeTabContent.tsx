@@ -2,7 +2,7 @@ import { useStore } from '@nanostores/react';
 import { motion } from 'framer-motion';
 import { memo, useCallback, useMemo } from 'react';
 
-import { buildAutopilotVariables, buildInteractiveVariables } from '@/lib/client-tools';
+import { buildInteractiveVariables, buildTicketInteractiveVariables } from '@/lib/client-tools';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { SessionStartupShell } from '@/renderer/common/SessionStartupShell';
 import { Button, cn } from '@/renderer/ds';
@@ -119,7 +119,7 @@ export const CodeTabContent = memo(
       () => store.projects.find((p) => p.id === tab.projectId) ?? null,
       [store.projects, tab.projectId]
     );
-    const workspaceDir = project?.workspaceDir ?? null;
+    const workspaceDir = tab.workspaceDir ?? project?.workspaceDir ?? null;
     const sandboxLabel = useMemo(
       () => (store.sandboxEnabled ? buildSandboxLabel(store.sandboxVariant, { custom: isCustomSandbox(project?.sandbox) }) : undefined),
       [store.sandboxEnabled, store.sandboxVariant, project?.sandbox]
@@ -158,7 +158,9 @@ export const CodeTabContent = memo(
     const clientToolVariables = useMemo(
       () =>
         tab.ticketId
-          ? buildAutopilotVariables()
+          ? buildTicketInteractiveVariables(
+              project ? { projectId: project.id, projectLabel: project.label } : undefined
+            )
           : buildInteractiveVariables(
               project ? { projectId: project.id, projectLabel: project.label } : undefined
             ),

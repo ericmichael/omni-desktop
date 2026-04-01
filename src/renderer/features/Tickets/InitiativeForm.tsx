@@ -3,11 +3,19 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/renderer/ds';
 import { initiativeApi } from '@/renderer/features/Initiatives/state';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { GitRepoInfo, ProjectId } from '@/shared/types';
+import type { GitRepoInfo, Initiative, ProjectId } from '@/shared/types';
 
 import { ticketApi } from './state';
 
-export const InitiativeForm = memo(({ projectId, onClose }: { projectId: ProjectId; onClose: () => void }) => {
+export const InitiativeForm = memo(({
+  projectId,
+  onClose,
+  editInitiative,
+}: {
+  projectId: ProjectId;
+  onClose: () => void;
+  editInitiative?: Initiative;
+}) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [branch, setBranch] = useState('');
@@ -26,22 +34,36 @@ export const InitiativeForm = memo(({ projectId, onClose }: { projectId: Project
     });
   }, [project]);
 
+  useEffect(() => {
+    setTitle(editInitiative?.title ?? '');
+    setDescription(editInitiative?.description ?? '');
+    setBranch(editInitiative?.branch ?? '');
+  }, [editInitiative]);
+
   const handleSubmit = useCallback(async () => {
     if (!title.trim() || isSubmitting) return;
     setIsSubmitting(true);
     try {
-      await initiativeApi.addInitiative({
-        projectId,
-        title: title.trim(),
-        description: description.trim(),
-        status: 'active',
-        ...(gitInfo?.isGitRepo && branch ? { branch } : {}),
-      });
+      if (editInitiative) {
+        await initiativeApi.updateInitiative(editInitiative.id, {
+          title: title.trim(),
+          description: description.trim(),
+          branch: gitInfo?.isGitRepo ? (branch || undefined) : undefined,
+        });
+      } else {
+        await initiativeApi.addInitiative({
+          projectId,
+          title: title.trim(),
+          description: description.trim(),
+          status: 'active',
+          ...(gitInfo?.isGitRepo && branch ? { branch } : {}),
+        });
+      }
       onClose();
     } finally {
       setIsSubmitting(false);
     }
-  }, [title, description, branch, gitInfo, isSubmitting, projectId, onClose]);
+  }, [title, description, branch, gitInfo, isSubmitting, projectId, onClose, editInitiative]);
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-surface-border bg-surface-overlay/50 p-4">
@@ -78,7 +100,7 @@ export const InitiativeForm = memo(({ projectId, onClose }: { projectId: Project
       )}
       <div className="flex items-center gap-2">
         <Button onClick={handleSubmit} isDisabled={!title.trim() || isSubmitting}>
-          Create Initiative
+          {editInitiative ? 'Save Initiative' : 'Create Initiative'}
         </Button>
         <Button variant="ghost" onClick={onClose}>
           Cancel

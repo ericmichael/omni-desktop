@@ -13,6 +13,7 @@ import { WebSocketServer } from 'ws';
 import {
   buildAutopilotVariables,
   buildInteractiveVariables,
+  buildTicketInteractiveVariables,
   TICKET_CLIENT_TOOLS,
   PROJECT_CLIENT_TOOLS,
   BRIEF_CLIENT_TOOLS,
@@ -609,6 +610,37 @@ describe('client_tools shape', () => {
     };
     expect(vars.additional_instructions).toContain('My Project');
     expect(vars.additional_instructions).toContain('proj-1');
+  });
+
+  it('ticket interactive variables contain ticket + project management tools', () => {
+    const vars = buildTicketInteractiveVariables() as { client_tools: { name: string }[]; additional_instructions: string };
+    const names = vars.client_tools.map((t) => t.name);
+
+    expect(names).toContain('get_ticket');
+    expect(names).toContain('move_ticket');
+    expect(names).toContain('escalate');
+    expect(names).toContain('list_projects');
+    expect(names).toContain('list_tickets');
+    expect(names).toContain('create_ticket');
+    expect(names).toContain('update_ticket');
+    expect(names).toContain('start_ticket');
+    expect(names).toContain('stop_ticket');
+    expect(names).toContain('read_brief');
+    expect(names).toContain('update_brief');
+    expect(names).toContain('list_initiatives');
+    expect(names).toContain('create_initiative');
+    expect(names).toContain('update_initiative');
+    expect(names).toContain('read_initiative_brief');
+    expect(names).toContain('list_inbox');
+    expect(names).toContain('create_inbox_item');
+    expect(names).toContain('update_inbox_item');
+    expect(names).toContain('delete_inbox_item');
+    expect(names).toContain('inbox_to_tickets');
+    expect(names).toHaveLength(20);
+    expect(vars.additional_instructions).toContain('Inbox');
+    expect(vars.additional_instructions).toContain('Brief');
+    expect(vars.additional_instructions).toContain('Tickets');
+    expect(vars.additional_instructions).toContain('Initiatives');
   });
 
   it('get_ticket takes no parameters', () => {
