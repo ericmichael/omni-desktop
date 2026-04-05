@@ -1,0 +1,254 @@
+/**
+ * Client for the omni-platform management plane API.
+ *
+ * When configured (platform URL + credentials), the launcher delegates
+ * container lifecycle and policy to the platform instead of running
+ * local Docker. When not configured, the launcher runs in open-source
+ * mode with local Docker — this client is never instantiated.
+ */
+
+import { SimpleLogger } from '@/lib/simple-logger';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export type PlatformConfig = {
+  /** Platform URL — baked in at build time, not user-provided */
+  url: string;
+  accessToken: string;
+  refreshToken: string;
+};
+
+export type PlatformSession = {
+  sessionId: string;
+  runtimeToken: string;
+  status: 'pending' | 'active' | 'completed' | 'failed';
+  websocketUrl?: string;
+  containerId?: string;
+  authToken?: string;
+  error?: string;
+};
+
+export type PlatformPolicy = {
+  agent: { name: string; slug: string; description?: string };
+  sandbox_profile: {
+    image_tier: string;
+    resource_limits: Record<string, string>;
+    max_duration_minutes: number;
+    volume_policy: Record<string, unknown>;
+  };
+  network_allowlist: string[];
+  network_endpoints: Array<{ name: string; host_pattern: string; port?: number; sensitivity: string }>;
+  skills: Array<{ name: string; slug: string; source_path?: string }>;
+  mcp_servers: Array<{ name: string; slug: string; url: string; auth_config?: Record<string, unknown> }>;
+};
+
+export type DeviceCodeResponse = {
+  device_code: string;
+  user_code: string;
+  verification_uri: string;
+  expires_in: number;
+  interval: number;
+  message: string;
+};
+
+export type AuthTokenResponse = {
+  status: 'authenticated' | 'pending' | 'expired';
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+  error?: string;
+  user?: {
+    id: number;
+    email: string;
+    name: string;
+    role: string;
+    domains: Array<{ id: number; name: string; slug: string }>;
+  };
+};
+
+// ---------------------------------------------------------------------------
+// Client
+// ---------------------------------------------------------------------------
+
+export class PlatformClient {
+  private config: PlatformConfig;
+  private log: SimpleLogger;
+  private fetchFn: typeof globalThis.fetch;
+
+  /** Called when a token refresh succeeds, so callers can persist the new token. */
+  onTokenRefresh?: (newAccessToken: string) => void;
+
+  constructor(config: PlatformConfig, fetchFn?: typeof globalThis.fetch) {
+    this.config = config;
+    this.fetchFn = fetchFn ?? globalThis.fetch;
+    this.log = new SimpleLogger((entry) => console[entry.level](`[Platform] ${entry.message}`));
+  }
+
+  get url(): string {
+    return this.config.url;
+  }
+
+  get isConfigured(): boolean {
+    return Boolean(this.config.url && this.config.accessToken);
+  }
+
+  // --- Auth ---
+
+  static async initiateDeviceCode(platformUrl: string, fetchFn?: typeof fetch): Promise<DeviceCodeResponse> {
+    const f = fetchFn ?? globalThis.fetch;
+    const res = await f(`${platformUrl}/api/v1/auth/device_code`, { method: 'POST' });
+    if (!res.ok) throw new Error(`Device code request failed: ${res.status}`);
+    return res.json() as Promise<DeviceCodeResponse>;
+  }
+
+  static async pollForToken(
+    platformUrl: string,
+    deviceCode: string,
+    fetchFn?: typeof fetch
+  ): Promise<AuthTokenResponse> {
+    const f = fetchFn ?? globalThis.fetch;
+    const res = await f(`${platformUrl}/api/v1/auth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_code: deviceCode }),
+    });
+    return res.json() as Promise<AuthTokenResponse>;
+  }
+
+  async refreshAccessToken(): Promise<string> {
+    const res = await this.fetchFn(`${this.config.url}/api/v1/auth/refresh`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.config.refreshToken}` },
+    });
+    if (!res.ok) throw new Error(`Token refresh failed: ${res.status}`);
+    const body = (await res.json()) as { access_token: string };
+    this.config.accessToken = body.access_token;
+    this.onTokenRefresh?.(body.access_token);
+    return body.access_token;
+  }
+
+  // --- Policy ---
+
+  async getPolicy(agentSlug: string, domain?: string): Promise<PlatformPolicy> {
+    const url = new URL(`/api/v1/policy/${agentSlug}`, this.config.url);
+    if (domain) url.searchParams.set('domain', domain);
+
+    const res = await this.authedFetch(url.toString());
+    if (!res.ok) throw new Error(`Policy fetch failed: ${res.status}`);
+    return res.json() as Promise<PlatformPolicy>;
+  }
+
+  // --- Compute ---
+
+  async startSession(agentSlug: string, domain?: string): Promise<PlatformSession> {
+    const body: Record<string, string> = { agent: agentSlug };
+    if (domain) body.domain = domain;
+
+    const res = await this.authedFetch(`${this.config.url}/api/v1/compute/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`Start session failed: ${res.status}`);
+    const data = (await res.json()) as { session_id: string; runtime_token: string; status: string };
+    return {
+      sessionId: data.session_id,
+      runtimeToken: data.runtime_token,
+      status: data.status as PlatformSession['status'],
+    };
+  }
+
+  async pollSessionStatus(sessionId: string): Promise<PlatformSession> {
+    const res = await this.authedFetch(
+      `${this.config.url}/api/v1/compute/status?session_id=${sessionId}`
+    );
+    if (!res.ok) throw new Error(`Status poll failed: ${res.status}`);
+    const data = (await res.json()) as {
+      session_id: string;
+      status: string;
+      container_id?: string;
+      websocket_url?: string;
+      auth_token?: string;
+      ready?: boolean;
+      error?: string;
+    };
+    return {
+      sessionId: data.session_id,
+      runtimeToken: '', // already issued at start
+      status: data.status as PlatformSession['status'],
+      websocketUrl: data.websocket_url,
+      containerId: data.container_id,
+      authToken: data.auth_token,
+      error: data.error,
+    };
+  }
+
+  async waitForSession(sessionId: string, maxAttempts = 120): Promise<PlatformSession> {
+    for (let i = 0; i < maxAttempts; i++) {
+      const session = await this.pollSessionStatus(sessionId);
+      if (session.status === 'active' && session.websocketUrl) return session;
+      if (session.status === 'failed') throw new Error(session.error || 'Session failed');
+      await new Promise<void>((r) => setTimeout(r, 2000));
+    }
+    throw new Error('Session did not become ready in time');
+  }
+
+  async stopSession(sessionId: string): Promise<void> {
+    const res = await this.authedFetch(`${this.config.url}/api/v1/compute/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+    if (!res.ok) {
+      this.log.warn(`Stop session failed: ${res.status}`);
+    }
+  }
+
+  // --- Workspace ---
+
+  async prepareWorkspace(sessionId: string): Promise<{ uploadSasUrl: string; shareName: string }> {
+    const res = await this.authedFetch(`${this.config.url}/api/v1/compute/workspace/prepare`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+    if (!res.ok) throw new Error(`Prepare workspace failed: ${res.status}`);
+    const data = (await res.json()) as { session_id: string; upload_sas_url: string; share_name: string };
+    return { uploadSasUrl: data.upload_sas_url, shareName: data.share_name };
+  }
+
+  async finalizeWorkspace(sessionId: string): Promise<{ downloadSasUrl: string }> {
+    const res = await this.authedFetch(`${this.config.url}/api/v1/compute/workspace/finalize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+    if (!res.ok) throw new Error(`Finalize workspace failed: ${res.status}`);
+    const data = (await res.json()) as { session_id: string; download_sas_url: string };
+    return { downloadSasUrl: data.download_sas_url };
+  }
+
+  // --- Internal ---
+
+  private async authedFetch(url: string, init?: RequestInit): Promise<Response> {
+    const headers = new Headers(init?.headers);
+    headers.set('Authorization', `Bearer ${this.config.accessToken}`);
+
+    let res = await this.fetchFn(url, { ...init, headers });
+
+    // Auto-refresh on 401
+    if (res.status === 401 && this.config.refreshToken) {
+      try {
+        await this.refreshAccessToken();
+        headers.set('Authorization', `Bearer ${this.config.accessToken}`);
+        res = await this.fetchFn(url, { ...init, headers });
+      } catch {
+        // refresh failed, return the 401
+      }
+    }
+
+    return res;
+  }
+}

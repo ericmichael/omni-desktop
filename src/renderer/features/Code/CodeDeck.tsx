@@ -5,6 +5,7 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PiArrowsInBold, PiArrowsOutBold, PiCodeBold, PiDotsSixVerticalBold, PiDotsThreeOutline, PiGitBranchBold, PiMonitorBold, PiPlusBold } from 'react-icons/pi';
 
+import { uuidv4 } from '@/lib/uuid';
 import { Button, cn } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { CodeLayoutMode, CodeTab, CodeTabId, TicketId, TicketResolution } from '@/shared/types';
@@ -619,7 +620,7 @@ export const CodeDeck = memo(() => {
 
   const handleNewTabSession = useCallback(
     (tab: CodeTab) => {
-      codeApi.setTabSessionId(tab.id, crypto.randomUUID());
+      codeApi.setTabSessionId(tab.id, uuidv4());
     },
     []
   );

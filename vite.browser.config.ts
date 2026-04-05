@@ -9,7 +9,11 @@ import tsconfigPaths from 'vite-tsconfig-paths';
  * Vite config for building the browser renderer (no Electron dependencies).
  * Produces a standalone SPA that uses WebSocket transport.
  */
-const SERVER_PORT = parseInt(process.env['PORT'] ?? '3000', 10);
+const SERVER_PORT = parseInt(process.env['PORT'] ?? '3001', 10);
+
+const platformDefines = {
+  __PLATFORM_URL__: JSON.stringify(process.env.OMNI_PLATFORM_URL || ''),
+};
 
 export default defineConfig({
   server: {
@@ -28,6 +32,7 @@ export default defineConfig({
       },
     },
   },
+  define: platformDefines,
   plugins: [
     tailwindcss(),
     react(),

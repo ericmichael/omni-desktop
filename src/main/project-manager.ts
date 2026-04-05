@@ -22,6 +22,7 @@ import type { ClientFunctionResponder } from '@/main/ticket-machine';
 import { WorkflowLoader } from '@/main/workflow-loader';
 import { AgentProcess } from '@/main/agent-process';
 import type { CodeManager } from '@/main/code-manager';
+import { createPlatformClient } from '@/main/platform-mode';
 import { getOmniConfigDir, getWorktreesDir } from '@/main/util';
 import { DEFAULT_PIPELINE } from '@/shared/pipeline-defaults';
 import type { TicketPhase } from '@/shared/ticket-phase';
@@ -1934,8 +1935,20 @@ export class ProjectManager {
     };
 
     const sandboxEnabled = this.store.get('sandboxEnabled', false);
+    const sandboxBackend = this.store.get('sandboxBackend') as import('@/shared/types').SandboxBackend | undefined;
+    const platformClient = createPlatformClient(this.store.get('platform'));
+    const mode = platformClient
+      ? 'platform'
+      : !sandboxEnabled
+        ? 'local'
+        : sandboxBackend === 'vm'
+          ? 'vm'
+          : sandboxBackend === 'podman'
+            ? 'podman'
+            : 'sandbox';
     const sandbox = new AgentProcess({
-      mode: sandboxEnabled ? 'sandbox' : 'local',
+      mode,
+      platformClient: platformClient ?? undefined,
       ipcRawOutput: () => {},
       onStatusChange: (status) => {
         const taskEntry = this.tasks.get(taskId);

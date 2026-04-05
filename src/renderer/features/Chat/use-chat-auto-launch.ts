@@ -6,10 +6,8 @@ import { fromCallback } from 'xstate';
 import {
   $omniInstallProcessStatus,
   $omniRuntimeInfo,
-  $sandboxProcessStatus,
   omniInstallApi,
   refreshOmniRuntimeInfo,
-  sandboxApi,
 } from '@/renderer/features/Omni/state';
 import { emitter } from '@/renderer/services/ipc';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
@@ -21,8 +19,8 @@ import { $chatProcessStatus, chatApi } from './state';
 export type ChatAutoLaunchPhase = AutoLaunchPhase;
 
 /**
- * Unified auto-launch hook for Chat. When `sandboxEnabled` is false, starts ChatManager (local process).
- * When true, starts SandboxManager (Docker).
+ * Unified auto-launch hook for Chat. ChatManager handles all modes
+ * (local, sandbox/docker, podman, vm, platform) via AgentProcess.
  *
  * Side effects are driven by XState invoke actors — no phase-gated useEffects.
  */
@@ -34,8 +32,6 @@ export const useChatAutoLaunch = () => {
   // Refs for mutable values so actor callbacks always see current values
   const storeRef = useRef(store);
   storeRef.current = store;
-  const sandboxEnabledRef = useRef(sandboxEnabled);
-  sandboxEnabledRef.current = sandboxEnabled;
 
   // Stable actor implementations
   const actors = useMemo(() => ({
@@ -96,14 +92,10 @@ export const useChatAutoLaunch = () => {
           if (cancelled) return;
         }
         if (cancelled) return;
-        if (sandboxEnabledRef.current) {
-          sandboxApi.start({
-            workspaceDir: s.workspaceDir!,
-            sandboxVariant: s.sandboxVariant,
-          });
-        } else {
-          chatApi.start({ workspaceDir: s.workspaceDir! });
-        }
+        chatApi.start({
+          workspaceDir: s.workspaceDir!,
+          sandboxVariant: s.sandboxVariant,
+        });
         sendBack({ type: 'CONFIG_OK' });
       })();
       return () => { cancelled = true; };
@@ -114,16 +106,12 @@ export const useChatAutoLaunch = () => {
 
       // Seed the atom with the current server-side status so we don't miss
       // a transition that happened before this page load.
-      const isSandbox = sandboxEnabledRef.current;
-      const channel = isSandbox ? 'sandbox-process:get-status' : 'chat-process:get-status';
-      const $store = isSandbox ? $sandboxProcessStatus : $chatProcessStatus;
-      emitter.invoke(channel).then((status) => {
+      emitter.invoke('chat-process:get-status').then((status) => {
         if (cancelled || !status || status.type === 'uninitialized') return;
-        $store.set(status);
+        $chatProcessStatus.set(status);
       }).catch(() => {});
 
-      // Watch whichever process store is relevant
-      const unsub = $store.subscribe((status) => {
+      const unsub = $chatProcessStatus.subscribe((status) => {
         if (status.type === 'running' || status.type === 'connecting') {
           sendBack({ type: 'SANDBOX_RUNNING' });
         } else if (status.type === 'error') {
@@ -137,25 +125,27 @@ export const useChatAutoLaunch = () => {
   }), []); // eslint-disable-line react-hooks/exhaustive-deps -- reads from refs
 
   const inspect = useMemo(() => createMachineLogger('autoLaunch:chat', {
-    tags: { sandbox: sandboxEnabled ? 'docker' : 'local' },
-  }), [sandboxEnabled]);
+    tags: { sandbox: sandboxEnabled ? (store.sandboxBackend ?? 'docker') : 'local' },
+  }), [sandboxEnabled, store.sandboxBackend]);
 
   const machine = useMemo(() => autoLaunchMachine.provide({ actors }), [actors]);
   const actor = useActorRef(machine, { inspect });
   const phase = useSelector(actor, (snap) => snap.value as AutoLaunchPhase);
   const error = useSelector(actor, (snap) => snap.context.error);
 
-  // Reset when sandboxEnabled changes
+  // Reset when sandboxEnabled or sandboxBackend changes
   const lastSandboxEnabled = useRef(sandboxEnabled);
+  const lastSandboxBackend = useRef(store.sandboxBackend);
   useEffect(() => {
-    if (lastSandboxEnabled.current !== sandboxEnabled) {
+    if (lastSandboxEnabled.current !== sandboxEnabled || lastSandboxBackend.current !== store.sandboxBackend) {
       lastSandboxEnabled.current = sandboxEnabled;
+      lastSandboxBackend.current = store.sandboxBackend;
       actor.send({ type: 'RESET' });
       if (initialized) {
         actor.send({ type: 'LAUNCH' });
       }
     }
-  }, [sandboxEnabled, initialized, actor]);
+  }, [sandboxEnabled, store.sandboxBackend, initialized, actor]);
 
   // Trigger: send LAUNCH when initialized
   useEffect(() => {

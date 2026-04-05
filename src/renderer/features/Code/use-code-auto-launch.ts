@@ -120,6 +120,7 @@ export const useCodeAutoLaunch = (tabId: CodeTabId, workspaceDir: string | null)
           workspaceDir: wd,
           sandboxVariant: storeRef.current.sandboxVariant,
           local: !storeRef.current.sandboxEnabled,
+          sandboxBackend: storeRef.current.sandboxBackend,
         });
         sendBack({ type: 'CONFIG_OK' });
       })();

@@ -14,6 +14,7 @@ import type { PendingMessage } from './ChatShell'
 import { useRPCClient, useRPCConnected } from './rpc-context'
 import { useUiConfig } from './ui-config'
 import { OmniAgentsHeaderActionsPortal, OmniAgentsHeaderActionsProvider } from './header-actions'
+import { uuidv4 } from '@/lib/uuid'
 import { persistedStoreApi } from '@/renderer/services/store'
 
 type UIState = 'connecting' | 'resume' | 'chat' | 'error'
@@ -569,7 +570,7 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   const handleSelectSession = useCallback(async (id?: string, opts?: { fromProp?: boolean }) => {
     // When no id is provided (new chat), generate a fresh session id so the
     // next startRun creates a brand-new session instead of reusing the last one.
-    const resolvedId = id ?? crypto.randomUUID()
+    const resolvedId = id ?? uuidv4()
     setSessionId(resolvedId)
     // Notify parent of session change (skip if the change originated from the prop)
     if (!opts?.fromProp) onSessionChange?.(id === undefined ? resolvedId : id)

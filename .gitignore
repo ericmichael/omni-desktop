@@ -112,3 +112,9 @@ uvx.exe
 .claude/
 
 .env
+
+# Sandbox CLI build artifacts
+sandbox-cli/target/
+assets/bin/omni-sandbox
+assets/bin/omni-sandbox.exe
+assets/bin/bwrap

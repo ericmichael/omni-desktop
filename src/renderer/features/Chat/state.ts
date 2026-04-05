@@ -4,7 +4,7 @@ import { atom } from 'nanostores';
 
 import { DEFAULT_XTERM_OPTIONS, STATUS_POLL_INTERVAL_MS } from '@/renderer/constants';
 import { emitter, ipc } from '@/renderer/services/ipc';
-import type { ChatProcessStatus, WithTimestamp } from '@/shared/types';
+import type { ChatProcessStatus, SandboxVariant, WithTimestamp } from '@/shared/types';
 
 export const $chatProcessStatus = atom<WithTimestamp<ChatProcessStatus>>({
   type: 'uninitialized',
@@ -29,6 +29,12 @@ const initializeChatTerminal = (): Terminal => {
     })
   );
 
+  chatTerminalSubscriptions.add(
+    xterm.onResize(({ cols, rows }) => {
+      emitter.invoke('chat-process:resize', cols, rows);
+    }).dispose
+  );
+
   $chatProcessXTerm.set(xterm);
   return xterm;
 };
@@ -48,13 +54,17 @@ const teardownChatTerminal = () => {
 };
 
 export const chatApi = {
-  start: (arg: { workspaceDir: string }) => {
+  start: (arg: { workspaceDir: string; sandboxVariant?: SandboxVariant }) => {
     initializeChatTerminal();
     emitter.invoke('chat-process:start', arg);
   },
   stop: async () => {
     await emitter.invoke('chat-process:stop');
     teardownChatTerminal();
+  },
+  rebuild: () => {
+    initializeChatTerminal();
+    emitter.invoke('chat-process:rebuild');
   },
 };
 

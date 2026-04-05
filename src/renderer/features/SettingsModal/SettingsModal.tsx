@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { memo, useCallback, useState } from 'react';
 
 import { AnimatedDialog, DialogBody, DialogContent, DialogFooter, DialogHeader } from '@/renderer/ds';
+import { SettingsModalAccountTab } from '@/renderer/features/SettingsModal/SettingsModalAccountTab';
 import { SettingsModalEnvironmentTab } from '@/renderer/features/SettingsModal/SettingsModalEnvironmentTab';
 import { SettingsModalGeneralTab } from '@/renderer/features/SettingsModal/SettingsModalGeneralTab';
 import { SettingsModalMcpTab } from '@/renderer/features/SettingsModal/SettingsModalMcpTab';
@@ -11,7 +12,7 @@ import { SettingsModalNetworkTab } from '@/renderer/features/SettingsModal/Setti
 import { SettingsModalResetButton } from '@/renderer/features/SettingsModal/SettingsModalResetButton';
 import { $isSettingsOpen } from '@/renderer/features/SettingsModal/state';
 
-const TABS = ['General', 'Environment', 'Models', 'MCP', 'Network'] as const;
+const TABS = ['General', 'Environment', 'Models', 'MCP', 'Network', 'Account'] as const;
 type Tab = (typeof TABS)[number];
 
 export const SettingsModal = memo(() => {
@@ -27,6 +28,7 @@ export const SettingsModal = memo(() => {
   const onClickModels = useCallback(() => switchTab('Models'), []);
   const onClickMcp = useCallback(() => switchTab('MCP'), []);
   const onClickNetwork = useCallback(() => switchTab('Network'), []);
+  const onClickAccount = useCallback(() => switchTab('Account'), []);
 
   const tabClickHandlers: Record<Tab, () => void> = {
     General: onClickGeneral,
@@ -34,6 +36,7 @@ export const SettingsModal = memo(() => {
     Models: onClickModels,
     MCP: onClickMcp,
     Network: onClickNetwork,
+    Account: onClickAccount,
   };
 
   return (
@@ -65,6 +68,7 @@ export const SettingsModal = memo(() => {
           {activeTab === 'Models' && <SettingsModalModelsTab />}
           {activeTab === 'MCP' && <SettingsModalMcpTab />}
           {activeTab === 'Network' && <SettingsModalNetworkTab />}
+          {activeTab === 'Account' && <SettingsModalAccountTab />}
         </DialogBody>
         {activeTab === 'General' && (
           <DialogFooter className="pt-4">

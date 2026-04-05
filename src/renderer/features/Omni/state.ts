@@ -7,8 +7,6 @@ import { emitter, ipc } from '@/renderer/services/ipc';
 import type {
   OmniInstallProcessStatus,
   OmniRuntimeInfo,
-  SandboxProcessStatus,
-  SandboxVariant,
   WithTimestamp,
 } from '@/shared/types';
 
@@ -78,81 +76,12 @@ export const omniInstallApi = {
   },
 };
 
-export const $sandboxProcessStatus = atom<WithTimestamp<SandboxProcessStatus>>({
-  type: 'uninitialized',
-  timestamp: Date.now(),
-});
-
-export const $sandboxProcessXTerm = atom<Terminal | null>(null);
-const sandboxTerminalSubscriptions = new Set<() => void>();
-
-const initializeSandboxTerminal = (): Terminal => {
-  let xterm = $sandboxProcessXTerm.get();
-
-  if (xterm) {
-    return xterm;
-  }
-
-  xterm = new Terminal({ ...DEFAULT_XTERM_OPTIONS, disableStdin: true });
-
-  sandboxTerminalSubscriptions.add(
-    ipc.on('sandbox-process:raw-output', (data) => {
-      xterm.write(data);
-    })
-  );
-
-  sandboxTerminalSubscriptions.add(
-    xterm.onResize(({ cols, rows }) => {
-      emitter.invoke('sandbox-process:resize', cols, rows);
-    }).dispose
-  );
-
-  $sandboxProcessXTerm.set(xterm);
-  return xterm;
-};
-
-const teardownSandboxTerminal = () => {
-  for (const unsubscribe of sandboxTerminalSubscriptions) {
-    unsubscribe();
-  }
-  sandboxTerminalSubscriptions.clear();
-
-  const xterm = $sandboxProcessXTerm.get();
-  if (!xterm) {
-    return;
-  }
-  xterm.dispose();
-  $sandboxProcessXTerm.set(null);
-};
-
-export const sandboxApi = {
-  start: (arg: { workspaceDir: string; sandboxVariant: SandboxVariant }) => {
-    initializeSandboxTerminal();
-    emitter.invoke('sandbox-process:start', arg);
-  },
-  stop: async () => {
-    await emitter.invoke('sandbox-process:stop');
-    teardownSandboxTerminal();
-  },
-  rebuild: () => {
-    initializeSandboxTerminal();
-    emitter.invoke('sandbox-process:rebuild');
-  },
-};
-
 const listen = () => {
   ipc.on('omni-install-process:status', (status) => {
     $omniInstallProcessStatus.set(status);
     if (status.type === 'completed') {
       refreshOmniRuntimeInfo();
       teardownOmniInstallTerminal();
-    }
-  });
-
-  ipc.on('sandbox-process:status', (status) => {
-    $sandboxProcessStatus.set(status);
-    if (status.type === 'exited') {
-      teardownSandboxTerminal();
     }
   });
 
@@ -165,17 +94,7 @@ const listen = () => {
     $omniInstallProcessStatus.set(newStatus);
   };
 
-  const pollSandbox = async () => {
-    const oldStatus = $sandboxProcessStatus.get();
-    const newStatus = await emitter.invoke('sandbox-process:get-status');
-    if (objectEquals(oldStatus, newStatus)) {
-      return;
-    }
-    $sandboxProcessStatus.set(newStatus);
-  };
-
   setInterval(pollOmniInstall, STATUS_POLL_INTERVAL_MS);
-  setInterval(pollSandbox, STATUS_POLL_INTERVAL_MS);
 };
 
 listen();

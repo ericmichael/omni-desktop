@@ -11,8 +11,6 @@ import { getGreeting } from '@/renderer/omniagents-ui/greeting';
 import { cn } from '@/renderer/ds';
 import {
   $omniInstallProcessXTerm,
-  $sandboxProcessStatus,
-  $sandboxProcessXTerm,
 } from '@/renderer/features/Omni/state';
 import { FloatingWidget } from '@/renderer/features/Omni/FloatingWidget';
 import { XTermLogViewer } from '@/renderer/features/XTermLogViewer/XTermLogViewer';
@@ -40,13 +38,6 @@ const ChatLogDetails = memo(() => {
   return <XTermLogViewer $xterm={$chatProcessXTerm} />;
 });
 ChatLogDetails.displayName = 'ChatLogDetails';
-
-const SandboxLogDetails = memo(() => {
-  const sandboxXTerm = useStore($sandboxProcessXTerm);
-  if (!sandboxXTerm) return null;
-  return <XTermLogViewer $xterm={$sandboxProcessXTerm} />;
-});
-SandboxLogDetails.displayName = 'SandboxLogDetails';
 
 /** Running view when sandbox is enabled — shows OmniAgentsApp with VNC floating widget. */
 const SandboxRunningView = memo(
@@ -106,7 +97,6 @@ SandboxRunningView.displayName = 'SandboxRunningView';
 export const Chat = memo(() => {
   const initialized = useStore($initialized);
   const chatStatus = useStore($chatProcessStatus);
-  const sandboxStatus = useStore($sandboxProcessStatus);
   const store = useStore(persistedStoreApi.$atom);
   const { phase, error, retry, launch, sandboxEnabled } = useChatAutoLaunch();
   const [greeting] = useState(getGreeting);
@@ -115,29 +105,27 @@ export const Chat = memo(() => {
   const theme = store.theme ?? 'tokyo-night';
   const sandboxLabel = useMemo(() => (store.sandboxEnabled ? buildSandboxLabel(store.sandboxVariant) : undefined), [store.sandboxEnabled, store.sandboxVariant]);
 
-  // Derive uiUrl from whichever process is active
-  const localUiUrl = useMemo(() => {
+  // Derive URLs from chatStatus (unified — handles both local and sandbox modes)
+  const chatData = useMemo(() => {
     if (chatStatus.type !== 'running' && chatStatus.type !== 'connecting') {
       return null;
     }
-    const url = new URL(chatStatus.data.uiUrl, window.location.origin);
+    return chatStatus.data;
+  }, [chatStatus]);
+
+  const localUiUrl = useMemo(() => {
+    if (!chatData) return null;
+    const url = new URL(chatData.uiUrl, window.location.origin);
     if (theme !== 'default') {
       url.searchParams.set('theme', theme);
     }
     return url.toString();
-  }, [chatStatus, theme]);
+  }, [chatData, theme]);
 
-  const sandboxUrls = useMemo(() => {
-    if (sandboxStatus.type !== 'running' && sandboxStatus.type !== 'connecting') {
-      return null;
-    }
-    return sandboxStatus.data;
-  }, [sandboxStatus]);
-
-  // Reset when sandbox URLs go away
+  // Reset when URLs go away
   useEffect(() => {
-    if (!sandboxUrls) setRunningMounted(false);
-  }, [sandboxUrls]);
+    if (!chatData) setRunningMounted(false);
+  }, [chatData]);
 
   const handleRunningReady = useCallback(() => {
     requestAnimationFrame(() => setRunningMounted(true));
@@ -150,15 +138,13 @@ export const Chat = memo(() => {
   const details =
     phase === 'installing' ? (
       <InstallDetails />
-    ) : sandboxEnabled ? (
-      <SandboxLogDetails />
     ) : (
       <ChatLogDetails />
     );
 
   // When sandbox is enabled, use ChatShell + SandboxRunningView (like old Omni.tsx)
   if (sandboxEnabled) {
-    const hasUrls = !!sandboxUrls;
+    const hasUrls = !!chatData;
     const showShell = !hasUrls || !runningMounted;
 
     const shellPhase =
@@ -186,7 +172,7 @@ export const Chat = memo(() => {
               if (el) handleRunningReady();
             }}
           >
-            <SandboxRunningView sandboxUrls={sandboxUrls} theme={theme} greeting={greeting} sandboxLabel={sandboxLabel} />
+            <SandboxRunningView sandboxUrls={chatData} theme={theme} greeting={greeting} sandboxLabel={sandboxLabel} />
           </div>
         )}
       </div>

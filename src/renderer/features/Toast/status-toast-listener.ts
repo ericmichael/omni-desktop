@@ -1,14 +1,15 @@
-import { $omniInstallProcessStatus, $sandboxProcessStatus } from '@/renderer/features/Omni/state';
+import { $omniInstallProcessStatus } from '@/renderer/features/Omni/state';
+import { $chatProcessStatus } from '@/renderer/features/Chat/state';
 import { toast } from '@/renderer/features/Toast/state';
 
 /**
  * Subscribe to process status atoms and show toasts for error and notable state changes.
  */
 
-let prevSandboxType: string = $sandboxProcessStatus.get().type;
-$sandboxProcessStatus.subscribe((status) => {
-  const prev = prevSandboxType;
-  prevSandboxType = status.type;
+let prevChatType: string = $chatProcessStatus.get().type;
+$chatProcessStatus.subscribe((status) => {
+  const prev = prevChatType;
+  prevChatType = status.type;
 
   if (status.type === 'error' && prev !== 'error') {
     toast.error('Sandbox error', status.error.message);

@@ -2,11 +2,13 @@ import type { IpcListener } from '@electron-toolkit/typed-ipc/main';
 import { ipcMain } from 'electron';
 
 import { AgentProcess, type AgentProcessMode, type FetchFn } from '@/main/agent-process';
+import type { PlatformClient } from '@/main/platform-client';
 import type {
   AgentProcessStatus,
   CodeTabId,
   IpcEvents,
   IpcRendererEvents,
+  SandboxBackend,
   SandboxVariant,
   WithTimestamp,
 } from '@/shared/types';
@@ -15,12 +17,16 @@ type StartArg = {
   workspaceDir: string;
   sandboxVariant: SandboxVariant;
   local?: boolean;
+  sandboxBackend?: SandboxBackend;
 };
 
 export class CodeManager {
   private processes = new Map<CodeTabId, AgentProcess>();
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   private fetchFn: FetchFn;
+
+  /** Set by the platform integration when in enterprise mode. */
+  platformClient: PlatformClient | null = null;
 
   /** Optional fallback for sandbox status — lets ProjectManager provide supervisor sandbox status. */
   statusFallback?: (tabId: CodeTabId) => WithTimestamp<AgentProcessStatus> | null;
@@ -49,6 +55,7 @@ export class CodeManager {
         this.sendToWindow('code:sandbox-status', tabId, status);
       },
       fetchFn: this.fetchFn,
+      platformClient: this.platformClient ?? undefined,
     });
 
     this.processes.set(tabId, proc);
@@ -56,7 +63,18 @@ export class CodeManager {
   }
 
   startSandbox = (tabId: CodeTabId, arg: StartArg): void => {
-    const mode: AgentProcessMode = arg.local ? 'local' : 'sandbox';
+    let mode: AgentProcessMode;
+    if (arg.local) {
+      mode = 'local';
+    } else if (this.platformClient) {
+      mode = 'platform';
+    } else if (arg.sandboxBackend === 'vm') {
+      mode = 'vm';
+    } else if (arg.sandboxBackend === 'podman') {
+      mode = 'podman';
+    } else {
+      mode = 'sandbox';
+    }
     const proc = this.getOrCreate(tabId, mode);
     proc.start(arg);
   };
@@ -69,7 +87,18 @@ export class CodeManager {
   };
 
   rebuildSandbox = async (tabId: CodeTabId, fallbackArg: StartArg): Promise<void> => {
-    const mode: AgentProcessMode = fallbackArg.local ? 'local' : 'sandbox';
+    let mode: AgentProcessMode;
+    if (fallbackArg.local) {
+      mode = 'local';
+    } else if (this.platformClient) {
+      mode = 'platform';
+    } else if (fallbackArg.sandboxBackend === 'vm') {
+      mode = 'vm';
+    } else if (fallbackArg.sandboxBackend === 'podman') {
+      mode = 'podman';
+    } else {
+      mode = 'sandbox';
+    }
     const proc = this.getOrCreate(tabId, mode);
     await proc.rebuild(fallbackArg);
   };

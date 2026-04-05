@@ -14,7 +14,7 @@ import type {
   IpcRendererEvents,
   StoreData,
   WithTimestamp,
-  SandboxProcessStatus,
+  AgentProcessStatus,
 } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
@@ -55,7 +55,7 @@ export interface ITicketMachine {
 export interface ISandbox {
   start(opts: { workspaceDir: string; sandboxVariant: string }): void;
   stop(): Promise<void>;
-  getStatus(): WithTimestamp<SandboxProcessStatus> | null;
+  getStatus(): WithTimestamp<AgentProcessStatus> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -64,7 +64,7 @@ export interface ISandbox {
 
 export interface ISandboxFactory {
   create(opts: {
-    onStatusChange: (status: WithTimestamp<SandboxProcessStatus>) => void;
+    onStatusChange: (status: WithTimestamp<AgentProcessStatus>) => void;
   }): ISandbox;
 }
 

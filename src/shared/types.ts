@@ -49,11 +49,28 @@ export type LayoutMode = 'chat' | 'code' | 'projects';
 export type OmniTheme = 'default' | 'tokyo-night' | 'vscode-dark' | 'vscode-light' | 'utrgv';
 
 export type SandboxVariant = 'standard' | 'work';
+export type SandboxBackend = 'docker' | 'podman' | 'vm' | 'local';
+
+/**
+ * Platform credentials for enterprise mode.
+ * The platform URL is baked in at build time via OMNI_PLATFORM_URL.
+ * These credentials are stored after the user signs in via device code flow.
+ * When absent, the launcher runs in open-source mode with local Docker.
+ */
+export type PlatformCredentials = {
+  accessToken: string;
+  refreshToken: string;
+  userEmail?: string;
+  userName?: string;
+  userRole?: string;
+  domains?: Array<{ id: number; name: string; slug: string }>;
+};
 
 export type StoreData = {
   workspaceDir?: string;
   sandboxEnabled: boolean;
   sandboxVariant: SandboxVariant;
+  sandboxBackend: SandboxBackend;
   launcherWindowProps?: WindowProps;
   appWindowProps?: WindowProps;
   optInToLauncherPrereleases: boolean;
@@ -72,6 +89,9 @@ export type StoreData = {
   activeCodeTabId: CodeTabId | null;
   codeLayoutMode: CodeLayoutMode;
   activeTicketId: TicketId | null;
+
+  // Enterprise platform (optional — when set, enables enterprise mode)
+  platform?: PlatformCredentials;
 };
 
 // The electron store uses JSON schema to validate its data.
@@ -111,6 +131,11 @@ export const schema: Schema<StoreData> = {
     type: 'string',
     enum: ['standard', 'work'],
     default: 'work',
+  },
+  sandboxBackend: {
+    type: 'string',
+    enum: ['docker', 'podman', 'vm', 'local'],
+    default: 'docker',
   },
   launcherWindowProps: winSizePropsSchema,
   appWindowProps: winSizePropsSchema,
@@ -289,6 +314,17 @@ export const schema: Schema<StoreData> = {
       required: ['id', 'title', 'status', 'createdAt', 'updatedAt'],
     },
   },
+  platform: {
+    type: 'object',
+    properties: {
+      accessToken: { type: 'string' },
+      refreshToken: { type: 'string' },
+      userEmail: { type: 'string' },
+      userName: { type: 'string' },
+      userRole: { type: 'string' },
+      domains: { type: 'array', items: { type: 'object' } },
+    },
+  },
 };
 
 /**
@@ -374,10 +410,6 @@ export type AgentProcessStatus =
   | OkStatus<'connecting', AgentProcessData>
   | OkStatus<'running', AgentProcessData>;
 
-// Legacy aliases — keep for backward compatibility during transition
-export type SandboxStatusData = AgentProcessData;
-export type SandboxProcessStatus = AgentProcessStatus;
-export type ChatStatusData = AgentProcessData;
 export type ChatProcessStatus = AgentProcessStatus;
 
 /**
@@ -585,7 +617,7 @@ export type Task = {
   id: TaskId;
   projectId: ProjectId;
   taskDescription: string;
-  status: WithTimestamp<SandboxProcessStatus>;
+  status: WithTimestamp<AgentProcessStatus>;
   createdAt: number;
   branch?: string;
   worktreePath?: string;
@@ -680,23 +712,14 @@ type OmniInstallProcessIpcEvents = Namespaced<
   }
 >;
 
-type SandboxProcessIpcEvents = Namespaced<
-  'sandbox-process',
-  {
-    'get-status': () => WithTimestamp<SandboxProcessStatus>;
-    start: (arg: { workspaceDir: string; sandboxVariant: SandboxVariant }) => void;
-    stop: () => void;
-    rebuild: () => void;
-    resize: (cols: number, rows: number) => void;
-  }
->;
-
 type ChatProcessIpcEvents = Namespaced<
   'chat-process',
   {
     'get-status': () => WithTimestamp<ChatProcessStatus>;
-    start: (arg: { workspaceDir: string }) => void;
+    start: (arg: { workspaceDir: string; sandboxVariant?: SandboxVariant }) => void;
     stop: () => void;
+    rebuild: () => void;
+    resize: (cols: number, rows: number) => void;
   }
 >;
 
@@ -764,14 +787,14 @@ type ConfigIpcEvents = Namespaced<
 type CodeIpcEvents = Namespaced<
   'code',
   {
-    'start-sandbox': (tabId: CodeTabId, arg: { workspaceDir: string; sandboxVariant: SandboxVariant; local?: boolean }) => void;
+    'start-sandbox': (tabId: CodeTabId, arg: { workspaceDir: string; sandboxVariant: SandboxVariant; local?: boolean; sandboxBackend?: SandboxBackend }) => void;
     'stop-sandbox': (tabId: CodeTabId) => void;
     'rebuild-sandbox': (
       tabId: CodeTabId,
-      fallbackArg: { workspaceDir: string; sandboxVariant: SandboxVariant; local?: boolean }
+      fallbackArg: { workspaceDir: string; sandboxVariant: SandboxVariant; local?: boolean; sandboxBackend?: SandboxBackend }
     ) => void;
     'resize-sandbox': (tabId: CodeTabId, cols: number, rows: number) => void;
-    'get-sandbox-status': (tabId: CodeTabId) => WithTimestamp<SandboxProcessStatus>;
+    'get-sandbox-status': (tabId: CodeTabId) => WithTimestamp<AgentProcessStatus>;
   }
 >;
 
@@ -814,6 +837,24 @@ type ProjectIpcEvents = Namespaced<
 >;
 
 /**
+ * Platform API. Main process handles these events, renderer process invokes them.
+ * Only functional in enterprise builds (OMNI_PLATFORM_URL set at build time).
+ */
+type PlatformIpcEvents = Namespaced<
+  'platform',
+  {
+    /** Returns true if this is an enterprise build with a baked-in platform URL. */
+    'is-enterprise': () => boolean;
+    /** Returns current auth state. */
+    'get-auth': () => PlatformCredentials | null;
+    /** Initiates device code flow. Returns user_code + verification_uri for user to open. */
+    'sign-in': () => { userCode: string; verificationUri: string; message: string };
+    /** Signs out — clears stored credentials. */
+    'sign-out': () => void;
+  }
+>;
+
+/**
  * Inbox API. Main process handles these events, renderer process invokes them.
  */
 type InboxIpcEvents = Namespaced<
@@ -847,7 +888,6 @@ type InitiativeIpcEvents = Namespaced<
  */
 export type IpcEvents = MainProcessIpcEvents &
   OmniInstallProcessIpcEvents &
-  SandboxProcessIpcEvents &
   ChatProcessIpcEvents &
   UtilIpcEvents &
   TerminalIpcEvents &
@@ -856,7 +896,8 @@ export type IpcEvents = MainProcessIpcEvents &
   CodeIpcEvents &
   ProjectIpcEvents &
   InboxIpcEvents &
-  InitiativeIpcEvents;
+  InitiativeIpcEvents &
+  PlatformIpcEvents;
 
 /**
  * Store events. Main process emits these events, renderer process listens to them.
@@ -893,15 +934,6 @@ type OmniInstallProcessIpcRendererEvents = Namespaced<
   'omni-install-process',
   {
     status: [WithTimestamp<OmniInstallProcessStatus>];
-    log: [WithTimestamp<LogEntry>];
-    'raw-output': [string];
-  }
->;
-
-type SandboxProcessIpcRendererEvents = Namespaced<
-  'sandbox-process',
-  {
-    status: [WithTimestamp<SandboxProcessStatus>];
     log: [WithTimestamp<LogEntry>];
     'raw-output': [string];
   }
@@ -951,7 +983,7 @@ type ToastIpcRendererEvents = Namespaced<
 type CodeIpcRendererEvents = Namespaced<
   'code',
   {
-    'sandbox-status': [CodeTabId, WithTimestamp<SandboxProcessStatus>];
+    'sandbox-status': [CodeTabId, WithTimestamp<AgentProcessStatus>];
     'sandbox-raw-output': [CodeTabId, string];
   }
 >;
@@ -962,7 +994,7 @@ type CodeIpcRendererEvents = Namespaced<
 type ProjectIpcRendererEvents = Namespaced<
   'project',
   {
-    'task-status': [TaskId, WithTimestamp<SandboxProcessStatus>];
+    'task-status': [TaskId, WithTimestamp<AgentProcessStatus>];
     'task-session': [TaskId, string];
     phase: [TicketId, import('@/shared/ticket-phase').TicketPhase];
     'supervisor-message': [TicketId, SessionMessage];
@@ -972,18 +1004,29 @@ type ProjectIpcRendererEvents = Namespaced<
 >;
 
 /**
+ * Platform events. Main process emits these events, renderer process listens to them.
+ */
+type PlatformIpcRendererEvents = Namespaced<
+  'platform',
+  {
+    /** Emitted when auth state changes (sign in / sign out / token refresh). */
+    'auth-changed': [PlatformCredentials | null];
+  }
+>;
+
+/**
  * Intersection of all the events emitted by main process that the renderer can listen to.
  */
 export type IpcRendererEvents = TerminalIpcRendererEvents &
   MainProcessIpcRendererEvents &
   OmniInstallProcessIpcRendererEvents &
-  SandboxProcessIpcRendererEvents &
   ChatProcessIpcRendererEvents &
   DevIpcRendererEvents &
   StoreIpcRendererEvents &
   CodeIpcRendererEvents &
   ProjectIpcRendererEvents &
-  ToastIpcRendererEvents;
+  ToastIpcRendererEvents &
+  PlatformIpcRendererEvents;
 
 // #region Config file types
 

@@ -15,7 +15,8 @@ import { createConsoleManager } from '@/main/console-manager';
 import { createProjectManager } from '@/main/project-manager';
 import { MainProcessManager } from '@/main/main-process-manager';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
-import { createSandboxManager } from '@/main/sandbox-manager';
+import { registerPlatformIpc } from '@/main/platform-ipc';
+import { createPlatformClient } from '@/main/platform-mode';
 import { store } from '@/main/store';
 import {
   checkModelsConfigured,
@@ -75,19 +76,15 @@ const [omniInstall, cleanupOmniInstall] = createOmniInstallManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
 });
-const [sandbox, cleanupSandbox] = createSandboxManager({
-  ipc: main.ipc,
-  sendToWindow: main.sendToWindow,
-  getStoreData: () => ({
-    workspaceDir: store.get('workspaceDir') ?? '',
-    sandboxVariant: store.get('sandboxVariant'),
-  }),
-  fetchFn: (input, init) => net.fetch(input as string, init),
-});
 const [chat, cleanupChat] = createChatManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
   fetchFn: (input, init) => net.fetch(input as string, init),
+  getStoreData: () => ({
+    sandboxEnabled: store.get('sandboxEnabled') ?? false,
+    sandboxBackend: store.get('sandboxBackend') ?? 'docker',
+    sandboxVariant: store.get('sandboxVariant'),
+  }),
 });
 const [codeManager, cleanupCode] = createCodeManager({
   ipc: main.ipc,
@@ -100,11 +97,44 @@ const [, cleanupProject] = createProjectManager({
   store,
   codeManager,
 });
+const cleanupPlatform = registerPlatformIpc({
+  ipc: main.ipc,
+  sendToWindow: main.sendToWindow,
+  store,
+  fetchFn: (input, init) => net.fetch(input as string, init),
+});
+
+// Keep CodeManager's platform client in sync with auth state.
+// On sign-in/sign-out, the platform client is updated so new sandboxes
+// use the correct mode without requiring an app restart.
+const platformFetchFn = (input: string | URL | Request, init?: RequestInit) =>
+  net.fetch(input as string, init);
+
+/** Attach onTokenRefresh so refreshed access tokens are persisted to the store. */
+const withTokenPersistence = (client: ReturnType<typeof createPlatformClient>) => {
+  if (client) {
+    client.onTokenRefresh = (newAccessToken) => {
+      const current = store.get('platform');
+      if (current) {
+        store.set('platform', { ...current, accessToken: newAccessToken });
+      }
+    };
+  }
+  return client;
+};
+
+const syncPlatformClients = (platform?: Parameters<typeof createPlatformClient>[0]) => {
+  const client = withTokenPersistence(createPlatformClient(platform, platformFetchFn));
+  codeManager.platformClient = client;
+  chat.platformClient = client;
+};
+syncPlatformClients(store.get('platform'));
+store.onDidChange('platform', (newVal) => {
+  syncPlatformClients(newVal);
+});
 
 main.ipc.handle('main-process:get-status', () => main.getStatus());
 main.ipc.handle('omni-install-process:get-status', () => omniInstall.getStatus());
-main.ipc.handle('sandbox-process:get-status', () => sandbox.getStatus());
-main.ipc.handle('chat-process:get-status', () => chat.getStatus());
 
 //#region App lifecycle
 
@@ -117,10 +147,10 @@ async function cleanup() {
   }
   isShuttingDown = true;
 
+  cleanupPlatform();
   const results = await Promise.allSettled([
     cleanupConsole(),
     cleanupOmniInstall(),
-    cleanupSandbox(),
     cleanupChat(),
     cleanupCode(),
     cleanupProject(),

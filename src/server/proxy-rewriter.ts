@@ -46,10 +46,10 @@ export const setupProxyRewriter = (fastify: FastifyInstance, wsHandler: WsHandle
   // --- URL rewriting via event interceptor ---
   // Intercepts all outgoing events (both sendToAll and sendTo) to rewrite URLs.
   wsHandler.addEventInterceptor((channel, args) => {
-    if (channel === 'sandbox-process:status' || channel === 'chat-process:status') {
+    if (channel === 'chat-process:status') {
       const status = args[0] as Record<string, unknown> | undefined;
       if (status && (status.type === 'running' || status.type === 'connecting') && status.data) {
-        rewriteStatusUrls(status.data as Record<string, string | undefined>, channel === 'chat-process:status' ? 'chat' : 'sandbox');
+        rewriteStatusUrls(status.data as Record<string, string | undefined>, 'chat');
       }
     }
 
@@ -72,14 +72,6 @@ export const setupProxyRewriter = (fastify: FastifyInstance, wsHandler: WsHandle
 
   // --- URL rewriting for invoke responses via result wrappers ---
   // Result wrappers receive a structuredClone from WsHandler, safe to mutate directly.
-  wsHandler.addResultWrapper('sandbox-process:get-status', (result) => {
-    const status = result as Record<string, unknown> | undefined;
-    if (status && (status.type === 'running' || status.type === 'connecting') && status.data) {
-      rewriteStatusUrls(status.data as Record<string, string | undefined>, 'sandbox');
-    }
-    return result;
-  });
-
   wsHandler.addResultWrapper('chat-process:get-status', (result) => {
     const status = result as Record<string, unknown> | undefined;
     if (status && (status.type === 'running' || status.type === 'connecting') && status.data) {
@@ -195,7 +187,8 @@ function handleWsProxy(
   const query = request.url.includes('?') ? `?${request.url.split('?')[1]}` : '';
   const targetUrl = `${wsUpstream}${upstreamPath}${query}`;
 
-  const upstreamSocket = new WsWebSocket(targetUrl);
+  console.log(`[ws-proxy] ${proxyName}: client → upstream ${targetUrl}`);
+  const upstreamSocket = new WsWebSocket(targetUrl, { handshakeTimeout: 10_000 });
 
   // Buffer client messages until upstream is ready
   const pendingMessages: (string | Buffer)[] = [];
@@ -211,6 +204,7 @@ function handleWsProxy(
   });
 
   upstreamSocket.on('open', () => {
+    console.log(`[ws-proxy] ${proxyName}: upstream connected`);
     for (const msg of pendingMessages) {
       upstreamSocket.send(msg);
     }
@@ -240,11 +234,13 @@ function handleWsProxy(
     safeClose(upstreamSocket);
   });
 
-  upstreamSocket.on('close', () => {
+  upstreamSocket.on('close', (code, reason) => {
+    console.log(`[ws-proxy] ${proxyName}: upstream closed code=${code} reason=${String(reason)}`);
     safeClose(clientSocket);
   });
 
-  upstreamSocket.on('error', () => {
+  upstreamSocket.on('error', (err) => {
+    console.error(`[ws-proxy] ${proxyName}: upstream error:`, err.message);
     safeClose(clientSocket, 4502, 'Upstream WebSocket error');
   });
 
@@ -282,14 +278,14 @@ const rewriteStatusUrls = (data: Record<string, string | undefined>, proxyName: 
         continue;
       }
       const parsed = new URL(url);
-      if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
-        const proxyKey = `${proxyName}-${field}`;
-        const upstream = `${parsed.protocol}//${parsed.host}`;
+      const proxyKey = `${proxyName}-${field}`;
+      const upstream = `${parsed.protocol}//${parsed.host}`;
 
-        upstreamMap.set(proxyKey, upstream);
+      upstreamMap.set(proxyKey, upstream);
 
-        data[field] = `/proxy/${proxyKey}${parsed.pathname}${parsed.search}`;
-      }
+      const proxyPath = `/proxy/${proxyKey}${parsed.pathname}${parsed.search}`;
+      console.log(`[proxy-rewrite] ${field}: ${url} → ${proxyPath} (upstream: ${upstream})`);
+      data[field] = proxyPath;
     } catch {
       // Not a valid URL, skip
     }

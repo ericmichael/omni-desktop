@@ -7,6 +7,7 @@ import type { ModelsConfig, OperatingSystem, StoreData } from '@/shared/types';
 const getDefaults = (): StoreData => ({
   sandboxEnabled: false,
   sandboxVariant: 'work',
+  sandboxBackend: 'docker',
   optInToLauncherPrereleases: false,
   previewFeatures: false,
 

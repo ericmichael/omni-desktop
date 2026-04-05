@@ -12,6 +12,7 @@ import { ErrorBoundaryFallback } from '@/renderer/app/ErrorBoundaryFallback';
 import { MainContent } from '@/renderer/app/MainContent';
 import { syncTheme } from '@/renderer/constants';
 import { SystemInfoLoadingGate, SystemInfoProvider } from '@/renderer/contexts/SystemInfoContext';
+import { AuthGate } from '@/renderer/features/Auth/AuthGate';
 import { Console } from '@/renderer/features/Console/Console';
 import { QuickCapture } from '@/renderer/features/Inbox/QuickCapture';
 import { SettingsModal } from '@/renderer/features/SettingsModal/SettingsModal';
@@ -39,13 +40,15 @@ export const App = () => {
       <div className="w-dvw h-dvh relative overflow-hidden bg-surface font-sans text-fg antialiased">
         <ErrorBoundary FallbackComponent={ErrorBoundaryFallback}>
           <SystemInfoLoadingGate>
-            <div className="flex w-full h-full min-h-0">
-              <MainContent />
-            </div>
+            <AuthGate>
+              <div className="flex w-full h-full min-h-0">
+                <MainContent />
+              </div>
+              <SettingsModal />
+              <Console />
+              <QuickCapture />
+            </AuthGate>
           </SystemInfoLoadingGate>
-          <SettingsModal />
-          <Console />
-          <QuickCapture />
           <ToastContainer />
         </ErrorBoundary>
       </div>

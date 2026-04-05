@@ -33,10 +33,12 @@ const MAX_RECONNECT_DELAY = 10_000;
 
 const SESSION_ID_KEY = 'omni-session-id';
 
+import { uuidv4 } from '@/lib/uuid';
+
 function getOrCreateSessionId(): string {
   let id = localStorage.getItem(SESSION_ID_KEY);
   if (!id) {
-    id = crypto.randomUUID();
+    id = uuidv4();
     localStorage.setItem(SESSION_ID_KEY, id);
   }
   return id;

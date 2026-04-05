@@ -1,6 +1,6 @@
-import type { TicketPriority, TicketResolution, SandboxProcessStatus, TicketPhase } from '@/shared/types';
+import type { TicketPriority, TicketResolution, AgentProcessStatus, TicketPhase } from '@/shared/types';
 
-export const STATUS_TEXT_COLORS: Partial<Record<SandboxProcessStatus['type'], string>> = {
+export const STATUS_TEXT_COLORS: Partial<Record<AgentProcessStatus['type'], string>> = {
   uninitialized: 'text-fg-subtle',
   starting: 'text-yellow-500 animate-pulse',
   running: 'text-green-500',
@@ -10,7 +10,7 @@ export const STATUS_TEXT_COLORS: Partial<Record<SandboxProcessStatus['type'], st
   error: 'text-red-500',
 };
 
-export const STATUS_BOX_COLORS: Partial<Record<SandboxProcessStatus['type'], string>> = {
+export const STATUS_BOX_COLORS: Partial<Record<AgentProcessStatus['type'], string>> = {
   uninitialized: 'bg-surface-overlay/50 border-surface-border text-fg-subtle',
   starting: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-500 animate-pulse',
   running: 'bg-green-500/10 border-green-500/30 text-green-500',

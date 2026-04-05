@@ -13,12 +13,12 @@ import type {
   CodeTabId,
   ProjectId,
   TicketId,
-  SandboxProcessStatus,
+  AgentProcessStatus,
   SandboxVariant,
   WithTimestamp,
 } from '@/shared/types';
 
-export const $codeTabStatuses = map<Record<CodeTabId, WithTimestamp<SandboxProcessStatus>>>({});
+export const $codeTabStatuses = map<Record<CodeTabId, WithTimestamp<AgentProcessStatus>>>({});
 export const $codeTabXTerms = map<Record<CodeTabId, Terminal>>({});
 export const $codeTabPhases = map<Record<CodeTabId, AutoLaunchPhase>>({});
 export const $codeTabErrors = map<Record<CodeTabId, string | null>>({});
@@ -73,7 +73,7 @@ const teardownTabTerminal = (tabId: CodeTabId) => {
 };
 
 export const codeApi = {
-  startSandbox: (tabId: CodeTabId, arg: { workspaceDir: string; sandboxVariant: SandboxVariant; local?: boolean }) => {
+  startSandbox: (tabId: CodeTabId, arg: { workspaceDir: string; sandboxVariant: SandboxVariant; local?: boolean; sandboxBackend?: import('@/shared/types').SandboxBackend }) => {
     // Clear stale status so watchProcessStatus doesn't see old data from a previous run
     // and immediately send a spurious SANDBOX_EXITED/SANDBOX_ERROR event.
     const statuses = { ...$codeTabStatuses.get() };
@@ -91,7 +91,7 @@ export const codeApi = {
     await emitter.invoke('code:stop-sandbox', tabId);
   },
 
-  rebuildSandbox: (tabId: CodeTabId, fallbackArg: { workspaceDir: string; sandboxVariant: SandboxVariant; local?: boolean }) => {
+  rebuildSandbox: (tabId: CodeTabId, fallbackArg: { workspaceDir: string; sandboxVariant: SandboxVariant; local?: boolean; sandboxBackend?: import('@/shared/types').SandboxBackend }) => {
     // Clear stale status (same rationale as startSandbox).
     const statuses = { ...$codeTabStatuses.get() };
     delete statuses[tabId];

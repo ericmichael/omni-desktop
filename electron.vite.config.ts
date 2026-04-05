@@ -5,9 +5,16 @@ import { resolve } from 'path';
 import { createHtmlPlugin } from 'vite-plugin-html';
 import tsconfigPaths from 'vite-tsconfig-paths';
 
+// Enterprise builds set OMNI_PLATFORM_URL at build time to bake in
+// the management plane endpoint. Open-source builds leave it unset.
+const platformDefines = {
+  __PLATFORM_URL__: JSON.stringify(process.env.OMNI_PLATFORM_URL || ''),
+};
+
 export default defineConfig({
   main: {
     plugins: [tsconfigPaths()],
+    define: platformDefines,
     build: {
       lib: {
         entry: resolve('src/main/index.ts'),
@@ -27,6 +34,7 @@ export default defineConfig({
   },
   renderer: {
     root: '.',
+    define: platformDefines,
     plugins: [
       tailwindcss(),
       react(),

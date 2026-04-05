@@ -13,7 +13,7 @@ import { setupProxyRewriter } from '@/server/proxy-rewriter';
 import { ServerStore } from '@/server/store';
 import { WsHandler } from '@/server/ws-handler';
 
-const PORT = parseInt(process.env['PORT'] ?? '3000', 10);
+const PORT = parseInt(process.env['PORT'] ?? '3001', 10);
 const HOST = process.env['HOST'] ?? '0.0.0.0';
 
 const main = async () => {
@@ -40,8 +40,8 @@ const main = async () => {
   // Set up reverse proxy URL rewriting for internal services (chat, sandbox, etc.)
   setupProxyRewriter(fastify, wsHandler);
 
-  // Wire global (shared) IPC handlers — store, util, config, project
-  const { cleanupProject } = wireGlobalHandlers({ wsHandler, store });
+  // Wire global (shared) IPC handlers — store, util, config, project, code, chat, sandbox, install
+  const { cleanupGlobalManagers } = wireGlobalHandlers({ wsHandler, store });
 
   // WebSocket route — each new connection gets its own manager instances.
   // Clients send a sessionId query param; if the server has an existing session
@@ -75,11 +75,11 @@ const main = async () => {
     return reply.code(404).send({ error: 'Not found' });
   });
 
-  // Graceful shutdown — clean up all persistent sessions + project manager
+  // Graceful shutdown — clean up all persistent sessions + global managers
   const shutdown = async () => {
     fastify.log.info('Shutting down...');
     await wsHandler.cleanupAllSessions();
-    await cleanupProject();
+    await cleanupGlobalManagers();
     await fastify.close();
     process.exit(0);
   };

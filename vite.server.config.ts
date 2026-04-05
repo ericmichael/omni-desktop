@@ -46,7 +46,12 @@ function serverRestart(entry: string): Plugin {
  * Aliases 'electron' and 'electron-store' to shims so manager imports work.
  * Outputs ESM to avoid interop issues with ESM-only deps (ansi-regex, nanoid, etc.).
  */
+const platformDefines = {
+  __PLATFORM_URL__: JSON.stringify(process.env.OMNI_PLATFORM_URL || ''),
+};
+
 export default defineConfig({
+  define: platformDefines,
   plugins: [tsconfigPaths(), serverRestart('out/server/index.mjs')],
   build: {
     target: 'node22',

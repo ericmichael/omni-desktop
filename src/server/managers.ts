@@ -9,7 +9,8 @@ import { createCodeManager } from '@/main/code-manager';
 import { createConsoleManager } from '@/main/console-manager';
 import { createProjectManager } from '@/main/project-manager';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
-import { createSandboxManager } from '@/main/sandbox-manager';
+import { isEnterpriseBuild, PLATFORM_URL, createPlatformClient } from '@/main/platform-mode';
+import { PlatformClient } from '@/main/platform-client';
 import {
   checkModelsConfigured,
   ensureDirectory,
@@ -36,8 +37,12 @@ type SendToWindow = <T extends keyof IpcRendererEvents>(channel: T, ...args: Ipc
 type HandleFn = (channel: string, handler: (...args: unknown[]) => unknown | Promise<unknown>) => void;
 
 /**
- * Wire up global (shared) IPC handlers — store, util, config, project, main-process.
+ * Wire up global (shared) IPC handlers — store, util, config, project, code, chat, main-process.
  * These are stateless or shared, safe for all clients to use.
+ *
+ * CodeManager and ChatManager are global so that containers/processes survive WebSocket
+ * reconnections and React re-renders. Each WS session reattaching to the same server
+ * gets the existing running container status instead of spawning duplicates.
  */
 export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerStore }) => {
   const { wsHandler, store } = arg;
@@ -50,6 +55,43 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
     sendToWindow: sendToAll,
     store: store as any,
   });
+
+  // --- Global managers (survive WS reconnections) ---
+
+  const [omniInstall, cleanupOmniInstall] = createOmniInstallManager({
+    ipc: ipc as any,
+    sendToWindow: sendToAll,
+  });
+
+  const [chat, cleanupChat] = createChatManager({
+    ipc: ipc as any,
+    sendToWindow: sendToAll,
+    fetchFn: globalThis.fetch,
+    getStoreData: () => ({
+      sandboxEnabled: store.get('sandboxEnabled') ?? false,
+      sandboxBackend: store.get('sandboxBackend') ?? 'docker',
+      sandboxVariant: store.get('sandboxVariant'),
+    }),
+  });
+
+  const [codeManager, cleanupCode] = createCodeManager({
+    ipc: ipc as any,
+    sendToWindow: sendToAll,
+    fetchFn: globalThis.fetch,
+  });
+
+  // Wire platform client for enterprise mode — all managers that use AgentProcess
+  const updatePlatformClients = () => {
+    const platform = store.get('platform');
+    const client = createPlatformClient(platform, globalThis.fetch);
+    codeManager.platformClient = client;
+    chat.platformClient = client;
+  };
+  updatePlatformClients();
+  const unsubPlatform = store.onDidAnyChange(() => updatePlatformClients());
+
+  // Global status getters
+  ipc.handle('omni-install-process:get-status', () => omniInstall.getStatus());
 
   // Store change notifications — broadcast to all clients
   store.onDidAnyChange((data) => {
@@ -194,12 +236,78 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
     await writeFile(filePath, content, 'utf-8');
   });
 
-  return { cleanupProject };
+  // Platform handlers
+  ipc.handle('platform:is-enterprise', () => isEnterpriseBuild());
+  ipc.handle('platform:get-auth', () => store.get('platform') ?? null);
+  ipc.handle('platform:sign-in', async () => {
+    if (!isEnterpriseBuild()) {
+      throw new Error('Not an enterprise build');
+    }
+    const deviceCode = await PlatformClient.initiateDeviceCode(PLATFORM_URL, globalThis.fetch);
+
+    // Poll in background
+    void (async () => {
+      const maxAttempts = Math.floor(deviceCode.expires_in / deviceCode.interval);
+      for (let i = 0; i < maxAttempts; i++) {
+        await new Promise<void>((r) => setTimeout(r, deviceCode.interval * 1000));
+        try {
+          const result = await PlatformClient.pollForToken(PLATFORM_URL, deviceCode.device_code, globalThis.fetch);
+          if (result.status === 'authenticated' && result.access_token && result.refresh_token) {
+            const credentials = {
+              accessToken: result.access_token,
+              refreshToken: result.refresh_token,
+              userEmail: result.user?.email,
+              userName: result.user?.name,
+              userRole: result.user?.role,
+              domains: result.user?.domains,
+            };
+            store.set('platform', credentials);
+            wsHandler.sendToAll('platform:auth-changed', credentials);
+            return;
+          }
+          if (result.status === 'expired') return;
+        } catch {
+          // keep polling
+        }
+      }
+    })();
+
+    return {
+      userCode: deviceCode.user_code,
+      verificationUri: deviceCode.verification_uri,
+      message: deviceCode.message,
+    };
+  });
+  ipc.handle('platform:sign-out', () => {
+    store.delete('platform');
+    wsHandler.sendToAll('platform:auth-changed', null);
+  });
+
+  const cleanupGlobalManagers = async () => {
+    unsubPlatform();
+    const results = await Promise.allSettled([
+      cleanupProject(),
+      cleanupOmniInstall(),
+      cleanupChat(),
+      cleanupCode(),
+    ]);
+    const errors = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected').map((r) => r.reason);
+    if (errors.length > 0) {
+      console.error('Error cleaning up global managers:', errors);
+    }
+  };
+
+  return { cleanupGlobalManagers };
 };
 
 /**
- * Wire up per-client managers (console, sandbox, chat, code, omni-install).
- * Each client gets its own manager instances with a scoped sendToWindow.
+ * Wire up per-client managers — only truly session-scoped resources (PTY console).
+ *
+ * CodeManager, ChatManager, and OmniInstallManager are ALL global (created in
+ * wireGlobalHandlers) so that containers/processes survive WebSocket reconnections
+ * and React re-renders. Per-session handlers would shadow the global ones and get
+ * destroyed on WS disconnect, killing running containers.
+ *
  * Returns a cleanup function for when the client disconnects.
  */
 export const wireClientManagers = (arg: {
@@ -207,56 +315,18 @@ export const wireClientManagers = (arg: {
   sendToWindow: SendToWindow;
   store: ServerStore;
 }): (() => Promise<void>) => {
-  const { handle, sendToWindow, store } = arg;
+  const { handle, sendToWindow } = arg;
   const ipc = new ServerIpcAdapter(handle);
 
-  // Create managers — cast ipc to any since ServerIpcAdapter is duck-typed to match IpcListener
+  // Console (PTY) is truly per-session — each browser tab gets its own terminal
   const [, cleanupConsole] = createConsoleManager({
     ipc: ipc as any,
     sendToWindow,
   });
 
-  const [omniInstall, cleanupOmniInstall] = createOmniInstallManager({
-    ipc: ipc as any,
-    sendToWindow,
-  });
-
-  const [sandbox, cleanupSandbox] = createSandboxManager({
-    ipc: ipc as any,
-    sendToWindow,
-    getStoreData: () => ({
-      workspaceDir: store.get('workspaceDir') ?? '',
-      sandboxVariant: store.get('sandboxVariant'),
-    }),
-    fetchFn: globalThis.fetch,
-  });
-
-  const [chat, cleanupChat] = createChatManager({
-    ipc: ipc as any,
-    sendToWindow,
-    fetchFn: globalThis.fetch,
-  });
-
-  const [, cleanupCode] = createCodeManager({
-    ipc: ipc as any,
-    sendToWindow,
-    fetchFn: globalThis.fetch,
-  });
-
-  // Status getters (per-client since each client has its own manager instances)
-  ipc.handle('omni-install-process:get-status', () => omniInstall.getStatus());
-  ipc.handle('sandbox-process:get-status', () => sandbox.getStatus());
-  ipc.handle('chat-process:get-status', () => chat.getStatus());
-
-  // Cleanup function — project manager is NOT cleaned up here (it's global/shared)
+  // Cleanup function — only per-session resources (console PTY)
   const cleanup = async () => {
-    const results = await Promise.allSettled([
-      cleanupConsole(),
-      cleanupOmniInstall(),
-      cleanupSandbox(),
-      cleanupChat(),
-      cleanupCode(),
-    ]);
+    const results = await Promise.allSettled([cleanupConsole()]);
     const errors = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected').map((r) => r.reason);
     if (errors.length > 0) {
       console.error('Error cleaning up client session processes:', errors);

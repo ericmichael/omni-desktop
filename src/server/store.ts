@@ -9,6 +9,7 @@ const STORE_PATH = join(homedir(), '.config', 'Omni Code', 'config.json');
 const DEFAULTS: StoreData = {
   sandboxEnabled: false,
   sandboxVariant: 'work',
+  sandboxBackend: 'docker',
   optInToLauncherPrereleases: false,
   previewFeatures: false,
   layoutMode: 'chat',
@@ -86,6 +87,12 @@ export class ServerStore {
     } else {
       Object.assign(this.data, keyOrData);
     }
+    this.persist();
+    this.notify();
+  }
+
+  delete<K extends keyof StoreData>(key: K): void {
+    delete (this.data as Record<string, unknown>)[key];
     this.persist();
     this.notify();
   }

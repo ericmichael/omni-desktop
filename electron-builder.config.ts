@@ -30,6 +30,16 @@ export default {
       filter: 'uv*',
     },
     {
+      from: 'assets/bin',
+      to: './bin',
+      filter: 'omni-sandbox*',
+    },
+    {
+      from: 'assets/bin',
+      to: './bin',
+      filter: 'bwrap',
+    },
+    {
       from: 'docker/sandbox',
       to: './sandbox',
     },

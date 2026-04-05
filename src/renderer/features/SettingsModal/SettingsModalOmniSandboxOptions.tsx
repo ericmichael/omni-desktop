@@ -7,20 +7,24 @@ import { $launcherVersion } from '@/renderer/features/Banner/state';
 import {
   $omniInstallProcessStatus,
   $omniRuntimeInfo,
-  $sandboxProcessStatus,
   omniInstallApi,
-  sandboxApi,
 } from '@/renderer/features/Omni/state';
+import { $chatProcessStatus, chatApi } from '@/renderer/features/Chat/state';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi, selectWorkspaceDir } from '@/renderer/services/store';
-import type { OmniTheme, SandboxVariant } from '@/shared/types';
+import type { OmniTheme, SandboxBackend, SandboxVariant } from '@/shared/types';
 
 export const SettingsModalOmniSandboxOptions = memo(() => {
   const store = useStore(persistedStoreApi.$atom);
   const runtimeInfo = useStore($omniRuntimeInfo);
   const installStatus = useStore($omniInstallProcessStatus);
-  const sandboxStatus = useStore($sandboxProcessStatus);
+  const sandboxStatus = useStore($chatProcessStatus);
   const launcherVersion = useStore($launcherVersion);
+  const [isEnterprise, setIsEnterprise] = useState(false);
+
+  useEffect(() => {
+    emitter.invoke('platform:is-enterprise').then(setIsEnterprise);
+  }, []);
 
   const isInstalling = installStatus.type === 'starting' || installStatus.type === 'installing';
   const isRebuilding = sandboxStatus.type === 'starting' || sandboxStatus.type === 'stopping';
@@ -60,8 +64,12 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
     persistedStoreApi.setKey('sandboxVariant', e.target.value as SandboxVariant);
   }, []);
 
+  const onChangeSandboxBackend = useCallback((e: ChangeEvent<HTMLSelectElement>) => {
+    persistedStoreApi.setKey('sandboxBackend', e.target.value as SandboxBackend);
+  }, []);
+
   const rebuildDockerImage = useCallback(() => {
-    sandboxApi.rebuild();
+    chatApi.rebuild();
   }, []);
 
   const reinstallRuntime = useCallback(() => {
@@ -86,26 +94,45 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
 
       <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">Sandbox</span>
       <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
-        <FormField label="Enable sandbox (Docker)">
-          <Switch checked={store.sandboxEnabled ?? false} onCheckedChange={onToggleSandboxEnabled} />
+        <FormField label={isEnterprise ? 'Use local sandbox' : 'Enable sandbox (Docker)'}>
+          <Switch
+            checked={isEnterprise ? !(store.sandboxEnabled ?? true) : (store.sandboxEnabled ?? false)}
+            onCheckedChange={isEnterprise ? (checked) => onToggleSandboxEnabled(!checked) : onToggleSandboxEnabled}
+          />
         </FormField>
-        <FormField label="Sandbox variant">
-          <select
-            value={store.sandboxVariant ?? 'work'}
-            onChange={onChangeSandboxVariant}
-            disabled={!store.sandboxEnabled}
-            className="h-8 px-2 text-xs rounded-md bg-surface border border-surface-border/50 text-fg cursor-pointer outline-none focus:border-accent-500/50 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <option value="work">Work</option>
-            <option value="standard">Standard</option>
-          </select>
-        </FormField>
-        {(import.meta.env.MODE === 'development' || store.previewFeatures) && (
-          <FormField label="Rebuild Docker image">
-            <Button size="sm" variant="ghost" onClick={rebuildDockerImage} isDisabled={isRebuilding}>
-              {isRebuilding ? 'Rebuilding\u2026' : 'Rebuild'}
-            </Button>
-          </FormField>
+        {!isEnterprise && (
+          <>
+            <FormField label="Sandbox backend">
+              <select
+                value={store.sandboxBackend ?? 'docker'}
+                onChange={onChangeSandboxBackend}
+                disabled={!store.sandboxEnabled}
+                className="h-8 px-2 text-xs rounded-md bg-surface border border-surface-border/50 text-fg cursor-pointer outline-none focus:border-accent-500/50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <option value="docker">Docker</option>
+                <option value="podman">Podman</option>
+                <option value="vm">VM (QEMU)</option>
+              </select>
+            </FormField>
+            <FormField label="Sandbox variant">
+              <select
+                value={store.sandboxVariant ?? 'work'}
+                onChange={onChangeSandboxVariant}
+                disabled={!store.sandboxEnabled}
+                className="h-8 px-2 text-xs rounded-md bg-surface border border-surface-border/50 text-fg cursor-pointer outline-none focus:border-accent-500/50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <option value="work">Work</option>
+                <option value="standard">Standard</option>
+              </select>
+            </FormField>
+            {(import.meta.env.MODE === 'development' || store.previewFeatures) && ((store.sandboxBackend ?? 'docker') === 'docker' || store.sandboxBackend === 'podman') && (
+              <FormField label={`Rebuild ${store.sandboxBackend === 'podman' ? 'Podman' : 'Docker'} image`}>
+                <Button size="sm" variant="ghost" onClick={rebuildDockerImage} isDisabled={isRebuilding}>
+                  {isRebuilding ? 'Rebuilding\u2026' : 'Rebuild'}
+                </Button>
+              </FormField>
+            )}
+          </>
         )}
       </div>
 
@@ -126,42 +153,51 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
         </FormField>
       </div>
 
-      <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">Runtime</span>
-      <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
-        <FormField label={`Runtime${runtimeInfo.isInstalled ? ` (v${runtimeInfo.version})` : ''}`}>
-          <Button size="sm" variant="ghost" onClick={reinstallRuntime} isDisabled={isInstalling}>
-            {isInstalling
-              ? runtimeInfo.isInstalled
-                ? 'Reinstalling\u2026'
-                : 'Installing\u2026'
-              : runtimeInfo.isInstalled
-                ? 'Reinstall'
-                : 'Install'}
-          </Button>
-        </FormField>
-        <FormField label="'omni' command in PATH">
-          {cliInPath?.installed ? (
-            <span className="text-xs text-fg-muted">Installed</span>
-          ) : (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={installCliToPath}
-              isDisabled={!runtimeInfo.isInstalled || cliInstalling}
-            >
-              {cliInstalling ? 'Installing\u2026' : 'Install'}
-            </Button>
-          )}
-        </FormField>
-        {cliError && (
-          <div className="rounded-md border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300">{cliError}</div>
-        )}
-      </div>
+      {!isEnterprise && (
+        <>
+          <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">Runtime</span>
+          <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
+            <FormField label={`Runtime${runtimeInfo.isInstalled ? ` (v${runtimeInfo.version})` : ''}`}>
+              <Button size="sm" variant="ghost" onClick={reinstallRuntime} isDisabled={isInstalling}>
+                {isInstalling
+                  ? runtimeInfo.isInstalled
+                    ? 'Reinstalling\u2026'
+                    : 'Installing\u2026'
+                  : runtimeInfo.isInstalled
+                    ? 'Reinstall'
+                    : 'Install'}
+              </Button>
+            </FormField>
+            <FormField label="'omni' command in PATH">
+              {cliInPath?.installed ? (
+                <span className="text-xs text-fg-muted">Installed</span>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={installCliToPath}
+                  isDisabled={!runtimeInfo.isInstalled || cliInstalling}
+                >
+                  {cliInstalling ? 'Installing\u2026' : 'Install'}
+                </Button>
+              )}
+            </FormField>
+            {cliError && (
+              <div className="rounded-md border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300">{cliError}</div>
+            )}
+          </div>
+        </>
+      )}
 
       <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">About</span>
       <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
         <FormField label="Launcher version">
           <span className="text-xs text-fg-muted">{launcherVersion ?? '—'}</span>
+        </FormField>
+        <FormField label="Compute">
+          <span className="text-xs text-fg-muted">
+            {isEnterprise && store.sandboxEnabled !== false ? 'Managed' : 'Local'}
+          </span>
         </FormField>
       </div>
     </div>
