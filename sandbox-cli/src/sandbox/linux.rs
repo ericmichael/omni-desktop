@@ -92,7 +92,7 @@ fn build_seccomp_filter(restrict_network: bool) -> Result<Vec<u8>> {
     ] {
         rules.insert(
             syscall,
-            vec![SeccompRule::new(vec![]).context("creating unconditional seccomp rule")?],
+            vec![],
         );
     }
 
@@ -119,7 +119,7 @@ fn build_seccomp_filter(restrict_network: bool) -> Result<Vec<u8>> {
         ] {
             rules.insert(
                 syscall,
-                vec![SeccompRule::new(vec![]).context("creating unconditional seccomp rule")?],
+                vec![],
             );
         }
     }
