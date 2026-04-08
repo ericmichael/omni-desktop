@@ -267,18 +267,23 @@ pub fn exec(config: SandboxConfig) -> Result<u8> {
     //   3. A regular file
     //
     // Case 1 is handled by binding /run/systemd/resolve below.
-    // Case 2 (and similar out-of-/etc symlinks) requires binding the real file
-    // because /etc is already bound but the symlink target is outside it.
-    if let Ok(real_path) = std::fs::canonicalize("/etc/resolv.conf") {
-        let real_str = real_path.to_string_lossy().to_string();
-        if !real_str.starts_with("/etc/") && !real_str.starts_with("/run/") {
-            // Target is outside /etc and /run (e.g. /mnt/wsl/resolv.conf).
-            // Bind the real file directly to /etc/resolv.conf in the sandbox.
-            args.extend([
-                "--ro-bind".into(),
-                real_str,
-                "/etc/resolv.conf".into(),
-            ]);
+    // Case 2 (and similar out-of-/etc symlinks): the symlink is inside /etc
+    // (already bound) but its target is outside the sandbox. We bind the real
+    // file to the symlink's target path so the existing symlink resolves.
+    if let Ok(link_target) = std::fs::read_link("/etc/resolv.conf") {
+        let target_str = link_target.to_string_lossy().to_string();
+        if !target_str.starts_with("/etc/") && !target_str.starts_with("/run/") {
+            if let Ok(real_path) = std::fs::canonicalize("/etc/resolv.conf") {
+                // Bind the resolved file to the symlink target path.
+                // e.g., bind /mnt/wsl/resolv.conf (real) → /mnt/wsl/resolv.conf (in sandbox)
+                // so the /etc/resolv.conf symlink inside the sandbox resolves.
+                let real_str = real_path.to_string_lossy().to_string();
+                args.extend([
+                    "--ro-bind".into(),
+                    real_str,
+                    target_str,
+                ]);
+            }
         }
     }
 
