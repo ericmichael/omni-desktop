@@ -259,8 +259,29 @@ pub fn exec(config: SandboxConfig) -> Result<u8> {
     // /run as tmpfs, then selectively bind what's needed.
     args.extend(["--tmpfs".into(), "/run".into()]);
 
-    // DNS resolution: /etc/resolv.conf is often a symlink to /run/systemd/resolve/.
-    // Bind the resolved directory so DNS works inside the sandbox.
+    // DNS resolution: ensure resolv.conf is available inside the sandbox.
+    //
+    // /etc/resolv.conf may be:
+    //   1. A symlink to /run/systemd/resolve/stub-resolv.conf (systemd-resolved)
+    //   2. A symlink to /mnt/wsl/resolv.conf (WSL)
+    //   3. A regular file
+    //
+    // Case 1 is handled by binding /run/systemd/resolve below.
+    // Case 2 (and similar out-of-/etc symlinks) requires binding the real file
+    // because /etc is already bound but the symlink target is outside it.
+    if let Ok(real_path) = std::fs::canonicalize("/etc/resolv.conf") {
+        let real_str = real_path.to_string_lossy().to_string();
+        if !real_str.starts_with("/etc/") && !real_str.starts_with("/run/") {
+            // Target is outside /etc and /run (e.g. /mnt/wsl/resolv.conf).
+            // Bind the real file directly to /etc/resolv.conf in the sandbox.
+            args.extend([
+                "--ro-bind".into(),
+                real_str,
+                "/etc/resolv.conf".into(),
+            ]);
+        }
+    }
+
     if Path::new("/run/systemd/resolve").exists() {
         args.extend([
             "--ro-bind".into(),
