@@ -34,25 +34,37 @@ Download the latest release from [GitHub Releases](https://github.com/ericmichae
 
 ## Development
 
-### Dev Environment
+### Prerequisites
 
-This project uses Node 22 and npm.
+- **Node 22+** and npm
+- **Rust** (for building the `omni-sandbox` binary) — install via [rustup](https://rustup.rs):
+  ```sh
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+  ```
+- **Docker** (for sandbox functionality)
+- **bubblewrap** (Linux only, for process sandboxing):
+  ```sh
+  sudo apt-get install bubblewrap   # Debian/Ubuntu
+  sudo pacman -S bubblewrap         # Arch
+  ```
+
+### Quick Start
 
 ```sh
+git clone https://github.com/ericmichael/omni-desktop.git
+cd omni-desktop
 npm i
-npm run download linux  # or: win, mac
 npm run dev
 ```
 
-### Getting `uv` for local dev
+`npm install` automatically:
+1. Rebuilds native modules (`node-pty`)
+2. Downloads the `uv` binary for your platform
+3. Builds `omni-sandbox` from `sandbox-cli/` (requires Rust)
 
-The `uv` binary is required to build or run the launcher in development mode.
+If Rust is not installed, the sandbox build is skipped with a warning. Install Rust and run `npm run build:sandbox` to build it later.
 
-```sh
-npm run download PLATFORM  # linux | win | mac
-```
-
-This downloads `uv` into `assets/bin/`. On macOS, you may need to remove the quarantine flag:
+On macOS, you may need to remove the quarantine flag from downloaded binaries:
 
 ```sh
 xattr -d 'com.apple.quarantine' assets/bin/uv
@@ -61,17 +73,19 @@ xattr -d 'com.apple.quarantine' assets/bin/uv
 ### Build
 
 ```sh
-npm i
-npm run build
-npm run package
+npm run build       # Build production bundles
+npm run package     # Package into installers (dist/)
 ```
 
-### Useful commands
+### Useful Commands
 
-- `npm run dev` — run in development with hot reload
-- `npm run lint` — run all checks (ESLint, Prettier, TypeScript, knip, dpdm)
-- `npm run fix` — auto-fix lint + format
-- `npm test` — run unit tests
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Run in development with hot reload |
+| `npm run build:sandbox` | Rebuild the sandbox binary |
+| `npm run lint` | Run all checks (ESLint, Prettier, TypeScript, knip, dpdm) |
+| `npm run fix` | Auto-fix lint + format |
+| `npm test` | Run unit tests |
 
 ### Code Signing
 
