@@ -276,6 +276,17 @@ pub fn exec(config: SandboxConfig) -> Result<u8> {
             "/run/resolvconf".into(),
         ]);
     }
+    // D-Bus system bus: required for systemd-resolved DNS on systems where
+    // nsswitch.conf uses the "resolve" module (talks to systemd-resolved via
+    // D-Bus rather than the stub resolver). Without this, glibc fails to
+    // resolve hostnames even though /etc/resolv.conf is available.
+    if Path::new("/run/dbus").exists() {
+        args.extend([
+            "--ro-bind".into(),
+            "/run/dbus".into(),
+            "/run/dbus".into(),
+        ]);
+    }
 
     // --- Home directory ---
     // Create an empty tmpfs home so $HOME resolves but is isolated.
@@ -581,6 +592,23 @@ mod tests {
         );
         let code = exec(config).expect("exec should succeed");
         assert_eq!(code, 0, "network namespace should not be unshared when allow_net is true");
+    }
+
+    #[test]
+    #[ignore]
+    fn sandbox_dns_resolution_works() {
+        // DNS must work inside the sandbox when network is allowed.
+        // This catches missing D-Bus socket (/run/dbus) or resolv.conf issues
+        // on systems using systemd-resolved.
+        let config = run_sh_opts(
+            "python3 -c 'import socket; socket.getaddrinfo(\"example.com\", 80)' 2>/dev/null && exit 0; \
+             getent hosts example.com >/dev/null 2>&1 && exit 0; \
+             nslookup example.com >/dev/null 2>&1 && exit 0; \
+             exit 1",
+            true, vec![], vec![], vec![],
+        );
+        let code = exec(config).expect("exec should succeed");
+        assert_eq!(code, 0, "DNS resolution should work when network is allowed");
     }
 
     #[test]
