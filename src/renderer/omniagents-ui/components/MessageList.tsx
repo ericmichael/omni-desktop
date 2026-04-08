@@ -87,8 +87,8 @@ export function MessageList({ items, greeting: greetingProp, statusText, thinkin
     return (
       <div className="flex-1 relative">
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="mx-auto max-w-2xl text-center px-4">
-            <div className="text-4xl font-normal tracking-tight text-textHeading font-serif">
+          <div className="mx-auto max-w-full sm:max-w-2xl text-center px-6">
+            <div className="text-2xl sm:text-4xl font-normal tracking-tight text-textHeading font-serif">
               {greeting}
             </div>
             <motion.div
@@ -133,7 +133,7 @@ function MessageBubble({ index, role, content, attachments, reactions, onReact, 
   if (role === 'user') {
     return (
       <div className="flex justify-end">
-        <div className="flex flex-col items-end max-w-[70%] space-y-3">
+        <div className="flex flex-col items-end max-w-[85%] sm:max-w-[70%] space-y-3">
           {attachments && attachments.length > 0 ? (
             <div className="flex flex-wrap gap-2 w-full justify-end">
               {attachments.map((att, i) => (
@@ -153,7 +153,7 @@ function MessageBubble({ index, role, content, attachments, reactions, onReact, 
   if (role === 'system') {
     return (
       <div className="flex justify-start">
-        <div className="flex flex-col items-start max-w-[70%]">
+        <div className="flex flex-col items-start max-w-[85%] sm:max-w-[70%]">
           {attachments && attachments.length > 0 ? (
             <div className="mb-1 flex flex-wrap gap-2 w-full">
               {attachments.map((att, i) => (
@@ -172,7 +172,7 @@ function MessageBubble({ index, role, content, attachments, reactions, onReact, 
   }
   return (
     <div className="flex justify-start">
-      <div className="flex flex-col items-start max-w-[70%]">
+      <div className="flex flex-col items-start max-w-[85%] sm:max-w-[70%]">
         {attachments && attachments.length > 0 ? (
           <div className="mb-1 flex flex-wrap gap-2 w-full">
             {attachments.map((att, i) => (

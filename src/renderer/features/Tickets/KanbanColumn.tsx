@@ -16,7 +16,7 @@ export const KanbanColumn = memo(({ column, tickets }: { column: Column; tickets
     <div
       ref={setNodeRef}
       className={cn(
-        'flex flex-col w-66 shrink-0 h-full rounded-lg border border-surface-border border-t-2 transition-colors',
+        'flex flex-col w-56 sm:w-66 shrink-0 h-full rounded-lg border border-surface-border border-t-2 transition-colors',
         COLUMN_COLORS[column.id] ?? 'border-t-fg-muted',
         isOver ? 'bg-accent-500/10' : (COLUMN_BG_COLORS[column.id] ?? 'bg-surface/50')
       )}

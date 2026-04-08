@@ -480,7 +480,7 @@ export function TerminalPanel({
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div
         className={[
-          'absolute left-0 right-0 bottom-0 h-[70vh] bg-bgColumn border-t border-bgCardAlt flex flex-col transition-transform',
+          'absolute left-0 right-0 bottom-0 h-[50vh] sm:h-[70vh] bg-bgColumn border-t border-bgCardAlt flex flex-col transition-transform',
           open ? 'translate-y-0' : 'translate-y-4',
         ].join(' ')}
       >

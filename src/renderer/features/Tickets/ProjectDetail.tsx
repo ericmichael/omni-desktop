@@ -87,48 +87,51 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
   return (
     <div className="flex flex-col w-full h-full">
       {/* Project header */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-surface-border shrink-0">
+      <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 border-b border-surface-border shrink-0">
         <span className="text-sm font-semibold text-fg truncate">{project.label}</span>
-        <div className="flex items-center rounded-md border border-surface-border text-xs overflow-hidden ml-2">
+        <div className="flex items-center rounded-md border border-surface-border text-xs overflow-hidden ml-1 sm:ml-2 shrink-0">
           <button
-            className={`px-2.5 py-1 transition-colors ${view === 'board' ? 'bg-surface-raised text-fg font-medium' : 'text-fg-muted hover:text-fg'}`}
+            className={`px-2 sm:px-2.5 py-1 transition-colors ${view === 'board' ? 'bg-surface-raised text-fg font-medium' : 'text-fg-muted hover:text-fg'}`}
             onClick={() => setView('board')}
           >
             Board
           </button>
           <button
-            className={`px-2.5 py-1 transition-colors ${view === 'brief' ? 'bg-surface-raised text-fg font-medium' : 'text-fg-muted hover:text-fg'}`}
+            className={`px-2 sm:px-2.5 py-1 transition-colors ${view === 'brief' ? 'bg-surface-raised text-fg font-medium' : 'text-fg-muted hover:text-fg'}`}
             onClick={() => setView('brief')}
           >
             Brief
           </button>
         </div>
         <div className="flex-1" />
-        <label className="flex items-center gap-1.5 text-xs text-fg-muted cursor-pointer select-none">
+        <label className="hidden sm:flex items-center gap-1.5 text-xs text-fg-muted cursor-pointer select-none">
           <Switch checked={project.autoDispatch ?? false} onCheckedChange={handleToggleAutoDispatch} />
           Auto-dispatch
         </label>
         {!ticketFormOpen && (
-          <Button size="sm" onClick={handleOpenTicketForm}>
-            New Ticket
+          <Button size="sm" onClick={handleOpenTicketForm} className="shrink-0">
+            <span className="hidden sm:inline">New Ticket</span>
+            <span className="sm:hidden"><PiPlusBold size={13} /></span>
           </Button>
         )}
-        {!initiativeFormOpen && projectInitiatives.length <= 1 && (
-          <Button size="sm" variant="ghost" onClick={handleOpenInitiativeForm}>
-            New Initiative
-          </Button>
-        )}
-        {activeInitiative && !editingInitiativeId && (
-          <Button size="sm" variant="ghost" onClick={handleOpenInitiativeEdit}>
-            Edit Initiative
-          </Button>
-        )}
-        {activeInitiative?.branch && (
-          <span className="flex items-center gap-1 rounded-full bg-purple-400/10 px-2 py-1 text-xs font-medium text-purple-400">
-            <PiGitBranchBold size={12} />
-            {activeInitiative.branch}
-          </span>
-        )}
+        <span className="hidden sm:contents">
+          {!initiativeFormOpen && projectInitiatives.length <= 1 && (
+            <Button size="sm" variant="ghost" onClick={handleOpenInitiativeForm}>
+              New Initiative
+            </Button>
+          )}
+          {activeInitiative && !editingInitiativeId && (
+            <Button size="sm" variant="ghost" onClick={handleOpenInitiativeEdit}>
+              Edit Initiative
+            </Button>
+          )}
+          {activeInitiative?.branch && (
+            <span className="flex items-center gap-1 rounded-full bg-purple-400/10 px-2 py-1 text-xs font-medium text-purple-400">
+              <PiGitBranchBold size={12} />
+              {activeInitiative.branch}
+            </span>
+          )}
+        </span>
         <IconButton aria-label="Edit project" icon={<PiPencilSimpleBold />} size="sm" onClick={handleOpenEditForm} />
         <IconButton
           aria-label="Pipeline settings"
@@ -140,7 +143,7 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
       </div>
 
       {ticketFormOpen && (
-        <div className="px-6 pt-4 shrink-0">
+        <div className="px-3 sm:px-6 pt-4 shrink-0">
           <TicketForm projectId={projectId} onClose={handleCloseTicketForm} />
         </div>
       )}
@@ -154,13 +157,13 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
       {editFormOpen && <ProjectForm open={editFormOpen} onClose={handleCloseEditForm} editProject={project} />}
 
       {initiativeFormOpen && (
-        <div className="px-6 pt-4 shrink-0">
+        <div className="px-3 sm:px-6 pt-4 shrink-0">
           <InitiativeForm projectId={projectId} onClose={handleCloseInitiativeForm} />
         </div>
       )}
 
       {editingInitiativeId && activeInitiative && (
-        <div className="px-6 pt-4 shrink-0">
+        <div className="px-3 sm:px-6 pt-4 shrink-0">
           <InitiativeForm
             projectId={projectId}
             onClose={handleCloseInitiativeEdit}
@@ -171,7 +174,7 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
 
       {/* Initiative filter bar */}
       {view === 'board' && projectInitiatives.length > 1 && (
-        <div className="flex items-center gap-1.5 px-4 py-1.5 border-b border-surface-border shrink-0">
+        <div className="flex items-center gap-1.5 px-2 sm:px-4 py-1.5 border-b border-surface-border shrink-0 overflow-x-auto">
           <button
             className={`px-2 py-0.5 rounded text-xs transition-colors ${
               activeInitiativeId === 'all'

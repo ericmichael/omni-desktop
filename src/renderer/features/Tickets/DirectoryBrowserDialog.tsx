@@ -20,7 +20,7 @@ const DirectoryRow = memo(({ entry, onNavigate }: DirectoryRowProps) => {
     <button
       type="button"
       onClick={handleClick}
-      className="flex items-center gap-2 w-full text-left py-1.5 px-3 text-sm hover:bg-surface-raised cursor-pointer transition-colors text-fg"
+      className="flex items-center gap-2.5 w-full text-left py-2.5 px-3.5 text-sm hover:bg-surface-raised active:bg-surface-raised cursor-pointer transition-colors text-fg"
     >
       <PiFolderBold size={14} className="shrink-0 text-yellow-400" />
       <span className="truncate">{entry.name}</span>
@@ -111,7 +111,7 @@ export const DirectoryBrowserDialog = memo(({ open, onClose, onSelect, initialPa
 
   return (
     <AnimatedDialog open={open} onClose={onClose}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>Select Directory</DialogHeader>
         <DialogBody className="flex flex-col gap-3">
           {/* Path bar */}
@@ -119,30 +119,30 @@ export const DirectoryBrowserDialog = memo(({ open, onClose, onSelect, initialPa
             <button
               type="button"
               onClick={handleHome}
-              className="shrink-0 rounded p-1.5 text-fg-muted hover:bg-surface-raised hover:text-fg transition-colors"
+              className="shrink-0 rounded-lg p-2 text-fg-muted hover:bg-surface-raised hover:text-fg transition-colors"
               title="Home"
             >
-              <PiHouseBold size={14} />
+              <PiHouseBold size={16} />
             </button>
             <button
               type="button"
               onClick={handleUp}
-              className="shrink-0 rounded p-1.5 text-fg-muted hover:bg-surface-raised hover:text-fg transition-colors"
+              className="shrink-0 rounded-lg p-2 text-fg-muted hover:bg-surface-raised hover:text-fg transition-colors"
               title="Parent directory"
             >
-              <PiArrowUpBold size={14} />
+              <PiArrowUpBold size={16} />
             </button>
             <input
               type="text"
               value={pathInput}
               onChange={handlePathInputChange}
               onKeyDown={handlePathInputKeyDown}
-              className="flex-1 rounded-lg border border-surface-border bg-surface px-3 py-1.5 text-sm text-fg placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500"
+              className="flex-1 min-w-0 rounded-xl border border-surface-border bg-surface px-3.5 py-2 text-base sm:text-sm text-fg placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500 transition-colors"
             />
           </div>
 
           {/* Directory listing */}
-          <div className="h-64 overflow-y-auto rounded-lg border border-surface-border bg-surface">
+          <div className="h-64 sm:h-64 flex-1 sm:flex-initial overflow-y-auto rounded-xl border border-surface-border bg-surface">
             {loading ? (
               <div className="flex items-center justify-center h-full">
                 <Spinner size="sm" />
@@ -158,12 +158,12 @@ export const DirectoryBrowserDialog = memo(({ open, onClose, onSelect, initialPa
             )}
           </div>
         </DialogBody>
-        <DialogFooter className="gap-2 justify-end">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={handleConfirm} isDisabled={!currentPath}>
+        <DialogFooter className="flex-col sm:flex-row gap-2 sm:justify-end">
+          <Button onClick={handleConfirm} isDisabled={!currentPath} className="w-full sm:w-auto justify-center">
             Select
+          </Button>
+          <Button variant="ghost" onClick={onClose} className="w-full sm:w-auto justify-center">
+            Cancel
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -1,10 +1,10 @@
 import { useStore } from '@nanostores/react';
 import { motion } from 'framer-motion';
 import { memo, useCallback, useMemo } from 'react';
-import { PiChatCircleFill, PiCodeBold, PiGearFill, PiRocketLaunchFill } from 'react-icons/pi';
+import { PiChatCircleFill, PiCodeBold, PiDotsThreeBold, PiGearFill, PiRocketLaunchFill } from 'react-icons/pi';
 
 import { OmniLogo } from '@/renderer/common/AsciiLogo';
-import { cn, IconButton } from '@/renderer/ds';
+import { cn } from '@/renderer/ds';
 import { $inboxItems } from '@/renderer/features/Inbox/state';
 import { $isSettingsOpen } from '@/renderer/features/SettingsModal/state';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -49,65 +49,103 @@ export const Sidebar = memo(() => {
   const activeTab = store.layoutMode;
 
   return (
-    <nav className="flex flex-col w-[68px] shrink-0 h-full bg-header border-r border-header-border">
-      {/* Logo */}
-      <div className="grid place-items-center py-3 border-b border-header-border">
+    <nav className="flex flex-row sm:flex-col w-full sm:w-[68px] shrink-0 h-auto sm:h-full bg-header border-t sm:border-t-0 sm:border-r border-header-border">
+      {/* Logo — hidden on mobile */}
+      <div className="hidden sm:grid place-items-center py-3 border-b border-header-border">
         <OmniLogo className="translate-y-px" />
       </div>
 
-      {/* Nav items */}
-      <div className="flex flex-col py-1">
-        {visibleTabs.map((tab) => {
-          const isActive = activeTab === tab.value;
-          return (
-            <button
-              key={tab.value}
-              onClick={setMode(tab.value)}
-              className={cn(
-                'relative flex flex-col items-center justify-center gap-0.5 py-2.5 cursor-pointer select-none transition-colors',
-                isActive ? 'text-header-fg' : 'text-fg-muted hover:text-header-fg hover:bg-white/5'
-              )}
-            >
-              {isActive && (
-                <motion.div
-                  layoutId="sidebar-active-indicator"
-                  className="absolute left-0 top-1 bottom-1 w-[3px] bg-accent-600 rounded-r-full"
-                  transition={springTransition}
-                />
-              )}
-              {isActive && (
-                <motion.div
-                  layoutId="sidebar-active-bg"
-                  className="absolute inset-1 rounded-md bg-white/10"
-                  transition={springTransition}
-                />
-              )}
-              <span className="relative z-10">
-                {tab.icon}
-                {tab.value === 'projects' && openInboxCount > 0 && (
-                  <span className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold leading-4 text-center bg-accent-600 text-white">
-                    {openInboxCount}
-                  </span>
+      {/* Nav items — flat row on mobile so all items (including settings) space evenly */}
+      <div className="contents sm:flex sm:flex-col sm:flex-1">
+        <div className="flex flex-row sm:flex-col flex-1 sm:flex-initial justify-evenly sm:justify-start py-0 sm:py-1">
+          {visibleTabs.map((tab) => {
+            const isActive = activeTab === tab.value;
+            return (
+              <button
+                key={tab.value}
+                onClick={setMode(tab.value)}
+                className={cn(
+                  'relative flex flex-col items-center justify-center gap-0.5 py-2 sm:py-2.5 flex-1 sm:flex-initial cursor-pointer select-none transition-colors',
+                  isActive ? 'text-header-fg' : 'text-fg-muted hover:text-header-fg hover:bg-white/5'
                 )}
-              </span>
-              <span className="relative z-10 text-[10px] leading-tight">{tab.label}</span>
-            </button>
-          );
-        })}
-      </div>
+              >
+                {isActive && (
+                  <motion.div
+                    layoutId="sidebar-active-indicator"
+                    className="absolute bottom-0 left-2 right-2 h-[3px] sm:bottom-auto sm:left-0 sm:top-1 sm:right-auto sm:h-auto sm:bottom-1 sm:w-[3px] bg-accent-600 rounded-t-full sm:rounded-t-none sm:rounded-r-full"
+                    transition={springTransition}
+                  />
+                )}
+                {isActive && (
+                  <motion.div
+                    layoutId="sidebar-active-bg"
+                    className="absolute inset-1 rounded-md bg-white/10"
+                    transition={springTransition}
+                  />
+                )}
+                <span className="relative z-10">
+                  {tab.icon}
+                  {tab.value === 'projects' && openInboxCount > 0 && (
+                    <span className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold leading-4 text-center bg-accent-600 text-white">
+                      {openInboxCount}
+                    </span>
+                  )}
+                </span>
+                <span className="relative z-10 text-[10px] leading-tight">{tab.label}</span>
+              </button>
+            );
+          })}
 
-      {/* Spacer */}
-      <div className="flex-1" />
+          {/* More — mobile only, opens a page with Settings etc. */}
+          <button
+            onClick={setMode('more')}
+            className={cn(
+              'relative flex flex-col items-center justify-center gap-0.5 py-2 flex-1 sm:hidden cursor-pointer select-none transition-colors',
+              activeTab === 'more' ? 'text-header-fg' : 'text-fg-muted hover:text-header-fg hover:bg-white/5'
+            )}
+          >
+            {activeTab === 'more' && (
+              <motion.div
+                layoutId="sidebar-active-indicator"
+                className="absolute bottom-0 left-2 right-2 h-[3px] bg-accent-600 rounded-t-full"
+                transition={springTransition}
+              />
+            )}
+            {activeTab === 'more' && (
+              <motion.div
+                layoutId="sidebar-active-bg"
+                className="absolute inset-1 rounded-md bg-white/10"
+                transition={springTransition}
+              />
+            )}
+            <span className="relative z-10">
+              <PiDotsThreeBold size={20} />
+            </span>
+            <span className="relative z-10 text-[10px] leading-tight">More</span>
+          </button>
+        </div>
 
-      {/* Bottom section */}
-      <div className="flex flex-col items-center gap-1 py-2 border-t border-header-border">
-        <IconButton
-          aria-label="Settings"
-          icon={<PiGearFill />}
-          size="sm"
-          onClick={openSettings}
-          isDisabled={isSettingsOpen}
-        />
+        {/* Spacer — desktop only */}
+        <div className="hidden sm:block flex-1" />
+
+        {/* Settings — desktop only, pinned to bottom */}
+        <div className="hidden sm:block sm:border-t border-header-border">
+          <button
+            onClick={openSettings}
+            disabled={isSettingsOpen}
+            className={cn(
+              'relative flex flex-col items-center justify-center gap-0.5 py-2.5 w-full cursor-pointer select-none transition-colors',
+              isSettingsOpen
+                ? 'text-header-fg opacity-40 pointer-events-none'
+                : 'text-fg-muted hover:text-header-fg hover:bg-white/5'
+            )}
+          >
+            <span className="relative z-10">
+              <PiGearFill size={20} />
+            </span>
+            <span className="relative z-10 text-[10px] leading-tight">Settings</span>
+          </button>
+        </div>
       </div>
     </nav>
   );

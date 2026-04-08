@@ -111,7 +111,7 @@ export const KanbanBoard = memo(({ projectId }: { projectId: ProjectId }) => {
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >
-      <div className="flex gap-3 h-full overflow-x-auto px-4 py-3">
+      <div className="flex gap-2 sm:gap-3 h-full overflow-x-auto px-2 sm:px-4 py-2 sm:py-3">
         {pipeline.columns.map((column) => (
           <KanbanColumn key={column.id} column={column} tickets={ticketsByColumn[column.id] ?? []} />
         ))}

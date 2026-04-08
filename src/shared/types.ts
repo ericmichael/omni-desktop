@@ -45,7 +45,7 @@ export type WindowProps = {
 /**
  * Data stored in the electron store.
  */
-export type LayoutMode = 'chat' | 'code' | 'projects';
+export type LayoutMode = 'chat' | 'code' | 'projects' | 'more';
 export type OmniTheme = 'default' | 'tokyo-night' | 'vscode-dark' | 'vscode-light' | 'utrgv';
 
 export type SandboxVariant = 'standard' | 'work';

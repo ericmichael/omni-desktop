@@ -108,7 +108,7 @@ export function PromptInputTextarea({ className, onKeyDown, disableAutosize = fa
       onChange={(e) => setValue(e.target.value)}
       onKeyDown={handleKeyDown}
       className={clsx(
-        'min-h-[44px] w-full resize-none border-none bg-transparent px-4 py-3 text-sm text-textHeading placeholder:text-textSubtle outline-none focus:ring-0',
+        'min-h-[44px] w-full resize-none border-none bg-transparent px-4 py-3 text-base sm:text-sm text-textHeading placeholder:text-textSubtle outline-none focus:ring-0',
         className,
       )}
       rows={1}

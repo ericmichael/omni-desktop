@@ -75,8 +75,8 @@ export const ChatShell = memo(
                   ) : (
                     <div className="flex-1 relative">
                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none [&_button]:pointer-events-auto">
-                        <div className="mx-auto max-w-2xl text-center px-4">
-                          <div className="text-4xl font-normal tracking-tight text-textHeading font-serif">
+                        <div className="mx-auto max-w-full sm:max-w-2xl text-center px-6">
+                          <div className="text-2xl sm:text-4xl font-normal tracking-tight text-textHeading font-serif">
                             {greeting}
                           </div>
                           <AnimatePresence>

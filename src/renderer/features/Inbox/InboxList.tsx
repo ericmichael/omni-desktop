@@ -1,6 +1,6 @@
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PiPlusBold, PiTrashFill } from 'react-icons/pi';
+import { PiCaretRightBold, PiPlusBold, PiTrashFill } from 'react-icons/pi';
 
 import { cn, IconButton } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -8,10 +8,10 @@ import type { InboxItem, InboxItemId, InboxItemStatus } from '@/shared/types';
 
 import { $inboxItems, inboxApi, openQuickCapture } from './state';
 
-const STATUS_COLORS: Record<InboxItemStatus, string> = {
-  open: 'text-blue-400 bg-blue-400/10',
-  done: 'text-green-400 bg-green-400/10',
-  deferred: 'text-fg-muted bg-fg-muted/10',
+const STATUS_DOT: Record<InboxItemStatus, string> = {
+  open: 'bg-blue-400',
+  done: 'bg-green-400',
+  deferred: 'bg-fg-muted/50',
 };
 
 const STATUS_LABELS: Record<InboxItemStatus, string> = {
@@ -19,6 +19,13 @@ const STATUS_LABELS: Record<InboxItemStatus, string> = {
   done: 'Done',
   deferred: 'Deferred',
 };
+
+const FILTERS: { value: InboxItemStatus | 'all'; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'open', label: 'Open' },
+  { value: 'done', label: 'Done' },
+  { value: 'deferred', label: 'Deferred' },
+];
 
 function timeAgo(ts: number): string {
   const diff = Date.now() - ts;
@@ -68,41 +75,46 @@ const InboxCard = memo(
         ref={ref}
         onClick={handleClick}
         className={cn(
-          'group flex flex-col gap-1.5 w-full px-4 py-3 text-left transition-colors border-b border-surface-border cursor-pointer',
+          'group flex items-center gap-3 w-full px-4 py-3.5 text-left transition-colors cursor-pointer rounded-xl',
           isSelected ? 'bg-accent-600/10' : isFocused ? 'bg-white/5' : 'hover:bg-white/5'
         )}
       >
-        <div className="flex items-start gap-2">
-          <div className="flex flex-col flex-1 min-w-0">
+        {/* Leading status dot */}
+        <span className={cn('size-2.5 rounded-full shrink-0', STATUS_DOT[item.status])} title={STATUS_LABELS[item.status]} />
+
+        {/* Content */}
+        <div className="flex flex-col flex-1 min-w-0 gap-0.5">
+          <div className="flex items-baseline gap-2">
             <span className="text-sm text-fg truncate">{item.title}</span>
-            {item.description && (
-              <span className="text-xs text-fg-muted truncate">{item.description}</span>
+          </div>
+          <div className="flex items-center gap-2 text-[11px] text-fg-subtle">
+            <span>{timeAgo(item.createdAt)}</span>
+            {project && (
+              <>
+                <span className="text-fg-muted/30">&middot;</span>
+                <span className="text-purple-400 truncate">{project.label}</span>
+              </>
+            )}
+            {item.linkedTicketIds && item.linkedTicketIds.length > 0 && (
+              <>
+                <span className="text-fg-muted/30">&middot;</span>
+                <span>{item.linkedTicketIds.length} ticket{item.linkedTicketIds.length > 1 ? 's' : ''}</span>
+              </>
             )}
           </div>
-          <span className="shrink-0 text-[10px] text-fg-subtle">{timeAgo(item.createdAt)}</span>
         </div>
-        <div className="flex items-center gap-2">
-          <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-medium', STATUS_COLORS[item.status])}>
-            {STATUS_LABELS[item.status]}
-          </span>
-          {project && (
-            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium text-purple-400 bg-purple-400/10">
-              {project.label}
-            </span>
-          )}
-          {item.linkedTicketIds && item.linkedTicketIds.length > 0 && (
-            <span className="text-[10px] text-fg-subtle">
-              {item.linkedTicketIds.length} ticket{item.linkedTicketIds.length > 1 ? 's' : ''}
-            </span>
-          )}
-          <div className="flex-1" />
+
+        {/* Trailing actions */}
+        {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
+        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
           <IconButton
             aria-label="Delete"
             icon={<PiTrashFill size={12} />}
             size="sm"
             onClick={handleDelete}
-            className="opacity-0 group-hover:opacity-70 hover:!opacity-100 transition-opacity"
+            className="opacity-70 sm:opacity-0 sm:group-hover:opacity-70 hover:!opacity-100 transition-opacity"
           />
+          <PiCaretRightBold size={12} className="text-fg-muted/40 hidden sm:block" />
         </div>
       </button>
     );
@@ -202,56 +214,70 @@ export const InboxList = memo(
     );
 
     return (
-      <div className="flex flex-col w-full h-full">
-        {/* Header */}
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-surface-border shrink-0">
-          <span className="text-sm font-semibold text-fg">Inbox</span>
-          {openCount > 0 && (
-            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-blue-400/10 text-blue-400">
-              {openCount}
-            </span>
-          )}
-          <div className="flex-1" />
-          <select
-            value={filter}
-            onChange={(e) => setFilter(e.target.value as InboxItemStatus | 'all')}
-            className="rounded-md border border-surface-border bg-surface px-2 py-1 text-xs text-fg focus:outline-none focus:border-accent-500"
-          >
-            <option value="all">All</option>
-            <option value="open">Open</option>
-            <option value="done">Done</option>
-            <option value="deferred">Deferred</option>
-          </select>
-          <IconButton aria-label="New item" icon={<PiPlusBold />} size="sm" onClick={openQuickCapture} />
+      <div className="relative flex flex-col w-full h-full">
+        {/* Header — desktop: title + select, mobile: just filter chips */}
+        <div className="flex flex-col gap-2 px-4 py-2.5 border-b border-surface-border shrink-0">
+          {/* Desktop title row */}
+          <div className="hidden sm:flex items-center gap-2">
+            <span className="text-sm font-semibold text-fg">Inbox</span>
+            {openCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-blue-400/10 text-blue-400">
+                {openCount}
+              </span>
+            )}
+            <div className="flex-1" />
+            <IconButton aria-label="New item" icon={<PiPlusBold />} size="sm" onClick={openQuickCapture} />
+          </div>
+
+          {/* Filter chips */}
+          <div className="flex items-center gap-1.5 overflow-x-auto">
+            {FILTERS.map((f) => (
+              <button
+                key={f.value}
+                onClick={() => setFilter(f.value)}
+                className={cn(
+                  'shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-colors',
+                  filter === f.value
+                    ? 'bg-accent-600/20 text-accent-400'
+                    : 'bg-surface-overlay text-fg-muted hover:text-fg hover:bg-surface-overlay/80'
+                )}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* List */}
         <div
           ref={listRef}
-          className="flex-1 min-h-0 overflow-y-auto focus:outline-none"
+          className="flex-1 min-h-0 overflow-y-auto focus:outline-none px-2 sm:px-3 py-2"
           tabIndex={0}
           onKeyDown={handleListKeyDown}
         >
           {items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 h-full">
+            <div className="flex flex-col items-center justify-center gap-2 h-full px-4">
               <p className="text-fg-muted text-sm">Inbox is empty</p>
-              <p className="text-fg-subtle text-xs">
+              <p className="text-fg-subtle text-xs hidden sm:block">
                 <kbd className="px-1 py-0.5 rounded border border-surface-border text-[10px]">Ctrl+I</kbd> to capture from anywhere
               </p>
+              <p className="text-fg-subtle text-xs sm:hidden">Tap + to add an item</p>
             </div>
           ) : (
             <>
-              {items.map((item, index) => (
-                <InboxCard
-                  key={item.id}
-                  item={item}
-                  isSelected={selectedId === item.id}
-                  isFocused={focusIndex === index}
-                  onSelect={handleSelect}
-                  onDelete={handleDelete}
-                />
-              ))}
-              <div className="flex flex-wrap gap-x-3 gap-y-1 px-4 py-2 text-[10px] text-fg-subtle">
+              <div className="flex flex-col gap-0.5">
+                {items.map((item, index) => (
+                  <InboxCard
+                    key={item.id}
+                    item={item}
+                    isSelected={selectedId === item.id}
+                    isFocused={focusIndex === index}
+                    onSelect={handleSelect}
+                    onDelete={handleDelete}
+                  />
+                ))}
+              </div>
+              <div className="hidden sm:flex flex-wrap gap-x-3 gap-y-1 px-4 py-2 text-[10px] text-fg-subtle">
                 <span><kbd className="px-1 py-0.5 rounded border border-surface-border">j</kbd>/<kbd className="px-1 py-0.5 rounded border border-surface-border">k</kbd> navigate</span>
                 <span><kbd className="px-1 py-0.5 rounded border border-surface-border">Enter</kbd> open</span>
                 <span><kbd className="px-1 py-0.5 rounded border border-surface-border">x</kbd> done</span>
@@ -261,6 +287,16 @@ export const InboxList = memo(
             </>
           )}
         </div>
+
+        {/* FAB — mobile only */}
+        <button
+          type="button"
+          onClick={openQuickCapture}
+          className="sm:hidden fixed right-4 bottom-20 z-30 size-14 rounded-2xl bg-accent-600 text-white shadow-lg shadow-accent-600/25 flex items-center justify-center active:scale-95 transition-transform"
+          aria-label="New item"
+        >
+          <PiPlusBold size={22} />
+        </button>
       </div>
     );
   }

@@ -1,5 +1,6 @@
 import { useStore } from '@nanostores/react';
-import { memo, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
+import { PiGearFill } from 'react-icons/pi';
 
 import { Sidebar } from '@/renderer/app/Sidebar';
 import { cn } from '@/renderer/ds';
@@ -7,8 +8,34 @@ import { Chat } from '@/renderer/features/Chat/Chat';
 import { Code } from '@/renderer/features/Code/Code';
 import { Tickets } from '@/renderer/features/Tickets/Tickets';
 import { OnboardingWizard } from '@/renderer/features/Onboarding/OnboardingWizard';
+import { $isSettingsOpen } from '@/renderer/features/SettingsModal/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { LayoutMode } from '@/shared/types';
+
+const MorePage = memo(() => {
+  const openSettings = useCallback(() => {
+    $isSettingsOpen.set(true);
+  }, []);
+
+  return (
+    <div className="flex flex-col w-full h-full bg-surface">
+      <div className="px-4 py-3 border-b border-surface-border">
+        <h1 className="text-base font-semibold text-fg">More</h1>
+      </div>
+      <div className="flex flex-col py-2">
+        <button
+          type="button"
+          onClick={openSettings}
+          className="flex items-center gap-3 px-4 py-3 text-left text-fg hover:bg-white/5 transition-colors"
+        >
+          <PiGearFill size={20} className="text-fg-muted" />
+          <span className="text-sm">Settings</span>
+        </button>
+      </div>
+    </div>
+  );
+});
+MorePage.displayName = 'MorePage';
 
 /**
  * Lazy-mount, never-unmount layout.
@@ -40,7 +67,7 @@ export const MainContent = memo(() => {
   }
 
   return (
-    <div className="flex w-full h-full">
+    <div className="flex flex-col-reverse sm:flex-row w-full h-full">
       <Sidebar />
       <div className="flex-1 min-w-0 min-h-0 relative">
         {mounted.has('chat') && (
@@ -56,6 +83,11 @@ export const MainContent = memo(() => {
         {mounted.has('projects') && (
           <div className={cn('w-full h-full', active !== 'projects' && 'hidden')}>
             <Tickets />
+          </div>
+        )}
+        {mounted.has('more') && (
+          <div className={cn('w-full h-full', active !== 'more' && 'hidden')}>
+            <MorePage />
           </div>
         )}
       </div>

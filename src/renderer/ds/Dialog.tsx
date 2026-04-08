@@ -31,15 +31,17 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogPrimitive.DialogCo
       <DialogOverlay />
       <DialogPrimitive.Content ref={ref} asChild {...props}>
         <motion.div
-          initial={{ opacity: 0, scale: 0.95, y: 8 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: 8 }}
+          initial={{ opacity: 0, y: '10%' }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: '10%' }}
           transition={{ type: 'spring', duration: 0.3, bounce: 0.1 }}
           className={cn(
-            'fixed inset-0 z-50 m-auto h-fit max-h-[85vh] w-full max-w-lg',
-            'rounded-xl border border-surface-border bg-surface-raised shadow-2xl',
-            'overflow-y-auto',
-            'focus:outline-none',
+            'fixed z-50 overflow-y-auto focus:outline-none',
+            // Mobile: full-screen sheet from bottom
+            'inset-0 rounded-none border-0 bg-surface-raised',
+            // Desktop: centered floating card
+            'sm:inset-0 sm:m-auto sm:h-fit sm:max-h-[85vh] sm:w-full sm:max-w-lg',
+            'sm:rounded-xl sm:border sm:border-surface-border sm:shadow-2xl',
             className
           )}
         >

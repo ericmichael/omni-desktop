@@ -46,7 +46,7 @@ const OverlayPaneView = memo(
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.97 }}
           transition={transition}
-          className="absolute inset-3 z-40 overflow-hidden rounded-xl border border-surface-border bg-surface shadow-2xl"
+          className="absolute inset-1 sm:inset-3 z-40 overflow-hidden rounded-xl border border-surface-border bg-surface shadow-2xl"
         >
           <div className="flex h-full flex-col">
             <div className="flex items-center justify-between border-b border-surface-border bg-surface-raised px-3 py-2">

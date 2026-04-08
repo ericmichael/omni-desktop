@@ -174,7 +174,7 @@ export function Sidebar({ open, sessions, selectedId, onClose, onNewChat, onSele
       {open && (
         <div className="fixed inset-0 z-40 md:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-          <div className="absolute left-0 top-0 bottom-0 w-72 bg-bgColumn border-r border-bgCardAlt flex flex-col">
+          <div className="absolute left-0 top-0 bottom-0 w-[85vw] max-w-72 bg-bgColumn border-r border-bgCardAlt flex flex-col">
             {sidebarContent(true)}
           </div>
         </div>

@@ -23,9 +23,9 @@ const COMPACT_WIDTH = 900;
 const CodeDeckHeader = memo(
   ({ layoutMode, onLayoutMode, onNewSession }: { layoutMode: CodeLayoutMode; onLayoutMode: (mode: CodeLayoutMode) => void; onNewSession: () => void }) => {
     return (
-      <div className="flex h-10 items-center justify-end px-3 border-b border-surface-border bg-surface-raised">
+      <div className="hidden sm:flex h-10 items-center justify-end px-3 border-b border-surface-border bg-surface-raised">
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-0.5 rounded-md bg-surface-overlay p-0.5">
+          <div className="hidden sm:flex items-center gap-0.5 rounded-md bg-surface-overlay p-0.5">
             <button
               type="button"
               onClick={() => onLayoutMode('deck')}
@@ -217,13 +217,15 @@ const CodeSessionHeader = memo(
           )}
         </div>
         {ticketTitle && (
-          <div className="flex items-center justify-between px-5 py-1.5 border-b border-surface-border bg-surface-raised/50">
+          <div className="flex items-center justify-between px-3 sm:px-5 py-1.5 border-b border-surface-border bg-surface-raised/50">
             <div className="flex items-center gap-2 min-w-0">
               <span className="text-[11px] text-fg-muted truncate">{ticketTitle}</span>
-              {ticketColumnBadge}
-              {ticketMetaBadge}
+              <span className="hidden sm:flex items-center gap-2 shrink-0">
+                {ticketColumnBadge}
+                {ticketMetaBadge}
+              </span>
             </div>
-            {ticketActions && <div className="flex items-center gap-1.5 shrink-0 ml-2">{ticketActions}</div>}
+            {ticketActions && <div className="hidden sm:flex items-center gap-1.5 shrink-0 ml-2">{ticketActions}</div>}
           </div>
         )}
       </>
@@ -335,6 +337,7 @@ const CodeSessionPane = memo(
     uiMinimal,
     headerActionsTargetId,
     headerActionsCompact,
+    hideHeaderOnMobile,
   }: {
     tab: CodeTab;
     label: string;
@@ -350,12 +353,15 @@ const CodeSessionPane = memo(
     uiMinimal?: boolean;
     headerActionsTargetId?: string;
     headerActionsCompact?: boolean;
+    /** Hide the session header row on mobile (used in paged mode where the session bar already identifies the session) */
+    hideHeaderOnMobile?: boolean;
   }) => {
     const [activePanel, setActivePanel] = useState<TicketPanel | null>(null);
     const handleClosePanel = useCallback(() => setActivePanel(null), []);
 
     return (
       <div className={cn('w-full h-full flex flex-col bg-surface-raised', !isVisible && 'hidden')}>
+        <div className={cn(hideHeaderOnMobile && 'hidden sm:block')}>
         <CodeSessionHeader
           label={label}
           ticketTitle={ticketTitle}
@@ -367,6 +373,7 @@ const CodeSessionPane = memo(
           ticketId={tab.ticketId as TicketId | undefined}
           onOpenPanel={tab.ticketId ? setActivePanel : undefined}
         />
+        </div>
         <div className="flex-1 min-h-0 relative">
           <CodeTabContent
             tab={tab}
@@ -807,14 +814,43 @@ export const CodeDeck = memo(() => {
         </DndContext>
       )}
       {derivedLayout === 'paged' && activeTab && (
-        <div className="flex-1 min-h-0 flex flex-col">
-          <div className="flex items-center justify-between px-4 py-2 border-b border-surface-border bg-surface-raised text-xs text-fg-muted">
-            <div className="flex items-center gap-2">
-              <span>Session</span>
+        <div className="flex-1 min-h-0 flex flex-col relative">
+          {/* Mobile: horizontal scrollable tab bar */}
+          <div className="sm:hidden flex items-center border-b border-surface-border bg-surface-raised overflow-x-auto">
+            <div className="flex items-center gap-1 px-2 py-1.5">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => handleSelect(tab.id)}
+                  className={cn(
+                    'shrink-0 px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors',
+                    tab.id === activeTab.id
+                      ? 'bg-accent-600/20 text-accent-400'
+                      : 'bg-surface-overlay text-fg-muted active:bg-surface-border'
+                  )}
+                >
+                  {resolveLabel(tab)}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={handleNewSession}
+                className="shrink-0 size-7 rounded-full bg-surface-overlay text-fg-muted flex items-center justify-center active:bg-surface-border transition-colors"
+                aria-label="New session"
+              >
+                <PiPlusBold size={13} />
+              </button>
+            </div>
+          </div>
+          {/* Desktop: select dropdown + prev/next */}
+          <div className="hidden sm:flex items-center justify-between px-4 py-2 border-b border-surface-border bg-surface-raised text-xs text-fg-muted">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="shrink-0">Session</span>
               <select
                 value={activeTab.id}
                 onChange={(e) => handleSelect(e.target.value)}
-                className="bg-surface border border-surface-border rounded-md px-2 py-1 text-xs text-fg"
+                className="bg-surface border border-surface-border rounded-md px-2 py-1 text-xs text-fg min-w-0 truncate"
               >
                 {tabs.map((tab) => (
                   <option key={tab.id} value={tab.id}>
@@ -823,7 +859,7 @@ export const CodeDeck = memo(() => {
                 ))}
               </select>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               <Button
                 size="sm"
                 variant="ghost"
@@ -871,6 +907,7 @@ export const CodeDeck = memo(() => {
                   uiMinimal={false}
                   headerActionsTargetId={undefined}
                   headerActionsCompact={false}
+                  hideHeaderOnMobile
                 />
             ))}
           </div>

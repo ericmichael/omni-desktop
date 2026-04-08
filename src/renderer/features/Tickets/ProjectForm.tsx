@@ -1,6 +1,6 @@
 import { memo, useCallback, useState } from 'react';
 
-import { AnimatedDialog, Button, DialogBody, DialogContent, DialogFooter, DialogHeader } from '@/renderer/ds';
+import { AnimatedDialog, Button, cn, DialogBody, DialogContent, DialogFooter, DialogHeader } from '@/renderer/ds';
 import type { Project, SandboxConfig } from '@/shared/types';
 
 import { DirectoryBrowserDialog } from './DirectoryBrowserDialog';
@@ -20,11 +20,20 @@ function deriveSandboxValue(sandbox?: SandboxConfig | null, mode?: SandboxMode):
   return '';
 }
 
+const SANDBOX_OPTIONS: { value: SandboxMode; label: string }[] = [
+  { value: 'default', label: 'Default' },
+  { value: 'image', label: 'Docker Image' },
+  { value: 'dockerfile', label: 'Dockerfile' },
+];
+
 type ProjectFormProps = {
   open: boolean;
   onClose: () => void;
   editProject?: Project;
 };
+
+const inputClass =
+  'w-full rounded-xl border border-surface-border bg-surface px-3.5 py-2.5 text-base sm:text-sm text-fg placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500 transition-colors';
 
 export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProps) => {
   const [label, setLabel] = useState(editProject?.label ?? '');
@@ -57,8 +66,7 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
     [label]
   );
 
-  const handleSandboxModeChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-    const mode = e.target.value as SandboxMode;
+  const handleSandboxModeChange = useCallback((mode: SandboxMode) => {
     setSandboxMode(mode);
     if (mode === 'default') setSandboxValue('');
   }, []);
@@ -100,56 +108,67 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
     }
   }, [isValid, isSubmitting, isEdit, editProject, label, workspaceDir, sandboxMode, sandboxValue, onClose]);
 
-  const inputClassName =
-    'w-full rounded-lg border border-surface-border bg-surface px-3 py-2 text-sm text-fg placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500';
-
   return (
     <>
       <AnimatedDialog open={open} onClose={onClose}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>{isEdit ? 'Edit Project' : 'New Project'}</DialogHeader>
           <DialogBody className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm text-fg">Name</label>
-              <input
-                type="text"
-                value={label}
-                onChange={handleLabelChange}
-                placeholder="my-project"
-                className={inputClassName}
-              />
-            </div>
+            {/* Name & Directory */}
+            <div className="flex flex-col gap-3 rounded-2xl bg-surface-raised/50 p-4 border border-surface-border">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-fg-muted uppercase tracking-wider">Name</label>
+                <input
+                  type="text"
+                  value={label}
+                  onChange={handleLabelChange}
+                  placeholder="my-project"
+                  className={inputClass}
+                />
+              </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm text-fg">Workspace Directory</label>
-              <div className="flex items-center gap-2">
-                <span className="flex-1 truncate rounded-lg border border-surface-border bg-surface px-3 py-2 text-sm text-fg-muted">
-                  {workspaceDir || 'No directory selected'}
-                </span>
-                <Button size="sm" variant="ghost" onClick={handleBrowseOpen}>
-                  Browse
-                </Button>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-fg-muted uppercase tracking-wider">Directory</label>
+                <button
+                  type="button"
+                  onClick={handleBrowseOpen}
+                  className="flex items-center gap-2 w-full rounded-xl border border-surface-border bg-surface px-3.5 py-2.5 text-left transition-colors hover:border-accent-500/50"
+                >
+                  <span className={cn('flex-1 truncate text-base sm:text-sm', workspaceDir ? 'text-fg' : 'text-fg-muted/50')}>
+                    {workspaceDir || 'Tap to select directory'}
+                  </span>
+                  <span className="text-xs text-accent-500 font-medium shrink-0">Browse</span>
+                </button>
               </div>
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm text-fg">Sandbox</label>
-              <select
-                value={sandboxMode}
-                onChange={handleSandboxModeChange}
-                className={inputClassName}
-              >
-                <option value="default">Default</option>
-                <option value="image">Docker Image</option>
-                <option value="dockerfile">Dockerfile</option>
-              </select>
+            {/* Sandbox */}
+            <div className="flex flex-col gap-3 rounded-2xl bg-surface-raised/50 p-4 border border-surface-border">
+              <label className="text-xs font-medium text-fg-muted uppercase tracking-wider">Sandbox</label>
+              <div className="flex items-center gap-1.5">
+                {SANDBOX_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => handleSandboxModeChange(opt.value)}
+                    className={cn(
+                      'px-3 py-1.5 rounded-full text-xs font-medium transition-colors',
+                      sandboxMode === opt.value
+                        ? 'bg-accent-600/20 text-accent-400'
+                        : 'bg-surface-overlay text-fg-muted hover:text-fg'
+                    )}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
               {sandboxMode === 'image' && (
                 <input
                   type="text"
                   value={sandboxValue}
                   onChange={handleSandboxValueChange}
                   placeholder="ubuntu:24.04"
-                  className={inputClassName}
+                  className={inputClass}
                 />
               )}
               {sandboxMode === 'dockerfile' && (
@@ -158,17 +177,17 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
                   value={sandboxValue}
                   onChange={handleSandboxValueChange}
                   placeholder="Dockerfile"
-                  className={inputClassName}
+                  className={inputClass}
                 />
               )}
             </div>
           </DialogBody>
-          <DialogFooter className="gap-2 justify-end">
-            <Button variant="ghost" onClick={onClose}>
-              Cancel
+          <DialogFooter className="flex-col sm:flex-row gap-2 sm:justify-end">
+            <Button onClick={handleSubmit} isDisabled={!isValid || isSubmitting} className="w-full sm:w-auto justify-center">
+              {isEdit ? 'Save' : 'Create Project'}
             </Button>
-            <Button onClick={handleSubmit} isDisabled={!isValid || isSubmitting}>
-              {isEdit ? 'Save' : 'Create'}
+            <Button variant="ghost" onClick={onClose} className="w-full sm:w-auto justify-center">
+              Cancel
             </Button>
           </DialogFooter>
         </DialogContent>

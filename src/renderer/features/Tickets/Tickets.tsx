@@ -1,13 +1,20 @@
 import { useStore } from '@nanostores/react';
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { PiArrowLeftBold, PiCaretRightBold, PiFolderBold, PiPlusBold } from 'react-icons/pi';
 
+import { cn } from '@/renderer/ds';
+import { $inboxItems } from '@/renderer/features/Inbox/state';
 import { InboxDetail } from '@/renderer/features/Inbox/InboxDetail';
 import { InboxList } from '@/renderer/features/Inbox/InboxList';
+import { persistedStoreApi } from '@/renderer/services/store';
 import type { InboxItemId } from '@/shared/types';
 
 import { ProjectDetail } from './ProjectDetail';
+import { ProjectForm } from './ProjectForm';
 import { TicketsSidebar } from './Sidebar';
 import { $ticketsView, ticketApi } from './state';
+
+/* ---------- Shared sub-views ---------- */
 
 const InboxView = memo(() => {
   const view = useStore($ticketsView);
@@ -28,33 +35,185 @@ const InboxView = memo(() => {
 });
 InboxView.displayName = 'InboxView';
 
-const TicketsContent = memo(() => {
-  const view = useStore($ticketsView);
+/* ---------- Mobile project list ---------- */
 
-  if (view.type === 'inbox') {
-    return <InboxView />;
-  }
-  if (view.type === 'project') {
-    return <ProjectDetail projectId={view.projectId} />;
-  }
+const MobileProjectList = memo(({ onNewProject }: { onNewProject: () => void }) => {
+  const store = useStore(persistedStoreApi.$atom);
+  const projects = store.projects;
+
+  const ticketCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const ticket of store.tickets) {
+      counts[ticket.projectId] = (counts[ticket.projectId] ?? 0) + 1;
+    }
+    return counts;
+  }, [store.tickets]);
+
   return (
-    <div className="flex flex-col items-center justify-center gap-3 h-full">
-      <p className="text-fg-muted text-sm">Select a project to get started</p>
-      <p className="text-fg-subtle text-xs">Or create a new project from the sidebar</p>
+    <div className="relative flex flex-col h-full">
+      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3">
+        {projects.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-2 h-full">
+            <p className="text-fg-muted text-sm">No projects yet</p>
+            <p className="text-fg-subtle text-xs">Tap + to create one</p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {projects.map((project) => {
+              const segments = project.workspaceDir.split('/').filter(Boolean);
+              const shortPath = segments.slice(-2).join('/');
+              const count = ticketCounts[project.id] ?? 0;
+              return (
+                <button
+                  key={project.id}
+                  onClick={() => ticketApi.goToProject(project.id)}
+                  className="flex items-center gap-3 w-full px-3 py-3.5 text-left transition-colors rounded-xl hover:bg-white/5 active:bg-white/10"
+                >
+                  <span className="size-9 rounded-lg bg-surface-overlay flex items-center justify-center shrink-0">
+                    <PiFolderBold size={18} className="text-fg-muted" />
+                  </span>
+                  <div className="flex flex-col flex-1 min-w-0 gap-0.5">
+                    <span className="text-sm font-medium text-fg truncate">{project.label}</span>
+                    <span className="text-[11px] text-fg-subtle truncate">{shortPath}</span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {count > 0 && (
+                      <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-blue-400/10 text-blue-400">
+                        {count}
+                      </span>
+                    )}
+                    <PiCaretRightBold size={12} className="text-fg-muted/40" />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* FAB */}
+      <button
+        type="button"
+        onClick={onNewProject}
+        className="fixed right-4 bottom-20 z-30 size-14 rounded-2xl bg-accent-600 text-white shadow-lg shadow-accent-600/25 flex items-center justify-center active:scale-95 transition-transform"
+        aria-label="New project"
+      >
+        <PiPlusBold size={22} />
+      </button>
     </div>
   );
 });
-TicketsContent.displayName = 'TicketsContent';
+MobileProjectList.displayName = 'MobileProjectList';
+
+/* ---------- Mobile tab type ---------- */
+
+type MobileTab = 'inbox' | 'projects';
+
+/* ---------- Main export ---------- */
 
 export const Tickets = memo(() => {
+  const view = useStore($ticketsView);
+  const inboxItemsMap = useStore($inboxItems);
+  const [mobileTab, setMobileTab] = useState<MobileTab>(view.type === 'inbox' ? 'inbox' : 'projects');
+  const [formOpen, setFormOpen] = useState(false);
+
+  const openInboxCount = useMemo(
+    () => Object.values(inboxItemsMap).filter((i) => i.status === 'open').length,
+    [inboxItemsMap]
+  );
+
+  const isViewingProject = view.type === 'project';
+
+  const handleBack = useCallback(() => {
+    ticketApi.goToDashboard();
+  }, []);
+
   return (
     <div className="flex w-full h-full">
-      <TicketsSidebar />
+      {/* Desktop: sidebar always visible */}
+      <div className="hidden sm:block">
+        <TicketsSidebar />
+      </div>
+
       <div className="flex-1 min-w-0 flex flex-col">
+        {/* Mobile: tab bar or back header */}
+        <div className="sm:hidden shrink-0">
+          {mobileTab === 'projects' && isViewingProject ? (
+            /* Back header when viewing a project detail */
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-surface-border bg-surface-raised">
+              <button
+                type="button"
+                onClick={handleBack}
+                className="inline-flex size-8 items-center justify-center rounded-md text-fg-muted hover:bg-white/5 hover:text-fg"
+                aria-label="Back to projects"
+              >
+                <PiArrowLeftBold size={16} />
+              </button>
+              <span className="text-sm font-medium text-fg truncate">Projects</span>
+            </div>
+          ) : (
+            /* Tab bar: Inbox / Projects */
+            <div className="flex border-b border-surface-border bg-surface-raised">
+              <button
+                onClick={() => { setMobileTab('inbox'); ticketApi.goToInbox(); }}
+                className={cn(
+                  'flex-1 py-2.5 text-center text-sm font-medium transition-colors relative',
+                  mobileTab === 'inbox' ? 'text-fg' : 'text-fg-muted'
+                )}
+              >
+                Inbox
+                {openInboxCount > 0 && (
+                  <span className="ml-1.5 inline-flex min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold leading-4 text-center bg-accent-600 text-white">
+                    {openInboxCount}
+                  </span>
+                )}
+                {mobileTab === 'inbox' && (
+                  <span className="absolute bottom-0 left-4 right-4 h-[2px] bg-accent-600 rounded-t-full" />
+                )}
+              </button>
+              <button
+                onClick={() => { setMobileTab('projects'); ticketApi.goToDashboard(); }}
+                className={cn(
+                  'flex-1 py-2.5 text-center text-sm font-medium transition-colors relative',
+                  mobileTab === 'projects' ? 'text-fg' : 'text-fg-muted'
+                )}
+              >
+                Projects
+                {mobileTab === 'projects' && (
+                  <span className="absolute bottom-0 left-4 right-4 h-[2px] bg-accent-600 rounded-t-full" />
+                )}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Content */}
         <div className="flex-1 min-h-0">
-          <TicketsContent />
+          {/* Desktop content — driven by $ticketsView */}
+          <div className="hidden sm:block h-full">
+            {view.type === 'inbox' && <InboxView />}
+            {view.type === 'project' && <ProjectDetail projectId={view.projectId} />}
+            {view.type === 'dashboard' && (
+              <div className="flex flex-col items-center justify-center gap-3 h-full">
+                <p className="text-fg-muted text-sm">Select a project to get started</p>
+                <p className="text-fg-subtle text-xs">Or create a new project from the sidebar</p>
+              </div>
+            )}
+          </div>
+
+          {/* Mobile content — driven by mobileTab + $ticketsView */}
+          <div className="sm:hidden h-full">
+            {mobileTab === 'inbox' && <InboxView />}
+            {mobileTab === 'projects' && (
+              isViewingProject
+                ? <ProjectDetail projectId={view.projectId} />
+                : <MobileProjectList onNewProject={() => setFormOpen(true)} />
+            )}
+          </div>
         </div>
       </div>
+
+      {formOpen && <ProjectForm open={formOpen} onClose={() => setFormOpen(false)} />}
     </div>
   );
 });

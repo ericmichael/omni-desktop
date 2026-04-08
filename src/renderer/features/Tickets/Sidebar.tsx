@@ -18,14 +18,17 @@ const SidebarProjectItem = memo(
     project,
     isActive,
     activeTicketCount,
+    onNavigate,
   }: {
     project: Project;
     isActive: boolean;
     activeTicketCount: number;
+    onNavigate?: () => void;
   }) => {
     const handleClick = useCallback(() => {
       ticketApi.goToProject(project.id);
-    }, [project.id]);
+      onNavigate?.();
+    }, [project.id, onNavigate]);
 
     const shortPath = useMemo(() => {
       const segments = project.workspaceDir.split('/').filter(Boolean);
@@ -93,8 +96,8 @@ const SidebarActiveTicketItem = memo(({ entry, isActive }: { entry: ActiveTicket
 SidebarActiveTicketItem.displayName = 'SidebarActiveTicketItem';
 
 const SidebarInboxItem = memo(
-  ({ item, isActive, onSelect }: { item: InboxItem; isActive: boolean; onSelect: (id: InboxItemId) => void }) => {
-    const handleClick = useCallback(() => onSelect(item.id), [item.id, onSelect]);
+  ({ item, isActive, onSelect, onNavigate }: { item: InboxItem; isActive: boolean; onSelect: (id: InboxItemId) => void; onNavigate?: () => void }) => {
+    const handleClick = useCallback(() => { onSelect(item.id); onNavigate?.(); }, [item.id, onSelect, onNavigate]);
 
     return (
       <button
@@ -111,7 +114,7 @@ const SidebarInboxItem = memo(
 );
 SidebarInboxItem.displayName = 'SidebarInboxItem';
 
-export const TicketsSidebar = memo(() => {
+export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void }) => {
   const store = useStore(persistedStoreApi.$atom);
   const activeTickets = useStore($activeTickets);
   const view = useStore($ticketsView);
@@ -174,7 +177,7 @@ export const TicketsSidebar = memo(() => {
     <div className="flex flex-col h-full w-60 border-r border-surface-border bg-surface shrink-0">
       {/* Inbox section */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-surface-border">
-        <button onClick={() => ticketApi.goToInbox()} className="text-xs font-semibold text-fg-muted uppercase tracking-wider hover:text-fg transition-colors cursor-pointer">
+        <button onClick={() => { ticketApi.goToInbox(); onNavigate?.(); }} className="text-xs font-semibold text-fg-muted uppercase tracking-wider hover:text-fg transition-colors cursor-pointer">
           Inbox
         </button>
         {openInboxItems.length > 0 && <span className="text-xs text-fg-subtle">{openInboxItems.length}</span>}
@@ -189,6 +192,7 @@ export const TicketsSidebar = memo(() => {
               item={item}
               isActive={isInboxView && selectedInboxItemId === item.id}
               onSelect={handleSelectInboxItem}
+              onNavigate={onNavigate}
             />
           ))
         )}
@@ -209,6 +213,7 @@ export const TicketsSidebar = memo(() => {
               project={project}
               isActive={view.type === 'project' && view.projectId === project.id}
               activeTicketCount={ticketCounts[project.id] ?? 0}
+              onNavigate={onNavigate}
             />
           ))
         )}

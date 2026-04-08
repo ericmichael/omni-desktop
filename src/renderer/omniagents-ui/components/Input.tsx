@@ -170,12 +170,12 @@ export function Input({ disabled, thinking, onStop, onSubmit, voiceEnabled, work
             disabled={disabled}
           />
 
-          <PromptInputActions className="flex items-center justify-between gap-2 pt-2 px-2">
-            <div className="flex items-center gap-1">
+          <PromptInputActions className="flex items-center justify-between gap-1 sm:gap-2 pt-2 px-2">
+            <div className="flex items-center gap-1 min-w-0">
               <label
                 htmlFor="file-upload"
                 onClick={(e) => e.stopPropagation()}
-                className="hover:bg-bgCardAlt/50 flex h-8 w-8 cursor-pointer items-center justify-center rounded-2xl"
+                className="hover:bg-bgCardAlt/50 flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-2xl"
                 aria-label="Attach files"
               >
                 <input
@@ -195,17 +195,17 @@ export function Input({ disabled, thinking, onStop, onSubmit, voiceEnabled, work
                 <button
                   onClick={workspaceLocked ? undefined : onWorkspaceClick}
                   disabled={workspaceLocked}
-                  className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors ${
+                  className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors min-w-0 ${
                     workspaceLocked
                       ? 'text-textSubtle cursor-default'
                       : 'text-textHeading hover:bg-bgCardAlt/50 cursor-pointer'
                   }`}
                   title={workspacePath || 'Select workspace'}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" className={workspaceLocked ? 'text-textSubtle' : 'text-tweetBlue'} fill="currentColor" aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 24 24" className={`shrink-0 ${workspaceLocked ? 'text-textSubtle' : 'text-tweetBlue'}`} fill="currentColor" aria-hidden="true">
                     <path d="M2 6a2 2 0 012-2h5l2 2h9a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
                   </svg>
-                  <span className="max-w-[200px] truncate">
+                  <span className="max-w-[120px] sm:max-w-[200px] truncate">
                     {workspacePath ? workspacePath.split('/').pop() || workspacePath : 'Select workspace'}
                   </span>
                   {workspaceLocked && (
@@ -219,7 +219,7 @@ export function Input({ disabled, thinking, onStop, onSubmit, voiceEnabled, work
 
               {sandboxLabel && (
                 <div
-                  className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-textHeading hover:bg-bgCardAlt/50 transition-colors"
+                  className="hidden sm:flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-textHeading hover:bg-bgCardAlt/50 transition-colors"
                   title={`Sandbox: ${sandboxLabel}`}
                 >
                   {sandboxLoading ? (
@@ -247,7 +247,7 @@ export function Input({ disabled, thinking, onStop, onSubmit, voiceEnabled, work
               )}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 sm:gap-2 shrink-0">
               {voiceEnabled ? (
                 <button
                   type="button"
