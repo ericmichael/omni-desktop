@@ -68,7 +68,7 @@ pub fn spawn(qemu_bin: &Path, config: &VmConfig, accel: &Accelerator) -> Result<
 }
 
 /// Build the QEMU command-line arguments.
-fn build_args(config: &VmConfig, accel: &Accelerator) -> Result<Vec<String>> {
+pub(crate) fn build_args(config: &VmConfig, accel: &Accelerator) -> Result<Vec<String>> {
     let mut args: Vec<String> = Vec::new();
 
     // Machine type and acceleration.
@@ -204,7 +204,7 @@ fn build_args(config: &VmConfig, accel: &Accelerator) -> Result<Vec<String>> {
 }
 
 /// Return the platform-appropriate QEMU binary name.
-fn qemu_binary_name() -> String {
+pub(crate) fn qemu_binary_name() -> String {
     let arch = if cfg!(target_arch = "aarch64") {
         "aarch64"
     } else {
@@ -214,5 +214,197 @@ fn qemu_binary_name() -> String {
         format!("qemu-system-{arch}.exe")
     } else {
         format!("qemu-system-{arch}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    /// Create a minimal fake image directory with the required files.
+    fn fake_image_dir() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("vmlinuz"), "fake-kernel").unwrap();
+        fs::write(dir.path().join("initrd.img"), "fake-initrd").unwrap();
+        fs::write(dir.path().join("rootfs.ext4"), "fake-rootfs").unwrap();
+        dir
+    }
+
+    fn test_config(image_dir: &Path, workspace: &Path) -> VmConfig {
+        VmConfig {
+            workspace: workspace.to_path_buf(),
+            memory_mb: 4096,
+            cpus: 2,
+            agent_port: 7681,
+            code_server_port: 8080,
+            vnc_port: 6080,
+            image_dir: image_dir.to_path_buf(),
+            net_allow: vec![],
+            no_net: false,
+        }
+    }
+
+    #[test]
+    fn build_args_basic() {
+        let img = fake_image_dir();
+        let ws = tempfile::tempdir().unwrap();
+        let config = test_config(img.path(), ws.path());
+        let args = build_args(&config, &Accelerator::Tcg).unwrap();
+        let joined = args.join(" ");
+
+        assert!(joined.contains("-machine"), "should have -machine");
+        assert!(joined.contains("-m 4096M"), "should set memory");
+        assert!(joined.contains("-smp 2"), "should set CPUs");
+        assert!(joined.contains("-nographic"), "should be headless");
+        assert!(joined.contains("-kernel"), "should have kernel path");
+        assert!(joined.contains("-initrd"), "should have initrd path");
+        assert!(joined.contains("-drive"), "should have rootfs drive");
+        assert!(joined.contains("-virtfs"), "should have 9p workspace mount");
+        assert!(joined.contains("-netdev"), "should have network device");
+        assert!(joined.contains("-serial stdio"), "should have serial console");
+        assert!(joined.contains("-no-reboot"), "should disable reboot on panic");
+    }
+
+    #[test]
+    fn build_args_accel_flag() {
+        let img = fake_image_dir();
+        let ws = tempfile::tempdir().unwrap();
+        let config = test_config(img.path(), ws.path());
+
+        let args_tcg = build_args(&config, &Accelerator::Tcg).unwrap();
+        assert!(args_tcg.iter().any(|a| a.contains("accel=tcg")));
+
+        let args_kvm = build_args(&config, &Accelerator::Kvm).unwrap();
+        assert!(args_kvm.iter().any(|a| a.contains("accel=kvm")));
+    }
+
+    #[test]
+    fn build_args_no_net() {
+        let img = fake_image_dir();
+        let ws = tempfile::tempdir().unwrap();
+        let mut config = test_config(img.path(), ws.path());
+        config.no_net = true;
+
+        let args = build_args(&config, &Accelerator::Tcg).unwrap();
+        let netdev = args.iter().find(|a| a.starts_with("user,id=net0")).unwrap();
+        assert!(netdev.contains("restrict=y"), "no_net should add restrict=y: {netdev}");
+    }
+
+    #[test]
+    fn build_args_full_net_no_restrict() {
+        let img = fake_image_dir();
+        let ws = tempfile::tempdir().unwrap();
+        let config = test_config(img.path(), ws.path());
+
+        let args = build_args(&config, &Accelerator::Tcg).unwrap();
+        let netdev = args.iter().find(|a| a.starts_with("user,id=net0")).unwrap();
+        assert!(!netdev.contains("restrict=y"), "full net should not restrict: {netdev}");
+        assert!(!args.iter().any(|a| a.contains("-fw_cfg")), "should not have fw_cfg");
+    }
+
+    #[test]
+    fn build_args_net_allow_adds_fw_cfg() {
+        let img = fake_image_dir();
+        let ws = tempfile::tempdir().unwrap();
+        let mut config = test_config(img.path(), ws.path());
+        config.net_allow = vec!["example.com".into(), "10.0.0.0/8".into()];
+
+        let args = build_args(&config, &Accelerator::Tcg).unwrap();
+        let fw_cfg_idx = args.iter().position(|a| a == "-fw_cfg").expect("should have -fw_cfg");
+        let fw_cfg_val = &args[fw_cfg_idx + 1];
+        assert!(
+            fw_cfg_val.contains("example.com,10.0.0.0/8"),
+            "fw_cfg should contain allowlist: {fw_cfg_val}"
+        );
+        assert!(fw_cfg_val.contains("opt/omni/net_allowlist"));
+    }
+
+    #[test]
+    fn build_args_port_forwarding() {
+        let img = fake_image_dir();
+        let ws = tempfile::tempdir().unwrap();
+        let mut config = test_config(img.path(), ws.path());
+        config.agent_port = 12345;
+        config.code_server_port = 23456;
+        config.vnc_port = 34567;
+
+        let args = build_args(&config, &Accelerator::Tcg).unwrap();
+        let netdev = args.iter().find(|a| a.starts_with("user,id=net0")).unwrap();
+        assert!(netdev.contains("hostfwd=tcp::12345-:7681"), "agent port: {netdev}");
+        assert!(netdev.contains("hostfwd=tcp::23456-:8080"), "code-server port: {netdev}");
+        assert!(netdev.contains("hostfwd=tcp::34567-:6080"), "vnc port: {netdev}");
+    }
+
+    #[test]
+    fn build_args_workspace_with_spaces() {
+        let img = fake_image_dir();
+        let ws_base = tempfile::tempdir().unwrap();
+        let ws = ws_base.path().join("my project dir");
+        fs::create_dir(&ws).unwrap();
+
+        let config = test_config(img.path(), &ws);
+        let args = build_args(&config, &Accelerator::Tcg).unwrap();
+        let virtfs = args.iter().find(|a| a.contains("mount_tag=workspace")).unwrap();
+        assert!(
+            virtfs.contains("my project dir"),
+            "workspace path with spaces should be in virtfs arg: {virtfs}"
+        );
+    }
+
+    #[test]
+    fn build_args_missing_kernel() {
+        let dir = tempfile::tempdir().unwrap();
+        // Only create initrd and rootfs — no kernel.
+        fs::write(dir.path().join("initrd.img"), "x").unwrap();
+        fs::write(dir.path().join("rootfs.ext4"), "x").unwrap();
+        let ws = tempfile::tempdir().unwrap();
+
+        let config = test_config(dir.path(), ws.path());
+        let result = build_args(&config, &Accelerator::Tcg);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("kernel"));
+    }
+
+    #[test]
+    fn build_args_missing_initrd() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("vmlinuz"), "x").unwrap();
+        fs::write(dir.path().join("rootfs.ext4"), "x").unwrap();
+        let ws = tempfile::tempdir().unwrap();
+
+        let config = test_config(dir.path(), ws.path());
+        let result = build_args(&config, &Accelerator::Tcg);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("initrd"));
+    }
+
+    #[test]
+    fn build_args_missing_rootfs() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("vmlinuz"), "x").unwrap();
+        fs::write(dir.path().join("initrd.img"), "x").unwrap();
+        let ws = tempfile::tempdir().unwrap();
+
+        let config = test_config(dir.path(), ws.path());
+        let result = build_args(&config, &Accelerator::Tcg);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("rootfs"));
+    }
+
+    #[test]
+    fn qemu_binary_name_format() {
+        let name = qemu_binary_name();
+        assert!(name.starts_with("qemu-system-"), "should start with qemu-system-: {name}");
+        if cfg!(target_arch = "x86_64") {
+            assert!(name.contains("x86_64"));
+        } else if cfg!(target_arch = "aarch64") {
+            assert!(name.contains("aarch64"));
+        }
+        if cfg!(windows) {
+            assert!(name.ends_with(".exe"));
+        } else {
+            assert!(!name.ends_with(".exe"));
+        }
     }
 }

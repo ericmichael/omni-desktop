@@ -208,7 +208,7 @@ fn cmd_image(args: VmImageArgs) -> Result<u8> {
 }
 
 /// Pick an available port. If `requested` is 0, bind to port 0 and let the OS choose.
-fn pick_port(requested: u16) -> Result<u16> {
+pub(crate) fn pick_port(requested: u16) -> Result<u16> {
     if requested != 0 {
         return Ok(requested);
     }
@@ -221,4 +221,102 @@ fn pick_port(requested: u16) -> Result<u16> {
     // Drop the listener so the port is free for QEMU to use.
     drop(listener);
     Ok(port)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn pick_port_zero_returns_ephemeral() {
+        let port = pick_port(0).unwrap();
+        assert!(port > 0, "ephemeral port should be > 0, got {port}");
+    }
+
+    #[test]
+    fn pick_port_specific_returns_same() {
+        assert_eq!(pick_port(8080).unwrap(), 8080);
+        assert_eq!(pick_port(3000).unwrap(), 3000);
+    }
+
+    #[test]
+    fn pick_port_two_calls_return_different() {
+        let a = pick_port(0).unwrap();
+        let b = pick_port(0).unwrap();
+        // The OS should assign different ports (not guaranteed but extremely likely).
+        assert_ne!(a, b, "two ephemeral ports should differ");
+    }
+
+    // CLI parsing tests use the top-level Cli struct from main.
+
+    #[test]
+    fn vm_run_args_parse() {
+        let args = VmRunArgs::try_parse_from([
+            "run",
+            "--workspace", "/tmp/project",
+            "--memory", "8192",
+            "--cpus", "4",
+            "--port", "7681",
+        ]).unwrap();
+
+        assert_eq!(args.workspace, std::path::PathBuf::from("/tmp/project"));
+        assert_eq!(args.memory, 8192);
+        assert_eq!(args.cpus, 4);
+        assert_eq!(args.port, 7681);
+        assert!(!args.no_net);
+        assert!(args.net_allow.is_empty());
+    }
+
+    #[test]
+    fn vm_run_args_defaults() {
+        let args = VmRunArgs::try_parse_from([
+            "run",
+            "--workspace", "/tmp",
+        ]).unwrap();
+
+        assert_eq!(args.memory, 4096);
+        assert_eq!(args.cpus, 2);
+        assert_eq!(args.port, 0);
+        assert_eq!(args.code_server_port, 0);
+        assert_eq!(args.vnc_port, 0);
+    }
+
+    #[test]
+    fn vm_run_args_no_net() {
+        let args = VmRunArgs::try_parse_from([
+            "run",
+            "--workspace", "/tmp",
+            "--no-net",
+        ]).unwrap();
+        assert!(args.no_net);
+    }
+
+    #[test]
+    fn vm_run_args_net_allow() {
+        let args = VmRunArgs::try_parse_from([
+            "run",
+            "--workspace", "/tmp",
+            "--net-allow", "example.com,10.0.0.0/8",
+        ]).unwrap();
+        assert_eq!(args.net_allow, vec!["example.com", "10.0.0.0/8"]);
+    }
+
+    #[test]
+    fn vm_image_pull_args_parse() {
+        let args = VmImagePullArgs::try_parse_from([
+            "pull",
+            "--arch", "aarch64",
+            "--url", "https://example.com/images",
+        ]).unwrap();
+        assert_eq!(args.arch.as_deref(), Some("aarch64"));
+        assert_eq!(args.url.as_deref(), Some("https://example.com/images"));
+    }
+
+    #[test]
+    fn vm_image_pull_args_defaults() {
+        let args = VmImagePullArgs::try_parse_from(["pull"]).unwrap();
+        assert!(args.arch.is_none());
+        assert!(args.url.is_none());
+    }
 }

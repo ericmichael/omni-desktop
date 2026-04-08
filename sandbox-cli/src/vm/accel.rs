@@ -113,3 +113,57 @@ fn whpx_available() -> bool {
         .map(|out| out.status.success())
         .unwrap_or(false)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kvm_qemu_flag() {
+        assert_eq!(Accelerator::Kvm.qemu_flag(), "kvm");
+    }
+
+    #[test]
+    fn hvf_qemu_flag() {
+        assert_eq!(Accelerator::Hvf.qemu_flag(), "hvf");
+    }
+
+    #[test]
+    fn whpx_qemu_flag() {
+        assert_eq!(Accelerator::Whpx.qemu_flag(), "whpx");
+    }
+
+    #[test]
+    fn tcg_qemu_flag() {
+        assert_eq!(Accelerator::Tcg.qemu_flag(), "tcg");
+    }
+
+    #[test]
+    fn tcg_cpu_flag_is_max() {
+        assert_eq!(Accelerator::Tcg.cpu_flag(), "max");
+    }
+
+    #[test]
+    fn hardware_accel_cpu_flag_is_host() {
+        for accel in [Accelerator::Kvm, Accelerator::Hvf, Accelerator::Whpx] {
+            assert_eq!(accel.cpu_flag(), "host", "{accel} should use host CPU");
+        }
+    }
+
+    #[test]
+    fn detect_returns_valid_accelerator() {
+        // Should not panic on any platform.
+        let accel = detect();
+        // Verify it's a known variant by checking Display is non-empty.
+        let display = format!("{accel}");
+        assert!(!display.is_empty());
+    }
+
+    #[test]
+    fn display_formatting() {
+        assert!(format!("{}", Accelerator::Kvm).contains("KVM"));
+        assert!(format!("{}", Accelerator::Hvf).contains("HVF"));
+        assert!(format!("{}", Accelerator::Whpx).contains("WHPX"));
+        assert!(format!("{}", Accelerator::Tcg).contains("TCG"));
+    }
+}

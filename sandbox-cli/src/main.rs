@@ -154,7 +154,8 @@ fn main() -> ExitCode {
     }
 }
 
-fn run_exec(args: ExecArgs) -> Result<u8> {
+/// Build a `SandboxConfig` from parsed CLI args. Extracted for testability.
+fn build_config(args: ExecArgs) -> Result<sandbox::SandboxConfig> {
     let workspace = args
         .workspace
         .canonicalize()
@@ -173,7 +174,7 @@ fn run_exec(args: ExecArgs) -> Result<u8> {
         args.protected_subpaths
     };
 
-    let config = sandbox::SandboxConfig {
+    Ok(sandbox::SandboxConfig {
         workspace,
         ro_binds: args.ro_bind,
         rw_binds: args.rw_bind,
@@ -182,7 +183,141 @@ fn run_exec(args: ExecArgs) -> Result<u8> {
         cwd: args.cwd,
         command: args.command,
         protected_subpaths,
-    };
+    })
+}
 
+fn run_exec(args: ExecArgs) -> Result<u8> {
+    let config = build_config(args)?;
     sandbox::exec(config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn flat_args_parse_basic() {
+        let cli = Cli::parse_from([
+            "omni-sandbox",
+            "--workspace", "/tmp",
+            "--net",
+            "--", "/bin/true",
+        ]);
+        assert!(cli.command.is_none());
+        assert_eq!(cli.workspace.unwrap(), PathBuf::from("/tmp"));
+        assert!(cli.net);
+        assert_eq!(cli.exec_command, vec!["/bin/true"]);
+    }
+
+    #[test]
+    fn exec_subcommand_parse() {
+        let cli = Cli::parse_from([
+            "omni-sandbox",
+            "exec",
+            "--workspace", "/tmp",
+            "--", "/bin/true",
+        ]);
+        match cli.command {
+            Some(Command::Exec(args)) => {
+                assert_eq!(args.workspace, PathBuf::from("/tmp"));
+                assert!(!args.net);
+                assert_eq!(args.command, vec!["/bin/true"]);
+            }
+            other => panic!("expected Exec subcommand, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn flat_args_with_ro_bind_and_protect() {
+        let cli = Cli::parse_from([
+            "omni-sandbox",
+            "--workspace", "/tmp",
+            "--ro-bind", "/opt/venv",
+            "--protect", ".secret",
+            "--", "/bin/true",
+        ]);
+        assert_eq!(cli.ro_bind, vec![PathBuf::from("/opt/venv")]);
+        assert_eq!(cli.protected_subpaths, vec!["secret".to_string()].iter().map(|_| ".secret".to_string()).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn net_allow_implies_allow_net() {
+        let args = ExecArgs {
+            workspace: PathBuf::from("/tmp"),
+            ro_bind: vec![],
+            rw_bind: vec![],
+            net: false,
+            net_allow: vec!["example.com".into()],
+            cwd: None,
+            protected_subpaths: vec![],
+            no_protected_subpaths: false,
+            command: vec!["/bin/true".into()],
+        };
+        // build_config canonicalizes workspace, so use a real path
+        let config = build_config(args).unwrap();
+        assert!(config.allow_net, "--net-allow should imply allow_net");
+    }
+
+    #[test]
+    fn default_protected_subpaths_applied() {
+        let args = ExecArgs {
+            workspace: PathBuf::from("/tmp"),
+            ro_bind: vec![],
+            rw_bind: vec![],
+            net: false,
+            net_allow: vec![],
+            cwd: None,
+            protected_subpaths: vec![],
+            no_protected_subpaths: false,
+            command: vec!["/bin/true".into()],
+        };
+        let config = build_config(args).unwrap();
+        assert_eq!(
+            config.protected_subpaths,
+            vec![".git", ".env", ".codex"],
+            "should apply DEFAULT_PROTECTED_SUBPATHS"
+        );
+    }
+
+    #[test]
+    fn no_protected_subpaths_flag_clears_defaults() {
+        let args = ExecArgs {
+            workspace: PathBuf::from("/tmp"),
+            ro_bind: vec![],
+            rw_bind: vec![],
+            net: false,
+            net_allow: vec![],
+            cwd: None,
+            protected_subpaths: vec![],
+            no_protected_subpaths: true,
+            command: vec!["/bin/true".into()],
+        };
+        let config = build_config(args).unwrap();
+        assert!(
+            config.protected_subpaths.is_empty(),
+            "--no-protected-subpaths should clear all defaults"
+        );
+    }
+
+    #[test]
+    fn custom_protected_subpaths_override_defaults() {
+        let args = ExecArgs {
+            workspace: PathBuf::from("/tmp"),
+            ro_bind: vec![],
+            rw_bind: vec![],
+            net: false,
+            net_allow: vec![],
+            cwd: None,
+            protected_subpaths: vec![".secrets".into()],
+            no_protected_subpaths: false,
+            command: vec!["/bin/true".into()],
+        };
+        let config = build_config(args).unwrap();
+        assert_eq!(
+            config.protected_subpaths,
+            vec![".secrets"],
+            "explicit --protect should replace defaults"
+        );
+    }
 }

@@ -42,3 +42,37 @@ pub fn wait_for_agent(host_port: u16, timeout: Duration) -> Result<()> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpListener;
+
+    #[test]
+    fn wait_for_agent_succeeds() {
+        // Bind a listener so the port is open.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let result = wait_for_agent(port, Duration::from_secs(5));
+        assert!(result.is_ok(), "should connect to open port: {result:?}");
+
+        drop(listener);
+    }
+
+    #[test]
+    fn wait_for_agent_timeout() {
+        // Bind a port, then drop the listener so nothing is listening.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let result = wait_for_agent(port, Duration::from_secs(2));
+        assert!(result.is_err(), "should timeout on closed port");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("did not become ready"),
+            "error should mention readiness timeout: {err}"
+        );
+    }
+}
