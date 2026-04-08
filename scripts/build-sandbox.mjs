@@ -25,8 +25,10 @@ if (existsSync(dest) && !process.argv.includes('--force')) {
 }
 
 // Check if cargo is available before attempting the build.
+const MIN_RUST_VERSION = [1, 85, 0]; // Required for Rust edition 2024
+let cargoVersion;
 try {
-  execFileSync('cargo', ['--version'], { stdio: 'pipe' });
+  cargoVersion = execFileSync('cargo', ['--version'], { stdio: 'pipe', encoding: 'utf-8' }).trim();
 } catch {
   console.warn(
     '\x1b[33m' +
@@ -38,13 +40,50 @@ try {
   process.exit(0);
 }
 
+// Check Rust version meets minimum requirement (edition 2024 needs 1.85+).
+const versionMatch = cargoVersion.match(/(\d+)\.(\d+)\.(\d+)/);
+if (versionMatch) {
+  const [, major, minor, patch] = versionMatch.map(Number);
+  const current = [major, minor, patch];
+  const tooOld = current[0] < MIN_RUST_VERSION[0] ||
+    (current[0] === MIN_RUST_VERSION[0] && current[1] < MIN_RUST_VERSION[1]) ||
+    (current[0] === MIN_RUST_VERSION[0] && current[1] === MIN_RUST_VERSION[1] && current[2] < MIN_RUST_VERSION[2]);
+  if (tooOld) {
+    console.warn(
+      '\x1b[33m' +
+        `WARNING: Rust ${major}.${minor}.${patch} is too old — ${MIN_RUST_VERSION.join('.')}+ is required (for edition 2024).\n` +
+        'Run `rustup update` to upgrade, then `npm run build:sandbox` to build.\n' +
+        'Sandbox features (local and VM modes) will not work until the binary is built.' +
+        '\x1b[0m'
+    );
+    process.exit(0);
+  }
+}
+
+const isPostinstall = !process.argv.includes('--force');
+
 console.log('Building omni-sandbox...');
 
-// Build the Rust binary.
-execFileSync('cargo', ['build', '--release'], {
-  cwd: sandboxDir,
-  stdio: 'inherit',
-});
+try {
+  // Build the Rust binary.
+  execFileSync('cargo', ['build', '--release'], {
+    cwd: sandboxDir,
+    stdio: 'inherit',
+  });
+} catch (err) {
+  if (isPostinstall) {
+    console.warn(
+      '\x1b[33m' +
+        'WARNING: omni-sandbox build failed — skipping.\n' +
+        'Fix the issue and run `npm run build:sandbox` to retry.\n' +
+        'Sandbox features (local and VM modes) will not work until the binary is built.' +
+        '\x1b[0m'
+    );
+    process.exit(0);
+  }
+  // Explicit build:sandbox — let it fail loud.
+  process.exit(1);
+}
 
 mkdirSync(binDir, { recursive: true });
 
