@@ -498,7 +498,7 @@ export class AgentProcess {
         const re = /:\s*'([^']+)'/g;
         let m: RegExpExecArray | null;
         while ((m = re.exec(content)) !== null) {
-          const srcPath = m[1];
+          const srcPath = m[1]!;
           if (srcPath.startsWith('/')) {
             dirs.add(resolve(srcPath, '..'));
           }

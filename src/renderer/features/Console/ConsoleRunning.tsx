@@ -18,24 +18,25 @@ export const ConsoleStarted = memo(({ terminal }: Props) => {
   const newTerminal = useNewTerminal();
   return (
     <div className="flex w-full h-full relative flex-col min-h-0">
-      <div className="flex w-full h-10 items-center px-2">
+      <div className="flex w-full h-12 sm:h-10 items-center px-2">
         <IconButton
           aria-label="Kill Console"
           onClick={destroyTerminal}
-          size="sm"
+          size="md"
           icon={<PiXBold />}
-          className="text-fg-error hover:bg-red-400/10"
+          className="text-fg-error hover:bg-red-400/10 sm:size-9"
         />
         <div className="flex-1" />
-        <span className="text-fg-subtle select-none text-sm">Dev Console</span>
+        <span className="text-fg-subtle select-none text-base sm:text-sm">Dev Console</span>
         <div className="flex-1" />
         <IconButton
           aria-label="Restart Console"
           onClick={newTerminal}
-          size="sm"
+          size="md"
           icon={<PiArrowCounterClockwiseBold />}
+          className="sm:size-9"
         />
-        <IconButton aria-label="Hide Console" onClick={closeConsole} size="sm" icon={<PiCaretDownBold />} />
+        <IconButton aria-label="Hide Console" onClick={closeConsole} size="md" icon={<PiCaretDownBold />} className="sm:size-9" />
       </div>
       <Divider />
       <div className="w-full h-full p-2 min-h-0">

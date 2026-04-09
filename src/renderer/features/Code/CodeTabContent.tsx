@@ -2,11 +2,11 @@ import { useStore } from '@nanostores/react';
 import { motion } from 'framer-motion';
 import { memo, useCallback, useMemo } from 'react';
 
-import { buildInteractiveVariables, buildTicketInteractiveVariables } from '@/lib/client-tools';
+import { buildInteractiveVariables } from '@/lib/client-tools';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { SessionStartupShell } from '@/renderer/common/SessionStartupShell';
 import { Button, cn } from '@/renderer/ds';
-import { buildClientToolHandler, buildTicketToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
+import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { buildSandboxLabel, isCustomSandbox } from '@/renderer/omniagents-ui/sandbox-label';
 import type { CodeTab, CodeTabId, TicketId } from '@/shared/types';
@@ -148,22 +148,22 @@ export const CodeTabContent = memo(
       [tab.id]
     );
 
-    const handleClientToolCall = useMemo(() => {
-      if (tab.ticketId && tab.projectId) {
-        return buildTicketToolHandler(tab.ticketId as TicketId, tab.projectId);
-      }
-      return buildClientToolHandler();
-    }, [tab.ticketId, tab.projectId]);
+    const handleClientToolCall = useMemo(
+      () =>
+        buildClientToolHandler(
+          tab.ticketId && tab.projectId
+            ? { ticketId: tab.ticketId as TicketId, projectId: tab.projectId }
+            : undefined
+        ),
+      [tab.ticketId, tab.projectId]
+    );
 
     const clientToolVariables = useMemo(
       () =>
-        tab.ticketId
-          ? buildTicketInteractiveVariables(
-              project ? { projectId: project.id, projectLabel: project.label } : undefined
-            )
-          : buildInteractiveVariables(
-              project ? { projectId: project.id, projectLabel: project.label } : undefined
-            ),
+        buildInteractiveVariables({
+          ...(project ? { projectId: project.id, projectLabel: project.label } : {}),
+          ...(tab.ticketId ? { ticketId: tab.ticketId } : {}),
+        }),
       [tab.ticketId, project]
     );
 

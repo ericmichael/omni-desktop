@@ -2,7 +2,7 @@ import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { PiPlusBold, PiTrashBold } from 'react-icons/pi';
 
-import { Button, IconButton } from '@/renderer/ds';
+import { Button, Card, IconButton, Input, SaveBar, SectionLabel } from '@/renderer/ds';
 import { configApi } from '@/renderer/services/config';
 
 type EnvLine = { kind: 'entry'; key: string; value: string } | { kind: 'comment'; text: string } | { kind: 'blank' };
@@ -115,20 +115,20 @@ export const SettingsModalEnvironmentTab = memo(() => {
 
   return (
     <div className="flex flex-col gap-3">
-      <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle">Environment File</span>
-      <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
-        <span className="text-xs text-fg-muted truncate">{envFilePath ?? 'Loading\u2026'}</span>
-      </div>
+      <SectionLabel>Environment File</SectionLabel>
+      <Card>
+        <span className="text-sm sm:text-xs text-fg-muted truncate">{envFilePath ?? 'Loading\u2026'}</span>
+      </Card>
 
-      <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">Variables</span>
-      <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-2">
+      <SectionLabel className="mt-2">Variables</SectionLabel>
+      <Card className="gap-2">
         {lines.map((line, i) => {
           if (line.kind === 'blank') {
             return null;
           }
           if (line.kind === 'comment') {
             return (
-              <div key={i} className="text-xs text-fg-subtle font-mono opacity-60">
+              <div key={i} className="text-sm sm:text-xs text-fg-subtle font-mono opacity-60">
                 {line.text}
               </div>
             );
@@ -140,16 +140,9 @@ export const SettingsModalEnvironmentTab = memo(() => {
           <PiPlusBold className="mr-1" />
           Add variable
         </Button>
-      </div>
+      </Card>
 
-      {error && <span className="text-xs text-red-400">{error}</span>}
-
-      <div className="flex items-center gap-2 mt-1">
-        <Button size="sm" variant="primary" onClick={save} isDisabled={!dirty || saving}>
-          {saving ? 'Saving\u2026' : 'Save'}
-        </Button>
-        {dirty && <span className="text-xs text-fg-subtle">Unsaved changes</span>}
-      </div>
+      <SaveBar onSave={save} dirty={dirty} saving={saving} error={error} />
     </div>
   );
 });
@@ -185,20 +178,23 @@ const EnvEntryRow = memo(
 
     return (
       <div className="flex items-center gap-2">
-        <input
+        <Input
           type="text"
           value={line.key}
           onChange={onChangeKey}
           placeholder="KEY"
-          className="h-8 px-2 text-xs rounded-md bg-transparent border border-surface-border/50 text-fg font-mono flex-1 outline-none focus:border-accent-500/50"
+          mono
+          className="flex-1"
         />
-        <span className="text-fg-subtle text-xs">=</span>
-        <input
+        <span className="text-fg-subtle text-sm sm:text-xs">=</span>
+        <Input
+          size="sm"
           type="text"
           value={line.value}
           onChange={onChangeValue}
           placeholder="value"
-          className="h-8 px-2 text-xs rounded-md bg-transparent border border-surface-border/50 text-fg font-mono flex-[2] outline-none focus:border-accent-500/50"
+          mono
+          className="flex-[2]"
         />
         <IconButton aria-label="Remove variable" icon={<PiTrashBold />} size="sm" onClick={onClickRemove} />
       </div>

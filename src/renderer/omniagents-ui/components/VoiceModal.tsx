@@ -840,7 +840,7 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
           <button
             type="button"
             onClick={() => setSidebarOpen(o => !o)}
-            className="h-7 w-7 rounded-md flex items-center justify-center text-white/40 hover:text-white/70 hover:bg-white/[0.06] transition-colors"
+            className="h-9 w-9 rounded-lg flex items-center justify-center text-white/40 hover:text-white/70 hover:bg-white/[0.06] transition-colors"
             aria-label={sidebarOpen ? 'Hide activity' : 'Show activity'}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -852,7 +852,7 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
           <button
             type="button"
             onClick={onClose}
-            className="h-7 w-7 rounded-md flex items-center justify-center text-white/40 hover:text-white/70 hover:bg-white/[0.06] transition-colors"
+            className="h-9 w-9 rounded-lg flex items-center justify-center text-white/40 hover:text-white/70 hover:bg-white/[0.06] transition-colors"
             aria-label="Close voice mode"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1046,7 +1046,7 @@ function SidebarTranscriptBubble({ role, text, timestamp }: { role: 'user' | 'as
       >
         {text}
       </div>
-      <span className="text-[10px] text-white/20 mt-0.5 px-1">
+      <span className="text-xs text-white/20 mt-0.5 px-1">
         {new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
       </span>
     </div>
@@ -1086,19 +1086,19 @@ function SidebarActivityCard({ notification: n, onApprove, onReject, onDismiss }
         <span className="text-xs font-medium text-white/80 truncate flex-1">
           {n.type === 'tool_approval' ? 'Approve tool call?' : n.tool}
         </span>
-        <span className="text-[10px] text-white/20 tabular-nums flex-shrink-0">
+        <span className="text-xs text-white/20 tabular-nums flex-shrink-0">
           {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
         </span>
       </div>
 
       {n.type === 'tool_called' && n.input && (
-        <div className="text-[11px] text-white/40 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
+        <div className="text-xs text-white/40 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
           {truncate(n.input, 120)}
         </div>
       )}
 
       {n.type === 'tool_result' && n.output && (
-        <div className="text-[11px] text-white/40 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
+        <div className="text-xs text-white/40 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
           {truncate(n.output, 120)}
         </div>
       )}
@@ -1107,7 +1107,7 @@ function SidebarActivityCard({ notification: n, onApprove, onReject, onDismiss }
         <>
           <div className="text-xs text-white/60 font-medium mt-0.5">{n.tool}</div>
           {n.input && (
-            <div className="text-[11px] text-white/40 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
+            <div className="text-xs text-white/40 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
               {truncate(n.input, 120)}
             </div>
           )}

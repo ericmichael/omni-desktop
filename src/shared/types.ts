@@ -410,7 +410,12 @@ export type AgentProcessStatus =
   | OkStatus<'connecting', AgentProcessData>
   | OkStatus<'running', AgentProcessData>;
 
-export type ChatProcessStatus = AgentProcessStatus;
+/**
+ * Start argument for the unified agent process manager.
+ */
+export type AgentProcessStartOptions = {
+  workspaceDir: string;
+};
 
 /**
  * A logging level.
@@ -470,6 +475,7 @@ export type ProjectId = string;
 export type InitiativeId = string;
 export type TaskId = string;
 export type TicketId = string;
+export type TicketCommentId = string;
 export type ColumnId = string;
 export type InboxItemId = string;
 
@@ -497,6 +503,8 @@ export type TokenUsage = {
 export type Column = {
   id: ColumnId;
   label: string;
+  /** Human-readable description of what this column represents. */
+  description?: string;
   /** Max concurrent supervisors allowed in this column. Unlimited if undefined. */
   maxConcurrent?: number;
   /** When true, the supervisor is stopped on entry and only a human can move the ticket out. */
@@ -556,6 +564,21 @@ export type Initiative = {
   updatedAt: number;
 };
 
+export type TicketComment = {
+  id: TicketCommentId;
+  author: 'agent' | 'human';
+  content: string;
+  createdAt: number;
+};
+
+export type TicketRun = {
+  id: string;
+  startedAt: number;
+  endedAt: number;
+  endReason: string;
+  tokenUsage?: TokenUsage;
+};
+
 export type Ticket = {
   id: TicketId;
   projectId: ProjectId;
@@ -594,6 +617,10 @@ export type Ticket = {
   tokenUsage?: TokenUsage;
   /** Resolution reason when ticket is closed. Undefined means open. */
   resolution?: TicketResolution;
+  /** Agent/human comments — serves as persistent memory across runs. */
+  comments?: TicketComment[];
+  /** History of supervisor runs on this ticket. */
+  runs?: TicketRun[];
 };
 
 // --- Inbox ---
@@ -712,14 +739,18 @@ type OmniInstallProcessIpcEvents = Namespaced<
   }
 >;
 
-type ChatProcessIpcEvents = Namespaced<
-  'chat-process',
+/**
+ * Unified agent process API. Main process handles these events, renderer process invokes them.
+ * All operations are keyed by a processId — "chat" for the chat tab, CodeTabId for code tabs.
+ */
+type AgentProcessIpcEvents = Namespaced<
+  'agent-process',
   {
-    'get-status': () => WithTimestamp<ChatProcessStatus>;
-    start: (arg: { workspaceDir: string; sandboxVariant?: SandboxVariant }) => void;
-    stop: () => void;
-    rebuild: () => void;
-    resize: (cols: number, rows: number) => void;
+    start: (processId: string, arg: AgentProcessStartOptions) => void;
+    stop: (processId: string) => void;
+    rebuild: (processId: string, arg: AgentProcessStartOptions) => void;
+    resize: (processId: string, cols: number, rows: number) => void;
+    'get-status': (processId: string) => WithTimestamp<AgentProcessStatus>;
   }
 >;
 
@@ -749,6 +780,7 @@ type UtilIpcEvents = Namespaced<
     'check-models-configured': () => boolean;
     'test-model-connection': (modelRef?: string) => { success: boolean; output: string };
     'list-directory': (path: string) => { name: string; path: string; isDirectory: boolean }[];
+    'rebuild-sandbox-image': () => { success: boolean; error?: string };
   }
 >;
 
@@ -781,22 +813,6 @@ type ConfigIpcEvents = Namespaced<
   }
 >;
 
-/**
- * Code Tab API. Main process handles these events, renderer process invokes them.
- */
-type CodeIpcEvents = Namespaced<
-  'code',
-  {
-    'start-sandbox': (tabId: CodeTabId, arg: { workspaceDir: string; sandboxVariant: SandboxVariant; local?: boolean; sandboxBackend?: SandboxBackend }) => void;
-    'stop-sandbox': (tabId: CodeTabId) => void;
-    'rebuild-sandbox': (
-      tabId: CodeTabId,
-      fallbackArg: { workspaceDir: string; sandboxVariant: SandboxVariant; local?: boolean; sandboxBackend?: SandboxBackend }
-    ) => void;
-    'resize-sandbox': (tabId: CodeTabId, cols: number, rows: number) => void;
-    'get-sandbox-status': (tabId: CodeTabId) => WithTimestamp<AgentProcessStatus>;
-  }
->;
 
 /**
  * Project & Ticket API. Main process handles these events, renderer process invokes them.
@@ -888,12 +904,11 @@ type InitiativeIpcEvents = Namespaced<
  */
 export type IpcEvents = MainProcessIpcEvents &
   OmniInstallProcessIpcEvents &
-  ChatProcessIpcEvents &
+  AgentProcessIpcEvents &
   UtilIpcEvents &
   TerminalIpcEvents &
   StoreIpcEvents &
   ConfigIpcEvents &
-  CodeIpcEvents &
   ProjectIpcEvents &
   InboxIpcEvents &
   InitiativeIpcEvents &
@@ -939,12 +954,15 @@ type OmniInstallProcessIpcRendererEvents = Namespaced<
   }
 >;
 
-type ChatProcessIpcRendererEvents = Namespaced<
-  'chat-process',
+/**
+ * Unified agent process events. Main process emits these, renderer listens.
+ * All keyed by processId.
+ */
+type AgentProcessIpcRendererEvents = Namespaced<
+  'agent-process',
   {
-    status: [WithTimestamp<ChatProcessStatus>];
-    log: [WithTimestamp<LogEntry>];
-    'raw-output': [string];
+    status: [string, WithTimestamp<AgentProcessStatus>];
+    'raw-output': [string, string];
   }
 >;
 
@@ -977,16 +995,6 @@ type ToastIpcRendererEvents = Namespaced<
   }
 >;
 
-/**
- * Code Tab events. Main process emits these events, renderer process listens to them.
- */
-type CodeIpcRendererEvents = Namespaced<
-  'code',
-  {
-    'sandbox-status': [CodeTabId, WithTimestamp<AgentProcessStatus>];
-    'sandbox-raw-output': [CodeTabId, string];
-  }
->;
 
 /**
  * Project events. Main process emits these events, renderer process listens to them.
@@ -1020,10 +1028,9 @@ type PlatformIpcRendererEvents = Namespaced<
 export type IpcRendererEvents = TerminalIpcRendererEvents &
   MainProcessIpcRendererEvents &
   OmniInstallProcessIpcRendererEvents &
-  ChatProcessIpcRendererEvents &
+  AgentProcessIpcRendererEvents &
   DevIpcRendererEvents &
   StoreIpcRendererEvents &
-  CodeIpcRendererEvents &
   ProjectIpcRendererEvents &
   ToastIpcRendererEvents &
   PlatformIpcRendererEvents;

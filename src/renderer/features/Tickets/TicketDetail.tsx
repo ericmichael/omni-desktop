@@ -25,7 +25,7 @@ import {
 
 import { CodeSplitLayout } from '@/renderer/common/CodeSplitLayout';
 import { Webview } from '@/renderer/common/Webview';
-import { Button, cn, IconButton, Spinner } from '@/renderer/ds';
+import { Badge, Button, cn, IconButton, Select, Spinner } from '@/renderer/ds';
 import { FloatingWidget } from '@/renderer/features/Omni/FloatingWidget';
 import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import { buildSandboxLabel, isCustomSandbox } from '@/renderer/omniagents-ui/sandbox-label';
@@ -312,7 +312,7 @@ return;
         {dragHandleProps && (
           <button
             type="button"
-            className="inline-flex items-center justify-center size-7 rounded-md text-fg-muted hover:text-fg hover:bg-white/5 cursor-grab active:cursor-grabbing"
+            className="inline-flex items-center justify-center size-9 rounded-lg text-fg-muted hover:text-fg hover:bg-white/5 cursor-grab active:cursor-grabbing"
             {...dragHandleProps.attributes}
             {...dragHandleProps.listeners}
             aria-label="Reorder"
@@ -370,7 +370,7 @@ return;
             <button
               onClick={handleColumnBadgeClick}
               className={cn(
-                'flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full font-medium cursor-pointer hover:brightness-125 transition-all',
+                'flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded-full font-medium cursor-pointer hover:brightness-125 transition-all',
                 COLUMN_BADGE_COLORS[currentColumn.id] ?? 'text-fg-muted bg-fg-muted/10'
               )}
             >
@@ -392,7 +392,7 @@ return;
                     )}
                   >
                     {col.label}
-                    {col.gate && <span className="ml-1 text-[10px] text-fg-muted">(gated)</span>}
+                    {col.gate && <span className="ml-1 text-xs text-fg-muted">(gated)</span>}
                   </button>
                 ))}
               </div>
@@ -402,7 +402,7 @@ return;
         {!compact && (
           <span
             className={cn(
-              'text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0',
+              'text-xs px-1.5 py-0.5 rounded-full font-medium shrink-0',
               TICKET_PRIORITY_COLORS[ticket.priority]
             )}
           >
@@ -412,7 +412,7 @@ return;
         {!compact && ticket.resolution && (
           <span
             className={cn(
-              'text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0',
+              'text-xs px-1.5 py-0.5 rounded-full font-medium shrink-0',
               RESOLUTION_COLORS[ticket.resolution]
             )}
           >
@@ -426,7 +426,7 @@ return;
               aria-label="Ticket menu"
               title="Ticket menu"
               onClick={handleResolveClick}
-              className="inline-flex size-6 items-center justify-center rounded-md text-fg-muted hover:bg-white/5 hover:text-fg transition-colors"
+              className="inline-flex size-9 items-center justify-center rounded-lg text-fg-muted hover:bg-white/5 hover:text-fg transition-colors"
             >
               <PiDotsThreeBold size={14} />
             </button>
@@ -447,15 +447,13 @@ return;
           </div>
         )}
         {!compact && initiative && !initiative.isDefault && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 text-sky-400 bg-sky-400/10">
-            {initiative.title}
-          </span>
+          <Badge color="sky" className="shrink-0">{initiative.title}</Badge>
         )}
         {!compact && gitInfo?.isGitRepo && (
           <button
             type="button"
             onClick={handleStartEditBranch}
-            className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 text-purple-400 bg-purple-400/10 hover:brightness-125 transition-all"
+            className="flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full font-medium shrink-0 text-purple-400 bg-purple-400/10 hover:brightness-125 transition-all"
           >
             <PiGitBranchBold size={10} />
             {ticket.branch || initiative?.branch || 'Set branch'}
@@ -469,10 +467,10 @@ return;
         <div className="flex items-center gap-3 px-3 py-2 border-b border-surface-border bg-surface-raised/30 shrink-0 flex-wrap">
           <div className="flex items-center gap-2">
             <label className="text-xs font-medium text-fg-subtle">Branch</label>
-            <select
+            <Select
               value={editBranch}
               onChange={(e) => setEditBranch(e.target.value)}
-              className="rounded-md border border-surface-border bg-surface px-2 py-1.5 text-sm text-fg focus:outline-none focus:border-accent-500"
+              size="sm"
             >
               <option value="">{initiative?.branch ? `Inherit from initiative (${initiative.branch})` : 'None'}</option>
               {gitInfo.branches.map((branch) => (
@@ -480,7 +478,7 @@ return;
                   {branch}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
           <span className="text-xs text-fg-muted">
             Tickets with a branch open in an isolated workspace.
@@ -575,7 +573,7 @@ const CompactPhaseIndicator = memo(
       return (
         <div className="flex items-center gap-1.5 shrink-0">
           <PiArrowsClockwiseBold size={10} className="text-green-400 animate-spin" />
-          <span className="text-[10px] text-green-400 font-medium">Working</span>
+          <span className="text-xs text-green-400 font-medium">Working</span>
           <IconButton aria-label="Stop" icon={<PiStopFill size={10} />} size="sm" onClick={onStop} />
         </div>
       );
@@ -591,7 +589,7 @@ const CompactPhaseIndicator = memo(
       return (
         <div className="flex items-center gap-1.5 shrink-0">
           <span className="size-1.5 rounded-full bg-blue-400 animate-pulse" />
-          <span className="text-[10px] text-blue-400 font-medium">Needs input</span>
+          <span className="text-xs text-blue-400 font-medium">Needs input</span>
           <IconButton aria-label="Stop" icon={<PiStopFill size={10} />} size="sm" onClick={onStop} />
         </div>
       );
@@ -600,7 +598,7 @@ const CompactPhaseIndicator = memo(
       return (
         <div className="flex items-center gap-1.5 shrink-0">
           <PiArrowsClockwiseBold size={10} className="text-yellow-400 animate-spin" />
-          <span className="text-[10px] text-yellow-400 font-medium">Retrying</span>
+          <span className="text-xs text-yellow-400 font-medium">Retrying</span>
           <IconButton aria-label="Stop" icon={<PiStopFill size={10} />} size="sm" onClick={onStop} />
         </div>
       );
@@ -620,7 +618,7 @@ const CompactPhaseIndicator = memo(
       return (
         <div className="flex items-center gap-1.5 shrink-0">
           <PiCheckCircleBold size={12} className="text-green-400" />
-          <span className="text-[10px] text-green-400 font-medium">Done</span>
+          <span className="text-xs text-green-400 font-medium">Done</span>
           <IconButton aria-label="New session" icon={<PiPlusBold size={10} />} size="sm" onClick={onReset} />
         </div>
       );

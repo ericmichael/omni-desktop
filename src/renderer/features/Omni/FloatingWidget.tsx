@@ -252,7 +252,7 @@ export const FloatingWidget = memo(
                   onMouseEnter={handleSplitBtnEnter}
                   onMouseLeave={handleSplitBtnLeave}
                   className={cn(
-                    'flex items-center justify-center size-7',
+                    'flex items-center justify-center size-9',
                     'border rounded-full',
                     'shadow-lg cursor-pointer transition-colors',
                     splitOpen

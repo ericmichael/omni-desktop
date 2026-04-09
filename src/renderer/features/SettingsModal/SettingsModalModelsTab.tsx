@@ -2,7 +2,7 @@ import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { PiCaretDownBold, PiCaretUpBold, PiPlusBold, PiTrashBold } from 'react-icons/pi';
 
-import { Button, FormField, IconButton, Spinner } from '@/renderer/ds';
+import { Button, Card, FormField, IconButton, Input, SaveBar, SectionLabel, Select, Spinner } from '@/renderer/ds';
 import { configApi } from '@/renderer/services/config';
 import type { ModelEntry, ModelsConfig, ProviderEntry } from '@/shared/types';
 
@@ -274,40 +274,32 @@ export const SettingsModalModelsTab = memo(() => {
 
   return (
     <div className="flex flex-col gap-3">
-      <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle">Defaults</span>
-      <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
+      <SectionLabel>Defaults</SectionLabel>
+      <Card>
         <FormField label="Default model">
-          <select
-            value={config.default ?? ''}
-            onChange={onChangeDefault}
-            className="h-8 px-2 text-xs rounded-md bg-surface border border-surface-border/50 text-fg cursor-pointer outline-none focus:border-accent-500/50"
-          >
+          <Select value={config.default ?? ''} onChange={onChangeDefault}>
             <option value="">None</option>
             {modelKeys.map((k) => (
               <option key={k} value={k}>
                 {k}
               </option>
             ))}
-          </select>
+          </Select>
         </FormField>
         <FormField label="Voice model">
-          <select
-            value={config.voice_default ?? ''}
-            onChange={onChangeVoiceDefault}
-            className="h-8 px-2 text-xs rounded-md bg-surface border border-surface-border/50 text-fg cursor-pointer outline-none focus:border-accent-500/50"
-          >
+          <Select value={config.voice_default ?? ''} onChange={onChangeVoiceDefault}>
             <option value="">None</option>
             {modelKeys.map((k) => (
               <option key={k} value={k}>
                 {k}
               </option>
             ))}
-          </select>
+          </Select>
         </FormField>
-      </div>
+      </Card>
 
-      <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">Providers</span>
-      <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 divide-y divide-surface-border/50">
+      <SectionLabel className="mt-2">Providers</SectionLabel>
+      <Card divided>
         {Object.entries(config.providers).map(([name, provider]) => (
           <ProviderRow
             key={name}
@@ -327,28 +319,22 @@ export const SettingsModalModelsTab = memo(() => {
           />
         ))}
         <div className="p-4 flex items-center gap-2">
-          <input
+          <Input
             type="text"
             value={newProviderName}
             onChange={onChangeNewProviderName}
             placeholder="Provider name"
-            className="h-8 px-2 text-xs rounded-md bg-transparent border border-surface-border/50 text-fg font-mono flex-1 outline-none focus:border-accent-500/50"
+            mono
+            className="flex-1"
           />
           <Button size="sm" variant="ghost" onClick={addProvider} isDisabled={!newProviderName.trim()}>
             <PiPlusBold className="mr-1" />
             Add provider
           </Button>
         </div>
-      </div>
+      </Card>
 
-      {error && <span className="text-xs text-red-400">{error}</span>}
-
-      <div className="flex items-center gap-2 mt-1">
-        <Button size="sm" variant="primary" onClick={save} isDisabled={!dirty || saving}>
-          {saving ? 'Saving\u2026' : 'Save'}
-        </Button>
-        {dirty && <span className="text-xs text-fg-subtle">Unsaved changes</span>}
-      </div>
+      <SaveBar onSave={save} dirty={dirty} saving={saving} error={error} />
     </div>
   );
 });
@@ -415,7 +401,7 @@ const ProviderRow = memo(
         <div className="flex items-center gap-2 p-4 cursor-pointer" onClick={onClickToggle}>
           <div className="flex-1 min-w-0">
             <div className="text-sm font-medium text-fg">{name}</div>
-            <div className="text-xs text-fg-muted">
+            <div className="text-sm sm:text-xs text-fg-muted">
               Type: {provider.type} &middot; Models: {modelCount}
             </div>
           </div>
@@ -430,51 +416,50 @@ const ProviderRow = memo(
         {isExpanded && (
           <div className="px-4 pb-4 flex flex-col gap-3 border-t border-surface-border/30 pt-3">
             <FormField label="Type">
-              <select
-                value={provider.type}
-                onChange={onChangeType}
-                className="h-8 px-2 text-xs rounded-md bg-surface border border-surface-border/50 text-fg cursor-pointer outline-none focus:border-accent-500/50"
-              >
+              <Select value={provider.type} onChange={onChangeType}>
                 {PROVIDER_TYPES.map((t) => (
                   <option key={t} value={t}>
                     {t}
                   </option>
                 ))}
-              </select>
+              </Select>
             </FormField>
             <FormField label="API Key">
-              <input
+              <Input
                 type="text"
                 value={provider.api_key ?? ''}
                 onChange={onChangeApiKey}
                 placeholder="sk-..."
-                className="h-8 px-2 text-xs rounded-md bg-transparent border border-surface-border/50 text-fg font-mono flex-1 outline-none focus:border-accent-500/50"
+                mono
+                className="flex-1"
               />
             </FormField>
             {showBaseUrl && (
               <FormField label="Base URL">
-                <input
+                <Input
                   type="text"
                   value={provider.base_url ?? ''}
                   onChange={onChangeBaseUrl}
                   placeholder="https://..."
-                  className="h-8 px-2 text-xs rounded-md bg-transparent border border-surface-border/50 text-fg font-mono flex-1 outline-none focus:border-accent-500/50"
+                  mono
+                  className="flex-1"
                 />
               </FormField>
             )}
             {showApiVersion && (
               <FormField label="API Version">
-                <input
+                <Input
                   type="text"
                   value={provider.api_version ?? ''}
                   onChange={onChangeApiVersion}
                   placeholder="2024-02-01"
-                  className="h-8 px-2 text-xs rounded-md bg-transparent border border-surface-border/50 text-fg font-mono flex-1 outline-none focus:border-accent-500/50"
+                  mono
+                  className="flex-1"
                 />
               </FormField>
             )}
 
-            <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">Models</span>
+            <SectionLabel className="mt-2">Models</SectionLabel>
             <div className="flex flex-col gap-1">
               {Object.entries(provider.models).map(([modelId, model]) => {
                 const isEditing = editingModel?.provider === name && editingModel.modelId === modelId;
@@ -494,12 +479,13 @@ const ProviderRow = memo(
             </div>
 
             <div className="flex items-center gap-2">
-              <input
+              <Input
                 type="text"
                 value={newModelId}
                 onChange={onChangeNewModelId}
                 placeholder="Model ID"
-                className="h-8 px-2 text-xs rounded-md bg-transparent border border-surface-border/50 text-fg font-mono flex-1 outline-none focus:border-accent-500/50"
+                mono
+                className="flex-1"
               />
               <Button size="sm" variant="ghost" onClick={onClickAddModel} isDisabled={!newModelId.trim()}>
                 <PiPlusBold className="mr-1" />
@@ -611,10 +597,10 @@ const ModelRow = memo(
     );
 
     return (
-      <div className="bg-surface/50 rounded-md border border-surface-border/30">
-        <div className="flex items-center gap-2 px-3 py-2">
-          <span className="text-xs font-mono text-fg flex-1">{modelId}</span>
-          {model.label && <span className="text-xs text-fg-muted">&ldquo;{model.label}&rdquo;</span>}
+      <div className="bg-surface/50 rounded-lg border border-surface-border/30">
+        <div className="flex items-center gap-2 px-3 py-2.5 sm:py-2">
+          <span className="text-sm sm:text-xs font-mono text-fg flex-1">{modelId}</span>
+          {model.label && <span className="text-sm sm:text-xs text-fg-muted">&ldquo;{model.label}&rdquo;</span>}
           <Button size="sm" variant="ghost" onClick={onClickToggle}>
             {isEditing ? 'Done' : 'Edit'}
           </Button>
@@ -623,52 +609,51 @@ const ModelRow = memo(
         {isEditing && (
           <div className="px-3 pb-3 flex flex-col gap-2 border-t border-surface-border/30 pt-2">
             <FormField label="Label">
-              <input
+              <Input
+                size="sm"
                 type="text"
                 value={model.label ?? ''}
                 onChange={onChangeLabel}
                 placeholder="Display label"
-                className="h-7 px-2 text-xs rounded-md bg-transparent border border-surface-border/50 text-fg flex-1 outline-none focus:border-accent-500/50"
+                className="flex-1"
               />
             </FormField>
             <FormField label="Max input tokens">
-              <input
+              <Input
+                size="sm"
                 type="number"
                 value={model.max_input_tokens ?? ''}
                 onChange={onChangeMaxInput}
-                className="h-7 px-2 text-xs rounded-md bg-transparent border border-surface-border/50 text-fg flex-1 outline-none focus:border-accent-500/50"
+                className="flex-1"
               />
             </FormField>
             <FormField label="Max output tokens">
-              <input
+              <Input
+                size="sm"
                 type="number"
                 value={model.max_output_tokens ?? ''}
                 onChange={onChangeMaxOutput}
-                className="h-7 px-2 text-xs rounded-md bg-transparent border border-surface-border/50 text-fg flex-1 outline-none focus:border-accent-500/50"
+                className="flex-1"
               />
             </FormField>
             <FormField label="Reasoning">
-              <select
-                value={model.reasoning ?? 'none'}
-                onChange={onChangeReasoning}
-                className="h-7 px-2 text-xs rounded-md bg-surface border border-surface-border/50 text-fg cursor-pointer outline-none focus:border-accent-500/50"
-              >
+              <Select size="sm" value={model.reasoning ?? 'none'} onChange={onChangeReasoning}>
                 {REASONING_OPTIONS.map((r) => (
                   <option key={r} value={r}>
                     {r}
                   </option>
                 ))}
-              </select>
+              </Select>
             </FormField>
-            <label className="flex items-center gap-2 text-xs text-fg cursor-pointer">
+            <label className="flex items-center gap-2.5 text-sm sm:text-xs text-fg cursor-pointer py-0.5">
               <input type="checkbox" checked={model.realtime ?? false} onChange={onChangeRealtime} />
               Realtime model
             </label>
-            <label className="flex items-center gap-2 text-xs text-fg cursor-pointer">
+            <label className="flex items-center gap-2.5 text-sm sm:text-xs text-fg cursor-pointer py-0.5">
               <input type="checkbox" checked={!storeValue} onChange={onChangeStore} />
               Disable storage (store: false)
             </label>
-            <label className="flex items-center gap-2 text-xs text-fg cursor-pointer">
+            <label className="flex items-center gap-2.5 text-sm sm:text-xs text-fg cursor-pointer py-0.5">
               <input type="checkbox" checked={hasEncryptedReasoning} onChange={onChangeEncryptedReasoning} />
               Include encrypted reasoning content
             </label>

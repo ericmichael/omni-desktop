@@ -37,8 +37,9 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogPrimitive.DialogCo
           transition={{ type: 'spring', duration: 0.3, bounce: 0.1 }}
           className={cn(
             'fixed z-50 overflow-y-auto focus:outline-none',
-            // Mobile: full-screen sheet from bottom
+            // Mobile: full-screen sheet with safe area padding
             'inset-0 rounded-none border-0 bg-surface-raised',
+            'pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]',
             // Desktop: centered floating card
             'sm:inset-0 sm:m-auto sm:h-fit sm:max-h-[85vh] sm:w-full sm:max-w-lg',
             'sm:rounded-xl sm:border sm:border-surface-border sm:shadow-2xl',

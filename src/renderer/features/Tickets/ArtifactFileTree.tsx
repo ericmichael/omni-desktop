@@ -74,7 +74,7 @@ const FileTreeNode = memo(({ entry, ticketId, selectedPath, onSelect, depth }: F
         {!entry.isDirectory && <span className="w-[10px] shrink-0" />}
         {getFileIcon(entry, expanded)}
         <span className="flex-1 truncate">{entry.name}</span>
-        {!entry.isDirectory && <span className="text-[10px] text-fg-subtle shrink-0">{formatSize(entry.size)}</span>}
+        {!entry.isDirectory && <span className="text-xs text-fg-subtle shrink-0">{formatSize(entry.size)}</span>}
       </button>
       {expanded && children && (
         <div>

@@ -7,9 +7,9 @@ import { OmniAgentsApp } from './LauncherApp';
 
 type OmniAgentsHostState =
   | { type: 'ready'; uiUrl: string }
-  | { type: 'starting'; phase: 'checking' | 'installing' | 'starting'; details?: React.ReactNode }
+  | { type: 'loading' }
   | { type: 'idle'; onLaunch?: () => void; disabled?: boolean }
-  | { type: 'error'; error: string; onRetry?: () => void; details?: React.ReactNode };
+  | { type: 'error'; error: string; onRetry?: () => void };
 
 type OmniAgentsHostAppProps = {
   state: OmniAgentsHostState;
@@ -62,13 +62,13 @@ export const OmniAgentsHostApp = memo(
     }, []);
 
     const shellPhase =
-      state.type === 'starting'
-        ? state.phase
+      state.type === 'loading'
+        ? 'loading' as const
         : state.type === 'error'
           ? 'error' as const
           : state.type === 'idle'
             ? 'idle' as const
-            : 'starting' as const;
+            : 'loading' as const;
 
     return (
       <div className="w-full h-full relative">
@@ -82,7 +82,6 @@ export const OmniAgentsHostApp = memo(
               onRetry={state.type === 'error' ? state.onRetry : undefined}
               onLaunch={state.type === 'idle' ? state.onLaunch : undefined}
               launchDisabled={state.type === 'idle' ? state.disabled : undefined}
-              details={state.type === 'starting' || state.type === 'error' ? state.details : undefined}
               onSubmit={handleShellSubmit}
               pendingMessages={pendingMessages}
             />

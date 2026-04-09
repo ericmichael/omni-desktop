@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Button, FormField, Spinner } from '@/renderer/ds';
+import { Button, Card, FormField, SectionLabel, Spinner } from '@/renderer/ds';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import type { PlatformCredentials } from '@/shared/types';
 
@@ -19,7 +19,6 @@ export const SettingsModalAccountTab = memo(() => {
     emitter.invoke('platform:get-auth').then(setAuth);
   }, []);
 
-  // Listen for auth changes from main process (background polling completes)
   useEffect(() => {
     return ipc.on('platform:auth-changed', (credentials) => {
       setAuth(credentials);
@@ -68,7 +67,6 @@ export const SettingsModalAccountTab = memo(() => {
     setTimeout(() => setCopied(false), 2000);
   }, [flow]);
 
-  // Loading state
   if (isEnterprise === null) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -77,45 +75,43 @@ export const SettingsModalAccountTab = memo(() => {
     );
   }
 
-  // Not an enterprise build
   if (!isEnterprise) {
     return (
       <div className="flex flex-col gap-3">
-        <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle">Account</span>
-        <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4">
-          <p className="text-xs text-fg-muted">
+        <SectionLabel>Account</SectionLabel>
+        <Card>
+          <p className="text-sm sm:text-xs text-fg-muted">
             This is an open-source build. Enterprise authentication is not available.
           </p>
-        </div>
+        </Card>
       </div>
     );
   }
 
-  // Signed in
   if (auth) {
     return (
       <div className="flex flex-col gap-3">
-        <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle">Account</span>
-        <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
+        <SectionLabel>Account</SectionLabel>
+        <Card>
           <FormField label="Signed in as">
-            <span className="text-xs text-fg-muted">{auth.userEmail ?? 'Unknown'}</span>
+            <span className="text-sm sm:text-xs text-fg-muted">{auth.userEmail ?? 'Unknown'}</span>
           </FormField>
           {auth.userName && (
             <FormField label="Name">
-              <span className="text-xs text-fg-muted">{auth.userName}</span>
+              <span className="text-sm sm:text-xs text-fg-muted">{auth.userName}</span>
             </FormField>
           )}
           {auth.userRole && (
             <FormField label="Role">
-              <span className="text-xs text-fg-muted capitalize">{auth.userRole}</span>
+              <span className="text-sm sm:text-xs text-fg-muted capitalize">{auth.userRole}</span>
             </FormField>
           )}
           {auth.domains && auth.domains.length > 0 && (
             <FormField label="Domains">
-              <span className="text-xs text-fg-muted">{auth.domains.map((d) => d.name).join(', ')}</span>
+              <span className="text-sm sm:text-xs text-fg-muted">{auth.domains.map((d) => d.name).join(', ')}</span>
             </FormField>
           )}
-        </div>
+        </Card>
         <div className="flex justify-end">
           <Button size="sm" variant="destructive" onClick={handleSignOut}>
             Sign out
@@ -125,14 +121,13 @@ export const SettingsModalAccountTab = memo(() => {
     );
   }
 
-  // Sign-in flow
   return (
     <div className="flex flex-col gap-3">
-      <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle">Account</span>
-      <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
+      <SectionLabel>Account</SectionLabel>
+      <Card>
         {flow.step === 'idle' && (
           <>
-            <p className="text-xs text-fg-muted">Sign in with your institutional account to access managed sandboxes and enterprise features.</p>
+            <p className="text-sm sm:text-xs text-fg-muted">Sign in with your institutional account to access managed sandboxes and enterprise features.</p>
             <div className="flex justify-end">
               <Button size="sm" variant="primary" onClick={handleSignIn}>
                 Sign in
@@ -143,8 +138,8 @@ export const SettingsModalAccountTab = memo(() => {
 
         {flow.step === 'pending' && (
           <>
-            <p className="text-xs text-fg-muted">{flow.message || 'Enter the code below at the verification URL to complete sign-in.'}</p>
-            <div className="flex items-center gap-3 p-3 bg-surface rounded-md border border-surface-border">
+            <p className="text-sm sm:text-xs text-fg-muted">{flow.message || 'Enter the code below at the verification URL to complete sign-in.'}</p>
+            <div className="flex items-center gap-3 p-3 bg-surface rounded-lg border border-surface-border">
               <code className="text-lg font-mono font-bold tracking-widest text-fg flex-1 text-center">
                 {flow.userCode}
               </code>
@@ -156,11 +151,11 @@ export const SettingsModalAccountTab = memo(() => {
               href={flow.verificationUri}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-accent-400 hover:text-accent-300 underline truncate"
+              className="text-sm sm:text-xs text-accent-400 hover:text-accent-300 underline truncate"
             >
               {flow.verificationUri}
             </a>
-            <div className="flex items-center gap-2 text-xs text-fg-muted">
+            <div className="flex items-center gap-2 text-sm sm:text-xs text-fg-muted">
               <Spinner />
               <span>Waiting for authentication...</span>
             </div>
@@ -169,7 +164,7 @@ export const SettingsModalAccountTab = memo(() => {
 
         {flow.step === 'error' && (
           <>
-            <div className="rounded-md border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300">
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 sm:p-2 text-sm sm:text-xs text-red-300">
               {flow.error}
             </div>
             <div className="flex justify-end">
@@ -179,7 +174,7 @@ export const SettingsModalAccountTab = memo(() => {
             </div>
           </>
         )}
-      </div>
+      </Card>
     </div>
   );
 });

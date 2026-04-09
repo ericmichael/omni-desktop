@@ -4,8 +4,8 @@ import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { WebSocket as WsWebSocket } from 'ws';
 
-import { createChatManager } from '@/main/chat-manager';
-import { createCodeManager } from '@/main/code-manager';
+import { rebuildSandboxImage } from '@/lib/rebuild-sandbox-image';
+import { createProcessManager } from '@/main/process-manager';
 import { createConsoleManager } from '@/main/console-manager';
 import { createProjectManager } from '@/main/project-manager';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
@@ -19,6 +19,8 @@ import {
   getOmniConfigDir,
   getOmniRuntimeInfo,
   getOperatingSystem,
+  getSandboxAssetsPath,
+  getSandboxDockerfilePath,
   installCliToPath,
   isCliInstalledInPath,
   isDirectory,
@@ -37,10 +39,10 @@ type SendToWindow = <T extends keyof IpcRendererEvents>(channel: T, ...args: Ipc
 type HandleFn = (channel: string, handler: (...args: unknown[]) => unknown | Promise<unknown>) => void;
 
 /**
- * Wire up global (shared) IPC handlers — store, util, config, project, code, chat, main-process.
+ * Wire up global (shared) IPC handlers — store, util, config, project, process, main-process.
  * These are stateless or shared, safe for all clients to use.
  *
- * CodeManager and ChatManager are global so that containers/processes survive WebSocket
+ * ProcessManager is global so that containers/processes survive WebSocket
  * reconnections and React re-renders. Each WS session reattaching to the same server
  * gets the existing running container status instead of spawning duplicates.
  */
@@ -63,7 +65,7 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
     sendToWindow: sendToAll,
   });
 
-  const [chat, cleanupChat] = createChatManager({
+  const [processManager, cleanupProcessManager] = createProcessManager({
     ipc: ipc as any,
     sendToWindow: sendToAll,
     fetchFn: globalThis.fetch,
@@ -74,18 +76,11 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
     }),
   });
 
-  const [codeManager, cleanupCode] = createCodeManager({
-    ipc: ipc as any,
-    sendToWindow: sendToAll,
-    fetchFn: globalThis.fetch,
-  });
-
-  // Wire platform client for enterprise mode — all managers that use AgentProcess
+  // Wire platform client for enterprise mode
   const updatePlatformClients = () => {
     const platform = store.get('platform');
     const client = createPlatformClient(platform, globalThis.fetch);
-    codeManager.platformClient = client;
-    chat.platformClient = client;
+    processManager.platformClient = client;
   };
   updatePlatformClients();
   const unsubPlatform = store.onDidAnyChange(() => updatePlatformClients());
@@ -159,6 +154,15 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
   });
   ipc.handle('util:check-models-configured', () => checkModelsConfigured());
   ipc.handle('util:test-model-connection', (_, modelRef) => testModelConnection(modelRef));
+  ipc.handle('util:rebuild-sandbox-image', async () => {
+    const variant = (store.get('sandboxVariant') ?? 'work') as 'work' | 'standard';
+    const backend = (store.get('sandboxBackend') ?? 'docker') as 'docker' | 'podman';
+    return rebuildSandboxImage({
+      backend,
+      dockerfilePath: getSandboxDockerfilePath(variant),
+      contextDir: getSandboxAssetsPath(),
+    });
+  });
 
   ipc.handle('util:check-url', async (_, url) => {
     try {
@@ -288,8 +292,7 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
     const results = await Promise.allSettled([
       cleanupProject(),
       cleanupOmniInstall(),
-      cleanupChat(),
-      cleanupCode(),
+      cleanupProcessManager(),
     ]);
     const errors = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected').map((r) => r.reason);
     if (errors.length > 0) {
@@ -303,7 +306,7 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
 /**
  * Wire up per-client managers — only truly session-scoped resources (PTY console).
  *
- * CodeManager, ChatManager, and OmniInstallManager are ALL global (created in
+ * ProcessManager and OmniInstallManager are ALL global (created in
  * wireGlobalHandlers) so that containers/processes survive WebSocket reconnections
  * and React re-renders. Per-session handlers would shadow the global ones and get
  * destroyed on WS disconnect, killing running containers.

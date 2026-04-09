@@ -19,8 +19,33 @@ mkdir -p "${log_dir}"
 
 export DISPLAY=:0
 
+# Ensure D-Bus machine-id exists (required for session bus activation).
+# May be missing if the container was built without dbus being started.
+if [[ ! -f /var/lib/dbus/machine-id ]]; then
+  dbus-uuidgen > /var/lib/dbus/machine-id 2>/dev/null || true
+fi
+
+# Ensure user xfce config directory exists so xfconfd can write to it.
+mkdir -p "${HOME}/.config/xfce4/xfconf/xfce-perchannel-xml" 2>/dev/null || true
+
 # Start dbus session bus
 export DBUS_SESSION_BUS_ADDRESS=$(dbus-daemon --session --fork --print-address)
+
+# Start xfconfd explicitly — it must be running before startxfce4 or the
+# failsafe session loader fails with "xfconfd isn't running (D-Bus setup problem)".
+# xfconfd is a libexec binary, not on PATH.
+xfconfd_bin="$(find /usr/lib -name xfconfd -type f 2>/dev/null | head -1)"
+if [[ -n "${xfconfd_bin}" ]]; then
+  "${xfconfd_bin}" --daemon > "${log_dir}/xfconfd.log" 2>&1 || true
+
+  # Wait until xfconfd is reachable on D-Bus (up to 5s).
+  for i in $(seq 1 50); do
+    if xfconf-query -l >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.1
+  done
+fi
 
 # Start Xvfb (virtual framebuffer)
 Xvfb :0 -screen 0 "${display_width}x${display_height}x24" > "${log_dir}/xvfb.log" 2>&1 &

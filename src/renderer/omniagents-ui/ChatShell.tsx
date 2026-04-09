@@ -5,7 +5,7 @@ import { Input } from './components/Input';
 import { getGreeting } from './greeting';
 import { OmniAgentsHeaderActionsProvider } from './header-actions';
 
-type ChatShellPhase = 'checking' | 'installing' | 'starting' | 'idle' | 'error';
+type ChatShellPhase = 'loading' | 'idle' | 'error';
 
 export type PendingMessage = { text: string; files?: File[] };
 
@@ -16,7 +16,6 @@ type ChatShellProps = {
   onRetry?: () => void;
   onLaunch?: () => void;
   launchDisabled?: boolean;
-  details?: React.ReactNode;
   onSubmit?: (msg: PendingMessage) => void;
   pendingMessages?: PendingMessage[];
 };
@@ -39,7 +38,7 @@ export const ChatShell = memo(
 
     const [fallbackGreeting] = useState(getGreeting);
     const greeting = greetingProp ?? fallbackGreeting;
-    const isConnecting = phase === 'checking' || phase === 'installing' || phase === 'starting';
+    const isConnecting = phase === 'loading';
     const hasPending = pendingMessages && pendingMessages.length > 0;
 
     return (

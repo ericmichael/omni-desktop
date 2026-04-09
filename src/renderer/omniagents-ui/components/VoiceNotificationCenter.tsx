@@ -80,13 +80,13 @@ function NotificationCard({ n, onApprove, onReject, onDismiss }: {
 
       {/* Body */}
       {n.type === 'tool_called' && n.input && (
-        <div className="text-[11px] text-white/50 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
+        <div className="text-xs text-white/50 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
           {truncate(n.input, 120)}
         </div>
       )}
 
       {n.type === 'tool_result' && n.output && (
-        <div className="text-[11px] text-white/50 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
+        <div className="text-xs text-white/50 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
           {truncate(n.output, 120)}
         </div>
       )}
@@ -95,7 +95,7 @@ function NotificationCard({ n, onApprove, onReject, onDismiss }: {
         <>
           <div className="text-xs text-white/70 font-medium mt-0.5">{n.tool}</div>
           {n.input && (
-            <div className="text-[11px] text-white/50 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
+            <div className="text-xs text-white/50 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
               {truncate(n.input, 120)}
             </div>
           )}

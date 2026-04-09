@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Button } from '@/renderer/ds';
+import { Button, Input, Select, Textarea } from '@/renderer/ds';
 import { initiativeApi } from '@/renderer/features/Initiatives/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { GitRepoInfo, Initiative, ProjectId } from '@/shared/types';
@@ -67,27 +67,26 @@ export const InitiativeForm = memo(({
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-surface-border bg-surface-overlay/50 p-4">
-      <input
+      <Input
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         placeholder="Initiative title..."
-        className="w-full rounded-md border border-surface-border bg-surface px-3 py-2 text-sm text-fg placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500"
+        className="w-full"
         autoFocus
       />
-      <textarea
+      <Textarea
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         placeholder="Description — what is this initiative delivering?"
         rows={2}
-        className="w-full rounded-md border border-surface-border bg-surface px-3 py-2 text-sm text-fg placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500 resize-none"
       />
       {gitInfo?.isGitRepo && (
         <div className="flex items-center gap-2">
           <label className="text-xs font-medium text-fg-subtle">Branch</label>
-          <select
+          <Select
             value={branch}
             onChange={(e) => setBranch(e.target.value)}
-            className="rounded-md border border-surface-border bg-surface px-2 py-1.5 text-sm text-fg focus:outline-none focus:border-accent-500"
+            size="sm"
           >
             <option value="">None</option>
             {gitInfo.branches.map((b) => (
@@ -95,7 +94,7 @@ export const InitiativeForm = memo(({
                 {b}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
       )}
       <div className="flex items-center gap-2">

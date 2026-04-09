@@ -17,7 +17,65 @@ export const refreshOmniRuntimeInfo = async () => {
   $omniRuntimeInfo.set(info);
 };
 
-refreshOmniRuntimeInfo();
+// ---------------------------------------------------------------------------
+// Global runtime readiness — checked once, observed by all sessions
+// ---------------------------------------------------------------------------
+
+export type OmniRuntimeReadiness =
+  | { status: 'idle' }
+  | { status: 'checking' }
+  | { status: 'installing' }
+  | { status: 'ready' }
+  | { status: 'error'; error: string };
+
+export const $omniRuntimeReadiness = atom<OmniRuntimeReadiness>({ status: 'idle' });
+
+let installUnsub: (() => void) | null = null;
+
+export const ensureRuntimeReady = () => {
+  const current = $omniRuntimeReadiness.get();
+  if (current.status === 'checking' || current.status === 'installing' || current.status === 'ready') return;
+
+  $omniRuntimeReadiness.set({ status: 'checking' });
+
+  refreshOmniRuntimeInfo()
+    .then(() => {
+      const info = $omniRuntimeInfo.get();
+      if (info.isInstalled && !info.isOutdated) {
+        $omniRuntimeReadiness.set({ status: 'ready' });
+      } else {
+        omniInstallApi.startInstall(info.isInstalled && info.isOutdated);
+        $omniRuntimeReadiness.set({ status: 'installing' });
+
+        installUnsub?.();
+        installUnsub = $omniInstallProcessStatus.subscribe((status) => {
+          if (status.type === 'completed') {
+            installUnsub?.();
+            installUnsub = null;
+            $omniRuntimeReadiness.set({ status: 'ready' });
+          } else if (status.type === 'error') {
+            installUnsub?.();
+            installUnsub = null;
+            $omniRuntimeReadiness.set({ status: 'error', error: status.error.message });
+          } else if (status.type === 'canceled') {
+            installUnsub?.();
+            installUnsub = null;
+            $omniRuntimeReadiness.set({ status: 'idle' });
+          }
+        });
+      }
+    })
+    .catch((err) => {
+      $omniRuntimeReadiness.set({ status: 'error', error: String(err) });
+    });
+};
+
+export const retryRuntimeCheck = () => {
+  installUnsub?.();
+  installUnsub = null;
+  $omniRuntimeReadiness.set({ status: 'idle' });
+  ensureRuntimeReady();
+};
 
 export const $omniInstallProcessStatus = atom<WithTimestamp<OmniInstallProcessStatus>>({
   type: 'uninitialized',
@@ -98,3 +156,5 @@ const listen = () => {
 };
 
 listen();
+
+ensureRuntimeReady();

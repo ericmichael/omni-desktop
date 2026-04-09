@@ -73,7 +73,7 @@ export const KanbanCard = memo(
           <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
             <span
               className={cn(
-                'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
+                'text-xs px-1.5 py-0.5 rounded-full font-medium',
                 TICKET_PRIORITY_COLORS[ticket.priority]
               )}
             >
@@ -82,7 +82,7 @@ export const KanbanCard = memo(
             {ticket.resolution && (
               <span
                 className={cn(
-                  'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
+                  'text-xs px-1.5 py-0.5 rounded-full font-medium',
                   RESOLUTION_COLORS[ticket.resolution]
                 )}
               >
@@ -92,7 +92,7 @@ export const KanbanCard = memo(
             {phase && phase !== 'idle' && !ticket.resolution && (
               <span
                 className={cn(
-                  'flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full font-medium',
+                  'flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded-full font-medium',
                   PHASE_COLORS[phase] ?? 'text-fg-muted bg-fg-muted/10'
                 )}
               >

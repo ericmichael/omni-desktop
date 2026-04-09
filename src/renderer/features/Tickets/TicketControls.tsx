@@ -64,7 +64,7 @@ export const TicketColumnBadge = memo(({ ticketId }: { ticketId: TicketId }) => 
   if (!columnLabel) return null;
 
   return (
-    <span className="text-[10px] text-fg-subtle bg-surface-raised px-1.5 py-0.5 rounded-sm font-medium truncate max-w-[120px]">
+    <span className="text-xs text-fg-subtle bg-surface-raised px-1.5 py-0.5 rounded-sm font-medium truncate max-w-[120px]">
       {columnLabel}
     </span>
   );
@@ -93,7 +93,7 @@ export const TicketBannerActions = memo(({ ticketId }: { ticketId: TicketId }) =
     return (
       <>
         <PiArrowsClockwiseBold size={10} className="text-green-400 animate-spin" />
-        <span className="text-[10px] text-green-400 font-medium">Working</span>
+        <span className="text-xs text-green-400 font-medium">Working</span>
         <IconButton aria-label="Stop" icon={<PiStopFill size={10} />} size="sm" onClick={handleStop} />
       </>
     );
@@ -105,7 +105,7 @@ export const TicketBannerActions = memo(({ ticketId }: { ticketId: TicketId }) =
     return (
       <>
         <span className="size-1.5 rounded-full bg-blue-400 animate-pulse" />
-        <span className="text-[10px] text-blue-400 font-medium">Needs input</span>
+        <span className="text-xs text-blue-400 font-medium">Needs input</span>
         <IconButton aria-label="Stop" icon={<PiStopFill size={10} />} size="sm" onClick={handleStop} />
       </>
     );
@@ -114,7 +114,7 @@ export const TicketBannerActions = memo(({ ticketId }: { ticketId: TicketId }) =
     return (
       <>
         <PiArrowsClockwiseBold size={10} className="text-yellow-400 animate-spin" />
-        <span className="text-[10px] text-yellow-400 font-medium">Retrying</span>
+        <span className="text-xs text-yellow-400 font-medium">Retrying</span>
         <IconButton aria-label="Stop" icon={<PiStopFill size={10} />} size="sm" onClick={handleStop} />
       </>
     );
@@ -133,7 +133,7 @@ export const TicketBannerActions = memo(({ ticketId }: { ticketId: TicketId }) =
     return (
       <>
         <PiCheckCircleBold size={12} className="text-green-400" />
-        <span className="text-[10px] text-green-400 font-medium">Done</span>
+        <span className="text-xs text-green-400 font-medium">Done</span>
       </>
     );
   }
@@ -156,7 +156,7 @@ export const TicketResolutionBadge = memo(({ ticketId }: { ticketId: TicketId })
   return (
     <span
       className={cn(
-        'text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0',
+        'text-xs px-1.5 py-0.5 rounded-full font-medium shrink-0',
         RESOLUTION_COLORS[ticket.resolution]
       )}
     >

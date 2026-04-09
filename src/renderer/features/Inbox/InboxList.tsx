@@ -2,7 +2,7 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PiCaretRightBold, PiPlusBold, PiTrashFill } from 'react-icons/pi';
 
-import { cn, IconButton } from '@/renderer/ds';
+import { Badge, cn, FAB, IconButton } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { InboxItem, InboxItemId, InboxItemStatus } from '@/shared/types';
 
@@ -87,7 +87,7 @@ const InboxCard = memo(
           <div className="flex items-baseline gap-2">
             <span className="text-sm text-fg truncate">{item.title}</span>
           </div>
-          <div className="flex items-center gap-2 text-[11px] text-fg-subtle">
+          <div className="flex items-center gap-2 text-xs text-fg-subtle">
             <span>{timeAgo(item.createdAt)}</span>
             {project && (
               <>
@@ -221,9 +221,7 @@ export const InboxList = memo(
           <div className="hidden sm:flex items-center gap-2">
             <span className="text-sm font-semibold text-fg">Inbox</span>
             {openCount > 0 && (
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-blue-400/10 text-blue-400">
-                {openCount}
-              </span>
+              <Badge color="blue">{openCount}</Badge>
             )}
             <div className="flex-1" />
             <IconButton aria-label="New item" icon={<PiPlusBold />} size="sm" onClick={openQuickCapture} />
@@ -259,7 +257,7 @@ export const InboxList = memo(
             <div className="flex flex-col items-center justify-center gap-2 h-full px-4">
               <p className="text-fg-muted text-sm">Inbox is empty</p>
               <p className="text-fg-subtle text-xs hidden sm:block">
-                <kbd className="px-1 py-0.5 rounded border border-surface-border text-[10px]">Ctrl+I</kbd> to capture from anywhere
+                <kbd className="px-1 py-0.5 rounded border border-surface-border text-xs">Ctrl+I</kbd> to capture from anywhere
               </p>
               <p className="text-fg-subtle text-xs sm:hidden">Tap + to add an item</p>
             </div>
@@ -277,7 +275,7 @@ export const InboxList = memo(
                   />
                 ))}
               </div>
-              <div className="hidden sm:flex flex-wrap gap-x-3 gap-y-1 px-4 py-2 text-[10px] text-fg-subtle">
+              <div className="hidden sm:flex flex-wrap gap-x-3 gap-y-1 px-4 py-2 text-xs text-fg-subtle">
                 <span><kbd className="px-1 py-0.5 rounded border border-surface-border">j</kbd>/<kbd className="px-1 py-0.5 rounded border border-surface-border">k</kbd> navigate</span>
                 <span><kbd className="px-1 py-0.5 rounded border border-surface-border">Enter</kbd> open</span>
                 <span><kbd className="px-1 py-0.5 rounded border border-surface-border">x</kbd> done</span>
@@ -288,15 +286,7 @@ export const InboxList = memo(
           )}
         </div>
 
-        {/* FAB — mobile only */}
-        <button
-          type="button"
-          onClick={openQuickCapture}
-          className="sm:hidden fixed right-4 bottom-20 z-30 size-14 rounded-2xl bg-accent-600 text-white shadow-lg shadow-accent-600/25 flex items-center justify-center active:scale-95 transition-transform"
-          aria-label="New item"
-        >
-          <PiPlusBold size={22} />
-        </button>
+        <FAB icon={<PiPlusBold size={22} />} onClick={openQuickCapture} aria-label="New item" className="sm:hidden" />
       </div>
     );
   }

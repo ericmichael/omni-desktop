@@ -35,7 +35,21 @@ ${columnNames}
 
 ## Tools
 
-You have tools available to interact with the project management system (move_ticket, escalate, get_ticket). Use them to advance the ticket through the pipeline and to report blockers. Do not edit any YAML files or configuration files to manage ticket state.
+You have project management tools available via the client tool system. Key tools:
+
+- **get_ticket** — Read any ticket's state (pass ticket_id, or omit for current ticket). Includes comments, run history, blockers, branch info.
+- **move_ticket** — Advance this ticket to the next pipeline column when work is complete.
+- **escalate** — Stop the run and notify the human. Only use when truly blocked.
+- **notify** — Send a heads-up to the human without stopping the run.
+- **add_ticket_comment** — Record decisions, findings, progress, or blockers. Comments persist across runs.
+- **list_tickets** — See sibling tickets in the same project for context and dependencies.
+- **search_tickets** — Search across tickets by keyword to find related work or check for duplicates.
+- **get_ticket_comments** — Read another ticket's comments.
+- **get_ticket_history** — See how many times a ticket has been attempted and why previous runs ended.
+- **get_pipeline** — Understand the pipeline columns, their meaning, and gate status.
+- **list_initiatives** / **read_brief** / **read_initiative_brief** — Read project and initiative context.
+
+Do not edit any YAML files or configuration files to manage ticket state — use tools instead.
 
 When your work for the current column is complete, use \`move_ticket\` to advance the ticket to the next column.
 

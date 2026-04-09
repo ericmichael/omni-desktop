@@ -49,7 +49,7 @@ export const Sidebar = memo(() => {
   const activeTab = store.layoutMode;
 
   return (
-    <nav className="flex flex-row sm:flex-col w-full sm:w-[68px] shrink-0 h-auto sm:h-full bg-header border-t sm:border-t-0 sm:border-r border-header-border">
+    <nav className="flex flex-row sm:flex-col w-full sm:w-[68px] shrink-0 h-auto sm:h-full bg-header border-t sm:border-t-0 sm:border-r border-header-border pb-[env(safe-area-inset-bottom,0px)] sm:pb-0">
       {/* Logo — hidden on mobile */}
       <div className="hidden sm:grid place-items-center py-3 border-b border-header-border">
         <OmniLogo className="translate-y-px" />
@@ -86,12 +86,12 @@ export const Sidebar = memo(() => {
                 <span className="relative z-10">
                   {tab.icon}
                   {tab.value === 'projects' && openInboxCount > 0 && (
-                    <span className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold leading-4 text-center bg-accent-600 text-white">
+                    <span className="absolute -top-1 -right-2 min-w-[18px] h-[18px] px-1 rounded-full text-xs font-bold leading-[18px] text-center bg-accent-600 text-white">
                       {openInboxCount}
                     </span>
                   )}
                 </span>
-                <span className="relative z-10 text-[10px] leading-tight">{tab.label}</span>
+                <span className="relative z-10 text-xs leading-tight">{tab.label}</span>
               </button>
             );
           })}
@@ -121,7 +121,7 @@ export const Sidebar = memo(() => {
             <span className="relative z-10">
               <PiDotsThreeBold size={20} />
             </span>
-            <span className="relative z-10 text-[10px] leading-tight">More</span>
+            <span className="relative z-10 text-xs leading-tight">More</span>
           </button>
         </div>
 
@@ -143,7 +143,7 @@ export const Sidebar = memo(() => {
             <span className="relative z-10">
               <PiGearFill size={20} />
             </span>
-            <span className="relative z-10 text-[10px] leading-tight">Settings</span>
+            <span className="relative z-10 text-xs leading-tight">Settings</span>
           </button>
         </div>
       </div>

@@ -20,6 +20,8 @@
   --color-fg-muted: #a1a1aa;
   --color-fg-subtle: #71717a;
   --color-fg-error: #f87171;
+  --color-fg-success: #4ade80;
+  --color-fg-warning: #fbbf24;
 
   /* Omniagents web UI palette */
   --color-tweetBlue: rgb(var(--omni-tweetBlue));
@@ -147,6 +149,8 @@
   --color-fg-muted: #a9b1d6;
   --color-fg-subtle: #545c7e;
   --color-fg-error: #f7768e;
+  --color-fg-success: #9ece6a;
+  --color-fg-warning: #e0af68;
   --color-accent-50: #e8edfb;
   --color-accent-100: #c5d0f5;
   --color-accent-200: #9db2ef;
@@ -193,6 +197,8 @@
   --color-fg-muted: #bbbbbb;
   --color-fg-subtle: #9d9d9d;
   --color-fg-error: #f85149;
+  --color-fg-success: #0dbc79;
+  --color-fg-warning: #cca700;
   --color-accent-50: #e0f0ff;
   --color-accent-100: #b3d9ff;
   --color-accent-200: #80bfff;
@@ -239,6 +245,8 @@
   --color-fg-muted: #3b3b3b;
   --color-fg-subtle: #767676;
   --color-fg-error: #f85149;
+  --color-fg-success: #2ea043;
+  --color-fg-warning: #cca700;
   --color-accent-50: #e0f0ff;
   --color-accent-100: #b3d9ff;
   --color-accent-200: #80bfff;
@@ -285,6 +293,8 @@
   --color-fg-muted: #646469;
   --color-fg-subtle: #8e8e93;
   --color-fg-error: #dc2626;
+  --color-fg-success: #1a7f37;
+  --color-fg-warning: #9a6700;
   --color-header: #c63727;
   --color-header-fg: #ffffff;
   --color-header-border: #a82e21;
@@ -367,6 +377,15 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-thumb-hover);
+}
+
+/* Hide scrollbar utility */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
 }
 
 /* Prevent text selection on UI elements */

@@ -36,7 +36,7 @@ export const SessionStartupShell = memo(({ eyebrow, title, description, children
             className={cn('flex w-full max-w-3xl flex-col gap-6 rounded-2xl border px-6 py-6 shadow-sm backdrop-blur-sm', toneClasses, className)}
           >
             <div className="flex flex-col items-center gap-2 text-center">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-fg-subtle">{eyebrow}</span>
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-fg-subtle">{eyebrow}</span>
               <Heading size="md">{title}</Heading>
               <p className="max-w-xl text-sm text-fg-muted text-center">{description}</p>
             </div>

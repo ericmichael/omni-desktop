@@ -57,7 +57,7 @@ const OverlayPaneView = memo(
               <button
                 type="button"
                 onClick={onClose}
-                className="inline-flex size-7 items-center justify-center rounded-md text-fg-muted transition-colors hover:bg-surface-overlay hover:text-fg"
+                className="inline-flex size-9 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-surface-overlay hover:text-fg"
                 aria-label="Close overlay"
               >
                 <PiXBold size={14} />

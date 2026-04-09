@@ -64,7 +64,7 @@ export const OnboardingCliStep = memo(({ onBack, onFinish }: Props) => {
             ) : (
               <span className="flex items-center gap-2">
                 Install omni to PATH
-                <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-medium text-white/80">
+                <span className="rounded-full bg-white/20 px-2 py-0.5 text-xs font-medium text-white/80">
                   Recommended
                 </span>
               </span>

@@ -21,7 +21,7 @@ import { TicketMachine } from '@/main/ticket-machine';
 import type { ClientFunctionResponder } from '@/main/ticket-machine';
 import { WorkflowLoader } from '@/main/workflow-loader';
 import { AgentProcess } from '@/main/agent-process';
-import type { CodeManager } from '@/main/code-manager';
+import type { ProcessManager } from '@/main/process-manager';
 import { createPlatformClient } from '@/main/platform-mode';
 import { getOmniConfigDir, getWorktreesDir } from '@/main/util';
 import { DEFAULT_PIPELINE } from '@/shared/pipeline-defaults';
@@ -415,19 +415,19 @@ export class ProjectManager {
   private sandboxFactory?: ISandboxFactory;
   private machineFactory?: IMachineFactory;
 
-  /** Optional CodeManager — when set, supervisor reuses Code tab sandboxes. */
-  private codeManager?: CodeManager;
+  /** Optional ProcessManager — when set, supervisor reuses Code tab sandboxes. */
+  private processManager?: ProcessManager;
 
   constructor(
-    arg: { store: Store<StoreData>; sendToWindow: ProjectManager['sendToWindow']; codeManager?: CodeManager },
+    arg: { store: Store<StoreData>; sendToWindow: ProjectManager['sendToWindow']; processManager?: ProcessManager },
     deps?: Partial<ProjectManagerDeps>
   ) {
     this.store = arg.store;
     this.sendToWindow = arg.sendToWindow;
-    this.codeManager = arg.codeManager;
-    // Let CodeManager fall back to supervisor sandbox status for ticket-linked tabs
-    if (this.codeManager) {
-      this.codeManager.statusFallback = (tabId) => this.getSupervisorStatusForCodeTab(tabId);
+    this.processManager = arg.processManager;
+    // Let ProcessManager fall back to supervisor sandbox status for ticket-linked tabs
+    if (this.processManager) {
+      this.processManager.statusFallback = (processId) => this.getSupervisorStatusForCodeTab(processId);
     }
     this.workflowLoader = deps?.workflowLoader ?? new WorkflowLoader({
       onChange: (projectId, workflow) => {
@@ -549,14 +549,44 @@ export class ProjectManager {
 
     switch (toolName) {
       case 'get_ticket': {
-        const column = pipeline.columns.find((c) => c.id === ticket.columnId);
+        const lookupId = (toolArgs.ticket_id as string) || ticketId;
+        const target = this.getTicketById(lookupId);
+        if (!target) {
+          respond(true, { error: `Ticket not found: ${lookupId}` });
+          return;
+        }
+        const targetPipeline = this.getPipeline(target.projectId);
+        const column = targetPipeline.columns.find((c) => c.id === target.columnId);
+        const comments = (target.comments ?? []).map((c) => ({
+          id: c.id,
+          author: c.author,
+          content: c.content,
+          created_at: new Date(c.createdAt).toISOString(),
+        }));
+        const runs = (target.runs ?? []).map((r) => ({
+          id: r.id,
+          started_at: new Date(r.startedAt).toISOString(),
+          ended_at: new Date(r.endedAt).toISOString(),
+          end_reason: r.endReason,
+          token_usage: r.tokenUsage ?? null,
+        }));
         respond(true, {
-          id: ticket.id,
-          title: ticket.title,
-          description: ticket.description || '',
-          priority: ticket.priority,
-          column: column?.label ?? ticket.columnId,
-          pipeline: pipeline.columns.map((c) => c.label),
+          id: target.id,
+          title: target.title,
+          description: target.description || '',
+          priority: target.priority,
+          column: column?.label ?? target.columnId,
+          pipeline: targetPipeline.columns.map((c) => c.label),
+          blocked_by: target.blockedBy ?? [],
+          branch: target.branch || null,
+          use_worktree: target.useWorktree ?? false,
+          worktree_path: target.worktreePath || null,
+          phase: target.phase ?? null,
+          run_count: runs.length,
+          created_at: new Date(target.createdAt).toISOString(),
+          updated_at: new Date(target.updatedAt).toISOString(),
+          comments,
+          runs,
         });
         break;
       }
@@ -592,6 +622,60 @@ export class ProjectManager {
         } else {
           respond(true, { ok: true, message: 'Escalated to human operator' });
         }
+        break;
+      }
+      case 'notify': {
+        const notifyMessage = (toolArgs.message as string) ?? '';
+        if (!notifyMessage) {
+          respond(true, { error: 'Empty notification message' });
+          return;
+        }
+        this.sendToWindow('toast:show', {
+          level: 'info',
+          title: `Agent note: ${ticket.title}`,
+          description: notifyMessage,
+        });
+        respond(true, { ok: true, message: 'Notification sent' });
+        break;
+      }
+      case 'add_ticket_comment': {
+        const commentTicketId = (toolArgs.ticket_id as string) || ticketId;
+        const content = (toolArgs.content as string) ?? '';
+        if (!content) {
+          respond(true, { error: 'Missing content' });
+          return;
+        }
+        const commentTarget = this.getTicketById(commentTicketId);
+        if (!commentTarget) {
+          respond(true, { error: `Ticket not found: ${commentTicketId}` });
+          return;
+        }
+        const comment = { id: nanoid(), author: 'agent' as const, content, createdAt: Date.now() };
+        const existingComments = commentTarget.comments ?? [];
+        this.updateTicket(commentTicketId, { comments: [...existingComments, comment] });
+        respond(true, { ok: true, comment_id: comment.id });
+        break;
+      }
+      // --- Read-only context tools (available to all sessions including autopilot) ---
+      case 'get_ticket_comments': {
+        const commentsTicketId = (toolArgs.ticket_id as string) ?? '';
+        if (!commentsTicketId) {
+          respond(true, { error: 'Missing ticket_id' });
+          return;
+        }
+        const commentsTarget = this.getTicketById(commentsTicketId);
+        if (!commentsTarget) {
+          respond(true, { error: `Ticket not found: ${commentsTicketId}` });
+          return;
+        }
+        respond(true, {
+          comments: (commentsTarget.comments ?? []).map((c) => ({
+            id: c.id,
+            author: c.author,
+            content: c.content,
+            created_at: new Date(c.createdAt).toISOString(),
+          })),
+        });
         break;
       }
       // --- Project-scoped tools (available in interactive sessions) ---
@@ -632,6 +716,9 @@ export class ProjectManager {
           priority: t.priority,
           column: pl.columns.find((c) => c.id === t.columnId)?.label ?? t.columnId,
           phase: t.phase,
+          blocked_by: t.blockedBy ?? [],
+          created_at: new Date(t.createdAt).toISOString(),
+          updated_at: new Date(t.updatedAt).toISOString(),
         }));
         respond(true, { tickets: result });
         break;
@@ -674,6 +761,14 @@ export class ProjectManager {
         if (toolArgs.title) patch.title = toolArgs.title;
         if (toolArgs.description !== undefined) patch.description = toolArgs.description;
         if (toolArgs.priority) patch.priority = toolArgs.priority;
+        if (toolArgs.branch !== undefined) patch.branch = toolArgs.branch;
+        // Dependency management
+        if (toolArgs.add_blocked_by || toolArgs.remove_blocked_by) {
+          const current = new Set(target.blockedBy ?? []);
+          for (const id of (toolArgs.add_blocked_by as string[]) ?? []) current.add(id);
+          for (const id of (toolArgs.remove_blocked_by as string[]) ?? []) current.delete(id);
+          patch.blockedBy = [...current];
+        }
         this.updateTicket(targetId, patch);
         respond(true, { ok: true });
         break;
@@ -700,6 +795,131 @@ export class ProjectManager {
           () => respond(true, { ok: true }),
           (err) => respond(true, { error: String(err) })
         );
+        break;
+      }
+      // --- Read-only context tools (available to all sessions including autopilot) ---
+      case 'list_initiatives': {
+        const projectId = (toolArgs.project_id as string) ?? '';
+        if (!projectId) {
+          respond(true, { error: 'Missing project_id' });
+          return;
+        }
+        const items = this.getInitiativesByProject(projectId);
+        respond(true, {
+          initiatives: items.map((i) => ({
+            id: i.id,
+            title: i.title,
+            description: i.description || '',
+            branch: i.branch || null,
+            status: i.status,
+            is_default: i.isDefault ?? false,
+            created_at: new Date(i.createdAt).toISOString(),
+            updated_at: new Date(i.updatedAt).toISOString(),
+          })),
+        });
+        break;
+      }
+      case 'read_brief': {
+        const projectId = (toolArgs.project_id as string) ?? '';
+        if (!projectId) {
+          respond(true, { error: 'Missing project_id' });
+          return;
+        }
+        const proj = this.getProjects().find((p) => p.id === projectId);
+        if (!proj) {
+          respond(true, { error: `Project not found: ${projectId}` });
+          return;
+        }
+        respond(true, { brief: proj.brief ?? '' });
+        break;
+      }
+      case 'read_initiative_brief': {
+        const initId = (toolArgs.initiative_id as string) ?? '';
+        if (!initId) {
+          respond(true, { error: 'Missing initiative_id' });
+          return;
+        }
+        const init = this.getInitiatives().find((i) => i.id === initId);
+        if (!init) {
+          respond(true, { error: `Initiative not found: ${initId}` });
+          return;
+        }
+        respond(true, { brief: init.brief ?? '' });
+        break;
+      }
+      case 'search_tickets': {
+        const query = (toolArgs.query as string) ?? '';
+        if (!query) {
+          respond(true, { error: 'Missing query' });
+          return;
+        }
+        const q = query.toLowerCase();
+        const projectFilter = toolArgs.project_id as string | undefined;
+        let allTickets = projectFilter
+          ? this.getTicketsByProject(projectFilter)
+          : this.getProjects().flatMap((p) => this.getTicketsByProject(p.id));
+        const matches = allTickets.filter(
+          (t) => t.title.toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q)
+        );
+        const searchResult = matches.map((t) => {
+          const pl = this.getPipeline(t.projectId);
+          return {
+            id: t.id,
+            project_id: t.projectId,
+            title: t.title,
+            description: t.description || '',
+            priority: t.priority,
+            column: pl.columns.find((c) => c.id === t.columnId)?.label ?? t.columnId,
+            phase: t.phase,
+            created_at: new Date(t.createdAt).toISOString(),
+            updated_at: new Date(t.updatedAt).toISOString(),
+          };
+        });
+        respond(true, { tickets: searchResult });
+        break;
+      }
+      case 'get_ticket_history': {
+        const historyTicketId = (toolArgs.ticket_id as string) ?? '';
+        if (!historyTicketId) {
+          respond(true, { error: 'Missing ticket_id' });
+          return;
+        }
+        const historyTarget = this.getTicketById(historyTicketId);
+        if (!historyTarget) {
+          respond(true, { error: `Ticket not found: ${historyTicketId}` });
+          return;
+        }
+        const historyRuns = (historyTarget.runs ?? []).map((r) => ({
+          id: r.id,
+          started_at: new Date(r.startedAt).toISOString(),
+          ended_at: new Date(r.endedAt).toISOString(),
+          end_reason: r.endReason,
+          token_usage: r.tokenUsage ?? null,
+        }));
+        respond(true, {
+          ticket_id: historyTarget.id,
+          phase: historyTarget.phase ?? null,
+          run_count: historyRuns.length,
+          total_token_usage: historyTarget.tokenUsage ?? null,
+          runs: historyRuns,
+        });
+        break;
+      }
+      case 'get_pipeline': {
+        const pipelineProjectId = (toolArgs.project_id as string) ?? '';
+        if (!pipelineProjectId) {
+          respond(true, { error: 'Missing project_id' });
+          return;
+        }
+        const pl = this.getPipeline(pipelineProjectId);
+        respond(true, {
+          columns: pl.columns.map((c) => ({
+            id: c.id,
+            label: c.label,
+            description: c.description || null,
+            gate: c.gate ?? false,
+          })),
+        });
         break;
       }
       default:
@@ -745,6 +965,19 @@ export class ProjectManager {
         continuationTurn: machine.continuationTurn,
         maxContinuationTurns: maxTurns,
       });
+
+      // Persist run record
+      if (ticket) {
+        const run = {
+          id: nanoid(),
+          startedAt: ticket.updatedAt, // best approximation — updated when run starts
+          endedAt: Date.now(),
+          endReason: reason,
+          tokenUsage: ticket.tokenUsage ? { ...ticket.tokenUsage } : undefined,
+        };
+        const existingRuns = ticket.runs ?? [];
+        this.updateTicket(ticketId, { runs: [...existingRuns, run] });
+      }
 
       switch (action.type) {
         case 'stopped':
@@ -1879,7 +2112,7 @@ export class ProjectManager {
       const machine = this.createMachine(ticketId);
       machine.transition('provisioning');
 
-      // We don't own the sandbox — Code tab's CodeManager owns the lifecycle.
+      // We don't own the sandbox — the Code tab's ProcessManager entry owns the lifecycle.
       this.machines.set(ticketId, { machine, sandbox: null });
 
       machine.setWsUrl(codeTabWsUrl);
@@ -1971,7 +2204,7 @@ export class ProjectManager {
         const codeTabs = this.store.get('codeTabs', []) as Array<{ id: string; ticketId?: string }>;
         const codeTab = codeTabs.find((t) => t.ticketId === ticketId);
         if (codeTab) {
-          this.sendToWindow('code:sandbox-status', codeTab.id as CodeTabId, status);
+          this.sendToWindow('agent-process:status', codeTab.id as CodeTabId, status);
         }
 
         // Resolve/reject the startup promise (only effective on first call)
@@ -2032,9 +2265,9 @@ export class ProjectManager {
 
   /** Check if a Code tab has a running sandbox for this ticket. */
   private getCodeTabWsUrl(ticketId: TicketId): string | null {
-    if (!this.codeManager) return null;
+    if (!this.processManager) return null;
     const codeTabs = this.store.get('codeTabs', []) as Array<{ id: string; ticketId?: string }>;
-    return this.codeManager.getRunningWsUrlForTicket(ticketId, codeTabs);
+    return this.processManager.getRunningWsUrlForTicket(ticketId, codeTabs);
   }
 
   private resolveTicketWorkspace = async (ticketId: TicketId): Promise<{
@@ -2234,9 +2467,20 @@ export class ProjectManager {
    * - 'interactive': broader project-management tools for human-driven ticket sessions
    */
   private buildRunVariables = (ticketId: TicketId, mode: 'autopilot' | 'interactive' = 'autopilot'): Record<string, unknown> => {
+    const ticket = this.getTicketById(ticketId);
+    const opts = {
+      projectId: ticket?.projectId,
+      projectLabel: ticket ? this.getProjects().find((p) => p.id === ticket.projectId)?.label : undefined,
+      ticketId,
+    };
+    const vars = mode === 'autopilot' ? buildAutopilotVariables(opts) : buildInteractiveVariables(opts);
+    const supervisorPrompt = this.buildFullSupervisorPrompt(ticketId);
+    const toolInstructions = (vars.additional_instructions as string) ?? '';
     return {
-      additional_instructions: this.buildFullSupervisorPrompt(ticketId),
-      ...(mode === 'autopilot' ? buildAutopilotVariables() : buildInteractiveVariables()),
+      ...vars,
+      additional_instructions: toolInstructions
+        ? `${supervisorPrompt}\n\n${toolInstructions}`
+        : supervisorPrompt,
     };
   };
 
@@ -2268,7 +2512,8 @@ export class ProjectManager {
       `- The original task instructions and prior context are already in this session, so do not restate them before acting.`,
       `- Use your best judgement to move the work forward. You are working in an isolated sandbox, so it is safe to make changes freely. Do not ask for confirmation or escalate to the user unless you are truly blocked on something that requires human input. The human will review your work at a later stage.`,
       `- Your ticket is currently in column "${currentColumn}". If you have completed the work, call \`move_ticket\` to advance it. Valid columns: ${columnLabels}.`,
-      `- If you are truly blocked and need human help, call \`escalate\` with a message. This will pause your run and notify the human. Only use this when you cannot proceed without human input.`,
+      `- Before continuing, use \`add_ticket_comment\` to briefly record what you accomplished so far and what remains. This helps future runs (and humans) understand the state of work.`,
+      `- Use \`notify\` to send the human a heads-up without stopping. Use \`escalate\` only when you truly cannot proceed without human input.`,
     ].join('\n');
   }
 
@@ -2981,14 +3226,14 @@ export const createProjectManager = (arg: {
   ipc: IpcListener<IpcEvents>;
   sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   store: Store<StoreData>;
-  codeManager?: CodeManager;
+  processManager?: ProcessManager;
 }) => {
-  const { ipc, sendToWindow, store, codeManager } = arg;
+  const { ipc, sendToWindow, store, processManager } = arg;
 
   // Run migration
   ProjectManager.migrateToSupervisor(store);
 
-  const projectManager = new ProjectManager({ store, sendToWindow, codeManager });
+  const projectManager = new ProjectManager({ store, sendToWindow, processManager });
   projectManager.restorePersistedTasks();
 
   // Project handlers

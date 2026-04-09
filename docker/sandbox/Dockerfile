@@ -42,7 +42,8 @@ RUN apt-get update && apt-get install -y \
     xdotool \
     dbus-x11 \
     software-properties-common \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s vnc_lite.html /usr/share/novnc/index.html
 
 # Install Firefox from Mozilla PPA (Ubuntu 24.04 only has a snap stub)
 RUN add-apt-repository -y ppa:mozillateam/ppa \

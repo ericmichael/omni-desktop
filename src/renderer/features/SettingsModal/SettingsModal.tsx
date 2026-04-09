@@ -41,20 +41,20 @@ export const SettingsModal = memo(() => {
 
   return (
     <AnimatedDialog open={isOpen} onClose={onClose}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>Settings</DialogHeader>
-        <div className="flex gap-1 px-6 pb-2">
+        <div className="flex gap-1 px-4 sm:px-6 pb-2 overflow-x-auto scrollbar-none">
           {TABS.map((tab) => (
             <button
               key={tab}
               onClick={tabClickHandlers[tab]}
-              className="relative px-3 py-1.5 text-xs font-medium rounded-md cursor-pointer select-none transition-colors"
+              className="relative px-3.5 py-2 sm:px-3 sm:py-1.5 text-sm sm:text-xs font-medium rounded-lg sm:rounded-md cursor-pointer select-none transition-colors shrink-0"
               style={{ color: activeTab === tab ? 'var(--color-fg)' : 'var(--color-fg-muted)' }}
             >
               {activeTab === tab && (
                 <motion.div
                   layoutId="settings-tab-indicator"
-                  className="absolute inset-0 bg-white/10 rounded-md"
+                  className="absolute inset-0 bg-white/10 rounded-lg sm:rounded-md"
                   transition={{ type: 'spring', duration: 0.3, bounce: 0.15 }}
                 />
               )}
@@ -62,7 +62,7 @@ export const SettingsModal = memo(() => {
             </button>
           ))}
         </div>
-        <DialogBody className="flex flex-col gap-6 min-h-[400px]">
+        <DialogBody className="flex flex-col gap-6 min-h-0 sm:min-h-[400px]">
           {activeTab === 'General' && <SettingsModalGeneralTab />}
           {activeTab === 'Environment' && <SettingsModalEnvironmentTab />}
           {activeTab === 'Models' && <SettingsModalModelsTab />}

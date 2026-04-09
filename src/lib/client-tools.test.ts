@@ -13,8 +13,8 @@ import { WebSocketServer } from 'ws';
 import {
   buildAutopilotVariables,
   buildInteractiveVariables,
-  buildTicketInteractiveVariables,
   TICKET_CLIENT_TOOLS,
+  READONLY_CONTEXT_TOOLS,
   PROJECT_CLIENT_TOOLS,
   BRIEF_CLIENT_TOOLS,
 } from '@/lib/client-tools';
@@ -89,14 +89,21 @@ function handleClientToolCall(
 
   switch (toolName) {
     case 'get_ticket': {
-      const column = pipeline.columns.find((c) => c.id === ticket.columnId);
+      const lookupId = (toolArgs.ticket_id as string) || ticketId;
+      const target = ctx.getTicketById(lookupId);
+      if (!target) {
+        respond(true, { error: `Ticket not found: ${lookupId}` });
+        return;
+      }
+      const targetPipeline = ctx.getPipeline(target.projectId);
+      const column = targetPipeline.columns.find((c) => c.id === target.columnId);
       respond(true, {
-        id: ticket.id,
-        title: ticket.title,
-        description: ticket.description || '',
-        priority: ticket.priority,
-        column: column?.label ?? ticket.columnId,
-        pipeline: pipeline.columns.map((c) => c.label),
+        id: target.id,
+        title: target.title,
+        description: target.description || '',
+        priority: target.priority,
+        column: column?.label ?? target.columnId,
+        pipeline: targetPipeline.columns.map((c) => c.label),
       });
       break;
     }
@@ -207,6 +214,57 @@ function handleClientToolCall(
         () => respond(true, { ok: true }),
         (err) => respond(true, { error: String(err) })
       );
+      break;
+    }
+    case 'notify': {
+      const message = (toolArgs.message as string) ?? '';
+      if (!message) { respond(true, { error: 'Empty notification message' }); return; }
+      ctx.sendToWindow('toast:show', { level: 'info', title: `Agent note: ${ticket.title}`, description: message });
+      respond(true, { ok: true, message: 'Notification sent' });
+      break;
+    }
+    case 'add_ticket_comment': {
+      const commentTicketId = (toolArgs.ticket_id as string) || ticketId;
+      const content = (toolArgs.content as string) ?? '';
+      if (!content) { respond(true, { error: 'Missing content' }); return; }
+      const target = ctx.getTicketById(commentTicketId);
+      if (!target) { respond(true, { error: `Ticket not found: ${commentTicketId}` }); return; }
+      const comment = { id: 'comment-1', author: 'agent' as const, content, createdAt: Date.now() };
+      const existing = (target as MockTicket & { comments?: unknown[] }).comments ?? [];
+      ctx.updateTicket?.(commentTicketId, { comments: [...existing, comment] });
+      respond(true, { ok: true, comment_id: comment.id });
+      break;
+    }
+    case 'get_ticket_comments': {
+      const commentsTicketId = (toolArgs.ticket_id as string) ?? '';
+      if (!commentsTicketId) { respond(true, { error: 'Missing ticket_id' }); return; }
+      const target = ctx.getTicketById(commentsTicketId);
+      if (!target) { respond(true, { error: `Ticket not found: ${commentsTicketId}` }); return; }
+      respond(true, { comments: (target as MockTicket & { comments?: { id: string; author: string; content: string; createdAt: number }[] }).comments ?? [] });
+      break;
+    }
+    case 'search_tickets': {
+      const query = (toolArgs.query as string) ?? '';
+      if (!query) { respond(true, { error: 'Missing query' }); return; }
+      const q = query.toLowerCase();
+      const allTickets = ctx.getTicketsByProject?.(ticket.projectId) ?? [];
+      const matches = allTickets.filter((t) => t.title.toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q));
+      respond(true, { tickets: matches.map((t) => ({ id: t.id, title: t.title })) });
+      break;
+    }
+    case 'get_ticket_history': {
+      const historyId = (toolArgs.ticket_id as string) ?? '';
+      if (!historyId) { respond(true, { error: 'Missing ticket_id' }); return; }
+      const target = ctx.getTicketById(historyId);
+      if (!target) { respond(true, { error: `Ticket not found: ${historyId}` }); return; }
+      respond(true, { ticket_id: target.id, run_count: 0, runs: [] });
+      break;
+    }
+    case 'get_pipeline': {
+      const pipelineProjectId = (toolArgs.project_id as string) ?? '';
+      if (!pipelineProjectId) { respond(true, { error: 'Missing project_id' }); return; }
+      const pl = ctx.getPipeline(pipelineProjectId);
+      respond(true, { columns: pl.columns.map((c) => ({ id: c.id, label: c.label, gate: false })) });
       break;
     }
     default:
@@ -553,7 +611,7 @@ describe('handleClientToolCall', () => {
 describe('client_tools shape', () => {
 
   it('every tool has name, description, and parameters', () => {
-    for (const tool of [...TICKET_CLIENT_TOOLS, ...PROJECT_CLIENT_TOOLS, ...BRIEF_CLIENT_TOOLS]) {
+    for (const tool of [...TICKET_CLIENT_TOOLS, ...READONLY_CONTEXT_TOOLS, ...PROJECT_CLIENT_TOOLS, ...BRIEF_CLIENT_TOOLS]) {
       expect(tool.name).toBeTypeOf('string');
       expect(tool.description).toBeTypeOf('string');
       expect(tool.parameters).toBeDefined();
@@ -562,28 +620,60 @@ describe('client_tools shape', () => {
     }
   });
 
-  it('autopilot variables contain only ticket tools', () => {
-    const vars = buildAutopilotVariables() as { client_tools: { name: string }[] };
+  it('autopilot variables contain ticket tools + read-only context tools', () => {
+    const vars = buildAutopilotVariables() as { client_tools: { name: string }[]; additional_instructions: string };
     const names = vars.client_tools.map((t) => t.name);
-    expect(names).toEqual(['get_ticket', 'move_ticket', 'escalate']);
+    // Ticket tools
+    expect(names).toContain('get_ticket');
+    expect(names).toContain('move_ticket');
+    expect(names).toContain('escalate');
+    expect(names).toContain('notify');
+    expect(names).toContain('add_ticket_comment');
+    // Read-only context tools
+    expect(names).toContain('list_tickets');
+    expect(names).toContain('list_initiatives');
+    expect(names).toContain('read_brief');
+    expect(names).toContain('read_initiative_brief');
+    expect(names).toContain('get_ticket_comments');
+    expect(names).toContain('search_tickets');
+    expect(names).toContain('get_ticket_history');
+    expect(names).toContain('get_pipeline');
+    // Should NOT contain write tools
+    expect(names).not.toContain('create_ticket');
+    expect(names).not.toContain('update_ticket');
+    expect(names).not.toContain('start_ticket');
+    expect(names).not.toContain('stop_ticket');
+    expect(names).not.toContain('update_brief');
+    expect(names).not.toContain('create_initiative');
+    expect(names).toHaveLength(13);
+    expect(vars.additional_instructions).toBeDefined();
   });
 
-  it('interactive variables contain project + brief + inbox tools (no ticket-scoped tools)', () => {
+  it('interactive variables contain all tools', () => {
     const vars = buildInteractiveVariables() as { client_tools: { name: string }[]; additional_instructions: string };
     const names = vars.client_tools.map((t) => t.name);
-    // Should NOT contain ticket-scoped tools
-    expect(names).not.toContain('get_ticket');
-    expect(names).not.toContain('move_ticket');
-    expect(names).not.toContain('escalate');
+    // Ticket tools
+    expect(names).toContain('get_ticket');
+    expect(names).toContain('move_ticket');
+    expect(names).toContain('escalate');
+    expect(names).toContain('notify');
+    expect(names).toContain('add_ticket_comment');
+    // Read-only context tools
+    expect(names).toContain('list_tickets');
+    expect(names).toContain('list_initiatives');
+    expect(names).toContain('read_brief');
+    expect(names).toContain('read_initiative_brief');
+    expect(names).toContain('get_ticket_comments');
+    expect(names).toContain('search_tickets');
+    expect(names).toContain('get_ticket_history');
+    expect(names).toContain('get_pipeline');
     // Project tools
     expect(names).toContain('list_projects');
-    expect(names).toContain('list_tickets');
     expect(names).toContain('create_ticket');
     expect(names).toContain('update_ticket');
     expect(names).toContain('start_ticket');
     expect(names).toContain('stop_ticket');
     // Brief tools
-    expect(names).toContain('read_brief');
     expect(names).toContain('update_brief');
     // Inbox tools
     expect(names).toContain('list_inbox');
@@ -592,11 +682,9 @@ describe('client_tools shape', () => {
     expect(names).toContain('delete_inbox_item');
     expect(names).toContain('inbox_to_tickets');
     // Initiative tools
-    expect(names).toContain('list_initiatives');
     expect(names).toContain('create_initiative');
     expect(names).toContain('update_initiative');
-    expect(names).toContain('read_initiative_brief');
-    expect(names).toHaveLength(17);
+    expect(names).toHaveLength(26);
     // Should include additional_instructions with project management guidance
     expect(vars.additional_instructions).toContain('Inbox');
     expect(vars.additional_instructions).toContain('Brief');
@@ -604,48 +692,20 @@ describe('client_tools shape', () => {
     expect(vars.additional_instructions).toContain('Initiatives');
   });
 
-  it('interactive variables include project context when provided', () => {
-    const vars = buildInteractiveVariables({ projectId: 'proj-1', projectLabel: 'My Project' }) as {
+  it('interactive variables include project and ticket context when provided', () => {
+    const vars = buildInteractiveVariables({ projectId: 'proj-1', projectLabel: 'My Project', ticketId: 'tkt-1' }) as {
       additional_instructions: string;
     };
     expect(vars.additional_instructions).toContain('My Project');
     expect(vars.additional_instructions).toContain('proj-1');
+    expect(vars.additional_instructions).toContain('tkt-1');
   });
 
-  it('ticket interactive variables contain ticket + project management tools', () => {
-    const vars = buildTicketInteractiveVariables() as { client_tools: { name: string }[]; additional_instructions: string };
-    const names = vars.client_tools.map((t) => t.name);
-
-    expect(names).toContain('get_ticket');
-    expect(names).toContain('move_ticket');
-    expect(names).toContain('escalate');
-    expect(names).toContain('list_projects');
-    expect(names).toContain('list_tickets');
-    expect(names).toContain('create_ticket');
-    expect(names).toContain('update_ticket');
-    expect(names).toContain('start_ticket');
-    expect(names).toContain('stop_ticket');
-    expect(names).toContain('read_brief');
-    expect(names).toContain('update_brief');
-    expect(names).toContain('list_initiatives');
-    expect(names).toContain('create_initiative');
-    expect(names).toContain('update_initiative');
-    expect(names).toContain('read_initiative_brief');
-    expect(names).toContain('list_inbox');
-    expect(names).toContain('create_inbox_item');
-    expect(names).toContain('update_inbox_item');
-    expect(names).toContain('delete_inbox_item');
-    expect(names).toContain('inbox_to_tickets');
-    expect(names).toHaveLength(20);
-    expect(vars.additional_instructions).toContain('Inbox');
-    expect(vars.additional_instructions).toContain('Brief');
-    expect(vars.additional_instructions).toContain('Tickets');
-    expect(vars.additional_instructions).toContain('Initiatives');
-  });
-
-  it('get_ticket takes no parameters', () => {
+  it('get_ticket has optional ticket_id parameter', () => {
     const tool = TICKET_CLIENT_TOOLS.find((t) => t.name === 'get_ticket')!;
-    expect(Object.keys(tool.parameters.properties)).toHaveLength(0);
+    expect(tool.parameters.properties).toHaveProperty('ticket_id');
+    // ticket_id is optional — no required array
+    expect((tool.parameters as Record<string, unknown>).required).toBeUndefined();
   });
 
   it('move_ticket requires column parameter', () => {
@@ -661,7 +721,7 @@ describe('client_tools shape', () => {
   });
 
   it('list_tickets requires project_id', () => {
-    const tool = PROJECT_CLIENT_TOOLS.find((t) => t.name === 'list_tickets')!;
+    const tool = READONLY_CONTEXT_TOOLS.find((t) => t.name === 'list_tickets')!;
     expect(tool.parameters.required).toEqual(['project_id']);
   });
 

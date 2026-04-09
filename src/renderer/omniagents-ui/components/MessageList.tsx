@@ -238,17 +238,17 @@ function MessageBubble({ index, role, content, attachments, reactions, onReact, 
                     }
                   }}
                   placeholder="Add a note (optional)…"
-                  className="flex-1 h-7 px-2 rounded-md bg-bgCardAlt text-xs text-textPrimary placeholder-textSubtle border border-transparent focus:border-tweetBlue focus:outline-none"
+                  className="flex-1 h-9 px-3 rounded-lg bg-bgCardAlt text-sm text-textPrimary placeholder-textSubtle border border-transparent focus:border-tweetBlue focus:outline-none"
                 />
                 <button
                   onClick={() => { onFeedbackSubmit?.(index, feedbackText); setFeedbackText('') }}
-                  className="h-7 px-2 rounded-md bg-tweetBlue text-white text-xs hover:brightness-110"
+                  className="h-9 px-3 rounded-lg bg-tweetBlue text-white text-sm hover:brightness-110"
                 >
                   Submit
                 </button>
                 <button
                   onClick={() => { onFeedbackDismiss?.(); setFeedbackText('') }}
-                  className="h-7 px-2 rounded-md text-textSubtle text-xs hover:text-textHeading hover:bg-bgCardAlt"
+                  className="h-9 px-3 rounded-lg text-textSubtle text-sm hover:text-textHeading hover:bg-bgCardAlt"
                 >
                   Skip
                 </button>
@@ -334,7 +334,7 @@ export function ToolCard({ item }: { item: ToolItem }) {
             <span className={["inline-block w-2 h-2 rounded-full flex-shrink-0", iconFill].join(' ')} />
             <div className="flex-1 min-w-0 text-sm text-textPrimary">{titleNode}</div>
             <button
-              className="w-6 h-6 flex items-center justify-center rounded hover:bg-bgColumn text-textSubtle hover:text-textHeading"
+              className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-bgColumn text-textSubtle hover:text-textHeading"
               aria-label="Toggle details"
               onClick={() => setOpen(v => !v)}
             >

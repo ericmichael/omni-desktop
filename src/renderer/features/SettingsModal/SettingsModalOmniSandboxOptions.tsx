@@ -2,14 +2,14 @@ import { useStore } from '@nanostores/react';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Button, FormField, Switch } from '@/renderer/ds';
+import { Button, Card, FormField, SectionLabel, Select, Switch } from '@/renderer/ds';
 import { $launcherVersion } from '@/renderer/features/Banner/state';
 import {
   $omniInstallProcessStatus,
   $omniRuntimeInfo,
   omniInstallApi,
 } from '@/renderer/features/Omni/state';
-import { $chatProcessStatus, chatApi } from '@/renderer/features/Chat/state';
+import { $chatProcessStatus } from '@/renderer/features/Chat/state';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi, selectWorkspaceDir } from '@/renderer/services/store';
 import type { OmniTheme, SandboxBackend, SandboxVariant } from '@/shared/types';
@@ -27,7 +27,8 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
   }, []);
 
   const isInstalling = installStatus.type === 'starting' || installStatus.type === 'installing';
-  const isRebuilding = sandboxStatus.type === 'starting' || sandboxStatus.type === 'stopping';
+  const [imageRebuilding, setIsRebuilding] = useState(false);
+  const isRebuilding = imageRebuilding || sandboxStatus.type === 'starting' || sandboxStatus.type === 'stopping';
 
   const [cliInPath, setCliInPath] = useState<{ installed: boolean; symlinkPath: string } | null>(null);
   const [cliInstalling, setCliInstalling] = useState(false);
@@ -68,8 +69,16 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
     persistedStoreApi.setKey('sandboxBackend', e.target.value as SandboxBackend);
   }, []);
 
-  const rebuildDockerImage = useCallback(() => {
-    chatApi.rebuild();
+  const rebuildDockerImage = useCallback(async () => {
+    setIsRebuilding(true);
+    try {
+      const result = await emitter.invoke('util:rebuild-sandbox-image');
+      if (result && !result.success) {
+        console.error('Sandbox image rebuild failed:', result.error);
+      }
+    } finally {
+      setIsRebuilding(false);
+    }
   }, []);
 
   const reinstallRuntime = useCallback(() => {
@@ -82,18 +91,18 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
 
   return (
     <div className="flex flex-col gap-3">
-      <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle">Workspace</span>
-      <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
+      <SectionLabel>Workspace</SectionLabel>
+      <Card>
         <FormField label="Workspace directory">
-          <span className="text-xs text-fg-muted truncate max-w-[200px]">{store.workspaceDir ?? 'Default'}</span>
+          <span className="text-sm sm:text-xs text-fg-muted truncate max-w-[200px]">{store.workspaceDir ?? 'Default'}</span>
           <Button size="sm" variant="ghost" onClick={selectWorkspaceDir}>
             Change
           </Button>
         </FormField>
-      </div>
+      </Card>
 
-      <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">Sandbox</span>
-      <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
+      <SectionLabel className="mt-2">Sandbox</SectionLabel>
+      <Card>
         <FormField label={isEnterprise ? 'Use local sandbox' : 'Enable sandbox (Docker)'}>
           <Switch
             checked={isEnterprise ? !(store.sandboxEnabled ?? true) : (store.sandboxEnabled ?? false)}
@@ -103,27 +112,17 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
         {!isEnterprise && (
           <>
             <FormField label="Sandbox backend">
-              <select
-                value={store.sandboxBackend ?? 'docker'}
-                onChange={onChangeSandboxBackend}
-                disabled={!store.sandboxEnabled}
-                className="h-8 px-2 text-xs rounded-md bg-surface border border-surface-border/50 text-fg cursor-pointer outline-none focus:border-accent-500/50 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
+              <Select value={store.sandboxBackend ?? 'docker'} onChange={onChangeSandboxBackend} disabled={!store.sandboxEnabled}>
                 <option value="docker">Docker</option>
                 <option value="podman">Podman</option>
                 <option value="vm">VM (QEMU)</option>
-              </select>
+              </Select>
             </FormField>
             <FormField label="Sandbox variant">
-              <select
-                value={store.sandboxVariant ?? 'work'}
-                onChange={onChangeSandboxVariant}
-                disabled={!store.sandboxEnabled}
-                className="h-8 px-2 text-xs rounded-md bg-surface border border-surface-border/50 text-fg cursor-pointer outline-none focus:border-accent-500/50 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
+              <Select value={store.sandboxVariant ?? 'work'} onChange={onChangeSandboxVariant} disabled={!store.sandboxEnabled}>
                 <option value="work">Work</option>
                 <option value="standard">Standard</option>
-              </select>
+              </Select>
             </FormField>
             {(import.meta.env.MODE === 'development' || store.previewFeatures) && ((store.sandboxBackend ?? 'docker') === 'docker' || store.sandboxBackend === 'podman') && (
               <FormField label={`Rebuild ${store.sandboxBackend === 'podman' ? 'Podman' : 'Docker'} image`}>
@@ -134,29 +133,25 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
             )}
           </>
         )}
-      </div>
+      </Card>
 
-      <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">Display</span>
-      <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
+      <SectionLabel className="mt-2">Display</SectionLabel>
+      <Card>
         <FormField label="Theme">
-          <select
-            value={store.theme ?? 'tokyo-night'}
-            onChange={onChangeTheme}
-            className="h-8 px-2 text-xs rounded-md bg-surface border border-surface-border/50 text-fg cursor-pointer outline-none focus:border-accent-500/50"
-          >
+          <Select value={store.theme ?? 'tokyo-night'} onChange={onChangeTheme}>
             <option value="default">Default</option>
             <option value="tokyo-night">Tokyo Night</option>
             <option value="vscode-dark">VS Code Dark</option>
             <option value="vscode-light">VS Code Light</option>
             <option value="utrgv">UTRGV</option>
-          </select>
+          </Select>
         </FormField>
-      </div>
+      </Card>
 
       {!isEnterprise && (
         <>
-          <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">Runtime</span>
-          <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
+          <SectionLabel className="mt-2">Runtime</SectionLabel>
+          <Card>
             <FormField label={`Runtime${runtimeInfo.isInstalled ? ` (v${runtimeInfo.version})` : ''}`}>
               <Button size="sm" variant="ghost" onClick={reinstallRuntime} isDisabled={isInstalling}>
                 {isInstalling
@@ -170,7 +165,7 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
             </FormField>
             <FormField label="'omni' command in PATH">
               {cliInPath?.installed ? (
-                <span className="text-xs text-fg-muted">Installed</span>
+                <span className="text-sm sm:text-xs text-fg-muted">Installed</span>
               ) : (
                 <Button
                   size="sm"
@@ -183,23 +178,23 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
               )}
             </FormField>
             {cliError && (
-              <div className="rounded-md border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300">{cliError}</div>
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 sm:p-2 text-sm sm:text-xs text-red-300">{cliError}</div>
             )}
-          </div>
+          </Card>
         </>
       )}
 
-      <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle mt-2">About</span>
-      <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-3">
+      <SectionLabel className="mt-2">About</SectionLabel>
+      <Card>
         <FormField label="Launcher version">
-          <span className="text-xs text-fg-muted">{launcherVersion ?? '—'}</span>
+          <span className="text-sm sm:text-xs text-fg-muted">{launcherVersion ?? '—'}</span>
         </FormField>
         <FormField label="Compute">
-          <span className="text-xs text-fg-muted">
+          <span className="text-sm sm:text-xs text-fg-muted">
             {isEnterprise && store.sandboxEnabled !== false ? 'Managed' : 'Local'}
           </span>
         </FormField>
-      </div>
+      </Card>
     </div>
   );
 });

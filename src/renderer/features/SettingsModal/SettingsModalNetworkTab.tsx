@@ -2,7 +2,7 @@ import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { PiPlusBold, PiTrashBold } from 'react-icons/pi';
 
-import { Button, Checkbox, FormField, IconButton, Spinner, Switch } from '@/renderer/ds';
+import { Button, Card, Checkbox, FormField, IconButton, Input, SaveBar, SectionLabel, Spinner, Switch } from '@/renderer/ds';
 import { configApi } from '@/renderer/services/config';
 import type { NetworkConfig } from '@/shared/types';
 
@@ -276,14 +276,14 @@ export const SettingsModalNetworkTab = memo(() => {
 
   return (
     <div className="flex flex-col gap-3">
-      <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle">Network Isolation</span>
+      <SectionLabel>Network Isolation</SectionLabel>
 
-      <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 p-4 flex flex-col gap-4">
+      <Card className="gap-4">
         <FormField label="Enable network isolation">
           <Switch checked={config.enabled} onCheckedChange={onToggleEnabled} />
         </FormField>
 
-        <p className="text-xs text-fg-muted">
+        <p className="text-sm sm:text-xs text-fg-muted">
           When enabled, outbound network traffic is restricted to the hosts listed below in both chat and sandbox modes.
           All other traffic is blocked. Hosts can be domain names, IP addresses, or CIDR ranges.
         </p>
@@ -291,7 +291,7 @@ export const SettingsModalNetworkTab = memo(() => {
         {config.enabled && (
           <>
             <div className="flex flex-col gap-2">
-              <span className="text-xs font-medium text-fg-subtle">Presets</span>
+              <span className="text-sm sm:text-xs font-medium text-fg-subtle">Presets</span>
               <div className="flex flex-col gap-2">
                 {PRESETS.map((preset) => (
                   <PresetRow
@@ -305,20 +305,21 @@ export const SettingsModalNetworkTab = memo(() => {
             </div>
 
             <div className="flex flex-col gap-2">
-              <span className="text-xs font-medium text-fg-subtle">Additional allowed hosts</span>
+              <span className="text-sm sm:text-xs font-medium text-fg-subtle">Additional allowed hosts</span>
               <div className="flex flex-col gap-1">
                 {config.allowlist.map((host, i) => (
                   <HostRow key={i} host={host} index={i} onRemove={removeHost} />
                 ))}
               </div>
               <div className="flex items-center gap-2">
-                <input
+                <Input
                   type="text"
                   value={newHost}
                   onChange={onChangeNewHost}
                   onKeyDown={onNewHostKeyDown}
                   placeholder="example.openai.azure.com or 10.0.0.0/16"
-                  className="h-8 px-2 text-xs rounded-md bg-transparent border border-surface-border/50 text-fg font-mono flex-1 outline-none focus:border-accent-500/50"
+                  mono
+                  className="flex-1"
                 />
                 <Button size="sm" variant="ghost" onClick={addHost} isDisabled={!newHost.trim()}>
                   <PiPlusBold className="mr-1" />
@@ -328,8 +329,8 @@ export const SettingsModalNetworkTab = memo(() => {
             </div>
 
             <div className="flex flex-col gap-2">
-              <span className="text-xs font-medium text-fg-subtle">Denied hosts</span>
-              <p className="text-xs text-fg-muted">
+              <span className="text-sm sm:text-xs font-medium text-fg-subtle">Denied hosts</span>
+              <p className="text-sm sm:text-xs text-fg-muted">
                 Explicitly blocked hosts. Denied hosts take precedence over allowed hosts.
               </p>
               <div className="flex flex-col gap-1">
@@ -338,13 +339,14 @@ export const SettingsModalNetworkTab = memo(() => {
                 ))}
               </div>
               <div className="flex items-center gap-2">
-                <input
+                <Input
                   type="text"
                   value={newDenyHost}
                   onChange={onChangeNewDenyHost}
                   onKeyDown={onNewDenyHostKeyDown}
                   placeholder="blocked.example.com"
-                  className="h-8 px-2 text-xs rounded-md bg-transparent border border-surface-border/50 text-fg font-mono flex-1 outline-none focus:border-accent-500/50"
+                  mono
+                  className="flex-1"
                 />
                 <Button size="sm" variant="ghost" onClick={addDenyHost} isDisabled={!newDenyHost.trim()}>
                   <PiPlusBold className="mr-1" />
@@ -359,22 +361,15 @@ export const SettingsModalNetworkTab = memo(() => {
 
             {effectiveHosts.length > 0 && (
               <div className="flex flex-col gap-1">
-                <span className="text-xs font-medium text-fg-subtle">Effective allowlist</span>
-                <p className="text-xs text-fg-muted font-mono">{effectiveHosts.join(', ')}</p>
+                <span className="text-sm sm:text-xs font-medium text-fg-subtle">Effective allowlist</span>
+                <p className="text-sm sm:text-xs text-fg-muted font-mono">{effectiveHosts.join(', ')}</p>
               </div>
             )}
           </>
         )}
-      </div>
+      </Card>
 
-      {error && <span className="text-xs text-red-400">{error}</span>}
-
-      <div className="flex items-center gap-2 mt-1">
-        <Button size="sm" variant="primary" onClick={save} isDisabled={!dirty || saving}>
-          {saving ? 'Saving\u2026' : 'Save'}
-        </Button>
-        {dirty && <span className="text-xs text-fg-subtle">Unsaved changes</span>}
-      </div>
+      <SaveBar onSave={save} dirty={dirty} saving={saving} error={error} />
     </div>
   );
 });
@@ -385,11 +380,11 @@ const PresetRow = memo(
     const onChange = useCallback(() => onToggle(preset.id), [preset.id, onToggle]);
 
     return (
-      <label className="flex items-center gap-2 cursor-pointer">
+      <label className="flex items-center gap-2.5 cursor-pointer py-0.5">
         <Checkbox checked={checked} onCheckedChange={onChange} />
         <div className="flex flex-col">
-          <span className="text-xs font-medium text-fg">{preset.label}</span>
-          <span className="text-xs text-fg-muted">{preset.description}</span>
+          <span className="text-sm sm:text-xs font-medium text-fg">{preset.label}</span>
+          <span className="text-sm sm:text-xs text-fg-muted">{preset.description}</span>
         </div>
       </label>
     );
@@ -403,7 +398,7 @@ const HostRow = memo(
 
     return (
       <div className="flex items-center gap-2">
-        <span className="h-7 px-2 text-xs rounded-md bg-surface-raised border border-surface-border/50 text-fg font-mono flex-1 flex items-center">
+        <span className="h-9 px-3 text-sm sm:h-8 sm:px-2 sm:text-xs rounded-lg bg-surface-raised border border-surface-border/50 text-fg font-mono flex-1 flex items-center">
           {host}
         </span>
         <IconButton aria-label="Remove host" icon={<PiTrashBold />} size="sm" onClick={onClickRemove} />

@@ -11,6 +11,8 @@ import {
   DialogFooter,
   DialogHeader,
   IconButton,
+  Input,
+  Switch,
 } from '@/renderer/ds';
 import type { Column, ProjectId } from '@/shared/types';
 
@@ -23,6 +25,8 @@ const ColumnEditor = memo(
     index,
     total,
     onMaxConcurrentChange,
+    onGateChange,
+    onDescriptionChange,
     onRename,
     onMoveUp,
     onMoveDown,
@@ -33,6 +37,8 @@ const ColumnEditor = memo(
     index: number;
     total: number;
     onMaxConcurrentChange: (columnId: string, value: number | undefined) => void;
+    onGateChange: (columnId: string, checked: boolean) => void;
+    onDescriptionChange: (columnId: string, value: string) => void;
     onRename: (columnId: string, label: string) => void;
     onMoveUp: (index: number) => void;
     onMoveDown: (index: number) => void;
@@ -89,7 +95,7 @@ const ColumnEditor = memo(
               onBlur={handleFinishRename}
               onKeyDown={handleRenameKeyDown}
               autoFocus
-              className="rounded border border-accent-500 bg-surface px-1.5 py-0.5 text-xs font-medium text-fg focus:outline-none"
+              className="rounded-lg border border-accent-500 bg-surface px-2.5 py-1.5 sm:px-1.5 sm:py-0.5 text-sm sm:text-xs font-medium text-fg focus:outline-none"
             />
           ) : (
             <button
@@ -134,14 +140,28 @@ const ColumnEditor = memo(
         </div>
 
         <div className="flex items-center gap-1.5">
-          <label className="text-[10px] text-fg-muted">Max concurrent</label>
+          <label className="text-sm sm:text-xs text-fg-muted">Max concurrent</label>
           <input
             type="number"
             min={1}
             value={column.maxConcurrent ?? ''}
             onChange={handleMaxConcurrentChange}
             placeholder="∞"
-            className="w-12 rounded border border-surface-border bg-surface px-1.5 py-0.5 text-xs text-fg text-center placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500"
+            className="w-14 sm:w-12 rounded-lg border border-surface-border bg-surface px-2 py-1.5 sm:px-1.5 sm:py-0.5 text-sm sm:text-xs text-fg text-center placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500"
+          />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <label className="text-sm sm:text-xs text-fg-muted">Gate</label>
+          <Switch checked={column.gate ?? false} onCheckedChange={(checked) => onGateChange(column.id, checked)} />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <label className="text-sm sm:text-xs text-fg-muted">Description</label>
+          <Input
+            size="sm"
+            value={column.description ?? ''}
+            onChange={(e) => onDescriptionChange(column.id, e.target.value)}
+            placeholder="What does this column mean?"
+            className="flex-1"
           />
         </div>
       </div>
@@ -190,6 +210,20 @@ export const PipelineSettingsDialog = memo(
           }
           return { ...col, maxConcurrent: value };
         });
+      });
+    }, []);
+
+    const handleGateChange = useCallback((columnId: string, checked: boolean) => {
+      setEditColumns((prev) => {
+        if (!prev) return prev;
+        return prev.map((col) => (col.id !== columnId ? col : { ...col, gate: checked }));
+      });
+    }, []);
+
+    const handleDescriptionChange = useCallback((columnId: string, value: string) => {
+      setEditColumns((prev) => {
+        if (!prev) return prev;
+        return prev.map((col) => (col.id !== columnId ? col : { ...col, description: value || undefined }));
       });
     }, []);
 
@@ -285,10 +319,10 @@ export const PipelineSettingsDialog = memo(
 
     return (
       <AnimatedDialog open={open} onClose={onClose}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>Pipeline Settings</DialogHeader>
           <DialogBody className="flex flex-col gap-3 max-h-[60vh] overflow-y-auto">
-            <p className="text-xs text-fg-muted">
+            <p className="text-sm sm:text-xs text-fg-muted">
               First column is the backlog. Last column is terminal (completed). Columns in between are active work
               stages.
             </p>
@@ -299,6 +333,8 @@ export const PipelineSettingsDialog = memo(
                 index={i}
                 total={editColumns.length}
                 onMaxConcurrentChange={handleMaxConcurrentChange}
+                onGateChange={handleGateChange}
+                onDescriptionChange={handleDescriptionChange}
                 onRename={handleRename}
                 onMoveUp={handleMoveUp}
                 onMoveDown={handleMoveDown}
@@ -312,7 +348,7 @@ export const PipelineSettingsDialog = memo(
                 value={newColumnLabel}
                 onChange={(e) => setNewColumnLabel(e.target.value)}
                 placeholder="Add column..."
-                className="flex-1 rounded-md border border-surface-border bg-surface px-2 py-1.5 text-sm text-fg placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500"
+                className="flex-1 rounded-lg border border-surface-border bg-surface px-3 py-2 sm:px-2 sm:py-1.5 text-base sm:text-sm text-fg placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500"
                 onKeyDown={handleAddColumnKeyDown}
               />
               <IconButton
@@ -324,11 +360,11 @@ export const PipelineSettingsDialog = memo(
               />
             </div>
           </DialogBody>
-          <DialogFooter className="gap-2 justify-end">
-            <Button size="sm" variant="ghost" onClick={onClose}>
+          <DialogFooter className="gap-2 justify-end flex-col sm:flex-row">
+            <Button variant="ghost" onClick={onClose} className="justify-center h-12 text-base sm:h-9 sm:text-sm order-2 sm:order-1">
               Cancel
             </Button>
-            <Button size="sm" onClick={handleSave} isDisabled={!isDirty}>
+            <Button onClick={handleSave} isDisabled={!isDirty} className="justify-center h-12 text-base sm:h-9 sm:text-sm order-1 sm:order-2">
               Save
             </Button>
           </DialogFooter>

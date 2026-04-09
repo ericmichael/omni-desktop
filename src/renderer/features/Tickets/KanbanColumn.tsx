@@ -26,14 +26,14 @@ export const KanbanColumn = memo(({ column, tickets }: { column: Column; tickets
         <div className="flex items-center gap-1.5">
           <span className="text-sm font-medium text-fg">{column.label}</span>
           {column.gate && (
-            <span className="text-[10px] text-fg-muted" title="Gated — only a human can advance tickets past this column">
+            <span className="text-xs text-fg-muted" title="Gated — only a human can advance tickets past this column">
               &#x1F512;
             </span>
           )}
         </div>
         <span
           className={cn(
-            'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
+            'text-xs px-1.5 py-0.5 rounded-full font-medium',
             COLUMN_BADGE_COLORS[column.id] ?? 'text-fg-muted bg-fg-muted/10'
           )}
         >

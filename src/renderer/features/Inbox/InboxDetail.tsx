@@ -1,8 +1,9 @@
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { PiArrowLeftBold } from 'react-icons/pi';
+import { PiArrowSquareOutBold } from 'react-icons/pi';
 
-import { Button, IconButton, cn } from '@/renderer/ds';
+import { Button, cn, ConfirmDialog, SectionLabel, Select, Textarea, TopAppBar } from '@/renderer/ds';
+import { ticketApi } from '@/renderer/features/Tickets/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { InboxItemId, InboxItemStatus } from '@/shared/types';
 
@@ -79,6 +80,30 @@ export const InboxDetail = memo(
       void inboxApi.updateItem(itemId, { status: 'deferred' });
     }, [itemId]);
 
+    const [converting, setConverting] = useState(false);
+    const handleConvertToTicket = useCallback(async () => {
+      if (!item?.projectId) return;
+      setConverting(true);
+      try {
+        const newTicket = await ticketApi.addTicket({
+          title: item.title,
+          description: item.description ?? '',
+          priority: 'medium',
+          blockedBy: [],
+          projectId: item.projectId,
+        });
+        await inboxApi.updateItem(itemId, {
+          status: 'done',
+          linkedTicketIds: [...(item.linkedTicketIds ?? []), newTicket.id],
+        });
+      } finally {
+        setConverting(false);
+      }
+    }, [item, itemId]);
+
+    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const handleOpenDeleteConfirm = useCallback(() => setDeleteConfirmOpen(true), []);
+    const handleCloseDeleteConfirm = useCallback(() => setDeleteConfirmOpen(false), []);
     const handleDelete = useCallback(() => {
       void inboxApi.removeItem(itemId);
       onBack();
@@ -94,14 +119,15 @@ export const InboxDetail = memo(
 
     return (
       <div className="flex flex-col w-full h-full">
-        {/* Header */}
-        <div className="flex items-center gap-2 px-3 sm:px-4 py-2 border-b border-surface-border shrink-0">
-          <IconButton aria-label="Back" icon={<PiArrowLeftBold />} size="sm" onClick={onBack} />
-          <span className="text-sm font-semibold text-fg truncate flex-1">{item.title}</span>
-          <span className="text-xs text-fg-subtle shrink-0 hidden sm:inline">
-            {new Date(item.createdAt).toLocaleDateString()}
-          </span>
-        </div>
+        <TopAppBar
+          title={item.title}
+          onBack={onBack}
+          actions={
+            <span className="text-xs text-fg-subtle hidden sm:inline">
+              {new Date(item.createdAt).toLocaleDateString()}
+            </span>
+          }
+        />
 
         {/* Body */}
         <div className="flex-1 min-h-0 overflow-y-auto">
@@ -114,12 +140,12 @@ export const InboxDetail = memo(
                 placeholder="Title"
                 className={inputClass}
               />
-              <textarea
+              <Textarea
                 value={description}
                 onChange={handleDescriptionChange}
                 placeholder="Add context, details, or paste raw content..."
                 rows={4}
-                className={`${inputClass} resize-none`}
+                className="rounded-xl"
               />
               {dirty && (
                 <div className="flex justify-end">
@@ -132,7 +158,7 @@ export const InboxDetail = memo(
 
             {/* Status chips */}
             <div className="flex flex-col gap-2 rounded-2xl bg-surface-raised/50 p-4 border border-surface-border">
-              <span className="text-xs font-medium text-fg-muted uppercase tracking-wider">Status</span>
+              <SectionLabel>Status</SectionLabel>
               <div className="flex items-center gap-2">
                 {STATUS_OPTIONS.map((opt) => (
                   <button
@@ -154,25 +180,21 @@ export const InboxDetail = memo(
 
             {/* Project */}
             <div className="flex flex-col gap-2 rounded-2xl bg-surface-raised/50 p-4 border border-surface-border">
-              <span className="text-xs font-medium text-fg-muted uppercase tracking-wider">Project</span>
-              <select
-                value={item.projectId ?? ''}
-                onChange={handleProjectChange}
-                className="w-full rounded-xl border border-surface-border bg-surface px-3.5 py-2.5 text-base sm:text-sm text-fg focus:outline-none focus:border-accent-500 transition-colors"
-              >
+              <SectionLabel>Project</SectionLabel>
+              <Select value={item.projectId ?? ''} onChange={handleProjectChange} className="w-full rounded-xl">
                 <option value="">None</option>
                 {store.projects.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
 
             {/* Linked tickets */}
             {linkedTickets.length > 0 && (
               <div className="flex flex-col gap-2 rounded-2xl bg-surface-raised/50 p-4 border border-surface-border">
-                <span className="text-xs font-medium text-fg-muted uppercase tracking-wider">Linked Tickets</span>
+                <SectionLabel>Linked Tickets</SectionLabel>
                 <div className="flex flex-col gap-1.5">
                   {linkedTickets.map((t) => (
                     <div
@@ -180,7 +202,7 @@ export const InboxDetail = memo(
                       className="flex items-center gap-2 rounded-xl bg-surface px-3.5 py-2.5"
                     >
                       <span className="text-sm text-fg flex-1 truncate">{t!.title}</span>
-                      <span className="text-[10px] text-fg-subtle shrink-0">{t!.priority}</span>
+                      <span className="text-xs text-fg-subtle shrink-0">{t!.priority}</span>
                     </div>
                   ))}
                 </div>
@@ -189,17 +211,32 @@ export const InboxDetail = memo(
 
             {/* Actions */}
             <div className="flex flex-col gap-2 pt-2">
+              {item.projectId && item.status !== 'done' && (
+                <Button size="sm" variant="ghost" onClick={handleConvertToTicket} isDisabled={converting} className="w-full sm:w-auto justify-center">
+                  <PiArrowSquareOutBold size={14} className="mr-1" />
+                  Convert to Ticket
+                </Button>
+              )}
               {item.status === 'open' && (
                 <Button size="sm" variant="ghost" onClick={handleDefer} className="w-full sm:w-auto justify-center">
                   Defer
                 </Button>
               )}
-              <Button size="sm" variant="destructive" onClick={handleDelete} className="w-full sm:w-auto justify-center">
+              <Button size="sm" variant="destructive" onClick={handleOpenDeleteConfirm} className="w-full sm:w-auto justify-center">
                 Delete
               </Button>
             </div>
           </div>
         </div>
+        <ConfirmDialog
+          open={deleteConfirmOpen}
+          onClose={handleCloseDeleteConfirm}
+          onConfirm={handleDelete}
+          title="Delete inbox item?"
+          description="This item will be permanently removed."
+          confirmLabel="Delete"
+          destructive
+        />
       </div>
     );
   }

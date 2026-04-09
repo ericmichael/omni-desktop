@@ -101,7 +101,7 @@ export const QuickCapture = memo(() => {
                 <PiTrayBold className="text-accent-500 shrink-0" size={16} />
                 <span className="text-sm font-medium text-fg">Quick Capture</span>
                 <div className="flex-1" />
-                <kbd className="text-[10px] text-fg-subtle border border-surface-border rounded px-1.5 py-0.5">
+                <kbd className="text-xs text-fg-subtle border border-surface-border rounded px-1.5 py-0.5">
                   Esc
                 </kbd>
               </div>

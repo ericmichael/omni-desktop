@@ -2,42 +2,18 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { PiMonitorBold } from 'react-icons/pi';
 
+
 import { buildInteractiveVariables } from '@/lib/client-tools';
 import { OmniAgentsApp, OmniAgentsHostApp } from '@/renderer/omniagents-ui';
 import { buildSandboxLabel } from '@/renderer/omniagents-ui/sandbox-label';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { ChatShell } from '@/renderer/omniagents-ui/ChatShell';
 import { getGreeting } from '@/renderer/omniagents-ui/greeting';
-import { cn } from '@/renderer/ds';
-import {
-  $omniInstallProcessXTerm,
-} from '@/renderer/features/Omni/state';
 import { FloatingWidget } from '@/renderer/features/Omni/FloatingWidget';
-import { XTermLogViewer } from '@/renderer/features/XTermLogViewer/XTermLogViewer';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
 
-import { $chatProcessStatus, $chatProcessXTerm } from './state';
-import type { ChatAutoLaunchPhase } from './use-chat-auto-launch';
+import { $chatProcessStatus } from './state';
 import { useChatAutoLaunch } from './use-chat-auto-launch';
-
-const toShellPhase = (phase: ChatAutoLaunchPhase): 'checking' | 'installing' | 'starting' => {
-  if (phase === 'checking' || phase === 'installing') return phase;
-  return 'starting';
-};
-
-const InstallDetails = memo(() => {
-  const omniInstallXTerm = useStore($omniInstallProcessXTerm);
-  if (!omniInstallXTerm) return null;
-  return <XTermLogViewer $xterm={$omniInstallProcessXTerm} />;
-});
-InstallDetails.displayName = 'InstallDetails';
-
-const ChatLogDetails = memo(() => {
-  const chatXTerm = useStore($chatProcessXTerm);
-  if (!chatXTerm) return null;
-  return <XTermLogViewer $xterm={$chatProcessXTerm} />;
-});
-ChatLogDetails.displayName = 'ChatLogDetails';
 
 /** Running view when sandbox is enabled — shows OmniAgentsApp with VNC floating widget. */
 const SandboxRunningView = memo(
@@ -135,20 +111,13 @@ export const Chat = memo(() => {
     return null;
   }
 
-  const details =
-    phase === 'installing' ? (
-      <InstallDetails />
-    ) : (
-      <ChatLogDetails />
-    );
-
   // When sandbox is enabled, use ChatShell + SandboxRunningView (like old Omni.tsx)
   if (sandboxEnabled) {
     const hasUrls = !!chatData;
     const showShell = !hasUrls || !runningMounted;
 
     const shellPhase =
-      phase === 'error' ? ('error' as const) : phase === 'idle' ? ('idle' as const) : toShellPhase(phase);
+      phase === 'error' ? ('error' as const) : phase === 'idle' ? ('idle' as const) : ('loading' as const);
 
     return (
       <div className="w-full h-full relative">
@@ -161,7 +130,6 @@ export const Chat = memo(() => {
               onRetry={phase === 'error' ? retry : undefined}
               onLaunch={phase === 'idle' ? launch : undefined}
               launchDisabled={phase === 'idle' ? !store.workspaceDir : undefined}
-              details={details}
             />
           </div>
         )}
@@ -180,13 +148,6 @@ export const Chat = memo(() => {
   }
 
   // When sandbox is disabled, use OmniAgentsHostApp (like old Chat.tsx)
-  const startingPhase =
-    phase === 'checking' || phase === 'installing' || phase === 'ready' || phase === 'starting'
-      ? phase === 'ready'
-        ? 'starting'
-        : phase
-      : 'starting';
-
   return (
     <div className="w-full h-full">
       <OmniAgentsHostApp
@@ -198,8 +159,8 @@ export const Chat = memo(() => {
             : phase === 'idle'
               ? { type: 'idle', onLaunch: launch, disabled: !store.workspaceDir }
               : phase === 'error'
-                ? { type: 'error', error: error ?? 'An unexpected error occurred.', onRetry: retry, details }
-                : { type: 'starting', phase: startingPhase as 'checking' | 'installing' | 'starting', details }
+                ? { type: 'error', error: error ?? 'An unexpected error occurred.', onRetry: retry }
+                : { type: 'loading' }
         }
       />
     </div>

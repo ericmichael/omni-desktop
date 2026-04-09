@@ -2,7 +2,7 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { PiGearSixBold, PiGitBranchBold, PiPencilSimpleBold, PiPlusBold, PiTrashFill } from 'react-icons/pi';
 
-import { Button, IconButton, Switch } from '@/renderer/ds';
+import { Button, ConfirmDialog, IconButton, SegmentedControl, Switch } from '@/renderer/ds';
 import { $initiatives, initiativeApi } from '@/renderer/features/Initiatives/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { InitiativeId, ProjectId } from '@/shared/types';
@@ -25,6 +25,7 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
   const [editFormOpen, setEditFormOpen] = useState(false);
   const [initiativeFormOpen, setInitiativeFormOpen] = useState(false);
   const [editingInitiativeId, setEditingInitiativeId] = useState<InitiativeId | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const initiatives = useStore($initiatives);
   const activeInitiativeId = useStore($activeInitiativeId);
 
@@ -68,6 +69,8 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
   const handleCloseInitiativeEdit = useCallback(() => setEditingInitiativeId(null), []);
   const handleSelectInitiative = useCallback((id: InitiativeId | 'all') => $activeInitiativeId.set(id), []);
 
+  const handleOpenDeleteConfirm = useCallback(() => setDeleteConfirmOpen(true), []);
+  const handleCloseDeleteConfirm = useCallback(() => setDeleteConfirmOpen(false), []);
   const handleRemoveProject = useCallback(async () => {
     await ticketApi.removeProject(projectId);
     ticketApi.goToDashboard();
@@ -80,6 +83,24 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
     [projectId]
   );
 
+  const handleCompleteInitiative = useCallback(() => {
+    if (activeInitiative) {
+      void initiativeApi.updateInitiative(activeInitiative.id, { status: 'completed' });
+    }
+  }, [activeInitiative]);
+
+  const handleArchiveInitiative = useCallback(() => {
+    if (activeInitiative) {
+      void initiativeApi.updateInitiative(activeInitiative.id, { status: 'archived' });
+    }
+  }, [activeInitiative]);
+
+  const handleReactivateInitiative = useCallback(() => {
+    if (activeInitiative) {
+      void initiativeApi.updateInitiative(activeInitiative.id, { status: 'active' });
+    }
+  }, [activeInitiative]);
+
   if (!project) {
     return null;
   }
@@ -87,22 +108,18 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
   return (
     <div className="flex flex-col w-full h-full">
       {/* Project header */}
-      <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 border-b border-surface-border shrink-0">
-        <span className="text-sm font-semibold text-fg truncate">{project.label}</span>
-        <div className="flex items-center rounded-md border border-surface-border text-xs overflow-hidden ml-1 sm:ml-2 shrink-0">
-          <button
-            className={`px-2 sm:px-2.5 py-1 transition-colors ${view === 'board' ? 'bg-surface-raised text-fg font-medium' : 'text-fg-muted hover:text-fg'}`}
-            onClick={() => setView('board')}
-          >
-            Board
-          </button>
-          <button
-            className={`px-2 sm:px-2.5 py-1 transition-colors ${view === 'brief' ? 'bg-surface-raised text-fg font-medium' : 'text-fg-muted hover:text-fg'}`}
-            onClick={() => setView('brief')}
-          >
-            Brief
-          </button>
-        </div>
+      <div className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 border-b border-surface-border shrink-0">
+        <span className="text-base sm:text-sm font-semibold text-fg truncate">{project.label}</span>
+        <span className="text-xs text-fg-subtle hidden sm:inline">
+          Created {new Date(project.createdAt).toLocaleDateString()}
+        </span>
+        <SegmentedControl
+          value={view}
+          options={[{ value: 'board', label: 'Board' }, { value: 'brief', label: 'Brief' }]}
+          onChange={setView}
+          layoutId="project-view-toggle"
+          className="ml-1 sm:ml-2 shrink-0"
+        />
         <div className="flex-1" />
         <label className="hidden sm:flex items-center gap-1.5 text-xs text-fg-muted cursor-pointer select-none">
           <Switch checked={project.autoDispatch ?? false} onCheckedChange={handleToggleAutoDispatch} />
@@ -139,7 +156,7 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
           size="sm"
           onClick={handleOpenPipelineSettings}
         />
-        <IconButton aria-label="Delete project" icon={<PiTrashFill />} size="sm" onClick={handleRemoveProject} />
+        <IconButton aria-label="Delete project" icon={<PiTrashFill />} size="sm" onClick={handleOpenDeleteConfirm} />
       </div>
 
       {ticketFormOpen && (
@@ -172,11 +189,21 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
         </div>
       )}
 
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        onClose={handleCloseDeleteConfirm}
+        onConfirm={handleRemoveProject}
+        title="Delete project?"
+        description="This will remove the project and all its tickets. Your workspace files will not be affected."
+        confirmLabel="Delete"
+        destructive
+      />
+
       {/* Initiative filter bar */}
       {view === 'board' && projectInitiatives.length > 1 && (
-        <div className="flex items-center gap-1.5 px-2 sm:px-4 py-1.5 border-b border-surface-border shrink-0 overflow-x-auto">
+        <div className="flex items-center gap-1.5 px-3 sm:px-4 py-1.5 border-b border-surface-border shrink-0 overflow-x-auto scrollbar-none">
           <button
-            className={`px-2 py-0.5 rounded text-xs transition-colors ${
+            className={`px-3 sm:px-2 py-1.5 sm:py-0.5 rounded-lg sm:rounded text-sm sm:text-xs shrink-0 transition-colors ${
               activeInitiativeId === 'all'
                 ? 'bg-surface-raised text-fg font-medium'
                 : 'text-fg-muted hover:text-fg'
@@ -188,7 +215,7 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
           {projectInitiatives.map((init) => (
             <button
               key={init.id}
-              className={`px-2 py-0.5 rounded text-xs transition-colors ${
+              className={`px-3 sm:px-2 py-1.5 sm:py-0.5 rounded-lg sm:rounded text-sm sm:text-xs shrink-0 transition-colors ${
                 activeInitiativeId === init.id
                   ? 'bg-surface-raised text-fg font-medium'
                   : 'text-fg-muted hover:text-fg'
@@ -199,7 +226,7 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
             </button>
           ))}
           {activeInitiative?.branch && (
-            <span className="ml-1 flex items-center gap-1 rounded-full bg-purple-400/10 px-2 py-0.5 text-[10px] font-medium text-purple-400">
+            <span className="ml-1 flex items-center gap-1 rounded-full bg-purple-400/10 px-2 py-0.5 text-xs font-medium text-purple-400">
               <PiGitBranchBold size={10} />
               {activeInitiative.branch}
             </span>
@@ -211,6 +238,30 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
           >
             <PiPlusBold />
           </button>
+        </div>
+      )}
+
+      {activeInitiative && !activeInitiative.isDefault && (
+        <div className="flex items-center gap-2 px-3 sm:px-4 py-1.5 border-b border-surface-border shrink-0 overflow-x-auto scrollbar-none">
+          {activeInitiative.description && (
+            <p className="text-sm sm:text-xs text-fg-muted truncate flex-1 min-w-0">{activeInitiative.description}</p>
+          )}
+          {!activeInitiative.description && <div className="flex-1" />}
+          {activeInitiative.status === 'active' && (
+            <>
+              <Button size="sm" variant="ghost" onClick={handleCompleteInitiative} className="shrink-0">
+                Complete
+              </Button>
+              <Button size="sm" variant="ghost" onClick={handleArchiveInitiative} className="shrink-0">
+                Archive
+              </Button>
+            </>
+          )}
+          {(activeInitiative.status === 'completed' || activeInitiative.status === 'archived') && (
+            <Button size="sm" variant="ghost" onClick={handleReactivateInitiative} className="shrink-0">
+              Reactivate
+            </Button>
+          )}
         </div>
       )}
 

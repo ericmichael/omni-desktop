@@ -6,7 +6,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PiArrowsInBold, PiArrowsOutBold, PiCodeBold, PiDotsSixVerticalBold, PiDotsThreeOutline, PiGitBranchBold, PiMonitorBold, PiPlusBold } from 'react-icons/pi';
 
 import { uuidv4 } from '@/lib/uuid';
-import { Button, cn } from '@/renderer/ds';
+import { Button, cn, SegmentedControl } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { CodeLayoutMode, CodeTab, CodeTabId, TicketId, TicketResolution } from '@/shared/types';
 
@@ -25,29 +25,13 @@ const CodeDeckHeader = memo(
     return (
       <div className="hidden sm:flex h-10 items-center justify-end px-3 border-b border-surface-border bg-surface-raised">
         <div className="flex items-center gap-2">
-          <div className="hidden sm:flex items-center gap-0.5 rounded-md bg-surface-overlay p-0.5">
-            <button
-              type="button"
-              onClick={() => onLayoutMode('deck')}
-              className={cn(
-                'px-2 py-1 text-[11px] rounded-sm transition-colors',
-                layoutMode === 'deck' ? 'bg-surface text-fg' : 'text-fg-muted hover:text-fg hover:bg-surface-border/40'
-              )}
-            >
-              Deck
-            </button>
-            <button
-              type="button"
-              onClick={() => onLayoutMode('focus')}
-              className={cn(
-                'px-2 py-1 text-[11px] rounded-sm transition-colors',
-                layoutMode === 'focus' ? 'bg-surface text-fg' : 'text-fg-muted hover:text-fg hover:bg-surface-border/40'
-              )}
-            >
-              Focus
-            </button>
-          </div>
-          <Button size="sm" variant="ghost" leftIcon={<PiPlusBold size={13} />} onClick={onNewSession} className="h-7 px-2.5 text-[11px]">
+          <SegmentedControl
+            value={layoutMode}
+            options={[{ value: 'deck', label: 'Deck' }, { value: 'focus', label: 'Focus' }]}
+            onChange={onLayoutMode}
+            layoutId="code-layout-toggle"
+          />
+          <Button size="sm" variant="ghost" leftIcon={<PiPlusBold size={13} />} onClick={onNewSession}>
             New Session
           </Button>
         </div>
@@ -219,7 +203,7 @@ const CodeSessionHeader = memo(
         {ticketTitle && (
           <div className="flex items-center justify-between px-3 sm:px-5 py-1.5 border-b border-surface-border bg-surface-raised/50">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="text-[11px] text-fg-muted truncate">{ticketTitle}</span>
+              <span className="text-xs text-fg-muted truncate">{ticketTitle}</span>
               <span className="hidden sm:flex items-center gap-2 shrink-0">
                 {ticketColumnBadge}
                 {ticketMetaBadge}
@@ -437,7 +421,7 @@ const FocusListItem = memo(
       >
         <button
           type="button"
-          className="inline-flex items-center justify-center size-6 rounded-md text-fg-muted hover:text-fg hover:bg-white/5"
+          className="inline-flex items-center justify-center size-8 rounded-lg text-fg-muted hover:text-fg hover:bg-white/5"
           {...attributes}
           {...listeners}
           aria-label="Reorder"
@@ -447,7 +431,7 @@ const FocusListItem = memo(
         <button type="button" onClick={() => onSelect(tab.id)} className="flex-1 min-w-0 text-left">
           <div className="flex flex-col min-w-0">
             <span className="text-sm truncate">{label}</span>
-            {subLabel && <span className="text-[10px] text-fg-subtle truncate">{subLabel}</span>}
+            {subLabel && <span className="text-xs text-fg-subtle truncate">{subLabel}</span>}
           </div>
         </button>
         <SessionActionButton
@@ -708,7 +692,7 @@ export const CodeDeck = memo(() => {
       }
 
       return (
-        <span className="flex items-center gap-1 rounded-full bg-purple-400/10 px-1.5 py-0.5 text-[10px] font-medium text-purple-400 shrink-0">
+        <span className="flex items-center gap-1 rounded-full bg-purple-400/10 px-1.5 py-0.5 text-xs font-medium text-purple-400 shrink-0">
           <PiGitBranchBold size={10} />
           {effectiveBranch ?? 'Isolated workspace'}
           {isIsolatedWorkspace ? ' · isolated' : ''}
@@ -836,7 +820,7 @@ export const CodeDeck = memo(() => {
               <button
                 type="button"
                 onClick={handleNewSession}
-                className="shrink-0 size-7 rounded-full bg-surface-overlay text-fg-muted flex items-center justify-center active:bg-surface-border transition-colors"
+                className="shrink-0 size-9 rounded-full bg-surface-overlay text-fg-muted flex items-center justify-center active:bg-surface-border transition-colors"
                 aria-label="New session"
               >
                 <PiPlusBold size={13} />

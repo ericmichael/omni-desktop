@@ -1,6 +1,6 @@
 import { memo, useCallback, useState } from 'react';
 
-import { AnimatedDialog, Button, DialogBody, DialogContent, DialogFooter, DialogHeader } from '@/renderer/ds';
+import { AnimatedDialog, Button, DialogBody, DialogContent, DialogFooter, DialogHeader, Input, Select } from '@/renderer/ds';
 import { DirectoryBrowserDialog } from '@/renderer/features/Tickets/DirectoryBrowserDialog';
 import type { Project, SandboxConfig } from '@/shared/types';
 
@@ -100,9 +100,6 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
     }
   }, [isValid, isSubmitting, isEdit, editProject, label, workspaceDir, sandboxMode, sandboxValue, onClose]);
 
-  const inputClassName =
-    'w-full rounded-lg border border-surface-border bg-surface px-3 py-2 text-sm text-fg placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500';
-
   return (
     <>
       <AnimatedDialog open={open} onClose={onClose}>
@@ -111,12 +108,12 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
           <DialogBody className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
               <label className="text-sm text-fg">Name</label>
-              <input
+              <Input
                 type="text"
                 value={label}
                 onChange={handleLabelChange}
                 placeholder="my-project"
-                className={inputClassName}
+                className="w-full"
               />
             </div>
 
@@ -134,31 +131,31 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
 
             <div className="flex flex-col gap-1.5">
               <label className="text-sm text-fg">Sandbox</label>
-              <select
+              <Select
                 value={sandboxMode}
                 onChange={handleSandboxModeChange}
-                className={inputClassName}
+                className="w-full"
               >
                 <option value="default">Default</option>
                 <option value="image">Docker Image</option>
                 <option value="dockerfile">Dockerfile</option>
-              </select>
+              </Select>
               {sandboxMode === 'image' && (
-                <input
+                <Input
                   type="text"
                   value={sandboxValue}
                   onChange={handleSandboxValueChange}
                   placeholder="ubuntu:24.04"
-                  className={inputClassName}
+                  className="w-full"
                 />
               )}
               {sandboxMode === 'dockerfile' && (
-                <input
+                <Input
                   type="text"
                   value={sandboxValue}
                   onChange={handleSandboxValueChange}
                   placeholder="Dockerfile"
-                  className={inputClassName}
+                  className="w-full"
                 />
               )}
             </div>

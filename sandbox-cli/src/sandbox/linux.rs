@@ -233,99 +233,20 @@ pub fn exec(config: SandboxConfig) -> Result<u8> {
     }
     args.extend(["--seccomp".into(), seccomp_fd.to_string()]);
 
-    // --- Minimal rootfs ---
-    // Mount system directories read-only so the child can resolve libraries,
-    // run binaries, etc. but cannot modify the host.
-    for dir in &["/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc"] {
-        if Path::new(dir).exists() {
-            args.extend(["--ro-bind".into(), dir.to_string(), dir.to_string()]);
-        }
-    }
+    // --- Filesystem: read-only root with targeted writable mounts ---
+    //
+    // Bind the entire host filesystem read-only, then layer writable mounts
+    // on top. This approach (used by Codex CLI and others) avoids the need
+    // to enumerate every system path, DNS config, WSL mount, etc. — the
+    // whole filesystem is just available read-only by default.
+    args.extend(["--ro-bind".into(), "/".into(), "/".into()]);
 
-    // SSL/TLS certificates (needed for HTTPS when network is allowed).
-    for cert_dir in &["/etc/ssl", "/etc/pki", "/etc/ca-certificates"] {
-        if Path::new(cert_dir).exists() {
-            args.extend(["--ro-bind".into(), cert_dir.to_string(), cert_dir.to_string()]);
-        }
-    }
-
-    // /proc and /dev
+    // /proc and /dev need special handling (can't be ro-bound from host).
     args.extend(["--proc".into(), "/proc".into()]);
     args.extend(["--dev".into(), "/dev".into()]);
 
-    // Writable /tmp
+    // Writable /tmp (override the read-only root bind).
     args.extend(["--tmpfs".into(), "/tmp".into()]);
-
-    // /run as tmpfs, then selectively bind what's needed.
-    args.extend(["--tmpfs".into(), "/run".into()]);
-
-    // DNS resolution: ensure resolv.conf is available inside the sandbox.
-    //
-    // /etc/resolv.conf may be:
-    //   1. A symlink to /run/systemd/resolve/stub-resolv.conf (systemd-resolved)
-    //   2. A symlink to /mnt/wsl/resolv.conf (WSL)
-    //   3. A regular file
-    //
-    // Case 1 is handled by binding /run/systemd/resolve below.
-    // Case 2 (and similar out-of-/etc symlinks): the symlink is inside /etc
-    // (already bound) but its target is outside the sandbox. We bind the real
-    // file to the symlink's target path so the existing symlink resolves.
-    if let Ok(link_target) = std::fs::read_link("/etc/resolv.conf") {
-        let target_str = link_target.to_string_lossy().to_string();
-        if !target_str.starts_with("/etc/") && !target_str.starts_with("/run/") {
-            if let Ok(real_path) = std::fs::canonicalize("/etc/resolv.conf") {
-                // Bind the resolved file to the symlink target path.
-                // e.g., bind /mnt/wsl/resolv.conf (real) → /mnt/wsl/resolv.conf (in sandbox)
-                // so the /etc/resolv.conf symlink inside the sandbox resolves.
-                let real_str = real_path.to_string_lossy().to_string();
-                args.extend([
-                    "--ro-bind".into(),
-                    real_str,
-                    target_str,
-                ]);
-            }
-        }
-    }
-
-    if Path::new("/run/systemd/resolve").exists() {
-        args.extend([
-            "--ro-bind".into(),
-            "/run/systemd/resolve".into(),
-            "/run/systemd/resolve".into(),
-        ]);
-    }
-    // Some systems use /run/resolvconf instead.
-    if Path::new("/run/resolvconf").exists() {
-        args.extend([
-            "--ro-bind".into(),
-            "/run/resolvconf".into(),
-            "/run/resolvconf".into(),
-        ]);
-    }
-    // D-Bus system bus: required for systemd-resolved DNS on systems where
-    // nsswitch.conf uses the "resolve" module (talks to systemd-resolved via
-    // D-Bus rather than the stub resolver). Without this, glibc fails to
-    // resolve hostnames even though /etc/resolv.conf is available.
-    if Path::new("/run/dbus").exists() {
-        args.extend([
-            "--ro-bind".into(),
-            "/run/dbus".into(),
-            "/run/dbus".into(),
-        ]);
-    }
-
-    // --- Home directory ---
-    // Create an empty tmpfs home so $HOME resolves but is isolated.
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".into());
-    args.extend(["--tmpfs".into(), home.clone()]);
-
-    // Allow common config that the agent may need (read-only).
-    for subdir in &[".config", ".local/share", ".cache"] {
-        let host_path = format!("{home}/{subdir}");
-        if Path::new(&host_path).exists() {
-            args.extend(["--ro-bind".into(), host_path.clone(), host_path]);
-        }
-    }
 
     // --- Workspace (read-write) ---
     let ws = config.workspace.to_string_lossy().to_string();
@@ -635,6 +556,65 @@ mod tests {
         );
         let code = exec(config).expect("exec should succeed");
         assert_eq!(code, 0, "DNS resolution should work when network is allowed");
+    }
+
+    // --- Read-only root bind tests ---
+    // These verify the benefits of the --ro-bind / / approach.
+
+    #[test]
+    #[ignore]
+    fn sandbox_home_config_readable() {
+        // With ro-bind / /, home directory config should be visible read-only.
+        // This covers tools like az, ssh, npm that need ~/.azure, ~/.ssh, etc.
+        let config = run_sh("test -d $HOME && ls $HOME >/dev/null 2>&1");
+        let code = exec(config).expect("exec should succeed");
+        assert_eq!(code, 0, "$HOME should be readable via ro-bind / /");
+    }
+
+    #[test]
+    #[ignore]
+    fn sandbox_home_not_writable() {
+        // Even though $HOME is visible, it should be read-only.
+        let host_home = std::env::var("HOME").unwrap();
+        let marker = format!("{host_home}/omni_sandbox_ro_test_{}", std::process::id());
+        let config = run_sh(&format!(
+            "touch {marker} 2>/dev/null && exit 1; exit 0"
+        ));
+        let code = exec(config).expect("exec should succeed");
+        assert_eq!(code, 0, "$HOME should be read-only");
+        assert!(!Path::new(&marker).exists());
+    }
+
+    #[test]
+    #[ignore]
+    fn sandbox_resolv_conf_available() {
+        // /etc/resolv.conf should be readable regardless of whether it's a
+        // regular file, a symlink to /run/systemd/resolve/, or a symlink to
+        // /mnt/wsl/ — the ro-bind / / makes all targets available.
+        let config = run_sh("cat /etc/resolv.conf >/dev/null 2>&1");
+        let code = exec(config).expect("exec should succeed");
+        assert_eq!(code, 0, "/etc/resolv.conf should be readable");
+    }
+
+    #[test]
+    #[ignore]
+    fn sandbox_tmp_is_writable() {
+        // /tmp should be a writable tmpfs overlay on top of the ro root.
+        let config = run_sh("echo test > /tmp/sandbox_test && cat /tmp/sandbox_test | grep -q test");
+        let code = exec(config).expect("exec should succeed");
+        assert_eq!(code, 0, "/tmp should be writable (tmpfs)");
+    }
+
+    #[test]
+    #[ignore]
+    fn sandbox_system_tools_available() {
+        // Common system tools should be available (git, python3, etc.) since
+        // the entire filesystem is bound read-only.
+        let config = run_sh(
+            "which sh && which ls && which cat"
+        );
+        let code = exec(config).expect("exec should succeed");
+        assert_eq!(code, 0, "basic system tools should be available");
     }
 
     #[test]

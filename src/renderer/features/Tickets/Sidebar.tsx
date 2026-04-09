@@ -2,7 +2,7 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { PiPlusBold } from 'react-icons/pi';
 
-import { cn, IconButton } from '@/renderer/ds';
+import { Badge, cn, IconButton } from '@/renderer/ds';
 import { $inboxItems } from '@/renderer/features/Inbox/state';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -45,12 +45,10 @@ const SidebarProjectItem = memo(
       >
         <div className="flex flex-col flex-1 min-w-0">
           <span className="text-sm truncate">{project.label}</span>
-          <span className="text-[10px] text-fg-subtle truncate">{shortPath}</span>
+          <span className="text-xs text-fg-subtle truncate">{shortPath}</span>
         </div>
         {activeTicketCount > 0 && (
-          <span className="shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-blue-400/10 text-blue-400">
-            {activeTicketCount}
-          </span>
+          <Badge color="blue" className="shrink-0">{activeTicketCount}</Badge>
         )}
       </button>
     );
@@ -82,7 +80,7 @@ const SidebarActiveTicketItem = memo(({ entry, isActive }: { entry: ActiveTicket
       )}
     >
       {columnLabel && (
-        <span className={cn('shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium', columnBadgeColor)}>
+        <span className={cn('shrink-0 px-1.5 py-0.5 rounded text-xs font-medium', columnBadgeColor)}>
           {columnLabel}
         </span>
       )}

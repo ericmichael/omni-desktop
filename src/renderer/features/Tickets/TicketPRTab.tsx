@@ -164,7 +164,7 @@ const FileListItem = memo(
       >
         <span
           className={cn(
-            'shrink-0 w-4 h-4 rounded text-[10px] font-bold flex items-center justify-center',
+            'shrink-0 w-4 h-4 rounded text-xs font-bold flex items-center justify-center',
             STATUS_COLORS[file.status],
             STATUS_BG_COLORS[file.status]
           )}
@@ -176,7 +176,7 @@ const FileListItem = memo(
           {dirPath && <span className="text-fg-subtle ml-1">{dirPath}</span>}
         </span>
         {(file.additions > 0 || file.deletions > 0) && (
-          <span className="shrink-0 text-[10px] tabular-nums">
+          <span className="shrink-0 text-xs tabular-nums">
             {file.additions > 0 && <span className="text-green-400">+{file.additions}</span>}
             {file.additions > 0 && file.deletions > 0 && <span className="text-fg-subtle"> / </span>}
             {file.deletions > 0 && <span className="text-red-400">-{file.deletions}</span>}

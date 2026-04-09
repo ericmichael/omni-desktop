@@ -23,7 +23,7 @@ export const SettingsModalOptInToLauncherPrereleases = memo(() => {
       >
         <Checkbox checked={optInToLauncherPrereleases} onCheckedChange={onChange} />
       </FormField>
-      <span className="text-xs text-fg-subtle">
+      <span className="text-sm sm:text-xs text-fg-subtle">
         Check for prerelease versions of the launcher on startup. If disabled, the launcher will only check for stable
         releases.
       </span>

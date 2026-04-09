@@ -1,8 +1,8 @@
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
-import { PiArrowLeftBold, PiCaretRightBold, PiFolderBold, PiPlusBold } from 'react-icons/pi';
+import { PiCaretRightBold, PiFolderBold, PiPlusBold } from 'react-icons/pi';
 
-import { cn } from '@/renderer/ds';
+import { Badge, cn, EmptyState, FAB, TopAppBar } from '@/renderer/ds';
 import { $inboxItems } from '@/renderer/features/Inbox/state';
 import { InboxDetail } from '@/renderer/features/Inbox/InboxDetail';
 import { InboxList } from '@/renderer/features/Inbox/InboxList';
@@ -53,10 +53,7 @@ const MobileProjectList = memo(({ onNewProject }: { onNewProject: () => void }) 
     <div className="relative flex flex-col h-full">
       <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3">
         {projects.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-2 h-full">
-            <p className="text-fg-muted text-sm">No projects yet</p>
-            <p className="text-fg-subtle text-xs">Tap + to create one</p>
-          </div>
+          <EmptyState title="No projects yet" description="Tap + to create one" />
         ) : (
           <div className="flex flex-col gap-1">
             {projects.map((project) => {
@@ -74,13 +71,11 @@ const MobileProjectList = memo(({ onNewProject }: { onNewProject: () => void }) 
                   </span>
                   <div className="flex flex-col flex-1 min-w-0 gap-0.5">
                     <span className="text-sm font-medium text-fg truncate">{project.label}</span>
-                    <span className="text-[11px] text-fg-subtle truncate">{shortPath}</span>
+                    <span className="text-xs text-fg-subtle truncate">{shortPath}</span>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {count > 0 && (
-                      <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-blue-400/10 text-blue-400">
-                        {count}
-                      </span>
+                      <Badge color="blue">{count}</Badge>
                     )}
                     <PiCaretRightBold size={12} className="text-fg-muted/40" />
                   </div>
@@ -91,15 +86,7 @@ const MobileProjectList = memo(({ onNewProject }: { onNewProject: () => void }) 
         )}
       </div>
 
-      {/* FAB */}
-      <button
-        type="button"
-        onClick={onNewProject}
-        className="fixed right-4 bottom-20 z-30 size-14 rounded-2xl bg-accent-600 text-white shadow-lg shadow-accent-600/25 flex items-center justify-center active:scale-95 transition-transform"
-        aria-label="New project"
-      >
-        <PiPlusBold size={22} />
-      </button>
+      <FAB icon={<PiPlusBold size={22} />} onClick={onNewProject} aria-label="New project" />
     </div>
   );
 });
@@ -140,17 +127,7 @@ export const Tickets = memo(() => {
         <div className="sm:hidden shrink-0">
           {mobileTab === 'projects' && isViewingProject ? (
             /* Back header when viewing a project detail */
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-surface-border bg-surface-raised">
-              <button
-                type="button"
-                onClick={handleBack}
-                className="inline-flex size-8 items-center justify-center rounded-md text-fg-muted hover:bg-white/5 hover:text-fg"
-                aria-label="Back to projects"
-              >
-                <PiArrowLeftBold size={16} />
-              </button>
-              <span className="text-sm font-medium text-fg truncate">Projects</span>
-            </div>
+            <TopAppBar title="Projects" onBack={handleBack} className="bg-surface-raised" />
           ) : (
             /* Tab bar: Inbox / Projects */
             <div className="flex border-b border-surface-border bg-surface-raised">
@@ -163,7 +140,7 @@ export const Tickets = memo(() => {
               >
                 Inbox
                 {openInboxCount > 0 && (
-                  <span className="ml-1.5 inline-flex min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold leading-4 text-center bg-accent-600 text-white">
+                  <span className="ml-1.5 inline-flex min-w-[16px] h-4 px-1 rounded-full text-xs font-bold leading-4 text-center bg-accent-600 text-white">
                     {openInboxCount}
                   </span>
                 )}
@@ -194,10 +171,7 @@ export const Tickets = memo(() => {
             {view.type === 'inbox' && <InboxView />}
             {view.type === 'project' && <ProjectDetail projectId={view.projectId} />}
             {view.type === 'dashboard' && (
-              <div className="flex flex-col items-center justify-center gap-3 h-full">
-                <p className="text-fg-muted text-sm">Select a project to get started</p>
-                <p className="text-fg-subtle text-xs">Or create a new project from the sidebar</p>
-              </div>
+              <EmptyState title="Select a project to get started" description="Or create a new project from the sidebar" />
             )}
           </div>
 

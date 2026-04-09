@@ -2,7 +2,7 @@ import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useState } from 'react';
 import { PiCaretDownBold, PiCaretUpBold, PiPlusBold, PiTrashBold } from 'react-icons/pi';
 
-import { Button, FormField, IconButton, Spinner } from '@/renderer/ds';
+import { Button, Card, FormField, IconButton, Input, SaveBar, SectionLabel, Select, Spinner } from '@/renderer/ds';
 import { configApi } from '@/renderer/services/config';
 import type { McpConfig, McpServerEntry } from '@/shared/types';
 
@@ -148,8 +148,8 @@ export const SettingsModalMcpTab = memo(() => {
 
   return (
     <div className="flex flex-col gap-3">
-      <span className="text-xs font-medium uppercase tracking-wider text-fg-subtle">MCP Servers</span>
-      <div className="bg-surface-raised/50 rounded-lg border border-surface-border/50 divide-y divide-surface-border/50">
+      <SectionLabel>MCP Servers</SectionLabel>
+      <Card divided>
         {Object.entries(config.mcpServers).map(([name, server]) => (
           <McpServerRow
             key={name}
@@ -162,28 +162,22 @@ export const SettingsModalMcpTab = memo(() => {
           />
         ))}
         <div className="p-4 flex items-center gap-2">
-          <input
+          <Input
             type="text"
             value={newServerName}
             onChange={onChangeNewServerName}
             placeholder="Server name"
-            className="h-8 px-2 text-xs rounded-md bg-transparent border border-surface-border/50 text-fg font-mono flex-1 outline-none focus:border-accent-500/50"
+            mono
+            className="flex-1"
           />
           <Button size="sm" variant="ghost" onClick={addServer} isDisabled={!newServerName.trim()}>
             <PiPlusBold className="mr-1" />
             Add server
           </Button>
         </div>
-      </div>
+      </Card>
 
-      {error && <span className="text-xs text-red-400">{error}</span>}
-
-      <div className="flex items-center gap-2 mt-1">
-        <Button size="sm" variant="primary" onClick={save} isDisabled={!dirty || saving}>
-          {saving ? 'Saving\u2026' : 'Save'}
-        </Button>
-        {dirty && <span className="text-xs text-fg-subtle">Unsaved changes</span>}
-      </div>
+      <SaveBar onSave={save} dirty={dirty} saving={saving} error={error} />
     </div>
   );
 });
@@ -249,7 +243,7 @@ const McpServerRow = memo(
         <div className="flex items-center gap-2 p-4 cursor-pointer" onClick={onClickToggle}>
           <div className="flex-1 min-w-0">
             <div className="text-sm font-medium text-fg">{name}</div>
-            <div className="text-xs text-fg-muted truncate">
+            <div className="text-sm sm:text-xs text-fg-muted truncate">
               {server.type ?? 'stdio'} &middot; {summary || '(not configured)'}
             </div>
           </div>
@@ -264,48 +258,47 @@ const McpServerRow = memo(
         {isExpanded && (
           <div className="px-4 pb-4 flex flex-col gap-3 border-t border-surface-border/30 pt-3">
             <FormField label="Type">
-              <select
-                value={server.type ?? 'stdio'}
-                onChange={onChangeType}
-                className="h-8 px-2 text-xs rounded-md bg-surface border border-surface-border/50 text-fg cursor-pointer outline-none focus:border-accent-500/50"
-              >
+              <Select value={server.type ?? 'stdio'} onChange={onChangeType}>
                 {SERVER_TYPES.map((t) => (
                   <option key={t} value={t}>
                     {t}
                   </option>
                 ))}
-              </select>
+              </Select>
             </FormField>
 
             {isStdio ? (
               <>
                 <FormField label="Command">
-                  <input
+                  <Input
                     type="text"
                     value={server.command ?? ''}
                     onChange={onChangeCommand}
                     placeholder="npx"
-                    className="h-8 px-2 text-xs rounded-md bg-transparent border border-surface-border/50 text-fg font-mono flex-1 outline-none focus:border-accent-500/50"
+                    mono
+                    className="flex-1"
                   />
                 </FormField>
                 <FormField label="Args">
-                  <input
+                  <Input
                     type="text"
                     value={(server.args ?? []).join(', ')}
                     onChange={onChangeArgs}
                     placeholder="arg1, arg2"
-                    className="h-8 px-2 text-xs rounded-md bg-transparent border border-surface-border/50 text-fg font-mono flex-1 outline-none focus:border-accent-500/50"
+                    mono
+                    className="flex-1"
                   />
                 </FormField>
               </>
             ) : (
               <FormField label="URL">
-                <input
+                <Input
                   type="text"
                   value={server.url ?? ''}
                   onChange={onChangeUrl}
                   placeholder="https://..."
-                  className="h-8 px-2 text-xs rounded-md bg-transparent border border-surface-border/50 text-fg font-mono flex-1 outline-none focus:border-accent-500/50"
+                  mono
+                  className="flex-1"
                 />
               </FormField>
             )}
@@ -357,7 +350,7 @@ const KeyValueSection = memo(
 
     return (
       <div className="flex flex-col gap-2">
-        <span className="text-xs font-medium text-fg-subtle">{label}</span>
+        <span className="text-sm sm:text-xs font-medium text-fg-subtle">{label}</span>
         {entryList.map(([key, value], i) => (
           <KvRow
             key={i}
@@ -431,19 +424,23 @@ const KvRow = memo(
 
     return (
       <div className="flex items-center gap-2">
-        <input
+        <Input
+          size="sm"
           type="text"
           value={entryKey}
           onChange={onChangeKey}
           placeholder="KEY"
-          className="h-7 px-2 text-xs rounded-md bg-transparent border border-surface-border/50 text-fg font-mono flex-1 outline-none focus:border-accent-500/50"
+          mono
+          className="flex-1"
         />
-        <input
+        <Input
+          size="sm"
           type="text"
           value={entryValue}
           onChange={onChangeValue}
           placeholder="value"
-          className="h-7 px-2 text-xs rounded-md bg-transparent border border-surface-border/50 text-fg font-mono flex-[2] outline-none focus:border-accent-500/50"
+          mono
+          className="flex-[2]"
         />
         <IconButton aria-label="Remove" icon={<PiTrashBold />} size="sm" onClick={onClickRemove} />
       </div>

@@ -19,7 +19,7 @@ export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(
         onCheckedChange={onCheckedChange}
         disabled={disabled}
         className={cn(
-          'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors',
+          'relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full transition-colors',
           'bg-surface-overlay',
           'data-[state=checked]:bg-accent-600',
           'disabled:cursor-not-allowed disabled:opacity-40',
@@ -29,9 +29,9 @@ export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(
       >
         <SwitchPrimitive.Thumb
           className={cn(
-            'block size-4 rounded-full bg-white shadow-sm transition-transform',
-            'translate-x-0.5 data-[state=checked]:translate-x-[18px]',
-            'mt-0.5'
+            'block size-5 rounded-full bg-white shadow-sm transition-transform',
+            'translate-x-1 data-[state=checked]:translate-x-[22px]',
+            'mt-[3px]'
           )}
         />
       </SwitchPrimitive.Root>

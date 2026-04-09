@@ -16,7 +16,7 @@ type IconButtonProps = {
 };
 
 const sizeClasses: Record<Size, string> = {
-  sm: 'size-8 text-base',
+  sm: 'size-9 text-base',
   md: 'size-10 text-lg',
   lg: 'size-12 text-xl',
 };
@@ -26,8 +26,8 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
     return (
       <motion.button
         ref={ref}
-        whileHover={isDisabled ? undefined : { scale: 1.1 }}
-        whileTap={isDisabled ? undefined : { scale: 0.9 }}
+        whileHover={isDisabled ? undefined : { scale: 1.05 }}
+        whileTap={isDisabled ? undefined : { scale: 0.95 }}
         transition={{ duration: 0.15 }}
         className={cn(
           'inline-flex items-center justify-center rounded-lg text-fg-muted cursor-pointer select-none',

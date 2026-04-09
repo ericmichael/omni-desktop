@@ -46,18 +46,12 @@ export const setupProxyRewriter = (fastify: FastifyInstance, wsHandler: WsHandle
   // --- URL rewriting via event interceptor ---
   // Intercepts all outgoing events (both sendToAll and sendTo) to rewrite URLs.
   wsHandler.addEventInterceptor((channel, args) => {
-    if (channel === 'chat-process:status') {
-      const status = args[0] as Record<string, unknown> | undefined;
-      if (status && (status.type === 'running' || status.type === 'connecting') && status.data) {
-        rewriteStatusUrls(status.data as Record<string, string | undefined>, 'chat');
-      }
-    }
-
-    if (channel === 'code:sandbox-status') {
-      const tabId = args[0] as string;
+    if (channel === 'agent-process:status') {
+      const processId = args[0] as string;
       const status = args[1] as Record<string, unknown> | undefined;
       if (status && (status.type === 'running' || status.type === 'connecting') && status.data) {
-        rewriteStatusUrls(status.data as Record<string, string | undefined>, `code-${tabId}`);
+        const proxyPrefix = processId === 'chat' ? 'chat' : `code-${processId}`;
+        rewriteStatusUrls(status.data as Record<string, string | undefined>, proxyPrefix);
       }
     }
 
@@ -72,19 +66,12 @@ export const setupProxyRewriter = (fastify: FastifyInstance, wsHandler: WsHandle
 
   // --- URL rewriting for invoke responses via result wrappers ---
   // Result wrappers receive a structuredClone from WsHandler, safe to mutate directly.
-  wsHandler.addResultWrapper('chat-process:get-status', (result) => {
+  wsHandler.addResultWrapper('agent-process:get-status', (result, args) => {
+    const processId = args[0] as string;
     const status = result as Record<string, unknown> | undefined;
     if (status && (status.type === 'running' || status.type === 'connecting') && status.data) {
-      rewriteStatusUrls(status.data as Record<string, string | undefined>, 'chat');
-    }
-    return result;
-  });
-
-  wsHandler.addResultWrapper('code:get-sandbox-status', (result, args) => {
-    const tabId = args[0] as string;
-    const status = result as Record<string, unknown> | undefined;
-    if (status && (status.type === 'running' || status.type === 'connecting') && status.data) {
-      rewriteStatusUrls(status.data as Record<string, string | undefined>, `code-${tabId}`);
+      const proxyPrefix = processId === 'chat' ? 'chat' : `code-${processId}`;
+      rewriteStatusUrls(status.data as Record<string, string | undefined>, proxyPrefix);
     }
     return result;
   });

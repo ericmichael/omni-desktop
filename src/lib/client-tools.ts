@@ -2,18 +2,24 @@
  * Client tool definitions for agent sessions.
  *
  * TICKET tools: scoped to the current ticket (get/move/escalate).
+ * READ-ONLY CONTEXT tools: read surrounding project state (list_tickets, read_brief, etc.).
  * PROJECT tools: broader project & ticket management (list/create/update/start/stop).
  *
- * Autopilot runs get TICKET tools only.
- * Human-interactive sessions get both TICKET + PROJECT tools.
+ * Autopilot runs get TICKET tools + READ-ONLY CONTEXT tools.
+ * Human-interactive sessions get everything.
  */
 
 export const TICKET_CLIENT_TOOLS = [
   {
     name: 'get_ticket',
     description:
-      'Get the current ticket state including title, description, priority, current column, and pipeline columns.',
-    parameters: { type: 'object', properties: {} },
+      'Get a ticket\'s state including title, description, priority, current column, and pipeline columns. Pass a ticket_id to look up any ticket, or omit it to get the current ticket.',
+    parameters: {
+      type: 'object',
+      properties: {
+        ticket_id: { type: 'string', description: 'The ticket ID to look up. Omit to get the current ticket.' },
+      },
+    },
   },
   {
     name: 'move_ticket',
@@ -38,9 +44,64 @@ export const TICKET_CLIENT_TOOLS = [
       required: ['message'],
     },
   },
+  {
+    name: 'notify',
+    description:
+      'Send a notification to the human operator without stopping the run. Use for heads-up messages like "changed the DB schema" or "found something unexpected". The run continues.',
+    parameters: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', description: 'Brief notification message for the human.' },
+      },
+      required: ['message'],
+    },
+  },
+  {
+    name: 'add_ticket_comment',
+    description:
+      'Add a comment to a ticket. Use this to record decisions, findings, progress, blockers, or anything useful for future runs. Comments persist across sessions and are visible to humans and other agents. Pass a ticket_id to comment on any ticket, or omit it to comment on the current ticket.',
+    parameters: {
+      type: 'object',
+      properties: {
+        ticket_id: { type: 'string', description: 'The ticket ID to comment on. Omit to use the current ticket.' },
+        content: { type: 'string', description: 'The comment content (markdown supported).' },
+      },
+      required: ['content'],
+    },
+  },
 ] as const;
 
-export const BRIEF_CLIENT_TOOLS = [
+/** Read-only context tools — available to autopilot agents for surrounding awareness. */
+export const READONLY_CONTEXT_TOOLS = [
+  {
+    name: 'list_tickets',
+    description: 'List tickets in a project, optionally filtered by column or priority.',
+    parameters: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'string', description: 'The project ID to list tickets for' },
+        initiative_id: { type: 'string', description: 'Optional initiative ID to filter by' },
+        column: { type: 'string', description: 'Optional column label to filter by' },
+        priority: {
+          type: 'string',
+          enum: ['low', 'medium', 'high', 'critical'],
+          description: 'Optional priority to filter by',
+        },
+      },
+      required: ['project_id'],
+    },
+  },
+  {
+    name: 'list_initiatives',
+    description: 'List all initiatives for a project.',
+    parameters: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'string', description: 'The project ID to list initiatives for' },
+      },
+      required: ['project_id'],
+    },
+  },
   {
     name: 'read_brief',
     description:
@@ -53,6 +114,69 @@ export const BRIEF_CLIENT_TOOLS = [
       required: ['project_id'],
     },
   },
+  {
+    name: 'read_initiative_brief',
+    description: 'Read an initiative brief — the deliverable-focused document describing goals and scope.',
+    parameters: {
+      type: 'object',
+      properties: {
+        initiative_id: { type: 'string', description: 'The initiative ID to read the brief for' },
+      },
+      required: ['initiative_id'],
+    },
+  },
+  {
+    name: 'get_ticket_comments',
+    description:
+      'Read comments on a ticket. Returns the comment history — decisions, findings, progress notes, and blockers recorded by agents and humans across runs.',
+    parameters: {
+      type: 'object',
+      properties: {
+        ticket_id: { type: 'string', description: 'The ticket ID to read comments for.' },
+      },
+      required: ['ticket_id'],
+    },
+  },
+  {
+    name: 'search_tickets',
+    description:
+      'Search across all tickets by keyword. Matches against title and description. Use to find related work or check for duplicates before creating a ticket.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query — matched case-insensitively against ticket title and description.' },
+        project_id: { type: 'string', description: 'Optional project ID to limit search scope.' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'get_ticket_history',
+    description:
+      'Get the run history for a ticket — how many times it has been attempted, what each run ended with, and token usage. Useful for understanding why previous attempts failed.',
+    parameters: {
+      type: 'object',
+      properties: {
+        ticket_id: { type: 'string', description: 'The ticket ID to get run history for.' },
+      },
+      required: ['ticket_id'],
+    },
+  },
+  {
+    name: 'get_pipeline',
+    description:
+      'Get the full pipeline definition for a project — columns with labels, descriptions, and gate status. Use to understand the workflow and what each column expects.',
+    parameters: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'string', description: 'The project ID to get the pipeline for.' },
+      },
+      required: ['project_id'],
+    },
+  },
+] as const;
+
+export const BRIEF_CLIENT_TOOLS = [
   {
     name: 'update_brief',
     description:
@@ -75,24 +199,6 @@ export const PROJECT_CLIENT_TOOLS = [
     parameters: { type: 'object', properties: {} },
   },
   {
-    name: 'list_tickets',
-    description: 'List tickets in a project, optionally filtered by column or priority.',
-    parameters: {
-      type: 'object',
-      properties: {
-        project_id: { type: 'string', description: 'The project ID to list tickets for' },
-        initiative_id: { type: 'string', description: 'Optional initiative ID to filter by' },
-        column: { type: 'string', description: 'Optional column label to filter by' },
-        priority: {
-          type: 'string',
-          enum: ['low', 'medium', 'high', 'critical'],
-          description: 'Optional priority to filter by',
-        },
-      },
-      required: ['project_id'],
-    },
-  },
-  {
     name: 'create_ticket',
     description: 'Create a new ticket in a project. It will be placed in the first pipeline column.',
     parameters: {
@@ -113,7 +219,7 @@ export const PROJECT_CLIENT_TOOLS = [
   },
   {
     name: 'update_ticket',
-    description: "Update a ticket's title, description, or priority.",
+    description: "Update a ticket's title, description, priority, branch, or dependencies.",
     parameters: {
       type: 'object',
       properties: {
@@ -124,6 +230,17 @@ export const PROJECT_CLIENT_TOOLS = [
           type: 'string',
           enum: ['low', 'medium', 'high', 'critical'],
           description: 'New priority',
+        },
+        branch: { type: 'string', description: 'Git branch for this ticket.' },
+        add_blocked_by: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Ticket IDs to add as blockers (this ticket cannot proceed until those are done).',
+        },
+        remove_blocked_by: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Ticket IDs to remove as blockers.',
         },
       },
       required: ['ticket_id'],
@@ -155,17 +272,6 @@ export const PROJECT_CLIENT_TOOLS = [
 
 export const INITIATIVE_CLIENT_TOOLS = [
   {
-    name: 'list_initiatives',
-    description: 'List all initiatives for a project.',
-    parameters: {
-      type: 'object',
-      properties: {
-        project_id: { type: 'string', description: 'The project ID to list initiatives for' },
-      },
-      required: ['project_id'],
-    },
-  },
-  {
     name: 'create_initiative',
     description:
       'Create a new initiative (large feature or deliverable) in a project. Tickets can be grouped under initiatives.',
@@ -192,17 +298,6 @@ export const INITIATIVE_CLIENT_TOOLS = [
         branch: { type: 'string', description: 'New branch' },
         status: { type: 'string', enum: ['active', 'completed', 'archived'], description: 'New status' },
         brief: { type: 'string', description: 'Full markdown content of the initiative brief' },
-      },
-      required: ['initiative_id'],
-    },
-  },
-  {
-    name: 'read_initiative_brief',
-    description: 'Read an initiative brief — the deliverable-focused document describing goals and scope.',
-    parameters: {
-      type: 'object',
-      properties: {
-        initiative_id: { type: 'string', description: 'The initiative ID to read the brief for' },
       },
       required: ['initiative_id'],
     },
@@ -295,15 +390,20 @@ export const INBOX_CLIENT_TOOLS = [
 const buildProjectManagementInstructions = (opts?: {
   projectId?: string;
   projectLabel?: string;
+  ticketId?: string;
 }): string => {
   const lines: string[] = [
     '## Project Management Tools',
     'You have tools to help with project management when asked. You can use them to inspect your current context or assist the user with organizing work.',
     '',
+    '- **Context**: Use get_ticket, list_tickets, search_tickets, read_brief, list_initiatives, read_initiative_brief, get_ticket_comments, get_ticket_history, and get_pipeline to understand the surrounding project state.',
+    '- **Comments**: Use add_ticket_comment to record decisions, findings, progress, blockers, or context that should persist across runs. Use get_ticket_comments to read previous notes. Comments are visible to humans and other agents.',
+    '- **Dependencies**: Tickets can block each other. Use update_ticket with add_blocked_by/remove_blocked_by to manage dependencies. get_ticket returns the blocked_by list.',
+    '- **Notifications**: Use notify to send a heads-up to the human without stopping the run. Use escalate only when you are truly blocked and need the run to stop.',
     '- **Inbox**: Capture raw ideas, stakeholder requests, or vague asks with create_inbox_item. Graduate shaped items into tickets with inbox_to_tickets.',
-    '- **Initiatives**: Group related tickets under an initiative (a large feature or deliverable). Use list_initiatives to see current initiatives. Use create_initiative to start a new one. Initiatives can have a branch — tickets inherit it.',
+    '- **Initiatives**: Group related tickets under an initiative (a large feature or deliverable). Use create_initiative to start a new one. Initiatives can have a branch — tickets inherit it.',
     '- **Brief**: Projects have a repo-level brief, initiatives have a deliverable-focused brief. Use read_brief / update_brief for projects, read_initiative_brief / update_initiative for initiative briefs.',
-    '- **Tickets**: Use create_ticket to decompose work into scoped units. Use list_tickets to see current state. Use start_ticket to dispatch an agent.',
+    '- **Tickets**: Use create_ticket to decompose work into scoped units. Use list_tickets or search_tickets to see current state. Use start_ticket to dispatch an agent.',
   ];
 
   if (opts?.projectId) {
@@ -313,42 +413,36 @@ const buildProjectManagementInstructions = (opts?: {
     );
   }
 
+  if (opts?.ticketId) {
+    lines.push(`Current ticket: ${opts.ticketId}`);
+  }
+
   return lines.join('\n');
 };
 
-/** Autopilot sessions: ticket tools only. */
-export const buildAutopilotVariables = (): Record<string, unknown> => ({
-  client_tools: TICKET_CLIENT_TOOLS,
+/** Autopilot sessions: ticket tools + read-only context tools for surrounding awareness. */
+export const buildAutopilotVariables = (opts?: {
+  projectId?: string;
+  projectLabel?: string;
+  ticketId?: string;
+}): Record<string, unknown> => ({
+  client_tools: [...TICKET_CLIENT_TOOLS, ...READONLY_CONTEXT_TOOLS],
+  additional_instructions: buildProjectManagementInstructions(opts),
 });
 
-/** Human-interactive sessions: project + inbox + brief tools (no ticket-scoped tools). */
+/** Interactive sessions: all tools. Includes ticket context when available. */
 export const buildInteractiveVariables = (opts?: {
   projectId?: string;
   projectLabel?: string;
-}): Record<string, unknown> => {
-  const vars: Record<string, unknown> = {
-    client_tools: [...PROJECT_CLIENT_TOOLS, ...INITIATIVE_CLIENT_TOOLS, ...BRIEF_CLIENT_TOOLS, ...INBOX_CLIENT_TOOLS],
-  };
-
-  vars.additional_instructions = buildProjectManagementInstructions(opts);
-  return vars;
-};
-
-/** Ticket-scoped interactive sessions: ticket tools + project management tools. */
-export const buildTicketInteractiveVariables = (opts?: {
-  projectId?: string;
-  projectLabel?: string;
-}): Record<string, unknown> => {
-  const vars: Record<string, unknown> = {
-    client_tools: [
-      ...TICKET_CLIENT_TOOLS,
-      ...PROJECT_CLIENT_TOOLS,
-      ...INITIATIVE_CLIENT_TOOLS,
-      ...BRIEF_CLIENT_TOOLS,
-      ...INBOX_CLIENT_TOOLS,
-    ],
-  };
-
-  vars.additional_instructions = buildProjectManagementInstructions(opts);
-  return vars;
-};
+  ticketId?: string;
+}): Record<string, unknown> => ({
+  client_tools: [
+    ...TICKET_CLIENT_TOOLS,
+    ...READONLY_CONTEXT_TOOLS,
+    ...PROJECT_CLIENT_TOOLS,
+    ...INITIATIVE_CLIENT_TOOLS,
+    ...BRIEF_CLIENT_TOOLS,
+    ...INBOX_CLIENT_TOOLS,
+  ],
+  additional_instructions: buildProjectManagementInstructions(opts),
+});

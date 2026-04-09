@@ -41,7 +41,7 @@ const useHeaderActions = () => {
 
 export const OmniAgentsHeaderActions = ({ compact = false }: { compact?: boolean }) => {
   const { showArtifactsButton, showTerminalButton, onArtifactsToggle, onTerminalToggle } = useHeaderActions();
-  const sizeClass = compact ? 'size-7' : 'size-8';
+  const sizeClass = compact ? 'size-8' : 'size-9';
 
   return (
     <div className="flex items-center gap-1">

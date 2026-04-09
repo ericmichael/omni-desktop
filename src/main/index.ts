@@ -9,8 +9,7 @@ import { assert } from 'tsafe';
 import { pathToFileURL } from 'url';
 
 import { getArtifactsDir } from '@/lib/artifacts';
-import { createChatManager } from '@/main/chat-manager';
-import { createCodeManager } from '@/main/code-manager';
+import { createProcessManager } from '@/main/process-manager';
 import { createConsoleManager } from '@/main/console-manager';
 import { createProjectManager } from '@/main/project-manager';
 import { MainProcessManager } from '@/main/main-process-manager';
@@ -18,6 +17,7 @@ import { createOmniInstallManager } from '@/main/omni-install-manager';
 import { registerPlatformIpc } from '@/main/platform-ipc';
 import { createPlatformClient } from '@/main/platform-mode';
 import { store } from '@/main/store';
+import { rebuildSandboxImage } from '@/lib/rebuild-sandbox-image';
 import {
   checkModelsConfigured,
   ensureDirectory,
@@ -27,6 +27,8 @@ import {
   getOmniConfigDir,
   getOmniRuntimeInfo,
   getOperatingSystem,
+  getSandboxAssetsPath,
+  getSandboxDockerfilePath,
   installCliToPath,
   isCliInstalledInPath,
   isDirectory,
@@ -76,7 +78,7 @@ const [omniInstall, cleanupOmniInstall] = createOmniInstallManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
 });
-const [chat, cleanupChat] = createChatManager({
+const [processManager, cleanupProcessManager] = createProcessManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
   fetchFn: (input, init) => net.fetch(input as string, init),
@@ -86,16 +88,11 @@ const [chat, cleanupChat] = createChatManager({
     sandboxVariant: store.get('sandboxVariant'),
   }),
 });
-const [codeManager, cleanupCode] = createCodeManager({
-  ipc: main.ipc,
-  sendToWindow: main.sendToWindow,
-  fetchFn: (input, init) => net.fetch(input as string, init),
-});
 const [, cleanupProject] = createProjectManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
   store,
-  codeManager,
+  processManager,
 });
 const cleanupPlatform = registerPlatformIpc({
   ipc: main.ipc,
@@ -104,7 +101,7 @@ const cleanupPlatform = registerPlatformIpc({
   fetchFn: (input, init) => net.fetch(input as string, init),
 });
 
-// Keep CodeManager's platform client in sync with auth state.
+// Keep ProcessManager's platform client in sync with auth state.
 // On sign-in/sign-out, the platform client is updated so new sandboxes
 // use the correct mode without requiring an app restart.
 const platformFetchFn = (input: string | URL | Request, init?: RequestInit) =>
@@ -125,8 +122,7 @@ const withTokenPersistence = (client: ReturnType<typeof createPlatformClient>) =
 
 const syncPlatformClients = (platform?: Parameters<typeof createPlatformClient>[0]) => {
   const client = withTokenPersistence(createPlatformClient(platform, platformFetchFn));
-  codeManager.platformClient = client;
-  chat.platformClient = client;
+  processManager.platformClient = client;
 };
 syncPlatformClients(store.get('platform'));
 store.onDidChange('platform', (newVal) => {
@@ -151,8 +147,7 @@ async function cleanup() {
   const results = await Promise.allSettled([
     cleanupConsole(),
     cleanupOmniInstall(),
-    cleanupChat(),
-    cleanupCode(),
+    cleanupProcessManager(),
     cleanupProject(),
   ]);
   const errors = results
@@ -319,6 +314,15 @@ main.ipc.handle('util:get-cli-in-path-status', async () => {
 });
 main.ipc.handle('util:check-models-configured', () => checkModelsConfigured());
 main.ipc.handle('util:test-model-connection', (_, modelRef) => testModelConnection(modelRef));
+main.ipc.handle('util:rebuild-sandbox-image', async () => {
+  const variant = (store.get('sandboxVariant') ?? 'work') as 'work' | 'standard';
+  const backend = (store.get('sandboxBackend') ?? 'docker') as 'docker' | 'podman';
+  return rebuildSandboxImage({
+    backend,
+    dockerfilePath: getSandboxDockerfilePath(variant),
+    contextDir: getSandboxAssetsPath(),
+  });
+});
 main.ipc.handle('util:check-url', async (_, url) => {
   try {
     const response = await net.fetch(url, { method: 'GET' });

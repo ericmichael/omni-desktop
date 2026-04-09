@@ -1,11 +1,13 @@
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
-import { PiGearFill } from 'react-icons/pi';
+import { PiGearFill, PiInfoBold, PiTerminalBold } from 'react-icons/pi';
 
 import { Sidebar } from '@/renderer/app/Sidebar';
-import { cn } from '@/renderer/ds';
+import { cn, ListItem } from '@/renderer/ds';
+import { $launcherVersion } from '@/renderer/features/Banner/state';
 import { Chat } from '@/renderer/features/Chat/Chat';
 import { Code } from '@/renderer/features/Code/Code';
+import { $isConsoleOpen } from '@/renderer/features/Console/state';
 import { Tickets } from '@/renderer/features/Tickets/Tickets';
 import { OnboardingWizard } from '@/renderer/features/Onboarding/OnboardingWizard';
 import { $isSettingsOpen } from '@/renderer/features/SettingsModal/state';
@@ -13,25 +15,33 @@ import { persistedStoreApi } from '@/renderer/services/store';
 import type { LayoutMode } from '@/shared/types';
 
 const MorePage = memo(() => {
+  const version = useStore($launcherVersion);
+
   const openSettings = useCallback(() => {
     $isSettingsOpen.set(true);
   }, []);
 
+  const openConsole = useCallback(() => {
+    $isConsoleOpen.set(true);
+  }, []);
+
   return (
     <div className="flex flex-col w-full h-full bg-surface">
-      <div className="px-4 py-3 border-b border-surface-border">
-        <h1 className="text-base font-semibold text-fg">More</h1>
+      <div className="px-5 pt-6 pb-4">
+        <h1 className="text-2xl font-bold text-fg tracking-tight">More</h1>
       </div>
-      <div className="flex flex-col py-2">
-        <button
-          type="button"
-          onClick={openSettings}
-          className="flex items-center gap-3 px-4 py-3 text-left text-fg hover:bg-white/5 transition-colors"
-        >
-          <PiGearFill size={20} className="text-fg-muted" />
-          <span className="text-sm">Settings</span>
-        </button>
+      <div className="flex flex-col">
+        <ListItem icon={<PiGearFill size={20} />} label="Settings" detail="Theme, models, network, MCP" onClick={openSettings} />
+        <ListItem icon={<PiTerminalBold size={20} />} label="Dev Console" detail="Terminal session" onClick={openConsole} />
       </div>
+      {version && (
+        <div className="mt-auto px-5 py-6">
+          <div className="flex items-center gap-2.5 text-fg-subtle">
+            <PiInfoBold size={14} />
+            <span className="text-xs">Omni Code Launcher v{version}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 });
