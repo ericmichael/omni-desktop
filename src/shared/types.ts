@@ -45,7 +45,7 @@ export type WindowProps = {
 /**
  * Data stored in the electron store.
  */
-export type LayoutMode = 'chat' | 'code' | 'projects' | 'more';
+export type LayoutMode = 'chat' | 'code' | 'projects' | 'dashboards' | 'more';
 export type OmniTheme = 'default' | 'tokyo-night' | 'vscode-dark' | 'vscode-light' | 'utrgv';
 
 export type SandboxVariant = 'standard' | 'work';
@@ -856,6 +856,15 @@ type ProjectIpcEvents = Namespaced<
  * Platform API. Main process handles these events, renderer process invokes them.
  * Only functional in enterprise builds (OMNI_PLATFORM_URL set at build time).
  */
+export type PlatformDashboard = {
+  resource_id: number;
+  name: string;
+  dashboard_id: string;
+  workspace_url: string;
+  widget_count: number;
+  embed_url: string;
+};
+
 type PlatformIpcEvents = Namespaced<
   'platform',
   {
@@ -867,6 +876,8 @@ type PlatformIpcEvents = Namespaced<
     'sign-in': () => { userCode: string; verificationUri: string; message: string };
     /** Signs out — clears stored credentials. */
     'sign-out': () => void;
+    /** Fetch entitled dashboards from platform policy. */
+    'get-dashboards': () => PlatformDashboard[];
   }
 >;
 

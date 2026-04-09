@@ -39,10 +39,6 @@ export default {
       to: './bin',
       filter: 'bwrap',
     },
-    {
-      from: 'docker/sandbox',
-      to: './sandbox',
-    },
   ],
   mac: {
     target: ['dmg'],

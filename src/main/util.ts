@@ -38,18 +38,6 @@ export const getBundledBinPath = (): string => {
   }
 };
 
-export const getSandboxAssetsPath = (): string => {
-  if (isDevelopment() || !app.isPackaged || !process.resourcesPath) {
-    return path.resolve(path.join(__dirname, '..', '..', 'docker', 'sandbox'));
-  }
-  return path.resolve(path.join(process.resourcesPath, 'sandbox'));
-};
-
-export const getSandboxDockerfilePath = (sandboxVariant: 'work' | 'standard'): string => {
-  const dockerfileName = sandboxVariant === 'work' ? 'Dockerfile.work' : 'Dockerfile';
-  return path.join(getSandboxAssetsPath(), dockerfileName);
-};
-
 /**
  * Get the path to the uv executable
  */

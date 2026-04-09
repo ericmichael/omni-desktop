@@ -56,6 +56,32 @@ export function registerPlatformIpc(arg: {
     sendToWindow('platform:auth-changed', null);
   });
 
+  ipc.handle('platform:get-dashboards', async () => {
+    const creds = store.get('platform');
+    if (!creds?.accessToken || !isEnterpriseBuild()) return [];
+
+    try {
+      const client = new PlatformClient({
+        url: PLATFORM_URL,
+        accessToken: creds.accessToken,
+        refreshToken: creds.refreshToken ?? '',
+      }, fetchFn);
+
+      client.onTokenRefresh = (newToken) => {
+        const current = store.get('platform');
+        if (current) {
+          store.set('platform', { ...current, accessToken: newToken });
+        }
+      };
+
+      const policy = await client.getPolicy('omni_code');
+      return policy.dashboards ?? [];
+    } catch (e) {
+      console.warn('[Platform] Failed to fetch dashboards:', (e as Error).message);
+      return [];
+    }
+  });
+
   // --- Internal ---
 
   async function pollForAuth(deviceCode: string, interval: number, expiresIn: number): Promise<void> {
@@ -99,6 +125,7 @@ export function registerPlatformIpc(arg: {
     ipcMain.removeHandler('platform:get-auth');
     ipcMain.removeHandler('platform:sign-in');
     ipcMain.removeHandler('platform:sign-out');
+    ipcMain.removeHandler('platform:get-dashboards');
   };
 
   return cleanup;

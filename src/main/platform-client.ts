@@ -31,17 +31,33 @@ export type PlatformSession = {
 };
 
 export type PlatformPolicy = {
-  agent: { name: string; slug: string; description?: string };
-  sandbox_profile: {
-    image_tier: string;
-    resource_limits: Record<string, string>;
-    max_duration_minutes: number;
-    volume_policy: Record<string, unknown>;
+  project?: {
+    name: string;
+    framework?: string;
+    framework_version?: string;
+    allow_user_models?: boolean;
+    allow_user_mcp_servers?: boolean;
   };
-  network_allowlist: string[];
-  network_endpoints: Array<{ name: string; host_pattern: string; port?: number; sensitivity: string }>;
-  skills: Array<{ name: string; slug: string; source_path?: string }>;
-  mcp_servers: Array<{ name: string; slug: string; url: string; auth_config?: Record<string, unknown> }>;
+  sandbox_profile: {
+    resource_limits: Record<string, string>;
+    volume_policy?: Record<string, unknown>;
+    sandbox_mode?: string;
+    network_mode?: string;
+  };
+  network_allowlist: Array<{ hostname: string; port: number; protocol: string }>;
+  skills: Array<{ resource_id: number; name: string; version?: string; content_url: string }>;
+  mcp_servers: Array<{ resource_id: number; name: string; transport: string; config: Record<string, unknown> }>;
+  dashboards: Array<{
+    resource_id: number;
+    name: string;
+    dashboard_id: string;
+    workspace_url: string;
+    widget_count: number;
+    embed_url: string;
+  }>;
+  data_access: Array<{ resource_id: number; name: string; fqn: string; phi: boolean }>;
+  security: { safety_mode: string; mcp_require_allowlist: boolean };
+  content_scanning: { enabled: boolean; provider: string; action: string };
 };
 
 export type DeviceCodeResponse = {

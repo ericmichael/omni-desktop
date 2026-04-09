@@ -4,7 +4,6 @@ import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { WebSocket as WsWebSocket } from 'ws';
 
-import { rebuildSandboxImage } from '@/lib/rebuild-sandbox-image';
 import { createProcessManager } from '@/main/process-manager';
 import { createConsoleManager } from '@/main/console-manager';
 import { createProjectManager } from '@/main/project-manager';
@@ -19,8 +18,6 @@ import {
   getOmniConfigDir,
   getOmniRuntimeInfo,
   getOperatingSystem,
-  getSandboxAssetsPath,
-  getSandboxDockerfilePath,
   installCliToPath,
   isCliInstalledInPath,
   isDirectory,
@@ -155,13 +152,16 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
   ipc.handle('util:check-models-configured', () => checkModelsConfigured());
   ipc.handle('util:test-model-connection', (_, modelRef) => testModelConnection(modelRef));
   ipc.handle('util:rebuild-sandbox-image', async () => {
-    const variant = (store.get('sandboxVariant') ?? 'work') as 'work' | 'standard';
-    const backend = (store.get('sandboxBackend') ?? 'docker') as 'docker' | 'podman';
-    return rebuildSandboxImage({
-      backend,
-      dockerfilePath: getSandboxDockerfilePath(variant),
-      contextDir: getSandboxAssetsPath(),
-    });
+    // Sandbox Dockerfiles now live in omni-code. Trigger rebuild via the CLI.
+    const { execFile } = await import('child_process');
+    const { promisify } = await import('util');
+    const execFilePromise = promisify(execFile);
+    try {
+      await execFilePromise('omni', ['sandbox', '--rebuild', '--output', 'json'], { timeout: 600_000 });
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: (e as Error).message };
+    }
   });
 
   ipc.handle('util:check-url', async (_, url) => {
@@ -285,6 +285,32 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
   ipc.handle('platform:sign-out', () => {
     store.delete('platform');
     wsHandler.sendToAll('platform:auth-changed', null);
+  });
+
+  ipc.handle('platform:get-dashboards', async () => {
+    const creds = store.get('platform');
+    if (!creds?.accessToken || !isEnterpriseBuild()) return [];
+
+    try {
+      const client = new PlatformClient({
+        url: PLATFORM_URL,
+        accessToken: creds.accessToken,
+        refreshToken: creds.refreshToken ?? '',
+      }, globalThis.fetch);
+
+      client.onTokenRefresh = (newToken) => {
+        const current = store.get('platform');
+        if (current) {
+          store.set('platform', { ...current, accessToken: newToken });
+        }
+      };
+
+      const policy = await client.getPolicy('omni_code');
+      return policy.dashboards ?? [];
+    } catch (e) {
+      console.warn('[Platform] Failed to fetch dashboards:', (e as Error).message);
+      return [];
+    }
   });
 
   const cleanupGlobalManagers = async () => {

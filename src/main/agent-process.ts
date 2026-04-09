@@ -17,7 +17,6 @@ import {
   getBundledBinPath,
   getOmniCliPath,
   getOmniConfigDir,
-  getSandboxDockerfilePath,
   isDevelopment,
   isDirectory,
   isFile,
@@ -572,17 +571,12 @@ export class AgentProcess {
     } else if (arg.sandboxConfig?.dockerfile) {
       args.push('--dockerfile', resolve(arg.workspaceDir, arg.sandboxConfig.dockerfile));
       args.push('--build-arg', `OMNI_CODE_VERSION=${OMNI_CODE_VERSION}`);
-    } else {
-      const dockerfilePath = getSandboxDockerfilePath(variant);
-      const shouldUseDockerfile = options?.rebuild || isDevelopment();
-      if (shouldUseDockerfile) {
-        args.push('--dockerfile', dockerfilePath);
-        args.push('--build-arg', `OMNI_CODE_VERSION=${OMNI_CODE_VERSION}`);
-      } else {
-        const imageSuffix = variant === 'work' ? '-work' : '';
-        args.push('--image', `ghcr.io/ericmichael/omni-code-sandbox${imageSuffix}:latest`);
-      }
+    } else if (!isDevelopment()) {
+      // Production: use pre-built image from registry
+      const imageSuffix = variant === 'work' ? '-work' : '';
+      args.push('--image', `ghcr.io/ericmichael/omni-code-sandbox${imageSuffix}:latest`);
     }
+    // Dev mode: omni sandbox resolves its own Dockerfile from omni_code/sandbox/
 
     args.push('--persist-volume', 'omni-gh:/home/user/.config/gh');
 

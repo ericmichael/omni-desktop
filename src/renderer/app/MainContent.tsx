@@ -8,6 +8,7 @@ import { $launcherVersion } from '@/renderer/features/Banner/state';
 import { Chat } from '@/renderer/features/Chat/Chat';
 import { Code } from '@/renderer/features/Code/Code';
 import { $isConsoleOpen } from '@/renderer/features/Console/state';
+import { Dashboards } from '@/renderer/features/Dashboards/Dashboards';
 import { Tickets } from '@/renderer/features/Tickets/Tickets';
 import { OnboardingWizard } from '@/renderer/features/Onboarding/OnboardingWizard';
 import { $isSettingsOpen } from '@/renderer/features/SettingsModal/state';
@@ -93,6 +94,11 @@ export const MainContent = memo(() => {
         {mounted.has('projects') && (
           <div className={cn('w-full h-full', active !== 'projects' && 'hidden')}>
             <Tickets />
+          </div>
+        )}
+        {mounted.has('dashboards') && (
+          <div className={cn('w-full h-full', active !== 'dashboards' && 'hidden')}>
+            <Dashboards />
           </div>
         )}
         {mounted.has('more') && (

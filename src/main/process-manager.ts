@@ -54,7 +54,10 @@ export class ProcessManager {
   }
 
   private resolveMode(): AgentProcessMode {
-    if (this.platformClient) return 'platform';
+    // Platform compute only when explicitly opted in — having a platformClient
+    // means governance is active (policy, dashboards, audit), not that compute
+    // should be delegated to cloud containers.
+    if (this.platformClient && process.env.OMNI_COMPUTE_MODE === 'platform') return 'platform';
     const { sandboxEnabled, sandboxBackend } = this.getStoreData();
     if (!sandboxEnabled) return 'local';
     if (sandboxBackend === 'vm') return 'vm';

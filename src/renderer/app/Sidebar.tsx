@@ -1,7 +1,14 @@
 import { useStore } from '@nanostores/react';
 import { motion } from 'framer-motion';
 import { memo, useCallback, useMemo } from 'react';
-import { PiChatCircleFill, PiCodeBold, PiDotsThreeBold, PiGearFill, PiRocketLaunchFill } from 'react-icons/pi';
+import {
+  PiChatCircleFill,
+  PiChartBarBold,
+  PiCodeBold,
+  PiDotsThreeBold,
+  PiGearFill,
+  PiRocketLaunchFill,
+} from 'react-icons/pi';
 
 import { OmniLogo } from '@/renderer/common/AsciiLogo';
 import { cn } from '@/renderer/ds';
@@ -10,10 +17,11 @@ import { $isSettingsOpen } from '@/renderer/features/SettingsModal/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { LayoutMode } from '@/shared/types';
 
-const ALL_TABS: { value: LayoutMode; label: string; icon: React.ReactNode }[] = [
+const ALL_TABS: { value: LayoutMode; label: string; icon: React.ReactNode; enterprise?: boolean }[] = [
   { value: 'chat', label: 'Chat', icon: <PiChatCircleFill size={20} /> },
   { value: 'code', label: 'Code', icon: <PiCodeBold size={20} /> },
   { value: 'projects', label: 'Projects', icon: <PiRocketLaunchFill size={20} /> },
+  { value: 'dashboards', label: 'Dashboards', icon: <PiChartBarBold size={20} />, enterprise: true },
 ];
 
 const springTransition = { type: 'spring', duration: 0.3, bounce: 0.15 } as const;
@@ -38,12 +46,19 @@ export const Sidebar = memo(() => {
     $isSettingsOpen.set(true);
   }, []);
 
+  const hasPlatform = Boolean(store.platform?.accessToken);
   const visibleTabs = useMemo(
-    () =>
-      import.meta.env.MODE === 'development' || store.previewFeatures
-        ? ALL_TABS
-        : ALL_TABS.filter((t) => t.value === 'chat'),
-    [store.previewFeatures]
+    () => {
+      return ALL_TABS.filter((t) => {
+        // Enterprise tabs: only when authenticated to platform
+        if (t.enterprise) return hasPlatform;
+        // Preview tabs (Code, Projects): dev mode or preview features enabled
+        if (t.value !== 'chat') return import.meta.env.MODE === 'development' || store.previewFeatures;
+        // Chat: always visible
+        return true;
+      });
+    },
+    [store.previewFeatures, hasPlatform]
   );
 
   const activeTab = store.layoutMode;

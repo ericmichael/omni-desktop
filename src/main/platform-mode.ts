@@ -32,16 +32,25 @@ export const isPlatformAuthenticated = (platform?: PlatformCredentials): boolean
 };
 
 /**
- * Returns the agent process mode based on build type and auth state.
- * - `'platform'` when enterprise build + user is signed in
- * - `'sandbox'` when sandboxEnabled (open-source with local Docker)
+ * Returns the agent process mode based on build type, auth state, and compute setting.
+ *
+ * Enterprise builds authenticate to the platform for governance (policy, dashboards,
+ * audit) but run agents locally unless explicitly configured for cloud compute.
+ *
+ * - `'platform'` only when OMNI_COMPUTE_MODE=platform (cloud container management)
+ * - `'sandbox'` when sandboxEnabled (local Docker/Podman)
  * - `'local'` when running without sandbox
  */
 export function resolveAgentMode(opts: {
   platform?: PlatformCredentials;
   sandboxEnabled: boolean;
 }): AgentProcessMode {
-  if (isEnterpriseBuild() && isPlatformAuthenticated(opts.platform)) {
+  // Platform compute only when explicitly opted in — not just because auth is configured
+  if (
+    isEnterpriseBuild() &&
+    isPlatformAuthenticated(opts.platform) &&
+    process.env.OMNI_COMPUTE_MODE === 'platform'
+  ) {
     return 'platform';
   }
   return opts.sandboxEnabled ? 'sandbox' : 'local';
