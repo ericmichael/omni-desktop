@@ -34,16 +34,6 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build artifacts
-        uses: actions/cache@v4
-        with:
-          path: sandbox-cli/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('sandbox-cli/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
-
       - name: Generate lockfile hash without version
         id: lockfile-hash
         run: echo "hash=$(node .github/scripts/generate-lockfile-hash.js)" >> $GITHUB_OUTPUT
@@ -107,16 +97,6 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build artifacts
-        uses: actions/cache@v4
-        with:
-          path: sandbox-cli/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('sandbox-cli/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
-
       - name: Generate lockfile hash without version
         id: lockfile-hash
         run: echo "hash=$(node .github/scripts/generate-lockfile-hash.js)" >> $GITHUB_OUTPUT
@@ -179,16 +159,6 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build artifacts
-        uses: actions/cache@v4
-        with:
-          path: sandbox-cli/target
-          key: ${{ runner.os }}-x64-cargo-${{ hashFiles('sandbox-cli/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-x64-cargo-
-
       - name: Generate lockfile hash without version
         id: lockfile-hash
         run: echo "hash=$(node .github/scripts/generate-lockfile-hash.js)" >> $GITHUB_OUTPUT
@@ -249,16 +219,6 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build artifacts
-        uses: actions/cache@v4
-        with:
-          path: sandbox-cli/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('sandbox-cli/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
 
       - name: Generate lockfile hash without version
         id: lockfile-hash
