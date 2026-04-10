@@ -1,8 +1,9 @@
 import type { ChildProcess } from 'node:child_process';
 import { execFile, spawn } from 'node:child_process';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { createServer } from 'node:net';
-import { join, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import c from 'ansi-colors';
@@ -14,6 +15,7 @@ import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { OMNI_CODE_VERSION } from '@/lib/omni-version';
 import { SimpleLogger } from '@/lib/simple-logger';
 import {
+  ensureDirectory,
   getBundledBinPath,
   getOmniCliPath,
   getOmniConfigDir,
@@ -39,7 +41,7 @@ const execFileAsync = promisify(execFile);
 // Types
 // ---------------------------------------------------------------------------
 
-export type AgentProcessMode = 'local' | 'sandbox' | 'podman' | 'vm' | 'platform';
+export type AgentProcessMode = 'none' | 'local' | 'sandbox' | 'podman' | 'vm' | 'platform';
 
 export type AgentProcessStartArg = {
   workspaceDir: string;
@@ -206,8 +208,8 @@ export class AgentProcess {
       }
 
       args = await this.buildVmArgs(arg);
-    } else {
-      // Local mode — wrap in omni-sandbox for process isolation.
+    } else if (this.mode === 'local') {
+      // Local mode — wrap in omni-sandbox for process isolation (bwrap + seccomp).
       const sandboxBinName = process.platform === 'win32' ? 'omni-sandbox.exe' : 'omni-sandbox';
       spawnBinary = join(getBundledBinPath(), sandboxBinName);
 
@@ -220,14 +222,25 @@ export class AgentProcess {
       }
 
       args = await this.buildLocalArgs(arg);
+    } else {
+      // None mode — run omni CLI directly, no sandboxing.
+      spawnBinary = getOmniCliPath();
+      args = await this.buildDirectArgs(arg);
     }
 
-    const label = this.mode === 'sandbox' ? 'sandbox' : this.mode === 'podman' ? 'sandbox (Podman)' : this.mode === 'vm' ? 'VM sandbox' : 'agent (sandboxed)';
-    this.log.info(c.cyan(`Starting ${label}...\r\n`));
+    const modeLabels: Record<AgentProcessMode, string> = {
+      none: 'agent',
+      local: 'agent (sandboxed)',
+      sandbox: 'sandbox',
+      podman: 'sandbox (Podman)',
+      vm: 'VM sandbox',
+      platform: 'platform sandbox',
+    };
+    this.log.info(c.cyan(`Starting ${modeLabels[this.mode]}...\r\n`));
     this.log.info(`> ${spawnBinary} ${args.join(' ')}\r\n`);
 
-    // In local mode we know the port upfront — start readiness polling immediately
-    if (this.mode === 'local') {
+    // In none/local mode we know the port upfront — start readiness polling immediately
+    if (this.mode === 'local' || this.mode === 'none') {
       const portMatch = args.find((a, i) => i > 0 && args[i - 1] === '--port');
       const port = portMatch ? parseInt(portMatch, 10) : 8000;
       const uiUrl = `http://127.0.0.1:${port}`;
@@ -453,11 +466,38 @@ export class AgentProcess {
       sandboxArgs.push('--ro-bind', omniConfigDir);
     }
 
+    // OmniAgents home dir (traces, sessions, audit) — needs write access.
+    const home = homedir();
+    const omniagentsHome = process.env['OMNIAGENTS_HOME'] || join(home, '.omniagents');
+    await ensureDirectory(omniagentsHome);
+    sandboxArgs.push('--rw-bind', omniagentsHome);
+
+    // OmniAgents cache dir — needs write access.
+    const cacheBase = process.env['XDG_CACHE_HOME'] || join(home, '.cache');
+    const omniagentsCache = join(cacheBase, 'omniagents');
+    await ensureDirectory(omniagentsCache);
+    sandboxArgs.push('--rw-bind', omniagentsCache);
+
+    // Git worktree support: when the workspace is a worktree, .git is a file
+    // pointing to the parent repo's .git/worktrees/<name>/ directory. Git needs
+    // write access to that directory (and the shared object store) for commits,
+    // ref updates, etc. Without this, all git writes fail inside the sandbox.
+    const parentGitDir = await this.detectWorktreeGitDir(arg.workspaceDir);
+    if (parentGitDir) {
+      sandboxArgs.push('--rw-bind', parentGitDir);
+    }
+
     // Separator between sandbox args and the wrapped command.
     sandboxArgs.push('--');
     sandboxArgs.push(omniCliPath, '--mode', 'server', '--host', '127.0.0.1', '--port', String(port));
 
     return sandboxArgs;
+  };
+
+  /** Build args for direct (unsandboxed) omni CLI invocation. */
+  private buildDirectArgs = async (_arg: AgentProcessStartArg): Promise<string[]> => {
+    const port = await this.pickAvailablePort();
+    return ['--mode', 'server', '--host', '127.0.0.1', '--port', String(port)];
   };
 
   private buildVmArgs = async (arg: AgentProcessStartArg): Promise<string[]> => {
@@ -506,6 +546,38 @@ export class AgentProcess {
       return [...dirs];
     } catch {
       return [];
+    }
+  };
+
+  /**
+   * Detect if a workspace is a git worktree and return the parent repo's .git
+   * directory. In a worktree, `.git` is a file containing `gitdir: <path>` that
+   * points to `<repo>/.git/worktrees/<name>`. We return the parent `.git` dir
+   * so it can be rw-bind mounted, giving git full write access to refs, objects,
+   * and worktree-specific state.
+   */
+  private detectWorktreeGitDir = async (workspaceDir: string): Promise<string | null> => {
+    try {
+      const dotGit = join(workspaceDir, '.git');
+      const st = await stat(dotGit);
+      if (!st.isFile()) return null;
+
+      const content = (await readFile(dotGit, 'utf-8')).trim();
+      if (!content.startsWith('gitdir:')) return null;
+
+      const gitdirValue = content.slice('gitdir:'.length).trim();
+      const gitdirPath = resolve(workspaceDir, gitdirValue);
+
+      // Expect: …/.git/worktrees/<name> — parent must be "worktrees"
+      const parent = resolve(gitdirPath, '..');
+      if (basename(parent) !== 'worktrees') return null;
+
+      const parentGitDir = resolve(parent, '..');
+      if (!(await isDirectory(parentGitDir))) return null;
+
+      return parentGitDir;
+    } catch {
+      return null;
     }
   };
 

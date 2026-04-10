@@ -9,6 +9,7 @@ import { Chat } from '@/renderer/features/Chat/Chat';
 import { Code } from '@/renderer/features/Code/Code';
 import { $isConsoleOpen } from '@/renderer/features/Console/state';
 import { Dashboards } from '@/renderer/features/Dashboards/Dashboards';
+import { RightNow } from '@/renderer/features/RightNow/RightNow';
 import { Tickets } from '@/renderer/features/Tickets/Tickets';
 import { OnboardingWizard } from '@/renderer/features/Onboarding/OnboardingWizard';
 import { $isSettingsOpen } from '@/renderer/features/SettingsModal/state';
@@ -81,6 +82,11 @@ export const MainContent = memo(() => {
     <div className="flex flex-col-reverse sm:flex-row w-full h-full">
       <Sidebar />
       <div className="flex-1 min-w-0 min-h-0 relative">
+        {mounted.has('home') && (
+          <div className={cn('w-full h-full', active !== 'home' && 'hidden')}>
+            <RightNow />
+          </div>
+        )}
         {mounted.has('chat') && (
           <div className={cn('w-full h-full', active !== 'chat' && 'hidden')}>
             <Chat />

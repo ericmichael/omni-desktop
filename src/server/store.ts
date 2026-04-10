@@ -12,7 +12,7 @@ const DEFAULTS: StoreData = {
   sandboxBackend: 'docker',
   optInToLauncherPrereleases: false,
   previewFeatures: false,
-  layoutMode: 'chat',
+  layoutMode: 'home',
   theme: 'tokyo-night',
   onboardingComplete: false,
   projects: [],
@@ -21,10 +21,14 @@ const DEFAULTS: StoreData = {
   tickets: [],
   inboxItems: [],
   schemaVersion: 0,
+  chatSessionId: null,
   codeTabs: [],
   activeCodeTabId: null,
   codeLayoutMode: 'deck',
   activeTicketId: null,
+  wipLimit: 3,
+  weeklyReviewDay: 5,
+  lastWeeklyReviewAt: null,
 };
 
 type ChangeCallback = (data: StoreData | undefined) => void;

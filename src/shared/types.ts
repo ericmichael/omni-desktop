@@ -45,7 +45,7 @@ export type WindowProps = {
 /**
  * Data stored in the electron store.
  */
-export type LayoutMode = 'chat' | 'code' | 'projects' | 'dashboards' | 'more';
+export type LayoutMode = 'home' | 'chat' | 'code' | 'projects' | 'dashboards' | 'more';
 export type OmniTheme = 'default' | 'tokyo-night' | 'vscode-dark' | 'vscode-light' | 'utrgv';
 
 export type SandboxVariant = 'standard' | 'work';
@@ -84,7 +84,14 @@ export type StoreData = {
   tasks: Task[];
   tickets: Ticket[];
   inboxItems: InboxItem[];
+  /** Maximum active tickets across all projects (cognitive WIP limit). Default: 3. */
+  wipLimit: number;
+  /** Day of week for the weekly review prompt (0=Sun, 1=Mon, ..., 6=Sat). Default: 5 (Friday). */
+  weeklyReviewDay: number;
+  /** Timestamp (ms) of last completed weekly review. Null if never done. */
+  lastWeeklyReviewAt: number | null;
   schemaVersion: number;
+  chatSessionId: string | null;
   codeTabs: CodeTab[];
   activeCodeTabId: CodeTabId | null;
   codeLayoutMode: CodeLayoutMode;
@@ -150,8 +157,8 @@ export const schema: Schema<StoreData> = {
 
   layoutMode: {
     type: 'string',
-    enum: ['chat', 'code', 'projects'],
-    default: 'chat',
+    enum: ['home', 'chat', 'code', 'projects'],
+    default: 'home',
   },
   theme: {
     type: 'string',
@@ -162,9 +169,25 @@ export const schema: Schema<StoreData> = {
     type: 'boolean',
     default: false,
   },
+  wipLimit: {
+    type: 'number',
+    default: 3,
+  },
+  weeklyReviewDay: {
+    type: 'number',
+    default: 5,
+  },
+  lastWeeklyReviewAt: {
+    type: ['number', 'null'],
+    default: null,
+  },
   schemaVersion: {
     type: 'number',
     default: 0,
+  },
+  chatSessionId: {
+    type: ['string', 'null'],
+    default: null,
   },
   codeTabs: {
     type: 'array',
@@ -269,6 +292,14 @@ export const schema: Schema<StoreData> = {
         priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
         status: { type: 'string', enum: ['open', 'in_progress', 'completed', 'closed'] },
         blockedBy: { type: 'array', items: { type: 'string' } },
+        shaping: {
+          type: 'object',
+          properties: {
+            doneLooksLike: { type: 'string' },
+            appetite: { type: 'string', enum: ['small', 'medium', 'large'] },
+            outOfScope: { type: 'string' },
+          },
+        },
         createdAt: { type: 'number' },
         updatedAt: { type: 'number' },
         // Kanban fields
@@ -307,7 +338,15 @@ export const schema: Schema<StoreData> = {
         attachments: { type: 'array', items: { type: 'string' } },
         projectId: { type: ['string', 'null'] },
         linkedTicketIds: { type: 'array', items: { type: 'string' } },
-        status: { type: 'string', enum: ['open', 'done', 'deferred'] },
+        status: { type: 'string', enum: ['open', 'done', 'deferred', 'iceboxed'] },
+        shaping: {
+          type: 'object',
+          properties: {
+            doneLooksLike: { type: 'string' },
+            appetite: { type: 'string', enum: ['small', 'medium', 'large'] },
+            outOfScope: { type: 'string' },
+          },
+        },
         createdAt: { type: 'number' },
         updatedAt: { type: 'number' },
       },
@@ -590,6 +629,9 @@ export type Ticket = {
   createdAt: number;
   updatedAt: number;
 
+  /** Shaping data carried from inbox — scope, appetite, boundaries. */
+  shaping?: ShapingData;
+
   // Kanban state
   /** Current column in the kanban pipeline. */
   columnId: ColumnId;
@@ -623,9 +665,22 @@ export type Ticket = {
   runs?: TicketRun[];
 };
 
+// --- Shaping ---
+
+export type Appetite = 'small' | 'medium' | 'large';
+
+export type ShapingData = {
+  /** 1-2 sentences: what is true when this is done? */
+  doneLooksLike: string;
+  /** How much time is this worth? small=day, medium=few days, large=week+ */
+  appetite: Appetite;
+  /** What's explicitly excluded from scope. */
+  outOfScope: string;
+};
+
 // --- Inbox ---
 
-export type InboxItemStatus = 'open' | 'done' | 'deferred';
+export type InboxItemStatus = 'open' | 'done' | 'deferred' | 'iceboxed';
 
 export type InboxItem = {
   id: InboxItemId;
@@ -636,6 +691,8 @@ export type InboxItem = {
   linkedTicketIds?: TicketId[];
   linkedInitiativeId?: InitiativeId;
   status: InboxItemStatus;
+  /** Shaping data — when present, item is shaped and ready for backlog. */
+  shaping?: ShapingData;
   createdAt: number;
   updatedAt: number;
 };
@@ -849,6 +906,7 @@ type ProjectIpcEvents = Namespaced<
     'resolve-ticket': (ticketId: TicketId, resolution: TicketResolution) => void;
     'set-auto-dispatch': (projectId: ProjectId, enabled: boolean) => void;
     'get-supervisor-sandbox-status': (tabId: CodeTabId) => WithTimestamp<AgentProcessStatus> | null;
+    'get-active-wip-tickets': () => Ticket[];
   }
 >;
 
@@ -891,6 +949,10 @@ type InboxIpcEvents = Namespaced<
     'add-item': (item: Omit<InboxItem, 'id' | 'createdAt' | 'updatedAt'>) => InboxItem;
     'update-item': (id: InboxItemId, patch: Partial<Omit<InboxItem, 'id' | 'createdAt'>>) => void;
     'remove-item': (id: InboxItemId) => void;
+    'get-icebox-items': () => InboxItem[];
+    'restore-from-icebox': (id: InboxItemId) => void;
+    'shape-item': (id: InboxItemId, shaping: ShapingData) => void;
+    'convert-to-ticket': (id: InboxItemId, projectId: ProjectId) => Ticket;
   }
 >;
 

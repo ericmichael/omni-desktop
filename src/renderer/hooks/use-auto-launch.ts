@@ -164,7 +164,7 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
   }), []); // eslint-disable-line react-hooks/exhaustive-deps -- reads from refs
 
   const inspect = useMemo(() => createMachineLogger(logLabel ?? `autoLaunch:${processId}`, {
-    tags: { sandbox: sandboxEnabled ? (store.sandboxBackend ?? 'docker') : 'local' },
+    tags: { sandbox: sandboxEnabled ? (store.sandboxBackend ?? 'docker') : 'none' },
   }), [processId, logLabel, sandboxEnabled, store.sandboxBackend]);
 
   const machine = useMemo(() => autoLaunchMachine.provide({ actors }), [actors]);

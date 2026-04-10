@@ -59,7 +59,8 @@ export class ProcessManager {
     // should be delegated to cloud containers.
     if (this.platformClient && process.env.OMNI_COMPUTE_MODE === 'platform') return 'platform';
     const { sandboxEnabled, sandboxBackend } = this.getStoreData();
-    if (!sandboxEnabled) return 'local';
+    if (!sandboxEnabled) return 'none';
+    if (sandboxBackend === 'local') return 'local';
     if (sandboxBackend === 'vm') return 'vm';
     if (sandboxBackend === 'podman') return 'podman';
     return 'sandbox';

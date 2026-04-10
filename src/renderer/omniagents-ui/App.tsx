@@ -1,21 +1,24 @@
 import { useStore } from '@nanostores/react'
 import { AnimatePresence, motion } from 'framer-motion'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Header } from './components/Header'
-import { MessageList, type MessageItem } from './components/MessageList'
-import { Input } from './components/Input'
-import { SessionList, type SessionItem } from './components/SessionList'
-import { Sidebar } from './components/Sidebar'
-import { ArtifactsPanel, type ArtifactItem } from './components/ArtifactsPanel'
-import { ResizableDivider } from './components/ResizableDivider'
-import { TerminalPanel } from './components/TerminalPanel'
-import { WorkspacePicker } from './components/WorkspacePicker'
-import type { PendingMessage } from './ChatShell'
-import { useRPCClient, useRPCConnected } from './rpc-context'
-import { useUiConfig } from './ui-config'
-import { OmniAgentsHeaderActionsPortal, OmniAgentsHeaderActionsProvider } from './header-actions'
+
+import { rehydrateHistory } from '@/lib/rehydrate-history'
 import { uuidv4 } from '@/lib/uuid'
 import { persistedStoreApi } from '@/renderer/services/store'
+
+import type { PendingMessage } from './ChatShell'
+import { type ArtifactItem,ArtifactsPanel } from './components/ArtifactsPanel'
+import { Header } from './components/Header'
+import { Input } from './components/Input'
+import { type MessageItem,MessageList } from './components/MessageList'
+import { ResizableDivider } from './components/ResizableDivider'
+import { type SessionItem,SessionList } from './components/SessionList'
+import { Sidebar } from './components/Sidebar'
+import { TerminalPanel } from './components/TerminalPanel'
+import { WorkspacePicker } from './components/WorkspacePicker'
+import { OmniAgentsHeaderActionsPortal, OmniAgentsHeaderActionsProvider } from './header-actions'
+import { useRPCClient, useRPCConnected } from './rpc-context'
+import { useUiConfig } from './ui-config'
 
 type UIState = 'connecting' | 'resume' | 'chat' | 'error'
 
@@ -88,18 +91,30 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   const startingRunRef = useRef(false)
   const readyRef = useRef(false)
   const onClientToolCallRef = useRef(onClientToolCall)
-  useEffect(() => { onClientToolCallRef.current = onClientToolCall }, [onClientToolCall])
+  useEffect(() => {
+ onClientToolCallRef.current = onClientToolCall
+}, [onClientToolCall])
+  const onSessionChangeRef = useRef(onSessionChange)
+  useEffect(() => {
+    onSessionChangeRef.current = onSessionChange
+  }, [onSessionChange])
   useEffect(() => {
     readyRef.current = false
   }, [uiConfig.uiUrl])
   const appendPendingApprovals = useCallback((base: MessageItem[], targetSession?: string) => {
-    if (!targetSession) return base
+    if (!targetSession) {
+return base
+}
     const additions: MessageItem[] = []
     for (const item of pendingApprovalsRef.current.values()) {
       const itemSession = (item as any).session_id
-      if (itemSession && itemSession !== targetSession) continue
+      if (itemSession && itemSession !== targetSession) {
+continue
+}
       const exists = base.some(existing => existing.type === 'approval' && (existing as any).request_id === (item as any).request_id)
-      if (!exists) additions.push(item)
+      if (!exists) {
+additions.push(item)
+}
     }
     return additions.length ? [...base, ...additions] : base
   }, [])
@@ -116,32 +131,48 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
 
       client.connectAndWait()
         .then(async () => {
-        if (cancelled) return
-        try { await client.clientFunctions(1, [{ name: 'ui.request_tool_approval' }, { name: 'ui.set_status' }, { name: 'ui.add_artifact' }]) } catch {}
-        if (cancelled) return
+        if (cancelled) {
+return
+}
+        try {
+ await client.clientFunctions(1, [{ name: 'ui.request_tool_approval' }, { name: 'ui.set_status' }, { name: 'ui.add_artifact' }]) 
+} catch {}
+        if (cancelled) {
+return
+}
         try {
           const info = await client.getAgentInfo()
-          if (cancelled) return
+          if (cancelled) {
+return
+}
           const agentName = normalizeAgentName(String(info?.name || 'OmniAgent'))
           setAgentName(agentName)
           const wt = info?.welcome_text ? String(info.welcome_text) : undefined
           setWelcomeText(wt)
           document.title = agentName
         } catch {}
-        if (cancelled) return
+        if (cancelled) {
+return
+}
         try {
           const funcs = await client.listServerFunctions()
-          if (cancelled) return
+          if (cancelled) {
+return
+}
           const names = new Set(funcs.map(f => f.name))
           if (names.has('fs_list_dir') && names.has('fs_get_workspace_root')) {
             setWorkspaceSupported(true)
             try {
               const res = await client.serverCall('fs_get_cwd') as any
-              if (res?.path && !cancelled) setWorkspacePath(res.path)
+              if (res?.path && !cancelled) {
+setWorkspacePath(res.path)
+}
             } catch {}
           }
         } catch {}
-        if (cancelled) return
+        if (cancelled) {
+return
+}
         try {
           const { RealtimeRPCClient } = await import('./rpc/realtime')
           const rtc = new RealtimeRPCClient(uiConfig.wsRealtimeUrl, uiConfig.token)
@@ -151,37 +182,70 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
             const sid = String(res?.session_id || '')
             if (sid) {
               setVoiceEnabled(true)
-              try { await rtc.stopSession(sid) } catch {}
+              try {
+ await rtc.stopSession(sid) 
+} catch {}
             }
-          } finally { rtc.disconnect() }
-        } catch { setVoiceEnabled(false) }
-        if (cancelled) return
+          } finally {
+ rtc.disconnect() 
+}
+        } catch {
+ setVoiceEnabled(false) 
+}
+        if (cancelled) {
+return
+}
         const resume = uiConfig.searchParams.get('resume') === 'true'
         const sid = sessionIdProp || uiConfig.searchParams.get('session') || undefined
         if (resume && !sid) {
           try {
             const list = await client.listSessions()
-            if (cancelled) return
+            if (cancelled) {
+return
+}
             setSessions(list)
             setUI('resume')
           } catch {
-            if (!cancelled) setUI('chat')
+            if (!cancelled) {
+setUI('chat')
+}
           }
         } else {
-          if (sid) setSessionId(sid)
+          if (sid) {
+            // Load history for the session so the UI rehydrates past messages
+            // on mount (e.g. after browser refresh).
+            setSessionId(sid)
+            try {
+              const history = await client.getSessionHistory(sid)
+              if (!cancelled) {
+                const msgs = rehydrateHistory(history as Record<string, unknown>[]) as MessageItem[]
+                setItems(msgs)
+              }
+            } catch {}
+          }
           setUI('chat')
         }
       })
-      .catch(() => { if (!cancelled) setUI('error') })
+      .catch(() => {
+ if (!cancelled) {
+setUI('error')
+} 
+})
 
     const offMessageOutput = client.on('message_output', (p: any) => {
       const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
       if (eventSessionId) {
-        if (sessionIdRef.current && sessionIdRef.current !== eventSessionId) return
-        if (!sessionIdRef.current && !startingRunRef.current) return
+        if (sessionIdRef.current && sessionIdRef.current !== eventSessionId) {
+return
+}
+        if (!sessionIdRef.current && !startingRunRef.current) {
+return
+}
       }
       const content = String(p?.content ?? '')
-      if (!content) return
+      if (!content) {
+return
+}
       preambleBufferRef.current.push({ content, timestamp: new Date(), superseded: false })
       setPreamble(content)
       setStatus(undefined)
@@ -190,12 +254,19 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
     const offRunStarted = client.on('run_started', (p: any) => {
       const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
       if (eventSessionId) {
-        if (sessionIdRef.current && sessionIdRef.current !== eventSessionId) return
-        if (!sessionIdRef.current && !startingRunRef.current) return
+        if (sessionIdRef.current && sessionIdRef.current !== eventSessionId) {
+return
+}
+        if (!sessionIdRef.current && !startingRunRef.current) {
+return
+}
       }
       startingRunRef.current = false
       setRunId(String(p?.run_id ?? ''))
-      if (eventSessionId) setSessionId(eventSessionId)
+      if (eventSessionId) {
+setSessionId(eventSessionId)
+onSessionChangeRef.current?.(eventSessionId)
+}
       setThinking(true)
       preambleBufferRef.current = []
       setPreamble(undefined)
@@ -207,7 +278,9 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
     })
     const offRunEnd = client.on('run_end', (p: any) => {
       const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
-      if (eventSessionId && sessionIdRef.current && sessionIdRef.current !== eventSessionId) return
+      if (eventSessionId && sessionIdRef.current && sessionIdRef.current !== eventSessionId) {
+return
+}
       setThinking(false)
       const nonSuperseded = preambleBufferRef.current.filter(m => !m.superseded)
       if (nonSuperseded.length) {
@@ -235,7 +308,9 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
     })
     const offRunStatus = client.on('run_status', (p: any) => {
       const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
-      if (eventSessionId && sessionIdRef.current && sessionIdRef.current !== eventSessionId) return
+      if (eventSessionId && sessionIdRef.current && sessionIdRef.current !== eventSessionId) {
+return
+}
       const msg = [p?.status, p?.message].filter(Boolean).join(': ')
       setStatus(msg)
       setStatusSpinner(true)
@@ -243,7 +318,9 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
     })
     const offToken = client.on('token', (p: any) => {
       const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
-      if (eventSessionId && sessionIdRef.current && sessionIdRef.current !== eventSessionId) return
+      if (eventSessionId && sessionIdRef.current && sessionIdRef.current !== eventSessionId) {
+return
+}
       try {
         setUsageDelta(p?.delta)
         setUsageTotals(p?.totals)
@@ -253,26 +330,38 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
     const offToolCalled = client.on('tool_called', (p: any) => {
       const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
       if (eventSessionId) {
-        if (sessionIdRef.current && sessionIdRef.current !== eventSessionId) return
-        if (!sessionIdRef.current && !startingRunRef.current) return
+        if (sessionIdRef.current && sessionIdRef.current !== eventSessionId) {
+return
+}
+        if (!sessionIdRef.current && !startingRunRef.current) {
+return
+}
       }
       const tool = String(p?.tool ?? '')
       const input = typeof p?.input === 'string' ? p?.input : JSON.stringify(p?.input)
       const call_id = String(p?.call_id ?? '')
-      preambleBufferRef.current.forEach(m => { m.superseded = true })
+      preambleBufferRef.current.forEach(m => {
+ m.superseded = true 
+})
       setItems(prev => [...prev, { type: 'tool', tool, input, call_id, status: 'called', runId: runIdRef.current }])
     })
     const offToolResult = client.on('tool_result', (p: any) => {
       const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
       if (eventSessionId) {
-        if (sessionIdRef.current && sessionIdRef.current !== eventSessionId) return
-        if (!sessionIdRef.current && !startingRunRef.current) return
+        if (sessionIdRef.current && sessionIdRef.current !== eventSessionId) {
+return
+}
+        if (!sessionIdRef.current && !startingRunRef.current) {
+return
+}
       }
       const tool = String(p?.tool ?? '')
       const output = typeof p?.output === 'string' ? p?.output : JSON.stringify(p?.output)
       const call_id = String(p?.call_id ?? '')
       const metadata = p?.metadata
-      preambleBufferRef.current.forEach(m => { m.superseded = true })
+      preambleBufferRef.current.forEach(m => {
+ m.superseded = true 
+})
       setItems(prev => {
         const idx = prev.findIndex(it => it.type === 'tool' && (it as any).call_id === call_id)
         if (idx >= 0) {
@@ -299,8 +388,11 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
           const next = prev.slice()
           const idx = artifact_id ? next.findIndex(a => a.artifact_id === artifact_id && (!eventSessionId || a.session_id === eventSessionId)) : -1
           const entry: ArtifactItem = { title, content, mode, artifact_id, session_id: eventSessionId, updated_at }
-          if (idx >= 0) next[idx] = entry
-          else next.push(entry)
+          if (idx >= 0) {
+next[idx] = entry
+} else {
+next.push(entry)
+}
           return next
         })
         if (request_id) {
@@ -345,7 +437,9 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
         setStatus(text)
         setStatusSpinner(showSpinner)
         setStatusItalic(false)
-        if (text && text.trim()) setToolStatus(text)
+        if (text && text.trim()) {
+setToolStatus(text)
+}
         if (request_id) {
           client.clientResponse(request_id, true, { ack: true }).catch(() => {})
         }
@@ -353,7 +447,9 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
       }
       if (fn === 'tool.call') {
         const request_id = String(p?.request_id ?? '')
-        if (!request_id) return
+        if (!request_id) {
+return
+}
         const args = (p?.args || {}) as Record<string, unknown>
         const toolName = String(args.tool ?? '')
         const toolArgs = (args.arguments ?? {}) as Record<string, unknown>
@@ -388,7 +484,9 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   }, [client, normalizeAgentName, refreshSessions, uiConfig])
 
   const visibleArtifacts = useMemo(() => {
-    if (!sessionId) return artifacts.filter(a => !a.session_id)
+    if (!sessionId) {
+return artifacts.filter(a => !a.session_id)
+}
     return artifacts.filter(a => !a.session_id || a.session_id === sessionId)
   }, [artifacts, sessionId])
 
@@ -399,7 +497,9 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   }, [])
 
   useEffect(() => {
-    try { localStorage.setItem('artifacts-panel-width', String(artifactsPanelWidth)) } catch {}
+    try {
+ localStorage.setItem('artifacts-panel-width', String(artifactsPanelWidth)) 
+} catch {}
   }, [artifactsPanelWidth])
 
   useEffect(() => {
@@ -428,10 +528,15 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
         if (argText) {
           try {
             const parsed = JSON.parse(argText)
-            if (typeof parsed === 'object' && !Array.isArray(parsed)) args = parsed
-            else if (Array.isArray(parsed)) args = { args: parsed }
-            else if (typeof parsed === 'string') args = { text: parsed }
-            else args = { value: parsed }
+            if (typeof parsed === 'object' && !Array.isArray(parsed)) {
+args = parsed
+} else if (Array.isArray(parsed)) {
+args = { args: parsed }
+} else if (typeof parsed === 'string') {
+args = { text: parsed }
+} else {
+args = { value: parsed }
+}
           } catch {
             args = { text: argText }
           }
@@ -451,7 +556,9 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
       let attachments: Array<{ type: 'image' | 'file'; url?: string; filename?: string; mime?: string; size?: number }> = []
       if (files && files.length > 0) {
         const parts: any[] = []
-        if (text.trim().length > 0) parts.push({ type: 'input_text', text })
+        if (text.trim().length > 0) {
+parts.push({ type: 'input_text', text })
+}
         const processed = await Promise.all(files.map(async (f) => {
           if (f.type && f.type.startsWith('image/')) {
             const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -472,7 +579,9 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
                   const buf = reader.result as ArrayBuffer
                   const bytes = new Uint8Array(buf)
                   let binary = ''
-                  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+                  for (let i = 0; i < bytes.length; i++) {
+binary += String.fromCharCode(bytes[i])
+}
                   resolve(btoa(binary))
                 } catch {
                   reject(new Error('Failed to encode file'))
@@ -482,7 +591,9 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
               reader.readAsArrayBuffer(f)
             })
             const param: any = { type: 'input_file', file_data: base64 }
-            if (f.name) param.filename = f.name
+            if (f.name) {
+param.filename = f.name
+}
             return {
               filePart: param,
               attachment: { type: 'file', filename: f.name, mime: f.type, size: f.size },
@@ -502,7 +613,9 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
         ? { ...variablesProp, ...workspaceVars }
         : undefined
       await client.startRun(text, sessionId, variables, content)
-      if (workspaceSupported) setWorkspaceLocked(true)
+      if (workspaceSupported) {
+setWorkspaceLocked(true)
+}
     } catch (e) {
       startingRunRef.current = false
       setStatus(String((e as Error)?.message || 'Failed to start run'))
@@ -511,9 +624,13 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   }, [client, sessionId, workspacePath, workspaceSupported])
 
   const handleStop = useCallback(() => {
-    if (!runId) return
+    if (!runId) {
+return
+}
     try {
-      preambleBufferRef.current.forEach(m => { m.superseded = true })
+      preambleBufferRef.current.forEach(m => {
+ m.superseded = true 
+})
     } catch {}
     setThinking(false)
     setStatusSpinner(false)
@@ -524,12 +641,20 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   }, [client, runId])
 
   useEffect(() => {
-    if (!connected) return
-    if (ui !== 'chat') return
-    if (initialSent) return
+    if (!connected) {
+return
+}
+    if (ui !== 'chat') {
+return
+}
+    if (initialSent) {
+return
+}
     // Only send initial message if there's no session param (session param is handled separately)
     const hasSessionParam = uiConfig.searchParams.has('session')
-    if (hasSessionParam) return
+    if (hasSessionParam) {
+return
+}
     const initial = uiConfig.searchParams.get('initial')
     if (initial && items.length === 0) {
       handleSubmit(initial)
@@ -540,9 +665,15 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   // Flush messages queued from ChatShell before the backend was ready
   const pendingFlushedRef = useRef(false)
   useEffect(() => {
-    if (pendingFlushedRef.current) return
-    if (!connected || ui !== 'chat') return
-    if (!pendingMessages || pendingMessages.length === 0) return
+    if (pendingFlushedRef.current) {
+return
+}
+    if (!connected || ui !== 'chat') {
+return
+}
+    if (!pendingMessages || pendingMessages.length === 0) {
+return
+}
     pendingFlushedRef.current = true
     for (const msg of pendingMessages) {
       handleSubmit(msg.text, msg.files)
@@ -573,7 +704,9 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
     const resolvedId = id ?? uuidv4()
     setSessionId(resolvedId)
     // Notify parent of session change (skip if the change originated from the prop)
-    if (!opts?.fromProp) onSessionChange?.(id === undefined ? resolvedId : id)
+    if (!opts?.fromProp) {
+onSessionChange?.(id === undefined ? resolvedId : id)
+}
     setItems([])
     setPreamble(undefined)
     preambleBufferRef.current = []
@@ -590,95 +723,25 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
       if (workspaceSupported) {
         try {
           const res = await client.serverCall('fs_get_cwd') as any
-          if (res?.path) setWorkspacePath(res.path)
+          if (res?.path) {
+setWorkspacePath(res.path)
+}
         } catch {}
       }
     }
     if (id) {
       try {
         const history = await client.getSessionHistory(id)
-        const msgs: MessageItem[] = []
-        const callIndex: Record<string, number> = {}
-        for (const item of history as any[]) {
-          const t = String((item && item.type) || '')
-
-          if (t && t.endsWith('_call') && !t.endsWith('_call_output')) {
-            const tool = String(item.name || '')
-            let input = ''
-            try {
-              if (typeof item.arguments === 'string') input = item.arguments
-              else if (item.arguments != null) input = JSON.stringify(item.arguments)
-            } catch { input = String(item.arguments || '') }
-            const call_id = String(item.call_id || '')
-            const idx = msgs.length
-            msgs.push({ type: 'tool', tool, input, call_id, status: 'called' })
-            if (call_id) callIndex[call_id] = idx
-            continue
-          }
-
-          if (t && t.endsWith('_call_output')) {
-            const call_id = String(item.call_id || '')
-            const tool = String(item.name || '')
-            let output = ''
-            try { output = typeof item.output === 'string' ? item.output : JSON.stringify(item.output) }
-            catch { output = String(item.output || '') }
-            const metadata = item.metadata
-            const existing = (call_id && callIndex[call_id] != null) ? callIndex[call_id] : -1
-            if (existing >= 0) {
-              const prev = msgs[existing] as any
-              msgs[existing] = { ...prev, output, status: 'result', metadata }
-            } else {
-              msgs.push({ type: 'tool', tool, output, call_id, status: 'result', metadata })
-            }
-            continue
-          }
-
-          if (item && item.role) {
-            const role = String(item.role) as any
-            let content = ''
-            let attachments: Array<{ type: 'image' | 'file'; url?: string; filename?: string; mime?: string; size?: number }> = []
-
-            if (typeof item.content === 'string') {
-              content = item.content
-            } else if (Array.isArray(item.content)) {
-              const parts = item.content as any[]
-              if (role === 'assistant') {
-                const textParts = parts
-                  .filter(p => p && (p.type === 'output_text' || p.type === 'text'))
-                  .map(p => String(p.text || ''))
-                content = textParts.join('\n')
-              } else {
-                const textParts = parts
-                  .filter(p => p && (p.type === 'input_text' || p.type === 'text'))
-                  .map(p => String(p.text || p.input_text || ''))
-                content = textParts.join('\n')
-                for (const p of parts) {
-                  if (p && p.type === 'input_image' && p.image_url) {
-                    attachments.push({ type: 'image', url: String(p.image_url), filename: p.filename })
-                  } else if (p && p.type === 'input_file') {
-                    attachments.push({ type: 'file', filename: p.filename })
-                  }
-                }
-              }
-            } else if (item.content && typeof item.content === 'object') {
-              const obj = item.content as any
-              content = String(obj.text || obj.input_text || '')
-              if (!content) {
-                try { content = JSON.stringify(item.content) } catch { content = String(item.content) }
-              }
-            }
-
-            msgs.push({ type: 'chat', role, content, timestamp: item.timestamp, attachments })
-            continue
-          }
-        }
+        const msgs = rehydrateHistory(history as Record<string, unknown>[]) as MessageItem[]
         const merged = appendPendingApprovals(msgs, id)
         setItems(merged)
         // Restore workspace from session and lock it
         if (workspaceSupported) {
           try {
             const res = await client.serverCall('fs_get_workspace_root', {}, id) as any
-            if (res?.path) setWorkspacePath(res.path)
+            if (res?.path) {
+setWorkspacePath(res.path)
+}
           } catch {}
           setWorkspaceLocked(true)
         }
@@ -690,10 +753,18 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   }, [client, appendPendingApprovals, workspaceSupported, onSessionChange])
 
   useEffect(() => {
-    if (urlSessionHandledRef.current) return
-    if (!initialSessionParam) return
-    if (!connected) return
-    if (ui !== 'chat') return
+    if (urlSessionHandledRef.current) {
+return
+}
+    if (!initialSessionParam) {
+return
+}
+    if (!connected) {
+return
+}
+    if (ui !== 'chat') {
+return
+}
     urlSessionHandledRef.current = true
     // Load session history, then send initial message only if session is empty
     ;(async () => {
@@ -720,9 +791,13 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   // React to controlled sessionId prop changes from parent
   const prevSessionIdProp = useRef(sessionIdProp)
   useEffect(() => {
-    if (sessionIdProp === prevSessionIdProp.current) return
+    if (sessionIdProp === prevSessionIdProp.current) {
+return
+}
     prevSessionIdProp.current = sessionIdProp
-    if (!connected) return
+    if (!connected) {
+return
+}
     if (sessionIdProp && sessionIdProp !== sessionIdRef.current) {
       handleSelectSession(sessionIdProp, { fromProp: true })
     } else if (!sessionIdProp && sessionIdRef.current) {
@@ -731,12 +806,16 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   }, [sessionIdProp, connected, handleSelectSession])
 
   useEffect(() => {
-    if (!connected) return
+    if (!connected) {
+return
+}
     refreshSessions()
   }, [connected, refreshSessions])
 
   useEffect(() => {
-    if (readyRef.current || !onReady) return
+    if (readyRef.current || !onReady) {
+return
+}
     if (connected && (ui === 'chat' || ui === 'resume')) {
       readyRef.current = true
       onReady()
@@ -763,7 +842,9 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
     try {
       const func = type === 'like' ? 'good' : 'bad'
       const args: Record<string, unknown> = {}
-      if (text) args.text = text
+      if (text) {
+args.text = text
+}
       await client.serverCall(func, args, sessionId)
     } catch {}
   }, [client, sessionId])
@@ -862,7 +943,11 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
                 sandboxLoading={!connected}
                 sessionId={sessionId}
                 onVoiceSessionCreated={(id: string) => setSessionId(id)}
-                onVoiceClose={() => { if (sessionIdRef.current) handleSelectSession(sessionIdRef.current); refreshSessions(); }}
+                onVoiceClose={() => {
+ if (sessionIdRef.current) {
+handleSelectSession(sessionIdRef.current);
+} refreshSessions(); 
+}}
               />
             </div>
             {isLargeScreen && artifactsPanelOpen && hasArtifacts && (

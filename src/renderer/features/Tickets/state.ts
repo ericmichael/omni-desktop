@@ -91,6 +91,17 @@ export const $activeTickets = computed([$tickets, $tasks], (ticketMap, taskMap) 
   });
 });
 
+/**
+ * Active WIP tickets across all projects (for WIP limit enforcement).
+ */
+export const $activeWipTickets = atom<Ticket[]>([]);
+
+/**
+ * When set, the WIP limit dialog is shown for this pending ticket.
+ * Set by startSupervisor when the WIP limit is hit. Cleared by dialog actions.
+ */
+export const $wipDialogPendingTicket = atom<Ticket | null>(null);
+
 export const ticketApi = {
   // Projects (delegated to shared Projects module)
   addProject: projectsApi.addProject,
@@ -180,10 +191,24 @@ export const ticketApi = {
     }
     void ticketApi.fetchTasks();
   },
-  startSupervisor: (ticketId: TicketId): Promise<void> => {
+  startSupervisor: async (ticketId: TicketId): Promise<void> => {
     // Clear old messages when starting a fresh supervisor session
     $supervisorMessages.setKey(ticketId, []);
-    return emitter.invoke('project:start-supervisor', ticketId);
+    try {
+      await emitter.invoke('project:start-supervisor', ticketId);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.startsWith('WIP_LIMIT:')) {
+        // Fetch active tickets and show the WIP dialog
+        await ticketApi.fetchActiveWipTickets();
+        const ticket = $tickets.get()[ticketId] ?? persistedStoreApi.$atom.get().tickets.find((t) => t.id === ticketId);
+        if (ticket) {
+          $wipDialogPendingTicket.set(ticket);
+        }
+        return;
+      }
+      throw err;
+    }
   },
   stopSupervisor: (ticketId: TicketId): Promise<void> => {
     return emitter.invoke('project:stop-supervisor', ticketId);
@@ -207,6 +232,11 @@ export const ticketApi = {
   },
   setAutoDispatch: (projectId: ProjectId, enabled: boolean): Promise<void> => {
     return emitter.invoke('project:set-auto-dispatch', projectId, enabled);
+  },
+  fetchActiveWipTickets: async (): Promise<Ticket[]> => {
+    const tickets = await emitter.invoke('project:get-active-wip-tickets');
+    $activeWipTickets.set(tickets);
+    return tickets;
   },
 
   // Session history

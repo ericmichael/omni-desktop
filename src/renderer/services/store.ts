@@ -11,7 +11,7 @@ const getDefaults = (): StoreData => ({
   optInToLauncherPrereleases: false,
   previewFeatures: false,
 
-  layoutMode: 'chat',
+  layoutMode: 'home',
   theme: 'tokyo-night',
   onboardingComplete: false,
   projects: [],
@@ -20,10 +20,14 @@ const getDefaults = (): StoreData => ({
   tickets: [],
   inboxItems: [],
   schemaVersion: 0,
+  chatSessionId: null,
   codeTabs: [],
   activeCodeTabId: null,
   codeLayoutMode: 'deck',
   activeTicketId: null,
+  wipLimit: 3,
+  weeklyReviewDay: 5,
+  lastWeeklyReviewAt: null,
 });
 
 /**

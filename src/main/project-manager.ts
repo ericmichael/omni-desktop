@@ -8,6 +8,7 @@ import path from 'path';
 import { promisify } from 'util';
 
 import { buildAutopilotVariables, buildInteractiveVariables } from '@/lib/client-tools';
+import { isExpired, INBOX_SWEEP_INTERVAL_MS } from '@/lib/inbox-expiry';
 import { getArtifactsDir } from '@/lib/artifacts';
 import type { ProjectManagerDeps, IMachineFactory, ISandboxFactory, IWorkflowLoader } from '@/lib/project-manager-deps';
 import { classifyRunEndReason, decideRunEndAction } from '@/lib/run-end';
@@ -25,6 +26,7 @@ import type { ProcessManager } from '@/main/process-manager';
 import { createPlatformClient } from '@/main/platform-mode';
 import { getOmniConfigDir, getWorktreesDir } from '@/main/util';
 import { DEFAULT_PIPELINE } from '@/shared/pipeline-defaults';
+import { isActivePhase } from '@/shared/ticket-phase';
 import type { TicketPhase } from '@/shared/ticket-phase';
 import type {
   ArtifactFileContent,
@@ -411,6 +413,9 @@ export class ProjectManager {
   /** Interval handle for auto-dispatch polling. */
   private autoDispatchTimer: ReturnType<typeof setInterval> | null = null;
 
+  /** Interval handle for inbox expiry sweep. */
+  private inboxSweepTimer: ReturnType<typeof setInterval> | null = null;
+
   /** Injectable factories for testing. */
   private sandboxFactory?: ISandboxFactory;
   private machineFactory?: IMachineFactory;
@@ -449,6 +454,7 @@ export class ProjectManager {
     this.machineFactory = deps?.machineFactory;
     this.startStallDetection();
     this.startAutoDispatch();
+    this.startInboxSweep();
   }
 
   // #region Machine factory
@@ -1160,6 +1166,14 @@ export class ProjectManager {
     return count;
   };
 
+  /**
+   * Get all tickets with active supervisor phases across all projects.
+   * Used for WIP limit enforcement and the "Right Now" view.
+   */
+  getActiveWipTickets = (): Ticket[] => {
+    return this.getTickets().filter((t) => t.phase && isActivePhase(t.phase));
+  };
+
   /** Check if a new supervisor can be started within global and per-column concurrency limits. */
   private canStartSupervisor = (projectId?: ProjectId, columnId?: ColumnId): boolean => {
     if (this.getRunningSupervisorCount() >= MAX_CONCURRENT_SUPERVISORS) {
@@ -1611,6 +1625,80 @@ export class ProjectManager {
 
   getInboxItemList = (): InboxItem[] => {
     return this.getInboxItems();
+  };
+
+  getIceboxItems = (): InboxItem[] => {
+    return this.getInboxItems().filter((i) => i.status === 'iceboxed');
+  };
+
+  restoreFromIcebox = (id: InboxItemId): void => {
+    const items = this.getInboxItems();
+    const index = items.findIndex((i) => i.id === id);
+    if (index === -1) return;
+    const now = Date.now();
+    items[index] = { ...items[index]!, status: 'open', createdAt: now, updatedAt: now };
+    this.setInboxItems(items);
+  };
+
+  /**
+   * Sweep expired inbox items — moves open items older than 7 days to iceboxed.
+   * Called on startup and on an hourly interval.
+   */
+  sweepExpiredInboxItems = (): void => {
+    const items = this.getInboxItems();
+    const now = Date.now();
+    let changed = false;
+    for (let i = 0; i < items.length; i++) {
+      if (isExpired(items[i]!, now)) {
+        items[i] = { ...items[i]!, status: 'iceboxed', updatedAt: now };
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.setInboxItems(items);
+      console.log('[ProjectManager] Swept expired inbox items to icebox');
+    }
+  };
+
+  private startInboxSweep = (): void => {
+    this.sweepExpiredInboxItems();
+    this.inboxSweepTimer = setInterval(() => this.sweepExpiredInboxItems(), INBOX_SWEEP_INTERVAL_MS);
+  };
+
+  shapeInboxItem = (id: InboxItemId, shaping: import('@/shared/types').ShapingData): void => {
+    const items = this.getInboxItems();
+    const index = items.findIndex((i) => i.id === id);
+    if (index === -1) return;
+    items[index] = { ...items[index]!, shaping, updatedAt: Date.now() };
+    this.setInboxItems(items);
+  };
+
+  /**
+   * Convert a shaped inbox item to a ticket. Requires shaping data to be present.
+   * Marks the inbox item as done and links the new ticket.
+   */
+  convertInboxToTicket = (id: InboxItemId, projectId: ProjectId): Ticket => {
+    const items = this.getInboxItems();
+    const item = items.find((i) => i.id === id);
+    if (!item) throw new Error(`Inbox item ${id} not found`);
+    if (!item.shaping) throw new Error('Cannot convert unshaped inbox item to ticket');
+
+    const ticket = this.addTicket({
+      title: item.title,
+      description: item.description ?? '',
+      priority: 'medium',
+      blockedBy: [],
+      projectId,
+      shaping: item.shaping,
+    });
+
+    this.updateInboxItem(id, {
+      status: 'done',
+      projectId,
+      linkedTicketIds: [...(item.linkedTicketIds ?? []), ticket.id],
+    });
+
+    return ticket;
   };
 
   // #endregion
@@ -2173,12 +2261,14 @@ export class ProjectManager {
     const mode = platformClient
       ? 'platform'
       : !sandboxEnabled
-        ? 'local'
-        : sandboxBackend === 'vm'
-          ? 'vm'
-          : sandboxBackend === 'podman'
-            ? 'podman'
-            : 'sandbox';
+        ? 'none'
+        : sandboxBackend === 'local'
+          ? 'local'
+          : sandboxBackend === 'vm'
+            ? 'vm'
+            : sandboxBackend === 'podman'
+              ? 'podman'
+              : 'sandbox';
     const sandbox = new AgentProcess({
       mode,
       platformClient: platformClient ?? undefined,
@@ -2404,6 +2494,15 @@ export class ProjectManager {
         }
       }
       return `Concurrency limit reached (${MAX_CONCURRENT_SUPERVISORS} supervisors running). Stop another supervisor first.`;
+    }
+
+    // WIP limit check (cognitive limit, cross-project)
+    const wipLimit = this.store.get('wipLimit') ?? 3;
+    const activeWip = this.getActiveWipTickets();
+    // Don't count the ticket itself if it's already active (e.g. retrying)
+    const wipCount = activeWip.filter((t) => t.id !== ticketId).length;
+    if (wipCount >= wipLimit) {
+      return `WIP_LIMIT:${wipLimit}`;
     }
 
     return null;
@@ -2984,7 +3083,24 @@ export class ProjectManager {
       return;
     }
 
-    if (version >= 5) {
+    // v5 → v6: migrate inbox 'deferred' status to 'iceboxed', add wipLimit
+    if (version === 5 || store.get('schemaVersion', 0) === 5) {
+      console.log('[ProjectManager] Migrating inbox deferred → iceboxed, adding wipLimit (→ v6)');
+      const inboxItems = store.get('inboxItems', []) as Record<string, unknown>[];
+      const migratedInbox = inboxItems.map((item) => ({
+        ...item,
+        status: (item.status as string) === 'deferred' ? 'iceboxed' : item.status,
+      }));
+      store.set('inboxItems', migratedInbox);
+      if (store.get('wipLimit') === undefined) {
+        store.set('wipLimit', 3);
+      }
+      store.set('schemaVersion', 6);
+      console.log(`[ProjectManager] v6 migration complete: ${migratedInbox.length} inbox items`);
+      return;
+    }
+
+    if (version >= 6) {
       return;
     }
 
@@ -3207,6 +3323,10 @@ export class ProjectManager {
       clearInterval(this.autoDispatchTimer);
       this.autoDispatchTimer = null;
     }
+    if (this.inboxSweepTimer) {
+      clearInterval(this.inboxSweepTimer);
+      this.inboxSweepTimer = null;
+    }
     this.cancelAllRetries();
     this.workflowLoader.dispose();
 
@@ -3290,12 +3410,17 @@ export const createProjectManager = (arg: {
   ipc.handle('project:get-supervisor-sandbox-status', (_, tabId) =>
     projectManager.getSupervisorStatusForCodeTab(tabId)
   );
+  ipc.handle('project:get-active-wip-tickets', () => projectManager.getActiveWipTickets());
 
   // Inbox handlers
   ipc.handle('inbox:get-items', () => projectManager.getInboxItemList());
   ipc.handle('inbox:add-item', (_, item) => projectManager.addInboxItem(item));
   ipc.handle('inbox:update-item', (_, id, patch) => projectManager.updateInboxItem(id, patch));
   ipc.handle('inbox:remove-item', (_, id) => projectManager.removeInboxItem(id));
+  ipc.handle('inbox:get-icebox-items', () => projectManager.getIceboxItems());
+  ipc.handle('inbox:restore-from-icebox', (_, id) => projectManager.restoreFromIcebox(id));
+  ipc.handle('inbox:shape-item', (_, id, shaping) => projectManager.shapeInboxItem(id, shaping));
+  ipc.handle('inbox:convert-to-ticket', (_, id, projectId) => projectManager.convertInboxToTicket(id, projectId));
 
   // Initiatives
   ipc.handle('initiative:get-items', (_, projectId) => projectManager.getInitiativesByProject(projectId));
@@ -3329,10 +3454,15 @@ export const createProjectManager = (arg: {
     ipcMain.removeHandler('project:reset-supervisor-session');
     ipcMain.removeHandler('project:set-auto-dispatch');
     ipcMain.removeHandler('project:get-supervisor-sandbox-status');
+    ipcMain.removeHandler('project:get-active-wip-tickets');
     ipcMain.removeHandler('inbox:get-items');
     ipcMain.removeHandler('inbox:add-item');
     ipcMain.removeHandler('inbox:update-item');
     ipcMain.removeHandler('inbox:remove-item');
+    ipcMain.removeHandler('inbox:get-icebox-items');
+    ipcMain.removeHandler('inbox:restore-from-icebox');
+    ipcMain.removeHandler('inbox:shape-item');
+    ipcMain.removeHandler('inbox:convert-to-ticket');
     ipcMain.removeHandler('initiative:get-items');
     ipcMain.removeHandler('initiative:add-item');
     ipcMain.removeHandler('initiative:update-item');

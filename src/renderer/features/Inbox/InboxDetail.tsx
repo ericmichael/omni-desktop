@@ -1,12 +1,14 @@
 import { useStore } from '@nanostores/react';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { PiArrowSquareOutBold } from 'react-icons/pi';
 
 import { Button, cn, ConfirmDialog, SectionLabel, Select, Textarea, TopAppBar } from '@/renderer/ds';
-import { ticketApi } from '@/renderer/features/Tickets/state';
+import { daysRemaining } from '@/lib/inbox-expiry';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { InboxItemId, InboxItemStatus } from '@/shared/types';
+import type { InboxItemId, InboxItemStatus, ShapingData } from '@/shared/types';
 
+import { APPETITE_COLORS, APPETITE_DESCRIPTIONS, APPETITE_LABELS } from './shaping-constants';
+import { ShapingForm } from './ShapingForm';
 import { $inboxItems, inboxApi } from './state';
 
 const inputClass =
@@ -15,7 +17,6 @@ const inputClass =
 const STATUS_OPTIONS: { value: InboxItemStatus; label: string; dot: string }[] = [
   { value: 'open', label: 'Open', dot: 'bg-blue-400' },
   { value: 'done', label: 'Done', dot: 'bg-green-400' },
-  { value: 'deferred', label: 'Deferred', dot: 'bg-fg-muted/50' },
 ];
 
 export const InboxDetail = memo(
@@ -27,6 +28,8 @@ export const InboxDetail = memo(
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
     const [dirty, setDirty] = useState(false);
+    const [converting, setConverting] = useState(false);
+    const [convertProjectId, setConvertProjectId] = useState('');
 
     // Sync local state when item changes externally
     useEffect(() => {
@@ -34,14 +37,13 @@ export const InboxDetail = memo(
       setTitle(item.title);
       setDescription(item.description ?? '');
       setDirty(false);
+      // Pre-select project if item has one, or default to first project
+      if (item.projectId) {
+        setConvertProjectId(item.projectId);
+      } else if (store.projects.length > 0 && !convertProjectId) {
+        setConvertProjectId(store.projects[0]!.id);
+      }
     }, [item?.id, item?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    const linkedTickets = useMemo(() => {
-      if (!item?.linkedTicketIds?.length) return [];
-      return item.linkedTicketIds
-        .map((tid) => store.tickets.find((t) => t.id === tid))
-        .filter(Boolean);
-    }, [item?.linkedTicketIds, store.tickets]);
 
     const handleTitleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
       setTitle(e.target.value);
@@ -69,37 +71,22 @@ export const InboxDetail = memo(
       [itemId]
     );
 
-    const handleProjectChange = useCallback(
-      (e: React.ChangeEvent<HTMLSelectElement>) => {
-        void inboxApi.updateItem(itemId, { projectId: e.target.value || undefined });
+    const handleShapeSave = useCallback(
+      (shaping: ShapingData) => {
+        void inboxApi.shapeItem(itemId, shaping);
       },
       [itemId]
     );
 
-    const handleDefer = useCallback(() => {
-      void inboxApi.updateItem(itemId, { status: 'deferred' });
-    }, [itemId]);
-
-    const [converting, setConverting] = useState(false);
     const handleConvertToTicket = useCallback(async () => {
-      if (!item?.projectId) return;
+      if (!convertProjectId) return;
       setConverting(true);
       try {
-        const newTicket = await ticketApi.addTicket({
-          title: item.title,
-          description: item.description ?? '',
-          priority: 'medium',
-          blockedBy: [],
-          projectId: item.projectId,
-        });
-        await inboxApi.updateItem(itemId, {
-          status: 'done',
-          linkedTicketIds: [...(item.linkedTicketIds ?? []), newTicket.id],
-        });
+        await inboxApi.convertToTicket(itemId, convertProjectId);
       } finally {
         setConverting(false);
       }
-    }, [item, itemId]);
+    }, [itemId, convertProjectId]);
 
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const handleOpenDeleteConfirm = useCallback(() => setDeleteConfirmOpen(true), []);
@@ -117,6 +104,9 @@ export const InboxDetail = memo(
       );
     }
 
+    const days = item.status === 'open' ? daysRemaining(item, Date.now()) : null;
+    const isShaped = !!item.shaping;
+
     return (
       <div className="flex flex-col w-full h-full">
         <TopAppBar
@@ -132,6 +122,20 @@ export const InboxDetail = memo(
         {/* Body */}
         <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="flex flex-col gap-4 max-w-2xl px-4 sm:px-6 py-4 sm:py-5">
+            {/* Expiry countdown */}
+            {days !== null && !isShaped && (
+              <div
+                className={cn(
+                  'flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-medium',
+                  days <= 1 ? 'bg-amber-500/10 text-amber-400' : 'bg-surface-raised/50 text-fg-subtle'
+                )}
+              >
+                {days <= 0
+                  ? 'Expiring today — shape or it moves to icebox'
+                  : `${days} day${days !== 1 ? 's' : ''} until this moves to icebox`}
+              </div>
+            )}
+
             {/* Title & Description card */}
             <div className="flex flex-col gap-3 rounded-2xl bg-surface-raised/50 p-4 border border-surface-border">
               <input
@@ -156,6 +160,64 @@ export const InboxDetail = memo(
               )}
             </div>
 
+            {/* Shaping */}
+            {item.status !== 'done' && !isShaped && (
+              <ShapingForm onSave={handleShapeSave} />
+            )}
+
+            {/* Shaped — read-only display */}
+            {isShaped && (
+              <div className="flex flex-col gap-3 rounded-2xl bg-surface-raised/50 p-4 border border-accent-500/20">
+                <SectionLabel>Shaped</SectionLabel>
+                <div className="flex flex-col gap-2.5">
+                  <div>
+                    <span className="text-xs font-medium text-fg-muted">Done looks like</span>
+                    <p className="text-sm text-fg mt-0.5">{item.shaping!.doneLooksLike}</p>
+                  </div>
+                  <div>
+                    <span className="text-xs font-medium text-fg-muted">Appetite</span>
+                    <div className="mt-0.5">
+                      <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium', APPETITE_COLORS[item.shaping!.appetite])}>
+                        {APPETITE_LABELS[item.shaping!.appetite]} — {APPETITE_DESCRIPTIONS[item.shaping!.appetite]}
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-xs font-medium text-fg-muted">Out of scope</span>
+                    <p className="text-sm text-fg mt-0.5">{item.shaping!.outOfScope}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Convert to ticket — only when shaped */}
+            {isShaped && item.status !== 'done' && (
+              <div className="flex flex-col gap-2 rounded-2xl bg-surface-raised/50 p-4 border border-surface-border">
+                <SectionLabel>Convert to Ticket</SectionLabel>
+                <Select
+                  value={convertProjectId}
+                  onChange={(e) => setConvertProjectId(e.target.value)}
+                  className="w-full rounded-xl"
+                >
+                  {store.projects.length === 0 && <option value="">No projects</option>}
+                  {store.projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </Select>
+                <Button
+                  size="sm"
+                  onClick={handleConvertToTicket}
+                  isDisabled={converting || !convertProjectId}
+                  className="w-full sm:w-auto justify-center"
+                >
+                  <PiArrowSquareOutBold size={14} className="mr-1" />
+                  Send to Backlog
+                </Button>
+              </div>
+            )}
+
             {/* Status chips */}
             <div className="flex flex-col gap-2 rounded-2xl bg-surface-raised/50 p-4 border border-surface-border">
               <SectionLabel>Status</SectionLabel>
@@ -178,50 +240,8 @@ export const InboxDetail = memo(
               </div>
             </div>
 
-            {/* Project */}
-            <div className="flex flex-col gap-2 rounded-2xl bg-surface-raised/50 p-4 border border-surface-border">
-              <SectionLabel>Project</SectionLabel>
-              <Select value={item.projectId ?? ''} onChange={handleProjectChange} className="w-full rounded-xl">
-                <option value="">None</option>
-                {store.projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-
-            {/* Linked tickets */}
-            {linkedTickets.length > 0 && (
-              <div className="flex flex-col gap-2 rounded-2xl bg-surface-raised/50 p-4 border border-surface-border">
-                <SectionLabel>Linked Tickets</SectionLabel>
-                <div className="flex flex-col gap-1.5">
-                  {linkedTickets.map((t) => (
-                    <div
-                      key={t!.id}
-                      className="flex items-center gap-2 rounded-xl bg-surface px-3.5 py-2.5"
-                    >
-                      <span className="text-sm text-fg flex-1 truncate">{t!.title}</span>
-                      <span className="text-xs text-fg-subtle shrink-0">{t!.priority}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* Actions */}
             <div className="flex flex-col gap-2 pt-2">
-              {item.projectId && item.status !== 'done' && (
-                <Button size="sm" variant="ghost" onClick={handleConvertToTicket} isDisabled={converting} className="w-full sm:w-auto justify-center">
-                  <PiArrowSquareOutBold size={14} className="mr-1" />
-                  Convert to Ticket
-                </Button>
-              )}
-              {item.status === 'open' && (
-                <Button size="sm" variant="ghost" onClick={handleDefer} className="w-full sm:w-auto justify-center">
-                  Defer
-                </Button>
-              )}
               <Button size="sm" variant="destructive" onClick={handleOpenDeleteConfirm} className="w-full sm:w-auto justify-center">
                 Delete
               </Button>

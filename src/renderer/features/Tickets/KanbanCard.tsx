@@ -7,6 +7,7 @@ import { openTicketInCode } from '@/renderer/services/navigation';
 import { isActivePhase } from '@/shared/ticket-phase';
 import type { Ticket, TicketPhase } from '@/shared/types';
 
+import { APPETITE_COLORS, APPETITE_LABELS } from '@/renderer/features/Inbox/shaping-constants';
 import { PHASE_COLORS, PHASE_LABELS, RESOLUTION_COLORS, RESOLUTION_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './ticket-constants';
 import { ticketApi } from './state';
 
@@ -79,6 +80,16 @@ export const KanbanCard = memo(
             >
               {TICKET_PRIORITY_LABELS[ticket.priority]}
             </span>
+            {ticket.shaping?.appetite && (
+              <span
+                className={cn(
+                  'text-xs px-1.5 py-0.5 rounded-full font-medium',
+                  APPETITE_COLORS[ticket.shaping.appetite]
+                )}
+              >
+                {APPETITE_LABELS[ticket.shaping.appetite]}
+              </span>
+            )}
             {ticket.resolution && (
               <span
                 className={cn(

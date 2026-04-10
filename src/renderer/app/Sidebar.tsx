@@ -1,12 +1,13 @@
 import { useStore } from '@nanostores/react';
 import { motion } from 'framer-motion';
-import { memo, useCallback, useMemo } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   PiChatCircleFill,
   PiChartBarBold,
   PiCodeBold,
   PiDotsThreeBold,
   PiGearFill,
+  PiLightningFill,
   PiRocketLaunchFill,
 } from 'react-icons/pi';
 
@@ -14,10 +15,12 @@ import { OmniLogo } from '@/renderer/common/AsciiLogo';
 import { cn } from '@/renderer/ds';
 import { $inboxItems } from '@/renderer/features/Inbox/state';
 import { $isSettingsOpen } from '@/renderer/features/SettingsModal/state';
+import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { LayoutMode } from '@/shared/types';
 
-const ALL_TABS: { value: LayoutMode; label: string; icon: React.ReactNode; enterprise?: boolean }[] = [
+const ALL_TABS: { value: LayoutMode; label: string; icon: React.ReactNode; enterprise?: boolean; alwaysVisible?: boolean }[] = [
+  { value: 'home', label: 'Now', icon: <PiLightningFill size={20} />, alwaysVisible: true },
   { value: 'chat', label: 'Chat', icon: <PiChatCircleFill size={20} /> },
   { value: 'code', label: 'Code', icon: <PiCodeBold size={20} /> },
   { value: 'projects', label: 'Projects', icon: <PiRocketLaunchFill size={20} /> },
@@ -46,19 +49,24 @@ export const Sidebar = memo(() => {
     $isSettingsOpen.set(true);
   }, []);
 
-  const hasPlatform = Boolean(store.platform?.accessToken);
+  const [isEnterprise, setIsEnterprise] = useState(false);
+  useEffect(() => {
+    emitter.invoke('platform:is-enterprise').then(setIsEnterprise);
+  }, []);
   const visibleTabs = useMemo(
     () => {
       return ALL_TABS.filter((t) => {
-        // Enterprise tabs: only when authenticated to platform
-        if (t.enterprise) return hasPlatform;
+        // Always-visible tabs (Home, Chat)
+        if (t.alwaysVisible) return true;
+        // Enterprise tabs: only in enterprise builds
+        if (t.enterprise) return isEnterprise;
         // Preview tabs (Code, Projects): dev mode or preview features enabled
         if (t.value !== 'chat') return import.meta.env.MODE === 'development' || store.previewFeatures;
         // Chat: always visible
         return true;
       });
     },
-    [store.previewFeatures, hasPlatform]
+    [store.previewFeatures, isEnterprise]
   );
 
   const activeTab = store.layoutMode;

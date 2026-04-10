@@ -15,13 +15,15 @@ type OmniAgentsHostAppProps = {
   state: OmniAgentsHostState;
   variables?: Record<string, unknown>;
   onClientToolCall?: ClientToolCallHandler;
+  sessionId?: string;
+  onSessionChange?: (sessionId: string | undefined) => void;
   onReady?: () => void;
   headerActionsTargetId?: string;
   headerActionsCompact?: boolean;
 };
 
 export const OmniAgentsHostApp = memo(
-  ({ state, variables, onClientToolCall, onReady, headerActionsTargetId, headerActionsCompact }: OmniAgentsHostAppProps) => {
+  ({ state, variables, onClientToolCall, sessionId, onSessionChange, onReady, headerActionsTargetId, headerActionsCompact }: OmniAgentsHostAppProps) => {
     const [greeting] = useState(getGreeting);
     const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([]);
     const pendingRef = useRef(pendingMessages);
@@ -95,6 +97,8 @@ export const OmniAgentsHostApp = memo(
               uiUrl={state.uiUrl}
               variables={variables}
               greeting={greeting}
+              sessionId={sessionId}
+              onSessionChange={onSessionChange}
               onReady={() => {
                 handleAppMounted();
                 onReady?.();

@@ -113,6 +113,7 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
           <>
             <FormField label="Sandbox backend">
               <Select value={store.sandboxBackend ?? 'docker'} onChange={onChangeSandboxBackend} disabled={!store.sandboxEnabled}>
+                <option value="local">Local (bwrap)</option>
                 <option value="docker">Docker</option>
                 <option value="podman">Podman</option>
                 <option value="vm">VM (QEMU)</option>

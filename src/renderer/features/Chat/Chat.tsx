@@ -22,6 +22,8 @@ const SandboxRunningView = memo(
     theme,
     greeting,
     sandboxLabel,
+    sessionId,
+    onSessionChange,
   }: {
     sandboxUrls: {
       uiUrl: string;
@@ -31,6 +33,8 @@ const SandboxRunningView = memo(
     theme: string;
     greeting?: string;
     sandboxLabel?: string;
+    sessionId?: string;
+    onSessionChange?: (sessionId: string | undefined) => void;
   }) => {
     const uiSrc = useMemo(() => {
       const url = new URL(sandboxUrls.uiUrl, window.location.origin);
@@ -49,7 +53,7 @@ const SandboxRunningView = memo(
       <div className="flex flex-col w-full h-full relative">
         <div className="flex-1 min-h-0 relative">
           <div className="w-full h-full relative">
-            <OmniAgentsApp uiUrl={uiSrc} greeting={greeting} sandboxLabel={sandboxLabel} variables={buildInteractiveVariables()} onClientToolCall={buildClientToolHandler()} />
+            <OmniAgentsApp uiUrl={uiSrc} greeting={greeting} sandboxLabel={sandboxLabel} sessionId={sessionId} onSessionChange={onSessionChange} variables={buildInteractiveVariables()} onClientToolCall={buildClientToolHandler()} />
             {vncSrc && (
               <FloatingWidget
                 src={vncSrc}
@@ -80,6 +84,11 @@ export const Chat = memo(() => {
 
   const theme = store.theme ?? 'tokyo-night';
   const sandboxLabel = useMemo(() => (store.sandboxEnabled ? buildSandboxLabel(store.sandboxVariant) : undefined), [store.sandboxEnabled, store.sandboxVariant]);
+
+  const chatSessionId = store.chatSessionId ?? undefined;
+  const handleSessionChange = useCallback((sessionId: string | undefined) => {
+    persistedStoreApi.setKey('chatSessionId', sessionId ?? null);
+  }, []);
 
   // Derive URLs from chatStatus (unified — handles both local and sandbox modes)
   const chatData = useMemo(() => {
@@ -140,7 +149,7 @@ export const Chat = memo(() => {
               if (el) handleRunningReady();
             }}
           >
-            <SandboxRunningView sandboxUrls={chatData} theme={theme} greeting={greeting} sandboxLabel={sandboxLabel} />
+            <SandboxRunningView sandboxUrls={chatData} theme={theme} greeting={greeting} sandboxLabel={sandboxLabel} sessionId={chatSessionId} onSessionChange={handleSessionChange} />
           </div>
         )}
       </div>
@@ -153,6 +162,8 @@ export const Chat = memo(() => {
       <OmniAgentsHostApp
         variables={buildInteractiveVariables()}
         onClientToolCall={buildClientToolHandler()}
+        sessionId={chatSessionId}
+        onSessionChange={handleSessionChange}
         state={
           localUiUrl
             ? { type: 'ready', uiUrl: localUiUrl }

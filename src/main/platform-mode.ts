@@ -39,7 +39,7 @@ export const isPlatformAuthenticated = (platform?: PlatformCredentials): boolean
  *
  * - `'platform'` only when OMNI_COMPUTE_MODE=platform (cloud container management)
  * - `'sandbox'` when sandboxEnabled (local Docker/Podman)
- * - `'local'` when running without sandbox
+ * - `'none'` when running without sandbox
  */
 export function resolveAgentMode(opts: {
   platform?: PlatformCredentials;
@@ -53,7 +53,7 @@ export function resolveAgentMode(opts: {
   ) {
     return 'platform';
   }
-  return opts.sandboxEnabled ? 'sandbox' : 'local';
+  return opts.sandboxEnabled ? 'sandbox' : 'none';
 }
 
 /**

@@ -4,21 +4,25 @@ import { PiCaretRightBold, PiFolderBold, PiPlusBold } from 'react-icons/pi';
 
 import { Badge, cn, EmptyState, FAB, TopAppBar } from '@/renderer/ds';
 import { $inboxItems } from '@/renderer/features/Inbox/state';
+import { IceboxList } from '@/renderer/features/Inbox/IceboxList';
 import { InboxDetail } from '@/renderer/features/Inbox/InboxDetail';
 import { InboxList } from '@/renderer/features/Inbox/InboxList';
+import { inboxApi } from '@/renderer/features/Inbox/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { InboxItemId } from '@/shared/types';
 
 import { ProjectDetail } from './ProjectDetail';
 import { ProjectForm } from './ProjectForm';
 import { TicketsSidebar } from './Sidebar';
-import { $ticketsView, ticketApi } from './state';
+import { $activeWipTickets, $ticketsView, $wipDialogPendingTicket, ticketApi } from './state';
+import { WipLimitDialog } from './WipLimitDialog';
 
 /* ---------- Shared sub-views ---------- */
 
 const InboxView = memo(() => {
   const view = useStore($ticketsView);
   const selectedId = view.type === 'inbox' ? view.selectedItemId ?? null : null;
+  const [showIcebox, setShowIcebox] = useState(false);
 
   const handleSelect = useCallback((id: InboxItemId | null) => {
     ticketApi.goToInbox(id ?? undefined);
@@ -28,10 +32,22 @@ const InboxView = memo(() => {
     ticketApi.goToInbox();
   }, []);
 
+  const handleShowIcebox = useCallback(() => {
+    void inboxApi.fetchIceboxItems();
+    setShowIcebox(true);
+  }, []);
+
+  const handleHideIcebox = useCallback(() => {
+    setShowIcebox(false);
+  }, []);
+
+  if (showIcebox) {
+    return <IceboxList onBack={handleHideIcebox} />;
+  }
   if (selectedId) {
     return <InboxDetail itemId={selectedId} onBack={handleBack} />;
   }
-  return <InboxList selectedId={selectedId} onSelect={handleSelect} />;
+  return <InboxList selectedId={selectedId} onSelect={handleSelect} onShowIcebox={handleShowIcebox} />;
 });
 InboxView.displayName = 'InboxView';
 
@@ -188,7 +204,42 @@ export const Tickets = memo(() => {
       </div>
 
       {formOpen && <ProjectForm open={formOpen} onClose={() => setFormOpen(false)} />}
+      <WipLimitOverlay />
     </div>
   );
 });
 Tickets.displayName = 'Tickets';
+
+/** Renders the WIP limit dialog when a pending ticket is set. */
+const WipLimitOverlay = memo(() => {
+  const pendingTicket = useStore($wipDialogPendingTicket);
+  const activeTickets = useStore($activeWipTickets);
+
+  const handleDrop = useCallback((droppedTicketId: string) => {
+    const pending = $wipDialogPendingTicket.get();
+    $wipDialogPendingTicket.set(null);
+    // After stopping the dropped ticket, start the pending one
+    if (pending) {
+      // Small delay to let the stop propagate
+      setTimeout(() => {
+        void ticketApi.startSupervisor(pending.id);
+      }, 500);
+    }
+  }, []);
+
+  const handleCancel = useCallback(() => {
+    $wipDialogPendingTicket.set(null);
+  }, []);
+
+  if (!pendingTicket) return null;
+
+  return (
+    <WipLimitDialog
+      pendingTicket={pendingTicket}
+      activeTickets={activeTickets}
+      onDrop={handleDrop}
+      onCancel={handleCancel}
+    />
+  );
+});
+WipLimitOverlay.displayName = 'WipLimitOverlay';

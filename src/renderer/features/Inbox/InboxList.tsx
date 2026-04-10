@@ -3,28 +3,32 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PiCaretRightBold, PiPlusBold, PiTrashFill } from 'react-icons/pi';
 
 import { Badge, cn, FAB, IconButton } from '@/renderer/ds';
+import { daysRemaining } from '@/lib/inbox-expiry';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { InboxItem, InboxItemId, InboxItemStatus } from '@/shared/types';
 
-import { $inboxItems, inboxApi, openQuickCapture } from './state';
+import { $inboxItems, $iceboxItems, inboxApi, openQuickCapture } from './state';
 
 const STATUS_DOT: Record<InboxItemStatus, string> = {
   open: 'bg-blue-400',
   done: 'bg-green-400',
   deferred: 'bg-fg-muted/50',
+  iceboxed: 'bg-fg-muted/30',
 };
 
 const STATUS_LABELS: Record<InboxItemStatus, string> = {
   open: 'Open',
   done: 'Done',
   deferred: 'Deferred',
+  iceboxed: 'Iceboxed',
 };
 
-const FILTERS: { value: InboxItemStatus | 'all'; label: string }[] = [
+type InboxFilter = 'all' | 'open' | 'done';
+
+const FILTERS: { value: InboxFilter; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'open', label: 'Open' },
   { value: 'done', label: 'Done' },
-  { value: 'deferred', label: 'Deferred' },
 ];
 
 function timeAgo(ts: number): string {
@@ -89,16 +93,31 @@ const InboxCard = memo(
           </div>
           <div className="flex items-center gap-2 text-xs text-fg-subtle">
             <span>{timeAgo(item.createdAt)}</span>
+            {item.status === 'open' && (() => {
+              const days = daysRemaining(item, Date.now());
+              return (
+                <>
+                  <span className="text-fg-muted/30">&middot;</span>
+                  <span className={cn(days <= 1 ? 'text-amber-400' : 'text-fg-subtle')}>
+                    {days <= 0 ? 'expiring' : `${days}d left`}
+                  </span>
+                </>
+              );
+            })()}
+            {item.status === 'open' && (
+              <>
+                <span className="text-fg-muted/30">&middot;</span>
+                {item.shaping ? (
+                  <span className="text-green-400">Shaped</span>
+                ) : (
+                  <span className="text-fg-muted">Needs shaping</span>
+                )}
+              </>
+            )}
             {project && (
               <>
                 <span className="text-fg-muted/30">&middot;</span>
                 <span className="text-purple-400 truncate">{project.label}</span>
-              </>
-            )}
-            {item.linkedTicketIds && item.linkedTicketIds.length > 0 && (
-              <>
-                <span className="text-fg-muted/30">&middot;</span>
-                <span>{item.linkedTicketIds.length} ticket{item.linkedTicketIds.length > 1 ? 's' : ''}</span>
               </>
             )}
           </div>
@@ -126,17 +145,20 @@ export const InboxList = memo(
   ({
     selectedId,
     onSelect,
+    onShowIcebox,
   }: {
     selectedId: InboxItemId | null;
     onSelect: (id: InboxItemId | null) => void;
+    onShowIcebox?: () => void;
   }) => {
     const itemsMap = useStore($inboxItems);
-    const [filter, setFilter] = useState<InboxItemStatus | 'all'>('all');
+    const iceboxMap = useStore($iceboxItems);
+    const [filter, setFilter] = useState<InboxFilter>('all');
     const [focusIndex, setFocusIndex] = useState(-1);
     const listRef = useRef<HTMLDivElement>(null);
 
     const items = useMemo(() => {
-      let list = Object.values(itemsMap);
+      let list = Object.values(itemsMap).filter((i) => i.status !== 'iceboxed');
       if (filter !== 'all') {
         list = list.filter((i) => i.status === filter);
       }
@@ -183,12 +205,6 @@ export const InboxList = memo(
           case 'Enter':
             e.preventDefault();
             if (focusedItem) onSelect(focusedItem.id);
-            break;
-          case 'd':
-            e.preventDefault();
-            if (focusedItem && focusedItem.status === 'open') {
-              void inboxApi.updateItem(focusedItem.id, { status: 'deferred' });
-            }
             break;
           case 'x':
             e.preventDefault();
@@ -279,12 +295,25 @@ export const InboxList = memo(
                 <span><kbd className="px-1 py-0.5 rounded border border-surface-border">j</kbd>/<kbd className="px-1 py-0.5 rounded border border-surface-border">k</kbd> navigate</span>
                 <span><kbd className="px-1 py-0.5 rounded border border-surface-border">Enter</kbd> open</span>
                 <span><kbd className="px-1 py-0.5 rounded border border-surface-border">x</kbd> done</span>
-                <span><kbd className="px-1 py-0.5 rounded border border-surface-border">d</kbd> defer</span>
                 <span><kbd className="px-1 py-0.5 rounded border border-surface-border">Del</kbd> remove</span>
               </div>
             </>
           )}
         </div>
+
+        {/* Icebox link */}
+        {onShowIcebox && (() => {
+          const iceboxCount = Object.keys(iceboxMap).length;
+          if (iceboxCount === 0) return null;
+          return (
+            <button
+              onClick={onShowIcebox}
+              className="shrink-0 px-4 py-2.5 border-t border-surface-border text-xs text-fg-subtle hover:text-fg transition-colors text-left"
+            >
+              View icebox ({iceboxCount} item{iceboxCount !== 1 ? 's' : ''})
+            </button>
+          );
+        })()}
 
         <FAB icon={<PiPlusBold size={22} />} onClick={openQuickCapture} aria-label="New item" className="sm:hidden" />
       </div>

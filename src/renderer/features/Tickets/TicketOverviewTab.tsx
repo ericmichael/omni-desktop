@@ -5,6 +5,7 @@ import { PiPencilSimpleBold, PiXBold } from 'react-icons/pi';
 import { Button, cn, IconButton, SectionLabel, Select, Textarea } from '@/renderer/ds';
 import type { Ticket, TicketPriority } from '@/shared/types';
 
+import { APPETITE_COLORS, APPETITE_DESCRIPTIONS, APPETITE_LABELS } from '@/renderer/features/Inbox/shaping-constants';
 import { COLUMN_BADGE_COLORS } from './ticket-constants';
 import { $tickets, ticketApi } from './state';
 
@@ -122,6 +123,31 @@ export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
           </button>
         )}
       </div>
+
+      {/* Scope (from shaping) */}
+      {ticket.shaping && (
+        <div className="flex flex-col gap-2">
+          <SectionLabel>Scope</SectionLabel>
+          <div className="flex flex-col gap-2.5 rounded-xl bg-surface-raised/30 p-3 border border-surface-border">
+            <div>
+              <span className="text-xs font-medium text-fg-muted">Done looks like</span>
+              <p className="text-sm text-fg mt-0.5">{ticket.shaping.doneLooksLike}</p>
+            </div>
+            <div>
+              <span className="text-xs font-medium text-fg-muted">Appetite</span>
+              <div className="mt-0.5">
+                <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium', APPETITE_COLORS[ticket.shaping.appetite])}>
+                  {APPETITE_LABELS[ticket.shaping.appetite]} — {APPETITE_DESCRIPTIONS[ticket.shaping.appetite]}
+                </span>
+              </div>
+            </div>
+            <div>
+              <span className="text-xs font-medium text-fg-muted">Out of scope</span>
+              <p className="text-sm text-fg mt-0.5">{ticket.shaping.outOfScope}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Priority */}
       <div className="flex flex-col gap-2">
