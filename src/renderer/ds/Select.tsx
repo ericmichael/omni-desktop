@@ -1,37 +1,39 @@
+import { Select as FluentSelect } from '@fluentui/react-components';
 import { forwardRef } from 'react';
-
-import { cn } from '@/renderer/ds/cn';
 
 type Size = 'sm' | 'md' | 'lg';
 
 type SelectProps = {
   size?: Size;
   className?: string;
-} & Omit<React.SelectHTMLAttributes<HTMLSelectElement>, 'size'>;
+} & Omit<React.SelectHTMLAttributes<HTMLSelectElement>, 'size' | 'onChange'> & {
+    onChange?: React.ChangeEventHandler<HTMLSelectElement>;
+  };
 
-const sizeClasses: Record<Size, string> = {
-  sm: 'h-9 px-3 text-sm sm:h-8 sm:px-2 sm:text-xs',
-  md: 'h-10 px-3 text-base sm:h-9 sm:px-2.5 sm:text-sm',
-  lg: 'h-12 px-4 text-base sm:h-10 sm:px-3 sm:text-sm',
+const sizeMap: Record<Size, 'small' | 'medium' | 'large'> = {
+  sm: 'small',
+  md: 'medium',
+  lg: 'large',
 };
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(
-  ({ size = 'md', className, children, ...props }, ref) => {
+  ({ size = 'md', className, children, onChange, value, defaultValue, disabled, ...props }, ref) => {
     return (
-      <select
+      <FluentSelect
         ref={ref}
-        className={cn(
-          'rounded-lg border border-surface-border/50 bg-surface text-fg cursor-pointer outline-none transition-colors',
-          'focus:border-accent-500/50',
-          'disabled:opacity-40 disabled:cursor-not-allowed',
-          sizeClasses[size],
-          className
-        )}
+        size={sizeMap[size]}
+        appearance="underline"
+        className={className}
+        onChange={onChange}
+        value={value as string | undefined}
+        defaultValue={defaultValue as string | undefined}
+        disabled={disabled}
         {...props}
       >
         {children}
-      </select>
+      </FluentSelect>
     );
   }
 );
+
 Select.displayName = 'Select';

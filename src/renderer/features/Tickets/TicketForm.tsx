@@ -1,5 +1,6 @@
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 
 import { Button, Input, Select, Textarea } from '@/renderer/ds';
 import { $initiatives } from '@/renderer/features/Initiatives/state';
@@ -8,7 +9,41 @@ import type { GitRepoInfo, InitiativeId, ProjectId, TicketPriority } from '@/sha
 
 import { $activeInitiativeId, $tickets, ticketApi } from './state';
 
+const useStyles = makeStyles({
+  root: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+    borderRadius: tokens.borderRadiusMedium,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: 'rgba(var(--colorNeutralBackground1Hover), 0.5)',
+    padding: tokens.spacingVerticalL,
+  },
+  fieldRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+    flexWrap: 'wrap',
+  },
+  fieldGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  fieldLabel: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightMedium,
+    color: tokens.colorNeutralForeground3,
+  },
+  actions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+});
+
 export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; onClose: () => void }) => {
+  const styles = useStyles();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<TicketPriority>('medium');
@@ -91,7 +126,7 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
   }, [title, description, priority, blockedBy, branch, gitInfo, isSubmitting, projectId, onClose]);
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-surface-border bg-surface-overlay/50 p-4">
+    <div className={styles.root}>
       <Input
         value={title}
         onChange={handleTitleChange}
@@ -104,10 +139,10 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
         placeholder="Description (optional)..."
         rows={2}
       />
-      <div className="flex items-center gap-3 flex-wrap">
+      <div className={styles.fieldRow}>
         {projectInitiatives.length > 1 && (
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-medium text-fg-subtle">Initiative</label>
+          <div className={styles.fieldGroup}>
+            <label className={styles.fieldLabel}>Initiative</label>
             <Select
               value={initiativeId}
               onChange={(e) => setInitiativeId(e.target.value)}
@@ -121,8 +156,8 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
             </Select>
           </div>
         )}
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-medium text-fg-subtle">Priority</label>
+        <div className={styles.fieldGroup}>
+          <label className={styles.fieldLabel}>Priority</label>
           <Select
             value={priority}
             onChange={handlePriorityChange}
@@ -135,8 +170,8 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
           </Select>
         </div>
         {projectTickets.length > 0 && (
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-medium text-fg-subtle">Blocked by</label>
+          <div className={styles.fieldGroup}>
+            <label className={styles.fieldLabel}>Blocked by</label>
             <Select
               multiple
               value={blockedBy}
@@ -154,9 +189,9 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
         )}
       </div>
       {gitInfo?.isGitRepo && (
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-medium text-fg-subtle">Branch</label>
+        <div className={styles.fieldRow}>
+          <div className={styles.fieldGroup}>
+            <label className={styles.fieldLabel}>Branch</label>
             <Select
               value={branch}
               onChange={(e) => setBranch(e.target.value)}
@@ -171,7 +206,7 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
           </div>
         </div>
       )}
-      <div className="flex items-center gap-2">
+      <div className={styles.actions}>
         <Button onClick={handleSubmit} isDisabled={!title.trim() || isSubmitting}>
           Create Ticket
         </Button>

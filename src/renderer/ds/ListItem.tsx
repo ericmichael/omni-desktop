@@ -1,7 +1,6 @@
+import { Body1, Caption1, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import type { ReactNode } from 'react';
-import { PiCaretRightBold } from 'react-icons/pi';
-
-import { cn } from '@/renderer/ds/cn';
+import { ChevronRight20Regular } from '@fluentui/react-icons';
 
 type ListItemProps = {
   icon?: ReactNode;
@@ -13,26 +12,75 @@ type ListItemProps = {
   className?: string;
 };
 
-export const ListItem = ({ icon, label, detail, trailing, showChevron = true, onClick, className }: ListItemProps) => (
-  <button
-    type="button"
-    onClick={onClick}
-    className={cn(
-      'flex items-center gap-3.5 w-full px-4 sm:px-5 py-3.5 text-left text-fg',
-      'hover:bg-white/5 active:bg-white/10 transition-colors',
-      className
-    )}
-  >
-    {icon && (
-      <span className="size-9 rounded-xl bg-surface-overlay/60 flex items-center justify-center shrink-0 text-fg-muted">
-        {icon}
+const useStyles = makeStyles({
+  root: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '14px',
+    width: '100%',
+    paddingLeft: '16px',
+    paddingRight: '16px',
+    paddingTop: '14px',
+    paddingBottom: '14px',
+    textAlign: 'left',
+    color: tokens.colorNeutralForeground1,
+    backgroundColor: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
+    ':active': {
+      backgroundColor: tokens.colorNeutralBackground1Pressed,
+    },
+  },
+  iconWrap: {
+    width: '36px',
+    height: '36px',
+    borderRadius: '12px',
+    backgroundColor: tokens.colorNeutralBackground3,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    color: tokens.colorNeutralForeground2,
+  },
+  content: {
+    flex: '1 1 0',
+    minWidth: 0,
+    overflow: 'hidden',
+  },
+  label: {
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  detail: {
+    display: 'block',
+    marginTop: '2px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  chevron: {
+    flexShrink: 0,
+    color: tokens.colorNeutralForeground3,
+    opacity: 0.4,
+  },
+});
+
+export const ListItem = ({ icon, label, detail, trailing, showChevron = true, onClick, className }: ListItemProps) => {
+  const styles = useStyles();
+  return (
+    <button type="button" onClick={onClick} className={mergeClasses(styles.root, className)}>
+      {icon && <span className={styles.iconWrap}>{icon}</span>}
+      <span className={styles.content}>
+        <Body1 className={styles.label}>{label}</Body1>
+        {detail && <Caption1 className={styles.detail}>{detail}</Caption1>}
       </span>
-    )}
-    <span className="flex-1 min-w-0">
-      <span className="text-base sm:text-sm font-medium block truncate">{label}</span>
-      {detail && <span className="text-xs text-fg-subtle block mt-0.5 truncate">{detail}</span>}
-    </span>
-    {trailing}
-    {showChevron && <PiCaretRightBold size={14} className="text-fg-muted/40 shrink-0" />}
-  </button>
-);
+      {trailing}
+      {showChevron && <ChevronRight20Regular style={{ width: 14, height: 14 }} className={styles.chevron} />}
+    </button>
+  );
+};

@@ -1,24 +1,5 @@
-import type { TicketPriority, TicketResolution, AgentProcessStatus, TicketPhase } from '@/shared/types';
+import type { TicketPriority, TicketResolution, TicketPhase } from '@/shared/types';
 
-export const STATUS_TEXT_COLORS: Partial<Record<AgentProcessStatus['type'], string>> = {
-  uninitialized: 'text-fg-subtle',
-  starting: 'text-yellow-500 animate-pulse',
-  running: 'text-green-500',
-  stopping: 'text-yellow-500',
-  exiting: 'text-yellow-500',
-  exited: 'text-fg-subtle',
-  error: 'text-red-500',
-};
-
-export const STATUS_BOX_COLORS: Partial<Record<AgentProcessStatus['type'], string>> = {
-  uninitialized: 'bg-surface-overlay/50 border-surface-border text-fg-subtle',
-  starting: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-500 animate-pulse',
-  running: 'bg-green-500/10 border-green-500/30 text-green-500',
-  stopping: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-500',
-  exiting: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-500',
-  exited: 'bg-surface-overlay/50 border-surface-border text-fg-subtle',
-  error: 'bg-red-500/10 border-red-500/30 text-red-500',
-};
 
 export const TICKET_PRIORITY_LABELS: Record<TicketPriority, string> = {
   low: 'Low',
@@ -27,66 +8,39 @@ export const TICKET_PRIORITY_LABELS: Record<TicketPriority, string> = {
   critical: 'Critical',
 };
 
-export const TICKET_PRIORITY_COLORS: Record<TicketPriority, string> = {
-  low: 'text-fg-muted bg-fg-muted/10',
-  medium: 'text-blue-400 bg-blue-400/10',
-  high: 'text-orange-400 bg-orange-400/10',
-  critical: 'text-red-400 bg-red-400/10',
+export type BadgeColor = 'default' | 'blue' | 'green' | 'purple' | 'red' | 'yellow' | 'sky' | 'orange';
+
+export const TICKET_PRIORITY_COLORS: Record<TicketPriority, BadgeColor> = {
+  low: 'default',
+  medium: 'blue',
+  high: 'orange',
+  critical: 'red',
 };
 
-const COLUMN_COLORS_MAP: Record<string, string> = {
-  backlog: 'border-t-gray-500',
-  spec: 'border-t-purple-500',
-  implementation: 'border-t-blue-500',
-  review: 'border-t-orange-500',
-  pr: 'border-t-indigo-500',
-  completed: 'border-t-green-500',
+/** Column color definitions — each column maps to a hue used for border-top, background tint, and badge. */
+type ColumnColorDef = {
+  borderTop: string;
+  background: string;
+  badgeColor: string;
+  badgeBg: string;
 };
 
-const COLUMN_BG_COLORS_MAP: Record<string, string> = {
-  backlog: 'bg-gray-500/5',
-  spec: 'bg-purple-500/5',
-  implementation: 'bg-blue-500/5',
-  review: 'bg-orange-500/5',
-  pr: 'bg-indigo-500/5',
-  completed: 'bg-green-500/5',
+const COLUMN_COLOR_DEFS: Record<string, ColumnColorDef> = {
+  backlog: { borderTop: '#6b7280', background: 'rgba(107, 114, 128, 0.05)', badgeColor: '#9ca3af', badgeBg: 'rgba(156, 163, 175, 0.1)' },
+  spec: { borderTop: '#a855f7', background: 'rgba(168, 85, 247, 0.05)', badgeColor: '#c084fc', badgeBg: 'rgba(192, 132, 252, 0.1)' },
+  implementation: { borderTop: '#3b82f6', background: 'rgba(59, 130, 246, 0.05)', badgeColor: '#60a5fa', badgeBg: 'rgba(96, 165, 250, 0.1)' },
+  review: { borderTop: '#f97316', background: 'rgba(249, 115, 22, 0.05)', badgeColor: '#fb923c', badgeBg: 'rgba(251, 146, 60, 0.1)' },
+  pr: { borderTop: '#6366f1', background: 'rgba(99, 102, 241, 0.05)', badgeColor: '#818cf8', badgeBg: 'rgba(129, 140, 248, 0.1)' },
+  completed: { borderTop: '#22c55e', background: 'rgba(34, 197, 94, 0.05)', badgeColor: '#4ade80', badgeBg: 'rgba(74, 222, 128, 0.1)' },
 };
 
-const COLUMN_BADGE_COLORS_MAP: Record<string, string> = {
-  backlog: 'text-gray-400 bg-gray-400/10',
-  spec: 'text-purple-400 bg-purple-400/10',
-  implementation: 'text-blue-400 bg-blue-400/10',
-  review: 'text-orange-400 bg-orange-400/10',
-  pr: 'text-indigo-400 bg-indigo-400/10',
-  completed: 'text-green-400 bg-green-400/10',
-};
-
-/** Fallback color cycle for custom columns not in the default set. */
-const FALLBACK_BORDER_COLORS = [
-  'border-t-teal-500',
-  'border-t-rose-500',
-  'border-t-amber-500',
-  'border-t-cyan-500',
-  'border-t-lime-500',
-  'border-t-fuchsia-500',
-];
-
-const FALLBACK_BG_COLORS = [
-  'bg-teal-500/5',
-  'bg-rose-500/5',
-  'bg-amber-500/5',
-  'bg-cyan-500/5',
-  'bg-lime-500/5',
-  'bg-fuchsia-500/5',
-];
-
-const FALLBACK_BADGE_COLORS = [
-  'text-teal-400 bg-teal-400/10',
-  'text-rose-400 bg-rose-400/10',
-  'text-amber-400 bg-amber-400/10',
-  'text-cyan-400 bg-cyan-400/10',
-  'text-lime-400 bg-lime-400/10',
-  'text-fuchsia-400 bg-fuchsia-400/10',
+const FALLBACK_COLORS: ColumnColorDef[] = [
+  { borderTop: '#14b8a6', background: 'rgba(20, 184, 166, 0.05)', badgeColor: '#2dd4bf', badgeBg: 'rgba(45, 212, 191, 0.1)' },
+  { borderTop: '#f43f5e', background: 'rgba(244, 63, 94, 0.05)', badgeColor: '#fb7185', badgeBg: 'rgba(251, 113, 133, 0.1)' },
+  { borderTop: '#f59e0b', background: 'rgba(245, 158, 11, 0.05)', badgeColor: '#fbbf24', badgeBg: 'rgba(251, 191, 36, 0.1)' },
+  { borderTop: '#06b6d4', background: 'rgba(6, 182, 212, 0.05)', badgeColor: '#22d3ee', badgeBg: 'rgba(34, 211, 238, 0.1)' },
+  { borderTop: '#84cc16', background: 'rgba(132, 204, 22, 0.05)', badgeColor: '#a3e635', badgeBg: 'rgba(163, 230, 53, 0.1)' },
+  { borderTop: '#d946ef', background: 'rgba(217, 70, 239, 0.05)', badgeColor: '#e879f9', badgeBg: 'rgba(232, 121, 249, 0.1)' },
 ];
 
 /** Simple hash to get a stable index from a column ID. */
@@ -98,18 +52,10 @@ const stableIndex = (id: string, len: number): number => {
   return Math.abs(hash) % len;
 };
 
-export const COLUMN_COLORS: Record<string, string> = new Proxy(COLUMN_COLORS_MAP, {
-  get: (target, prop: string) => target[prop] ?? FALLBACK_BORDER_COLORS[stableIndex(prop, FALLBACK_BORDER_COLORS.length)],
-});
+/** Returns the color definition for a column, falling back to a stable hash-based color for custom columns. */
+export const getColumnColors = (columnId: string): ColumnColorDef =>
+  COLUMN_COLOR_DEFS[columnId] ?? FALLBACK_COLORS[stableIndex(columnId, FALLBACK_COLORS.length)];
 
-export const COLUMN_BG_COLORS: Record<string, string> = new Proxy(COLUMN_BG_COLORS_MAP, {
-  get: (target, prop: string) => target[prop] ?? FALLBACK_BG_COLORS[stableIndex(prop, FALLBACK_BG_COLORS.length)],
-});
-
-export const COLUMN_BADGE_COLORS: Record<string, string> = new Proxy(COLUMN_BADGE_COLORS_MAP, {
-  get: (target, prop: string) =>
-    target[prop] ?? FALLBACK_BADGE_COLORS[stableIndex(prop, FALLBACK_BADGE_COLORS.length)],
-});
 
 
 /** Human-readable labels for ticket resolutions. */
@@ -121,11 +67,11 @@ export const RESOLUTION_LABELS: Record<TicketResolution, string> = {
 };
 
 /** Badge colors for ticket resolutions. */
-export const RESOLUTION_COLORS: Record<TicketResolution, string> = {
-  completed: 'text-green-400 bg-green-400/10',
-  wont_do: 'text-fg-muted bg-fg-muted/10',
-  duplicate: 'text-yellow-400 bg-yellow-400/10',
-  cancelled: 'text-red-400 bg-red-400/10',
+export const RESOLUTION_COLORS: Record<TicketResolution, BadgeColor> = {
+  completed: 'green',
+  wont_do: 'default',
+  duplicate: 'yellow',
+  cancelled: 'red',
 };
 
 /** Human-readable labels for ticket phases. */
@@ -143,15 +89,15 @@ export const PHASE_LABELS: Partial<Record<TicketPhase, string>> = {
 };
 
 /** Phase colors for badges. */
-export const PHASE_COLORS: Partial<Record<TicketPhase, string>> = {
-  provisioning: 'text-yellow-400 bg-yellow-400/10',
-  connecting: 'text-yellow-400 bg-yellow-400/10',
-  session_creating: 'text-yellow-400 bg-yellow-400/10',
-  ready: 'text-fg-muted bg-fg-muted/10',
-  running: 'text-green-400 bg-green-400/10',
-  continuing: 'text-green-400 bg-green-400/10',
-  awaiting_input: 'text-blue-400 bg-blue-400/10',
-  retrying: 'text-yellow-400 bg-yellow-400/10',
-  error: 'text-red-400 bg-red-400/10',
-  completed: 'text-fg-muted bg-fg-muted/10',
+export const PHASE_COLORS: Partial<Record<TicketPhase, BadgeColor>> = {
+  provisioning: 'yellow',
+  connecting: 'yellow',
+  session_creating: 'yellow',
+  ready: 'default',
+  running: 'green',
+  continuing: 'green',
+  awaiting_input: 'blue',
+  retrying: 'yellow',
+  error: 'red',
+  completed: 'default',
 };

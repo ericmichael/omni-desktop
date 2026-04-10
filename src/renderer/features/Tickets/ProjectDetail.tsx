@@ -1,8 +1,9 @@
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { PiGearSixBold, PiGitBranchBold, PiPencilSimpleBold, PiPlusBold, PiTrashFill } from 'react-icons/pi';
+import { Settings20Regular, BranchFork20Regular, Edit20Regular, Add20Regular, Delete20Filled } from '@fluentui/react-icons';
+import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 
-import { Button, ConfirmDialog, IconButton, SegmentedControl, Switch } from '@/renderer/ds';
+import { Body1, Button, Caption1, ConfirmDialog, IconButton, SegmentedControl, Switch, Subtitle2, Tab, TabList } from '@/renderer/ds';
 import { $initiatives, initiativeApi } from '@/renderer/features/Initiatives/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { InitiativeId, ProjectId } from '@/shared/types';
@@ -17,7 +18,149 @@ import { $activeInitiativeId, ticketApi } from './state';
 
 type ProjectView = 'board' | 'brief';
 
+const useStyles = makeStyles({
+  root: {
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    height: '100%',
+  },
+  headerBar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: '6px',
+    paddingBottom: '6px',
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    flexShrink: 0,
+    '@media (min-width: 640px)': {
+      gap: tokens.spacingHorizontalS,
+      paddingLeft: tokens.spacingHorizontalL,
+      paddingRight: tokens.spacingHorizontalL,
+      paddingTop: tokens.spacingVerticalS,
+      paddingBottom: tokens.spacingVerticalS,
+    },
+  },
+  projectTitle: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  createdDate: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    display: 'none',
+    '@media (min-width: 640px)': {
+      display: 'inline',
+    },
+  },
+  flex1: {
+    flex: '1 1 0',
+  },
+  autoDispatchLabel: {
+    display: 'none',
+    '@media (min-width: 640px)': {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '6px',
+      fontSize: tokens.fontSizeBase200,
+      color: tokens.colorNeutralForeground2,
+      cursor: 'pointer',
+      userSelect: 'none',
+    },
+  },
+  desktopOnly: {
+    display: 'none',
+    '@media (min-width: 640px)': {
+      display: 'contents',
+    },
+  },
+  branchBadge: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    borderRadius: '9999px',
+    backgroundColor: tokens.colorPalettePurpleBackground2,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    paddingTop: '4px',
+    paddingBottom: '4px',
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightMedium,
+    color: tokens.colorPalettePurpleForeground2,
+  },
+  formArea: {
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalL,
+    flexShrink: 0,
+    '@media (min-width: 640px)': {
+      paddingLeft: tokens.spacingHorizontalXXL,
+      paddingRight: tokens.spacingHorizontalXXL,
+    },
+  },
+  filterBar: {
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    flexShrink: 0,
+    overflowX: 'auto',
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+  },
+  initiativeBar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: '6px',
+    paddingBottom: '6px',
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    flexShrink: 0,
+    overflowX: 'auto',
+    '@media (min-width: 640px)': {
+      paddingLeft: tokens.spacingHorizontalL,
+      paddingRight: tokens.spacingHorizontalL,
+    },
+  },
+  initiativeDesc: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    flex: '1 1 0',
+    minWidth: 0,
+    '@media (min-width: 640px)': {
+      fontSize: tokens.fontSizeBase200,
+    },
+  },
+  boardArea: {
+    flex: '1 1 0',
+    minHeight: 0,
+  },
+  filterBranchBadge: {
+    marginLeft: '4px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    borderRadius: '9999px',
+    backgroundColor: tokens.colorPalettePurpleBackground2,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    paddingTop: '2px',
+    paddingBottom: '2px',
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightMedium,
+    color: tokens.colorPalettePurpleForeground2,
+  },
+});
+
 export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
+  const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const [view, setView] = useState<ProjectView>('board');
   const [ticketFormOpen, setTicketFormOpen] = useState(false);
@@ -106,13 +249,13 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
   }
 
   return (
-    <div className="flex flex-col w-full h-full">
+    <div className={styles.root}>
       {/* Project header */}
-      <div className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 border-b border-surface-border shrink-0">
-        <span className="text-base sm:text-sm font-semibold text-fg truncate">{project.label}</span>
-        <span className="text-xs text-fg-subtle hidden sm:inline">
+      <div className={styles.headerBar}>
+        <Subtitle2 className={styles.projectTitle}>{project.label}</Subtitle2>
+        <Caption1 className={styles.createdDate}>
           Created {new Date(project.createdAt).toLocaleDateString()}
-        </span>
+        </Caption1>
         <SegmentedControl
           value={view}
           options={[{ value: 'board', label: 'Board' }, { value: 'brief', label: 'Brief' }]}
@@ -120,18 +263,18 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
           layoutId="project-view-toggle"
           className="ml-1 sm:ml-2 shrink-0"
         />
-        <div className="flex-1" />
-        <label className="hidden sm:flex items-center gap-1.5 text-xs text-fg-muted cursor-pointer select-none">
+        <div className={styles.flex1} />
+        <label className={styles.autoDispatchLabel}>
           <Switch checked={project.autoDispatch ?? false} onCheckedChange={handleToggleAutoDispatch} />
           Auto-dispatch
         </label>
         {!ticketFormOpen && (
           <Button size="sm" onClick={handleOpenTicketForm} className="shrink-0">
             <span className="hidden sm:inline">New Ticket</span>
-            <span className="sm:hidden"><PiPlusBold size={13} /></span>
+            <span className="sm:hidden"><Add20Regular style={{ width: 13, height: 13 }} /></span>
           </Button>
         )}
-        <span className="hidden sm:contents">
+        <span className={styles.desktopOnly}>
           {!initiativeFormOpen && projectInitiatives.length <= 1 && (
             <Button size="sm" variant="ghost" onClick={handleOpenInitiativeForm}>
               New Initiative
@@ -143,24 +286,24 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
             </Button>
           )}
           {activeInitiative?.branch && (
-            <span className="flex items-center gap-1 rounded-full bg-purple-400/10 px-2 py-1 text-xs font-medium text-purple-400">
-              <PiGitBranchBold size={12} />
+            <span className={styles.branchBadge}>
+              <BranchFork20Regular style={{ width: 16, height: 16 }} />
               {activeInitiative.branch}
             </span>
           )}
         </span>
-        <IconButton aria-label="Edit project" icon={<PiPencilSimpleBold />} size="sm" onClick={handleOpenEditForm} />
+        <IconButton aria-label="Edit project" icon={<Edit20Regular />} size="sm" onClick={handleOpenEditForm} />
         <IconButton
           aria-label="Pipeline settings"
-          icon={<PiGearSixBold />}
+          icon={<Settings20Regular />}
           size="sm"
           onClick={handleOpenPipelineSettings}
         />
-        <IconButton aria-label="Delete project" icon={<PiTrashFill />} size="sm" onClick={handleOpenDeleteConfirm} />
+        <IconButton aria-label="Delete project" icon={<Delete20Filled />} size="sm" onClick={handleOpenDeleteConfirm} />
       </div>
 
       {ticketFormOpen && (
-        <div className="px-3 sm:px-6 pt-4 shrink-0">
+        <div className={styles.formArea}>
           <TicketForm projectId={projectId} onClose={handleCloseTicketForm} />
         </div>
       )}
@@ -174,13 +317,13 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
       {editFormOpen && <ProjectForm open={editFormOpen} onClose={handleCloseEditForm} editProject={project} />}
 
       {initiativeFormOpen && (
-        <div className="px-3 sm:px-6 pt-4 shrink-0">
+        <div className={styles.formArea}>
           <InitiativeForm projectId={projectId} onClose={handleCloseInitiativeForm} />
         </div>
       )}
 
       {editingInitiativeId && activeInitiative && (
-        <div className="px-3 sm:px-6 pt-4 shrink-0">
+        <div className={styles.formArea}>
           <InitiativeForm
             projectId={projectId}
             onClose={handleCloseInitiativeEdit}
@@ -201,52 +344,39 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
 
       {/* Initiative filter bar */}
       {view === 'board' && projectInitiatives.length > 1 && (
-        <div className="flex items-center gap-1.5 px-3 sm:px-4 py-1.5 border-b border-surface-border shrink-0 overflow-x-auto scrollbar-none">
-          <button
-            className={`px-3 sm:px-2 py-1.5 sm:py-0.5 rounded-lg sm:rounded text-sm sm:text-xs shrink-0 transition-colors ${
-              activeInitiativeId === 'all'
-                ? 'bg-surface-raised text-fg font-medium'
-                : 'text-fg-muted hover:text-fg'
-            }`}
-            onClick={() => handleSelectInitiative('all')}
+        <div className={styles.filterBar}>
+          <TabList
+            selectedValue={activeInitiativeId}
+            onTabSelect={(_e, data) => handleSelectInitiative(data.value as InitiativeId | 'all')}
+            size="small"
+            appearance="subtle"
           >
-            All
-          </button>
-          {projectInitiatives.map((init) => (
-            <button
-              key={init.id}
-              className={`px-3 sm:px-2 py-1.5 sm:py-0.5 rounded-lg sm:rounded text-sm sm:text-xs shrink-0 transition-colors ${
-                activeInitiativeId === init.id
-                  ? 'bg-surface-raised text-fg font-medium'
-                  : 'text-fg-muted hover:text-fg'
-              }`}
-              onClick={() => handleSelectInitiative(init.id)}
-            >
-              {init.title}
-            </button>
-          ))}
+            <Tab value="all">All</Tab>
+            {projectInitiatives.map((init) => (
+              <Tab key={init.id} value={init.id}>{init.title}</Tab>
+            ))}
+          </TabList>
           {activeInitiative?.branch && (
-            <span className="ml-1 flex items-center gap-1 rounded-full bg-purple-400/10 px-2 py-0.5 text-xs font-medium text-purple-400">
-              <PiGitBranchBold size={10} />
+            <span className={styles.filterBranchBadge}>
+              <BranchFork20Regular style={{ width: 16, height: 16 }} />
               {activeInitiative.branch}
             </span>
           )}
-          <button
-            className="px-1 py-0.5 rounded text-xs text-fg-muted hover:text-fg transition-colors"
-            onClick={handleOpenInitiativeForm}
+          <IconButton
             aria-label="New initiative"
-          >
-            <PiPlusBold />
-          </button>
+            icon={<Add20Regular />}
+            size="sm"
+            onClick={handleOpenInitiativeForm}
+          />
         </div>
       )}
 
       {activeInitiative && !activeInitiative.isDefault && (
-        <div className="flex items-center gap-2 px-3 sm:px-4 py-1.5 border-b border-surface-border shrink-0 overflow-x-auto scrollbar-none">
+        <div className={styles.initiativeBar}>
           {activeInitiative.description && (
-            <p className="text-sm sm:text-xs text-fg-muted truncate flex-1 min-w-0">{activeInitiative.description}</p>
+            <p className={styles.initiativeDesc}>{activeInitiative.description}</p>
           )}
-          {!activeInitiative.description && <div className="flex-1" />}
+          {!activeInitiative.description && <div className={styles.flex1} />}
           {activeInitiative.status === 'active' && (
             <>
               <Button size="sm" variant="ghost" onClick={handleCompleteInitiative} className="shrink-0">
@@ -265,7 +395,7 @@ export const ProjectDetail = memo(({ projectId }: { projectId: ProjectId }) => {
         </div>
       )}
 
-      <div className="flex-1 min-h-0">
+      <div className={styles.boardArea}>
         {view === 'board' ? <KanbanBoard projectId={projectId} /> : <ProjectBrief projectId={projectId} />}
       </div>
     </div>

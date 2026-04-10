@@ -1,19 +1,73 @@
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo } from 'react';
-import {
-  PiArrowsClockwiseBold,
-  PiCheckCircleBold,
-  PiPlayFill,
-  PiPlusBold,
-  PiStopFill,
-  PiWarningCircleBold,
-} from 'react-icons/pi';
+import { ArrowSync20Regular, CheckmarkCircle20Regular, Play20Filled, Add20Regular, Stop20Filled, Warning20Regular } from '@fluentui/react-icons';
+import { makeStyles, tokens } from '@fluentui/react-components';
 
-import { Button, cn, IconButton, Spinner } from '@/renderer/ds';
+import { Badge, Button, IconButton, Spinner } from '@/renderer/ds';
 import { $pipeline, $tasks, $tickets, ticketApi } from '@/renderer/features/Tickets/state';
 import type { TicketId, TicketPhase } from '@/shared/types';
 
 import { RESOLUTION_COLORS, RESOLUTION_LABELS } from './ticket-constants';
+
+const useStyles = makeStyles({
+  columnBadge: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    backgroundColor: tokens.colorNeutralBackground2,
+    paddingLeft: '6px',
+    paddingRight: '6px',
+    paddingTop: '2px',
+    paddingBottom: '2px',
+    borderRadius: tokens.borderRadiusSmall,
+    fontWeight: tokens.fontWeightMedium,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    maxWidth: '120px',
+  },
+  phaseRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    flexShrink: 0,
+  },
+  greenIcon: {
+    color: '#4ade80',
+  },
+  greenText: {
+    fontSize: tokens.fontSizeBase200,
+    color: '#4ade80',
+    fontWeight: tokens.fontWeightMedium,
+  },
+  yellowIcon: {
+    color: '#facc15',
+  },
+  yellowText: {
+    fontSize: tokens.fontSizeBase200,
+    color: '#facc15',
+    fontWeight: tokens.fontWeightMedium,
+  },
+  blueText: {
+    fontSize: tokens.fontSizeBase200,
+    color: '#60a5fa',
+    fontWeight: tokens.fontWeightMedium,
+  },
+  blueDot: {
+    width: '6px',
+    height: '6px',
+    borderRadius: '50%',
+    backgroundColor: '#60a5fa',
+  },
+  redIcon: {
+    color: '#f87171',
+  },
+  controlsRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    flexShrink: 0,
+  },
+});
 
 /** Shared hook for ticket automation state and handlers. */
 const useTicketAutomation = (ticketId: TicketId) => {
@@ -44,6 +98,7 @@ const useTicketAutomation = (ticketId: TicketId) => {
 
 /** Column label badge for the ticket banner. */
 export const TicketColumnBadge = memo(({ ticketId }: { ticketId: TicketId }) => {
+  const styles = useStyles();
   const tickets = useStore($tickets);
   const pipeline = useStore($pipeline);
   const ticket = tickets[ticketId];
@@ -64,7 +119,7 @@ export const TicketColumnBadge = memo(({ ticketId }: { ticketId: TicketId }) => 
   if (!columnLabel) return null;
 
   return (
-    <span className="text-xs text-fg-subtle bg-surface-raised px-1.5 py-0.5 rounded-sm font-medium truncate max-w-[120px]">
+    <span className={styles.columnBadge}>
       {columnLabel}
     </span>
   );
@@ -74,12 +129,13 @@ TicketColumnBadge.displayName = 'TicketColumnBadge';
 /** Header action: new session button (+ icon). */
 export const TicketHeaderActions = memo(({ ticketId }: { ticketId: TicketId }) => {
   const { handleReset } = useTicketAutomation(ticketId);
-  return <IconButton aria-label="New session" icon={<PiPlusBold size={10} />} size="sm" onClick={handleReset} />;
+  return <IconButton aria-label="New session" icon={<Add20Regular style={{ width: 10, height: 10 }} />} size="sm" onClick={handleReset} />;
 });
 TicketHeaderActions.displayName = 'TicketHeaderActions';
 
 /** Banner action: autopilot controls + phase indicator. */
 export const TicketBannerActions = memo(({ ticketId }: { ticketId: TicketId }) => {
+  const styles = useStyles();
   const { phase, handleStart, handleStop, handleReset } = useTicketAutomation(ticketId);
 
   const isAutonomous = phase === 'running' || phase === 'continuing';
@@ -92,9 +148,9 @@ export const TicketBannerActions = memo(({ ticketId }: { ticketId: TicketId }) =
   if (isAutonomous) {
     return (
       <>
-        <PiArrowsClockwiseBold size={10} className="text-green-400 animate-spin" />
-        <span className="text-xs text-green-400 font-medium">Working</span>
-        <IconButton aria-label="Stop" icon={<PiStopFill size={10} />} size="sm" onClick={handleStop} />
+        <ArrowSync20Regular style={{ width: 10, height: 10 }} className={`${styles.greenIcon} animate-spin`} />
+        <span className={styles.greenText}>Working</span>
+        <IconButton aria-label="Stop" icon={<Stop20Filled style={{ width: 10, height: 10 }} />} size="sm" onClick={handleStop} />
       </>
     );
   }
@@ -104,26 +160,26 @@ export const TicketBannerActions = memo(({ ticketId }: { ticketId: TicketId }) =
   if (isAwaitingInput) {
     return (
       <>
-        <span className="size-1.5 rounded-full bg-blue-400 animate-pulse" />
-        <span className="text-xs text-blue-400 font-medium">Needs input</span>
-        <IconButton aria-label="Stop" icon={<PiStopFill size={10} />} size="sm" onClick={handleStop} />
+        <span className={`${styles.blueDot} animate-pulse`} />
+        <span className={styles.blueText}>Needs input</span>
+        <IconButton aria-label="Stop" icon={<Stop20Filled style={{ width: 10, height: 10 }} />} size="sm" onClick={handleStop} />
       </>
     );
   }
   if (isRetrying) {
     return (
       <>
-        <PiArrowsClockwiseBold size={10} className="text-yellow-400 animate-spin" />
-        <span className="text-xs text-yellow-400 font-medium">Retrying</span>
-        <IconButton aria-label="Stop" icon={<PiStopFill size={10} />} size="sm" onClick={handleStop} />
+        <ArrowSync20Regular style={{ width: 10, height: 10 }} className={`${styles.yellowIcon} animate-spin`} />
+        <span className={styles.yellowText}>Retrying</span>
+        <IconButton aria-label="Stop" icon={<Stop20Filled style={{ width: 10, height: 10 }} />} size="sm" onClick={handleStop} />
       </>
     );
   }
   if (isError) {
     return (
       <>
-        <PiWarningCircleBold size={12} className="text-red-400" />
-        <Button size="sm" leftIcon={<PiPlayFill size={10} />} onClick={handleStart}>
+        <Warning20Regular style={{ width: 12, height: 12 }} className={styles.redIcon} />
+        <Button size="sm" leftIcon={<Play20Filled style={{ width: 10, height: 10 }} />} onClick={handleStart}>
           Retry
         </Button>
       </>
@@ -132,14 +188,14 @@ export const TicketBannerActions = memo(({ ticketId }: { ticketId: TicketId }) =
   if (isCompleted) {
     return (
       <>
-        <PiCheckCircleBold size={12} className="text-green-400" />
-        <span className="text-xs text-green-400 font-medium">Done</span>
+        <CheckmarkCircle20Regular style={{ width: 12, height: 12 }} className={styles.greenIcon} />
+        <span className={styles.greenText}>Done</span>
       </>
     );
   }
   // Idle — show autopilot button
   return (
-    <Button size="sm" leftIcon={<PiPlayFill size={10} />} onClick={handleStart}>
+    <Button size="sm" leftIcon={<Play20Filled style={{ width: 10, height: 10 }} />} onClick={handleStart}>
       Autopilot
     </Button>
   );
@@ -154,22 +210,16 @@ export const TicketResolutionBadge = memo(({ ticketId }: { ticketId: TicketId })
   if (!ticket?.resolution) return null;
 
   return (
-    <span
-      className={cn(
-        'text-xs px-1.5 py-0.5 rounded-full font-medium shrink-0',
-        RESOLUTION_COLORS[ticket.resolution]
-      )}
-    >
-      {RESOLUTION_LABELS[ticket.resolution]}
-    </span>
+    <Badge color={RESOLUTION_COLORS[ticket.resolution]}>{RESOLUTION_LABELS[ticket.resolution]}</Badge>
   );
 });
 TicketResolutionBadge.displayName = 'TicketResolutionBadge';
 
 /** Combined controls (legacy export). */
 export const CodeTicketControls = memo(({ ticketId }: { ticketId: TicketId }) => {
+  const styles = useStyles();
   return (
-    <div className="flex items-center gap-1.5 shrink-0">
+    <div className={styles.controlsRow}>
       <TicketHeaderActions ticketId={ticketId} />
       <TicketBannerActions ticketId={ticketId} />
     </div>

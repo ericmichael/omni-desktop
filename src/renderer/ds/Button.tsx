@@ -1,8 +1,6 @@
-import { motion } from 'framer-motion';
-import type { ReactNode } from 'react';
+import { Button as FluentButton, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import type { ReactElement, ReactNode } from 'react';
 import { forwardRef } from 'react';
-
-import { cn } from '@/renderer/ds/cn';
 
 type Variant = 'primary' | 'ghost' | 'destructive' | 'link';
 type Size = 'sm' | 'md' | 'lg';
@@ -19,44 +17,57 @@ type ButtonProps = {
   children?: ReactNode;
 };
 
-const variantClasses: Record<Variant, string> = {
-  primary:
-    'bg-gradient-to-b from-accent-500 to-accent-600 text-white shadow-md hover:from-accent-400 hover:to-accent-500 active:from-accent-600 active:to-accent-700',
-  ghost: 'bg-transparent text-fg hover:bg-white/5 active:bg-white/10',
-  destructive: 'bg-transparent text-fg-error hover:bg-red-400/10 active:bg-red-400/15',
-  link: 'bg-transparent text-fg-muted hover:text-fg underline-offset-4 hover:underline',
+const variantToAppearance: Record<Variant, 'primary' | 'subtle' | 'transparent'> = {
+  primary: 'primary',
+  ghost: 'subtle',
+  destructive: 'subtle',
+  link: 'transparent',
 };
 
-const sizeClasses: Record<Size, string> = {
-  sm: 'h-9 px-3.5 text-sm gap-1.5 rounded-lg',
-  md: 'h-10 px-4 text-sm gap-2 rounded-xl',
-  lg: 'h-12 px-6 text-base gap-2.5 rounded-xl',
+const sizeMap: Record<Size, 'small' | 'medium' | 'large'> = {
+  sm: 'small',
+  md: 'medium',
+  lg: 'large',
 };
+
+const useStyles = makeStyles({
+  destructive: {
+    color: tokens.colorPaletteRedForeground1,
+    ':hover': {
+      color: tokens.colorPaletteRedForeground1,
+    },
+  },
+  link: {
+    textDecorationLine: 'none',
+    ':hover': {
+      textDecorationLine: 'underline',
+    },
+  },
+});
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ({ variant = 'primary', size = 'md', isDisabled, leftIcon, rightIcon, className, children, onClick, type }, ref) => {
+    const styles = useStyles();
+
     return (
-      <motion.button
+      <FluentButton
         ref={ref}
-        whileHover={isDisabled ? undefined : { scale: 1.02 }}
-        whileTap={isDisabled ? undefined : { scale: 0.98 }}
-        transition={{ duration: 0.15 }}
-        className={cn(
-          'inline-flex items-center justify-center font-medium transition-colors cursor-pointer select-none',
-          'focus-visible:outline-2 focus-visible:outline-accent-500/50 focus-visible:outline-offset-2',
-          'disabled:opacity-40 disabled:pointer-events-none',
-          variantClasses[variant],
-          sizeClasses[size],
-          className
-        )}
+        appearance={variantToAppearance[variant]}
+        size={sizeMap[size]}
         disabled={isDisabled}
         onClick={onClick}
         type={type}
+        icon={leftIcon ? (leftIcon as ReactElement) : undefined}
+        iconPosition="before"
+        className={mergeClasses(
+          variant === 'destructive' && styles.destructive,
+          variant === 'link' && styles.link,
+          className
+        )}
       >
-        {leftIcon}
         {children}
         {rightIcon}
-      </motion.button>
+      </FluentButton>
     );
   }
 );

@@ -1,7 +1,8 @@
+import { makeStyles, tokens } from '@fluentui/react-components';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback } from 'react';
 
-import { Button } from '@/renderer/ds';
+import { Body1, Button, Caption1, Input } from '@/renderer/ds';
 import type { ProviderEntry } from '@/shared/types';
 
 type Props = {
@@ -14,11 +15,19 @@ type Props = {
   onBack: () => void;
 };
 
-const INPUT_CLASS =
-  'h-9 w-full px-3 text-sm rounded-md bg-transparent border border-surface-border/50 text-fg font-mono outline-none focus:border-accent-500/50 placeholder:text-fg-muted/50';
+const useStyles = makeStyles({
+  root: { display: 'flex', flexDirection: 'column', gap: '24px' },
+  header: { display: 'flex', flexDirection: 'column', gap: '4px' },
+  fields: { display: 'flex', flexDirection: 'column', gap: '16px' },
+  field: { display: 'flex', flexDirection: 'column', gap: '6px' },
+  required: { color: tokens.colorPaletteRedForeground1 },
+  actions: { display: 'flex', justifyContent: 'space-between' },
+});
 
 export const OnboardingModelStep = memo(
   ({ providerType, modelId, displayName, onChangeModelId, onChangeDisplayName, onNext, onBack }: Props) => {
+    const styles = useStyles();
+
     const handleModelIdChange = useCallback(
       (e: ChangeEvent<HTMLInputElement>) => onChangeModelId(e.target.value),
       [onChangeModelId]
@@ -37,49 +46,42 @@ export const OnboardingModelStep = memo(
           : 'model-name';
 
     return (
-      <div className="flex flex-col gap-6">
-        <div className="flex flex-col gap-1">
-          <h3 className="text-lg font-semibold text-fg">Add a model</h3>
-          <p className="text-sm text-fg-muted">Enter the model identifier and an optional display name.</p>
+      <div className={styles.root}>
+        <div className={styles.header}>
+          <Body1 weight="semibold">Add a model</Body1>
+          <Caption1>Enter the model identifier and an optional display name.</Caption1>
         </div>
 
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm text-fg" htmlFor="onboarding-model-id">
-              Model ID <span className="text-red-400">*</span>
-            </label>
-            <input
-              id="onboarding-model-id"
-              type="text"
+        <div className={styles.fields}>
+          <div className={styles.field}>
+            <Caption1>
+              Model ID <span className={styles.required}>*</span>
+            </Caption1>
+            <Input
+              size="sm"
+              mono
               value={modelId}
               onChange={handleModelIdChange}
               placeholder={modelIdPlaceholder}
-              className={INPUT_CLASS}
               autoFocus
             />
             {providerType === 'litellm' && (
-              <span className="text-xs text-fg-muted">
-                Use LiteLLM format: anthropic/claude-sonnet-4-20250514, gemini/gemini-2.5-pro, etc.
-              </span>
+              <Caption1>Use LiteLLM format: anthropic/claude-sonnet-4-20250514, gemini/gemini-2.5-pro, etc.</Caption1>
             )}
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm text-fg" htmlFor="onboarding-display-name">
-              Display name
-            </label>
-            <input
-              id="onboarding-display-name"
-              type="text"
+          <div className={styles.field}>
+            <Caption1>Display name</Caption1>
+            <Input
+              size="sm"
               value={displayName}
               onChange={handleDisplayNameChange}
               placeholder={modelId.split('/').pop() || 'My Model'}
-              className={INPUT_CLASS}
             />
           </div>
         </div>
 
-        <div className="flex justify-between">
+        <div className={styles.actions}>
           <Button variant="ghost" size="sm" onClick={onBack}>
             Back
           </Button>

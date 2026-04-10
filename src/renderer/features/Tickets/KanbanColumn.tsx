@@ -1,48 +1,109 @@
 import { useDroppable } from '@dnd-kit/core';
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
+import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 
-import { cn } from '@/renderer/ds';
+import { Body1 } from '@/renderer/ds';
 import type { Column, Ticket } from '@/shared/types';
 
-import { COLUMN_BADGE_COLORS, COLUMN_BG_COLORS, COLUMN_COLORS } from './ticket-constants';
+import { getColumnColors } from './ticket-constants';
 import { KanbanCard } from './KanbanCard';
 
+const useStyles = makeStyles({
+  column: {
+    display: 'flex',
+    flexDirection: 'column',
+    width: '224px',
+    flexShrink: 0,
+    height: '100%',
+    borderRadius: tokens.borderRadiusMedium,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    borderTopWidth: '2px',
+    transitionProperty: 'background-color',
+    transitionDuration: '150ms',
+    '@media (min-width: 640px)': {
+      width: '264px',
+    },
+  },
+  dropHighlight: {
+    backgroundColor: tokens.colorBrandBackground2,
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    flexShrink: 0,
+  },
+  headerLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  gateIcon: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+  },
+  countBadge: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightMedium,
+    paddingLeft: tokens.spacingHorizontalSNudge,
+    paddingRight: tokens.spacingHorizontalSNudge,
+    paddingTop: '2px',
+    paddingBottom: '2px',
+    borderRadius: '9999px',
+  },
+  cards: {
+    flex: '1 1 0',
+    overflowY: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    paddingBottom: tokens.spacingVerticalS,
+  },
+});
+
 export const KanbanColumn = memo(({ column, tickets }: { column: Column; tickets: Ticket[] }) => {
+  const styles = useStyles();
   const { isOver, setNodeRef } = useDroppable({
     id: column.id,
   });
 
+  const colors = useMemo(() => getColumnColors(column.id), [column.id]);
+
   return (
     <div
       ref={setNodeRef}
-      className={cn(
-        'flex flex-col w-56 sm:w-66 shrink-0 h-full rounded-lg border border-surface-border border-t-2 transition-colors',
-        COLUMN_COLORS[column.id] ?? 'border-t-fg-muted',
-        isOver ? 'bg-accent-500/10' : (COLUMN_BG_COLORS[column.id] ?? 'bg-surface/50')
-      )}
+      className={mergeClasses(styles.column, isOver && styles.dropHighlight)}
+      style={{
+        borderTopColor: colors.borderTop,
+        backgroundColor: isOver ? undefined : colors.background,
+      }}
     >
       {/* Column header */}
-      <div className="flex items-center justify-between px-3 py-2 shrink-0">
-        <div className="flex items-center gap-1.5">
-          <span className="text-sm font-medium text-fg">{column.label}</span>
+      <div className={styles.header}>
+        <div className={styles.headerLabel}>
+          <Body1>{column.label}</Body1>
           {column.gate && (
-            <span className="text-xs text-fg-muted" title="Gated — only a human can advance tickets past this column">
+            <span className={styles.gateIcon} title="Gated — only a human can advance tickets past this column">
               &#x1F512;
             </span>
           )}
         </div>
         <span
-          className={cn(
-            'text-xs px-1.5 py-0.5 rounded-full font-medium',
-            COLUMN_BADGE_COLORS[column.id] ?? 'text-fg-muted bg-fg-muted/10'
-          )}
+          className={styles.countBadge}
+          style={{ color: colors.badgeColor, backgroundColor: colors.badgeBg }}
         >
           {tickets.length}
         </span>
       </div>
 
       {/* Cards */}
-      <div className="flex-1 overflow-y-auto flex flex-col gap-2 px-2 pb-2">
+      <div className={styles.cards}>
         {tickets.map((ticket) => (
           <KanbanCard key={ticket.id} ticket={ticket} />
         ))}

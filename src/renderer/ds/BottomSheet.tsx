@@ -1,8 +1,12 @@
-import { AnimatePresence, motion } from 'framer-motion';
-import type { MouseEvent, PropsWithChildren } from 'react';
+import {
+  Drawer,
+  DrawerBody,
+  makeStyles,
+  mergeClasses,
+  tokens,
+} from '@fluentui/react-components';
+import type { PropsWithChildren } from 'react';
 import { useCallback } from 'react';
-
-import { cn } from '@/renderer/ds/cn';
 
 type BottomSheetProps = {
   open: boolean;
@@ -10,48 +14,65 @@ type BottomSheetProps = {
   className?: string;
 };
 
+const useStyles = makeStyles({
+  drawer: {
+    position: 'absolute',
+    top: 'max(3rem, env(safe-area-inset-top, 3rem))',
+    bottom: '0',
+    left: '0',
+    right: '0',
+    height: 'auto',
+    maxWidth: '100%',
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderTopLeftRadius: '16px',
+    borderTopRightRadius: '16px',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: tokens.colorNeutralStroke1,
+  },
+  handle: {
+    display: 'flex',
+    justifyContent: 'center',
+    paddingTop: '10px',
+    paddingBottom: '4px',
+    flexShrink: 0,
+  },
+  handleBar: {
+    width: '32px',
+    height: '4px',
+    borderRadius: '9999px',
+    backgroundColor: tokens.colorNeutralForeground3,
+    opacity: 0.4,
+  },
+  body: {
+    flex: '1 1 0',
+    minHeight: 0,
+    padding: 0,
+  },
+});
+
 export const BottomSheet = ({ open, onClose, className, children }: PropsWithChildren<BottomSheetProps>) => {
-  const onClickBackdrop = useCallback(
-    (e: MouseEvent) => {
-      if (e.target === e.currentTarget) {
-        onClose();
-      }
+  const styles = useStyles();
+
+  const handleOpenChange = useCallback(
+    (_event: unknown, data: { open: boolean }) => {
+      if (!data.open) onClose();
     },
     [onClose]
   );
 
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
-          className="absolute inset-0 z-40"
-          onClick={onClickBackdrop}
-        >
-          <motion.div
-            initial={{ y: '100%' }}
-            animate={{ y: 0 }}
-            exit={{ y: '100%' }}
-            transition={{ type: 'spring', duration: 0.35, bounce: 0.1 }}
-            className={cn(
-              'absolute inset-x-0 bottom-0 top-[max(3rem,env(safe-area-inset-top,3rem))] flex flex-col overflow-hidden',
-              'rounded-t-2xl border-t border-white/10 shadow-2xl backdrop-blur-[32px]',
-              className
-            )}
-          >
-            <div className="absolute inset-0 bg-surface-raised/95" />
-            {/* Drag handle */}
-            <div className="relative flex justify-center pt-2.5 pb-1 shrink-0">
-              <div className="w-8 h-1 rounded-full bg-fg-subtle/40" />
-            </div>
-            <div className="relative flex-1 min-h-0">{children}</div>
-            <div className="relative shrink-0 h-[env(safe-area-inset-bottom,0px)]" />
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <Drawer
+      open={open}
+      onOpenChange={handleOpenChange}
+      position="bottom"
+      type="overlay"
+      className={mergeClasses(styles.drawer, className)}
+    >
+      <div className={styles.handle}>
+        <div className={styles.handleBar} />
+      </div>
+      <DrawerBody className={styles.body}>{children}</DrawerBody>
+    </Drawer>
   );
 };

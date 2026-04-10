@@ -1,7 +1,8 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { PiPencilSimpleBold, PiEyeBold } from 'react-icons/pi';
+import { Edit20Regular, Eye20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 
+import { Textarea as FluentTextarea, makeStyles, tokens, shorthands } from '@fluentui/react-components';
 import { IconButton } from '@/renderer/ds';
 import { Markdown } from '@/renderer/omniagents-ui/components/promptkit/markdown';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -11,7 +12,50 @@ import { ticketApi } from './state';
 
 const SAVE_DEBOUNCE_MS = 1000;
 
+const useStyles = makeStyles({
+  root: {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingTop: '6px',
+    paddingBottom: '6px',
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    flexShrink: 0,
+  },
+  headerLabel: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightMedium,
+    color: tokens.colorNeutralForeground2,
+    textTransform: 'uppercase',
+    letterSpacing: '0.025em',
+  },
+  flex1: {
+    flex: '1 1 0',
+  },
+  body: {
+    flex: '1 1 0',
+    minHeight: 0,
+    overflowY: 'auto',
+  },
+  previewPadding: {
+    padding: tokens.spacingVerticalL,
+  },
+  emptyText: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    fontStyle: 'italic',
+  },
+});
+
 export const ProjectBrief = memo(({ projectId }: { projectId: ProjectId }) => {
+  const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const project = store.projects.find((p) => p.id === projectId);
 
@@ -70,33 +114,35 @@ export const ProjectBrief = memo(({ projectId }: { projectId: ProjectId }) => {
   if (!project) return null;
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 px-4 py-1.5 border-b border-surface-border shrink-0">
-        <span className="text-xs font-medium text-fg-muted uppercase tracking-wide">Brief</span>
-        <div className="flex-1" />
+    <div className={styles.root}>
+      <div className={styles.header}>
+        <span className={styles.headerLabel}>Brief</span>
+        <div className={styles.flex1} />
         <IconButton
           aria-label={mode === 'edit' ? 'Preview' : 'Edit'}
-          icon={mode === 'edit' ? <PiEyeBold /> : <PiPencilSimpleBold />}
+          icon={mode === 'edit' ? <Eye20Regular /> : <Edit20Regular />}
           size="sm"
           onClick={toggleMode}
         />
       </div>
-      <div className="flex-1 min-h-0 overflow-auto">
+      <div className={styles.body}>
         {mode === 'edit' ? (
-          <textarea
+          <FluentTextarea
             ref={textareaRef}
             value={draft}
             onChange={handleChange}
             spellCheck={false}
-            className="w-full h-full resize-none bg-transparent text-sm text-fg font-mono p-4 focus:outline-none"
+            resize="none"
+            appearance="filled-lighter"
             placeholder="Describe the problem, appetite, solution direction, open questions..."
+            style={{ width: '100%', height: '100%', fontFamily: tokens.fontFamilyMonospace }}
           />
         ) : (
-          <div className="p-4">
+          <div className={styles.previewPadding}>
             {draft.trim() ? (
               <Markdown inheritTextColor>{draft}</Markdown>
             ) : (
-              <p className="text-sm text-fg-muted italic">No brief yet. Switch to edit mode to start writing.</p>
+              <p className={styles.emptyText}>No brief yet. Switch to edit mode to start writing.</p>
             )}
           </div>
         )}

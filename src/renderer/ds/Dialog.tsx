@@ -1,82 +1,76 @@
-import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { AnimatePresence, motion } from 'framer-motion';
+import {
+  Dialog as FluentDialog,
+  DialogActions,
+  DialogBody as FluentDialogBody,
+  DialogContent as FluentDialogContent,
+  DialogSurface,
+  DialogTitle,
+  DialogTrigger,
+  makeStyles,
+  mergeClasses,
+  tokens,
+} from '@fluentui/react-components';
 import type { PropsWithChildren } from 'react';
-import { forwardRef, useCallback } from 'react';
+import { useCallback } from 'react';
 
-import { cn } from '@/renderer/ds/cn';
+// Re-export Fluent primitives for advanced usage
+export { DialogTrigger };
 
-export const Dialog = DialogPrimitive.Root;
-export const DialogTrigger = DialogPrimitive.Trigger;
+// ── Styles ──────────────────────────────────────────────────────────────────
 
-export const DialogOverlay = forwardRef<HTMLDivElement, DialogPrimitive.DialogOverlayProps>(
-  ({ className, ...props }, ref) => (
-    <DialogPrimitive.Overlay ref={ref} asChild {...props}>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.2 }}
-        className={cn('fixed inset-0 z-50 backdrop-blur-2xl', className)}
-      >
-        <div className="absolute inset-0 bg-surface/70" />
-      </motion.div>
-    </DialogPrimitive.Overlay>
-  )
-);
-DialogOverlay.displayName = 'DialogOverlay';
+const useStyles = makeStyles({
+  surface: {
+    backgroundColor: tokens.colorNeutralBackground2,
+    maxWidth: '32rem',
+    width: '100%',
+  },
+  title: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+});
 
-export const DialogContent = forwardRef<HTMLDivElement, DialogPrimitive.DialogContentProps>(
-  ({ className, children, ...props }, ref) => (
-    <DialogPrimitive.Portal forceMount>
-      <DialogOverlay />
-      <DialogPrimitive.Content ref={ref} asChild {...props}>
-        <motion.div
-          initial={{ opacity: 0, y: '10%' }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: '10%' }}
-          transition={{ type: 'spring', duration: 0.3, bounce: 0.1 }}
-          className={cn(
-            'fixed z-50 overflow-y-auto focus:outline-none',
-            // Mobile: full-screen sheet with safe area padding
-            'inset-0 rounded-none border-0 bg-surface-raised',
-            'pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]',
-            // Desktop: centered floating card
-            'sm:inset-0 sm:m-auto sm:h-fit sm:max-h-[85vh] sm:w-full sm:max-w-lg',
-            'sm:rounded-xl sm:border sm:border-surface-border sm:shadow-2xl',
-            className
-          )}
-        >
-          {children}
-        </motion.div>
-      </DialogPrimitive.Content>
-    </DialogPrimitive.Portal>
-  )
-);
-DialogContent.displayName = 'DialogContent';
+// ── DialogContent ───────────────────────────────────────────────────────────
+// Maps to FluentDialogSurface. Accepts className for max-width overrides.
 
-export const DialogHeader = ({ className, children }: PropsWithChildren<{ className?: string }>) => (
-  <div className={cn('flex items-center justify-between px-6 pt-6 pb-2', className)}>
-    <DialogPrimitive.Title className="text-lg font-semibold tracking-tight text-fg">{children}</DialogPrimitive.Title>
-    <DialogPrimitive.Close className="rounded-lg p-1.5 text-fg-muted hover:bg-white/5 hover:text-fg transition-colors cursor-pointer">
-      <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path
-          d="M11.7816 4.03157C12.0062 3.80702 12.0062 3.44295 11.7816 3.2184C11.5571 2.99385 11.193 2.99385 10.9685 3.2184L7.50005 6.68682L4.03164 3.2184C3.80708 2.99385 3.44301 2.99385 3.21846 3.2184C2.99391 3.44295 2.99391 3.80702 3.21846 4.03157L6.68688 7.49999L3.21846 10.9684C2.99391 11.193 2.99391 11.557 3.21846 11.7816C3.44301 12.0061 3.80708 12.0061 4.03164 11.7816L7.50005 8.31316L10.9685 11.7816C11.193 12.0061 11.5571 12.0061 11.7816 11.7816C12.0062 11.557 12.0062 11.193 11.7816 10.9684L8.31322 7.49999L11.7816 4.03157Z"
-          fill="currentColor"
-          fillRule="evenodd"
-          clipRule="evenodd"
-        />
-      </svg>
-    </DialogPrimitive.Close>
-  </div>
-);
+export const DialogContent = ({ className, children }: PropsWithChildren<{ className?: string }>) => {
+  const styles = useStyles();
+  return (
+    <DialogSurface className={mergeClasses(styles.surface, className)}>
+      <FluentDialogBody>{children}</FluentDialogBody>
+    </DialogSurface>
+  );
+};
 
-export const DialogBody = ({ className, children }: PropsWithChildren<{ className?: string }>) => (
-  <div className={cn('px-6 py-4', className)}>{children}</div>
-);
+// ── DialogHeader ────────────────────────────────────────────────────────────
+// Maps to FluentDialogTitle with a built-in close action.
 
-export const DialogFooter = ({ className, children }: PropsWithChildren<{ className?: string }>) => (
-  <div className={cn('flex items-center px-6 pb-6 pt-2', className)}>{children}</div>
-);
+export const DialogHeader = ({ className, children }: PropsWithChildren<{ className?: string }>) => {
+  const styles = useStyles();
+  return (
+    <DialogTitle className={mergeClasses(styles.title, className)} action={<DialogTrigger action="close" />}>
+      {children}
+    </DialogTitle>
+  );
+};
+
+// ── DialogBody ──────────────────────────────────────────────────────────────
+// Maps to FluentDialogContent (the scrollable content area inside DialogBody).
+
+export const DialogBody = ({ className, children }: PropsWithChildren<{ className?: string }>) => {
+  return <FluentDialogContent className={className}>{children}</FluentDialogContent>;
+};
+
+// ── DialogFooter ────────────────────────────────────────────────────────────
+// Maps to FluentDialogActions.
+
+export const DialogFooter = ({ className, children }: PropsWithChildren<{ className?: string }>) => {
+  return <DialogActions className={className}>{children}</DialogActions>;
+};
+
+// ── AnimatedDialog ──────────────────────────────────────────────────────────
+// Controlled open/close wrapper — maps to Fluent Dialog with open + onOpenChange.
 
 export const AnimatedDialog = ({
   open,
@@ -84,8 +78,8 @@ export const AnimatedDialog = ({
   children,
 }: PropsWithChildren<{ open: boolean; onClose?: () => void }>) => {
   const handleOpenChange = useCallback(
-    (next: boolean) => {
-      if (!next) {
+    (_event: unknown, data: { open: boolean }) => {
+      if (!data.open) {
         onClose?.();
       }
     },
@@ -93,8 +87,8 @@ export const AnimatedDialog = ({
   );
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <AnimatePresence>{open && children}</AnimatePresence>
-    </Dialog>
+    <FluentDialog open={open} onOpenChange={handleOpenChange} modalType="modal">
+      {open && children}
+    </FluentDialog>
   );
 };

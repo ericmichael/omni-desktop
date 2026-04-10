@@ -1,26 +1,79 @@
+import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
-import { PiGearFill, PiInfoBold, PiTerminalBold } from 'react-icons/pi';
+import { Settings20Filled, Info20Regular, WindowConsole20Regular } from '@fluentui/react-icons';
 
 import { Sidebar } from '@/renderer/app/Sidebar';
-import { cn, ListItem } from '@/renderer/ds';
+import { Caption1, ListItem, Subtitle2 } from '@/renderer/ds';
 import { $launcherVersion } from '@/renderer/features/Banner/state';
 import { Chat } from '@/renderer/features/Chat/Chat';
 import { Code } from '@/renderer/features/Code/Code';
 import { $isConsoleOpen } from '@/renderer/features/Console/state';
 import { Dashboards } from '@/renderer/features/Dashboards/Dashboards';
 import { RightNow } from '@/renderer/features/RightNow/RightNow';
+import { SettingsPage } from '@/renderer/features/SettingsModal/SettingsPage';
 import { Tickets } from '@/renderer/features/Tickets/Tickets';
 import { OnboardingWizard } from '@/renderer/features/Onboarding/OnboardingWizard';
-import { $isSettingsOpen } from '@/renderer/features/SettingsModal/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { LayoutMode } from '@/shared/types';
 
+const useStyles = makeStyles({
+  root: {
+    display: 'flex',
+    flexDirection: 'column-reverse',
+    width: '100%',
+    height: '100%',
+    '@media (min-width: 640px)': {
+      flexDirection: 'row',
+    },
+  },
+  content: {
+    flex: '1 1 0',
+    minWidth: 0,
+    minHeight: 0,
+    position: 'relative',
+  },
+  panel: {
+    width: '100%',
+    height: '100%',
+  },
+  hidden: {
+    display: 'none',
+  },
+  morePage: {
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    height: '100%',
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  moreHeader: {
+    paddingLeft: '20px',
+    paddingRight: '20px',
+    paddingTop: '24px',
+    paddingBottom: '16px',
+  },
+  moreFooter: {
+    marginTop: 'auto',
+    paddingLeft: '20px',
+    paddingRight: '20px',
+    paddingTop: '24px',
+    paddingBottom: '24px',
+  },
+  moreVersion: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    color: tokens.colorNeutralForeground3,
+  },
+});
+
 const MorePage = memo(() => {
+  const styles = useStyles();
   const version = useStore($launcherVersion);
 
   const openSettings = useCallback(() => {
-    $isSettingsOpen.set(true);
+    persistedStoreApi.setKey('layoutMode', 'settings');
   }, []);
 
   const openConsole = useCallback(() => {
@@ -28,19 +81,19 @@ const MorePage = memo(() => {
   }, []);
 
   return (
-    <div className="flex flex-col w-full h-full bg-surface">
-      <div className="px-5 pt-6 pb-4">
-        <h1 className="text-2xl font-bold text-fg tracking-tight">More</h1>
+    <div className={styles.morePage}>
+      <div className={styles.moreHeader}>
+        <Subtitle2>More</Subtitle2>
       </div>
-      <div className="flex flex-col">
-        <ListItem icon={<PiGearFill size={20} />} label="Settings" detail="Theme, models, network, MCP" onClick={openSettings} />
-        <ListItem icon={<PiTerminalBold size={20} />} label="Dev Console" detail="Terminal session" onClick={openConsole} />
+      <div>
+        <ListItem icon={<Settings20Filled />} label="Settings" detail="Theme, models, network, MCP" onClick={openSettings} />
+        <ListItem icon={<WindowConsole20Regular />} label="Dev Console" detail="Terminal session" onClick={openConsole} />
       </div>
       {version && (
-        <div className="mt-auto px-5 py-6">
-          <div className="flex items-center gap-2.5 text-fg-subtle">
-            <PiInfoBold size={14} />
-            <span className="text-xs">Omni Code Launcher v{version}</span>
+        <div className={styles.moreFooter}>
+          <div className={styles.moreVersion}>
+            <Info20Regular style={{ width: 14, height: 14 }} />
+            <Caption1>Omni Code Launcher v{version}</Caption1>
           </div>
         </div>
       )}
@@ -57,17 +110,15 @@ MorePage.displayName = 'MorePage';
  * Docker container connections, and component state across tab switches.
  */
 export const MainContent = memo(() => {
+  const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const active: LayoutMode = store.layoutMode;
 
-  // Track which component keys have been visited so we mount lazily but never unmount.
   const [mounted, setMounted] = useState<Set<LayoutMode>>(() => new Set([active]));
 
   useEffect(() => {
     setMounted((prev) => {
-      if (prev.has(active)) {
-        return prev;
-      }
+      if (prev.has(active)) return prev;
       const next = new Set(prev);
       next.add(active);
       return next;
@@ -78,39 +129,27 @@ export const MainContent = memo(() => {
     return <OnboardingWizard />;
   }
 
+  const panels: { key: LayoutMode; Component: React.ComponentType }[] = [
+    { key: 'home', Component: RightNow },
+    { key: 'chat', Component: Chat },
+    { key: 'code', Component: Code },
+    { key: 'projects', Component: Tickets },
+    { key: 'dashboards', Component: Dashboards },
+    { key: 'settings', Component: SettingsPage },
+    { key: 'more', Component: MorePage },
+  ];
+
   return (
-    <div className="flex flex-col-reverse sm:flex-row w-full h-full">
+    <div className={styles.root}>
       <Sidebar />
-      <div className="flex-1 min-w-0 min-h-0 relative">
-        {mounted.has('home') && (
-          <div className={cn('w-full h-full', active !== 'home' && 'hidden')}>
-            <RightNow />
-          </div>
-        )}
-        {mounted.has('chat') && (
-          <div className={cn('w-full h-full', active !== 'chat' && 'hidden')}>
-            <Chat />
-          </div>
-        )}
-        {mounted.has('code') && (
-          <div className={cn('w-full h-full', active !== 'code' && 'hidden')}>
-            <Code />
-          </div>
-        )}
-        {mounted.has('projects') && (
-          <div className={cn('w-full h-full', active !== 'projects' && 'hidden')}>
-            <Tickets />
-          </div>
-        )}
-        {mounted.has('dashboards') && (
-          <div className={cn('w-full h-full', active !== 'dashboards' && 'hidden')}>
-            <Dashboards />
-          </div>
-        )}
-        {mounted.has('more') && (
-          <div className={cn('w-full h-full', active !== 'more' && 'hidden')}>
-            <MorePage />
-          </div>
+      <div className={styles.content}>
+        {panels.map(
+          ({ key, Component }) =>
+            mounted.has(key) && (
+              <div key={key} className={mergeClasses(styles.panel, active !== key && styles.hidden)}>
+                <Component />
+              </div>
+            )
         )}
       </div>
     </div>

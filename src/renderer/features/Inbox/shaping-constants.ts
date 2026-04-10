@@ -12,8 +12,10 @@ export const APPETITE_DESCRIPTIONS: Record<Appetite, string> = {
   large: 'A week+',
 };
 
-export const APPETITE_COLORS: Record<Appetite, string> = {
-  small: 'text-green-400 bg-green-400/10',
-  medium: 'text-blue-400 bg-blue-400/10',
-  large: 'text-purple-400 bg-purple-400/10',
+import type { BadgeColor } from '@/renderer/features/Tickets/ticket-constants';
+
+export const APPETITE_COLORS: Record<Appetite, BadgeColor> = {
+  small: 'green',
+  medium: 'blue',
+  large: 'purple',
 };

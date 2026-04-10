@@ -1,10 +1,121 @@
+import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { ComponentType } from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { PiSidebarBold, PiXBold } from 'react-icons/pi';
+import type { FluentIcon } from '@fluentui/react-icons';
+import { PanelLeft20Regular, Dismiss20Regular } from '@fluentui/react-icons';
 
 import { Webview } from '@/renderer/common/Webview';
 import { cn } from '@/renderer/ds';
+
+const useStyles = makeStyles({
+  backdrop: { position: 'absolute', inset: 0, zIndex: 30, backgroundColor: 'rgba(0, 0, 0, 0.4)' },
+  overlayCard: {
+    position: 'absolute',
+    inset: tokens.spacingHorizontalL,
+    zIndex: 40,
+    borderRadius: tokens.borderRadiusXLarge,
+    overflow: 'hidden',
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: tokens.colorNeutralBackground1,
+    boxShadow: tokens.shadow64,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  overlayHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    backgroundColor: tokens.colorNeutralBackground2,
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+  },
+  overlayHeaderLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+  },
+  overlayCloseBtn: {
+    color: tokens.colorNeutralForeground2,
+    cursor: 'pointer',
+    padding: '4px',
+    borderRadius: tokens.borderRadiusMedium,
+    border: 'none',
+    backgroundColor: 'transparent',
+    transitionProperty: 'color, background-color',
+    transitionDuration: '150ms',
+    ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover, color: tokens.colorNeutralForeground1 },
+  },
+  overlayBody: { flex: '1 1 0', minHeight: 0 },
+  resizeOverlay: { position: 'absolute', inset: 0, zIndex: 40, cursor: 'nw-resize' },
+  widgetWrap: { position: 'absolute', right: tokens.spacingHorizontalM, zIndex: 30 },
+  previewBase: {
+    position: 'absolute',
+    bottom: '100%',
+    right: 0,
+    marginBottom: tokens.spacingVerticalS,
+    borderRadius: tokens.borderRadiusLarge,
+    overflow: 'hidden',
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: tokens.colorNeutralBackground1,
+    boxShadow: tokens.shadow28,
+    cursor: 'pointer',
+  },
+  previewResizing: { userSelect: 'none', cursor: 'default' },
+  resizeEdgeTop: { position: 'absolute', top: 0, left: '16px', right: 0, height: '6px', cursor: 'n-resize', zIndex: 10 },
+  resizeEdgeLeft: { position: 'absolute', top: 0, left: 0, bottom: '16px', width: '6px', cursor: 'w-resize', zIndex: 10 },
+  resizeCorner: { position: 'absolute', top: 0, left: 0, width: '12px', height: '12px', cursor: 'nw-resize', zIndex: 10 },
+  pillRow: { display: 'flex', alignItems: 'center', gap: '6px' },
+  splitBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '36px',
+    height: '36px',
+    borderRadius: '9999px',
+    boxShadow: tokens.shadow16,
+    cursor: 'pointer',
+    transitionProperty: 'color, background-color',
+    transitionDuration: '150ms',
+    ...shorthands.borderWidth('1px'),
+    ...shorthands.borderStyle('solid'),
+  },
+  splitBtnActive: {
+    backgroundColor: tokens.colorBrandBackground,
+    ...shorthands.borderColor(tokens.colorBrandStroke1),
+    color: '#fff',
+  },
+  splitBtnInactive: {
+    backgroundColor: tokens.colorNeutralBackground2,
+    ...shorthands.borderColor(tokens.colorNeutralStroke1),
+    color: tokens.colorNeutralForeground2,
+    ':hover': { color: tokens.colorNeutralForeground1 },
+  },
+  pill: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: '6px',
+    paddingBottom: '6px',
+    backgroundColor: tokens.colorNeutralBackground2,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    borderRadius: '9999px',
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    boxShadow: tokens.shadow16,
+    cursor: 'pointer',
+    transitionProperty: 'color',
+    transitionDuration: '150ms',
+    ':hover': { color: tokens.colorNeutralForeground1 },
+  },
+});
 
 const springTransition = { type: 'spring' as const, duration: 0.3, bounce: 0.1 };
 
@@ -22,9 +133,10 @@ const FloatingOverlay = memo(
   }: {
     src: string;
     label: string;
-    icon: ComponentType<{ size: number }>;
+    icon: FluentIcon;
     onClose: () => void;
   }) => {
+    const styles = useStyles();
     return (
       <>
         <motion.div
@@ -33,7 +145,7 @@ const FloatingOverlay = memo(
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={springTransition}
-          className="absolute inset-0 z-30 bg-black/40"
+          className={styles.backdrop}
           onClick={onClose}
         />
 
@@ -43,21 +155,21 @@ const FloatingOverlay = memo(
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.95 }}
           transition={springTransition}
-          className="absolute inset-4 z-40 rounded-xl overflow-hidden border border-surface-border bg-surface shadow-2xl flex flex-col"
+          className={styles.overlayCard}
         >
-          <div className="flex items-center justify-between px-3 py-2 bg-surface-raised border-b border-surface-border">
-            <div className="flex items-center gap-2 text-sm text-fg-muted">
-              <Icon size={14} />
+          <div className={styles.overlayHeader}>
+            <div className={styles.overlayHeaderLeft}>
+              <Icon style={{ width: 14, height: 14 }} />
               <span>{label}</span>
             </div>
             <button
               onClick={onClose}
-              className="text-fg-muted hover:text-fg cursor-pointer p-1 rounded hover:bg-surface-overlay transition-colors"
+              className={styles.overlayCloseBtn}
             >
-              <PiXBold size={14} />
+              <Dismiss20Regular style={{ width: 14, height: 14 }} />
             </button>
           </div>
-          <div className="flex-1 min-h-0">
+          <div className={styles.overlayBody}>
             <Webview src={src} showUnavailable={false} />
           </div>
         </motion.div>
@@ -70,7 +182,7 @@ FloatingOverlay.displayName = 'FloatingOverlay';
 type FloatingWidgetProps = {
   src: string;
   label: string;
-  icon: ComponentType<{ size: number }>;
+  icon: FluentIcon;
   overlayOpen: boolean;
   onOpenOverlay: () => void;
   onCloseOverlay: () => void;
@@ -194,17 +306,18 @@ export const FloatingWidget = memo(
 
     const showPreview = (hovering || isResizing) && !overlayOpen && !splitOpen && !hoveringSplitBtn;
 
+    const styles = useStyles();
     return (
       <>
         <AnimatePresence>
           {overlayOpen && <FloatingOverlay src={src} label={label} icon={Icon} onClose={handleCloseAndReset} />}
         </AnimatePresence>
 
-        {isResizing && <div className="absolute inset-0 z-40 cursor-nw-resize" />}
+        {isResizing && <div className={styles.resizeOverlay} />}
 
         {!overlayOpen && (
           <div
-            className={cn('absolute right-3 z-30', className)}
+            className={mergeClasses(styles.widgetWrap, className)}
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
           >
@@ -217,25 +330,22 @@ export const FloatingWidget = memo(
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.9, y: 12 }}
                   transition={springTransition}
-                  className={cn(
-                    'absolute bottom-full right-0 mb-2 rounded-lg overflow-hidden border border-surface-border bg-surface shadow-xl cursor-pointer',
-                    isResizing && 'select-none cursor-default'
-                  )}
+                  className={mergeClasses(styles.previewBase, isResizing && styles.previewResizing)}
                   style={{ width: previewSize.width, height: previewSize.height }}
                   onClick={isResizing ? undefined : handlePillClick}
                 >
                   {resizable && (
                     <>
                       <div
-                        className="absolute top-0 left-4 right-0 h-1.5 cursor-n-resize z-10"
+                        className={styles.resizeEdgeTop}
                         onMouseDown={handleResizeStart('top')}
                       />
                       <div
-                        className="absolute top-0 left-0 bottom-4 w-1.5 cursor-w-resize z-10"
+                        className={styles.resizeEdgeLeft}
                         onMouseDown={handleResizeStart('left')}
                       />
                       <div
-                        className="absolute top-0 left-0 size-3 cursor-nw-resize z-10"
+                        className={styles.resizeCorner}
                         onMouseDown={handleResizeStart('top-left')}
                       />
                     </>
@@ -245,39 +355,30 @@ export const FloatingWidget = memo(
               )}
             </AnimatePresence>
 
-            <div className="flex items-center gap-1.5">
+            <div className={styles.pillRow}>
               {onToggleSplit && hovering && (
                 <motion.button
                   onClick={onToggleSplit}
                   onMouseEnter={handleSplitBtnEnter}
                   onMouseLeave={handleSplitBtnLeave}
-                  className={cn(
-                    'flex items-center justify-center size-9',
-                    'border rounded-full',
-                    'shadow-lg cursor-pointer transition-colors',
-                    splitOpen
-                      ? 'bg-accent-600 border-accent-500 text-white'
-                      : 'bg-surface-raised border-surface-border text-fg-muted hover:text-fg'
+                  className={mergeClasses(
+                    styles.splitBtn,
+                    splitOpen ? styles.splitBtnActive : styles.splitBtnInactive
                   )}
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.9 }}
                 >
-                  <PiSidebarBold size={13} />
+                  <PanelLeft20Regular style={{ width: 13, height: 13 }} />
                 </motion.button>
               )}
 
               <motion.button
                 onClick={handlePillClick}
-                className={cn(
-                  'flex items-center gap-2 px-3 py-1.5',
-                  'bg-surface-raised border border-surface-border rounded-full',
-                  'text-sm text-fg-muted hover:text-fg',
-                  'shadow-lg cursor-pointer transition-colors'
-                )}
+                className={styles.pill}
                 whileHover={{ scale: 1.03 }}
                 whileTap={{ scale: 0.97 }}
               >
-                <Icon size={14} />
+                <Icon style={{ width: 14, height: 14 }} />
                 <span>{label}</span>
               </motion.button>
             </div>

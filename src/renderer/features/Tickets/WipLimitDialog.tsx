@@ -1,13 +1,62 @@
-import { memo, useCallback, useEffect, useState } from 'react';
-import { PiStopFill } from 'react-icons/pi';
+import { memo, useCallback } from 'react';
+import { Stop20Filled } from '@fluentui/react-icons';
+import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 
-import { Button, cn } from '@/renderer/ds';
+import { AnimatedDialog, Badge, Button, DialogBody, DialogContent, DialogFooter, DialogHeader } from '@/renderer/ds';
 import { APPETITE_COLORS, APPETITE_LABELS } from '@/renderer/features/Inbox/shaping-constants';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { Ticket, TicketId } from '@/shared/types';
 
 import { PHASE_COLORS, PHASE_LABELS } from './ticket-constants';
 import { ticketApi } from './state';
+
+const useStyles = makeStyles({
+  description: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+  },
+  pendingName: {
+    color: tokens.colorNeutralForeground1,
+    fontWeight: tokens.fontWeightMedium,
+  },
+  ticketList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+    marginTop: tokens.spacingVerticalM,
+  },
+  ticketCard: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+    borderRadius: tokens.borderRadiusXLarge,
+    backgroundColor: tokens.colorNeutralBackground1,
+    padding: tokens.spacingVerticalM,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+  },
+  ticketInfo: {
+    display: 'flex',
+    flexDirection: 'column',
+    flex: '1 1 0',
+    minWidth: 0,
+    gap: '2px',
+  },
+  ticketTitle: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  badgeRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  stopIcon: {
+    marginRight: '4px',
+  },
+});
 
 type WipLimitDialogProps = {
   /** The ticket the user is trying to start. */
@@ -22,6 +71,7 @@ type WipLimitDialogProps = {
 
 export const WipLimitDialog = memo(
   ({ pendingTicket, activeTickets, onDrop, onCancel }: WipLimitDialogProps) => {
+    const styles = useStyles();
     const wipLimit = persistedStoreApi.$atom.get().wipLimit ?? 3;
 
     const handleDrop = useCallback(
@@ -32,81 +82,50 @@ export const WipLimitDialog = memo(
       [onDrop]
     );
 
-    // Close on Escape
-    useEffect(() => {
-      const handler = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') onCancel();
-      };
-      window.addEventListener('keydown', handler);
-      return () => window.removeEventListener('keydown', handler);
-    }, [onCancel]);
-
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-        <div className="w-full max-w-lg mx-4 rounded-2xl border border-surface-border bg-surface-raised shadow-2xl overflow-hidden">
-          {/* Header */}
-          <div className="px-5 pt-5 pb-3">
-            <h2 className="text-base font-semibold text-fg">
-              WIP limit reached ({wipLimit} of {wipLimit})
-            </h2>
-            <p className="text-sm text-fg-muted mt-1">
-              To start <span className="text-fg font-medium">{pendingTicket.title}</span>,
+      <AnimatedDialog open onClose={onCancel}>
+        <DialogContent>
+          <DialogHeader>
+            WIP limit reached ({wipLimit} of {wipLimit})
+          </DialogHeader>
+          <DialogBody>
+            <p className={styles.description}>
+              To start <span className={styles.pendingName}>{pendingTicket.title}</span>,
               stop one of your active items.
             </p>
-          </div>
-
-          {/* Active tickets */}
-          <div className="flex flex-col gap-2 px-5 pb-3">
-            {activeTickets.map((ticket) => (
-              <div
-                key={ticket.id}
-                className="flex items-center gap-3 rounded-xl bg-surface p-3 border border-surface-border"
-              >
-                <div className="flex flex-col flex-1 min-w-0 gap-0.5">
-                  <span className="text-sm text-fg truncate">{ticket.title}</span>
-                  <div className="flex items-center gap-1.5">
-                    {ticket.phase && (
-                      <span
-                        className={cn(
-                          'text-xs px-1.5 py-0.5 rounded-full font-medium',
-                          PHASE_COLORS[ticket.phase] ?? 'text-fg-muted bg-fg-muted/10'
-                        )}
-                      >
-                        {PHASE_LABELS[ticket.phase] ?? ticket.phase}
-                      </span>
-                    )}
-                    {ticket.shaping?.appetite && (
-                      <span
-                        className={cn(
-                          'text-xs px-1.5 py-0.5 rounded-full font-medium',
-                          APPETITE_COLORS[ticket.shaping.appetite]
-                        )}
-                      >
-                        {APPETITE_LABELS[ticket.shaping.appetite]}
-                      </span>
-                    )}
+            <div className={styles.ticketList}>
+              {activeTickets.map((ticket) => (
+                <div key={ticket.id} className={styles.ticketCard}>
+                  <div className={styles.ticketInfo}>
+                    <span className={styles.ticketTitle}>{ticket.title}</span>
+                    <div className={styles.badgeRow}>
+                      {ticket.phase && (
+                        <Badge color={PHASE_COLORS[ticket.phase] ?? 'default'}>
+                          {PHASE_LABELS[ticket.phase] ?? ticket.phase}
+                        </Badge>
+                      )}
+                      {ticket.shaping?.appetite && (
+                        <Badge color={APPETITE_COLORS[ticket.shaping.appetite]}>
+                          {APPETITE_LABELS[ticket.shaping.appetite]}
+                        </Badge>
+                      )}
+                    </div>
                   </div>
+                  <Button size="sm" variant="destructive" onClick={() => handleDrop(ticket.id)}>
+                    <Stop20Filled style={{ width: 12, height: 12 }} className={styles.stopIcon} />
+                    Stop
+                  </Button>
                 </div>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={() => handleDrop(ticket.id)}
-                >
-                  <PiStopFill size={12} className="mr-1" />
-                  Stop
-                </Button>
-              </div>
-            ))}
-          </div>
-
-          {/* Footer */}
-          <div className="flex justify-end px-5 py-3 border-t border-surface-border">
+              ))}
+            </div>
+          </DialogBody>
+          <DialogFooter>
             <Button size="sm" variant="ghost" onClick={onCancel}>
               Never mind
             </Button>
-          </div>
-        </div>
-      </div>
+          </DialogFooter>
+        </DialogContent>
+      </AnimatedDialog>
     );
   }
 );

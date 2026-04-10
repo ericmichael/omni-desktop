@@ -1,6 +1,6 @@
+import type { InputProps as FluentInputProps } from '@fluentui/react-components';
+import { Input as FluentInput, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { forwardRef } from 'react';
-
-import { cn } from '@/renderer/ds/cn';
 
 type Size = 'sm' | 'md' | 'lg';
 
@@ -8,31 +8,99 @@ type InputProps = {
   size?: Size;
   mono?: boolean;
   className?: string;
-} & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'size'>;
-
-const sizeClasses: Record<Size, string> = {
-  sm: 'h-9 px-3 text-sm sm:h-8 sm:px-2 sm:text-xs',
-  md: 'h-10 px-3 text-base sm:h-9 sm:px-2.5 sm:text-sm',
-  lg: 'h-12 px-4 text-base sm:h-10 sm:px-3 sm:text-sm',
+  type?: FluentInputProps['type'];
+  onChange?: React.ChangeEventHandler<HTMLInputElement>;
+  value?: string;
+  defaultValue?: string;
+  placeholder?: string;
+  disabled?: boolean;
+  readOnly?: boolean;
+  id?: string;
+  name?: string;
+  autoFocus?: boolean;
+  autoComplete?: string;
+  maxLength?: number;
+  minLength?: number;
+  pattern?: string;
+  required?: boolean;
+  'aria-label'?: string;
+  'aria-describedby'?: string;
+  onFocus?: React.FocusEventHandler<HTMLInputElement>;
+  onBlur?: React.FocusEventHandler<HTMLInputElement>;
+  onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>;
 };
 
+const sizeMap: Record<Size, 'small' | 'medium' | 'large'> = {
+  sm: 'small',
+  md: 'medium',
+  lg: 'large',
+};
+
+const useStyles = makeStyles({
+  mono: {
+    fontFamily: tokens.fontFamilyMonospace,
+  },
+});
+
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ size = 'md', mono, className, ...props }, ref) => {
+  (
+    {
+      size = 'md',
+      mono,
+      className,
+      onChange,
+      value,
+      defaultValue,
+      placeholder,
+      disabled,
+      readOnly,
+      type,
+      id,
+      name,
+      autoFocus,
+      autoComplete,
+      maxLength,
+      minLength,
+      pattern,
+      required,
+      onFocus,
+      onBlur,
+      onKeyDown,
+      ...rest
+    },
+    ref
+  ) => {
+    const styles = useStyles();
+
     return (
-      <input
+      <FluentInput
         ref={ref}
-        className={cn(
-          'rounded-lg border border-surface-border/50 bg-transparent text-fg outline-none transition-colors',
-          'placeholder:text-fg-muted/50',
-          'focus:border-accent-500/50',
-          'disabled:opacity-40 disabled:cursor-not-allowed',
-          sizeClasses[size],
-          mono && 'font-mono',
-          className
-        )}
-        {...props}
+        size={sizeMap[size]}
+        appearance="underline"
+        className={mergeClasses(mono && styles.mono, className)}
+        onChange={onChange}
+        value={value}
+        defaultValue={defaultValue}
+        placeholder={placeholder}
+        disabled={disabled}
+        readOnly={readOnly}
+        type={type}
+        id={id}
+        name={name}
+        autoFocus={autoFocus}
+        autoComplete={autoComplete}
+        maxLength={maxLength}
+        minLength={minLength}
+        pattern={pattern}
+        required={required}
+        aria-label={rest['aria-label']}
+        aria-describedby={rest['aria-describedby']}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        onKeyDown={onKeyDown}
       />
     );
   }
 );
+
 Input.displayName = 'Input';

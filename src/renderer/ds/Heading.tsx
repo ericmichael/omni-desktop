@@ -1,7 +1,6 @@
+import { makeStyles, mergeClasses, Subtitle1, Subtitle2, Title1, Title2, Title3 } from '@fluentui/react-components';
 import type { HTMLAttributes } from 'react';
 import { forwardRef } from 'react';
-
-import { cn } from '@/renderer/ds/cn';
 
 type HeadingLevel = 'h1' | 'h2' | 'h3' | 'h4';
 
@@ -10,17 +9,30 @@ type HeadingProps = {
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
 } & HTMLAttributes<HTMLHeadingElement>;
 
-const sizeClasses = {
-  xs: 'text-sm font-semibold tracking-tight',
-  sm: 'text-base font-semibold tracking-tight',
-  md: 'text-xl font-bold tracking-tight',
-  lg: 'text-2xl font-bold tracking-tight',
-  xl: 'text-3xl font-bold tracking-tight',
+const sizeToComponent = {
+  xs: Subtitle2,
+  sm: Subtitle1,
+  md: Title3,
+  lg: Title2,
+  xl: Title1,
 };
 
+const useStyles = makeStyles({
+  root: {
+    letterSpacing: '-0.01em',
+  },
+});
+
 export const Heading = forwardRef<HTMLHeadingElement, HeadingProps>(
-  ({ as: Tag = 'h2', size = 'md', className, ...props }, ref) => {
-    return <Tag ref={ref} className={cn('text-fg', sizeClasses[size], className)} {...props} />;
+  ({ as: tag = 'h2', size = 'md', className, children, ...props }, ref) => {
+    const styles = useStyles();
+    const Component = sizeToComponent[size];
+
+    return (
+      <Component ref={ref} as={tag} className={mergeClasses(styles.root, className)} {...props}>
+        {children}
+      </Component>
+    );
   }
 );
 

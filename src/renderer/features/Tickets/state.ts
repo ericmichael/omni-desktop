@@ -45,11 +45,13 @@ export const $pipeline = atom<Pipeline | null>(null);
 export const $activeInitiativeId = atom<InitiativeId | 'all'>('all');
 
 /**
- * Which tickets view is active: dashboard = no selection, project = project detail, inbox = inbox view.
- * Ticket selection is handled by `activeTicketId` in the persisted store.
+ * Which tickets view is active: dashboard, project detail, inbox, or ticket detail.
  */
 export const $ticketsView = atom<
-  { type: 'dashboard' } | { type: 'project'; projectId: ProjectId } | { type: 'inbox'; selectedItemId?: string }
+  | { type: 'dashboard' }
+  | { type: 'project'; projectId: ProjectId }
+  | { type: 'inbox'; selectedItemId?: string }
+  | { type: 'ticket'; ticketId: TicketId }
 >({ type: 'dashboard' });
 
 /**
@@ -271,6 +273,10 @@ export const ticketApi = {
     void ticketApi.fetchTickets(projectId);
     void ticketApi.getPipeline(projectId);
     void initiativeApi.fetchInitiatives(projectId);
+  },
+  goToTicket: (ticketId: TicketId): void => {
+    $ticketsView.set({ type: 'ticket', ticketId });
+    persistedStoreApi.setKey('activeTicketId', ticketId);
   },
   setActiveTicket: (ticketId: TicketId): void => {
     persistedStoreApi.setKey('activeTicketId', ticketId);

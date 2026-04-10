@@ -1,7 +1,8 @@
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { PiPlusBold, PiTrashBold } from 'react-icons/pi';
+import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
 
+import { makeStyles, tokens } from '@fluentui/react-components';
 import { Button, Card, IconButton, Input, SaveBar, SectionLabel } from '@/renderer/ds';
 import { configApi } from '@/renderer/services/config';
 
@@ -41,7 +42,38 @@ function serializeEnvLines(lines: EnvLine[]): string {
     .join('\n');
 }
 
+const useStyles = makeStyles({
+  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
+  sectionLabelSpaced: { marginTop: tokens.spacingVerticalS },
+  filePath: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
+  },
+  comment: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground3,
+    fontFamily: 'monospace',
+    opacity: 0.6,
+    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
+  },
+  addButton: { alignSelf: 'flex-start', marginTop: tokens.spacingVerticalXXS },
+  entryRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
+  flex1: { flex: '1 1 0' },
+  flex2: { flex: '2 1 0' },
+  iconMr: { marginRight: tokens.spacingHorizontalXS },
+  equals: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase300,
+    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
+  },
+});
+
 export const SettingsModalEnvironmentTab = memo(() => {
+  const styles = useStyles();
   const [envFilePath, setEnvFilePath] = useState<string | null>(null);
   const [lines, setLines] = useState<EnvLine[]>([]);
   const [dirty, setDirty] = useState(false);
@@ -114,21 +146,21 @@ export const SettingsModalEnvironmentTab = memo(() => {
   }, [envFilePath, lines]);
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className={styles.root}>
       <SectionLabel>Environment File</SectionLabel>
       <Card>
-        <span className="text-sm sm:text-xs text-fg-muted truncate">{envFilePath ?? 'Loading\u2026'}</span>
+        <span className={styles.filePath}>{envFilePath ?? 'Loading\u2026'}</span>
       </Card>
 
-      <SectionLabel className="mt-2">Variables</SectionLabel>
-      <Card className="gap-2">
+      <SectionLabel className={styles.sectionLabelSpaced}>Variables</SectionLabel>
+      <Card className={styles.root}>
         {lines.map((line, i) => {
           if (line.kind === 'blank') {
             return null;
           }
           if (line.kind === 'comment') {
             return (
-              <div key={i} className="text-sm sm:text-xs text-fg-subtle font-mono opacity-60">
+              <div key={i} className={styles.comment}>
                 {line.text}
               </div>
             );
@@ -136,8 +168,8 @@ export const SettingsModalEnvironmentTab = memo(() => {
           return <EnvEntryRow key={i} index={i} line={line} onUpdate={updateEntry} onRemove={removeEntry} />;
         })}
 
-        <Button size="sm" variant="ghost" onClick={addEntry} className="self-start mt-1">
-          <PiPlusBold className="mr-1" />
+        <Button size="sm" variant="ghost" onClick={addEntry} className={styles.addButton}>
+          <Add20Regular className={styles.iconMr} />
           Add variable
         </Button>
       </Card>
@@ -160,6 +192,7 @@ const EnvEntryRow = memo(
     onUpdate: (index: number, field: 'key' | 'value', value: string) => void;
     onRemove: (index: number) => void;
   }) => {
+    const styles = useStyles();
     const onChangeKey = useCallback(
       (e: ChangeEvent<HTMLInputElement>) => {
         onUpdate(index, 'key', e.target.value);
@@ -177,16 +210,16 @@ const EnvEntryRow = memo(
     }, [index, onRemove]);
 
     return (
-      <div className="flex items-center gap-2">
+      <div className={styles.entryRow}>
         <Input
           type="text"
           value={line.key}
           onChange={onChangeKey}
           placeholder="KEY"
           mono
-          className="flex-1"
+          className={styles.flex1}
         />
-        <span className="text-fg-subtle text-sm sm:text-xs">=</span>
+        <span className={styles.equals}>=</span>
         <Input
           size="sm"
           type="text"
@@ -194,9 +227,9 @@ const EnvEntryRow = memo(
           onChange={onChangeValue}
           placeholder="value"
           mono
-          className="flex-[2]"
+          className={styles.flex2}
         />
-        <IconButton aria-label="Remove variable" icon={<PiTrashBold />} size="sm" onClick={onClickRemove} />
+        <IconButton aria-label="Remove variable" icon={<Delete20Regular />} size="sm" onClick={onClickRemove} />
       </div>
     );
   }

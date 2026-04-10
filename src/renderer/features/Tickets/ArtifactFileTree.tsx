@@ -1,22 +1,40 @@
-import { memo, useCallback, useState } from 'react';
-import { PiCaretRightBold, PiFileBold, PiFileImageBold, PiFolderBold, PiFolderOpenBold } from 'react-icons/pi';
+import { memo, useCallback, useRef, useState } from 'react';
+import { Document20Regular, Image20Regular, Folder20Regular, FolderOpen20Regular } from '@fluentui/react-icons';
+import { makeStyles, tokens } from '@fluentui/react-components';
 
-import { cn } from '@/renderer/ds';
+import { Tree, TreeItem, TreeItemLayout } from '@/renderer/ds';
+import type { TreeItemOpenChangeData } from '@/renderer/ds';
 import type { ArtifactFileEntry, TicketId } from '@/shared/types';
 
 import { ticketApi } from './state';
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico']);
 
-const getFileIcon = (entry: ArtifactFileEntry, isExpanded: boolean) => {
+const useStyles = makeStyles({
+  folderIcon: {
+    color: '#facc15',
+  },
+  imageIcon: {
+    color: '#c084fc',
+  },
+  docIcon: {
+    color: tokens.colorNeutralForeground2,
+  },
+  sizeLabel: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+  },
+});
+
+const getFileIcon = (entry: ArtifactFileEntry, isExpanded: boolean, styles: ReturnType<typeof useStyles>) => {
   if (entry.isDirectory) {
-    return isExpanded ? <PiFolderOpenBold size={14} className="text-yellow-400" /> : <PiFolderBold size={14} className="text-yellow-400" />;
+    return isExpanded ? <FolderOpen20Regular style={{ width: 14, height: 14 }} className={styles.folderIcon} /> : <Folder20Regular style={{ width: 14, height: 14 }} className={styles.folderIcon} />;
   }
   const ext = entry.name.slice(entry.name.lastIndexOf('.')).toLowerCase();
   if (IMAGE_EXTENSIONS.has(ext)) {
-    return <PiFileImageBold size={14} className="text-purple-400" />;
+    return <Image20Regular style={{ width: 14, height: 14 }} className={styles.imageIcon} />;
   }
-  return <PiFileBold size={14} className="text-fg-muted" />;
+  return <Document20Regular style={{ width: 14, height: 14 }} className={styles.docIcon} />;
 };
 
 const formatSize = (bytes: number): string => {
@@ -34,63 +52,63 @@ type FileTreeNodeProps = {
   ticketId: TicketId;
   selectedPath: string | null;
   onSelect: (entry: ArtifactFileEntry) => void;
-  depth: number;
+  openItems: Set<string>;
+  childrenMap: Map<string, ArtifactFileEntry[]>;
 };
 
-const FileTreeNode = memo(({ entry, ticketId, selectedPath, onSelect, depth }: FileTreeNodeProps) => {
-  const [expanded, setExpanded] = useState(false);
-  const [children, setChildren] = useState<ArtifactFileEntry[] | null>(null);
+const FileTreeNode = memo(({ entry, ticketId, selectedPath, onSelect, openItems, childrenMap }: FileTreeNodeProps) => {
+  const styles = useStyles();
+  const isExpanded = openItems.has(entry.relativePath);
+  const children = childrenMap.get(entry.relativePath);
 
   const handleClick = useCallback(() => {
-    if (entry.isDirectory) {
-      if (!expanded && children === null) {
-        void ticketApi.listArtifacts(ticketId, entry.relativePath).then(setChildren);
-      }
-      setExpanded((prev) => !prev);
-    } else {
+    if (!entry.isDirectory) {
       onSelect(entry);
     }
-  }, [entry, ticketId, expanded, children, onSelect]);
+  }, [entry, onSelect]);
 
-  const isSelected = !entry.isDirectory && selectedPath === entry.relativePath;
+  if (entry.isDirectory) {
+    return (
+      <TreeItem itemType="branch" value={entry.relativePath}>
+        <TreeItemLayout iconBefore={getFileIcon(entry, isExpanded, styles)}>
+          {entry.name}
+        </TreeItemLayout>
+        {isExpanded && children && (
+          <Tree>
+            {children.map((child) => (
+              <FileTreeNode
+                key={child.relativePath}
+                entry={child}
+                ticketId={ticketId}
+                selectedPath={selectedPath}
+                onSelect={onSelect}
+                openItems={openItems}
+                childrenMap={childrenMap}
+              />
+            ))}
+          </Tree>
+        )}
+      </TreeItem>
+    );
+  }
+
+  const isSelected = selectedPath === entry.relativePath;
 
   return (
-    <>
-      <button
-        type="button"
-        onClick={handleClick}
-        className={cn(
-          'flex items-center gap-1.5 w-full text-left py-1 px-2 rounded text-sm hover:bg-surface-raised cursor-pointer transition-colors',
-          isSelected && 'bg-accent-500/15 text-accent-400'
-        )}
-        style={{ paddingLeft: `${depth * 16 + 8}px` }}
+    <TreeItem
+      itemType="leaf"
+      value={entry.relativePath}
+      onClick={handleClick}
+      aria-selected={isSelected}
+      style={isSelected ? { backgroundColor: 'var(--colorBrandBackground2, rgba(99, 102, 241, 0.15))' } : undefined}
+    >
+      <TreeItemLayout
+        iconBefore={getFileIcon(entry, false, styles)}
+        aside={<span className={styles.sizeLabel}>{formatSize(entry.size)}</span>}
       >
-        {entry.isDirectory && (
-          <PiCaretRightBold
-            size={10}
-            className={cn('shrink-0 text-fg-subtle transition-transform', expanded && 'rotate-90')}
-          />
-        )}
-        {!entry.isDirectory && <span className="w-[10px] shrink-0" />}
-        {getFileIcon(entry, expanded)}
-        <span className="flex-1 truncate">{entry.name}</span>
-        {!entry.isDirectory && <span className="text-xs text-fg-subtle shrink-0">{formatSize(entry.size)}</span>}
-      </button>
-      {expanded && children && (
-        <div>
-          {children.map((child) => (
-            <FileTreeNode
-              key={child.relativePath}
-              entry={child}
-              ticketId={ticketId}
-              selectedPath={selectedPath}
-              onSelect={onSelect}
-              depth={depth + 1}
-            />
-          ))}
-        </div>
-      )}
-    </>
+        {entry.name}
+      </TreeItemLayout>
+    </TreeItem>
   );
 });
 FileTreeNode.displayName = 'FileTreeNode';
@@ -103,8 +121,39 @@ type ArtifactFileTreeProps = {
 };
 
 export const ArtifactFileTree = memo(({ entries, ticketId, selectedPath, onSelect }: ArtifactFileTreeProps) => {
+  const [openItems, setOpenItems] = useState<Set<string>>(new Set());
+  const [childrenMap, setChildrenMap] = useState<Map<string, ArtifactFileEntry[]>>(new Map());
+  const loadingRef = useRef<Set<string>>(new Set());
+
+  const handleOpenChange = useCallback(
+    (_e: unknown, data: TreeItemOpenChangeData) => {
+      const path = data.value as string;
+      const willOpen = data.open;
+
+      setOpenItems((prev) => {
+        const next = new Set(prev);
+        if (willOpen) {
+          next.add(path);
+        } else {
+          next.delete(path);
+        }
+        return next;
+      });
+
+      // Lazy-load children on first expand
+      if (willOpen && !childrenMap.has(path) && !loadingRef.current.has(path)) {
+        loadingRef.current.add(path);
+        void ticketApi.listArtifacts(ticketId, path).then((children) => {
+          setChildrenMap((prev) => new Map(prev).set(path, children));
+          loadingRef.current.delete(path);
+        });
+      }
+    },
+    [ticketId, childrenMap]
+  );
+
   return (
-    <div className="flex flex-col py-1">
+    <Tree aria-label="Artifact files" onOpenChange={handleOpenChange} openItems={openItems}>
       {entries.map((entry) => (
         <FileTreeNode
           key={entry.relativePath}
@@ -112,10 +161,11 @@ export const ArtifactFileTree = memo(({ entries, ticketId, selectedPath, onSelec
           ticketId={ticketId}
           selectedPath={selectedPath}
           onSelect={onSelect}
-          depth={0}
+          openItems={openItems}
+          childrenMap={childrenMap}
         />
       ))}
-    </div>
+    </Tree>
   );
 });
 ArtifactFileTree.displayName = 'ArtifactFileTree';

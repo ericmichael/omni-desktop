@@ -1,7 +1,8 @@
 import type { ChangeEvent } from 'react';
 import { memo, useCallback } from 'react';
 
-import { Button } from '@/renderer/ds';
+import { makeStyles, tokens } from '@fluentui/react-components';
+import { Body1Strong, Button, Caption1, Input } from '@/renderer/ds';
 import type { ProviderEntry } from '@/shared/types';
 
 type Props = {
@@ -14,11 +15,18 @@ type Props = {
   onBack: () => void;
 };
 
-const INPUT_CLASS =
-  'h-9 w-full px-3 text-sm rounded-md bg-transparent border border-surface-border/50 text-fg font-mono outline-none focus:border-accent-500/50 placeholder:text-fg-muted/50';
+const useStyles = makeStyles({
+  root: { display: 'flex', flexDirection: 'column', gap: '24px' },
+  header: { display: 'flex', flexDirection: 'column', gap: '4px' },
+  fields: { display: 'flex', flexDirection: 'column', gap: '16px' },
+  field: { display: 'flex', flexDirection: 'column', gap: '6px' },
+  required: { color: tokens.colorPaletteRedForeground1 },
+  actions: { display: 'flex', justifyContent: 'space-between' },
+});
 
 export const OnboardingCredentialsStep = memo(
   ({ providerType, apiKey, baseUrl, onChangeApiKey, onChangeBaseUrl, onNext, onBack }: Props) => {
+    const styles = useStyles();
     const showBaseUrl = providerType === 'openai-compatible' || providerType === 'litellm';
     const apiKeyRequired = providerType !== 'openai-compatible';
     const baseUrlRequired = providerType === 'openai-compatible';
@@ -46,51 +54,48 @@ export const OnboardingCredentialsStep = memo(
       providerType === 'openai-compatible' ? 'http://localhost:11434/v1' : 'https://api.example.com/v1';
 
     return (
-      <div className="flex flex-col gap-6">
-        <div className="flex flex-col gap-1">
-          <h3 className="text-lg font-semibold text-fg">Enter credentials</h3>
-          <p className="text-sm text-fg-muted">
+      <div className={styles.root}>
+        <div className={styles.header}>
+          <Body1Strong>Enter credentials</Body1Strong>
+          <Caption1>
             {providerType === 'openai' && 'Enter your OpenAI API key.'}
             {providerType === 'openai-compatible' && 'Enter the base URL for your OpenAI-compatible server.'}
             {providerType === 'litellm' && 'Enter your API key and optional base URL.'}
-          </p>
+          </Caption1>
         </div>
 
-        <div className="flex flex-col gap-4">
+        <div className={styles.fields}>
           {showBaseUrl && (
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm text-fg" htmlFor="onboarding-base-url">
-                Base URL {baseUrlRequired && <span className="text-red-400">*</span>}
-              </label>
-              <input
-                id="onboarding-base-url"
-                type="text"
+            <div className={styles.field}>
+              <Caption1>
+                Base URL {baseUrlRequired && <span className={styles.required}>*</span>}
+              </Caption1>
+              <Input
                 value={baseUrl}
                 onChange={handleBaseUrlChange}
                 placeholder={baseUrlPlaceholder}
-                className={INPUT_CLASS}
                 autoFocus={providerType === 'openai-compatible'}
+                size="sm"
               />
             </div>
           )}
 
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm text-fg" htmlFor="onboarding-api-key">
-              API Key {apiKeyRequired && <span className="text-red-400">*</span>}
-            </label>
-            <input
-              id="onboarding-api-key"
+          <div className={styles.field}>
+            <Caption1>
+              API Key {apiKeyRequired && <span className={styles.required}>*</span>}
+            </Caption1>
+            <Input
               type="password"
               value={apiKey}
               onChange={handleApiKeyChange}
               placeholder={apiKeyPlaceholder}
-              className={INPUT_CLASS}
               autoFocus={!showBaseUrl}
+              size="sm"
             />
           </div>
         </div>
 
-        <div className="flex justify-between">
+        <div className={styles.actions}>
           <Button variant="ghost" size="sm" onClick={onBack}>
             Back
           </Button>

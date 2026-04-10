@@ -1,8 +1,9 @@
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { PiPlusBold, PiTrashBold } from 'react-icons/pi';
+import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
 
-import { Button, Card, Checkbox, FormField, IconButton, Input, SaveBar, SectionLabel, Spinner, Switch } from '@/renderer/ds';
+import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
+import { Button, Card, Checkbox, FormField, FormSkeleton, IconButton, Input, SaveBar, SectionLabel, Switch } from '@/renderer/ds';
 import { configApi } from '@/renderer/services/config';
 import type { NetworkConfig } from '@/shared/types';
 
@@ -91,7 +92,75 @@ function buildSavePayload(config: NetworkConfig): NetworkConfig {
   return { ...config, allowlist: mergedAllowlist };
 }
 
+const useStyles = makeStyles({
+  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
+  cardGap4: { gap: tokens.spacingVerticalL },
+  description: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
+  },
+  colGap2: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
+  colGap1: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS },
+  subLabel: {
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightMedium,
+    color: tokens.colorNeutralForeground3,
+    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
+  },
+  rowGap2: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
+  flex1: { flex: '1 1 0' },
+  hostChip: {
+    height: '36px',
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    fontSize: tokens.fontSizeBase300,
+    borderRadius: tokens.borderRadiusLarge,
+    backgroundColor: tokens.colorNeutralBackground2,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
+    color: tokens.colorNeutralForeground1,
+    fontFamily: 'monospace',
+    flex: '1 1 0',
+    display: 'flex',
+    alignItems: 'center',
+    '@media (min-width: 640px)': {
+      height: '32px',
+      paddingLeft: tokens.spacingHorizontalS,
+      paddingRight: tokens.spacingHorizontalS,
+      fontSize: tokens.fontSizeBase200,
+    },
+  },
+  effectiveMono: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    fontFamily: 'monospace',
+    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
+  },
+  iconMr: { marginRight: tokens.spacingHorizontalXS },
+  presetLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    cursor: 'pointer',
+    paddingTop: '2px',
+    paddingBottom: '2px',
+  },
+  presetCol: { display: 'flex', flexDirection: 'column' },
+  presetName: {
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightMedium,
+    color: tokens.colorNeutralForeground1,
+    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
+  },
+  presetDesc: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
+  },
+});
+
 export const SettingsModalNetworkTab = memo(() => {
+  const styles = useStyles();
   const [configDir, setConfigDir] = useState<string | null>(null);
   const [config, setConfig] = useState<NetworkConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -267,32 +336,28 @@ export const SettingsModalNetworkTab = memo(() => {
   }, [config]);
 
   if (loading || !config) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Spinner />
-      </div>
-    );
+    return <FormSkeleton fields={4} />;
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className={styles.root}>
       <SectionLabel>Network Isolation</SectionLabel>
 
-      <Card className="gap-4">
+      <Card className={styles.cardGap4}>
         <FormField label="Enable network isolation">
           <Switch checked={config.enabled} onCheckedChange={onToggleEnabled} />
         </FormField>
 
-        <p className="text-sm sm:text-xs text-fg-muted">
+        <p className={styles.description}>
           When enabled, outbound network traffic is restricted to the hosts listed below in both chat and sandbox modes.
           All other traffic is blocked. Hosts can be domain names, IP addresses, or CIDR ranges.
         </p>
 
         {config.enabled && (
           <>
-            <div className="flex flex-col gap-2">
-              <span className="text-sm sm:text-xs font-medium text-fg-subtle">Presets</span>
-              <div className="flex flex-col gap-2">
+            <div className={styles.colGap2}>
+              <span className={styles.subLabel}>Presets</span>
+              <div className={styles.colGap2}>
                 {PRESETS.map((preset) => (
                   <PresetRow
                     key={preset.id}
@@ -304,14 +369,14 @@ export const SettingsModalNetworkTab = memo(() => {
               </div>
             </div>
 
-            <div className="flex flex-col gap-2">
-              <span className="text-sm sm:text-xs font-medium text-fg-subtle">Additional allowed hosts</span>
-              <div className="flex flex-col gap-1">
+            <div className={styles.colGap2}>
+              <span className={styles.subLabel}>Additional allowed hosts</span>
+              <div className={styles.colGap1}>
                 {config.allowlist.map((host, i) => (
                   <HostRow key={i} host={host} index={i} onRemove={removeHost} />
                 ))}
               </div>
-              <div className="flex items-center gap-2">
+              <div className={styles.rowGap2}>
                 <Input
                   type="text"
                   value={newHost}
@@ -319,26 +384,26 @@ export const SettingsModalNetworkTab = memo(() => {
                   onKeyDown={onNewHostKeyDown}
                   placeholder="example.openai.azure.com or 10.0.0.0/16"
                   mono
-                  className="flex-1"
+                  className={styles.flex1}
                 />
                 <Button size="sm" variant="ghost" onClick={addHost} isDisabled={!newHost.trim()}>
-                  <PiPlusBold className="mr-1" />
+                  <Add20Regular className={styles.iconMr} />
                   Add host
                 </Button>
               </div>
             </div>
 
-            <div className="flex flex-col gap-2">
-              <span className="text-sm sm:text-xs font-medium text-fg-subtle">Denied hosts</span>
-              <p className="text-sm sm:text-xs text-fg-muted">
+            <div className={styles.colGap2}>
+              <span className={styles.subLabel}>Denied hosts</span>
+              <p className={styles.description}>
                 Explicitly blocked hosts. Denied hosts take precedence over allowed hosts.
               </p>
-              <div className="flex flex-col gap-1">
+              <div className={styles.colGap1}>
                 {config.denylist.map((host, i) => (
                   <HostRow key={i} host={host} index={i} onRemove={removeDenyHost} />
                 ))}
               </div>
-              <div className="flex items-center gap-2">
+              <div className={styles.rowGap2}>
                 <Input
                   type="text"
                   value={newDenyHost}
@@ -346,10 +411,10 @@ export const SettingsModalNetworkTab = memo(() => {
                   onKeyDown={onNewDenyHostKeyDown}
                   placeholder="blocked.example.com"
                   mono
-                  className="flex-1"
+                  className={styles.flex1}
                 />
                 <Button size="sm" variant="ghost" onClick={addDenyHost} isDisabled={!newDenyHost.trim()}>
-                  <PiPlusBold className="mr-1" />
+                  <Add20Regular className={styles.iconMr} />
                   Add denied host
                 </Button>
               </div>
@@ -360,9 +425,9 @@ export const SettingsModalNetworkTab = memo(() => {
             </FormField>
 
             {effectiveHosts.length > 0 && (
-              <div className="flex flex-col gap-1">
-                <span className="text-sm sm:text-xs font-medium text-fg-subtle">Effective allowlist</span>
-                <p className="text-sm sm:text-xs text-fg-muted font-mono">{effectiveHosts.join(', ')}</p>
+              <div className={styles.colGap1}>
+                <span className={styles.subLabel}>Effective allowlist</span>
+                <p className={styles.effectiveMono}>{effectiveHosts.join(', ')}</p>
               </div>
             )}
           </>
@@ -377,14 +442,15 @@ SettingsModalNetworkTab.displayName = 'SettingsModalNetworkTab';
 
 const PresetRow = memo(
   ({ preset, checked, onToggle }: { preset: Preset; checked: boolean; onToggle: (id: string) => void }) => {
+    const styles = useStyles();
     const onChange = useCallback(() => onToggle(preset.id), [preset.id, onToggle]);
 
     return (
-      <label className="flex items-center gap-2.5 cursor-pointer py-0.5">
+      <label className={styles.presetLabel}>
         <Checkbox checked={checked} onCheckedChange={onChange} />
-        <div className="flex flex-col">
-          <span className="text-sm sm:text-xs font-medium text-fg">{preset.label}</span>
-          <span className="text-sm sm:text-xs text-fg-muted">{preset.description}</span>
+        <div className={styles.presetCol}>
+          <span className={styles.presetName}>{preset.label}</span>
+          <span className={styles.presetDesc}>{preset.description}</span>
         </div>
       </label>
     );
@@ -394,14 +460,15 @@ PresetRow.displayName = 'PresetRow';
 
 const HostRow = memo(
   ({ host, index, onRemove }: { host: string; index: number; onRemove: (index: number) => void }) => {
+    const styles = useStyles();
     const onClickRemove = useCallback(() => onRemove(index), [index, onRemove]);
 
     return (
-      <div className="flex items-center gap-2">
-        <span className="h-9 px-3 text-sm sm:h-8 sm:px-2 sm:text-xs rounded-lg bg-surface-raised border border-surface-border/50 text-fg font-mono flex-1 flex items-center">
+      <div className={styles.rowGap2}>
+        <span className={styles.hostChip}>
           {host}
         </span>
-        <IconButton aria-label="Remove host" icon={<PiTrashBold />} size="sm" onClick={onClickRemove} />
+        <IconButton aria-label="Remove host" icon={<Delete20Regular />} size="sm" onClick={onClickRemove} />
       </div>
     );
   }

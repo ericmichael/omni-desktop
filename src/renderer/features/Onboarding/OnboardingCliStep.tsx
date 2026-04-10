@@ -1,6 +1,7 @@
+import { makeStyles } from '@fluentui/react-components';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Button, Spinner } from '@/renderer/ds';
+import { Badge, Body1, Button, Caption1, MessageBar, MessageBarBody, Spinner } from '@/renderer/ds';
 import { emitter } from '@/renderer/services/ipc';
 
 type Props = {
@@ -8,7 +9,16 @@ type Props = {
   onFinish: () => void;
 };
 
+const useStyles = makeStyles({
+  root: { display: 'flex', flexDirection: 'column', gap: '24px' },
+  header: { display: 'flex', flexDirection: 'column', gap: '8px' },
+  body: { display: 'flex', flexDirection: 'column', gap: '12px' },
+  actions: { display: 'flex', justifyContent: 'space-between' },
+  actionsEnd: { display: 'flex', justifyContent: 'flex-end' },
+});
+
 export const OnboardingCliStep = memo(({ onBack, onFinish }: Props) => {
+  const styles = useStyles();
   const [status, setStatus] = useState<{ installed: boolean; symlinkPath: string } | null>(null);
   const [installing, setInstalling] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,9 +37,7 @@ export const OnboardingCliStep = memo(({ onBack, onFinish }: Props) => {
     setError(null);
     try {
       const result = await emitter.invoke('util:install-cli-to-path');
-      if (!result.success) {
-        setError(result.error);
-      }
+      if (!result.success) setError(result.error);
       await checkStatus();
     } finally {
       setInstalling(false);
@@ -39,45 +47,44 @@ export const OnboardingCliStep = memo(({ onBack, onFinish }: Props) => {
   const installed = status?.installed === true;
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-2">
-        <h3 className="text-lg font-semibold text-fg">Install the Omni CLI</h3>
-        <p className="text-sm text-fg-muted">
-          Omni Code also comes as a terminal-based coding agent. Install the{' '}
-          <code className="rounded bg-surface-sunken px-1.5 py-0.5 text-xs text-fg">omni</code> command to use it
+    <div className={styles.root}>
+      <div className={styles.header}>
+        <Body1 weight="semibold">Install the Omni CLI</Body1>
+        <Caption1>
+          Omni Code also comes as a terminal-based coding agent. Install the <code>omni</code> command to use it
           directly from your terminal.
-        </p>
+        </Caption1>
       </div>
 
-      <div className="flex flex-col gap-3">
+      <div className={styles.body}>
         {installed ? (
-          <div className="rounded-md border border-green-500/30 bg-green-500/10 p-3 text-xs text-green-300">
-            Installed at {status.symlinkPath}
-          </div>
+          <MessageBar intent="success">
+            <MessageBarBody>Installed at {status.symlinkPath}</MessageBarBody>
+          </MessageBar>
         ) : (
           <Button variant="primary" size="sm" onClick={handleInstall} isDisabled={installing}>
             {installing ? (
-              <span className="flex items-center gap-2">
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Spinner size="sm" />
                 Installing…
               </span>
             ) : (
-              <span className="flex items-center gap-2">
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 Install omni to PATH
-                <span className="rounded-full bg-white/20 px-2 py-0.5 text-xs font-medium text-white/80">
-                  Recommended
-                </span>
+                <Badge appearance="filled" color="brand" size="small">Recommended</Badge>
               </span>
             )}
           </Button>
         )}
 
         {error && (
-          <div className="rounded-md border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">{error}</div>
+          <MessageBar intent="error">
+            <MessageBarBody>{error}</MessageBarBody>
+          </MessageBar>
         )}
       </div>
 
-      <div className={`flex ${onBack ? 'justify-between' : 'justify-end'}`}>
+      <div className={onBack ? styles.actions : styles.actionsEnd}>
         {onBack && (
           <Button variant="ghost" size="sm" onClick={onBack}>
             Back

@@ -1,11 +1,22 @@
 import { useStore } from '@nanostores/react';
 import { memo, useCallback } from 'react';
 
+import { makeStyles, tokens } from '@fluentui/react-components';
 import { SectionLabel, Select } from '@/renderer/ds';
 import { DAY_OPTIONS } from '@/lib/weekly-review';
 import { persistedStoreApi } from '@/renderer/services/store';
 
+const useStyles = makeStyles({
+  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
+  hint: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+  },
+  select: { width: '144px' },
+});
+
 export const SettingsModalWeeklyReviewDay = memo(() => {
+  const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const reviewDay = store.weeklyReviewDay ?? 5;
 
@@ -14,13 +25,13 @@ export const SettingsModalWeeklyReviewDay = memo(() => {
   }, []);
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className={styles.root}>
       <SectionLabel>Weekly Review</SectionLabel>
-      <p className="text-xs text-fg-muted">
+      <p className={styles.hint}>
         Pick the day you want to be prompted for a weekly review. The review helps you reflect on
         completed work, triage your inbox, and set intentions.
       </p>
-      <Select value={String(reviewDay)} onChange={handleChange} className="w-36">
+      <Select value={String(reviewDay)} onChange={handleChange} className={styles.select}>
         {DAY_OPTIONS.map((opt) => (
           <option key={opt.value} value={String(opt.value)}>
             {opt.label}

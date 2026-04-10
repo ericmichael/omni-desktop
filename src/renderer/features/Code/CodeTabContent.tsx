@@ -1,3 +1,4 @@
+import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { motion } from 'framer-motion';
 import { memo, useCallback, useMemo } from 'react';
@@ -5,7 +6,7 @@ import { memo, useCallback, useMemo } from 'react';
 import { buildInteractiveVariables } from '@/lib/client-tools';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { SessionStartupShell } from '@/renderer/common/SessionStartupShell';
-import { Button, cn } from '@/renderer/ds';
+import { Button } from '@/renderer/ds';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { buildSandboxLabel, isCustomSandbox } from '@/renderer/omniagents-ui/sandbox-label';
@@ -16,15 +17,40 @@ import { CodeWorkspaceLayout } from './CodeWorkspaceLayout';
 import { $codeTabErrors, $codeTabStatuses, codeApi } from './state';
 import { useCodeAutoLaunch } from './use-code-auto-launch';
 
+const useStyles = makeStyles({
+  fullSize: { width: '100%', height: '100%' },
+  fullSizeRelative: { width: '100%', height: '100%', position: 'relative' },
+  hidden: { display: 'none' },
+  flexCenter: { width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  errorWrap: { maxWidth: '448px', textAlign: 'center', paddingLeft: tokens.spacingHorizontalL, paddingRight: tokens.spacingHorizontalL },
+  errorText: { fontSize: tokens.fontSizeBase400, fontWeight: tokens.fontWeightMedium, color: tokens.colorNeutralForeground1 },
+  errorRetry: { marginTop: tokens.spacingVerticalL },
+  flexColFullRelative: { display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative' },
+  flex1Relative: { flex: '1 1 0', minHeight: 0, position: 'relative' },
+  spinnerPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    borderRadius: '9999px',
+    backgroundColor: tokens.colorNeutralBackground2,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+  },
+  spinnerText: { fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground2 },
+});
+
 const CodeErrorView = memo(({ tabId, retry }: { tabId: CodeTabId; retry: () => void }) => {
+  const styles = useStyles();
   const allErrors = useStore($codeTabErrors);
   const error = allErrors[tabId] ?? null;
 
   return (
-    <div className="w-full h-full flex items-center justify-center">
-      <div className="max-w-md text-center px-4">
-        <div className="text-lg font-medium text-fg">{error ?? 'Something went wrong'}</div>
-        <div className="mt-4">
+    <div className={styles.flexCenter}>
+      <div className={styles.errorWrap}>
+        <div className={styles.errorText}>{error ?? 'Something went wrong'}</div>
+        <div className={styles.errorRetry}>
           <Button onClick={retry}>Retry</Button>
         </div>
       </div>
@@ -61,8 +87,9 @@ const CodeRunningView = memo(
     sandboxLabel?: string;
     onClientToolCall?: ClientToolCallHandler;
   }) => {
+    const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
-    const theme = store.theme ?? 'tokyo-night';
+    const theme = store.theme ?? 'teams-light';
 
     const uiSrc = useMemo(() => {
       const url = new URL(sandboxUrls.uiUrl, window.location.origin);
@@ -78,8 +105,8 @@ const CodeRunningView = memo(
     const vncSrc = sandboxUrls.noVncUrl;
 
     return (
-      <div className="flex flex-col w-full h-full relative">
-        <div className="flex-1 min-h-0 relative">
+      <div className={styles.flexColFullRelative}>
+        <div className={styles.flex1Relative}>
           <CodeWorkspaceLayout
             uiSrc={uiSrc}
             sessionId={sessionId}
@@ -114,6 +141,7 @@ type CodeTabContentProps = {
 
 export const CodeTabContent = memo(
   ({ tab, isVisible, overlayPane = 'none', onCloseOverlay, uiMinimal, headerActionsTargetId, headerActionsCompact }: CodeTabContentProps) => {
+    const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
     const project = useMemo(
       () => store.projects.find((p) => p.id === tab.projectId) ?? null,
@@ -170,7 +198,7 @@ export const CodeTabContent = memo(
     // No project selected — show project picker
     if (!tab.projectId) {
       return (
-        <div className={cn('w-full h-full', !isVisible && 'hidden')}>
+        <div className={mergeClasses(styles.fullSize, !isVisible && styles.hidden)}>
           <SessionStartupShell
             eyebrow="Workspace Setup"
             title="Choose a project"
@@ -183,7 +211,7 @@ export const CodeTabContent = memo(
     }
 
     return (
-      <div className={cn('w-full h-full relative', !isVisible && 'hidden')}>
+      <div className={mergeClasses(styles.fullSizeRelative, !isVisible && styles.hidden)}>
         {sandboxUrls ? (
           <CodeRunningView
             sandboxUrls={sandboxUrls}
@@ -211,9 +239,9 @@ export const CodeTabContent = memo(
           </SessionStartupShell>
         ) : (
           /* Connecting — show a subtle centered indicator */
-          <div className="w-full h-full flex items-center justify-center">
+          <div className={styles.flexCenter}>
             <motion.div
-              className="inline-flex items-center gap-2 rounded-full bg-surface-raised px-4 py-2"
+              className={styles.spinnerPill}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, ease: 'easeOut' }}
@@ -231,7 +259,7 @@ export const CodeTabContent = memo(
                   d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                 />
               </svg>
-              <span className="text-sm text-fg-muted">Connecting…</span>
+              <span className={styles.spinnerText}>Connecting…</span>
             </motion.div>
           </div>
         )}

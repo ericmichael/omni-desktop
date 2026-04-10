@@ -7,10 +7,30 @@ import { debounce } from 'es-toolkit/compat';
 import type { Atom } from 'nanostores';
 import type { PropsWithChildren } from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { PiCaretDownBold } from 'react-icons/pi';
+import { ChevronDown20Regular } from '@fluentui/react-icons';
 
+import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 import { $XTERM_THEME } from '@/renderer/constants';
 import { IconButton } from '@/renderer/ds';
+
+const useStyles = makeStyles({
+  root: {
+    position: 'relative',
+    width: '100%',
+    height: '100%',
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    borderRadius: tokens.borderRadiusLarge,
+    overflow: 'hidden',
+  },
+  container: { position: 'absolute', inset: tokens.spacingHorizontalS },
+  scrollBtn: {
+    position: 'absolute',
+    bottom: tokens.spacingVerticalS,
+    right: tokens.spacingVerticalS,
+    backgroundColor: tokens.colorNeutralBackground2,
+    opacity: 0.8,
+  },
+});
 
 const getIsAtBottom: (terminal: Terminal) => boolean = (terminal) => {
   const viewport = terminal.buffer.active.viewportY;
@@ -69,17 +89,18 @@ export const XTermLogViewer = memo(({ children, $xterm }: PropsWithChildren<{ $x
     xterm.scrollToBottom();
   }, [$xterm]);
 
+  const styles = useStyles();
   return (
-    <div className="relative w-full h-full border border-surface-border rounded-lg overflow-hidden">
-      <div ref={containerRef} className="absolute inset-2" />
+    <div className={styles.root}>
+      <div ref={containerRef} className={styles.container} />
       {children}
       {!isAtBottom && (
         <IconButton
           aria-label="Scroll to Bottom"
-          icon={<PiCaretDownBold />}
+          icon={<ChevronDown20Regular />}
           onClick={onClickScrollToBottom}
           size="sm"
-          className="absolute bottom-2 right-2 bg-surface-raised/80"
+          className={styles.scrollBtn}
         />
       )}
     </div>

@@ -1,8 +1,13 @@
-import type { PropsWithChildren, ReactNode } from 'react';
-import { PiArrowLeftBold } from 'react-icons/pi';
-
-import { cn } from '@/renderer/ds/cn';
-import { IconButton } from '@/renderer/ds/IconButton';
+import {
+  Toolbar,
+  ToolbarButton,
+  makeStyles,
+  mergeClasses,
+  tokens,
+  Subtitle2,
+} from '@fluentui/react-components';
+import type { ReactNode } from 'react';
+import { ArrowLeft20Regular } from '@fluentui/react-icons';
 
 type TopAppBarProps = {
   title: ReactNode;
@@ -11,18 +16,48 @@ type TopAppBarProps = {
   className?: string;
 };
 
-export const TopAppBar = ({ title, onBack, actions, className }: TopAppBarProps) => (
-  <div className={cn('flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 border-b border-surface-border shrink-0', className)}>
-    {onBack && (
-      <IconButton
-        aria-label="Back"
-        icon={<PiArrowLeftBold />}
-        size="md"
-        onClick={onBack}
-        className="sm:size-9"
-      />
-    )}
-    <span className="text-base sm:text-sm font-semibold text-fg truncate flex-1">{title}</span>
-    {actions && <div className="flex items-center gap-1 shrink-0">{actions}</div>}
-  </div>
-);
+const useStyles = makeStyles({
+  root: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    paddingLeft: '12px',
+    paddingRight: '12px',
+    paddingTop: '6px',
+    paddingBottom: '6px',
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: tokens.colorNeutralStroke1,
+    flexShrink: 0,
+  },
+  title: {
+    flex: '1 1 0',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  actions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    flexShrink: 0,
+  },
+});
+
+export const TopAppBar = ({ title, onBack, actions, className }: TopAppBarProps) => {
+  const styles = useStyles();
+  return (
+    <Toolbar className={mergeClasses(styles.root, className)}>
+      {onBack && (
+        <ToolbarButton
+          aria-label="Back"
+          icon={<ArrowLeft20Regular />}
+          appearance="subtle"
+          onClick={onBack}
+        />
+      )}
+      <Subtitle2 className={styles.title}>{title}</Subtitle2>
+      {actions && <div className={styles.actions}>{actions}</div>}
+    </Toolbar>
+  );
+};

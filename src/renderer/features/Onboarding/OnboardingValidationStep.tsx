@@ -1,6 +1,7 @@
+import { makeStyles } from '@fluentui/react-components';
 import { memo, useCallback, useState } from 'react';
 
-import { Button, Spinner } from '@/renderer/ds';
+import { Body1, Button, Caption1, MessageBar, MessageBarBody, Spinner } from '@/renderer/ds';
 import { emitter } from '@/renderer/services/ipc';
 
 type Props = {
@@ -8,7 +9,15 @@ type Props = {
   onFinish: () => void;
 };
 
+const useStyles = makeStyles({
+  root: { display: 'flex', flexDirection: 'column', gap: '24px' },
+  header: { display: 'flex', flexDirection: 'column', gap: '4px' },
+  body: { display: 'flex', flexDirection: 'column', gap: '12px' },
+  actions: { display: 'flex', justifyContent: 'space-between' },
+});
+
 export const OnboardingValidationStep = memo(({ onBack, onFinish }: Props) => {
+  const styles = useStyles();
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; output: string } | null>(null);
 
@@ -26,18 +35,18 @@ export const OnboardingValidationStep = memo(({ onBack, onFinish }: Props) => {
   }, []);
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <h3 className="text-lg font-semibold text-fg">Configuration saved</h3>
-        <p className="text-sm text-fg-muted">
+    <div className={styles.root}>
+      <div className={styles.header}>
+        <Body1 weight="semibold">Configuration saved</Body1>
+        <Caption1>
           Your model configuration has been written. You can optionally test the connection before continuing.
-        </p>
+        </Caption1>
       </div>
 
-      <div className="flex flex-col gap-3">
+      <div className={styles.body}>
         <Button variant="ghost" size="sm" onClick={handleTest} isDisabled={testing}>
           {testing ? (
-            <span className="flex items-center gap-2">
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Spinner size="sm" />
               Testing connection…
             </span>
@@ -47,19 +56,13 @@ export const OnboardingValidationStep = memo(({ onBack, onFinish }: Props) => {
         </Button>
 
         {testResult && (
-          <div
-            className={`rounded-md border p-3 text-xs font-mono whitespace-pre-wrap ${
-              testResult.success
-                ? 'border-green-500/30 bg-green-500/10 text-green-300'
-                : 'border-red-500/30 bg-red-500/10 text-red-300'
-            }`}
-          >
-            {testResult.output}
-          </div>
+          <MessageBar intent={testResult.success ? 'success' : 'error'}>
+            <MessageBarBody>{testResult.output}</MessageBarBody>
+          </MessageBar>
         )}
       </div>
 
-      <div className="flex justify-between">
+      <div className={styles.actions}>
         <Button variant="ghost" size="sm" onClick={onBack}>
           Back
         </Button>

@@ -1,8 +1,96 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { PiArrowUpBold, PiFolderBold, PiHouseBold } from 'react-icons/pi';
+import { ArrowUp20Regular, Folder20Regular, Home20Regular } from '@fluentui/react-icons';
+import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 
-import { AnimatedDialog, Button, DialogBody, DialogContent, DialogFooter, DialogHeader, Spinner } from '@/renderer/ds';
+import { AnimatedDialog, Button, DialogBody, DialogContent, DialogFooter, DialogHeader, Input, ListSkeleton } from '@/renderer/ds';
 import { emitter } from '@/renderer/services/ipc';
+
+const useStyles = makeStyles({
+  directoryRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    width: '100%',
+    textAlign: 'left',
+    paddingTop: '10px',
+    paddingBottom: '10px',
+    paddingLeft: '14px',
+    paddingRight: '14px',
+    fontSize: tokens.fontSizeBase300,
+    cursor: 'pointer',
+    transitionProperty: 'background-color',
+    transitionDuration: '150ms',
+    color: tokens.colorNeutralForeground1,
+    backgroundColor: 'transparent',
+    border: 'none',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground2,
+    },
+    ':active': {
+      backgroundColor: tokens.colorNeutralBackground2,
+    },
+  },
+  folderIcon: {
+    flexShrink: 0,
+    color: '#facc15',
+  },
+  truncate: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  body: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+  },
+  pathBar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  navButton: {
+    flexShrink: 0,
+    borderRadius: tokens.borderRadiusMedium,
+    padding: tokens.spacingVerticalS,
+    color: tokens.colorNeutralForeground2,
+    transitionProperty: 'color, background-color',
+    transitionDuration: '150ms',
+    backgroundColor: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground2,
+      color: tokens.colorNeutralForeground1,
+    },
+  },
+  pathInput: {
+    flex: '1 1 0',
+    minWidth: 0,
+  },
+  listing: {
+    height: '256px',
+    flex: '1 1 0',
+    overflowY: 'auto',
+    borderRadius: tokens.borderRadiusXLarge,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  emptyMessage: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+  },
+  entriesColumn: {
+    display: 'flex',
+    flexDirection: 'column',
+    paddingTop: '4px',
+    paddingBottom: '4px',
+  },
+});
 
 type DirectoryEntry = { name: string; path: string; isDirectory: boolean };
 
@@ -12,6 +100,7 @@ type DirectoryRowProps = {
 };
 
 const DirectoryRow = memo(({ entry, onNavigate }: DirectoryRowProps) => {
+  const styles = useStyles();
   const handleClick = useCallback(() => {
     onNavigate(entry.path);
   }, [entry.path, onNavigate]);
@@ -20,10 +109,10 @@ const DirectoryRow = memo(({ entry, onNavigate }: DirectoryRowProps) => {
     <button
       type="button"
       onClick={handleClick}
-      className="flex items-center gap-2.5 w-full text-left py-2.5 px-3.5 text-sm hover:bg-surface-raised active:bg-surface-raised cursor-pointer transition-colors text-fg"
+      className={styles.directoryRow}
     >
-      <PiFolderBold size={14} className="shrink-0 text-yellow-400" />
-      <span className="truncate">{entry.name}</span>
+      <Folder20Regular style={{ width: 14, height: 14 }} className={styles.folderIcon} />
+      <span className={styles.truncate}>{entry.name}</span>
     </button>
   );
 });
@@ -37,6 +126,7 @@ type DirectoryBrowserDialogProps = {
 };
 
 export const DirectoryBrowserDialog = memo(({ open, onClose, onSelect, initialPath }: DirectoryBrowserDialogProps) => {
+  const styles = useStyles();
   const [currentPath, setCurrentPath] = useState('');
   const [pathInput, setPathInput] = useState('');
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
@@ -113,44 +203,42 @@ export const DirectoryBrowserDialog = memo(({ open, onClose, onSelect, initialPa
     <AnimatedDialog open={open} onClose={onClose}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>Select Directory</DialogHeader>
-        <DialogBody className="flex flex-col gap-3">
+        <DialogBody className={styles.body}>
           {/* Path bar */}
-          <div className="flex items-center gap-1.5">
+          <div className={styles.pathBar}>
             <button
               type="button"
               onClick={handleHome}
-              className="shrink-0 rounded-lg p-2 text-fg-muted hover:bg-surface-raised hover:text-fg transition-colors"
+              className={styles.navButton}
               title="Home"
             >
-              <PiHouseBold size={16} />
+              <Home20Regular style={{ width: 16, height: 16 }} />
             </button>
             <button
               type="button"
               onClick={handleUp}
-              className="shrink-0 rounded-lg p-2 text-fg-muted hover:bg-surface-raised hover:text-fg transition-colors"
+              className={styles.navButton}
               title="Parent directory"
             >
-              <PiArrowUpBold size={16} />
+              <ArrowUp20Regular style={{ width: 16, height: 16 }} />
             </button>
-            <input
+            <Input
               type="text"
               value={pathInput}
               onChange={handlePathInputChange}
               onKeyDown={handlePathInputKeyDown}
-              className="flex-1 min-w-0 rounded-xl border border-surface-border bg-surface px-3.5 py-2 text-base sm:text-sm text-fg placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500 transition-colors"
+              className={styles.pathInput}
             />
           </div>
 
           {/* Directory listing */}
-          <div className="h-64 sm:h-64 flex-1 sm:flex-initial overflow-y-auto rounded-xl border border-surface-border bg-surface">
+          <div className={styles.listing}>
             {loading ? (
-              <div className="flex items-center justify-center h-full">
-                <Spinner size="sm" />
-              </div>
+              <ListSkeleton rows={6} />
             ) : entries.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-sm text-fg-muted">No subdirectories</div>
+              <div className={styles.emptyMessage}>No subdirectories</div>
             ) : (
-              <div className="flex flex-col py-1">
+              <div className={styles.entriesColumn}>
                 {entries.map((entry) => (
                   <DirectoryRow key={entry.path} entry={entry} onNavigate={handleNavigate} />
                 ))}

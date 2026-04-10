@@ -1,14 +1,26 @@
+import { Textarea as FluentTextarea } from '@fluentui/react-components';
 import { forwardRef, useCallback, useEffect, useRef } from 'react';
-
-import { cn } from '@/renderer/ds/cn';
 
 type TextareaProps = {
   maxHeight?: number;
   className?: string;
-} & Omit<React.TextareaHTMLAttributes<HTMLTextAreaElement>, 'style'>;
+  value?: string;
+  defaultValue?: string;
+  placeholder?: string;
+  disabled?: boolean;
+  readOnly?: boolean;
+  rows?: number;
+  id?: string;
+  name?: string;
+  onChange?: React.ChangeEventHandler<HTMLTextAreaElement>;
+  onFocus?: React.FocusEventHandler<HTMLTextAreaElement>;
+  onBlur?: React.FocusEventHandler<HTMLTextAreaElement>;
+  onKeyDown?: React.KeyboardEventHandler<HTMLTextAreaElement>;
+  'aria-label'?: string;
+};
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
-  ({ maxHeight = 200, className, value, onChange, ...props }, forwardedRef) => {
+  ({ maxHeight = 200, className, value, onChange, onFocus, onBlur, onKeyDown, ...props }, forwardedRef) => {
     const internalRef = useRef<HTMLTextAreaElement | null>(null);
 
     const setRef = useCallback(
@@ -31,22 +43,25 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
     }, [value, maxHeight]);
 
     return (
-      <textarea
+      <FluentTextarea
         ref={setRef}
+        appearance="underline"
+        resize="none"
         value={value}
         onChange={onChange}
-        className={cn(
-          'w-full rounded-lg border border-surface-border/50 bg-transparent text-fg outline-none transition-colors',
-          'text-base sm:text-sm px-3 py-2.5 sm:py-2',
-          'placeholder:text-fg-muted/50',
-          'focus:border-accent-500/50',
-          'disabled:opacity-40 disabled:cursor-not-allowed',
-          'resize-none',
-          className
-        )}
-        {...props}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        onKeyDown={onKeyDown}
+        className={className}
+        placeholder={props.placeholder}
+        disabled={props.disabled}
+        readOnly={props.readOnly}
+        id={props.id}
+        name={props.name}
+        aria-label={props['aria-label']}
       />
     );
   }
 );
+
 Textarea.displayName = 'Textarea';

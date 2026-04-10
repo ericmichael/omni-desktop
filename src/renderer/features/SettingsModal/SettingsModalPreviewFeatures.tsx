@@ -1,11 +1,24 @@
 import { useStore } from '@nanostores/react';
 import { memo, useCallback } from 'react';
-import { PiEyeFill } from 'react-icons/pi';
+import { Eye20Filled } from '@fluentui/react-icons';
 
+import { makeStyles, tokens } from '@fluentui/react-components';
 import { Checkbox, FormField } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
 
+const useStyles = makeStyles({
+  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
+  labelRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
+  labelIcon: { color: tokens.colorBrandForeground1 },
+  hint: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground3,
+    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
+  },
+});
+
 export const SettingsModalPreviewFeatures = memo(() => {
+  const styles = useStyles();
   const { previewFeatures } = useStore(persistedStoreApi.$atom);
   const onChange = useCallback((checked: boolean) => {
     persistedStoreApi.setKey('previewFeatures', checked);
@@ -16,18 +29,18 @@ export const SettingsModalPreviewFeatures = memo(() => {
   }, []);
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className={styles.root}>
       <FormField
         label={
-          <span className="flex items-center gap-2">
-            <PiEyeFill className="text-accent-400" />
+          <span className={styles.labelRow}>
+            <Eye20Filled className={styles.labelIcon} />
             Enable Preview Features
           </span>
         }
       >
         <Checkbox checked={previewFeatures} onCheckedChange={onChange} />
       </FormField>
-      <span className="text-sm sm:text-xs text-fg-subtle">
+      <span className={styles.hint}>
         Unlock experimental features such as Projects, Work, and Code tabs. These features are under active development and
         may be unstable or change without notice.
       </span>

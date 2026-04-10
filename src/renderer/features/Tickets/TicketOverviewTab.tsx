@@ -1,22 +1,160 @@
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
-import { PiPencilSimpleBold, PiXBold } from 'react-icons/pi';
+import { Edit20Regular, Dismiss20Regular } from '@fluentui/react-icons';
+import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 
-import { Button, cn, IconButton, SectionLabel, Select, Textarea } from '@/renderer/ds';
-import type { Ticket, TicketPriority } from '@/shared/types';
+import { Badge, Button, IconButton, SectionLabel, Select, Textarea } from '@/renderer/ds';
+import { $initiatives } from '@/renderer/features/Initiatives/state';
+import type { Ticket, TicketPriority, TicketResolution } from '@/shared/types';
 
 import { APPETITE_COLORS, APPETITE_DESCRIPTIONS, APPETITE_LABELS } from '@/renderer/features/Inbox/shaping-constants';
-import { COLUMN_BADGE_COLORS } from './ticket-constants';
-import { $tickets, ticketApi } from './state';
+import { getColumnColors, RESOLUTION_COLORS, RESOLUTION_LABELS } from './ticket-constants';
+import { $pipeline, $tickets, ticketApi } from './state';
+
+const useStyles = makeStyles({
+  root: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXL,
+    maxWidth: '42rem',
+  },
+  section: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+  },
+  labelRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  editActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  descriptionText: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    whiteSpace: 'pre-wrap',
+  },
+  tapToAdd: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground3,
+    fontStyle: 'italic',
+    textAlign: 'left',
+    cursor: 'pointer',
+    transitionProperty: 'color',
+    transitionDuration: '150ms',
+    backgroundColor: 'transparent',
+    border: 'none',
+    ':hover': {
+      color: tokens.colorNeutralForeground2,
+    },
+  },
+  scopeCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
+    borderRadius: tokens.borderRadiusXLarge,
+    backgroundColor: 'rgba(var(--colorNeutralBackground2), 0.3)',
+    padding: tokens.spacingVerticalM,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+  },
+  scopeFieldLabel: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightMedium,
+    color: tokens.colorNeutralForeground2,
+  },
+  scopeFieldValue: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+    marginTop: '2px',
+  },
+  blockerRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  blockerTitle: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    flex: '1 1 0',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  blockerList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+  },
+  noBlockers: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground3,
+    '@media (min-width: 640px)': {
+      fontSize: tokens.fontSizeBase200,
+    },
+  },
+  infoText: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    '@media (min-width: 640px)': {
+      fontSize: tokens.fontSizeBase200,
+    },
+  },
+  tokenRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalL,
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    '@media (min-width: 640px)': {
+      fontSize: tokens.fontSizeBase200,
+    },
+  },
+  detailSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+  },
+  detailRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    columnGap: tokens.spacingHorizontalL,
+    rowGap: '4px',
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    '@media (min-width: 640px)': {
+      fontSize: tokens.fontSizeBase200,
+    },
+  },
+  metaRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+});
 
 type TicketOverviewTabProps = {
   ticket: Ticket;
 };
 
 export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
+  const styles = useStyles();
   const tickets = useStore($tickets);
+  const pipeline = useStore($pipeline);
+  const initiatives = useStore($initiatives);
   const [editingDescription, setEditingDescription] = useState(false);
   const [editDescription, setEditDescription] = useState('');
+
+  const currentColumn = useMemo(() => {
+    if (!ticket.columnId || !pipeline) return undefined;
+    return pipeline.columns.find((c) => c.id === ticket.columnId);
+  }, [ticket, pipeline]);
+
+  const initiative = ticket.initiativeId ? initiatives[ticket.initiativeId] : undefined;
 
   const blockerTickets = useMemo(() => {
     return ticket.blockedBy.flatMap((id) => {
@@ -29,6 +167,27 @@ export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
     const blocked = new Set(ticket.blockedBy);
     return Object.values(tickets).filter((t) => t.id !== ticket.id && t.projectId === ticket.projectId && !blocked.has(t.id));
   }, [ticket, tickets]);
+
+  const handleColumnChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      if (e.target.value) {
+        void ticketApi.moveTicketToColumn(ticket.id, e.target.value);
+      }
+    },
+    [ticket.id]
+  );
+
+  const handleResolve = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const val = e.target.value;
+      if (val === '__clear__') {
+        void ticketApi.updateTicket(ticket.id, { resolution: undefined });
+      } else if (val) {
+        void ticketApi.resolveTicket(ticket.id, val as TicketResolution);
+      }
+    },
+    [ticket.id]
+  );
 
   const handlePriorityChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -80,23 +239,42 @@ export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
   }, []);
 
   return (
-    <div className="flex flex-col gap-6 max-w-2xl">
+    <div className={styles.root}>
+      {/* Status metadata */}
+      <div className={styles.section}>
+        <SectionLabel>Status</SectionLabel>
+        <div className={styles.metaRow}>
+          {pipeline && (
+            <Select size="sm" value={ticket.columnId ?? ''} onChange={handleColumnChange} className="w-40">
+              {pipeline.columns.map((col) => (
+                <option key={col.id} value={col.id}>{col.label}</option>
+              ))}
+            </Select>
+          )}
+          {ticket.resolution && (
+            <Badge color={RESOLUTION_COLORS[ticket.resolution]}>{RESOLUTION_LABELS[ticket.resolution]}</Badge>
+          )}
+          {initiative && (
+            <Badge color="purple">{initiative.title}</Badge>
+          )}
+        </div>
+      </div>
+
       {/* Description */}
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-1.5">
+      <div className={styles.section}>
+        <div className={styles.labelRow}>
           <SectionLabel>Description</SectionLabel>
           {!editingDescription && (
             <IconButton
               aria-label="Edit description"
-              icon={<PiPencilSimpleBold />}
+              icon={<Edit20Regular />}
               size="sm"
               onClick={handleStartEditDescription}
-              className="sm:opacity-0 sm:group-hover/desc:opacity-100 sm:transition-opacity"
             />
           )}
         </div>
         {editingDescription ? (
-          <div className="flex flex-col gap-2">
+          <div className={styles.section}>
             <Textarea
               value={editDescription}
               onChange={handleEditDescriptionChange}
@@ -106,7 +284,7 @@ export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
               maxHeight={400}
               placeholder="Ticket description..."
             />
-            <div className="flex items-center gap-2">
+            <div className={styles.editActions}>
               <Button size="sm" onClick={handleSaveDescription}>
                 Save
               </Button>
@@ -116,9 +294,9 @@ export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
             </div>
           </div>
         ) : ticket.description ? (
-          <p className="text-sm text-fg-muted whitespace-pre-wrap">{ticket.description}</p>
+          <p className={styles.descriptionText}>{ticket.description}</p>
         ) : (
-          <button onClick={handleStartEditDescription} className="text-sm text-fg-subtle italic text-left cursor-pointer hover:text-fg-muted transition-colors">
+          <button onClick={handleStartEditDescription} className={styles.tapToAdd}>
             Tap to add description
           </button>
         )}
@@ -126,31 +304,31 @@ export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
 
       {/* Scope (from shaping) */}
       {ticket.shaping && (
-        <div className="flex flex-col gap-2">
+        <div className={styles.section}>
           <SectionLabel>Scope</SectionLabel>
-          <div className="flex flex-col gap-2.5 rounded-xl bg-surface-raised/30 p-3 border border-surface-border">
+          <div className={styles.scopeCard}>
             <div>
-              <span className="text-xs font-medium text-fg-muted">Done looks like</span>
-              <p className="text-sm text-fg mt-0.5">{ticket.shaping.doneLooksLike}</p>
+              <span className={styles.scopeFieldLabel}>Done looks like</span>
+              <p className={styles.scopeFieldValue}>{ticket.shaping.doneLooksLike}</p>
             </div>
             <div>
-              <span className="text-xs font-medium text-fg-muted">Appetite</span>
-              <div className="mt-0.5">
-                <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium', APPETITE_COLORS[ticket.shaping.appetite])}>
+              <span className={styles.scopeFieldLabel}>Appetite</span>
+              <div style={{ marginTop: '2px' }}>
+                <Badge color={APPETITE_COLORS[ticket.shaping.appetite]}>
                   {APPETITE_LABELS[ticket.shaping.appetite]} — {APPETITE_DESCRIPTIONS[ticket.shaping.appetite]}
-                </span>
+                </Badge>
               </div>
             </div>
             <div>
-              <span className="text-xs font-medium text-fg-muted">Out of scope</span>
-              <p className="text-sm text-fg mt-0.5">{ticket.shaping.outOfScope}</p>
+              <span className={styles.scopeFieldLabel}>Out of scope</span>
+              <p className={styles.scopeFieldValue}>{ticket.shaping.outOfScope}</p>
             </div>
           </div>
         </div>
       )}
 
       {/* Priority */}
-      <div className="flex flex-col gap-2">
+      <div className={styles.section}>
         <SectionLabel>Priority</SectionLabel>
         <Select size="sm" value={ticket.priority} onChange={handlePriorityChange} className="w-full sm:w-40">
           <option value="low">Low</option>
@@ -161,27 +339,27 @@ export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
       </div>
 
       {/* Dependencies */}
-      <div className="flex flex-col gap-2">
+      <div className={styles.section}>
         <SectionLabel>Blocked By</SectionLabel>
         {blockerTickets.length > 0 && (
-          <div className="flex flex-col gap-1.5">
+          <div className={styles.blockerList}>
             {blockerTickets.map((blocker) => (
-              <div key={blocker.id} className="flex items-center gap-2">
-                <span
-                  className={cn(
-                    'text-xs px-1.5 py-0.5 rounded-full font-medium shrink-0',
-                    COLUMN_BADGE_COLORS[blocker.columnId ?? 'backlog'] ?? 'text-fg-muted bg-fg-muted/10'
-                  )}
+              <div key={blocker.id} className={styles.blockerRow}>
+                <Badge
+                  color="default"
+                  style={{
+                    color: getColumnColors(blocker.columnId ?? 'backlog').badgeColor,
+                    backgroundColor: getColumnColors(blocker.columnId ?? 'backlog').badgeBg,
+                  }}
                 >
                   {blocker.columnId ?? 'backlog'}
-                </span>
-                <span className="text-sm text-fg-muted flex-1 truncate">{blocker.title}</span>
+                </Badge>
+                <span className={styles.blockerTitle}>{blocker.title}</span>
                 <IconButton
                   aria-label={`Remove blocker ${blocker.title}`}
-                  icon={<PiXBold />}
+                  icon={<Dismiss20Regular />}
                   size="sm"
                   onClick={() => handleRemoveBlocker(blocker.id)}
-                  className="text-fg-subtle hover:text-red-400 shrink-0"
                 />
               </div>
             ))}
@@ -198,15 +376,15 @@ export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
           </Select>
         )}
         {blockerTickets.length === 0 && availableBlockers.length === 0 && (
-          <p className="text-sm sm:text-xs text-fg-subtle">No tickets available to block on</p>
+          <p className={styles.noBlockers}>No tickets available to block on</p>
         )}
       </div>
 
       {/* Supervisor info */}
       {ticket.supervisorSessionId && (
-        <div className="flex flex-col gap-2">
+        <div className={styles.section}>
           <SectionLabel>Supervisor</SectionLabel>
-          <div className="text-sm sm:text-xs text-fg-muted">
+          <div className={styles.infoText}>
             <p>Session: {ticket.supervisorSessionId}</p>
             {ticket.phase && <p>Phase: {ticket.phase}</p>}
           </div>
@@ -215,9 +393,9 @@ export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
 
       {/* Token usage */}
       {ticket.tokenUsage && (
-        <div className="flex flex-col gap-2">
+        <div className={styles.section}>
           <SectionLabel>Token Usage</SectionLabel>
-          <div className="flex items-center gap-4 text-sm sm:text-xs text-fg-muted">
+          <div className={styles.tokenRow}>
             <span>In: {ticket.tokenUsage.inputTokens.toLocaleString()}</span>
             <span>Out: {ticket.tokenUsage.outputTokens.toLocaleString()}</span>
             <span>Total: {ticket.tokenUsage.totalTokens.toLocaleString()}</span>
@@ -226,9 +404,9 @@ export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
       )}
 
       {/* Timestamps */}
-      <div className="flex flex-col gap-1">
+      <div className={styles.detailSection}>
         <SectionLabel>Details</SectionLabel>
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm sm:text-xs text-fg-muted">
+        <div className={styles.detailRow}>
           <span>Created {new Date(ticket.createdAt).toLocaleDateString()}</span>
           <span>Updated {new Date(ticket.updatedAt).toLocaleDateString()}</span>
         </div>

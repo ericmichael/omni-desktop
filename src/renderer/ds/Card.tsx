@@ -1,20 +1,40 @@
+import { Card as FluentCard, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import type { PropsWithChildren } from 'react';
-
-import { cn } from '@/renderer/ds/cn';
 
 type CardProps = {
   divided?: boolean;
   className?: string;
 };
 
-export const Card = ({ divided, className, children }: PropsWithChildren<CardProps>) => (
-  <div
-    className={cn(
-      'bg-surface-raised/50 rounded-lg border border-surface-border/50',
-      divided ? 'divide-y divide-surface-border/50' : 'p-4 flex flex-col gap-3',
-      className
-    )}
-  >
-    {children}
-  </div>
-);
+const useStyles = makeStyles({
+  root: {
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderColor: tokens.colorNeutralStroke1,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderRadius: '8px',
+    padding: '16px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  divided: {
+    padding: '0',
+    gap: '0',
+    '& > *': {
+      padding: '16px',
+    },
+    '& > * + *': {
+      borderTopWidth: '1px',
+      borderTopStyle: 'solid',
+      borderTopColor: tokens.colorNeutralStroke1,
+    },
+  },
+});
+
+export const Card = ({ divided, className, children }: PropsWithChildren<CardProps>) => {
+  const styles = useStyles();
+  return (
+    <FluentCard className={mergeClasses(styles.root, divided && styles.divided, className)}>{children}</FluentCard>
+  );
+};

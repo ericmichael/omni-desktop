@@ -1,6 +1,5 @@
-import type { ReactNode } from 'react';
-
-import { cn } from '@/renderer/ds/cn';
+import { Button as FluentButton, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import type { ReactElement, ReactNode } from 'react';
 
 type FABProps = {
   icon: ReactNode;
@@ -9,20 +8,30 @@ type FABProps = {
   className?: string;
 };
 
-export const FAB = ({ icon, onClick, className, ...rest }: FABProps) => (
-  <button
-    type="button"
-    onClick={onClick}
-    className={cn(
-      'fixed right-4 bottom-20 z-30',
-      'size-14 rounded-2xl bg-accent-600 text-white',
-      'shadow-lg shadow-accent-600/25',
-      'flex items-center justify-center',
-      'active:scale-95 transition-transform cursor-pointer',
-      className
-    )}
-    aria-label={rest['aria-label']}
-  >
-    {icon}
-  </button>
-);
+const useStyles = makeStyles({
+  root: {
+    position: 'fixed',
+    right: '16px',
+    bottom: '80px',
+    zIndex: 30,
+    width: '56px',
+    height: '56px',
+    minWidth: '56px',
+    borderRadius: '16px',
+    boxShadow: tokens.shadow16,
+  },
+});
+
+export const FAB = ({ icon, onClick, className, ...rest }: FABProps) => {
+  const styles = useStyles();
+  return (
+    <FluentButton
+      appearance="primary"
+      shape="square"
+      icon={icon as ReactElement}
+      onClick={onClick}
+      aria-label={rest['aria-label']}
+      className={mergeClasses(styles.root, className)}
+    />
+  );
+};

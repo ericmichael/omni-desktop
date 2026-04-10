@@ -1,8 +1,9 @@
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useState } from 'react';
-import { PiCaretDownBold, PiCaretUpBold, PiPlusBold, PiTrashBold } from 'react-icons/pi';
+import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
 
-import { Button, Card, FormField, IconButton, Input, SaveBar, SectionLabel, Select, Spinner } from '@/renderer/ds';
+import { makeStyles, tokens } from '@fluentui/react-components';
+import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, Button, FormField, FormSkeleton, IconButton, Input, SaveBar, SectionLabel, Select } from '@/renderer/ds';
 import { configApi } from '@/renderer/services/config';
 import type { McpConfig, McpServerEntry } from '@/shared/types';
 
@@ -16,7 +17,59 @@ function emptyServer(): McpServerEntry {
   return { type: 'stdio', command: '', args: [] };
 }
 
+const useStyles = makeStyles({
+  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
+  addRow: {
+    padding: tokens.spacingVerticalL,
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  flex1: { flex: '1 1 0' },
+  flex2: { flex: '2 1 0' },
+  headerRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    flex: '1 1 0',
+    minWidth: 0,
+  },
+  headerContent: { flex: '1 1 0', minWidth: 0 },
+  headerName: {
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightMedium,
+    color: tokens.colorNeutralForeground1,
+  },
+  headerSummary: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
+  },
+  panelBody: {
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingBottom: tokens.spacingVerticalL,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+  },
+  kvSection: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
+  kvLabel: {
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightMedium,
+    color: tokens.colorNeutralForeground3,
+    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
+  },
+  kvRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
+  selfStart: { alignSelf: 'flex-start' },
+  iconMr: { marginRight: tokens.spacingHorizontalXS },
+});
+
 export const SettingsModalMcpTab = memo(() => {
+  const styles = useStyles();
   const [configDir, setConfigDir] = useState<string | null>(null);
   const [config, setConfig] = useState<McpConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -106,10 +159,6 @@ export const SettingsModalMcpTab = memo(() => {
     [expandedServer, updateConfig]
   );
 
-  const toggleServer = useCallback((name: string) => {
-    setExpandedServer((prev) => (prev === name ? null : name));
-  }, []);
-
   const updateServer = useCallback(
     (name: string, updater: (prev: McpServerEntry) => McpServerEntry) => {
       updateConfig((c) => {
@@ -130,52 +179,40 @@ export const SettingsModalMcpTab = memo(() => {
     setNewServerName(e.target.value);
   }, []);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Spinner />
-      </div>
-    );
-  }
-
-  if (!config) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Spinner />
-      </div>
-    );
+  if (loading || !config) {
+    return <FormSkeleton fields={4} />;
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className={styles.root}>
       <SectionLabel>MCP Servers</SectionLabel>
-      <Card divided>
+      <Accordion collapsible onToggle={(_e, data) => {
+        setExpandedServer(data.openItems.length > 0 ? String(data.openItems[data.openItems.length - 1]) : null);
+      }} openItems={expandedServer ? [expandedServer] : []}>
         {Object.entries(config.mcpServers).map(([name, server]) => (
           <McpServerRow
             key={name}
             name={name}
             server={server}
-            isExpanded={expandedServer === name}
-            onToggle={toggleServer}
             onRemove={removeServer}
             onUpdate={updateServer}
           />
         ))}
-        <div className="p-4 flex items-center gap-2">
-          <Input
-            type="text"
-            value={newServerName}
-            onChange={onChangeNewServerName}
-            placeholder="Server name"
-            mono
-            className="flex-1"
-          />
-          <Button size="sm" variant="ghost" onClick={addServer} isDisabled={!newServerName.trim()}>
-            <PiPlusBold className="mr-1" />
-            Add server
-          </Button>
-        </div>
-      </Card>
+      </Accordion>
+      <div className={styles.addRow}>
+        <Input
+          type="text"
+          value={newServerName}
+          onChange={onChangeNewServerName}
+          placeholder="Server name"
+          mono
+          className={styles.flex1}
+        />
+        <Button size="sm" variant="ghost" onClick={addServer} isDisabled={!newServerName.trim()}>
+          <Add20Regular className={styles.iconMr} />
+          Add server
+        </Button>
+      </div>
 
       <SaveBar onSave={save} dirty={dirty} saving={saving} error={error} />
     </div>
@@ -187,22 +224,18 @@ const McpServerRow = memo(
   ({
     name,
     server,
-    isExpanded,
-    onToggle,
     onRemove,
     onUpdate,
   }: {
     name: string;
     server: McpServerEntry;
-    isExpanded: boolean;
-    onToggle: (name: string) => void;
     onRemove: (name: string) => void;
     onUpdate: (name: string, updater: (prev: McpServerEntry) => McpServerEntry) => void;
   }) => {
+    const styles = useStyles();
     const isStdio = !server.type || server.type === 'stdio';
     const summary = isStdio ? [server.command, ...(server.args ?? [])].filter(Boolean).join(' ') : (server.url ?? '');
 
-    const onClickToggle = useCallback(() => onToggle(name), [name, onToggle]);
     const onClickRemove = useCallback(() => onRemove(name), [name, onRemove]);
 
     const onChangeType = useCallback(
@@ -239,24 +272,20 @@ const McpServerRow = memo(
     }, [name, onUpdate]);
 
     return (
-      <div className="flex flex-col">
-        <div className="flex items-center gap-2 p-4 cursor-pointer" onClick={onClickToggle}>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium text-fg">{name}</div>
-            <div className="text-sm sm:text-xs text-fg-muted truncate">
-              {server.type ?? 'stdio'} &middot; {summary || '(not configured)'}
+      <AccordionItem value={name}>
+        <AccordionHeader expandIconPosition="end">
+          <div className={styles.headerRow}>
+            <div className={styles.headerContent}>
+              <div className={styles.headerName}>{name}</div>
+              <div className={styles.headerSummary}>
+                {server.type ?? 'stdio'} &middot; {summary || '(not configured)'}
+              </div>
             </div>
+            <IconButton aria-label="Remove server" icon={<Delete20Regular />} size="sm" onClick={onClickRemove} />
           </div>
-          {isExpanded ? (
-            <PiCaretUpBold className="text-fg-muted text-xs" />
-          ) : (
-            <PiCaretDownBold className="text-fg-muted text-xs" />
-          )}
-          <IconButton aria-label="Remove server" icon={<PiTrashBold />} size="sm" onClick={onClickRemove} />
-        </div>
-
-        {isExpanded && (
-          <div className="px-4 pb-4 flex flex-col gap-3 border-t border-surface-border/30 pt-3">
+        </AccordionHeader>
+        <AccordionPanel>
+          <div className={styles.panelBody}>
             <FormField label="Type">
               <Select value={server.type ?? 'stdio'} onChange={onChangeType}>
                 {SERVER_TYPES.map((t) => (
@@ -276,7 +305,7 @@ const McpServerRow = memo(
                     onChange={onChangeCommand}
                     placeholder="npx"
                     mono
-                    className="flex-1"
+                    className={styles.flex1}
                   />
                 </FormField>
                 <FormField label="Args">
@@ -286,7 +315,7 @@ const McpServerRow = memo(
                     onChange={onChangeArgs}
                     placeholder="arg1, arg2"
                     mono
-                    className="flex-1"
+                    className={styles.flex1}
                   />
                 </FormField>
               </>
@@ -298,7 +327,7 @@ const McpServerRow = memo(
                   onChange={onChangeUrl}
                   placeholder="https://..."
                   mono
-                  className="flex-1"
+                  className={styles.flex1}
                 />
               </FormField>
             )}
@@ -323,8 +352,8 @@ const McpServerRow = memo(
               onAdd={onAddEnvVar}
             />
           </div>
-        )}
-      </div>
+        </AccordionPanel>
+      </AccordionItem>
     );
   }
 );
@@ -346,11 +375,12 @@ const KeyValueSection = memo(
     onUpdate: (name: string, updater: (prev: McpServerEntry) => McpServerEntry) => void;
     onAdd: () => void;
   }) => {
+    const styles = useStyles();
     const entryList = Object.entries(entries);
 
     return (
-      <div className="flex flex-col gap-2">
-        <span className="text-sm sm:text-xs font-medium text-fg-subtle">{label}</span>
+      <div className={styles.kvSection}>
+        <span className={styles.kvLabel}>{label}</span>
         {entryList.map(([key, value], i) => (
           <KvRow
             key={i}
@@ -362,8 +392,8 @@ const KeyValueSection = memo(
             onUpdate={onUpdate}
           />
         ))}
-        <Button size="sm" variant="ghost" onClick={onAdd} className="self-start">
-          <PiPlusBold className="mr-1" />
+        <Button size="sm" variant="ghost" onClick={onAdd} className={styles.selfStart}>
+          <Add20Regular className={styles.iconMr} />
           Add
         </Button>
       </div>
@@ -388,6 +418,7 @@ const KvRow = memo(
     field: 'env' | 'headers';
     onUpdate: (name: string, updater: (prev: McpServerEntry) => McpServerEntry) => void;
   }) => {
+    const styles = useStyles();
     const onChangeKey = useCallback(
       (e: ChangeEvent<HTMLInputElement>) => {
         const newKey = e.target.value;
@@ -423,7 +454,7 @@ const KvRow = memo(
     }, [serverName, field, index, onUpdate]);
 
     return (
-      <div className="flex items-center gap-2">
+      <div className={styles.kvRow}>
         <Input
           size="sm"
           type="text"
@@ -431,7 +462,7 @@ const KvRow = memo(
           onChange={onChangeKey}
           placeholder="KEY"
           mono
-          className="flex-1"
+          className={styles.flex1}
         />
         <Input
           size="sm"
@@ -440,9 +471,9 @@ const KvRow = memo(
           onChange={onChangeValue}
           placeholder="value"
           mono
-          className="flex-[2]"
+          className={styles.flex2}
         />
-        <IconButton aria-label="Remove" icon={<PiTrashBold />} size="sm" onClick={onClickRemove} />
+        <IconButton aria-label="Remove" icon={<Delete20Regular />} size="sm" onClick={onClickRemove} />
       </div>
     );
   }

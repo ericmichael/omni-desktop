@@ -1,146 +1,149 @@
+import {
+  NavDrawer,
+  NavDrawerBody,
+  NavItem,
+  makeStyles,
+  tokens,
+  Subtitle2,
+} from '@fluentui/react-components';
+import type { OnNavItemSelectData } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { PiPlusBold } from 'react-icons/pi';
+import { Add20Regular, ChevronDown12Regular, ChevronRight12Regular, MailInbox20Regular } from '@fluentui/react-icons';
 
-import { Badge, cn, IconButton } from '@/renderer/ds';
+import { Caption1, IconButton } from '@/renderer/ds';
 import { $inboxItems } from '@/renderer/features/Inbox/state';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { InboxItem, InboxItemId, Project } from '@/shared/types';
 
-import { COLUMN_BADGE_COLORS } from './ticket-constants';
 import { ProjectForm } from './ProjectForm';
-import type { ActiveTicketEntry } from './state';
-import { $activeTickets, $pipeline, $ticketsView, ticketApi } from './state';
+import { $activeTickets, $ticketsView, ticketApi } from './state';
 
-const SidebarProjectItem = memo(
-  ({
-    project,
-    isActive,
-    activeTicketCount,
-    onNavigate,
-  }: {
-    project: Project;
-    isActive: boolean;
-    activeTicketCount: number;
-    onNavigate?: () => void;
-  }) => {
-    const handleClick = useCallback(() => {
-      ticketApi.goToProject(project.id);
-      onNavigate?.();
-    }, [project.id, onNavigate]);
+const useStyles = makeStyles({
+  drawer: {
+    width: '240px',
+    height: '100%',
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalXS,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalXS,
+  },
+  headerTitle: {
+    flex: '1 1 0',
+  },
+  body: {
+    flex: '1 1 0',
+  },
+  sectionHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    paddingLeft: tokens.spacingHorizontalMNudge,
+    paddingRight: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalXS,
+    cursor: 'pointer',
+    userSelect: 'none',
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground3,
+    ':hover': {
+      color: tokens.colorNeutralForeground2,
+    },
+  },
+  chevron: {
+    flexShrink: 0,
+    color: 'inherit',
+  },
+  sectionLabel: {
+    flex: '1 1 0',
+  },
+  navItemContent: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+  },
+  liveDot: {
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
+    backgroundColor: tokens.colorPaletteGreenForeground1,
+    flexShrink: 0,
+  },
+  emptyHint: {
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+  },
+});
 
-    const shortPath = useMemo(() => {
-      const segments = project.workspaceDir.split('/').filter(Boolean);
-      return segments.slice(-2).join('/');
-    }, [project.workspaceDir]);
+/** Build a unique selectedValue from the current view state. */
+function viewToNavValue(view: ReturnType<typeof $ticketsView.get>): string | undefined {
+  if (view.type === 'inbox') return view.selectedItemId ? `inbox:${view.selectedItemId}` : 'inbox';
+  if (view.type === 'project') return `project:${view.projectId}`;
+  if (view.type === 'ticket') return `ticket:${view.ticketId}`;
+  return undefined;
+}
 
-    return (
-      <button
-        onClick={handleClick}
-        className={cn(
-          'flex items-center gap-2 w-full px-3 py-1.5 text-left transition-colors cursor-pointer',
-          isActive ? 'bg-accent-600/20 text-fg' : 'text-fg-muted hover:bg-white/5 hover:text-fg'
-        )}
-      >
-        <div className="flex flex-col flex-1 min-w-0">
-          <span className="text-sm truncate">{project.label}</span>
-          <span className="text-xs text-fg-subtle truncate">{shortPath}</span>
-        </div>
-        {activeTicketCount > 0 && (
-          <Badge color="blue" className="shrink-0">{activeTicketCount}</Badge>
-        )}
-      </button>
-    );
-  }
-);
-SidebarProjectItem.displayName = 'SidebarProjectItem';
-
-const SidebarActiveTicketItem = memo(({ entry, isActive }: { entry: ActiveTicketEntry; isActive: boolean }) => {
-  const { ticket, hasLiveTask } = entry;
-  const pipeline = useStore($pipeline);
-
-  const handleClick = useCallback(() => {
-    openTicketInCode(ticket.id);
-  }, [ticket.id]);
-
-  const pipelineColumn = pipeline?.columns.find((c) => c.id === ticket.columnId);
-  const columnLabel = pipelineColumn?.label ?? null;
-  const columnBadgeColor = pipelineColumn ? (COLUMN_BADGE_COLORS[pipelineColumn.id] ?? '') : '';
-
-  const phase = ticket.phase;
-  const isRunning = phase != null && phase !== 'idle' && phase !== 'error' && phase !== 'completed';
-
+/** Lightweight collapsible section header — small gray text + chevron, like Teams. */
+const SectionHeader = memo(({ label, open, onToggle }: { label: string; open: boolean; onToggle: () => void }) => {
+  const styles = useStyles();
   return (
-    <button
-      onClick={handleClick}
-      className={cn(
-        'flex items-center gap-2 w-full px-3 py-1.5 text-left transition-colors cursor-pointer',
-        isActive ? 'bg-accent-600/20 text-fg' : 'text-fg-muted hover:bg-white/5 hover:text-fg'
-      )}
-    >
-      {columnLabel && (
-        <span className={cn('shrink-0 px-1.5 py-0.5 rounded text-xs font-medium', columnBadgeColor)}>
-          {columnLabel}
-        </span>
-      )}
-      <span className="text-sm truncate flex-1 min-w-0">{ticket.title}</span>
-      <div className="flex items-center gap-1.5 shrink-0">
-        {(isRunning || hasLiveTask) && <span className="size-2 rounded-full bg-green-400 animate-pulse shrink-0" />}
-      </div>
-    </button>
+    <div className={styles.sectionHeader} onClick={onToggle} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onToggle()}>
+      <span className={styles.chevron}>
+        {open ? <ChevronDown12Regular /> : <ChevronRight12Regular />}
+      </span>
+      <span className={styles.sectionLabel}>{label}</span>
+    </div>
   );
 });
-SidebarActiveTicketItem.displayName = 'SidebarActiveTicketItem';
+SectionHeader.displayName = 'SectionHeader';
 
-const SidebarInboxItem = memo(
-  ({ item, isActive, onSelect, onNavigate }: { item: InboxItem; isActive: boolean; onSelect: (id: InboxItemId) => void; onNavigate?: () => void }) => {
-    const handleClick = useCallback(() => { onSelect(item.id); onNavigate?.(); }, [item.id, onSelect, onNavigate]);
-
-    return (
-      <button
-        onClick={handleClick}
-        className={cn(
-          'flex items-center gap-2 w-full px-3 py-1.5 text-left transition-colors cursor-pointer',
-          isActive ? 'bg-accent-600/20 text-fg' : 'text-fg-muted hover:bg-white/5 hover:text-fg'
-        )}
-      >
-        <span className="text-sm truncate flex-1 min-w-0">{item.title}</span>
-      </button>
-    );
-  }
-);
-SidebarInboxItem.displayName = 'SidebarInboxItem';
+/* ── Main sidebar ── */
 
 export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void }) => {
+  const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const activeTickets = useStore($activeTickets);
   const view = useStore($ticketsView);
   const [formOpen, setFormOpen] = useState(false);
+  const [projectsOpen, setProjectsOpen] = useState(true);
+  const [activeOpen, setActiveOpen] = useState(true);
 
   const projects = store.projects;
+  const selectedValue = viewToNavValue(view);
 
-  const ticketCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const ticket of store.tickets) {
-      counts[ticket.projectId] = (counts[ticket.projectId] ?? 0) + 1;
-    }
-    return counts;
-  }, [store.tickets]);
+  const handleOpenForm = useCallback(() => setFormOpen(true), []);
+  const handleCloseForm = useCallback(() => setFormOpen(false), []);
+  const toggleProjects = useCallback(() => setProjectsOpen((v) => !v), []);
+  const toggleActive = useCallback(() => setActiveOpen((v) => !v), []);
 
-  const handleOpenForm = useCallback(() => {
-    setFormOpen(true);
-  }, []);
+  const handleNavSelect = useCallback(
+    (_e: unknown, data: OnNavItemSelectData) => {
+      const val = data.value as string;
+      if (val === 'inbox') {
+        ticketApi.goToInbox();
+      } else if (val.startsWith('inbox:')) {
+        ticketApi.goToInbox(val.slice(6));
+      } else if (val.startsWith('project:')) {
+        ticketApi.goToProject(val.slice(8));
+      } else if (val.startsWith('ticket:')) {
+        ticketApi.goToTicket(val.slice(7));
+      }
+      onNavigate?.();
+    },
+    [onNavigate]
+  );
 
-  const handleCloseForm = useCallback(() => {
-    setFormOpen(false);
-  }, []);
-
+  // Keyboard shortcut: Alt+1–9 for active tickets
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) {
-        return;
-      }
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
       const num = parseInt(e.key, 10);
       if (num >= 1 && num <= 9) {
         const entry = activeTickets[num - 1];
@@ -150,7 +153,6 @@ export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void })
         }
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [activeTickets]);
@@ -164,80 +166,73 @@ export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void })
     [inboxItemsMap]
   );
 
-  const handleSelectInboxItem = useCallback((id: InboxItemId) => {
-    ticketApi.goToInbox(id);
-  }, []);
-
-  const isInboxView = view.type === 'inbox';
-  const selectedInboxItemId = isInboxView ? view.selectedItemId : undefined;
-
   return (
-    <div className="flex flex-col h-full w-60 border-r border-surface-border bg-surface shrink-0">
-      {/* Inbox section */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-surface-border">
-        <button onClick={() => { ticketApi.goToInbox(); onNavigate?.(); }} className="text-xs font-semibold text-fg-muted uppercase tracking-wider hover:text-fg transition-colors cursor-pointer">
-          Inbox
-        </button>
-        {openInboxItems.length > 0 && <span className="text-xs text-fg-subtle">{openInboxItems.length}</span>}
-      </div>
-      <div className="flex-1 min-h-0 overflow-y-auto py-1">
-        {openInboxItems.length === 0 ? (
-          <p className="px-3 py-2 text-xs text-fg-subtle">No open items</p>
-        ) : (
-          openInboxItems.map((item) => (
-            <SidebarInboxItem
-              key={item.id}
-              item={item}
-              isActive={isInboxView && selectedInboxItemId === item.id}
-              onSelect={handleSelectInboxItem}
-              onNavigate={onNavigate}
-            />
-          ))
-        )}
+    <NavDrawer
+      type="inline"
+      open
+      selectedValue={selectedValue}
+      onNavItemSelect={handleNavSelect}
+      className={styles.drawer}
+      size="small"
+    >
+      {/* ── Header ── */}
+      <div className={styles.header}>
+        <Subtitle2 className={styles.headerTitle}>Projects</Subtitle2>
+        <IconButton aria-label="New project" icon={<Add20Regular />} size="sm" onClick={handleOpenForm} />
       </div>
 
-      {/* Projects section */}
-      <div className="flex items-center justify-between px-3 py-2 border-t border-b border-surface-border">
-        <span className="text-xs font-semibold text-fg-muted uppercase tracking-wider">Projects</span>
-        <IconButton aria-label="New project" icon={<PiPlusBold />} size="sm" onClick={handleOpenForm} />
-      </div>
-      <div className="flex-1 min-h-0 overflow-y-auto py-1">
-        {projects.length === 0 ? (
-          <p className="px-3 py-2 text-xs text-fg-subtle">No projects yet</p>
-        ) : (
-          projects.map((project) => (
-            <SidebarProjectItem
-              key={project.id}
-              project={project}
-              isActive={view.type === 'project' && view.projectId === project.id}
-              activeTicketCount={ticketCounts[project.id] ?? 0}
-              onNavigate={onNavigate}
-            />
-          ))
-        )}
-      </div>
+      <NavDrawerBody className={styles.body}>
+        {/* ── Pinned ── */}
+        <NavItem value="inbox" icon={<MailInbox20Regular />}>
+          <span className={styles.navItemContent}>
+            Inbox
+            {openInboxItems.length > 0 && <span className={styles.liveDot} />}
+          </span>
+        </NavItem>
 
-      {/* Active Tickets section */}
-      <div className="flex items-center justify-between px-3 py-2 border-t border-b border-surface-border">
-        <span className="text-xs font-semibold text-fg-muted uppercase tracking-wider">Active Tickets</span>
-        {activeTickets.length > 0 && <span className="text-xs text-fg-subtle">{activeTickets.length}</span>}
-      </div>
-      <div className="flex-1 min-h-0 overflow-y-auto py-1">
-        {activeTickets.length === 0 ? (
-          <p className="px-3 py-2 text-xs text-fg-subtle">No active tickets</p>
-        ) : (
-          activeTickets.map((entry) => (
-            <SidebarActiveTicketItem
-              key={entry.ticket.id}
-              entry={entry}
-              isActive={store.activeTicketId === entry.ticket.id}
-            />
-          ))
+        {/* ── Projects ── */}
+        <SectionHeader label="Projects" open={projectsOpen} onToggle={toggleProjects} />
+        {projectsOpen && (
+          projects.length === 0 ? (
+            <Caption1 className={styles.emptyHint}>No projects yet</Caption1>
+          ) : (
+            projects.map((project) => (
+              <NavItem key={project.id} value={`project:${project.id}`}>
+                {project.label}
+              </NavItem>
+            ))
+          )
         )}
-      </div>
+
+        {/* ── Active Tickets ── */}
+        <SectionHeader
+          label={`Active Tickets${activeTickets.length > 0 ? ` (${activeTickets.length})` : ''}`}
+          open={activeOpen}
+          onToggle={toggleActive}
+        />
+        {activeOpen && (
+          activeTickets.length === 0 ? (
+            <Caption1 className={styles.emptyHint}>No active tickets</Caption1>
+          ) : (
+            activeTickets.map((entry) => {
+              const { ticket, hasLiveTask } = entry;
+              const phase = ticket.phase;
+              const isRunning = phase != null && phase !== 'idle' && phase !== 'error' && phase !== 'completed';
+              return (
+                <NavItem key={ticket.id} value={`ticket:${ticket.id}`}>
+                  <span className={styles.navItemContent}>
+                    {ticket.title}
+                    {(isRunning || hasLiveTask) && <span className={styles.liveDot} />}
+                  </span>
+                </NavItem>
+              );
+            })
+          )
+        )}
+      </NavDrawerBody>
 
       <ProjectForm open={formOpen} onClose={handleCloseForm} />
-    </div>
+    </NavDrawer>
   );
 });
 TicketsSidebar.displayName = 'TicketsSidebar';

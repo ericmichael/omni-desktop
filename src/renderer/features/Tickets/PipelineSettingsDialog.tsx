@@ -1,11 +1,11 @@
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
-import { PiArrowDownBold, PiArrowUpBold, PiPlusBold, PiTrashFill } from 'react-icons/pi';
+import { ArrowDown20Regular, ArrowUp20Regular, Add20Regular, Delete20Filled } from '@fluentui/react-icons';
+import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 
 import {
   AnimatedDialog,
   Button,
-  cn,
   DialogBody,
   DialogContent,
   DialogFooter,
@@ -16,8 +16,64 @@ import {
 } from '@/renderer/ds';
 import type { Column, ProjectId } from '@/shared/types';
 
-import { COLUMN_BADGE_COLORS } from './ticket-constants';
+import { getColumnColors } from './ticket-constants';
 import { $pipeline, ticketApi } from './state';
+
+const useStyles = makeStyles({
+  columnCard: {
+    borderRadius: tokens.borderRadiusMedium,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: 'rgba(var(--colorNeutralBackground1Hover), 0.3)',
+    padding: tokens.spacingVerticalM,
+  },
+  columnHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    marginBottom: tokens.spacingVerticalS,
+  },
+  actionsGroup: {
+    marginLeft: 'auto',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+  },
+  fieldRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  fieldLabel: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    '@media (min-width: 640px)': {
+      fontSize: tokens.fontSizeBase200,
+    },
+  },
+  bodyColumn: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+    maxHeight: '60vh',
+    overflowY: 'auto',
+  },
+  helpText: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    '@media (min-width: 640px)': {
+      fontSize: tokens.fontSizeBase200,
+    },
+  },
+  addRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    marginTop: '4px',
+  },
+  flex1: {
+    flex: '1 1 0',
+  },
+});
 
 const ColumnEditor = memo(
   ({
@@ -45,6 +101,7 @@ const ColumnEditor = memo(
     onRemoveColumn: (columnId: string) => void;
     isRemovable: boolean;
   }) => {
+    const styles = useStyles();
     const [editing, setEditing] = useState(false);
     const [editLabel, setEditLabel] = useState(column.label);
 
@@ -85,83 +142,76 @@ const ColumnEditor = memo(
     const handleRemoveColumn = useCallback(() => onRemoveColumn(column.id), [column.id, onRemoveColumn]);
 
     return (
-      <div className="rounded-lg border border-surface-border bg-surface-overlay/30 p-3">
-        <div className="flex items-center gap-2 mb-2">
+      <div className={styles.columnCard}>
+        <div className={styles.columnHeader}>
           {editing ? (
-            <input
-              type="text"
+            <Input
+              size="sm"
               value={editLabel}
               onChange={(e) => setEditLabel(e.target.value)}
               onBlur={handleFinishRename}
               onKeyDown={handleRenameKeyDown}
               autoFocus
-              className="rounded-lg border border-accent-500 bg-surface px-2.5 py-1.5 sm:px-1.5 sm:py-0.5 text-sm sm:text-xs font-medium text-fg focus:outline-none"
             />
           ) : (
             <button
               onClick={handleStartRename}
-              className={cn(
-                'text-xs px-1.5 py-0.5 rounded-full font-medium cursor-pointer hover:ring-1 hover:ring-accent-500/50',
-                COLUMN_BADGE_COLORS[column.id] ?? 'text-fg-muted bg-fg-muted/10'
-              )}
+              className="text-xs px-1.5 py-0.5 rounded-full font-medium cursor-pointer hover:ring-1 hover:ring-accent-500/50"
+              style={{ color: getColumnColors(column.id).badgeColor, backgroundColor: getColumnColors(column.id).badgeBg }}
               title="Click to rename"
             >
               {column.label}
             </button>
           )}
 
-          <div className="ml-auto flex items-center gap-1">
+          <div className={styles.actionsGroup}>
             <IconButton
               aria-label="Move up"
-              icon={<PiArrowUpBold />}
+              icon={<ArrowUp20Regular />}
               size="sm"
               onClick={handleMoveUp}
               isDisabled={index === 0}
-              className="opacity-60 hover:opacity-100"
             />
             <IconButton
               aria-label="Move down"
-              icon={<PiArrowDownBold />}
+              icon={<ArrowDown20Regular />}
               size="sm"
               onClick={handleMoveDown}
               isDisabled={index === total - 1}
-              className="opacity-60 hover:opacity-100"
             />
             {isRemovable && (
               <IconButton
                 aria-label="Remove column"
-                icon={<PiTrashFill />}
+                icon={<Delete20Filled />}
                 size="sm"
                 onClick={handleRemoveColumn}
-                className="opacity-60 hover:opacity-100 text-red-400"
               />
             )}
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
-          <label className="text-sm sm:text-xs text-fg-muted">Max concurrent</label>
-          <input
+        <div className={styles.fieldRow}>
+          <label className={styles.fieldLabel}>Max concurrent</label>
+          <Input
             type="number"
-            min={1}
-            value={column.maxConcurrent ?? ''}
+            size="sm"
+            value={column.maxConcurrent?.toString() ?? ''}
             onChange={handleMaxConcurrentChange}
-            placeholder="∞"
-            className="w-14 sm:w-12 rounded-lg border border-surface-border bg-surface px-2 py-1.5 sm:px-1.5 sm:py-0.5 text-sm sm:text-xs text-fg text-center placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500"
+            placeholder="&#x221E;"
           />
         </div>
-        <div className="flex items-center gap-1.5">
-          <label className="text-sm sm:text-xs text-fg-muted">Gate</label>
+        <div className={styles.fieldRow}>
+          <label className={styles.fieldLabel}>Gate</label>
           <Switch checked={column.gate ?? false} onCheckedChange={(checked) => onGateChange(column.id, checked)} />
         </div>
-        <div className="flex items-center gap-1.5">
-          <label className="text-sm sm:text-xs text-fg-muted">Description</label>
+        <div className={styles.fieldRow}>
+          <label className={styles.fieldLabel}>Description</label>
           <Input
             size="sm"
             value={column.description ?? ''}
             onChange={(e) => onDescriptionChange(column.id, e.target.value)}
             placeholder="What does this column mean?"
-            className="flex-1"
+            className={styles.flex1}
           />
         </div>
       </div>
@@ -172,6 +222,7 @@ ColumnEditor.displayName = 'ColumnEditor';
 
 export const PipelineSettingsDialog = memo(
   ({ projectId, open, onClose }: { projectId: ProjectId; open: boolean; onClose: () => void }) => {
+    const styles = useStyles();
     const pipeline = useStore($pipeline);
 
     // Deep-clone columns for local editing
@@ -321,8 +372,8 @@ export const PipelineSettingsDialog = memo(
       <AnimatedDialog open={open} onClose={onClose}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>Pipeline Settings</DialogHeader>
-          <DialogBody className="flex flex-col gap-3 max-h-[60vh] overflow-y-auto">
-            <p className="text-sm sm:text-xs text-fg-muted">
+          <DialogBody className={styles.bodyColumn}>
+            <p className={styles.helpText}>
               First column is the backlog. Last column is terminal (completed). Columns in between are active work
               stages.
             </p>
@@ -342,18 +393,18 @@ export const PipelineSettingsDialog = memo(
                 isRemovable={editColumns.length > 2}
               />
             ))}
-            <div className="flex items-center gap-2 mt-1">
-              <input
-                type="text"
+            <div className={styles.addRow}>
+              <Input
+                size="sm"
                 value={newColumnLabel}
                 onChange={(e) => setNewColumnLabel(e.target.value)}
                 placeholder="Add column..."
-                className="flex-1 rounded-lg border border-surface-border bg-surface px-3 py-2 sm:px-2 sm:py-1.5 text-base sm:text-sm text-fg placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500"
                 onKeyDown={handleAddColumnKeyDown}
+                className={styles.flex1}
               />
               <IconButton
                 aria-label="Add column"
-                icon={<PiPlusBold />}
+                icon={<Add20Regular />}
                 size="sm"
                 onClick={handleAddColumn}
                 isDisabled={!newColumnLabel.trim()}

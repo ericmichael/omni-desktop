@@ -1,6 +1,7 @@
+import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useState } from 'react';
-import { PiFolderOpenBold, PiPlusBold } from 'react-icons/pi';
+import { FolderOpen20Regular, Add20Regular } from '@fluentui/react-icons';
 
 import { Button, Heading } from '@/renderer/ds';
 import { ProjectForm } from '@/renderer/features/Projects/ProjectForm';
@@ -9,6 +10,74 @@ import type { CodeTabId, Project } from '@/shared/types';
 
 import { codeApi } from './state';
 
+const useStyles = makeStyles({
+  projectCard: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+    borderRadius: tokens.borderRadiusLarge,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: tokens.colorNeutralBackground1,
+    padding: tokens.spacingHorizontalL,
+    textAlign: 'left',
+    transitionProperty: 'border-color, background-color',
+    transitionDuration: '150ms',
+    cursor: 'pointer',
+    ':hover': { ...shorthands.borderColor(tokens.colorBrandStroke1), backgroundColor: tokens.colorNeutralBackground1Hover },
+  },
+  projectIcon: { color: tokens.colorNeutralForeground2, flexShrink: 0 },
+  projectContent: { minWidth: 0 },
+  projectLabel: {
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightMedium,
+    color: tokens.colorNeutralForeground1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  projectDir: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  rootEmbedded: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: tokens.spacingVerticalXXL,
+    width: '100%',
+  },
+  rootFull: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
+    width: '100%',
+    gap: tokens.spacingVerticalXXL,
+    padding: '32px',
+  },
+  description: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    textAlign: 'center',
+    maxWidth: '448px',
+  },
+  grid: {
+    display: 'grid',
+    gridTemplateColumns: '1fr',
+    gap: tokens.spacingVerticalM,
+    maxWidth: '512px',
+    width: '100%',
+    maxHeight: '400px',
+    overflowY: 'auto',
+    '@media (min-width: 640px)': { gridTemplateColumns: '1fr 1fr' },
+  },
+  newProjectIcon: { marginRight: '6px' },
+});
+
 type CodeEmptyStateProps = {
   tabId: CodeTabId;
   embedded?: boolean;
@@ -16,6 +85,7 @@ type CodeEmptyStateProps = {
 
 const ProjectCard = memo(
   ({ project, onSelect }: { project: Project; onSelect: (project: Project) => void }) => {
+    const styles = useStyles();
     const handleClick = useCallback(() => {
       onSelect(project);
     }, [project, onSelect]);
@@ -23,12 +93,12 @@ const ProjectCard = memo(
     return (
       <button
         onClick={handleClick}
-        className="flex items-center gap-3 rounded-lg border border-surface-border bg-surface p-4 text-left hover:border-accent-500 hover:bg-surface-overlay transition-colors cursor-pointer"
+        className={styles.projectCard}
       >
-        <PiFolderOpenBold className="text-fg-muted shrink-0" size={20} />
-        <div className="min-w-0">
-          <div className="text-sm font-medium text-fg truncate">{project.label}</div>
-          <div className="text-xs text-fg-muted truncate">{project.workspaceDir}</div>
+        <FolderOpen20Regular className={styles.projectIcon} />
+        <div className={styles.projectContent}>
+          <div className={styles.projectLabel}>{project.label}</div>
+          <div className={styles.projectDir}>{project.workspaceDir}</div>
         </div>
       </button>
     );
@@ -37,6 +107,7 @@ const ProjectCard = memo(
 ProjectCard.displayName = 'ProjectCard';
 
 export const CodeEmptyState = memo(({ tabId, embedded = false }: CodeEmptyStateProps) => {
+  const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const [showNewProject, setShowNewProject] = useState(false);
 
@@ -58,22 +129,22 @@ export const CodeEmptyState = memo(({ tabId, embedded = false }: CodeEmptyStateP
   }, []);
 
   return (
-    <div className={embedded ? 'flex flex-col items-center gap-6 w-full' : 'flex flex-col items-center justify-center h-full w-full gap-6 p-8'}>
+    <div className={embedded ? styles.rootEmbedded : styles.rootFull}>
       {!embedded && <Heading size="md">Select a Project</Heading>}
       {!embedded && (
-        <p className="text-sm text-fg-muted text-center max-w-md">
+        <p className={styles.description}>
           Choose an existing project to open in this tab, or create a new one.
         </p>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg w-full max-h-[400px] overflow-y-auto">
+      <div className={styles.grid}>
         {projects.map((project) => (
           <ProjectCard key={project.id} project={project} onSelect={handleSelectProject} />
         ))}
       </div>
 
       <Button variant="ghost" onClick={handleOpenNewProject}>
-        <PiPlusBold className="mr-1.5" size={14} />
+        <Add20Regular className={styles.newProjectIcon} style={{ width: 14, height: 14 }} />
         Create new project
       </Button>
 

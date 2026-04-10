@@ -1,7 +1,7 @@
-import { motion } from 'framer-motion';
-import { memo, useCallback } from 'react';
+import { makeStyles } from '@fluentui/react-components';
+import { memo } from 'react';
 
-import { Button, cn } from '@/renderer/ds';
+import { Body1Strong, Button, Caption1, Radio, RadioGroup } from '@/renderer/ds';
 import type { ProviderEntry } from '@/shared/types';
 
 type ProviderOption = {
@@ -12,11 +12,7 @@ type ProviderOption = {
 
 const PROVIDER_OPTIONS: ProviderOption[] = [
   { value: 'openai', label: 'OpenAI', description: 'GPT-4o, GPT-5, o3 and other OpenAI models' },
-  {
-    value: 'openai-compatible',
-    label: 'OpenAI-Compatible',
-    description: 'Any provider with an OpenAI-compatible API (Ollama, vLLM, etc.)',
-  },
+  { value: 'openai-compatible', label: 'OpenAI-Compatible', description: 'Any provider with an OpenAI-compatible API (Ollama, vLLM, etc.)' },
   { value: 'litellm', label: 'LiteLLM', description: 'Anthropic, Google, Mistral and 100+ providers via LiteLLM' },
 ];
 
@@ -26,48 +22,41 @@ type Props = {
   onNext: () => void;
 };
 
-export const OnboardingProviderTypeStep = memo(({ selected, onSelect, onNext }: Props) => {
-  const handleSelectOpenai = useCallback(() => onSelect('openai'), [onSelect]);
-  const handleSelectCompatible = useCallback(() => onSelect('openai-compatible'), [onSelect]);
-  const handleSelectLitellm = useCallback(() => onSelect('litellm'), [onSelect]);
+const useStyles = makeStyles({
+  root: { display: 'flex', flexDirection: 'column', gap: '24px' },
+  header: { display: 'flex', flexDirection: 'column', gap: '4px' },
+  actions: { display: 'flex', justifyContent: 'flex-end' },
+});
 
-  const handlers: Record<ProviderEntry['type'], () => void> = {
-    openai: handleSelectOpenai,
-    'openai-compatible': handleSelectCompatible,
-    litellm: handleSelectLitellm,
-    azure: handleSelectOpenai,
-  };
+export const OnboardingProviderTypeStep = memo(({ selected, onSelect, onNext }: Props) => {
+  const styles = useStyles();
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <h3 className="text-lg font-semibold text-fg">Choose a provider</h3>
-        <p className="text-sm text-fg-muted">Select the AI provider you want to use with Omni.</p>
+    <div className={styles.root}>
+      <div className={styles.header}>
+        <Body1Strong>Choose a provider</Body1Strong>
+        <Caption1>Select the AI provider you want to use with Omni.</Caption1>
       </div>
 
-      <div className="flex flex-col gap-3">
+      <RadioGroup
+        value={selected ?? ''}
+        onChange={(_e, data) => onSelect(data.value as ProviderEntry['type'])}
+      >
         {PROVIDER_OPTIONS.map((option) => (
-          <motion.button
+          <Radio
             key={option.value}
-            type="button"
-            whileHover={{ scale: 1.01 }}
-            whileTap={{ scale: 0.99 }}
-            transition={{ duration: 0.15 }}
-            onClick={handlers[option.value]}
-            className={cn(
-              'flex flex-col gap-1 rounded-lg border p-4 text-left transition-colors',
-              selected === option.value
-                ? 'border-accent-500 bg-accent-500/10'
-                : 'border-surface-border/50 bg-surface-raised/50 hover:border-surface-border'
-            )}
-          >
-            <span className="text-sm font-medium text-fg">{option.label}</span>
-            <span className="text-xs text-fg-muted">{option.description}</span>
-          </motion.button>
+            value={option.value}
+            label={
+              <div>
+                <Body1Strong>{option.label}</Body1Strong>
+                <Caption1 block>{option.description}</Caption1>
+              </div>
+            }
+          />
         ))}
-      </div>
+      </RadioGroup>
 
-      <div className="flex justify-end">
+      <div className={styles.actions}>
         <Button variant="primary" size="sm" onClick={onNext} isDisabled={!selected}>
           Continue
         </Button>

@@ -1,16 +1,23 @@
+import { makeStyles, mergeClasses } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { PiTerminalBold } from 'react-icons/pi';
+import { WindowConsole20Regular } from '@fluentui/react-icons';
 
 import { cn, IconButton } from '@/renderer/ds';
 import { $isConsoleOpen, $terminalHasNewOutput } from '@/renderer/features/Console/state';
+
+const useStyles = makeStyles({
+  hidden: { pointerEvents: 'none' },
+  newOutput: { color: '#facc15' },
+});
 
 const hotkeyOptions = {
   enableOnFormTags: true,
 };
 
 export const ConsoleOpenButton = memo(({ className }: { className?: string }) => {
+  const styles = useStyles();
   const isOpen = useStore($isConsoleOpen);
   const consoleHasNewOutput = useStore($terminalHasNewOutput);
 
@@ -29,11 +36,11 @@ export const ConsoleOpenButton = memo(({ className }: { className?: string }) =>
       aria-label="Open Terminal"
       onClick={openConsole}
       icon={
-        <PiTerminalBold
-          className={cn(consoleHasNewOutput && 'animate-jump-shake', consoleHasNewOutput && 'text-yellow-400')}
+        <WindowConsole20Regular
+          className={cn(consoleHasNewOutput && 'animate-jump-shake', consoleHasNewOutput && styles.newOutput)}
         />
       }
-      className={cn(isOpen && 'pointer-events-none', className)}
+      className={mergeClasses(isOpen && styles.hidden, className)}
     />
   );
 });

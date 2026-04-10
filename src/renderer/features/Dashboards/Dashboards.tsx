@@ -1,9 +1,91 @@
+import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 import { memo, useCallback, useEffect, useState } from 'react';
-import { PiArrowLeft, PiChartBarBold, PiArrowSquareOutBold } from 'react-icons/pi';
+import { ArrowLeft20Regular, DataBarVertical20Regular, Open20Regular } from '@fluentui/react-icons';
 
-import { cn } from '@/renderer/ds';
 import { emitter } from '@/renderer/services/ipc';
 import type { PlatformDashboard } from '@/shared/types';
+
+const useStyles = makeStyles({
+  root: { display: 'flex', flexDirection: 'column', width: '100%', height: '100%', backgroundColor: tokens.colorNeutralBackground1 },
+  listHeader: {
+    paddingLeft: tokens.spacingHorizontalXL,
+    paddingRight: tokens.spacingHorizontalXL,
+    paddingTop: tokens.spacingVerticalXXL,
+    paddingBottom: tokens.spacingVerticalL,
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+  },
+  listTitle: { fontSize: '24px', fontWeight: tokens.fontWeightBold, color: tokens.colorNeutralForeground1, letterSpacing: '-0.025em' },
+  listSubtitle: { fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground3, marginTop: '4px' },
+  listBody: { flex: '1 1 0', overflowY: 'auto', padding: tokens.spacingHorizontalXL },
+  loading: { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '128px', color: tokens.colorNeutralForeground2 },
+  emptyState: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '128px', color: tokens.colorNeutralForeground2 },
+  emptyIcon: { marginBottom: tokens.spacingVerticalS, opacity: 0.4 },
+  emptyHint: { fontSize: tokens.fontSizeBase200, marginTop: '4px' },
+  grid: {
+    display: 'grid',
+    gridTemplateColumns: '1fr',
+    gap: tokens.spacingVerticalL,
+    '@media (min-width: 640px)': { gridTemplateColumns: 'repeat(2, 1fr)' },
+    '@media (min-width: 1024px)': { gridTemplateColumns: 'repeat(3, 1fr)' },
+  },
+  dashCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    textAlign: 'left',
+    padding: tokens.spacingHorizontalL,
+    borderRadius: tokens.borderRadiusLarge,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: tokens.colorNeutralBackground2,
+    transitionProperty: 'background-color',
+    transitionDuration: '150ms',
+    cursor: 'pointer',
+    ':hover': { backgroundColor: tokens.colorNeutralBackground2Hover },
+  },
+  dashCardTop: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' },
+  dashCardIcon: { color: tokens.colorBrandForeground1, flexShrink: 0, marginTop: '2px' },
+  dashCardOpenIcon: { color: tokens.colorNeutralForeground2, opacity: 0, transitionProperty: 'opacity', transitionDuration: '150ms' },
+  dashCardName: { fontSize: tokens.fontSizeBase300, fontWeight: tokens.fontWeightSemibold, color: tokens.colorNeutralForeground1, marginTop: tokens.spacingVerticalS, lineHeight: '1.375' },
+  dashCardWidgets: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2, marginTop: '4px' },
+  embedHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingTop: '10px',
+    paddingBottom: '10px',
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: tokens.colorNeutralBackground2,
+    flexShrink: 0,
+  },
+  backBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    transitionProperty: 'color',
+    transitionDuration: '150ms',
+    cursor: 'pointer',
+    border: 'none',
+    backgroundColor: 'transparent',
+    ':hover': { color: tokens.colorNeutralForeground1 },
+  },
+  embedTitleWrap: { flex: '1 1 0', minWidth: 0 },
+  embedTitle: { fontSize: tokens.fontSizeBase300, fontWeight: tokens.fontWeightSemibold, color: tokens.colorNeutralForeground1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  openLink: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+    transitionProperty: 'color',
+    transitionDuration: '150ms',
+    ':hover': { color: tokens.colorNeutralForeground1 },
+  },
+  embedBody: { flex: '1 1 0', minHeight: 0 },
+  iframe: { width: '100%', height: '100%', border: 'none' },
+});
 
 /**
  * Dashboards tab — shows entitled Databricks dashboards from platform policy.
@@ -55,54 +137,52 @@ const DashboardList = memo(
     dashboards: PlatformDashboard[];
     loading: boolean;
     onOpen: (d: PlatformDashboard) => void;
-  }) => (
-    <div className="flex flex-col w-full h-full bg-surface">
-      <div className="px-5 pt-6 pb-4 border-b border-border">
-        <h1 className="text-2xl font-bold text-fg tracking-tight">Dashboards</h1>
-        <p className="text-sm text-fg-subtle mt-1">Your entitled Databricks dashboards</p>
+  }) => {
+    const styles = useStyles();
+    return (
+    <div className={styles.root}>
+      <div className={styles.listHeader}>
+        <h1 className={styles.listTitle}>Dashboards</h1>
+        <p className={styles.listSubtitle}>Your entitled Databricks dashboards</p>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-5">
+      <div className={styles.listBody}>
         {loading && (
-          <div className="flex items-center justify-center h-32 text-fg-muted">Loading dashboards...</div>
+          <div className={styles.loading}>Loading dashboards...</div>
         )}
 
         {!loading && dashboards.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-32 text-fg-muted">
-            <PiChartBarBold size={32} className="mb-2 opacity-40" />
+          <div className={styles.emptyState}>
+            <DataBarVertical20Regular style={{ width: 32, height: 32 }} className={styles.emptyIcon} />
             <p>No dashboards available.</p>
-            <p className="text-xs mt-1">Request access from your domain admin.</p>
+            <p className={styles.emptyHint}>Request access from your domain admin.</p>
           </div>
         )}
 
         {!loading && dashboards.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className={styles.grid}>
             {dashboards.map((d) => (
               <button
                 key={d.resource_id}
                 onClick={() => onOpen(d)}
-                className={cn(
-                  'flex flex-col text-left p-4 rounded-lg border border-border',
-                  'bg-surface-raised hover:bg-surface-raised-hover',
-                  'transition-colors cursor-pointer group'
-                )}
+                className={styles.dashCard}
               >
-                <div className="flex items-start justify-between">
-                  <PiChartBarBold size={20} className="text-accent-500 shrink-0 mt-0.5" />
-                  <PiArrowSquareOutBold
-                    size={14}
-                    className="text-fg-muted opacity-0 group-hover:opacity-100 transition-opacity"
-                  />
+                <div className={styles.dashCardTop}>
+                  <DataBarVertical20Regular className={styles.dashCardIcon} />
+                  <Open20Regular
+                    style={{ width: 14, height: 14 }}
+                    className={styles.dashCardOpenIcon} />
                 </div>
-                <h3 className="text-sm font-semibold text-fg mt-2 leading-snug">{d.name}</h3>
-                <p className="text-xs text-fg-muted mt-1">{d.widget_count} widgets</p>
+                <h3 className={styles.dashCardName}>{d.name}</h3>
+                <p className={styles.dashCardWidgets}>{d.widget_count} widgets</p>
               </button>
             ))}
           </div>
         )}
       </div>
     </div>
-  )
+    );
+  }
 );
 DashboardList.displayName = 'DashboardList';
 
@@ -117,41 +197,44 @@ const DashboardEmbed = memo(
   }: {
     dashboard: PlatformDashboard;
     onBack: () => void;
-  }) => (
-    <div className="flex flex-col w-full h-full bg-surface">
+  }) => {
+    const styles = useStyles();
+    return (
+    <div className={styles.root}>
       {/* Header bar */}
-      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-surface-raised shrink-0">
+      <div className={styles.embedHeader}>
         <button
           onClick={onBack}
-          className="flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg transition-colors cursor-pointer"
+          className={styles.backBtn}
         >
-          <PiArrowLeft size={16} />
+          <ArrowLeft20Regular style={{ width: 16, height: 16 }} />
           <span>Back</span>
         </button>
-        <div className="flex-1 min-w-0">
-          <h2 className="text-sm font-semibold text-fg truncate">{dashboard.name}</h2>
+        <div className={styles.embedTitleWrap}>
+          <h2 className={styles.embedTitle}>{dashboard.name}</h2>
         </div>
         <a
           href={dashboard.workspace_url}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg transition-colors"
+          className={styles.openLink}
         >
-          <PiArrowSquareOutBold size={14} />
+          <Open20Regular style={{ width: 14, height: 14 }} />
           <span>Open in Databricks</span>
         </a>
       </div>
 
       {/* Embedded dashboard — uses published embed URL with embed_credentials */}
-      <div className="flex-1 min-h-0">
+      <div className={styles.embedBody}>
         <iframe
           src={dashboard.embed_url}
-          className="w-full h-full border-0"
+          className={styles.iframe}
           sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
           title={dashboard.name}
         />
       </div>
     </div>
-  )
+    );
+  }
 );
 DashboardEmbed.displayName = 'DashboardEmbed';

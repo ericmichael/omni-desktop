@@ -1,8 +1,8 @@
 import { useStore } from '@nanostores/react';
-import { motion } from 'framer-motion';
 import { memo, useCallback, useState } from 'react';
 
-import { AnimatedDialog, DialogBody, DialogContent, DialogFooter, DialogHeader } from '@/renderer/ds';
+import { makeStyles, tokens } from '@fluentui/react-components';
+import { AnimatedDialog, DialogBody, DialogContent, DialogFooter, DialogHeader, Tab, TabList } from '@/renderer/ds';
 import { SettingsModalAccountTab } from '@/renderer/features/SettingsModal/SettingsModalAccountTab';
 import { SettingsModalEnvironmentTab } from '@/renderer/features/SettingsModal/SettingsModalEnvironmentTab';
 import { SettingsModalGeneralTab } from '@/renderer/features/SettingsModal/SettingsModalGeneralTab';
@@ -13,56 +13,58 @@ import { SettingsModalResetButton } from '@/renderer/features/SettingsModal/Sett
 import { $isSettingsOpen } from '@/renderer/features/SettingsModal/state';
 
 const TABS = ['General', 'Environment', 'Models', 'MCP', 'Network', 'Account'] as const;
-type Tab = (typeof TABS)[number];
+type SettingsTab = (typeof TABS)[number];
+
+const useStyles = makeStyles({
+  content: {
+    '@media (min-width: 640px)': { maxWidth: '672px' },
+  },
+  body: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXL,
+    minHeight: 0,
+    '@media (min-width: 640px)': { minHeight: '400px' },
+  },
+  footer: {
+    paddingTop: tokens.spacingVerticalL,
+  },
+});
 
 export const SettingsModal = memo(() => {
+  const styles = useStyles();
   const isOpen = useStore($isSettingsOpen);
-  const [activeTab, switchTab] = useState<Tab>('General');
+  const [activeTab, switchTab] = useState<SettingsTab>('General');
 
   const onClose = useCallback(() => {
     $isSettingsOpen.set(false);
   }, []);
 
-  const onClickGeneral = useCallback(() => switchTab('General'), []);
-  const onClickEnvironment = useCallback(() => switchTab('Environment'), []);
-  const onClickModels = useCallback(() => switchTab('Models'), []);
-  const onClickMcp = useCallback(() => switchTab('MCP'), []);
-  const onClickNetwork = useCallback(() => switchTab('Network'), []);
-  const onClickAccount = useCallback(() => switchTab('Account'), []);
-
-  const tabClickHandlers: Record<Tab, () => void> = {
-    General: onClickGeneral,
-    Environment: onClickEnvironment,
-    Models: onClickModels,
-    MCP: onClickMcp,
-    Network: onClickNetwork,
-    Account: onClickAccount,
-  };
+  const handleTabSelect = useCallback(
+    (_event: unknown, data: { value: unknown }) => {
+      switchTab(data.value as SettingsTab);
+    },
+    []
+  );
 
   return (
     <AnimatedDialog open={isOpen} onClose={onClose}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className={styles.content}>
         <DialogHeader>Settings</DialogHeader>
-        <div className="flex gap-1 px-4 sm:px-6 pb-2 overflow-x-auto scrollbar-none">
+        <TabList
+          selectedValue={activeTab}
+          onTabSelect={handleTabSelect}
+          size="small"
+          appearance="subtle"
+          style={{ paddingLeft: 24, paddingRight: 24, paddingBottom: 8 }}
+        >
           {TABS.map((tab) => (
-            <button
-              key={tab}
-              onClick={tabClickHandlers[tab]}
-              className="relative px-3.5 py-2 sm:px-3 sm:py-1.5 text-sm sm:text-xs font-medium rounded-lg sm:rounded-md cursor-pointer select-none transition-colors shrink-0"
-              style={{ color: activeTab === tab ? 'var(--color-fg)' : 'var(--color-fg-muted)' }}
-            >
-              {activeTab === tab && (
-                <motion.div
-                  layoutId="settings-tab-indicator"
-                  className="absolute inset-0 bg-white/10 rounded-lg sm:rounded-md"
-                  transition={{ type: 'spring', duration: 0.3, bounce: 0.15 }}
-                />
-              )}
-              <span className="relative z-10">{tab}</span>
-            </button>
+            <Tab key={tab} value={tab}>
+              {tab}
+            </Tab>
           ))}
-        </div>
-        <DialogBody className="flex flex-col gap-6 min-h-0 sm:min-h-[400px]">
+        </TabList>
+        <DialogBody className={styles.body}>
           {activeTab === 'General' && <SettingsModalGeneralTab />}
           {activeTab === 'Environment' && <SettingsModalEnvironmentTab />}
           {activeTab === 'Models' && <SettingsModalModelsTab />}
@@ -71,7 +73,7 @@ export const SettingsModal = memo(() => {
           {activeTab === 'Account' && <SettingsModalAccountTab />}
         </DialogBody>
         {activeTab === 'General' && (
-          <DialogFooter className="pt-4">
+          <DialogFooter className={styles.footer}>
             <SettingsModalResetButton />
           </DialogFooter>
         )}

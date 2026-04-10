@@ -45,8 +45,15 @@ export type WindowProps = {
 /**
  * Data stored in the electron store.
  */
-export type LayoutMode = 'home' | 'chat' | 'code' | 'projects' | 'dashboards' | 'more';
-export type OmniTheme = 'default' | 'tokyo-night' | 'vscode-dark' | 'vscode-light' | 'utrgv';
+export type LayoutMode = 'home' | 'chat' | 'code' | 'projects' | 'dashboards' | 'settings' | 'more';
+export type OmniTheme =
+  | 'teams-light'
+  | 'teams-dark'
+  | 'default'
+  | 'tokyo-night'
+  | 'vscode-dark'
+  | 'vscode-light'
+  | 'utrgv';
 
 export type SandboxVariant = 'standard' | 'work';
 export type SandboxBackend = 'docker' | 'podman' | 'vm' | 'local';

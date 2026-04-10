@@ -1,37 +1,214 @@
+import { Tooltip, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+
+import { CounterBadge } from '@/renderer/ds';
 import { useStore } from '@nanostores/react';
-import { motion } from 'framer-motion';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import type { KeyboardEvent } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  PiChatCircleFill,
-  PiChartBarBold,
-  PiCodeBold,
-  PiDotsThreeBold,
-  PiGearFill,
-  PiLightningFill,
-  PiRocketLaunchFill,
-} from 'react-icons/pi';
+  Chat24Filled,
+  DataBarVertical24Regular,
+  Code24Regular,
+  MoreHorizontal24Filled,
+  Settings24Filled,
+  Flash24Filled,
+  Rocket24Filled,
+} from '@fluentui/react-icons';
 
 import { OmniLogo } from '@/renderer/common/AsciiLogo';
-import { cn } from '@/renderer/ds';
 import { $inboxItems } from '@/renderer/features/Inbox/state';
-import { $isSettingsOpen } from '@/renderer/features/SettingsModal/state';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { LayoutMode } from '@/shared/types';
 
-const ALL_TABS: { value: LayoutMode; label: string; icon: React.ReactNode; enterprise?: boolean; alwaysVisible?: boolean }[] = [
-  { value: 'home', label: 'Now', icon: <PiLightningFill size={20} />, alwaysVisible: true },
-  { value: 'chat', label: 'Chat', icon: <PiChatCircleFill size={20} /> },
-  { value: 'code', label: 'Code', icon: <PiCodeBold size={20} /> },
-  { value: 'projects', label: 'Projects', icon: <PiRocketLaunchFill size={20} /> },
-  { value: 'dashboards', label: 'Dashboards', icon: <PiChartBarBold size={20} />, enterprise: true },
+const ALL_TABS: {
+  value: LayoutMode;
+  label: string;
+  icon: React.ReactNode;
+  enterprise?: boolean;
+  alwaysVisible?: boolean;
+  pinBottom?: boolean;
+}[] = [
+  { value: 'home', label: 'Now', icon: <Flash24Filled />, alwaysVisible: true },
+  { value: 'chat', label: 'Chat', icon: <Chat24Filled /> },
+  { value: 'code', label: 'Code', icon: <Code24Regular /> },
+  { value: 'projects', label: 'Projects', icon: <Rocket24Filled /> },
+  { value: 'dashboards', label: 'Dashboards', icon: <DataBarVertical24Regular />, enterprise: true },
+  { value: 'settings', label: 'Settings', icon: <Settings24Filled />, alwaysVisible: true, pinBottom: true },
 ];
 
-const springTransition = { type: 'spring', duration: 0.3, bounce: 0.15 } as const;
+const useStyles = makeStyles({
+  /* ── Rail container ── */
+  nav: {
+    display: 'flex',
+    flexDirection: 'row',
+    width: '100%',
+    flexShrink: 0,
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: tokens.colorNeutralStroke1,
+    paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+    '@media (min-width: 640px)': {
+      flexDirection: 'column',
+      width: '78px',
+      height: '100%',
+      borderTopWidth: '0',
+      borderRightWidth: '1px',
+      borderRightStyle: 'solid',
+      borderRightColor: tokens.colorNeutralStroke1,
+      paddingBottom: '0',
+    },
+  },
+
+  /* ── Logo (desktop only) ── */
+  logo: {
+    display: 'none',
+    '@media (min-width: 640px)': {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '100%',
+      paddingTop: '24px',
+      paddingBottom: '16px',
+    },
+  },
+
+  /* ── Tab list ── */
+  items: {
+    display: 'flex',
+    flexDirection: 'row',
+    flex: '1 1 0',
+    justifyContent: 'space-evenly',
+    '@media (min-width: 640px)': {
+      flexDirection: 'column',
+      flex: '0 0 auto',
+      alignItems: 'center',
+      gap: '2px',
+      paddingTop: '8px',
+    },
+  },
+
+  /* ── Single nav item ── */
+  item: {
+    position: 'relative',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '4px',
+    paddingTop: '8px',
+    paddingBottom: '8px',
+    flex: '1 1 0',
+    cursor: 'pointer',
+    userSelect: 'none',
+    border: 'none',
+    backgroundColor: 'transparent',
+    color: tokens.colorNeutralForeground3,
+    borderRadius: '0',
+    transitionProperty: 'color, background-color',
+    transitionDuration: '100ms',
+    transitionTimingFunction: 'ease',
+    ':hover': {
+      color: tokens.colorNeutralForeground1,
+    },
+    ':focus-visible': {
+      outlineWidth: '2px',
+      outlineStyle: 'solid',
+      outlineColor: tokens.colorBrandStroke1,
+      outlineOffset: '-2px',
+      borderRadius: tokens.borderRadiusMedium,
+    },
+    '@media (min-width: 640px)': {
+      flex: '0 0 auto',
+      width: '100%',
+      borderRadius: '0',
+      paddingTop: '10px',
+      paddingBottom: '8px',
+      ':hover': {
+        backgroundColor: tokens.colorNeutralBackground1Hover,
+        color: tokens.colorNeutralForeground1,
+      },
+    },
+  },
+  itemActive: {
+    color: tokens.colorNeutralForeground1,
+    '@media (min-width: 640px)': {
+      backgroundColor: tokens.colorNeutralBackground1Selected,
+    },
+  },
+
+  /* ── Active indicator bar ── */
+  indicator: {
+    position: 'absolute',
+    bottom: '0',
+    left: '25%',
+    right: '25%',
+    height: '3px',
+    backgroundColor: tokens.colorBrandForeground1,
+    borderTopLeftRadius: tokens.borderRadiusCircular,
+    borderTopRightRadius: tokens.borderRadiusCircular,
+    '@media (min-width: 640px)': {
+      top: '8px',
+      bottom: '8px',
+      left: '0',
+      right: 'auto',
+      width: '3px',
+      height: 'auto',
+      borderTopLeftRadius: '0',
+      borderTopRightRadius: tokens.borderRadiusCircular,
+      borderBottomRightRadius: tokens.borderRadiusCircular,
+    },
+  },
+
+  itemLabel: {
+    fontSize: '12px',
+    fontWeight: tokens.fontWeightSemibold,
+    lineHeight: '1',
+  },
+  iconWrap: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    '> svg': {
+      width: '24px',
+      height: '24px',
+    },
+  },
+  badge: {
+    position: 'absolute',
+    top: '-6px',
+    right: '-10px',
+  },
+
+  /* ── More button (mobile only) ── */
+  moreItem: {
+    '@media (min-width: 640px)': {
+      display: 'none',
+    },
+  },
+
+  /* ── Spacer + Settings (desktop only) ── */
+  spacer: {
+    display: 'none',
+    '@media (min-width: 640px)': {
+      display: 'block',
+      flex: '1 1 0',
+    },
+  },
+  settingsWrap: {
+    display: 'none',
+    '@media (min-width: 640px)': {
+      display: 'flex',
+      justifyContent: 'center',
+      paddingBottom: '12px',
+    },
+  },
+});
 
 export const Sidebar = memo(() => {
+  const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
-  const isSettingsOpen = useStore($isSettingsOpen);
   const inboxItems = useStore($inboxItems);
   const openInboxCount = useMemo(
     () => Object.values(inboxItems).filter((i) => i.status === 'open').length,
@@ -39,136 +216,108 @@ export const Sidebar = memo(() => {
   );
 
   const setMode = useCallback(
-    (mode: LayoutMode) => () => {
-      persistedStoreApi.setKey('layoutMode', mode);
-    },
+    (mode: LayoutMode) => () => persistedStoreApi.setKey('layoutMode', mode),
     []
   );
-
-  const openSettings = useCallback(() => {
-    $isSettingsOpen.set(true);
-  }, []);
 
   const [isEnterprise, setIsEnterprise] = useState(false);
   useEffect(() => {
     emitter.invoke('platform:is-enterprise').then(setIsEnterprise);
   }, []);
-  const visibleTabs = useMemo(
-    () => {
-      return ALL_TABS.filter((t) => {
-        // Always-visible tabs (Home, Chat)
-        if (t.alwaysVisible) return true;
-        // Enterprise tabs: only in enterprise builds
-        if (t.enterprise) return isEnterprise;
-        // Preview tabs (Code, Projects): dev mode or preview features enabled
-        if (t.value !== 'chat') return import.meta.env.MODE === 'development' || store.previewFeatures;
-        // Chat: always visible
-        return true;
-      });
-    },
-    [store.previewFeatures, isEnterprise]
-  );
+
+  const visibleTabs = useMemo(() => {
+    return ALL_TABS.filter((t) => {
+      if (t.alwaysVisible) return true;
+      if (t.enterprise) return isEnterprise;
+      if (t.value !== 'chat') return import.meta.env.MODE === 'development' || store.previewFeatures;
+      return true;
+    });
+  }, [store.previewFeatures, isEnterprise]);
+
+  const topTabs = useMemo(() => visibleTabs.filter((t) => !t.pinBottom), [visibleTabs]);
+  const bottomTabs = useMemo(() => visibleTabs.filter((t) => t.pinBottom), [visibleTabs]);
 
   const activeTab = store.layoutMode;
 
+  // Arrow-key navigation within the tab rail
+  const navRef = useRef<HTMLElement>(null);
+  const handleKeyDown = useCallback((e: KeyboardEvent<HTMLElement>) => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const buttons = Array.from(nav.querySelectorAll<HTMLButtonElement>('button[role="tab"]'));
+    const current = buttons.indexOf(e.target as HTMLButtonElement);
+    if (current === -1) return;
+
+    let next = -1;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+      next = (current + 1) % buttons.length;
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+      next = (current - 1 + buttons.length) % buttons.length;
+    } else if (e.key === 'Home') {
+      next = 0;
+    } else if (e.key === 'End') {
+      next = buttons.length - 1;
+    }
+
+    if (next !== -1) {
+      e.preventDefault();
+      buttons[next]?.focus();
+    }
+  }, []);
+
+  const renderTab = (tab: (typeof ALL_TABS)[number], extraClass?: string) => {
+    const isActive = activeTab === tab.value;
+    return (
+      <Tooltip key={tab.value} content={tab.label} relationship="label" positioning="after">
+        <button
+          role="tab"
+          aria-selected={isActive}
+          tabIndex={isActive ? 0 : -1}
+          type="button"
+          onClick={setMode(tab.value)}
+          className={mergeClasses(styles.item, isActive && styles.itemActive, extraClass)}
+        >
+          {isActive && <div className={styles.indicator} />}
+          <span className={styles.iconWrap}>
+            {tab.icon}
+            {tab.value === 'projects' && openInboxCount > 0 && (
+              <CounterBadge count={openInboxCount} size="small" color="brand" className={styles.badge} />
+            )}
+          </span>
+          <span className={styles.itemLabel}>{tab.label}</span>
+        </button>
+      </Tooltip>
+    );
+  };
+
   return (
-    <nav className="flex flex-row sm:flex-col w-full sm:w-[68px] shrink-0 h-auto sm:h-full bg-header border-t sm:border-t-0 sm:border-r border-header-border pb-[env(safe-area-inset-bottom,0px)] sm:pb-0">
-      {/* Logo — hidden on mobile */}
-      <div className="hidden sm:grid place-items-center py-3 border-b border-header-border">
-        <OmniLogo className="translate-y-px" />
+    <nav
+      ref={navRef}
+      className={styles.nav}
+      role="tablist"
+      aria-label="Main navigation"
+      aria-orientation="vertical"
+      onKeyDown={handleKeyDown}
+    >
+      <div className={styles.logo}>
+        <OmniLogo />
       </div>
 
-      {/* Nav items — flat row on mobile so all items (including settings) space evenly */}
-      <div className="contents sm:flex sm:flex-col sm:flex-1">
-        <div className="flex flex-row sm:flex-col flex-1 sm:flex-initial justify-evenly sm:justify-start py-0 sm:py-1">
-          {visibleTabs.map((tab) => {
-            const isActive = activeTab === tab.value;
-            return (
-              <button
-                key={tab.value}
-                onClick={setMode(tab.value)}
-                className={cn(
-                  'relative flex flex-col items-center justify-center gap-0.5 py-2 sm:py-2.5 flex-1 sm:flex-initial cursor-pointer select-none transition-colors',
-                  isActive ? 'text-header-fg' : 'text-fg-muted hover:text-header-fg hover:bg-white/5'
-                )}
-              >
-                {isActive && (
-                  <motion.div
-                    layoutId="sidebar-active-indicator"
-                    className="absolute bottom-0 left-2 right-2 h-[3px] sm:bottom-auto sm:left-0 sm:top-1 sm:right-auto sm:h-auto sm:bottom-1 sm:w-[3px] bg-accent-600 rounded-t-full sm:rounded-t-none sm:rounded-r-full"
-                    transition={springTransition}
-                  />
-                )}
-                {isActive && (
-                  <motion.div
-                    layoutId="sidebar-active-bg"
-                    className="absolute inset-1 rounded-md bg-white/10"
-                    transition={springTransition}
-                  />
-                )}
-                <span className="relative z-10">
-                  {tab.icon}
-                  {tab.value === 'projects' && openInboxCount > 0 && (
-                    <span className="absolute -top-1 -right-2 min-w-[18px] h-[18px] px-1 rounded-full text-xs font-bold leading-[18px] text-center bg-accent-600 text-white">
-                      {openInboxCount}
-                    </span>
-                  )}
-                </span>
-                <span className="relative z-10 text-xs leading-tight">{tab.label}</span>
-              </button>
-            );
-          })}
+      <div className={styles.items}>
+        {topTabs.map((tab) => renderTab(tab))}
 
-          {/* More — mobile only, opens a page with Settings etc. */}
-          <button
-            onClick={setMode('more')}
-            className={cn(
-              'relative flex flex-col items-center justify-center gap-0.5 py-2 flex-1 sm:hidden cursor-pointer select-none transition-colors',
-              activeTab === 'more' ? 'text-header-fg' : 'text-fg-muted hover:text-header-fg hover:bg-white/5'
-            )}
-          >
-            {activeTab === 'more' && (
-              <motion.div
-                layoutId="sidebar-active-indicator"
-                className="absolute bottom-0 left-2 right-2 h-[3px] bg-accent-600 rounded-t-full"
-                transition={springTransition}
-              />
-            )}
-            {activeTab === 'more' && (
-              <motion.div
-                layoutId="sidebar-active-bg"
-                className="absolute inset-1 rounded-md bg-white/10"
-                transition={springTransition}
-              />
-            )}
-            <span className="relative z-10">
-              <PiDotsThreeBold size={20} />
-            </span>
-            <span className="relative z-10 text-xs leading-tight">More</span>
-          </button>
-        </div>
+        {/* More — mobile only */}
+        {renderTab(
+          { value: 'more', label: 'More', icon: <MoreHorizontal24Filled />, alwaysVisible: true },
+          styles.moreItem
+        )}
+      </div>
 
-        {/* Spacer — desktop only */}
-        <div className="hidden sm:block flex-1" />
+      <div className={styles.spacer} />
 
-        {/* Settings — desktop only, pinned to bottom */}
-        <div className="hidden sm:block sm:border-t border-header-border">
-          <button
-            onClick={openSettings}
-            disabled={isSettingsOpen}
-            className={cn(
-              'relative flex flex-col items-center justify-center gap-0.5 py-2.5 w-full cursor-pointer select-none transition-colors',
-              isSettingsOpen
-                ? 'text-header-fg opacity-40 pointer-events-none'
-                : 'text-fg-muted hover:text-header-fg hover:bg-white/5'
-            )}
-          >
-            <span className="relative z-10">
-              <PiGearFill size={20} />
-            </span>
-            <span className="relative z-10 text-xs leading-tight">Settings</span>
-          </button>
-        </div>
+      {/* Bottom-pinned tabs (Settings) — desktop only */}
+      <div className={styles.settingsWrap}>
+        {bottomTabs.map((tab) => renderTab(tab))}
       </div>
     </nav>
   );

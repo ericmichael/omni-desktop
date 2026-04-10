@@ -1,12 +1,65 @@
+import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo } from 'react';
-import { PiPlusBold, PiXBold } from 'react-icons/pi';
+import { Add20Regular, Dismiss20Regular } from '@fluentui/react-icons';
 
-import { cn, IconButton } from '@/renderer/ds';
+import { IconButton } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { CodeTab, CodeTabId } from '@/shared/types';
 
 import { $codeTabStatuses, codeApi } from './state';
+
+const useStyles = makeStyles({
+  root: {
+    display: 'flex',
+    alignItems: 'flex-end',
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: tokens.colorNeutralBackground2,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    paddingTop: '4px',
+    gap: '2px',
+    overflowX: 'auto',
+    flexShrink: 0,
+  },
+  tab: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: '6px',
+    paddingBottom: '6px',
+    fontSize: tokens.fontSizeBase300,
+    borderTopLeftRadius: tokens.borderRadiusMedium,
+    borderTopRightRadius: tokens.borderRadiusMedium,
+    borderBottomWidth: '2px',
+    borderBottomStyle: 'solid',
+    transitionProperty: 'color, background-color',
+    transitionDuration: '150ms',
+    minWidth: 0,
+    maxWidth: '200px',
+    cursor: 'pointer',
+    border: 'none',
+    backgroundColor: 'transparent',
+  },
+  tabActive: {
+    borderBottomColor: tokens.colorBrandStroke1,
+    backgroundColor: tokens.colorNeutralBackground1,
+    color: tokens.colorNeutralForeground1,
+  },
+  tabInactive: {
+    borderBottomColor: 'transparent',
+    color: tokens.colorNeutralForeground2,
+    ':hover': { color: tokens.colorNeutralForeground1, backgroundColor: tokens.colorNeutralBackground1Hover },
+  },
+  runningDot: { width: '8px', height: '8px', flexShrink: 0, borderRadius: '9999px', backgroundColor: '#4ade80' },
+  truncate: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  closeBtn: { flexShrink: 0, width: '20px !important', height: '20px !important' },
+  closeBtnActive: { opacity: 0.7, ':hover': { opacity: 1 } },
+  closeBtnInactive: { opacity: 0 },
+  addBtn: { flexShrink: 0, marginLeft: '4px', marginBottom: '2px' },
+});
 
 type CodeTabBarProps = {
   tabs: CodeTab[];
@@ -29,6 +82,7 @@ const TabItem = memo(
     onSelect: (id: CodeTabId) => void;
     onClose: (id: CodeTabId) => void;
   }) => {
+    const styles = useStyles();
     const handleSelect = useCallback(() => {
       onSelect(tab.id);
     }, [tab.id, onSelect]);
@@ -40,24 +94,16 @@ const TabItem = memo(
     return (
       <button
         onClick={handleSelect}
-        className={cn(
-          'group flex items-center gap-2 px-3 py-1.5 text-sm rounded-t-md border-b-2 transition-colors min-w-0 max-w-[200px] cursor-pointer',
-          isActive
-            ? 'border-accent-500 bg-surface text-fg'
-            : 'border-transparent text-fg-muted hover:text-fg hover:bg-surface-overlay'
-        )}
+        className={mergeClasses(styles.tab, isActive ? styles.tabActive : styles.tabInactive)}
       >
-        {isRunning && <div className="size-2 shrink-0 rounded-full bg-green-400" />}
-        <span className="truncate">{projectLabel}</span>
+        {isRunning && <div className={styles.runningDot} />}
+        <span className={styles.truncate}>{projectLabel}</span>
         <IconButton
           aria-label="Close tab"
-          icon={<PiXBold size={12} />}
+          icon={<Dismiss20Regular style={{ width: 12, height: 12 }} />}
           size="sm"
           onClick={handleClose}
-          className={cn(
-            'shrink-0 !size-5',
-            isActive ? 'opacity-70 hover:opacity-100' : 'opacity-0 group-hover:opacity-70 hover:!opacity-100'
-          )}
+          className={mergeClasses(styles.closeBtn, isActive ? styles.closeBtnActive : styles.closeBtnInactive)}
         />
       </button>
     );
@@ -66,6 +112,7 @@ const TabItem = memo(
 TabItem.displayName = 'TabItem';
 
 export const CodeTabBar = memo(({ tabs, activeTabId }: CodeTabBarProps) => {
+  const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const allStatuses = useStore($codeTabStatuses);
 
@@ -90,7 +137,7 @@ export const CodeTabBar = memo(({ tabs, activeTabId }: CodeTabBarProps) => {
   }, []);
 
   return (
-    <div className="flex items-end border-b border-surface-border bg-surface-raised px-2 pt-1 gap-0.5 overflow-x-auto shrink-0">
+    <div className={styles.root}>
       {tabs.map((tab) => {
         const status = allStatuses[tab.id];
         const isRunning = status?.type === 'running';
@@ -109,10 +156,10 @@ export const CodeTabBar = memo(({ tabs, activeTabId }: CodeTabBarProps) => {
       })}
       <IconButton
         aria-label="New tab"
-        icon={<PiPlusBold size={14} />}
+        icon={<Add20Regular style={{ width: 14, height: 14 }} />}
         size="sm"
         onClick={handleAdd}
-        className="shrink-0 ml-1 mb-0.5"
+        className={styles.addBtn}
       />
     </div>
   );

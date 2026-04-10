@@ -1,8 +1,9 @@
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { PiCaretDownBold, PiCaretUpBold, PiPlusBold, PiTrashBold } from 'react-icons/pi';
+import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
 
-import { Button, Card, FormField, IconButton, Input, SaveBar, SectionLabel, Select, Spinner } from '@/renderer/ds';
+import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
+import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, Button, Card, Checkbox, FormField, FormSkeleton, IconButton, Input, SaveBar, SectionLabel, Select, Spinner } from '@/renderer/ds';
 import { configApi } from '@/renderer/services/config';
 import type { ModelEntry, ModelsConfig, ProviderEntry } from '@/shared/types';
 
@@ -32,7 +33,90 @@ function collectModelKeys(config: ModelsConfig): string[] {
   return keys;
 }
 
+const useStyles = makeStyles({
+  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
+  sectionLabelSpaced: { marginTop: tokens.spacingVerticalS },
+  addRow: {
+    padding: tokens.spacingVerticalL,
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  flex1: { flex: '1 1 0' },
+  headerRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    flex: '1 1 0',
+    minWidth: 0,
+  },
+  headerContent: { flex: '1 1 0', minWidth: 0 },
+  headerName: {
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightMedium,
+    color: tokens.colorNeutralForeground1,
+  },
+  headerSummary: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
+  },
+  panelBody: {
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingBottom: tokens.spacingVerticalL,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+  },
+  colGap1: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS },
+  rowGap2: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
+  iconMr: { marginRight: tokens.spacingHorizontalXS },
+  modelCard: {
+    backgroundColor: tokens.colorNeutralBackground1,
+    opacity: 0.8,
+    borderRadius: tokens.borderRadiusLarge,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
+  },
+  modelHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: '10px',
+    paddingBottom: '10px',
+    '@media (min-width: 640px)': {
+      paddingTop: tokens.spacingVerticalS,
+      paddingBottom: tokens.spacingVerticalS,
+    },
+  },
+  modelId: {
+    fontSize: tokens.fontSizeBase300,
+    fontFamily: 'monospace',
+    color: tokens.colorNeutralForeground1,
+    flex: '1 1 0',
+    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
+  },
+  modelLabel: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
+  },
+  modelEditBody: {
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingBottom: tokens.spacingVerticalM,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke2),
+    paddingTop: tokens.spacingVerticalS,
+  },
+});
+
 export const SettingsModalModelsTab = memo(() => {
+  const styles = useStyles();
   const [configDir, setConfigDir] = useState<string | null>(null);
   const [config, setConfig] = useState<ModelsConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -139,11 +223,6 @@ export const SettingsModalModelsTab = memo(() => {
     },
     [expandedProvider, updateConfig]
   );
-
-  const toggleProvider = useCallback((name: string) => {
-    setExpandedProvider((prev) => (prev === name ? null : name));
-    setEditingModel(null);
-  }, []);
 
   const updateProvider = useCallback(
     (name: string, field: string, value: string) => {
@@ -256,24 +335,12 @@ export const SettingsModalModelsTab = memo(() => {
     setNewModelId(e.target.value);
   }, []);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Spinner />
-      </div>
-    );
-  }
-
-  if (!config) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Spinner />
-      </div>
-    );
+  if (loading || !config) {
+    return <FormSkeleton fields={5} />;
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className={styles.root}>
       <SectionLabel>Defaults</SectionLabel>
       <Card>
         <FormField label="Default model">
@@ -298,17 +365,18 @@ export const SettingsModalModelsTab = memo(() => {
         </FormField>
       </Card>
 
-      <SectionLabel className="mt-2">Providers</SectionLabel>
-      <Card divided>
+      <SectionLabel className={styles.sectionLabelSpaced}>Providers</SectionLabel>
+      <Accordion collapsible onToggle={(_e, data) => {
+        setExpandedProvider(data.openItems.length > 0 ? String(data.openItems[data.openItems.length - 1]) : null);
+        setEditingModel(null);
+      }} openItems={expandedProvider ? [expandedProvider] : []}>
         {Object.entries(config.providers).map(([name, provider]) => (
           <ProviderRow
             key={name}
             name={name}
             provider={provider}
-            isExpanded={expandedProvider === name}
             editingModel={editingModel}
             newModelId={newModelId}
-            onToggle={toggleProvider}
             onRemove={removeProvider}
             onUpdateProvider={updateProvider}
             onAddModel={addModel}
@@ -318,21 +386,21 @@ export const SettingsModalModelsTab = memo(() => {
             onChangeNewModelId={onChangeNewModelId}
           />
         ))}
-        <div className="p-4 flex items-center gap-2">
-          <Input
-            type="text"
-            value={newProviderName}
-            onChange={onChangeNewProviderName}
-            placeholder="Provider name"
-            mono
-            className="flex-1"
-          />
-          <Button size="sm" variant="ghost" onClick={addProvider} isDisabled={!newProviderName.trim()}>
-            <PiPlusBold className="mr-1" />
-            Add provider
-          </Button>
-        </div>
-      </Card>
+      </Accordion>
+      <div className={styles.addRow}>
+        <Input
+          type="text"
+          value={newProviderName}
+          onChange={onChangeNewProviderName}
+          placeholder="Provider name"
+          mono
+          className={styles.flex1}
+        />
+        <Button size="sm" variant="ghost" onClick={addProvider} isDisabled={!newProviderName.trim()}>
+          <Add20Regular className={styles.iconMr} />
+          Add provider
+        </Button>
+      </div>
 
       <SaveBar onSave={save} dirty={dirty} saving={saving} error={error} />
     </div>
@@ -344,10 +412,8 @@ const ProviderRow = memo(
   ({
     name,
     provider,
-    isExpanded,
     editingModel,
     newModelId,
-    onToggle,
     onRemove,
     onUpdateProvider,
     onAddModel,
@@ -358,10 +424,8 @@ const ProviderRow = memo(
   }: {
     name: string;
     provider: ProviderEntry;
-    isExpanded: boolean;
     editingModel: { provider: string; modelId: string } | null;
     newModelId: string;
-    onToggle: (name: string) => void;
     onRemove: (name: string) => void;
     onUpdateProvider: (name: string, field: string, value: string) => void;
     onAddModel: (providerName: string) => void;
@@ -370,13 +434,15 @@ const ProviderRow = memo(
     onToggleEditModel: (provider: string, modelId: string) => void;
     onChangeNewModelId: (e: ChangeEvent<HTMLInputElement>) => void;
   }) => {
+    const styles = useStyles();
     const modelCount = Object.keys(provider.models).length;
     const showBaseUrl =
       provider.type === 'azure' || provider.type === 'openai-compatible' || provider.type === 'litellm';
     const showApiVersion = provider.type === 'azure';
 
-    const onClickToggle = useCallback(() => onToggle(name), [name, onToggle]);
-    const onClickRemove = useCallback(() => onRemove(name), [name, onRemove]);
+    const onClickRemove = useCallback(() => {
+      onRemove(name);
+    }, [name, onRemove]);
 
     const onChangeType = useCallback(
       (e: ChangeEvent<HTMLSelectElement>) => onUpdateProvider(name, 'type', e.target.value),
@@ -397,24 +463,20 @@ const ProviderRow = memo(
     const onClickAddModel = useCallback(() => onAddModel(name), [name, onAddModel]);
 
     return (
-      <div className="flex flex-col">
-        <div className="flex items-center gap-2 p-4 cursor-pointer" onClick={onClickToggle}>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium text-fg">{name}</div>
-            <div className="text-sm sm:text-xs text-fg-muted">
-              Type: {provider.type} &middot; Models: {modelCount}
+      <AccordionItem value={name}>
+        <AccordionHeader expandIconPosition="end">
+          <div className={styles.headerRow}>
+            <div className={styles.headerContent}>
+              <div className={styles.headerName}>{name}</div>
+              <div className={styles.headerSummary}>
+                Type: {provider.type} &middot; Models: {modelCount}
+              </div>
             </div>
+            <IconButton aria-label="Remove provider" icon={<Delete20Regular />} size="sm" onClick={onClickRemove} />
           </div>
-          {isExpanded ? (
-            <PiCaretUpBold className="text-fg-muted text-xs" />
-          ) : (
-            <PiCaretDownBold className="text-fg-muted text-xs" />
-          )}
-          <IconButton aria-label="Remove provider" icon={<PiTrashBold />} size="sm" onClick={onClickRemove} />
-        </div>
-
-        {isExpanded && (
-          <div className="px-4 pb-4 flex flex-col gap-3 border-t border-surface-border/30 pt-3">
+        </AccordionHeader>
+        <AccordionPanel>
+          <div className={styles.panelBody}>
             <FormField label="Type">
               <Select value={provider.type} onChange={onChangeType}>
                 {PROVIDER_TYPES.map((t) => (
@@ -431,7 +493,7 @@ const ProviderRow = memo(
                 onChange={onChangeApiKey}
                 placeholder="sk-..."
                 mono
-                className="flex-1"
+                className={styles.flex1}
               />
             </FormField>
             {showBaseUrl && (
@@ -442,7 +504,7 @@ const ProviderRow = memo(
                   onChange={onChangeBaseUrl}
                   placeholder="https://..."
                   mono
-                  className="flex-1"
+                  className={styles.flex1}
                 />
               </FormField>
             )}
@@ -454,13 +516,13 @@ const ProviderRow = memo(
                   onChange={onChangeApiVersion}
                   placeholder="2024-02-01"
                   mono
-                  className="flex-1"
+                  className={styles.flex1}
                 />
               </FormField>
             )}
 
-            <SectionLabel className="mt-2">Models</SectionLabel>
-            <div className="flex flex-col gap-1">
+            <SectionLabel className={styles.sectionLabelSpaced}>Models</SectionLabel>
+            <div className={styles.colGap1}>
               {Object.entries(provider.models).map(([modelId, model]) => {
                 const isEditing = editingModel?.provider === name && editingModel.modelId === modelId;
                 return (
@@ -478,23 +540,23 @@ const ProviderRow = memo(
               })}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className={styles.rowGap2}>
               <Input
                 type="text"
                 value={newModelId}
                 onChange={onChangeNewModelId}
                 placeholder="Model ID"
                 mono
-                className="flex-1"
+                className={styles.flex1}
               />
               <Button size="sm" variant="ghost" onClick={onClickAddModel} isDisabled={!newModelId.trim()}>
-                <PiPlusBold className="mr-1" />
+                <Add20Regular className={styles.iconMr} />
                 Add model
               </Button>
             </div>
           </div>
-        )}
-      </div>
+        </AccordionPanel>
+      </AccordionItem>
     );
   }
 );
@@ -518,6 +580,7 @@ const ModelRow = memo(
     onRemove: (providerName: string, modelId: string) => void;
     onUpdate: (providerName: string, modelId: string, field: string, value: unknown) => void;
   }) => {
+    const styles = useStyles();
     const onClickToggle = useCallback(() => onToggleEdit(providerName, modelId), [providerName, modelId, onToggleEdit]);
     const onClickRemove = useCallback(() => onRemove(providerName, modelId), [providerName, modelId, onRemove]);
 
@@ -546,8 +609,8 @@ const ModelRow = memo(
       [providerName, modelId, onUpdate]
     );
     const onChangeRealtime = useCallback(
-      (e: ChangeEvent<HTMLInputElement>) => {
-        onUpdate(providerName, modelId, 'realtime', e.target.checked || undefined);
+      (checked: boolean) => {
+        onUpdate(providerName, modelId, 'realtime', checked || undefined);
       },
       [providerName, modelId, onUpdate]
     );
@@ -560,12 +623,12 @@ const ModelRow = memo(
     const hasEncryptedReasoning = includeArr.includes('reasoning.encrypted_content');
 
     const onChangeStore = useCallback(
-      (e: ChangeEvent<HTMLInputElement>) => {
+      (checked: boolean) => {
         const prev = (model.model_settings ?? {}) as Record<string, unknown>;
         // Checkbox label is "Disable storage" — checked means store: false
-        const next = e.target.checked ? { ...prev, store: false } : { ...prev };
+        const next = checked ? { ...prev, store: false } : { ...prev };
         // Clean up: remove store key when re-enabling (default is true)
-        if (!e.target.checked) {
+        if (!checked) {
           delete next.store;
         }
         onUpdate(providerName, modelId, 'model_settings', Object.keys(next).length > 0 ? next : undefined);
@@ -574,13 +637,13 @@ const ModelRow = memo(
     );
 
     const onChangeEncryptedReasoning = useCallback(
-      (e: ChangeEvent<HTMLInputElement>) => {
+      (checked: boolean) => {
         const prev = (model.model_settings ?? {}) as Record<string, unknown>;
         const prevExtra = (prev.extra_body ?? {}) as Record<string, unknown>;
         const prevInclude = Array.isArray(prevExtra.include) ? (prevExtra.include as string[]) : [];
 
         let nextInclude: string[];
-        if (e.target.checked) {
+        if (checked) {
           nextInclude = [...prevInclude, 'reasoning.encrypted_content'];
         } else {
           nextInclude = prevInclude.filter((v) => v !== 'reasoning.encrypted_content');
@@ -597,17 +660,17 @@ const ModelRow = memo(
     );
 
     return (
-      <div className="bg-surface/50 rounded-lg border border-surface-border/30">
-        <div className="flex items-center gap-2 px-3 py-2.5 sm:py-2">
-          <span className="text-sm sm:text-xs font-mono text-fg flex-1">{modelId}</span>
-          {model.label && <span className="text-sm sm:text-xs text-fg-muted">&ldquo;{model.label}&rdquo;</span>}
+      <div className={styles.modelCard}>
+        <div className={styles.modelHeader}>
+          <span className={styles.modelId}>{modelId}</span>
+          {model.label && <span className={styles.modelLabel}>&ldquo;{model.label}&rdquo;</span>}
           <Button size="sm" variant="ghost" onClick={onClickToggle}>
             {isEditing ? 'Done' : 'Edit'}
           </Button>
-          <IconButton aria-label="Remove model" icon={<PiTrashBold />} size="sm" onClick={onClickRemove} />
+          <IconButton aria-label="Remove model" icon={<Delete20Regular />} size="sm" onClick={onClickRemove} />
         </div>
         {isEditing && (
-          <div className="px-3 pb-3 flex flex-col gap-2 border-t border-surface-border/30 pt-2">
+          <div className={styles.modelEditBody}>
             <FormField label="Label">
               <Input
                 size="sm"
@@ -615,7 +678,7 @@ const ModelRow = memo(
                 value={model.label ?? ''}
                 onChange={onChangeLabel}
                 placeholder="Display label"
-                className="flex-1"
+                className={styles.flex1}
               />
             </FormField>
             <FormField label="Max input tokens">
@@ -624,7 +687,7 @@ const ModelRow = memo(
                 type="number"
                 value={model.max_input_tokens ?? ''}
                 onChange={onChangeMaxInput}
-                className="flex-1"
+                className={styles.flex1}
               />
             </FormField>
             <FormField label="Max output tokens">
@@ -633,7 +696,7 @@ const ModelRow = memo(
                 type="number"
                 value={model.max_output_tokens ?? ''}
                 onChange={onChangeMaxOutput}
-                className="flex-1"
+                className={styles.flex1}
               />
             </FormField>
             <FormField label="Reasoning">
@@ -645,18 +708,9 @@ const ModelRow = memo(
                 ))}
               </Select>
             </FormField>
-            <label className="flex items-center gap-2.5 text-sm sm:text-xs text-fg cursor-pointer py-0.5">
-              <input type="checkbox" checked={model.realtime ?? false} onChange={onChangeRealtime} />
-              Realtime model
-            </label>
-            <label className="flex items-center gap-2.5 text-sm sm:text-xs text-fg cursor-pointer py-0.5">
-              <input type="checkbox" checked={!storeValue} onChange={onChangeStore} />
-              Disable storage (store: false)
-            </label>
-            <label className="flex items-center gap-2.5 text-sm sm:text-xs text-fg cursor-pointer py-0.5">
-              <input type="checkbox" checked={hasEncryptedReasoning} onChange={onChangeEncryptedReasoning} />
-              Include encrypted reasoning content
-            </label>
+            <Checkbox checked={model.realtime ?? false} onCheckedChange={onChangeRealtime} label="Realtime model" />
+            <Checkbox checked={!storeValue} onCheckedChange={onChangeStore} label="Disable storage (store: false)" />
+            <Checkbox checked={hasEncryptedReasoning} onCheckedChange={onChangeEncryptedReasoning} label="Include encrypted reasoning content" />
           </div>
         )}
       </div>

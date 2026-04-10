@@ -13,6 +13,36 @@
   --omni-textSecondary: 209 213 219;
 }
 
+[data-theme="teams-light"] {
+  --omni-tweetBlue: 0 120 212;          /* #0078D4  M365 brand blue */
+  --omni-bgMain: 255 255 255;           /* #FFFFFF  page background */
+  --omni-bgColumn: 250 250 250;         /* #FAFAFA  sidebar */
+  --omni-bgCard: 245 245 245;           /* #F5F5F5  card surface */
+  --omni-bgCardAlt: 235 235 235;        /* #EBEBEB  input / alt surface */
+  --omni-textSubtle: 97 97 97;          /* #616161  placeholder */
+  --omni-successGreen: 14 122 13;       /* #0E7A0D  Teams green */
+  --omni-warningOrange: 138 116 0;      /* #8A7400  Teams warning */
+  --omni-errorRed: 196 49 75;           /* #C4314B  Teams red */
+  --omni-textPrimary: 66 66 66;         /* #424242  body text */
+  --omni-textHeading: 36 36 36;         /* #242424  heading text */
+  --omni-textSecondary: 97 97 97;       /* #616161  secondary text */
+}
+
+[data-theme="teams-dark"] {
+  --omni-tweetBlue: 58 159 232;         /* #3A9FE8  M365 brand blue (dark) */
+  --omni-bgMain: 31 31 31;              /* #1F1F1F  page background */
+  --omni-bgColumn: 43 43 43;            /* #2B2B2B  sidebar */
+  --omni-bgCard: 51 51 51;              /* #333333  card surface */
+  --omni-bgCardAlt: 64 64 64;           /* #404040  input / alt surface */
+  --omni-textSubtle: 158 158 158;       /* #9E9E9E  placeholder */
+  --omni-successGreen: 19 161 14;       /* #13A10E  Teams green (dark) */
+  --omni-warningOrange: 252 225 0;      /* #FCE100  Teams warning (dark) */
+  --omni-errorRed: 231 72 86;           /* #E74856  Teams red (dark) */
+  --omni-textPrimary: 200 200 200;      /* #C8C8C8  body text */
+  --omni-textHeading: 224 224 224;      /* #E0E0E0  heading text */
+  --omni-textSecondary: 158 158 158;    /* #9E9E9E  secondary text */
+}
+
 [data-theme="tokyo-night"] {
   --omni-tweetBlue: 61 89 161;       /* #3d59a1  button.background */
   --omni-bgMain: 26 27 38;           /* #1a1b26  editor.background */
@@ -89,6 +119,23 @@
 }
 
 [data-theme="utrgv"] .prose-invert {
+  --tw-prose-body: rgb(var(--omni-textPrimary));
+  --tw-prose-headings: rgb(var(--omni-textHeading));
+  --tw-prose-bold: rgb(var(--omni-textHeading));
+  --tw-prose-links: rgb(var(--omni-tweetBlue));
+  --tw-prose-code: rgb(var(--omni-textPrimary));
+  --tw-prose-pre-code: rgb(var(--omni-textPrimary));
+  --tw-prose-counters: rgb(var(--omni-textSecondary));
+  --tw-prose-bullets: rgb(var(--omni-textSecondary));
+  --tw-prose-hr: rgb(var(--omni-bgCardAlt));
+  --tw-prose-quotes: rgb(var(--omni-textPrimary));
+  --tw-prose-quote-borders: rgb(var(--omni-bgCardAlt));
+  --tw-prose-captions: rgb(var(--omni-textSecondary));
+  --tw-prose-th-borders: rgb(var(--omni-bgCardAlt));
+  --tw-prose-td-borders: rgb(var(--omni-bgCardAlt));
+}
+
+[data-theme="teams-light"] .prose-invert {
   --tw-prose-body: rgb(var(--omni-textPrimary));
   --tw-prose-headings: rgb(var(--omni-textHeading));
   --tw-prose-bold: rgb(var(--omni-textHeading));

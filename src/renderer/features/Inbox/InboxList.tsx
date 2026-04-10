@@ -1,6 +1,7 @@
+import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PiCaretRightBold, PiPlusBold, PiTrashFill } from 'react-icons/pi';
+import { ChevronRight20Regular, Add20Regular, Delete20Filled } from '@fluentui/react-icons';
 
 import { Badge, cn, FAB, IconButton } from '@/renderer/ds';
 import { daysRemaining } from '@/lib/inbox-expiry';
@@ -8,6 +9,139 @@ import { persistedStoreApi } from '@/renderer/services/store';
 import type { InboxItem, InboxItemId, InboxItemStatus } from '@/shared/types';
 
 import { $inboxItems, $iceboxItems, inboxApi, openQuickCapture } from './state';
+
+const useStyles = makeStyles({
+  root: { position: 'relative', display: 'flex', flexDirection: 'column', width: '100%', height: '100%' },
+  header: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingTop: '10px',
+    paddingBottom: '10px',
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    flexShrink: 0,
+  },
+  headerRow: {
+    display: 'none',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    '@media (min-width: 640px)': { display: 'flex' },
+  },
+  headerTitle: { fontSize: tokens.fontSizeBase300, fontWeight: tokens.fontWeightSemibold, color: tokens.colorNeutralForeground1 },
+  spacer: { flex: '1 1 0' },
+  filterRow: { display: 'flex', alignItems: 'center', gap: '6px', overflowX: 'auto' },
+  filterChip: {
+    flexShrink: 0,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: '4px',
+    paddingBottom: '4px',
+    borderRadius: '9999px',
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightMedium,
+    transitionProperty: 'background-color, color',
+    transitionDuration: '150ms',
+    border: 'none',
+    cursor: 'pointer',
+  },
+  filterActive: { backgroundColor: 'rgba(96, 165, 250, 0.2)', color: 'rgb(96, 165, 250)' },
+  filterInactive: { backgroundColor: tokens.colorNeutralBackground3, color: tokens.colorNeutralForeground2, ':hover': { color: tokens.colorNeutralForeground1 } },
+  list: {
+    flex: '1 1 0',
+    minHeight: 0,
+    overflowY: 'auto',
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    ':focus': { outline: 'none' },
+    '@media (min-width: 640px)': { paddingLeft: tokens.spacingHorizontalM, paddingRight: tokens.spacingHorizontalM },
+  },
+  emptyState: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: tokens.spacingVerticalS,
+    height: '100%',
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+  },
+  emptyTitle: { color: tokens.colorNeutralForeground2, fontSize: tokens.fontSizeBase300 },
+  emptyHintDesktop: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200, display: 'none', '@media (min-width: 640px)': { display: 'block' } },
+  emptyHintMobile: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200, '@media (min-width: 640px)': { display: 'none' } },
+  cardList: { display: 'flex', flexDirection: 'column', gap: '2px' },
+  kbdRow: {
+    display: 'none',
+    flexWrap: 'wrap',
+    columnGap: tokens.spacingHorizontalM,
+    rowGap: '4px',
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    '@media (min-width: 640px)': { display: 'flex' },
+  },
+  kbd: {
+    paddingLeft: '4px',
+    paddingRight: '4px',
+    paddingTop: '2px',
+    paddingBottom: '2px',
+    borderRadius: tokens.borderRadiusMedium,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    fontSize: tokens.fontSizeBase200,
+  },
+  iceboxLink: {
+    flexShrink: 0,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingTop: '10px',
+    paddingBottom: '10px',
+    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke1),
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    transitionProperty: 'color',
+    transitionDuration: '150ms',
+    textAlign: 'left',
+    border: 'none',
+    backgroundColor: 'transparent',
+    cursor: 'pointer',
+    ':hover': { color: tokens.colorNeutralForeground1 },
+  },
+  mobileHidden: { '@media (min-width: 640px)': { display: 'none' } },
+  inboxCard: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+    width: '100%',
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingTop: '14px',
+    paddingBottom: '14px',
+    textAlign: 'left',
+    transitionProperty: 'background-color',
+    transitionDuration: '150ms',
+    cursor: 'pointer',
+    borderRadius: tokens.borderRadiusXLarge,
+    border: 'none',
+    backgroundColor: 'transparent',
+  },
+  cardSelected: { backgroundColor: 'rgba(96, 165, 250, 0.1)' },
+  cardFocused: { backgroundColor: 'rgba(255, 255, 255, 0.05)' },
+  cardDefault: { ':hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' } },
+  statusDot: { width: '10px', height: '10px', borderRadius: '9999px', flexShrink: 0 },
+  cardContent: { display: 'flex', flexDirection: 'column', flex: '1 1 0', minWidth: 0, gap: '2px' },
+  cardTitleRow: { display: 'flex', alignItems: 'baseline', gap: tokens.spacingHorizontalS },
+  cardTitle: { fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  cardMeta: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 },
+  cardActions: { display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 },
+  deleteBtn: { opacity: 0.7, transitionProperty: 'opacity', transitionDuration: '150ms', '@media (min-width: 640px)': { opacity: 0 } },
+  chevron: { color: tokens.colorNeutralForeground2, opacity: 0.4, display: 'none', '@media (min-width: 640px)': { display: 'block' } },
+});
 
 const STATUS_DOT: Record<InboxItemStatus, string> = {
   open: 'bg-blue-400',
@@ -74,24 +208,25 @@ const InboxCard = memo(
       onDelete(item.id);
     }, [item.id, onDelete]);
 
+    const styles = useStyles();
     return (
       <button
         ref={ref}
         onClick={handleClick}
-        className={cn(
-          'group flex items-center gap-3 w-full px-4 py-3.5 text-left transition-colors cursor-pointer rounded-xl',
-          isSelected ? 'bg-accent-600/10' : isFocused ? 'bg-white/5' : 'hover:bg-white/5'
+        className={mergeClasses(
+          styles.inboxCard,
+          isSelected ? styles.cardSelected : isFocused ? styles.cardFocused : styles.cardDefault
         )}
       >
         {/* Leading status dot */}
-        <span className={cn('size-2.5 rounded-full shrink-0', STATUS_DOT[item.status])} title={STATUS_LABELS[item.status]} />
+        <span className={cn(styles.statusDot, STATUS_DOT[item.status])} title={STATUS_LABELS[item.status]} />
 
         {/* Content */}
-        <div className="flex flex-col flex-1 min-w-0 gap-0.5">
-          <div className="flex items-baseline gap-2">
-            <span className="text-sm text-fg truncate">{item.title}</span>
+        <div className={styles.cardContent}>
+          <div className={styles.cardTitleRow}>
+            <span className={styles.cardTitle}>{item.title}</span>
           </div>
-          <div className="flex items-center gap-2 text-xs text-fg-subtle">
+          <div className={styles.cardMeta}>
             <span>{timeAgo(item.createdAt)}</span>
             {item.status === 'open' && (() => {
               const days = daysRemaining(item, Date.now());
@@ -125,15 +260,15 @@ const InboxCard = memo(
 
         {/* Trailing actions */}
         {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
-        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+        <div className={styles.cardActions} onClick={(e) => e.stopPropagation()}>
           <IconButton
             aria-label="Delete"
-            icon={<PiTrashFill size={12} />}
+            icon={<Delete20Filled style={{ width: 12, height: 12 }} />}
             size="sm"
             onClick={handleDelete}
-            className="opacity-70 sm:opacity-0 sm:group-hover:opacity-70 hover:!opacity-100 transition-opacity"
+            className={styles.deleteBtn}
           />
-          <PiCaretRightBold size={12} className="text-fg-muted/40 hidden sm:block" />
+          <ChevronRight20Regular style={{ width: 12, height: 12 }} className={styles.chevron} />
         </div>
       </button>
     );
@@ -229,31 +364,30 @@ export const InboxList = memo(
       [focusIndex, items, onSelect]
     );
 
+    const styles = useStyles();
     return (
-      <div className="relative flex flex-col w-full h-full">
+      <div className={styles.root}>
         {/* Header — desktop: title + select, mobile: just filter chips */}
-        <div className="flex flex-col gap-2 px-4 py-2.5 border-b border-surface-border shrink-0">
+        <div className={styles.header}>
           {/* Desktop title row */}
-          <div className="hidden sm:flex items-center gap-2">
-            <span className="text-sm font-semibold text-fg">Inbox</span>
+          <div className={styles.headerRow}>
+            <span className={styles.headerTitle}>Inbox</span>
             {openCount > 0 && (
               <Badge color="blue">{openCount}</Badge>
             )}
-            <div className="flex-1" />
-            <IconButton aria-label="New item" icon={<PiPlusBold />} size="sm" onClick={openQuickCapture} />
+            <div className={styles.spacer} />
+            <IconButton aria-label="New item" icon={<Add20Regular />} size="sm" onClick={openQuickCapture} />
           </div>
 
           {/* Filter chips */}
-          <div className="flex items-center gap-1.5 overflow-x-auto">
+          <div className={styles.filterRow}>
             {FILTERS.map((f) => (
               <button
                 key={f.value}
                 onClick={() => setFilter(f.value)}
-                className={cn(
-                  'shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-colors',
-                  filter === f.value
-                    ? 'bg-accent-600/20 text-accent-400'
-                    : 'bg-surface-overlay text-fg-muted hover:text-fg hover:bg-surface-overlay/80'
+                className={mergeClasses(
+                  styles.filterChip,
+                  filter === f.value ? styles.filterActive : styles.filterInactive
                 )}
               >
                 {f.label}
@@ -265,21 +399,21 @@ export const InboxList = memo(
         {/* List */}
         <div
           ref={listRef}
-          className="flex-1 min-h-0 overflow-y-auto focus:outline-none px-2 sm:px-3 py-2"
+          className={styles.list}
           tabIndex={0}
           onKeyDown={handleListKeyDown}
         >
           {items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 h-full px-4">
-              <p className="text-fg-muted text-sm">Inbox is empty</p>
-              <p className="text-fg-subtle text-xs hidden sm:block">
-                <kbd className="px-1 py-0.5 rounded border border-surface-border text-xs">Ctrl+I</kbd> to capture from anywhere
+            <div className={styles.emptyState}>
+              <p className={styles.emptyTitle}>Inbox is empty</p>
+              <p className={styles.emptyHintDesktop}>
+                <kbd className={styles.kbd}>Ctrl+I</kbd> to capture from anywhere
               </p>
-              <p className="text-fg-subtle text-xs sm:hidden">Tap + to add an item</p>
+              <p className={styles.emptyHintMobile}>Tap + to add an item</p>
             </div>
           ) : (
             <>
-              <div className="flex flex-col gap-0.5">
+              <div className={styles.cardList}>
                 {items.map((item, index) => (
                   <InboxCard
                     key={item.id}
@@ -291,11 +425,11 @@ export const InboxList = memo(
                   />
                 ))}
               </div>
-              <div className="hidden sm:flex flex-wrap gap-x-3 gap-y-1 px-4 py-2 text-xs text-fg-subtle">
-                <span><kbd className="px-1 py-0.5 rounded border border-surface-border">j</kbd>/<kbd className="px-1 py-0.5 rounded border border-surface-border">k</kbd> navigate</span>
-                <span><kbd className="px-1 py-0.5 rounded border border-surface-border">Enter</kbd> open</span>
-                <span><kbd className="px-1 py-0.5 rounded border border-surface-border">x</kbd> done</span>
-                <span><kbd className="px-1 py-0.5 rounded border border-surface-border">Del</kbd> remove</span>
+              <div className={styles.kbdRow}>
+                <span><kbd className={styles.kbd}>j</kbd>/<kbd className={styles.kbd}>k</kbd> navigate</span>
+                <span><kbd className={styles.kbd}>Enter</kbd> open</span>
+                <span><kbd className={styles.kbd}>x</kbd> done</span>
+                <span><kbd className={styles.kbd}>Del</kbd> remove</span>
               </div>
             </>
           )}
@@ -308,14 +442,14 @@ export const InboxList = memo(
           return (
             <button
               onClick={onShowIcebox}
-              className="shrink-0 px-4 py-2.5 border-t border-surface-border text-xs text-fg-subtle hover:text-fg transition-colors text-left"
+              className={styles.iceboxLink}
             >
               View icebox ({iceboxCount} item{iceboxCount !== 1 ? 's' : ''})
             </button>
           );
         })()}
 
-        <FAB icon={<PiPlusBold size={22} />} onClick={openQuickCapture} aria-label="New item" className="sm:hidden" />
+        <FAB icon={<Add20Regular style={{ width: 22, height: 22 }} />} onClick={openQuickCapture} aria-label="New item" className={styles.mobileHidden} />
       </div>
     );
   }

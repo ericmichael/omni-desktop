@@ -1,13 +1,20 @@
+import { Caption1Strong, makeStyles, mergeClasses } from '@fluentui/react-components';
 import type { PropsWithChildren } from 'react';
-
-import { cn } from '@/renderer/ds/cn';
 
 type SectionLabelProps = {
   className?: string;
 };
 
-export const SectionLabel = ({ className, children }: PropsWithChildren<SectionLabelProps>) => (
-  <span className={cn('text-sm sm:text-xs font-medium uppercase tracking-wider text-fg-subtle', className)}>
-    {children}
-  </span>
-);
+const useStyles = makeStyles({
+  root: {
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+  },
+});
+
+export const SectionLabel = ({ className, children }: PropsWithChildren<SectionLabelProps>) => {
+  const styles = useStyles();
+  return (
+    <Caption1Strong className={mergeClasses(styles.root, className)}>{children}</Caption1Strong>
+  );
+};

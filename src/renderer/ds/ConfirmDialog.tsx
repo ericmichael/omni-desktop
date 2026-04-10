@@ -1,7 +1,7 @@
 import { memo, useCallback } from 'react';
 
-import { AnimatedDialog, DialogBody, DialogContent, DialogFooter, DialogHeader } from '@/renderer/ds/Dialog';
 import { Button } from '@/renderer/ds/Button';
+import { AnimatedDialog, DialogBody, DialogContent, DialogFooter, DialogHeader } from '@/renderer/ds/Dialog';
 
 type ConfirmDialogProps = {
   open: boolean;
@@ -32,22 +32,18 @@ export const ConfirmDialog = memo(
 
     return (
       <AnimatedDialog open={open} onClose={onClose}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent>
           <DialogHeader>{title}</DialogHeader>
           {description && (
             <DialogBody>
-              <p className="text-sm sm:text-xs text-fg-muted">{description}</p>
+              <p>{description}</p>
             </DialogBody>
           )}
-          <DialogFooter className="gap-2 flex-col-reverse sm:flex-row sm:justify-end">
-            <Button variant="ghost" onClick={onClose} className="justify-center sm:w-auto">
+          <DialogFooter>
+            <Button variant="ghost" onClick={onClose}>
               {cancelLabel}
             </Button>
-            <Button
-              variant={destructive ? 'destructive' : 'primary'}
-              onClick={handleConfirm}
-              className="justify-center sm:w-auto"
-            >
+            <Button variant={destructive ? 'destructive' : 'primary'} onClick={handleConfirm}>
               {confirmLabel}
             </Button>
           </DialogFooter>

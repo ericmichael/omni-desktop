@@ -1,10 +1,111 @@
 import { memo, useCallback, useState } from 'react';
+import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 
-import { AnimatedDialog, Button, cn, DialogBody, DialogContent, DialogFooter, DialogHeader } from '@/renderer/ds';
+import { AnimatedDialog, Button, cn, DialogBody, DialogContent, DialogFooter, DialogHeader, Input } from '@/renderer/ds';
 import type { Project, SandboxConfig } from '@/shared/types';
 
 import { DirectoryBrowserDialog } from './DirectoryBrowserDialog';
 import { ticketApi } from './state';
+
+const useStyles = makeStyles({
+  body: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalL,
+  },
+  section: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+    borderRadius: tokens.borderRadiusXLarge,
+    backgroundColor: 'rgba(var(--colorNeutralBackground2), 0.5)',
+    padding: tokens.spacingVerticalL,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+  },
+  fieldGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+  },
+  label: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightMedium,
+    color: tokens.colorNeutralForeground2,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+  },
+  browseBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    width: '100%',
+    borderRadius: tokens.borderRadiusXLarge,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: tokens.colorNeutralBackground1,
+    paddingLeft: '14px',
+    paddingRight: '14px',
+    paddingTop: '10px',
+    paddingBottom: '10px',
+    textAlign: 'left',
+    transitionProperty: 'border-color',
+    transitionDuration: '150ms',
+    cursor: 'pointer',
+    ':hover': {
+      ...shorthands.borderColor('rgba(99, 102, 241, 0.5)'),
+    },
+  },
+  browseText: {
+    flex: '1 1 0',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: tokens.fontSizeBase400,
+    '@media (min-width: 640px)': {
+      fontSize: tokens.fontSizeBase300,
+    },
+  },
+  browseTextFilled: {
+    color: tokens.colorNeutralForeground1,
+  },
+  browseTextEmpty: {
+    color: 'rgba(var(--colorNeutralForeground2), 0.5)',
+  },
+  browseLabel: {
+    fontSize: tokens.fontSizeBase200,
+    color: 'var(--accent-500)',
+    fontWeight: tokens.fontWeightMedium,
+    flexShrink: 0,
+  },
+  sandboxOptions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  sandboxBtn: {
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: '6px',
+    paddingBottom: '6px',
+    borderRadius: '9999px',
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightMedium,
+    transitionProperty: 'background-color, color',
+    transitionDuration: '150ms',
+    border: 'none',
+    cursor: 'pointer',
+  },
+  sandboxBtnActive: {
+    backgroundColor: 'rgba(99, 102, 241, 0.2)',
+    color: '#818cf8',
+  },
+  sandboxBtnInactive: {
+    backgroundColor: tokens.colorNeutralBackground1Hover,
+    color: tokens.colorNeutralForeground2,
+    ':hover': {
+      color: tokens.colorNeutralForeground1,
+    },
+  },
+});
 
 type SandboxMode = 'default' | 'image' | 'dockerfile';
 
@@ -32,10 +133,9 @@ type ProjectFormProps = {
   editProject?: Project;
 };
 
-const inputClass =
-  'w-full rounded-xl border border-surface-border bg-surface px-3.5 py-2.5 text-base sm:text-sm text-fg placeholder:text-fg-muted/50 focus:outline-none focus:border-accent-500 transition-colors';
 
 export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProps) => {
+  const styles = useStyles();
   const [label, setLabel] = useState(editProject?.label ?? '');
   const [workspaceDir, setWorkspaceDir] = useState(editProject?.workspaceDir ?? '');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -113,49 +213,46 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
       <AnimatedDialog open={open} onClose={onClose}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>{isEdit ? 'Edit Project' : 'New Project'}</DialogHeader>
-          <DialogBody className="flex flex-col gap-4">
+          <DialogBody className={styles.body}>
             {/* Name & Directory */}
-            <div className="flex flex-col gap-3 rounded-2xl bg-surface-raised/50 p-4 border border-surface-border">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-medium text-fg-muted uppercase tracking-wider">Name</label>
-                <input
+            <div className={styles.section}>
+              <div className={styles.fieldGroup}>
+                <label className={styles.label}>Name</label>
+                <Input
                   type="text"
                   value={label}
                   onChange={handleLabelChange}
                   placeholder="my-project"
-                  className={inputClass}
                 />
               </div>
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-medium text-fg-muted uppercase tracking-wider">Directory</label>
+              <div className={styles.fieldGroup}>
+                <label className={styles.label}>Directory</label>
                 <button
                   type="button"
                   onClick={handleBrowseOpen}
-                  className="flex items-center gap-2 w-full rounded-xl border border-surface-border bg-surface px-3.5 py-2.5 text-left transition-colors hover:border-accent-500/50"
+                  className={styles.browseBtn}
                 >
-                  <span className={cn('flex-1 truncate text-base sm:text-sm', workspaceDir ? 'text-fg' : 'text-fg-muted/50')}>
+                  <span className={mergeClasses(styles.browseText, workspaceDir ? styles.browseTextFilled : styles.browseTextEmpty)}>
                     {workspaceDir || 'Tap to select directory'}
                   </span>
-                  <span className="text-xs text-accent-500 font-medium shrink-0">Browse</span>
+                  <span className={styles.browseLabel}>Browse</span>
                 </button>
               </div>
             </div>
 
             {/* Sandbox */}
-            <div className="flex flex-col gap-3 rounded-2xl bg-surface-raised/50 p-4 border border-surface-border">
-              <label className="text-xs font-medium text-fg-muted uppercase tracking-wider">Sandbox</label>
-              <div className="flex items-center gap-1.5">
+            <div className={styles.section}>
+              <label className={styles.label}>Sandbox</label>
+              <div className={styles.sandboxOptions}>
                 {SANDBOX_OPTIONS.map((opt) => (
                   <button
                     key={opt.value}
                     type="button"
                     onClick={() => handleSandboxModeChange(opt.value)}
-                    className={cn(
-                      'px-3 py-1.5 rounded-full text-xs font-medium transition-colors',
-                      sandboxMode === opt.value
-                        ? 'bg-accent-600/20 text-accent-400'
-                        : 'bg-surface-overlay text-fg-muted hover:text-fg'
+                    className={mergeClasses(
+                      styles.sandboxBtn,
+                      sandboxMode === opt.value ? styles.sandboxBtnActive : styles.sandboxBtnInactive
                     )}
                   >
                     {opt.label}
@@ -163,21 +260,19 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
                 ))}
               </div>
               {sandboxMode === 'image' && (
-                <input
+                <Input
                   type="text"
                   value={sandboxValue}
                   onChange={handleSandboxValueChange}
                   placeholder="ubuntu:24.04"
-                  className={inputClass}
                 />
               )}
               {sandboxMode === 'dockerfile' && (
-                <input
+                <Input
                   type="text"
                   value={sandboxValue}
                   onChange={handleSandboxValueChange}
                   placeholder="Dockerfile"
-                  className={inputClass}
                 />
               )}
             </div>

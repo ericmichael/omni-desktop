@@ -9,6 +9,7 @@ import {
 } from '@dnd-kit/core';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
+import { makeStyles, tokens } from '@fluentui/react-components';
 
 import type { Column, ProjectId, Ticket, TicketId } from '@/shared/types';
 
@@ -16,7 +17,38 @@ import { KanbanCard } from './KanbanCard';
 import { KanbanColumn } from './KanbanColumn';
 import { $activeInitiativeId, $pipeline, $tickets, ticketApi } from './state';
 
+const useStyles = makeStyles({
+  loading: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '160px',
+  },
+  loadingText: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+  },
+  board: {
+    display: 'flex',
+    gap: tokens.spacingHorizontalS,
+    height: '100%',
+    overflowX: 'auto',
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    '@media (min-width: 640px)': {
+      gap: tokens.spacingHorizontalM,
+      paddingLeft: tokens.spacingHorizontalL,
+      paddingRight: tokens.spacingHorizontalL,
+      paddingTop: tokens.spacingVerticalM,
+      paddingBottom: tokens.spacingVerticalM,
+    },
+  },
+});
+
 export const KanbanBoard = memo(({ projectId }: { projectId: ProjectId }) => {
+  const styles = useStyles();
   const pipeline = useStore($pipeline);
   const tickets = useStore($tickets);
   const activeInitiativeId = useStore($activeInitiativeId);
@@ -98,8 +130,8 @@ export const KanbanBoard = memo(({ projectId }: { projectId: ProjectId }) => {
 
   if (!pipeline) {
     return (
-      <div className="flex items-center justify-center h-40">
-        <p className="text-sm text-fg-muted">Loading pipeline...</p>
+      <div className={styles.loading}>
+        <p className={styles.loadingText}>Loading pipeline...</p>
       </div>
     );
   }
@@ -111,7 +143,7 @@ export const KanbanBoard = memo(({ projectId }: { projectId: ProjectId }) => {
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >
-      <div className="flex gap-2 sm:gap-3 h-full overflow-x-auto px-2 sm:px-4 py-2 sm:py-3">
+      <div className={styles.board}>
         {pipeline.columns.map((column) => (
           <KanbanColumn key={column.id} column={column} tickets={ticketsByColumn[column.id] ?? []} />
         ))}

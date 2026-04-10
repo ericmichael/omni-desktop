@@ -1,0 +1,15 @@
+export {
+  Body1,
+  Body1Strong,
+  Body2,
+  Caption1,
+  Caption1Strong,
+  Caption2,
+  Display,
+  LargeTitle,
+  Subtitle1,
+  Subtitle2,
+  Title1,
+  Title2,
+  Title3,
+} from '@fluentui/react-components';

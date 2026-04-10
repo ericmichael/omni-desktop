@@ -2,11 +2,12 @@ import { DndContext, PointerSensor, type DragEndEvent, useSensor, useSensors } f
 import { SortableContext, arrayMove, horizontalListSortingStrategy, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useStore } from '@nanostores/react';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PiArrowsInBold, PiArrowsOutBold, PiCodeBold, PiDotsSixVerticalBold, PiDotsThreeOutline, PiGitBranchBold, PiMonitorBold, PiPlusBold } from 'react-icons/pi';
+import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowMinimize20Regular, ArrowMaximize20Regular, Code20Regular, ReOrderDotsVertical20Regular, MoreHorizontal20Regular, BranchFork20Regular, Desktop20Regular, Add20Regular } from '@fluentui/react-icons';
 
 import { uuidv4 } from '@/lib/uuid';
-import { Button, cn, SegmentedControl } from '@/renderer/ds';
+import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
+import { Button, cn, Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger, SegmentedControl } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { CodeLayoutMode, CodeTab, CodeTabId, TicketId, TicketResolution } from '@/shared/types';
 
@@ -20,18 +21,286 @@ const COLUMN_WIDTH = 480;
 const EXPANDED_COLUMN_WIDTH = 860;
 const COMPACT_WIDTH = 900;
 
+const useStyles = makeStyles({
+  root: { display: 'flex', flexDirection: 'column', width: '100%', height: '100%', minHeight: 0, overflow: 'hidden' },
+  deckHeader: {
+    display: 'none',
+    height: '40px',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: tokens.colorNeutralBackground2,
+    '@media (min-width: 640px)': { display: 'flex' },
+  },
+  deckHeaderActions: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
+  flexItemsCenter: { display: 'flex', alignItems: 'center' },
+  gap1: { gap: '4px' },
+  gap2: { gap: tokens.spacingHorizontalS },
+  gap3: { gap: tokens.spacingHorizontalM },
+  minW0: { minWidth: 0 },
+  sessionActionBtn: {
+    display: 'inline-flex',
+    width: '32px',
+    height: '32px',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: tokens.borderRadiusMedium,
+    color: tokens.colorNeutralForeground2,
+    transitionProperty: 'color, background-color',
+    transitionDuration: '150ms',
+    ':hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)', color: tokens.colorNeutralForeground1 },
+    border: 'none',
+    backgroundColor: 'transparent',
+    cursor: 'pointer',
+  },
+  sessionActionBtnDisabled: {
+    cursor: 'not-allowed',
+    opacity: 0.4,
+    ':hover': { backgroundColor: 'transparent', color: tokens.colorNeutralForeground2 },
+  },
+  sessionHeader: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  sessionLabel: {
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightMedium,
+    color: tokens.colorNeutralForeground1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  ticketBanner: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: '6px',
+    paddingBottom: '6px',
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: tokens.colorNeutralBackground2,
+    '@media (min-width: 640px)': {
+      paddingLeft: tokens.spacingHorizontalXL,
+      paddingRight: tokens.spacingHorizontalXL,
+    },
+  },
+  ticketTitle: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  ticketBadges: {
+    display: 'none',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    flexShrink: 0,
+    '@media (min-width: 640px)': { display: 'flex' },
+  },
+  ticketActions: {
+    display: 'none',
+    alignItems: 'center',
+    gap: '6px',
+    flexShrink: 0,
+    marginLeft: tokens.spacingHorizontalS,
+    '@media (min-width: 640px)': { display: 'flex' },
+  },
+  deckColumn: {
+    display: 'flex',
+    height: '100%',
+    flexDirection: 'column',
+    ...shorthands.borderRight('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+  deckColumnDragging: { opacity: 0.7 },
+  dragHandle: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '32px',
+    height: '32px',
+    borderRadius: tokens.borderRadiusMedium,
+    color: tokens.colorNeutralForeground2,
+    border: 'none',
+    backgroundColor: 'transparent',
+    cursor: 'grab',
+    ':hover': { color: tokens.colorNeutralForeground1, backgroundColor: 'rgba(255, 255, 255, 0.05)' },
+  },
+  flex1MinH0Relative: { flex: '1 1 0', minHeight: 0, position: 'relative' },
+  sessionPane: { width: '100%', height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: tokens.colorNeutralBackground2 },
+  sessionPaneHidden: { display: 'none' },
+  hideOnMobile: { display: 'none', '@media (min-width: 640px)': { display: 'block' } },
+  focusListItem: { position: 'relative' },
+  focusListItemDragging: { opacity: 0.7 },
+  focusListItemRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+    width: '100%',
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: '6px',
+    paddingBottom: '6px',
+    textAlign: 'left',
+    transitionProperty: 'background-color',
+    transitionDuration: '150ms',
+    cursor: 'pointer',
+    border: 'none',
+    backgroundColor: 'transparent',
+  },
+  focusListItemActive: { backgroundColor: 'rgba(96, 165, 250, 0.2)', color: tokens.colorNeutralForeground1 },
+  focusListItemInactive: { color: tokens.colorNeutralForeground2, ':hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)', color: tokens.colorNeutralForeground1 } },
+  focusListItemContent: { flex: '1 1 0', minWidth: 0, textAlign: 'left', border: 'none', backgroundColor: 'transparent', cursor: 'pointer' },
+  focusListItemInner: { display: 'flex', flexDirection: 'column', minWidth: 0 },
+  focusListItemLabel: { fontSize: tokens.fontSizeBase300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  focusListItemSub: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  deckScroll: { flex: '1 1 0', minHeight: 0, overflowX: 'auto', overflowY: 'hidden' },
+  deckInner: { display: 'flex', height: '100%', minWidth: 'max-content', overflowY: 'hidden' },
+  deckColumnWrap: { height: '100%', flexShrink: 0 },
+  focusLayout: { flex: '1 1 0', minHeight: 0, display: 'flex' },
+  focusSidebar: {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    width: '240px',
+    ...shorthands.borderRight('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: tokens.colorNeutralBackground1,
+    flexShrink: 0,
+  },
+  focusSidebarHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+  },
+  focusSidebarTitle: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground2,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+  },
+  focusSidebarCount: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 },
+  focusSidebarList: { flex: '1 1 0', minHeight: 0, overflowY: 'auto', paddingTop: '4px', paddingBottom: '4px' },
+  focusContent: { flex: '1 1 0', minWidth: 0, minHeight: 0 },
+  pagedLayout: { flex: '1 1 0', minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' },
+  mobileTabBar: {
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: tokens.colorNeutralBackground2,
+    overflowX: 'auto',
+    '@media (min-width: 640px)': { display: 'none' },
+  },
+  mobileTabBarInner: { display: 'flex', alignItems: 'center', gap: '4px', paddingLeft: tokens.spacingHorizontalS, paddingTop: '6px', paddingBottom: '6px' },
+  mobileTabChip: {
+    flexShrink: 0,
+    paddingLeft: '14px',
+    paddingRight: '14px',
+    paddingTop: '6px',
+    paddingBottom: '6px',
+    borderRadius: '9999px',
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightMedium,
+    transitionProperty: 'background-color, color',
+    transitionDuration: '150ms',
+    border: 'none',
+    cursor: 'pointer',
+  },
+  mobileTabChipActive: { backgroundColor: 'rgba(96, 165, 250, 0.2)', color: 'rgb(96, 165, 250)' },
+  mobileTabChipInactive: { backgroundColor: tokens.colorNeutralBackground3, color: tokens.colorNeutralForeground2 },
+  mobileNewBtn: {
+    flexShrink: 0,
+    width: '36px',
+    height: '36px',
+    borderRadius: '9999px',
+    backgroundColor: tokens.colorNeutralBackground3,
+    color: tokens.colorNeutralForeground2,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transitionProperty: 'background-color',
+    transitionDuration: '150ms',
+    border: 'none',
+    cursor: 'pointer',
+  },
+  desktopPagedBar: {
+    display: 'none',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: tokens.colorNeutralBackground2,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+    '@media (min-width: 640px)': { display: 'flex' },
+  },
+  shrink0: { flexShrink: 0 },
+  pagedContent: { flex: '1 1 0', minHeight: 0 },
+  metaBadge: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    borderRadius: '9999px',
+    backgroundColor: 'rgba(192, 132, 252, 0.1)',
+    paddingLeft: '6px',
+    paddingRight: '6px',
+    paddingTop: '2px',
+    paddingBottom: '2px',
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightMedium,
+    color: 'rgb(192, 132, 252)',
+    flexShrink: 0,
+  },
+  desktopPagedSelect: {
+    backgroundColor: tokens.colorNeutralBackground1,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    borderRadius: tokens.borderRadiusMedium,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    paddingTop: '4px',
+    paddingBottom: '4px',
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground1,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+});
+
 const CodeDeckHeader = memo(
   ({ layoutMode, onLayoutMode, onNewSession }: { layoutMode: CodeLayoutMode; onLayoutMode: (mode: CodeLayoutMode) => void; onNewSession: () => void }) => {
+    const styles = useStyles();
     return (
-      <div className="hidden sm:flex h-10 items-center justify-end px-3 border-b border-surface-border bg-surface-raised">
-        <div className="flex items-center gap-2">
+      <div className={styles.deckHeader}>
+        <div className={styles.deckHeaderActions}>
           <SegmentedControl
             value={layoutMode}
             options={[{ value: 'deck', label: 'Deck' }, { value: 'focus', label: 'Focus' }]}
             onChange={onLayoutMode}
             layoutId="code-layout-toggle"
           />
-          <Button size="sm" variant="ghost" leftIcon={<PiPlusBold size={13} />} onClick={onNewSession}>
+          <Button size="sm" variant="ghost" leftIcon={<Add20Regular style={{ width: 13, height: 13 }} />} onClick={onNewSession}>
             New Session
           </Button>
         </div>
@@ -41,20 +310,19 @@ const CodeDeckHeader = memo(
 );
 CodeDeckHeader.displayName = 'CodeDeckHeader';
 
-const SessionActionButton = memo(
-  ({ icon, label, isDisabled, onClick }: { icon: React.ReactNode; label: string; isDisabled?: boolean; onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void }) => {
+const SessionActionButton = forwardRef<HTMLButtonElement, { icon: React.ReactNode; label: string; isDisabled?: boolean; onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void }>(
+  ({ icon, label, isDisabled, onClick, ...rest }, ref) => {
+    const styles = useStyles();
     return (
       <button
+        ref={ref}
         type="button"
         aria-label={label}
         title={label}
         disabled={isDisabled}
         onClick={onClick}
-        className={cn(
-          'inline-flex size-8 items-center justify-center rounded-md text-fg-muted transition-colors',
-          'hover:bg-white/5 hover:text-fg',
-          isDisabled && 'cursor-not-allowed opacity-40 hover:bg-transparent hover:text-fg-muted'
-        )}
+        className={mergeClasses(styles.sessionActionBtn, isDisabled && styles.sessionActionBtnDisabled)}
+        {...rest}
       >
         {icon}
       </button>
@@ -70,7 +338,6 @@ const RESOLUTIONS: { value: TicketResolution; label: string }[] = [
   { value: 'cancelled', label: 'Close as Cancelled' },
 ];
 
-const MENU_DIVIDER = <div className="my-1 border-t border-surface-border" />;
 
 const CodeSessionHeader = memo(
   ({
@@ -96,120 +363,70 @@ const CodeSessionHeader = memo(
     ticketId?: TicketId;
     onOpenPanel?: (panel: TicketPanel) => void;
   }) => {
-    const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
-
-    useEffect(() => {
-      if (!menuPosition) return;
-      const handleClick = () => setMenuPosition(null);
-      const handleKey = (event: KeyboardEvent) => {
-        if (event.key === 'Escape') {
-          setMenuPosition(null);
-        }
-      };
-      window.addEventListener('click', handleClick);
-      window.addEventListener('keydown', handleKey);
-      return () => {
-        window.removeEventListener('click', handleClick);
-        window.removeEventListener('keydown', handleKey);
-      };
-    }, [menuPosition]);
-
-    const handleOpenPanel = useCallback(
-      (panel: TicketPanel) => {
-        setMenuPosition(null);
-        onOpenPanel?.(panel);
-      },
-      [onOpenPanel]
-    );
-
     const handleResolve = useCallback(
       (resolution: TicketResolution) => {
         if (ticketId) {
           ticketApi.resolveTicket(ticketId, resolution);
         }
-        setMenuPosition(null);
       },
       [ticketId]
     );
 
+    const styles = useStyles();
     return (
       <>
-        <div className="relative flex items-center justify-between px-3 py-2 border-b border-surface-border bg-surface">
-          <div className="flex items-center gap-2 min-w-0">
+        <div className={styles.sessionHeader}>
+          <div className={mergeClasses(styles.flexItemsCenter, styles.gap2, styles.minW0)}>
             {dragHandle}
-            <span className="text-sm font-medium text-fg truncate">{label}</span>
+            <span className={styles.sessionLabel}>{label}</span>
           </div>
-          <div className="flex items-center gap-1">
+          <div className={mergeClasses(styles.flexItemsCenter, styles.gap1)}>
             {actions}
             {onClose && (
-              <SessionActionButton
-                icon={<PiDotsThreeOutline size={16} />}
-                label="Session menu"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  setMenuPosition({ x: rect.right, y: rect.bottom + 6 });
-                }}
-              />
+              <Menu positioning={{ position: 'below', align: 'end', fallbackPositions: ['above-end'] }}>
+                <MenuTrigger>
+                  <SessionActionButton
+                    icon={<MoreHorizontal20Regular style={{ width: 16, height: 16 }} />}
+                    label="Session menu"
+                  />
+                </MenuTrigger>
+                <MenuPopover>
+                  <MenuList>
+                    {ticketId && onOpenPanel && (
+                      <>
+                        <MenuItem onClick={() => onOpenPanel('overview')}>Overview</MenuItem>
+                        <MenuItem onClick={() => onOpenPanel('pr')}>PR</MenuItem>
+                        <MenuItem onClick={() => onOpenPanel('artifacts')}>Artifacts</MenuItem>
+                        <MenuDivider />
+                      </>
+                    )}
+                    {ticketId && (
+                      <>
+                        {RESOLUTIONS.map((res) => (
+                          <MenuItem key={res.value} onClick={() => handleResolve(res.value)}>
+                            {res.label}
+                          </MenuItem>
+                        ))}
+                        <MenuDivider />
+                      </>
+                    )}
+                    <MenuItem onClick={onClose}>Close session</MenuItem>
+                  </MenuList>
+                </MenuPopover>
+              </Menu>
             )}
           </div>
-          {menuPosition && onClose && (
-            <div
-              className="fixed z-50 min-w-[160px] rounded-md border border-surface-border bg-surface shadow-lg py-1"
-              style={{ left: menuPosition.x - 160, top: menuPosition.y }}
-            >
-              {ticketId && onOpenPanel && (
-                <>
-                  <button type="button" onClick={() => handleOpenPanel('overview')} className="w-full text-left px-3 py-1.5 text-xs text-fg hover:bg-surface-hover transition-colors">
-                    Overview
-                  </button>
-                  <button type="button" onClick={() => handleOpenPanel('pr')} className="w-full text-left px-3 py-1.5 text-xs text-fg hover:bg-surface-hover transition-colors">
-                    PR
-                  </button>
-                  <button type="button" onClick={() => handleOpenPanel('artifacts')} className="w-full text-left px-3 py-1.5 text-xs text-fg hover:bg-surface-hover transition-colors">
-                    Artifacts
-                  </button>
-                  {MENU_DIVIDER}
-                </>
-              )}
-              {ticketId && (
-                <>
-                  {RESOLUTIONS.map((res) => (
-                    <button
-                      key={res.value}
-                      type="button"
-                      onClick={() => handleResolve(res.value)}
-                      className="w-full text-left px-3 py-1.5 text-xs text-fg hover:bg-surface-hover transition-colors"
-                    >
-                      {res.label}
-                    </button>
-                  ))}
-                  {MENU_DIVIDER}
-                </>
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  setMenuPosition(null);
-                  onClose();
-                }}
-                className="w-full text-left px-3 py-1.5 text-xs text-fg hover:bg-surface-hover transition-colors"
-              >
-                Close session
-              </button>
-            </div>
-          )}
         </div>
         {ticketTitle && (
-          <div className="flex items-center justify-between px-3 sm:px-5 py-1.5 border-b border-surface-border bg-surface-raised/50">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-xs text-fg-muted truncate">{ticketTitle}</span>
-              <span className="hidden sm:flex items-center gap-2 shrink-0">
+          <div className={styles.ticketBanner}>
+            <div className={mergeClasses(styles.flexItemsCenter, styles.gap2, styles.minW0)}>
+              <span className={styles.ticketTitle}>{ticketTitle}</span>
+              <span className={styles.ticketBadges}>
                 {ticketColumnBadge}
                 {ticketMetaBadge}
               </span>
             </div>
-            {ticketActions && <div className="hidden sm:flex items-center gap-1.5 shrink-0 ml-2">{ticketActions}</div>}
+            {ticketActions && <div className={styles.ticketActions}>{ticketActions}</div>}
           </div>
         )}
       </>
@@ -252,6 +469,7 @@ const DeckColumn = memo(
       transition,
     };
 
+    const styles = useStyles();
     const [activePanel, setActivePanel] = useState<TicketPanel | null>(null);
     const handleClosePanel = useCallback(() => setActivePanel(null), []);
 
@@ -259,7 +477,7 @@ const DeckColumn = memo(
       <div
         ref={setNodeRef}
         style={style}
-        className={cn('flex h-full flex-col border-r border-surface-border bg-surface-raised', isDragging && 'opacity-70')}
+        className={mergeClasses(styles.deckColumn, isDragging && styles.deckColumnDragging)}
       >
         <CodeSessionHeader
           label={label}
@@ -268,11 +486,11 @@ const DeckColumn = memo(
           ticketMetaBadge={ticketMetaBadge}
           ticketActions={ticketActions}
           actions={
-            <div className="flex items-center gap-1">
+            <div className={mergeClasses(styles.flexItemsCenter, styles.gap1)}>
               {headerActionsSlot}
               {actions}
               <SessionActionButton
-                icon={isExpanded ? <PiArrowsInBold size={15} /> : <PiArrowsOutBold size={15} />}
+                icon={isExpanded ? <ArrowMinimize20Regular style={{ width: 15, height: 15 }} /> : <ArrowMaximize20Regular style={{ width: 15, height: 15 }} />}
                 label={isExpanded ? 'Collapse column' : 'Expand column'}
                 onClick={() => onToggleExpand(tab.id)}
               />
@@ -284,16 +502,16 @@ const DeckColumn = memo(
           dragHandle={
             <button
               type="button"
-              className="inline-flex items-center justify-center size-8 rounded-md text-fg-muted hover:text-fg hover:bg-white/5"
+              className={styles.dragHandle}
               {...attributes}
               {...listeners}
               aria-label="Reorder"
             >
-              <PiDotsSixVerticalBold size={16} />
+              <ReOrderDotsVertical20Regular style={{ width: 16, height: 16 }} />
             </button>
           }
         />
-        <div className="flex-1 min-h-0 relative">
+        <div className={styles.flex1MinH0Relative}>
           {children}
           {tab.ticketId && (
             <TicketPanelOverlay panel={activePanel} ticketId={tab.ticketId as TicketId} onClose={handleClosePanel} />
@@ -340,12 +558,13 @@ const CodeSessionPane = memo(
     /** Hide the session header row on mobile (used in paged mode where the session bar already identifies the session) */
     hideHeaderOnMobile?: boolean;
   }) => {
+    const styles = useStyles();
     const [activePanel, setActivePanel] = useState<TicketPanel | null>(null);
     const handleClosePanel = useCallback(() => setActivePanel(null), []);
 
     return (
-      <div className={cn('w-full h-full flex flex-col bg-surface-raised', !isVisible && 'hidden')}>
-        <div className={cn(hideHeaderOnMobile && 'hidden sm:block')}>
+      <div className={mergeClasses(styles.sessionPane, !isVisible && styles.sessionPaneHidden)}>
+        <div className={mergeClasses(hideHeaderOnMobile && styles.hideOnMobile)}>
         <CodeSessionHeader
           label={label}
           ticketTitle={ticketTitle}
@@ -358,7 +577,7 @@ const CodeSessionPane = memo(
           onOpenPanel={tab.ticketId ? setActivePanel : undefined}
         />
         </div>
-        <div className="flex-1 min-h-0 relative">
+        <div className={styles.flex1MinH0Relative}>
           <CodeTabContent
             tab={tab}
             isVisible={isVisible}
@@ -381,86 +600,53 @@ CodeSessionPane.displayName = 'CodeSessionPane';
 const FocusListItem = memo(
   ({ tab, label, subLabel, isActive, onSelect, onClose }: { tab: CodeTab; label: string; subLabel?: string | null; isActive: boolean; onSelect: (id: CodeTabId) => void; onClose: (id: CodeTabId) => void }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
-    const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
     const style = {
       transform: CSS.Transform.toString(transform),
       transition,
     };
 
-    useEffect(() => {
-      if (!menuPosition) return;
-      const handleClick = () => setMenuPosition(null);
-      const handleKey = (event: KeyboardEvent) => {
-        if (event.key === 'Escape') {
-          setMenuPosition(null);
-        }
-      };
-      window.addEventListener('click', handleClick);
-      window.addEventListener('keydown', handleKey);
-      return () => {
-        window.removeEventListener('click', handleClick);
-        window.removeEventListener('keydown', handleKey);
-      };
-    }, [menuPosition]);
-
+    const styles = useStyles();
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={cn('group relative', isDragging && 'opacity-70')}
-      onContextMenu={(event) => {
-        event.preventDefault();
-        setMenuPosition({ x: event.clientX, y: event.clientY });
-      }}
+      className={mergeClasses(styles.focusListItem, isDragging && styles.focusListItemDragging)}
     >
       <div
-        className={cn(
-          'flex items-center gap-3 w-full px-3 py-1.5 text-left transition-colors cursor-pointer',
-          isActive ? 'bg-accent-600/20 text-fg' : 'text-fg-muted hover:bg-white/5 hover:text-fg'
+        className={mergeClasses(
+          styles.focusListItemRow,
+          isActive ? styles.focusListItemActive : styles.focusListItemInactive
         )}
       >
         <button
           type="button"
-          className="inline-flex items-center justify-center size-8 rounded-lg text-fg-muted hover:text-fg hover:bg-white/5"
+          className={styles.dragHandle}
           {...attributes}
           {...listeners}
           aria-label="Reorder"
         >
-          <PiDotsSixVerticalBold size={14} />
+          <ReOrderDotsVertical20Regular style={{ width: 14, height: 14 }} />
         </button>
-        <button type="button" onClick={() => onSelect(tab.id)} className="flex-1 min-w-0 text-left">
-          <div className="flex flex-col min-w-0">
-            <span className="text-sm truncate">{label}</span>
-            {subLabel && <span className="text-xs text-fg-subtle truncate">{subLabel}</span>}
+        <button type="button" onClick={() => onSelect(tab.id)} className={styles.focusListItemContent}>
+          <div className={styles.focusListItemInner}>
+            <span className={styles.focusListItemLabel}>{label}</span>
+            {subLabel && <span className={styles.focusListItemSub}>{subLabel}</span>}
           </div>
         </button>
-        <SessionActionButton
-          icon={<PiDotsThreeOutline size={16} />}
-          label="Session menu"
-          onClick={(event) => {
-            event.stopPropagation();
-            const rect = event.currentTarget.getBoundingClientRect();
-            setMenuPosition({ x: rect.left, y: rect.bottom + 6 });
-          }}
-        />
+        <Menu positioning={{ position: 'below', align: 'end', fallbackPositions: ['above-end'] }}>
+          <MenuTrigger>
+            <SessionActionButton
+              icon={<MoreHorizontal20Regular style={{ width: 16, height: 16 }} />}
+              label="Session menu"
+            />
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              <MenuItem onClick={() => onClose(tab.id)}>Delete session</MenuItem>
+            </MenuList>
+          </MenuPopover>
+        </Menu>
       </div>
-      {menuPosition && (
-        <div
-          className="fixed z-50 min-w-[160px] rounded-md border border-surface-border bg-surface shadow-lg py-1"
-          style={{ left: menuPosition.x, top: menuPosition.y }}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              setMenuPosition(null);
-              onClose(tab.id);
-            }}
-            className="w-full text-left px-3 py-1.5 text-xs text-fg hover:bg-surface-hover transition-colors"
-          >
-            Delete session
-          </button>
-        </div>
-      )}
     </div>
   );
   }
@@ -468,6 +654,7 @@ const FocusListItem = memo(
 FocusListItem.displayName = 'FocusListItem';
 
 export const CodeDeck = memo(() => {
+  const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const statuses = useStore($codeTabStatuses);
   const tabs = store.codeTabs ?? [];
@@ -620,7 +807,7 @@ export const CodeDeck = memo(() => {
     (tab: CodeTab) => {
       const newSessionBtn = (
         <SessionActionButton
-          icon={<PiPlusBold size={13} />}
+          icon={<Add20Regular style={{ width: 13, height: 13 }} />}
           label="New session"
           onClick={() => handleNewTabSession(tab)}
         />
@@ -633,13 +820,13 @@ export const CodeDeck = memo(() => {
         <>
           {newSessionBtn}
           <SessionActionButton
-            icon={<PiCodeBold size={15} />}
+            icon={<Code20Regular style={{ width: 15, height: 15 }} />}
             label="Expand VS Code"
             isDisabled={!codeServerUrl}
             onClick={codeServerUrl ? () => handleOpenOverlay(tab.id, 'code') : undefined}
           />
           <SessionActionButton
-            icon={<PiMonitorBold size={15} />}
+            icon={<Desktop20Regular style={{ width: 15, height: 15 }} />}
             label="Expand Desktop"
             isDisabled={!vncUrl}
             onClick={vncUrl ? () => handleOpenOverlay(tab.id, 'vnc') : undefined}
@@ -692,8 +879,8 @@ export const CodeDeck = memo(() => {
       }
 
       return (
-        <span className="flex items-center gap-1 rounded-full bg-purple-400/10 px-1.5 py-0.5 text-xs font-medium text-purple-400 shrink-0">
-          <PiGitBranchBold size={10} />
+        <span className={styles.metaBadge}>
+          <BranchFork20Regular style={{ width: 10, height: 10 }} />
           {effectiveBranch ?? 'Isolated workspace'}
           {isIsolatedWorkspace ? ' · isolated' : ''}
           {!ticket.branch && initiative?.branch ? ' · inherited' : ''}
@@ -704,19 +891,19 @@ export const CodeDeck = memo(() => {
   );
 
   return (
-    <div className="flex flex-col w-full h-full min-h-0 overflow-hidden">
+    <div className={styles.root}>
       <CodeDeckHeader layoutMode={layoutMode} onLayoutMode={handleLayoutMode} onNewSession={handleNewSession} />
       {derivedLayout === 'deck' && (
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
           <SortableContext items={tabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
-            <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden">
-              <div className="flex h-full min-w-max overflow-y-hidden">
+            <div className={styles.deckScroll}>
+              <div className={styles.deckInner}>
                 {tabs.map((tab) => {
                   return (
                     <div
                       key={tab.id}
                       style={{ width: expandedTabId === tab.id ? EXPANDED_COLUMN_WIDTH : COLUMN_WIDTH }}
-                      className="h-full flex-shrink-0"
+                      className={styles.deckColumnWrap}
                     >
                       <DeckColumn
                         tab={tab}
@@ -752,13 +939,13 @@ export const CodeDeck = memo(() => {
       {derivedLayout === 'focus' && (
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
           <SortableContext items={tabs.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-            <div className="flex-1 min-h-0 flex">
-              <div className="flex flex-col h-full w-60 border-r border-surface-border bg-surface shrink-0">
-                <div className="flex items-center justify-between px-3 py-2 border-b border-surface-border">
-                  <span className="text-xs font-semibold text-fg-muted uppercase tracking-wider">Sessions</span>
-                  {tabs.length > 0 && <span className="text-xs text-fg-subtle">{tabs.length}</span>}
+            <div className={styles.focusLayout}>
+              <div className={styles.focusSidebar}>
+                <div className={styles.focusSidebarHeader}>
+                  <span className={styles.focusSidebarTitle}>Sessions</span>
+                  {tabs.length > 0 && <span className={styles.focusSidebarCount}>{tabs.length}</span>}
                 </div>
-                <div className="flex-1 min-h-0 overflow-y-auto py-1">
+                <div className={styles.focusSidebarList}>
                   {tabs.map((tab) => (
                     <FocusListItem
                       key={tab.id}
@@ -772,7 +959,7 @@ export const CodeDeck = memo(() => {
                   ))}
                 </div>
               </div>
-              <div className="flex-1 min-w-0 min-h-0">
+              <div className={styles.focusContent}>
                 {tabs.map((tab) => (
                     <CodeSessionPane
                       key={tab.id}
@@ -798,20 +985,20 @@ export const CodeDeck = memo(() => {
         </DndContext>
       )}
       {derivedLayout === 'paged' && activeTab && (
-        <div className="flex-1 min-h-0 flex flex-col relative">
+        <div className={styles.pagedLayout}>
           {/* Mobile: horizontal scrollable tab bar */}
-          <div className="sm:hidden flex items-center border-b border-surface-border bg-surface-raised overflow-x-auto">
-            <div className="flex items-center gap-1 px-2 py-1.5">
+          <div className={styles.mobileTabBar}>
+            <div className={styles.mobileTabBarInner}>
               {tabs.map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
                   onClick={() => handleSelect(tab.id)}
-                  className={cn(
-                    'shrink-0 px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors',
+                  className={mergeClasses(
+                    styles.mobileTabChip,
                     tab.id === activeTab.id
-                      ? 'bg-accent-600/20 text-accent-400'
-                      : 'bg-surface-overlay text-fg-muted active:bg-surface-border'
+                      ? styles.mobileTabChipActive
+                      : styles.mobileTabChipInactive
                   )}
                 >
                   {resolveLabel(tab)}
@@ -820,21 +1007,21 @@ export const CodeDeck = memo(() => {
               <button
                 type="button"
                 onClick={handleNewSession}
-                className="shrink-0 size-9 rounded-full bg-surface-overlay text-fg-muted flex items-center justify-center active:bg-surface-border transition-colors"
+                className={styles.mobileNewBtn}
                 aria-label="New session"
               >
-                <PiPlusBold size={13} />
+                <Add20Regular style={{ width: 13, height: 13 }} />
               </button>
             </div>
           </div>
           {/* Desktop: select dropdown + prev/next */}
-          <div className="hidden sm:flex items-center justify-between px-4 py-2 border-b border-surface-border bg-surface-raised text-xs text-fg-muted">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="shrink-0">Session</span>
+          <div className={styles.desktopPagedBar}>
+            <div className={mergeClasses(styles.flexItemsCenter, styles.gap2, styles.minW0)}>
+              <span className={styles.shrink0}>Session</span>
               <select
                 value={activeTab.id}
                 onChange={(e) => handleSelect(e.target.value)}
-                className="bg-surface border border-surface-border rounded-md px-2 py-1 text-xs text-fg min-w-0 truncate"
+                className={styles.desktopPagedSelect}
               >
                 {tabs.map((tab) => (
                   <option key={tab.id} value={tab.id}>
@@ -843,7 +1030,7 @@ export const CodeDeck = memo(() => {
                 ))}
               </select>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className={mergeClasses(styles.flexItemsCenter, styles.gap2, styles.shrink0)}>
               <Button
                 size="sm"
                 variant="ghost"
@@ -874,7 +1061,7 @@ export const CodeDeck = memo(() => {
               </Button>
             </div>
           </div>
-          <div className="flex-1 min-h-0">
+          <div className={styles.pagedContent}>
             {tabs.map((tab) => (
                 <CodeSessionPane
                   key={tab.id}

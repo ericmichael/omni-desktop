@@ -1,7 +1,9 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { PiArrowsClockwiseBold, PiGitDiffBold } from 'react-icons/pi';
+import { ArrowSync20Regular, BranchCompare20Regular } from '@fluentui/react-icons';
+import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 
-import { cn, IconButton, Spinner } from '@/renderer/ds';
+import { IconButton, ListSkeleton, Spinner, Tab, TabList } from '@/renderer/ds';
+import type { SelectTabData } from '@/renderer/ds';
 import type { DiffResponse, FileDiff, TicketId } from '@/shared/types';
 
 import { TicketPROverview } from './TicketPROverview';
@@ -87,54 +89,267 @@ const buildPatchRows = (patch: string): PatchRow[] => {
   return rows;
 };
 
+const useStyles = makeStyles({
+  centerMessage: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+  },
+  diffRoot: {
+    overflowY: 'auto',
+    height: '100%',
+    fontFamily: 'monospace',
+    fontSize: tokens.fontSizeBase200,
+    lineHeight: '20px',
+  },
+  hunkRow: {
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    color: '#60a5fa',
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingTop: '2px',
+    paddingBottom: '2px',
+    position: 'sticky',
+    top: 0,
+    zIndex: 10,
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+  },
+  diffLine: {
+    display: 'grid',
+    gridTemplateColumns: '3.5rem 3.5rem 1fr',
+    minWidth: 'fit-content',
+  },
+  additionBg: {
+    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+  },
+  deletionBg: {
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+  },
+  lineNumber: {
+    textAlign: 'right',
+    paddingRight: tokens.spacingHorizontalS,
+    color: 'rgba(var(--colorNeutralForeground3), 0.5)',
+    userSelect: 'none',
+    ...shorthands.borderRight('1px', 'solid', 'rgba(var(--colorNeutralStroke1), 0.5)'),
+  },
+  lineContent: {
+    paddingLeft: tokens.spacingHorizontalS,
+    whiteSpace: 'pre',
+  },
+  additionText: {
+    color: '#86efac',
+  },
+  deletionText: {
+    color: '#fca5a5',
+  },
+  contextText: {
+    color: tokens.colorNeutralForeground2,
+  },
+  selectNone: {
+    userSelect: 'none',
+  },
+  fileListBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    width: '100%',
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: '6px',
+    paddingBottom: '6px',
+    textAlign: 'left',
+    fontSize: tokens.fontSizeBase200,
+    cursor: 'pointer',
+    transitionProperty: 'background-color',
+    transitionDuration: '100ms',
+    border: 'none',
+    backgroundColor: 'transparent',
+  },
+  fileListSelected: {
+    backgroundColor: 'rgba(99, 102, 241, 0.2)',
+    color: tokens.colorNeutralForeground1,
+  },
+  fileListUnselected: {
+    color: tokens.colorNeutralForeground2,
+    ':hover': {
+      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    },
+  },
+  statusBadge: {
+    flexShrink: 0,
+    width: '16px',
+    height: '16px',
+    borderRadius: tokens.borderRadiusSmall,
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightBold,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fileNameWrapper: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    flex: '1 1 0',
+    minWidth: 0,
+  },
+  fileName: {
+    color: tokens.colorNeutralForeground1,
+  },
+  dirPath: {
+    color: tokens.colorNeutralForeground3,
+    marginLeft: '4px',
+  },
+  statNumbers: {
+    flexShrink: 0,
+    fontSize: tokens.fontSizeBase200,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  emptyState: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
+    gap: tokens.spacingVerticalM,
+  },
+  emptyIcon: {
+    color: tokens.colorNeutralForeground3,
+  },
+  emptyText: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+  },
+  emptySubText: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+  },
+  columnLayout: {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+  },
+  summaryBar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingTop: '6px',
+    paddingBottom: '6px',
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+    flexShrink: 0,
+  },
+  flex1: {
+    flex: '1 1 0',
+  },
+  splitPane: {
+    position: 'relative',
+    display: 'flex',
+    flex: '1 1 0',
+    minHeight: 0,
+  },
+  selectNonePane: {
+    userSelect: 'none',
+  },
+  dragOverlay: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 20,
+    cursor: 'col-resize',
+  },
+  fileListPane: {
+    minWidth: 0,
+    overflowY: 'auto',
+    ...shorthands.borderRight('1px', 'solid', tokens.colorNeutralStroke1),
+  },
+  divider: {
+    width: '4px',
+    flexShrink: 0,
+    cursor: 'col-resize',
+    transitionProperty: 'background-color',
+    transitionDuration: '100ms',
+    backgroundColor: tokens.colorNeutralStroke1,
+    zIndex: 10,
+    ':hover': {
+      backgroundColor: 'rgba(99, 102, 241, 0.5)',
+    },
+  },
+  diffPane: {
+    flex: '1 1 0',
+    minWidth: 0,
+    minHeight: 0,
+  },
+  tabBar: {
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    flexShrink: 0,
+  },
+  tabContent: {
+    flex: '1 1 0',
+    minHeight: 0,
+  },
+  greenText: {
+    color: '#4ade80',
+  },
+  redText: {
+    color: '#f87171',
+  },
+});
+
 const DiffViewer = memo(({ file }: { file: FileDiff }) => {
+  const styles = useStyles();
+
   if (file.isBinary) {
     return (
-      <div className="flex items-center justify-center h-full text-sm text-fg-muted">
+      <div className={styles.centerMessage}>
         Binary file — no diff available
       </div>
     );
   }
 
   if (!file.patch) {
-    return <div className="flex items-center justify-center h-full text-sm text-fg-muted">No changes to display</div>;
+    return <div className={styles.centerMessage}>No changes to display</div>;
   }
 
   const rows = buildPatchRows(file.patch);
 
   return (
-    <div className="overflow-auto h-full font-mono text-xs leading-5">
+    <div className={styles.diffRoot}>
       {rows.map((row, i) => {
         if (row.type === 'hunk') {
           return (
-            <div
-              key={i}
-              className="bg-blue-500/10 text-blue-400 px-4 py-0.5 sticky top-0 z-10 border-y border-surface-border"
-            >
+            <div key={i} className={styles.hunkRow}>
               {row.text}
             </div>
           );
         }
 
-        const bgClass = row.type === 'addition' ? 'bg-green-500/10' : row.type === 'deletion' ? 'bg-red-500/10' : '';
+        const bgClass = row.type === 'addition' ? styles.additionBg : row.type === 'deletion' ? styles.deletionBg : undefined;
 
         const textClass =
-          row.type === 'addition' ? 'text-green-300' : row.type === 'deletion' ? 'text-red-300' : 'text-fg-muted';
+          row.type === 'addition' ? styles.additionText : row.type === 'deletion' ? styles.deletionText : styles.contextText;
 
         const prefix = row.type === 'addition' ? '+' : row.type === 'deletion' ? '-' : ' ';
         const oldNum = row.type === 'addition' ? '' : 'oldLine' in row ? row.oldLine : '';
         const newNum = row.type === 'deletion' ? '' : 'newLine' in row ? row.newLine : '';
 
         return (
-          <div key={i} className={cn('grid grid-cols-[3.5rem_3.5rem_1fr] min-w-fit', bgClass)}>
+          <div key={i} className={mergeClasses(styles.diffLine, bgClass)}>
             <span className="text-right pr-2 text-fg-subtle/50 select-none border-r border-surface-border/50">
               {oldNum}
             </span>
             <span className="text-right pr-2 text-fg-subtle/50 select-none border-r border-surface-border/50">
               {newNum}
             </span>
-            <span className={cn('pl-2 whitespace-pre', textClass)}>
-              <span className="select-none">{prefix}</span>
+            <span className={mergeClasses(styles.lineContent, textClass)}>
+              <span className={styles.selectNone}>{prefix}</span>
               {row.text}
             </span>
           </div>
@@ -147,6 +362,7 @@ DiffViewer.displayName = 'DiffViewer';
 
 const FileListItem = memo(
   ({ file, isSelected, onSelect }: { file: FileDiff; isSelected: boolean; onSelect: (path: string) => void }) => {
+    const styles = useStyles();
     const fileName = file.path.split('/').pop() ?? file.path;
     const dirPath = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : '';
 
@@ -157,29 +373,29 @@ const FileListItem = memo(
     return (
       <button
         onClick={handleClick}
-        className={cn(
-          'flex items-center gap-2 w-full px-3 py-1.5 text-left text-xs cursor-pointer transition-colors',
-          isSelected ? 'bg-accent-500/20 text-fg' : 'text-fg-muted hover:bg-white/5'
+        className={mergeClasses(
+          styles.fileListBtn,
+          isSelected ? styles.fileListSelected : styles.fileListUnselected
         )}
       >
         <span
-          className={cn(
-            'shrink-0 w-4 h-4 rounded text-xs font-bold flex items-center justify-center',
+          className={mergeClasses(
+            styles.statusBadge,
             STATUS_COLORS[file.status],
             STATUS_BG_COLORS[file.status]
           )}
         >
           {STATUS_LABELS[file.status]}
         </span>
-        <span className="truncate flex-1 min-w-0">
-          <span className="text-fg">{fileName}</span>
-          {dirPath && <span className="text-fg-subtle ml-1">{dirPath}</span>}
+        <span className={styles.fileNameWrapper}>
+          <span className={styles.fileName}>{fileName}</span>
+          {dirPath && <span className={styles.dirPath}>{dirPath}</span>}
         </span>
         {(file.additions > 0 || file.deletions > 0) && (
-          <span className="shrink-0 text-xs tabular-nums">
-            {file.additions > 0 && <span className="text-green-400">+{file.additions}</span>}
+          <span className={styles.statNumbers}>
+            {file.additions > 0 && <span className={styles.greenText}>+{file.additions}</span>}
             {file.additions > 0 && file.deletions > 0 && <span className="text-fg-subtle"> / </span>}
-            {file.deletions > 0 && <span className="text-red-400">-{file.deletions}</span>}
+            {file.deletions > 0 && <span className={styles.redText}>-{file.deletions}</span>}
           </span>
         )}
       </button>
@@ -189,6 +405,7 @@ const FileListItem = memo(
 FileListItem.displayName = 'FileListItem';
 
 const FilesChangedContent = memo(({ ticketId }: { ticketId: TicketId }) => {
+  const styles = useStyles();
   const [data, setData] = useState<DiffResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -253,44 +470,41 @@ const FilesChangedContent = memo(({ ticketId }: { ticketId: TicketId }) => {
 
   if (loading && !data) {
     return (
-      <div className="flex items-center justify-center h-full gap-2">
-        <Spinner size="sm" />
-        <span className="text-sm text-fg-muted">Loading changes...</span>
-      </div>
+      <ListSkeleton rows={6} />
     );
   }
 
   if (!data?.hasChanges) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-3">
-        <PiGitDiffBold size={32} className="text-fg-subtle" />
-        <p className="text-sm text-fg-muted">No changes detected</p>
-        <p className="text-xs text-fg-subtle">File changes will appear here when the agent modifies files</p>
-        <IconButton aria-label="Refresh" icon={<PiArrowsClockwiseBold />} size="sm" onClick={handleRefresh} />
+      <div className={styles.emptyState}>
+        <BranchCompare20Regular style={{ width: 32, height: 32 }} className={styles.emptyIcon} />
+        <p className={styles.emptyText}>No changes detected</p>
+        <p className={styles.emptySubText}>File changes will appear here when the agent modifies files</p>
+        <IconButton aria-label="Refresh" icon={<ArrowSync20Regular />} size="sm" onClick={handleRefresh} />
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className={styles.columnLayout}>
       {/* Summary bar */}
-      <div className="flex items-center gap-3 px-4 py-1.5 border-b border-surface-border text-xs text-fg-muted shrink-0">
+      <div className={styles.summaryBar}>
         <span>
           {data.totalFiles} file{data.totalFiles !== 1 ? 's' : ''} changed
         </span>
-        {data.totalAdditions > 0 && <span className="text-green-400">+{data.totalAdditions}</span>}
-        {data.totalDeletions > 0 && <span className="text-red-400">-{data.totalDeletions}</span>}
-        <div className="flex-1" />
-        <IconButton aria-label="Refresh" icon={<PiArrowsClockwiseBold />} size="sm" onClick={handleRefresh} />
+        {data.totalAdditions > 0 && <span className={styles.greenText}>+{data.totalAdditions}</span>}
+        {data.totalDeletions > 0 && <span className={styles.redText}>-{data.totalDeletions}</span>}
+        <div className={styles.flex1} />
+        <IconButton aria-label="Refresh" icon={<ArrowSync20Regular />} size="sm" onClick={handleRefresh} />
       </div>
 
       {/* Split pane */}
-      <div ref={splitRef} className={cn('relative flex flex-1 min-h-0', isDragging && 'select-none')}>
-        {isDragging && <div className="absolute inset-0 z-20 cursor-col-resize" />}
+      <div ref={splitRef} className={mergeClasses(styles.splitPane, isDragging && styles.selectNonePane)}>
+        {isDragging && <div className={styles.dragOverlay} />}
 
         {/* File list */}
         <div
-          className="min-w-0 overflow-y-auto border-r border-surface-border"
+          className={styles.fileListPane}
           style={{ width: `${listWidthPercent}%` }}
         >
           {data.files.map((file) => (
@@ -305,16 +519,16 @@ const FilesChangedContent = memo(({ ticketId }: { ticketId: TicketId }) => {
 
         {/* Draggable divider */}
         <div
-          className="w-1 shrink-0 cursor-col-resize hover:bg-accent-500/50 transition-colors bg-surface-border z-10"
+          className={styles.divider}
           onMouseDown={handleDividerMouseDown}
         />
 
         {/* Diff pane */}
-        <div className="flex-1 min-w-0 min-h-0">
+        <div className={styles.diffPane}>
           {selectedFile ? (
             <DiffViewer file={selectedFile} />
           ) : (
-            <div className="flex items-center justify-center h-full text-sm text-fg-muted">
+            <div className={styles.centerMessage}>
               Select a file to view its diff
             </div>
           )}
@@ -329,28 +543,26 @@ type PRSubTab = 'Overview' | 'Files Changed';
 const PR_SUB_TABS: PRSubTab[] = ['Overview', 'Files Changed'];
 
 export const TicketPRTab = memo(({ ticketId }: { ticketId: TicketId }) => {
+  const styles = useStyles();
   const [activeSubTab, setActiveSubTab] = useState<PRSubTab>('Overview');
 
+  const handleTabSelect = useCallback((_e: unknown, data: SelectTabData) => {
+    setActiveSubTab(data.value as PRSubTab);
+  }, []);
+
   return (
-    <div className="flex flex-col h-full">
+    <div className={styles.columnLayout}>
       {/* Sub-tab bar */}
-      <div className="flex gap-1 px-4 py-1.5 border-b border-surface-border shrink-0">
-        {PR_SUB_TABS.map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveSubTab(tab)}
-            className={cn(
-              'px-3 py-1 text-xs font-medium rounded-md cursor-pointer select-none transition-colors',
-              activeSubTab === tab ? 'bg-white/10 text-fg' : 'text-fg-muted hover:text-fg hover:bg-white/5'
-            )}
-          >
-            {tab}
-          </button>
-        ))}
+      <div className={styles.tabBar}>
+        <TabList size="small" selectedValue={activeSubTab} onTabSelect={handleTabSelect}>
+          {PR_SUB_TABS.map((tab) => (
+            <Tab key={tab} value={tab}>{tab}</Tab>
+          ))}
+        </TabList>
       </div>
 
       {/* Sub-tab content */}
-      <div className="flex-1 min-h-0">
+      <div className={styles.tabContent}>
         {activeSubTab === 'Overview' && <TicketPROverview ticketId={ticketId} />}
         {activeSubTab === 'Files Changed' && <FilesChangedContent ticketId={ticketId} />}
       </div>

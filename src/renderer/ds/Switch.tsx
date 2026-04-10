@@ -1,7 +1,5 @@
-import * as SwitchPrimitive from '@radix-ui/react-switch';
+import { Switch as FluentSwitch } from '@fluentui/react-components';
 import { forwardRef } from 'react';
-
-import { cn } from '@/renderer/ds/cn';
 
 type SwitchProps = {
   checked?: boolean;
@@ -10,31 +8,16 @@ type SwitchProps = {
   className?: string;
 };
 
-export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(
+export const Switch = forwardRef<HTMLInputElement, SwitchProps>(
   ({ checked, onCheckedChange, disabled, className }, ref) => {
     return (
-      <SwitchPrimitive.Root
+      <FluentSwitch
         ref={ref}
         checked={checked}
-        onCheckedChange={onCheckedChange}
+        onChange={(_e, data) => onCheckedChange?.(data.checked)}
         disabled={disabled}
-        className={cn(
-          'relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full transition-colors',
-          'bg-surface-overlay',
-          'data-[state=checked]:bg-accent-600',
-          'disabled:cursor-not-allowed disabled:opacity-40',
-          'focus-visible:outline-2 focus-visible:outline-accent-500/50 focus-visible:outline-offset-2',
-          className
-        )}
-      >
-        <SwitchPrimitive.Thumb
-          className={cn(
-            'block size-5 rounded-full bg-white shadow-sm transition-transform',
-            'translate-x-1 data-[state=checked]:translate-x-[22px]',
-            'mt-[3px]'
-          )}
-        />
-      </SwitchPrimitive.Root>
+        className={className}
+      />
     );
   }
 );

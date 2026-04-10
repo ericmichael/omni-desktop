@@ -1,8 +1,9 @@
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
-import { PiCaretRightBold, PiFolderBold, PiPlusBold } from 'react-icons/pi';
+import { ChevronRight20Regular, Folder20Regular, Add20Regular } from '@fluentui/react-icons';
+import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 
-import { Badge, cn, EmptyState, FAB, TopAppBar } from '@/renderer/ds';
+import { Badge, Body1, Caption1, CounterBadge, EmptyState, FAB, Tab, TabList, TopAppBar } from '@/renderer/ds';
 import { $inboxItems } from '@/renderer/features/Inbox/state';
 import { IceboxList } from '@/renderer/features/Inbox/IceboxList';
 import { InboxDetail } from '@/renderer/features/Inbox/InboxDetail';
@@ -14,8 +15,136 @@ import type { InboxItemId } from '@/shared/types';
 import { ProjectDetail } from './ProjectDetail';
 import { ProjectForm } from './ProjectForm';
 import { TicketsSidebar } from './Sidebar';
+import { TicketDetail } from './TicketDetail';
 import { $activeWipTickets, $ticketsView, $wipDialogPendingTicket, ticketApi } from './state';
 import { WipLimitDialog } from './WipLimitDialog';
+
+const useStyles = makeStyles({
+  root: {
+    display: 'flex',
+    width: '100%',
+    height: '100%',
+  },
+  desktopSidebar: {
+    display: 'none',
+    '@media (min-width: 640px)': {
+      display: 'block',
+    },
+  },
+  mainColumn: {
+    flex: '1 1 0',
+    minWidth: 0,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  mobileHeader: {
+    flexShrink: 0,
+    '@media (min-width: 640px)': {
+      display: 'none',
+    },
+  },
+  mobileTabBar: {
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+  inboxBadge: {
+    marginLeft: tokens.spacingHorizontalXS,
+  },
+  contentArea: {
+    flex: '1 1 0',
+    minHeight: 0,
+  },
+  desktopContent: {
+    display: 'none',
+    '@media (min-width: 640px)': {
+      display: 'block',
+      height: '100%',
+    },
+  },
+  mobileContent: {
+    height: '100%',
+    '@media (min-width: 640px)': {
+      display: 'none',
+    },
+  },
+  mobileProjectList: {
+    position: 'relative',
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+  },
+  projectListScroll: {
+    flex: '1 1 0',
+    minHeight: 0,
+    overflowY: 'auto',
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalM,
+  },
+  projectListItems: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+  },
+  projectBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+    width: '100%',
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: '14px',
+    paddingBottom: '14px',
+    textAlign: 'left',
+    transitionProperty: 'background-color',
+    transitionDuration: tokens.durationFaster,
+    borderRadius: tokens.borderRadiusLarge,
+    border: 'none',
+    backgroundColor: 'transparent',
+    cursor: 'pointer',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
+    ':active': {
+      backgroundColor: tokens.colorNeutralBackground1Pressed,
+    },
+  },
+  projectIcon: {
+    width: '36px',
+    height: '36px',
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1Hover,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  projectIconText: {
+    color: tokens.colorNeutralForeground2,
+  },
+  projectTextCol: {
+    display: 'flex',
+    flexDirection: 'column',
+    flex: '1 1 0',
+    minWidth: 0,
+    gap: '2px',
+  },
+  projectActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    flexShrink: 0,
+  },
+  truncate: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  chevron: {
+    color: tokens.colorNeutralForeground3,
+  },
+});
 
 /* ---------- Shared sub-views ---------- */
 
@@ -54,6 +183,7 @@ InboxView.displayName = 'InboxView';
 /* ---------- Mobile project list ---------- */
 
 const MobileProjectList = memo(({ onNewProject }: { onNewProject: () => void }) => {
+  const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const projects = store.projects;
 
@@ -66,12 +196,12 @@ const MobileProjectList = memo(({ onNewProject }: { onNewProject: () => void }) 
   }, [store.tickets]);
 
   return (
-    <div className="relative flex flex-col h-full">
-      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3">
+    <div className={styles.mobileProjectList}>
+      <div className={styles.projectListScroll}>
         {projects.length === 0 ? (
           <EmptyState title="No projects yet" description="Tap + to create one" />
         ) : (
-          <div className="flex flex-col gap-1">
+          <div className={styles.projectListItems}>
             {projects.map((project) => {
               const segments = project.workspaceDir.split('/').filter(Boolean);
               const shortPath = segments.slice(-2).join('/');
@@ -80,20 +210,20 @@ const MobileProjectList = memo(({ onNewProject }: { onNewProject: () => void }) 
                 <button
                   key={project.id}
                   onClick={() => ticketApi.goToProject(project.id)}
-                  className="flex items-center gap-3 w-full px-3 py-3.5 text-left transition-colors rounded-xl hover:bg-white/5 active:bg-white/10"
+                  className={styles.projectBtn}
                 >
-                  <span className="size-9 rounded-lg bg-surface-overlay flex items-center justify-center shrink-0">
-                    <PiFolderBold size={18} className="text-fg-muted" />
+                  <span className={styles.projectIcon}>
+                    <Folder20Regular className={styles.projectIconText} />
                   </span>
-                  <div className="flex flex-col flex-1 min-w-0 gap-0.5">
-                    <span className="text-sm font-medium text-fg truncate">{project.label}</span>
-                    <span className="text-xs text-fg-subtle truncate">{shortPath}</span>
+                  <div className={styles.projectTextCol}>
+                    <Body1 className={styles.truncate}>{project.label}</Body1>
+                    <Caption1 className={styles.truncate}>{shortPath}</Caption1>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className={styles.projectActions}>
                     {count > 0 && (
                       <Badge color="blue">{count}</Badge>
                     )}
-                    <PiCaretRightBold size={12} className="text-fg-muted/40" />
+                    <ChevronRight20Regular className={styles.chevron} />
                   </div>
                 </button>
               );
@@ -102,7 +232,7 @@ const MobileProjectList = memo(({ onNewProject }: { onNewProject: () => void }) 
         )}
       </div>
 
-      <FAB icon={<PiPlusBold size={22} />} onClick={onNewProject} aria-label="New project" />
+      <FAB icon={<Add20Regular style={{ width: 22, height: 22 }} />} onClick={onNewProject} aria-label="New project" />
     </div>
   );
 });
@@ -115,6 +245,7 @@ type MobileTab = 'inbox' | 'projects';
 /* ---------- Main export ---------- */
 
 export const Tickets = memo(() => {
+  const styles = useStyles();
   const view = useStore($ticketsView);
   const inboxItemsMap = useStore($inboxItems);
   const [mobileTab, setMobileTab] = useState<MobileTab>(view.type === 'inbox' ? 'inbox' : 'projects');
@@ -132,72 +263,67 @@ export const Tickets = memo(() => {
   }, []);
 
   return (
-    <div className="flex w-full h-full">
+    <div className={styles.root}>
       {/* Desktop: sidebar always visible */}
-      <div className="hidden sm:block">
+      <div className={styles.desktopSidebar}>
         <TicketsSidebar />
       </div>
 
-      <div className="flex-1 min-w-0 flex flex-col">
+      <div className={styles.mainColumn}>
         {/* Mobile: tab bar or back header */}
-        <div className="sm:hidden shrink-0">
+        <div className={styles.mobileHeader}>
           {mobileTab === 'projects' && isViewingProject ? (
             /* Back header when viewing a project detail */
             <TopAppBar title="Projects" onBack={handleBack} className="bg-surface-raised" />
           ) : (
             /* Tab bar: Inbox / Projects */
-            <div className="flex border-b border-surface-border bg-surface-raised">
-              <button
-                onClick={() => { setMobileTab('inbox'); ticketApi.goToInbox(); }}
-                className={cn(
-                  'flex-1 py-2.5 text-center text-sm font-medium transition-colors relative',
-                  mobileTab === 'inbox' ? 'text-fg' : 'text-fg-muted'
-                )}
+            <div className={styles.mobileTabBar}>
+              <TabList
+                selectedValue={mobileTab}
+                onTabSelect={(_e, data) => {
+                  const tab = data.value as MobileTab;
+                  setMobileTab(tab);
+                  if (tab === 'inbox') ticketApi.goToInbox();
+                  else ticketApi.goToDashboard();
+                }}
+                appearance="subtle"
+                style={{ width: '100%' }}
               >
-                Inbox
-                {openInboxCount > 0 && (
-                  <span className="ml-1.5 inline-flex min-w-[16px] h-4 px-1 rounded-full text-xs font-bold leading-4 text-center bg-accent-600 text-white">
-                    {openInboxCount}
-                  </span>
-                )}
-                {mobileTab === 'inbox' && (
-                  <span className="absolute bottom-0 left-4 right-4 h-[2px] bg-accent-600 rounded-t-full" />
-                )}
-              </button>
-              <button
-                onClick={() => { setMobileTab('projects'); ticketApi.goToDashboard(); }}
-                className={cn(
-                  'flex-1 py-2.5 text-center text-sm font-medium transition-colors relative',
-                  mobileTab === 'projects' ? 'text-fg' : 'text-fg-muted'
-                )}
-              >
-                Projects
-                {mobileTab === 'projects' && (
-                  <span className="absolute bottom-0 left-4 right-4 h-[2px] bg-accent-600 rounded-t-full" />
-                )}
-              </button>
+                <Tab value="inbox" style={{ flex: '1 1 0', justifyContent: 'center' }}>
+                  Inbox
+                  {openInboxCount > 0 && (
+                    <CounterBadge count={openInboxCount} size="small" color="brand" className={styles.inboxBadge} />
+                  )}
+                </Tab>
+                <Tab value="projects" style={{ flex: '1 1 0', justifyContent: 'center' }}>
+                  Projects
+                </Tab>
+              </TabList>
             </div>
           )}
         </div>
 
         {/* Content */}
-        <div className="flex-1 min-h-0">
+        <div className={styles.contentArea}>
           {/* Desktop content — driven by $ticketsView */}
-          <div className="hidden sm:block h-full">
+          <div className={styles.desktopContent}>
             {view.type === 'inbox' && <InboxView />}
             {view.type === 'project' && <ProjectDetail projectId={view.projectId} />}
+            {view.type === 'ticket' && <TicketDetail ticketId={view.ticketId} onClose={() => ticketApi.goToDashboard()} />}
             {view.type === 'dashboard' && (
               <EmptyState title="Select a project to get started" description="Or create a new project from the sidebar" />
             )}
           </div>
 
           {/* Mobile content — driven by mobileTab + $ticketsView */}
-          <div className="sm:hidden h-full">
+          <div className={styles.mobileContent}>
             {mobileTab === 'inbox' && <InboxView />}
             {mobileTab === 'projects' && (
-              isViewingProject
-                ? <ProjectDetail projectId={view.projectId} />
-                : <MobileProjectList onNewProject={() => setFormOpen(true)} />
+              view.type === 'ticket'
+                ? <TicketDetail ticketId={view.ticketId} onClose={() => ticketApi.goToDashboard()} />
+                : isViewingProject
+                  ? <ProjectDetail projectId={view.projectId} />
+                  : <MobileProjectList onNewProject={() => setFormOpen(true)} />
             )}
           </div>
         </div>

@@ -1,15 +1,74 @@
 import { memo, useCallback, useEffect, useState } from 'react';
 import Markdown from 'react-markdown';
-import { PiArrowsClockwiseBold, PiGitPullRequestBold } from 'react-icons/pi';
+import { ArrowSync20Regular, BranchRequest20Regular } from '@fluentui/react-icons';
+import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 
-import { IconButton, Spinner } from '@/renderer/ds';
+import { CardSkeleton, IconButton } from '@/renderer/ds';
 import type { TicketId } from '@/shared/types';
 
 import { ticketApi } from './state';
 
 const POLL_INTERVAL_MS = 5_000;
 
+const useStyles = makeStyles({
+  emptyState: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
+    gap: tokens.spacingVerticalM,
+  },
+  emptyIcon: {
+    color: tokens.colorNeutralForeground3,
+  },
+  emptyText: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+  },
+  root: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXL,
+    height: '100%',
+    overflowY: 'auto',
+    padding: tokens.spacingVerticalXXL,
+    maxWidth: '48rem',
+  },
+  prTitle: {
+    fontSize: tokens.fontSizeBase500,
+    fontWeight: tokens.fontWeightBold,
+    color: tokens.colorNeutralForeground1,
+    lineHeight: '1.25',
+  },
+  prBodyWrapper: {
+    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke1),
+    paddingTop: tokens.spacingVerticalL,
+    color: tokens.colorNeutralForeground2,
+  },
+  ciSection: {
+    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke1),
+    paddingTop: tokens.spacingVerticalL,
+  },
+  ciHeading: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground2,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    marginBottom: tokens.spacingVerticalS,
+  },
+  ciBody: {
+    maxWidth: 'none',
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderRadius: tokens.borderRadiusMedium,
+    padding: tokens.spacingVerticalM,
+    color: tokens.colorNeutralForeground2,
+  },
+});
+
 export const TicketPROverview = memo(({ ticketId }: { ticketId: TicketId }) => {
+  const styles = useStyles();
   const [prTitle, setPrTitle] = useState<string | null>(null);
   const [prBody, setPrBody] = useState<string | null>(null);
   const [ciStatus, setCiStatus] = useState<string | null>(null);
@@ -43,43 +102,38 @@ export const TicketPROverview = memo(({ ticketId }: { ticketId: TicketId }) => {
   }, [fetchData]);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-full gap-2">
-        <Spinner size="sm" />
-        <span className="text-sm text-fg-muted">Loading PR details...</span>
-      </div>
-    );
+    return <CardSkeleton cards={3} />;
   }
 
   const hasContent = prTitle || prBody || ciStatus;
 
   if (!hasContent) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-3">
-        <PiGitPullRequestBold size={32} className="text-fg-subtle" />
-        <p className="text-sm text-fg-muted">PR description will appear here when the agent creates it</p>
-        <IconButton aria-label="Refresh" icon={<PiArrowsClockwiseBold />} size="sm" onClick={handleRefresh} />
+      <div className={styles.emptyState}>
+        <BranchRequest20Regular style={{ width: 32, height: 32 }} className={styles.emptyIcon} />
+        <p className={styles.emptyText}>PR description will appear here when the agent creates it</p>
+        <IconButton aria-label="Refresh" icon={<ArrowSync20Regular />} size="sm" onClick={handleRefresh} />
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-6 h-full overflow-y-auto p-6 max-w-3xl">
+    <div className={styles.root}>
       {/* PR Title */}
-      {prTitle && <h1 className="text-xl font-bold text-fg leading-tight">{prTitle}</h1>}
+      {prTitle && <h1 className={styles.prTitle}>{prTitle}</h1>}
 
       {/* PR Body */}
       {prBody && (
-        <div className="prose prose-invert prose-sm max-w-none border-t border-surface-border pt-4 text-fg-muted [&_h1]:text-fg [&_h2]:text-fg [&_h3]:text-fg [&_strong]:text-fg [&_a]:text-accent-400 [&_code]:text-fg [&_code]:bg-surface-raised [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_pre]:bg-surface-raised [&_pre]:rounded-lg [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:px-0 [&_pre_code]:py-0 [&_li]:marker:text-fg-subtle">
+        <div className={`prose prose-invert prose-sm max-w-none ${styles.prBodyWrapper} [&_h1]:text-fg [&_h2]:text-fg [&_h3]:text-fg [&_strong]:text-fg [&_a]:text-accent-400 [&_code]:text-fg [&_code]:bg-surface-raised [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_pre]:bg-surface-raised [&_pre]:rounded-lg [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:px-0 [&_pre_code]:py-0 [&_li]:marker:text-fg-subtle`}>
           <Markdown>{prBody}</Markdown>
         </div>
       )}
 
       {/* CI Status */}
       {ciStatus && (
-        <div className="border-t border-surface-border pt-4">
-          <h3 className="text-xs font-semibold text-fg-muted uppercase tracking-wider mb-2">CI Status</h3>
-          <div className="prose prose-invert prose-sm max-w-none bg-surface-raised rounded-lg p-3 text-fg-muted [&_strong]:text-fg [&_code]:text-fg [&_code]:bg-surface-overlay [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded">
+        <div className={styles.ciSection}>
+          <h3 className={styles.ciHeading}>CI Status</h3>
+          <div className={`prose prose-invert prose-sm max-w-none ${styles.ciBody} [&_strong]:text-fg [&_code]:text-fg [&_code]:bg-surface-overlay [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded`}>
             <Markdown>{ciStatus}</Markdown>
           </div>
         </div>

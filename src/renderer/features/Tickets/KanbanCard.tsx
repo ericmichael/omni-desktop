@@ -1,8 +1,9 @@
 import { useDraggable } from '@dnd-kit/core';
+import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 import { memo, useCallback } from 'react';
-import { PiArrowsClockwiseBold, PiArrowSquareOutBold, PiDotsSixVerticalBold, PiPlayFill } from 'react-icons/pi';
+import { ArrowSync20Regular, Open20Regular, ReOrderDotsVertical20Regular, Play20Filled } from '@fluentui/react-icons';
 
-import { cn } from '@/renderer/ds';
+import { Badge, Body1, IconButton } from '@/renderer/ds';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { isActivePhase } from '@/shared/ticket-phase';
 import type { Ticket, TicketPhase } from '@/shared/types';
@@ -13,8 +14,71 @@ import { ticketApi } from './state';
 
 const canStart = (phase: TicketPhase | undefined) => !phase || !isActivePhase(phase);
 
+const useStyles = makeStyles({
+  card: {
+    borderRadius: tokens.borderRadiusMedium,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: tokens.colorNeutralBackground2,
+    padding: '10px',
+    transitionProperty: 'box-shadow',
+    transitionDuration: '150ms',
+  },
+  overlay: {
+    boxShadow: tokens.shadow16,
+  },
+  dragging: {
+    opacity: 0.3,
+  },
+  titleRow: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '6px',
+  },
+  dragHandle: {
+    flexShrink: 0,
+    marginTop: '2px',
+    cursor: 'grab',
+    color: tokens.colorNeutralForeground3,
+    touchAction: 'none',
+    ':active': { cursor: 'grabbing' },
+    ':hover': { color: tokens.colorNeutralForeground1 },
+  },
+  titleBtn: {
+    flex: '1 1 0',
+    minWidth: 0,
+    textAlign: 'left',
+    cursor: 'pointer',
+    border: 'none',
+    backgroundColor: 'transparent',
+    padding: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  badgeRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    marginTop: '6px',
+  },
+  badges: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    flexWrap: 'wrap',
+    flex: '1 1 0',
+    minWidth: 0,
+  },
+  actions: {
+    display: 'flex',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+});
+
 export const KanbanCard = memo(
   ({ ticket, isOverlay }: { ticket: Ticket; isOverlay?: boolean }) => {
+    const styles = useStyles();
     const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
       id: ticket.id,
       disabled: isOverlay,
@@ -47,93 +111,52 @@ export const KanbanCard = memo(
     return (
       <div
         ref={isOverlay ? undefined : setNodeRef}
-        className={cn(
-          'rounded-lg border border-surface-border bg-surface-raised p-2.5 transition-shadow group',
-          isOverlay ? 'shadow-xl' : '',
-          isDragging && !isOverlay && 'opacity-30'
+        className={mergeClasses(
+          styles.card,
+          isOverlay && styles.overlay,
+          isDragging && !isOverlay && styles.dragging
         )}
       >
-        {/* Title row with drag handle */}
-        <div className="flex items-start gap-1.5">
+        <div className={styles.titleRow}>
           {!isOverlay && (
-            <div
-              {...listeners}
-              {...attributes}
-              className="shrink-0 mt-0.5 cursor-grab active:cursor-grabbing text-fg-muted hover:text-fg touch-none"
-            >
-              <PiDotsSixVerticalBold size={14} />
+            <div {...listeners} {...attributes} className={styles.dragHandle}>
+              <ReOrderDotsVertical20Regular style={{ width: 16, height: 16 }} />
             </div>
           )}
-          <button onClick={handleClick} className="flex-1 min-w-0 text-left cursor-pointer">
-            <p className="text-sm text-fg truncate">{ticket.title}</p>
-          </button>
+          <Body1 as="button" onClick={handleClick} className={styles.titleBtn}>
+            {ticket.title}
+          </Body1>
         </div>
 
-        {/* Badges + actions row */}
-        <div className="flex items-center gap-1.5 mt-1.5">
-          <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
-            <span
-              className={cn(
-                'text-xs px-1.5 py-0.5 rounded-full font-medium',
-                TICKET_PRIORITY_COLORS[ticket.priority]
-              )}
-            >
+        <div className={styles.badgeRow}>
+          <div className={styles.badges}>
+            <Badge color={TICKET_PRIORITY_COLORS[ticket.priority]}>
               {TICKET_PRIORITY_LABELS[ticket.priority]}
-            </span>
+            </Badge>
             {ticket.shaping?.appetite && (
-              <span
-                className={cn(
-                  'text-xs px-1.5 py-0.5 rounded-full font-medium',
-                  APPETITE_COLORS[ticket.shaping.appetite]
-                )}
-              >
+              <Badge color={APPETITE_COLORS[ticket.shaping.appetite]}>
                 {APPETITE_LABELS[ticket.shaping.appetite]}
-              </span>
+              </Badge>
             )}
             {ticket.resolution && (
-              <span
-                className={cn(
-                  'text-xs px-1.5 py-0.5 rounded-full font-medium',
-                  RESOLUTION_COLORS[ticket.resolution]
-                )}
-              >
+              <Badge color={RESOLUTION_COLORS[ticket.resolution]}>
                 {RESOLUTION_LABELS[ticket.resolution]}
-              </span>
+              </Badge>
             )}
             {phase && phase !== 'idle' && !ticket.resolution && (
-              <span
-                className={cn(
-                  'flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded-full font-medium',
-                  PHASE_COLORS[phase] ?? 'text-fg-muted bg-fg-muted/10'
-                )}
-              >
-                {isActivePhase(phase) && (
-                  <PiArrowsClockwiseBold size={10} className="animate-spin" />
-                )}
+              <Badge color={PHASE_COLORS[phase] ?? 'default'}>
+                {isActivePhase(phase) && <ArrowSync20Regular style={{ width: 16, height: 16 }} />}
                 {PHASE_LABELS[phase] ?? phase}
-              </span>
+              </Badge>
             )}
           </div>
           {canStart(phase) && (
-            <div className="flex items-center gap-0.5 shrink-0">
-              <button
-                onClick={handleOpen}
-                className="p-1 rounded text-fg-muted hover:text-fg hover:bg-surface-border/40 transition-colors cursor-pointer"
-                title="Chat"
-              >
-                <PiArrowSquareOutBold size={12} />
-              </button>
-              <button
-                onClick={handleStart}
-                className="p-1 rounded text-fg-muted hover:text-accent hover:bg-accent/10 transition-colors cursor-pointer"
-                title="Autopilot"
-              >
-                <PiPlayFill size={12} />
-              </button>
+            <div className={styles.actions}>
+              <IconButton icon={<Open20Regular />} size="sm" onClick={handleOpen} aria-label="Chat" />
+              <IconButton icon={<Play20Filled />} size="sm" onClick={handleStart} aria-label="Autopilot" />
             </div>
           )}
         </div>
-
       </div>
     );
   }

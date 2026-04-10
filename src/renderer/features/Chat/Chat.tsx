@@ -1,6 +1,7 @@
+import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { PiMonitorBold } from 'react-icons/pi';
+import { Desktop20Regular } from '@fluentui/react-icons';
 
 
 import { buildInteractiveVariables } from '@/lib/client-tools';
@@ -14,6 +15,15 @@ import { $initialized, persistedStoreApi } from '@/renderer/services/store';
 
 import { $chatProcessStatus } from './state';
 import { useChatAutoLaunch } from './use-chat-auto-launch';
+
+const useStyles = makeStyles({
+  fullSize: { width: '100%', height: '100%' },
+  fullSizeRelative: { width: '100%', height: '100%', position: 'relative' },
+  flexColFullRelative: { display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative' },
+  flex1Relative: { flex: '1 1 0', minHeight: 0, position: 'relative' },
+  absoluteInsetZ0: { position: 'absolute', inset: 0, zIndex: 0 },
+  absoluteInsetZ10: { position: 'absolute', inset: 0, zIndex: 10 },
+});
 
 /** Running view when sandbox is enabled — shows OmniAgentsApp with VNC floating widget. */
 const SandboxRunningView = memo(
@@ -49,16 +59,17 @@ const SandboxRunningView = memo(
     const handleOpenVncOverlay = useCallback(() => setVncOverlayOpen(true), []);
     const handleCloseVncOverlay = useCallback(() => setVncOverlayOpen(false), []);
 
+    const styles = useStyles();
     return (
-      <div className="flex flex-col w-full h-full relative">
-        <div className="flex-1 min-h-0 relative">
-          <div className="w-full h-full relative">
+      <div className={styles.flexColFullRelative}>
+        <div className={styles.flex1Relative}>
+          <div className={styles.fullSizeRelative}>
             <OmniAgentsApp uiUrl={uiSrc} greeting={greeting} sandboxLabel={sandboxLabel} sessionId={sessionId} onSessionChange={onSessionChange} variables={buildInteractiveVariables()} onClientToolCall={buildClientToolHandler()} />
             {vncSrc && (
               <FloatingWidget
                 src={vncSrc}
                 label="Omni's PC"
-                icon={PiMonitorBold}
+                icon={Desktop20Regular}
                 overlayOpen={vncOverlayOpen}
                 onOpenOverlay={handleOpenVncOverlay}
                 onCloseOverlay={handleCloseVncOverlay}
@@ -75,6 +86,7 @@ const SandboxRunningView = memo(
 SandboxRunningView.displayName = 'SandboxRunningView';
 
 export const Chat = memo(() => {
+  const styles = useStyles();
   const initialized = useStore($initialized);
   const chatStatus = useStore($chatProcessStatus);
   const store = useStore(persistedStoreApi.$atom);
@@ -82,7 +94,7 @@ export const Chat = memo(() => {
   const [greeting] = useState(getGreeting);
   const [runningMounted, setRunningMounted] = useState(false);
 
-  const theme = store.theme ?? 'tokyo-night';
+  const theme = store.theme ?? 'teams-light';
   const sandboxLabel = useMemo(() => (store.sandboxEnabled ? buildSandboxLabel(store.sandboxVariant) : undefined), [store.sandboxEnabled, store.sandboxVariant]);
 
   const chatSessionId = store.chatSessionId ?? undefined;
@@ -129,9 +141,9 @@ export const Chat = memo(() => {
       phase === 'error' ? ('error' as const) : phase === 'idle' ? ('idle' as const) : ('loading' as const);
 
     return (
-      <div className="w-full h-full relative">
+      <div className={styles.fullSizeRelative}>
         {showShell && (
-          <div className="absolute inset-0 z-0">
+          <div className={styles.absoluteInsetZ0}>
             <ChatShell
               greeting={greeting}
               phase={shellPhase}
@@ -144,7 +156,7 @@ export const Chat = memo(() => {
         )}
         {hasUrls && (
           <div
-            className="absolute inset-0 z-10"
+            className={styles.absoluteInsetZ10}
             ref={(el) => {
               if (el) handleRunningReady();
             }}
@@ -158,7 +170,7 @@ export const Chat = memo(() => {
 
   // When sandbox is disabled, use OmniAgentsHostApp (like old Chat.tsx)
   return (
-    <div className="w-full h-full">
+    <div className={styles.fullSize}>
       <OmniAgentsHostApp
         variables={buildInteractiveVariables()}
         onClientToolCall={buildClientToolHandler()}

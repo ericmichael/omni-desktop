@@ -1,6 +1,5 @@
-import type { PropsWithChildren, ReactNode } from 'react';
-
-import { cn } from '@/renderer/ds/cn';
+import { Body1, Caption1, makeStyles, mergeClasses } from '@fluentui/react-components';
+import type { ReactNode } from 'react';
 
 type EmptyStateProps = {
   title: string;
@@ -9,10 +8,27 @@ type EmptyStateProps = {
   className?: string;
 };
 
-export const EmptyState = ({ title, description, action, className }: EmptyStateProps) => (
-  <div className={cn('flex flex-col items-center justify-center gap-3 h-full px-6', className)}>
-    <p className="text-fg-muted text-base sm:text-sm font-medium">{title}</p>
-    {description && <p className="text-fg-subtle text-sm sm:text-xs text-center">{description}</p>}
-    {action}
-  </div>
-);
+const useStyles = makeStyles({
+  root: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '12px',
+    height: '100%',
+    paddingLeft: '24px',
+    paddingRight: '24px',
+    textAlign: 'center',
+  },
+});
+
+export const EmptyState = ({ title, description, action, className }: EmptyStateProps) => {
+  const styles = useStyles();
+  return (
+    <div className={mergeClasses(styles.root, className)}>
+      <Body1>{title}</Body1>
+      {description && <Caption1>{description}</Caption1>}
+      {action}
+    </div>
+  );
+};

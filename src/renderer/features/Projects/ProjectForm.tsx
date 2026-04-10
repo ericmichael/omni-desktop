@@ -1,3 +1,4 @@
+import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 import { memo, useCallback, useState } from 'react';
 
 import { AnimatedDialog, Button, DialogBody, DialogContent, DialogFooter, DialogHeader, Input, Select } from '@/renderer/ds';
@@ -5,6 +6,30 @@ import { DirectoryBrowserDialog } from '@/renderer/features/Tickets/DirectoryBro
 import type { Project, SandboxConfig } from '@/shared/types';
 
 import { projectsApi } from './state';
+
+const useStyles = makeStyles({
+  body: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalL },
+  field: { display: 'flex', flexDirection: 'column', gap: '6px' },
+  label: { fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground1 },
+  fullWidth: { width: '100%' },
+  dirRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
+  dirDisplay: {
+    flex: '1 1 0',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    borderRadius: tokens.borderRadiusLarge,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: tokens.colorNeutralBackground1,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+  },
+  footer: { gap: tokens.spacingHorizontalS, justifyContent: 'flex-end' },
+});
 
 type SandboxMode = 'default' | 'image' | 'dockerfile';
 
@@ -27,6 +52,7 @@ type ProjectFormProps = {
 };
 
 export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProps) => {
+  const styles = useStyles();
   const [label, setLabel] = useState(editProject?.label ?? '');
   const [workspaceDir, setWorkspaceDir] = useState(editProject?.workspaceDir ?? '');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -105,22 +131,22 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
       <AnimatedDialog open={open} onClose={onClose}>
         <DialogContent className="max-w-md">
           <DialogHeader>{isEdit ? 'Edit Project' : 'New Project'}</DialogHeader>
-          <DialogBody className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm text-fg">Name</label>
+          <DialogBody className={styles.body}>
+            <div className={styles.field}>
+              <label className={styles.label}>Name</label>
               <Input
                 type="text"
                 value={label}
                 onChange={handleLabelChange}
                 placeholder="my-project"
-                className="w-full"
+                className={styles.fullWidth}
               />
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm text-fg">Workspace Directory</label>
-              <div className="flex items-center gap-2">
-                <span className="flex-1 truncate rounded-lg border border-surface-border bg-surface px-3 py-2 text-sm text-fg-muted">
+            <div className={styles.field}>
+              <label className={styles.label}>Workspace Directory</label>
+              <div className={styles.dirRow}>
+                <span className={styles.dirDisplay}>
                   {workspaceDir || 'No directory selected'}
                 </span>
                 <Button size="sm" variant="ghost" onClick={handleBrowseOpen}>
@@ -129,12 +155,12 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
               </div>
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm text-fg">Sandbox</label>
+            <div className={styles.field}>
+              <label className={styles.label}>Sandbox</label>
               <Select
                 value={sandboxMode}
                 onChange={handleSandboxModeChange}
-                className="w-full"
+                className={styles.fullWidth}
               >
                 <option value="default">Default</option>
                 <option value="image">Docker Image</option>
@@ -146,7 +172,7 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
                   value={sandboxValue}
                   onChange={handleSandboxValueChange}
                   placeholder="ubuntu:24.04"
-                  className="w-full"
+                  className={styles.fullWidth}
                 />
               )}
               {sandboxMode === 'dockerfile' && (
@@ -155,12 +181,12 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
                   value={sandboxValue}
                   onChange={handleSandboxValueChange}
                   placeholder="Dockerfile"
-                  className="w-full"
+                  className={styles.fullWidth}
                 />
               )}
             </div>
           </DialogBody>
-          <DialogFooter className="gap-2 justify-end">
+          <DialogFooter className={styles.footer}>
             <Button variant="ghost" onClick={onClose}>
               Cancel
             </Button>

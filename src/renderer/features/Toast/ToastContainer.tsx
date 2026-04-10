@@ -1,96 +1,64 @@
-import { useStore } from '@nanostores/react';
-import { AnimatePresence, motion } from 'framer-motion';
-import { memo, useCallback, useEffect, useRef } from 'react';
-import { PiCheckCircleFill, PiInfoFill, PiWarningFill, PiXBold, PiXCircleFill } from 'react-icons/pi';
+import {
+  Toast,
+  ToastBody,
+  ToastTitle,
+  Toaster,
+  useId,
+  useToastController,
+} from '@fluentui/react-components';
+import { memo, useCallback, useEffect } from 'react';
 
-import { cn } from '@/renderer/ds';
-import type { Toast, ToastLevel } from '@/renderer/features/Toast/state';
+import type { ToastLevel } from '@/renderer/features/Toast/state';
 import { $toasts, removeToast } from '@/renderer/features/Toast/state';
 
-const LEVEL_STYLES: Record<ToastLevel, { icon: React.ReactNode; border: string; iconColor: string }> = {
-  info: {
-    icon: <PiInfoFill />,
-    border: 'border-blue-500/30',
-    iconColor: 'text-blue-400',
-  },
-  success: {
-    icon: <PiCheckCircleFill />,
-    border: 'border-green-500/30',
-    iconColor: 'text-green-400',
-  },
-  warning: {
-    icon: <PiWarningFill />,
-    border: 'border-yellow-500/30',
-    iconColor: 'text-yellow-400',
-  },
-  error: {
-    icon: <PiXCircleFill />,
-    border: 'border-red-500/30',
-    iconColor: 'text-red-400',
-  },
+const LEVEL_TO_INTENT: Record<ToastLevel, 'info' | 'success' | 'warning' | 'error'> = {
+  info: 'info',
+  success: 'success',
+  warning: 'warning',
+  error: 'error',
 };
 
-const ToastItem = memo(({ toast }: { toast: Toast }) => {
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const style = LEVEL_STYLES[toast.level];
+export const ToastContainer = memo(() => {
+  const toasterId = useId('app-toaster');
+  const { dispatchToast } = useToastController(toasterId);
+
+  // Watch the nanostore and dispatch Fluent toasts for each new entry.
+  // This bridges the imperative addToast() API used by IPC/status listeners
+  // into Fluent's toast system.
+  const dispatchRef = useCallback(
+    (toastData: { id: string; level: ToastLevel; title: string; description?: string; durationMs: number }) => {
+      dispatchToast(
+        <Toast>
+          <ToastTitle>{toastData.title}</ToastTitle>
+          {toastData.description && <ToastBody>{toastData.description}</ToastBody>}
+        </Toast>,
+        {
+          intent: LEVEL_TO_INTENT[toastData.level],
+          timeout: toastData.durationMs > 0 ? toastData.durationMs : undefined,
+          toastId: toastData.id,
+        }
+      );
+      // Remove from the nanostore immediately — Fluent now owns the lifecycle
+      removeToast(toastData.id);
+    },
+    [dispatchToast]
+  );
 
   useEffect(() => {
-    if (toast.durationMs > 0) {
-      timerRef.current = setTimeout(() => {
-        removeToast(toast.id);
-      }, toast.durationMs);
+    // Process any toasts already queued before this component mounted
+    for (const t of $toasts.get()) {
+      dispatchRef(t);
     }
-    return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
+
+    // Subscribe to future toasts
+    const unsub = $toasts.subscribe((toasts) => {
+      for (const t of toasts) {
+        dispatchRef(t);
       }
-    };
-  }, [toast.id, toast.durationMs]);
+    });
+    return unsub;
+  }, [dispatchRef]);
 
-  const onDismiss = useCallback(() => {
-    removeToast(toast.id);
-  }, [toast.id]);
-
-  return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, y: 20, scale: 0.95 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 20, scale: 0.95 }}
-      transition={{ type: 'spring', duration: 0.35, bounce: 0.1 }}
-      className={cn(
-        'pointer-events-auto w-full sm:w-80 rounded-xl border bg-surface-raised shadow-lg',
-        'flex items-start gap-3 px-4 py-3.5 sm:px-3.5 sm:py-3',
-        style.border
-      )}
-    >
-      <span className={cn('mt-0.5 text-base sm:text-sm shrink-0', style.iconColor)}>{style.icon}</span>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm sm:text-xs font-medium text-fg">{toast.title}</p>
-        {toast.description && <p className="mt-0.5 text-sm sm:text-xs text-fg-muted leading-relaxed">{toast.description}</p>}
-      </div>
-      <button
-        onClick={onDismiss}
-        className="shrink-0 size-8 sm:size-6 rounded-lg sm:rounded flex items-center justify-center text-fg-subtle hover:text-fg hover:bg-white/5 transition-colors cursor-pointer"
-      >
-        <PiXBold className="text-sm sm:text-xs" />
-      </button>
-    </motion.div>
-  );
-});
-ToastItem.displayName = 'ToastItem';
-
-export const ToastContainer = memo(() => {
-  const toasts = useStore($toasts);
-
-  return (
-    <div className="fixed bottom-16 sm:bottom-4 inset-x-3 sm:inset-x-auto sm:right-4 z-50 flex flex-col-reverse gap-2 pointer-events-none">
-      <AnimatePresence mode="popLayout">
-        {toasts.map((t) => (
-          <ToastItem key={t.id} toast={t} />
-        ))}
-      </AnimatePresence>
-    </div>
-  );
+  return <Toaster toasterId={toasterId} position="bottom-end" />;
 });
 ToastContainer.displayName = 'ToastContainer';

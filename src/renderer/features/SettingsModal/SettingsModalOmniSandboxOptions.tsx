@@ -2,7 +2,8 @@ import { useStore } from '@nanostores/react';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Button, Card, FormField, SectionLabel, Select, Switch } from '@/renderer/ds';
+import { makeStyles, tokens } from '@fluentui/react-components';
+import { Button, Card, FormField, MessageBar, MessageBarBody, SectionLabel, Select, Switch } from '@/renderer/ds';
 import { $launcherVersion } from '@/renderer/features/Banner/state';
 import {
   $omniInstallProcessStatus,
@@ -14,7 +15,27 @@ import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi, selectWorkspaceDir } from '@/renderer/services/store';
 import type { OmniTheme, SandboxBackend, SandboxVariant } from '@/shared/types';
 
+const useStyles = makeStyles({
+  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
+  sectionLabelSpaced: { marginTop: tokens.spacingVerticalS },
+  text: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    maxWidth: '200px',
+    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
+  },
+  textSimple: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
+  },
+});
+
 export const SettingsModalOmniSandboxOptions = memo(() => {
+  const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const runtimeInfo = useStore($omniRuntimeInfo);
   const installStatus = useStore($omniInstallProcessStatus);
@@ -90,18 +111,18 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
   }, []);
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className={styles.root}>
       <SectionLabel>Workspace</SectionLabel>
       <Card>
         <FormField label="Workspace directory">
-          <span className="text-sm sm:text-xs text-fg-muted truncate max-w-[200px]">{store.workspaceDir ?? 'Default'}</span>
+          <span className={styles.text}>{store.workspaceDir ?? 'Default'}</span>
           <Button size="sm" variant="ghost" onClick={selectWorkspaceDir}>
             Change
           </Button>
         </FormField>
       </Card>
 
-      <SectionLabel className="mt-2">Sandbox</SectionLabel>
+      <SectionLabel className={styles.sectionLabelSpaced}>Sandbox</SectionLabel>
       <Card>
         <FormField label={isEnterprise ? 'Use local sandbox' : 'Enable sandbox (Docker)'}>
           <Switch
@@ -136,11 +157,13 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
         )}
       </Card>
 
-      <SectionLabel className="mt-2">Display</SectionLabel>
+      <SectionLabel className={styles.sectionLabelSpaced}>Display</SectionLabel>
       <Card>
         <FormField label="Theme">
-          <Select value={store.theme ?? 'tokyo-night'} onChange={onChangeTheme}>
-            <option value="default">Default</option>
+          <Select value={store.theme ?? 'teams-light'} onChange={onChangeTheme}>
+            <option value="teams-light">Teams Light</option>
+            <option value="teams-dark">Teams Dark</option>
+            <option value="default">Indigo Dark</option>
             <option value="tokyo-night">Tokyo Night</option>
             <option value="vscode-dark">VS Code Dark</option>
             <option value="vscode-light">VS Code Light</option>
@@ -151,7 +174,7 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
 
       {!isEnterprise && (
         <>
-          <SectionLabel className="mt-2">Runtime</SectionLabel>
+          <SectionLabel className={styles.sectionLabelSpaced}>Runtime</SectionLabel>
           <Card>
             <FormField label={`Runtime${runtimeInfo.isInstalled ? ` (v${runtimeInfo.version})` : ''}`}>
               <Button size="sm" variant="ghost" onClick={reinstallRuntime} isDisabled={isInstalling}>
@@ -166,7 +189,7 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
             </FormField>
             <FormField label="'omni' command in PATH">
               {cliInPath?.installed ? (
-                <span className="text-sm sm:text-xs text-fg-muted">Installed</span>
+                <span className={styles.textSimple}>Installed</span>
               ) : (
                 <Button
                   size="sm"
@@ -179,19 +202,19 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
               )}
             </FormField>
             {cliError && (
-              <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 sm:p-2 text-sm sm:text-xs text-red-300">{cliError}</div>
+              <MessageBar intent="error"><MessageBarBody>{cliError}</MessageBarBody></MessageBar>
             )}
           </Card>
         </>
       )}
 
-      <SectionLabel className="mt-2">About</SectionLabel>
+      <SectionLabel className={styles.sectionLabelSpaced}>About</SectionLabel>
       <Card>
         <FormField label="Launcher version">
-          <span className="text-sm sm:text-xs text-fg-muted">{launcherVersion ?? '—'}</span>
+          <span className={styles.textSimple}>{launcherVersion ?? '—'}</span>
         </FormField>
         <FormField label="Compute">
-          <span className="text-sm sm:text-xs text-fg-muted">
+          <span className={styles.textSimple}>
             {isEnterprise && store.sandboxEnabled !== false ? 'Managed' : 'Local'}
           </span>
         </FormField>

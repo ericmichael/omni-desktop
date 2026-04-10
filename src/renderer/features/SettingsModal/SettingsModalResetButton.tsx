@@ -1,7 +1,6 @@
 import { memo, useCallback, useState } from 'react';
 
 import { Button, ConfirmDialog } from '@/renderer/ds';
-import { $isSettingsOpen } from '@/renderer/features/SettingsModal/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 
 export const SettingsModalResetButton = memo(() => {
@@ -12,7 +11,7 @@ export const SettingsModalResetButton = memo(() => {
 
   const handleReset = useCallback(() => {
     persistedStoreApi.reset();
-    $isSettingsOpen.set(false);
+    persistedStoreApi.setKey('layoutMode', 'home');
   }, []);
 
   return (

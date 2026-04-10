@@ -1,6 +1,5 @@
+import { Badge as FluentBadge, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import type { PropsWithChildren } from 'react';
-
-import { cn } from '@/renderer/ds/cn';
 
 type ColorScheme = 'default' | 'blue' | 'green' | 'purple' | 'red' | 'yellow' | 'sky' | 'orange';
 
@@ -9,19 +8,33 @@ type BadgeProps = {
   className?: string;
 };
 
-const colorClasses: Record<ColorScheme, string> = {
-  default: 'text-fg-muted bg-fg-muted/10',
-  blue: 'text-blue-400 bg-blue-400/10',
-  green: 'text-green-400 bg-green-400/10',
-  purple: 'text-purple-400 bg-purple-400/10',
-  red: 'text-red-400 bg-red-400/10',
-  yellow: 'text-yellow-400 bg-yellow-400/10',
-  sky: 'text-sky-400 bg-sky-400/10',
-  orange: 'text-orange-400 bg-orange-400/10',
+const fluentColorMap: Record<ColorScheme, 'informative' | 'brand' | 'success' | 'important' | 'warning' | 'severe' | 'subtle'> = {
+  default: 'subtle',
+  blue: 'informative',
+  green: 'success',
+  purple: 'brand',
+  red: 'important',
+  yellow: 'warning',
+  sky: 'informative',
+  orange: 'severe',
 };
 
-export const Badge = ({ color = 'default', className, children }: PropsWithChildren<BadgeProps>) => (
-  <span className={cn('inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium', colorClasses[color], className)}>
-    {children}
-  </span>
-);
+const useStyles = makeStyles({
+  root: {
+    fontWeight: tokens.fontWeightSemibold,
+  },
+});
+
+export const Badge = ({ color = 'default', className, children }: PropsWithChildren<BadgeProps>) => {
+  const styles = useStyles();
+  return (
+    <FluentBadge
+      appearance="tint"
+      color={fluentColorMap[color]}
+      shape="rounded"
+      className={mergeClasses(styles.root, className)}
+    >
+      {children}
+    </FluentBadge>
+  );
+};

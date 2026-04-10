@@ -1,8 +1,6 @@
-import { motion } from 'framer-motion';
-import type { ReactNode } from 'react';
+import { Button as FluentButton, Tooltip } from '@fluentui/react-components';
+import type { ReactElement, ReactNode } from 'react';
 import { forwardRef } from 'react';
-
-import { cn } from '@/renderer/ds/cn';
 
 type Size = 'sm' | 'md' | 'lg';
 
@@ -10,40 +8,43 @@ type IconButtonProps = {
   'aria-label': string;
   icon: ReactNode;
   size?: Size;
+  tooltip?: string;
   isDisabled?: boolean;
   onClick?: () => void;
   className?: string;
 };
 
-const sizeClasses: Record<Size, string> = {
-  sm: 'size-9 text-base',
-  md: 'size-10 text-lg',
-  lg: 'size-12 text-xl',
+const sizeMap: Record<Size, 'small' | 'medium' | 'large'> = {
+  sm: 'small',
+  md: 'medium',
+  lg: 'large',
 };
 
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
-  ({ icon, size = 'md', isDisabled, className, onClick, ...rest }, ref) => {
-    return (
-      <motion.button
+  ({ icon, size = 'md', tooltip, isDisabled, className, onClick, ...rest }, ref) => {
+    const button = (
+      <FluentButton
         ref={ref}
-        whileHover={isDisabled ? undefined : { scale: 1.05 }}
-        whileTap={isDisabled ? undefined : { scale: 0.95 }}
-        transition={{ duration: 0.15 }}
-        className={cn(
-          'inline-flex items-center justify-center rounded-lg text-fg-muted cursor-pointer select-none',
-          'hover:bg-white/5 hover:text-fg transition-colors',
-          'focus-visible:outline-2 focus-visible:outline-accent-500/50 focus-visible:outline-offset-2',
-          'disabled:opacity-40 disabled:pointer-events-none',
-          sizeClasses[size],
-          className
-        )}
+        appearance="subtle"
+        shape="circular"
+        size={sizeMap[size]}
         disabled={isDisabled}
         onClick={onClick}
+        icon={icon as ReactElement}
         aria-label={rest['aria-label']}
-      >
-        {icon}
-      </motion.button>
+        className={className}
+      />
     );
+
+    if (tooltip) {
+      return (
+        <Tooltip content={tooltip} relationship="label">
+          {button}
+        </Tooltip>
+      );
+    }
+
+    return button;
   }
 );
 

@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 
 import { Button, Input, Select, Textarea } from '@/renderer/ds';
 import { initiativeApi } from '@/renderer/features/Initiatives/state';
@@ -6,6 +7,33 @@ import { persistedStoreApi } from '@/renderer/services/store';
 import type { GitRepoInfo, Initiative, ProjectId } from '@/shared/types';
 
 import { ticketApi } from './state';
+
+const useStyles = makeStyles({
+  root: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+    borderRadius: tokens.borderRadiusMedium,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: 'rgba(var(--colorNeutralBackground1Hover), 0.5)',
+    padding: tokens.spacingVerticalL,
+  },
+  branchRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  branchLabel: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightMedium,
+    color: tokens.colorNeutralForeground3,
+  },
+  actions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+});
 
 export const InitiativeForm = memo(({
   projectId,
@@ -16,6 +44,7 @@ export const InitiativeForm = memo(({
   onClose: () => void;
   editInitiative?: Initiative;
 }) => {
+  const styles = useStyles();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [branch, setBranch] = useState('');
@@ -66,7 +95,7 @@ export const InitiativeForm = memo(({
   }, [title, description, branch, gitInfo, isSubmitting, projectId, onClose, editInitiative]);
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-surface-border bg-surface-overlay/50 p-4">
+    <div className={styles.root}>
       <Input
         value={title}
         onChange={(e) => setTitle(e.target.value)}
@@ -81,8 +110,8 @@ export const InitiativeForm = memo(({
         rows={2}
       />
       {gitInfo?.isGitRepo && (
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-medium text-fg-subtle">Branch</label>
+        <div className={styles.branchRow}>
+          <label className={styles.branchLabel}>Branch</label>
           <Select
             value={branch}
             onChange={(e) => setBranch(e.target.value)}
@@ -97,7 +126,7 @@ export const InitiativeForm = memo(({
           </Select>
         </div>
       )}
-      <div className="flex items-center gap-2">
+      <div className={styles.actions}>
         <Button onClick={handleSubmit} isDisabled={!title.trim() || isSubmitting}>
           {editInitiative ? 'Save Initiative' : 'Create Initiative'}
         </Button>

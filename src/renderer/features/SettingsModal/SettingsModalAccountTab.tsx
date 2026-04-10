@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Button, Card, FormField, SectionLabel, Spinner } from '@/renderer/ds';
+import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
+import { Button, Card, FormField, FormSkeleton, MessageBar, MessageBarBody, SectionLabel, Spinner } from '@/renderer/ds';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import type { PlatformCredentials } from '@/shared/types';
 
@@ -9,7 +10,59 @@ type AuthFlowState =
   | { step: 'pending'; userCode: string; verificationUri: string; message: string }
   | { step: 'error'; error: string };
 
+const useStyles = makeStyles({
+  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
+  text: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
+  },
+  textCapitalize: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    textTransform: 'capitalize',
+    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
+  },
+  flexEnd: { display: 'flex', justifyContent: 'flex-end' },
+  codeBox: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+    padding: tokens.spacingVerticalM,
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: tokens.borderRadiusLarge,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+  },
+  codeText: {
+    fontSize: tokens.fontSizeBase500,
+    fontFamily: 'monospace',
+    fontWeight: tokens.fontWeightBold,
+    letterSpacing: '0.1em',
+    color: tokens.colorNeutralForeground1,
+    flex: '1 1 0',
+    textAlign: 'center',
+  },
+  link: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorBrandForeground1,
+    textDecorationLine: 'underline',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
+  },
+  waitingRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
+  },
+});
+
 export const SettingsModalAccountTab = memo(() => {
+  const styles = useStyles();
   const [isEnterprise, setIsEnterprise] = useState<boolean | null>(null);
   const [auth, setAuth] = useState<PlatformCredentials | null>(null);
   const [flow, setFlow] = useState<AuthFlowState>({ step: 'idle' });
@@ -68,19 +121,15 @@ export const SettingsModalAccountTab = memo(() => {
   }, [flow]);
 
   if (isEnterprise === null) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Spinner />
-      </div>
-    );
+    return <FormSkeleton fields={3} />;
   }
 
   if (!isEnterprise) {
     return (
-      <div className="flex flex-col gap-3">
+      <div className={styles.root}>
         <SectionLabel>Account</SectionLabel>
         <Card>
-          <p className="text-sm sm:text-xs text-fg-muted">
+          <p className={styles.text}>
             This is an open-source build. Enterprise authentication is not available.
           </p>
         </Card>
@@ -90,29 +139,29 @@ export const SettingsModalAccountTab = memo(() => {
 
   if (auth) {
     return (
-      <div className="flex flex-col gap-3">
+      <div className={styles.root}>
         <SectionLabel>Account</SectionLabel>
         <Card>
           <FormField label="Signed in as">
-            <span className="text-sm sm:text-xs text-fg-muted">{auth.userEmail ?? 'Unknown'}</span>
+            <span className={styles.text}>{auth.userEmail ?? 'Unknown'}</span>
           </FormField>
           {auth.userName && (
             <FormField label="Name">
-              <span className="text-sm sm:text-xs text-fg-muted">{auth.userName}</span>
+              <span className={styles.text}>{auth.userName}</span>
             </FormField>
           )}
           {auth.userRole && (
             <FormField label="Role">
-              <span className="text-sm sm:text-xs text-fg-muted capitalize">{auth.userRole}</span>
+              <span className={styles.textCapitalize}>{auth.userRole}</span>
             </FormField>
           )}
           {auth.domains && auth.domains.length > 0 && (
             <FormField label="Domains">
-              <span className="text-sm sm:text-xs text-fg-muted">{auth.domains.map((d) => d.name).join(', ')}</span>
+              <span className={styles.text}>{auth.domains.map((d) => d.name).join(', ')}</span>
             </FormField>
           )}
         </Card>
-        <div className="flex justify-end">
+        <div className={styles.flexEnd}>
           <Button size="sm" variant="destructive" onClick={handleSignOut}>
             Sign out
           </Button>
@@ -122,13 +171,13 @@ export const SettingsModalAccountTab = memo(() => {
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className={styles.root}>
       <SectionLabel>Account</SectionLabel>
       <Card>
         {flow.step === 'idle' && (
           <>
-            <p className="text-sm sm:text-xs text-fg-muted">Sign in with your institutional account to access managed sandboxes and enterprise features.</p>
-            <div className="flex justify-end">
+            <p className={styles.text}>Sign in with your institutional account to access managed sandboxes and enterprise features.</p>
+            <div className={styles.flexEnd}>
               <Button size="sm" variant="primary" onClick={handleSignIn}>
                 Sign in
               </Button>
@@ -138,9 +187,9 @@ export const SettingsModalAccountTab = memo(() => {
 
         {flow.step === 'pending' && (
           <>
-            <p className="text-sm sm:text-xs text-fg-muted">{flow.message || 'Enter the code below at the verification URL to complete sign-in.'}</p>
-            <div className="flex items-center gap-3 p-3 bg-surface rounded-lg border border-surface-border">
-              <code className="text-lg font-mono font-bold tracking-widest text-fg flex-1 text-center">
+            <p className={styles.text}>{flow.message || 'Enter the code below at the verification URL to complete sign-in.'}</p>
+            <div className={styles.codeBox}>
+              <code className={styles.codeText}>
                 {flow.userCode}
               </code>
               <Button size="sm" variant="ghost" onClick={handleCopyCode}>
@@ -151,11 +200,11 @@ export const SettingsModalAccountTab = memo(() => {
               href={flow.verificationUri}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-sm sm:text-xs text-accent-400 hover:text-accent-300 underline truncate"
+              className={styles.link}
             >
               {flow.verificationUri}
             </a>
-            <div className="flex items-center gap-2 text-sm sm:text-xs text-fg-muted">
+            <div className={styles.waitingRow}>
               <Spinner />
               <span>Waiting for authentication...</span>
             </div>
@@ -164,10 +213,8 @@ export const SettingsModalAccountTab = memo(() => {
 
         {flow.step === 'error' && (
           <>
-            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 sm:p-2 text-sm sm:text-xs text-red-300">
-              {flow.error}
-            </div>
-            <div className="flex justify-end">
+            <MessageBar intent="error"><MessageBarBody>{flow.error}</MessageBarBody></MessageBar>
+            <div className={styles.flexEnd}>
               <Button size="sm" variant="primary" onClick={handleSignIn}>
                 Try again
               </Button>

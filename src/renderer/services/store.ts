@@ -12,7 +12,7 @@ const getDefaults = (): StoreData => ({
   previewFeatures: false,
 
   layoutMode: 'home',
-  theme: 'tokyo-night',
+  theme: 'teams-light',
   onboardingComplete: false,
   projects: [],
   initiatives: [],
@@ -126,7 +126,7 @@ const init = async () => {
   const lm = store.layoutMode as string;
   if (lm === 'work' || lm === 'desktop') {
     await persistedStoreApi.setKey('layoutMode', 'chat');
-  } else if (!['chat', 'code', 'projects'].includes(lm)) {
+  } else if (!['home', 'chat', 'code', 'projects', 'dashboards', 'settings'].includes(lm)) {
     await persistedStoreApi.setKey('layoutMode', 'projects');
   }
 

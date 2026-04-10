@@ -1,9 +1,25 @@
+import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 import { memo, useCallback, useState } from 'react';
 
-import { Button, cn, SectionLabel, Textarea } from '@/renderer/ds';
+import { Button, Radio, RadioGroup, SectionLabel, Textarea } from '@/renderer/ds';
 import type { Appetite, ShapingData } from '@/shared/types';
 
 import { APPETITE_DESCRIPTIONS, APPETITE_LABELS } from './shaping-constants';
+
+const useStyles = makeStyles({
+  root: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalL,
+    borderRadius: '16px',
+    backgroundColor: tokens.colorNeutralBackground2,
+    padding: tokens.spacingHorizontalL,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+  },
+  field: { display: 'flex', flexDirection: 'column', gap: '6px' },
+  label: { fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightMedium, color: tokens.colorNeutralForeground2 },
+  footer: { display: 'flex', justifyContent: 'flex-end' },
+});
 
 type ShapingFormProps = {
   initial?: ShapingData;
@@ -13,6 +29,7 @@ type ShapingFormProps = {
 const APPETITES: Appetite[] = ['small', 'medium', 'large'];
 
 export const ShapingForm = memo(({ initial, onSave }: ShapingFormProps) => {
+  const styles = useStyles();
   const [doneLooksLike, setDoneLooksLike] = useState(initial?.doneLooksLike ?? '');
   const [appetite, setAppetite] = useState<Appetite>(initial?.appetite ?? 'medium');
   const [outOfScope, setOutOfScope] = useState(initial?.outOfScope ?? '');
@@ -29,58 +46,52 @@ export const ShapingForm = memo(({ initial, onSave }: ShapingFormProps) => {
   }, [doneLooksLike, appetite, outOfScope, isValid, onSave]);
 
   return (
-    <div className="flex flex-col gap-4 rounded-2xl bg-surface-raised/50 p-4 border border-surface-border">
+    <div className={styles.root}>
       <SectionLabel>Shape this work</SectionLabel>
 
       {/* Done looks like */}
-      <div className="flex flex-col gap-1.5">
-        <label className="text-xs font-medium text-fg-muted">What does done look like?</label>
+      <div className={styles.field}>
+        <label className={styles.label}>What does done look like?</label>
         <Textarea
           value={doneLooksLike}
           onChange={(e) => setDoneLooksLike(e.target.value)}
           placeholder="When this is finished, what's true that isn't true now?"
           rows={2}
           maxHeight={120}
-          className="rounded-xl"
         />
       </div>
 
       {/* Appetite */}
-      <div className="flex flex-col gap-1.5">
-        <label className="text-xs font-medium text-fg-muted">Appetite</label>
-        <div className="flex items-center gap-2">
+      <div className={styles.field}>
+        <label className={styles.label}>Appetite</label>
+        <RadioGroup
+          layout="horizontal"
+          value={appetite}
+          onChange={(_e, data) => setAppetite(data.value as Appetite)}
+        >
           {APPETITES.map((a) => (
-            <button
+            <Radio
               key={a}
-              onClick={() => setAppetite(a)}
-              className={cn(
-                'flex flex-col items-center gap-0.5 px-4 py-2 rounded-xl text-xs font-medium transition-colors flex-1',
-                appetite === a
-                  ? 'bg-accent-600/20 text-accent-400 border border-accent-500/30'
-                  : 'bg-surface-overlay text-fg-muted hover:text-fg border border-transparent'
-              )}
-            >
-              <span>{APPETITE_LABELS[a]}</span>
-              <span className="text-[10px] font-normal opacity-70">{APPETITE_DESCRIPTIONS[a]}</span>
-            </button>
+              value={a}
+              label={`${APPETITE_LABELS[a]} — ${APPETITE_DESCRIPTIONS[a]}`}
+            />
           ))}
-        </div>
+        </RadioGroup>
       </div>
 
       {/* Out of scope */}
-      <div className="flex flex-col gap-1.5">
-        <label className="text-xs font-medium text-fg-muted">What's out of scope?</label>
+      <div className={styles.field}>
+        <label className={styles.label}>What's out of scope?</label>
         <Textarea
           value={outOfScope}
           onChange={(e) => setOutOfScope(e.target.value)}
           placeholder="What are we explicitly NOT doing?"
           rows={2}
           maxHeight={120}
-          className="rounded-xl"
         />
       </div>
 
-      <div className="flex justify-end">
+      <div className={styles.footer}>
         <Button size="sm" onClick={handleSave} isDisabled={!isValid}>
           Shape
         </Button>
