@@ -31,7 +31,7 @@ const makeTicket = (overrides: Partial<Ticket> = {}): Ticket => ({
 const makeProject = (overrides: Partial<Project> = {}): Project => ({
   id: 'proj-1',
   label: 'My Project',
-  workspaceDir: '/home/user/project',
+  source: { kind: 'local', workspaceDir: '/home/user/project' },
   createdAt: Date.now(),
   ...overrides,
 });

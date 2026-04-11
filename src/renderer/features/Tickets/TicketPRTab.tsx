@@ -107,7 +107,7 @@ const useStyles = makeStyles({
   },
   hunkRow: {
     backgroundColor: 'rgba(59, 130, 246, 0.1)',
-    color: '#60a5fa',
+    color: tokens.colorBrandForeground1,
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalL,
     paddingTop: '2px',
@@ -142,10 +142,10 @@ const useStyles = makeStyles({
     whiteSpace: 'pre',
   },
   additionText: {
-    color: '#86efac',
+    color: tokens.colorPaletteGreenForeground1,
   },
   deletionText: {
-    color: '#fca5a5',
+    color: tokens.colorPaletteRedForeground1,
   },
   contextText: {
     color: tokens.colorNeutralForeground2,
@@ -171,13 +171,13 @@ const useStyles = makeStyles({
     backgroundColor: 'transparent',
   },
   fileListSelected: {
-    backgroundColor: 'rgba(99, 102, 241, 0.2)',
+    backgroundColor: tokens.colorBrandBackground2,
     color: tokens.colorNeutralForeground1,
   },
   fileListUnselected: {
     color: tokens.colorNeutralForeground2,
     ':hover': {
-      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+      backgroundColor: tokens.colorSubtleBackgroundHover,
     },
   },
   statusBadge: {
@@ -279,7 +279,7 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralStroke1,
     zIndex: 10,
     ':hover': {
-      backgroundColor: 'rgba(99, 102, 241, 0.5)',
+      backgroundColor: tokens.colorBrandStroke1,
     },
   },
   diffPane: {
@@ -296,10 +296,10 @@ const useStyles = makeStyles({
     minHeight: 0,
   },
   greenText: {
-    color: '#4ade80',
+    color: tokens.colorPaletteGreenForeground1,
   },
   redText: {
-    color: '#f87171',
+    color: tokens.colorPaletteRedForeground1,
   },
 });
 

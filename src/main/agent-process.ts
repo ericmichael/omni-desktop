@@ -51,6 +51,13 @@ export type AgentProcessStartArg = {
   agentSlug?: string;
   /** Enterprise mode: domain slug override */
   domain?: string;
+  /** Pre-synced share name from WorkspaceSyncManager (skips one-shot upload). */
+  preSyncedShareName?: string;
+  /** Git-remote source: container clones this repo instead of receiving an uploaded workspace. */
+  gitRepo?: {
+    url: string;
+    branch?: string;
+  };
 };
 
 export type FetchFn = typeof globalThis.fetch;
@@ -166,7 +173,8 @@ export class AgentProcess {
       if (!podmanOk) return;
     }
 
-    if (!(await isDirectory(arg.workspaceDir))) {
+    // Git-remote projects don't have a local workspace dir — the container clones the repo
+    if (!arg.gitRepo && !(await isDirectory(arg.workspaceDir))) {
       this.updateStatus({ type: 'error', error: { message: `Workspace directory not found: ${arg.workspaceDir}` } });
       return;
     }
@@ -313,7 +321,8 @@ export class AgentProcess {
         }
 
         // Download workspace files back from Azure Files share
-        if (this.lastStartArg) {
+        // Skip if: sync manager handles it, or git-remote (container pushes to git)
+        if (this.lastStartArg && !this.lastStartArg.preSyncedShareName && !this.lastStartArg.gitRepo) {
           try {
             this.ipcRawOutput('Finalizing workspace download...\r\n');
             const { downloadSasUrl } = await this.platformClient.finalizeWorkspace(sessionId);
@@ -375,16 +384,24 @@ export class AgentProcess {
     try {
       this.log.info(c.cyan(`Requesting sandbox from platform (agent: ${agentSlug})...\r\n`));
 
-      const session = await this.platformClient.startSession(agentSlug, arg.domain);
+      const session = await this.platformClient.startSession(agentSlug, arg.domain, arg.gitRepo);
       this.platformSessionId = session.sessionId;
 
-      // Upload workspace files to Azure Files share
-      this.log.info(c.cyan(`Preparing workspace upload for session ${session.sessionId}...\r\n`));
-      const { uploadSasUrl } = await this.platformClient.prepareWorkspace(session.sessionId);
-      await uploadWorkspace(arg.workspaceDir, uploadSasUrl, this.fetchFn, (msg) =>
-        this.ipcRawOutput(msg + '\r\n')
-      );
-      this.log.info(c.cyan('Workspace uploaded successfully\r\n'));
+      if (arg.gitRepo) {
+        // Git-remote: container will clone the repo — no workspace upload needed
+        this.log.info(c.cyan(`Container will clone ${arg.gitRepo.url}${arg.gitRepo.branch ? ` (${arg.gitRepo.branch})` : ''}\r\n`));
+      } else if (arg.preSyncedShareName) {
+        // Workspace is already synced via WorkspaceSyncManager — skip upload
+        this.log.info(c.cyan(`Using pre-synced share: ${arg.preSyncedShareName}\r\n`));
+      } else {
+        // One-shot upload for non-synced workspaces
+        this.log.info(c.cyan(`Preparing workspace upload for session ${session.sessionId}...\r\n`));
+        const { uploadSasUrl } = await this.platformClient.prepareWorkspace(session.sessionId);
+        await uploadWorkspace(arg.workspaceDir, uploadSasUrl, this.fetchFn, (msg) =>
+          this.ipcRawOutput(msg + '\r\n')
+        );
+        this.log.info(c.cyan('Workspace uploaded successfully\r\n'));
+      }
 
       this.log.info(c.cyan(`Session ${session.sessionId} created, waiting for container...\r\n`));
       this.updateStatus({ type: 'connecting', data: { uiUrl: '' } });
@@ -663,6 +680,14 @@ export class AgentProcess {
       args.push('--rebuild');
     }
 
+    // Git-remote: pass repo info so the container clones instead of expecting a mounted workspace
+    if (arg.gitRepo) {
+      args.push('--env', `OMNI_GIT_REPO_URL=${arg.gitRepo.url}`);
+      if (arg.gitRepo.branch) {
+        args.push('--env', `OMNI_GIT_BRANCH=${arg.gitRepo.branch}`);
+      }
+    }
+
     return args;
   };
 
@@ -876,6 +901,65 @@ export class AgentProcess {
       await execFileAsync(this.containerBin, ['stop', containerRef], { encoding: 'utf8', timeout: 15_000, env });
     } catch {
       // ignore cleanup failures
+    }
+  };
+
+  /**
+   * Execute a command inside the running container. Returns true on exit 0.
+   * Uses docker/podman exec for local container modes, platform API for platform mode.
+   */
+  execInContainer = async (command: string, cwd?: string, timeoutMs = 60_000): Promise<boolean> => {
+    // Platform mode — delegate to the platform exec API
+    if (this.mode === 'platform') {
+      if (!this.platformClient || !this.platformSessionId) {
+        this.log.warn('execInContainer: no platform session');
+        return false;
+      }
+      try {
+        const result = await this.platformClient.execInSession(
+          this.platformSessionId,
+          command,
+          cwd,
+          Math.floor(timeoutMs / 1000)
+        );
+        if (result.stderr) this.log.info(`[exec] ${result.stderr.trim()}`);
+        return result.success;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.log.warn(`execInContainer (platform) failed: ${msg}`);
+        return false;
+      }
+    }
+
+    // Local/none modes have no container to exec into
+    if (this.mode === 'local' || this.mode === 'none') {
+      this.log.warn('execInContainer not supported for mode: ' + this.mode);
+      return true;
+    }
+
+    // Docker/podman — exec directly
+    const containerRef = this.getActiveContainerRef();
+    if (!containerRef) {
+      this.log.warn('execInContainer: no running container');
+      return false;
+    }
+    const args = ['exec'];
+    if (cwd) args.push('-w', cwd);
+    args.push(containerRef, '/bin/sh', '-c', command);
+
+    try {
+      const env = { ...process.env, ...DEFAULT_ENV, ...shellEnvSync() } as Record<string, string>;
+      const { stderr } = await execFileAsync(this.containerBin, args, {
+        encoding: 'utf8',
+        timeout: timeoutMs,
+        env,
+      });
+      if (stderr) this.log.info(`[exec] ${stderr.trim()}`);
+      return true;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.log.warn(`execInContainer failed: ${msg}`);
+      return false;
     }
   };
 

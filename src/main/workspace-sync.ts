@@ -1,23 +1,34 @@
 /**
  * Workspace file sync for Azure Files shares.
  *
- * Uploads a local directory to an Azure Files share and downloads it back,
- * using the Azure Files REST API with SAS URLs.
+ * Provides both bulk (tar-based) and incremental (per-file) sync operations
+ * against Azure Files REST API using SAS URLs.
  */
 
-import { readdir, readFile, mkdir, writeFile, stat } from 'node:fs/promises';
-import { join, posix } from 'node:path';
+import { execFile } from 'node:child_process';
+import { readFile, stat, unlink, writeFile, mkdir } from 'node:fs/promises';
+import { join, posix, dirname } from 'node:path';
+import { promisify } from 'node:util';
+import { tmpdir } from 'node:os';
+
+const execFileAsync = promisify(execFile);
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type FetchFn = typeof globalThis.fetch;
-type ProgressFn = (message: string) => void;
+export type FetchFn = typeof globalThis.fetch;
+export type ProgressFn = (message: string) => void;
 
-type ParsedSasUrl = {
+export type ParsedSasUrl = {
   baseUrl: string;
   sasParams: string;
+};
+
+export type RemoteFileEntry = {
+  relativePath: string;
+  size: number;
+  lastModified: number; // epoch ms
 };
 
 // ---------------------------------------------------------------------------
@@ -25,16 +36,27 @@ type ParsedSasUrl = {
 // ---------------------------------------------------------------------------
 
 const API_VERSION = '2024-11-04';
-const MAX_CONCURRENCY = 5;
+const ARCHIVE_NAME = '__workspace__.tar.gz';
+/** Azure Files PUT Range max is 4 MiB. */
+const RANGE_CHUNK_SIZE = 4 * 1024 * 1024;
 
-const SKIP_DIRS = new Set(['.git', 'node_modules', '__pycache__', '.venv', 'venv']);
-const SKIP_FILES = new Set(['.env']);
+const TAR_EXCLUDES = [
+  '--exclude=.git',
+  '--exclude=node_modules',
+  '--exclude=__pycache__',
+  '--exclude=.venv',
+  '--exclude=venv',
+  '--exclude=.env',
+];
+
+export const IGNORE_DIRS = new Set(['.git', 'node_modules', '__pycache__', '.venv', 'venv']);
+export const IGNORE_FILES = new Set(['.env']);
 
 // ---------------------------------------------------------------------------
 // SAS URL helpers
 // ---------------------------------------------------------------------------
 
-function parseSasUrl(sasUrl: string): ParsedSasUrl {
+export function parseSasUrl(sasUrl: string): ParsedSasUrl {
   const qIdx = sasUrl.indexOf('?');
   if (qIdx === -1) {
     return { baseUrl: sasUrl, sasParams: '' };
@@ -45,7 +67,13 @@ function parseSasUrl(sasUrl: string): ParsedSasUrl {
   };
 }
 
-function fileUrl(parsed: ParsedSasUrl, relativePath: string, extraParams?: string): string {
+/** Strip SAS token from a URL or error message so it doesn't leak into logs. */
+export function sanitizeUrl(url: string): string {
+  // Match anything after '?sig=' or '?sv=' (SAS query params) and redact it
+  return url.replace(/\?(?:sig|sv|se|sp|srt|ss|spr|st)=[^\s'")]+/gi, '?[SAS_REDACTED]');
+}
+
+export function fileUrl(parsed: ParsedSasUrl, relativePath: string, extraParams?: string): string {
   const encodedPath = relativePath
     .split('/')
     .map((seg) => encodeURIComponent(seg))
@@ -80,69 +108,49 @@ async function runWithConcurrency<T>(tasks: (() => Promise<T>)[], limit: number)
 }
 
 // ---------------------------------------------------------------------------
-// Upload
+// Azure Files REST operations — single file
 // ---------------------------------------------------------------------------
 
-type FileEntry = {
-  relativePath: string;
-  absolutePath: string;
-  size: number;
-};
-
-async function walkDirectory(dir: string, relativeBase: string): Promise<{ dirs: string[]; files: FileEntry[] }> {
-  const dirs: string[] = [];
-  const files: FileEntry[] = [];
-
-  async function walk(currentDir: string, currentRelative: string): Promise<void> {
-    const entries = await readdir(currentDir, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const name = entry.name;
-      const relativePath = currentRelative ? posix.join(currentRelative, name) : name;
-      const absolutePath = join(currentDir, name);
-
-      if (entry.isDirectory()) {
-        if (SKIP_DIRS.has(name)) continue;
-        dirs.push(relativePath);
-        await walk(absolutePath, relativePath);
-      } else if (entry.isFile()) {
-        if (SKIP_FILES.has(name)) continue;
-        const info = await stat(absolutePath);
-        files.push({ relativePath, absolutePath, size: info.size });
-      }
+/** Create a directory (and all parents) on the Azure Files share. */
+export async function createRemoteDir(
+  parsed: ParsedSasUrl,
+  dirPath: string,
+  fetchFn: FetchFn
+): Promise<void> {
+  // Create each segment from root down
+  const segments = dirPath.split('/').filter(Boolean);
+  let current = '';
+  for (const seg of segments) {
+    current = current ? `${current}/${seg}` : seg;
+    const url = fileUrl(parsed, current, 'restype=directory');
+    const res = await fetchFn(url, {
+      method: 'PUT',
+      headers: { 'x-ms-version': API_VERSION },
+    });
+    // 201 Created or 409 Conflict (already exists) are both fine
+    if (!res.ok && res.status !== 409) {
+      throw new Error(`Failed to create directory "${current}": ${res.status}`);
     }
   }
-
-  await walk(dir, relativeBase);
-  return { dirs, files };
 }
 
-async function createAzureDirectory(
+/** Upload a single file to the Azure Files share. Creates parent dirs. */
+export async function uploadRemoteFile(
   parsed: ParsedSasUrl,
-  relativeDirPath: string,
+  relativePath: string,
+  contents: Buffer,
   fetchFn: FetchFn
 ): Promise<void> {
-  const url = fileUrl(parsed, relativeDirPath, 'restype=directory');
-  const res = await fetchFn(url, {
-    method: 'PUT',
-    headers: { 'x-ms-version': API_VERSION },
-  });
-  // 201 Created or 409 Conflict (already exists) are both fine
-  if (!res.ok && res.status !== 409) {
-    throw new Error(`Failed to create directory "${relativeDirPath}": ${res.status} ${res.statusText}`);
+  // Ensure parent directory exists
+  const parentDir = posix.dirname(relativePath);
+  if (parentDir && parentDir !== '.') {
+    await createRemoteDir(parsed, parentDir, fetchFn);
   }
-}
 
-async function uploadFile(
-  parsed: ParsedSasUrl,
-  entry: FileEntry,
-  fetchFn: FetchFn
-): Promise<void> {
-  const contents = await readFile(entry.absolutePath);
   const size = contents.byteLength;
 
-  // Step 1: Create file entry
-  const createUrl = fileUrl(parsed, entry.relativePath);
+  // Create file entry
+  const createUrl = fileUrl(parsed, relativePath);
   const createRes = await fetchFn(createUrl, {
     method: 'PUT',
     headers: {
@@ -153,70 +161,81 @@ async function uploadFile(
     },
   });
   if (!createRes.ok) {
-    throw new Error(`Failed to create file "${entry.relativePath}": ${createRes.status} ${createRes.statusText}`);
+    throw new Error(`Failed to create file "${relativePath}": ${createRes.status}`);
   }
 
-  // Step 2: Upload content (only if file is non-empty)
+  // Upload content in 4 MiB chunks
   if (size > 0) {
-    const rangeUrl = fileUrl(parsed, entry.relativePath, 'comp=range');
-    const rangeRes = await fetchFn(rangeUrl, {
-      method: 'PUT',
-      headers: {
-        'x-ms-version': API_VERSION,
-        'x-ms-range': `bytes=0-${size - 1}`,
-        'x-ms-write': 'update',
-        'Content-Length': String(size),
-      },
-      body: contents.buffer.slice(contents.byteOffset, contents.byteOffset + contents.byteLength) as BodyInit,
-    });
-    if (!rangeRes.ok) {
-      throw new Error(`Failed to upload file "${entry.relativePath}": ${rangeRes.status} ${rangeRes.statusText}`);
+    const totalChunks = Math.ceil(size / RANGE_CHUNK_SIZE);
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * RANGE_CHUNK_SIZE;
+      const end = Math.min(start + RANGE_CHUNK_SIZE, size) - 1;
+      const chunk = contents.subarray(start, end + 1);
+
+      const rangeUrl = fileUrl(parsed, relativePath, 'comp=range');
+      const rangeRes = await fetchFn(rangeUrl, {
+        method: 'PUT',
+        headers: {
+          'x-ms-version': API_VERSION,
+          'x-ms-range': `bytes=${start}-${end}`,
+          'x-ms-write': 'update',
+          'Content-Length': String(chunk.byteLength),
+        },
+        body: chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength) as BodyInit,
+      });
+      if (!rangeRes.ok) {
+        throw new Error(`Failed to upload range for "${relativePath}": ${rangeRes.status}`);
+      }
     }
   }
 }
 
-export async function uploadWorkspace(
-  workspaceDir: string,
-  sasUrl: string,
-  fetchFn: FetchFn,
-  onProgress?: ProgressFn
-): Promise<void> {
-  const parsed = parseSasUrl(sasUrl);
-
-  onProgress?.('Scanning workspace...');
-  const { dirs, files } = await walkDirectory(workspaceDir, '');
-  onProgress?.(`Found ${files.length} files in ${dirs.length} directories`);
-
-  // Create directories first (in order so parents exist before children)
-  for (const dir of dirs) {
-    await createAzureDirectory(parsed, dir, fetchFn);
-  }
-
-  // Upload files with concurrency limit
-  let completed = 0;
-  const total = files.length;
-
-  const tasks = files.map((entry) => async () => {
-    await uploadFile(parsed, entry, fetchFn);
-    completed++;
-    onProgress?.(`Uploading file ${completed}/${total}...`);
+/** Download a single file from the Azure Files share. */
+export async function downloadRemoteFile(
+  parsed: ParsedSasUrl,
+  relativePath: string,
+  fetchFn: FetchFn
+): Promise<Buffer> {
+  const url = fileUrl(parsed, relativePath);
+  const res = await fetchFn(url, {
+    method: 'GET',
+    headers: { 'x-ms-version': API_VERSION },
   });
+  if (!res.ok) {
+    throw new Error(`Failed to download "${relativePath}": ${res.status}`);
+  }
+  return Buffer.from(await res.arrayBuffer());
+}
 
-  await runWithConcurrency(tasks, MAX_CONCURRENCY);
-  onProgress?.(`Upload complete: ${total} files`);
+/** Delete a single file from the Azure Files share. */
+export async function deleteRemoteFile(
+  parsed: ParsedSasUrl,
+  relativePath: string,
+  fetchFn: FetchFn
+): Promise<void> {
+  const url = fileUrl(parsed, relativePath);
+  const res = await fetchFn(url, {
+    method: 'DELETE',
+    headers: { 'x-ms-version': API_VERSION },
+  });
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`Failed to delete "${relativePath}": ${res.status}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Download
+// Azure Files REST operations — listing
 // ---------------------------------------------------------------------------
 
-type ListEntry = {
+type RawListEntry = {
   type: 'directory' | 'file';
   name: string;
+  size?: number;
+  lastModified?: string;
 };
 
-function parseListXml(xml: string): ListEntry[] {
-  const entries: ListEntry[] = [];
+function parseListXml(xml: string): RawListEntry[] {
+  const entries: RawListEntry[] = [];
 
   const dirRegex = /<Directory><Name>(.*?)<\/Name><\/Directory>/g;
   let match: RegExpExecArray | null;
@@ -224,50 +243,59 @@ function parseListXml(xml: string): ListEntry[] {
     if (match[1]) entries.push({ type: 'directory', name: match[1] });
   }
 
-  const fileRegex = /<File><Name>(.*?)<\/Name>/g;
+  const fileRegex = /<File><Name>(.*?)<\/Name><Properties>(?:.*?<Content-Length>(\d+)<\/Content-Length>)?(?:.*?<Last-Modified>(.*?)<\/Last-Modified>)?.*?<\/Properties><\/File>/gs;
   while ((match = fileRegex.exec(xml)) !== null) {
-    if (match[1]) entries.push({ type: 'file', name: match[1] });
+    if (match[1]) {
+      entries.push({
+        type: 'file',
+        name: match[1],
+        size: match[2] ? parseInt(match[2], 10) : 0,
+        lastModified: match[3],
+      });
+    }
   }
 
   return entries;
 }
 
-async function listAzureDirectory(
+async function listRemoteDir(
   parsed: ParsedSasUrl,
   dirPath: string,
   fetchFn: FetchFn
-): Promise<ListEntry[]> {
-  const extra = dirPath ? 'restype=directory&comp=list' : 'restype=directory&comp=list';
-  const url = fileUrl(parsed, dirPath, extra);
+): Promise<RawListEntry[]> {
+  const url = fileUrl(parsed, dirPath, 'restype=directory&comp=list');
   const res = await fetchFn(url, {
     method: 'GET',
     headers: { 'x-ms-version': API_VERSION },
   });
   if (!res.ok) {
-    throw new Error(`Failed to list directory "${dirPath || '(root)'}": ${res.status} ${res.statusText}`);
+    throw new Error(`Failed to list "${dirPath || '(root)'}": ${res.status}`);
   }
   const xml = await res.text();
   return parseListXml(xml);
 }
 
-type RemoteFile = {
-  relativePath: string;
-};
-
-async function listAllFiles(
+/** Recursively list all files on the remote share. */
+export async function listRemoteFiles(
   parsed: ParsedSasUrl,
   fetchFn: FetchFn
-): Promise<RemoteFile[]> {
-  const files: RemoteFile[] = [];
+): Promise<RemoteFileEntry[]> {
+  const files: RemoteFileEntry[] = [];
 
   async function recurse(dirPath: string): Promise<void> {
-    const entries = await listAzureDirectory(parsed, dirPath, fetchFn);
+    const entries = await listRemoteDir(parsed, dirPath, fetchFn);
     for (const entry of entries) {
       const relativePath = dirPath ? posix.join(dirPath, entry.name) : entry.name;
       if (entry.type === 'directory') {
+        if (IGNORE_DIRS.has(entry.name)) continue;
         await recurse(relativePath);
       } else {
-        files.push({ relativePath });
+        if (IGNORE_FILES.has(entry.name) || entry.name === ARCHIVE_NAME) continue;
+        files.push({
+          relativePath,
+          size: entry.size ?? 0,
+          lastModified: entry.lastModified ? new Date(entry.lastModified).getTime() : 0,
+        });
       }
     }
   }
@@ -276,28 +304,46 @@ async function listAllFiles(
   return files;
 }
 
-async function downloadFile(
-  parsed: ParsedSasUrl,
-  remotePath: string,
-  localPath: string,
-  fetchFn: FetchFn
+// ---------------------------------------------------------------------------
+// Bulk upload (tar-based) — for initial sync
+// ---------------------------------------------------------------------------
+
+export async function uploadWorkspace(
+  workspaceDir: string,
+  sasUrl: string,
+  fetchFn: FetchFn,
+  onProgress?: ProgressFn
 ): Promise<void> {
-  const url = fileUrl(parsed, remotePath);
-  const res = await fetchFn(url, {
-    method: 'GET',
-    headers: { 'x-ms-version': API_VERSION },
-  });
-  if (!res.ok) {
-    throw new Error(`Failed to download file "${remotePath}": ${res.status} ${res.statusText}`);
+  const parsed = parseSasUrl(sasUrl);
+  const tarPath = join(tmpdir(), `workspace-upload-${Date.now()}.tar.gz`);
+
+  try {
+    onProgress?.('Compressing workspace...');
+    await execFileAsync('tar', ['-I', 'zstd -3', '-cf', tarPath, ...TAR_EXCLUDES, '-C', workspaceDir, '.'], {
+      timeout: 120_000,
+    }).catch(() =>
+      // Fallback to gzip if zstd not available
+      execFileAsync('tar', ['czf', tarPath, ...TAR_EXCLUDES, '-C', workspaceDir, '.'], {
+        timeout: 120_000,
+      })
+    );
+
+    const info = await stat(tarPath);
+    const sizeMB = (info.size / (1024 * 1024)).toFixed(1);
+    onProgress?.(`Archive: ${sizeMB} MB`);
+
+    const contents = await readFile(tarPath);
+    await uploadRemoteFile(parsed, ARCHIVE_NAME, contents, fetchFn);
+
+    onProgress?.(`Upload complete: ${sizeMB} MB`);
+  } finally {
+    try { await unlink(tarPath); } catch { /* ignore */ }
   }
-  const buffer = Buffer.from(await res.arrayBuffer());
-
-  // Ensure parent directory exists
-  const parentDir = join(localPath, '..');
-  await mkdir(parentDir, { recursive: true });
-
-  await writeFile(localPath, buffer);
 }
+
+// ---------------------------------------------------------------------------
+// Bulk download (tar-based) — for final sync
+// ---------------------------------------------------------------------------
 
 export async function downloadWorkspace(
   workspaceDir: string,
@@ -306,29 +352,41 @@ export async function downloadWorkspace(
   onProgress?: ProgressFn
 ): Promise<void> {
   const parsed = parseSasUrl(sasUrl);
+  const tarPath = join(tmpdir(), `workspace-download-${Date.now()}.tar.gz`);
 
-  onProgress?.('Listing remote workspace files...');
-  const remoteFiles = await listAllFiles(parsed, fetchFn);
-  onProgress?.(`Found ${remoteFiles.length} files to download`);
+  try {
+    onProgress?.('Checking for workspace archive...');
+    let hasTar = false;
+    try {
+      const headUrl = fileUrl(parsed, ARCHIVE_NAME);
+      const headRes = await fetchFn(headUrl, {
+        method: 'HEAD',
+        headers: { 'x-ms-version': API_VERSION },
+      });
+      hasTar = headRes.ok;
+    } catch {
+      hasTar = false;
+    }
 
-  if (remoteFiles.length === 0) {
-    onProgress?.('No files to download');
-    return;
+    if (!hasTar) {
+      onProgress?.('No workspace archive found — skipping download');
+      return;
+    }
+
+    onProgress?.('Downloading workspace archive...');
+    const contents = await downloadRemoteFile(parsed, ARCHIVE_NAME, fetchFn);
+    const sizeMB = (contents.byteLength / (1024 * 1024)).toFixed(1);
+    onProgress?.(`Downloaded: ${sizeMB} MB`);
+
+    await writeFile(tarPath, contents);
+
+    onProgress?.('Extracting workspace...');
+    await execFileAsync('tar', ['xzf', tarPath, '-C', workspaceDir], {
+      timeout: 120_000,
+    });
+
+    onProgress?.(`Download complete: ${sizeMB} MB`);
+  } finally {
+    try { await unlink(tarPath); } catch { /* ignore */ }
   }
-
-  // Ensure workspace directory exists
-  await mkdir(workspaceDir, { recursive: true });
-
-  let completed = 0;
-  const total = remoteFiles.length;
-
-  const tasks = remoteFiles.map((remote) => async () => {
-    const localPath = join(workspaceDir, ...remote.relativePath.split('/'));
-    await downloadFile(parsed, remote.relativePath, localPath, fetchFn);
-    completed++;
-    onProgress?.(`Downloading file ${completed}/${total}...`);
-  });
-
-  await runWithConcurrency(tasks, MAX_CONCURRENCY);
-  onProgress?.(`Download complete: ${total} files`);
 }

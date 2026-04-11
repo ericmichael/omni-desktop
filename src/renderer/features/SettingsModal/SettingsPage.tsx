@@ -76,12 +76,12 @@ const useStyles = makeStyles({
     transitionProperty: 'color, background-color',
     transitionDuration: '100ms',
     ':hover': {
-      backgroundColor: tokens.colorNeutralBackground1Hover,
+      backgroundColor: tokens.colorSubtleBackgroundHover,
       color: tokens.colorNeutralForeground1,
     },
   },
   navItemActive: {
-    backgroundColor: tokens.colorNeutralBackground1Selected,
+    backgroundColor: tokens.colorSubtleBackgroundSelected,
     color: tokens.colorNeutralForeground1,
     fontWeight: tokens.fontWeightSemibold,
   },
@@ -134,7 +134,7 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
   mobileTabActive: {
-    backgroundColor: tokens.colorNeutralBackground1Selected,
+    backgroundColor: tokens.colorSubtleBackgroundSelected,
     color: tokens.colorNeutralForeground1,
   },
   footer: {

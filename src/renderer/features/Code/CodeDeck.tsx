@@ -50,7 +50,7 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
     transitionProperty: 'color, background-color',
     transitionDuration: '150ms',
-    ':hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)', color: tokens.colorNeutralForeground1 },
+    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
     border: 'none',
     backgroundColor: 'transparent',
     cursor: 'pointer',
@@ -136,7 +136,7 @@ const useStyles = makeStyles({
     border: 'none',
     backgroundColor: 'transparent',
     cursor: 'grab',
-    ':hover': { color: tokens.colorNeutralForeground1, backgroundColor: 'rgba(255, 255, 255, 0.05)' },
+    ':hover': { color: tokens.colorNeutralForeground1, backgroundColor: tokens.colorSubtleBackgroundHover },
   },
   flex1MinH0Relative: { flex: '1 1 0', minHeight: 0, position: 'relative' },
   sessionPane: { width: '100%', height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: tokens.colorNeutralBackground2 },
@@ -160,8 +160,8 @@ const useStyles = makeStyles({
     border: 'none',
     backgroundColor: 'transparent',
   },
-  focusListItemActive: { backgroundColor: 'rgba(96, 165, 250, 0.2)', color: tokens.colorNeutralForeground1 },
-  focusListItemInactive: { color: tokens.colorNeutralForeground2, ':hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)', color: tokens.colorNeutralForeground1 } },
+  focusListItemActive: { backgroundColor: tokens.colorBrandBackground2, color: tokens.colorNeutralForeground1 },
+  focusListItemInactive: { color: tokens.colorNeutralForeground2, ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 } },
   focusListItemContent: { flex: '1 1 0', minWidth: 0, textAlign: 'left', border: 'none', backgroundColor: 'transparent', cursor: 'pointer' },
   focusListItemInner: { display: 'flex', flexDirection: 'column', minWidth: 0 },
   focusListItemLabel: { fontSize: tokens.fontSizeBase300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
@@ -223,7 +223,7 @@ const useStyles = makeStyles({
     border: 'none',
     cursor: 'pointer',
   },
-  mobileTabChipActive: { backgroundColor: 'rgba(96, 165, 250, 0.2)', color: 'rgb(96, 165, 250)' },
+  mobileTabChipActive: { backgroundColor: tokens.colorBrandBackground2, color: tokens.colorBrandForeground1 },
   mobileTabChipInactive: { backgroundColor: tokens.colorNeutralBackground3, color: tokens.colorNeutralForeground2 },
   mobileNewBtn: {
     flexShrink: 0,
@@ -696,9 +696,9 @@ export const CodeDeck = memo(() => {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   const projectMap = useMemo(() => {
-    const map = new Map<string, { label: string; workspaceDir: string }>();
+    const map = new Map<string, { label: string; workspaceDir: string | undefined }>();
     for (const p of store.projects) {
-      map.set(p.id, { label: p.label, workspaceDir: p.workspaceDir });
+      map.set(p.id, { label: p.label, workspaceDir: p.source.kind === 'local' ? p.source.workspaceDir : undefined });
     }
     return map;
   }, [store.projects]);

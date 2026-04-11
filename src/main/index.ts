@@ -12,6 +12,7 @@ import { getArtifactsDir } from '@/lib/artifacts';
 import { createProcessManager } from '@/main/process-manager';
 import { createConsoleManager } from '@/main/console-manager';
 import { createProjectManager } from '@/main/project-manager';
+import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
 import { MainProcessManager } from '@/main/main-process-manager';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
 import { registerPlatformIpc } from '@/main/platform-ipc';
@@ -81,9 +82,9 @@ const [processManager, cleanupProcessManager] = createProcessManager({
   sendToWindow: main.sendToWindow,
   fetchFn: (input, init) => net.fetch(input as string, init),
   getStoreData: () => ({
-    sandboxEnabled: store.get('sandboxEnabled') ?? false,
-    sandboxBackend: store.get('sandboxBackend') ?? 'docker',
-    sandboxVariant: store.get('sandboxVariant'),
+    sandboxBackend: store.get('sandboxBackend') ?? 'none',
+    sandboxProfiles: store.get('sandboxProfiles') ?? null,
+    selectedMachineId: store.get('selectedMachineId') ?? null,
   }),
 });
 const [, cleanupProject] = createProjectManager({
@@ -92,7 +93,7 @@ const [, cleanupProject] = createProjectManager({
   store,
   processManager,
 });
-const cleanupPlatform = registerPlatformIpc({
+const { cleanup: cleanupPlatform, refreshPolicy: refreshPlatformPolicy } = registerPlatformIpc({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
   store,
@@ -127,7 +128,38 @@ store.onDidChange('platform', (newVal) => {
   syncPlatformClients(newVal);
 });
 
+// Background workspace sync manager — like OneDrive for project workspaces.
+const syncManager = new WorkspaceSyncManager({
+  fetchFn: platformFetchFn,
+  platformClient: processManager.platformClient,
+  manifestDir: OMNI_CONFIG_DIR,
+  onStatusChange: (projectId, status) => {
+    main.sendToWindow('workspace-sync:status-changed', projectId, status);
+  },
+});
+store.onDidChange('platform', () => {
+  syncManager.setPlatformClient(processManager.platformClient);
+});
+
+// On startup, refresh platform policy if already signed in.
+// This ensures sandbox profiles are up-to-date with the latest entitlements.
+void refreshPlatformPolicy();
+
 main.ipc.handle('main-process:get-status', () => main.getStatus());
+
+// Workspace sync IPC handlers
+main.ipc.handle('workspace-sync:start', (_, projectId, workspaceDir) => {
+  return syncManager.startSync(projectId, workspaceDir);
+});
+main.ipc.handle('workspace-sync:stop', (_, projectId) => {
+  return syncManager.stopSync(projectId);
+});
+main.ipc.handle('workspace-sync:get-status', (_, projectId) => {
+  return syncManager.getStatus(projectId);
+});
+main.ipc.handle('workspace-sync:get-share-name', (_, projectId) => {
+  return syncManager.getShareName(projectId);
+});
 main.ipc.handle('omni-install-process:get-status', () => omniInstall.getStatus());
 
 //#region App lifecycle
@@ -142,6 +174,7 @@ async function cleanup() {
   isShuttingDown = true;
 
   cleanupPlatform();
+  await syncManager.dispose();
   const results = await Promise.allSettled([
     cleanupConsole(),
     cleanupOmniInstall(),

@@ -41,7 +41,7 @@ const useStyles = makeStyles({
     display: 'flex',
     overflow: 'hidden',
     borderRadius: tokens.borderRadiusXLarge,
-    ...shorthands.border('1px', 'solid', 'rgba(255, 255, 255, 0.05)'),
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
     boxShadow: tokens.shadow64,
     backdropFilter: 'blur(32px)',
   },

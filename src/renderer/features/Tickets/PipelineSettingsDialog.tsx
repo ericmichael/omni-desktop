@@ -23,7 +23,7 @@ const useStyles = makeStyles({
   columnCard: {
     borderRadius: tokens.borderRadiusMedium,
     ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: 'rgba(var(--colorNeutralBackground1Hover), 0.3)',
+    backgroundColor: tokens.colorNeutralBackground2,
     padding: tokens.spacingVerticalM,
   },
   columnHeader: {

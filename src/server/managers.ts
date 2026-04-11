@@ -8,7 +8,7 @@ import { createProcessManager } from '@/main/process-manager';
 import { createConsoleManager } from '@/main/console-manager';
 import { createProjectManager } from '@/main/project-manager';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
-import { isEnterpriseBuild, PLATFORM_URL, createPlatformClient } from '@/main/platform-mode';
+import { isEnterpriseBuild, mapSandboxProfiles, PLATFORM_URL, createPlatformClient } from '@/main/platform-mode';
 import { PlatformClient } from '@/main/platform-client';
 import {
   checkModelsConfigured,
@@ -67,9 +67,9 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
     sendToWindow: sendToAll,
     fetchFn: globalThis.fetch,
     getStoreData: () => ({
-      sandboxEnabled: store.get('sandboxEnabled') ?? false,
-      sandboxBackend: store.get('sandboxBackend') ?? 'docker',
-      sandboxVariant: store.get('sandboxVariant'),
+      sandboxBackend: store.get('sandboxBackend') ?? 'none',
+      sandboxProfiles: store.get('sandboxProfiles') ?? null,
+      selectedMachineId: store.get('selectedMachineId') ?? null,
     }),
   });
 
@@ -241,6 +241,33 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
   });
 
   // Platform handlers
+
+  /** Fetch policy and apply sandbox profiles to the store. */
+  const fetchAndApplyPolicy = async (credentials: { accessToken: string; refreshToken: string }) => {
+    try {
+      const client = new PlatformClient(
+        { url: PLATFORM_URL, accessToken: credentials.accessToken, refreshToken: credentials.refreshToken },
+        globalThis.fetch
+      );
+      client.onTokenRefresh = (newToken) => {
+        const current = store.get('platform');
+        if (current) store.set('platform', { ...current, accessToken: newToken });
+      };
+      const policy = await client.getPolicy('omni_code');
+      const profiles = mapSandboxProfiles(policy.sandbox_profiles ?? []);
+      store.set('sandboxProfiles', profiles.length > 0 ? profiles : null);
+      if (profiles.length > 0) {
+        const platformProfile = profiles.find((p) => p.backend === 'platform');
+        const selected = platformProfile ?? profiles[0]!;
+        store.set('sandboxBackend', selected.backend);
+        store.set('selectedMachineId', selected.resource_id);
+      }
+      console.log(`[Platform] Policy applied: ${profiles.length} sandbox profile(s)`);
+    } catch (e) {
+      console.warn('[Platform] Failed to fetch policy:', (e as Error).message);
+    }
+  };
+
   ipc.handle('platform:is-enterprise', () => isEnterpriseBuild());
   ipc.handle('platform:get-auth', () => store.get('platform') ?? null);
   ipc.handle('platform:sign-in', async () => {
@@ -267,6 +294,7 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
             };
             store.set('platform', credentials);
             wsHandler.sendToAll('platform:auth-changed', credentials);
+            await fetchAndApplyPolicy(credentials);
             return;
           }
           if (result.status === 'expired') return;
@@ -284,8 +312,17 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
   });
   ipc.handle('platform:sign-out', () => {
     store.delete('platform');
+    store.set('sandboxProfiles', null);
+    store.set('selectedMachineId', null);
+    store.set('sandboxBackend', 'none');
     wsHandler.sendToAll('platform:auth-changed', null);
   });
+
+  // Refresh policy on startup if already signed in
+  const existingCreds = store.get('platform');
+  if (existingCreds?.accessToken && isEnterpriseBuild()) {
+    void fetchAndApplyPolicy(existingCreds);
+  }
 
   ipc.handle('platform:get-dashboards', async () => {
     const creds = store.get('platform');

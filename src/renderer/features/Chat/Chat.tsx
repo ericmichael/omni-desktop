@@ -95,7 +95,8 @@ export const Chat = memo(() => {
   const [runningMounted, setRunningMounted] = useState(false);
 
   const theme = store.theme ?? 'teams-light';
-  const sandboxLabel = useMemo(() => (store.sandboxEnabled ? buildSandboxLabel(store.sandboxVariant) : undefined), [store.sandboxEnabled, store.sandboxVariant]);
+  const sandboxBackend = store.sandboxBackend ?? 'none';
+  const sandboxLabel = useMemo(() => (sandboxBackend !== 'none' ? buildSandboxLabel(sandboxBackend) : undefined), [sandboxBackend]);
 
   const chatSessionId = store.chatSessionId ?? undefined;
   const handleSessionChange = useCallback((sessionId: string | undefined) => {

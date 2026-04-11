@@ -61,7 +61,7 @@ const useStyles = makeStyles({
     backgroundColor: 'rgba(239, 68, 68, 0.1)',
     padding: tokens.spacingHorizontalM,
     fontSize: tokens.fontSizeBase200,
-    color: '#fca5a5',
+    color: tokens.colorPaletteRedForeground1,
     textAlign: 'center',
   },
 });

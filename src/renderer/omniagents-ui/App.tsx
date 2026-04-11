@@ -850,7 +850,7 @@ args.text = text
   }, [client, sessionId])
 
   const hasArtifacts = visibleArtifacts.length > 0
-  const sandboxLabel = sandboxLabelProp ?? (launcherStore.sandboxEnabled ? (launcherStore.sandboxVariant === 'standard' ? 'Standard' : 'Work') : undefined)
+  const sandboxLabel = sandboxLabelProp ?? ((launcherStore.sandboxBackend ?? 'none') !== 'none' ? ({ platform: 'Cloud', docker: 'Docker', podman: 'Podman', vm: 'VM', local: 'Local', none: undefined } as Record<string, string | undefined>)[launcherStore.sandboxBackend] : undefined)
   const headerActions = {
     showArtifactsButton: hasArtifacts,
     showTerminalButton: true,

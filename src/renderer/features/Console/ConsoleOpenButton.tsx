@@ -1,4 +1,4 @@
-import { makeStyles, mergeClasses } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
@@ -9,7 +9,7 @@ import { $isConsoleOpen, $terminalHasNewOutput } from '@/renderer/features/Conso
 
 const useStyles = makeStyles({
   hidden: { pointerEvents: 'none' },
-  newOutput: { color: '#facc15' },
+  newOutput: { color: tokens.colorPaletteYellowForeground1 },
 });
 
 const hotkeyOptions = {

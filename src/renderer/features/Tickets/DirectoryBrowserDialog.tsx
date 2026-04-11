@@ -32,7 +32,7 @@ const useStyles = makeStyles({
   },
   folderIcon: {
     flexShrink: 0,
-    color: '#facc15',
+    color: tokens.colorPaletteYellowForeground1,
   },
   truncate: {
     overflow: 'hidden',

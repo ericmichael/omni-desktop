@@ -1,14 +1,23 @@
-import type { SandboxConfig, SandboxVariant } from '@/shared/types';
+import type { SandboxBackend, SandboxConfig } from '@/shared/types';
+
+const BACKEND_LABELS: Record<SandboxBackend, string> = {
+  platform: 'Cloud',
+  docker: 'Docker',
+  podman: 'Podman',
+  vm: 'VM',
+  local: 'Local',
+  none: 'None',
+};
 
 /**
  * Build the sandbox label shown in the Input component.
- * Examples: "Work", "Work (dev)", "Work (custom)", "Work (dev, custom)"
+ * Examples: "Docker", "Cloud (dev)", "Docker (custom)"
  */
 export const buildSandboxLabel = (
-  variant: SandboxVariant,
+  backend: SandboxBackend,
   options?: { custom?: boolean }
 ): string => {
-  const base = variant === 'standard' ? 'Standard' : 'Work';
+  const base = BACKEND_LABELS[backend] ?? backend;
   const tags: string[] = [];
   if (import.meta.env.MODE === 'development') tags.push('dev');
   if (options?.custom) tags.push('custom');

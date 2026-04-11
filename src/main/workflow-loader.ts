@@ -8,13 +8,17 @@
  */
 import type { FSWatcher } from 'fs';
 import { watch } from 'fs';
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import fs from 'fs/promises';
+import os from 'os';
 import path from 'path';
+import { promisify } from 'util';
 
 import type { Workflow, WorkflowConfig } from '@/lib/workflow';
 import { parseWorkflow } from '@/lib/workflow';
 import type { ProjectId } from '@/shared/types';
+
+const execFileAsync = promisify(execFile);
 
 const FLEET_WORKFLOW_FILENAME = 'FLEET.md';
 const DEBOUNCE_MS = 500;
@@ -67,6 +71,48 @@ export class WorkflowLoader {
     // Start watching
     this.startWatching(projectId, entry, filePath);
 
+    return workflow;
+  }
+
+  /**
+   * Load FLEET.md from a git remote. Does a minimal partial clone to fetch
+   * just the workflow file, parses it, and caches the result. No file watcher
+   * (the remote doesn't change underneath us like a local file does).
+   */
+  async loadFromRemote(projectId: ProjectId, repoUrl: string, branch?: string): Promise<Workflow> {
+    this.unload(projectId);
+
+    let workflow: Workflow = { config: {}, promptTemplate: '' };
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'fleet-remote-'));
+
+    try {
+      const cloneArgs = ['clone', '--depth', '1', '--no-checkout', '--filter=blob:none'];
+      if (branch) cloneArgs.push('--branch', branch);
+      cloneArgs.push(repoUrl, tmpDir);
+
+      await execFileAsync('git', cloneArgs, { timeout: 30_000 });
+
+      const { stdout } = await execFileAsync('git', ['-C', tmpDir, 'show', `HEAD:${FLEET_WORKFLOW_FILENAME}`], {
+        timeout: 10_000,
+      });
+
+      workflow = parseWorkflow(stdout);
+      console.log(`[WorkflowLoader] Loaded ${FLEET_WORKFLOW_FILENAME} from remote ${repoUrl} for project ${projectId}`);
+    } catch {
+      // File doesn't exist in the remote or clone failed — use empty defaults
+      console.log(`[WorkflowLoader] No ${FLEET_WORKFLOW_FILENAME} in remote ${repoUrl} for project ${projectId}`);
+    } finally {
+      fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
+
+    const entry: WatcherEntry = {
+      watcher: null,
+      debounceTimer: null,
+      workflow,
+      workspaceDir: '', // no local dir for remote projects
+    };
+
+    this.entries.set(projectId, entry);
     return workflow;
   }
 

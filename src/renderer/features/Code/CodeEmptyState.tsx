@@ -23,7 +23,7 @@ const useStyles = makeStyles({
     transitionProperty: 'border-color, background-color',
     transitionDuration: '150ms',
     cursor: 'pointer',
-    ':hover': { ...shorthands.borderColor(tokens.colorBrandStroke1), backgroundColor: tokens.colorNeutralBackground1Hover },
+    ':hover': { ...shorthands.borderColor(tokens.colorBrandStroke1), backgroundColor: tokens.colorSubtleBackgroundHover },
   },
   projectIcon: { color: tokens.colorNeutralForeground2, flexShrink: 0 },
   projectContent: { minWidth: 0 },
@@ -98,7 +98,7 @@ const ProjectCard = memo(
         <FolderOpen20Regular className={styles.projectIcon} />
         <div className={styles.projectContent}>
           <div className={styles.projectLabel}>{project.label}</div>
-          <div className={styles.projectDir}>{project.workspaceDir}</div>
+          <div className={styles.projectDir}>{project.source.kind === 'local' ? project.source.workspaceDir : project.source.repoUrl}</div>
         </div>
       </button>
     );

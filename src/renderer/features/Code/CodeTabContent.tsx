@@ -147,10 +147,11 @@ export const CodeTabContent = memo(
       () => store.projects.find((p) => p.id === tab.projectId) ?? null,
       [store.projects, tab.projectId]
     );
-    const workspaceDir = tab.workspaceDir ?? project?.workspaceDir ?? null;
+    const workspaceDir = tab.workspaceDir ?? (project?.source.kind === 'local' ? project.source.workspaceDir : null) ?? null;
+    const sandboxBackend = store.sandboxBackend ?? 'none';
     const sandboxLabel = useMemo(
-      () => (store.sandboxEnabled ? buildSandboxLabel(store.sandboxVariant, { custom: isCustomSandbox(project?.sandbox) }) : undefined),
-      [store.sandboxEnabled, store.sandboxVariant, project?.sandbox]
+      () => (sandboxBackend !== 'none' ? buildSandboxLabel(sandboxBackend, { custom: isCustomSandbox(project?.sandbox) }) : undefined),
+      [sandboxBackend, project?.sandbox]
     );
 
     const { phase, retry } = useCodeAutoLaunch(tab.id, workspaceDir);

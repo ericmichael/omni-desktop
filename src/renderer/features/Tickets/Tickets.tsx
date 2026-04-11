@@ -104,17 +104,17 @@ const useStyles = makeStyles({
     backgroundColor: 'transparent',
     cursor: 'pointer',
     ':hover': {
-      backgroundColor: tokens.colorNeutralBackground1Hover,
+      backgroundColor: tokens.colorSubtleBackgroundHover,
     },
     ':active': {
-      backgroundColor: tokens.colorNeutralBackground1Pressed,
+      backgroundColor: tokens.colorSubtleBackgroundPressed,
     },
   },
   projectIcon: {
     width: '36px',
     height: '36px',
     borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground1Hover,
+    backgroundColor: tokens.colorNeutralBackground3,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -203,7 +203,8 @@ const MobileProjectList = memo(({ onNewProject }: { onNewProject: () => void }) 
         ) : (
           <div className={styles.projectListItems}>
             {projects.map((project) => {
-              const segments = project.workspaceDir.split('/').filter(Boolean);
+              const dirLabel = project.source.kind === 'local' ? project.source.workspaceDir : project.source.repoUrl;
+              const segments = dirLabel.split('/').filter(Boolean);
               const shortPath = segments.slice(-2).join('/');
               const count = ticketCounts[project.id] ?? 0;
               return (

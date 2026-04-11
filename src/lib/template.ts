@@ -7,7 +7,7 @@
  * Supported variables:
  * - ticket.id, ticket.title, ticket.description, ticket.priority, ticket.columnId, ticket.branch
  * - pipeline.columns (comma-separated column labels)
- * - project.label, project.workspaceDir
+ * - project.label, project.workspaceDir (local projects only, git-remote shows repoUrl)
  * - attempt (number or null for first run)
  */
 

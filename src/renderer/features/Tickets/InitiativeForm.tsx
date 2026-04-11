@@ -15,7 +15,7 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalM,
     borderRadius: tokens.borderRadiusMedium,
     ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: 'rgba(var(--colorNeutralBackground1Hover), 0.5)',
+    backgroundColor: tokens.colorNeutralBackground2,
     padding: tokens.spacingVerticalL,
   },
   branchRow: {
@@ -58,7 +58,8 @@ export const InitiativeForm = memo(({
 
   useEffect(() => {
     if (!project) return;
-    ticketApi.checkGitRepo(project.workspaceDir).then((info) => {
+    if (project.source.kind !== 'local') return;
+    ticketApi.checkGitRepo(project.source.workspaceDir).then((info) => {
       setGitInfo(info);
     });
   }, [project]);

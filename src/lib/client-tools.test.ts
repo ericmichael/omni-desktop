@@ -44,7 +44,7 @@ type MockTicket = {
 type MockProject = {
   id: string;
   label: string;
-  workspaceDir: string;
+  source: { kind: 'local'; workspaceDir: string } | { kind: 'git-remote'; repoUrl: string };
 };
 
 type ToolCallCtx = {
@@ -144,7 +144,7 @@ function handleClientToolCall(
     case 'list_projects': {
       const projects = (ctx.getProjects?.() ?? []).map((p) => {
         const pl = ctx.getPipeline(p.id);
-        return { id: p.id, label: p.label, workspaceDir: p.workspaceDir, columns: pl.columns.map((c) => c.label) };
+        return { id: p.id, label: p.label, workspaceDir: p.source.kind === 'local' ? p.source.workspaceDir : p.source.repoUrl, columns: pl.columns.map((c) => c.label) };
       });
       respond(true, { projects });
       break;
@@ -293,7 +293,7 @@ const MOCK_PIPELINE = {
 const MOCK_PROJECT: MockProject = {
   id: 'proj-1',
   label: 'My Project',
-  workspaceDir: '/workspace/my-project',
+  source: { kind: 'local', workspaceDir: '/workspace/my-project' },
 };
 
 const MOCK_TICKET_2: MockTicket = {

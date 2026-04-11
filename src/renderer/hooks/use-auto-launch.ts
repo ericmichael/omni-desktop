@@ -40,7 +40,7 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
   const { processId, supervisorAware = false, logLabel } = opts;
   const initialized = useStore($initialized);
   const store = useStore(persistedStoreApi.$atom);
-  const sandboxEnabled = store.sandboxEnabled;
+  const sandboxEnabled = store.sandboxBackend !== 'none';
 
   // Refs so actor callbacks always see current values without recreating the actors object
   const processIdRef = useRef(processId);
@@ -164,27 +164,25 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
   }), []); // eslint-disable-line react-hooks/exhaustive-deps -- reads from refs
 
   const inspect = useMemo(() => createMachineLogger(logLabel ?? `autoLaunch:${processId}`, {
-    tags: { sandbox: sandboxEnabled ? (store.sandboxBackend ?? 'docker') : 'none' },
-  }), [processId, logLabel, sandboxEnabled, store.sandboxBackend]);
+    tags: { sandbox: store.sandboxBackend ?? 'none' },
+  }), [processId, logLabel, store.sandboxBackend]);
 
   const machine = useMemo(() => autoLaunchMachine.provide({ actors }), [actors]);
   const actor = useActorRef(machine, { inspect });
   const phase = useSelector(actor, (snap) => snap.value as AutoLaunchPhase);
   const error = useSelector(actor, (snap) => snap.context.error);
 
-  // Reset when sandbox settings change
-  const lastSandboxEnabled = useRef(sandboxEnabled);
+  // Reset when sandbox backend changes
   const lastSandboxBackend = useRef(store.sandboxBackend);
   useEffect(() => {
-    if (lastSandboxEnabled.current !== sandboxEnabled || lastSandboxBackend.current !== store.sandboxBackend) {
-      lastSandboxEnabled.current = sandboxEnabled;
+    if (lastSandboxBackend.current !== store.sandboxBackend) {
       lastSandboxBackend.current = store.sandboxBackend;
       actor.send({ type: 'RESET' });
       if (initialized) {
         actor.send({ type: 'LAUNCH' });
       }
     }
-  }, [sandboxEnabled, store.sandboxBackend, initialized, actor]);
+  }, [store.sandboxBackend, initialized, actor]);
 
   // Trigger: send LAUNCH when initialized + workspace available
   useEffect(() => {

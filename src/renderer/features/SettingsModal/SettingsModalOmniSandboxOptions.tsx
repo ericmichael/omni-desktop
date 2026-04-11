@@ -3,7 +3,7 @@ import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
 import { makeStyles, tokens } from '@fluentui/react-components';
-import { Button, Card, FormField, MessageBar, MessageBarBody, SectionLabel, Select, Switch } from '@/renderer/ds';
+import { Button, Card, FormField, MessageBar, MessageBarBody, SectionLabel, Select } from '@/renderer/ds';
 import { $launcherVersion } from '@/renderer/features/Banner/state';
 import {
   $omniInstallProcessStatus,
@@ -13,7 +13,16 @@ import {
 import { $chatProcessStatus } from '@/renderer/features/Chat/state';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi, selectWorkspaceDir } from '@/renderer/services/store';
-import type { OmniTheme, SandboxBackend, SandboxVariant } from '@/shared/types';
+import type { OmniTheme, SandboxBackend } from '@/shared/types';
+
+const BACKEND_LABELS: Record<SandboxBackend, string> = {
+  platform: 'Cloud (managed)',
+  docker: 'Docker',
+  podman: 'Podman',
+  vm: 'VM (QEMU)',
+  local: 'Local (bwrap)',
+  none: 'No sandbox',
+};
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
@@ -33,6 +42,9 @@ const useStyles = makeStyles({
     '@media (min-width: 640px)': { fontSize: tokens.fontSizeBase200 },
   },
 });
+
+/** All backends available in open-source mode (no platform policy). */
+const OPEN_SOURCE_BACKENDS: SandboxBackend[] = ['docker', 'podman', 'vm', 'local', 'none'];
 
 export const SettingsModalOmniSandboxOptions = memo(() => {
   const styles = useStyles();
@@ -78,17 +90,22 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
     }
   }, [checkCliStatus]);
 
-  const onToggleSandboxEnabled = useCallback((checked: boolean) => {
-    persistedStoreApi.setKey('sandboxEnabled', checked);
-  }, []);
-
-  const onChangeSandboxVariant = useCallback((e: ChangeEvent<HTMLSelectElement>) => {
-    persistedStoreApi.setKey('sandboxVariant', e.target.value as SandboxVariant);
-  }, []);
+  // Derive available backends from policy or fall back to open-source defaults
+  const profiles = store.sandboxProfiles;
+  const availableBackends: SandboxBackend[] = profiles
+    ? [...new Set(profiles.map((p) => p.backend)), 'none' as const]
+    : OPEN_SOURCE_BACKENDS;
 
   const onChangeSandboxBackend = useCallback((e: ChangeEvent<HTMLSelectElement>) => {
-    persistedStoreApi.setKey('sandboxBackend', e.target.value as SandboxBackend);
-  }, []);
+    const backend = e.target.value as SandboxBackend;
+    persistedStoreApi.setKey('sandboxBackend', backend);
+
+    // Auto-select the first matching machine profile
+    if (profiles) {
+      const match = profiles.find((p) => p.backend === backend);
+      persistedStoreApi.setKey('selectedMachineId', match?.resource_id ?? null);
+    }
+  }, [profiles]);
 
   const rebuildDockerImage = useCallback(async () => {
     setIsRebuilding(true);
@@ -110,6 +127,10 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
     persistedStoreApi.setKey('theme', e.target.value as OmniTheme);
   }, []);
 
+  const currentBackend = store.sandboxBackend ?? 'none';
+  const showRebuild = (import.meta.env.MODE === 'development' || store.previewFeatures)
+    && (currentBackend === 'docker' || currentBackend === 'podman');
+
   return (
     <div className={styles.root}>
       <SectionLabel>Workspace</SectionLabel>
@@ -124,36 +145,19 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
 
       <SectionLabel className={styles.sectionLabelSpaced}>Sandbox</SectionLabel>
       <Card>
-        <FormField label={isEnterprise ? 'Use local sandbox' : 'Enable sandbox (Docker)'}>
-          <Switch
-            checked={isEnterprise ? !(store.sandboxEnabled ?? true) : (store.sandboxEnabled ?? false)}
-            onCheckedChange={isEnterprise ? (checked) => onToggleSandboxEnabled(!checked) : onToggleSandboxEnabled}
-          />
+        <FormField label="Sandbox backend">
+          <Select value={currentBackend} onChange={onChangeSandboxBackend}>
+            {availableBackends.map((b) => (
+              <option key={b} value={b}>{BACKEND_LABELS[b]}</option>
+            ))}
+          </Select>
         </FormField>
-        {!isEnterprise && (
-          <>
-            <FormField label="Sandbox backend">
-              <Select value={store.sandboxBackend ?? 'docker'} onChange={onChangeSandboxBackend} disabled={!store.sandboxEnabled}>
-                <option value="local">Local (bwrap)</option>
-                <option value="docker">Docker</option>
-                <option value="podman">Podman</option>
-                <option value="vm">VM (QEMU)</option>
-              </Select>
-            </FormField>
-            <FormField label="Sandbox variant">
-              <Select value={store.sandboxVariant ?? 'work'} onChange={onChangeSandboxVariant} disabled={!store.sandboxEnabled}>
-                <option value="work">Work</option>
-                <option value="standard">Standard</option>
-              </Select>
-            </FormField>
-            {(import.meta.env.MODE === 'development' || store.previewFeatures) && ((store.sandboxBackend ?? 'docker') === 'docker' || store.sandboxBackend === 'podman') && (
-              <FormField label={`Rebuild ${store.sandboxBackend === 'podman' ? 'Podman' : 'Docker'} image`}>
-                <Button size="sm" variant="ghost" onClick={rebuildDockerImage} isDisabled={isRebuilding}>
-                  {isRebuilding ? 'Rebuilding\u2026' : 'Rebuild'}
-                </Button>
-              </FormField>
-            )}
-          </>
+        {showRebuild && (
+          <FormField label={`Rebuild ${currentBackend === 'podman' ? 'Podman' : 'Docker'} image`}>
+            <Button size="sm" variant="ghost" onClick={rebuildDockerImage} isDisabled={isRebuilding}>
+              {isRebuilding ? 'Rebuilding\u2026' : 'Rebuild'}
+            </Button>
+          </FormField>
         )}
       </Card>
 
@@ -215,7 +219,7 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
         </FormField>
         <FormField label="Compute">
           <span className={styles.textSimple}>
-            {isEnterprise && store.sandboxEnabled !== false ? 'Managed' : 'Local'}
+            {currentBackend === 'platform' ? 'Managed' : currentBackend === 'none' ? 'None' : 'Local'}
           </span>
         </FormField>
       </Card>

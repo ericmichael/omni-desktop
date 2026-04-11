@@ -80,7 +80,7 @@ const useStyles = makeStyles({
     backgroundColor: 'transparent',
     cursor: 'pointer',
     ':hover': {
-      backgroundColor: tokens.colorNeutralBackground1Hover,
+      backgroundColor: tokens.colorSubtleBackgroundHover,
       color: tokens.colorNeutralForeground1,
     },
   },

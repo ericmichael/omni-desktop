@@ -28,6 +28,7 @@ import { getOmniConfigDir, getWorktreesDir } from '@/main/util';
 import { DEFAULT_PIPELINE } from '@/shared/pipeline-defaults';
 import { isActivePhase } from '@/shared/ticket-phase';
 import type { TicketPhase } from '@/shared/ticket-phase';
+import { getLocalWorkspaceDir, requireLocalWorkspaceDir } from '@/shared/project-source';
 import type {
   ArtifactFileContent,
   ArtifactFileEntry,
@@ -691,7 +692,7 @@ export class ProjectManager {
           return {
             id: p.id,
             label: p.label,
-            workspaceDir: p.workspaceDir,
+            workspaceDir: getLocalWorkspaceDir(p.source),
             columns: pl.columns.map((c) => c.label),
           };
         });
@@ -957,8 +958,16 @@ export class ProjectManager {
       const ticket = this.getTicketById(ticketId);
       if (ticket) {
         const project = this.getProjects().find((p) => p.id === ticket.projectId);
-        if (project) {
-          void this.workflowLoader.runHook(ticket.projectId, 'after_run', project.workspaceDir);
+        if (project?.source.kind === 'local') {
+          void this.workflowLoader.runHook(ticket.projectId, 'after_run', project.source.workspaceDir);
+        } else if (project?.source.kind === 'git-remote') {
+          const hookScript = this.workflowLoader.getConfig(ticket.projectId).hooks?.after_run;
+          if (hookScript) {
+            const entry = this.machines.get(ticketId);
+            if (entry?.sandbox) {
+              void entry.sandbox.execInContainer(hookScript, '/home/user/workspace');
+            }
+          }
         }
       }
 
@@ -1300,7 +1309,18 @@ export class ProjectManager {
         const project = this.getProjects().find((p) => p.id === ticket.projectId);
         if (!project) return;
 
-        const hookOk = await this.workflowLoader.runHook(ticket.projectId, 'before_run', project.workspaceDir);
+        let hookOk = true;
+        if (project.source.kind === 'local') {
+          hookOk = await this.workflowLoader.runHook(ticket.projectId, 'before_run', project.source.workspaceDir);
+        } else {
+          const hookScript = this.workflowLoader.getConfig(ticket.projectId).hooks?.before_run;
+          if (hookScript) {
+            const entry = this.machines.get(ticketId);
+            if (entry?.sandbox) {
+              hookOk = await entry.sandbox.execInContainer(hookScript, '/home/user/workspace');
+            }
+          }
+        }
         if (!hookOk) {
           console.warn(
             `[ProjectManager] before_run hook failed during retry for ${ticketId}. Scheduling another retry.`
@@ -1378,7 +1398,11 @@ export class ProjectManager {
     // Create the default "General" initiative for the new project
     this.createDefaultInitiative(project.id);
     // Eagerly load FLEET.md so pipeline is ready when the UI fetches it
-    void this.workflowLoader.load(project.id, project.workspaceDir);
+    if (project.source.kind === 'local') {
+      void this.workflowLoader.load(project.id, project.source.workspaceDir);
+    } else {
+      void this.workflowLoader.loadFromRemote(project.id, project.source.repoUrl, project.source.defaultBranch);
+    }
     return project;
   };
 
@@ -1419,12 +1443,16 @@ export class ProjectManager {
       return;
     }
     const project = this.getProjects().find((p) => p.id === projectId);
-    if (project) {
-      await this.workflowLoader.load(projectId, project.workspaceDir);
-      // Migrate any tickets with stale columnIds after first load
-      const pipeline = this.getPipeline(projectId);
-      this.migrateOrphanedTickets(projectId, pipeline);
+    if (!project) return;
+
+    if (project.source.kind === 'local') {
+      await this.workflowLoader.load(projectId, project.source.workspaceDir);
+    } else {
+      await this.workflowLoader.loadFromRemote(projectId, project.source.repoUrl, project.source.defaultBranch);
     }
+    // Migrate any tickets with stale columnIds after first load
+    const pipeline = this.getPipeline(projectId);
+    this.migrateOrphanedTickets(projectId, pipeline);
   };
 
   getPipeline = (projectId: ProjectId): Pipeline => {
@@ -1924,10 +1952,10 @@ export class ProjectManager {
     } else {
       // Supervisor mode: no worktree, diff the project workspace against its upstream
       const project = this.getProjects().find((p) => p.id === ticket.projectId);
-      if (!project) {
-        return empty;
+      if (!project || project.source.kind !== 'local') {
+        return empty; // git-remote diffs happen inside the container, not locally
       }
-      gitDir = project.workspaceDir;
+      gitDir = project.source.workspaceDir;
       try {
         await fs.access(gitDir);
       } catch {
@@ -2236,7 +2264,7 @@ export class ProjectManager {
       if (!afterCreateOk) {
         clearTimeout(startTimeout);
         if (worktreePath && worktreeName) {
-          await removeWorktree(project.workspaceDir, worktreePath, worktreeName);
+          await removeWorktree(requireLocalWorkspaceDir(project.source), worktreePath, worktreeName);
         }
         machine.transition('error');
         throw new Error('after_create hook failed');
@@ -2255,20 +2283,15 @@ export class ProjectManager {
       worktreeName,
     };
 
-    const sandboxEnabled = this.store.get('sandboxEnabled', false);
     const sandboxBackend = this.store.get('sandboxBackend') as import('@/shared/types').SandboxBackend | undefined;
     const platformClient = createPlatformClient(this.store.get('platform'));
-    const mode = platformClient
-      ? 'platform'
-      : !sandboxEnabled
-        ? 'none'
-        : sandboxBackend === 'local'
-          ? 'local'
-          : sandboxBackend === 'vm'
-            ? 'vm'
-            : sandboxBackend === 'podman'
-              ? 'podman'
-              : 'sandbox';
+    const mode: import('@/main/agent-process').AgentProcessMode =
+      sandboxBackend === 'platform' ? 'platform'
+      : sandboxBackend === 'docker' ? 'sandbox'
+      : sandboxBackend === 'podman' ? 'podman'
+      : sandboxBackend === 'vm' ? 'vm'
+      : sandboxBackend === 'local' ? 'local'
+      : 'none';
     const sandbox = new AgentProcess({
       mode,
       platformClient: platformClient ?? undefined,
@@ -2316,6 +2339,7 @@ export class ProjectManager {
       workspaceDir,
       sandboxVariant: 'work',
       sandboxConfig: project.sandbox,
+      gitRepo: resolvedWorkspace.gitRepo,
     });
 
     // Await sandbox readiness
@@ -2365,6 +2389,8 @@ export class ProjectManager {
     worktreePath?: string;
     worktreeName?: string;
     action: 'reuse' | 'create' | 'none';
+    /** For git-remote projects: repo info so the container can clone. */
+    gitRepo?: { url: string; branch?: string };
   }> => {
     const ticket = this.getTicketById(ticketId);
     if (!ticket) {
@@ -2376,7 +2402,20 @@ export class ProjectManager {
       throw new Error(`Project not found: ${ticket.projectId}`);
     }
 
-    let workspaceDir = project.workspaceDir;
+    // Git-remote projects: container clones the repo — no local workspace or worktrees
+    if (project.source.kind === 'git-remote') {
+      const effectiveBranch = this.resolveTicketBranch(ticket) ?? project.source.defaultBranch;
+      return {
+        workspaceDir: '/home/user/workspace', // container-side path (not local)
+        action: 'none',
+        gitRepo: {
+          url: project.source.repoUrl,
+          branch: effectiveBranch,
+        },
+      };
+    }
+
+    let workspaceDir = requireLocalWorkspaceDir(project.source);
     let worktreePath: string | undefined;
     let worktreeName: string | undefined;
     const effectiveBranch = this.resolveTicketBranch(ticket);
@@ -2398,7 +2437,7 @@ export class ProjectManager {
       console.log(`[ProjectManager] Reusing existing worktree "${worktreeName}" for ticket ${ticketId}`);
     } else if (wtAction.action === 'create') {
       worktreeName = generateWorktreeName();
-      worktreePath = await createWorktree(project.workspaceDir, effectiveBranch!, worktreeName);
+      worktreePath = await createWorktree(requireLocalWorkspaceDir(project.source), effectiveBranch!, worktreeName);
       workspaceDir = worktreePath;
       this.updateTicket(ticketId, { worktreePath, worktreeName });
     }
@@ -2468,8 +2507,11 @@ export class ProjectManager {
       return `Project not found: ${ticket.projectId}`;
     }
 
-    if (!project.workspaceDir) {
+    if (project.source.kind === 'local' && !project.source.workspaceDir) {
       return `Project "${project.label}" has no workspace directory configured`;
+    }
+    if (project.source.kind === 'git-remote' && !project.source.repoUrl) {
+      return `Project "${project.label}" has no repository URL configured`;
     }
 
     if (this.isTerminalColumn(ticket.projectId, ticket.columnId)) {
@@ -2538,7 +2580,7 @@ export class ProjectManager {
           },
           project: {
             label: project.label,
-            workspaceDir: project.workspaceDir,
+            workspaceDir: project.source.kind === 'local' ? project.source.workspaceDir : project.source.repoUrl,
           },
           attempt,
         };
@@ -2631,19 +2673,35 @@ export class ProjectManager {
       const ticket = this.getTicketById(ticketId)!;
       const project = this.getProjects().find((p) => p.id === ticket.projectId)!;
 
-      // Load FLEET.md workflow for this project (also starts file watcher)
-      await this.workflowLoader.load(ticket.projectId, project.workspaceDir);
+      // Load FLEET.md workflow (from local dir or git remote)
+      if (project.source.kind === 'local') {
+        await this.workflowLoader.load(ticket.projectId, project.source.workspaceDir);
 
-      // Run before_run hook if configured
-      const hookOk = await this.workflowLoader.runHook(ticket.projectId, 'before_run', project.workspaceDir);
-      if (!hookOk) {
-        console.warn(`[ProjectManager] before_run hook failed for ${ticketId}. Aborting start.`);
-        throw new Error('before_run hook failed');
+        const hookOk = await this.workflowLoader.runHook(ticket.projectId, 'before_run', project.source.workspaceDir);
+        if (!hookOk) {
+          console.warn(`[ProjectManager] before_run hook failed for ${ticketId}. Aborting start.`);
+          throw new Error('before_run hook failed');
+        }
+      } else {
+        const effectiveBranch = this.resolveTicketBranch(ticket) ?? project.source.defaultBranch;
+        await this.workflowLoader.loadFromRemote(ticket.projectId, project.source.repoUrl, effectiveBranch);
       }
 
       console.log(`[ProjectManager] startSupervisor: ensureSupervisorInfra for ${ticketId}...`);
-      const { machine } = await this.ensureSupervisorInfra(ticketId);
+      const { machine, sandbox } = await this.ensureSupervisorInfra(ticketId);
       console.log(`[ProjectManager] startSupervisor: ensureSupervisorInfra done. Phase: ${machine.getPhase()}, sessionId: ${machine.getSessionId()}`);
+
+      // For git-remote projects, run before_run hook inside the container via sandbox exec
+      if (project.source.kind === 'git-remote') {
+        const hookScript = this.workflowLoader.getConfig(ticket.projectId).hooks?.before_run;
+        if (hookScript && sandbox) {
+          const hookOk = await sandbox.execInContainer(hookScript, '/home/user/workspace');
+          if (!hookOk) {
+            console.warn(`[ProjectManager] before_run hook failed in container for ${ticketId}. Aborting start.`);
+            throw new Error('before_run hook failed');
+          }
+        }
+      }
 
       // Use the session ID from the machine (may have been freshly created by ensureSupervisorInfra)
       const sessionId = machine.getSessionId() ?? undefined;
@@ -2702,9 +2760,17 @@ export class ProjectManager {
     const taskId = ticket.supervisorTaskId;
 
     // Run before_remove hook
-    if (project) {
-      const workspaceDir = ticket.worktreePath ?? project.workspaceDir;
+    if (project?.source.kind === 'local') {
+      const workspaceDir = ticket.worktreePath ?? project.source.workspaceDir;
       await this.workflowLoader.runHook(ticket.projectId, 'before_remove', workspaceDir);
+    } else if (project?.source.kind === 'git-remote') {
+      const hookScript = this.workflowLoader.getConfig(ticket.projectId).hooks?.before_remove;
+      if (hookScript) {
+        const machineEntry = this.machines.get(ticketId);
+        if (machineEntry?.sandbox) {
+          await machineEntry.sandbox.execInContainer(hookScript, '/home/user/workspace');
+        }
+      }
     }
 
     // Dispose machine if still registered
@@ -2725,8 +2791,8 @@ export class ProjectManager {
     }
 
     // Remove worktree (source of truth is the ticket, not the task)
-    if (ticket.worktreePath && ticket.worktreeName && project) {
-      await removeWorktree(project.workspaceDir, ticket.worktreePath, ticket.worktreeName);
+    if (ticket.worktreePath && ticket.worktreeName && project && project.source.kind === 'local') {
+      await removeWorktree(project.source.workspaceDir, ticket.worktreePath, ticket.worktreeName);
       this.updateTicket(ticketId, { worktreePath: undefined, worktreeName: undefined });
     }
 
@@ -2888,8 +2954,8 @@ export class ProjectManager {
       // Clean up worktree from the ticket
       if (ticket.worktreePath && ticket.worktreeName) {
         const project = this.getProjects().find((p) => p.id === ticket.projectId);
-        if (project) {
-          await removeWorktree(project.workspaceDir, ticket.worktreePath, ticket.worktreeName);
+        if (project?.source.kind === 'local') {
+          await removeWorktree(project.source.workspaceDir, ticket.worktreePath, ticket.worktreeName);
         }
         this.updateTicket(ticket.id, { worktreePath: undefined, worktreeName: undefined });
         cleaned++;
@@ -2908,8 +2974,8 @@ export class ProjectManager {
       if (task.ticketId && !ticketIds.has(task.ticketId)) {
         if (task.worktreePath && task.worktreeName) {
           const project = this.getProjects().find((p) => p.id === task.projectId);
-          if (project) {
-            await removeWorktree(project.workspaceDir, task.worktreePath, task.worktreeName);
+          if (project?.source.kind === 'local') {
+            await removeWorktree(project.source.workspaceDir, task.worktreePath, task.worktreeName);
           }
         }
         this.removePersistedTask(task.id);
@@ -3003,15 +3069,15 @@ export class ProjectManager {
       const ticket = this.getTicketById(entry.task.ticketId);
       if (ticket?.worktreePath && ticket.worktreeName) {
         const project = this.getProjects().find((p) => p.id === ticket.projectId);
-        if (project) {
-          await removeWorktree(project.workspaceDir, ticket.worktreePath, ticket.worktreeName);
+        if (project?.source.kind === 'local') {
+          await removeWorktree(project.source.workspaceDir, ticket.worktreePath, ticket.worktreeName);
         }
         this.updateTicket(ticket.id, { worktreePath: undefined, worktreeName: undefined });
       }
     } else if (entry.task.worktreePath && entry.task.worktreeName) {
       const project = this.getProjects().find((p) => p.id === entry.task.projectId);
-      if (project) {
-        await removeWorktree(project.workspaceDir, entry.task.worktreePath, entry.task.worktreeName);
+      if (project?.source.kind === 'local') {
+        await removeWorktree(project.source.workspaceDir, entry.task.worktreePath, entry.task.worktreeName);
       }
     }
 
@@ -3100,7 +3166,26 @@ export class ProjectManager {
       return;
     }
 
-    if (version >= 6) {
+    // v6 → v7: migrate Project.workspaceDir to Project.source
+    if (version === 6 || store.get('schemaVersion', 0) === 6) {
+      console.log('[ProjectManager] Migrating projects to ProjectSource (→ v7)');
+      const projects = store.get('projects', []) as Record<string, unknown>[];
+      const migrated = projects.map((raw) => {
+        // Already migrated (defensive)
+        if (raw.source && typeof raw.source === 'object') return raw;
+        const { workspaceDir, ...rest } = raw;
+        return {
+          ...rest,
+          source: { kind: 'local', workspaceDir: workspaceDir as string },
+        };
+      });
+      store.set('projects', migrated);
+      store.set('schemaVersion', 7);
+      console.log(`[ProjectManager] v7 migration complete: ${migrated.length} projects`);
+      return;
+    }
+
+    if (version >= 7) {
       return;
     }
 

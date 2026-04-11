@@ -16,7 +16,7 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalM,
     borderRadius: tokens.borderRadiusMedium,
     ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: 'rgba(var(--colorNeutralBackground1Hover), 0.5)',
+    backgroundColor: tokens.colorNeutralBackground2,
     padding: tokens.spacingVerticalL,
   },
   fieldRow: {
@@ -75,7 +75,8 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
 
   useEffect(() => {
     if (!project) return;
-    ticketApi.checkGitRepo(project.workspaceDir).then((info) => {
+    if (project.source.kind !== 'local') return;
+    ticketApi.checkGitRepo(project.source.workspaceDir).then((info) => {
       setGitInfo(info);
       if (info.isGitRepo) {
         setBranch(info.currentBranch);

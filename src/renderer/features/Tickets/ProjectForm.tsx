@@ -95,11 +95,11 @@ const useStyles = makeStyles({
     cursor: 'pointer',
   },
   sandboxBtnActive: {
-    backgroundColor: 'rgba(99, 102, 241, 0.2)',
-    color: '#818cf8',
+    backgroundColor: tokens.colorBrandBackground2,
+    color: tokens.colorBrandForeground1,
   },
   sandboxBtnInactive: {
-    backgroundColor: tokens.colorNeutralBackground1Hover,
+    backgroundColor: tokens.colorNeutralBackground3,
     color: tokens.colorNeutralForeground2,
     ':hover': {
       color: tokens.colorNeutralForeground1,
@@ -134,10 +134,15 @@ type ProjectFormProps = {
 };
 
 
+type SourceKind = 'local' | 'git-remote';
+
 export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProps) => {
   const styles = useStyles();
   const [label, setLabel] = useState(editProject?.label ?? '');
-  const [workspaceDir, setWorkspaceDir] = useState(editProject?.workspaceDir ?? '');
+  const [sourceKind, setSourceKind] = useState<SourceKind>(editProject?.source.kind === 'git-remote' ? 'git-remote' : 'local');
+  const [workspaceDir, setWorkspaceDir] = useState(editProject?.source.kind === 'local' ? editProject.source.workspaceDir : '');
+  const [repoUrl, setRepoUrl] = useState(editProject?.source.kind === 'git-remote' ? editProject.source.repoUrl : '');
+  const [defaultBranch, setDefaultBranch] = useState(editProject?.source.kind === 'git-remote' ? (editProject.source.defaultBranch ?? '') : '');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [browseOpen, setBrowseOpen] = useState(false);
 
@@ -146,7 +151,9 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
   const [sandboxValue, setSandboxValue] = useState(deriveSandboxValue(editProject?.sandbox, initialSandboxMode));
 
   const isEdit = Boolean(editProject);
-  const isValid = label.trim().length > 0 && workspaceDir.trim().length > 0;
+  const isValid =
+    label.trim().length > 0 &&
+    (sourceKind === 'local' ? workspaceDir.trim().length > 0 : repoUrl.trim().length > 0);
 
   const handleLabelChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setLabel(e.target.value);
@@ -165,6 +172,22 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
     },
     [label]
   );
+
+  const handleSourceKindChange = useCallback((kind: SourceKind) => {
+    setSourceKind(kind);
+  }, []);
+
+  const handleRepoUrlChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setRepoUrl(e.target.value);
+    if (!label.trim()) {
+      const match = e.target.value.match(/\/([^/]+?)(?:\.git)?$/);
+      if (match?.[1]) setLabel(match[1]);
+    }
+  }, [label]);
+
+  const handleDefaultBranchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setDefaultBranch(e.target.value);
+  }, []);
 
   const handleSandboxModeChange = useCallback((mode: SandboxMode) => {
     setSandboxMode(mode);
@@ -188,17 +211,26 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
           ? { dockerfile: sandboxValue.trim() }
           : undefined;
 
+    const source =
+      sourceKind === 'local'
+        ? { kind: 'local' as const, workspaceDir: workspaceDir.trim() }
+        : {
+            kind: 'git-remote' as const,
+            repoUrl: repoUrl.trim(),
+            ...(defaultBranch.trim() ? { defaultBranch: defaultBranch.trim() } : {}),
+          };
+
     try {
       if (isEdit && editProject) {
         await ticketApi.updateProject(editProject.id, {
           label: label.trim(),
-          workspaceDir: workspaceDir.trim(),
+          source,
           sandbox: sandbox ?? null,
         });
       } else {
         await ticketApi.addProject({
           label: label.trim(),
-          workspaceDir: workspaceDir.trim(),
+          source,
           sandbox: sandbox ?? null,
         });
       }
@@ -206,7 +238,7 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
     } finally {
       setIsSubmitting(false);
     }
-  }, [isValid, isSubmitting, isEdit, editProject, label, workspaceDir, sandboxMode, sandboxValue, onClose]);
+  }, [isValid, isSubmitting, isEdit, editProject, label, sourceKind, workspaceDir, repoUrl, defaultBranch, sandboxMode, sandboxValue, onClose]);
 
   return (
     <>
@@ -214,7 +246,7 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
         <DialogContent className="sm:max-w-md">
           <DialogHeader>{isEdit ? 'Edit Project' : 'New Project'}</DialogHeader>
           <DialogBody className={styles.body}>
-            {/* Name & Directory */}
+            {/* Name & Source */}
             <div className={styles.section}>
               <div className={styles.fieldGroup}>
                 <label className={styles.label}>Name</label>
@@ -227,18 +259,69 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
               </div>
 
               <div className={styles.fieldGroup}>
-                <label className={styles.label}>Directory</label>
-                <button
-                  type="button"
-                  onClick={handleBrowseOpen}
-                  className={styles.browseBtn}
-                >
-                  <span className={mergeClasses(styles.browseText, workspaceDir ? styles.browseTextFilled : styles.browseTextEmpty)}>
-                    {workspaceDir || 'Tap to select directory'}
-                  </span>
-                  <span className={styles.browseLabel}>Browse</span>
-                </button>
+                <label className={styles.label}>Source</label>
+                <div className={styles.sandboxOptions}>
+                  <button
+                    type="button"
+                    onClick={() => handleSourceKindChange('local')}
+                    className={mergeClasses(
+                      styles.sandboxBtn,
+                      sourceKind === 'local' ? styles.sandboxBtnActive : styles.sandboxBtnInactive
+                    )}
+                  >
+                    Local Directory
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSourceKindChange('git-remote')}
+                    className={mergeClasses(
+                      styles.sandboxBtn,
+                      sourceKind === 'git-remote' ? styles.sandboxBtnActive : styles.sandboxBtnInactive
+                    )}
+                  >
+                    Git Repository
+                  </button>
+                </div>
               </div>
+
+              {sourceKind === 'local' && (
+                <div className={styles.fieldGroup}>
+                  <label className={styles.label}>Directory</label>
+                  <button
+                    type="button"
+                    onClick={handleBrowseOpen}
+                    className={styles.browseBtn}
+                  >
+                    <span className={mergeClasses(styles.browseText, workspaceDir ? styles.browseTextFilled : styles.browseTextEmpty)}>
+                      {workspaceDir || 'Tap to select directory'}
+                    </span>
+                    <span className={styles.browseLabel}>Browse</span>
+                  </button>
+                </div>
+              )}
+
+              {sourceKind === 'git-remote' && (
+                <>
+                  <div className={styles.fieldGroup}>
+                    <label className={styles.label}>Repository URL</label>
+                    <Input
+                      type="text"
+                      value={repoUrl}
+                      onChange={handleRepoUrlChange}
+                      placeholder="https://github.com/org/repo.git"
+                    />
+                  </div>
+                  <div className={styles.fieldGroup}>
+                    <label className={styles.label}>Default Branch (optional)</label>
+                    <Input
+                      type="text"
+                      value={defaultBranch}
+                      onChange={handleDefaultBranchChange}
+                      placeholder="main"
+                    />
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Sandbox */}

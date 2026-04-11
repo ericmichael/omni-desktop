@@ -7,6 +7,8 @@ import type { Project, SandboxConfig } from '@/shared/types';
 
 import { projectsApi } from './state';
 
+type SourceKind = 'local' | 'git-remote';
+
 const useStyles = makeStyles({
   body: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalL },
   field: { display: 'flex', flexDirection: 'column', gap: '6px' },
@@ -54,7 +56,10 @@ type ProjectFormProps = {
 export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProps) => {
   const styles = useStyles();
   const [label, setLabel] = useState(editProject?.label ?? '');
-  const [workspaceDir, setWorkspaceDir] = useState(editProject?.workspaceDir ?? '');
+  const [sourceKind, setSourceKind] = useState<SourceKind>(editProject?.source.kind === 'git-remote' ? 'git-remote' : 'local');
+  const [workspaceDir, setWorkspaceDir] = useState(editProject?.source.kind === 'local' ? editProject.source.workspaceDir : '');
+  const [repoUrl, setRepoUrl] = useState(editProject?.source.kind === 'git-remote' ? editProject.source.repoUrl : '');
+  const [defaultBranch, setDefaultBranch] = useState(editProject?.source.kind === 'git-remote' ? (editProject.source.defaultBranch ?? '') : '');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [browseOpen, setBrowseOpen] = useState(false);
 
@@ -63,7 +68,9 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
   const [sandboxValue, setSandboxValue] = useState(deriveSandboxValue(editProject?.sandbox, initialSandboxMode));
 
   const isEdit = Boolean(editProject);
-  const isValid = label.trim().length > 0 && workspaceDir.trim().length > 0;
+  const isValid =
+    label.trim().length > 0 &&
+    (sourceKind === 'local' ? workspaceDir.trim().length > 0 : repoUrl.trim().length > 0);
 
   const handleLabelChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setLabel(e.target.value);
@@ -82,6 +89,22 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
     },
     [label]
   );
+
+  const handleSourceKindChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSourceKind(e.target.value as SourceKind);
+  }, []);
+
+  const handleRepoUrlChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setRepoUrl(e.target.value);
+    if (!label.trim()) {
+      const match = e.target.value.match(/\/([^/]+?)(?:\.git)?$/);
+      if (match?.[1]) setLabel(match[1]);
+    }
+  }, [label]);
+
+  const handleDefaultBranchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setDefaultBranch(e.target.value);
+  }, []);
 
   const handleSandboxModeChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     const mode = e.target.value as SandboxMode;
@@ -106,17 +129,26 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
           ? { dockerfile: sandboxValue.trim() }
           : undefined;
 
+    const source =
+      sourceKind === 'local'
+        ? { kind: 'local' as const, workspaceDir: workspaceDir.trim() }
+        : {
+            kind: 'git-remote' as const,
+            repoUrl: repoUrl.trim(),
+            ...(defaultBranch.trim() ? { defaultBranch: defaultBranch.trim() } : {}),
+          };
+
     try {
       if (isEdit && editProject) {
         await projectsApi.updateProject(editProject.id, {
           label: label.trim(),
-          workspaceDir: workspaceDir.trim(),
+          source,
           sandbox: sandbox ?? null,
         });
       } else {
         await projectsApi.addProject({
           label: label.trim(),
-          workspaceDir: workspaceDir.trim(),
+          source,
           sandbox: sandbox ?? null,
         });
       }
@@ -124,7 +156,7 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
     } finally {
       setIsSubmitting(false);
     }
-  }, [isValid, isSubmitting, isEdit, editProject, label, workspaceDir, sandboxMode, sandboxValue, onClose]);
+  }, [isValid, isSubmitting, isEdit, editProject, label, sourceKind, workspaceDir, repoUrl, defaultBranch, sandboxMode, sandboxValue, onClose]);
 
   return (
     <>
@@ -144,16 +176,51 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
             </div>
 
             <div className={styles.field}>
-              <label className={styles.label}>Workspace Directory</label>
-              <div className={styles.dirRow}>
-                <span className={styles.dirDisplay}>
-                  {workspaceDir || 'No directory selected'}
-                </span>
-                <Button size="sm" variant="ghost" onClick={handleBrowseOpen}>
-                  Browse
-                </Button>
-              </div>
+              <label className={styles.label}>Source</label>
+              <Select value={sourceKind} onChange={handleSourceKindChange} className={styles.fullWidth}>
+                <option value="local">Local Directory</option>
+                <option value="git-remote">Git Repository</option>
+              </Select>
             </div>
+
+            {sourceKind === 'local' && (
+              <div className={styles.field}>
+                <label className={styles.label}>Workspace Directory</label>
+                <div className={styles.dirRow}>
+                  <span className={styles.dirDisplay}>
+                    {workspaceDir || 'No directory selected'}
+                  </span>
+                  <Button size="sm" variant="ghost" onClick={handleBrowseOpen}>
+                    Browse
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {sourceKind === 'git-remote' && (
+              <>
+                <div className={styles.field}>
+                  <label className={styles.label}>Repository URL</label>
+                  <Input
+                    type="text"
+                    value={repoUrl}
+                    onChange={handleRepoUrlChange}
+                    placeholder="https://github.com/org/repo.git"
+                    className={styles.fullWidth}
+                  />
+                </div>
+                <div className={styles.field}>
+                  <label className={styles.label}>Default Branch (optional)</label>
+                  <Input
+                    type="text"
+                    value={defaultBranch}
+                    onChange={handleDefaultBranchChange}
+                    placeholder="main"
+                    className={styles.fullWidth}
+                  />
+                </div>
+              </>
+            )}
 
             <div className={styles.field}>
               <label className={styles.label}>Sandbox</label>

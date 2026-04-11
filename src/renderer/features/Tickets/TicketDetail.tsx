@@ -150,14 +150,14 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, dragHandleProps,
   const [editBranch, setEditBranch] = useState('');
 
   useEffect(() => {
-    if (!project?.workspaceDir) {
+    if (project?.source.kind !== 'local') {
       setGitInfo(null);
       return;
     }
-    ticketApi.checkGitRepo(project.workspaceDir).then((info) => {
+    ticketApi.checkGitRepo(project.source.workspaceDir).then((info) => {
       setGitInfo(info);
     });
-  }, [project?.workspaceDir]);
+  }, [project?.source]);
 
   const handleStartEditTitle = useCallback(() => {
     if (ticket) {

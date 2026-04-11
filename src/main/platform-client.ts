@@ -37,13 +37,18 @@ export type PlatformPolicy = {
     framework_version?: string;
     allow_user_models?: boolean;
     allow_user_mcp_servers?: boolean;
+    runtime?: { name: string; resource_id: number };
   };
-  sandbox_profile: {
-    resource_limits: Record<string, string>;
-    volume_policy?: Record<string, unknown>;
-    sandbox_mode?: string;
+  sandbox_profiles: Array<{
+    resource_id: number;
+    name: string;
+    backend: string;
+    variant?: string;
+    image?: string;
     network_mode?: string;
-  };
+    resource_limits?: Record<string, string | number>;
+    volume_policy?: Record<string, unknown>;
+  }>;
   network_allowlist: Array<{ hostname: string; port: number; protocol: string }>;
   skills: Array<{ resource_id: number; name: string; version?: string; content_url: string }>;
   mcp_servers: Array<{ resource_id: number; name: string; transport: string; config: Record<string, unknown> }>;
@@ -158,9 +163,17 @@ export class PlatformClient {
 
   // --- Compute ---
 
-  async startSession(agentSlug: string, domain?: string): Promise<PlatformSession> {
-    const body: Record<string, string> = { agent: agentSlug };
+  async startSession(
+    agentSlug: string,
+    domain?: string,
+    gitRepo?: { url: string; branch?: string }
+  ): Promise<PlatformSession> {
+    const body: Record<string, unknown> = { agent: agentSlug };
     if (domain) body.domain = domain;
+    if (gitRepo) {
+      body.git_repo_url = gitRepo.url;
+      if (gitRepo.branch) body.git_branch = gitRepo.branch;
+    }
 
     const res = await this.authedFetch(`${this.config.url}/api/v1/compute/start`, {
       method: 'POST',
@@ -211,6 +224,36 @@ export class PlatformClient {
     throw new Error('Session did not become ready in time');
   }
 
+  async execInSession(
+    sessionId: string,
+    command: string,
+    workdir?: string,
+    timeout?: number
+  ): Promise<{ success: boolean; exitCode: number; stdout: string; stderr: string }> {
+    const body: Record<string, unknown> = { session_id: sessionId, command };
+    if (workdir) body.workdir = workdir;
+    if (timeout) body.timeout = timeout;
+
+    const res = await this.authedFetch(`${this.config.url}/api/v1/compute/exec`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`Exec in session failed: ${res.status}`);
+    const data = (await res.json()) as {
+      success: boolean;
+      exit_code: number;
+      stdout: string;
+      stderr: string;
+    };
+    return {
+      success: data.success,
+      exitCode: data.exit_code,
+      stdout: data.stdout,
+      stderr: data.stderr,
+    };
+  }
+
   async stopSession(sessionId: string): Promise<void> {
     const res = await this.authedFetch(`${this.config.url}/api/v1/compute/stop`, {
       method: 'POST',
@@ -222,7 +265,33 @@ export class PlatformClient {
     }
   }
 
-  // --- Workspace ---
+  // --- Project workspace (persistent per-project share for background sync) ---
+
+  async getProjectWorkspace(projectId: string): Promise<{ sasUrl: string; shareName: string; expiresAt: number }> {
+    const res = await this.authedFetch(`${this.config.url}/api/v1/compute/workspace/project-share`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: projectId }),
+    });
+    if (!res.ok) throw new Error(`Project workspace request failed: ${res.status}`);
+    const data = (await res.json()) as { sas_url: string; share_name: string; expires_at: number };
+    return { sasUrl: data.sas_url, shareName: data.share_name, expiresAt: data.expires_at };
+  }
+
+  // --- Encryption key (for client-side file encryption) ---
+
+  async getProjectEncryptionKey(projectId: string): Promise<Buffer> {
+    const res = await this.authedFetch(`${this.config.url}/api/v1/compute/workspace/encryption-key`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: projectId }),
+    });
+    if (!res.ok) throw new Error(`Encryption key request failed: ${res.status}`);
+    const data = (await res.json()) as { key: string };
+    return Buffer.from(data.key, 'base64');
+  }
+
+  // --- Session workspace ---
 
   async prepareWorkspace(sessionId: string): Promise<{ uploadSasUrl: string; shareName: string }> {
     const res = await this.authedFetch(`${this.config.url}/api/v1/compute/workspace/prepare`, {
@@ -244,6 +313,28 @@ export class PlatformClient {
     if (!res.ok) throw new Error(`Finalize workspace failed: ${res.status}`);
     const data = (await res.json()) as { session_id: string; download_sas_url: string };
     return { downloadSasUrl: data.download_sas_url };
+  }
+
+  // --- Workspace audit ---
+
+  async reportWorkspaceAuditEvents(
+    events: Array<{
+      action: 'workspace_sync.upload' | 'workspace_sync.download' | 'workspace_sync.delete';
+      share_name: string;
+      file_path: string;
+      file_size: number;
+      timestamp: number;
+    }>
+  ): Promise<void> {
+    if (events.length === 0) return;
+    const res = await this.authedFetch(`${this.config.url}/api/v1/audit/workspace`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ events }),
+    });
+    if (!res.ok) {
+      this.log.warn(`Workspace audit report failed: ${res.status}`);
+    }
   }
 
   // --- Internal ---

@@ -288,7 +288,7 @@ async function handleProjectTools(
       const projects = store.projects.map((p) => ({
         id: p.id,
         label: p.label,
-        workspaceDir: p.workspaceDir,
+        workspaceDir: p.source.kind === 'local' ? p.source.workspaceDir : p.source.repoUrl,
         columns: (p.pipeline?.columns ?? []).map((c) => c.label),
       }));
       return ok({ projects });

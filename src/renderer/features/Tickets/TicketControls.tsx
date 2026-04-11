@@ -32,34 +32,34 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
   greenIcon: {
-    color: '#4ade80',
+    color: tokens.colorPaletteGreenForeground1,
   },
   greenText: {
     fontSize: tokens.fontSizeBase200,
-    color: '#4ade80',
+    color: tokens.colorPaletteGreenForeground1,
     fontWeight: tokens.fontWeightMedium,
   },
   yellowIcon: {
-    color: '#facc15',
+    color: tokens.colorPaletteYellowForeground1,
   },
   yellowText: {
     fontSize: tokens.fontSizeBase200,
-    color: '#facc15',
+    color: tokens.colorPaletteYellowForeground1,
     fontWeight: tokens.fontWeightMedium,
   },
   blueText: {
     fontSize: tokens.fontSizeBase200,
-    color: '#60a5fa',
+    color: tokens.colorBrandForeground1,
     fontWeight: tokens.fontWeightMedium,
   },
   blueDot: {
     width: '6px',
     height: '6px',
     borderRadius: '50%',
-    backgroundColor: '#60a5fa',
+    backgroundColor: tokens.colorBrandForeground1,
   },
   redIcon: {
-    color: '#f87171',
+    color: tokens.colorPaletteRedForeground1,
   },
   controlsRow: {
     display: 'flex',

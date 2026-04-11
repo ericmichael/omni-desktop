@@ -28,10 +28,10 @@ const useStyles = makeStyles({
     border: 'none',
     cursor: 'pointer',
     ':hover': {
-      backgroundColor: tokens.colorNeutralBackground1Hover,
+      backgroundColor: tokens.colorSubtleBackgroundHover,
     },
     ':active': {
-      backgroundColor: tokens.colorNeutralBackground1Pressed,
+      backgroundColor: tokens.colorSubtleBackgroundPressed,
     },
   },
   iconWrap: {

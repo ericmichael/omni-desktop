@@ -12,10 +12,10 @@ const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.sv
 
 const useStyles = makeStyles({
   folderIcon: {
-    color: '#facc15',
+    color: tokens.colorPaletteYellowForeground1,
   },
   imageIcon: {
-    color: '#c084fc',
+    color: tokens.colorBrandForeground2,
   },
   docIcon: {
     color: tokens.colorNeutralForeground2,

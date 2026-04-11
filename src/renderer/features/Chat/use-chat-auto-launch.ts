@@ -14,5 +14,5 @@ export const useChatAutoLaunch = () => {
     logLabel: 'autoLaunch:chat',
   });
 
-  return { phase, error, retry, launch, sandboxEnabled: store.sandboxEnabled };
+  return { phase, error, retry, launch, sandboxEnabled: (store.sandboxBackend ?? 'none') !== 'none' };
 };

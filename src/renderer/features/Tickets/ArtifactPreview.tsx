@@ -73,7 +73,7 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
   },
   openLink: {
-    color: '#818cf8',
+    color: tokens.colorBrandForeground1,
     cursor: 'pointer',
     backgroundColor: 'transparent',
     border: 'none',

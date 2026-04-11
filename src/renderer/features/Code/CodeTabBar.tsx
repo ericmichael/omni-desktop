@@ -51,9 +51,9 @@ const useStyles = makeStyles({
   tabInactive: {
     borderBottomColor: 'transparent',
     color: tokens.colorNeutralForeground2,
-    ':hover': { color: tokens.colorNeutralForeground1, backgroundColor: tokens.colorNeutralBackground1Hover },
+    ':hover': { color: tokens.colorNeutralForeground1, backgroundColor: tokens.colorSubtleBackgroundHover },
   },
-  runningDot: { width: '8px', height: '8px', flexShrink: 0, borderRadius: '9999px', backgroundColor: '#4ade80' },
+  runningDot: { width: '8px', height: '8px', flexShrink: 0, borderRadius: '9999px', backgroundColor: tokens.colorPaletteGreenForeground1 },
   truncate: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   closeBtn: { flexShrink: 0, width: '20px !important', height: '20px !important' },
   closeBtnActive: { opacity: 0.7, ':hover': { opacity: 1 } },

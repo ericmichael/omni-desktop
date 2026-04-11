@@ -46,7 +46,7 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightMedium,
   },
-  expiryUrgent: { backgroundColor: 'rgba(245, 158, 11, 0.1)', color: '#fbbf24' },
+  expiryUrgent: { backgroundColor: tokens.colorPaletteYellowBackground1, color: tokens.colorPaletteYellowForeground1 },
   expiryNormal: { backgroundColor: tokens.colorNeutralBackground2, color: tokens.colorNeutralForeground3 },
   card: {
     display: 'flex',
@@ -97,7 +97,7 @@ const useStyles = makeStyles({
     border: 'none',
     cursor: 'pointer',
   },
-  statusActive: { backgroundColor: 'rgba(96, 165, 250, 0.2)', color: 'rgb(96, 165, 250)' },
+  statusActive: { backgroundColor: tokens.colorBrandBackground2, color: tokens.colorBrandForeground1 },
   statusInactive: { backgroundColor: tokens.colorNeutralBackground3, color: tokens.colorNeutralForeground2, ':hover': { color: tokens.colorNeutralForeground1 } },
   statusDot: { width: '8px', height: '8px', borderRadius: '9999px' },
   actionsRow: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS, paddingTop: tokens.spacingVerticalS },

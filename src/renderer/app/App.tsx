@@ -3,6 +3,7 @@ import '@fontsource-variable/inter';
 import '@xterm/xterm/css/xterm.css';
 import '@/renderer/features/Toast/ipc-toast-listener';
 import '@/renderer/features/Toast/status-toast-listener';
+import '@/renderer/features/WorkspaceSync/state'; // side-effect: registers IPC listener
 
 import { FluentProvider, makeStyles, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
@@ -17,6 +18,7 @@ import { AuthGate } from '@/renderer/features/Auth/AuthGate';
 import { Console } from '@/renderer/features/Console/Console';
 import { QuickCapture } from '@/renderer/features/Inbox/QuickCapture';
 import { ToastContainer } from '@/renderer/features/Toast/ToastContainer';
+import { SyncBar } from '@/renderer/features/WorkspaceSync/SyncBar';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { applyCssVars, fluentThemes } from '@/renderer/theme/fluent-themes';
 
@@ -73,6 +75,7 @@ export const App = () => {
                 </div>
                 <Console />
                 <QuickCapture />
+                <SyncBar />
               </AuthGate>
             </SystemInfoLoadingGate>
             <ToastContainer />

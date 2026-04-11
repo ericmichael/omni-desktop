@@ -11,7 +11,7 @@ import { ipcMain } from 'electron';
 import type Store from 'electron-store';
 
 import { PlatformClient } from '@/main/platform-client';
-import { isEnterpriseBuild, PLATFORM_URL } from '@/main/platform-mode';
+import { isEnterpriseBuild, mapSandboxProfiles, PLATFORM_URL } from '@/main/platform-mode';
 import type { FetchFn } from '@/main/agent-process';
 import type { IpcEvents, IpcRendererEvents, PlatformCredentials, StoreData } from '@/shared/types';
 
@@ -53,6 +53,9 @@ export function registerPlatformIpc(arg: {
 
   ipc.handle('platform:sign-out', () => {
     store.delete('platform');
+    store.set('sandboxProfiles', null);
+    store.set('selectedMachineId', null);
+    store.set('sandboxBackend', 'none');
     sendToWindow('platform:auth-changed', null);
   });
 
@@ -84,6 +87,41 @@ export function registerPlatformIpc(arg: {
 
   // --- Internal ---
 
+  /**
+   * Fetch the effective policy from the platform and apply sandbox profiles
+   * to the store. Auto-selects 'platform' backend if available.
+   */
+  async function fetchAndApplyPolicy(credentials: PlatformCredentials): Promise<void> {
+    try {
+      const client = new PlatformClient(
+        { url: PLATFORM_URL, accessToken: credentials.accessToken, refreshToken: credentials.refreshToken },
+        fetchFn
+      );
+      client.onTokenRefresh = (newToken) => {
+        const current = store.get('platform');
+        if (current) {
+          store.set('platform', { ...current, accessToken: newToken });
+        }
+      };
+
+      const policy = await client.getPolicy('omni_code');
+      const profiles = mapSandboxProfiles(policy.sandbox_profiles ?? []);
+      store.set('sandboxProfiles', profiles.length > 0 ? profiles : null);
+
+      if (profiles.length > 0) {
+        // Auto-select: prefer 'platform' backend, otherwise first available
+        const platformProfile = profiles.find((p) => p.backend === 'platform');
+        const selected = platformProfile ?? profiles[0]!;
+        store.set('sandboxBackend', selected.backend);
+        store.set('selectedMachineId', selected.resource_id);
+      }
+
+      console.log(`[Platform] Policy applied: ${profiles.length} sandbox profile(s)`);
+    } catch (e) {
+      console.warn('[Platform] Failed to fetch policy:', (e as Error).message);
+    }
+  }
+
   async function pollForAuth(deviceCode: string, interval: number, expiresIn: number): Promise<void> {
     const maxAttempts = Math.floor(expiresIn / interval);
 
@@ -105,6 +143,9 @@ export function registerPlatformIpc(arg: {
 
           store.set('platform', credentials);
           sendToWindow('platform:auth-changed', credentials);
+
+          // Fetch policy and apply sandbox profiles
+          await fetchAndApplyPolicy(credentials);
           return;
         }
 
@@ -120,6 +161,14 @@ export function registerPlatformIpc(arg: {
     }
   }
 
+  /** Refresh policy from the platform. Call on startup if credentials exist. */
+  const refreshPolicy = async () => {
+    const creds = store.get('platform');
+    if (creds?.accessToken && isEnterpriseBuild()) {
+      await fetchAndApplyPolicy(creds);
+    }
+  };
+
   const cleanup = () => {
     ipcMain.removeHandler('platform:is-enterprise');
     ipcMain.removeHandler('platform:get-auth');
@@ -128,5 +177,5 @@ export function registerPlatformIpc(arg: {
     ipcMain.removeHandler('platform:get-dashboards');
   };
 
-  return cleanup;
+  return { cleanup, refreshPolicy };
 }

@@ -67,7 +67,7 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
     transitionProperty: 'color, background-color',
     transitionDuration: '150ms',
-    ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover, color: tokens.colorNeutralForeground1 },
+    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
   },
   overlayBody: { minHeight: 0, flex: '1 1 0' },
   root: {

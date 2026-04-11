@@ -56,7 +56,25 @@ export type OmniTheme =
   | 'utrgv';
 
 export type SandboxVariant = 'standard' | 'work';
-export type SandboxBackend = 'docker' | 'podman' | 'vm' | 'local';
+export type SandboxBackend = 'platform' | 'docker' | 'podman' | 'vm' | 'local' | 'none';
+
+/**
+ * A sandbox execution profile from platform policy.
+ * Each Machine governed resource produces one of these.
+ */
+export type SandboxProfile = {
+  resource_id: number;
+  name: string;
+  backend: SandboxBackend;
+  variant?: string;
+  image?: string;
+  network_mode?: string;
+  resource_limits?: {
+    cpu?: string;
+    memory?: string;
+    max_duration_minutes?: number;
+  };
+};
 
 /**
  * Platform credentials for enterprise mode.
@@ -75,9 +93,11 @@ export type PlatformCredentials = {
 
 export type StoreData = {
   workspaceDir?: string;
-  sandboxEnabled: boolean;
-  sandboxVariant: SandboxVariant;
   sandboxBackend: SandboxBackend;
+  /** Platform-provided sandbox profiles. Null = open-source mode (all local backends available). */
+  sandboxProfiles: SandboxProfile[] | null;
+  /** ID of the selected Machine governed resource (from sandboxProfiles). */
+  selectedMachineId: number | null;
   launcherWindowProps?: WindowProps;
   appWindowProps?: WindowProps;
   optInToLauncherPrereleases: boolean;
@@ -137,19 +157,18 @@ export const schema: Schema<StoreData> = {
   workspaceDir: {
     type: 'string',
   },
-  sandboxEnabled: {
-    type: 'boolean',
-    default: false,
-  },
-  sandboxVariant: {
-    type: 'string',
-    enum: ['standard', 'work'],
-    default: 'work',
-  },
   sandboxBackend: {
     type: 'string',
-    enum: ['docker', 'podman', 'vm', 'local'],
-    default: 'docker',
+    enum: ['platform', 'docker', 'podman', 'vm', 'local', 'none'],
+    default: 'none',
+  },
+  sandboxProfiles: {
+    type: ['array', 'null'],
+    default: null,
+  },
+  selectedMachineId: {
+    type: ['number', 'null'],
+    default: null,
   },
   launcherWindowProps: winSizePropsSchema,
   appWindowProps: winSizePropsSchema,
@@ -234,12 +253,12 @@ export const schema: Schema<StoreData> = {
       properties: {
         id: { type: 'string' },
         label: { type: 'string' },
-        workspaceDir: { type: 'string' },
+        source: { type: 'object' },
         createdAt: { type: 'number' },
         pipeline: { type: 'object' },
         sandbox: { type: ['object', 'null'] },
       },
-      required: ['id', 'label', 'workspaceDir', 'createdAt'],
+      required: ['id', 'label', 'source', 'createdAt'],
     },
   },
   initiatives: {
@@ -579,10 +598,22 @@ export type SandboxConfig = {
 
 // --- Core entities ---
 
+/** Credential reference for git-remote sources. Resolved at clone time by the platform. */
+export type GitCredentialRef = { kind: 'platform-managed'; credentialId: string };
+
+/**
+ * Discriminated union describing where a project's files live.
+ * - `local`: directory on the user's machine (may or may not be a git repo — `gitDetected` is auto-set).
+ * - `git-remote`: sandbox clones the repo; git is the persistence layer.
+ */
+export type ProjectSource =
+  | { kind: 'local'; workspaceDir: string; gitDetected?: boolean }
+  | { kind: 'git-remote'; repoUrl: string; defaultBranch?: string; credentials?: GitCredentialRef };
+
 export type Project = {
   id: ProjectId;
   label: string;
-  workspaceDir: string;
+  source: ProjectSource;
   createdAt: number;
   /** Pipeline configuration. If undefined, DEFAULT_PIPELINE is used. */
   pipeline?: Pipeline;
@@ -979,6 +1010,52 @@ type InitiativeIpcEvents = Namespaced<
   }
 >;
 
+// ---------------------------------------------------------------------------
+// Workspace sync types
+// ---------------------------------------------------------------------------
+
+export type WorkspaceSyncState = 'stopped' | 'starting' | 'syncing' | 'watching' | 'error';
+
+export type WorkspaceSyncStatus = {
+  state: WorkspaceSyncState;
+  /** Files uploaded since sync started. */
+  filesUploaded: number;
+  /** Files downloaded since sync started. */
+  filesDownloaded: number;
+  /** Timestamp of the last completed sync operation. */
+  lastSyncAt: number | null;
+  /** Human-readable error (only when state === 'error'). */
+  error?: string;
+  /** Progress of the current batch operation (if any). */
+  progress?: {
+    /** What we're doing right now. */
+    phase: 'uploading' | 'downloading' | 'reconciling';
+    /** Total files in the current batch. */
+    totalFiles: number;
+    /** Files completed so far. */
+    completedFiles: number;
+    /** Observed bytes per second (smoothed). */
+    bytesPerSecond: number;
+    /** Estimated seconds remaining (null if unknown). */
+    etaSeconds: number | null;
+    /** Timestamp when this batch started. */
+    startedAt: number;
+  };
+};
+
+/**
+ * Workspace sync IPC events. Renderer invokes, main handles.
+ */
+type WorkspaceSyncIpcEvents = Namespaced<
+  'workspace-sync',
+  {
+    start: (projectId: string, workspaceDir: string) => void;
+    stop: (projectId: string) => void;
+    'get-status': (projectId: string) => WorkspaceSyncStatus;
+    'get-share-name': (projectId: string) => string | null;
+  }
+>;
+
 /**
  * Intersection of all the events that the renderer can invoke and main process can handle.
  */
@@ -992,7 +1069,8 @@ export type IpcEvents = MainProcessIpcEvents &
   ProjectIpcEvents &
   InboxIpcEvents &
   InitiativeIpcEvents &
-  PlatformIpcEvents;
+  PlatformIpcEvents &
+  WorkspaceSyncIpcEvents;
 
 /**
  * Store events. Main process emits these events, renderer process listens to them.
@@ -1103,6 +1181,16 @@ type PlatformIpcRendererEvents = Namespaced<
 >;
 
 /**
+ * Workspace sync events. Main process emits these, renderer listens.
+ */
+type WorkspaceSyncIpcRendererEvents = Namespaced<
+  'workspace-sync',
+  {
+    'status-changed': [string, WorkspaceSyncStatus];
+  }
+>;
+
+/**
  * Intersection of all the events emitted by main process that the renderer can listen to.
  */
 export type IpcRendererEvents = TerminalIpcRendererEvents &
@@ -1113,7 +1201,8 @@ export type IpcRendererEvents = TerminalIpcRendererEvents &
   StoreIpcRendererEvents &
   ProjectIpcRendererEvents &
   ToastIpcRendererEvents &
-  PlatformIpcRendererEvents;
+  PlatformIpcRendererEvents &
+  WorkspaceSyncIpcRendererEvents;
 
 // #region Config file types
 

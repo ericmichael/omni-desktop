@@ -135,7 +135,7 @@ const useStyles = makeStyles({
     border: 'none',
     cursor: 'pointer',
   },
-  submitActive: { backgroundColor: tokens.colorBrandBackground, color: '#fff' },
+  submitActive: { backgroundColor: tokens.colorBrandBackground, color: tokens.colorNeutralForegroundOnBrand },
   submitDisabled: { backgroundColor: tokens.colorNeutralBackground3, color: tokens.colorNeutralForeground2, opacity: 0.4 },
   safeArea: { height: 'env(safe-area-inset-bottom, 0px)' },
 });

@@ -49,7 +49,7 @@ const useStyles = makeStyles({
     backgroundColor: 'transparent',
     transitionProperty: 'color, background-color',
     transitionDuration: '150ms',
-    ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover, color: tokens.colorNeutralForeground1 },
+    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
   },
   overlayBody: { flex: '1 1 0', minHeight: 0 },
   resizeOverlay: { position: 'absolute', inset: 0, zIndex: 40, cursor: 'nw-resize' },
@@ -88,7 +88,7 @@ const useStyles = makeStyles({
   splitBtnActive: {
     backgroundColor: tokens.colorBrandBackground,
     ...shorthands.borderColor(tokens.colorBrandStroke1),
-    color: '#fff',
+    color: tokens.colorNeutralForegroundOnBrand,
   },
   splitBtnInactive: {
     backgroundColor: tokens.colorNeutralBackground2,

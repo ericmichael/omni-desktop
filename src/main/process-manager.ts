@@ -9,14 +9,14 @@ import type {
   IpcEvents,
   IpcRendererEvents,
   SandboxBackend,
-  SandboxVariant,
+  SandboxProfile,
   WithTimestamp,
 } from '@/shared/types';
 
 export type ProcessManagerStoreData = {
-  sandboxEnabled: boolean;
   sandboxBackend: SandboxBackend;
-  sandboxVariant: SandboxVariant;
+  sandboxProfiles: SandboxProfile[] | null;
+  selectedMachineId: number | null;
 };
 
 /**
@@ -47,23 +47,29 @@ export class ProcessManager {
     this.sendToWindow = arg.sendToWindow;
     this.fetchFn = arg.fetchFn ?? globalThis.fetch;
     this.getStoreData = arg.getStoreData ?? (() => ({
-      sandboxEnabled: false,
-      sandboxBackend: 'docker' as const,
-      sandboxVariant: 'work' as const,
+      sandboxBackend: 'none' as const,
+      sandboxProfiles: null,
+      selectedMachineId: null,
     }));
   }
 
   private resolveMode(): AgentProcessMode {
-    // Platform compute only when explicitly opted in — having a platformClient
-    // means governance is active (policy, dashboards, audit), not that compute
-    // should be delegated to cloud containers.
-    if (this.platformClient && process.env.OMNI_COMPUTE_MODE === 'platform') return 'platform';
-    const { sandboxEnabled, sandboxBackend } = this.getStoreData();
-    if (!sandboxEnabled) return 'none';
-    if (sandboxBackend === 'local') return 'local';
-    if (sandboxBackend === 'vm') return 'vm';
-    if (sandboxBackend === 'podman') return 'podman';
-    return 'sandbox';
+    const { sandboxBackend } = this.getStoreData();
+    switch (sandboxBackend) {
+      case 'platform': return 'platform';
+      case 'docker': return 'sandbox';
+      case 'podman': return 'podman';
+      case 'vm': return 'vm';
+      case 'local': return 'local';
+      default: return 'none';
+    }
+  }
+
+  /** Returns the selected Machine profile from the platform policy, if any. */
+  private getSelectedProfile(): SandboxProfile | null {
+    const { sandboxProfiles, selectedMachineId } = this.getStoreData();
+    if (!sandboxProfiles || !selectedMachineId) return null;
+    return sandboxProfiles.find((p) => p.resource_id === selectedMachineId) ?? null;
   }
 
   private getOrCreate(processId: string, mode: AgentProcessMode): AgentProcess {
@@ -95,9 +101,10 @@ export class ProcessManager {
     this.lastStartArgs.set(processId, opts);
     const mode = this.resolveMode();
     const proc = this.getOrCreate(processId, mode);
+    const profile = this.getSelectedProfile();
     const startArg: AgentProcessStartArg = {
       workspaceDir: opts.workspaceDir,
-      sandboxVariant: this.getStoreData().sandboxVariant,
+      sandboxVariant: (profile?.variant as 'standard' | 'work') ?? 'work',
     };
     proc.start(startArg);
   };
@@ -114,9 +121,10 @@ export class ProcessManager {
     const workspaceDir = opts.workspaceDir || lastOpts?.workspaceDir || '';
     const mode = this.resolveMode();
     const proc = this.getOrCreate(processId, mode);
+    const profile = this.getSelectedProfile();
     const fallbackArg: AgentProcessStartArg = {
       workspaceDir,
-      sandboxVariant: this.getStoreData().sandboxVariant,
+      sandboxVariant: (profile?.variant as 'standard' | 'work') ?? 'work',
     };
     await proc.rebuild(fallbackArg);
   };

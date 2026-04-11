@@ -125,7 +125,7 @@ const useStyles = makeStyles({
       paddingTop: '10px',
       paddingBottom: '8px',
       ':hover': {
-        backgroundColor: tokens.colorNeutralBackground1Hover,
+        backgroundColor: tokens.colorSubtleBackgroundHover,
         color: tokens.colorNeutralForeground1,
       },
     },
@@ -133,7 +133,7 @@ const useStyles = makeStyles({
   itemActive: {
     color: tokens.colorNeutralForeground1,
     '@media (min-width: 640px)': {
-      backgroundColor: tokens.colorNeutralBackground1Selected,
+      backgroundColor: tokens.colorSubtleBackgroundSelected,
     },
   },
 
