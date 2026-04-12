@@ -22,9 +22,7 @@ type ChatShellProps = {
 
 const headerActions = {
   showArtifactsButton: false,
-  showTerminalButton: false,
   onArtifactsToggle: undefined,
-  onTerminalToggle: undefined,
 };
 
 export const ChatShell = memo(

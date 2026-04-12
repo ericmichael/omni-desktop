@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react'
+import { PaperclipIcon, FolderIcon, MonitorIcon, MicIcon, ArrowUpIcon, SquareIcon, XIcon, Loader2Icon, LockIcon } from 'lucide-react'
 import { PromptInput, PromptInputTextarea, PromptInputActions } from './promptkit/PromptInput'
 import { VoiceModal } from './VoiceModal'
 
@@ -132,29 +133,23 @@ export function Input({ disabled, thinking, onStop, onSubmit, voiceEnabled, work
               {files.map((f, i) => (
                 f.type.startsWith('image/') ? (
                   <div key={i} className="relative group">
-                    <img src={URL.createObjectURL(f)} alt="" className="h-20 max-w-[160px] rounded-lg object-cover border border-bgCardAlt" />
+                    <img src={URL.createObjectURL(f)} alt="" className="h-20 max-w-[160px] rounded-lg object-cover border border-border" />
                     <button onClick={() => {
                       setFiles(prev => prev.filter((_, idx) => idx !== i))
                       if (fileInputRef.current) fileInputRef.current.value = ''
-                    }} className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-bgCard border border-bgCardAlt text-textSubtle hover:text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                      <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
+                    }} className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-card border border-border text-muted-foreground hover:text-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <XIcon size={12} />
                     </button>
                   </div>
                 ) : (
-                  <div key={i} className="bg-bgCard flex items-center gap-2 rounded-lg px-3 py-2 text-sm">
-                    <svg width="16" height="16" viewBox="0 0 24 24" className="text-white" aria-hidden="true">
-                      <path d="M21.44 11.05l-8.49 8.49a5.5 5.5 0 11-7.78-7.78l8.49-8.49a3.5 3.5 0 114.95 4.95l-8.49 8.49a1.5 1.5 0 11-2.12-2.12l8.49-8.49" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                    <span className="max-w-[120px] truncate text-white" title={f.name}>{f.name}</span>
+                  <div key={i} className="bg-card flex items-center gap-2 rounded-lg px-3 py-2 text-sm">
+                    <PaperclipIcon size={16} className="text-foreground" />
+                    <span className="max-w-[120px] truncate text-foreground" title={f.name}>{f.name}</span>
                     <button onClick={() => {
                       setFiles(prev => prev.filter((_, idx) => idx !== i))
                       if (fileInputRef.current) fileInputRef.current.value = ''
-                    }} className="hover:bg-bgCardAlt rounded-full p-1">
-                      <svg width="16" height="16" viewBox="0 0 24 24" className="text-white" aria-hidden="true">
-                        <path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
+                    }} className="hover:bg-accent rounded-full p-1">
+                      <XIcon size={16} className="text-foreground" />
                     </button>
                   </div>
                 )
@@ -175,7 +170,7 @@ export function Input({ disabled, thinking, onStop, onSubmit, voiceEnabled, work
               <label
                 htmlFor="file-upload"
                 onClick={(e) => e.stopPropagation()}
-                className="hover:bg-bgCardAlt/50 flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-2xl"
+                className="hover:bg-accent/50 flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-2xl"
                 aria-label="Attach files"
               >
                 <input
@@ -186,9 +181,7 @@ export function Input({ disabled, thinking, onStop, onSubmit, voiceEnabled, work
                   className="hidden"
                   id="file-upload"
                 />
-                <svg width="20" height="20" viewBox="0 0 24 24" className="text-white" aria-hidden="true">
-                  <path d="M21.44 11.05l-8.49 8.49a5.5 5.5 0 11-7.78-7.78l8.49-8.49a3.5 3.5 0 114.95 4.95l-8.49 8.49a1.5 1.5 0 11-2.12-2.12l8.49-8.49" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
+                <PaperclipIcon size={20} className="text-foreground" />
               </label>
 
               {workspacePath !== undefined && (
@@ -197,51 +190,30 @@ export function Input({ disabled, thinking, onStop, onSubmit, voiceEnabled, work
                   disabled={workspaceLocked}
                   className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors min-w-0 ${
                     workspaceLocked
-                      ? 'text-textSubtle cursor-default'
-                      : 'text-textHeading hover:bg-bgCardAlt/50 cursor-pointer'
+                      ? 'text-muted-foreground cursor-default'
+                      : 'text-secondary-foreground hover:bg-accent/50 cursor-pointer'
                   }`}
                   title={workspacePath || 'Select workspace'}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" className={`shrink-0 ${workspaceLocked ? 'text-textSubtle' : 'text-tweetBlue'}`} fill="currentColor" aria-hidden="true">
-                    <path d="M2 6a2 2 0 012-2h5l2 2h9a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
-                  </svg>
+                  <FolderIcon size={14} className={`shrink-0 ${workspaceLocked ? 'text-muted-foreground' : 'text-primary'}`} />
                   <span className="max-w-[120px] sm:max-w-[200px] truncate">
                     {workspacePath ? workspacePath.split('/').pop() || workspacePath : 'Select workspace'}
                   </span>
                   {workspaceLocked && (
-                    <svg width="10" height="10" viewBox="0 0 24 24" className="text-textSubtle flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
-                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                      <path d="M7 11V7a5 5 0 0110 0v4" />
-                    </svg>
+                    <LockIcon size={10} className="text-muted-foreground flex-shrink-0" />
                   )}
                 </button>
               )}
 
               {sandboxLabel && (
                 <div
-                  className="hidden sm:flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-textHeading hover:bg-bgCardAlt/50 transition-colors"
+                  className="hidden sm:flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-secondary-foreground hover:bg-accent/50 transition-colors"
                   title={`Sandbox: ${sandboxLabel}`}
                 >
                   {sandboxLoading ? (
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      className="text-textSubtle animate-spin"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      aria-hidden="true"
-                    >
-                      <path d="M21 12a9 9 0 1 1-6.22-8.56" />
-                    </svg>
+                    <Loader2Icon size={14} className="text-muted-foreground animate-spin" />
                   ) : null}
-                  <svg width="14" height="14" viewBox="0 0 24 24" className="text-textHeading" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <rect x="3" y="4" width="18" height="12" rx="2" />
-                    <path d="M8 20h8" />
-                    <path d="M12 16v4" />
-                  </svg>
+                  <MonitorIcon size={14} className="text-secondary-foreground" />
                   <span>{sandboxLabel}</span>
                 </div>
               )}
@@ -252,13 +224,10 @@ export function Input({ disabled, thinking, onStop, onSubmit, voiceEnabled, work
                 <button
                   type="button"
                   onClick={() => setIsVoiceModalOpen(true)}
-                  className="hover:bg-bgCardAlt/50 flex h-8 w-8 items-center justify-center rounded-2xl"
+                  className="hover:bg-accent/50 flex h-8 w-8 items-center justify-center rounded-2xl"
                   aria-label="Voice mode"
                 >
-                  <svg width="20" height="20" viewBox="0 0 24 24" className="text-white" aria-hidden="true">
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" fill="currentColor"/>
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none"/>
-                  </svg>
+                  <MicIcon size={20} className="text-foreground" />
                 </button>
               ) : null}
 
@@ -267,25 +236,21 @@ export function Input({ disabled, thinking, onStop, onSubmit, voiceEnabled, work
                 type="button"
                 disabled={!canSend}
                 onClick={handleSubmit}
-                className="h-8 w-8 rounded-full bg-tweetBlue text-white flex items-center justify-center disabled:bg-bgCardAlt disabled:text-textSubtle hover:brightness-110 focus:outline-none shadow-sm"
+                className="h-8 w-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center disabled:bg-secondary disabled:text-muted-foreground hover:brightness-110 focus:outline-none shadow-sm"
                 aria-label="Send"
                 title="Send (Enter)"
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" className="pointer-events-none" aria-hidden="true">
-                  <path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
+                <ArrowUpIcon size={20} className="pointer-events-none" />
               </button>
             ) : (
               <button
                 type="button"
                 onClick={onStop}
-                className="h-8 w-8 rounded-full bg-errorRed text-white flex items-center justify-center hover:brightness-110 focus:outline-none shadow-sm"
+                className="h-8 w-8 rounded-full bg-destructive text-primary-foreground flex items-center justify-center hover:brightness-110 focus:outline-none shadow-sm"
                 aria-label="Stop"
                 title="Stop"
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" className="pointer-events-none" aria-hidden="true">
-                  <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" />
-                </svg>
+                <SquareIcon size={20} className="pointer-events-none" />
               </button>
               )}
             </div>

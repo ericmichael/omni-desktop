@@ -22,59 +22,97 @@ export type TerminalState =
     });
 
 export const $isConsoleOpen = atom(false);
-export const $terminal = atom<TerminalState | null>(null);
+export const $terminals = atom<TerminalState[]>([]);
+export const $activeTerminalId = atom<string | null>(null);
+
+export const $activeTerminal = computed([$terminals, $activeTerminalId], (terminals, activeId) => {
+  return terminals.find((t) => t.id === activeId) ?? null;
+});
+
+export const $terminalHasNewOutput = computed([$terminals], (terminals) => {
+  return terminals.some((t) => t.hasNewOutput);
+});
+
+// Legacy compat — alias for components that read a single terminal
+export const $terminal = $activeTerminal;
 
 $isConsoleOpen.listen((isConsoleOpen) => {
-  const terminal = $terminal.get();
-  if (isConsoleOpen && terminal) {
-    $terminal.set({ ...terminal, hasNewOutput: false });
-    terminal.fitAddon.fit();
+  if (isConsoleOpen) {
+    // Clear new-output flags and fit all terminals
+    const terminals = $terminals.get();
+    const updated = terminals.map((t) => (t.hasNewOutput ? { ...t, hasNewOutput: false } : t));
+    if (updated.some((t, i) => t !== terminals[i])) {
+      $terminals.set(updated);
+    }
+    const active = $activeTerminal.get();
+    if (active) {
+      active.fitAddon.fit();
+    }
   }
 });
 
-onMount($terminal, () => {
+onMount($terminals, () => {
   task(async () => {
     const terminalIds = await emitter.invoke('terminal:list');
-    const [id, ...rest] = terminalIds;
-    if (rest.length > 0) {
-      console.warn(
-        `Multiple terminals are not supported. Only the first terminal will be opened.
-        Disposing ${rest.length} other terminal(s).`
-      );
-      await Promise.allSettled(rest.map((id) => emitter.invoke('terminal:dispose', id)));
-    }
+    if (terminalIds.length === 0) return;
 
-    if (!id) {
-      return;
-    }
-
-    console.debug('Attaching to terminal', id);
-    const terminal = buildTerminalState(id);
-    $terminal.set(terminal);
+    const terminals = terminalIds.map((id) => buildTerminalState(id));
+    $terminals.set(terminals);
+    $activeTerminalId.set(terminals[0]!.id);
   });
 });
 
-export const destroyTerminal = async () => {
-  const terminal = $terminal.get();
-  if (!terminal) {
-    console.warn('Terminal not found');
-    return;
+export const createTerminal = async (cwd?: string) => {
+  const id = await emitter.invoke('terminal:create', cwd);
+  const terminal = buildTerminalState(id);
+  $terminals.set([...$terminals.get(), terminal]);
+  $activeTerminalId.set(id);
+  return id;
+};
+
+export const destroyTerminal = async (id?: string) => {
+  const targetId = id ?? $activeTerminalId.get();
+  if (!targetId) return;
+
+  const terminals = $terminals.get();
+  const target = terminals.find((t) => t.id === targetId);
+  if (!target) return;
+
+  await emitter.invoke('terminal:dispose', targetId);
+  target.xterm.dispose();
+
+  const remaining = terminals.filter((t) => t.id !== targetId);
+  $terminals.set(remaining);
+
+  if ($activeTerminalId.get() === targetId) {
+    $activeTerminalId.set(remaining.length > 0 ? remaining[remaining.length - 1]!.id : null);
   }
-  await emitter.invoke('terminal:dispose', terminal.id);
-  terminal.xterm.dispose();
-  $terminal.set(null);
+
+  if (remaining.length === 0) {
+    $isConsoleOpen.set(false);
+  }
+};
+
+export const destroyAllTerminals = async () => {
+  const terminals = $terminals.get();
+  await Promise.allSettled(
+    terminals.map(async (t) => {
+      await emitter.invoke('terminal:dispose', t.id);
+      t.xterm.dispose();
+    })
+  );
+  $terminals.set([]);
+  $activeTerminalId.set(null);
   $isConsoleOpen.set(false);
 };
 
+export const setActiveTerminal = (id: string) => {
+  $activeTerminalId.set(id);
+};
+
+/** @deprecated Use createTerminal instead */
 export const initializeTerminal = async (cwd?: string) => {
-  const terminal = $terminal.get();
-  if (terminal) {
-    console.warn('Disposing terminal', terminal.id);
-    await emitter.invoke('terminal:dispose', terminal.id);
-    terminal.xterm.dispose();
-  }
-  const id = await emitter.invoke('terminal:create', cwd);
-  $terminal.set(buildTerminalState(id));
+  await createTerminal(cwd);
 };
 
 const buildTerminalState = (id: string): TerminalState => {
@@ -99,18 +137,24 @@ const buildTerminalState = (id: string): TerminalState => {
 };
 
 const doWithTerminal = (id: string, fn: (terminal: TerminalState) => void) => {
-  const terminal = $terminal.get();
-  if (!terminal || terminal.id !== id) {
+  const terminals = $terminals.get();
+  const terminal = terminals.find((t) => t.id === id);
+  if (!terminal) {
     console.warn(`Terminal ${id} not found`);
     return;
   }
   fn(terminal);
 };
 
+const updateTerminal = (id: string, patch: Partial<BaseXtermState> & { isRunning?: boolean; exitCode?: number }) => {
+  const terminals = $terminals.get();
+  $terminals.set(terminals.map((t) => (t.id === id ? { ...t, ...patch } as TerminalState : t)));
+};
+
 ipc.on('terminal:exited', (id, exitCode) => {
   doWithTerminal(id, (terminal) => {
     terminal.xterm.options.disableStdin = true;
-    $terminal.set({ ...terminal, isRunning: false, exitCode, hasNewOutput: !$isConsoleOpen.get() });
+    updateTerminal(id, { isRunning: false, exitCode, hasNewOutput: !$isConsoleOpen.get() });
   });
 });
 
@@ -118,11 +162,7 @@ ipc.on('terminal:output', (id, data) => {
   doWithTerminal(id, (terminal) => {
     terminal.xterm.write(data);
     if (!$isConsoleOpen.get()) {
-      $terminal.set({ ...terminal, hasNewOutput: true });
+      updateTerminal(id, { hasNewOutput: true });
     }
   });
-});
-
-export const $terminalHasNewOutput = computed([$terminal], (terminal) => {
-  return terminal && terminal.hasNewOutput;
 });

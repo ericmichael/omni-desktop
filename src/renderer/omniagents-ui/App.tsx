@@ -10,13 +10,13 @@ import type { PendingMessage } from './ChatShell'
 import { type ArtifactItem,ArtifactsPanel } from './components/ArtifactsPanel'
 import { Header } from './components/Header'
 import { Input } from './components/Input'
-import { type MessageItem,MessageList } from './components/MessageList'
+import { type Attachment, type MessageItem,MessageList } from './components/MessageList'
 import { ResizableDivider } from './components/ResizableDivider'
 import { type SessionItem,SessionList } from './components/SessionList'
 import { Sidebar } from './components/Sidebar'
-import { TerminalPanel } from './components/TerminalPanel'
 import { WorkspacePicker } from './components/WorkspacePicker'
 import { OmniAgentsHeaderActionsPortal, OmniAgentsHeaderActionsProvider } from './header-actions'
+import { useChatSession } from './hooks/use-chat-session'
 import { useRPCClient, useRPCConnected } from './rpc-context'
 import { useUiConfig } from './ui-config'
 
@@ -27,23 +27,13 @@ export type ClientToolCallHandler = (
   args: Record<string, unknown>,
 ) => Promise<{ ok: boolean; result?: Record<string, unknown>; error?: Record<string, unknown> }>;
 
-export function App({ sessionId: sessionIdProp, onSessionChange, variables: variablesProp, greeting, onReady, headerActionsTargetId, headerActionsCompact, pendingMessages, sandboxLabel: sandboxLabelProp, onClientToolCall }: { sessionId?: string; onSessionChange?: (sessionId: string | undefined) => void; variables?: Record<string, unknown>; greeting?: string; onReady?: () => void; headerActionsTargetId?: string; headerActionsCompact?: boolean; pendingMessages?: PendingMessage[]; sandboxLabel?: string; onClientToolCall?: ClientToolCallHandler }) {
+export function App({ sessionId: sessionIdProp, onSessionChange, variables: variablesProp, greeting, onReady, headerActionsTargetId, headerActionsCompact, pendingMessages, sandboxLabel: sandboxLabelProp, onClientToolCall, pendingPlan, onPlanDecision }: { sessionId?: string; onSessionChange?: (sessionId: string | undefined) => void; variables?: Record<string, unknown>; greeting?: string; onReady?: () => void; headerActionsTargetId?: string; headerActionsCompact?: boolean; pendingMessages?: PendingMessage[]; sandboxLabel?: string; onClientToolCall?: ClientToolCallHandler; pendingPlan?: import('@/shared/chat-types').PlanItem | null; onPlanDecision?: (approved: boolean) => void }) {
   const uiConfig = useUiConfig()
   const launcherStore = useStore(persistedStoreApi.$atom)
   const [ui, setUI] = useState<UIState>('connecting')
   const client = useRPCClient()
   const connected = useRPCConnected()
   const [voiceEnabled, setVoiceEnabled] = useState(false)
-  const [items, setItems] = useState<MessageItem[]>([])
-  const [artifacts, setArtifacts] = useState<ArtifactItem[]>([])
-  const [thinking, setThinking] = useState(false)
-  const [status, setStatus] = useState<string | undefined>(undefined)
-  const [statusSpinner, setStatusSpinner] = useState<boolean>(false)
-  const [statusItalic, setStatusItalic] = useState<boolean>(false)
-  const [preamble, setPreamble] = useState<string | undefined>(undefined)
-  const [toolStatus, setToolStatus] = useState<string | undefined>(undefined)
-  const [runId, setRunId] = useState<string | undefined>(undefined)
-  const [sessionId, setSessionId] = useState<string | undefined>(undefined)
   const [sessions, setSessions] = useState<SessionItem[]>([])
   const [_usageTotals, setUsageTotals] = useState<any | undefined>(undefined)
   const [_usageDelta, setUsageDelta] = useState<any | undefined>(undefined)
@@ -59,18 +49,15 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   }, [])
 
   const [initialSent, setInitialSent] = useState(false)
-  const preambleBufferRef = useRef<Array<{ content: string; timestamp: Date; superseded: boolean }>>([])
-  const pendingApprovalsRef = useRef(new Map<string, (MessageItem & { session_id?: string })>())
   const urlSessionHandledRef = useRef(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [artifactsPanelOpen, setArtifactsPanelOpen] = useState(false)
-  const [terminalPanelOpen, setTerminalPanelOpen] = useState(false)
   const [artifactsPanelWidth, setArtifactsPanelWidth] = useState(() => {
     try {
       const stored = localStorage.getItem('artifacts-panel-width')
-      return stored ? parseInt(stored, 10) : 480
+      return stored ? parseInt(stored, 10) : 240
     } catch {
-      return 480
+      return 240
     }
   })
   const [isLargeScreen, setIsLargeScreen] = useState(() => window.innerWidth >= 1024)
@@ -80,15 +67,6 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   const [workspaceLocked, setWorkspaceLocked] = useState(false)
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false)
   const [initialSessionParam] = useState<string | undefined>(() => uiConfig.session)
-  const sessionIdRef = useRef<string | undefined>(undefined)
-  useEffect(() => {
-    sessionIdRef.current = sessionId
-  }, [sessionId])
-  const runIdRef = useRef<string | undefined>(undefined)
-  useEffect(() => {
-    runIdRef.current = runId
-  }, [runId])
-  const startingRunRef = useRef(false)
   const readyRef = useRef(false)
   const onClientToolCallRef = useRef(onClientToolCall)
   useEffect(() => {
@@ -101,23 +79,15 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   useEffect(() => {
     readyRef.current = false
   }, [uiConfig.uiUrl])
-  const appendPendingApprovals = useCallback((base: MessageItem[], targetSession?: string) => {
-    if (!targetSession) {
-return base
-}
-    const additions: MessageItem[] = []
-    for (const item of pendingApprovalsRef.current.values()) {
-      const itemSession = (item as any).session_id
-      if (itemSession && itemSession !== targetSession) {
-continue
-}
-      const exists = base.some(existing => existing.type === 'approval' && (existing as any).request_id === (item as any).request_id)
-      if (!exists) {
-additions.push(item)
-}
-    }
-    return additions.length ? [...base, ...additions] : base
-  }, [])
+
+  // Chat session state machine — manages items, sessionId, runId, thinking,
+  // status, preamble, tool status, and approval state.
+  const machine = useChatSession(client)
+  const {
+    actor,
+    items, thinking, status, statusSpinner, statusItalic, preamble, toolStatus, runId, sessionId,
+    submit, submitError, stop, selectSession, historyLoaded, historyError, newSession, approvalDecided, appendResponse, addArtifact, setSessionId,
+  } = machine
 
   const refreshSessions = useCallback(async () => {
     try {
@@ -219,7 +189,7 @@ setUI('chat')
               const history = await client.getSessionHistory(sid)
               if (!cancelled) {
                 const msgs = rehydrateHistory(history as Record<string, unknown>[]) as MessageItem[]
-                setItems(msgs)
+                historyLoaded(msgs)
               }
             } catch {}
           }
@@ -232,66 +202,13 @@ setUI('error')
 } 
 })
 
-    const offMessageOutput = client.on('message_output', (p: any) => {
-      const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
-      if (eventSessionId) {
-        if (sessionIdRef.current && sessionIdRef.current !== eventSessionId) {
-return
-}
-        if (!sessionIdRef.current && !startingRunRef.current) {
-return
-}
-      }
-      const content = String(p?.content ?? '')
-      if (!content) {
-return
-}
-      preambleBufferRef.current.push({ content, timestamp: new Date(), superseded: false })
-      setPreamble(content)
-      setStatus(undefined)
-      setStatusItalic(false)
-    })
-    const offRunStarted = client.on('run_started', (p: any) => {
-      const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
-      if (eventSessionId) {
-        if (sessionIdRef.current && sessionIdRef.current !== eventSessionId) {
-return
-}
-        if (!sessionIdRef.current && !startingRunRef.current) {
-return
-}
-      }
-      startingRunRef.current = false
-      setRunId(String(p?.run_id ?? ''))
-      if (eventSessionId) {
-setSessionId(eventSessionId)
-onSessionChangeRef.current?.(eventSessionId)
-}
-      setThinking(true)
-      preambleBufferRef.current = []
-      setPreamble(undefined)
-      setStatus(undefined)
-      setToolStatus(undefined)
-      setStatusSpinner(false)
-      setStatusItalic(false)
+    // Side-effect-only listeners for events the machine doesn't handle
+    // (session state + filtering is handled by the useChatSession hook)
+    const offRunStarted = client.on('run_started', () => {
+      onSessionChangeRef.current?.(actor.getSnapshot().context.sessionId)
       refreshSessions()
     })
     const offRunEnd = client.on('run_end', (p: any) => {
-      const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
-      if (eventSessionId && sessionIdRef.current && sessionIdRef.current !== eventSessionId) {
-return
-}
-      setThinking(false)
-      const nonSuperseded = preambleBufferRef.current.filter(m => !m.superseded)
-      if (nonSuperseded.length) {
-        setItems(prev => [
-          ...prev,
-          ...nonSuperseded.map(m => ({ type: 'chat', role: 'assistant', content: m.content } as MessageItem)),
-        ])
-      }
-      preambleBufferRef.current = []
-      setPreamble(undefined)
-      setToolStatus(undefined)
       try {
         const usage = p?.usage || {}
         const info = {
@@ -302,144 +219,27 @@ return
         setModelInfo(info)
         setUsageTotals(usage)
       } catch {}
-      setStatusSpinner(false)
-      setStatusItalic(false)
       refreshSessions()
     })
-    const offRunStatus = client.on('run_status', (p: any) => {
-      const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
-      if (eventSessionId && sessionIdRef.current && sessionIdRef.current !== eventSessionId) {
-return
-}
-      const msg = [p?.status, p?.message].filter(Boolean).join(': ')
-      setStatus(msg)
-      setStatusSpinner(true)
-      setStatusItalic(false)
-    })
     const offToken = client.on('token', (p: any) => {
-      const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
-      if (eventSessionId && sessionIdRef.current && sessionIdRef.current !== eventSessionId) {
-return
-}
       try {
         setUsageDelta(p?.delta)
         setUsageTotals(p?.totals)
         setModelInfo({ model: p?.model, max_input_tokens: p?.max_input_tokens, max_output_tokens: p?.max_output_tokens })
       } catch {}
     })
-    const offToolCalled = client.on('tool_called', (p: any) => {
-      const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
-      if (eventSessionId) {
-        if (sessionIdRef.current && sessionIdRef.current !== eventSessionId) {
-return
-}
-        if (!sessionIdRef.current && !startingRunRef.current) {
-return
-}
-      }
-      const tool = String(p?.tool ?? '')
-      const input = typeof p?.input === 'string' ? p?.input : JSON.stringify(p?.input)
-      const call_id = String(p?.call_id ?? '')
-      preambleBufferRef.current.forEach(m => {
- m.superseded = true 
-})
-      setItems(prev => [...prev, { type: 'tool', tool, input, call_id, status: 'called', runId: runIdRef.current }])
-    })
-    const offToolResult = client.on('tool_result', (p: any) => {
-      const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
-      if (eventSessionId) {
-        if (sessionIdRef.current && sessionIdRef.current !== eventSessionId) {
-return
-}
-        if (!sessionIdRef.current && !startingRunRef.current) {
-return
-}
-      }
-      const tool = String(p?.tool ?? '')
-      const output = typeof p?.output === 'string' ? p?.output : JSON.stringify(p?.output)
-      const call_id = String(p?.call_id ?? '')
-      const metadata = p?.metadata
-      preambleBufferRef.current.forEach(m => {
- m.superseded = true 
-})
-      setItems(prev => {
-        const idx = prev.findIndex(it => it.type === 'tool' && (it as any).call_id === call_id)
-        if (idx >= 0) {
-          const next = prev.slice()
-          const it = next[idx] as any
-          next[idx] = { ...it, output, status: 'result', metadata }
-          return next
-        }
-        return [...prev, { type: 'tool', tool, output, call_id, status: 'result', metadata, runId: runIdRef.current }]
-      })
-    })
     const offClientRequest = client.on('client_request', (p: any) => {
       const fn = String(p?.function ?? '')
       if (fn === 'ui.add_artifact') {
         const request_id = String(p?.request_id ?? '')
         const args = p?.args || {}
-        const title = typeof args?.title === 'string' ? args.title : ''
-        const content = typeof args?.content === 'string' ? args.content : ''
-        const mode = typeof args?.mode === 'string' ? args.mode : 'markdown'
-        const artifact_id = typeof args?.artifact_id === 'string' ? args.artifact_id : undefined
-        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
-        const updated_at = Date.now()
-        setArtifacts(prev => {
-          const next = prev.slice()
-          const idx = artifact_id ? next.findIndex(a => a.artifact_id === artifact_id && (!eventSessionId || a.session_id === eventSessionId)) : -1
-          const entry: ArtifactItem = { title, content, mode, artifact_id, session_id: eventSessionId, updated_at }
-          if (idx >= 0) {
-next[idx] = entry
-} else {
-next.push(entry)
-}
-          return next
+        addArtifact({
+          title: typeof args?.title === 'string' ? args.title : '',
+          content: typeof args?.content === 'string' ? args.content : '',
+          mode: typeof args?.mode === 'string' ? args.mode : 'markdown',
+          artifact_id: typeof args?.artifact_id === 'string' ? args.artifact_id : undefined,
+          session_id: typeof p?.session_id === 'string' ? p.session_id : undefined,
         })
-        if (request_id) {
-          client.clientResponse(request_id, true, { ack: true }).catch(() => {})
-        }
-        return
-      }
-      if (fn === 'ui.request_tool_approval') {
-        const args = p?.args || {}
-        const request_id = String(p?.request_id ?? '')
-        const tool = String(args?.tool ?? '')
-        const argumentsText = String(args?.arguments ?? '')
-        const metadata = args?.metadata
-        setThinking(false)
-        if (!request_id) {
-          return
-        }
-        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
-        const approvalItem: MessageItem & { session_id?: string } = { type: 'approval', request_id, tool, argumentsText, metadata, session_id: eventSessionId }
-        pendingApprovalsRef.current.set(request_id, approvalItem)
-        const shouldDisplay = !eventSessionId || !sessionIdRef.current || sessionIdRef.current === eventSessionId
-        if (shouldDisplay) {
-          setItems(prev => {
-            const filtered = prev.filter(it => !(it.type === 'approval' && (it as any).request_id === request_id))
-            return [...filtered, approvalItem]
-          })
-        }
-        return
-      }
-      if (fn === 'ui.set_status') {
-        const request_id = String(p?.request_id ?? '')
-        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
-        if (eventSessionId && sessionIdRef.current && sessionIdRef.current !== eventSessionId) {
-          if (request_id) {
-            client.clientResponse(request_id, true, { ack: true }).catch(() => {})
-          }
-          return
-        }
-        const args = p?.args || {}
-        const text = typeof args?.text === 'string' ? args.text : undefined
-        const showSpinner = typeof args?.show_spinner === 'boolean' ? !!args.show_spinner : true
-        setStatus(text)
-        setStatusSpinner(showSpinner)
-        setStatusItalic(false)
-        if (text && text.trim()) {
-setToolStatus(text)
-}
         if (request_id) {
           client.clientResponse(request_id, true, { ack: true }).catch(() => {})
         }
@@ -468,27 +268,17 @@ return
       }
     })
 
-    const offClientRequestResolved = client.on('client_request_resolved', (p: any) => {
-      const request_id = String(p?.request_id ?? '')
-      if (request_id) {
-        pendingApprovalsRef.current.delete(request_id)
-        setItems(prev => prev.filter(it => !(it.type === 'approval' && (it as any).request_id === request_id)))
-      }
-    })
-
     return () => {
       cancelled = true
-      offMessageOutput(); offRunStarted(); offRunEnd(); offRunStatus(); offClientRequest(); offClientRequestResolved(); offToken(); offToolCalled(); offToolResult()
+      offRunStarted(); offRunEnd(); offClientRequest(); offToken()
       client.disconnect()
     }
-  }, [client, normalizeAgentName, refreshSessions, uiConfig])
+  }, [client, actor, setSessionId, historyLoaded, addArtifact, normalizeAgentName, refreshSessions, uiConfig])
 
+  // Derive artifact index from the items stream (artifacts are now inline in conversation)
   const visibleArtifacts = useMemo(() => {
-    if (!sessionId) {
-return artifacts.filter(a => !a.session_id)
-}
-    return artifacts.filter(a => !a.session_id || a.session_id === sessionId)
-  }, [artifacts, sessionId])
+    return items.filter((it): it is ArtifactItem => it.type === 'artifact')
+  }, [items])
 
   useEffect(() => {
     const handler = () => setIsLargeScreen(window.innerWidth >= 1024)
@@ -502,11 +292,16 @@ return artifacts.filter(a => !a.session_id)
 } catch {}
   }, [artifactsPanelWidth])
 
-  useEffect(() => {
-    if (visibleArtifacts.length > 0 && !artifactsPanelOpen) {
-      setArtifactsPanelOpen(true)
+  // Scroll to an inline artifact in the conversation stream
+  const handleScrollToArtifact = useCallback((artifactId: string) => {
+    setArtifactsPanelOpen(false)
+    const el = document.querySelector(`[data-artifact-id="${CSS.escape(artifactId)}"]`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.classList.add('ring-2', 'ring-primary', 'rounded-lg')
+      setTimeout(() => el.classList.remove('ring-2', 'ring-primary', 'rounded-lg'), 1500)
     }
-  }, [visibleArtifacts.length])
+  }, [])
 
   // moved below handleSubmit
 
@@ -543,17 +338,21 @@ args = { value: parsed }
         }
         const result = await client.serverCall(name, args, sessionId)
         const formatted = JSON.stringify(result, null, 2)
-        setItems(prev => [...prev, { type: 'chat', role: 'assistant', content: formatted === 'null' ? 'Done.' : formatted }])
+        appendResponse(formatted === 'null' ? 'Done.' : formatted)
         return
       } catch (e) {
-        setItems(prev => [...prev, { type: 'chat', role: 'assistant', content: `Error: ${String((e as Error)?.message || e)}` }])
+        appendResponse(`Error: ${String((e as Error)?.message || e)}`)
         return
       }
     }
     try {
-      startingRunRef.current = true
+      // Ensure we always have a session ID before calling startRun.
+      const effectiveSessionId = sessionId ?? uuidv4()
+      if (!sessionId) {
+        onSessionChangeRef.current?.(effectiveSessionId)
+      }
       let content: any | undefined = undefined
-      let attachments: Array<{ type: 'image' | 'file'; url?: string; filename?: string; mime?: string; size?: number }> = []
+      let attachments: Attachment[] = []
       if (files && files.length > 0) {
         const parts: any[] = []
         if (text.trim().length > 0) {
@@ -569,7 +368,7 @@ parts.push({ type: 'input_text', text })
             })
             return {
               filePart: { type: 'input_image', image_url: dataUrl, detail: 'auto' },
-              attachment: { type: 'image', url: dataUrl, filename: f.name, mime: f.type, size: f.size },
+              attachment: { type: 'image' as const, url: dataUrl, filename: f.name, mime: f.type, size: f.size },
             }
           } else {
             const base64 = await new Promise<string>((resolve, reject) => {
@@ -596,7 +395,7 @@ param.filename = f.name
 }
             return {
               filePart: param,
-              attachment: { type: 'file', filename: f.name, mime: f.type, size: f.size },
+              attachment: { type: 'file' as const, filename: f.name, mime: f.type, size: f.size },
             }
           }
         }))
@@ -604,7 +403,8 @@ param.filename = f.name
         attachments = processed.map(p => p.attachment)
         content = parts
       }
-      setItems(prev => [...prev, { type: 'chat', role: 'user', content: text, attachments }])
+      // Tell the machine we're submitting (appends user message, sets sessionId, transitions to starting)
+      submit(text, effectiveSessionId, attachments.length ? attachments : undefined)
       // Merge parent-provided variables (e.g. client_tools) with workspace variables
       const workspaceVars = (workspacePath && workspaceSupported)
         ? { workspace_root: workspacePath }
@@ -612,33 +412,20 @@ param.filename = f.name
       const variables = (variablesProp || workspaceVars)
         ? { ...variablesProp, ...workspaceVars }
         : undefined
-      await client.startRun(text, sessionId, variables, content)
+      await client.startRun(text, effectiveSessionId, variables, content)
       if (workspaceSupported) {
 setWorkspaceLocked(true)
 }
     } catch (e) {
-      startingRunRef.current = false
-      setStatus(String((e as Error)?.message || 'Failed to start run'))
-      setStatusItalic(false)
+      submitError(String((e as Error)?.message || 'Failed to start run'))
     }
-  }, [client, sessionId, workspacePath, workspaceSupported])
+  }, [client, submit, submitError, workspacePath, workspaceSupported])
 
   const handleStop = useCallback(() => {
-    if (!runId) {
-return
-}
-    try {
-      preambleBufferRef.current.forEach(m => {
- m.superseded = true 
-})
-    } catch {}
-    setThinking(false)
-    setStatusSpinner(false)
-    setStatusItalic(true)
-    setStatus('Cancelled by user')
-    setPreamble(undefined)
+    if (!runId) return
+    stop()
     client.stopRun(runId).catch(() => {})
-  }, [client, runId])
+  }, [client, stop, runId])
 
   useEffect(() => {
     if (!connected) {
@@ -681,60 +468,31 @@ return
   }, [connected, ui, pendingMessages, handleSubmit])
 
   const handleApprovalDecision = useCallback(async (request_id: string, value: 'yes' | 'always' | 'no') => {
-    const removeApproval = () => {
-      pendingApprovalsRef.current.delete(request_id)
-      setItems(prev => prev.filter(it => !(it.type === 'approval' && (it as any).request_id === request_id)))
-    }
     try {
       const approved = value !== 'no'
       const always_approve = value === 'always'
       await client.clientResponse(request_id, true, { approved, always_approve })
-      removeApproval()
-      setThinking(true)
     } catch (e) {
-      await client.clientResponse(request_id, false, undefined, { message: String((e as Error)?.message || 'failed') })
-      removeApproval()
-      setThinking(true)
+      await client.clientResponse(request_id, false, undefined, { message: String((e as Error)?.message || 'failed') }).catch(() => {})
     }
-  }, [client])
+    approvalDecided(request_id, value)
+  }, [client, approvalDecided])
 
   const handleSelectSession = useCallback(async (id?: string, opts?: { fromProp?: boolean }) => {
     // When no id is provided (new chat), generate a fresh session id so the
     // next startRun creates a brand-new session instead of reusing the last one.
     const resolvedId = id ?? uuidv4()
-    setSessionId(resolvedId)
     // Notify parent of session change (skip if the change originated from the prop)
     if (!opts?.fromProp) {
 onSessionChange?.(id === undefined ? resolvedId : id)
 }
-    setItems([])
-    setPreamble(undefined)
-    preambleBufferRef.current = []
-    // Reset UI state to prevent stale state from previous conversation
-    setThinking(false)
-    setStatus(undefined)
-    setStatusSpinner(false)
-    setStatusItalic(false)
-    setRunId(undefined)
-    // Reset or restore workspace state
-    if (!id) {
-      // New chat — unlock workspace, restore default (cwd)
-      setWorkspaceLocked(false)
-      if (workspaceSupported) {
-        try {
-          const res = await client.serverCall('fs_get_cwd') as any
-          if (res?.path) {
-setWorkspacePath(res.path)
-}
-        } catch {}
-      }
-    }
     if (id) {
+      // Resuming an existing session
+      selectSession(resolvedId)
       try {
         const history = await client.getSessionHistory(id)
         const msgs = rehydrateHistory(history as Record<string, unknown>[]) as MessageItem[]
-        const merged = appendPendingApprovals(msgs, id)
-        setItems(merged)
+        historyLoaded(msgs)
         // Restore workspace from session and lock it
         if (workspaceSupported) {
           try {
@@ -745,12 +503,24 @@ setWorkspacePath(res.path)
           } catch {}
           setWorkspaceLocked(true)
         }
-      } catch {}
+      } catch {
+        historyError('Failed to load history')
+      }
     } else {
-      setItems([])
+      // New chat
+      newSession(resolvedId)
+      setWorkspaceLocked(false)
+      if (workspaceSupported) {
+        try {
+          const res = await client.serverCall('fs_get_cwd') as any
+          if (res?.path) {
+setWorkspacePath(res.path)
+}
+        } catch {}
+      }
     }
     setUI('chat')
-  }, [client, appendPendingApprovals, workspaceSupported, onSessionChange])
+  }, [client, selectSession, historyLoaded, historyError, newSession, workspaceSupported, onSessionChange])
 
   useEffect(() => {
     if (urlSessionHandledRef.current) {
@@ -798,12 +568,13 @@ return
     if (!connected) {
 return
 }
-    if (sessionIdProp && sessionIdProp !== sessionIdRef.current) {
+    const currentSessionId = actor.getSnapshot().context.sessionId
+    if (sessionIdProp && sessionIdProp !== currentSessionId) {
       handleSelectSession(sessionIdProp, { fromProp: true })
-    } else if (!sessionIdProp && sessionIdRef.current) {
+    } else if (!sessionIdProp && currentSessionId) {
       handleSelectSession(undefined, { fromProp: true })
     }
-  }, [sessionIdProp, connected, handleSelectSession])
+  }, [sessionIdProp, connected, handleSelectSession, actor])
 
   useEffect(() => {
     if (!connected) {
@@ -853,9 +624,7 @@ args.text = text
   const sandboxLabel = sandboxLabelProp ?? ((launcherStore.sandboxBackend ?? 'none') !== 'none' ? ({ platform: 'Cloud', docker: 'Docker', podman: 'Podman', vm: 'VM', local: 'Local', none: undefined } as Record<string, string | undefined>)[launcherStore.sandboxBackend] : undefined)
   const headerActions = {
     showArtifactsButton: hasArtifacts,
-    showTerminalButton: true,
     onArtifactsToggle: hasArtifacts ? () => setArtifactsPanelOpen((v) => !v) : undefined,
-    onTerminalToggle: () => setTerminalPanelOpen((v) => !v),
   }
 
   let content: React.ReactNode = null
@@ -888,9 +657,7 @@ args.text = text
               agentName={agentName}
               onMenu={() => setSidebarOpen(v => !v)}
               onArtifactsToggle={headerActions.onArtifactsToggle}
-              onTerminalToggle={headerActions.onTerminalToggle}
               showArtifactsButton={headerActions.showArtifactsButton}
-              showTerminalButton={headerActions.showTerminalButton}
             />
           )}
           <div className="flex-1 flex flex-row min-h-0 min-w-0">
@@ -905,6 +672,8 @@ args.text = text
                   preambleText={preamble}
                   welcomeText={welcomeText}
                   onApprovalDecision={handleApprovalDecision}
+                  pendingPlan={pendingPlan}
+                  onPlanDecision={onPlanDecision}
                   statusItalic={statusItalic}
                   onReaction={handleReaction}
                   currentRunId={runId}
@@ -944,9 +713,10 @@ args.text = text
                 sessionId={sessionId}
                 onVoiceSessionCreated={(id: string) => setSessionId(id)}
                 onVoiceClose={() => {
- if (sessionIdRef.current) {
-handleSelectSession(sessionIdRef.current);
-} refreshSessions(); 
+ const sid = actor.getSnapshot().context.sessionId
+ if (sid) {
+handleSelectSession(sid);
+} refreshSessions();
 }}
               />
             </div>
@@ -955,8 +725,8 @@ handleSelectSession(sessionIdRef.current);
                 <ResizableDivider
                   onResize={setArtifactsPanelWidth}
                   currentWidth={artifactsPanelWidth}
-                  minWidth={320}
-                  maxWidth={800}
+                  minWidth={180}
+                  maxWidth={400}
                 />
                 <div
                   className="flex-shrink-0 min-h-0 border-l border-bgCardAlt"
@@ -965,6 +735,7 @@ handleSelectSession(sessionIdRef.current);
                   <ArtifactsPanel
                     artifacts={visibleArtifacts}
                     onClose={() => setArtifactsPanelOpen(false)}
+                    onScrollTo={handleScrollToArtifact}
                   />
                 </div>
               </>
@@ -975,16 +746,10 @@ handleSelectSession(sessionIdRef.current);
           <ArtifactsPanel
             artifacts={visibleArtifacts}
             onClose={() => setArtifactsPanelOpen(false)}
+            onScrollTo={handleScrollToArtifact}
             asOverlay
           />
         )}
-        <TerminalPanel
-          open={terminalPanelOpen}
-          sessionId={sessionId}
-          onSessionId={setSessionId}
-          onClose={() => setTerminalPanelOpen(false)}
-          confined={minimalMode}
-        />
         {workspacePickerOpen && (
           <WorkspacePicker
             sessionId={sessionId}

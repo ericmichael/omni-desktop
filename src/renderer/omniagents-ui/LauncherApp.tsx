@@ -20,6 +20,8 @@ type OmniAgentsAppProps = {
   pendingMessages?: PendingMessage[];
   sandboxLabel?: string;
   onClientToolCall?: ClientToolCallHandler;
+  pendingPlan?: import('@/shared/chat-types').PlanItem | null;
+  onPlanDecision?: (approved: boolean) => void;
 };
 
 const ThemeSync = ({ children }: { children: ReactNode }) => {
@@ -36,14 +38,14 @@ const ThemeSync = ({ children }: { children: ReactNode }) => {
   return <>{children}</>;
 };
 
-export const OmniAgentsApp = ({ uiUrl, sessionId, onSessionChange, variables, greeting, onReady, headerActionsTargetId, headerActionsCompact, pendingMessages, sandboxLabel, onClientToolCall }: OmniAgentsAppProps) => {
+export const OmniAgentsApp = ({ uiUrl, sessionId, onSessionChange, variables, greeting, onReady, headerActionsTargetId, headerActionsCompact, pendingMessages, sandboxLabel, onClientToolCall, pendingPlan, onPlanDecision }: OmniAgentsAppProps) => {
   const normalizedUrl = useMemo(() => new URL(uiUrl, window.location.origin).toString(), [uiUrl]);
 
   return (
     <UiConfigProvider uiUrl={normalizedUrl}>
       <RPCClientProvider>
         <ThemeSync>
-          <OmniAgentsCore sessionId={sessionId} onSessionChange={onSessionChange} variables={variables} greeting={greeting} onReady={onReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} pendingMessages={pendingMessages} sandboxLabel={sandboxLabel} onClientToolCall={onClientToolCall} />
+          <OmniAgentsCore sessionId={sessionId} onSessionChange={onSessionChange} variables={variables} greeting={greeting} onReady={onReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} pendingMessages={pendingMessages} sandboxLabel={sandboxLabel} onClientToolCall={onClientToolCall} pendingPlan={pendingPlan} onPlanDecision={onPlanDecision} />
         </ThemeSync>
       </RPCClientProvider>
     </UiConfigProvider>

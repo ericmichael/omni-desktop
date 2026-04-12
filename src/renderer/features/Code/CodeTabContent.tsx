@@ -3,17 +3,19 @@ import { useStore } from '@nanostores/react';
 import { motion } from 'framer-motion';
 import { memo, useCallback, useMemo } from 'react';
 
-import { buildInteractiveVariables } from '@/lib/client-tools';
+import { buildCodeVariables } from '@/lib/client-tools';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { SessionStartupShell } from '@/renderer/common/SessionStartupShell';
 import { Button } from '@/renderer/ds';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
+import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { buildSandboxLabel, isCustomSandbox } from '@/renderer/omniagents-ui/sandbox-label';
 import type { CodeTab, CodeTabId, TicketId } from '@/shared/types';
 
 import { CodeEmptyState } from './CodeEmptyState';
 import { CodeWorkspaceLayout } from './CodeWorkspaceLayout';
+import type { DockPane } from './EnvironmentDock';
 import { $codeTabErrors, $codeTabStatuses, codeApi } from './state';
 import { useCodeAutoLaunch } from './use-code-auto-launch';
 
@@ -67,29 +69,36 @@ const CodeRunningView = memo(
     variables,
     overlayPane,
     onCloseOverlay,
+    onOpenOverlay,
     onReady,
     uiMinimal,
     headerActionsTargetId,
     headerActionsCompact,
     sandboxLabel,
     onClientToolCall,
+    previewUrl,
+    onPreviewUrlChange,
   }: {
     sandboxUrls: { uiUrl: string; codeServerUrl?: string; noVncUrl?: string };
     sessionId?: string;
     onSessionChange?: (sessionId: string | undefined) => void;
     variables?: Record<string, unknown>;
-    overlayPane: 'none' | 'code' | 'vnc';
+    overlayPane: DockPane;
     onCloseOverlay: () => void;
+    onOpenOverlay?: (pane: Exclude<DockPane, 'none'>) => void;
     onReady: () => void;
     uiMinimal?: boolean;
     headerActionsTargetId?: string;
     headerActionsCompact?: boolean;
     sandboxLabel?: string;
     onClientToolCall?: ClientToolCallHandler;
+    previewUrl?: string;
+    onPreviewUrlChange?: (url: string) => void;
   }) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
     const theme = store.theme ?? 'teams-light';
+    const pendingPlan = useStore($pendingPlan);
 
     const uiSrc = useMemo(() => {
       const url = new URL(sandboxUrls.uiUrl, window.location.origin);
@@ -114,13 +123,18 @@ const CodeRunningView = memo(
             variables={variables}
             codeServerSrc={codeServerSrc}
             vncSrc={vncSrc}
+            previewUrl={previewUrl}
+            onPreviewUrlChange={onPreviewUrlChange}
             overlayPane={overlayPane}
             onCloseOverlay={onCloseOverlay}
+            onOpenOverlay={onOpenOverlay}
             onReady={onReady}
             headerActionsTargetId={headerActionsTargetId}
             headerActionsCompact={headerActionsCompact}
             sandboxLabel={sandboxLabel}
             onClientToolCall={onClientToolCall}
+            pendingPlan={pendingPlan}
+            onPlanDecision={resolvePlanApproval}
           />
         </div>
       </div>
@@ -132,15 +146,18 @@ CodeRunningView.displayName = 'CodeRunningView';
 type CodeTabContentProps = {
   tab: CodeTab;
   isVisible: boolean;
-  overlayPane?: 'none' | 'code' | 'vnc';
+  overlayPane?: DockPane;
   onCloseOverlay?: () => void;
+  onOpenOverlay?: (pane: Exclude<DockPane, 'none'>) => void;
   uiMinimal?: boolean;
   headerActionsTargetId?: string;
   headerActionsCompact?: boolean;
+  previewUrl?: string;
+  onPreviewUrlChange?: (url: string) => void;
 };
 
 export const CodeTabContent = memo(
-  ({ tab, isVisible, overlayPane = 'none', onCloseOverlay, uiMinimal, headerActionsTargetId, headerActionsCompact }: CodeTabContentProps) => {
+  ({ tab, isVisible, overlayPane = 'none', onCloseOverlay, onOpenOverlay, uiMinimal, headerActionsTargetId, headerActionsCompact, previewUrl, onPreviewUrlChange }: CodeTabContentProps) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
     const project = useMemo(
@@ -179,17 +196,18 @@ export const CodeTabContent = memo(
 
     const handleClientToolCall = useMemo(
       () =>
-        buildClientToolHandler(
-          tab.ticketId && tab.projectId
+        buildClientToolHandler({
+          ...(tab.ticketId && tab.projectId
             ? { ticketId: tab.ticketId as TicketId, projectId: tab.projectId }
-            : undefined
-        ),
-      [tab.ticketId, tab.projectId]
+            : {}),
+          tabId: tab.id,
+        }),
+      [tab.id, tab.ticketId, tab.projectId]
     );
 
     const clientToolVariables = useMemo(
       () =>
-        buildInteractiveVariables({
+        buildCodeVariables({
           ...(project ? { projectId: project.id, projectLabel: project.label } : {}),
           ...(tab.ticketId ? { ticketId: tab.ticketId } : {}),
         }),
@@ -221,12 +239,15 @@ export const CodeTabContent = memo(
             variables={clientToolVariables}
             overlayPane={overlayPane}
             onCloseOverlay={handleCloseOverlay}
+            onOpenOverlay={onOpenOverlay}
             onReady={() => {}}
             uiMinimal={uiMinimal}
             headerActionsTargetId={headerActionsTargetId}
             headerActionsCompact={headerActionsCompact}
             sandboxLabel={sandboxLabel}
             onClientToolCall={handleClientToolCall}
+            previewUrl={previewUrl}
+            onPreviewUrlChange={onPreviewUrlChange}
           />
         ) : phase === 'error' ? (
           <CodeErrorView tabId={tab.id} retry={retry} />

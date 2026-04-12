@@ -15,6 +15,8 @@ import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { $inboxItems, inboxApi } from '@/renderer/features/Inbox/state';
 import { $initiatives, initiativeApi } from '@/renderer/features/Initiatives/state';
 import { $tickets, ticketApi } from '@/renderer/features/Tickets/state';
+import { requestPlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
+import { requestPreviewOpen } from '@/renderer/features/Tickets/preview-bridge';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { InitiativeId, TicketId, ProjectId, InboxItemId, Pipeline } from '@/shared/types';
 
@@ -487,6 +489,34 @@ async function handleInitiativeTools(
   }
 }
 
+async function handleUITools(
+  toolName: string,
+  toolArgs: Record<string, unknown>,
+  tabId?: string,
+): Promise<ClientToolResult | null> {
+  switch (toolName) {
+    case 'open_preview': {
+      const url = (toolArgs.url as string) ?? '';
+      if (!url) return err('Missing url');
+      requestPreviewOpen(url, tabId);
+      return ok({ ok: true, url });
+    }
+    case 'display_plan': {
+      const title = (toolArgs.title as string) ?? 'Plan';
+      const description = toolArgs.description as string | undefined;
+      const rawSteps = toolArgs.steps as Array<{ title: string; description?: string }> | undefined;
+      const steps = (rawSteps ?? []).map((s) => ({
+        title: String(s?.title ?? ''),
+        description: typeof s?.description === 'string' ? s.description : undefined,
+      }));
+      const approved = await requestPlanApproval({ title, description, steps });
+      return ok({ approved });
+    }
+    default:
+      return null;
+  }
+}
+
 /**
  * Build a ClientToolCallHandler for interactive sessions.
  * All tools are available. When ticketId/projectId are provided,
@@ -495,6 +525,7 @@ async function handleInitiativeTools(
 export function buildClientToolHandler(opts?: {
   ticketId?: TicketId;
   projectId?: ProjectId;
+  tabId?: string;
 }): ClientToolCallHandler {
   return async (toolName: string, toolArgs: Record<string, unknown>) => {
     const ticketResult = await handleTicketTools(toolName, toolArgs, opts?.ticketId, opts?.projectId);
@@ -511,6 +542,9 @@ export function buildClientToolHandler(opts?: {
 
     const projectResult = await handleProjectTools(toolName, toolArgs);
     if (projectResult) return projectResult;
+
+    const uiResult = await handleUITools(toolName, toolArgs, opts?.tabId);
+    if (uiResult) return uiResult;
 
     return err(`Unknown tool: ${toolName}`);
   };

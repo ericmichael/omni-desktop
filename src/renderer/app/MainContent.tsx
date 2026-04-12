@@ -33,6 +33,13 @@ const useStyles = makeStyles({
     minHeight: 0,
     position: 'relative',
   },
+  /** Hide the sidebar (bottom tab bar) on mobile when the code tab owns the bottom dock */
+  sidebarHiddenMobile: {
+    display: 'none',
+    '@media (min-width: 640px)': {
+      display: 'contents',
+    },
+  },
   panel: {
     width: '100%',
     height: '100%',
@@ -141,7 +148,9 @@ export const MainContent = memo(() => {
 
   return (
     <div className={styles.root}>
-      <Sidebar />
+      <div className={mergeClasses(active === 'code' && styles.sidebarHiddenMobile)}>
+        <Sidebar />
+      </div>
       <div className={styles.content}>
         {panels.map(
           ({ key, Component }) =>

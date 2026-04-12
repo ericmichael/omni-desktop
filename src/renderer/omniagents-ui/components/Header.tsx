@@ -4,16 +4,12 @@ export function Header({
   agentName,
   onMenu,
   onArtifactsToggle,
-  onTerminalToggle,
   showArtifactsButton = false,
-  showTerminalButton = false,
 }: {
   agentName: string
   onMenu?: () => void
   onArtifactsToggle?: () => void
-  onTerminalToggle?: () => void
   showArtifactsButton?: boolean
-  showTerminalButton?: boolean
 }) {
   return (
     <div className="flex items-center justify-between px-3 py-2 bg-surface">
@@ -33,18 +29,6 @@ export function Header({
         ) : null}
       </div>
       <div className="flex items-center gap-1">
-        {showTerminalButton && onTerminalToggle ? (
-          <button
-            className="inline-flex size-8 items-center justify-center rounded-md text-fg-muted transition-colors hover:bg-white/5 hover:text-fg"
-            onClick={onTerminalToggle}
-            aria-label="Toggle terminal"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M4 17l6-6-6-6" />
-              <path d="M12 19h8" />
-            </svg>
-          </button>
-        ) : null}
         {showArtifactsButton && onArtifactsToggle ? (
           <button
             className="inline-flex size-8 items-center justify-center rounded-md text-fg-muted transition-colors hover:bg-white/5 hover:text-fg"

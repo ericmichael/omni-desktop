@@ -2,37 +2,34 @@ import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { MouseEvent } from 'react';
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 
 import { BottomSheet } from '@/renderer/ds';
 import { ConsoleNotRunning } from '@/renderer/features/Console/ConsoleNotStarted';
 import { ConsoleStarted } from '@/renderer/features/Console/ConsoleRunning';
-import { $isConsoleOpen, $terminal } from '@/renderer/features/Console/state';
+import { $isConsoleOpen, $terminals } from '@/renderer/features/Console/state';
 
 const onClose = () => {
   $isConsoleOpen.set(false);
 };
 
 const ConsoleContent = memo(() => {
-  const terminal = useStore($terminal);
+  const terminals = useStore($terminals);
   return (
     <>
-      {!terminal && <ConsoleNotRunning />}
-      {terminal && <ConsoleStarted terminal={terminal} />}
+      {terminals.length === 0 && <ConsoleNotRunning />}
+      {terminals.length > 0 && <ConsoleStarted />}
     </>
   );
 });
 ConsoleContent.displayName = 'ConsoleContent';
 
 const useStyles = makeStyles({
-  mobileOnly: { '@media (min-width: 640px)': { display: 'none' } },
   overlay: {
     position: 'absolute',
     inset: 0,
     zIndex: 40,
-    display: 'none',
-    '@media (min-width: 640px)': { display: 'block' },
   },
   card: {
     position: 'absolute',
@@ -51,7 +48,13 @@ const useStyles = makeStyles({
 
 export const Console = memo(() => {
   const isOpen = useStore($isConsoleOpen);
-  const terminal = useStore($terminal);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 640);
+
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 640);
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
 
   useHotkeys('esc', onClose);
 
@@ -67,16 +70,14 @@ export const Console = memo(() => {
 
   return (
     <>
-      {/* Mobile: bottom sheet */}
-      <div className={styles.mobileOnly}>
+      {isMobile && (
         <BottomSheet open={isOpen} onClose={onClose}>
           <ConsoleContent />
         </BottomSheet>
-      </div>
+      )}
 
-      {/* Desktop: floating card */}
       <AnimatePresence>
-        {isOpen && (
+        {isOpen && !isMobile && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

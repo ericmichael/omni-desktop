@@ -20,10 +20,12 @@ type OmniAgentsHostAppProps = {
   onReady?: () => void;
   headerActionsTargetId?: string;
   headerActionsCompact?: boolean;
+  pendingPlan?: import('@/shared/chat-types').PlanItem | null;
+  onPlanDecision?: (approved: boolean) => void;
 };
 
 export const OmniAgentsHostApp = memo(
-  ({ state, variables, onClientToolCall, sessionId, onSessionChange, onReady, headerActionsTargetId, headerActionsCompact }: OmniAgentsHostAppProps) => {
+  ({ state, variables, onClientToolCall, sessionId, onSessionChange, onReady, headerActionsTargetId, headerActionsCompact, pendingPlan, onPlanDecision }: OmniAgentsHostAppProps) => {
     const [greeting] = useState(getGreeting);
     const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([]);
     const pendingRef = useRef(pendingMessages);
@@ -107,6 +109,8 @@ export const OmniAgentsHostApp = memo(
               headerActionsCompact={headerActionsCompact}
               pendingMessages={pendingForApp}
               onClientToolCall={onClientToolCall}
+              pendingPlan={pendingPlan}
+              onPlanDecision={onPlanDecision}
             />
           </div>
         )}

@@ -8,17 +8,16 @@ import { getActivateVenvCommand, getBundledBinPath, getHomeDirectory, getShell, 
 import type { IpcEvents, IpcRendererEvents } from '@/shared/types';
 
 /**
- * ConsoleManager manages a singleton interactive shell PTY for the terminal/console.
- * Unlike command execution, this provides an interactive shell session.
+ * ConsoleManager manages multiple interactive shell PTYs for the terminal/console.
  */
 export class ConsoleManager {
-  private consoleEntry: PtyEntry | null = null;
+  private entries = new Map<string, PtyEntry>();
 
   constructor() {}
 
   /**
-   * Create the singleton console PTY
-   * Returns the console ID
+   * Create a new console PTY.
+   * Returns the console ID.
    */
   async createConsole(
     callbacks: {
@@ -27,11 +26,6 @@ export class ConsoleManager {
     },
     initialCwd?: string
   ): Promise<string> {
-    // If a console already exists, dispose it first
-    if (this.consoleEntry) {
-      this.dispose();
-    }
-
     const id = nanoid();
     const shell = getShell();
     const ansiBuffer = createPtyBuffer();
@@ -47,10 +41,7 @@ export class ConsoleManager {
         callbacks.onData(id, data);
       },
       onExit: (exitCode, signal) => {
-        // Clean up on exit
-        if (this.consoleEntry?.id === id) {
-          this.consoleEntry = null;
-        }
+        this.entries.delete(id);
         callbacks.onData(id, `Process exited with code ${exitCode}${signal ? `, signal: ${signal}` : ''}`);
         callbacks.onExit(id, exitCode, signal);
       },
@@ -58,14 +49,10 @@ export class ConsoleManager {
 
     setupPtyCallbacks(process, ptyCallbacks, ansiBuffer);
 
-    this.consoleEntry = {
-      id,
-      process,
-      ansiSequenceBuffer: ansiBuffer,
-    };
+    this.entries.set(id, { id, process, ansiSequenceBuffer: ansiBuffer });
 
     // Initialize the console environment
-    await this.initializeConsole(initialCwd);
+    await this.initializeConsole(id, initialCwd);
 
     return id;
   }
@@ -73,73 +60,74 @@ export class ConsoleManager {
   /**
    * Initialize the console with PATH and optional venv activation
    */
-  private async initializeConsole(cwd?: string): Promise<void> {
-    if (!this.consoleEntry) {
-      return;
-    }
+  private async initializeConsole(id: string, cwd?: string): Promise<void> {
+    const entry = this.entries.get(id);
+    if (!entry) return;
 
     // Add the bundled bin dir to the PATH env var
     if (process.platform === 'win32') {
-      this.consoleEntry.process.write(`$env:Path='${getBundledBinPath()};'+$env:Path\r`);
+      entry.process.write(`$env:Path='${getBundledBinPath()};'+$env:Path\r`);
     } else {
-      // macOS, Linux
-      this.consoleEntry.process.write(`export PATH="${getBundledBinPath()}:$PATH"\r`);
+      entry.process.write(`export PATH="${getBundledBinPath()}:$PATH"\r`);
     }
 
     if (cwd && (await isDirectory(cwd))) {
-      this.consoleEntry.process.write(`cd ${cwd}\r`);
+      entry.process.write(`cd ${cwd}\r`);
 
       // If the cwd contains a .venv, activate it
       const venvPath = `${cwd}/.venv`;
       if (await isDirectory(venvPath)) {
         const activateVenvCmd = getActivateVenvCommand(cwd);
-        this.consoleEntry.process.write(`${activateVenvCmd}\r`);
+        entry.process.write(`${activateVenvCmd}\r`);
       }
     }
   }
 
   /**
-   * Write data to the console
+   * Write data to a console
    */
-  write(data: string): void {
-    if (this.consoleEntry) {
-      this.consoleEntry.process.write(data);
-    }
+  write(id: string, data: string): void {
+    this.entries.get(id)?.process.write(data);
   }
 
   /**
-   * Resize the console PTY
+   * Resize a console PTY
    */
-  resize(cols: number, rows: number): void {
-    if (this.consoleEntry) {
-      this.consoleEntry.process.resize(cols, rows);
-    }
+  resize(id: string, cols: number, rows: number): void {
+    this.entries.get(id)?.process.resize(cols, rows);
   }
 
   /**
-   * Dispose of the console PTY
+   * Dispose of a single console PTY
    */
-  async dispose(): Promise<void> {
-    if (this.consoleEntry) {
-      const entry = this.consoleEntry;
-      this.consoleEntry = null;
-      await killPtyProcessAsync(entry.process);
-      entry.ansiSequenceBuffer.clear();
-    }
+  async disposeOne(id: string): Promise<void> {
+    const entry = this.entries.get(id);
+    if (!entry) return;
+    this.entries.delete(id);
+    await killPtyProcessAsync(entry.process);
+    entry.ansiSequenceBuffer.clear();
   }
 
   /**
-   * Get the current console ID
+   * Dispose of all console PTYs
    */
-  getConsoleId(): string | null {
-    return this.consoleEntry?.id ?? null;
+  async disposeAll(): Promise<void> {
+    const ids = [...this.entries.keys()];
+    await Promise.allSettled(ids.map((id) => this.disposeOne(id)));
   }
 
   /**
-   * Check if a console is currently active
+   * List all active console IDs
+   */
+  listIds(): string[] {
+    return [...this.entries.keys()];
+  }
+
+  /**
+   * Check if any console is currently active
    */
   isActive(): boolean {
-    return this.consoleEntry !== null;
+    return this.entries.size > 0;
   }
 }
 
@@ -163,30 +151,29 @@ export const createConsoleManager = (arg: {
     sendToWindow('terminal:exited', id, exitCode);
   };
 
-  // IPC handlers - maintaining compatibility with existing terminal interface
+  // IPC handlers
   ipc.handle('terminal:create', (_, cwd) => {
     return consoleManager.createConsole({ onData, onExit }, cwd);
   });
 
-  ipc.handle('terminal:dispose', async (_) => {
-    await consoleManager.dispose();
+  ipc.handle('terminal:dispose', async (_, id) => {
+    await consoleManager.disposeOne(id);
   });
 
   ipc.handle('terminal:resize', (_, id, cols, rows) => {
-    consoleManager.resize(cols, rows);
+    consoleManager.resize(id, cols, rows);
   });
 
   ipc.handle('terminal:write', (_, id, data) => {
-    consoleManager.write(data);
+    consoleManager.write(id, data);
   });
 
   ipc.handle('terminal:list', (_) => {
-    const id = consoleManager.getConsoleId();
-    return id ? [id] : [];
+    return consoleManager.listIds();
   });
 
   const cleanup = async () => {
-    await consoleManager.dispose();
+    await consoleManager.disposeAll();
     ipcMain.removeHandler('terminal:create');
     ipcMain.removeHandler('terminal:dispose');
     ipcMain.removeHandler('terminal:resize');

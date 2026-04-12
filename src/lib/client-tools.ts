@@ -12,6 +12,7 @@
 export const TICKET_CLIENT_TOOLS = [
   {
     name: 'get_ticket',
+    safe: true,
     description:
       'Get a ticket\'s state including title, description, priority, current column, and pipeline columns. Pass a ticket_id to look up any ticket, or omit it to get the current ticket.',
     parameters: {
@@ -75,6 +76,7 @@ export const TICKET_CLIENT_TOOLS = [
 export const READONLY_CONTEXT_TOOLS = [
   {
     name: 'list_tickets',
+    safe: true,
     description: 'List tickets in a project, optionally filtered by column or priority.',
     parameters: {
       type: 'object',
@@ -93,6 +95,7 @@ export const READONLY_CONTEXT_TOOLS = [
   },
   {
     name: 'list_initiatives',
+    safe: true,
     description: 'List all initiatives for a project.',
     parameters: {
       type: 'object',
@@ -104,6 +107,7 @@ export const READONLY_CONTEXT_TOOLS = [
   },
   {
     name: 'read_brief',
+    safe: true,
     description:
       'Read a project brief — the living document that captures the problem, appetite, solution direction, open questions, decisions, and scope boundaries.',
     parameters: {
@@ -116,6 +120,7 @@ export const READONLY_CONTEXT_TOOLS = [
   },
   {
     name: 'read_initiative_brief',
+    safe: true,
     description: 'Read an initiative brief — the deliverable-focused document describing goals and scope.',
     parameters: {
       type: 'object',
@@ -127,6 +132,7 @@ export const READONLY_CONTEXT_TOOLS = [
   },
   {
     name: 'get_ticket_comments',
+    safe: true,
     description:
       'Read comments on a ticket. Returns the comment history — decisions, findings, progress notes, and blockers recorded by agents and humans across runs.',
     parameters: {
@@ -139,6 +145,7 @@ export const READONLY_CONTEXT_TOOLS = [
   },
   {
     name: 'search_tickets',
+    safe: true,
     description:
       'Search across all tickets by keyword. Matches against title and description. Use to find related work or check for duplicates before creating a ticket.',
     parameters: {
@@ -152,6 +159,7 @@ export const READONLY_CONTEXT_TOOLS = [
   },
   {
     name: 'get_ticket_history',
+    safe: true,
     description:
       'Get the run history for a ticket — how many times it has been attempted, what each run ended with, and token usage. Useful for understanding why previous attempts failed.',
     parameters: {
@@ -164,6 +172,7 @@ export const READONLY_CONTEXT_TOOLS = [
   },
   {
     name: 'get_pipeline',
+    safe: true,
     description:
       'Get the full pipeline definition for a project — columns with labels, descriptions, and gate status. Use to understand the workflow and what each column expects.',
     parameters: {
@@ -195,6 +204,7 @@ export const BRIEF_CLIENT_TOOLS = [
 export const PROJECT_CLIENT_TOOLS = [
   {
     name: 'list_projects',
+    safe: true,
     description: 'List all projects with their pipeline columns.',
     parameters: { type: 'object', properties: {} },
   },
@@ -307,6 +317,7 @@ export const INITIATIVE_CLIENT_TOOLS = [
 export const INBOX_CLIENT_TOOLS = [
   {
     name: 'list_inbox',
+    safe: true,
     description: 'List all inbox items, optionally filtered by status.',
     parameters: {
       type: 'object',
@@ -387,6 +398,58 @@ export const INBOX_CLIENT_TOOLS = [
   },
 ] as const;
 
+/** Code-deck-only UI tools — require the overlay panel infrastructure. */
+export const CODE_UI_TOOLS = [
+  {
+    name: 'open_preview',
+    safe: true,
+    description:
+      'Open a web preview panel showing the given URL. Use this to show the user a running web app, dev server, or any web page. The preview opens as an overlay panel with a URL bar.',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'The URL to preview (e.g. "http://localhost:3000")' },
+      },
+      required: ['url'],
+    },
+  },
+] as const;
+
+export const UI_CLIENT_TOOLS = [
+  {
+    name: 'display_plan',
+    safe: true,
+    description:
+      'Present a step-by-step plan to the user for approval before executing. The tool blocks until the user approves or rejects. Returns { approved: true } or { approved: false }. Use this when you have a multi-step implementation plan and want the user to confirm before proceeding.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Short title for the plan (e.g. "Refactor auth middleware")' },
+        description: { type: 'string', description: 'Optional brief description of the overall goal' },
+        steps: {
+          type: 'array',
+          description: 'Ordered list of steps in the plan',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: 'Step title' },
+              description: { type: 'string', description: 'Optional detail about what this step involves' },
+            },
+            required: ['title'],
+          },
+        },
+      },
+      required: ['title', 'steps'],
+    },
+  },
+] as const;
+
+type ClientToolDef = { name: string; safe?: boolean; [k: string]: unknown };
+
+/** Extract tool names that are marked safe (read-only, no approval needed). */
+export const extractSafeToolNames = (tools: readonly ClientToolDef[]): string[] =>
+  tools.filter((t) => t.safe).map((t) => t.name);
+
 const buildProjectManagementInstructions = (opts?: {
   projectId?: string;
   projectLabel?: string;
@@ -430,19 +493,47 @@ export const buildAutopilotVariables = (opts?: {
   additional_instructions: buildProjectManagementInstructions(opts),
 });
 
-/** Interactive sessions: all tools. Includes ticket context when available. */
+/** Interactive sessions (Chat tab): all tools except code-deck-only tools. */
 export const buildInteractiveVariables = (opts?: {
   projectId?: string;
   projectLabel?: string;
   ticketId?: string;
-}): Record<string, unknown> => ({
-  client_tools: [
+}): Record<string, unknown> => {
+  const allTools = [
     ...TICKET_CLIENT_TOOLS,
     ...READONLY_CONTEXT_TOOLS,
     ...PROJECT_CLIENT_TOOLS,
     ...INITIATIVE_CLIENT_TOOLS,
     ...BRIEF_CLIENT_TOOLS,
     ...INBOX_CLIENT_TOOLS,
-  ],
-  additional_instructions: buildProjectManagementInstructions(opts),
-});
+    ...UI_CLIENT_TOOLS,
+  ];
+  return {
+    client_tools: allTools,
+    safe_tool_overrides: { safe_tool_names: extractSafeToolNames(allTools) },
+    additional_instructions: buildProjectManagementInstructions(opts),
+  };
+};
+
+/** Code deck sessions: interactive tools + code-deck-only tools (open_preview, etc.). */
+export const buildCodeVariables = (opts?: {
+  projectId?: string;
+  projectLabel?: string;
+  ticketId?: string;
+}): Record<string, unknown> => {
+  const allTools = [
+    ...TICKET_CLIENT_TOOLS,
+    ...READONLY_CONTEXT_TOOLS,
+    ...PROJECT_CLIENT_TOOLS,
+    ...INITIATIVE_CLIENT_TOOLS,
+    ...BRIEF_CLIENT_TOOLS,
+    ...INBOX_CLIENT_TOOLS,
+    ...UI_CLIENT_TOOLS,
+    ...CODE_UI_TOOLS,
+  ];
+  return {
+    client_tools: allTools,
+    safe_tool_overrides: { safe_tool_names: extractSafeToolNames(allTools) },
+    additional_instructions: buildProjectManagementInstructions(opts),
+  };
+};

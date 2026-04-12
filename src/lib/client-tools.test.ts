@@ -13,6 +13,8 @@ import { WebSocketServer } from 'ws';
 import {
   buildAutopilotVariables,
   buildInteractiveVariables,
+  buildCodeVariables,
+  extractSafeToolNames,
   TICKET_CLIENT_TOOLS,
   READONLY_CONTEXT_TOOLS,
   PROJECT_CLIENT_TOOLS,
@@ -684,12 +686,61 @@ describe('client_tools shape', () => {
     // Initiative tools
     expect(names).toContain('create_initiative');
     expect(names).toContain('update_initiative');
-    expect(names).toHaveLength(26);
+    // UI tools
+    expect(names).toContain('display_plan');
+    // Code-only tools should NOT be in interactive
+    expect(names).not.toContain('open_preview');
+    expect(names).toHaveLength(27);
     // Should include additional_instructions with project management guidance
     expect(vars.additional_instructions).toContain('Inbox');
     expect(vars.additional_instructions).toContain('Brief');
     expect(vars.additional_instructions).toContain('Tickets');
     expect(vars.additional_instructions).toContain('Initiatives');
+  });
+
+  it('code variables include code-deck-only tools', () => {
+    const vars = buildCodeVariables() as { client_tools: { name: string }[] };
+    const names = vars.client_tools.map((t) => t.name);
+    expect(names).toContain('open_preview');
+    expect(names).toContain('display_plan');
+    expect(names).toHaveLength(28);
+  });
+
+  it('interactive variables include safe_tool_overrides for read-only tools', () => {
+    const vars = buildInteractiveVariables() as { safe_tool_overrides: { safe_tool_names: string[] } };
+    const safeNames = vars.safe_tool_overrides.safe_tool_names;
+    // Read-only tools should be safe
+    expect(safeNames).toContain('get_ticket');
+    expect(safeNames).toContain('list_tickets');
+    expect(safeNames).toContain('list_initiatives');
+    expect(safeNames).toContain('read_brief');
+    expect(safeNames).toContain('read_initiative_brief');
+    expect(safeNames).toContain('get_ticket_comments');
+    expect(safeNames).toContain('search_tickets');
+    expect(safeNames).toContain('get_ticket_history');
+    expect(safeNames).toContain('get_pipeline');
+    expect(safeNames).toContain('list_projects');
+    expect(safeNames).toContain('list_inbox');
+    expect(safeNames).toContain('display_plan');
+    // Code-only tools not present
+    expect(safeNames).not.toContain('open_preview');
+    // Write tools should NOT be safe
+    expect(safeNames).not.toContain('move_ticket');
+    expect(safeNames).not.toContain('escalate');
+    expect(safeNames).not.toContain('create_ticket');
+    expect(safeNames).not.toContain('update_ticket');
+    expect(safeNames).not.toContain('start_ticket');
+    expect(safeNames).not.toContain('stop_ticket');
+    expect(safeNames).not.toContain('update_brief');
+    expect(safeNames).not.toContain('create_inbox_item');
+    expect(safeNames).not.toContain('delete_inbox_item');
+  });
+
+  it('code variables include open_preview in safe_tool_overrides', () => {
+    const vars = buildCodeVariables() as { safe_tool_overrides: { safe_tool_names: string[] } };
+    const safeNames = vars.safe_tool_overrides.safe_tool_names;
+    expect(safeNames).toContain('open_preview');
+    expect(safeNames).toContain('display_plan');
   });
 
   it('interactive variables include project and ticket context when provided', () => {
@@ -699,6 +750,15 @@ describe('client_tools shape', () => {
     expect(vars.additional_instructions).toContain('My Project');
     expect(vars.additional_instructions).toContain('proj-1');
     expect(vars.additional_instructions).toContain('tkt-1');
+  });
+
+  it('extractSafeToolNames returns only tools with safe: true', () => {
+    const tools = [
+      { name: 'read_thing', safe: true, description: '', parameters: { type: 'object', properties: {} } },
+      { name: 'write_thing', description: '', parameters: { type: 'object', properties: {} } },
+      { name: 'list_thing', safe: true, description: '', parameters: { type: 'object', properties: {} } },
+    ] as const;
+    expect(extractSafeToolNames(tools)).toEqual(['read_thing', 'list_thing']);
   });
 
   it('get_ticket has optional ticket_id parameter', () => {

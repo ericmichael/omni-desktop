@@ -8,6 +8,15 @@ import type { WsHandler } from '@/server/ws-handler';
 const upstreamMap = new Map<string, string>();
 
 /**
+ * Register a proxy upstream and return the proxy path prefix.
+ * Used by the preview system to dynamically route arbitrary URLs through the proxy.
+ */
+export const registerProxyUpstream = (proxyName: string, upstreamOrigin: string): string => {
+  upstreamMap.set(proxyName, upstreamOrigin);
+  return `/proxy/${proxyName}/`;
+};
+
+/**
  * Register the wildcard proxy route, WebSocket proxy routes, and URL rewriting interceptors.
  * Must be called BEFORE fastify.listen() so routes are registered at boot time.
  */
@@ -38,6 +47,24 @@ export const setupProxyRewriter = (fastify: FastifyInstance, wsHandler: WsHandle
           return handleHttpProxy(request, reply);
         },
       });
+    }
+  });
+
+  // --- Dynamic proxy registration endpoint ---
+  fastify.post('/proxy/_register', async (request, reply) => {
+    const { name, upstream } = request.body as { name?: string; upstream?: string };
+    if (!name || !upstream) {
+      reply.code(400).send({ error: 'Missing name or upstream' });
+      return;
+    }
+    try {
+      const parsed = new URL(upstream);
+      const origin = `${parsed.protocol}//${parsed.host}`;
+      upstreamMap.set(name, origin);
+      const proxyPath = `/proxy/${name}${parsed.pathname}${parsed.search}`;
+      reply.send({ ok: true, proxyPath });
+    } catch {
+      reply.code(400).send({ error: 'Invalid upstream URL' });
     }
   });
 
@@ -90,6 +117,60 @@ export const setupProxyRewriter = (fastify: FastifyInstance, wsHandler: WsHandle
 };
 
 /**
+ * Rewrite URLs in HTML **attributes only** so that absolute and root-relative
+ * URLs go through the proxy. Avoids touching inline JS/JSON which would break pages.
+ *
+ * Targets: href, src, action, formaction, poster, data, srcset attributes.
+ */
+function rewriteHtmlUrls(html: string, upstream: string, proxyName: string): string {
+  const proxyPrefix = `/proxy/${proxyName}`;
+
+  let upstreamHost = '';
+  try { upstreamHost = new URL(upstream).host; } catch { /* skip */ }
+
+  // Single regex: match URL-bearing HTML attributes whose value starts with
+  // the upstream origin, a protocol-relative //host, or a root-relative /path.
+  // The regex captures (attribute-prefix + opening-quote + url-start).
+  const attrNames = 'href|src|action|formaction|poster|data|srcset';
+
+  // 1. Absolute upstream URLs in attributes:  href="https://upstream/path" → href="/proxy/name/path"
+  if (upstream) {
+    const absRe = new RegExp(
+      `((?:${attrNames})\\s*=\\s*["'])${escapeForRegex(upstream)}`,
+      'gi',
+    );
+    html = html.replace(absRe, `$1${proxyPrefix}`);
+  }
+
+  // 2. Protocol-relative URLs in attributes:  src="//host/path" → src="/proxy/name/path"
+  if (upstreamHost) {
+    const protoRelRe = new RegExp(
+      `((?:${attrNames})\\s*=\\s*["'])//${escapeForRegex(upstreamHost)}`,
+      'gi',
+    );
+    html = html.replace(protoRelRe, `$1${proxyPrefix}`);
+  }
+
+  // 3. Root-relative URLs in attributes:  action="/path" → action="/proxy/name/path"
+  //    Skips values already starting with /proxy/ or // (protocol-relative)
+  html = html.replace(
+    new RegExp(`((?:${attrNames})\\s*=\\s*["'])\\/(?!\\/|proxy\\/)`, 'gi'),
+    `$1${proxyPrefix}/`,
+  );
+
+  // 4. Strip CSP <meta> tags — we already strip the HTTP header, but inline CSP
+  //    blocks our injected scripts (console capture, navigation, etc.)
+  html = html.replace(/<meta[^>]*http-equiv\s*=\s*["']Content-Security-Policy["'][^>]*>/gi, '');
+
+  return html;
+}
+
+/** Escape a string for use in a RegExp. */
+function escapeForRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
  * Proxy an HTTP request to the upstream service.
  */
 async function handleHttpProxy(request: FastifyRequest, reply: FastifyReply): Promise<void> {
@@ -133,9 +214,22 @@ async function handleHttpProxy(request: FastifyRequest, reply: FastifyReply): Pr
 
     if (isHtml && response.body) {
       let html = await response.text();
+
+      // --- Server-side URL rewriting (primary mechanism) ---
+      html = rewriteHtmlUrls(html, upstream, proxyName);
+
+      // Inject <base> tag and minimal scripts (console capture, navigation reporting, WS rewriting)
       const baseTag = `<base href="/proxy/${proxyName}/">`;
-      html = html.replace('<head>', `<head>${baseTag}${wsRewriteScript(proxyName)}`);
-      html = html.replace(/(src|href)="\/assets\//g, '$1="assets/');
+      const headPayload = `${baseTag}${navigationCapture()}${consoleCapture()}${wsRewriteScript(proxyName)}`;
+      // Handle <head>, <HEAD>, or missing <head> (lookahead excludes <header>, <heading>, etc.)
+      if (/<head(?=[\s>])/i.test(html)) {
+        html = html.replace(/<head(?=[\s>])[^>]*>/i, `$&${headPayload}`);
+      } else if (/<html[\s>]/i.test(html)) {
+        html = html.replace(/<html([\s>][^>]*)>/i, `<html$1><head>${headPayload}</head>`);
+      } else {
+        html = `<head>${headPayload}</head>${html}`;
+      }
+
       // Prevent caching of rewritten HTML
       reply.header('cache-control', 'no-store');
       reply.send(html);
@@ -234,6 +328,52 @@ function handleWsProxy(
   clientSocket.on('error', () => {
     safeClose(upstreamSocket);
   });
+}
+
+/**
+ * Generate a <script> tag for lightweight behaviour capture only.
+ * URL rewriting is handled server-side by rewriteHtmlUrls() — this script
+ * only handles things that can't be done server-side:
+ * 1. target="_blank" → _self (keep navigation in-frame)
+ * 2. window.open → location.href
+ * 3. Navigation change notifications (pushState/replaceState/popstate)
+ * 4. Title change notifications
+ */
+function navigationCapture(): string {
+  return `<script>(function(){` +
+    // Keep navigation in-frame
+    `document.addEventListener("click",function(e){` +
+    `var a=e.target;while(a&&a.tagName!=="A")a=a.parentElement;` +
+    `if(a&&(a.target==="_blank"||a.target==="_new"))a.target='_self'` +
+    `},true);` +
+    `window.open=function(u){if(u)location.href=u;return window};` +
+    // Notify parent on navigation
+    `function N(){window.parent.postMessage({type:"__preview_navigate__",url:location.href},"*")}` +
+    `var oPS=history.pushState,oRS=history.replaceState;` +
+    `history.pushState=function(){oPS.apply(this,arguments);N()};` +
+    `history.replaceState=function(){oRS.apply(this,arguments);N()};` +
+    `window.addEventListener("popstate",N);window.addEventListener("hashchange",N);` +
+    // Title notifications
+    `function T(){window.parent.postMessage({type:"__preview_title__",title:document.title},"*")}` +
+    `new MutationObserver(T).observe(document.querySelector("title")||document.head,{childList:true,subtree:true,characterData:true});T()` +
+    `})()</script>`;
+}
+
+/**
+ * Generate a <script> tag that intercepts console methods and posts
+ * them to the parent window so the preview panel can display them.
+ * Also sends a connection confirmation so the UI knows capture is active.
+ */
+function consoleCapture(): string {
+  return `<script>(function(){` +
+    `var P=function(l,m){try{window.parent.postMessage({type:"__preview_console__",level:l,message:m},"*")}catch(e){}};` +
+    `["log","info","debug","warn","error"].forEach(function(l){` +
+    `var o=console[l];console[l]=function(){o.apply(console,arguments);` +
+    `try{var m=Array.prototype.slice.call(arguments).map(function(a){` +
+    `try{return typeof a==="object"?JSON.stringify(a):String(a)}catch(e){return String(a)}` +
+    `}).join(" ");P(l==="info"||l==="debug"?"log":l,m)}catch(e){}}});` +
+    `P("log","[console connected]")` +
+    `})()</script>`;
 }
 
 /**

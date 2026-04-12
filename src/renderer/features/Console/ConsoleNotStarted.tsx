@@ -1,10 +1,10 @@
 import { makeStyles, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
-import { memo } from 'react';
+import { memo, useCallback } from 'react';
 
 import { Strong } from '@/renderer/common/Strong';
 import { Button } from '@/renderer/ds';
-import { useNewTerminal } from '@/renderer/features/Console/use-new-terminal';
+import { createTerminal } from '@/renderer/features/Console/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 
 const useStyles = makeStyles({
@@ -24,10 +24,13 @@ const useStyles = makeStyles({
 export const ConsoleNotRunning = memo(() => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
-  const newTerminal = useNewTerminal();
+  const handleStart = useCallback(() => {
+    const cwd = store.workspaceDir ?? undefined;
+    createTerminal(cwd);
+  }, [store.workspaceDir]);
   return (
     <div className={styles.root}>
-      <Button variant="link" onClick={newTerminal}>
+      <Button variant="link" onClick={handleStart}>
         Start Dev Console
       </Button>
       {store.workspaceDir && (

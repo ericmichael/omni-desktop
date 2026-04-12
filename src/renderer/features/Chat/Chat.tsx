@@ -1,6 +1,6 @@
 import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Desktop20Regular } from '@fluentui/react-icons';
 
 
@@ -8,6 +8,7 @@ import { buildInteractiveVariables } from '@/lib/client-tools';
 import { OmniAgentsApp, OmniAgentsHostApp } from '@/renderer/omniagents-ui';
 import { buildSandboxLabel } from '@/renderer/omniagents-ui/sandbox-label';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
+import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
 import { ChatShell } from '@/renderer/omniagents-ui/ChatShell';
 import { getGreeting } from '@/renderer/omniagents-ui/greeting';
 import { FloatingWidget } from '@/renderer/features/Omni/FloatingWidget';
@@ -58,13 +59,14 @@ const SandboxRunningView = memo(
     const [vncOverlayOpen, setVncOverlayOpen] = useState(false);
     const handleOpenVncOverlay = useCallback(() => setVncOverlayOpen(true), []);
     const handleCloseVncOverlay = useCallback(() => setVncOverlayOpen(false), []);
+    const pendingPlan = useStore($pendingPlan);
 
     const styles = useStyles();
     return (
       <div className={styles.flexColFullRelative}>
         <div className={styles.flex1Relative}>
           <div className={styles.fullSizeRelative}>
-            <OmniAgentsApp uiUrl={uiSrc} greeting={greeting} sandboxLabel={sandboxLabel} sessionId={sessionId} onSessionChange={onSessionChange} variables={buildInteractiveVariables()} onClientToolCall={buildClientToolHandler()} />
+            <OmniAgentsApp uiUrl={uiSrc} greeting={greeting} sandboxLabel={sandboxLabel} sessionId={sessionId} onSessionChange={onSessionChange} variables={buildInteractiveVariables()} onClientToolCall={buildClientToolHandler()} pendingPlan={pendingPlan} onPlanDecision={resolvePlanApproval} />
             {vncSrc && (
               <FloatingWidget
                 src={vncSrc}
@@ -93,6 +95,7 @@ export const Chat = memo(() => {
   const { phase, error, retry, launch, sandboxEnabled } = useChatAutoLaunch();
   const [greeting] = useState(getGreeting);
   const [runningMounted, setRunningMounted] = useState(false);
+  const pendingPlan = useStore($pendingPlan);
 
   const theme = store.theme ?? 'teams-light';
   const sandboxBackend = store.sandboxBackend ?? 'none';
@@ -175,6 +178,8 @@ export const Chat = memo(() => {
       <OmniAgentsHostApp
         variables={buildInteractiveVariables()}
         onClientToolCall={buildClientToolHandler()}
+        pendingPlan={pendingPlan}
+        onPlanDecision={resolvePlanApproval}
         sessionId={chatSessionId}
         onSessionChange={handleSessionChange}
         state={

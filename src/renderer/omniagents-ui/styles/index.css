@@ -169,6 +169,67 @@
   --tw-prose-td-borders: rgb(var(--omni-bgCardAlt));
 }
 
+/* ── shadcn/ai-elements CSS variable bridge ──────────────────────────
+   Maps --omni-* space-separated RGB vars to shadcn's expected semantic
+   color tokens. These are consumed by Tailwind's color utilities via
+   the shadcn convention (e.g. bg-background, text-foreground, etc.).
+   ------------------------------------------------------------------ */
+:root,
+[data-theme] {
+  /* Core surfaces */
+  --background: rgb(var(--omni-bgMain));
+  --foreground: rgb(var(--omni-textPrimary));
+
+  /* Card / popover */
+  --card: rgb(var(--omni-bgCard));
+  --card-foreground: rgb(var(--omni-textPrimary));
+  --popover: rgb(var(--omni-bgCard));
+  --popover-foreground: rgb(var(--omni-textPrimary));
+
+  /* Primary = brand blue */
+  --primary: rgb(var(--omni-tweetBlue));
+  --primary-foreground: #ffffff;
+
+  /* Secondary = alt card */
+  --secondary: rgb(var(--omni-bgCardAlt));
+  --secondary-foreground: rgb(var(--omni-textHeading));
+
+  /* Muted = column bg */
+  --muted: rgb(var(--omni-bgColumn));
+  --muted-foreground: rgb(var(--omni-textSubtle));
+
+  /* Accent = card alt hover */
+  --accent: rgb(var(--omni-bgCardAlt));
+  --accent-foreground: rgb(var(--omni-textHeading));
+
+  /* Destructive = error red */
+  --destructive: rgb(var(--omni-errorRed));
+  --destructive-foreground: #ffffff;
+
+  /* Semantic status colors */
+  --warning: rgb(var(--omni-warningOrange));
+  --warning-foreground: rgb(var(--omni-textHeading));
+  --success: rgb(var(--omni-successGreen));
+  --success-foreground: #ffffff;
+  --info: rgb(var(--omni-tweetBlue));
+  --info-foreground: #ffffff;
+
+  /* Border / input / ring */
+  --border: rgb(var(--omni-bgCardAlt));
+  --input: rgb(var(--omni-bgCardAlt));
+  --ring: rgb(var(--omni-tweetBlue));
+
+  /* Radius */
+  --radius: 0.5rem;
+}
+
+/* Default border color for bare `border` utilities (shadcn convention) */
+*,
+::before,
+::after {
+  border-color: var(--color-border, currentColor);
+}
+
 /* Basic layout */
 html, body, #root { height: 100%; overflow: hidden; }
 .app { height: 100%; display: flex; }

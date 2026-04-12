@@ -1,25 +1,25 @@
 import React from 'react'
-import { StickToBottom } from 'use-stick-to-bottom'
+import { Conversation, ConversationContent, ConversationScrollButton } from './ai/conversation'
 import { cn } from '../lib/utils'
 
-type StickToBottomProps = React.ComponentProps<typeof StickToBottom>
-type StickToBottomContentProps = React.ComponentProps<typeof StickToBottom.Content>
-
+type ConversationProps = React.ComponentProps<typeof Conversation>
+type ConversationContentProps = React.ComponentProps<typeof ConversationContent>
 type ChatContainerScrollAnchorProps = React.HTMLAttributes<HTMLDivElement>
 
-export function ChatContainerRoot({ className, resize = 'smooth', initial = 'instant', role = 'log', children, ...rest }: StickToBottomProps) {
+export function ChatContainerRoot({ className, children, ...rest }: ConversationProps) {
   return (
-    <StickToBottom className={cn('flex w-full min-w-0 overflow-y-auto', className)} resize={resize} initial={initial} role={role} {...rest}>
-      {children}
-    </StickToBottom>
+    <Conversation className={cn('flex w-full min-w-0', className)} {...rest}>
+      {children as React.ReactNode}
+      <ConversationScrollButton />
+    </Conversation>
   )
 }
 
-export function ChatContainerContent({ className, children, ...rest }: StickToBottomContentProps) {
+export function ChatContainerContent({ className, children, ...rest }: ConversationContentProps) {
   return (
-    <StickToBottom.Content className={cn('flex w-full min-w-0 flex-col', className)} {...rest}>
+    <ConversationContent className={cn('flex w-full min-w-0 flex-col', className)} {...rest}>
       {children}
-    </StickToBottom.Content>
+    </ConversationContent>
   )
 }
 

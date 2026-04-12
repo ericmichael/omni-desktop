@@ -23,7 +23,7 @@
   --color-fg-success: #4ade80;
   --color-fg-warning: #fbbf24;
 
-  /* Omniagents web UI palette */
+  /* Omniagents web UI palette (legacy names) */
   --color-tweetBlue: rgb(var(--omni-tweetBlue));
   --color-bgMain: rgb(var(--omni-bgMain));
   --color-bgColumn: rgb(var(--omni-bgColumn));
@@ -36,6 +36,35 @@
   --color-textPrimary: rgb(var(--omni-textPrimary));
   --color-textHeading: rgb(var(--omni-textHeading));
   --color-textSecondary: rgb(var(--omni-textSecondary));
+
+  /* shadcn / ai-elements semantic tokens
+     These reference the --omni-* vars (source of truth) so they
+     automatically adapt when [data-theme] changes. */
+  --color-background: rgb(var(--omni-bgMain));
+  --color-foreground: rgb(var(--omni-textPrimary));
+  --color-card: rgb(var(--omni-bgCard));
+  --color-card-foreground: rgb(var(--omni-textPrimary));
+  --color-popover: rgb(var(--omni-bgCard));
+  --color-popover-foreground: rgb(var(--omni-textPrimary));
+  --color-primary: rgb(var(--omni-tweetBlue));
+  --color-primary-foreground: #ffffff;
+  --color-secondary: rgb(var(--omni-bgCardAlt));
+  --color-secondary-foreground: rgb(var(--omni-textHeading));
+  --color-muted: rgb(var(--omni-bgColumn));
+  --color-muted-foreground: rgb(var(--omni-textSubtle));
+  --color-accent: rgb(var(--omni-bgCardAlt));
+  --color-accent-foreground: rgb(var(--omni-textHeading));
+  --color-destructive: rgb(var(--omni-errorRed));
+  --color-destructive-foreground: #ffffff;
+  --color-border: rgb(var(--omni-bgCardAlt));
+  --color-input: rgb(var(--omni-bgCardAlt));
+  --color-ring: rgb(var(--omni-tweetBlue));
+  --color-warning: rgb(var(--omni-warningOrange));
+  --color-warning-foreground: rgb(var(--omni-textHeading));
+  --color-success: rgb(var(--omni-successGreen));
+  --color-success-foreground: #ffffff;
+  --color-info: rgb(var(--omni-tweetBlue));
+  --color-info-foreground: #ffffff;
 
   /* Accent (indigo) palette */
   --color-accent-50: #eef2ff;

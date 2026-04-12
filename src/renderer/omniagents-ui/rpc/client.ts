@@ -325,7 +325,12 @@ export class RPCClient {
   async startRun(prompt: string, sessionId?: string, variables?: Record<string, unknown>, content?: unknown): Promise<{ run_id: string; session_id: string }> {
     const params: Record<string, unknown> = { prompt }
     if (sessionId) params.session_id = sessionId
-    if (variables) params.variables = variables
+    if (variables) {
+      // Extract safe_tool_overrides — it's a top-level start_run param, not a variable
+      const { safe_tool_overrides, ...rest } = variables
+      if (Object.keys(rest).length > 0) params.variables = rest
+      if (safe_tool_overrides) params.safe_tool_overrides = safe_tool_overrides
+    }
     if (content != null) params.content = content
     return this.call('start_run', params)
   }

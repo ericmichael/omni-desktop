@@ -3,29 +3,23 @@ import { createContext, useContext, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
 type HeaderActionsContextValue = {
-  showTerminalButton: boolean;
   showArtifactsButton: boolean;
-  onTerminalToggle?: () => void;
   onArtifactsToggle?: () => void;
 };
 
 const HeaderActionsContext = createContext<HeaderActionsContextValue | null>(null);
 
 export const OmniAgentsHeaderActionsProvider = ({
-  showTerminalButton,
   showArtifactsButton,
-  onTerminalToggle,
   onArtifactsToggle,
   children,
 }: HeaderActionsContextValue & { children: ReactNode }) => {
   const value = useMemo(
     () => ({
-      showTerminalButton,
       showArtifactsButton,
-      onTerminalToggle,
       onArtifactsToggle,
     }),
-    [showArtifactsButton, showTerminalButton, onArtifactsToggle, onTerminalToggle]
+    [showArtifactsButton, onArtifactsToggle]
   );
 
   return <HeaderActionsContext.Provider value={value}>{children}</HeaderActionsContext.Provider>;
@@ -40,24 +34,11 @@ const useHeaderActions = () => {
 };
 
 export const OmniAgentsHeaderActions = ({ compact = false }: { compact?: boolean }) => {
-  const { showArtifactsButton, showTerminalButton, onArtifactsToggle, onTerminalToggle } = useHeaderActions();
+  const { showArtifactsButton, onArtifactsToggle } = useHeaderActions();
   const sizeClass = compact ? 'size-8' : 'size-9';
 
   return (
     <div className="flex items-center gap-1">
-      {showTerminalButton && onTerminalToggle ? (
-        <button
-          className={`${sizeClass} rounded hover:bg-bgCardAlt text-textPrimary flex items-center justify-center`}
-          onClick={onTerminalToggle}
-          aria-label="Toggle terminal"
-          type="button"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M4 17l6-6-6-6" />
-            <path d="M12 19h8" />
-          </svg>
-        </button>
-      ) : null}
       {showArtifactsButton && onArtifactsToggle ? (
         <button
           className={`${sizeClass} rounded hover:bg-bgCardAlt text-textPrimary flex items-center justify-center`}
