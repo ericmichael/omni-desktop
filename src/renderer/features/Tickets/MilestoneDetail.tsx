@@ -12,6 +12,7 @@ import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 
 import { Badge, Button, Caption1, IconButton, ProgressBar, Subtitle2 } from '@/renderer/ds';
 import { $milestones, milestoneApi } from '@/renderer/features/Initiatives/state';
+import { persistedStoreApi } from '@/renderer/services/store';
 import type { MilestoneId, ProjectId } from '@/shared/types';
 
 import { WorkItemsList } from './WorkItemsList';
@@ -38,9 +39,19 @@ const useStyles = makeStyles({
     // branch/due badges off-screen.
     minWidth: 0,
   },
-  title: {
-    flex: '1 1 auto',
+  titleBlock: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
     minWidth: 0,
+    flex: '1 1 auto',
+  },
+  backBtn: {
+    '@media (max-width: 639px)': {
+      display: 'none',
+    },
+  },
+  title: {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
@@ -140,7 +151,9 @@ type MilestoneDetailProps = {
 export const MilestoneDetail = memo(({ milestoneId, projectId }: MilestoneDetailProps) => {
   const styles = useStyles();
   const milestones = useStore($milestones);
+  const store = useStore(persistedStoreApi.$atom);
   const milestone = milestones[milestoneId];
+  const project = useMemo(() => store.projects.find((entry) => entry.id === projectId) ?? null, [store.projects, projectId]);
 
   // Force filter to this milestone
   useMemo(() => {
@@ -174,8 +187,11 @@ export const MilestoneDetail = memo(({ milestoneId, projectId }: MilestoneDetail
     <div className={styles.root}>
       {/* Header */}
       <div className={styles.header}>
-        <IconButton aria-label="Back" icon={<ArrowLeft20Regular />} size="sm" onClick={handleBack} />
-        <Subtitle2 className={styles.title}>{milestone.title}</Subtitle2>
+        <IconButton aria-label="Back" icon={<ArrowLeft20Regular />} size="sm" onClick={handleBack} className={styles.backBtn} />
+        <div className={styles.titleBlock}>
+          {project && <Caption1>{project.label}</Caption1>}
+          <Subtitle2 className={styles.title}>{milestone.title}</Subtitle2>
+        </div>
         {milestone.status !== 'active' && (
           <Badge color={milestone.status === 'completed' ? 'green' : 'default'}>{milestone.status}</Badge>
         )}

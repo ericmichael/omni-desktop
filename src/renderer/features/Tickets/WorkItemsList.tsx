@@ -2,6 +2,7 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
 import {
   Add16Regular,
+  ArrowLeft20Regular,
   ArrowSync20Regular,
   Board20Regular,
   List20Regular,
@@ -10,7 +11,7 @@ import {
 } from '@fluentui/react-icons';
 import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 
-import { Badge, Caption1, IconButton, SectionLabel } from '@/renderer/ds';
+import { Badge, Caption1, IconButton, SectionLabel, Subtitle2 } from '@/renderer/ds';
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { isActivePhase } from '@/shared/ticket-phase';
@@ -45,6 +46,12 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalS,
     ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
     flexShrink: 0,
+  },
+  headerTitle: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    minWidth: 0,
   },
   flex1: {
     flex: '1 1 0',
@@ -160,9 +167,12 @@ type WorkItemsListProps = {
   projectId: ProjectId;
   selectedTicketId?: TicketId | null;
   onSelectTicket?: (ticketId: TicketId) => void;
+  title?: string;
+  contextLabel?: string;
+  onBack?: () => void;
 };
 
-export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket }: WorkItemsListProps) => {
+export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket, title = 'Items', contextLabel, onBack }: WorkItemsListProps) => {
   const styles = useStyles();
   const ticketMap = useStore($tickets);
   const pipeline = useStore($pipeline);
@@ -229,7 +239,15 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
   return (
     <div className={styles.root}>
       <div className={styles.header}>
-        <SectionLabel>Items</SectionLabel>
+        {onBack ? <IconButton aria-label="Back" icon={<ArrowLeft20Regular />} size="sm" onClick={onBack} /> : null}
+        {contextLabel || title !== 'Items' ? (
+          <div className={styles.headerTitle}>
+            {contextLabel ? <Caption1>{contextLabel}</Caption1> : null}
+            <Subtitle2>{title}</Subtitle2>
+          </div>
+        ) : (
+          <SectionLabel>{title}</SectionLabel>
+        )}
         <Caption1 style={{ color: tokens.colorNeutralForeground3 }}>({sortedTickets.length})</Caption1>
         <div className={styles.flex1} />
         <IconButton

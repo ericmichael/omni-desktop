@@ -2,12 +2,12 @@ import { objectEquals } from '@observ33r/object-equals';
 import { atom, computed, map } from 'nanostores';
 
 import { STATUS_POLL_INTERVAL_MS } from '@/renderer/constants';
+import { milestoneApi } from '@/renderer/features/Initiatives/state';
+import { pageApi } from '@/renderer/features/Pages/state';
 import { projectsApi } from '@/renderer/features/Projects/state';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { isActivePhase } from '@/shared/ticket-phase';
-import { milestoneApi } from '@/renderer/features/Initiatives/state';
-import { pageApi } from '@/renderer/features/Pages/state';
 import type {
   ArtifactFileContent,
   ArtifactFileEntry,
@@ -66,6 +66,45 @@ export const $ticketsView = atom<TicketsView>({ type: 'dashboard' });
  * (PageView, MilestoneDetail, etc.) can offer a contextual back button.
  */
 export const $previousTicketsView = atom<TicketsView | null>(null);
+
+const replayTicketsView = (view: TicketsView | null, fallbackProjectId?: ProjectId): void => {
+  if (!view) {
+    if (fallbackProjectId) {
+      ticketApi.goToProject(fallbackProjectId);
+      return;
+    }
+    ticketApi.goToDashboard();
+    return;
+  }
+
+  switch (view.type) {
+    case 'inbox':
+      ticketApi.goToInbox(view.selectedItemId);
+      break;
+    case 'dashboard':
+      ticketApi.goToDashboard();
+      break;
+    case 'project':
+      ticketApi.goToProject(view.projectId);
+      break;
+    case 'page':
+      ticketApi.goToPage(view.pageId, view.projectId);
+      break;
+    case 'milestone':
+      ticketApi.goToMilestone(view.milestoneId, view.projectId);
+      break;
+    case 'board':
+      ticketApi.goToBoard(view.projectId);
+      break;
+    case 'ticket':
+      if (fallbackProjectId) {
+        ticketApi.goToProject(fallbackProjectId);
+      } else {
+        ticketApi.goToDashboard();
+      }
+      break;
+  }
+};
 
 /**
  * Supervisor chat messages, keyed by ticket ID.
@@ -161,7 +200,9 @@ export const ticketApi = {
     const current = $tickets.get();
     const next: Record<TicketId, Ticket> = {};
     for (const [id, ticket] of Object.entries(current)) {
-      if (ticket.projectId !== projectId) next[id] = ticket;
+      if (ticket.projectId !== projectId) {
+        next[id] = ticket;
+      }
     }
     for (const ticket of tickets) {
       next[ticket.id] = ticket;
@@ -342,6 +383,9 @@ export const ticketApi = {
   },
   setActiveTicket: (ticketId: TicketId): void => {
     persistedStoreApi.setKey('activeTicketId', ticketId);
+  },
+  goBackToPrevious: (fallbackProjectId?: ProjectId): void => {
+    replayTicketsView($previousTicketsView.get(), fallbackProjectId);
   },
 };
 

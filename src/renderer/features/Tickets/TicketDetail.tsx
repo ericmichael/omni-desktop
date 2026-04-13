@@ -1,20 +1,32 @@
+import { Button as FluentButton, makeStyles, mergeClasses, shorthands, Subtitle2, tokens } from '@fluentui/react-components';
+import {
+  ArrowLeft20Regular,
+  ArrowMaximize20Regular,
+  ArrowMinimize20Regular,
+  BranchFork20Regular,
+  Chat20Regular,
+  Delete20Regular,
+  Dismiss20Regular,
+  Edit20Regular,
+  MoreHorizontal20Filled,
+  Play20Filled,
+  ReOrderDotsVertical20Regular,
+} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowMinimize20Regular, ArrowMaximize20Regular, MoreHorizontal20Filled, ReOrderDotsVertical20Regular, BranchFork20Regular, Edit20Regular, Play20Filled, Chat20Regular, Delete20Regular, Dismiss20Regular } from '@fluentui/react-icons';
-import { Button as FluentButton, Subtitle2, makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 
-import { Badge, Body1, Button, Caption1, IconButton, Input, Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger, Select, Tab, TabList } from '@/renderer/ds';
 import type { SelectTabData } from '@/renderer/ds';
+import { Badge, Body1, Button, Caption1, IconButton, Input, Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger, Select, Tab, TabList } from '@/renderer/ds';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { GitRepoInfo, TicketId, TicketPhase, TicketResolution } from '@/shared/types';
 
+import { $pipeline, $tickets, ticketApi } from './state';
 import { RESOLUTION_LABELS } from './ticket-constants';
 import { TicketArtifactsTab } from './TicketArtifactsTab';
 import { TicketDiscussionTab } from './TicketDiscussionTab';
 import { TicketOverviewTab } from './TicketOverviewTab';
 import { TicketPRTab } from './TicketPRTab';
-import { $pipeline, $tickets, ticketApi } from './state';
 
 const useStyles = makeStyles({
   root: {
@@ -127,12 +139,13 @@ type TicketDetailProps = {
   ticketId: TicketId;
   compact?: boolean;
   onClose?: () => void;
+  closeBehavior?: 'close' | 'back';
   dragHandleProps?: DragHandleProps;
   isExpanded?: boolean;
   onToggleExpand?: () => void;
 };
 
-export const TicketDetail = memo(({ ticketId, compact, onClose, dragHandleProps, isExpanded, onToggleExpand }: TicketDetailProps) => {
+export const TicketDetail = memo(({ ticketId, compact, onClose, closeBehavior = 'close', dragHandleProps, isExpanded, onToggleExpand }: TicketDetailProps) => {
   const styles = useStyles();
   const tickets = useStore($tickets);
   const pipeline = useStore($pipeline);
@@ -179,7 +192,9 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, dragHandleProps,
   }, [editTitle, ticket, ticketId]);
 
   const handleStartEditBranch = useCallback(() => {
-    if (!ticket) return;
+    if (!ticket) {
+      return;
+    }
     setEditBranch(ticket.branch ?? '');
     setEditingBranch(true);
   }, [ticket]);
@@ -189,7 +204,9 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, dragHandleProps,
   }, []);
 
   const handleSaveBranch = useCallback(() => {
-    if (!ticket) return;
+    if (!ticket) {
+      return;
+    }
     void ticketApi.updateTicket(ticketId, {
       branch: editBranch || undefined,
     });
@@ -221,7 +238,9 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, dragHandleProps,
   }, [ticketId]);
 
   const isTerminalColumn = useMemo(() => {
-    if (!pipeline || !ticket) return false;
+    if (!pipeline || !ticket) {
+      return false;
+    }
     const terminalId = pipeline.columns[pipeline.columns.length - 1]?.id;
     return ticket.columnId === terminalId;
   }, [pipeline, ticket]);
@@ -298,7 +317,14 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, dragHandleProps,
             onClick={onToggleExpand}
           />
         )}
-        {onClose && <IconButton aria-label="Close" icon={<Dismiss20Regular />} size="sm" onClick={onClose} />}
+        {onClose && (
+          <IconButton
+            aria-label={closeBehavior === 'back' ? 'Back' : 'Close'}
+            icon={closeBehavior === 'back' ? <ArrowLeft20Regular /> : <Dismiss20Regular />}
+            size="sm"
+            onClick={onClose}
+          />
+        )}
       </div>
 
       {/* ── Row 2: Tabs + overflow menu ── */}

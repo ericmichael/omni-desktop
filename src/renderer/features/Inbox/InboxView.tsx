@@ -6,8 +6,9 @@ import {
   TimerRegular,
 } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
+import { ticketApi } from '@/renderer/features/Tickets/state';
 import type { InboxItem, InboxItemId } from '@/shared/types';
 
 import { InboxItemDetail } from './InboxItemDetail';
@@ -142,7 +143,7 @@ const useStyles = makeStyles({
 
 type InboxTab = 'active' | 'later' | 'archive';
 
-export const InboxView = memo(() => {
+export const InboxView = memo(({ selectedItemId }: { selectedItemId?: InboxItemId }) => {
   const styles = useStyles();
   const active = useStore($activeInbox);
   const later = useStore($laterInbox);
@@ -161,7 +162,35 @@ export const InboxView = memo(() => {
 
   const visible = tab === 'active' ? active : tab === 'later' ? later : promoted;
 
-  const handleBack = useCallback(() => setSelectedId(null), []);
+  useEffect(() => {
+    if (!selectedItemId) {
+      setSelectedId(null);
+      return;
+    }
+
+    const item = itemsById[selectedItemId] ?? null;
+    setSelectedId(item?.id ?? null);
+    if (!item) {
+      return;
+    }
+    if (item.promotedTo) {
+      setTab('archive');
+      return;
+    }
+    if (item.status === 'later') {
+      setTab('later');
+      return;
+    }
+    setTab('active');
+  }, [selectedItemId, itemsById]);
+
+  const handleBack = useCallback(() => {
+    if (selectedItemId) {
+      ticketApi.goToInbox();
+      return;
+    }
+    setSelectedId(null);
+  }, [selectedItemId]);
 
   // Detail view takes over the panel when an item is selected.
   if (selectedItem) {
