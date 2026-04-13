@@ -8,6 +8,14 @@ export type WebviewHandle = {
   goForward: () => void;
   stop: () => void;
   executeScript: (code: string) => Promise<unknown>;
+  /**
+   * Inject a stylesheet into the embedded document. Returns a key that can be
+   * passed to `removeInsertedCSS`. In Electron `<webview>` this works across
+   * origins via the chromium `insertCSS` API. In iframe (browser) mode this
+   * is a no-op and returns null.
+   */
+  insertCSS: (css: string) => Promise<string | null>;
+  removeInsertedCSS: (key: string) => Promise<void>;
 };
 
 export type ConsoleMessage = {
@@ -46,17 +54,31 @@ export const Webview = forwardRef<WebviewHandle, {
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryDelayRef = useRef(750);
 
-  useEffect(() => { onReadyRef.current = onReady; }, [onReady]);
-  useEffect(() => { onConsoleRef.current = onConsoleMessage; }, [onConsoleMessage]);
-  useEffect(() => { onNavigateRef.current = onNavigate; }, [onNavigate]);
-  useEffect(() => { onLoadingRef.current = onLoadingChange; }, [onLoadingChange]);
-  useEffect(() => { onTitleRef.current = onTitleChange; }, [onTitleChange]);
-  useEffect(() => { onErrorRef.current = onError; }, [onError]);
+  useEffect(() => {
+ onReadyRef.current = onReady; 
+}, [onReady]);
+  useEffect(() => {
+ onConsoleRef.current = onConsoleMessage; 
+}, [onConsoleMessage]);
+  useEffect(() => {
+ onNavigateRef.current = onNavigate; 
+}, [onNavigate]);
+  useEffect(() => {
+ onLoadingRef.current = onLoadingChange; 
+}, [onLoadingChange]);
+  useEffect(() => {
+ onTitleRef.current = onTitleChange; 
+}, [onTitleChange]);
+  useEffect(() => {
+ onErrorRef.current = onError; 
+}, [onError]);
 
   useImperativeHandle(handleRef, () => ({
     reload: () => {
       const el = elementRef.current;
-      if (!el) return;
+      if (!el) {
+return;
+}
       if (isElectron) {
         (el as unknown as Electron.WebviewTag).reload();
       } else {
@@ -65,43 +87,81 @@ export const Webview = forwardRef<WebviewHandle, {
     },
     goBack: () => {
       const el = elementRef.current;
-      if (!el) return;
+      if (!el) {
+return;
+}
       if (isElectron) {
         (el as unknown as Electron.WebviewTag).goBack();
       } else {
-        try { (el as HTMLIFrameElement).contentWindow?.history.back(); } catch { /* cross-origin */ }
+        try {
+ (el as HTMLIFrameElement).contentWindow?.history.back(); 
+} catch { /* cross-origin */ }
       }
     },
     goForward: () => {
       const el = elementRef.current;
-      if (!el) return;
+      if (!el) {
+return;
+}
       if (isElectron) {
         (el as unknown as Electron.WebviewTag).goForward();
       } else {
-        try { (el as HTMLIFrameElement).contentWindow?.history.forward(); } catch { /* cross-origin */ }
+        try {
+ (el as HTMLIFrameElement).contentWindow?.history.forward(); 
+} catch { /* cross-origin */ }
       }
     },
     stop: () => {
       const el = elementRef.current;
-      if (!el) return;
+      if (!el) {
+return;
+}
       if (isElectron) {
         (el as unknown as Electron.WebviewTag).stop();
       } else {
-        try { (el as HTMLIFrameElement).contentWindow?.stop(); } catch { /* cross-origin */ }
+        try {
+ (el as HTMLIFrameElement).contentWindow?.stop(); 
+} catch { /* cross-origin */ }
       }
     },
     executeScript: async (code: string): Promise<unknown> => {
       const el = elementRef.current;
-      if (!el) return undefined;
+      if (!el) {
+return undefined;
+}
       if (isElectron) {
         return (el as unknown as Electron.WebviewTag).executeJavaScript(code);
       }
       try {
         const win = (el as HTMLIFrameElement).contentWindow as (Window & { eval: (code: string) => unknown }) | null;
-        if (!win) return undefined;
+        if (!win) {
+return undefined;
+}
         return win.eval(code);
       } catch (e) {
         return String(e);
+      }
+    },
+    insertCSS: async (css: string): Promise<string | null> => {
+      const el = elementRef.current;
+      if (!el || !isElectron) {
+return null;
+}
+      try {
+        return await (el as unknown as Electron.WebviewTag).insertCSS(css);
+      } catch {
+        return null;
+      }
+    },
+    removeInsertedCSS: async (key: string): Promise<void> => {
+      const el = elementRef.current;
+      if (!el || !isElectron) {
+return;
+}
+      try {
+        await (el as unknown as Electron.WebviewTag).removeInsertedCSS(key);
+      } catch {
+        // ignore — webview may have navigated away
       }
     },
   }), []);
@@ -176,8 +236,12 @@ export const Webview = forwardRef<WebviewHandle, {
           const errorCode = e.errorCode ?? null;
           const isMainFrame = e.isMainFrame ?? true;
 
-          if (!isMainFrame) return;
-          if (errorCode === -3) return; // ERR_ABORTED
+          if (!isMainFrame) {
+return;
+}
+          if (errorCode === -3) {
+return;
+} // ERR_ABORTED
           onLoadingRef.current?.(false);
 
           if (readyEmittedRef.current) {
@@ -195,13 +259,19 @@ export const Webview = forwardRef<WebviewHandle, {
 
         const onNavigateEvent = (event: unknown) => {
           const e = event as { url?: string; isMainFrame?: boolean };
-          if (e.isMainFrame === false) return;
-          if (e.url) onNavigateRef.current?.(e.url);
+          if (e.isMainFrame === false) {
+return;
+}
+          if (e.url) {
+onNavigateRef.current?.(e.url);
+}
         };
 
         const onTitleUpdate = (event: unknown) => {
           const e = event as { title?: string };
-          if (e.title) onTitleRef.current?.(e.title);
+          if (e.title) {
+onTitleRef.current?.(e.title);
+}
         };
 
         el.addEventListener('did-start-loading', onStartLoad);
@@ -244,7 +314,9 @@ export const Webview = forwardRef<WebviewHandle, {
               onNavigateRef.current?.(href);
             }
             const title = iframe.contentDocument?.title;
-            if (title) onTitleRef.current?.(title);
+            if (title) {
+onTitleRef.current?.(title);
+}
           } catch { /* cross-origin */ }
         };
 
@@ -258,7 +330,9 @@ export const Webview = forwardRef<WebviewHandle, {
         };
 
         const onMessage = (event: MessageEvent) => {
-          if (event.source !== iframe.contentWindow) return;
+          if (event.source !== iframe.contentWindow) {
+return;
+}
           const data = event.data as { type?: string; level?: string; message?: string; url?: string; title?: string } | null;
           if (data?.type === '__preview_console__') {
             const level = data.level === 'error' ? 'error' : data.level === 'warn' ? 'warn' : 'log';

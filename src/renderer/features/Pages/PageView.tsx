@@ -1,10 +1,11 @@
-import { useStore } from '@nanostores/react';
-import { memo, Suspense, lazy, useCallback, useEffect, useReducer, useRef, useState, useMemo } from 'react';
-import { makeStyles, Skeleton, SkeletonItem, tokens, shorthands } from '@fluentui/react-components';
+import { makeStyles, shorthands,Skeleton, SkeletonItem, tokens } from '@fluentui/react-components';
 import { ArrowLeft20Regular } from '@fluentui/react-icons';
+import { useStore } from '@nanostores/react';
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo,useReducer, useRef, useState } from 'react';
 
 import { currentContent, editorReducer, type EditorState } from '@/lib/page-editor-state';
 import { IconButton } from '@/renderer/ds';
+import { NotebookView } from '@/renderer/features/Notebooks/NotebookView';
 import { $previousTicketsView, ticketApi } from '@/renderer/features/Tickets/state';
 import type { PageId, ProjectId } from '@/shared/types';
 
@@ -231,7 +232,7 @@ type PageViewProps = {
   projectId: ProjectId;
 };
 
-export const PageView = memo(({ pageId, projectId }: PageViewProps) => {
+const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
   const styles = useStyles();
   const pages = useStore($pages);
   const page = pages[pageId];
@@ -282,7 +283,9 @@ export const PageView = memo(({ pageId, projectId }: PageViewProps) => {
   // Title editing state
   const [title, setTitle] = useState(page?.title ?? '');
   useEffect(() => {
-    if (page) setTitle(page.title);
+    if (page) {
+setTitle(page.title);
+}
   }, [page]);
 
   // -------------------------------------------------------------------------
@@ -294,7 +297,9 @@ export const PageView = memo(({ pageId, projectId }: PageViewProps) => {
     // editor never mounts with transient empty content — it mounts exactly
     // once with the real content, no remount flash on first open.
     void pageApi.watch(pageId).then((content) => {
-      if (cancelled) return;
+      if (cancelled) {
+return;
+}
       dispatch({ type: 'loaded', content });
       latestLocal.current = content;
     });
@@ -332,14 +337,18 @@ export const PageView = memo(({ pageId, projectId }: PageViewProps) => {
   // -------------------------------------------------------------------------
   const scheduleSave = useCallback(
     (content: string) => {
-      if (saveTimer.current) clearTimeout(saveTimer.current);
+      if (saveTimer.current) {
+clearTimeout(saveTimer.current);
+}
       saveTimer.current = setTimeout(() => {
         saveTimer.current = null;
         dispatch({ type: 'save-start' });
         void pageApi.writeContent(pageId, content).then(() => {
           dispatch({ type: 'save-done' });
           setJustSaved(true);
-          if (savedTimer.current) clearTimeout(savedTimer.current);
+          if (savedTimer.current) {
+clearTimeout(savedTimer.current);
+}
           savedTimer.current = setTimeout(() => setJustSaved(false), SAVED_AFFORDANCE_MS);
         });
       }, SAVE_DEBOUNCE_MS);
@@ -359,7 +368,9 @@ export const PageView = memo(({ pageId, projectId }: PageViewProps) => {
   // Cleanup the "Saved" timer on unmount.
   useEffect(() => {
     return () => {
-      if (savedTimer.current) clearTimeout(savedTimer.current);
+      if (savedTimer.current) {
+clearTimeout(savedTimer.current);
+}
     };
   }, []);
 
@@ -390,7 +401,9 @@ export const PageView = memo(({ pageId, projectId }: PageViewProps) => {
   // Conflict resolution
   // -------------------------------------------------------------------------
   const handleUseDisk = useCallback(() => {
-    if (state.kind !== 'conflict') return;
+    if (state.kind !== 'conflict') {
+return;
+}
     // Cancel any pending save — we're dropping the local copy.
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
@@ -402,7 +415,9 @@ export const PageView = memo(({ pageId, projectId }: PageViewProps) => {
   }, [state]);
 
   const handleKeepLocal = useCallback(() => {
-    if (state.kind !== 'conflict') return;
+    if (state.kind !== 'conflict') {
+return;
+}
     dispatch({ type: 'resolve-keep-local' });
     // Schedule an immediate save so local wins on disk.
     scheduleSave(state.localContent);
@@ -424,7 +439,9 @@ export const PageView = memo(({ pageId, projectId }: PageViewProps) => {
     [projectId]
   );
 
-  if (!page) return null;
+  if (!page) {
+return null;
+}
 
   const showConflict = state.kind === 'conflict';
   const editorContent = currentContent(state);
@@ -523,6 +540,21 @@ export const PageView = memo(({ pageId, projectId }: PageViewProps) => {
       </div>
     </div>
   );
+});
+DocPageView.displayName = 'DocPageView';
+
+/**
+ * Dispatch on `page.kind`: notebook pages mount the marimo extension webview;
+ * everything else uses the Yoopta-based DocPageView. Keeps hook order stable
+ * because the dispatcher itself only ever runs one hook.
+ */
+export const PageView = memo(({ pageId, projectId }: PageViewProps) => {
+  const pages = useStore($pages);
+  const page = pages[pageId];
+  if (page?.kind === 'notebook') {
+    return <NotebookView pageId={pageId} />;
+  }
+  return <DocPageView pageId={pageId} projectId={projectId} />;
 });
 PageView.displayName = 'PageView';
 

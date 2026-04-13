@@ -32,6 +32,7 @@ const DEFAULTS: StoreData = {
   wipLimit: 3,
   weeklyReviewDay: 5,
   lastWeeklyReviewAt: null,
+  enabledExtensions: {},
 };
 
 type ChangeCallback = (data: StoreData | undefined) => void;

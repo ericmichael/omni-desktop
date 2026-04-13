@@ -1,10 +1,11 @@
+import { makeStyles, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useState } from 'react';
 
-import { makeStyles, tokens } from '@fluentui/react-components';
 import { AnimatedDialog, DialogBody, DialogContent, DialogFooter, DialogHeader, Tab, TabList } from '@/renderer/ds';
 import { SettingsModalAccountTab } from '@/renderer/features/SettingsModal/SettingsModalAccountTab';
 import { SettingsModalEnvironmentTab } from '@/renderer/features/SettingsModal/SettingsModalEnvironmentTab';
+import { SettingsModalExtensionsTab } from '@/renderer/features/SettingsModal/SettingsModalExtensionsTab';
 import { SettingsModalGeneralTab } from '@/renderer/features/SettingsModal/SettingsModalGeneralTab';
 import { SettingsModalMcpTab } from '@/renderer/features/SettingsModal/SettingsModalMcpTab';
 import { SettingsModalModelsTab } from '@/renderer/features/SettingsModal/SettingsModalModelsTab';
@@ -12,7 +13,7 @@ import { SettingsModalNetworkTab } from '@/renderer/features/SettingsModal/Setti
 import { SettingsModalResetButton } from '@/renderer/features/SettingsModal/SettingsModalResetButton';
 import { $isSettingsOpen } from '@/renderer/features/SettingsModal/state';
 
-const TABS = ['General', 'Environment', 'Models', 'MCP', 'Network', 'Account'] as const;
+const TABS = ['General', 'Environment', 'Models', 'MCP', 'Network', 'Extensions', 'Account'] as const;
 type SettingsTab = (typeof TABS)[number];
 
 const useStyles = makeStyles({
@@ -70,6 +71,7 @@ export const SettingsModal = memo(() => {
           {activeTab === 'Models' && <SettingsModalModelsTab />}
           {activeTab === 'MCP' && <SettingsModalMcpTab />}
           {activeTab === 'Network' && <SettingsModalNetworkTab />}
+          {activeTab === 'Extensions' && <SettingsModalExtensionsTab />}
           {activeTab === 'Account' && <SettingsModalAccountTab />}
         </DialogBody>
         {activeTab === 'General' && (

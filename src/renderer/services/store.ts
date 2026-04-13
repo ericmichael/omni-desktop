@@ -31,6 +31,7 @@ const getDefaults = (): StoreData => ({
   wipLimit: 3,
   weeklyReviewDay: 5,
   lastWeeklyReviewAt: null,
+  enabledExtensions: {},
 });
 
 /**

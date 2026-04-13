@@ -1,4 +1,6 @@
-import { memo, useCallback, useMemo, useRef, useState } from 'react';
+// Board20/Flag20 are kept because they render inside MenuPopover action menus,
+// which want the larger 20px icon size. The tree's iconBefore slot uses 16px.
+import { makeStyles, tokens } from '@fluentui/react-components';
 import {
   Add16Regular,
   Board16Regular,
@@ -14,15 +16,15 @@ import {
   Globe16Regular,
   Link16Regular,
   MoreHorizontal16Regular,
+  Notebook20Regular,
   Open20Regular,
   Play20Filled,
   Settings20Regular,
   TaskListSquareLtr16Regular,
 } from '@fluentui/react-icons';
-// Board20/Flag20 are kept because they render inside MenuPopover action menus,
-// which want the larger 20px icon size. The tree's iconBefore slot uses 16px.
-import { makeStyles, tokens } from '@fluentui/react-components';
+import { memo, useCallback, useMemo, useRef, useState } from 'react';
 
+import type { TreeItemOpenChangeData } from '@/renderer/ds';
 import {
   Input,
   Menu,
@@ -35,7 +37,6 @@ import {
   TreeItem,
   TreeItemLayout,
 } from '@/renderer/ds';
-import type { TreeItemOpenChangeData } from '@/renderer/ds';
 import { milestoneApi } from '@/renderer/features/Initiatives/state';
 import { pageApi } from '@/renderer/features/Pages/state';
 import { openTicketInCode } from '@/renderer/services/navigation';
@@ -185,7 +186,9 @@ const useStyles = makeStyles({
 /** Shorten a local path to the last 2 segments (e.g. ~/projects/my-app → projects/my-app). */
 function shortenPath(fullPath: string): string {
   const parts = fullPath.replace(/\\/g, '/').split('/').filter(Boolean);
-  if (parts.length <= 2) return fullPath;
+  if (parts.length <= 2) {
+return fullPath;
+}
   return parts.slice(-2).join('/');
 }
 
@@ -198,7 +201,9 @@ function shortenRepoUrl(url: string): string {
   } catch {
     // Not a valid URL — try extracting from ssh-style (git@host:org/repo.git)
     const sshMatch = url.match(/:([^/].*?)(?:\.git)?$/);
-    if (sshMatch) return sshMatch[1]!;
+    if (sshMatch) {
+return sshMatch[1]!;
+}
     return url;
   }
 }
@@ -456,8 +461,11 @@ export const SidebarTree = memo(
           // Chevron: just toggle open/close, no navigation
           setOpenItems((prev) => {
             const next = new Set(prev);
-            if (data.open) next.add(value);
-            else next.delete(value);
+            if (data.open) {
+next.add(value);
+} else {
+next.delete(value);
+}
             return next;
           });
           // Fetch data when expanding a project
@@ -467,7 +475,9 @@ export const SidebarTree = memo(
         } else {
           // Label click on a branch: always open (never toggle closed) + navigate
           setOpenItems((prev) => {
-            if (prev.has(value)) return prev;
+            if (prev.has(value)) {
+return prev;
+}
             const next = new Set(prev);
             next.add(value);
             return next;
@@ -475,7 +485,9 @@ export const SidebarTree = memo(
           onSelect(value);
           handledByOpenChange.current = true;
           // Reset after this event cycle
-          requestAnimationFrame(() => { handledByOpenChange.current = false; });
+          requestAnimationFrame(() => {
+ handledByOpenChange.current = false; 
+});
         }
       },
       [onSelect, onExpandProject]
@@ -553,7 +565,9 @@ export const SidebarTree = memo(
       >
         {projects.map((project) => {
           const data = projectData[project.id];
-          if (!data) return null;
+          if (!data) {
+return null;
+}
           const { milestones: projectMilestones, ticketsByMilestone, looseTickets, rootPages } = data;
 
           const projectValue = `project:${project.id}`;
@@ -568,7 +582,9 @@ export const SidebarTree = memo(
                 onClick={(e) => {
                   e.stopPropagation();
                   const rootPage = Object.values(pages).find((p) => p.projectId === project.id && p.isRoot);
-                  if (!rootPage) return;
+                  if (!rootPage) {
+return;
+}
                   const siblings = Object.values(pages).filter((p) => p.parentId === rootPage.id);
                   const maxSort = siblings.reduce((max, p) => Math.max(max, p.sortOrder), 0);
                   void pageApi
@@ -598,6 +614,28 @@ export const SidebarTree = memo(
                     </MenuItem>
                     <MenuItem icon={<Flag20Regular />} onClick={() => onCreateMilestone?.(project.id)}>
                       New milestone
+                    </MenuItem>
+                    <MenuItem
+                      icon={<Notebook20Regular />}
+                      onClick={() => {
+                        const rootPage = Object.values(pages).find((p) => p.projectId === project.id && p.isRoot);
+                        if (!rootPage) {
+return;
+}
+                        const siblings = Object.values(pages).filter((p) => p.parentId === rootPage.id);
+                        const maxSort = siblings.reduce((max, p) => Math.max(max, p.sortOrder), 0);
+                        void pageApi
+                          .addPage({
+                            projectId: project.id,
+                            parentId: rootPage.id,
+                            title: 'Untitled notebook',
+                            sortOrder: maxSort + 1,
+                            kind: 'notebook',
+                          })
+                          .then((newPage) => onSelect(`page:${newPage.id}:${project.id}`));
+                      }}
+                    >
+                      New notebook
                     </MenuItem>
                     <MenuDivider />
                     <MenuItem icon={<Settings20Regular />} onClick={() => onSelect(projectValue)}>
@@ -679,7 +717,9 @@ export const SidebarTree = memo(
                           type="button"
                           aria-label="New ticket"
                           className={styles.nativeBtn}
-                          onClick={(e) => { e.stopPropagation(); handleNewMilestoneTicket(); }}
+                          onClick={(e) => {
+ e.stopPropagation(); handleNewMilestoneTicket(); 
+}}
                         >
                           <Add16Regular />
                         </button>

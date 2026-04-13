@@ -2,13 +2,14 @@ import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-co
 import { useStore } from '@nanostores/react';
 import type { CSSProperties } from 'react';
 import { memo, useCallback, useState } from 'react';
-import { Settings20Regular, WindowConsole20Regular, Cube20Regular, PlugConnected20Regular, Globe20Regular, Person20Regular, Lightbulb20Regular } from '@fluentui/react-icons';
+import { Settings20Regular, WindowConsole20Regular, Cube20Regular, PlugConnected20Regular, Globe20Regular, Person20Regular, Lightbulb20Regular, PuzzlePiece20Regular } from '@fluentui/react-icons';
 
 import { Subtitle2 } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
 
 import { SettingsModalAccountTab } from '@/renderer/features/SettingsModal/SettingsModalAccountTab';
 import { SettingsModalEnvironmentTab } from '@/renderer/features/SettingsModal/SettingsModalEnvironmentTab';
+import { SettingsModalExtensionsTab } from '@/renderer/features/SettingsModal/SettingsModalExtensionsTab';
 import { SettingsModalGeneralTab } from '@/renderer/features/SettingsModal/SettingsModalGeneralTab';
 import { SettingsModalMcpTab } from '@/renderer/features/SettingsModal/SettingsModalMcpTab';
 import { SettingsModalModelsTab } from '@/renderer/features/SettingsModal/SettingsModalModelsTab';
@@ -23,6 +24,7 @@ const TABS = [
   { value: 'MCP', label: 'MCP Servers', icon: <PlugConnected20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Skills', label: 'Skills', icon: <Lightbulb20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Network', label: 'Network', icon: <Globe20Regular style={{ width: 18, height: 18 }} /> },
+  { value: 'Extensions', label: 'Extensions', icon: <PuzzlePiece20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Account', label: 'Account', icon: <Person20Regular style={{ width: 18, height: 18 }} /> },
 ] as const;
 
@@ -240,6 +242,7 @@ export const SettingsPage = memo(() => {
           {activeTab === 'MCP' && <SettingsModalMcpTab />}
           {activeTab === 'Skills' && <SettingsModalSkillsTab />}
           {activeTab === 'Network' && <SettingsModalNetworkTab />}
+          {activeTab === 'Extensions' && <SettingsModalExtensionsTab />}
           {activeTab === 'Account' && <SettingsModalAccountTab />}
           {activeTab === 'General' && (
             <div className={styles.footer}>

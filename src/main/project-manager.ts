@@ -2,49 +2,56 @@ import type { IpcListener } from '@electron-toolkit/typed-ipc/main';
 import { execFile } from 'child_process';
 import { ipcMain, shell } from 'electron';
 import type Store from 'electron-store';
-import fs from 'fs/promises';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import fs from 'fs/promises';
 import { nanoid } from 'nanoid';
 import path from 'path';
 import { promisify } from 'util';
 
+import { getArtifactsDir } from '@/lib/artifacts';
 import { buildAutopilotVariables, buildInteractiveVariables } from '@/lib/client-tools';
 import { INBOX_SWEEP_INTERVAL_MS } from '@/lib/inbox-expiry';
 import { upgradeLegacyInbox } from '@/lib/inbox-migration';
-import { getArtifactsDir } from '@/lib/artifacts';
-import type { ProjectManagerDeps, IMachineFactory, ISandboxFactory, IWorkflowLoader } from '@/lib/project-manager-deps';
+import { getMimeType, isTextMime } from '@/lib/mime-types';
 import { computePagesToDelete } from '@/lib/page-cascade';
 import { getTemplate, type TemplateKey } from '@/lib/page-templates';
-import { InboxManager, type InboxManagerStore } from '@/main/inbox-manager';
 import { PageWatcherManager } from '@/lib/page-watcher';
-import { classifyRunEndReason, decideRunEndAction } from '@/lib/run-end';
-import { decideWorktreeAction } from '@/lib/worktree';
+import type { IMachineFactory, ISandboxFactory, IWorkflowLoader,ProjectManagerDeps } from '@/lib/project-manager-deps';
 import type { FailureClass } from '@/lib/run-end';
-import { hasTemplateExpressions, renderTemplate } from '@/lib/template';
+import { decideRunEndAction } from '@/lib/run-end';
 import type { TemplateVariables } from '@/lib/template';
-import { getMimeType, isTextMime } from '@/lib/mime-types';
-import { buildSupervisorPrompt } from '@/main/supervisor-prompt';
-import type { SupervisorContext } from '@/main/supervisor-prompt';
-import { TicketMachine } from '@/main/ticket-machine';
-import type { ClientFunctionResponder } from '@/main/ticket-machine';
-import { WorkflowLoader } from '@/main/workflow-loader';
+import { hasTemplateExpressions, renderTemplate } from '@/lib/template';
+import { decideWorktreeAction } from '@/lib/worktree';
 import { AgentProcess } from '@/main/agent-process';
-import type { ProcessManager } from '@/main/process-manager';
+import { MARIMO_NOTEBOOK_TEMPLATE } from '@/main/extensions/marimo';
+import { writeMarimoAiConfig } from '@/main/extensions/marimo-config';
+import { ensureNotebookCssReference, writeGlassCss } from '@/main/extensions/marimo-glass';
+import { InboxManager, type InboxManagerStore } from '@/main/inbox-manager';
 import { createPlatformClient } from '@/main/platform-mode';
+import type { ProcessManager } from '@/main/process-manager';
+import type { SupervisorContext } from '@/main/supervisor-prompt';
+import { buildSupervisorPrompt } from '@/main/supervisor-prompt';
+import type { ClientFunctionResponder } from '@/main/ticket-machine';
+import { TicketMachine } from '@/main/ticket-machine';
 import { ensureDirectory, getDefaultWorkspaceDir, getOmniConfigDir, getProjectDir, getWorktreesDir } from '@/main/util';
+import { WorkflowLoader } from '@/main/workflow-loader';
 import { DEFAULT_PIPELINE, SIMPLE_PIPELINE } from '@/shared/pipeline-defaults';
-import { isActivePhase } from '@/shared/ticket-phase';
-import type { TicketPhase } from '@/shared/ticket-phase';
 import { getLocalWorkspaceDir, requireLocalWorkspaceDir } from '@/shared/project-source';
+import type { TicketPhase } from '@/shared/ticket-phase';
+import { isActivePhase } from '@/shared/ticket-phase';
 import type {
+  AgentProcessStatus,
   ArtifactFileContent,
   ArtifactFileEntry,
   CodeTabId,
+  ColumnId,
   DiffResponse,
   FileDiff,
-  ColumnId,
+  GitRepoInfo,
   InboxItem,
   InboxShaping,
+  IpcEvents,
+  IpcRendererEvents,
   Milestone,
   MilestoneId,
   Page,
@@ -53,17 +60,13 @@ import type {
   Project,
   ProjectId,
   SessionMessage,
+  StoreData,
   Task,
   TaskId,
   Ticket,
   TicketId,
   TicketPriority,
-  AgentProcessStatus,
   WithTimestamp,
-  GitRepoInfo,
-  IpcEvents,
-  IpcRendererEvents,
-  StoreData,
 } from '@/shared/types';
 
 const execFileAsync = promisify(execFile);
@@ -451,10 +454,10 @@ export class ProjectManager {
     this.workflowLoader = deps?.workflowLoader ?? new WorkflowLoader({
       onChange: (projectId, workflow) => {
         console.log(
-          `[ProjectManager] FLEET.md reloaded for project ${projectId}` +
-            (workflow.promptTemplate ? ' (has custom prompt)' : '') +
-            (workflow.config.supervisor ? ' (has supervisor config)' : '') +
-            (workflow.config.hooks ? ' (has hooks)' : '')
+          `[ProjectManager] FLEET.md reloaded for project ${projectId}${ 
+            workflow.promptTemplate ? ' (has custom prompt)' : '' 
+            }${workflow.config.supervisor ? ' (has supervisor config)' : '' 
+            }${workflow.config.hooks ? ' (has hooks)' : ''}`
         );
         // Push updated pipeline to the renderer so the UI reflects FLEET.md changes
         const pipeline = this.getPipeline(projectId);
@@ -470,12 +473,16 @@ export class ProjectManager {
       {
         onExternalChange: (filePath, content) => {
           const pageId = this.pageIdForFilePath(filePath);
-          if (!pageId) return;
+          if (!pageId) {
+return;
+}
           this.sendToWindow('page:content-changed', pageId, content);
         },
         onExternalDelete: (filePath) => {
           const pageId = this.pageIdForFilePath(filePath);
-          if (!pageId) return;
+          if (!pageId) {
+return;
+}
           this.sendToWindow('page:content-deleted', pageId);
         },
       },
@@ -512,7 +519,9 @@ export class ProjectManager {
     const projects = this.getProjects();
     for (const page of pages) {
       const project = projects.find((p) => p.id === page.projectId);
-      if (!project) continue;
+      if (!project) {
+continue;
+}
       if (this.getPageFilePath(project, page) === filePath) {
         return page.id;
       }
@@ -536,7 +545,9 @@ export class ProjectManager {
       },
       onTokenUsage: (tid: TicketId, usage: { inputTokens: number; outputTokens: number; totalTokens: number }) => {
         const ticket = this.getTicketById(tid);
-        if (!ticket) return;
+        if (!ticket) {
+return;
+}
         const prev = ticket.tokenUsage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
         const updated = {
           inputTokens: Math.max(prev.inputTokens, usage.inputTokens),
@@ -772,7 +783,9 @@ export class ProjectManager {
         const columnFilter = toolArgs.column as string | undefined;
         if (columnFilter) {
           const col = pl.columns.find((c) => c.label.toLowerCase() === columnFilter.toLowerCase());
-          if (col) tickets = tickets.filter((t) => t.columnId === col.id);
+          if (col) {
+tickets = tickets.filter((t) => t.columnId === col.id);
+}
         }
         const priorityFilter = toolArgs.priority as string | undefined;
         if (priorityFilter) {
@@ -827,15 +840,27 @@ export class ProjectManager {
           return;
         }
         const patch: Record<string, unknown> = {};
-        if (toolArgs.title) patch.title = toolArgs.title;
-        if (toolArgs.description !== undefined) patch.description = toolArgs.description;
-        if (toolArgs.priority) patch.priority = toolArgs.priority;
-        if (toolArgs.branch !== undefined) patch.branch = toolArgs.branch;
+        if (toolArgs.title) {
+patch.title = toolArgs.title;
+}
+        if (toolArgs.description !== undefined) {
+patch.description = toolArgs.description;
+}
+        if (toolArgs.priority) {
+patch.priority = toolArgs.priority;
+}
+        if (toolArgs.branch !== undefined) {
+patch.branch = toolArgs.branch;
+}
         // Dependency management
         if (toolArgs.add_blocked_by || toolArgs.remove_blocked_by) {
           const current = new Set(target.blockedBy ?? []);
-          for (const id of (toolArgs.add_blocked_by as string[]) ?? []) current.add(id);
-          for (const id of (toolArgs.remove_blocked_by as string[]) ?? []) current.delete(id);
+          for (const id of (toolArgs.add_blocked_by as string[]) ?? []) {
+current.add(id);
+}
+          for (const id of (toolArgs.remove_blocked_by as string[]) ?? []) {
+current.delete(id);
+}
           patch.blockedBy = [...current];
         }
         this.updateTicket(targetId, patch);
@@ -889,7 +914,9 @@ export class ProjectManager {
       }
       case 'list_pages': {
         const projectId = (toolArgs.project_id as string) ?? '';
-        if (!projectId) { respond(true, { error: 'Missing project_id' }); return; }
+        if (!projectId) {
+ respond(true, { error: 'Missing project_id' }); return; 
+}
         if (!this.getProjects().find((p) => p.id === projectId)) {
           respond(true, { error: `Project not found: ${projectId}` }); return;
         }
@@ -910,9 +937,13 @@ export class ProjectManager {
       }
       case 'read_page': {
         const pageId = (toolArgs.page_id as string) ?? '';
-        if (!pageId) { respond(true, { error: 'Missing page_id' }); return; }
+        if (!pageId) {
+ respond(true, { error: 'Missing page_id' }); return; 
+}
         const page = this.getPages().find((p) => p.id === pageId);
-        if (!page) { respond(true, { error: `Page not found: ${pageId}` }); return; }
+        if (!page) {
+ respond(true, { error: `Page not found: ${pageId}` }); return; 
+}
         void this.readPageContent(pageId).then(
           (content) =>
             respond(true, {
@@ -1030,7 +1061,9 @@ export class ProjectManager {
       console.log(`[ProjectManager] Machine run ended for ${ticketId}: ${reason}`);
 
       const entry = this.machines.get(ticketId);
-      if (!entry) return;
+      if (!entry) {
+return;
+}
       const { machine } = entry;
 
       // Guard: ignore if machine was already stopped/transitioned (e.g., user clicked Stop)
@@ -1203,11 +1236,15 @@ export class ProjectManager {
       // An active run (running/continuing) is never stalled — the agent may be
       // executing long tool calls. We only detect stalls in phases where the
       // machine is stuck without progressing (e.g. provisioning, connecting).
-      if (!machine.isActive() || machine.isStreaming()) continue;
+      if (!machine.isActive() || machine.isStreaming()) {
+continue;
+}
       // Skip phases that have their own timeouts or are waiting intentionally.
       // 'ready' means the session exists but no autonomous run was started — the user
       // may be using the workspace manually, so don't treat it as stalled.
-      if (phase === 'retrying' || phase === 'awaiting_input' || phase === 'ready') continue;
+      if (phase === 'retrying' || phase === 'awaiting_input' || phase === 'ready') {
+continue;
+}
 
       const ticket = this.getTicketById(ticketId);
       const stallTimeout = ticket ? this.getEffectiveStallTimeout(ticket.projectId) : STALL_TIMEOUT_MS;
@@ -1216,10 +1253,16 @@ export class ProjectManager {
       if (elapsed > stallTimeout) {
         void this.withTicketLock(ticketId, async () => {
           // Re-check under lock
-          if (!machine.isActive() || machine.isStreaming()) return;
-          if (machine.getPhase() === 'retrying' || machine.getPhase() === 'awaiting_input') return;
+          if (!machine.isActive() || machine.isStreaming()) {
+return;
+}
+          if (machine.getPhase() === 'retrying' || machine.getPhase() === 'awaiting_input') {
+return;
+}
           const elapsedNow = Date.now() - machine.getLastActivity();
-          if (elapsedNow <= stallTimeout) return;
+          if (elapsedNow <= stallTimeout) {
+return;
+}
 
           console.warn(
             `[ProjectManager] Supervisor stalled for ticket ${ticketId} in phase "${machine.getPhase()}" (${Math.round(elapsedNow / 1000)}s since last activity). Stopping and scheduling retry.`
@@ -1244,7 +1287,9 @@ export class ProjectManager {
   private getRunningSupervisorCount = (): number => {
     let count = 0;
     for (const [, entry] of this.machines) {
-      if (entry.machine.isActive()) count++;
+      if (entry.machine.isActive()) {
+count++;
+}
     }
     return count;
   };
@@ -1253,7 +1298,9 @@ export class ProjectManager {
   private getRunningSupervisorCountByColumn = (projectId: ProjectId, columnId: ColumnId): number => {
     let count = 0;
     for (const [ticketId, entry] of this.machines) {
-      if (!entry.machine.isActive()) continue;
+      if (!entry.machine.isActive()) {
+continue;
+}
       const ticket = this.getTicketById(ticketId);
       if (ticket && ticket.projectId === projectId && ticket.columnId === columnId) {
         count++;
@@ -1300,7 +1347,9 @@ export class ProjectManager {
     opts: { attempt?: number; continuationTurn?: number; error?: string }
   ): void => {
     const entry = this.machines.get(ticketId);
-    if (!entry) return;
+    if (!entry) {
+return;
+}
     const { machine } = entry;
 
     const attempt = opts.attempt ?? 0;
@@ -1342,8 +1391,8 @@ export class ProjectManager {
 
     console.log(
       `[ProjectManager] Scheduling ${failureClass === 'completed' ? 'continuation' : 'retry'} for ${ticketId} ` +
-        `(attempt=${attempt}, turn=${continuationTurn}) in ${Math.round(delayMs / 1000)}s` +
-        (opts.error ? ` (reason: ${opts.error})` : '')
+        `(attempt=${attempt}, turn=${continuationTurn}) in ${Math.round(delayMs / 1000)}s${ 
+        opts.error ? ` (reason: ${opts.error})` : ''}`
     );
 
     machine.scheduleRetryTimer(delayMs, () => {
@@ -1394,7 +1443,9 @@ export class ProjectManager {
 
       try {
         const project = this.getProjects().find((p) => p.id === ticket.projectId);
-        if (!project) return;
+        if (!project) {
+return;
+}
 
         let hookOk = true;
         if (project.source?.kind === 'local') {
@@ -1566,7 +1617,9 @@ export class ProjectManager {
   /** Read context.md for a project. Returns empty string if file doesn't exist. */
   readContext = async (projectId: ProjectId): Promise<string> => {
     const project = this.getProjects().find((p) => p.id === projectId);
-    if (!project) return '';
+    if (!project) {
+return '';
+}
     const contextPath = path.join(this.getProjectDirPath(project), 'context.md');
     try {
       return await fs.readFile(contextPath, 'utf-8');
@@ -1578,7 +1631,9 @@ export class ProjectManager {
   /** Write context.md for a project. Creates the directory if needed. */
   writeContext = async (projectId: ProjectId, content: string): Promise<void> => {
     const project = this.getProjects().find((p) => p.id === projectId);
-    if (!project) return;
+    if (!project) {
+return;
+}
     const dir = this.getProjectDirPath(project);
     await ensureDirectory(dir);
     await fs.writeFile(path.join(dir, 'context.md'), content, 'utf-8');
@@ -1587,7 +1642,9 @@ export class ProjectManager {
   /** List files in the project folder (excluding context.md). */
   listProjectFiles = async (projectId: ProjectId): Promise<ArtifactFileEntry[]> => {
     const project = this.getProjects().find((p) => p.id === projectId);
-    if (!project) return [];
+    if (!project) {
+return [];
+}
     const dir = this.getProjectDirPath(project);
 
     try {
@@ -1595,7 +1652,9 @@ export class ProjectManager {
       const results: ArtifactFileEntry[] = [];
 
       for (const entry of entries) {
-        if (entry.name === 'context.md') continue;
+        if (entry.name === 'context.md') {
+continue;
+}
         const fullPath = path.join(dir, entry.name);
         try {
           const stat = await fs.stat(fullPath);
@@ -1612,7 +1671,9 @@ export class ProjectManager {
       }
 
       results.sort((a, b) => {
-        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+        if (a.isDirectory !== b.isDirectory) {
+return a.isDirectory ? -1 : 1;
+}
         return a.name.localeCompare(b.name);
       });
 
@@ -1631,7 +1692,9 @@ export class ProjectManager {
   /** Open a file from the project folder in the OS default application. */
   openProjectFile = async (projectId: ProjectId, relativePath: string): Promise<void> => {
     const project = this.getProjects().find((p) => p.id === projectId);
-    if (!project) return;
+    if (!project) {
+return;
+}
     const dir = this.getProjectDirPath(project);
     const fullPath = path.resolve(dir, relativePath);
     // Validate no directory traversal
@@ -1651,7 +1714,9 @@ export class ProjectManager {
       return;
     }
     const project = this.getProjects().find((p) => p.id === projectId);
-    if (!project) return;
+    if (!project) {
+return;
+}
 
     if (project.source?.kind === 'local') {
       await this.workflowLoader.load(projectId, project.source?.workspaceDir);
@@ -1675,7 +1740,9 @@ export class ProjectManager {
       };
     }
     const project = this.getProjects().find((p) => p.id === projectId);
-    if (project?.pipeline) return project.pipeline;
+    if (project?.pipeline) {
+return project.pipeline;
+}
     // Projects with a linked repo get the full dev pipeline; others get the simple one
     return project?.source ? DEFAULT_PIPELINE : SIMPLE_PIPELINE;
   };
@@ -1711,7 +1778,9 @@ export class ProjectManager {
   private migrateOrphanedTickets = (projectId: ProjectId, pipeline: Pipeline): void => {
     const columnIds = new Set(pipeline.columns.map((c) => c.id));
     const firstColumnId = pipeline.columns[0]?.id;
-    if (!firstColumnId) return;
+    if (!firstColumnId) {
+return;
+}
 
     const tickets = this.getTickets();
     let changed = false;
@@ -1874,7 +1943,9 @@ export class ProjectManager {
   updateMilestone = (id: MilestoneId, patch: Partial<Omit<Milestone, 'id' | 'projectId' | 'createdAt'>>): void => {
     const milestones = this.getMilestones();
     const index = milestones.findIndex((i) => i.id === id);
-    if (index === -1) return;
+    if (index === -1) {
+return;
+}
     const prev = milestones[index]!;
     const next = { ...prev, ...patch, updatedAt: Date.now() };
     // Stamp completedAt on first transition into 'completed'; clear it on transition out.
@@ -1890,7 +1961,9 @@ export class ProjectManager {
   removeMilestone = (id: MilestoneId): void => {
     const milestones = this.getMilestones();
     const target = milestones.find((i) => i.id === id);
-    if (!target) return;
+    if (!target) {
+return;
+}
     // Clear milestoneId on orphaned tickets
     const tickets = this.getTickets();
     let ticketsChanged = false;
@@ -1901,7 +1974,9 @@ export class ProjectManager {
         ticketsChanged = true;
       }
     }
-    if (ticketsChanged) this.setTickets(tickets);
+    if (ticketsChanged) {
+this.setTickets(tickets);
+}
     this.setMilestones(milestones.filter((i) => i.id !== id));
   };
 
@@ -1933,11 +2008,18 @@ export class ProjectManager {
     const project = this.getProjects().find((p) => p.id === page.projectId);
     if (project) {
       const filePath = this.getPageFilePath(project, page);
-      const initialContent = getTemplate(template);
+      const initialContent = page.kind === 'notebook' ? MARIMO_NOTEBOOK_TEMPLATE : getTemplate(template);
       this.pageWatcher.notePendingWrite(filePath, initialContent);
       void ensureDirectory(path.dirname(filePath)).then(() =>
         fs.writeFile(filePath, initialContent, 'utf-8').catch(() => {})
       );
+      // Notebook pages also need the glass CSS sidecar file so marimo's
+      // `css_file=` reference resolves on first open. Default to glass-off;
+      // the renderer will rewrite the contents based on current glass mode
+      // immediately before launching the marimo webview.
+      if (page.kind === 'notebook') {
+        void writeGlassCss(path.dirname(filePath), false).catch(() => {});
+      }
     }
     return page;
   };
@@ -1945,7 +2027,9 @@ export class ProjectManager {
   updatePage = (id: PageId, patch: Partial<Omit<Page, 'id' | 'projectId' | 'createdAt'>>): void => {
     const pages = this.getPages();
     const index = pages.findIndex((p) => p.id === id);
-    if (index === -1) return;
+    if (index === -1) {
+return;
+}
     pages[index] = { ...pages[index]!, ...patch, updatedAt: Date.now() };
     this.setPages(pages);
   };
@@ -1953,9 +2037,13 @@ export class ProjectManager {
   removePage = (id: PageId): void => {
     const pages = this.getPages();
     const target = pages.find((p) => p.id === id);
-    if (!target) return;
+    if (!target) {
+return;
+}
     const toDelete = computePagesToDelete(pages, id);
-    if (toDelete.size === 0) return; // target is root or not found
+    if (toDelete.size === 0) {
+return;
+} // target is root or not found
 
     // Delete .md files from disk. Unsubscribe the watcher for each path BEFORE
     // the rm so chokidar's unlink event doesn't reach the manager and emit a
@@ -1975,21 +2063,49 @@ export class ProjectManager {
     this.setPages(pages.filter((p) => !toDelete.has(p.id)));
   };
 
-  /** Get the file path for a page's markdown content. Root pages use context.md; others use pages/<id>.md. */
+  /**
+   * Get the file path for a page's content. Root pages always use context.md.
+   * Doc pages are markdown (`pages/<id>.md`); notebook pages are Python files
+   * (`pages/<id>.py`) edited by the marimo extension.
+   */
   private getPageFilePath = (project: Project, page: Page): string => {
     const dir = this.getProjectDirPath(project);
     if (page.isRoot) {
       return path.join(dir, 'context.md');
     }
-    return path.join(dir, 'pages', `${page.id}.md`);
+    const ext = page.kind === 'notebook' ? '.py' : '.md';
+    return path.join(dir, 'pages', `${page.id}${ext}`);
+  };
+
+  /** Public accessor used by the extension layer to resolve a project's working directory. */
+  getProjectDir = (projectId: ProjectId): string | null => {
+    const project = this.getProjects().find((p) => p.id === projectId);
+    return project ? this.getProjectDirPath(project) : null;
+  };
+
+  /** Public accessor for a notebook page's absolute file path. */
+  getNotebookFilePath = (pageId: PageId): string | null => {
+    const page = this.getPages().find((p) => p.id === pageId);
+    if (!page || page.kind !== 'notebook') {
+return null;
+}
+    const project = this.getProjects().find((p) => p.id === page.projectId);
+    if (!project) {
+return null;
+}
+    return this.getPageFilePath(project, page);
   };
 
   readPageContent = async (pageId: PageId): Promise<string> => {
     const pages = this.getPages();
     const page = pages.find((p) => p.id === pageId);
-    if (!page) return '';
+    if (!page) {
+return '';
+}
     const project = this.getProjects().find((p) => p.id === page.projectId);
-    if (!project) return '';
+    if (!project) {
+return '';
+}
     const filePath = this.getPageFilePath(project, page);
     try {
       return await fs.readFile(filePath, 'utf-8');
@@ -2001,9 +2117,13 @@ export class ProjectManager {
   writePageContent = async (pageId: PageId, content: string): Promise<void> => {
     const pages = this.getPages();
     const page = pages.find((p) => p.id === pageId);
-    if (!page) return;
+    if (!page) {
+return;
+}
     const project = this.getProjects().find((p) => p.id === page.projectId);
-    if (!project) return;
+    if (!project) {
+return;
+}
     const filePath = this.getPageFilePath(project, page);
     await ensureDirectory(path.dirname(filePath));
     // Record the pending write BEFORE touching disk so the resulting chokidar
@@ -2015,9 +2135,13 @@ export class ProjectManager {
   /** Renderer-facing: start watching a page's file for external edits. */
   watchPage = async (pageId: PageId): Promise<{ content: string } | null> => {
     const page = this.getPages().find((p) => p.id === pageId);
-    if (!page) return null;
+    if (!page) {
+return null;
+}
     const project = this.getProjects().find((p) => p.id === page.projectId);
-    if (!project) return null;
+    if (!project) {
+return null;
+}
     const filePath = this.getPageFilePath(project, page);
     await this.pageWatcher.subscribe(filePath);
     let content = '';
@@ -2031,9 +2155,13 @@ export class ProjectManager {
 
   unwatchPage = (pageId: PageId): void => {
     const page = this.getPages().find((p) => p.id === pageId);
-    if (!page) return;
+    if (!page) {
+return;
+}
     const project = this.getProjects().find((p) => p.id === page.projectId);
-    if (!project) return;
+    if (!project) {
+return;
+}
     const filePath = this.getPageFilePath(project, page);
     this.pageWatcher.unsubscribe(filePath);
   };
@@ -2041,7 +2169,9 @@ export class ProjectManager {
   reorderPage = (pageId: PageId, newParentId: PageId | null, newSortOrder: number): void => {
     const pages = this.getPages();
     const index = pages.findIndex((p) => p.id === pageId);
-    if (index === -1) return;
+    if (index === -1) {
+return;
+}
     pages[index] = { ...pages[index]!, parentId: newParentId, sortOrder: newSortOrder, updatedAt: Date.now() };
     this.setPages(pages);
   };
@@ -2050,8 +2180,12 @@ export class ProjectManager {
 
   /** Resolve the effective branch for a ticket (ticket.branch ?? milestone.branch ?? undefined). */
   resolveTicketBranch = (ticket: Ticket): string | undefined => {
-    if (ticket.branch) return ticket.branch;
-    if (!ticket.milestoneId) return undefined;
+    if (ticket.branch) {
+return ticket.branch;
+}
+    if (!ticket.milestoneId) {
+return undefined;
+}
     const milestone = this.getMilestones().find((i) => i.id === ticket.milestoneId);
     return milestone?.branch;
   };
@@ -2253,10 +2387,14 @@ export class ProjectManager {
         // -z output: entries are NUL-separated. Rename entries produce two
         // fields (old\0new) but renames are impossible with no commits.
         for (const entry of lsOutput.split('\0')) {
-          if (!entry || entry.length < 4) continue;
+          if (!entry || entry.length < 4) {
+continue;
+}
           const xy = entry.slice(0, 2);
           const filePath = entry.slice(3);
-          if (!filePath) continue;
+          if (!filePath) {
+continue;
+}
           const status: FileDiff['status'] = xy.includes('?') ? 'untracked' : 'added';
           files.push({ path: filePath, status, additions: 0, deletions: 0, isBinary: false });
         }
@@ -2276,10 +2414,14 @@ export class ProjectManager {
           const entries = statusOutput.split('\0');
           for (let i = 0; i < entries.length; i++) {
             const entry = entries[i]!;
-            if (!entry || entry.length < 4) continue;
+            if (!entry || entry.length < 4) {
+continue;
+}
             const xy = entry.slice(0, 2);
             const filePath = entry.slice(3);
-            if (!filePath) continue;
+            if (!filePath) {
+continue;
+}
 
             let status: FileDiff['status'];
             if (xy.includes('?')) {
@@ -2309,7 +2451,9 @@ export class ProjectManager {
           const parts = diffOutput.split('\0');
           for (let i = 0; i < parts.length; i++) {
             const statusField = parts[i];
-            if (!statusField) continue;
+            if (!statusField) {
+continue;
+}
             const statusChar = statusField.charAt(0);
             const filePath = parts[++i] ?? '';
             let oldPath: string | undefined;
@@ -2358,7 +2502,9 @@ export class ProjectManager {
 
       for (let fi = 0; fi < files.length; fi++) {
         const file = files[fi]!;
-        if (fi >= MAX_PATCH_FILES) break;
+        if (fi >= MAX_PATCH_FILES) {
+break;
+}
 
         try {
           if (file.status === 'untracked') {
@@ -2452,9 +2598,13 @@ export class ProjectManager {
 
   resolveTicket = (ticketId: TicketId, resolution: import('@/shared/types').TicketResolution): void => {
     const ticket = this.getTicketById(ticketId);
-    if (!ticket) return;
+    if (!ticket) {
+return;
+}
     const patch: Partial<Ticket> = { resolution };
-    if (ticket.resolvedAt === undefined) patch.resolvedAt = Date.now();
+    if (ticket.resolvedAt === undefined) {
+patch.resolvedAt = Date.now();
+}
     this.updateTicket(ticketId, patch);
     const terminalColumnId = this.getTerminalColumnId(ticket.projectId);
     if (ticket.columnId !== terminalColumnId) {
@@ -2731,9 +2881,13 @@ export class ProjectManager {
   getSupervisorStatusForCodeTab(tabId: CodeTabId): WithTimestamp<AgentProcessStatus> | null {
     const codeTabs = this.store.get('codeTabs', []) as Array<{ id: string; ticketId?: string }>;
     const tab = codeTabs.find((t) => t.id === tabId);
-    if (!tab?.ticketId) return null;
+    if (!tab?.ticketId) {
+return null;
+}
     const entry = this.machines.get(tab.ticketId as TicketId);
-    if (!entry?.sandbox) return null;
+    if (!entry?.sandbox) {
+return null;
+}
     return entry.sandbox.getStatus();
   }
 
@@ -2746,7 +2900,9 @@ export class ProjectManager {
 
   /** Check if a Code tab has a running sandbox for this ticket. */
   private getCodeTabWsUrl(ticketId: TicketId): string | null {
-    if (!this.processManager) return null;
+    if (!this.processManager) {
+return null;
+}
     const codeTabs = this.store.get('codeTabs', []) as Array<{ id: string; ticketId?: string }>;
     return this.processManager.getRunningWsUrlForTicket(ticketId, codeTabs);
   }
@@ -2824,7 +2980,9 @@ export class ProjectManager {
    */
   private ensureSession = async (ticketId: TicketId): Promise<void> => {
     const ticket = this.getTicketById(ticketId);
-    if (!ticket) return;
+    if (!ticket) {
+return;
+}
 
     // If the machine is already in 'ready' state with a session, nothing to do
     const existingEntry = this.machines.get(ticketId);
@@ -2833,7 +2991,9 @@ export class ProjectManager {
     }
 
     const entry = this.machines.get(ticketId);
-    if (!entry) return;
+    if (!entry) {
+return;
+}
 
     const variables = this.buildRunVariables(ticketId, 'interactive');
 
@@ -2945,7 +3105,7 @@ export class ProjectManager {
         if (existsSync(contextPath)) {
           const brief = require('fs').readFileSync(contextPath, 'utf-8') as string;
           if (brief.trim()) {
-            context.projectBrief = brief.length > 500 ? brief.slice(0, 500) + '\n…(truncated)' : brief;
+            context.projectBrief = brief.length > 500 ? `${brief.slice(0, 500)  }\n…(truncated)` : brief;
           }
         }
       } catch { /* non-critical */ }
@@ -3073,7 +3233,7 @@ export class ProjectManager {
     const comments = ticket?.comments ?? [];
     const lastComment = comments.length > 0 ? comments[comments.length - 1] : undefined;
     const lastCommentLine = lastComment
-      ? `- Last comment [${lastComment.author}]: ${lastComment.content.length > 200 ? lastComment.content.slice(0, 200) + '…' : lastComment.content}`
+      ? `- Last comment [${lastComment.author}]: ${lastComment.content.length > 200 ? `${lastComment.content.slice(0, 200)  }…` : lastComment.content}`
       : '';
 
     return [
@@ -3173,7 +3333,9 @@ export class ProjectManager {
   stopSupervisor = (ticketId: TicketId): Promise<void> => {
     return this.withTicketLock(ticketId, async () => {
       const entry = this.machines.get(ticketId);
-      if (!entry) return;
+      if (!entry) {
+return;
+}
 
       await entry.machine.stop();
     });
@@ -3235,7 +3397,9 @@ export class ProjectManager {
   resetSupervisorSession = (ticketId: TicketId): Promise<void> => {
     return this.withTicketLock(ticketId, async () => {
       const entry = this.machines.get(ticketId);
-      if (!entry) return;
+      if (!entry) {
+return;
+}
 
       await entry.machine.stop();
 
@@ -3250,7 +3414,9 @@ export class ProjectManager {
         }
       } else {
         const wsUrl = this.getCodeTabWsUrl(ticketId);
-        if (wsUrl) entry.machine.setWsUrl(wsUrl);
+        if (wsUrl) {
+entry.machine.setWsUrl(wsUrl);
+}
       }
 
       // Create a new session, then update the ticket so the renderer
@@ -3298,7 +3464,9 @@ export class ProjectManager {
    */
   private sendUserRunMessage = async (ticketId: TicketId, message: string): Promise<void> => {
     const entry = this.machines.get(ticketId);
-    if (!entry) return;
+    if (!entry) {
+return;
+}
 
     if (entry.sandbox) {
       const sbStatus = entry.sandbox.getStatus();
@@ -3307,7 +3475,9 @@ export class ProjectManager {
       }
     } else {
       const wsUrl = this.getCodeTabWsUrl(ticketId);
-      if (wsUrl) entry.machine.setWsUrl(wsUrl);
+      if (wsUrl) {
+entry.machine.setWsUrl(wsUrl);
+}
     }
 
     const sessionId = entry.machine.getSessionId() ?? undefined;
@@ -3604,7 +3774,9 @@ export class ProjectManager {
       const projects = store.get('projects', []) as Record<string, unknown>[];
       const migrated = projects.map((raw) => {
         // Already migrated (defensive)
-        if (raw.source && typeof raw.source === 'object') return raw;
+        if (raw.source && typeof raw.source === 'object') {
+return raw;
+}
         const { workspaceDir, ...rest } = raw;
         return {
           ...rest,
@@ -3666,7 +3838,9 @@ export class ProjectManager {
       console.log('[ProjectManager] Adding slug to projects (→ v9)');
       const projects = store.get('projects', []) as Record<string, unknown>[];
       const migrated = projects.map((raw) => {
-        if (raw.slug) return raw;
+        if (raw.slug) {
+return raw;
+}
         const label = (raw.label as string) ?? 'project';
         const slug = label
           .toLowerCase()
@@ -3713,7 +3887,9 @@ export class ProjectManager {
           : getProjectDir(project.slug ?? 'project');
         const contextPath = path.join(dir, 'context.md');
         try {
-          if (existsSync(contextPath)) continue;
+          if (existsSync(contextPath)) {
+continue;
+}
           mkdirSync(dir, { recursive: true });
           writeFileSync(contextPath, project.brief ?? DEFAULT_BRIEF_TEMPLATE, 'utf-8');
           briefsWritten++;
@@ -3817,15 +3993,20 @@ export class ProjectManager {
 
         const legacyStatus = props.status;
         // `done` was terminal in the old model; drop those entirely on recovery.
-        if (legacyStatus === 'done') continue;
+        if (legacyStatus === 'done') {
+continue;
+}
 
         const hasOutcome = typeof props.outcome === 'string' && (props.outcome as string).trim().length > 0;
         const hasShaping = hasOutcome || props.size !== undefined || typeof props.notDoing === 'string';
         // Map old PageStatus → new InboxItemStatus. `doing` becomes a shaped
         // actionable item the user can promote to a ticket.
         let status: InboxItem['status'] = 'new';
-        if (legacyStatus === 'later') status = 'later';
-        else if (legacyStatus === 'ready' || legacyStatus === 'doing' || hasShaping) status = 'shaped';
+        if (legacyStatus === 'later') {
+status = 'later';
+} else if (legacyStatus === 'ready' || legacyStatus === 'doing' || hasShaping) {
+status = 'shaped';
+}
 
         const appetite: InboxShaping['appetite'] =
           props.size === 'small' ||
@@ -3852,7 +4033,9 @@ export class ProjectManager {
           createdAt: typeof pageRaw.createdAt === 'number' ? (pageRaw.createdAt as number) : now,
           updatedAt: typeof pageRaw.updatedAt === 'number' ? (pageRaw.updatedAt as number) : now,
         };
-        if (shaping) item.shaping = shaping;
+        if (shaping) {
+item.shaping = shaping;
+}
         if (status === 'later') {
           item.laterAt = typeof props.laterAt === 'number' ? (props.laterAt as number) : now;
         }
@@ -3880,8 +4063,12 @@ export class ProjectManager {
       const migratedTickets = tickets.map((raw) => {
         const updatedAt = typeof raw.updatedAt === 'number' ? (raw.updatedAt as number) : Date.now();
         const next: Record<string, unknown> = { ...raw };
-        if (next.phaseChangedAt === undefined) next.phaseChangedAt = updatedAt;
-        if (next.columnChangedAt === undefined) next.columnChangedAt = updatedAt;
+        if (next.phaseChangedAt === undefined) {
+next.phaseChangedAt = updatedAt;
+}
+        if (next.columnChangedAt === undefined) {
+next.columnChangedAt = updatedAt;
+}
         if (raw.resolution !== undefined && next.resolvedAt === undefined) {
           next.resolvedAt = updatedAt;
         }
@@ -4251,6 +4438,47 @@ export const createProjectManager = (arg: {
   );
   ipc.handle('page:watch', (_, pageId) => projectManager.watchPage(pageId));
   ipc.handle('page:unwatch', (_, pageId) => projectManager.unwatchPage(pageId));
+  ipc.handle('page:get-notebook-paths', (_, pageId) => {
+    const filePath = projectManager.getNotebookFilePath(pageId);
+    if (!filePath) {
+return null;
+}
+    const page = projectManager.getPages().find((p) => p.id === pageId);
+    if (!page) {
+return null;
+}
+    const projectDir = projectManager.getProjectDir(page.projectId);
+    if (!projectDir) {
+return null;
+}
+    return { filePath, projectDir };
+  });
+  ipc.handle('page:prepare-notebook', async (_, pageId, glassEnabled) => {
+    const filePath = projectManager.getNotebookFilePath(pageId);
+    if (!filePath) {
+      return;
+    }
+    const pagesDir = path.dirname(filePath);
+    await writeGlassCss(pagesDir, glassEnabled);
+    await ensureNotebookCssReference(filePath);
+    // Wire the launcher's default model into marimo via .marimo.toml in the
+    // project directory (marimo searches up from cwd for it). Only writes
+    // when a default model with an api key is configured; refuses to
+    // clobber any pre-existing user-authored .marimo.toml.
+    const page = projectManager.getPages().find((p) => p.id === pageId);
+    if (page) {
+      const projectDir = projectManager.getProjectDir(page.projectId);
+      if (projectDir) {
+        await writeMarimoAiConfig(projectDir);
+      }
+    }
+  });
+  ipc.handle('page:set-notebook-glass', async (_, projectDir, enabled) => {
+    // The renderer passes the project's working directory; notebook files
+    // (and the glass CSS) live in `<projectDir>/pages/`.
+    const pagesDir = path.join(projectDir, 'pages');
+    await writeGlassCss(pagesDir, enabled);
+  });
 
   // Inbox
   const inbox = projectManager.getInboxManager();
@@ -4310,6 +4538,9 @@ export const createProjectManager = (arg: {
     ipcMain.removeHandler('page:reorder');
     ipcMain.removeHandler('page:watch');
     ipcMain.removeHandler('page:unwatch');
+    ipcMain.removeHandler('page:get-notebook-paths');
+    ipcMain.removeHandler('page:prepare-notebook');
+    ipcMain.removeHandler('page:set-notebook-glass');
     ipcMain.removeHandler('inbox:get-all');
     ipcMain.removeHandler('inbox:get-active');
     ipcMain.removeHandler('inbox:add');

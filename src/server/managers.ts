@@ -6,6 +6,7 @@ import { WebSocket as WsWebSocket } from 'ws';
 
 import { createProcessManager } from '@/main/process-manager';
 import { createConsoleManager } from '@/main/console-manager';
+import { createExtensionManager } from '@/main/extension-manager';
 import { createProjectManager } from '@/main/project-manager';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
 import { isEnterpriseBuild, mapSandboxProfiles, PLATFORM_URL, createPlatformClient } from '@/main/platform-mode';
@@ -72,6 +73,12 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
       sandboxProfiles: store.get('sandboxProfiles') ?? null,
       selectedMachineId: store.get('selectedMachineId') ?? null,
     }),
+  });
+
+  const [, cleanupExtensions] = createExtensionManager({
+    ipc: ipc as any,
+    store: store as any,
+    sendToWindow: sendToAll,
   });
 
   // Wire platform client for enterprise mode
@@ -364,6 +371,7 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
       cleanupProject(),
       cleanupOmniInstall(),
       cleanupProcessManager(),
+      cleanupExtensions(),
     ]);
     const errors = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected').map((r) => r.reason);
     if (errors.length > 0) {

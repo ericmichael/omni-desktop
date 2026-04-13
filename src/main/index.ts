@@ -9,14 +9,14 @@ import { assert } from 'tsafe';
 import { pathToFileURL } from 'url';
 
 import { getArtifactsDir } from '@/lib/artifacts';
-import { createProcessManager } from '@/main/process-manager';
 import { createConsoleManager } from '@/main/console-manager';
-import { createProjectManager } from '@/main/project-manager';
-import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
+import { createExtensionManager } from '@/main/extension-manager';
 import { MainProcessManager } from '@/main/main-process-manager';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
 import { registerPlatformIpc } from '@/main/platform-ipc';
 import { createPlatformClient } from '@/main/platform-mode';
+import { createProcessManager } from '@/main/process-manager';
+import { createProjectManager } from '@/main/project-manager';
 import { store } from '@/main/store';
 import {
   checkModelsConfigured,
@@ -36,6 +36,7 @@ import {
   pathExists,
   testModelConnection,
 } from '@/main/util';
+import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
 
 // Register artifact: protocol as privileged before app is ready
 protocol.registerSchemesAsPrivileged([
@@ -93,6 +94,11 @@ const [, cleanupProject] = createProjectManager({
   sendToWindow: main.sendToWindow,
   store,
   processManager,
+});
+const [, cleanupExtensions] = createExtensionManager({
+  ipc: main.ipc,
+  store,
+  sendToWindow: main.sendToWindow,
 });
 const { cleanup: cleanupPlatform, refreshPolicy: refreshPlatformPolicy } = registerPlatformIpc({
   ipc: main.ipc,
@@ -181,6 +187,7 @@ async function cleanup() {
     cleanupOmniInstall(),
     cleanupProcessManager(),
     cleanupProject(),
+    cleanupExtensions(),
   ]);
   const errors = results
     .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
@@ -455,7 +462,7 @@ main.ipc.handle('config:write-text-file', async (_, filePath, content) => {
 
 //#region Skills API
 
-import { listSkills, readSkillContent, createSkill, removeSkill, writeSkillContent } from '@/main/skills';
+import { createSkill, listSkills, readSkillContent, removeSkill, writeSkillContent } from '@/main/skills';
 
 main.ipc.handle('skills:list', () => listSkills(OMNI_CONFIG_DIR));
 main.ipc.handle('skills:read', (_, skillPath) => readSkillContent(skillPath));

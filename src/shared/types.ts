@@ -1,6 +1,12 @@
 import type { Rectangle } from 'electron/main';
 import type { Schema } from 'electron-store';
 
+import type {
+  ExtensionDescriptor,
+  ExtensionEnsureResult,
+  ExtensionInstanceState,
+} from '@/shared/extensions';
+
 // Normally we'd use SWR or some query library, but I had some issues with react render cycles and the easiest fix
 // was to just move all the fetching outside react. Also SWR doesn't narrow its data field when the request is
 // successful, which is suuuuper annoying. This type provides a similar API, but better types. Just have to implement
@@ -131,6 +137,12 @@ export type StoreData = {
 
   // Enterprise platform (optional — when set, enables enterprise mode)
   platform?: PlatformCredentials;
+
+  /**
+   * Per-extension enabled flag. Missing/false means the extension is dormant
+   * and never spawns a subprocess. Toggled from Settings → Extensions.
+   */
+  enabledExtensions: Record<string, boolean>;
 };
 
 // The electron store uses JSON schema to validate its data.
@@ -310,6 +322,7 @@ export const schema: Schema<StoreData> = {
         icon: { type: 'string' },
         sortOrder: { type: 'number' },
         isRoot: { type: 'boolean' },
+        kind: { type: 'string', enum: ['doc', 'notebook'] },
         createdAt: { type: 'number' },
         updatedAt: { type: 'number' },
       },
@@ -436,6 +449,11 @@ export const schema: Schema<StoreData> = {
       userRole: { type: 'string' },
       domains: { type: 'array', items: { type: 'object' } },
     },
+  },
+  enabledExtensions: {
+    type: 'object',
+    additionalProperties: { type: 'boolean' },
+    default: {},
   },
 };
 
@@ -708,6 +726,8 @@ export type Milestone = {
  * and markdown body (stored on disk, not in the store). Pages have no
  * lifecycle status — they are docs, not work items. Work happens on tickets.
  */
+export type PageKind = 'doc' | 'notebook';
+
 export type Page = {
   id: PageId;
   projectId: ProjectId;
@@ -720,6 +740,12 @@ export type Page = {
   sortOrder: number;
   /** True for the auto-created root page. Cannot be deleted. */
   isRoot?: boolean;
+  /**
+   * Content kind. 'doc' (default) is a Yoopta markdown page stored as `.md`.
+   * 'notebook' is a marimo notebook stored as `.py`, edited via the marimo
+   * extension's webview surface. Root pages are always 'doc'.
+   */
+  kind?: PageKind;
   createdAt: number;
   updatedAt: number;
 };
@@ -1169,6 +1195,24 @@ type PageIpcEvents = Namespaced<
     'watch': (pageId: PageId) => { content: string } | null;
     /** Unsubscribe from external-edit notifications. */
     'unwatch': (pageId: PageId) => void;
+    /**
+     * Resolve a notebook page to its on-disk `.py` absolute path and the
+     * containing project directory (used as the cwd for the marimo extension
+     * instance). Returns null if the page isn't a notebook.
+     */
+    'get-notebook-paths': (pageId: PageId) => { filePath: string; projectDir: string } | null;
+    /**
+     * Ensure the marimo glass CSS file exists for this notebook's project and
+     * migrate the notebook's `marimo.App()` to reference it. Idempotent —
+     * called by the renderer immediately before opening a notebook.
+     */
+    'prepare-notebook': (pageId: PageId, glassEnabled: boolean) => void;
+    /**
+     * Rewrite the marimo glass CSS file content for a project. Called when
+     * the launcher's glass mode toggles. Caller reloads the marimo webview
+     * afterwards to pick up the new CSS.
+     */
+    'set-notebook-glass': (projectDir: string, enabled: boolean) => void;
   }
 >;
 
@@ -1266,6 +1310,26 @@ export type WorkspaceSyncStatus = {
 };
 
 /**
+ * Extension API. Built-in (and eventually user-managed) external tools the
+ * launcher orchestrates as local subprocesses. Marimo is the seed consumer.
+ *
+ * Instances are scoped to a working directory (typically a project folder)
+ * and refcounted — multiple webview surfaces sharing the same cwd reuse a
+ * single subprocess. See `src/main/extension-manager.ts` for the lifecycle.
+ */
+type ExtensionIpcEvents = Namespaced<
+  'extension',
+  {
+    'list-descriptors': () => ExtensionDescriptor[];
+    'set-enabled': (id: string, enabled: boolean) => void;
+    'get-instance-status': (id: string, cwd: string) => ExtensionInstanceState;
+    'ensure-instance': (id: string, cwd: string) => ExtensionEnsureResult;
+    'release-instance': (id: string, cwd: string) => void;
+    'get-logs': (id: string, cwd: string) => string;
+  }
+>;
+
+/**
  * Workspace sync IPC events. Renderer invokes, main handles.
  */
 type WorkspaceSyncIpcEvents = Namespaced<
@@ -1294,6 +1358,7 @@ export type IpcEvents = MainProcessIpcEvents &
   PageIpcEvents &
   InboxIpcEvents &
   PlatformIpcEvents &
+  ExtensionIpcEvents &
   WorkspaceSyncIpcEvents;
 
 /**
@@ -1417,6 +1482,18 @@ type PlatformIpcRendererEvents = Namespaced<
 >;
 
 /**
+ * Extension events. Main process emits these, renderer listens. Status
+ * updates fire on every state transition (idle → starting → running → idle/error)
+ * for a given (extensionId, cwd) instance.
+ */
+type ExtensionIpcRendererEvents = Namespaced<
+  'extension',
+  {
+    'status-changed': [string, string, ExtensionInstanceState];
+  }
+>;
+
+/**
  * Workspace sync events. Main process emits these, renderer listens.
  */
 type WorkspaceSyncIpcRendererEvents = Namespaced<
@@ -1439,6 +1516,7 @@ export type IpcRendererEvents = TerminalIpcRendererEvents &
   PageIpcRendererEvents &
   ToastIpcRendererEvents &
   PlatformIpcRendererEvents &
+  ExtensionIpcRendererEvents &
   WorkspaceSyncIpcRendererEvents;
 
 // #region Config file types
