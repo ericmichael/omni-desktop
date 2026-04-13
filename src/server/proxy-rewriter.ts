@@ -51,21 +51,32 @@ export const setupProxyRewriter = (fastify: FastifyInstance, wsHandler: WsHandle
   });
 
   // --- Dynamic proxy registration endpoint ---
-  fastify.post('/proxy/_register', async (request, reply) => {
-    const { name, upstream } = request.body as { name?: string; upstream?: string };
-    if (!name || !upstream) {
-      reply.code(400).send({ error: 'Missing name or upstream' });
-      return;
-    }
-    try {
-      const parsed = new URL(upstream);
-      const origin = `${parsed.protocol}//${parsed.host}`;
-      upstreamMap.set(name, origin);
-      const proxyPath = `/proxy/${name}${parsed.pathname}${parsed.search}`;
-      reply.send({ ok: true, proxyPath });
-    } catch {
-      reply.code(400).send({ error: 'Invalid upstream URL' });
-    }
+  // Set OMNI_ALLOW_EXTERNAL_REGISTER=1 only if callers are trusted (e.g. internal k8s cluster).
+  fastify.post('/proxy/_register', {
+    onRequest: async (request, reply) => {
+      const addr = request.socket.remoteAddress ?? '';
+      const isLoopback = addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
+      if (!isLoopback && !process.env['OMNI_ALLOW_EXTERNAL_REGISTER']) {
+        reply.code(403).send({ error: 'Forbidden: only loopback clients may register proxy upstreams' });
+        return;
+      }
+    },
+    handler: async (request, reply) => {
+      const { name, upstream } = request.body as { name?: string; upstream?: string };
+      if (!name || !upstream) {
+        reply.code(400).send({ error: 'Missing name or upstream' });
+        return;
+      }
+      try {
+        const parsed = new URL(upstream);
+        const origin = `${parsed.protocol}//${parsed.host}`;
+        upstreamMap.set(name, origin);
+        const proxyPath = `/proxy/${name}${parsed.pathname}${parsed.search}`;
+        reply.send({ ok: true, proxyPath });
+      } catch {
+        reply.code(400).send({ error: 'Invalid upstream URL' });
+      }
+    },
   });
 
   fastify.log.info('Proxy routes registered at /proxy/:proxyName/*');
