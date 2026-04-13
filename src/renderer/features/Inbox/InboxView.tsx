@@ -23,7 +23,6 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     width: '100%',
     height: '100%',
-    backgroundColor: tokens.colorNeutralBackground1,
   },
   header: {
     display: 'flex',

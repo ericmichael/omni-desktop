@@ -125,6 +125,8 @@ export type StoreData = {
   codeTabs: CodeTab[];
   activeCodeTabId: CodeTabId | null;
   codeLayoutMode: CodeLayoutMode;
+  /** Optional background image (data URL) rendered behind the Code Deck. */
+  codeDeckBackground: string | null;
   activeTicketId: TicketId | null;
 
   // Enterprise platform (optional — when set, enables enterprise mode)
@@ -247,6 +249,10 @@ export const schema: Schema<StoreData> = {
     type: 'string',
     enum: ['deck', 'focus'],
     default: 'deck',
+  },
+  codeDeckBackground: {
+    type: ['string', 'null'],
+    default: null,
   },
   activeTicketId: {
     type: ['string', 'null'],

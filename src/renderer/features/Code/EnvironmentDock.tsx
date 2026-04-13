@@ -9,6 +9,7 @@ type EnvironmentDockProps = {
   onSelect: (pane: DockPane) => void;
   codeAvailable: boolean;
   desktopAvailable: boolean;
+  isGlass?: boolean;
 };
 
 const useStyles = makeStyles({
@@ -29,6 +30,12 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
     boxShadow: `0 1px 12px rgba(0,0,0,0.10), 0 0 0 1px ${tokens.colorNeutralStroke2}`,
     flexShrink: 0,
+  },
+  dockGlass: {
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 18%, transparent)`,
+    backdropFilter: 'blur(36px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+    boxShadow: `0 1px 0 0 color-mix(in srgb, white 14%, transparent) inset, 0 0 0 1px color-mix(in srgb, ${tokens.colorNeutralStroke1} 40%, transparent), 0 12px 32px -12px rgba(0, 0, 0, 0.35)`,
   },
   separator: {
     width: '1px',
@@ -120,7 +127,7 @@ const PANE_ITEMS: { pane: DockPane; label: string; Icon: typeof Code20Regular; a
   { pane: 'preview', label: 'Browser', Icon: Globe20Regular },
 ];
 
-export const EnvironmentDock = memo(({ activePane, onSelect, codeAvailable, desktopAvailable }: EnvironmentDockProps) => {
+export const EnvironmentDock = memo(({ activePane, onSelect, codeAvailable, desktopAvailable, isGlass }: EnvironmentDockProps) => {
   const styles = useStyles();
   const availability: Record<string, boolean> = { codeAvailable, desktopAvailable };
 
@@ -133,7 +140,7 @@ export const EnvironmentDock = memo(({ activePane, onSelect, codeAvailable, desk
   );
 
   return (
-    <div className={styles.dock}>
+    <div className={mergeClasses(styles.dock, isGlass && styles.dockGlass)}>
       {PANE_ITEMS.map(({ pane, label, Icon, availabilityKey }) => {
         const isActive = activePane === pane;
         const isAvailable = availabilityKey ? !!availability[availabilityKey] : true;

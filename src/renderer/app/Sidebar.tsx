@@ -57,6 +57,13 @@ const useStyles = makeStyles({
       paddingBottom: '0',
     },
   },
+  navGlass: {
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
+    backdropFilter: 'blur(36px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+    borderRightColor: 'rgba(255, 255, 255, 0.14)',
+    borderTopColor: 'rgba(255, 255, 255, 0.14)',
+  },
 
   /* ── Logo (desktop only) ── */
   logo: {
@@ -208,6 +215,7 @@ export const Sidebar = memo(() => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const openInboxCount = useStore($activeInboxCount);
+  const isGlass = (store.layoutMode === 'code' || store.layoutMode === 'chat' || store.layoutMode === 'settings' || store.layoutMode === 'projects') && !!store.codeDeckBackground;
 
   const setMode = useCallback(
     (mode: LayoutMode) => () => persistedStoreApi.setKey('layoutMode', mode),
@@ -287,7 +295,7 @@ export const Sidebar = memo(() => {
   return (
     <nav
       ref={navRef}
-      className={styles.nav}
+      className={mergeClasses(styles.nav, isGlass && styles.navGlass)}
       role="tablist"
       aria-label="Main navigation"
       aria-orientation="vertical"

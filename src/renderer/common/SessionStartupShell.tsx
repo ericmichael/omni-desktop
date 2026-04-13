@@ -21,7 +21,7 @@ type SessionStartupShellProps = {
 };
 
 export const SessionStartupShell = memo(({ eyebrow, title, description, children, tone = 'default', className, contentClassName }: SessionStartupShellProps) => {
-  const toneClasses = tone === 'danger' ? 'border-red-400/20 bg-red-400/5' : 'border-surface-border bg-surface/90';
+  const toneClasses = tone === 'danger' ? 'border-red-400/20 bg-red-400/5' : 'border-transparent bg-transparent';
 
   return (
     <BodyContainer className="p-6">
@@ -33,7 +33,7 @@ export const SessionStartupShell = memo(({ eyebrow, title, description, children
             initial="initial"
             animate="animate"
             exit="exit"
-            className={cn('flex w-full max-w-3xl flex-col gap-6 rounded-2xl border px-6 py-6 shadow-sm backdrop-blur-sm', toneClasses, className)}
+            className={cn('flex w-full max-w-3xl flex-col gap-6 rounded-2xl border px-6 py-6', toneClasses, className)}
           >
             <div className="flex flex-col items-center gap-2 text-center">
               <span className="text-xs font-semibold uppercase tracking-[0.18em] text-fg-subtle">{eyebrow}</span>

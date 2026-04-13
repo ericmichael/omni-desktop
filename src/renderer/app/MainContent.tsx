@@ -1,5 +1,6 @@
 import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
+import type { CSSProperties } from 'react';
 import { memo, useCallback, useEffect, useState } from 'react';
 import { Settings20Filled, Info20Regular, WindowConsole20Regular } from '@fluentui/react-icons';
 
@@ -25,6 +26,11 @@ const useStyles = makeStyles({
     '@media (min-width: 640px)': {
       flexDirection: 'row',
     },
+  },
+  rootWithDeckBg: {
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+    backgroundRepeat: 'no-repeat',
   },
   content: {
     flex: '1 1 0',
@@ -119,6 +125,8 @@ export const MainContent = memo(() => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const active: LayoutMode = store.layoutMode;
+  const deckBackground = store.codeDeckBackground ?? null;
+  const showDeckBg = (active === 'code' || active === 'chat' || active === 'settings' || active === 'projects') && !!deckBackground;
 
   const [mounted, setMounted] = useState<Set<LayoutMode>>(() => new Set([active]));
 
@@ -145,7 +153,28 @@ export const MainContent = memo(() => {
   ];
 
   return (
-    <div className={styles.root}>
+    <div
+      className={mergeClasses(styles.root, showDeckBg && styles.rootWithDeckBg)}
+      style={
+        showDeckBg
+          ? ({
+              backgroundImage: `url(${deckBackground})`,
+              '--colorSubtleBackgroundHover': 'rgba(255, 255, 255, 0.10)',
+              '--colorSubtleBackgroundPressed': 'rgba(255, 255, 255, 0.16)',
+              '--colorSubtleBackgroundSelected': 'rgba(255, 255, 255, 0.14)',
+              '--colorNeutralBackground1Hover': 'rgba(255, 255, 255, 0.10)',
+              '--colorNeutralBackground1Pressed': 'rgba(255, 255, 255, 0.16)',
+              '--colorNeutralBackground1Selected': 'rgba(255, 255, 255, 0.14)',
+              '--colorNeutralBackground2Hover': 'rgba(255, 255, 255, 0.10)',
+              '--colorNeutralBackground2Pressed': 'rgba(255, 255, 255, 0.16)',
+              '--colorNeutralBackground2Selected': 'rgba(255, 255, 255, 0.14)',
+              '--colorNeutralBackground3Hover': 'rgba(255, 255, 255, 0.10)',
+              '--colorNeutralBackground3Pressed': 'rgba(255, 255, 255, 0.16)',
+              '--colorNeutralBackground3Selected': 'rgba(255, 255, 255, 0.14)',
+            } as CSSProperties)
+          : undefined
+      }
+    >
       <div className={mergeClasses(active === 'code' && styles.sidebarHiddenMobile)}>
         <Sidebar />
       </div>

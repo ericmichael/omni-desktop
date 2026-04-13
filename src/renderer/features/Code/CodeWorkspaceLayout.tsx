@@ -1,6 +1,7 @@
 import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 import { AnimatePresence, motion } from 'framer-motion';
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowLeft20Regular, ArrowRight20Regular, ArrowClockwise20Regular, Code20Regular, Desktop20Regular, Dismiss20Regular, DismissCircle20Regular, Globe20Regular, WindowConsole20Regular, WindowDevTools20Regular } from '@fluentui/react-icons';
 
 import { resolvePreviewUrl, reverseProxyUrl } from '@/renderer/features/Tickets/preview-bridge';
@@ -38,6 +39,8 @@ type CodeWorkspaceLayoutProps = {
   onClientToolCall?: ClientToolCallHandler;
   pendingPlan?: import('@/shared/chat-types').PlanItem | null;
   onPlanDecision?: (approved: boolean) => void;
+  dockTargetId?: string;
+  isGlass?: boolean;
 };
 
 const useStyles = makeStyles({
@@ -135,8 +138,59 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     backgroundColor: tokens.colorNeutralBackground1,
   },
+  rootGlass: {
+    backgroundColor: 'transparent',
+  },
   mainArea: { position: 'relative', minHeight: 0, flex: '1 1 0' },
   mainContent: { height: '100%', width: '100%', minWidth: 0 },
+  glassChatSurfaces: {
+    '& .bg-surface, & .bg-card, & .bg-background, & .bg-bgColumn, & .bg-bgCard, & .bg-bgCardAlt, & .bg-bgMain': {
+      backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
+      backdropFilter: 'blur(28px) saturate(160%)',
+      WebkitBackdropFilter: 'blur(28px) saturate(160%)',
+    },
+    '& .bg-secondary': {
+      backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
+      backdropFilter: 'blur(20px) saturate(160%)',
+      WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+      boxShadow: `0 1px 0 0 rgba(255,255,255,0.12) inset, 0 2px 8px -2px rgba(0,0,0,0.15)`,
+    },
+    '& .bg-primary': {
+      backgroundColor: `color-mix(in srgb, ${tokens.colorBrandBackground} 70%, transparent)`,
+      backdropFilter: 'blur(20px) saturate(160%)',
+      WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+      boxShadow: `0 1px 0 0 rgba(255,255,255,0.14) inset, 0 2px 8px -2px rgba(0,0,0,0.15)`,
+    },
+    '& .chat-input-footer': {
+      position: 'relative',
+      overflow: 'hidden',
+      backgroundColor: 'transparent',
+      backdropFilter: 'none',
+      WebkitBackdropFilter: 'none',
+      borderTop: `1px solid rgba(255, 255, 255, 0.14)`,
+    },
+    '& .chat-input-footer::before': {
+      content: '""',
+      position: 'absolute',
+      top: '12px',
+      right: '12px',
+      bottom: '12px',
+      left: '12px',
+      borderRadius: '24px',
+      boxShadow: '0 0 0 9999px rgba(255, 255, 255, 0.06)',
+      pointerEvents: 'none',
+      zIndex: 0,
+    },
+    '& .chat-input-footer > *': {
+      position: 'relative',
+      zIndex: 1,
+    },
+    '& .chat-input-footer .bg-bgCardAlt': {
+      backgroundColor: 'transparent',
+      backdropFilter: 'none',
+      WebkitBackdropFilter: 'none',
+    },
+  },
 });
 
 const transition = { type: 'spring' as const, duration: 0.28, bounce: 0.08 };
@@ -428,9 +482,18 @@ const OverlayPaneView = memo(
 );
 OverlayPaneView.displayName = 'OverlayPaneView';
 
-export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, variables, codeServerSrc, vncSrc, previewUrl, onPreviewUrlChange, overlayPane = 'none', onCloseOverlay, onOpenOverlay, onReady, headerActionsTargetId, headerActionsCompact, sandboxLabel, onClientToolCall, pendingPlan, onPlanDecision }: CodeWorkspaceLayoutProps) => {
+export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, variables, codeServerSrc, vncSrc, previewUrl, onPreviewUrlChange, overlayPane = 'none', onCloseOverlay, onOpenOverlay, onReady, headerActionsTargetId, headerActionsCompact, sandboxLabel, onClientToolCall, pendingPlan, onPlanDecision, dockTargetId, isGlass }: CodeWorkspaceLayoutProps) => {
   const styles = useStyles();
   const overlaySrc = overlayPane === 'code' ? codeServerSrc : overlayPane === 'vnc' ? vncSrc : overlayPane === 'preview' ? previewUrl : undefined;
+
+  const [dockTarget, setDockTarget] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    if (!dockTargetId) {
+      setDockTarget(null);
+      return;
+    }
+    setDockTarget(document.getElementById(dockTargetId));
+  }, [dockTargetId]);
 
   const handleUiReady = useCallback(() => {
     onReady?.();
@@ -461,7 +524,7 @@ export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, va
   const showOverlay = overlayPane !== 'none' && (overlaySrc || overlayPane === 'preview' || overlayPane === 'terminal');
 
   return (
-    <div className={styles.root}>
+    <div className={mergeClasses(styles.root, isGlass && styles.rootGlass, isGlass && styles.glassChatSurfaces)}>
       <div className={styles.mainArea}>
         <div className={styles.mainContent}>
           <OmniAgentsApp uiUrl={uiSrc} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables} onReady={handleUiReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} sandboxLabel={sandboxLabel} onClientToolCall={onClientToolCall} pendingPlan={pendingPlan} onPlanDecision={onPlanDecision} />
@@ -470,12 +533,21 @@ export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, va
           {showOverlay && <OverlayPaneView pane={overlayPane as Exclude<OverlayPane, 'none'>} src={overlaySrc} onClose={closeOverlay} onUrlChange={overlayPane === 'preview' ? onPreviewUrlChange : undefined} />}
         </AnimatePresence>
       </div>
-      <EnvironmentDock
-        activePane={overlayPane}
-        onSelect={handleDockSelect}
-        codeAvailable={!!codeServerSrc}
-        desktopAvailable={!!vncSrc}
-      />
+      {(() => {
+        const dock = (
+          <EnvironmentDock
+            activePane={overlayPane}
+            onSelect={handleDockSelect}
+            codeAvailable={!!codeServerSrc}
+            desktopAvailable={!!vncSrc}
+            isGlass={isGlass}
+          />
+        );
+        if (dockTargetId && dockTarget) {
+          return createPortal(dock, dockTarget);
+        }
+        return dock;
+      })()}
     </div>
   );
 });

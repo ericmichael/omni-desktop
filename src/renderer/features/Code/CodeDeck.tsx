@@ -131,8 +131,75 @@ const useStyles = makeStyles({
     display: 'flex',
     height: '100%',
     flexDirection: 'column',
-    ...shorthands.borderRight('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground2,
+    backgroundColor: 'transparent',
+  },
+  deckColumnBordered: {
+    display: 'flex',
+    flexDirection: 'column',
+    flex: '1 1 0',
+    minHeight: 0,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    borderRadius: tokens.borderRadiusXLarge,
+    overflow: 'hidden',
+    margin: tokens.spacingHorizontalS,
+    backgroundColor: 'transparent',
+  },
+  deckDockSlot: { flexShrink: 0 },
+  glassDeckHeader: {
+    backgroundColor: 'transparent',
+    backdropFilter: 'none',
+    WebkitBackdropFilter: 'none',
+    borderBottomColor: 'transparent',
+  },
+  glassSessionHeader: {
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 10%, transparent)`,
+    backdropFilter: 'blur(36px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+    borderBottomColor: 'transparent',
+  },
+  glassTicketBanner: {
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 8%, transparent)`,
+    backdropFilter: 'blur(36px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+    borderBottomColor: 'transparent',
+  },
+  glassFocusSidebar: {
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
+    backdropFilter: 'blur(36px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+    borderRightColor: 'rgba(255, 255, 255, 0.14)',
+  },
+  glassFocusSidebarHeader: {
+    borderBottomColor: 'rgba(255, 255, 255, 0.14)',
+  },
+  glassMobileTabBar: {
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
+    backdropFilter: 'blur(36px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+    borderBottomColor: 'rgba(255, 255, 255, 0.14)',
+  },
+  glassSessionPane: {
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
+    backdropFilter: 'blur(36px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+  },
+  glassMobileTabChipInactive: {
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 18%, transparent)`,
+    backdropFilter: 'blur(20px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+  },
+  glassMobileTabChipActive: {
+    backgroundColor: `color-mix(in srgb, ${tokens.colorBrandBackground} 60%, transparent)`,
+    backdropFilter: 'blur(20px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+  },
+  glassCard: {
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 12%, transparent)`,
+    backdropFilter: 'blur(36px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+    borderRadius: '28px',
+    ...shorthands.borderColor(`color-mix(in srgb, white 12%, transparent)`),
+    boxShadow: `0 1px 0 0 rgba(255, 255, 255, 0.22) inset, 0 0 0 1px rgba(255, 255, 255, 0.06) inset, 0 30px 80px -24px rgba(0, 0, 0, 0.45), 0 12px 32px -12px rgba(0, 0, 0, 0.3)`,
   },
   deckColumnDragging: { opacity: 0.7 },
   dragHandle: {
@@ -296,10 +363,10 @@ const useStyles = makeStyles({
 });
 
 const CodeDeckHeader = memo(
-  ({ layoutMode, onLayoutMode, onNewSession }: { layoutMode: CodeLayoutMode; onLayoutMode: (mode: CodeLayoutMode) => void; onNewSession: () => void }) => {
+  ({ layoutMode, onLayoutMode, onNewSession, isGlass }: { layoutMode: CodeLayoutMode; onLayoutMode: (mode: CodeLayoutMode) => void; onNewSession: () => void; isGlass?: boolean }) => {
     const styles = useStyles();
     return (
-      <div className={styles.deckHeader}>
+      <div className={mergeClasses(styles.deckHeader, isGlass && styles.glassDeckHeader)}>
         <div className={styles.deckHeaderNav}>
           <Menu positioning={{ position: 'below', align: 'start' }}>
             <MenuTrigger>
@@ -379,6 +446,7 @@ const CodeSessionHeader = memo(
     dragHandle,
     ticketId,
     onOpenPanel,
+    isGlass,
   }: {
     label: string;
     ticketTitle?: string | null;
@@ -390,6 +458,7 @@ const CodeSessionHeader = memo(
     dragHandle?: React.ReactNode;
     ticketId?: TicketId;
     onOpenPanel?: (panel: TicketPanel) => void;
+    isGlass?: boolean;
   }) => {
     const handleResolve = useCallback(
       (resolution: TicketResolution) => {
@@ -403,7 +472,7 @@ const CodeSessionHeader = memo(
     const styles = useStyles();
     return (
       <>
-        <div className={styles.sessionHeader}>
+        <div className={mergeClasses(styles.sessionHeader, isGlass && styles.glassSessionHeader)}>
           <div className={mergeClasses(styles.flexItemsCenter, styles.gap2, styles.minW0)}>
             {dragHandle}
             <span className={styles.sessionLabel}>{label}</span>
@@ -446,7 +515,7 @@ const CodeSessionHeader = memo(
           </div>
         </div>
         {ticketTitle && (
-          <div className={styles.ticketBanner}>
+          <div className={mergeClasses(styles.ticketBanner, isGlass && styles.glassTicketBanner)}>
             <div className={mergeClasses(styles.flexItemsCenter, styles.gap2, styles.minW0)}>
               <span className={styles.ticketTitle}>{ticketTitle}</span>
               <span className={styles.ticketBadges}>
@@ -477,6 +546,7 @@ const DeckColumn = memo(
     onToggleExpand,
     children,
     headerActionsSlot,
+    isGlass,
   }: {
     tab: CodeTab;
     label: string;
@@ -490,6 +560,7 @@ const DeckColumn = memo(
     onToggleExpand: (id: CodeTabId) => void;
     children: React.ReactNode;
     headerActionsSlot?: React.ReactNode;
+    isGlass?: boolean;
   }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
     const style = {
@@ -507,44 +578,48 @@ const DeckColumn = memo(
         style={style}
         className={mergeClasses(styles.deckColumn, isDragging && styles.deckColumnDragging)}
       >
-        <CodeSessionHeader
-          label={label}
-          ticketTitle={ticketTitle}
-          ticketColumnBadge={ticketColumnBadge}
-          ticketMetaBadge={ticketMetaBadge}
-          ticketActions={ticketActions}
-          actions={
-            <div className={mergeClasses(styles.flexItemsCenter, styles.gap1)}>
-              {headerActionsSlot}
-              {actions}
-              <SessionActionButton
-                icon={isExpanded ? <ArrowMinimize20Regular style={{ width: 15, height: 15 }} /> : <ArrowMaximize20Regular style={{ width: 15, height: 15 }} />}
-                label={isExpanded ? 'Collapse column' : 'Expand column'}
-                onClick={() => onToggleExpand(tab.id)}
-              />
-            </div>
-          }
-          onClose={() => onClose(tab.id)}
-          ticketId={tab.ticketId as TicketId | undefined}
-          onOpenPanel={tab.ticketId ? setActivePanel : undefined}
-          dragHandle={
-            <button
-              type="button"
-              className={styles.dragHandle}
-              {...attributes}
-              {...listeners}
-              aria-label="Reorder"
-            >
-              <ReOrderDotsVertical20Regular style={{ width: 16, height: 16 }} />
-            </button>
-          }
-        />
-        <div className={styles.flex1MinH0Relative}>
-          {children}
-          {tab.ticketId && (
-            <TicketPanelOverlay panel={activePanel} ticketId={tab.ticketId as TicketId} onClose={handleClosePanel} />
-          )}
+        <div className={mergeClasses(styles.deckColumnBordered, isGlass && styles.glassCard)}>
+          <CodeSessionHeader
+            label={label}
+            ticketTitle={ticketTitle}
+            ticketColumnBadge={ticketColumnBadge}
+            ticketMetaBadge={ticketMetaBadge}
+            ticketActions={ticketActions}
+            isGlass={isGlass}
+            actions={
+              <div className={mergeClasses(styles.flexItemsCenter, styles.gap1)}>
+                {headerActionsSlot}
+                {actions}
+                <SessionActionButton
+                  icon={isExpanded ? <ArrowMinimize20Regular style={{ width: 15, height: 15 }} /> : <ArrowMaximize20Regular style={{ width: 15, height: 15 }} />}
+                  label={isExpanded ? 'Collapse column' : 'Expand column'}
+                  onClick={() => onToggleExpand(tab.id)}
+                />
+              </div>
+            }
+            onClose={() => onClose(tab.id)}
+            ticketId={tab.ticketId as TicketId | undefined}
+            onOpenPanel={tab.ticketId ? setActivePanel : undefined}
+            dragHandle={
+              <button
+                type="button"
+                className={styles.dragHandle}
+                {...attributes}
+                {...listeners}
+                aria-label="Reorder"
+              >
+                <ReOrderDotsVertical20Regular style={{ width: 16, height: 16 }} />
+              </button>
+            }
+          />
+          <div className={styles.flex1MinH0Relative}>
+            {children}
+            {tab.ticketId && (
+              <TicketPanelOverlay panel={activePanel} ticketId={tab.ticketId as TicketId} onClose={handleClosePanel} />
+            )}
+          </div>
         </div>
+        <div id={`code-deck-dock-target-${tab.id}`} className={styles.deckDockSlot} />
       </div>
     );
   }
@@ -570,6 +645,7 @@ const CodeSessionPane = memo(
     headerActionsCompact,
     previewUrl,
     onPreviewUrlChange,
+    isGlass,
   }: {
     tab: CodeTab;
     label: string;
@@ -588,13 +664,14 @@ const CodeSessionPane = memo(
     headerActionsCompact?: boolean;
     previewUrl?: string;
     onPreviewUrlChange?: (url: string) => void;
+    isGlass?: boolean;
   }) => {
     const styles = useStyles();
     const [activePanel, setActivePanel] = useState<TicketPanel | null>(null);
     const handleClosePanel = useCallback(() => setActivePanel(null), []);
 
     return (
-      <div className={mergeClasses(styles.sessionPane, !isVisible && styles.sessionPaneHidden)}>
+      <div className={mergeClasses(styles.sessionPane, isGlass && styles.glassSessionPane, !isVisible && styles.sessionPaneHidden)}>
         <CodeSessionHeader
           label={label}
           ticketTitle={ticketTitle}
@@ -605,6 +682,7 @@ const CodeSessionPane = memo(
           onClose={() => onClose(tab.id)}
           ticketId={tab.ticketId as TicketId | undefined}
           onOpenPanel={tab.ticketId ? setActivePanel : undefined}
+          isGlass={isGlass}
         />
         <div className={styles.flex1MinH0Relative}>
           <CodeTabContent
@@ -618,6 +696,7 @@ const CodeSessionPane = memo(
             headerActionsCompact={headerActionsCompact}
             previewUrl={previewUrl}
             onPreviewUrlChange={onPreviewUrlChange}
+            isGlass={isGlass}
           />
           {tab.ticketId && (
             <TicketPanelOverlay panel={activePanel} ticketId={tab.ticketId as TicketId} onClose={handleClosePanel} />
@@ -692,6 +771,7 @@ export const CodeDeck = memo(() => {
   const tabs = store.codeTabs ?? [];
   const layoutMode = store.codeLayoutMode ?? 'deck';
   const activeTabId = store.activeCodeTabId ?? tabs[0]?.id ?? null;
+  const deckBackground = store.codeDeckBackground ?? null;
   const [overlayTarget, setOverlayTarget] = useState<{ tabId: CodeTabId; pane: Exclude<DockPane, 'none'> } | null>(null);
   const [previewUrls, setPreviewUrls] = useState<Record<CodeTabId, string>>({});
   const [expandedTabId, setExpandedTabId] = useState<CodeTabId | null>(null);
@@ -924,7 +1004,7 @@ export const CodeDeck = memo(() => {
 
   return (
     <div className={styles.root}>
-      <CodeDeckHeader layoutMode={layoutMode} onLayoutMode={handleLayoutMode} onNewSession={handleNewSession} />
+      <CodeDeckHeader layoutMode={layoutMode} onLayoutMode={handleLayoutMode} onNewSession={handleNewSession} isGlass={!!deckBackground} />
       {layoutMode === 'deck' && (
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
           <SortableContext items={tabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
@@ -949,6 +1029,7 @@ export const CodeDeck = memo(() => {
                         isExpanded={expandedTabId === tab.id}
                         onToggleExpand={handleToggleExpand}
                         headerActionsSlot={<div id={`code-deck-header-actions-${tab.id}`} />}
+                        isGlass={!!deckBackground}
                       >
                         <CodeTabContent
                           tab={tab}
@@ -961,6 +1042,8 @@ export const CodeDeck = memo(() => {
                           headerActionsCompact
                           previewUrl={previewUrls[tab.id]}
                           onPreviewUrlChange={(url) => handlePreviewUrlChange(tab.id, url)}
+                          dockTargetId={`code-deck-dock-target-${tab.id}`}
+                          isGlass={!!deckBackground}
                         />
                       </DeckColumn>
                     </div>
@@ -976,7 +1059,7 @@ export const CodeDeck = memo(() => {
           <SortableContext items={tabs.map((t) => t.id)} strategy={verticalListSortingStrategy}>
             <div className={styles.focusLayout}>
               {/* Mobile chip bar for focus mode — replaces sidebar on small screens */}
-              <div className={styles.mobileTabBar}>
+              <div className={mergeClasses(styles.mobileTabBar, !!deckBackground && styles.glassMobileTabBar)}>
                 <div className={styles.mobileTabBarInner}>
                   <Menu positioning={{ position: 'below', align: 'start' }}>
                     <MenuTrigger>
@@ -1004,7 +1087,10 @@ export const CodeDeck = memo(() => {
                         styles.mobileTabChip,
                         tab.id === activeTab?.id
                           ? styles.mobileTabChipActive
-                          : styles.mobileTabChipInactive
+                          : styles.mobileTabChipInactive,
+                        !!deckBackground && (tab.id === activeTab?.id
+                          ? styles.glassMobileTabChipActive
+                          : styles.glassMobileTabChipInactive)
                       )}
                     >
                       {resolveLabel(tab)}
@@ -1020,8 +1106,8 @@ export const CodeDeck = memo(() => {
                   </button>
                 </div>
               </div>
-              <div className={styles.focusSidebar}>
-                <div className={styles.focusSidebarHeader}>
+              <div className={mergeClasses(styles.focusSidebar, !!deckBackground && styles.glassFocusSidebar)}>
+                <div className={mergeClasses(styles.focusSidebarHeader, !!deckBackground && styles.glassFocusSidebarHeader)}>
                   <span className={styles.focusSidebarTitle}>Sessions</span>
                   {tabs.length > 0 && <span className={styles.focusSidebarCount}>{tabs.length}</span>}
                 </div>
@@ -1055,11 +1141,12 @@ export const CodeDeck = memo(() => {
                       overlayPane={overlayTarget?.tabId === tab.id ? overlayTarget.pane : 'none'}
                       onCloseOverlay={handleCloseOverlay}
                       onOpenOverlay={(pane) => handleOpenOverlay(tab.id, pane)}
-                      uiMinimal={false}
+                      uiMinimal
                       headerActionsTargetId={undefined}
-                      headerActionsCompact={false}
+                      headerActionsCompact
                       previewUrl={previewUrls[tab.id]}
                       onPreviewUrlChange={(url) => handlePreviewUrlChange(tab.id, url)}
+                      isGlass={!!deckBackground}
                     />
                 ))}
               </div>

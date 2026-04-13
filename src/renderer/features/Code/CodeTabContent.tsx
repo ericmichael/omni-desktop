@@ -78,6 +78,8 @@ const CodeRunningView = memo(
     onClientToolCall,
     previewUrl,
     onPreviewUrlChange,
+    dockTargetId,
+    isGlass,
   }: {
     sandboxUrls: { uiUrl: string; codeServerUrl?: string; noVncUrl?: string };
     sessionId?: string;
@@ -94,6 +96,8 @@ const CodeRunningView = memo(
     onClientToolCall?: ClientToolCallHandler;
     previewUrl?: string;
     onPreviewUrlChange?: (url: string) => void;
+    dockTargetId?: string;
+    isGlass?: boolean;
   }) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
@@ -135,6 +139,8 @@ const CodeRunningView = memo(
             onClientToolCall={onClientToolCall}
             pendingPlan={pendingPlan}
             onPlanDecision={resolvePlanApproval}
+            dockTargetId={dockTargetId}
+            isGlass={isGlass}
           />
         </div>
       </div>
@@ -154,10 +160,12 @@ type CodeTabContentProps = {
   headerActionsCompact?: boolean;
   previewUrl?: string;
   onPreviewUrlChange?: (url: string) => void;
+  dockTargetId?: string;
+  isGlass?: boolean;
 };
 
 export const CodeTabContent = memo(
-  ({ tab, isVisible, overlayPane = 'none', onCloseOverlay, onOpenOverlay, uiMinimal, headerActionsTargetId, headerActionsCompact, previewUrl, onPreviewUrlChange }: CodeTabContentProps) => {
+  ({ tab, isVisible, overlayPane = 'none', onCloseOverlay, onOpenOverlay, uiMinimal, headerActionsTargetId, headerActionsCompact, previewUrl, onPreviewUrlChange, dockTargetId, isGlass }: CodeTabContentProps) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
     const project = useMemo(
@@ -248,6 +256,8 @@ export const CodeTabContent = memo(
             onClientToolCall={handleClientToolCall}
             previewUrl={previewUrl}
             onPreviewUrlChange={onPreviewUrlChange}
+            dockTargetId={dockTargetId}
+            isGlass={isGlass}
           />
         ) : phase === 'error' ? (
           <CodeErrorView tabId={tab.id} retry={retry} />

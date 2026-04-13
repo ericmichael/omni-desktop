@@ -118,7 +118,7 @@ export function Input({ disabled, thinking, onStop, onSubmit, voiceEnabled, work
   }, [])
 
   return (
-    <div>
+    <div className="chat-input-footer">
       <div className="container-chat px-3 py-3">
         <PromptInput
           isLoading={!!thinking}

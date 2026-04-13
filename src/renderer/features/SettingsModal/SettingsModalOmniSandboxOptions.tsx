@@ -1,6 +1,6 @@
 import { useStore } from '@nanostores/react';
 import type { ChangeEvent } from 'react';
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
 import { makeStyles, tokens } from '@fluentui/react-components';
 import { Button, Card, FormField, MessageBar, MessageBarBody, SectionLabel, Select } from '@/renderer/ds';
@@ -127,6 +127,36 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
     persistedStoreApi.setKey('theme', e.target.value as OmniTheme);
   }, []);
 
+  const deckBgInputRef = useRef<HTMLInputElement>(null);
+  const pickDeckBackground = useCallback(() => {
+    deckBgInputRef.current?.click();
+  }, []);
+  const clearDeckBackground = useCallback(() => {
+    persistedStoreApi.setKey('codeDeckBackground', null);
+  }, []);
+  const onDeckBackgroundFile = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      window.alert('Please choose an image file.');
+      return;
+    }
+    const MAX = 3 * 1024 * 1024;
+    if (file.size > MAX) {
+      window.alert(`Image is too large (max ${Math.round(MAX / 1024 / 1024)}MB).`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === 'string') {
+        persistedStoreApi.setKey('codeDeckBackground', result);
+      }
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
   const currentBackend = store.sandboxBackend ?? 'none';
   const showRebuild = (import.meta.env.MODE === 'development' || store.previewFeatures)
     && (currentBackend === 'docker' || currentBackend === 'podman');
@@ -173,6 +203,24 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
             <option value="vscode-light">VS Code Light</option>
             <option value="utrgv">UTRGV</option>
           </Select>
+        </FormField>
+        <FormField label="Code Deck background">
+          <span className={styles.textSimple}>{store.codeDeckBackground ? 'Custom image' : 'None'}</span>
+          <input
+            ref={deckBgInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={onDeckBackgroundFile}
+          />
+          <Button size="sm" variant="ghost" onClick={pickDeckBackground}>
+            {store.codeDeckBackground ? 'Change' : 'Upload'}
+          </Button>
+          {store.codeDeckBackground && (
+            <Button size="sm" variant="ghost" onClick={clearDeckBackground}>
+              Remove
+            </Button>
+          )}
         </FormField>
       </Card>
 

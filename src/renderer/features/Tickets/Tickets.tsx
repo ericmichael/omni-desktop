@@ -1,6 +1,9 @@
 import { useStore } from '@nanostores/react';
+import type { CSSProperties } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
+
+import { persistedStoreApi } from '@/renderer/services/store';
 
 import { CounterBadge, Tab, TabList, TopAppBar } from '@/renderer/ds';
 import { InboxView } from '@/renderer/features/Inbox/InboxView';
@@ -22,6 +25,25 @@ const useStyles = makeStyles({
     display: 'flex',
     width: '100%',
     height: '100%',
+  },
+  rootGlass: {
+    backgroundColor: 'transparent',
+  },
+  mobileTabBarGlass: {
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
+    backdropFilter: 'blur(36px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+  },
+  desktopSidebarGlass: {
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
+    backdropFilter: 'blur(36px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+    borderRight: '1px solid rgba(255, 255, 255, 0.14)',
+  },
+  contentAreaGlass: {
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
+    backdropFilter: 'blur(36px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
   },
   desktopSidebar: {
     display: 'none',
@@ -84,6 +106,8 @@ type MobileTab = 'inbox' | 'projects';
 
 export const Tickets = memo(() => {
   const styles = useStyles();
+  const persistedStore = useStore(persistedStoreApi.$atom);
+  const isGlass = !!persistedStore.codeDeckBackground;
   const view = useStore($ticketsView);
   const isDesktop = useIsDesktop();
   const [mobileTab, setMobileTab] = useState<MobileTab>(view.type === 'inbox' ? 'inbox' : 'projects');
@@ -167,9 +191,22 @@ export const Tickets = memo(() => {
   }, [view]);
 
   return (
-    <div className={styles.root}>
+    <div
+      className={mergeClasses(styles.root, isGlass && styles.rootGlass)}
+      style={
+        isGlass
+          ? ({
+              '--colorNeutralBackground2': 'rgba(255, 255, 255, 0.06)',
+              '--colorNeutralBackground3': 'rgba(255, 255, 255, 0.04)',
+              '--colorNeutralBackground4': 'rgba(255, 255, 255, 0.04)',
+              '--colorNeutralBackground5': 'rgba(255, 255, 255, 0.04)',
+              '--colorNeutralBackground6': 'rgba(255, 255, 255, 0.04)',
+            } as CSSProperties)
+          : undefined
+      }
+    >
       {/* Desktop: sidebar always visible */}
-      <div className={styles.desktopSidebar}>
+      <div className={mergeClasses(styles.desktopSidebar, isGlass && styles.desktopSidebarGlass)}>
         <TicketsSidebar />
       </div>
 
@@ -181,7 +218,7 @@ export const Tickets = memo(() => {
             <TopAppBar title={mobileBackTitle} onBack={handleBack} className="bg-surface-raised" />
           ) : (
             /* Tab bar: Inbox / Projects */
-            <div className={styles.mobileTabBar}>
+            <div className={mergeClasses(styles.mobileTabBar, isGlass && styles.mobileTabBarGlass)}>
               <TabList
                 selectedValue={mobileTab}
                 onTabSelect={(_e, data) => {
@@ -208,7 +245,7 @@ export const Tickets = memo(() => {
         </div>
 
         {/* Content — only mount one layout to avoid duplicate stateful editors */}
-        <div className={styles.contentArea}>
+        <div className={mergeClasses(styles.contentArea, isGlass && styles.contentAreaGlass)}>
           {isDesktop ? (
             <div className={styles.desktopContent}>
               {view.type === 'inbox' && <InboxView />}

@@ -26,6 +26,7 @@ const getDefaults = (): StoreData => ({
   codeTabs: [],
   activeCodeTabId: null,
   codeLayoutMode: 'deck',
+  codeDeckBackground: null,
   activeTicketId: null,
   wipLimit: 3,
   weeklyReviewDay: 5,

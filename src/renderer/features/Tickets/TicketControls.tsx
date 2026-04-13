@@ -13,7 +13,9 @@ const useStyles = makeStyles({
   columnBadge: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
-    backgroundColor: tokens.colorNeutralBackground2,
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground2} 50%, transparent)`,
+    backdropFilter: 'blur(20px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(20px) saturate(160%)',
     paddingLeft: '6px',
     paddingRight: '6px',
     paddingTop: '2px',

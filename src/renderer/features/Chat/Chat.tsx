@@ -1,4 +1,4 @@
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Desktop20Regular } from '@fluentui/react-icons';
@@ -24,6 +24,57 @@ const useStyles = makeStyles({
   flex1Relative: { flex: '1 1 0', minHeight: 0, position: 'relative' },
   absoluteInsetZ0: { position: 'absolute', inset: 0, zIndex: 0 },
   absoluteInsetZ10: { position: 'absolute', inset: 0, zIndex: 10 },
+  glassRoot: {
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
+    backdropFilter: 'blur(36px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+    '& .bg-surface, & .bg-card, & .bg-background, & .bg-bgColumn, & .bg-bgCard, & .bg-bgCardAlt, & .bg-bgMain': {
+      backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
+      backdropFilter: 'blur(28px) saturate(160%)',
+      WebkitBackdropFilter: 'blur(28px) saturate(160%)',
+    },
+    '& .bg-secondary': {
+      backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
+      backdropFilter: 'blur(20px) saturate(160%)',
+      WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+      boxShadow: `0 1px 0 0 rgba(255,255,255,0.12) inset, 0 2px 8px -2px rgba(0,0,0,0.15)`,
+    },
+    '& .bg-primary': {
+      backgroundColor: `color-mix(in srgb, ${tokens.colorBrandBackground} 70%, transparent)`,
+      backdropFilter: 'blur(20px) saturate(160%)',
+      WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+      boxShadow: `0 1px 0 0 rgba(255,255,255,0.14) inset, 0 2px 8px -2px rgba(0,0,0,0.15)`,
+    },
+    '& .chat-input-footer': {
+      position: 'relative',
+      overflow: 'hidden',
+      backgroundColor: 'transparent',
+      backdropFilter: 'none',
+      WebkitBackdropFilter: 'none',
+      borderTop: `1px solid rgba(255, 255, 255, 0.14)`,
+    },
+    '& .chat-input-footer::before': {
+      content: '""',
+      position: 'absolute',
+      top: '12px',
+      right: '12px',
+      bottom: '12px',
+      left: '12px',
+      borderRadius: '24px',
+      boxShadow: '0 0 0 9999px rgba(255, 255, 255, 0.06)',
+      pointerEvents: 'none',
+      zIndex: 0,
+    },
+    '& .chat-input-footer > *': {
+      position: 'relative',
+      zIndex: 1,
+    },
+    '& .chat-input-footer .bg-bgCardAlt': {
+      backgroundColor: 'transparent',
+      backdropFilter: 'none',
+      WebkitBackdropFilter: 'none',
+    },
+  },
   projectSelect: {
     position: 'absolute',
     top: tokens.spacingVerticalS,
@@ -176,6 +227,7 @@ export const Chat = memo(() => {
   const pendingPlan = useStore($pendingPlan);
   const { variables, toolHandler } = useChatProjectContext();
 
+  const isGlass = !!store.codeDeckBackground;
   const theme = store.theme ?? 'teams-light';
   const sandboxBackend = store.sandboxBackend ?? 'none';
   const sandboxLabel = useMemo(() => (sandboxBackend !== 'none' ? buildSandboxLabel(sandboxBackend) : undefined), [sandboxBackend]);
@@ -224,7 +276,7 @@ export const Chat = memo(() => {
       phase === 'error' ? ('error' as const) : phase === 'idle' ? ('idle' as const) : ('loading' as const);
 
     return (
-      <div className={styles.fullSizeRelative}>
+      <div className={mergeClasses(styles.fullSizeRelative, isGlass && styles.glassRoot)}>
         <ChatProjectPicker />
         {showShell && (
           <div className={styles.absoluteInsetZ0}>
@@ -254,7 +306,7 @@ export const Chat = memo(() => {
 
   // When sandbox is disabled, use OmniAgentsHostApp (like old Chat.tsx)
   return (
-    <div className={styles.fullSize}>
+    <div className={mergeClasses(styles.fullSize, isGlass && styles.glassRoot)}>
       <ChatProjectPicker />
       <OmniAgentsHostApp
         variables={variables}

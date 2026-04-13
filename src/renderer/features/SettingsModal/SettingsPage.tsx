@@ -1,8 +1,11 @@
 import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
+import { useStore } from '@nanostores/react';
+import type { CSSProperties } from 'react';
 import { memo, useCallback, useState } from 'react';
 import { Settings20Regular, WindowConsole20Regular, Cube20Regular, PlugConnected20Regular, Globe20Regular, Person20Regular, Lightbulb20Regular } from '@fluentui/react-icons';
 
 import { Subtitle2 } from '@/renderer/ds';
+import { persistedStoreApi } from '@/renderer/services/store';
 
 import { SettingsModalAccountTab } from '@/renderer/features/SettingsModal/SettingsModalAccountTab';
 import { SettingsModalEnvironmentTab } from '@/renderer/features/SettingsModal/SettingsModalEnvironmentTab';
@@ -31,6 +34,25 @@ const useStyles = makeStyles({
     width: '100%',
     height: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
+  },
+  rootGlass: {
+    backgroundColor: 'transparent',
+  },
+  navGlass: {
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
+    backdropFilter: 'blur(36px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+    borderRightColor: 'rgba(255, 255, 255, 0.14)',
+  },
+  contentGlass: {
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
+    backdropFilter: 'blur(36px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+  },
+  mobileTabsGlass: {
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
+    backdropFilter: 'blur(36px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
   },
   /* ── Left nav ── */
   nav: {
@@ -147,6 +169,8 @@ const useStyles = makeStyles({
 
 export const SettingsPage = memo(() => {
   const styles = useStyles();
+  const store = useStore(persistedStoreApi.$atom);
+  const isGlass = !!store.codeDeckBackground;
   const [activeTab, setActiveTab] = useState<SettingsTab>('General');
 
   const handleNav = useCallback(
@@ -155,9 +179,22 @@ export const SettingsPage = memo(() => {
   );
 
   return (
-    <div className={styles.root}>
+    <div
+      className={mergeClasses(styles.root, isGlass && styles.rootGlass)}
+      style={
+        isGlass
+          ? ({
+              '--colorNeutralBackground2': 'rgba(255, 255, 255, 0.06)',
+              '--colorNeutralBackground3': 'rgba(255, 255, 255, 0.04)',
+              '--colorNeutralBackground4': 'rgba(255, 255, 255, 0.04)',
+              '--colorNeutralBackground5': 'rgba(255, 255, 255, 0.04)',
+              '--colorNeutralBackground6': 'rgba(255, 255, 255, 0.04)',
+            } as CSSProperties)
+          : undefined
+      }
+    >
       {/* Desktop: left nav */}
-      <nav className={styles.nav}>
+      <nav className={mergeClasses(styles.nav, isGlass && styles.navGlass)}>
         <div className={styles.navHeader}>
           <Subtitle2>Settings</Subtitle2>
         </div>
@@ -179,7 +216,7 @@ export const SettingsPage = memo(() => {
       </nav>
 
       {/* Mobile: horizontal tabs */}
-      <div className={styles.mobileTabs}>
+      <div className={mergeClasses(styles.mobileTabs, isGlass && styles.mobileTabsGlass)}>
         {TABS.map((tab) => (
           <button
             key={tab.value}
@@ -195,7 +232,7 @@ export const SettingsPage = memo(() => {
       </div>
 
       {/* Content */}
-      <div className={styles.content}>
+      <div className={mergeClasses(styles.content, isGlass && styles.contentGlass)}>
         <div className={styles.contentInner}>
           {activeTab === 'General' && <SettingsModalGeneralTab />}
           {activeTab === 'Environment' && <SettingsModalEnvironmentTab />}

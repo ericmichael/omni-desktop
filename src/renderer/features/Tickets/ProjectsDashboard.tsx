@@ -34,7 +34,6 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     height: '100%',
-    backgroundColor: tokens.colorNeutralBackground1,
   },
   scroll: { flex: '1 1 0', minHeight: 0, overflowY: 'auto' },
   container: {
