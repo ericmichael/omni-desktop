@@ -116,6 +116,8 @@ export const TicketColumnBadge = memo(({ ticketId }: { ticketId: TicketId }) => 
     return pipeline.columns.find((c) => c.id === ticket.columnId)?.label ?? null;
   }, [ticket?.columnId, pipeline]);
 
+  // Hide when resolved — TicketResolutionBadge takes over.
+  if (ticket?.resolution) return null;
   if (!columnLabel) return null;
 
   return (
@@ -136,7 +138,12 @@ TicketHeaderActions.displayName = 'TicketHeaderActions';
 /** Banner action: autopilot controls + phase indicator. */
 export const TicketBannerActions = memo(({ ticketId }: { ticketId: TicketId }) => {
   const styles = useStyles();
+  const tickets = useStore($tickets);
+  const ticket = tickets[ticketId];
   const { phase, handleStart, handleStop, handleReset } = useTicketAutomation(ticketId);
+
+  // When the ticket has a resolution, TicketResolutionBadge handles the display.
+  if (ticket?.resolution) return null;
 
   const isAutonomous = phase === 'running' || phase === 'continuing';
   const isProvisioning = phase === 'provisioning' || phase === 'connecting' || phase === 'session_creating';

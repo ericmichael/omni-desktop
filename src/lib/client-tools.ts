@@ -82,7 +82,7 @@ export const READONLY_CONTEXT_TOOLS = [
       type: 'object',
       properties: {
         project_id: { type: 'string', description: 'The project ID to list tickets for' },
-        initiative_id: { type: 'string', description: 'Optional initiative ID to filter by' },
+        milestone_id: { type: 'string', description: 'Optional milestone ID to filter by' },
         column: { type: 'string', description: 'Optional column label to filter by' },
         priority: {
           type: 'string',
@@ -94,40 +94,27 @@ export const READONLY_CONTEXT_TOOLS = [
     },
   },
   {
-    name: 'list_initiatives',
+    name: 'list_milestones',
     safe: true,
-    description: 'List all initiatives for a project.',
+    description: 'List all milestones for a project.',
     parameters: {
       type: 'object',
       properties: {
-        project_id: { type: 'string', description: 'The project ID to list initiatives for' },
+        project_id: { type: 'string', description: 'The project ID to list milestones for' },
       },
       required: ['project_id'],
     },
   },
   {
-    name: 'read_brief',
+    name: 'read_milestone_brief',
     safe: true,
-    description:
-      'Read a project brief — the living document that captures the problem, appetite, solution direction, open questions, decisions, and scope boundaries.',
+    description: 'Read a milestone brief — the deliverable-focused document describing goals and scope.',
     parameters: {
       type: 'object',
       properties: {
-        project_id: { type: 'string', description: 'The project ID to read the brief for' },
+        milestone_id: { type: 'string', description: 'The milestone ID to read the brief for' },
       },
-      required: ['project_id'],
-    },
-  },
-  {
-    name: 'read_initiative_brief',
-    safe: true,
-    description: 'Read an initiative brief — the deliverable-focused document describing goals and scope.',
-    parameters: {
-      type: 'object',
-      properties: {
-        initiative_id: { type: 'string', description: 'The initiative ID to read the brief for' },
-      },
-      required: ['initiative_id'],
+      required: ['milestone_id'],
     },
   },
   {
@@ -183,20 +170,30 @@ export const READONLY_CONTEXT_TOOLS = [
       required: ['project_id'],
     },
   },
-] as const;
-
-export const BRIEF_CLIENT_TOOLS = [
   {
-    name: 'update_brief',
+    name: 'list_pages',
+    safe: true,
     description:
-      'Update a project brief. Pass the full markdown content — it replaces the existing brief.',
+      'List all pages in a project as a flat list with parent/child relationships. Each page has an id, title, icon, parentId, sortOrder, and structured properties (status, size, outcome, etc.).',
     parameters: {
       type: 'object',
       properties: {
-        project_id: { type: 'string', description: 'The project ID to update the brief for' },
-        content: { type: 'string', description: 'The full markdown content of the brief' },
+        project_id: { type: 'string', description: 'The project ID to list pages for.' },
       },
-      required: ['project_id', 'content'],
+      required: ['project_id'],
+    },
+  },
+  {
+    name: 'read_page',
+    safe: true,
+    description:
+      'Read a page\'s markdown content and metadata. Returns the title, properties, and full body text.',
+    parameters: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string', description: 'The page ID to read.' },
+      },
+      required: ['page_id'],
     },
   },
 ] as const;
@@ -209,13 +206,73 @@ export const PROJECT_CLIENT_TOOLS = [
     parameters: { type: 'object', properties: {} },
   },
   {
+    name: 'create_project',
+    description:
+      'Create a new project. Optionally link a local directory or a remote git repo as the workspace. Pass workspace_dir for local, or repo_url for git-remote — not both.',
+    parameters: {
+      type: 'object',
+      properties: {
+        label: { type: 'string', description: 'Human-readable project name' },
+        workspace_dir: {
+          type: 'string',
+          description: 'Local directory to link as the project workspace (source kind "local").',
+        },
+        repo_url: {
+          type: 'string',
+          description: 'Git remote URL to clone inside the sandbox (source kind "git-remote"). The sandbox clones this repo at startup.',
+        },
+        default_branch: {
+          type: 'string',
+          description: 'Default branch for git-remote repos (e.g. "main"). Only used with repo_url.',
+        },
+      },
+      required: ['label'],
+    },
+  },
+  {
+    name: 'update_project',
+    description: "Update a project's label, workspace directory, or git remote URL.",
+    parameters: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'string', description: 'The project ID to update' },
+        label: { type: 'string', description: 'New project name' },
+        workspace_dir: {
+          type: 'string',
+          description: 'Set source to local with this directory. Pass an empty string to unlink.',
+        },
+        repo_url: {
+          type: 'string',
+          description: 'Set source to git-remote with this URL. Pass an empty string to unlink.',
+        },
+        default_branch: {
+          type: 'string',
+          description: 'Default branch for git-remote repos. Only used with repo_url.',
+        },
+      },
+      required: ['project_id'],
+    },
+  },
+  {
+    name: 'delete_project',
+    description:
+      'Delete a project and all its tickets, pages, and milestones. Cannot delete the Personal project.',
+    parameters: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'string', description: 'The project ID to delete' },
+      },
+      required: ['project_id'],
+    },
+  },
+  {
     name: 'create_ticket',
     description: 'Create a new ticket in a project. It will be placed in the first pipeline column.',
     parameters: {
       type: 'object',
       properties: {
         project_id: { type: 'string', description: 'The project to create the ticket in' },
-        initiative_id: { type: 'string', description: 'Optional initiative ID. Defaults to the project\'s General initiative.' },
+        milestone_id: { type: 'string', description: 'Optional milestone ID to group this ticket under.' },
         title: { type: 'string', description: 'Ticket title' },
         description: { type: 'string', description: 'Ticket description' },
         priority: {
@@ -280,36 +337,87 @@ export const PROJECT_CLIENT_TOOLS = [
   },
 ] as const;
 
-export const INITIATIVE_CLIENT_TOOLS = [
+export const MILESTONE_CLIENT_TOOLS = [
   {
-    name: 'create_initiative',
+    name: 'create_milestone',
     description:
-      'Create a new initiative (large feature or deliverable) in a project. Tickets can be grouped under initiatives.',
+      'Create a new milestone (large feature or deliverable) in a project. Tickets can be grouped under milestones.',
     parameters: {
       type: 'object',
       properties: {
-        project_id: { type: 'string', description: 'The project to create the initiative in' },
-        title: { type: 'string', description: 'Initiative title' },
-        description: { type: 'string', description: 'What this initiative delivers' },
-        branch: { type: 'string', description: 'Optional git branch for this initiative. Tickets inherit it.' },
+        project_id: { type: 'string', description: 'The project to create the milestone in' },
+        title: { type: 'string', description: 'Milestone title' },
+        description: { type: 'string', description: 'What this milestone delivers' },
+        branch: { type: 'string', description: 'Optional git branch for this milestone. Tickets inherit it.' },
       },
       required: ['project_id', 'title'],
     },
   },
   {
-    name: 'update_initiative',
-    description: 'Update an initiative — title, description, branch, status, or brief.',
+    name: 'update_milestone',
+    description: 'Update a milestone — title, description, branch, status, or brief.',
     parameters: {
       type: 'object',
       properties: {
-        initiative_id: { type: 'string', description: 'The initiative ID to update' },
+        milestone_id: { type: 'string', description: 'The milestone ID to update' },
         title: { type: 'string', description: 'New title' },
         description: { type: 'string', description: 'New description' },
         branch: { type: 'string', description: 'New branch' },
         status: { type: 'string', enum: ['active', 'completed', 'archived'], description: 'New status' },
-        brief: { type: 'string', description: 'Full markdown content of the initiative brief' },
+        brief: { type: 'string', description: 'Full markdown content of the milestone brief' },
       },
-      required: ['initiative_id'],
+      required: ['milestone_id'],
+    },
+  },
+] as const;
+
+export const PAGE_CLIENT_TOOLS = [
+  {
+    name: 'create_page',
+    description:
+      'Create a new page in a project. Pages are markdown documents organized in a tree. Use for notes, specs, research, meeting notes, or any structured content.',
+    parameters: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'string', description: 'The project to create the page in.' },
+        title: { type: 'string', description: 'Page title.' },
+        parent_id: {
+          type: 'string',
+          description: 'Optional parent page ID. Omit for a root-level page.',
+        },
+        content: { type: 'string', description: 'Optional markdown body content.' },
+        icon: { type: 'string', description: 'Optional emoji icon for sidebar display.' },
+      },
+      required: ['project_id', 'title'],
+    },
+  },
+  {
+    name: 'update_page',
+    description:
+      'Update a page\'s title, content, icon, or structured properties. Only pass the fields you want to change.',
+    parameters: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string', description: 'The page ID to update.' },
+        title: { type: 'string', description: 'New title.' },
+        content: { type: 'string', description: 'New markdown body content (replaces the full body).' },
+        icon: { type: 'string', description: 'New emoji icon.' },
+        status: {
+          type: 'string',
+          enum: ['new', 'ready', 'doing', 'done', 'later'],
+          description: 'Workflow status.',
+        },
+        size: {
+          type: 'string',
+          enum: ['small', 'medium', 'large', 'xl'],
+          description: 'Effort sizing.',
+        },
+        outcome: { type: 'string', description: 'What does success look like? (1-2 sentences)' },
+        not_doing: { type: 'string', description: 'What is explicitly out of scope.' },
+        project_id: { type: 'string', description: 'Reassign to a different project.' },
+        milestone_id: { type: 'string', description: 'Assign to a milestone.' },
+      },
+      required: ['page_id'],
     },
   },
 ] as const;
@@ -318,14 +426,16 @@ export const INBOX_CLIENT_TOOLS = [
   {
     name: 'list_inbox',
     safe: true,
-    description: 'List all inbox items, optionally filtered by status.',
+    description:
+      'List inbox items, optionally filtered by status. Omit the status parameter to list the default inbox (items in "new" or "ready").',
     parameters: {
       type: 'object',
       properties: {
         status: {
           type: 'string',
-          enum: ['open', 'done', 'deferred'],
-          description: 'Filter by status. Omit to list all.',
+          enum: ['new', 'ready', 'doing', 'done', 'later'],
+          description:
+            'Filter by status. "new" = captured but unshaped, "ready" = shaped and ready to commit, "doing" = in progress, "done" = completed, "later" = deferred. Omit to list the default inbox (new + ready).',
         },
       },
     },
@@ -333,7 +443,7 @@ export const INBOX_CLIENT_TOOLS = [
   {
     name: 'create_inbox_item',
     description:
-      'Add a new item to the inbox. Use for capturing raw ideas, requests, emails, or any unstructured input.',
+      'Add a new item to the inbox. Use for capturing raw ideas, requests, emails, or any unstructured input. Item starts with status "new".',
     parameters: {
       type: 'object',
       properties: {
@@ -346,14 +456,20 @@ export const INBOX_CLIENT_TOOLS = [
   },
   {
     name: 'update_inbox_item',
-    description: 'Update an inbox item — edit title, description, add notes, change status, assign to a project.',
+    description:
+      'Update an inbox item — edit title, description, change status, assign to a project. Use this to shape an item (set status from "new" to "ready") or to park it ("later").',
     parameters: {
       type: 'object',
       properties: {
         item_id: { type: 'string', description: 'The inbox item ID to update' },
         title: { type: 'string', description: 'Updated title' },
-        description: { type: 'string', description: 'Updated description' },
-        status: { type: 'string', enum: ['open', 'done', 'deferred'], description: 'New status' },
+        description: { type: 'string', description: 'Updated description (overwrites the full body)' },
+        status: {
+          type: 'string',
+          enum: ['new', 'ready', 'doing', 'done', 'later'],
+          description:
+            'New status. "new" = captured, "ready" = shaped, "doing" = in progress, "done" = completed, "later" = parked.',
+        },
         project_id: { type: 'string', description: 'Assign to a project (or null to unassign)' },
       },
       required: ['item_id'],
@@ -450,36 +566,26 @@ type ClientToolDef = { name: string; safe?: boolean; [k: string]: unknown };
 export const extractSafeToolNames = (tools: readonly ClientToolDef[]): string[] =>
   tools.filter((t) => t.safe).map((t) => t.name);
 
-const buildProjectManagementInstructions = (opts?: {
+/**
+ * Build context identifiers for additional_instructions.
+ * Tool descriptions and workflow guidance are handled by the skill system and
+ * tool definitions (name, description, parameters) already passed via client_tools.
+ * We tell the agent which project/ticket it's operating in and which skill to use.
+ */
+const buildContextIdentifiers = (opts?: {
   projectId?: string;
   projectLabel?: string;
   ticketId?: string;
 }): string => {
   const lines: string[] = [
-    '## Project Management Tools',
-    'You have tools to help with project management when asked. You can use them to inspect your current context or assist the user with organizing work.',
-    '',
-    '- **Context**: Use get_ticket, list_tickets, search_tickets, read_brief, list_initiatives, read_initiative_brief, get_ticket_comments, get_ticket_history, and get_pipeline to understand the surrounding project state.',
-    '- **Comments**: Use add_ticket_comment to record decisions, findings, progress, blockers, or context that should persist across runs. Use get_ticket_comments to read previous notes. Comments are visible to humans and other agents.',
-    '- **Dependencies**: Tickets can block each other. Use update_ticket with add_blocked_by/remove_blocked_by to manage dependencies. get_ticket returns the blocked_by list.',
-    '- **Notifications**: Use notify to send a heads-up to the human without stopping the run. Use escalate only when you are truly blocked and need the run to stop.',
-    '- **Inbox**: Capture raw ideas, stakeholder requests, or vague asks with create_inbox_item. Graduate shaped items into tickets with inbox_to_tickets.',
-    '- **Initiatives**: Group related tickets under an initiative (a large feature or deliverable). Use create_initiative to start a new one. Initiatives can have a branch — tickets inherit it.',
-    '- **Brief**: Projects have a repo-level brief, initiatives have a deliverable-focused brief. Use read_brief / update_brief for projects, read_initiative_brief / update_initiative for initiative briefs.',
-    '- **Tickets**: Use create_ticket to decompose work into scoped units. Use list_tickets or search_tickets to see current state. Use start_ticket to dispatch an agent.',
+    'Use the `omni-projects-tickets` skill for guidance on project management workflows, tool usage patterns, and domain concepts (pipelines, gates, milestones, pages, inbox).',
   ];
-
   if (opts?.projectId) {
-    lines.push(
-      '',
-      `Current project: ${opts.projectLabel ?? opts.projectId} (ID: ${opts.projectId})`
-    );
+    lines.push(`Current project: ${opts.projectLabel ?? opts.projectId} (ID: ${opts.projectId})`);
   }
-
   if (opts?.ticketId) {
     lines.push(`Current ticket: ${opts.ticketId}`);
   }
-
   return lines.join('\n');
 };
 
@@ -490,7 +596,7 @@ export const buildAutopilotVariables = (opts?: {
   ticketId?: string;
 }): Record<string, unknown> => ({
   client_tools: [...TICKET_CLIENT_TOOLS, ...READONLY_CONTEXT_TOOLS],
-  additional_instructions: buildProjectManagementInstructions(opts),
+  additional_instructions: buildContextIdentifiers(opts),
 });
 
 /** Interactive sessions (Chat tab): all tools except code-deck-only tools. */
@@ -503,15 +609,16 @@ export const buildInteractiveVariables = (opts?: {
     ...TICKET_CLIENT_TOOLS,
     ...READONLY_CONTEXT_TOOLS,
     ...PROJECT_CLIENT_TOOLS,
-    ...INITIATIVE_CLIENT_TOOLS,
-    ...BRIEF_CLIENT_TOOLS,
+    ...MILESTONE_CLIENT_TOOLS,
+
+    ...PAGE_CLIENT_TOOLS,
     ...INBOX_CLIENT_TOOLS,
     ...UI_CLIENT_TOOLS,
   ];
   return {
     client_tools: allTools,
     safe_tool_overrides: { safe_tool_names: extractSafeToolNames(allTools) },
-    additional_instructions: buildProjectManagementInstructions(opts),
+    additional_instructions: buildContextIdentifiers(opts),
   };
 };
 
@@ -525,8 +632,9 @@ export const buildCodeVariables = (opts?: {
     ...TICKET_CLIENT_TOOLS,
     ...READONLY_CONTEXT_TOOLS,
     ...PROJECT_CLIENT_TOOLS,
-    ...INITIATIVE_CLIENT_TOOLS,
-    ...BRIEF_CLIENT_TOOLS,
+    ...MILESTONE_CLIENT_TOOLS,
+
+    ...PAGE_CLIENT_TOOLS,
     ...INBOX_CLIENT_TOOLS,
     ...UI_CLIENT_TOOLS,
     ...CODE_UI_TOOLS,
@@ -534,6 +642,6 @@ export const buildCodeVariables = (opts?: {
   return {
     client_tools: allTools,
     safe_tool_overrides: { safe_tool_names: extractSafeToolNames(allTools) },
-    additional_instructions: buildProjectManagementInstructions(opts),
+    additional_instructions: buildContextIdentifiers(opts),
   };
 };

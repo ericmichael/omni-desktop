@@ -1,6 +1,6 @@
 import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 import { memo, useCallback, useState } from 'react';
-import { Settings20Regular, WindowConsole20Regular, Cube20Regular, PlugConnected20Regular, Globe20Regular, Person20Regular } from '@fluentui/react-icons';
+import { Settings20Regular, WindowConsole20Regular, Cube20Regular, PlugConnected20Regular, Globe20Regular, Person20Regular, Lightbulb20Regular } from '@fluentui/react-icons';
 
 import { Subtitle2 } from '@/renderer/ds';
 
@@ -11,12 +11,14 @@ import { SettingsModalMcpTab } from '@/renderer/features/SettingsModal/SettingsM
 import { SettingsModalModelsTab } from '@/renderer/features/SettingsModal/SettingsModalModelsTab';
 import { SettingsModalNetworkTab } from '@/renderer/features/SettingsModal/SettingsModalNetworkTab';
 import { SettingsModalResetButton } from '@/renderer/features/SettingsModal/SettingsModalResetButton';
+import { SettingsModalSkillsTab } from '@/renderer/features/SettingsModal/SettingsModalSkillsTab';
 
 const TABS = [
   { value: 'General', label: 'General', icon: <Settings20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Environment', label: 'Environment', icon: <WindowConsole20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Models', label: 'Models', icon: <Cube20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'MCP', label: 'MCP Servers', icon: <PlugConnected20Regular style={{ width: 18, height: 18 }} /> },
+  { value: 'Skills', label: 'Skills', icon: <Lightbulb20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Network', label: 'Network', icon: <Globe20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Account', label: 'Account', icon: <Person20Regular style={{ width: 18, height: 18 }} /> },
 ] as const;
@@ -199,6 +201,7 @@ export const SettingsPage = memo(() => {
           {activeTab === 'Environment' && <SettingsModalEnvironmentTab />}
           {activeTab === 'Models' && <SettingsModalModelsTab />}
           {activeTab === 'MCP' && <SettingsModalMcpTab />}
+          {activeTab === 'Skills' && <SettingsModalSkillsTab />}
           {activeTab === 'Network' && <SettingsModalNetworkTab />}
           {activeTab === 'Account' && <SettingsModalAccountTab />}
           {activeTab === 'General' && (

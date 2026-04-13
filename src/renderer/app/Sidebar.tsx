@@ -10,12 +10,11 @@ import {
   Code24Regular,
   MoreHorizontal24Filled,
   Settings24Filled,
-  Flash24Filled,
   Rocket24Filled,
 } from '@fluentui/react-icons';
 
 import { OmniLogo } from '@/renderer/common/AsciiLogo';
-import { $inboxItems } from '@/renderer/features/Inbox/state';
+import { $activeInboxCount } from '@/renderer/features/Inbox/state';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { LayoutMode } from '@/shared/types';
@@ -28,8 +27,7 @@ const ALL_TABS: {
   alwaysVisible?: boolean;
   pinBottom?: boolean;
 }[] = [
-  { value: 'home', label: 'Now', icon: <Flash24Filled />, alwaysVisible: true },
-  { value: 'chat', label: 'Chat', icon: <Chat24Filled /> },
+  { value: 'chat', label: 'Chat', icon: <Chat24Filled />, alwaysVisible: true },
   { value: 'code', label: 'Code', icon: <Code24Regular /> },
   { value: 'projects', label: 'Projects', icon: <Rocket24Filled /> },
   { value: 'dashboards', label: 'Dashboards', icon: <DataBarVertical24Regular />, enterprise: true },
@@ -209,11 +207,7 @@ const useStyles = makeStyles({
 export const Sidebar = memo(() => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
-  const inboxItems = useStore($inboxItems);
-  const openInboxCount = useMemo(
-    () => Object.values(inboxItems).filter((i) => i.status === 'open').length,
-    [inboxItems]
-  );
+  const openInboxCount = useStore($activeInboxCount);
 
   const setMode = useCallback(
     (mode: LayoutMode) => () => persistedStoreApi.setKey('layoutMode', mode),

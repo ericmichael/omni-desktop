@@ -10,7 +10,6 @@ import { Chat } from '@/renderer/features/Chat/Chat';
 import { Code } from '@/renderer/features/Code/Code';
 import { $isConsoleOpen } from '@/renderer/features/Console/state';
 import { Dashboards } from '@/renderer/features/Dashboards/Dashboards';
-import { RightNow } from '@/renderer/features/RightNow/RightNow';
 import { SettingsPage } from '@/renderer/features/SettingsModal/SettingsPage';
 import { Tickets } from '@/renderer/features/Tickets/Tickets';
 import { OnboardingWizard } from '@/renderer/features/Onboarding/OnboardingWizard';
@@ -137,7 +136,6 @@ export const MainContent = memo(() => {
   }
 
   const panels: { key: LayoutMode; Component: React.ComponentType }[] = [
-    { key: 'home', Component: RightNow },
     { key: 'chat', Component: Chat },
     { key: 'code', Component: Code },
     { key: 'projects', Component: Tickets },

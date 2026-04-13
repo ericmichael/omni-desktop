@@ -8,8 +8,7 @@ import { openTicketInCode } from '@/renderer/services/navigation';
 import { isActivePhase } from '@/shared/ticket-phase';
 import type { Ticket, TicketPhase } from '@/shared/types';
 
-import { APPETITE_COLORS, APPETITE_LABELS } from '@/renderer/features/Inbox/shaping-constants';
-import { PHASE_COLORS, PHASE_LABELS, RESOLUTION_COLORS, RESOLUTION_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './ticket-constants';
+import { APPETITE_COLORS, APPETITE_LABELS, PHASE_COLORS, PHASE_LABELS, RESOLUTION_COLORS, RESOLUTION_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './ticket-constants';
 import { ticketApi } from './state';
 
 const canStart = (phase: TicketPhase | undefined) => !phase || !isActivePhase(phase);
@@ -138,11 +137,7 @@ export const KanbanCard = memo(
                 {APPETITE_LABELS[ticket.shaping.appetite]}
               </Badge>
             )}
-            {ticket.resolution && (
-              <Badge color={RESOLUTION_COLORS[ticket.resolution]}>
-                {RESOLUTION_LABELS[ticket.resolution]}
-              </Badge>
-            )}
+            {/* Resolution badge omitted — column placement already conveys resolved status. */}
             {phase && phase !== 'idle' && !ticket.resolution && (
               <Badge color={PHASE_COLORS[phase] ?? 'default'}>
                 {isActivePhase(phase) && <ArrowSync20Regular style={{ width: 16, height: 16 }} />}

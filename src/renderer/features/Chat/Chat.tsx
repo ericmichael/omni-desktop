@@ -1,8 +1,7 @@
-import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Desktop20Regular } from '@fluentui/react-icons';
-
 
 import { buildInteractiveVariables } from '@/lib/client-tools';
 import { OmniAgentsApp, OmniAgentsHostApp } from '@/renderer/omniagents-ui';
@@ -13,6 +12,7 @@ import { ChatShell } from '@/renderer/omniagents-ui/ChatShell';
 import { getGreeting } from '@/renderer/omniagents-ui/greeting';
 import { FloatingWidget } from '@/renderer/features/Omni/FloatingWidget';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
+import type { ProjectId } from '@/shared/types';
 
 import { $chatProcessStatus } from './state';
 import { useChatAutoLaunch } from './use-chat-auto-launch';
@@ -24,7 +24,81 @@ const useStyles = makeStyles({
   flex1Relative: { flex: '1 1 0', minHeight: 0, position: 'relative' },
   absoluteInsetZ0: { position: 'absolute', inset: 0, zIndex: 0 },
   absoluteInsetZ10: { position: 'absolute', inset: 0, zIndex: 10 },
+  projectSelect: {
+    position: 'absolute',
+    top: tokens.spacingVerticalS,
+    right: tokens.spacingHorizontalM,
+    zIndex: 20,
+    fontSize: tokens.fontSizeBase200,
+    backgroundColor: tokens.colorNeutralBackground1,
+    color: tokens.colorNeutralForeground2,
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    borderRadius: tokens.borderRadiusMedium,
+    paddingTop: '2px',
+    paddingBottom: '2px',
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    cursor: 'pointer',
+    outline: 'none',
+  },
 });
+
+/** Small project picker in the chat header area. */
+const ChatProjectPicker = memo(() => {
+  const styles = useStyles();
+  const store = useStore(persistedStoreApi.$atom);
+  const projects = store.projects;
+  const chatProjectId = store.chatProjectId ?? '';
+
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    persistedStoreApi.setKey('chatProjectId', value || null);
+  }, []);
+
+  if (projects.length === 0) return null;
+
+  return (
+    <select
+      className={styles.projectSelect}
+      value={chatProjectId}
+      onChange={handleChange}
+      aria-label="Chat project context"
+    >
+      <option value="">No project</option>
+      {projects.map((p) => (
+        <option key={p.id} value={p.id}>
+          {p.label}
+        </option>
+      ))}
+    </select>
+  );
+});
+ChatProjectPicker.displayName = 'ChatProjectPicker';
+
+/** Hook to get project context variables and tool handler for the selected chat project. */
+function useChatProjectContext() {
+  const store = useStore(persistedStoreApi.$atom);
+  const chatProjectId = store.chatProjectId ?? null;
+  const project = chatProjectId ? store.projects.find((p) => p.id === chatProjectId) : null;
+
+  const variables = useMemo(
+    () =>
+      buildInteractiveVariables(
+        project ? { projectId: project.id, projectLabel: project.label } : undefined
+      ),
+    [project]
+  );
+
+  const toolHandler = useMemo(
+    () =>
+      buildClientToolHandler(
+        project ? { projectId: project.id as ProjectId } : undefined
+      ),
+    [project]
+  );
+
+  return { variables, toolHandler };
+}
 
 /** Running view when sandbox is enabled — shows OmniAgentsApp with VNC floating widget. */
 const SandboxRunningView = memo(
@@ -35,6 +109,8 @@ const SandboxRunningView = memo(
     sandboxLabel,
     sessionId,
     onSessionChange,
+    variables,
+    onClientToolCall,
   }: {
     sandboxUrls: {
       uiUrl: string;
@@ -46,6 +122,8 @@ const SandboxRunningView = memo(
     sandboxLabel?: string;
     sessionId?: string;
     onSessionChange?: (sessionId: string | undefined) => void;
+    variables?: Record<string, unknown>;
+    onClientToolCall?: Parameters<typeof OmniAgentsApp>[0]['onClientToolCall'];
   }) => {
     const uiSrc = useMemo(() => {
       const url = new URL(sandboxUrls.uiUrl, window.location.origin);
@@ -66,7 +144,7 @@ const SandboxRunningView = memo(
       <div className={styles.flexColFullRelative}>
         <div className={styles.flex1Relative}>
           <div className={styles.fullSizeRelative}>
-            <OmniAgentsApp uiUrl={uiSrc} greeting={greeting} sandboxLabel={sandboxLabel} sessionId={sessionId} onSessionChange={onSessionChange} variables={buildInteractiveVariables()} onClientToolCall={buildClientToolHandler()} pendingPlan={pendingPlan} onPlanDecision={resolvePlanApproval} />
+            <OmniAgentsApp uiUrl={uiSrc} greeting={greeting} sandboxLabel={sandboxLabel} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables ?? buildInteractiveVariables()} onClientToolCall={onClientToolCall ?? buildClientToolHandler()} pendingPlan={pendingPlan} onPlanDecision={resolvePlanApproval} />
             {vncSrc && (
               <FloatingWidget
                 src={vncSrc}
@@ -96,6 +174,7 @@ export const Chat = memo(() => {
   const [greeting] = useState(getGreeting);
   const [runningMounted, setRunningMounted] = useState(false);
   const pendingPlan = useStore($pendingPlan);
+  const { variables, toolHandler } = useChatProjectContext();
 
   const theme = store.theme ?? 'teams-light';
   const sandboxBackend = store.sandboxBackend ?? 'none';
@@ -146,6 +225,7 @@ export const Chat = memo(() => {
 
     return (
       <div className={styles.fullSizeRelative}>
+        <ChatProjectPicker />
         {showShell && (
           <div className={styles.absoluteInsetZ0}>
             <ChatShell
@@ -165,7 +245,7 @@ export const Chat = memo(() => {
               if (el) handleRunningReady();
             }}
           >
-            <SandboxRunningView sandboxUrls={chatData} theme={theme} greeting={greeting} sandboxLabel={sandboxLabel} sessionId={chatSessionId} onSessionChange={handleSessionChange} />
+            <SandboxRunningView sandboxUrls={chatData} theme={theme} greeting={greeting} sandboxLabel={sandboxLabel} sessionId={chatSessionId} onSessionChange={handleSessionChange} variables={variables} onClientToolCall={toolHandler} />
           </div>
         )}
       </div>
@@ -175,9 +255,10 @@ export const Chat = memo(() => {
   // When sandbox is disabled, use OmniAgentsHostApp (like old Chat.tsx)
   return (
     <div className={styles.fullSize}>
+      <ChatProjectPicker />
       <OmniAgentsHostApp
-        variables={buildInteractiveVariables()}
-        onClientToolCall={buildClientToolHandler()}
+        variables={variables}
+        onClientToolCall={toolHandler}
         pendingPlan={pendingPlan}
         onPlanDecision={resolvePlanApproval}
         sessionId={chatSessionId}

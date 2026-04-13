@@ -11,16 +11,18 @@ const getDefaults = (): StoreData => ({
   optInToLauncherPrereleases: false,
   previewFeatures: false,
 
-  layoutMode: 'home',
+  layoutMode: 'chat',
   theme: 'teams-light',
   onboardingComplete: false,
   projects: [],
-  initiatives: [],
+  milestones: [],
+  pages: [],
+  inboxItems: [],
   tasks: [],
   tickets: [],
-  inboxItems: [],
   schemaVersion: 0,
   chatSessionId: null,
+  chatProjectId: null,
   codeTabs: [],
   activeCodeTabId: null,
   codeLayoutMode: 'deck',
@@ -126,8 +128,10 @@ const init = async () => {
   const lm = store.layoutMode as string;
   if (lm === 'work' || lm === 'desktop') {
     await persistedStoreApi.setKey('layoutMode', 'chat');
-  } else if (!['home', 'chat', 'code', 'projects', 'dashboards', 'settings'].includes(lm)) {
-    await persistedStoreApi.setKey('layoutMode', 'projects');
+  } else if (lm === 'home') {
+    await persistedStoreApi.setKey('layoutMode', 'chat');
+  } else if (!['chat', 'code', 'projects', 'dashboards', 'settings'].includes(lm)) {
+    await persistedStoreApi.setKey('layoutMode', 'chat');
   }
 
   // Apply default workspace dir if user has never picked one

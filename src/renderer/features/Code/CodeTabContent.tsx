@@ -164,7 +164,7 @@ export const CodeTabContent = memo(
       () => store.projects.find((p) => p.id === tab.projectId) ?? null,
       [store.projects, tab.projectId]
     );
-    const workspaceDir = tab.workspaceDir ?? (project?.source.kind === 'local' ? project.source.workspaceDir : null) ?? null;
+    const workspaceDir = tab.workspaceDir ?? (project?.source?.kind === 'local' ? project.source.workspaceDir : null) ?? null;
     const sandboxBackend = store.sandboxBackend ?? 'none';
     const sandboxLabel = useMemo(
       () => (sandboxBackend !== 'none' ? buildSandboxLabel(sandboxBackend, { custom: isCustomSandbox(project?.sandbox) }) : undefined),

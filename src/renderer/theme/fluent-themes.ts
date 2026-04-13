@@ -583,6 +583,11 @@ const { themes: fluentThemesBuilt, cssVars: themeCssVarsBuilt } = buildAll();
 
 export const fluentThemes: Record<OmniTheme, Theme> = fluentThemesBuilt;
 
+/** Whether a theme uses dark mode. */
+export function isThemeDark(theme: OmniTheme): boolean {
+  return themeDefs[theme].mode === 'dark';
+}
+
 /** Apply CSS custom properties for the given theme onto :root. */
 export function applyCssVars(theme: OmniTheme): void {
   const vars = themeCssVarsBuilt[theme];

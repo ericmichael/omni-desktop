@@ -3,13 +3,13 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
 import { CheckmarkCircle20Filled, Stop20Filled } from '@fluentui/react-icons';
 
-import { daysRemaining } from '@/lib/inbox-expiry';
 import { AnimatedDialog, Badge, Button, cn, DialogBody, DialogContent, DialogFooter, DialogHeader } from '@/renderer/ds';
-import { APPETITE_COLORS, APPETITE_LABELS } from '@/renderer/features/Inbox/shaping-constants';
-import { PHASE_COLORS, PHASE_LABELS } from '@/renderer/features/Tickets/ticket-constants';
+import { APPETITE_COLORS, APPETITE_LABELS, PHASE_COLORS, PHASE_LABELS } from '@/renderer/features/Tickets/ticket-constants';
 import { ticketApi } from '@/renderer/features/Tickets/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { isActivePhase } from '@/shared/ticket-phase';
+import { daysRemaining as inboxDaysRemaining } from '@/lib/inbox-expiry';
+import { $activeInbox } from '@/renderer/features/Inbox/state';
 import type { InboxItem, Ticket } from '@/shared/types';
 
 const useStyles = makeStyles({
@@ -177,9 +177,8 @@ const InboxStep = memo(({ items }: { items: InboxItem[] }) => {
   const styles = useStyles();
   const now = Date.now();
 
-  const handleNavigate = useCallback((itemId: string) => {
+  const handleNavigate = useCallback(() => {
     persistedStoreApi.setKey('layoutMode', 'projects');
-    ticketApi.goToInbox(itemId);
   }, []);
 
   if (items.length === 0) {
@@ -194,22 +193,22 @@ const InboxStep = memo(({ items }: { items: InboxItem[] }) => {
   return (
     <div className={styles.list}>
       <p className={styles.listHint}>
-        {items.length} item{items.length !== 1 ? 's' : ''} in your inbox. Shape and convert, or let them expire.
+        {items.length} item{items.length !== 1 ? 's' : ''} in your inbox. Shape and commit, or let them expire.
       </p>
       {items.map((item) => {
-        const days = daysRemaining(item, now);
+        const days = inboxDaysRemaining(item.createdAt, now);
         const isUrgent = days <= 1;
-        const isShaped = item.shaping != null;
+        const isShaped = item.status === 'shaped';
         return (
           <button
             key={item.id}
-            onClick={() => handleNavigate(item.id)}
+            onClick={handleNavigate}
             className={mergeClasses(styles.row, styles.rowBordered, styles.rowInteractive)}
           >
             <div className={styles.rowContent}>
-              <span className={styles.rowTitle}>{item.title}</span>
+              <span className={styles.rowTitle}>{item.title || 'Untitled'}</span>
               <span className={styles.rowSub}>
-                {isShaped ? 'Shaped — ready to convert' : 'Needs shaping'}
+                {isShaped ? 'Shaped — ready to commit' : 'Needs shaping'}
               </span>
             </div>
             <span className={mergeClasses(styles.expiryLabel, isUrgent ? styles.urgentText : styles.subtleText)}>
@@ -268,12 +267,15 @@ export const WeeklyReviewDialog = memo(({ open, onClose }: WeeklyReviewDialogPro
     [store.tickets]
   );
 
+  const activeInbox = useStore($activeInbox);
   const openInboxItems = useMemo(
-    () =>
-      store.inboxItems
-        .filter((i) => i.status === 'open')
-        .sort((a, b) => daysRemaining(a, Date.now()) - daysRemaining(b, Date.now())),
-    [store.inboxItems]
+    () => {
+      const now = Date.now();
+      return [...activeInbox].sort(
+        (a, b) => inboxDaysRemaining(a.createdAt, now) - inboxDaysRemaining(b.createdAt, now)
+      );
+    },
+    [activeInbox]
   );
 
   const handleNext = useCallback(() => {

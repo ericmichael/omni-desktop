@@ -2,9 +2,9 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 
 import { Button, Input, Select, Textarea } from '@/renderer/ds';
-import { initiativeApi } from '@/renderer/features/Initiatives/state';
+import { milestoneApi } from '@/renderer/features/Initiatives/state';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { GitRepoInfo, Initiative, ProjectId } from '@/shared/types';
+import type { GitRepoInfo, Milestone, ProjectId } from '@/shared/types';
 
 import { ticketApi } from './state';
 
@@ -35,19 +35,20 @@ const useStyles = makeStyles({
   },
 });
 
-export const InitiativeForm = memo(({
+export const MilestoneForm = memo(({
   projectId,
   onClose,
-  editInitiative,
+  editMilestone,
 }: {
   projectId: ProjectId;
   onClose: () => void;
-  editInitiative?: Initiative;
+  editMilestone?: Milestone;
 }) => {
   const styles = useStyles();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [branch, setBranch] = useState('');
+  const [dueDate, setDueDate] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [gitInfo, setGitInfo] = useState<GitRepoInfo | null>(null);
 
@@ -58,56 +59,60 @@ export const InitiativeForm = memo(({
 
   useEffect(() => {
     if (!project) return;
-    if (project.source.kind !== 'local') return;
+    if (project.source?.kind !== 'local') return;
     ticketApi.checkGitRepo(project.source.workspaceDir).then((info) => {
       setGitInfo(info);
     });
   }, [project]);
 
   useEffect(() => {
-    setTitle(editInitiative?.title ?? '');
-    setDescription(editInitiative?.description ?? '');
-    setBranch(editInitiative?.branch ?? '');
-  }, [editInitiative]);
+    setTitle(editMilestone?.title ?? '');
+    setDescription(editMilestone?.description ?? '');
+    setBranch(editMilestone?.branch ?? '');
+    setDueDate(editMilestone?.dueDate ? toInputDate(editMilestone.dueDate) : '');
+  }, [editMilestone]);
 
   const handleSubmit = useCallback(async () => {
     if (!title.trim() || isSubmitting) return;
     setIsSubmitting(true);
     try {
-      if (editInitiative) {
-        await initiativeApi.updateInitiative(editInitiative.id, {
+      const dueDateMs = fromInputDate(dueDate);
+      if (editMilestone) {
+        await milestoneApi.updateMilestone(editMilestone.id, {
           title: title.trim(),
           description: description.trim(),
           branch: gitInfo?.isGitRepo ? (branch || undefined) : undefined,
+          dueDate: dueDateMs,
         });
       } else {
-        await initiativeApi.addInitiative({
+        await milestoneApi.addMilestone({
           projectId,
           title: title.trim(),
           description: description.trim(),
           status: 'active',
           ...(gitInfo?.isGitRepo && branch ? { branch } : {}),
+          ...(dueDateMs !== undefined ? { dueDate: dueDateMs } : {}),
         });
       }
       onClose();
     } finally {
       setIsSubmitting(false);
     }
-  }, [title, description, branch, gitInfo, isSubmitting, projectId, onClose, editInitiative]);
+  }, [title, description, branch, dueDate, gitInfo, isSubmitting, projectId, onClose, editMilestone]);
 
   return (
     <div className={styles.root}>
       <Input
         value={title}
         onChange={(e) => setTitle(e.target.value)}
-        placeholder="Initiative title..."
+        placeholder="Milestone title..."
         className="w-full"
         autoFocus
       />
       <Textarea
         value={description}
         onChange={(e) => setDescription(e.target.value)}
-        placeholder="Description — what is this initiative delivering?"
+        placeholder="Description — what is this milestone delivering?"
         rows={2}
       />
       {gitInfo?.isGitRepo && (
@@ -127,9 +132,17 @@ export const InitiativeForm = memo(({
           </Select>
         </div>
       )}
+      <div className={styles.branchRow}>
+        <label className={styles.branchLabel}>Due date</label>
+        <Input
+          type="date"
+          value={dueDate}
+          onChange={(e) => setDueDate(e.target.value)}
+        />
+      </div>
       <div className={styles.actions}>
         <Button onClick={handleSubmit} isDisabled={!title.trim() || isSubmitting}>
-          {editInitiative ? 'Save Initiative' : 'Create Initiative'}
+          {editMilestone ? 'Save Milestone' : 'Create Milestone'}
         </Button>
         <Button variant="ghost" onClick={onClose}>
           Cancel
@@ -138,4 +151,21 @@ export const InitiativeForm = memo(({
     </div>
   );
 });
-InitiativeForm.displayName = 'InitiativeForm';
+MilestoneForm.displayName = 'MilestoneForm';
+
+/** Format an epoch-ms timestamp as a local YYYY-MM-DD string for <input type="date">. */
+function toInputDate(ms: number): string {
+  const d = new Date(ms);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Parse a YYYY-MM-DD input value into an epoch-ms at local midnight, or undefined. */
+function fromInputDate(value: string): number | undefined {
+  if (!value) return undefined;
+  const [y, m, d] = value.split('-').map(Number);
+  if (!y || !m || !d) return undefined;
+  return new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
+}

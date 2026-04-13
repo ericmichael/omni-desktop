@@ -10,6 +10,7 @@ import { createProjectManager } from '@/main/project-manager';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
 import { isEnterpriseBuild, mapSandboxProfiles, PLATFORM_URL, createPlatformClient } from '@/main/platform-mode';
 import { PlatformClient } from '@/main/platform-client';
+import { listSkills, readSkillContent, createSkill, removeSkill, writeSkillContent } from '@/main/skills';
 import {
   checkModelsConfigured,
   ensureDirectory,
@@ -239,6 +240,13 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
     await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, content, 'utf-8');
   });
+
+  // Skills API
+  ipc.handle('skills:list', () => listSkills(OMNI_CONFIG_DIR));
+  ipc.handle('skills:read', (_, skillPath) => readSkillContent(skillPath));
+  ipc.handle('skills:create', (_, name, description) => createSkill(OMNI_CONFIG_DIR, name, description));
+  ipc.handle('skills:remove', (_, skillPath) => removeSkill(skillPath));
+  ipc.handle('skills:write-content', (_, skillPath, content) => writeSkillContent(skillPath, content));
 
   // Platform handlers
 

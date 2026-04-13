@@ -6,13 +6,15 @@ import { projectsApi } from '@/renderer/features/Projects/state';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { isActivePhase } from '@/shared/ticket-phase';
-import { initiativeApi } from '@/renderer/features/Initiatives/state';
+import { milestoneApi } from '@/renderer/features/Initiatives/state';
+import { pageApi } from '@/renderer/features/Pages/state';
 import type {
   ArtifactFileContent,
   ArtifactFileEntry,
   ColumnId,
   DiffResponse,
-  InitiativeId,
+  MilestoneId,
+  PageId,
   Pipeline,
   ProjectId,
   SessionMessage,
@@ -30,7 +32,8 @@ import type {
 export const $tasks = map<Record<TaskId, Task>>({});
 
 /**
- * All tickets for the current project, keyed by ticket ID.
+ * Tickets keyed by ID. Accumulates across projects — the sidebar tree and
+ * the dashboard both need to render multiple projects' tickets at once.
  */
 export const $tickets = map<Record<TicketId, Ticket>>({});
 
@@ -40,19 +43,29 @@ export const $tickets = map<Record<TicketId, Ticket>>({});
 export const $pipeline = atom<Pipeline | null>(null);
 
 /**
- * Which initiative is selected for kanban filtering. 'all' shows all initiatives.
+ * Which milestone is selected for kanban filtering. 'all' shows all milestones.
  */
-export const $activeInitiativeId = atom<InitiativeId | 'all'>('all');
+export const $activeMilestoneId = atom<MilestoneId | 'all'>('all');
 
 /**
  * Which tickets view is active: dashboard, project detail, inbox, or ticket detail.
  */
-export const $ticketsView = atom<
+export type TicketsView =
   | { type: 'dashboard' }
   | { type: 'project'; projectId: ProjectId }
   | { type: 'inbox'; selectedItemId?: string }
   | { type: 'ticket'; ticketId: TicketId }
->({ type: 'dashboard' });
+  | { type: 'page'; pageId: PageId; projectId: ProjectId }
+  | { type: 'milestone'; milestoneId: MilestoneId; projectId: ProjectId }
+  | { type: 'board'; projectId: ProjectId };
+
+export const $ticketsView = atom<TicketsView>({ type: 'dashboard' });
+
+/**
+ * Captures the view the user was on before the current one, so detail views
+ * (PageView, MilestoneDetail, etc.) can offer a contextual back button.
+ */
+export const $previousTicketsView = atom<TicketsView | null>(null);
 
 /**
  * Supervisor chat messages, keyed by ticket ID.
@@ -115,7 +128,7 @@ export const ticketApi = {
 
   // Tickets
   addTicket: async (
-    ticket: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'columnId' | 'initiativeId'> & { initiativeId?: InitiativeId }
+    ticket: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'columnId'>
   ): Promise<Ticket> => {
     const created = await emitter.invoke('project:add-ticket', ticket);
     $tickets.setKey(created.id, created);
@@ -143,11 +156,17 @@ export const ticketApi = {
   },
   fetchTickets: async (projectId: ProjectId): Promise<void> => {
     const tickets = await emitter.invoke('project:get-tickets', projectId);
-    const newMap: Record<TicketId, Ticket> = {};
-    for (const ticket of tickets) {
-      newMap[ticket.id] = ticket;
+    // Merge: replace this project's tickets, keep others untouched so
+    // expanding another project in the tree doesn't wipe this one.
+    const current = $tickets.get();
+    const next: Record<TicketId, Ticket> = {};
+    for (const [id, ticket] of Object.entries(current)) {
+      if (ticket.projectId !== projectId) next[id] = ticket;
     }
-    $tickets.set(newMap);
+    for (const ticket of tickets) {
+      next[ticket.id] = ticket;
+    }
+    $tickets.set(next);
   },
   getTicketWorkspace: (ticketId: TicketId): Promise<string> => {
     return emitter.invoke('project:get-ticket-workspace', ticketId);
@@ -260,21 +279,64 @@ export const ticketApi = {
     return emitter.invoke('project:get-files-changed', ticketId);
   },
 
+  // Context files (replaces project.brief)
+  readContext: (projectId: ProjectId): Promise<string> => {
+    return emitter.invoke('project:read-context', projectId);
+  },
+  writeContext: (projectId: ProjectId, content: string): Promise<void> => {
+    return emitter.invoke('project:write-context', projectId, content);
+  },
+
+  // Project files
+  listProjectFiles: (projectId: ProjectId): Promise<ArtifactFileEntry[]> => {
+    return emitter.invoke('project:list-project-files', projectId);
+  },
+  getContextPreview: (projectId: ProjectId): Promise<string> => {
+    return emitter.invoke('project:get-context-preview', projectId);
+  },
+  openProjectFile: (projectId: ProjectId, relativePath: string): Promise<void> => {
+    return emitter.invoke('project:open-project-file', projectId, relativePath);
+  },
+
   // Navigation
   goToDashboard: (): void => {
+    $previousTicketsView.set($ticketsView.get());
     $ticketsView.set({ type: 'dashboard' });
   },
   goToInbox: (selectedItemId?: string): void => {
+    $previousTicketsView.set($ticketsView.get());
     $ticketsView.set({ type: 'inbox', selectedItemId });
   },
   goToProject: (projectId: ProjectId): void => {
+    $previousTicketsView.set($ticketsView.get());
     $ticketsView.set({ type: 'project', projectId });
-    $activeInitiativeId.set('all');
+    $activeMilestoneId.set('all');
     void ticketApi.fetchTickets(projectId);
     void ticketApi.getPipeline(projectId);
-    void initiativeApi.fetchInitiatives(projectId);
+    void milestoneApi.fetchMilestones(projectId);
+    void pageApi.fetchPages(projectId);
+  },
+  goToPage: (pageId: PageId, projectId: ProjectId): void => {
+    $previousTicketsView.set($ticketsView.get());
+    $ticketsView.set({ type: 'page', pageId, projectId });
+    void pageApi.fetchPages(projectId);
+  },
+  goToMilestone: (milestoneId: MilestoneId, projectId: ProjectId): void => {
+    $previousTicketsView.set($ticketsView.get());
+    $ticketsView.set({ type: 'milestone', milestoneId, projectId });
+    void ticketApi.fetchTickets(projectId);
+    void milestoneApi.fetchMilestones(projectId);
+  },
+  goToBoard: (projectId: ProjectId): void => {
+    $previousTicketsView.set($ticketsView.get());
+    $ticketsView.set({ type: 'board', projectId });
+    $activeMilestoneId.set('all');
+    void ticketApi.fetchTickets(projectId);
+    void ticketApi.getPipeline(projectId);
+    void milestoneApi.fetchMilestones(projectId);
   },
   goToTicket: (ticketId: TicketId): void => {
+    $previousTicketsView.set($ticketsView.get());
     $ticketsView.set({ type: 'ticket', ticketId });
     persistedStoreApi.setKey('activeTicketId', ticketId);
   },
@@ -355,7 +417,7 @@ const listen = () => {
     // 1. The current project view in the Projects tab
     const projectIds = new Set<ProjectId>();
     const view = $ticketsView.get();
-    if (view.type === 'project' && view.projectId) {
+    if (view.type === 'project' || view.type === 'page' || view.type === 'milestone' || view.type === 'board') {
       projectIds.add(view.projectId);
     }
 

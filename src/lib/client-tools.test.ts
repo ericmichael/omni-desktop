@@ -18,7 +18,7 @@ import {
   TICKET_CLIENT_TOOLS,
   READONLY_CONTEXT_TOOLS,
   PROJECT_CLIENT_TOOLS,
-  BRIEF_CLIENT_TOOLS,
+  PAGE_CLIENT_TOOLS,
 } from '@/lib/client-tools';
 import { TicketMachine } from '@/main/ticket-machine';
 import type { TicketMachineCallbacks, ClientFunctionResponder } from '@/main/ticket-machine';
@@ -613,7 +613,7 @@ describe('handleClientToolCall', () => {
 describe('client_tools shape', () => {
 
   it('every tool has name, description, and parameters', () => {
-    for (const tool of [...TICKET_CLIENT_TOOLS, ...READONLY_CONTEXT_TOOLS, ...PROJECT_CLIENT_TOOLS, ...BRIEF_CLIENT_TOOLS]) {
+    for (const tool of [...TICKET_CLIENT_TOOLS, ...READONLY_CONTEXT_TOOLS, ...PROJECT_CLIENT_TOOLS, ...PAGE_CLIENT_TOOLS]) {
       expect(tool.name).toBeTypeOf('string');
       expect(tool.description).toBeTypeOf('string');
       expect(tool.parameters).toBeDefined();
@@ -633,22 +633,26 @@ describe('client_tools shape', () => {
     expect(names).toContain('add_ticket_comment');
     // Read-only context tools
     expect(names).toContain('list_tickets');
-    expect(names).toContain('list_initiatives');
-    expect(names).toContain('read_brief');
-    expect(names).toContain('read_initiative_brief');
+    expect(names).toContain('list_milestones');
+    expect(names).toContain('read_milestone_brief');
     expect(names).toContain('get_ticket_comments');
     expect(names).toContain('search_tickets');
     expect(names).toContain('get_ticket_history');
     expect(names).toContain('get_pipeline');
+    // Read-only page tools
+    expect(names).toContain('list_pages');
+    expect(names).toContain('read_page');
     // Should NOT contain write tools
     expect(names).not.toContain('create_ticket');
     expect(names).not.toContain('update_ticket');
     expect(names).not.toContain('start_ticket');
     expect(names).not.toContain('stop_ticket');
-    expect(names).not.toContain('update_brief');
-    expect(names).not.toContain('create_initiative');
-    expect(names).toHaveLength(13);
-    expect(vars.additional_instructions).toBeDefined();
+    expect(names).not.toContain('create_milestone');
+    expect(names).not.toContain('create_page');
+    expect(names).not.toContain('update_page');
+    expect(names).toHaveLength(14);
+    // additional_instructions points to the skill — no tool descriptions restated
+    expect(vars.additional_instructions).toContain('omni-projects-tickets');
   });
 
   it('interactive variables contain all tools', () => {
@@ -662,9 +666,8 @@ describe('client_tools shape', () => {
     expect(names).toContain('add_ticket_comment');
     // Read-only context tools
     expect(names).toContain('list_tickets');
-    expect(names).toContain('list_initiatives');
-    expect(names).toContain('read_brief');
-    expect(names).toContain('read_initiative_brief');
+    expect(names).toContain('list_milestones');
+    expect(names).toContain('read_milestone_brief');
     expect(names).toContain('get_ticket_comments');
     expect(names).toContain('search_tickets');
     expect(names).toContain('get_ticket_history');
@@ -675,27 +678,31 @@ describe('client_tools shape', () => {
     expect(names).toContain('update_ticket');
     expect(names).toContain('start_ticket');
     expect(names).toContain('stop_ticket');
-    // Brief tools
-    expect(names).toContain('update_brief');
     // Inbox tools
     expect(names).toContain('list_inbox');
     expect(names).toContain('create_inbox_item');
     expect(names).toContain('update_inbox_item');
     expect(names).toContain('delete_inbox_item');
     expect(names).toContain('inbox_to_tickets');
-    // Initiative tools
-    expect(names).toContain('create_initiative');
-    expect(names).toContain('update_initiative');
+    // Milestone tools
+    expect(names).toContain('create_milestone');
+    expect(names).toContain('update_milestone');
     // UI tools
     expect(names).toContain('display_plan');
+    // Project tools
+    expect(names).toContain('create_project');
+    expect(names).toContain('update_project');
+    expect(names).toContain('delete_project');
+    // Page tools
+    expect(names).toContain('list_pages');
+    expect(names).toContain('read_page');
+    expect(names).toContain('create_page');
+    expect(names).toContain('update_page');
     // Code-only tools should NOT be in interactive
     expect(names).not.toContain('open_preview');
-    expect(names).toHaveLength(27);
-    // Should include additional_instructions with project management guidance
-    expect(vars.additional_instructions).toContain('Inbox');
-    expect(vars.additional_instructions).toContain('Brief');
-    expect(vars.additional_instructions).toContain('Tickets');
-    expect(vars.additional_instructions).toContain('Initiatives');
+    expect(names).toHaveLength(32);
+    // Points to skill, no tool descriptions restated
+    expect(vars.additional_instructions).toContain('omni-projects-tickets');
   });
 
   it('code variables include code-deck-only tools', () => {
@@ -703,7 +710,7 @@ describe('client_tools shape', () => {
     const names = vars.client_tools.map((t) => t.name);
     expect(names).toContain('open_preview');
     expect(names).toContain('display_plan');
-    expect(names).toHaveLength(28);
+    expect(names).toHaveLength(33);
   });
 
   it('interactive variables include safe_tool_overrides for read-only tools', () => {
@@ -712,14 +719,15 @@ describe('client_tools shape', () => {
     // Read-only tools should be safe
     expect(safeNames).toContain('get_ticket');
     expect(safeNames).toContain('list_tickets');
-    expect(safeNames).toContain('list_initiatives');
-    expect(safeNames).toContain('read_brief');
-    expect(safeNames).toContain('read_initiative_brief');
+    expect(safeNames).toContain('list_milestones');
+    expect(safeNames).toContain('read_milestone_brief');
     expect(safeNames).toContain('get_ticket_comments');
     expect(safeNames).toContain('search_tickets');
     expect(safeNames).toContain('get_ticket_history');
     expect(safeNames).toContain('get_pipeline');
     expect(safeNames).toContain('list_projects');
+    expect(safeNames).toContain('list_pages');
+    expect(safeNames).toContain('read_page');
     expect(safeNames).toContain('list_inbox');
     expect(safeNames).toContain('display_plan');
     // Code-only tools not present
@@ -727,11 +735,15 @@ describe('client_tools shape', () => {
     // Write tools should NOT be safe
     expect(safeNames).not.toContain('move_ticket');
     expect(safeNames).not.toContain('escalate');
+    expect(safeNames).not.toContain('create_project');
+    expect(safeNames).not.toContain('update_project');
+    expect(safeNames).not.toContain('delete_project');
     expect(safeNames).not.toContain('create_ticket');
     expect(safeNames).not.toContain('update_ticket');
     expect(safeNames).not.toContain('start_ticket');
     expect(safeNames).not.toContain('stop_ticket');
-    expect(safeNames).not.toContain('update_brief');
+    expect(safeNames).not.toContain('create_page');
+    expect(safeNames).not.toContain('update_page');
     expect(safeNames).not.toContain('create_inbox_item');
     expect(safeNames).not.toContain('delete_inbox_item');
   });
@@ -743,13 +755,19 @@ describe('client_tools shape', () => {
     expect(safeNames).toContain('display_plan');
   });
 
-  it('interactive variables include project and ticket context when provided', () => {
+  it('variables include context identifiers when provided', () => {
     const vars = buildInteractiveVariables({ projectId: 'proj-1', projectLabel: 'My Project', ticketId: 'tkt-1' }) as {
       additional_instructions: string;
     };
     expect(vars.additional_instructions).toContain('My Project');
     expect(vars.additional_instructions).toContain('proj-1');
     expect(vars.additional_instructions).toContain('tkt-1');
+
+    const autopilotVars = buildAutopilotVariables({ projectId: 'proj-1', projectLabel: 'My Project', ticketId: 'tkt-1' }) as {
+      additional_instructions: string;
+    };
+    expect(autopilotVars.additional_instructions).toContain('My Project');
+    expect(autopilotVars.additional_instructions).toContain('tkt-1');
   });
 
   it('extractSafeToolNames returns only tools with safe: true', () => {

@@ -1,11 +1,50 @@
 import { getContainerArtifactsDir } from '@/lib/artifacts';
 import type { Pipeline, Project, Ticket } from '@/shared/types';
 
+export type SupervisorContext = {
+  /** First ~500 chars of the project's root page content. */
+  projectBrief?: string;
+  /** Recent ticket comments (most recent first, max 5). */
+  recentComments?: { author: string; content: string }[];
+  /** Titles of blocking tickets that are not yet completed. */
+  blockerTitles?: string[];
+};
+
+/** Render optional context sections (project brief, comments, blockers). */
+const buildContextSection = (ctx?: SupervisorContext): string => {
+  if (!ctx) return '';
+  const parts: string[] = [];
+
+  if (ctx.projectBrief) {
+    parts.push(`\n\n## Project Brief (preview)\n${ctx.projectBrief}`);
+  }
+
+  if (ctx.blockerTitles && ctx.blockerTitles.length > 0) {
+    parts.push(
+      `\n\n## Blockers\nThis ticket is blocked by:\n${ctx.blockerTitles.map((t) => `- ${t}`).join('\n')}\nCheck whether these are resolved before starting work. If still blocked, escalate.`
+    );
+  }
+
+  if (ctx.recentComments && ctx.recentComments.length > 0) {
+    const formatted = ctx.recentComments
+      .map((c) => `[${c.author}]: ${c.content}`)
+      .join('\n\n');
+    parts.push(`\n\n## Recent Comments\n${formatted}`);
+  }
+
+  return parts.join('');
+};
+
 /**
  * Build the system prompt for a supervisor agent session.
  * Single prompt replaces all per-column prompt templates.
  */
-export const buildSupervisorPrompt = (ticket: Ticket, project: Project, pipeline: Pipeline): string => {
+export const buildSupervisorPrompt = (
+  ticket: Ticket,
+  project: Project,
+  pipeline: Pipeline,
+  context?: SupervisorContext
+): string => {
   const artifactsDir = getContainerArtifactsDir(ticket.id);
   const currentColumn = pipeline.columns.find((c) => c.id === ticket.columnId);
   const columnLabel = currentColumn?.label ?? ticket.columnId;
@@ -33,25 +72,11 @@ Current Column: ${columnLabel}
 ## Pipeline
 ${columnNames}
 
-## Tools
-
-You have project management tools available via the client tool system. Key tools:
-
-- **get_ticket** — Read any ticket's state (pass ticket_id, or omit for current ticket). Includes comments, run history, blockers, branch info.
-- **move_ticket** — Advance this ticket to the next pipeline column when work is complete.
-- **escalate** — Stop the run and notify the human. Only use when truly blocked.
-- **notify** — Send a heads-up to the human without stopping the run.
-- **add_ticket_comment** — Record decisions, findings, progress, or blockers. Comments persist across runs.
-- **list_tickets** — See sibling tickets in the same project for context and dependencies.
-- **search_tickets** — Search across tickets by keyword to find related work or check for duplicates.
-- **get_ticket_comments** — Read another ticket's comments.
-- **get_ticket_history** — See how many times a ticket has been attempted and why previous runs ended.
-- **get_pipeline** — Understand the pipeline columns, their meaning, and gate status.
-- **list_initiatives** / **read_brief** / **read_initiative_brief** — Read project and initiative context.
-
-Do not edit any YAML files or configuration files to manage ticket state — use tools instead.
-
 When your work for the current column is complete, use \`move_ticket\` to advance the ticket to the next column.
+Do not edit YAML files or configuration files to manage ticket state — use your project management tools instead.
+
+## Skills
+Use the \`omni-projects-tickets\` skill for guidance on project management workflows, tool usage patterns, and domain concepts (pipelines, gates, milestones, pages, inbox). Consult its references when you need to understand how tools work together or what the correct workflow is.
 
 ## Artifacts Directory
 Persistent artifacts directory: ${artifactsDir}
@@ -63,5 +88,5 @@ Use this for progress notes, research, scratch work, or any files that should pe
 2. **Plan** — Create a concrete plan with testable steps.
 3. **Execute** — Use \`spawn_worker\` to delegate implementation tasks. Give each worker a clear goal, scope, context, boundaries, and acceptance criteria.
 4. **Verify** — Run tests, check linting, review changes.
-5. **Advance** — When work for the current column is complete, use \`move_ticket\` to advance the ticket.`;
+5. **Advance** — When work for the current column is complete, use \`move_ticket\` to advance the ticket.${buildContextSection(context)}`;
 };

@@ -150,7 +150,7 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, dragHandleProps,
   const [editBranch, setEditBranch] = useState('');
 
   useEffect(() => {
-    if (project?.source.kind !== 'local') {
+    if (project?.source?.kind !== 'local') {
       setGitInfo(null);
       return;
     }

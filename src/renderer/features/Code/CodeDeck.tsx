@@ -313,7 +313,6 @@ const CodeDeckHeader = memo(
                   Switch to {layoutMode === 'deck' ? 'Focus' : 'Deck'}
                 </MenuItem>
                 <MenuDivider />
-                <MenuItem onClick={() => persistedStoreApi.setKey('layoutMode', 'home')}>Now</MenuItem>
                 <MenuItem onClick={() => persistedStoreApi.setKey('layoutMode', 'chat')}>Chat</MenuItem>
                 <MenuItem onClick={() => persistedStoreApi.setKey('layoutMode', 'projects')}>Projects</MenuItem>
                 <MenuDivider />
@@ -741,7 +740,7 @@ export const CodeDeck = memo(() => {
   const projectMap = useMemo(() => {
     const map = new Map<string, { label: string; workspaceDir: string | undefined }>();
     for (const p of store.projects) {
-      map.set(p.id, { label: p.label, workspaceDir: p.source.kind === 'local' ? p.source.workspaceDir : undefined });
+      map.set(p.id, { label: p.label, workspaceDir: p.source?.kind === 'local' ? p.source.workspaceDir : undefined });
     }
     return map;
   }, [store.projects]);
@@ -902,8 +901,8 @@ export const CodeDeck = memo(() => {
         return undefined;
       }
 
-      const initiative = store.initiatives.find((item) => item.id === ticket.initiativeId);
-      const effectiveBranch = ticket.branch ?? initiative?.branch;
+      const milestone = store.milestones.find((item) => item.id === ticket.milestoneId);
+      const effectiveBranch = ticket.branch ?? milestone?.branch;
       const projectWorkspaceDir = tab.projectId ? projectMap.get(tab.projectId)?.workspaceDir : undefined;
       const isIsolatedWorkspace = !!tab.workspaceDir && !!projectWorkspaceDir && tab.workspaceDir !== projectWorkspaceDir;
 
@@ -916,11 +915,11 @@ export const CodeDeck = memo(() => {
           <BranchFork20Regular style={{ width: 10, height: 10 }} />
           {effectiveBranch ?? 'Isolated workspace'}
           {isIsolatedWorkspace ? ' · isolated' : ''}
-          {!ticket.branch && initiative?.branch ? ' · inherited' : ''}
+          {!ticket.branch && milestone?.branch ? ' · inherited' : ''}
         </span>
       );
     },
-    [projectMap, store.initiatives, store.tickets]
+    [projectMap, store.milestones, store.tickets]
   );
 
   return (
@@ -989,7 +988,6 @@ export const CodeDeck = memo(() => {
                       <MenuList>
                         <MenuItem onClick={() => handleLayoutMode('deck')}>Switch to Deck</MenuItem>
                         <MenuDivider />
-                        <MenuItem onClick={() => persistedStoreApi.setKey('layoutMode', 'home')}>Now</MenuItem>
                         <MenuItem onClick={() => persistedStoreApi.setKey('layoutMode', 'chat')}>Chat</MenuItem>
                         <MenuItem onClick={() => persistedStoreApi.setKey('layoutMode', 'projects')}>Projects</MenuItem>
                         <MenuDivider />

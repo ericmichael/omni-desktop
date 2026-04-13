@@ -3,11 +3,11 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 
 import { Button, Input, Select, Textarea } from '@/renderer/ds';
-import { $initiatives } from '@/renderer/features/Initiatives/state';
+import { $milestones } from '@/renderer/features/Initiatives/state';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { GitRepoInfo, InitiativeId, ProjectId, TicketPriority } from '@/shared/types';
+import type { GitRepoInfo, MilestoneId, ProjectId, TicketPriority } from '@/shared/types';
 
-import { $activeInitiativeId, $tickets, ticketApi } from './state';
+import { $activeMilestoneId, $tickets, ticketApi } from './state';
 
 const useStyles = makeStyles({
   root: {
@@ -54,18 +54,19 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
 
   const store = useStore(persistedStoreApi.$atom);
   const project = useMemo(() => store.projects.find((p) => p.id === projectId), [store.projects, projectId]);
+  const projectHasRepo = project?.source != null;
 
-  const initiatives = useStore($initiatives);
-  const activeInitiativeId = useStore($activeInitiativeId);
-  const projectInitiatives = useMemo(
-    () => Object.values(initiatives).filter((i) => i.projectId === projectId),
-    [initiatives, projectId]
+  const milestones = useStore($milestones);
+  const activeMilestoneId = useStore($activeMilestoneId);
+  const projectMilestones = useMemo(
+    () => Object.values(milestones).filter((i) => i.projectId === projectId),
+    [milestones, projectId]
   );
-  const defaultInitiativeId = useMemo(
-    () => (activeInitiativeId !== 'all' ? activeInitiativeId : projectInitiatives.find((i) => i.isDefault)?.id ?? ''),
-    [activeInitiativeId, projectInitiatives]
+  const defaultMilestoneId = useMemo(
+    () => (activeMilestoneId !== 'all' ? activeMilestoneId : projectMilestones[0]?.id ?? ''),
+    [activeMilestoneId, projectMilestones]
   );
-  const [initiativeId, setInitiativeId] = useState<InitiativeId>(defaultInitiativeId);
+  const [milestoneId, setMilestoneId] = useState<MilestoneId>(defaultMilestoneId);
 
   const tickets = useStore($tickets);
   const projectTickets = useMemo(
@@ -73,9 +74,10 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
     [tickets, projectId]
   );
 
+  // Only fetch git info when project has a local repo
   useEffect(() => {
     if (!project) return;
-    if (project.source.kind !== 'local') return;
+    if (project.source?.kind !== 'local') return;
     ticketApi.checkGitRepo(project.source.workspaceDir).then((info) => {
       setGitInfo(info);
       if (info.isGitRepo) {
@@ -109,7 +111,7 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
     try {
       await ticketApi.addTicket({
         projectId,
-        initiativeId: initiativeId || undefined,
+        milestoneId: milestoneId || undefined,
         title: title.trim(),
         description: description.trim(),
         priority,
@@ -124,7 +126,7 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
     } finally {
       setIsSubmitting(false);
     }
-  }, [title, description, priority, blockedBy, branch, gitInfo, isSubmitting, projectId, onClose]);
+  }, [title, description, priority, blockedBy, branch, gitInfo, isSubmitting, projectId, milestoneId, onClose]);
 
   return (
     <div className={styles.root}>
@@ -141,15 +143,15 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
         rows={2}
       />
       <div className={styles.fieldRow}>
-        {projectInitiatives.length > 1 && (
+        {projectMilestones.length > 1 && (
           <div className={styles.fieldGroup}>
-            <label className={styles.fieldLabel}>Initiative</label>
+            <label className={styles.fieldLabel}>Milestone</label>
             <Select
-              value={initiativeId}
-              onChange={(e) => setInitiativeId(e.target.value)}
+              value={milestoneId}
+              onChange={(e) => setMilestoneId(e.target.value)}
               size="sm"
             >
-              {projectInitiatives.map((i) => (
+              {projectMilestones.map((i) => (
                 <option key={i.id} value={i.id}>
                   {i.title}
                 </option>
@@ -189,7 +191,7 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
           </div>
         )}
       </div>
-      {gitInfo?.isGitRepo && (
+      {projectHasRepo && gitInfo?.isGitRepo && (
         <div className={styles.fieldRow}>
           <div className={styles.fieldGroup}>
             <label className={styles.fieldLabel}>Branch</label>

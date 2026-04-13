@@ -4,11 +4,10 @@ import { Edit20Regular, Dismiss20Regular } from '@fluentui/react-icons';
 import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 
 import { Badge, Button, IconButton, SectionLabel, Select, Textarea } from '@/renderer/ds';
-import { $initiatives } from '@/renderer/features/Initiatives/state';
+import { $milestones } from '@/renderer/features/Initiatives/state';
 import type { Ticket, TicketPriority, TicketResolution } from '@/shared/types';
 
-import { APPETITE_COLORS, APPETITE_DESCRIPTIONS, APPETITE_LABELS } from '@/renderer/features/Inbox/shaping-constants';
-import { getColumnColors, RESOLUTION_COLORS, RESOLUTION_LABELS } from './ticket-constants';
+import { APPETITE_COLORS, APPETITE_DESCRIPTIONS, APPETITE_LABELS, getColumnColors, RESOLUTION_COLORS, RESOLUTION_LABELS } from './ticket-constants';
 import { $pipeline, $tickets, ticketApi } from './state';
 
 const useStyles = makeStyles({
@@ -145,7 +144,7 @@ export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
   const styles = useStyles();
   const tickets = useStore($tickets);
   const pipeline = useStore($pipeline);
-  const initiatives = useStore($initiatives);
+  const milestones = useStore($milestones);
   const [editingDescription, setEditingDescription] = useState(false);
   const [editDescription, setEditDescription] = useState('');
 
@@ -154,7 +153,7 @@ export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
     return pipeline.columns.find((c) => c.id === ticket.columnId);
   }, [ticket, pipeline]);
 
-  const initiative = ticket.initiativeId ? initiatives[ticket.initiativeId] : undefined;
+  const milestone = ticket.milestoneId ? milestones[ticket.milestoneId] : undefined;
 
   const blockerTickets = useMemo(() => {
     return ticket.blockedBy.flatMap((id) => {
@@ -254,8 +253,8 @@ export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
           {ticket.resolution && (
             <Badge color={RESOLUTION_COLORS[ticket.resolution]}>{RESOLUTION_LABELS[ticket.resolution]}</Badge>
           )}
-          {initiative && (
-            <Badge color="purple">{initiative.title}</Badge>
+          {milestone && (
+            <Badge color="purple" truncate>{milestone.title}</Badge>
           )}
         </div>
       </div>

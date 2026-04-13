@@ -1,27 +1,28 @@
 import {
   NavDrawer,
   NavDrawerBody,
-  NavItem,
   makeStyles,
   tokens,
   Subtitle2,
 } from '@fluentui/react-components';
-import type { OnNavItemSelectData } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { Add20Regular, ChevronDown12Regular, ChevronRight12Regular, MailInbox20Regular } from '@fluentui/react-icons';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { Add20Regular, ChevronDown12Regular, ChevronRight12Regular, Home16Regular, MailInbox16Regular } from '@fluentui/react-icons';
 
-import { Caption1, IconButton } from '@/renderer/ds';
-import { $inboxItems } from '@/renderer/features/Inbox/state';
-import { openTicketInCode } from '@/renderer/services/navigation';
+import { AnimatedDialog, Caption1, DialogBody, DialogContent, DialogHeader, IconButton, Tree, TreeItem, TreeItemLayout } from '@/renderer/ds';
+import { $activeInbox } from '@/renderer/features/Inbox/state';
+import { $milestones, milestoneApi } from '@/renderer/features/Initiatives/state';
+import { $pages, pageApi } from '@/renderer/features/Pages/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 
+import { MilestoneForm } from './MilestoneForm';
 import { ProjectForm } from './ProjectForm';
-import { $activeTickets, $ticketsView, ticketApi } from './state';
+import { SidebarTree } from './SidebarTree';
+import { $tickets, $ticketsView, ticketApi } from './state';
 
 const useStyles = makeStyles({
   drawer: {
-    width: '240px',
+    width: '260px',
     height: '100%',
   },
   header: {
@@ -44,7 +45,7 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalXS,
     paddingLeft: tokens.spacingHorizontalMNudge,
     paddingRight: tokens.spacingHorizontalS,
-    paddingTop: tokens.spacingVerticalM,
+    paddingTop: tokens.spacingVerticalXL,
     paddingBottom: tokens.spacingVerticalXS,
     cursor: 'pointer',
     userSelect: 'none',
@@ -62,7 +63,16 @@ const useStyles = makeStyles({
   sectionLabel: {
     flex: '1 1 0',
   },
-  navItemContent: {
+  /**
+   * Wrapper for the Home/Inbox mini-tree. Keeps it visually identical to
+   * the projects tree below so Fluent's TreeItem geometry — icon column,
+   * row height, hover/selection — lines up pixel-for-pixel.
+   */
+  pinnedTree: {
+    paddingTop: '2px',
+    paddingBottom: '2px',
+  },
+  pinnedLabelRow: {
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
@@ -84,9 +94,13 @@ const useStyles = makeStyles({
 
 /** Build a unique selectedValue from the current view state. */
 function viewToNavValue(view: ReturnType<typeof $ticketsView.get>): string | undefined {
+  if (view.type === 'dashboard') return 'home';
   if (view.type === 'inbox') return view.selectedItemId ? `inbox:${view.selectedItemId}` : 'inbox';
   if (view.type === 'project') return `project:${view.projectId}`;
   if (view.type === 'ticket') return `ticket:${view.ticketId}`;
+  if (view.type === 'page') return `page:${view.pageId}:${view.projectId}`;
+  if (view.type === 'milestone') return `milestone:${view.milestoneId}:${view.projectId}`;
+  if (view.type === 'board') return `board:${view.projectId}`;
   return undefined;
 }
 
@@ -109,29 +123,57 @@ SectionHeader.displayName = 'SectionHeader';
 export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void }) => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
-  const activeTickets = useStore($activeTickets);
   const view = useStore($ticketsView);
+  const pages = useStore($pages);
+  const milestones = useStore($milestones);
+  const tickets = useStore($tickets);
   const [formOpen, setFormOpen] = useState(false);
+  const [milestoneFormProjectId, setMilestoneFormProjectId] = useState<string | null>(null);
   const [projectsOpen, setProjectsOpen] = useState(true);
-  const [activeOpen, setActiveOpen] = useState(true);
 
   const projects = store.projects;
   const selectedValue = viewToNavValue(view);
 
   const handleOpenForm = useCallback(() => setFormOpen(true), []);
   const handleCloseForm = useCallback(() => setFormOpen(false), []);
+  const handleCreateMilestone = useCallback((projectId: string) => setMilestoneFormProjectId(projectId), []);
+  const handleCloseMilestoneForm = useCallback(() => setMilestoneFormProjectId(null), []);
   const toggleProjects = useCallback(() => setProjectsOpen((v) => !v), []);
-  const toggleActive = useCallback(() => setActiveOpen((v) => !v), []);
 
-  const handleNavSelect = useCallback(
-    (_e: unknown, data: OnNavItemSelectData) => {
-      const val = data.value as string;
-      if (val === 'inbox') {
-        ticketApi.goToInbox();
-      } else if (val.startsWith('inbox:')) {
-        ticketApi.goToInbox(val.slice(6));
+  // Fetch project data when expanding in the tree (without navigating)
+  const handleExpandProject = useCallback((projectId: string) => {
+    void pageApi.fetchPages(projectId);
+    void milestoneApi.fetchMilestones(projectId);
+    void ticketApi.fetchTickets(projectId);
+  }, []);
+
+  const handleGoHome = useCallback(() => {
+    ticketApi.goToDashboard();
+    onNavigate?.();
+  }, [onNavigate]);
+
+  const handleGoInbox = useCallback(() => {
+    ticketApi.goToInbox();
+    onNavigate?.();
+  }, [onNavigate]);
+
+  // Tree selection handler — parses the value prefix to navigate
+  const handleTreeSelect = useCallback(
+    (val: string) => {
+      if (val.startsWith('board:')) {
+        ticketApi.goToBoard(val.slice(6));
       } else if (val.startsWith('project:')) {
         ticketApi.goToProject(val.slice(8));
+      } else if (val.startsWith('page:')) {
+        const parts = val.split(':');
+        const pageId = parts[1]!;
+        const projectId = parts[2]!;
+        ticketApi.goToPage(pageId, projectId);
+      } else if (val.startsWith('milestone:')) {
+        const parts = val.split(':');
+        const milestoneId = parts[1]!;
+        const projectId = parts[2]!;
+        ticketApi.goToMilestone(milestoneId, projectId);
       } else if (val.startsWith('ticket:')) {
         ticketApi.goToTicket(val.slice(7));
       }
@@ -140,30 +182,10 @@ export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void })
     [onNavigate]
   );
 
-  // Keyboard shortcut: Alt+1–9 for active tickets
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-      const num = parseInt(e.key, 10);
-      if (num >= 1 && num <= 9) {
-        const entry = activeTickets[num - 1];
-        if (entry) {
-          e.preventDefault();
-          openTicketInCode(entry.ticket.id);
-        }
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTickets]);
-
-  const inboxItemsMap = useStore($inboxItems);
+  const activeInbox = useStore($activeInbox);
   const openInboxItems = useMemo(
-    () =>
-      Object.values(inboxItemsMap)
-        .filter((i) => i.status === 'open')
-        .sort((a, b) => b.createdAt - a.createdAt),
-    [inboxItemsMap]
+    () => [...activeInbox].sort((a, b) => b.createdAt - a.createdAt),
+    [activeInbox]
   );
 
   return (
@@ -171,7 +193,6 @@ export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void })
       type="inline"
       open
       selectedValue={selectedValue}
-      onNavItemSelect={handleNavSelect}
       className={styles.drawer}
       size="small"
     >
@@ -182,56 +203,53 @@ export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void })
       </div>
 
       <NavDrawerBody className={styles.body}>
-        {/* ── Pinned ── */}
-        <NavItem value="inbox" icon={<MailInbox20Regular />}>
-          <span className={styles.navItemContent}>
-            Inbox
-            {openInboxItems.length > 0 && <span className={styles.liveDot} />}
-          </span>
-        </NavItem>
+        {/* ── Pinned: Home + Inbox as tree leaves so they share exact
+              geometry with the projects tree below. ── */}
+        <Tree aria-label="Pinned" className={styles.pinnedTree}>
+          <TreeItem itemType="leaf" value="home" onClick={handleGoHome}>
+            <TreeItemLayout iconBefore={<Home16Regular />}>Home</TreeItemLayout>
+          </TreeItem>
+          <TreeItem itemType="leaf" value="inbox" onClick={handleGoInbox}>
+            <TreeItemLayout iconBefore={<MailInbox16Regular />}>
+              <span className={styles.pinnedLabelRow}>
+                Inbox
+                {openInboxItems.length > 0 && <span className={styles.liveDot} />}
+              </span>
+            </TreeItemLayout>
+          </TreeItem>
+        </Tree>
 
-        {/* ── Projects ── */}
+        {/* ── Projects Tree ── */}
         <SectionHeader label="Projects" open={projectsOpen} onToggle={toggleProjects} />
         {projectsOpen && (
           projects.length === 0 ? (
             <Caption1 className={styles.emptyHint}>No projects yet</Caption1>
           ) : (
-            projects.map((project) => (
-              <NavItem key={project.id} value={`project:${project.id}`}>
-                {project.label}
-              </NavItem>
-            ))
-          )
-        )}
-
-        {/* ── Active Tickets ── */}
-        <SectionHeader
-          label={`Active Tickets${activeTickets.length > 0 ? ` (${activeTickets.length})` : ''}`}
-          open={activeOpen}
-          onToggle={toggleActive}
-        />
-        {activeOpen && (
-          activeTickets.length === 0 ? (
-            <Caption1 className={styles.emptyHint}>No active tickets</Caption1>
-          ) : (
-            activeTickets.map((entry) => {
-              const { ticket, hasLiveTask } = entry;
-              const phase = ticket.phase;
-              const isRunning = phase != null && phase !== 'idle' && phase !== 'error' && phase !== 'completed';
-              return (
-                <NavItem key={ticket.id} value={`ticket:${ticket.id}`}>
-                  <span className={styles.navItemContent}>
-                    {ticket.title}
-                    {(isRunning || hasLiveTask) && <span className={styles.liveDot} />}
-                  </span>
-                </NavItem>
-              );
-            })
+            <SidebarTree
+              projects={projects}
+              pages={pages}
+              milestones={milestones}
+              tickets={tickets}
+              selectedValue={selectedValue}
+              onSelect={handleTreeSelect}
+              onExpandProject={handleExpandProject}
+              onCreateMilestone={handleCreateMilestone}
+            />
           )
         )}
       </NavDrawerBody>
 
       <ProjectForm open={formOpen} onClose={handleCloseForm} />
+      <AnimatedDialog open={milestoneFormProjectId != null} onClose={handleCloseMilestoneForm}>
+        <DialogContent>
+          <DialogHeader>New Milestone</DialogHeader>
+          <DialogBody>
+            {milestoneFormProjectId && (
+              <MilestoneForm projectId={milestoneFormProjectId} onClose={handleCloseMilestoneForm} />
+            )}
+          </DialogBody>
+        </DialogContent>
+      </AnimatedDialog>
     </NavDrawer>
   );
 });

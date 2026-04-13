@@ -28,6 +28,7 @@ import {
   getOmniConfigDir,
   getOmniRuntimeInfo,
   getOperatingSystem,
+  getProjectsDir,
   installCliToPath,
   isCliInstalledInPath,
   isDirectory,
@@ -227,6 +228,11 @@ app.on('ready', () => {
   });
 
   main.createWindow();
+
+  // Ensure workspace and projects directories exist on startup
+  void ensureDirectory(getDefaultWorkspaceDir())
+    .then(() => ensureDirectory(getProjectsDir()))
+    .catch((err) => console.warn('Failed to create workspace directories:', err));
 
   void (async () => {
     const { cleanupOrphanedContainers, pruneDockerResources } = await import('@/main/docker-orphan-cleanup');
@@ -444,5 +450,17 @@ main.ipc.handle('config:write-text-file', async (_, filePath, content) => {
   await mkdir(dirname(filePath), { recursive: true });
   await writeFile(filePath, content, 'utf-8');
 });
+
+//#endregion
+
+//#region Skills API
+
+import { listSkills, readSkillContent, createSkill, removeSkill, writeSkillContent } from '@/main/skills';
+
+main.ipc.handle('skills:list', () => listSkills(OMNI_CONFIG_DIR));
+main.ipc.handle('skills:read', (_, skillPath) => readSkillContent(skillPath));
+main.ipc.handle('skills:create', (_, name, description) => createSkill(OMNI_CONFIG_DIR, name, description));
+main.ipc.handle('skills:remove', (_, skillPath) => removeSkill(skillPath));
+main.ipc.handle('skills:write-content', (_, skillPath, content) => writeSkillContent(skillPath, content));
 
 //#endregion

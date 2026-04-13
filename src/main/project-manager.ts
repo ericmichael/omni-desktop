@@ -3,14 +3,20 @@ import { execFile } from 'child_process';
 import { ipcMain, shell } from 'electron';
 import type Store from 'electron-store';
 import fs from 'fs/promises';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { nanoid } from 'nanoid';
 import path from 'path';
 import { promisify } from 'util';
 
 import { buildAutopilotVariables, buildInteractiveVariables } from '@/lib/client-tools';
-import { isExpired, INBOX_SWEEP_INTERVAL_MS } from '@/lib/inbox-expiry';
+import { INBOX_SWEEP_INTERVAL_MS } from '@/lib/inbox-expiry';
+import { upgradeLegacyInbox } from '@/lib/inbox-migration';
 import { getArtifactsDir } from '@/lib/artifacts';
 import type { ProjectManagerDeps, IMachineFactory, ISandboxFactory, IWorkflowLoader } from '@/lib/project-manager-deps';
+import { computePagesToDelete } from '@/lib/page-cascade';
+import { getTemplate, type TemplateKey } from '@/lib/page-templates';
+import { InboxManager, type InboxManagerStore } from '@/main/inbox-manager';
+import { PageWatcherManager } from '@/lib/page-watcher';
 import { classifyRunEndReason, decideRunEndAction } from '@/lib/run-end';
 import { decideWorktreeAction } from '@/lib/worktree';
 import type { FailureClass } from '@/lib/run-end';
@@ -18,14 +24,15 @@ import { hasTemplateExpressions, renderTemplate } from '@/lib/template';
 import type { TemplateVariables } from '@/lib/template';
 import { getMimeType, isTextMime } from '@/lib/mime-types';
 import { buildSupervisorPrompt } from '@/main/supervisor-prompt';
+import type { SupervisorContext } from '@/main/supervisor-prompt';
 import { TicketMachine } from '@/main/ticket-machine';
 import type { ClientFunctionResponder } from '@/main/ticket-machine';
 import { WorkflowLoader } from '@/main/workflow-loader';
 import { AgentProcess } from '@/main/agent-process';
 import type { ProcessManager } from '@/main/process-manager';
 import { createPlatformClient } from '@/main/platform-mode';
-import { getOmniConfigDir, getWorktreesDir } from '@/main/util';
-import { DEFAULT_PIPELINE } from '@/shared/pipeline-defaults';
+import { ensureDirectory, getDefaultWorkspaceDir, getOmniConfigDir, getProjectDir, getWorktreesDir } from '@/main/util';
+import { DEFAULT_PIPELINE, SIMPLE_PIPELINE } from '@/shared/pipeline-defaults';
 import { isActivePhase } from '@/shared/ticket-phase';
 import type { TicketPhase } from '@/shared/ticket-phase';
 import { getLocalWorkspaceDir, requireLocalWorkspaceDir } from '@/shared/project-source';
@@ -37,9 +44,11 @@ import type {
   FileDiff,
   ColumnId,
   InboxItem,
-  InboxItemId,
-  Initiative,
-  InitiativeId,
+  InboxShaping,
+  Milestone,
+  MilestoneId,
+  Page,
+  PageId,
   Pipeline,
   Project,
   ProjectId,
@@ -405,6 +414,7 @@ export class ProjectManager {
   private ticketLocks = new Map<TicketId, Promise<void>>();
   private store: Store<StoreData>;
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
+  private pageWatcher: PageWatcherManager;
   /** Interval handle for periodic stall checks. */
   private stallCheckTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -423,6 +433,9 @@ export class ProjectManager {
 
   /** Optional ProcessManager — when set, supervisor reuses Code tab sandboxes. */
   private processManager?: ProcessManager;
+
+  /** Inbox lifecycle owner — CRUD, shape, defer, promote, sweep, gc. */
+  private inbox: InboxManager;
 
   constructor(
     arg: { store: Store<StoreData>; sendToWindow: ProjectManager['sendToWindow']; processManager?: ProcessManager },
@@ -453,17 +466,66 @@ export class ProjectManager {
     });
     this.sandboxFactory = deps?.sandboxFactory;
     this.machineFactory = deps?.machineFactory;
+    this.pageWatcher = new PageWatcherManager(
+      {
+        onExternalChange: (filePath, content) => {
+          const pageId = this.pageIdForFilePath(filePath);
+          if (!pageId) return;
+          this.sendToWindow('page:content-changed', pageId, content);
+        },
+        onExternalDelete: (filePath) => {
+          const pageId = this.pageIdForFilePath(filePath);
+          if (!pageId) return;
+          this.sendToWindow('page:content-deleted', pageId);
+        },
+      },
+      { debug: process.env['DEBUG_PAGE_WATCHER'] === '1' || process.env['NODE_ENV'] === 'development' }
+    );
+    const inboxStore: InboxManagerStore = {
+      getInboxItems: () => (this.store.get('inboxItems') ?? []) as InboxItem[],
+      setInboxItems: (items) => {
+        this.store.set('inboxItems', items);
+        this.sendToWindow('store:changed', this.store.store);
+      },
+      getTickets: () => this.getTickets(),
+      setTickets: (tickets) => this.setTickets(tickets),
+      getProjects: () => this.getProjects(),
+      setProjects: (projects) => this.setProjects(projects),
+    };
+    this.inbox = new InboxManager({
+      store: inboxStore,
+      newId: () => nanoid(),
+      now: () => Date.now(),
+    });
+
     this.startStallDetection();
     this.startAutoDispatch();
     this.startInboxSweep();
   }
+
+  /** Public accessor for IPC wiring. */
+  getInboxManager = (): InboxManager => this.inbox;
+
+  /** Reverse-lookup a pageId from its on-disk file path. */
+  private pageIdForFilePath = (filePath: string): PageId | null => {
+    const pages = this.getPages();
+    const projects = this.getProjects();
+    for (const page of pages) {
+      const project = projects.find((p) => p.id === page.projectId);
+      if (!project) continue;
+      if (this.getPageFilePath(project, page) === filePath) {
+        return page.id;
+      }
+    }
+    return null;
+  };
 
   // #region Machine factory
 
   private createMachine(ticketId: TicketId): TicketMachine {
     const callbacks = {
       onPhaseChange: (tid: TicketId, phase: TicketPhase) => {
-        this.updateTicket(tid, { phase });
+        this.updateTicket(tid, { phase, phaseChangedAt: Date.now() });
         this.sendToWindow('project:phase', tid, phase);
       },
       onMessage: (tid: TicketId, msg: SessionMessage) => {
@@ -744,7 +806,7 @@ export class ProjectManager {
         }
         const newTicket = this.addTicket({
           projectId,
-          initiativeId: (toolArgs.initiative_id as string) || undefined,
+          milestoneId: (toolArgs.milestone_id as string) || undefined,
           title,
           description: (toolArgs.description as string) ?? '',
           priority: (toolArgs.priority as TicketPriority) ?? 'medium',
@@ -805,53 +867,78 @@ export class ProjectManager {
         break;
       }
       // --- Read-only context tools (available to all sessions including autopilot) ---
-      case 'list_initiatives': {
+      case 'list_milestones': {
         const projectId = (toolArgs.project_id as string) ?? '';
         if (!projectId) {
           respond(true, { error: 'Missing project_id' });
           return;
         }
-        const items = this.getInitiativesByProject(projectId);
+        const items = this.getMilestonesByProject(projectId);
         respond(true, {
-          initiatives: items.map((i) => ({
+          milestones: items.map((i) => ({
             id: i.id,
             title: i.title,
             description: i.description || '',
             branch: i.branch || null,
             status: i.status,
-            is_default: i.isDefault ?? false,
             created_at: new Date(i.createdAt).toISOString(),
             updated_at: new Date(i.updatedAt).toISOString(),
           })),
         });
         break;
       }
-      case 'read_brief': {
+      case 'list_pages': {
         const projectId = (toolArgs.project_id as string) ?? '';
-        if (!projectId) {
-          respond(true, { error: 'Missing project_id' });
-          return;
+        if (!projectId) { respond(true, { error: 'Missing project_id' }); return; }
+        if (!this.getProjects().find((p) => p.id === projectId)) {
+          respond(true, { error: `Project not found: ${projectId}` }); return;
         }
-        const proj = this.getProjects().find((p) => p.id === projectId);
-        if (!proj) {
-          respond(true, { error: `Project not found: ${projectId}` });
-          return;
-        }
-        respond(true, { brief: proj.brief ?? '' });
+        const pages = this.getPages().filter((p) => p.projectId === projectId);
+        respond(true, {
+          pages: pages.map((p) => ({
+            id: p.id,
+            title: p.title,
+            icon: p.icon ?? null,
+            parent_id: p.parentId,
+            sort_order: p.sortOrder,
+            is_root: p.isRoot ?? false,
+            created_at: new Date(p.createdAt).toISOString(),
+            updated_at: new Date(p.updatedAt).toISOString(),
+          })),
+        });
         break;
       }
-      case 'read_initiative_brief': {
-        const initId = (toolArgs.initiative_id as string) ?? '';
-        if (!initId) {
-          respond(true, { error: 'Missing initiative_id' });
+      case 'read_page': {
+        const pageId = (toolArgs.page_id as string) ?? '';
+        if (!pageId) { respond(true, { error: 'Missing page_id' }); return; }
+        const page = this.getPages().find((p) => p.id === pageId);
+        if (!page) { respond(true, { error: `Page not found: ${pageId}` }); return; }
+        void this.readPageContent(pageId).then(
+          (content) =>
+            respond(true, {
+              id: page.id,
+              title: page.title,
+              icon: page.icon ?? null,
+              parent_id: page.parentId,
+              is_root: page.isRoot ?? false,
+              content,
+            }),
+          () => respond(true, { error: `Failed to read page content: ${pageId}` })
+        );
+        break;
+      }
+      case 'read_milestone_brief': {
+        const milestoneId = (toolArgs.milestone_id as string) ?? '';
+        if (!milestoneId) {
+          respond(true, { error: 'Missing milestone_id' });
           return;
         }
-        const init = this.getInitiatives().find((i) => i.id === initId);
-        if (!init) {
-          respond(true, { error: `Initiative not found: ${initId}` });
+        const ms = this.getMilestones().find((i) => i.id === milestoneId);
+        if (!ms) {
+          respond(true, { error: `Milestone not found: ${milestoneId}` });
           return;
         }
-        respond(true, { brief: init.brief ?? '' });
+        respond(true, { brief: ms.brief ?? '' });
         break;
       }
       case 'search_tickets': {
@@ -958,9 +1045,9 @@ export class ProjectManager {
       const ticket = this.getTicketById(ticketId);
       if (ticket) {
         const project = this.getProjects().find((p) => p.id === ticket.projectId);
-        if (project?.source.kind === 'local') {
-          void this.workflowLoader.runHook(ticket.projectId, 'after_run', project.source.workspaceDir);
-        } else if (project?.source.kind === 'git-remote') {
+        if (project?.source?.kind === 'local') {
+          void this.workflowLoader.runHook(ticket.projectId, 'after_run', project.source?.workspaceDir);
+        } else if (project?.source?.kind === 'git-remote') {
           const hookScript = this.workflowLoader.getConfig(ticket.projectId).hooks?.after_run;
           if (hookScript) {
             const entry = this.machines.get(ticketId);
@@ -1310,8 +1397,8 @@ export class ProjectManager {
         if (!project) return;
 
         let hookOk = true;
-        if (project.source.kind === 'local') {
-          hookOk = await this.workflowLoader.runHook(ticket.projectId, 'before_run', project.source.workspaceDir);
+        if (project.source?.kind === 'local') {
+          hookOk = await this.workflowLoader.runHook(ticket.projectId, 'before_run', project.source?.workspaceDir);
         } else {
           const hookScript = this.workflowLoader.getConfig(ticket.projectId).hooks?.before_run;
           if (hookScript) {
@@ -1390,17 +1477,33 @@ export class ProjectManager {
       ...input,
       id: nanoid(),
       createdAt: Date.now(),
-      brief: input.brief ?? DEFAULT_BRIEF_TEMPLATE,
     };
     const projects = this.getProjects();
     projects.push(project);
     this.setProjects(projects);
-    // Create the default "General" initiative for the new project
-    this.createDefaultInitiative(project.id);
-    // Eagerly load FLEET.md so pipeline is ready when the UI fetches it
-    if (project.source.kind === 'local') {
+    // Create root page for this project
+    const now = Date.now();
+    const rootPage: Page = {
+      id: nanoid(),
+      projectId: project.id,
+      parentId: null,
+      title: project.label,
+      sortOrder: 0,
+      isRoot: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const pages = this.getPages();
+    pages.push(rootPage);
+    this.setPages(pages);
+    // Create project directory and context.md
+    void this.ensureProjectDir(project);
+    // Eagerly load FLEET.md so the pipeline is ready when the UI fetches it.
+    // Personal / context-only projects (no source) have no FLEET.md and no
+    // workflow to load — they use SIMPLE_PIPELINE and run no hooks. See getPipeline().
+    if (project.source?.kind === 'local') {
       void this.workflowLoader.load(project.id, project.source.workspaceDir);
-    } else {
+    } else if (project.source?.kind === 'git-remote') {
       void this.workflowLoader.loadFromRemote(project.id, project.source.repoUrl, project.source.defaultBranch);
     }
     return project;
@@ -1429,8 +1532,113 @@ export class ProjectManager {
     this.setPersistedTasks(remainingTasks);
     const remainingTickets = this.getTickets().filter((t) => t.projectId !== id);
     this.setTickets(remainingTickets);
-    const remainingInitiatives = this.getInitiatives().filter((i) => i.projectId !== id);
-    this.setInitiatives(remainingInitiatives);
+    const remainingMilestones = this.getMilestones().filter((i) => i.projectId !== id);
+    this.setMilestones(remainingMilestones);
+    const remainingPages = this.getPages().filter((p) => p.projectId !== id);
+    this.setPages(remainingPages);
+  };
+
+  // #endregion
+
+  // #region Project directories & context files
+
+  /** Get the project directory path. Personal projects use workspace root; others use Projects/<slug>/. */
+  private getProjectDirPath = (project: Project): string => {
+    if (project.isPersonal) {
+      return getDefaultWorkspaceDir();
+    }
+    return getProjectDir(project.slug);
+  };
+
+  /** Ensure the project directory and context.md exist on disk. */
+  private ensureProjectDir = async (project: Project): Promise<void> => {
+    const dir = this.getProjectDirPath(project);
+    await ensureDirectory(dir);
+    const contextPath = path.join(dir, 'context.md');
+    try {
+      await fs.access(contextPath);
+    } catch {
+      // Write default context template
+      await fs.writeFile(contextPath, DEFAULT_BRIEF_TEMPLATE, 'utf-8');
+    }
+  };
+
+  /** Read context.md for a project. Returns empty string if file doesn't exist. */
+  readContext = async (projectId: ProjectId): Promise<string> => {
+    const project = this.getProjects().find((p) => p.id === projectId);
+    if (!project) return '';
+    const contextPath = path.join(this.getProjectDirPath(project), 'context.md');
+    try {
+      return await fs.readFile(contextPath, 'utf-8');
+    } catch {
+      return '';
+    }
+  };
+
+  /** Write context.md for a project. Creates the directory if needed. */
+  writeContext = async (projectId: ProjectId, content: string): Promise<void> => {
+    const project = this.getProjects().find((p) => p.id === projectId);
+    if (!project) return;
+    const dir = this.getProjectDirPath(project);
+    await ensureDirectory(dir);
+    await fs.writeFile(path.join(dir, 'context.md'), content, 'utf-8');
+  };
+
+  /** List files in the project folder (excluding context.md). */
+  listProjectFiles = async (projectId: ProjectId): Promise<ArtifactFileEntry[]> => {
+    const project = this.getProjects().find((p) => p.id === projectId);
+    if (!project) return [];
+    const dir = this.getProjectDirPath(project);
+
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      const results: ArtifactFileEntry[] = [];
+
+      for (const entry of entries) {
+        if (entry.name === 'context.md') continue;
+        const fullPath = path.join(dir, entry.name);
+        try {
+          const stat = await fs.stat(fullPath);
+          results.push({
+            relativePath: entry.name,
+            name: entry.name,
+            isDirectory: entry.isDirectory(),
+            size: stat.size,
+            modifiedAt: stat.mtimeMs,
+          });
+        } catch {
+          // Skip entries we can't stat
+        }
+      }
+
+      results.sort((a, b) => {
+        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      return results;
+    } catch {
+      return [];
+    }
+  };
+
+  /** Get first 200 chars of context.md for preview. */
+  getContextPreview = async (projectId: ProjectId): Promise<string> => {
+    const content = await this.readContext(projectId);
+    return content.slice(0, 200);
+  };
+
+  /** Open a file from the project folder in the OS default application. */
+  openProjectFile = async (projectId: ProjectId, relativePath: string): Promise<void> => {
+    const project = this.getProjects().find((p) => p.id === projectId);
+    if (!project) return;
+    const dir = this.getProjectDirPath(project);
+    const fullPath = path.resolve(dir, relativePath);
+    // Validate no directory traversal
+    if (!fullPath.startsWith(dir)) {
+      throw new Error('Path traversal not allowed');
+    }
+    await shell.openPath(fullPath);
   };
 
   // #endregion
@@ -1445,10 +1653,10 @@ export class ProjectManager {
     const project = this.getProjects().find((p) => p.id === projectId);
     if (!project) return;
 
-    if (project.source.kind === 'local') {
-      await this.workflowLoader.load(projectId, project.source.workspaceDir);
-    } else {
-      await this.workflowLoader.loadFromRemote(projectId, project.source.repoUrl, project.source.defaultBranch);
+    if (project.source?.kind === 'local') {
+      await this.workflowLoader.load(projectId, project.source?.workspaceDir);
+    } else if (project.source?.kind === 'git-remote') {
+      await this.workflowLoader.loadFromRemote(projectId, project.source?.repoUrl, project.source?.defaultBranch);
     }
     // Migrate any tickets with stale columnIds after first load
     const pipeline = this.getPipeline(projectId);
@@ -1467,7 +1675,9 @@ export class ProjectManager {
       };
     }
     const project = this.getProjects().find((p) => p.id === projectId);
-    return project?.pipeline ?? DEFAULT_PIPELINE;
+    if (project?.pipeline) return project.pipeline;
+    // Projects with a linked repo get the full dev pipeline; others get the simple one
+    return project?.source ? DEFAULT_PIPELINE : SIMPLE_PIPELINE;
   };
 
   private getColumn = (projectId: ProjectId, columnId: ColumnId) => {
@@ -1535,13 +1745,11 @@ export class ProjectManager {
   };
 
   addTicket = (
-    input: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'columnId' | 'initiativeId'> & { initiativeId?: InitiativeId }
+    input: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'columnId'> & { milestoneId?: MilestoneId }
   ): Ticket => {
     const now = Date.now();
-    const initiativeId = input.initiativeId ?? this.getDefaultInitiativeId(input.projectId);
     const ticket: Ticket = {
       ...input,
-      initiativeId,
       id: nanoid(),
       columnId: this.getFirstColumnId(input.projectId),
       createdAt: now,
@@ -1618,73 +1826,17 @@ export class ProjectManager {
 
   // #endregion
 
-  // #region Inbox (persisted in electron-store)
-
-  private getInboxItems = (): InboxItem[] => {
-    return this.store.get('inboxItems') ?? [];
-  };
-
-  private setInboxItems = (items: InboxItem[]): void => {
-    this.store.set('inboxItems', items);
-    this.sendToWindow('store:changed', this.store.store);
-  };
-
-  addInboxItem = (input: Omit<InboxItem, 'id' | 'createdAt' | 'updatedAt'>): InboxItem => {
-    const now = Date.now();
-    const item: InboxItem = { ...input, id: nanoid(), createdAt: now, updatedAt: now };
-    const items = this.getInboxItems();
-    items.push(item);
-    this.setInboxItems(items);
-    return item;
-  };
-
-  updateInboxItem = (id: InboxItemId, patch: Partial<Omit<InboxItem, 'id' | 'createdAt'>>): void => {
-    const items = this.getInboxItems();
-    const index = items.findIndex((i) => i.id === id);
-    if (index === -1) return;
-    items[index] = { ...items[index]!, ...patch, updatedAt: Date.now() };
-    this.setInboxItems(items);
-  };
-
-  removeInboxItem = (id: InboxItemId): void => {
-    const items = this.getInboxItems().filter((i) => i.id !== id);
-    this.setInboxItems(items);
-  };
-
-  getInboxItemList = (): InboxItem[] => {
-    return this.getInboxItems();
-  };
-
-  getIceboxItems = (): InboxItem[] => {
-    return this.getInboxItems().filter((i) => i.status === 'iceboxed');
-  };
-
-  restoreFromIcebox = (id: InboxItemId): void => {
-    const items = this.getInboxItems();
-    const index = items.findIndex((i) => i.id === id);
-    if (index === -1) return;
-    const now = Date.now();
-    items[index] = { ...items[index]!, status: 'open', createdAt: now, updatedAt: now };
-    this.setInboxItems(items);
-  };
+  // #region Inbox sweep (auto-expire stale inbox pages → later)
 
   /**
-   * Sweep expired inbox items — moves open items older than 7 days to iceboxed.
-   * Called on startup and on an hourly interval.
+   * Sweep stale inbox items — delegates to `InboxManager.sweepExpired()`.
+   * Called on startup and on an hourly interval. Keeps the inbox from
+   * turning into a graveyard of forgotten captures.
    */
   sweepExpiredInboxItems = (): void => {
-    const items = this.getInboxItems();
-    const now = Date.now();
-    let changed = false;
-    for (let i = 0; i < items.length; i++) {
-      if (isExpired(items[i]!, now)) {
-        items[i] = { ...items[i]!, status: 'iceboxed', updatedAt: now };
-        changed = true;
-      }
-    }
-    if (changed) {
-      this.setInboxItems(items);
-      console.log('[ProjectManager] Swept expired inbox items to icebox');
+    const changed = this.inbox.sweepExpired();
+    if (changed > 0) {
+      console.log(`[ProjectManager] Swept ${changed} expired inbox items → later`);
     }
   };
 
@@ -1693,129 +1845,215 @@ export class ProjectManager {
     this.inboxSweepTimer = setInterval(() => this.sweepExpiredInboxItems(), INBOX_SWEEP_INTERVAL_MS);
   };
 
-  shapeInboxItem = (id: InboxItemId, shaping: import('@/shared/types').ShapingData): void => {
-    const items = this.getInboxItems();
-    const index = items.findIndex((i) => i.id === id);
-    if (index === -1) return;
-    items[index] = { ...items[index]!, shaping, updatedAt: Date.now() };
-    this.setInboxItems(items);
-  };
-
-  /**
-   * Convert a shaped inbox item to a ticket. Requires shaping data to be present.
-   * Marks the inbox item as done and links the new ticket.
-   */
-  convertInboxToTicket = (id: InboxItemId, projectId: ProjectId): Ticket => {
-    const items = this.getInboxItems();
-    const item = items.find((i) => i.id === id);
-    if (!item) throw new Error(`Inbox item ${id} not found`);
-    if (!item.shaping) throw new Error('Cannot convert unshaped inbox item to ticket');
-
-    const ticket = this.addTicket({
-      title: item.title,
-      description: item.description ?? '',
-      priority: 'medium',
-      blockedBy: [],
-      projectId,
-      shaping: item.shaping,
-    });
-
-    this.updateInboxItem(id, {
-      status: 'done',
-      projectId,
-      linkedTicketIds: [...(item.linkedTicketIds ?? []), ticket.id],
-    });
-
-    return ticket;
-  };
-
   // #endregion
 
-  // #region Initiatives (persisted in electron-store)
+  // #region Milestones (persisted in electron-store)
 
-  private getInitiatives = (): Initiative[] => {
-    return this.store.get('initiatives') ?? [];
+  private getMilestones = (): Milestone[] => {
+    return this.store.get('milestones') ?? [];
   };
 
-  private setInitiatives = (items: Initiative[]): void => {
-    this.store.set('initiatives', items);
+  private setMilestones = (items: Milestone[]): void => {
+    this.store.set('milestones', items);
     this.sendToWindow('store:changed', this.store.store);
   };
 
-  /** Get the default initiative ID for a project. Creates one if missing (defensive). */
-  getDefaultInitiativeId = (projectId: ProjectId): InitiativeId => {
-    const initiatives = this.getInitiatives();
-    const defaultInit = initiatives.find((i) => i.projectId === projectId && i.isDefault);
-    if (defaultInit) return defaultInit.id;
-    // Defensive: create one if somehow missing
-    const created = this.createDefaultInitiative(projectId);
-    return created.id;
+  getMilestonesByProject = (projectId: ProjectId): Milestone[] => {
+    return this.getMilestones().filter((i) => i.projectId === projectId);
   };
 
-  /** Create the "General" default initiative for a project. */
-  private createDefaultInitiative = (projectId: ProjectId): Initiative => {
+  addMilestone = (input: Omit<Milestone, 'id' | 'createdAt' | 'updatedAt'>): Milestone => {
     const now = Date.now();
-    const initiative: Initiative = {
-      id: nanoid(),
-      projectId,
-      title: 'General',
-      description: 'Default initiative',
-      status: 'active',
-      isDefault: true,
-      createdAt: now,
-      updatedAt: now,
-    };
-    const initiatives = this.getInitiatives();
-    initiatives.push(initiative);
-    this.setInitiatives(initiatives);
-    return initiative;
+    const milestone: Milestone = { ...input, id: nanoid(), createdAt: now, updatedAt: now };
+    const milestones = this.getMilestones();
+    milestones.push(milestone);
+    this.setMilestones(milestones);
+    return milestone;
   };
 
-  getInitiativesByProject = (projectId: ProjectId): Initiative[] => {
-    return this.getInitiatives().filter((i) => i.projectId === projectId);
-  };
-
-  addInitiative = (input: Omit<Initiative, 'id' | 'createdAt' | 'updatedAt'>): Initiative => {
-    const now = Date.now();
-    const initiative: Initiative = { ...input, id: nanoid(), createdAt: now, updatedAt: now };
-    const initiatives = this.getInitiatives();
-    initiatives.push(initiative);
-    this.setInitiatives(initiatives);
-    return initiative;
-  };
-
-  updateInitiative = (id: InitiativeId, patch: Partial<Omit<Initiative, 'id' | 'projectId' | 'createdAt'>>): void => {
-    const initiatives = this.getInitiatives();
-    const index = initiatives.findIndex((i) => i.id === id);
+  updateMilestone = (id: MilestoneId, patch: Partial<Omit<Milestone, 'id' | 'projectId' | 'createdAt'>>): void => {
+    const milestones = this.getMilestones();
+    const index = milestones.findIndex((i) => i.id === id);
     if (index === -1) return;
-    initiatives[index] = { ...initiatives[index]!, ...patch, updatedAt: Date.now() };
-    this.setInitiatives(initiatives);
+    const prev = milestones[index]!;
+    const next = { ...prev, ...patch, updatedAt: Date.now() };
+    // Stamp completedAt on first transition into 'completed'; clear it on transition out.
+    if (patch.status === 'completed' && prev.status !== 'completed' && next.completedAt === undefined) {
+      next.completedAt = Date.now();
+    } else if (patch.status !== undefined && patch.status !== 'completed' && prev.status === 'completed') {
+      next.completedAt = undefined;
+    }
+    milestones[index] = next;
+    this.setMilestones(milestones);
   };
 
-  removeInitiative = (id: InitiativeId): void => {
-    const initiatives = this.getInitiatives();
-    const target = initiatives.find((i) => i.id === id);
-    if (!target || target.isDefault) return; // Cannot delete default initiative
-    // Reassign orphaned tickets to the default initiative
-    const defaultId = this.getDefaultInitiativeId(target.projectId);
+  removeMilestone = (id: MilestoneId): void => {
+    const milestones = this.getMilestones();
+    const target = milestones.find((i) => i.id === id);
+    if (!target) return;
+    // Clear milestoneId on orphaned tickets
     const tickets = this.getTickets();
     let ticketsChanged = false;
     for (const ticket of tickets) {
-      if (ticket.initiativeId === id) {
-        ticket.initiativeId = defaultId;
+      if (ticket.milestoneId === id) {
+        ticket.milestoneId = undefined;
         ticket.updatedAt = Date.now();
         ticketsChanged = true;
       }
     }
     if (ticketsChanged) this.setTickets(tickets);
-    this.setInitiatives(initiatives.filter((i) => i.id !== id));
+    this.setMilestones(milestones.filter((i) => i.id !== id));
   };
 
-  /** Resolve the effective branch for a ticket (ticket.branch ?? initiative.branch ?? undefined). */
+  // #region Pages
+
+  getPages = (): Page[] => {
+    return this.store.get('pages') ?? [];
+  };
+
+  private setPages = (items: Page[]): void => {
+    this.store.set('pages', items);
+    this.sendToWindow('store:changed', this.store.store);
+  };
+
+  getPagesByProject = (projectId: ProjectId): Page[] => {
+    return this.getPages().filter((p) => p.projectId === projectId);
+  };
+
+  addPage = (input: Omit<Page, 'id' | 'createdAt' | 'updatedAt'>, template?: TemplateKey): Page => {
+    const now = Date.now();
+    const page: Page = { ...input, id: nanoid(), createdAt: now, updatedAt: now };
+    const pages = this.getPages();
+    pages.push(page);
+    this.setPages(pages);
+    // Seed the .md file on disk. If a template is provided, its markdown is
+    // the initial body; otherwise the file is empty. The template note is
+    // recorded via notePendingWrite so the watcher's echo-suppression keeps
+    // working for the first external-change check.
+    const project = this.getProjects().find((p) => p.id === page.projectId);
+    if (project) {
+      const filePath = this.getPageFilePath(project, page);
+      const initialContent = getTemplate(template);
+      this.pageWatcher.notePendingWrite(filePath, initialContent);
+      void ensureDirectory(path.dirname(filePath)).then(() =>
+        fs.writeFile(filePath, initialContent, 'utf-8').catch(() => {})
+      );
+    }
+    return page;
+  };
+
+  updatePage = (id: PageId, patch: Partial<Omit<Page, 'id' | 'projectId' | 'createdAt'>>): void => {
+    const pages = this.getPages();
+    const index = pages.findIndex((p) => p.id === id);
+    if (index === -1) return;
+    pages[index] = { ...pages[index]!, ...patch, updatedAt: Date.now() };
+    this.setPages(pages);
+  };
+
+  removePage = (id: PageId): void => {
+    const pages = this.getPages();
+    const target = pages.find((p) => p.id === id);
+    if (!target) return;
+    const toDelete = computePagesToDelete(pages, id);
+    if (toDelete.size === 0) return; // target is root or not found
+
+    // Delete .md files from disk. Unsubscribe the watcher for each path BEFORE
+    // the rm so chokidar's unlink event doesn't reach the manager and emit a
+    // phantom `page:content-deleted` to any renderer that was watching.
+    const project = this.getProjects().find((p) => p.id === target.projectId);
+    if (project) {
+      for (const pageId of toDelete) {
+        const page = pages.find((p) => p.id === pageId);
+        if (page) {
+          const filePath = this.getPageFilePath(project, page);
+          this.pageWatcher.unsubscribe(filePath);
+          void fs.rm(filePath, { force: true }).catch(() => {});
+        }
+      }
+    }
+
+    this.setPages(pages.filter((p) => !toDelete.has(p.id)));
+  };
+
+  /** Get the file path for a page's markdown content. Root pages use context.md; others use pages/<id>.md. */
+  private getPageFilePath = (project: Project, page: Page): string => {
+    const dir = this.getProjectDirPath(project);
+    if (page.isRoot) {
+      return path.join(dir, 'context.md');
+    }
+    return path.join(dir, 'pages', `${page.id}.md`);
+  };
+
+  readPageContent = async (pageId: PageId): Promise<string> => {
+    const pages = this.getPages();
+    const page = pages.find((p) => p.id === pageId);
+    if (!page) return '';
+    const project = this.getProjects().find((p) => p.id === page.projectId);
+    if (!project) return '';
+    const filePath = this.getPageFilePath(project, page);
+    try {
+      return await fs.readFile(filePath, 'utf-8');
+    } catch {
+      return '';
+    }
+  };
+
+  writePageContent = async (pageId: PageId, content: string): Promise<void> => {
+    const pages = this.getPages();
+    const page = pages.find((p) => p.id === pageId);
+    if (!page) return;
+    const project = this.getProjects().find((p) => p.id === page.projectId);
+    if (!project) return;
+    const filePath = this.getPageFilePath(project, page);
+    await ensureDirectory(path.dirname(filePath));
+    // Record the pending write BEFORE touching disk so the resulting chokidar
+    // event is recognized as our own echo and suppressed.
+    this.pageWatcher.notePendingWrite(filePath, content);
+    await fs.writeFile(filePath, content, 'utf-8');
+  };
+
+  /** Renderer-facing: start watching a page's file for external edits. */
+  watchPage = async (pageId: PageId): Promise<{ content: string } | null> => {
+    const page = this.getPages().find((p) => p.id === pageId);
+    if (!page) return null;
+    const project = this.getProjects().find((p) => p.id === page.projectId);
+    if (!project) return null;
+    const filePath = this.getPageFilePath(project, page);
+    await this.pageWatcher.subscribe(filePath);
+    let content = '';
+    try {
+      content = await fs.readFile(filePath, 'utf-8');
+    } catch {
+      // File may not exist yet; subscriber will be notified if it appears.
+    }
+    return { content };
+  };
+
+  unwatchPage = (pageId: PageId): void => {
+    const page = this.getPages().find((p) => p.id === pageId);
+    if (!page) return;
+    const project = this.getProjects().find((p) => p.id === page.projectId);
+    if (!project) return;
+    const filePath = this.getPageFilePath(project, page);
+    this.pageWatcher.unsubscribe(filePath);
+  };
+
+  reorderPage = (pageId: PageId, newParentId: PageId | null, newSortOrder: number): void => {
+    const pages = this.getPages();
+    const index = pages.findIndex((p) => p.id === pageId);
+    if (index === -1) return;
+    pages[index] = { ...pages[index]!, parentId: newParentId, sortOrder: newSortOrder, updatedAt: Date.now() };
+    this.setPages(pages);
+  };
+
+  // #endregion
+
+  /** Resolve the effective branch for a ticket (ticket.branch ?? milestone.branch ?? undefined). */
   resolveTicketBranch = (ticket: Ticket): string | undefined => {
     if (ticket.branch) return ticket.branch;
-    const initiative = this.getInitiatives().find((i) => i.id === ticket.initiativeId);
-    return initiative?.branch;
+    if (!ticket.milestoneId) return undefined;
+    const milestone = this.getMilestones().find((i) => i.id === ticket.milestoneId);
+    return milestone?.branch;
   };
 
   // #endregion
@@ -1952,10 +2190,10 @@ export class ProjectManager {
     } else {
       // Supervisor mode: no worktree, diff the project workspace against its upstream
       const project = this.getProjects().find((p) => p.id === ticket.projectId);
-      if (!project || project.source.kind !== 'local') {
+      if (!project || project.source?.kind !== 'local') {
         return empty; // git-remote diffs happen inside the container, not locally
       }
-      gitDir = project.source.workspaceDir;
+      gitDir = project.source?.workspaceDir;
       try {
         await fs.access(gitDir);
       } catch {
@@ -1990,62 +2228,189 @@ export class ProjectManager {
     }
 
     try {
-      // Only show committed changes (HEAD vs merge-base), not unstaged/untracked work
-      const { stdout: diffOutput } = await execFileAsync(
-        'git',
-        ['-C', gitDir, 'diff', '--name-status', '-M', '-C', mergeBase, 'HEAD'],
-        { timeout: 10_000 }
-      );
+      // The empty-tree SHA is a well-known constant in git — it represents a tree with no files.
+      const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf899d936927d637e';
+
+      // Check whether HEAD exists (repo may have zero commits).
+      let hasHead = true;
+      try {
+        await execFileAsync('git', ['-C', gitDir, 'rev-parse', '--verify', 'HEAD'], { timeout: 5_000 });
+      } catch {
+        hasHead = false;
+      }
 
       const files: FileDiff[] = [];
 
-      for (const line of diffOutput.split('\n')) {
-        if (!line.trim()) {
-          continue;
+      if (!hasHead) {
+        // ── No commits yet ──────────────────────────────────────────────
+        // Use `git status --porcelain -z` for NUL-delimited output (handles
+        // filenames with spaces, quotes, and unicode correctly).
+        const { stdout: lsOutput } = await execFileAsync(
+          'git',
+          ['-C', gitDir, 'status', '--porcelain', '-z', '-uall'],
+          { timeout: 10_000 }
+        );
+        // -z output: entries are NUL-separated. Rename entries produce two
+        // fields (old\0new) but renames are impossible with no commits.
+        for (const entry of lsOutput.split('\0')) {
+          if (!entry || entry.length < 4) continue;
+          const xy = entry.slice(0, 2);
+          const filePath = entry.slice(3);
+          if (!filePath) continue;
+          const status: FileDiff['status'] = xy.includes('?') ? 'untracked' : 'added';
+          files.push({ path: filePath, status, additions: 0, deletions: 0, isBinary: false });
         }
-        const parts = line.split('\t');
-        const statusChar = parts[0]?.charAt(0);
-        const filePath = parts[parts.length === 3 ? 2 : 1] ?? '';
-        const oldPath = parts.length === 3 ? parts[1] : undefined;
+      } else {
+        // ── Commits exist ───────────────────────────────────────────────
+        // When mergeBase === 'HEAD' (no upstream), `git diff HEAD HEAD` is
+        // empty — useless. Fall back to showing uncommitted work instead.
+        const showUncommitted = mergeBase === 'HEAD';
 
-        let status: FileDiff['status'];
-        switch (statusChar) {
-          case 'A':
-            status = 'added';
-            break;
-          case 'M':
-            status = 'modified';
-            break;
-          case 'D':
-            status = 'deleted';
-            break;
-          case 'R':
-            status = 'renamed';
-            break;
-          case 'C':
-            status = 'copied';
-            break;
-          default:
-            status = 'modified';
+        if (showUncommitted) {
+          // Show staged + unstaged + untracked changes relative to HEAD.
+          const { stdout: statusOutput } = await execFileAsync(
+            'git',
+            ['-C', gitDir, 'status', '--porcelain', '-z', '-uall'],
+            { timeout: 10_000 }
+          );
+          const entries = statusOutput.split('\0');
+          for (let i = 0; i < entries.length; i++) {
+            const entry = entries[i]!;
+            if (!entry || entry.length < 4) continue;
+            const xy = entry.slice(0, 2);
+            const filePath = entry.slice(3);
+            if (!filePath) continue;
+
+            let status: FileDiff['status'];
+            if (xy.includes('?')) {
+              status = 'untracked';
+            } else if (xy.startsWith('R') || xy.endsWith('R')) {
+              status = 'renamed';
+              i++; // skip the next entry (old path in -z format)
+            } else if (xy.startsWith('A') || xy.endsWith('A')) {
+              status = 'added';
+            } else if (xy.startsWith('D') || xy.endsWith('D')) {
+              status = 'deleted';
+            } else {
+              status = 'modified';
+            }
+
+            files.push({ path: filePath, status, additions: 0, deletions: 0, isBinary: false });
+          }
+        } else {
+          // Normal path: diff committed changes between mergeBase and HEAD.
+          const { stdout: diffOutput } = await execFileAsync(
+            'git',
+            ['-C', gitDir, 'diff', '--name-status', '-M', '-C', '-z', mergeBase, 'HEAD'],
+            { timeout: 10_000 }
+          );
+
+          // -z with --name-status: NUL-delimited as STATUS\0path[\0oldpath]
+          const parts = diffOutput.split('\0');
+          for (let i = 0; i < parts.length; i++) {
+            const statusField = parts[i];
+            if (!statusField) continue;
+            const statusChar = statusField.charAt(0);
+            const filePath = parts[++i] ?? '';
+            let oldPath: string | undefined;
+            if (statusChar === 'R' || statusChar === 'C') {
+              oldPath = filePath;
+              i++;
+              const newPath = parts[i] ?? '';
+              files.push({ path: newPath, oldPath, status: statusChar === 'R' ? 'renamed' : 'copied', additions: 0, deletions: 0, isBinary: false });
+              continue;
+            }
+
+            let status: FileDiff['status'];
+            switch (statusChar) {
+              case 'A':
+                status = 'added';
+                break;
+              case 'M':
+                status = 'modified';
+                break;
+              case 'D':
+                status = 'deleted';
+                break;
+              default:
+                status = 'modified';
+            }
+
+            files.push({ path: filePath, oldPath, status, additions: 0, deletions: 0, isBinary: false });
+          }
         }
-
-        files.push({ path: filePath, oldPath, status, additions: 0, deletions: 0, isBinary: false });
       }
 
-      // Get per-file patches and stats
+      // Determine the base ref for producing patches.
+      // - No commits → empty tree
+      // - No upstream (mergeBase was 'HEAD') → diff working tree against HEAD
+      // - Normal → diff mergeBase..HEAD
+      const effectiveBase = !hasHead ? EMPTY_TREE : mergeBase;
+      const diffWorktree = hasHead && mergeBase === 'HEAD';
+
+      // Cap the number of files we produce patches for to avoid excessive I/O on large repos.
+      const MAX_PATCH_FILES = 200;
+      // Cap individual file reads for untracked files to avoid loading huge files into memory.
+      const MAX_UNTRACKED_BYTES = 512_000;
+
       let totalAdditions = 0;
       let totalDeletions = 0;
 
-      for (const file of files) {
+      for (let fi = 0; fi < files.length; fi++) {
+        const file = files[fi]!;
+        if (fi >= MAX_PATCH_FILES) break;
+
         try {
-          const { stdout: patch } = await execFileAsync(
-            'git',
-            ['-C', gitDir, 'diff', '--unified=8', '--inter-hunk-context=4', mergeBase, 'HEAD', '--', file.path],
-            { timeout: 5_000 }
-          );
+          if (file.status === 'untracked') {
+            // Untracked files have no git object — synthesize a patch from file content.
+            const absPath = path.join(gitDir, file.path);
+            // Verify the resolved path is still inside gitDir (prevent traversal).
+            const realGitDir = await fs.realpath(gitDir);
+            const realFile = await fs.realpath(absPath).catch(() => absPath);
+            if (!realFile.startsWith(realGitDir + path.sep) && realFile !== realGitDir) {
+              continue;
+            }
+            const stat = await fs.stat(absPath).catch(() => null);
+            if (!stat || !stat.isFile()) {
+              continue;
+            }
+            if (stat.size > MAX_UNTRACKED_BYTES) {
+              file.isBinary = true;
+              continue;
+            }
+            try {
+              const buf = await fs.readFile(absPath);
+              // Detect binary: check for NUL bytes in the first 8KB (same heuristic as git).
+              const probe = buf.subarray(0, 8192);
+              if (probe.includes(0)) {
+                file.isBinary = true;
+                continue;
+              }
+              const fileContent = buf.toString('utf-8');
+              const lines = fileContent.split('\n');
+              // A trailing newline produces an empty last element — don't count it as an added line.
+              if (lines.length > 0 && lines[lines.length - 1] === '') {
+                lines.pop();
+              }
+              file.additions = lines.length;
+              totalAdditions += file.additions;
+              const patchLines = lines.map((l) => `+${l}`);
+              file.patch = `--- /dev/null\n+++ b/${file.path}\n@@ -0,0 +1,${lines.length} @@\n${patchLines.join('\n')}`;
+            } catch {
+              file.isBinary = true;
+            }
+            continue;
+          }
+
+          // For committed or staged diffs, use git diff directly.
+          // When diffWorktree is true we diff the working tree against HEAD (no second ref).
+          const diffArgs = diffWorktree
+            ? ['-C', gitDir, 'diff', '--unified=8', '--inter-hunk-context=4', 'HEAD', '--', file.path]
+            : ['-C', gitDir, 'diff', '--unified=8', '--inter-hunk-context=4', effectiveBase, 'HEAD', '--', file.path];
+
+          const { stdout: patch } = await execFileAsync('git', diffArgs, { timeout: 5_000 });
           file.patch = patch;
 
-          // Count additions/deletions from the patch
           if (file.patch) {
             for (const patchLine of file.patch.split('\n')) {
               if (patchLine.startsWith('+') && !patchLine.startsWith('+++')) {
@@ -2088,7 +2453,9 @@ export class ProjectManager {
   resolveTicket = (ticketId: TicketId, resolution: import('@/shared/types').TicketResolution): void => {
     const ticket = this.getTicketById(ticketId);
     if (!ticket) return;
-    this.updateTicket(ticketId, { resolution });
+    const patch: Partial<Ticket> = { resolution };
+    if (ticket.resolvedAt === undefined) patch.resolvedAt = Date.now();
+    this.updateTicket(ticketId, patch);
     const terminalColumnId = this.getTerminalColumnId(ticket.projectId);
     if (ticket.columnId !== terminalColumnId) {
       this.moveTicketToColumn(ticketId, terminalColumnId);
@@ -2106,12 +2473,12 @@ export class ProjectManager {
       return;
     }
 
-    this.updateTicket(ticketId, { columnId });
+    this.updateTicket(ticketId, { columnId, columnChangedAt: Date.now() });
 
     // Clear resolution when moving away from terminal column (reopen)
     const ticket2 = this.getTicketById(ticketId);
     if (ticket2?.resolution && !this.isTerminalColumn(ticket.projectId, columnId)) {
-      this.updateTicket(ticketId, { resolution: undefined });
+      this.updateTicket(ticketId, { resolution: undefined, resolvedAt: undefined });
     }
 
     // Reconciliation: stop supervisor and clean up workspace when ticket moves to a terminal column
@@ -2403,13 +2770,13 @@ export class ProjectManager {
     }
 
     // Git-remote projects: container clones the repo — no local workspace or worktrees
-    if (project.source.kind === 'git-remote') {
-      const effectiveBranch = this.resolveTicketBranch(ticket) ?? project.source.defaultBranch;
+    if (project.source?.kind === 'git-remote') {
+      const effectiveBranch = this.resolveTicketBranch(ticket) ?? project.source?.defaultBranch;
       return {
         workspaceDir: '/home/user/workspace', // container-side path (not local)
         action: 'none',
         gitRepo: {
-          url: project.source.repoUrl,
+          url: project.source?.repoUrl,
           branch: effectiveBranch,
         },
       };
@@ -2507,6 +2874,12 @@ export class ProjectManager {
       return `Project not found: ${ticket.projectId}`;
     }
 
+    // Personal / context-only projects have no source and cannot run supervisors:
+    // there's no workspace to mount and no workflow to execute. Reject explicitly
+    // so the user sees a clear message instead of a downstream mount failure.
+    if (!project.source) {
+      return `Project "${project.label}" has no repository — supervisors require a workspace or git remote`;
+    }
     if (project.source.kind === 'local' && !project.source.workspaceDir) {
       return `Project "${project.label}" has no workspace directory configured`;
     }
@@ -2558,7 +2931,55 @@ export class ProjectManager {
     const project = this.getProjects().find((p) => p.id === ticket.projectId)!;
     const pipeline = this.getPipeline(ticket.projectId);
 
-    const basePrompt = buildSupervisorPrompt(ticket, project, pipeline);
+    // Gather context for the supervisor prompt
+    const context: SupervisorContext = {};
+
+    // Project brief: read the root page's context.md (sync-safe since we pre-load it)
+    const pages = this.getPages().filter((p) => p.projectId === ticket.projectId);
+    const rootPage = pages.find((p) => p.isRoot);
+    if (rootPage) {
+      // Read context.md synchronously from the project dir if available
+      try {
+        const dir = this.getProjectDirPath(project);
+        const contextPath = path.join(dir, 'context.md');
+        if (existsSync(contextPath)) {
+          const brief = require('fs').readFileSync(contextPath, 'utf-8') as string;
+          if (brief.trim()) {
+            context.projectBrief = brief.length > 500 ? brief.slice(0, 500) + '\n…(truncated)' : brief;
+          }
+        }
+      } catch { /* non-critical */ }
+    }
+
+    // Recent comments (last 5)
+    const comments = ticket.comments ?? [];
+    if (comments.length > 0) {
+      context.recentComments = comments
+        .slice(-5)
+        .reverse()
+        .map((c) => ({ author: c.author, content: c.content }));
+    }
+
+    // Blocker titles
+    if (ticket.blockedBy && ticket.blockedBy.length > 0) {
+      const blockerTitles: string[] = [];
+      for (const blockerId of ticket.blockedBy) {
+        const blocker = this.getTicketById(blockerId);
+        if (blocker) {
+          // Only include if blocker is not in a terminal column
+          const blockerPipeline = this.getPipeline(blocker.projectId);
+          const lastCol = blockerPipeline.columns[blockerPipeline.columns.length - 1];
+          if (blocker.columnId !== lastCol?.id) {
+            blockerTitles.push(blocker.title);
+          }
+        }
+      }
+      if (blockerTitles.length > 0) {
+        context.blockerTitles = blockerTitles;
+      }
+    }
+
+    const basePrompt = buildSupervisorPrompt(ticket, project, pipeline, context);
     const customPrompt = this.workflowLoader.getPromptTemplate(ticket.projectId);
 
     if (customPrompt) {
@@ -2580,7 +3001,7 @@ export class ProjectManager {
           },
           project: {
             label: project.label,
-            workspaceDir: project.source.kind === 'local' ? project.source.workspaceDir : project.source.repoUrl,
+            workspaceDir: (project.source?.kind === 'local' ? project.source?.workspaceDir : project.source?.repoUrl) ?? '',
           },
           attempt,
         };
@@ -2644,18 +3065,30 @@ export class ProjectManager {
       return customContinuation.replace(/\{\{turn}}/g, String(turn)).replace(/\{\{maxTurns}}/g, String(maxTurns));
     }
 
+    // Gather last run context for the continuation prompt
+    const runs = ticket?.runs ?? [];
+    const lastRun = runs.length > 0 ? runs[runs.length - 1] : undefined;
+    const lastRunReason = lastRun?.endReason ? `- The previous run ended with reason: "${lastRun.endReason}".` : '';
+
+    const comments = ticket?.comments ?? [];
+    const lastComment = comments.length > 0 ? comments[comments.length - 1] : undefined;
+    const lastCommentLine = lastComment
+      ? `- Last comment [${lastComment.author}]: ${lastComment.content.length > 200 ? lastComment.content.slice(0, 200) + '…' : lastComment.content}`
+      : '';
+
     return [
       'Continuation guidance:',
       '',
-      `- The previous run completed normally, but the ticket may still have remaining work.`,
       `- This is continuation turn ${turn} of ${maxTurns}.`,
+      lastRunReason,
+      lastCommentLine,
       `- Resume from current workspace state — do not restart from scratch or re-read files you already have in context.`,
       `- The original task instructions and prior context are already in this session, so do not restate them before acting.`,
       `- Use your best judgement to move the work forward. You are working in an isolated sandbox, so it is safe to make changes freely. Do not ask for confirmation or escalate to the user unless you are truly blocked on something that requires human input. The human will review your work at a later stage.`,
       `- Your ticket is currently in column "${currentColumn}". If you have completed the work, call \`move_ticket\` to advance it. Valid columns: ${columnLabels}.`,
       `- Before continuing, use \`add_ticket_comment\` to briefly record what you accomplished so far and what remains. This helps future runs (and humans) understand the state of work.`,
       `- Use \`notify\` to send the human a heads-up without stopping. Use \`escalate\` only when you truly cannot proceed without human input.`,
-    ].join('\n');
+    ].filter(Boolean).join('\n');
   }
 
   /**
@@ -2674,17 +3107,17 @@ export class ProjectManager {
       const project = this.getProjects().find((p) => p.id === ticket.projectId)!;
 
       // Load FLEET.md workflow (from local dir or git remote)
-      if (project.source.kind === 'local') {
-        await this.workflowLoader.load(ticket.projectId, project.source.workspaceDir);
+      if (project.source?.kind === 'local') {
+        await this.workflowLoader.load(ticket.projectId, project.source?.workspaceDir);
 
-        const hookOk = await this.workflowLoader.runHook(ticket.projectId, 'before_run', project.source.workspaceDir);
+        const hookOk = await this.workflowLoader.runHook(ticket.projectId, 'before_run', project.source?.workspaceDir);
         if (!hookOk) {
           console.warn(`[ProjectManager] before_run hook failed for ${ticketId}. Aborting start.`);
           throw new Error('before_run hook failed');
         }
-      } else {
-        const effectiveBranch = this.resolveTicketBranch(ticket) ?? project.source.defaultBranch;
-        await this.workflowLoader.loadFromRemote(ticket.projectId, project.source.repoUrl, effectiveBranch);
+      } else if (project.source?.kind === 'git-remote') {
+        const effectiveBranch = this.resolveTicketBranch(ticket) ?? project.source?.defaultBranch;
+        await this.workflowLoader.loadFromRemote(ticket.projectId, project.source?.repoUrl, effectiveBranch);
       }
 
       console.log(`[ProjectManager] startSupervisor: ensureSupervisorInfra for ${ticketId}...`);
@@ -2692,7 +3125,7 @@ export class ProjectManager {
       console.log(`[ProjectManager] startSupervisor: ensureSupervisorInfra done. Phase: ${machine.getPhase()}, sessionId: ${machine.getSessionId()}`);
 
       // For git-remote projects, run before_run hook inside the container via sandbox exec
-      if (project.source.kind === 'git-remote') {
+      if (project.source?.kind === 'git-remote') {
         const hookScript = this.workflowLoader.getConfig(ticket.projectId).hooks?.before_run;
         if (hookScript && sandbox) {
           const hookOk = await sandbox.execInContainer(hookScript, '/home/user/workspace');
@@ -2760,10 +3193,10 @@ export class ProjectManager {
     const taskId = ticket.supervisorTaskId;
 
     // Run before_remove hook
-    if (project?.source.kind === 'local') {
-      const workspaceDir = ticket.worktreePath ?? project.source.workspaceDir;
+    if (project?.source?.kind === 'local') {
+      const workspaceDir = ticket.worktreePath ?? project.source?.workspaceDir;
       await this.workflowLoader.runHook(ticket.projectId, 'before_remove', workspaceDir);
-    } else if (project?.source.kind === 'git-remote') {
+    } else if (project?.source?.kind === 'git-remote') {
       const hookScript = this.workflowLoader.getConfig(ticket.projectId).hooks?.before_remove;
       if (hookScript) {
         const machineEntry = this.machines.get(ticketId);
@@ -2791,8 +3224,8 @@ export class ProjectManager {
     }
 
     // Remove worktree (source of truth is the ticket, not the task)
-    if (ticket.worktreePath && ticket.worktreeName && project && project.source.kind === 'local') {
-      await removeWorktree(project.source.workspaceDir, ticket.worktreePath, ticket.worktreeName);
+    if (ticket.worktreePath && ticket.worktreeName && project && project.source?.kind === 'local') {
+      await removeWorktree(project.source?.workspaceDir, ticket.worktreePath, ticket.worktreeName);
       this.updateTicket(ticketId, { worktreePath: undefined, worktreeName: undefined });
     }
 
@@ -2954,8 +3387,8 @@ export class ProjectManager {
       // Clean up worktree from the ticket
       if (ticket.worktreePath && ticket.worktreeName) {
         const project = this.getProjects().find((p) => p.id === ticket.projectId);
-        if (project?.source.kind === 'local') {
-          await removeWorktree(project.source.workspaceDir, ticket.worktreePath, ticket.worktreeName);
+        if (project?.source?.kind === 'local') {
+          await removeWorktree(project.source?.workspaceDir, ticket.worktreePath, ticket.worktreeName);
         }
         this.updateTicket(ticket.id, { worktreePath: undefined, worktreeName: undefined });
         cleaned++;
@@ -2974,8 +3407,8 @@ export class ProjectManager {
       if (task.ticketId && !ticketIds.has(task.ticketId)) {
         if (task.worktreePath && task.worktreeName) {
           const project = this.getProjects().find((p) => p.id === task.projectId);
-          if (project?.source.kind === 'local') {
-            await removeWorktree(project.source.workspaceDir, task.worktreePath, task.worktreeName);
+          if (project?.source?.kind === 'local') {
+            await removeWorktree(project.source?.workspaceDir, task.worktreePath, task.worktreeName);
           }
         }
         this.removePersistedTask(task.id);
@@ -3069,15 +3502,15 @@ export class ProjectManager {
       const ticket = this.getTicketById(entry.task.ticketId);
       if (ticket?.worktreePath && ticket.worktreeName) {
         const project = this.getProjects().find((p) => p.id === ticket.projectId);
-        if (project?.source.kind === 'local') {
-          await removeWorktree(project.source.workspaceDir, ticket.worktreePath, ticket.worktreeName);
+        if (project?.source?.kind === 'local') {
+          await removeWorktree(project.source?.workspaceDir, ticket.worktreePath, ticket.worktreeName);
         }
         this.updateTicket(ticket.id, { worktreePath: undefined, worktreeName: undefined });
       }
     } else if (entry.task.worktreePath && entry.task.worktreeName) {
       const project = this.getProjects().find((p) => p.id === entry.task.projectId);
-      if (project?.source.kind === 'local') {
-        await removeWorktree(project.source.workspaceDir, entry.task.worktreePath, entry.task.worktreeName);
+      if (project?.source?.kind === 'local') {
+        await removeWorktree(project.source?.workspaceDir, entry.task.worktreePath, entry.task.worktreeName);
       }
     }
 
@@ -3110,26 +3543,25 @@ export class ProjectManager {
       // Fall through to v4→v5 migration
     }
 
-    // v4 → v5: create default initiatives per project, assign tickets
+    // v4 → v5: create default milestones per project, assign tickets
     if (version === 4 || store.get('schemaVersion', 0) === 4) {
-      console.log('[ProjectManager] Migrating to initiative schema (→ v5)');
+      console.log('[ProjectManager] Migrating to milestone schema (→ v5)');
       const projects = store.get('projects', []) as Array<{ id: string }>;
       const tickets = store.get('tickets', []) as Record<string, unknown>[];
 
-      const initiatives: Initiative[] = [];
-      const projectToDefaultInitiative = new Map<string, string>();
+      const milestones: Milestone[] = [];
+      const projectToDefaultMilestone = new Map<string, string>();
 
       for (const proj of projects) {
-        const initId = nanoid();
-        projectToDefaultInitiative.set(proj.id, initId);
+        const msId = nanoid();
+        projectToDefaultMilestone.set(proj.id, msId);
         const now = Date.now();
-        initiatives.push({
-          id: initId,
+        milestones.push({
+          id: msId,
           projectId: proj.id,
           title: 'General',
-          description: 'Default initiative',
+          description: 'Default milestone',
           status: 'active',
-          isDefault: true,
           createdAt: now,
           updatedAt: now,
         });
@@ -3137,33 +3569,33 @@ export class ProjectManager {
 
       const migratedTickets = tickets.map((raw) => ({
         ...raw,
-        initiativeId: projectToDefaultInitiative.get(raw.projectId as string) ?? '',
+        milestoneId: projectToDefaultMilestone.get(raw.projectId as string) ?? '',
       }));
 
-      store.set('initiatives', initiatives);
+      store.set('milestones', milestones);
       store.set('tickets', migratedTickets);
       store.set('schemaVersion', 5);
       console.log(
-        `[ProjectManager] v5 migration complete: ${initiatives.length} initiatives, ${migratedTickets.length} tickets`
+        `[ProjectManager] v5 migration complete: ${milestones.length} milestones, ${migratedTickets.length} tickets`
       );
-      return;
+      // Fall through to v5→v6 migration
     }
 
     // v5 → v6: migrate inbox 'deferred' status to 'iceboxed', add wipLimit
     if (version === 5 || store.get('schemaVersion', 0) === 5) {
       console.log('[ProjectManager] Migrating inbox deferred → iceboxed, adding wipLimit (→ v6)');
-      const inboxItems = store.get('inboxItems', []) as Record<string, unknown>[];
+      const inboxItems = store.get('inboxItems' as never, []) as Record<string, unknown>[];
       const migratedInbox = inboxItems.map((item) => ({
         ...item,
         status: (item.status as string) === 'deferred' ? 'iceboxed' : item.status,
       }));
-      store.set('inboxItems', migratedInbox);
+      store.set('inboxItems' as never, migratedInbox);
       if (store.get('wipLimit') === undefined) {
         store.set('wipLimit', 3);
       }
       store.set('schemaVersion', 6);
       console.log(`[ProjectManager] v6 migration complete: ${migratedInbox.length} inbox items`);
-      return;
+      // Fall through to v6→v7 migration
     }
 
     // v6 → v7: migrate Project.workspaceDir to Project.source
@@ -3182,10 +3614,303 @@ export class ProjectManager {
       store.set('projects', migrated);
       store.set('schemaVersion', 7);
       console.log(`[ProjectManager] v7 migration complete: ${migrated.length} projects`);
+      // Fall through to v7→v8 migration
+    }
+
+    // v7 → v8: rename initiatives → milestones, strip isDefault, rename ticket.initiativeId → milestoneId
+    if (version === 7 || store.get('schemaVersion', 0) === 7) {
+      console.log('[ProjectManager] Migrating initiatives → milestones (→ v8)');
+
+      // Rename initiatives store key → milestones and strip isDefault
+      // Handle both old key ('initiatives') and already-renamed key ('milestones')
+      const legacyInitiatives = store.get('initiatives' as never, []) as Record<string, unknown>[];
+      const existingMilestones = store.get('milestones', []) as Record<string, unknown>[];
+      const rawItems = legacyInitiatives.length > 0 ? legacyInitiatives : existingMilestones;
+      const milestones = rawItems.map((raw) => {
+        const { isDefault, ...rest } = raw;
+        return rest;
+      });
+      if (legacyInitiatives.length > 0) {
+        store.delete('initiatives' as never);
+      }
+      store.set('milestones', milestones);
+
+      // Rename ticket.initiativeId → milestoneId (skip if already renamed)
+      const tickets = store.get('tickets', []) as Record<string, unknown>[];
+      const migratedTickets = tickets.map((raw) => {
+        const { initiativeId, ...rest } = raw;
+        if (initiativeId !== undefined && !('milestoneId' in raw)) {
+          return { ...rest, milestoneId: initiativeId };
+        }
+        return raw;
+      });
+      store.set('tickets', migratedTickets);
+
+      // Rename inboxItem.linkedInitiativeId → linkedMilestoneId
+      const inboxItems = store.get('inboxItems' as never, []) as Record<string, unknown>[];
+      const migratedInbox = inboxItems.map((raw) => {
+        const { linkedInitiativeId, ...rest } = raw;
+        return linkedInitiativeId ? { ...rest, linkedMilestoneId: linkedInitiativeId } : rest;
+      });
+      store.set('inboxItems' as never, migratedInbox);
+
+      store.set('schemaVersion', 8);
+      console.log(
+        `[ProjectManager] v8 migration complete: ${milestones.length} milestones, ${migratedTickets.length} tickets`
+      );
+      // Fall through to v8→v9 migration
+    }
+
+    // v8 → v9: add slug to projects, make source optional
+    if (version === 8 || store.get('schemaVersion', 0) === 8) {
+      console.log('[ProjectManager] Adding slug to projects (→ v9)');
+      const projects = store.get('projects', []) as Record<string, unknown>[];
+      const migrated = projects.map((raw) => {
+        if (raw.slug) return raw;
+        const label = (raw.label as string) ?? 'project';
+        const slug = label
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-|-$/g, '')
+          || 'project';
+        return { ...raw, slug };
+      });
+      store.set('projects', migrated);
+      store.set('schemaVersion', 9);
+      console.log(`[ProjectManager] v9 migration complete: ${migrated.length} projects`);
+      // Fall through to v9→v10 migration
+    }
+
+    // v9 → v10: add pages collection, create root page per project,
+    // and backfill each project's legacy brief into <projectDir>/context.md
+    // so the root page has content on first open.
+    if (version === 9 || store.get('schemaVersion', 0) === 9) {
+      console.log('[ProjectManager] Adding pages collection (→ v10)');
+      const projects = store.get('projects', []) as Array<{
+        id: string;
+        label: string;
+        slug?: string;
+        isPersonal?: boolean;
+        brief?: string;
+      }>;
+      const now = Date.now();
+      const pages = projects.map((project) => ({
+        id: nanoid(),
+        projectId: project.id,
+        parentId: null,
+        title: project.label,
+        sortOrder: 0,
+        isRoot: true,
+        createdAt: now,
+        updatedAt: now,
+      }));
+      store.set('pages', pages);
+
+      let briefsWritten = 0;
+      for (const project of projects) {
+        const dir = project.isPersonal
+          ? getDefaultWorkspaceDir()
+          : getProjectDir(project.slug ?? 'project');
+        const contextPath = path.join(dir, 'context.md');
+        try {
+          if (existsSync(contextPath)) continue;
+          mkdirSync(dir, { recursive: true });
+          writeFileSync(contextPath, project.brief ?? DEFAULT_BRIEF_TEMPLATE, 'utf-8');
+          briefsWritten++;
+        } catch (err) {
+          console.warn(`[ProjectManager] v10: failed to write context.md for ${project.id}:`, err);
+        }
+      }
+
+      store.set('schemaVersion', 10);
+      console.log(
+        `[ProjectManager] v10 migration complete: ${pages.length} root pages, ${briefsWritten} briefs backfilled`
+      );
+      // Fall through to v10→v11 migration
+    }
+
+    // v10 → v11: strip legacy `brief` field from project records. The v10 migration
+    // already copied each project's brief to `<projectDir>/context.md`, so the field
+    // is now dead weight in the store.
+    if (version === 10 || store.get('schemaVersion', 0) === 10) {
+      console.log('[ProjectManager] Stripping legacy project.brief field (→ v11)');
+      const projects = store.get('projects', []) as Record<string, unknown>[];
+      let stripped = 0;
+      const cleaned = projects.map((raw) => {
+        if ('brief' in raw) {
+          stripped++;
+          const { brief: _brief, ...rest } = raw;
+          return rest;
+        }
+        return raw;
+      });
+      store.set('projects', cleaned);
+      store.set('schemaVersion', 11);
+      console.log(`[ProjectManager] v11 migration complete: stripped brief from ${stripped} projects`);
+      // Fall through to v11→v12 migration
+    }
+
+    // v11 → v12: migrate InboxItems to Pages with properties. Also ensure a
+    // Personal project exists to act as the physical home for loose inbox pages.
+    if (version === 11 || store.get('schemaVersion', 0) === 11) {
+      console.log('[ProjectManager] Upgrading legacy inbox records (→ v12)');
+      const projects = store.get('projects', []) as Array<{ id: string; label: string; isPersonal?: boolean; slug?: string }>;
+      const legacyItems = store.get('inboxItems' as never, []) as Array<Record<string, unknown>>;
+      const now = Date.now();
+
+      // Ensure a Personal project exists as the implicit home for projectless
+      // inbox items. The inbox itself remains a flat global list — Personal
+      // only matters when the user promotes an item without selecting a target.
+      let personal = projects.find((p) => p.isPersonal);
+      if (!personal) {
+        personal = {
+          id: nanoid(),
+          label: 'Personal',
+          slug: 'personal',
+          isPersonal: true,
+        };
+        (personal as unknown as { createdAt: number }).createdAt = now;
+        projects.push(personal);
+        store.set('projects', projects);
+        try {
+          mkdirSync(getDefaultWorkspaceDir(), { recursive: true });
+          const contextPath = path.join(getDefaultWorkspaceDir(), 'context.md');
+          if (!existsSync(contextPath)) {
+            writeFileSync(contextPath, DEFAULT_BRIEF_TEMPLATE, 'utf-8');
+          }
+        } catch (err) {
+          console.warn('[ProjectManager] v12: failed to ensure Personal project dir:', err);
+        }
+        console.log('[ProjectManager] v12: created Personal project');
+      }
+
+      const upgraded = upgradeLegacyInbox(legacyItems, now, () => nanoid());
+      store.set('inboxItems', upgraded);
+      store.set('schemaVersion', 13);
+      console.log(
+        `[ProjectManager] v12/v13 migration complete: ${upgraded.length} legacy inbox records upgraded`
+      );
+      // Fall through to v13→v14 recovery.
+    }
+
+    // v13 → v14: recover orphaned inbox data from `pages`. The pre-refactor
+    // v12 migration moved legacy InboxItems into `pages` with a `properties`
+    // object. Step 1 of the type split removed `Page.properties`, stranding
+    // that data. This step converts any page still carrying `properties`
+    // into a new-model `InboxItem` and removes the stale page.
+    if (version === 13 || store.get('schemaVersion', 0) === 13) {
+      const pagesRaw = store.get('pages', []) as Array<Record<string, unknown>>;
+      const existingInbox = (store.get('inboxItems') ?? []) as InboxItem[];
+      const recovered: InboxItem[] = [];
+      const keptPages: Array<Record<string, unknown>> = [];
+      const now = Date.now();
+
+      for (const pageRaw of pagesRaw) {
+        const props = pageRaw.properties as Record<string, unknown> | undefined;
+        if (!props || Object.keys(props).length === 0) {
+          // Not inbox data — keep it as a page but drop the empty properties key.
+          const { properties, ...rest } = pageRaw;
+          void properties;
+          keptPages.push(rest);
+          continue;
+        }
+
+        const legacyStatus = props.status;
+        // `done` was terminal in the old model; drop those entirely on recovery.
+        if (legacyStatus === 'done') continue;
+
+        const hasOutcome = typeof props.outcome === 'string' && (props.outcome as string).trim().length > 0;
+        const hasShaping = hasOutcome || props.size !== undefined || typeof props.notDoing === 'string';
+        // Map old PageStatus → new InboxItemStatus. `doing` becomes a shaped
+        // actionable item the user can promote to a ticket.
+        let status: InboxItem['status'] = 'new';
+        if (legacyStatus === 'later') status = 'later';
+        else if (legacyStatus === 'ready' || legacyStatus === 'doing' || hasShaping) status = 'shaped';
+
+        const appetite: InboxShaping['appetite'] =
+          props.size === 'small' ||
+          props.size === 'medium' ||
+          props.size === 'large' ||
+          props.size === 'xl'
+            ? props.size
+            : 'medium';
+        const shaping: InboxShaping | undefined = hasShaping
+          ? {
+              outcome: (props.outcome as string | undefined)?.trim() ?? '',
+              appetite,
+              ...(typeof props.notDoing === 'string' && (props.notDoing as string).trim()
+                ? { notDoing: (props.notDoing as string).trim() }
+                : {}),
+            }
+          : undefined;
+
+        const item: InboxItem = {
+          id: (pageRaw.id as string) ?? nanoid(),
+          title: (pageRaw.title as string | undefined)?.trim() || 'Untitled',
+          status,
+          projectId: typeof props.projectId === 'string' ? (props.projectId as string) : null,
+          createdAt: typeof pageRaw.createdAt === 'number' ? (pageRaw.createdAt as number) : now,
+          updatedAt: typeof pageRaw.updatedAt === 'number' ? (pageRaw.updatedAt as number) : now,
+        };
+        if (shaping) item.shaping = shaping;
+        if (status === 'later') {
+          item.laterAt = typeof props.laterAt === 'number' ? (props.laterAt as number) : now;
+        }
+        recovered.push(item);
+      }
+
+      if (recovered.length > 0 || keptPages.length !== pagesRaw.length) {
+        store.set('inboxItems', [...existingInbox, ...recovered]);
+        store.set('pages', keptPages);
+        console.log(
+          `[ProjectManager] v14 recovery: ${recovered.length} pages → inbox items, ${pagesRaw.length - keptPages.length - recovered.length} dropped`
+        );
+      }
+      store.set('schemaVersion', 14);
+      // Fall through to v14→v15 migration
+    }
+
+    // v14 → v15: backfill activity timestamps for dashboard ranking/risk.
+    // - Ticket.phaseChangedAt / columnChangedAt / resolvedAt: backfilled from updatedAt
+    // - Milestone.completedAt: backfilled from updatedAt iff status === 'completed'
+    // Also drop the legacy 'home' layoutMode (Now tab is going away).
+    if (version === 14 || store.get('schemaVersion', 0) === 14) {
+      console.log('[ProjectManager] Backfilling activity timestamps (→ v15)');
+      const tickets = store.get('tickets', []) as Record<string, unknown>[];
+      const migratedTickets = tickets.map((raw) => {
+        const updatedAt = typeof raw.updatedAt === 'number' ? (raw.updatedAt as number) : Date.now();
+        const next: Record<string, unknown> = { ...raw };
+        if (next.phaseChangedAt === undefined) next.phaseChangedAt = updatedAt;
+        if (next.columnChangedAt === undefined) next.columnChangedAt = updatedAt;
+        if (raw.resolution !== undefined && next.resolvedAt === undefined) {
+          next.resolvedAt = updatedAt;
+        }
+        return next;
+      });
+      store.set('tickets', migratedTickets);
+
+      const milestones = store.get('milestones', []) as Record<string, unknown>[];
+      const migratedMilestones = milestones.map((raw) => {
+        if (raw.status === 'completed' && raw.completedAt === undefined) {
+          const updatedAt = typeof raw.updatedAt === 'number' ? (raw.updatedAt as number) : Date.now();
+          return { ...raw, completedAt: updatedAt };
+        }
+        return raw;
+      });
+      store.set('milestones', migratedMilestones);
+
+      if ((store.get('layoutMode' as never) as string) === 'home') {
+        store.set('layoutMode' as never, 'chat');
+      }
+
+      store.set('schemaVersion', 15);
+      console.log(
+        `[ProjectManager] v15 migration complete: ${migratedTickets.length} tickets, ${migratedMilestones.length} milestones`
+      );
       return;
     }
 
-    if (version >= 7) {
+    if (version >= 15) {
       return;
     }
 
@@ -3195,7 +3920,7 @@ export class ProjectManager {
     const migrated: Record<string, unknown>[] = [];
 
     for (const raw of tickets) {
-      // Strip all legacy fields and normalize (initiativeId added in v5 migration)
+      // Strip all legacy fields and normalize (milestoneId added in v5 migration)
       const ticket: Record<string, unknown> = {
         id: (raw.id as string) ?? nanoid(),
         projectId: (raw.projectId as string) ?? '',
@@ -3414,6 +4139,7 @@ export class ProjectManager {
     }
     this.cancelAllRetries();
     this.workflowLoader.dispose();
+    await this.pageWatcher.dispose();
 
     // Dispose all machines
     for (const [ticketId, entry] of this.machines) {
@@ -3496,22 +4222,50 @@ export const createProjectManager = (arg: {
     projectManager.getSupervisorStatusForCodeTab(tabId)
   );
   ipc.handle('project:get-active-wip-tickets', () => projectManager.getActiveWipTickets());
+  ipc.handle('project:read-context', (_, projectId) => projectManager.readContext(projectId));
+  ipc.handle('project:write-context', (_, projectId, content) => projectManager.writeContext(projectId, content));
+  ipc.handle('project:list-project-files', (_, projectId) => projectManager.listProjectFiles(projectId));
+  ipc.handle('project:get-context-preview', (_, projectId) => projectManager.getContextPreview(projectId));
+  ipc.handle('project:open-project-file', (_, projectId, relativePath) =>
+    projectManager.openProjectFile(projectId, relativePath)
+  );
 
   // Inbox handlers
-  ipc.handle('inbox:get-items', () => projectManager.getInboxItemList());
-  ipc.handle('inbox:add-item', (_, item) => projectManager.addInboxItem(item));
-  ipc.handle('inbox:update-item', (_, id, patch) => projectManager.updateInboxItem(id, patch));
-  ipc.handle('inbox:remove-item', (_, id) => projectManager.removeInboxItem(id));
-  ipc.handle('inbox:get-icebox-items', () => projectManager.getIceboxItems());
-  ipc.handle('inbox:restore-from-icebox', (_, id) => projectManager.restoreFromIcebox(id));
-  ipc.handle('inbox:shape-item', (_, id, shaping) => projectManager.shapeInboxItem(id, shaping));
-  ipc.handle('inbox:convert-to-ticket', (_, id, projectId) => projectManager.convertInboxToTicket(id, projectId));
 
-  // Initiatives
-  ipc.handle('initiative:get-items', (_, projectId) => projectManager.getInitiativesByProject(projectId));
-  ipc.handle('initiative:add-item', (_, item) => projectManager.addInitiative(item));
-  ipc.handle('initiative:update-item', (_, id, patch) => projectManager.updateInitiative(id, patch));
-  ipc.handle('initiative:remove-item', (_, id) => projectManager.removeInitiative(id));
+  // Milestones
+  ipc.handle('milestone:get-items', (_, projectId) => projectManager.getMilestonesByProject(projectId));
+  ipc.handle('milestone:add-item', (_, item) => projectManager.addMilestone(item));
+  ipc.handle('milestone:update-item', (_, id, patch) => projectManager.updateMilestone(id, patch));
+  ipc.handle('milestone:remove-item', (_, id) => projectManager.removeMilestone(id));
+
+  // Pages
+  ipc.handle('page:get-items', (_, projectId) => projectManager.getPagesByProject(projectId));
+  ipc.handle('page:get-all', () => projectManager.getPages());
+  ipc.handle('page:add-item', (_, item, template) => projectManager.addPage(item, template));
+  ipc.handle('page:update-item', (_, id, patch) => projectManager.updatePage(id, patch));
+  ipc.handle('page:remove-item', (_, id) => projectManager.removePage(id));
+  ipc.handle('page:read-content', (_, pageId) => projectManager.readPageContent(pageId));
+  ipc.handle('page:write-content', (_, pageId, content) => projectManager.writePageContent(pageId, content));
+  ipc.handle('page:reorder', (_, pageId, newParentId, newSortOrder) =>
+    projectManager.reorderPage(pageId, newParentId, newSortOrder)
+  );
+  ipc.handle('page:watch', (_, pageId) => projectManager.watchPage(pageId));
+  ipc.handle('page:unwatch', (_, pageId) => projectManager.unwatchPage(pageId));
+
+  // Inbox
+  const inbox = projectManager.getInboxManager();
+  ipc.handle('inbox:get-all', () => inbox.getAll());
+  ipc.handle('inbox:get-active', () => inbox.getActive());
+  ipc.handle('inbox:add', (_, input) => inbox.add(input));
+  ipc.handle('inbox:update', (_, id, patch) => inbox.update(id, patch));
+  ipc.handle('inbox:remove', (_, id) => inbox.remove(id));
+  ipc.handle('inbox:shape', (_, id, shaping) => inbox.shape(id, shaping));
+  ipc.handle('inbox:defer', (_, id) => inbox.defer(id));
+  ipc.handle('inbox:reactivate', (_, id) => inbox.reactivate(id));
+  ipc.handle('inbox:promote-to-ticket', (_, id, opts) => inbox.promoteToTicket(id, opts));
+  ipc.handle('inbox:promote-to-project', (_, id, opts) => inbox.promoteToProject(id, opts));
+  ipc.handle('inbox:sweep', () => inbox.sweepExpired());
+  ipc.handle('inbox:gc-promoted', () => inbox.gcPromoted());
 
   const cleanup = async () => {
     await projectManager.exit();
@@ -3540,18 +4294,34 @@ export const createProjectManager = (arg: {
     ipcMain.removeHandler('project:set-auto-dispatch');
     ipcMain.removeHandler('project:get-supervisor-sandbox-status');
     ipcMain.removeHandler('project:get-active-wip-tickets');
-    ipcMain.removeHandler('inbox:get-items');
-    ipcMain.removeHandler('inbox:add-item');
-    ipcMain.removeHandler('inbox:update-item');
-    ipcMain.removeHandler('inbox:remove-item');
-    ipcMain.removeHandler('inbox:get-icebox-items');
-    ipcMain.removeHandler('inbox:restore-from-icebox');
-    ipcMain.removeHandler('inbox:shape-item');
-    ipcMain.removeHandler('inbox:convert-to-ticket');
-    ipcMain.removeHandler('initiative:get-items');
-    ipcMain.removeHandler('initiative:add-item');
-    ipcMain.removeHandler('initiative:update-item');
-    ipcMain.removeHandler('initiative:remove-item');
+    ipcMain.removeHandler('project:read-context');
+    ipcMain.removeHandler('project:write-context');
+    ipcMain.removeHandler('milestone:get-items');
+    ipcMain.removeHandler('milestone:add-item');
+    ipcMain.removeHandler('milestone:update-item');
+    ipcMain.removeHandler('milestone:remove-item');
+    ipcMain.removeHandler('page:get-items');
+    ipcMain.removeHandler('page:get-all');
+    ipcMain.removeHandler('page:add-item');
+    ipcMain.removeHandler('page:update-item');
+    ipcMain.removeHandler('page:remove-item');
+    ipcMain.removeHandler('page:read-content');
+    ipcMain.removeHandler('page:write-content');
+    ipcMain.removeHandler('page:reorder');
+    ipcMain.removeHandler('page:watch');
+    ipcMain.removeHandler('page:unwatch');
+    ipcMain.removeHandler('inbox:get-all');
+    ipcMain.removeHandler('inbox:get-active');
+    ipcMain.removeHandler('inbox:add');
+    ipcMain.removeHandler('inbox:update');
+    ipcMain.removeHandler('inbox:remove');
+    ipcMain.removeHandler('inbox:shape');
+    ipcMain.removeHandler('inbox:defer');
+    ipcMain.removeHandler('inbox:reactivate');
+    ipcMain.removeHandler('inbox:promote-to-ticket');
+    ipcMain.removeHandler('inbox:promote-to-project');
+    ipcMain.removeHandler('inbox:sweep');
+    ipcMain.removeHandler('inbox:gc-promoted');
   };
 
   return [projectManager, cleanup] as const;

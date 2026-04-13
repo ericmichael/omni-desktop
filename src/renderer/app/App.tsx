@@ -20,7 +20,7 @@ import { QuickCapture } from '@/renderer/features/Inbox/QuickCapture';
 import { ToastContainer } from '@/renderer/features/Toast/ToastContainer';
 import { SyncBar } from '@/renderer/features/WorkspaceSync/SyncBar';
 import { persistedStoreApi } from '@/renderer/services/store';
-import { applyCssVars, fluentThemes } from '@/renderer/theme/fluent-themes';
+import { applyCssVars, fluentThemes, isThemeDark } from '@/renderer/theme/fluent-themes';
 
 import { usePreloadTerminalFont } from './use-preload-terminal-font';
 
@@ -60,6 +60,8 @@ export const App = () => {
     } else {
       document.documentElement.setAttribute('data-theme', themeName);
     }
+    // Toggle .dark class for Tailwind dark: variant (used by @yoopta/themes-shadcn)
+    document.documentElement.classList.toggle('dark', isThemeDark(themeName));
     syncTheme();
   }, [themeName]);
 

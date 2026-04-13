@@ -1,95 +1,83 @@
-import { atom, map } from 'nanostores';
+import { computed } from 'nanostores';
 
 import { emitter } from '@/renderer/services/ipc';
-import type { InboxItem, InboxItemId, ProjectId, ShapingData, Ticket } from '@/shared/types';
-
-/** Whether the quick-capture overlay is open. */
-export const $quickCaptureOpen = atom(false);
-
-export const openQuickCapture = (): void => {
-  $quickCaptureOpen.set(true);
-};
-
-/**
- * All inbox items, keyed by item ID.
- */
-export const $inboxItems = map<Record<InboxItemId, InboxItem>>({});
+import { persistedStoreApi } from '@/renderer/services/store';
+import type {
+  InboxItem,
+  InboxItemId,
+  InboxShaping,
+  MilestoneId,
+  ProjectId,
+  Ticket,
+} from '@/shared/types';
 
 /**
- * Iceboxed items, keyed by item ID.
+ * Inbox state. Derived directly from `persistedStoreApi.$atom` so it stays
+ * in sync with every `store:changed` broadcast from main — no separate
+ * hydration step, no optimistic write layer that can drift from the source
+ * of truth. Mutations go through IPC, main updates the store, and the new
+ * state flows back through `store:changed` to update every consumer.
  */
-export const $iceboxItems = map<Record<InboxItemId, InboxItem>>({});
+export const $inboxItems = computed(persistedStoreApi.$atom, (store) => {
+  const out: Record<InboxItemId, InboxItem> = {};
+  for (const item of store.inboxItems ?? []) out[item.id] = item;
+  return out;
+});
+
+/** Active view: still shapeable/actionable (hides later + promoted). */
+export const $activeInbox = computed($inboxItems, (items) =>
+  Object.values(items).filter((i) => i.status !== 'later' && !i.promotedTo)
+);
+
+/** Deferred items (hides promoted). */
+export const $laterInbox = computed($inboxItems, (items) =>
+  Object.values(items).filter((i) => i.status === 'later' && !i.promotedTo)
+);
+
+/** Promoted tombstones — what this item became. */
+export const $promotedInbox = computed($inboxItems, (items) =>
+  Object.values(items).filter((i) => !!i.promotedTo)
+);
+
+/** Count for the sidebar badge. Only counts actionable items. */
+export const $activeInboxCount = computed($activeInbox, (items) => items.length);
+
+// ---------------------------------------------------------------------------
+// IPC wrapper — thin pass-through. Mutations persist in the main store and
+// the renderer atom rehydrates automatically via `store:changed`.
+// ---------------------------------------------------------------------------
 
 export const inboxApi = {
-  addItem: async (item: Omit<InboxItem, 'id' | 'createdAt' | 'updatedAt'>): Promise<InboxItem> => {
-    const created = await emitter.invoke('inbox:add-item', item);
-    $inboxItems.setKey(created.id, created);
-    return created;
-  },
-  updateItem: async (id: InboxItemId, patch: Partial<Omit<InboxItem, 'id' | 'createdAt'>>): Promise<void> => {
-    await emitter.invoke('inbox:update-item', id, patch);
-    const existing = $inboxItems.get()[id];
-    if (existing) {
-      $inboxItems.setKey(id, { ...existing, ...patch, updatedAt: Date.now() });
-    }
-  },
-  removeItem: async (id: InboxItemId): Promise<void> => {
-    await emitter.invoke('inbox:remove-item', id);
-    const current = { ...$inboxItems.get() };
-    delete current[id];
-    $inboxItems.set(current);
-  },
-  fetchItems: async (): Promise<void> => {
-    const items = await emitter.invoke('inbox:get-items');
-    const newMap: Record<InboxItemId, InboxItem> = {};
-    for (const item of items) {
-      newMap[item.id] = item;
-    }
-    $inboxItems.set(newMap);
-  },
-  fetchIceboxItems: async (): Promise<void> => {
-    const items = await emitter.invoke('inbox:get-icebox-items');
-    const newMap: Record<InboxItemId, InboxItem> = {};
-    for (const item of items) {
-      newMap[item.id] = item;
-    }
-    $iceboxItems.set(newMap);
-  },
-  restoreFromIcebox: async (id: InboxItemId): Promise<void> => {
-    await emitter.invoke('inbox:restore-from-icebox', id);
-    // Move from icebox map to inbox map with fresh timestamps
-    const iceboxCurrent = { ...$iceboxItems.get() };
-    const restored = iceboxCurrent[id];
-    delete iceboxCurrent[id];
-    $iceboxItems.set(iceboxCurrent);
-    if (restored) {
-      const now = Date.now();
-      $inboxItems.setKey(id, { ...restored, status: 'open', createdAt: now, updatedAt: now });
-    }
-  },
-  shapeItem: async (id: InboxItemId, shaping: ShapingData): Promise<void> => {
-    await emitter.invoke('inbox:shape-item', id, shaping);
-    const existing = $inboxItems.get()[id];
-    if (existing) {
-      $inboxItems.setKey(id, { ...existing, shaping, updatedAt: Date.now() });
-    }
-  },
-  convertToTicket: async (id: InboxItemId, projectId: ProjectId): Promise<Ticket> => {
-    const ticket = await emitter.invoke('inbox:convert-to-ticket', id, projectId);
-    // Mark inbox item as done locally
-    const existing = $inboxItems.get()[id];
-    if (existing) {
-      $inboxItems.setKey(id, {
-        ...existing,
-        status: 'done',
-        projectId,
-        linkedTicketIds: [...(existing.linkedTicketIds ?? []), ticket.id],
-        updatedAt: Date.now(),
-      });
-    }
-    return ticket;
-  },
-};
+  add: (input: {
+    title: string;
+    note?: string;
+    projectId?: ProjectId | null;
+    attachments?: string[];
+  }): Promise<InboxItem> => emitter.invoke('inbox:add', input),
 
-// Hydrate on import
-void inboxApi.fetchItems();
+  update: (
+    id: InboxItemId,
+    patch: Partial<Pick<InboxItem, 'title' | 'note' | 'projectId' | 'attachments'>>
+  ): Promise<void> => emitter.invoke('inbox:update', id, patch),
+
+  remove: (id: InboxItemId): Promise<void> => emitter.invoke('inbox:remove', id),
+
+  shape: (id: InboxItemId, shaping: InboxShaping): Promise<void> =>
+    emitter.invoke('inbox:shape', id, shaping),
+
+  defer: (id: InboxItemId): Promise<void> => emitter.invoke('inbox:defer', id),
+
+  reactivate: (id: InboxItemId): Promise<void> => emitter.invoke('inbox:reactivate', id),
+
+  promoteToTicket: (
+    id: InboxItemId,
+    opts: { projectId: ProjectId; milestoneId?: MilestoneId; columnId?: string }
+  ): Promise<Ticket> => emitter.invoke('inbox:promote-to-ticket', id, opts),
+
+  promoteToProject: (id: InboxItemId, opts: { label: string }) =>
+    emitter.invoke('inbox:promote-to-project', id, opts),
+
+  sweep: (): Promise<number> => emitter.invoke('inbox:sweep'),
+
+  gcPromoted: (): Promise<number> => emitter.invoke('inbox:gc-promoted'),
+};

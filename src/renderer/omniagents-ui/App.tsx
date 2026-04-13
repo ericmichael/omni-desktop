@@ -419,7 +419,7 @@ setWorkspaceLocked(true)
     } catch (e) {
       submitError(String((e as Error)?.message || 'Failed to start run'))
     }
-  }, [client, submit, submitError, workspacePath, workspaceSupported])
+  }, [client, sessionId, variablesProp, submit, submitError, workspacePath, workspaceSupported])
 
   const handleStop = useCallback(() => {
     if (!runId) return

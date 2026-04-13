@@ -1,9 +1,10 @@
 import { useDroppable } from '@dnd-kit/core';
-import { memo, useMemo } from 'react';
+import { memo, useCallback, useMemo } from 'react';
+import { Add16Regular } from '@fluentui/react-icons';
 import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 
 import { Body1 } from '@/renderer/ds';
-import type { Column, Ticket } from '@/shared/types';
+import type { Column, ColumnId, Ticket } from '@/shared/types';
 
 import { getColumnColors } from './ticket-constants';
 import { KanbanCard } from './KanbanCard';
@@ -65,15 +66,47 @@ const useStyles = makeStyles({
     paddingRight: tokens.spacingHorizontalS,
     paddingBottom: tokens.spacingVerticalS,
   },
+  newBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    width: '100%',
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: '6px',
+    paddingBottom: '6px',
+    border: 'none',
+    backgroundColor: 'transparent',
+    borderRadius: tokens.borderRadiusMedium,
+    cursor: 'pointer',
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+    transitionProperty: 'background-color, color',
+    transitionDuration: tokens.durationFaster,
+    ':hover': {
+      backgroundColor: tokens.colorSubtleBackgroundHover,
+      color: tokens.colorNeutralForeground1,
+    },
+  },
 });
 
-export const KanbanColumn = memo(({ column, tickets }: { column: Column; tickets: Ticket[] }) => {
+type KanbanColumnProps = {
+  column: Column;
+  tickets: Ticket[];
+  onNewTicket?: (columnId: ColumnId) => void;
+};
+
+export const KanbanColumn = memo(({ column, tickets, onNewTicket }: KanbanColumnProps) => {
   const styles = useStyles();
   const { isOver, setNodeRef } = useDroppable({
     id: column.id,
   });
 
   const colors = useMemo(() => getColumnColors(column.id), [column.id]);
+
+  const handleNew = useCallback(() => {
+    onNewTicket?.(column.id);
+  }, [onNewTicket, column.id]);
 
   return (
     <div
@@ -108,6 +141,14 @@ export const KanbanColumn = memo(({ column, tickets }: { column: Column; tickets
           <KanbanCard key={ticket.id} ticket={ticket} />
         ))}
       </div>
+
+      {/* + New */}
+      {onNewTicket && (
+        <button type="button" className={styles.newBtn} onClick={handleNew}>
+          <Add16Regular />
+          New
+        </button>
+      )}
     </div>
   );
 });

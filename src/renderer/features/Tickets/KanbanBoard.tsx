@@ -11,11 +11,11 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
 import { makeStyles, tokens } from '@fluentui/react-components';
 
-import type { Column, ProjectId, Ticket, TicketId } from '@/shared/types';
+import type { Column, ColumnId, ProjectId, Ticket, TicketId } from '@/shared/types';
 
 import { KanbanCard } from './KanbanCard';
 import { KanbanColumn } from './KanbanColumn';
-import { $activeInitiativeId, $pipeline, $tickets, ticketApi } from './state';
+import { $activeMilestoneId, $pipeline, $tickets, ticketApi } from './state';
 
 const useStyles = makeStyles({
   loading: {
@@ -51,7 +51,7 @@ export const KanbanBoard = memo(({ projectId }: { projectId: ProjectId }) => {
   const styles = useStyles();
   const pipeline = useStore($pipeline);
   const tickets = useStore($tickets);
-  const activeInitiativeId = useStore($activeInitiativeId);
+  const activeMilestoneId = useStore($activeMilestoneId);
 
   const [activeTicket, setActiveTicket] = useState<{ ticket: Ticket; column: Column } | null>(null);
 
@@ -60,9 +60,9 @@ export const KanbanBoard = memo(({ projectId }: { projectId: ProjectId }) => {
   const projectTickets = useMemo(
     () =>
       Object.values(tickets).filter(
-        (t) => t.projectId === projectId && (activeInitiativeId === 'all' || t.initiativeId === activeInitiativeId)
+        (t) => t.projectId === projectId && (activeMilestoneId === 'all' || t.milestoneId === activeMilestoneId)
       ),
-    [tickets, projectId, activeInitiativeId]
+    [tickets, projectId, activeMilestoneId]
   );
 
   const ticketsByColumn = useMemo(() => {
@@ -128,6 +128,26 @@ export const KanbanBoard = memo(({ projectId }: { projectId: ProjectId }) => {
     setActiveTicket(null);
   }, []);
 
+  const handleNewTicket = useCallback(
+    async (columnId: ColumnId) => {
+      const ticket = await ticketApi.addTicket({
+        projectId,
+        milestoneId: activeMilestoneId !== 'all' ? activeMilestoneId : undefined,
+        title: 'Untitled',
+        description: '',
+        priority: 'medium',
+        blockedBy: [],
+      });
+      // Place in the target column
+      if (columnId !== pipeline?.columns[0]?.id) {
+        void ticketApi.moveTicketToColumn(ticket.id, columnId);
+      }
+      // Navigate to the ticket detail so user can fill in details
+      ticketApi.goToTicket(ticket.id);
+    },
+    [projectId, activeMilestoneId, pipeline]
+  );
+
   if (!pipeline) {
     return (
       <div className={styles.loading}>
@@ -145,7 +165,12 @@ export const KanbanBoard = memo(({ projectId }: { projectId: ProjectId }) => {
     >
       <div className={styles.board}>
         {pipeline.columns.map((column) => (
-          <KanbanColumn key={column.id} column={column} tickets={ticketsByColumn[column.id] ?? []} />
+          <KanbanColumn
+            key={column.id}
+            column={column}
+            tickets={ticketsByColumn[column.id] ?? []}
+            onNewTicket={handleNewTicket}
+          />
         ))}
       </div>
       <DragOverlay dropAnimation={null}>

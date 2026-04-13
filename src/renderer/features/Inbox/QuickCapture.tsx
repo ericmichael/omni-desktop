@@ -1,13 +1,16 @@
 import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
+import { atom } from 'nanostores';
 import { AnimatePresence, motion } from 'framer-motion';
 import { memo, useCallback, useRef, useState } from 'react';
 import { ArrowUp20Regular, MailInbox20Regular } from '@fluentui/react-icons';
 import { useHotkeys } from 'react-hotkeys-hook';
 
 import { cn } from '@/renderer/ds';
+import { inboxApi } from '@/renderer/features/Inbox/state';
 
-import { $quickCaptureOpen, inboxApi } from './state';
+/** Whether the global quick-capture overlay is open. Exported for any future callers. */
+export const $quickCaptureOpen = atom(false);
 
 const useStyles = makeStyles({
   overlay: { position: 'absolute', inset: 0, zIndex: 50 },
@@ -172,7 +175,9 @@ export const QuickCapture = memo(() => {
     const trimmed = value.trim();
     if (!trimmed) return;
 
-    await inboxApi.addItem({ title: trimmed, status: 'open' });
+    // Capture lands as a global inbox item with no project context. Shaping
+    // and promotion happen later from the Inbox view.
+    await inboxApi.add({ title: trimmed });
 
     // Flash confirmation then close
     setFlash(true);

@@ -45,7 +45,7 @@ export type WindowProps = {
 /**
  * Data stored in the electron store.
  */
-export type LayoutMode = 'home' | 'chat' | 'code' | 'projects' | 'dashboards' | 'settings' | 'more';
+export type LayoutMode = 'chat' | 'code' | 'projects' | 'dashboards' | 'settings' | 'more';
 export type OmniTheme =
   | 'teams-light'
   | 'teams-dark'
@@ -107,10 +107,11 @@ export type StoreData = {
   theme: OmniTheme;
   onboardingComplete: boolean;
   projects: Project[];
-  initiatives: Initiative[];
+  milestones: Milestone[];
+  pages: Page[];
+  inboxItems: InboxItem[];
   tasks: Task[];
   tickets: Ticket[];
-  inboxItems: InboxItem[];
   /** Maximum active tickets across all projects (cognitive WIP limit). Default: 3. */
   wipLimit: number;
   /** Day of week for the weekly review prompt (0=Sun, 1=Mon, ..., 6=Sat). Default: 5 (Friday). */
@@ -119,6 +120,8 @@ export type StoreData = {
   lastWeeklyReviewAt: number | null;
   schemaVersion: number;
   chatSessionId: string | null;
+  /** Which project is selected in the Chat tab. Null = no project context. */
+  chatProjectId: ProjectId | null;
   codeTabs: CodeTab[];
   activeCodeTabId: CodeTabId | null;
   codeLayoutMode: CodeLayoutMode;
@@ -215,6 +218,10 @@ export const schema: Schema<StoreData> = {
     type: ['string', 'null'],
     default: null,
   },
+  chatProjectId: {
+    type: ['string', 'null'],
+    default: null,
+  },
   codeTabs: {
     type: 'array',
     default: [],
@@ -253,15 +260,17 @@ export const schema: Schema<StoreData> = {
       properties: {
         id: { type: 'string' },
         label: { type: 'string' },
-        source: { type: 'object' },
+        slug: { type: 'string' },
+        isPersonal: { type: 'boolean' },
+        source: { type: ['object', 'null'] },
         createdAt: { type: 'number' },
         pipeline: { type: 'object' },
         sandbox: { type: ['object', 'null'] },
       },
-      required: ['id', 'label', 'source', 'createdAt'],
+      required: ['id', 'label', 'slug', 'createdAt'],
     },
   },
-  initiatives: {
+  milestones: {
     type: 'array',
     default: [],
     items: {
@@ -274,11 +283,67 @@ export const schema: Schema<StoreData> = {
         branch: { type: 'string' },
         brief: { type: 'string' },
         status: { type: 'string', enum: ['active', 'completed', 'archived'] },
-        isDefault: { type: 'boolean' },
+        dueDate: { type: 'number' },
+        completedAt: { type: 'number' },
         createdAt: { type: 'number' },
         updatedAt: { type: 'number' },
       },
       required: ['id', 'projectId', 'title', 'description', 'status', 'createdAt', 'updatedAt'],
+    },
+  },
+  pages: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        projectId: { type: 'string' },
+        parentId: { type: ['string', 'null'] },
+        title: { type: 'string' },
+        icon: { type: 'string' },
+        sortOrder: { type: 'number' },
+        isRoot: { type: 'boolean' },
+        createdAt: { type: 'number' },
+        updatedAt: { type: 'number' },
+      },
+      required: ['id', 'projectId', 'title', 'sortOrder', 'createdAt', 'updatedAt'],
+    },
+  },
+  inboxItems: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        title: { type: 'string' },
+        note: { type: 'string' },
+        attachments: { type: 'array', items: { type: 'string' } },
+        projectId: { type: ['string', 'null'] },
+        status: { type: 'string', enum: ['new', 'shaped', 'later'] },
+        shaping: {
+          type: 'object',
+          properties: {
+            outcome: { type: 'string' },
+            appetite: { type: 'string', enum: ['small', 'medium', 'large', 'xl'] },
+            notDoing: { type: 'string' },
+          },
+        },
+        laterAt: { type: 'number' },
+        promotedTo: {
+          type: 'object',
+          properties: {
+            kind: { type: 'string', enum: ['ticket', 'project'] },
+            id: { type: 'string' },
+            at: { type: 'number' },
+          },
+          required: ['kind', 'id', 'at'],
+        },
+        createdAt: { type: 'number' },
+        updatedAt: { type: 'number' },
+      },
+      required: ['id', 'title', 'status', 'createdAt', 'updatedAt'],
     },
   },
   tasks: {
@@ -312,7 +377,7 @@ export const schema: Schema<StoreData> = {
       properties: {
         id: { type: 'string' },
         projectId: { type: 'string' },
-        initiativeId: { type: 'string' },
+        milestoneId: { type: 'string' },
         title: { type: 'string' },
         description: { type: 'string' },
         priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
@@ -328,6 +393,9 @@ export const schema: Schema<StoreData> = {
         },
         createdAt: { type: 'number' },
         updatedAt: { type: 'number' },
+        phaseChangedAt: { type: 'number' },
+        columnChangedAt: { type: 'number' },
+        resolvedAt: { type: 'number' },
         // Kanban fields
         columnId: { type: 'string' },
         currentPhaseId: { type: ['string', 'null'] },
@@ -350,33 +418,6 @@ export const schema: Schema<StoreData> = {
         'createdAt',
         'updatedAt',
       ],
-    },
-  },
-  inboxItems: {
-    type: 'array',
-    default: [],
-    items: {
-      type: 'object',
-      properties: {
-        id: { type: 'string' },
-        title: { type: 'string' },
-        description: { type: 'string' },
-        attachments: { type: 'array', items: { type: 'string' } },
-        projectId: { type: ['string', 'null'] },
-        linkedTicketIds: { type: 'array', items: { type: 'string' } },
-        status: { type: 'string', enum: ['open', 'done', 'deferred', 'iceboxed'] },
-        shaping: {
-          type: 'object',
-          properties: {
-            doneLooksLike: { type: 'string' },
-            appetite: { type: 'string', enum: ['small', 'medium', 'large'] },
-            outOfScope: { type: 'string' },
-          },
-        },
-        createdAt: { type: 'number' },
-        updatedAt: { type: 'number' },
-      },
-      required: ['id', 'title', 'status', 'createdAt', 'updatedAt'],
     },
   },
   platform: {
@@ -537,18 +578,27 @@ export type CodeTab = {
 // --- ID types ---
 
 export type ProjectId = string;
-export type InitiativeId = string;
+
+/**
+ * Minimal pointer the launcher persists so it knows where each project's
+ * file-backed data lives. All other project attributes are loaded from
+ * `<dir>/.omni/project.yml` at runtime.
+ */
+export type ProjectIndexEntry = { id: ProjectId; dir: string };
+
+export type MilestoneId = string;
+export type PageId = string;
+export type InboxItemId = string;
 export type TaskId = string;
 export type TicketId = string;
 export type TicketCommentId = string;
 export type ColumnId = string;
-export type InboxItemId = string;
 
 // --- Enums ---
 
 export type TicketPriority = 'low' | 'medium' | 'high' | 'critical';
 export type TicketResolution = 'completed' | 'wont_do' | 'duplicate' | 'cancelled';
-export type InitiativeStatus = 'active' | 'completed' | 'archived';
+export type MilestoneStatus = 'active' | 'completed' | 'archived';
 
 /** Re-export TicketPhase so renderer can import from shared/types. */
 export type { TicketPhase } from '@/shared/ticket-phase';
@@ -602,7 +652,8 @@ export type SandboxConfig = {
 export type GitCredentialRef = { kind: 'platform-managed'; credentialId: string };
 
 /**
- * Discriminated union describing where a project's files live.
+ * Discriminated union describing where a project's code repo lives.
+ * Optional — projects don't require a linked repo.
  * - `local`: directory on the user's machine (may or may not be a git repo — `gitDetected` is auto-set).
  * - `git-remote`: sandbox clones the repo; git is the persistence layer.
  */
@@ -613,7 +664,12 @@ export type ProjectSource =
 export type Project = {
   id: ProjectId;
   label: string;
-  source: ProjectSource;
+  /** Filesystem-safe name derived from label, used for project folder path. */
+  slug: string;
+  /** True for the auto-created Personal project. Cannot be deleted. */
+  isPersonal?: boolean;
+  /** Optional repo link. Projects without a repo use their project folder as workspace. */
+  source?: ProjectSource;
   createdAt: number;
   /** Pipeline configuration. If undefined, DEFAULT_PIPELINE is used. */
   pipeline?: Pipeline;
@@ -621,22 +677,94 @@ export type Project = {
   autoDispatch?: boolean;
   /** Per-project sandbox configuration. When absent/null, the default sandbox image is used. */
   sandbox?: SandboxConfig | null;
-  /** Project brief — a living document that captures problem, appetite, scope, and open questions. */
-  brief?: string;
 };
 
-export type Initiative = {
-  id: InitiativeId;
+export type Milestone = {
+  id: MilestoneId;
   projectId: ProjectId;
   title: string;
   description: string;
   /** Optional feature branch. Tickets inherit this unless they override with their own branch. */
   branch?: string;
-  /** Initiative brief — describes the deliverable, goals, and scope. */
+  /** Milestone brief — describes the deliverable, goals, and scope. */
   brief?: string;
-  status: InitiativeStatus;
-  /** True for the auto-created "General" initiative. Cannot be deleted. */
-  isDefault?: boolean;
+  status: MilestoneStatus;
+  /** Optional target date (epoch ms). Drives deadline-pressure risk signals. */
+  dueDate?: number;
+  /** Stamped when status transitions to 'completed'. */
+  completedAt?: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
+/**
+ * A knowledge-base page. Notion-style: hierarchical doc with a title, icon,
+ * and markdown body (stored on disk, not in the store). Pages have no
+ * lifecycle status — they are docs, not work items. Work happens on tickets.
+ */
+export type Page = {
+  id: PageId;
+  projectId: ProjectId;
+  /** Null for root-level pages in the project. */
+  parentId: PageId | null;
+  title: string;
+  /** Emoji for sidebar display. */
+  icon?: string;
+  /** Sort position among siblings. Lower = first. */
+  sortOrder: number;
+  /** True for the auto-created root page. Cannot be deleted. */
+  isRoot?: boolean;
+  createdAt: number;
+  updatedAt: number;
+};
+
+// --- Inbox ---
+
+/**
+ * GTD-style inbox lifecycle:
+ * - new:    captured, not yet shaped
+ * - shaped: has a filled-in `shaping` block, ready to promote
+ * - later:  deferred; `laterAt` drives stale-item reminders
+ *
+ * Terminal transition is promotion: the item is stamped with `promotedTo`
+ * pointing at the ticket or project it became, and is filtered out of the
+ * active inbox view. Promoted items stay as tombstones for undo + audit
+ * (GC'd after 30d by the inbox manager).
+ */
+export type InboxItemStatus = 'new' | 'shaped' | 'later';
+
+export type InboxShaping = {
+  /** 1-2 sentences — what does success look like? (Shape Up "done looks like"). */
+  outcome: string;
+  /** Rough effort sizing. */
+  appetite: 'small' | 'medium' | 'large' | 'xl';
+  /** Explicit exclusions — what is NOT in scope. */
+  notDoing?: string;
+};
+
+export type InboxPromotion = {
+  kind: 'ticket' | 'project';
+  /** ID of the ticket or project this inbox item became. */
+  id: string;
+  /** Timestamp of promotion, used for tombstone GC. */
+  at: number;
+};
+
+export type InboxItem = {
+  id: InboxItemId;
+  title: string;
+  /** Free-form capture body. */
+  note?: string;
+  attachments?: string[];
+  /** Optional project context at capture time. Null = loose / global. */
+  projectId?: ProjectId | null;
+  status: InboxItemStatus;
+  /** Present once the item has been shaped. Required for promotion to ticket. */
+  shaping?: InboxShaping;
+  /** Stamped when moved to `later`. Drives the stale-items reminder. */
+  laterAt?: number;
+  /** Stamped on promotion. Presence hides the item from the active view. */
+  promotedTo?: InboxPromotion;
   createdAt: number;
   updatedAt: number;
 };
@@ -659,7 +787,7 @@ export type TicketRun = {
 export type Ticket = {
   id: TicketId;
   projectId: ProjectId;
-  initiativeId: InitiativeId;
+  milestoneId?: MilestoneId;
   title: string;
   description: string;
   priority: TicketPriority;
@@ -691,6 +819,12 @@ export type Ticket = {
   supervisorSessionId?: string;
   /** Current supervisor lifecycle phase. */
   phase?: import('@/shared/ticket-phase').TicketPhase;
+  /** Stamped whenever `phase` transitions. Drives stalled-ticket risk. */
+  phaseChangedAt?: number;
+  /** Stamped whenever `columnId` changes. Drives aging-in-column risk. */
+  columnChangedAt?: number;
+  /** Stamped when `resolution` first becomes defined. Drives shipped-today/week. */
+  resolvedAt?: number;
   /** Task ID for the supervisor's sandbox. */
   supervisorTaskId?: TaskId;
   /** Accumulated token usage across all supervisor runs. */
@@ -714,25 +848,6 @@ export type ShapingData = {
   appetite: Appetite;
   /** What's explicitly excluded from scope. */
   outOfScope: string;
-};
-
-// --- Inbox ---
-
-export type InboxItemStatus = 'open' | 'done' | 'deferred' | 'iceboxed';
-
-export type InboxItem = {
-  id: InboxItemId;
-  title: string;
-  description?: string;
-  attachments?: string[];
-  projectId?: ProjectId;
-  linkedTicketIds?: TicketId[];
-  linkedInitiativeId?: InitiativeId;
-  status: InboxItemStatus;
-  /** Shaping data — when present, item is shaped and ready for backlog. */
-  shaping?: ShapingData;
-  createdAt: number;
-  updatedAt: number;
 };
 
 export type Task = {
@@ -908,6 +1023,34 @@ type ConfigIpcEvents = Namespaced<
   }
 >;
 
+/**
+ * A discovered skill entry returned by the skills:list IPC handler.
+ */
+export type SkillEntry = {
+  /** Directory name (must match `name` in SKILL.md frontmatter). */
+  name: string;
+  /** Human-readable description from SKILL.md frontmatter. */
+  description: string;
+  /** Absolute path to the skill directory. */
+  path: string;
+  /** Whether this skill lives in the global config dir (vs project-local). */
+  isGlobal: boolean;
+};
+
+/**
+ * Skills management API. Main process handles these events, renderer process invokes them.
+ */
+type SkillsIpcEvents = Namespaced<
+  'skills',
+  {
+    list: () => SkillEntry[];
+    read: (skillPath: string) => string | null;
+    create: (name: string, description: string) => SkillEntry;
+    remove: (skillPath: string) => void;
+    'write-content': (skillPath: string, content: string) => void;
+  }
+>;
+
 
 /**
  * Project & Ticket API. Main process handles these events, renderer process invokes them.
@@ -920,7 +1063,7 @@ type ProjectIpcEvents = Namespaced<
     'remove-project': (id: ProjectId) => void;
     'check-git-repo': (workspaceDir: string) => GitRepoInfo;
     'add-ticket': (
-      ticket: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'columnId' | 'initiativeId'> & { initiativeId?: InitiativeId }
+      ticket: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'columnId'>
     ) => Ticket;
     'update-ticket': (id: TicketId, patch: Partial<Omit<Ticket, 'id' | 'projectId' | 'createdAt'>>) => void;
     'remove-ticket': (id: TicketId) => void;
@@ -945,6 +1088,13 @@ type ProjectIpcEvents = Namespaced<
     'set-auto-dispatch': (projectId: ProjectId, enabled: boolean) => void;
     'get-supervisor-sandbox-status': (tabId: CodeTabId) => WithTimestamp<AgentProcessStatus> | null;
     'get-active-wip-tickets': () => Ticket[];
+    // Context file operations (replaces project.brief)
+    'read-context': (projectId: ProjectId) => string;
+    'write-context': (projectId: ProjectId, content: string) => void;
+    // Project file listing
+    'list-project-files': (projectId: ProjectId) => ArtifactFileEntry[];
+    'get-context-preview': (projectId: ProjectId) => string;
+    'open-project-file': (projectId: ProjectId, relativePath: string) => void;
   }
 >;
 
@@ -978,35 +1128,101 @@ type PlatformIpcEvents = Namespaced<
 >;
 
 /**
- * Inbox API. Main process handles these events, renderer process invokes them.
+ * Milestone API. Main process handles these events, renderer process invokes them.
  */
-type InboxIpcEvents = Namespaced<
-  'inbox',
+type MilestoneIpcEvents = Namespaced<
+  'milestone',
   {
-    'get-items': () => InboxItem[];
-    'add-item': (item: Omit<InboxItem, 'id' | 'createdAt' | 'updatedAt'>) => InboxItem;
-    'update-item': (id: InboxItemId, patch: Partial<Omit<InboxItem, 'id' | 'createdAt'>>) => void;
-    'remove-item': (id: InboxItemId) => void;
-    'get-icebox-items': () => InboxItem[];
-    'restore-from-icebox': (id: InboxItemId) => void;
-    'shape-item': (id: InboxItemId, shaping: ShapingData) => void;
-    'convert-to-ticket': (id: InboxItemId, projectId: ProjectId) => Ticket;
+    'get-items': (projectId: ProjectId) => Milestone[];
+    'add-item': (item: Omit<Milestone, 'id' | 'createdAt' | 'updatedAt'>) => Milestone;
+    'update-item': (
+      id: MilestoneId,
+      patch: Partial<Omit<Milestone, 'id' | 'projectId' | 'createdAt'>>
+    ) => void;
+    'remove-item': (id: MilestoneId) => void;
   }
 >;
 
 /**
- * Initiative API. Main process handles these events, renderer process invokes them.
+ * Page API. Main process handles these events, renderer process invokes them.
  */
-type InitiativeIpcEvents = Namespaced<
-  'initiative',
+type PageIpcEvents = Namespaced<
+  'page',
   {
-    'get-items': (projectId: ProjectId) => Initiative[];
-    'add-item': (item: Omit<Initiative, 'id' | 'createdAt' | 'updatedAt'>) => Initiative;
-    'update-item': (
-      id: InitiativeId,
-      patch: Partial<Omit<Initiative, 'id' | 'projectId' | 'createdAt'>>
+    'get-items': (projectId: ProjectId) => Page[];
+    /** All pages across all projects. Used by the global Inbox view. */
+    'get-all': () => Page[];
+    /** Create a new page. Optional `template` seeds the body with starter content. */
+    'add-item': (item: Omit<Page, 'id' | 'createdAt' | 'updatedAt'>, template?: import('@/lib/page-templates').TemplateKey) => Page;
+    'update-item': (id: PageId, patch: Partial<Omit<Page, 'id' | 'projectId' | 'createdAt'>>) => void;
+    'remove-item': (id: PageId) => void;
+    'read-content': (pageId: PageId) => string;
+    'write-content': (pageId: PageId, content: string) => void;
+    'reorder': (pageId: PageId, newParentId: PageId | null, newSortOrder: number) => void;
+    /** Subscribe to external-edit notifications for a page's file. Returns the current on-disk content. */
+    'watch': (pageId: PageId) => { content: string } | null;
+    /** Unsubscribe from external-edit notifications. */
+    'unwatch': (pageId: PageId) => void;
+  }
+>;
+
+/**
+ * Inbox API. Renderer invokes, main handles. The inbox is a global capture
+ * surface (items can be projectless) backed by electron-store. Its lifecycle
+ * is GTD: new → shaped → promoted (to ticket/project) or deferred.
+ */
+type InboxIpcEvents = Namespaced<
+  'inbox',
+  {
+    /** All inbox items including promoted tombstones. */
+    'get-all': () => InboxItem[];
+    /** Active view: status !== 'later' and not promoted. */
+    'get-active': () => InboxItem[];
+    /** Create a new item. Defaults status to 'new'. */
+    add: (input: {
+      title: string;
+      note?: string;
+      projectId?: ProjectId | null;
+      attachments?: string[];
+    }) => InboxItem;
+    /** Patch basic fields. Status transitions use the dedicated verbs below. */
+    update: (
+      id: InboxItemId,
+      patch: Partial<Pick<InboxItem, 'title' | 'note' | 'projectId' | 'attachments'>>
     ) => void;
-    'remove-item': (id: InitiativeId) => void;
+    /** Hard delete. Use sparingly — prefer defer/promote for audit trail. */
+    remove: (id: InboxItemId) => void;
+    /** Attach or overwrite shaping. Sets status to 'shaped' unless item is in 'later'. */
+    shape: (id: InboxItemId, shaping: InboxShaping) => void;
+    /** Move to 'later'. Stamps `laterAt`. */
+    defer: (id: InboxItemId) => void;
+    /**
+     * Move out of 'later' back to 'new' (or 'shaped' if shaping is present).
+     * Clears `laterAt`.
+     */
+    reactivate: (id: InboxItemId) => void;
+    /**
+     * Promote to a ticket. Requires projectId. Seeds the ticket's title,
+     * description, and shaping from the inbox item. Stamps `promotedTo` on
+     * the inbox item so it disappears from active views but stays as a
+     * tombstone for undo/audit.
+     */
+    'promote-to-ticket': (
+      id: InboxItemId,
+      opts: { projectId: ProjectId; milestoneId?: MilestoneId; columnId?: ColumnId }
+    ) => Ticket;
+    /**
+     * Promote to a new project. Seeds the project's label. Stamps
+     * `promotedTo`.
+     */
+    'promote-to-project': (id: InboxItemId, opts: { label: string }) => Project;
+    /** Manually trigger the expiry sweep. Returns number of items flipped to later. */
+    sweep: () => number;
+    /**
+     * GC promoted tombstones older than 30d. Returns number removed.
+     * Called on a schedule; exposed for manual triggering in tests/tools.
+     */
+    'gc-promoted': () => number;
   }
 >;
 
@@ -1066,9 +1282,11 @@ export type IpcEvents = MainProcessIpcEvents &
   TerminalIpcEvents &
   StoreIpcEvents &
   ConfigIpcEvents &
+  SkillsIpcEvents &
   ProjectIpcEvents &
+  MilestoneIpcEvents &
+  PageIpcEvents &
   InboxIpcEvents &
-  InitiativeIpcEvents &
   PlatformIpcEvents &
   WorkspaceSyncIpcEvents;
 
@@ -1172,6 +1390,18 @@ type ProjectIpcRendererEvents = Namespaced<
 /**
  * Platform events. Main process emits these events, renderer process listens to them.
  */
+/**
+ * Page content events. Main process emits when a watched page file changes on
+ * disk due to an external edit (e.g. the user edited context.md in their IDE).
+ */
+type PageIpcRendererEvents = Namespaced<
+  'page',
+  {
+    'content-changed': [PageId, string];
+    'content-deleted': [PageId];
+  }
+>;
+
 type PlatformIpcRendererEvents = Namespaced<
   'platform',
   {
@@ -1200,6 +1430,7 @@ export type IpcRendererEvents = TerminalIpcRendererEvents &
   DevIpcRendererEvents &
   StoreIpcRendererEvents &
   ProjectIpcRendererEvents &
+  PageIpcRendererEvents &
   ToastIpcRendererEvents &
   PlatformIpcRendererEvents &
   WorkspaceSyncIpcRendererEvents;

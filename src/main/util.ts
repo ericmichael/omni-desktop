@@ -135,6 +135,23 @@ export const getDefaultWorkspaceDir = (): string => {
   return path.join(app.getPath('home'), 'Omni', 'Workspace');
 };
 
+export const getProjectsDir = (): string => {
+  return path.join(getDefaultWorkspaceDir(), 'Projects');
+};
+
+export const getProjectDir = (slug: string): string => {
+  return path.join(getProjectsDir(), slug);
+};
+
+/** Generate a filesystem-safe slug from a project label. */
+export const slugify = (label: string): string => {
+  return label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 60) || 'project';
+};
+
 export const getWorktreesDir = (): string => {
   return path.join(app.getPath('home'), 'Omni', 'Worktrees');
 };

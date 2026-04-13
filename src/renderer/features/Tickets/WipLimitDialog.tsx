@@ -3,11 +3,10 @@ import { Stop20Filled } from '@fluentui/react-icons';
 import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 
 import { AnimatedDialog, Badge, Button, DialogBody, DialogContent, DialogFooter, DialogHeader } from '@/renderer/ds';
-import { APPETITE_COLORS, APPETITE_LABELS } from '@/renderer/features/Inbox/shaping-constants';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { Ticket, TicketId } from '@/shared/types';
 
-import { PHASE_COLORS, PHASE_LABELS } from './ticket-constants';
+import { APPETITE_COLORS, APPETITE_LABELS, PHASE_COLORS, PHASE_LABELS } from './ticket-constants';
 import { ticketApi } from './state';
 
 const useStyles = makeStyles({

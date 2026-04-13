@@ -11,7 +11,7 @@ export const SettingsModalResetButton = memo(() => {
 
   const handleReset = useCallback(() => {
     persistedStoreApi.reset();
-    persistedStoreApi.setKey('layoutMode', 'home');
+    persistedStoreApi.setKey('layoutMode', 'chat');
   }, []);
 
   return (

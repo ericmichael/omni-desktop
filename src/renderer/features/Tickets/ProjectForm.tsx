@@ -1,7 +1,7 @@
 import { memo, useCallback, useState } from 'react';
 import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 
-import { AnimatedDialog, Button, cn, DialogBody, DialogContent, DialogFooter, DialogHeader, Input } from '@/renderer/ds';
+import { AnimatedDialog, Button, cn, DialogBody, DialogContent, DialogFooter, DialogHeader, Input, Switch } from '@/renderer/ds';
 import type { Project, SandboxConfig } from '@/shared/types';
 
 import { DirectoryBrowserDialog } from './DirectoryBrowserDialog';
@@ -50,9 +50,6 @@ const useStyles = makeStyles({
     transitionProperty: 'border-color',
     transitionDuration: '150ms',
     cursor: 'pointer',
-    ':hover': {
-      ...shorthands.borderColor('rgba(99, 102, 241, 0.5)'),
-    },
   },
   browseText: {
     flex: '1 1 0',
@@ -101,9 +98,30 @@ const useStyles = makeStyles({
   sandboxBtnInactive: {
     backgroundColor: tokens.colorNeutralBackground3,
     color: tokens.colorNeutralForeground2,
-    ':hover': {
-      color: tokens.colorNeutralForeground1,
-    },
+  },
+  linkToggle: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorBrandForeground1,
+    cursor: 'pointer',
+    backgroundColor: 'transparent',
+    border: 'none',
+    padding: 0,
+    fontWeight: tokens.fontWeightMedium,
+  },
+  switchRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalM,
+  },
+  switchLabel: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+  },
+  switchDescription: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
   },
 });
 
@@ -133,27 +151,30 @@ type ProjectFormProps = {
   editProject?: Project;
 };
 
-
 type SourceKind = 'local' | 'git-remote';
 
 export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProps) => {
   const styles = useStyles();
+  const isEdit = Boolean(editProject);
+
   const [label, setLabel] = useState(editProject?.label ?? '');
-  const [sourceKind, setSourceKind] = useState<SourceKind>(editProject?.source.kind === 'git-remote' ? 'git-remote' : 'local');
-  const [workspaceDir, setWorkspaceDir] = useState(editProject?.source.kind === 'local' ? editProject.source.workspaceDir : '');
-  const [repoUrl, setRepoUrl] = useState(editProject?.source.kind === 'git-remote' ? editProject.source.repoUrl : '');
-  const [defaultBranch, setDefaultBranch] = useState(editProject?.source.kind === 'git-remote' ? (editProject.source.defaultBranch ?? '') : '');
+  const [linkRepo, setLinkRepo] = useState(editProject?.source != null);
+  const [sourceKind, setSourceKind] = useState<SourceKind>(editProject?.source?.kind === 'git-remote' ? 'git-remote' : 'local');
+  const [workspaceDir, setWorkspaceDir] = useState(editProject?.source?.kind === 'local' ? editProject.source.workspaceDir : '');
+  const [repoUrl, setRepoUrl] = useState(editProject?.source?.kind === 'git-remote' ? editProject.source.repoUrl : '');
+  const [defaultBranch, setDefaultBranch] = useState(editProject?.source?.kind === 'git-remote' ? (editProject.source.defaultBranch ?? '') : '');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [browseOpen, setBrowseOpen] = useState(false);
 
+  // Sandbox only shown in edit mode
   const initialSandboxMode = deriveSandboxMode(editProject?.sandbox);
   const [sandboxMode, setSandboxMode] = useState<SandboxMode>(initialSandboxMode);
   const [sandboxValue, setSandboxValue] = useState(deriveSandboxValue(editProject?.sandbox, initialSandboxMode));
+  const [autoDispatch, setAutoDispatch] = useState(editProject?.autoDispatch ?? false);
 
-  const isEdit = Boolean(editProject);
   const isValid =
     label.trim().length > 0 &&
-    (sourceKind === 'local' ? workspaceDir.trim().length > 0 : repoUrl.trim().length > 0);
+    (!linkRepo || (sourceKind === 'local' ? workspaceDir.trim().length > 0 : repoUrl.trim().length > 0));
 
   const handleLabelChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setLabel(e.target.value);
@@ -211,26 +232,29 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
           ? { dockerfile: sandboxValue.trim() }
           : undefined;
 
-    const source =
-      sourceKind === 'local'
+    const source = linkRepo
+      ? sourceKind === 'local'
         ? { kind: 'local' as const, workspaceDir: workspaceDir.trim() }
         : {
             kind: 'git-remote' as const,
             repoUrl: repoUrl.trim(),
             ...(defaultBranch.trim() ? { defaultBranch: defaultBranch.trim() } : {}),
-          };
+          }
+      : undefined;
 
     try {
       if (isEdit && editProject) {
         await ticketApi.updateProject(editProject.id, {
           label: label.trim(),
-          source,
-          sandbox: sandbox ?? null,
+          ...(source !== undefined ? { source } : {}),
+          ...(isEdit ? { sandbox: sandbox ?? null } : {}),
+          autoDispatch,
         });
       } else {
         await ticketApi.addProject({
           label: label.trim(),
-          source,
+          slug: label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'project',
+          ...(source ? { source } : {}),
           sandbox: sandbox ?? null,
         });
       }
@@ -238,7 +262,7 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
     } finally {
       setIsSubmitting(false);
     }
-  }, [isValid, isSubmitting, isEdit, editProject, label, sourceKind, workspaceDir, repoUrl, defaultBranch, sandboxMode, sandboxValue, onClose]);
+  }, [isValid, isSubmitting, isEdit, editProject, label, linkRepo, sourceKind, workspaceDir, repoUrl, defaultBranch, sandboxMode, sandboxValue, autoDispatch, onClose]);
 
   return (
     <>
@@ -246,7 +270,7 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
         <DialogContent className="sm:max-w-md">
           <DialogHeader>{isEdit ? 'Edit Project' : 'New Project'}</DialogHeader>
           <DialogBody className={styles.body}>
-            {/* Name & Source */}
+            {/* Name */}
             <div className={styles.section}>
               <div className={styles.fieldGroup}>
                 <label className={styles.label}>Name</label>
@@ -258,107 +282,144 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
                 />
               </div>
 
-              <div className={styles.fieldGroup}>
-                <label className={styles.label}>Source</label>
-                <div className={styles.sandboxOptions}>
-                  <button
-                    type="button"
-                    onClick={() => handleSourceKindChange('local')}
-                    className={mergeClasses(
-                      styles.sandboxBtn,
-                      sourceKind === 'local' ? styles.sandboxBtnActive : styles.sandboxBtnInactive
-                    )}
-                  >
-                    Local Directory
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSourceKindChange('git-remote')}
-                    className={mergeClasses(
-                      styles.sandboxBtn,
-                      sourceKind === 'git-remote' ? styles.sandboxBtnActive : styles.sandboxBtnInactive
-                    )}
-                  >
-                    Git Repository
-                  </button>
-                </div>
-              </div>
-
-              {sourceKind === 'local' && (
-                <div className={styles.fieldGroup}>
-                  <label className={styles.label}>Directory</label>
-                  <button
-                    type="button"
-                    onClick={handleBrowseOpen}
-                    className={styles.browseBtn}
-                  >
-                    <span className={mergeClasses(styles.browseText, workspaceDir ? styles.browseTextFilled : styles.browseTextEmpty)}>
-                      {workspaceDir || 'Tap to select directory'}
-                    </span>
-                    <span className={styles.browseLabel}>Browse</span>
-                  </button>
-                </div>
+              {/* Link a repository toggle */}
+              {!linkRepo && (
+                <button
+                  type="button"
+                  className={styles.linkToggle}
+                  onClick={() => setLinkRepo(true)}
+                >
+                  + Link a code repository
+                </button>
               )}
 
-              {sourceKind === 'git-remote' && (
+              {linkRepo && (
                 <>
                   <div className={styles.fieldGroup}>
-                    <label className={styles.label}>Repository URL</label>
-                    <Input
-                      type="text"
-                      value={repoUrl}
-                      onChange={handleRepoUrlChange}
-                      placeholder="https://github.com/org/repo.git"
-                    />
+                    <label className={styles.label}>Source</label>
+                    <div className={styles.sandboxOptions}>
+                      <button
+                        type="button"
+                        onClick={() => handleSourceKindChange('local')}
+                        className={mergeClasses(
+                          styles.sandboxBtn,
+                          sourceKind === 'local' ? styles.sandboxBtnActive : styles.sandboxBtnInactive
+                        )}
+                      >
+                        Local Directory
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSourceKindChange('git-remote')}
+                        className={mergeClasses(
+                          styles.sandboxBtn,
+                          sourceKind === 'git-remote' ? styles.sandboxBtnActive : styles.sandboxBtnInactive
+                        )}
+                      >
+                        Git Repository
+                      </button>
+                    </div>
                   </div>
-                  <div className={styles.fieldGroup}>
-                    <label className={styles.label}>Default Branch (optional)</label>
-                    <Input
-                      type="text"
-                      value={defaultBranch}
-                      onChange={handleDefaultBranchChange}
-                      placeholder="main"
-                    />
-                  </div>
+
+                  {sourceKind === 'local' && (
+                    <div className={styles.fieldGroup}>
+                      <label className={styles.label}>Directory</label>
+                      <button
+                        type="button"
+                        onClick={handleBrowseOpen}
+                        className={styles.browseBtn}
+                      >
+                        <span className={mergeClasses(styles.browseText, workspaceDir ? styles.browseTextFilled : styles.browseTextEmpty)}>
+                          {workspaceDir || 'Tap to select directory'}
+                        </span>
+                        <span className={styles.browseLabel}>Browse</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {sourceKind === 'git-remote' && (
+                    <>
+                      <div className={styles.fieldGroup}>
+                        <label className={styles.label}>Repository URL</label>
+                        <Input
+                          type="text"
+                          value={repoUrl}
+                          onChange={handleRepoUrlChange}
+                          placeholder="https://github.com/org/repo.git"
+                        />
+                      </div>
+                      <div className={styles.fieldGroup}>
+                        <label className={styles.label}>Default Branch (optional)</label>
+                        <Input
+                          type="text"
+                          value={defaultBranch}
+                          onChange={handleDefaultBranchChange}
+                          placeholder="main"
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  <button
+                    type="button"
+                    className={styles.linkToggle}
+                    onClick={() => setLinkRepo(false)}
+                  >
+                    Remove repository link
+                  </button>
                 </>
               )}
             </div>
 
-            {/* Sandbox */}
-            <div className={styles.section}>
-              <label className={styles.label}>Sandbox</label>
-              <div className={styles.sandboxOptions}>
-                {SANDBOX_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => handleSandboxModeChange(opt.value)}
-                    className={mergeClasses(
-                      styles.sandboxBtn,
-                      sandboxMode === opt.value ? styles.sandboxBtnActive : styles.sandboxBtnInactive
-                    )}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
+            {/* Sandbox — only in edit mode */}
+            {isEdit && (
+              <div className={styles.section}>
+                <label className={styles.label}>Sandbox</label>
+                <div className={styles.sandboxOptions}>
+                  {SANDBOX_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => handleSandboxModeChange(opt.value)}
+                      className={mergeClasses(
+                        styles.sandboxBtn,
+                        sandboxMode === opt.value ? styles.sandboxBtnActive : styles.sandboxBtnInactive
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                {sandboxMode === 'image' && (
+                  <Input
+                    type="text"
+                    value={sandboxValue}
+                    onChange={handleSandboxValueChange}
+                    placeholder="ubuntu:24.04"
+                  />
+                )}
+                {sandboxMode === 'dockerfile' && (
+                  <Input
+                    type="text"
+                    value={sandboxValue}
+                    onChange={handleSandboxValueChange}
+                    placeholder="Dockerfile"
+                  />
+                )}
               </div>
-              {sandboxMode === 'image' && (
-                <Input
-                  type="text"
-                  value={sandboxValue}
-                  onChange={handleSandboxValueChange}
-                  placeholder="ubuntu:24.04"
-                />
-              )}
-              {sandboxMode === 'dockerfile' && (
-                <Input
-                  type="text"
-                  value={sandboxValue}
-                  onChange={handleSandboxValueChange}
-                  placeholder="Dockerfile"
-                />
-              )}
-            </div>
+            )}
+            {/* Auto-dispatch — only in edit mode with a linked repo */}
+            {isEdit && linkRepo && (
+              <div className={styles.section}>
+                <div className={styles.switchRow}>
+                  <div className={styles.switchLabel}>
+                    <label className={styles.label}>Auto-dispatch</label>
+                    <span className={styles.switchDescription}>Automatically assign and start tickets</span>
+                  </div>
+                  <Switch checked={autoDispatch} onCheckedChange={setAutoDispatch} />
+                </div>
+              </div>
+            )}
           </DialogBody>
           <DialogFooter className="flex-col sm:flex-row gap-2 sm:justify-end">
             <Button onClick={handleSubmit} isDisabled={!isValid || isSubmitting} className="w-full sm:w-auto justify-center">
