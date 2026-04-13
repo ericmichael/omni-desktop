@@ -19,6 +19,7 @@ import {
   READONLY_CONTEXT_TOOLS,
   PROJECT_CLIENT_TOOLS,
   PAGE_CLIENT_TOOLS,
+  INBOX_CLIENT_TOOLS,
 } from '@/lib/client-tools';
 import { TicketMachine } from '@/main/ticket-machine';
 import type { TicketMachineCallbacks, ClientFunctionResponder } from '@/main/ticket-machine';
@@ -678,12 +679,15 @@ describe('client_tools shape', () => {
     expect(names).toContain('update_ticket');
     expect(names).toContain('start_ticket');
     expect(names).toContain('stop_ticket');
+    expect(names).toContain('archive_ticket');
+    expect(names).toContain('unarchive_ticket');
     // Inbox tools
     expect(names).toContain('list_inbox');
     expect(names).toContain('create_inbox_item');
     expect(names).toContain('update_inbox_item');
     expect(names).toContain('delete_inbox_item');
     expect(names).toContain('inbox_to_tickets');
+    expect(names).toContain('inbox_to_project');
     // Milestone tools
     expect(names).toContain('create_milestone');
     expect(names).toContain('update_milestone');
@@ -700,7 +704,7 @@ describe('client_tools shape', () => {
     expect(names).toContain('update_page');
     // Code-only tools should NOT be in interactive
     expect(names).not.toContain('open_preview');
-    expect(names).toHaveLength(32);
+    expect(names).toHaveLength(35);
     // Points to skill, no tool descriptions restated
     expect(vars.additional_instructions).toContain('omni-projects-tickets');
   });
@@ -710,7 +714,7 @@ describe('client_tools shape', () => {
     const names = vars.client_tools.map((t) => t.name);
     expect(names).toContain('open_preview');
     expect(names).toContain('display_plan');
-    expect(names).toHaveLength(33);
+    expect(names).toHaveLength(36);
   });
 
   it('interactive variables include safe_tool_overrides for read-only tools', () => {
@@ -742,6 +746,8 @@ describe('client_tools shape', () => {
     expect(safeNames).not.toContain('update_ticket');
     expect(safeNames).not.toContain('start_ticket');
     expect(safeNames).not.toContain('stop_ticket');
+    expect(safeNames).not.toContain('archive_ticket');
+    expect(safeNames).not.toContain('unarchive_ticket');
     expect(safeNames).not.toContain('create_page');
     expect(safeNames).not.toContain('update_page');
     expect(safeNames).not.toContain('create_inbox_item');
@@ -806,6 +812,34 @@ describe('client_tools shape', () => {
   it('create_ticket requires project_id and title', () => {
     const tool = PROJECT_CLIENT_TOOLS.find((t) => t.name === 'create_ticket')!;
     expect(tool.parameters.required).toEqual(['project_id', 'title']);
+  });
+
+  it('inbox tools match the current inbox lifecycle', () => {
+    const listTool = INBOX_CLIENT_TOOLS.find((t) => t.name === 'list_inbox')!;
+    expect(listTool.parameters.properties.status.enum).toEqual(['new', 'shaped', 'later']);
+
+    const updateTool = INBOX_CLIENT_TOOLS.find((t) => t.name === 'update_inbox_item')!;
+    expect(updateTool.parameters.properties.status.enum).toEqual(['new', 'shaped', 'later']);
+    expect(updateTool.parameters.properties).toHaveProperty('outcome');
+    expect(updateTool.parameters.properties).toHaveProperty('appetite');
+    expect(updateTool.parameters.properties).toHaveProperty('not_doing');
+
+    const promoteTool = INBOX_CLIENT_TOOLS.find((t) => t.name === 'inbox_to_tickets')!;
+    expect(promoteTool.parameters.required).toEqual(['item_id', 'project_id']);
+    expect(promoteTool.parameters.properties).not.toHaveProperty('tickets');
+
+    const projectTool = INBOX_CLIENT_TOOLS.find((t) => t.name === 'inbox_to_project')!;
+    expect(projectTool).toBeTruthy();
+    expect(projectTool?.parameters.required).toEqual(['item_id']);
+  });
+
+  it('milestone tools expose due_date', () => {
+    const createTool = buildInteractiveVariables() as { client_tools: Array<{ name: string; parameters: { properties: Record<string, unknown> } }> };
+    const createMilestone = createTool.client_tools.find((t) => t.name === 'create_milestone');
+    const updateMilestone = createTool.client_tools.find((t) => t.name === 'update_milestone');
+
+    expect(createMilestone?.parameters.properties).toHaveProperty('due_date');
+    expect(updateMilestone?.parameters.properties).toHaveProperty('due_date');
   });
 });
 

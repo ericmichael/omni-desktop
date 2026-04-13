@@ -2601,7 +2601,7 @@ break;
     if (!ticket) {
 return;
 }
-    const patch: Partial<Ticket> = { resolution };
+    const patch: Partial<Ticket> = { resolution, archivedAt: undefined };
     if (ticket.resolvedAt === undefined) {
 patch.resolvedAt = Date.now();
 }
@@ -2625,10 +2625,21 @@ patch.resolvedAt = Date.now();
 
     this.updateTicket(ticketId, { columnId, columnChangedAt: Date.now() });
 
-    // Clear resolution when moving away from terminal column (reopen)
+    // Moving into the terminal column implicitly resolves the ticket as completed
+    // unless it already has an explicit outcome like won't-do/duplicate/cancelled.
+    const movedTicket = this.getTicketById(ticketId);
+    if (movedTicket && this.isTerminalColumn(ticket.projectId, columnId) && !movedTicket.resolution) {
+      const patch: Partial<Ticket> = { resolution: 'completed', archivedAt: undefined };
+      if (movedTicket.resolvedAt === undefined) {
+        patch.resolvedAt = Date.now();
+      }
+      this.updateTicket(ticketId, patch);
+    }
+
+    // Clear resolution/archive when moving away from terminal column (reopen)
     const ticket2 = this.getTicketById(ticketId);
     if (ticket2?.resolution && !this.isTerminalColumn(ticket.projectId, columnId)) {
-      this.updateTicket(ticketId, { resolution: undefined, resolvedAt: undefined });
+      this.updateTicket(ticketId, { resolution: undefined, resolvedAt: undefined, archivedAt: undefined });
     }
 
     // Reconciliation: stop supervisor and clean up workspace when ticket moves to a terminal column
@@ -4094,10 +4105,29 @@ next.columnChangedAt = updatedAt;
       console.log(
         `[ProjectManager] v15 migration complete: ${migratedTickets.length} tickets, ${migratedMilestones.length} milestones`
       );
+      ProjectManager.repairProjectRootsAndContextFiles(store);
+      // Fall through to v15→v16 migration
+    }
+
+    // v15 → v16: add ticket archive support.
+    if (version === 15 || store.get('schemaVersion', 0) === 15) {
+      console.log('[ProjectManager] Adding ticket archive support (→ v16)');
+      const tickets = store.get('tickets', []) as Record<string, unknown>[];
+      const migratedTickets = tickets.map((raw) => {
+        if ('archivedAt' in raw) {
+          return raw;
+        }
+        return { ...raw, archivedAt: undefined };
+      });
+      store.set('tickets', migratedTickets);
+      store.set('schemaVersion', 16);
+      console.log(`[ProjectManager] v16 migration complete: ${migratedTickets.length} tickets`);
+      ProjectManager.repairProjectRootsAndContextFiles(store);
       return;
     }
 
-    if (version >= 15) {
+    if (version >= 16) {
+      ProjectManager.repairProjectRootsAndContextFiles(store);
       return;
     }
 
@@ -4138,6 +4168,46 @@ next.columnChangedAt = updatedAt;
     console.log(`[ProjectManager] Migration complete: ${migrated.length} tickets migrated`);
     // Re-enter to run v4→v5 migration
     ProjectManager.migrateToSupervisor(store);
+  }
+
+  private static repairProjectRootsAndContextFiles(store: Store<StoreData>): void {
+    const projects = store.get('projects', []) as Project[];
+    const pages = store.get('pages', []) as Page[];
+    const now = Date.now();
+
+    const existingRootProjectIds = new Set(pages.filter((page) => page.isRoot).map((page) => page.projectId));
+    const repairedPages: Page[] = [];
+
+    for (const project of projects) {
+      if (!existingRootProjectIds.has(project.id)) {
+        repairedPages.push({
+          id: nanoid(),
+          projectId: project.id,
+          parentId: null,
+          title: project.label,
+          sortOrder: 0,
+          isRoot: true,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+
+      const dir = project.isPersonal ? getDefaultWorkspaceDir() : getProjectDir(project.slug);
+      const contextPath = path.join(dir, 'context.md');
+      try {
+        if (!existsSync(contextPath)) {
+          mkdirSync(dir, { recursive: true });
+          writeFileSync(contextPath, DEFAULT_BRIEF_TEMPLATE, 'utf-8');
+        }
+      } catch (err) {
+        console.warn(`[ProjectManager] failed to repair context.md for ${project.id}:`, err);
+      }
+    }
+
+    if (repairedPages.length > 0) {
+      store.set('pages', [...pages, ...repairedPages]);
+      console.log(`[ProjectManager] repaired ${repairedPages.length} missing root pages`);
+    }
   }
 
   // #endregion

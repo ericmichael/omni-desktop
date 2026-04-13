@@ -335,6 +335,28 @@ export const PROJECT_CLIENT_TOOLS = [
       required: ['ticket_id'],
     },
   },
+  {
+    name: 'archive_ticket',
+    description: 'Archive a resolved ticket so it drops out of active project views.',
+    parameters: {
+      type: 'object',
+      properties: {
+        ticket_id: { type: 'string', description: 'The ticket ID to archive' },
+      },
+      required: ['ticket_id'],
+    },
+  },
+  {
+    name: 'unarchive_ticket',
+    description: 'Restore an archived ticket back into resolved project views.',
+    parameters: {
+      type: 'object',
+      properties: {
+        ticket_id: { type: 'string', description: 'The ticket ID to unarchive' },
+      },
+      required: ['ticket_id'],
+    },
+  },
 ] as const;
 
 export const MILESTONE_CLIENT_TOOLS = [
@@ -349,13 +371,17 @@ export const MILESTONE_CLIENT_TOOLS = [
         title: { type: 'string', description: 'Milestone title' },
         description: { type: 'string', description: 'What this milestone delivers' },
         branch: { type: 'string', description: 'Optional git branch for this milestone. Tickets inherit it.' },
+        due_date: {
+          type: 'string',
+          description: 'Optional due date in ISO format (for example `2026-04-30` or a full ISO timestamp).',
+        },
       },
       required: ['project_id', 'title'],
     },
   },
   {
     name: 'update_milestone',
-    description: 'Update a milestone — title, description, branch, status, or brief.',
+    description: 'Update a milestone — title, description, branch, status, brief, or due date.',
     parameters: {
       type: 'object',
       properties: {
@@ -365,6 +391,10 @@ export const MILESTONE_CLIENT_TOOLS = [
         branch: { type: 'string', description: 'New branch' },
         status: { type: 'string', enum: ['active', 'completed', 'archived'], description: 'New status' },
         brief: { type: 'string', description: 'Full markdown content of the milestone brief' },
+        due_date: {
+          type: 'string',
+          description: 'Optional due date in ISO format. Pass an empty string to clear it.',
+        },
       },
       required: ['milestone_id'],
     },
@@ -427,15 +457,15 @@ export const INBOX_CLIENT_TOOLS = [
     name: 'list_inbox',
     safe: true,
     description:
-      'List inbox items, optionally filtered by status. Omit the status parameter to list the default inbox (items in "new" or "ready").',
+      'List inbox items, optionally filtered by status. Omit the status parameter to list the default inbox view (active items in "new" or "shaped").',
     parameters: {
       type: 'object',
       properties: {
         status: {
           type: 'string',
-          enum: ['new', 'ready', 'doing', 'done', 'later'],
+          enum: ['new', 'shaped', 'later'],
           description:
-            'Filter by status. "new" = captured but unshaped, "ready" = shaped and ready to commit, "doing" = in progress, "done" = completed, "later" = deferred. Omit to list the default inbox (new + ready).',
+            'Filter by status. "new" = captured but unshaped, "shaped" = clarified and ready to promote, "later" = parked. Omit to list the default inbox (new + shaped, excluding promoted items).',
         },
       },
     },
@@ -457,7 +487,7 @@ export const INBOX_CLIENT_TOOLS = [
   {
     name: 'update_inbox_item',
     description:
-      'Update an inbox item — edit title, description, change status, assign to a project. Use this to shape an item (set status from "new" to "ready") or to park it ("later").',
+      'Update an inbox item — edit title, description, assign to a project, shape it, or park/reactivate it. To shape an item, pass shaping fields like outcome/appetite/not_doing. Status only supports "new", "shaped", and "later".',
     parameters: {
       type: 'object',
       properties: {
@@ -466,11 +496,18 @@ export const INBOX_CLIENT_TOOLS = [
         description: { type: 'string', description: 'Updated description (overwrites the full body)' },
         status: {
           type: 'string',
-          enum: ['new', 'ready', 'doing', 'done', 'later'],
+          enum: ['new', 'shaped', 'later'],
           description:
-            'New status. "new" = captured, "ready" = shaped, "doing" = in progress, "done" = completed, "later" = parked.',
+            'New status. "new" = captured, "shaped" = active/shaped, "later" = parked. Use shaping fields to attach shaping metadata.',
         },
         project_id: { type: 'string', description: 'Assign to a project (or null to unassign)' },
+        outcome: { type: 'string', description: 'What success looks like. Passing this shapes the item.' },
+        appetite: {
+          type: 'string',
+          enum: ['small', 'medium', 'large', 'xl'],
+          description: 'Rough effort sizing used when shaping the item.',
+        },
+        not_doing: { type: 'string', description: 'Explicitly out-of-scope work for the shaped item.' },
       },
       required: ['item_id'],
     },
@@ -489,27 +526,28 @@ export const INBOX_CLIENT_TOOLS = [
   {
     name: 'inbox_to_tickets',
     description:
-      'Graduate an inbox item into one or more tickets on a project. Creates the tickets and marks the inbox item as done.',
+      'Promote an inbox item into a single ticket on a project. The ticket title/description are seeded from the inbox item and the inbox item is marked as promoted.',
     parameters: {
       type: 'object',
       properties: {
         item_id: { type: 'string', description: 'The inbox item ID to graduate' },
         project_id: { type: 'string', description: 'The project to create tickets in' },
-        tickets: {
-          type: 'array',
-          description: 'Array of tickets to create',
-          items: {
-            type: 'object',
-            properties: {
-              title: { type: 'string' },
-              description: { type: 'string' },
-              priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
-            },
-            required: ['title'],
-          },
-        },
+        milestone_id: { type: 'string', description: 'Optional milestone to assign the new ticket to.' },
       },
-      required: ['item_id', 'project_id', 'tickets'],
+      required: ['item_id', 'project_id'],
+    },
+  },
+  {
+    name: 'inbox_to_project',
+    description:
+      'Promote an inbox item into a new project. The new project label comes from `label`, falling back to the inbox item title.',
+    parameters: {
+      type: 'object',
+      properties: {
+        item_id: { type: 'string', description: 'The inbox item ID to promote.' },
+        label: { type: 'string', description: 'Optional label for the new project.' },
+      },
+      required: ['item_id'],
     },
   },
 ] as const;

@@ -523,6 +523,7 @@ return prev;
           ticketsByMilestone: Record<string, Ticket[]>;
           looseTickets: Ticket[];
           rootPages: Page[];
+          activeTicketCount: number;
         }
       > = {};
 
@@ -532,7 +533,7 @@ return prev;
           .sort((a, b) => a.createdAt - b.createdAt);
 
         const projectTickets = Object.values(tickets).filter(
-          (t) => t.projectId === project.id && !t.resolution
+          (t) => t.projectId === project.id && !t.resolution && !t.archivedAt
         );
 
         const ticketsByMilestone: Record<string, Ticket[]> = {};
@@ -550,7 +551,13 @@ return prev;
         const rootPage = Object.values(pages).find((p) => p.projectId === project.id && p.isRoot);
         const rootPages = rootPage ? getChildPages(pages, rootPage.id) : [];
 
-        result[project.id] = { milestones: projectMilestones, ticketsByMilestone, looseTickets, rootPages };
+        result[project.id] = {
+          milestones: projectMilestones,
+          ticketsByMilestone,
+          looseTickets,
+          rootPages,
+          activeTicketCount: projectTickets.length,
+        };
       }
 
       return result;
@@ -568,7 +575,7 @@ return prev;
           if (!data) {
 return null;
 }
-          const { milestones: projectMilestones, ticketsByMilestone, looseTickets, rootPages } = data;
+          const { milestones: projectMilestones, ticketsByMilestone, looseTickets, rootPages, activeTicketCount } = data;
 
           const projectValue = `project:${project.id}`;
 
@@ -655,12 +662,15 @@ return;
               className={styles.hoverableItem}
               onClick={() => handleItemClick(projectValue)}
             >
-              <TreeItemLayout
-                iconBefore={<Folder16Regular className={styles.icon} />}
-                aside={projectActions}
-              >
-                <span className={styles.truncate}>{project.label}</span>
-              </TreeItemLayout>
+                <TreeItemLayout
+                  iconBefore={<Folder16Regular className={styles.icon} />}
+                  aside={projectActions}
+                >
+                  <span className={styles.titleRow}>
+                    <span className={styles.titleRowMain}>{project.label}</span>
+                    <span className={`${styles.badge} ${styles.titleRowTrail}`}>({activeTicketCount})</span>
+                  </span>
+                </TreeItemLayout>
 
               <Tree>
                   {/* Board */}
@@ -670,10 +680,13 @@ return;
                     className={styles.hoverableItem}
                     onClick={() => handleItemClick(`board:${project.id}`)}
                   >
-                    <TreeItemLayout iconBefore={<Board16Regular className={styles.icon} />}>
-                      Board
-                    </TreeItemLayout>
-                  </TreeItem>
+                      <TreeItemLayout iconBefore={<Board16Regular className={styles.icon} />}>
+                        <span className={styles.titleRow}>
+                          <span className={styles.titleRowMain}>Board</span>
+                          <span className={`${styles.badge} ${styles.titleRowTrail}`}>({activeTicketCount})</span>
+                        </span>
+                      </TreeItemLayout>
+                    </TreeItem>
 
                   {/* Pages */}
                   {rootPages.map((page) => (

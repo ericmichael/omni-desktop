@@ -485,6 +485,23 @@ async function handleProjectTools(
         return err(String(e));
       }
     }
+    case 'archive_ticket': {
+      const targetId = (toolArgs.ticket_id as string) ?? '';
+      if (!targetId) return err('Missing ticket_id');
+      const target = store.tickets.find((t) => t.id === targetId);
+      if (!target) return err(`Ticket not found: ${targetId}`);
+      if (!target.resolution) return err('Only resolved tickets can be archived');
+      await ticketApi.updateTicket(targetId as TicketId, { archivedAt: Date.now() });
+      return ok({ ok: true });
+    }
+    case 'unarchive_ticket': {
+      const targetId = (toolArgs.ticket_id as string) ?? '';
+      if (!targetId) return err('Missing ticket_id');
+      const target = store.tickets.find((t) => t.id === targetId);
+      if (!target) return err(`Ticket not found: ${targetId}`);
+      await ticketApi.updateTicket(targetId as TicketId, { archivedAt: undefined });
+      return ok({ ok: true });
+    }
     default:
       return null;
   }
@@ -624,6 +641,13 @@ async function handleInboxTools(
       });
       return ok({ ok: true, ticket_ids: [ticket.id] });
     }
+    case 'inbox_to_project': {
+      const itemId = (toolArgs.item_id as string) ?? '';
+      if (!itemId) return err('Missing item_id');
+      const label = (toolArgs.label as string) ?? '';
+      const project = await inboxApi.promoteToProject(itemId as InboxItemId, { label });
+      return ok({ ok: true, project_id: project.id, label: project.label, slug: project.slug });
+    }
     default:
       return null;
   }
@@ -633,6 +657,14 @@ async function handleMilestoneTools(
   toolName: string,
   toolArgs: Record<string, unknown>
 ): Promise<ClientToolResult | null> {
+  const parseDueDate = (value: unknown): { kind: 'unset' | 'clear' | 'value' | 'invalid'; value?: number } => {
+    if (value === undefined) return { kind: 'unset' };
+    if (value === null || value === '') return { kind: 'clear' };
+    if (typeof value !== 'string') return { kind: 'invalid' };
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? { kind: 'invalid' } : { kind: 'value', value: parsed };
+  };
+
   switch (toolName) {
     case 'create_milestone': {
       const projectId = (toolArgs.project_id as string) ?? '';
@@ -640,12 +672,17 @@ async function handleMilestoneTools(
       if (!projectId || !title) return err('Missing project_id or title');
       const store = persistedStoreApi.$atom.get();
       if (!store.projects.find((p) => p.id === projectId)) return err(`Project not found: ${projectId}`);
+      const dueDate = parseDueDate(toolArgs.due_date);
+      if (dueDate.kind === 'invalid' || dueDate.kind === 'clear') {
+        return err('Invalid due_date. Use an ISO date like 2026-04-30.');
+      }
       const created = await milestoneApi.addMilestone({
         projectId,
         title,
         description: (toolArgs.description as string) ?? '',
         status: 'active',
         ...(toolArgs.branch ? { branch: toolArgs.branch as string } : {}),
+        ...(dueDate.kind === 'value' ? { dueDate: dueDate.value } : {}),
       });
       return ok({ id: created.id, title: created.title });
     }
@@ -655,11 +692,15 @@ async function handleMilestoneTools(
       const existing = $milestones.get()[id];
       if (!existing) return err(`Milestone not found: ${id}`);
       const patch: Record<string, unknown> = {};
+      const dueDate = parseDueDate(toolArgs.due_date);
+      if (dueDate.kind === 'invalid') return err('Invalid due_date. Use an ISO date like 2026-04-30, or empty string to clear it.');
       if (toolArgs.title !== undefined) patch.title = toolArgs.title;
       if (toolArgs.description !== undefined) patch.description = toolArgs.description;
       if (toolArgs.branch !== undefined) patch.branch = toolArgs.branch;
       if (toolArgs.status !== undefined) patch.status = toolArgs.status;
       if (toolArgs.brief !== undefined) patch.brief = toolArgs.brief;
+      if (dueDate.kind === 'value') patch.dueDate = dueDate.value;
+      if (dueDate.kind === 'clear') patch.dueDate = undefined;
       await milestoneApi.updateMilestone(id as MilestoneId, patch);
       return ok({ ok: true });
     }

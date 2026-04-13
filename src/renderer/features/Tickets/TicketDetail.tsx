@@ -252,6 +252,14 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, closeBehavior = 
     [ticketId]
   );
 
+  const handleArchive = useCallback(() => {
+    void ticketApi.updateTicket(ticketId, { archivedAt: Date.now() });
+  }, [ticketId]);
+
+  const handleUnarchive = useCallback(() => {
+    void ticketApi.updateTicket(ticketId, { archivedAt: undefined });
+  }, [ticketId]);
+
   const handleTabSelect = useCallback((_e: unknown, data: SelectTabData) => {
     setActiveTab(data.value as TicketTab);
   }, []);
@@ -359,6 +367,16 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, closeBehavior = 
                         {RESOLUTION_LABELS[res]}
                       </MenuItem>
                     ))}
+                  </>
+                )}
+                {ticket.resolution && (
+                  <>
+                    <MenuDivider />
+                    {ticket.archivedAt ? (
+                      <MenuItem onClick={handleUnarchive}>Unarchive ticket</MenuItem>
+                    ) : (
+                      <MenuItem onClick={handleArchive}>Archive ticket</MenuItem>
+                    )}
                   </>
                 )}
                 <MenuDivider />

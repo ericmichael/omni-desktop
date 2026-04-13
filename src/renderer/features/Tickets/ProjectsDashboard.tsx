@@ -446,7 +446,7 @@ export const ProjectsDashboard = memo(() => {
   // scratch space that fetchTickets(projectId) wholesale replaces, so reading
   // from it would make the dashboard flicker to a single project as soon as
   // the user expands a node in the sidebar.
-  const tickets = store.tickets;
+  const tickets = useMemo(() => store.tickets.filter((ticket) => !ticket.archivedAt), [store.tickets]);
 
   // Collect terminal (last) column IDs across every project. The rest of the
   // system treats "in the last kanban column" as done — the ranker and risk

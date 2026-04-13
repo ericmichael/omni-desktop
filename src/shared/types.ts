@@ -415,6 +415,7 @@ export const schema: Schema<StoreData> = {
         phaseChangedAt: { type: 'number' },
         columnChangedAt: { type: 'number' },
         resolvedAt: { type: 'number' },
+        archivedAt: { type: 'number' },
         // Kanban fields
         columnId: { type: 'string' },
         currentPhaseId: { type: ['string', 'null'] },
@@ -863,6 +864,8 @@ export type Ticket = {
   tokenUsage?: TokenUsage;
   /** Resolution reason when ticket is closed. Undefined means open. */
   resolution?: TicketResolution;
+  /** Timestamp when the ticket was archived from active views. */
+  archivedAt?: number;
   /** Agent/human comments — serves as persistent memory across runs. */
   comments?: TicketComment[];
   /** History of supervisor runs on this ticket. */
