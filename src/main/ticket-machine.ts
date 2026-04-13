@@ -45,10 +45,6 @@ export type TicketMachineCallbacks = {
   ) => void;
 };
 
-// --- RPC ID counter ---
-
-let rpcIdCounter = 0;
-const nextRpcId = (): string => String(++rpcIdCounter);
 
 /**
  * TicketMachine — single source of truth for a ticket's supervisor lifecycle.
@@ -74,6 +70,7 @@ export class TicketMachine {
   private sessionId: string | null = null;
   private runId: string | null = null;
   private pendingRpc = new Map<string, { resolve: (v: RpcResponse) => void; reject: (e: Error) => void }>();
+  private rpcIdCounter = 0;
   private messageIdCounter = 0;
 
   // Retry/continuation state
@@ -247,7 +244,7 @@ export class TicketMachine {
         return;
       }
 
-      const id = nextRpcId();
+      const id = String(++this.rpcIdCounter);
       const request: RpcRequest = { jsonrpc: '2.0', id, method, params };
 
       const timer = setTimeout(() => {
