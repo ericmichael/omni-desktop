@@ -15,7 +15,7 @@ import { getMimeType, isTextMime } from '@/lib/mime-types';
 import { computePagesToDelete } from '@/lib/page-cascade';
 import { getTemplate, type TemplateKey } from '@/lib/page-templates';
 import { PageWatcherManager } from '@/lib/page-watcher';
-import type { IMachineFactory, ISandboxFactory, IWorkflowLoader,ProjectManagerDeps } from '@/lib/project-manager-deps';
+import type { IMachineFactory, ISandbox, ISandboxFactory, IWorkflowLoader,ProjectManagerDeps } from '@/lib/project-manager-deps';
 import type { FailureClass } from '@/lib/run-end';
 import { decideRunEndAction } from '@/lib/run-end';
 import type { TemplateVariables } from '@/lib/template';
@@ -320,8 +320,8 @@ const MAX_CONTINUATION_TURNS = 10;
 // classifyRunEndReason, decideRunEndAction, isWorkComplete imported from @/lib/run-end
 
 export class ProjectManager {
-  private tasks = new Map<TaskId, { task: Task; sandbox: AgentProcess }>();
-  private machines = new Map<TicketId, { machine: TicketMachine; sandbox: AgentProcess | null }>();
+  private tasks = new Map<TaskId, { task: Task; sandbox: ISandbox }>();
+  private machines = new Map<TicketId, { machine: TicketMachine; sandbox: ISandbox | null }>();
   private ticketLocks = new Map<TicketId, Promise<void>>();
   private store: Store<StoreData>;
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
@@ -338,8 +338,8 @@ export class ProjectManager {
   /** Interval handle for inbox expiry sweep. */
   private inboxSweepTimer: ReturnType<typeof setInterval> | null = null;
 
-  /** Injectable factories for testing. */
-  private sandboxFactory?: ISandboxFactory;
+  /** Injectable factories for testing. Always set — defaults to a real-AgentProcess factory. */
+  private sandboxFactory: ISandboxFactory;
   private machineFactory?: IMachineFactory;
 
   /** Optional ProcessManager — when set, supervisor reuses Code tab sandboxes. */
@@ -375,7 +375,9 @@ export class ProjectManager {
         this.migrateOrphanedTickets(projectId, pipeline);
       },
     });
-    this.sandboxFactory = deps?.sandboxFactory;
+    this.sandboxFactory = deps?.sandboxFactory ?? {
+      create: (opts) => new AgentProcess(opts),
+    };
     this.machineFactory = deps?.machineFactory;
     this.pageWatcher = new PageWatcherManager(
       {
@@ -2594,7 +2596,7 @@ patch.resolvedAt = Date.now();
 
   ensureSupervisorInfra = async (
     ticketId: TicketId
-  ): Promise<{ machine: TicketMachine; sandbox: AgentProcess | null }> => {
+  ): Promise<{ machine: TicketMachine; sandbox: ISandbox | null }> => {
     const ticket = this.getTicketById(ticketId);
     if (!ticket) {
       throw new Error(`Ticket not found: ${ticketId}`);
@@ -2717,7 +2719,7 @@ patch.resolvedAt = Date.now();
       : sandboxBackend === 'vm' ? 'vm'
       : sandboxBackend === 'local' ? 'local'
       : 'none';
-    const sandbox = new AgentProcess({
+    const sandbox = this.sandboxFactory.create({
       mode,
       platformClient: platformClient ?? undefined,
       ipcRawOutput: () => {},

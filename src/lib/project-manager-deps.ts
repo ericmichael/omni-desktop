@@ -7,6 +7,8 @@
 
 import type { TicketPhase } from '@/shared/ticket-phase';
 import type { WorkflowConfig } from '@/lib/workflow';
+import type { AgentProcessMode, AgentProcessStartArg } from '@/main/agent-process';
+import type { PlatformClient } from '@/main/platform-client';
 import type {
   SessionMessage,
   TicketId,
@@ -53,9 +55,12 @@ export interface ITicketMachine {
 // ---------------------------------------------------------------------------
 
 export interface ISandbox {
-  start(opts: { workspaceDir: string; sandboxVariant: string }): void;
+  readonly mode: AgentProcessMode;
+  start(arg: AgentProcessStartArg, options?: { rebuild?: boolean }): Promise<void> | void;
   stop(): Promise<void>;
-  getStatus(): WithTimestamp<AgentProcessStatus> | null;
+  exit(): Promise<void>;
+  execInContainer(command: string, cwd?: string, timeoutMs?: number): Promise<boolean>;
+  getStatus(): WithTimestamp<AgentProcessStatus>;
 }
 
 // ---------------------------------------------------------------------------
@@ -64,6 +69,9 @@ export interface ISandbox {
 
 export interface ISandboxFactory {
   create(opts: {
+    mode: AgentProcessMode;
+    platformClient?: PlatformClient;
+    ipcRawOutput: (data: string) => void;
     onStatusChange: (status: WithTimestamp<AgentProcessStatus>) => void;
   }): ISandbox;
 }
