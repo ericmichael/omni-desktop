@@ -550,9 +550,9 @@ return;
 }
         const prev = ticket.tokenUsage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
         const updated = {
-          inputTokens: Math.max(prev.inputTokens, usage.inputTokens),
-          outputTokens: Math.max(prev.outputTokens, usage.outputTokens),
-          totalTokens: Math.max(prev.totalTokens, usage.totalTokens),
+          inputTokens: prev.inputTokens + usage.inputTokens,
+          outputTokens: prev.outputTokens + usage.outputTokens,
+          totalTokens: prev.totalTokens + usage.totalTokens,
         };
         if (updated.totalTokens !== prev.totalTokens) {
           this.updateTicket(tid, { tokenUsage: updated });
@@ -621,7 +621,7 @@ return;
 
     const ticket = this.getTicketById(ticketId);
     if (!ticket) {
-      respond(true, { error: 'Ticket not found' });
+      respond(false, { error: { message: 'Ticket not found' } });
       return;
     }
 
@@ -632,7 +632,7 @@ return;
         const lookupId = (toolArgs.ticket_id as string) || ticketId;
         const target = this.getTicketById(lookupId);
         if (!target) {
-          respond(true, { error: `Ticket not found: ${lookupId}` });
+          respond(false, { error: { message: `Ticket not found: ${lookupId}` } });
           return;
         }
         const targetPipeline = this.getPipeline(target.projectId);
@@ -675,7 +675,7 @@ return;
         const col = pipeline.columns.find((c) => c.label.toLowerCase() === columnLabel.toLowerCase());
         if (!col) {
           const valid = pipeline.columns.map((c) => c.label).join(', ');
-          respond(true, { error: `Unknown column: "${columnLabel}". Valid columns: ${valid}` });
+          respond(false, { error: { message: `Unknown column: "${columnLabel}". Valid columns: ${valid}` } });
           return;
         }
         this.moveTicketToColumn(ticketId, col.id);
@@ -685,7 +685,7 @@ return;
       case 'escalate': {
         const message = (toolArgs.message as string) ?? '';
         if (!message) {
-          respond(true, { error: 'Empty escalation message' });
+          respond(false, { error: { message: 'Empty escalation message' } });
           return;
         }
         this.sendToWindow('toast:show', {
@@ -707,7 +707,7 @@ return;
       case 'notify': {
         const notifyMessage = (toolArgs.message as string) ?? '';
         if (!notifyMessage) {
-          respond(true, { error: 'Empty notification message' });
+          respond(false, { error: { message: 'Empty notification message' } });
           return;
         }
         this.sendToWindow('toast:show', {
@@ -722,12 +722,12 @@ return;
         const commentTicketId = (toolArgs.ticket_id as string) || ticketId;
         const content = (toolArgs.content as string) ?? '';
         if (!content) {
-          respond(true, { error: 'Missing content' });
+          respond(false, { error: { message: 'Missing content' } });
           return;
         }
         const commentTarget = this.getTicketById(commentTicketId);
         if (!commentTarget) {
-          respond(true, { error: `Ticket not found: ${commentTicketId}` });
+          respond(false, { error: { message: `Ticket not found: ${commentTicketId}` } });
           return;
         }
         const comment = { id: nanoid(), author: 'agent' as const, content, createdAt: Date.now() };
@@ -740,12 +740,12 @@ return;
       case 'get_ticket_comments': {
         const commentsTicketId = (toolArgs.ticket_id as string) ?? '';
         if (!commentsTicketId) {
-          respond(true, { error: 'Missing ticket_id' });
+          respond(false, { error: { message: 'Missing ticket_id' } });
           return;
         }
         const commentsTarget = this.getTicketById(commentsTicketId);
         if (!commentsTarget) {
-          respond(true, { error: `Ticket not found: ${commentsTicketId}` });
+          respond(false, { error: { message: `Ticket not found: ${commentsTicketId}` } });
           return;
         }
         respond(true, {
@@ -775,7 +775,7 @@ return;
       case 'list_tickets': {
         const projectId = (toolArgs.project_id as string) ?? '';
         if (!projectId) {
-          respond(true, { error: 'Missing project_id' });
+          respond(false, { error: { message: 'Missing project_id' } });
           return;
         }
         const pl = this.getPipeline(projectId);
@@ -809,12 +809,12 @@ tickets = tickets.filter((t) => t.columnId === col.id);
         const projectId = (toolArgs.project_id as string) ?? '';
         const title = (toolArgs.title as string) ?? '';
         if (!projectId || !title) {
-          respond(true, { error: 'Missing project_id or title' });
+          respond(false, { error: { message: 'Missing project_id or title' } });
           return;
         }
         const proj = this.getProjects().find((p) => p.id === projectId);
         if (!proj) {
-          respond(true, { error: `Project not found: ${projectId}` });
+          respond(false, { error: { message: `Project not found: ${projectId}` } });
           return;
         }
         const newTicket = this.addTicket({
@@ -831,12 +831,12 @@ tickets = tickets.filter((t) => t.columnId === col.id);
       case 'update_ticket': {
         const targetId = (toolArgs.ticket_id as string) ?? '';
         if (!targetId) {
-          respond(true, { error: 'Missing ticket_id' });
+          respond(false, { error: { message: 'Missing ticket_id' } });
           return;
         }
         const target = this.getTicketById(targetId);
         if (!target) {
-          respond(true, { error: `Ticket not found: ${targetId}` });
+          respond(false, { error: { message: `Ticket not found: ${targetId}` } });
           return;
         }
         const patch: Record<string, unknown> = {};
@@ -870,24 +870,24 @@ current.delete(id);
       case 'start_ticket': {
         const targetId = (toolArgs.ticket_id as string) ?? '';
         if (!targetId) {
-          respond(true, { error: 'Missing ticket_id' });
+          respond(false, { error: { message: 'Missing ticket_id' } });
           return;
         }
         void this.startSupervisor(targetId).then(
           () => respond(true, { ok: true }),
-          (err) => respond(true, { error: String(err) })
+          (err) => respond(false, { error: { message: String(err) } })
         );
         break;
       }
       case 'stop_ticket': {
         const targetId = (toolArgs.ticket_id as string) ?? '';
         if (!targetId) {
-          respond(true, { error: 'Missing ticket_id' });
+          respond(false, { error: { message: 'Missing ticket_id' } });
           return;
         }
         void this.stopSupervisor(targetId).then(
           () => respond(true, { ok: true }),
-          (err) => respond(true, { error: String(err) })
+          (err) => respond(false, { error: { message: String(err) } })
         );
         break;
       }
@@ -895,7 +895,7 @@ current.delete(id);
       case 'list_milestones': {
         const projectId = (toolArgs.project_id as string) ?? '';
         if (!projectId) {
-          respond(true, { error: 'Missing project_id' });
+          respond(false, { error: { message: 'Missing project_id' } });
           return;
         }
         const items = this.getMilestonesByProject(projectId);
@@ -915,10 +915,10 @@ current.delete(id);
       case 'list_pages': {
         const projectId = (toolArgs.project_id as string) ?? '';
         if (!projectId) {
- respond(true, { error: 'Missing project_id' }); return; 
+ respond(false, { error: { message: 'Missing project_id' } }); return;
 }
         if (!this.getProjects().find((p) => p.id === projectId)) {
-          respond(true, { error: `Project not found: ${projectId}` }); return;
+          respond(false, { error: { message: `Project not found: ${projectId}` } }); return;
         }
         const pages = this.getPages().filter((p) => p.projectId === projectId);
         respond(true, {
@@ -938,11 +938,11 @@ current.delete(id);
       case 'read_page': {
         const pageId = (toolArgs.page_id as string) ?? '';
         if (!pageId) {
- respond(true, { error: 'Missing page_id' }); return; 
+ respond(false, { error: { message: 'Missing page_id' } }); return;
 }
         const page = this.getPages().find((p) => p.id === pageId);
         if (!page) {
- respond(true, { error: `Page not found: ${pageId}` }); return; 
+ respond(false, { error: { message: `Page not found: ${pageId}` } }); return;
 }
         void this.readPageContent(pageId).then(
           (content) =>
@@ -954,19 +954,19 @@ current.delete(id);
               is_root: page.isRoot ?? false,
               content,
             }),
-          () => respond(true, { error: `Failed to read page content: ${pageId}` })
+          () => respond(false, { error: { message: `Failed to read page content: ${pageId}` } })
         );
         break;
       }
       case 'read_milestone_brief': {
         const milestoneId = (toolArgs.milestone_id as string) ?? '';
         if (!milestoneId) {
-          respond(true, { error: 'Missing milestone_id' });
+          respond(false, { error: { message: 'Missing milestone_id' } });
           return;
         }
         const ms = this.getMilestones().find((i) => i.id === milestoneId);
         if (!ms) {
-          respond(true, { error: `Milestone not found: ${milestoneId}` });
+          respond(false, { error: { message: `Milestone not found: ${milestoneId}` } });
           return;
         }
         respond(true, { brief: ms.brief ?? '' });
@@ -975,7 +975,7 @@ current.delete(id);
       case 'search_tickets': {
         const query = (toolArgs.query as string) ?? '';
         if (!query) {
-          respond(true, { error: 'Missing query' });
+          respond(false, { error: { message: 'Missing query' } });
           return;
         }
         const q = query.toLowerCase();
@@ -1006,12 +1006,12 @@ current.delete(id);
       case 'get_ticket_history': {
         const historyTicketId = (toolArgs.ticket_id as string) ?? '';
         if (!historyTicketId) {
-          respond(true, { error: 'Missing ticket_id' });
+          respond(false, { error: { message: 'Missing ticket_id' } });
           return;
         }
         const historyTarget = this.getTicketById(historyTicketId);
         if (!historyTarget) {
-          respond(true, { error: `Ticket not found: ${historyTicketId}` });
+          respond(false, { error: { message: `Ticket not found: ${historyTicketId}` } });
           return;
         }
         const historyRuns = (historyTarget.runs ?? []).map((r) => ({
@@ -1033,7 +1033,7 @@ current.delete(id);
       case 'get_pipeline': {
         const pipelineProjectId = (toolArgs.project_id as string) ?? '';
         if (!pipelineProjectId) {
-          respond(true, { error: 'Missing project_id' });
+          respond(false, { error: { message: 'Missing project_id' } });
           return;
         }
         const pl = this.getPipeline(pipelineProjectId);
@@ -1048,7 +1048,7 @@ current.delete(id);
         break;
       }
       default:
-        respond(true, { error: `Unknown tool: ${toolName}` });
+        respond(false, { error: { message: `Unknown tool: ${toolName}` } });
     }
   }
 
@@ -4286,6 +4286,11 @@ next.columnChangedAt = updatedAt;
       // Skip if already active
       const machineEntry = this.machines.get(nextTicket.id);
       if (machineEntry && machineEntry.machine.isActive()) {
+        continue;
+      }
+
+      // Check global + per-column WIP limits
+      if (!this.canStartSupervisor(project.id, nextTicket.columnId)) {
         continue;
       }
 
