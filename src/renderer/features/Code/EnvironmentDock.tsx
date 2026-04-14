@@ -2,11 +2,11 @@ import { memo, useCallback } from 'react';
 import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { Chat20Regular, Code20Regular, Desktop20Regular, Globe20Regular, WindowConsole20Regular } from '@fluentui/react-icons';
 
-export type DockPane = 'none' | 'code' | 'vnc' | 'preview' | 'terminal';
+export type WorkspaceApp = 'chat' | 'code' | 'desktop' | 'browser' | 'terminal';
 
 type EnvironmentDockProps = {
-  activePane: DockPane;
-  onSelect: (pane: DockPane) => void;
+  activeApp: WorkspaceApp;
+  onSelect: (app: WorkspaceApp) => void;
   codeAvailable: boolean;
   desktopAvailable: boolean;
   isGlass?: boolean;
@@ -120,40 +120,41 @@ const useStyles = makeStyles({
   },
 });
 
-const PANE_ITEMS: { pane: DockPane; label: string; Icon: typeof Code20Regular; availabilityKey?: keyof Pick<EnvironmentDockProps, 'codeAvailable' | 'desktopAvailable'> }[] = [
-  { pane: 'none', label: 'Chat', Icon: Chat20Regular },
-  { pane: 'code', label: 'Code', Icon: Code20Regular, availabilityKey: 'codeAvailable' },
-  { pane: 'vnc', label: 'Desktop', Icon: Desktop20Regular, availabilityKey: 'desktopAvailable' },
-  { pane: 'preview', label: 'Browser', Icon: Globe20Regular },
+const APP_ITEMS: { app: WorkspaceApp; label: string; Icon: typeof Code20Regular; availabilityKey?: keyof Pick<EnvironmentDockProps, 'codeAvailable' | 'desktopAvailable'> }[] = [
+  { app: 'chat', label: 'Chat', Icon: Chat20Regular },
+  { app: 'code', label: 'Code', Icon: Code20Regular, availabilityKey: 'codeAvailable' },
+  { app: 'desktop', label: 'Desktop', Icon: Desktop20Regular, availabilityKey: 'desktopAvailable' },
+  { app: 'browser', label: 'Browser', Icon: Globe20Regular },
+  { app: 'terminal', label: 'Terminal', Icon: WindowConsole20Regular },
 ];
 
-export const EnvironmentDock = memo(({ activePane, onSelect, codeAvailable, desktopAvailable, isGlass }: EnvironmentDockProps) => {
+export const EnvironmentDock = memo(({ activeApp, onSelect, codeAvailable, desktopAvailable, isGlass }: EnvironmentDockProps) => {
   const styles = useStyles();
   const availability: Record<string, boolean> = { codeAvailable, desktopAvailable };
 
-  const handlePaneClick = useCallback(
-    (pane: DockPane, isAvailable: boolean) => {
+  const handleAppClick = useCallback(
+    (app: WorkspaceApp, isAvailable: boolean) => {
       if (!isAvailable) return;
-      onSelect(pane === activePane && pane !== 'none' ? 'none' : pane);
+      onSelect(app);
     },
-    [activePane, onSelect]
+    [onSelect]
   );
 
   return (
     <div className={mergeClasses(styles.dock, isGlass && styles.dockGlass)}>
-      {PANE_ITEMS.map(({ pane, label, Icon, availabilityKey }) => {
-        const isActive = activePane === pane;
+      {APP_ITEMS.map(({ app, label, Icon, availabilityKey }) => {
+        const isActive = activeApp === app;
         const isAvailable = availabilityKey ? !!availability[availabilityKey] : true;
         return (
           <button
-            key={pane}
+            key={app}
             type="button"
             className={mergeClasses(
               styles.item,
               isActive && styles.itemActive,
               !isAvailable && styles.itemDisabled,
             )}
-            onClick={() => handlePaneClick(pane, isAvailable)}
+            onClick={() => handleAppClick(app, isAvailable)}
             disabled={!isAvailable}
             aria-label={label}
             title={!isAvailable ? `${label} (unavailable)` : label}
@@ -164,20 +165,6 @@ export const EnvironmentDock = memo(({ activePane, onSelect, codeAvailable, desk
           </button>
         );
       })}
-
-      <div className={styles.separator} />
-
-      <button
-        type="button"
-        className={mergeClasses(styles.item, activePane === 'terminal' && styles.itemActive)}
-        onClick={() => handlePaneClick('terminal', true)}
-        aria-label="Terminal"
-        title="Terminal"
-      >
-        <WindowConsole20Regular className={styles.icon} style={{ width: 20, height: 20 }} />
-        <span className={styles.label}>Terminal</span>
-        <span className={mergeClasses(styles.dot, activePane !== 'terminal' && styles.dotHidden)} />
-      </button>
     </div>
   );
 });
