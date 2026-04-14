@@ -9,6 +9,7 @@ import { promisify } from 'util';
 
 import { getArtifactsDir } from '@/lib/artifacts';
 import { buildAutopilotVariables, buildInteractiveVariables } from '@/lib/client-tools';
+import { buildContinuationPrompt } from '@/lib/continuation-prompt';
 import { INBOX_SWEEP_INTERVAL_MS } from '@/lib/inbox-expiry';
 import { getMimeType, isTextMime } from '@/lib/mime-types';
 import type {
@@ -21,6 +22,7 @@ import type {
 import { runMigrations as runSchemaMigrations } from '@/lib/project-migrations';
 import type { FailureClass } from '@/lib/run-end';
 import { decideRunEndAction } from '@/lib/run-end';
+import { parseSessionHistoryRows, type HistoryRow } from '@/lib/session-history';
 import type { TemplateVariables } from '@/lib/template';
 import { hasTemplateExpressions, renderTemplate } from '@/lib/template';
 import { decideWorktreeAction } from '@/lib/worktree';
@@ -1095,7 +1097,7 @@ export class ProjectManager {
           console.log(`[ProjectManager] Continuing ticket ${ticketId} (turn ${action.nextTurn}/${maxTurns}).`);
 
           const sessionId = machine.getSessionId() ?? undefined;
-          const continuationPrompt = this.buildContinuationPrompt(ticketId, action.nextTurn + 1, maxTurns);
+          const continuationPrompt = this.buildContinuationPromptForTicket(ticketId, action.nextTurn + 1, maxTurns);
           // Brief delay to let the server's worker task finish cleanup (clear current_task)
           // before we send the next start_run, avoiding "Run already active" race.
           await new Promise((r) => setTimeout(r, 500));
@@ -2905,51 +2907,18 @@ export class ProjectManager {
   };
 
   /**
-   * Build the continuation prompt for a supervisor run.
-   * Uses custom prompt from FLEET.md if configured, otherwise the default.
-   * Supports {{turn}} and {{maxTurns}} placeholders in custom prompts.
+   * Wrapper around the pure `buildContinuationPrompt` helper that resolves the
+   * ticket, pipeline, and FLEET.md continuation override from this instance's
+   * state.
    */
-  private buildContinuationPrompt(ticketId: TicketId, turn: number, maxTurns: number): string {
+  private buildContinuationPromptForTicket = (ticketId: TicketId, turn: number, maxTurns: number): string => {
     const ticket = this.getTicketById(ticketId);
     const customContinuation = ticket
       ? this.workflowLoader.getConfig(ticket.projectId).supervisor?.continuation_prompt
       : undefined;
-
     const pipeline = ticket ? this.getPipeline(ticket.projectId) : null;
-    const columnLabels = pipeline?.columns.map((c) => c.label).join(', ') ?? '';
-    const currentColumn = pipeline?.columns.find((c) => c.id === ticket?.columnId)?.label ?? ticket?.columnId ?? '';
-
-    if (customContinuation) {
-      return customContinuation.replace(/\{\{turn}}/g, String(turn)).replace(/\{\{maxTurns}}/g, String(maxTurns));
-    }
-
-    // Gather last run context for the continuation prompt
-    const runs = ticket?.runs ?? [];
-    const lastRun = runs.length > 0 ? runs[runs.length - 1] : undefined;
-    const lastRunReason = lastRun?.endReason ? `- The previous run ended with reason: "${lastRun.endReason}".` : '';
-
-    const comments = ticket?.comments ?? [];
-    const lastComment = comments.length > 0 ? comments[comments.length - 1] : undefined;
-    const lastCommentLine = lastComment
-      ? `- Last comment [${lastComment.author}]: ${lastComment.content.length > 200 ? `${lastComment.content.slice(0, 200)}…` : lastComment.content}`
-      : '';
-
-    return [
-      'Continuation guidance:',
-      '',
-      `- This is continuation turn ${turn} of ${maxTurns}.`,
-      lastRunReason,
-      lastCommentLine,
-      `- Resume from current workspace state — do not restart from scratch or re-read files you already have in context.`,
-      `- The original task instructions and prior context are already in this session, so do not restate them before acting.`,
-      `- Use your best judgement to move the work forward. You are working in an isolated sandbox, so it is safe to make changes freely. Do not ask for confirmation or escalate to the user unless you are truly blocked on something that requires human input. The human will review your work at a later stage.`,
-      `- Your ticket is currently in column "${currentColumn}". If you have completed the work, call \`move_ticket\` to advance it. Valid columns: ${columnLabels}.`,
-      `- Before continuing, use \`add_ticket_comment\` to briefly record what you accomplished so far and what remains. This helps future runs (and humans) understand the state of work.`,
-      `- Use \`notify\` to send the human a heads-up without stopping. Use \`escalate\` only when you truly cannot proceed without human input.`,
-    ]
-      .filter(Boolean)
-      .join('\n');
-  }
+    return buildContinuationPrompt({ ticket, pipeline, customContinuation, turn, maxTurns });
+  };
 
   /**
    * Start the autonomous supervisor — sends the full supervisor prompt as the user turn.
@@ -3495,69 +3464,8 @@ export class ProjectManager {
         return [];
       }
 
-      const rows = JSON.parse(stdout) as Array<{ id: number; msg_json: string; created_at: string }>;
-      const messages: SessionMessage[] = [];
-
-      for (const row of rows) {
-        try {
-          const msg = JSON.parse(row.msg_json) as Record<string, unknown>;
-          const msgType = msg.type as string | undefined;
-          const role = msg.role as string | undefined;
-
-          // Skip reasoning blocks (encrypted, not useful)
-          if (msgType === 'reasoning') {
-            continue;
-          }
-
-          if (role === 'user') {
-            const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-            messages.push({
-              id: row.id,
-              role: 'user',
-              content: content.slice(0, 50_000),
-              createdAt: row.created_at,
-            });
-          } else if (role === 'assistant' && msgType === 'message') {
-            const contentBlocks = msg.content as Array<{ type: string; text?: string }> | undefined;
-            const text = Array.isArray(contentBlocks)
-              ? contentBlocks
-                  .filter((b) => b.type === 'text' && b.text)
-                  .map((b) => b.text)
-                  .join('\n')
-              : '';
-            if (text) {
-              messages.push({
-                id: row.id,
-                role: 'assistant',
-                content: text.slice(0, 50_000),
-                createdAt: row.created_at,
-              });
-            }
-          } else if (msgType === 'function_call') {
-            const name = (msg.name as string) || 'unknown_tool';
-            const args = typeof msg.arguments === 'string' ? msg.arguments : JSON.stringify(msg.arguments ?? '');
-            messages.push({
-              id: row.id,
-              role: 'tool_call',
-              content: args.slice(0, 2000),
-              toolName: name,
-              createdAt: row.created_at,
-            });
-          } else if (msgType === 'function_call_output') {
-            const output = typeof msg.output === 'string' ? msg.output : JSON.stringify(msg.output ?? '');
-            messages.push({
-              id: row.id,
-              role: 'tool_result',
-              content: output.slice(0, 5000),
-              createdAt: row.created_at,
-            });
-          }
-        } catch {
-          // Skip unparseable messages
-        }
-      }
-
-      return messages;
+      const rows = JSON.parse(stdout) as HistoryRow[];
+      return parseSessionHistoryRows(rows);
     } catch (err) {
       console.error('[ProjectManager] Failed to query session history:', err);
       return [];
