@@ -1,4 +1,5 @@
 import 'dotenv/config';
+
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify from 'fastify';
@@ -12,6 +13,17 @@ import { wireClientManagers, wireGlobalHandlers } from '@/server/managers';
 import { setupProxyRewriter } from '@/server/proxy-rewriter';
 import { ServerStore } from '@/server/store';
 import { WsHandler } from '@/server/ws-handler';
+
+// Process-level crash visibility. Log only — do not exit. The server
+// process is typically managed externally (systemd, pm2, docker), so
+// killing on an unhandled rejection would mask the underlying bug under
+// a restart loop. Log loudly and let the operator decide.
+process.on('unhandledRejection', (reason) => {
+  console.error('[fatal] unhandledRejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[fatal] uncaughtException:', err);
+});
 
 const PORT = parseInt(process.env['PORT'] ?? '3001', 10);
 const HOST = process.env['HOST'] ?? '0.0.0.0';

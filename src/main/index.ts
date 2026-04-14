@@ -32,6 +32,18 @@ import {
   registerUtilHandlers,
 } from '@/shared/ipc-handlers';
 
+// Process-level crash visibility. Log only — do not exit. Killing the
+// Electron main process from an unhandled rejection would take the whole
+// UI down with it, which is worse than letting the rejection slip through.
+// The goal here is leaving a stderr breadcrumb so we can debug instead of
+// silently losing the failure.
+process.on('unhandledRejection', (reason) => {
+  console.error('[fatal] unhandledRejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[fatal] uncaughtException:', err);
+});
+
 // Register artifact: protocol as privileged before app is ready.
 // NOTE: `bypassCSP` is intentionally NOT set. Artifacts are agent-generated
 // content (Omni Code writes them into ticket workspaces) — bypassing CSP
