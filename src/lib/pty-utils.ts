@@ -50,7 +50,13 @@ export function createPtyProcess(options: PtyProcessOptions): pty.IPty {
     env: { ...process.env, ...DEFAULT_ENV, ...options.env },
     cols: options.cols,
     rows: options.rows,
-    useConpty: false,
+    // ConPTY is the native Win10 1809+ pseudo-console API. The previous
+    // `useConpty: false` forced the legacy winpty backend, which has known
+    // encoding bugs with non-ASCII cwd/args — a likely cause of venv-creation
+    // failures on user machines whose %USERPROFILE% contains accents or
+    // non-Latin characters. ConPTY passes bytes through the kernel without
+    // userland re-encoding and doesn't have that class of bug.
+    useConpty: true,
   });
 }
 

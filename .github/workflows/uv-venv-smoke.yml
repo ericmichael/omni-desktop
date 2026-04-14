@@ -20,20 +20,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Drives uv.exe through node-pty with useConpty:false — exactly how the
-  # packaged app runs it in production (see src/lib/pty-utils.ts). The matrix
-  # above exercises uv directly from PowerShell; this job exercises the
-  # winpty code path that is our top suspect for non-ASCII-path failures on
-  # personal laptops. If this job fails while the matrix passes, winpty is
-  # the culprit and we need to flip useConpty:true (F7).
-  node-pty-winpty-smoke:
+  # Drives uv.exe through node-pty — exactly how the packaged app runs it in
+  # production (see src/lib/pty-utils.ts). The matrix above exercises uv
+  # directly from PowerShell, which bypasses node-pty entirely; this job
+  # exercises the real PTY code path with ASCII and non-ASCII target paths.
+  #
+  # Matrix is 2×2: (useConpty=true, useConpty=false) × (ascii, non-ascii).
+  # - useConpty=true is the production setting. All four of these must pass.
+  #   Historically the non-ASCII case broke because useConpty was false; this
+  #   matrix exists to make sure it stays fixed.
+  # - useConpty=false is legacy winpty, left in as a regression fence. If it
+  #   ever breaks on ascii, winpty in node-pty has regressed and we'll want
+  #   to know before anyone tries to fall back. Non-ascii winpty failures are
+  #   expected and informational — continue-on-error keeps them from blocking.
+  node-pty-smoke:
     runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
+        conpty: [true, false]
         target:
           - 'C:\omni-pty-smoke\ascii\runtime'
           - 'C:\omni-pty-smoke\José María\Ω-runtime'
+    # Non-ascii + winpty is the known-broken combo we're documenting, not
+    # gating on. Every other combination must pass.
+    continue-on-error: ${{ matrix.conpty == false && contains(matrix.target, 'José') }}
 
     steps:
       - uses: actions/checkout@v4
@@ -79,10 +90,11 @@ jobs:
         if: steps.cache-uv.outputs.cache-hit != 'true'
         run: npm run download win
 
-      - name: Create venv via node-pty + winpty
+      - name: Create venv via node-pty (useConpty=${{ matrix.conpty }})
         shell: pwsh
         env:
           TARGET: ${{ matrix.target }}
+          USE_CONPTY: ${{ matrix.conpty }}
         run: |
           $script = @'
           const pty = require('node-pty');
@@ -90,6 +102,7 @@ jobs:
           const fs = require('fs');
 
           const target = process.env.TARGET;
+          const useConpty = process.env.USE_CONPTY === 'true';
           const uv = path.resolve('assets/bin/uv.exe');
           const parent = path.dirname(target);
           fs.mkdirSync(parent, { recursive: true });
@@ -101,12 +114,15 @@ jobs:
             target,
           ];
 
-          // Mirrors src/lib/pty-utils.ts createPtyProcess exactly.
+          console.log(`[node-pty-smoke] useConpty=${useConpty} target=${target}`);
+
+          // Mirrors src/lib/pty-utils.ts createPtyProcess, with useConpty
+          // parameterized so this job covers both backends in one matrix.
           const proc = pty.spawn(uv, args, {
             name: 'xterm-color',
             cwd: process.cwd(),
             env: { ...process.env, FORCE_COLOR: '1', PYTHONUNBUFFERED: '1' },
-            useConpty: false,
+            useConpty,
           });
 
           let output = '';
