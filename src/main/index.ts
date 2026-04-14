@@ -261,6 +261,20 @@ app.on('ready', () => {
 
   main.createWindow();
 
+  if (process.env.OMNI_CI_AUTOINSTALL) {
+    void (async () => {
+      console.log('[OMNI_CI] starting auto-install');
+      try {
+        await omniInstall.startInstall();
+      } catch (err) {
+        console.error('[OMNI_CI] startInstall threw:', err);
+      }
+      const status = omniInstall.getStatus();
+      console.log(`[OMNI_CI] final status: ${status.type}`);
+      app.exit(status.type === 'completed' ? 0 : 1);
+    })();
+  }
+
   // Ensure workspace and projects directories exist on startup
   void ensureDirectory(getDefaultWorkspaceDir())
     .then(() => ensureDirectory(getProjectsDir()))

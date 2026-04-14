@@ -1,0 +1,103 @@
+name: Windows uv venv smoke test
+
+on:
+  push:
+    branches:
+      - 'main'
+  pull_request:
+    types:
+      - 'ready_for_review'
+      - 'opened'
+      - 'synchronize'
+  merge_group:
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '22'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  uv-venv-smoke:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each case exercises a path shape that has caused real-world venv
+        # failures on Windows. Mirrors the exact args used by
+        # src/main/omni-install-manager.ts so we fail fast in CI instead of
+        # finding out from test users.
+        case:
+          - name: plain
+            dir: 'C:\omni-smoke\plain'
+          - name: space-in-path
+            dir: 'C:\omni-smoke\Omni Code\runtime'
+          - name: deeply-nested
+            dir: 'C:\omni-smoke\a\b\c\d\e\f\g\h\i\j\k\l\m\n\o\p\runtime'
+          - name: junction-reparse
+            dir: 'C:\omni-smoke-link\runtime'
+            reparse_source: 'C:\omni-smoke\real-target'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Get UV hash
+        id: uv-hash
+        shell: bash
+        run: echo "hash=$(node -e "console.log(require('./package.json').uv.win.sha256)")" >> $GITHUB_OUTPUT
+
+      - name: Cache UV binary
+        id: cache-uv
+        uses: actions/cache@v4
+        with:
+          path: assets/bin
+          key: ${{ runner.os }}-uv-${{ steps.uv-hash.outputs.hash }}
+
+      - name: Download uv
+        if: steps.cache-uv.outputs.cache-hit != 'true'
+        run: npm run download win
+
+      - name: Create junction for reparse-point case
+        if: matrix.case.name == 'junction-reparse'
+        shell: cmd
+        run: |
+          mkdir "${{ matrix.case.reparse_source }}"
+          mklink /J "C:\omni-smoke-link" "${{ matrix.case.reparse_source }}"
+
+      - name: Install managed Python
+        shell: pwsh
+        run: |
+          $uv = Join-Path $PWD 'assets\bin\uv.exe'
+          & $uv python install 3.11 --python-preference only-managed
+          if ($LASTEXITCODE -ne 0) { throw "uv python install failed ($LASTEXITCODE)" }
+
+      - name: Create venv (matches omni-install-manager args)
+        shell: pwsh
+        run: |
+          $uv = Join-Path $PWD 'assets\bin\uv.exe'
+          $target = '${{ matrix.case.dir }}'
+          New-Item -ItemType Directory -Force -Path (Split-Path $target) | Out-Null
+          & $uv venv --relocatable --prompt omni --python 3.11 --python-preference only-managed $target
+          if ($LASTEXITCODE -ne 0) { throw "uv venv failed ($LASTEXITCODE)" }
+          if (-not (Test-Path (Join-Path $target 'Scripts\activate'))) {
+            throw "venv created but Scripts\activate missing at $target"
+          }
+          if (-not (Test-Path (Join-Path $target 'Scripts\python.exe'))) {
+            throw "venv created but Scripts\python.exe missing at $target"
+          }
+
+      - name: Create venv with --link-mode=copy (mitigation check)
+        shell: pwsh
+        run: |
+          $uv = Join-Path $PWD 'assets\bin\uv.exe'
+          $target = '${{ matrix.case.dir }}-copy'
+          New-Item -ItemType Directory -Force -Path (Split-Path $target) | Out-Null
+          & $uv venv --relocatable --prompt omni --python 3.11 --python-preference only-managed --link-mode=copy $target
+          if ($LASTEXITCODE -ne 0) { throw "uv venv --link-mode=copy failed ($LASTEXITCODE)" }

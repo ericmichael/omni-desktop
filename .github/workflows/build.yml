@@ -275,9 +275,94 @@ jobs:
             dist/*.yml
             dist/*.yaml
 
+  smoke-windows:
+    # End-to-end smoke test of the packaged, unsigned Windows build. Installs
+    # via NSIS silently, launches the app with OMNI_CI_AUTOINSTALL=1 (see
+    # src/main/index.ts), and asserts the managed Python venv is created.
+    # Catches asar-unpack regressions (pty.node, winpty-agent.exe, bundled
+    # uv.exe under resources/bin) and fuses/IPC issues that the lightweight
+    # uv-venv-smoke workflow can't see.
+    needs: build-windows
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-artifacts-unsigned
+          path: artifacts
+
+      - name: Locate installer
+        id: installer
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem artifacts -Filter '*.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'No .exe found in artifacts' }
+          "path=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Silent install
+        shell: cmd
+        run: |
+          "${{ steps.installer.outputs.path }}" /S /D=C:\OmniTest
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Verify install layout
+        shell: pwsh
+        run: |
+          $app = 'C:\OmniTest\Omni Code.exe'
+          if (-not (Test-Path $app)) {
+            Get-ChildItem C:\OmniTest -Recurse -Depth 2 | Format-Table -AutoSize
+            throw "Omni Code.exe not found at $app"
+          }
+
+      - name: Run auto-install flow
+        shell: pwsh
+        env:
+          OMNI_CI_AUTOINSTALL: '1'
+          ELECTRON_ENABLE_LOGGING: '1'
+        run: |
+          $app = 'C:\OmniTest\Omni Code.exe'
+          $stdout = 'C:\OmniTest\ci-stdout.log'
+          $stderr = 'C:\OmniTest\ci-stderr.log'
+          $proc = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          if (-not $proc.WaitForExit(900000)) {
+            Stop-Process -Id $proc.Id -Force
+            Get-Content $stdout, $stderr -ErrorAction SilentlyContinue
+            throw 'App did not exit within 15 minutes'
+          }
+          Write-Host "--- stdout ---"
+          Get-Content $stdout -ErrorAction SilentlyContinue
+          Write-Host "--- stderr ---"
+          Get-Content $stderr -ErrorAction SilentlyContinue
+          if ($proc.ExitCode -ne 0) {
+            throw "App exited with code $($proc.ExitCode)"
+          }
+
+      - name: Verify venv on disk
+        shell: pwsh
+        run: |
+          $venv = Join-Path $env:APPDATA 'Omni Code\omni\.venv'
+          foreach ($rel in @('Scripts\python.exe', 'Scripts\activate', 'Scripts\omni.exe')) {
+            $p = Join-Path $venv $rel
+            if (-not (Test-Path $p)) { throw "Missing: $p" }
+          }
+          Write-Host "venv OK at $venv"
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-windows-diagnostics
+          path: |
+            C:\OmniTest\ci-stdout.log
+            C:\OmniTest\ci-stderr.log
+            C:\Users\runneradmin\AppData\Roaming\Omni Code\logs
+          if-no-files-found: ignore
+
   publish-release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [build-linux, build-macos, build-macos-x64, build-windows]
+    needs: [build-linux, build-macos, build-macos-x64, build-windows, smoke-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
