@@ -10,9 +10,7 @@ import { promisify } from 'util';
 import { getArtifactsDir } from '@/lib/artifacts';
 import { buildAutopilotVariables, buildInteractiveVariables } from '@/lib/client-tools';
 import { INBOX_SWEEP_INTERVAL_MS } from '@/lib/inbox-expiry';
-import { upgradeLegacyInbox } from '@/lib/inbox-migration';
 import { getMimeType, isTextMime } from '@/lib/mime-types';
-import type { TemplateKey } from '@/lib/page-templates';
 import type {
   IMachineFactory,
   ISandbox,
@@ -30,6 +28,7 @@ import { AgentProcess } from '@/main/agent-process';
 import { writeMarimoAiConfig } from '@/main/extensions/marimo-config';
 import { ensureNotebookCssReference, writeGlassCss } from '@/main/extensions/marimo-glass';
 import { InboxManager, type InboxManagerStore } from '@/main/inbox-manager';
+import { MilestoneManager, type MilestoneManagerStore } from '@/main/milestone-manager';
 import { PageManager, type PageManagerStore } from '@/main/page-manager';
 import { createPlatformClient } from '@/main/platform-mode';
 import type { ProcessManager } from '@/main/process-manager';
@@ -39,8 +38,8 @@ import type { ClientFunctionResponder } from '@/main/ticket-machine';
 import { TicketMachine } from '@/main/ticket-machine';
 import { ensureDirectory, getDefaultWorkspaceDir, getOmniConfigDir, getProjectDir, getWorktreesDir } from '@/main/util';
 import { WorkflowLoader } from '@/main/workflow-loader';
-import { DEFAULT_PIPELINE, SIMPLE_PIPELINE } from '@/shared/pipeline-defaults';
 import type { IIpcListener } from '@/shared/ipc-listener';
+import { DEFAULT_PIPELINE, SIMPLE_PIPELINE } from '@/shared/pipeline-defaults';
 import { getLocalWorkspaceDir, requireLocalWorkspaceDir } from '@/shared/project-source';
 import type { TicketPhase } from '@/shared/ticket-phase';
 import { isActivePhase } from '@/shared/ticket-phase';
@@ -54,12 +53,10 @@ import type {
   FileDiff,
   GitRepoInfo,
   InboxItem,
-  InboxShaping,
   IpcRendererEvents,
   Milestone,
   MilestoneId,
   Page,
-  PageId,
   Pipeline,
   Project,
   ProjectId,
@@ -361,6 +358,9 @@ export class ProjectManager {
   /** Inbox lifecycle owner — CRUD, shape, defer, promote, sweep, gc. */
   private inbox: InboxManager;
 
+  /** Milestone lifecycle owner — CRUD, completedAt stamping, orphan-ticket clear, branch fallback. */
+  private milestones: MilestoneManager;
+
   constructor(
     arg: { store: Store<StoreData>; sendToWindow: ProjectManager['sendToWindow']; processManager?: ProcessManager },
     deps?: Partial<ProjectManagerDeps>
@@ -422,6 +422,21 @@ export class ProjectManager {
     };
     this.inbox = new InboxManager({
       store: inboxStore,
+      newId: () => nanoid(),
+      now: () => Date.now(),
+    });
+
+    const milestoneStore: MilestoneManagerStore = {
+      getMilestones: () => (this.store.get('milestones') ?? []) as Milestone[],
+      setMilestones: (items) => {
+        this.store.set('milestones', items);
+        this.sendToWindow('store:changed', this.store.store);
+      },
+      getTickets: () => this.getTickets(),
+      setTickets: (tickets) => this.setTickets(tickets),
+    };
+    this.milestones = new MilestoneManager({
+      store: milestoneStore,
       newId: () => nanoid(),
       now: () => Date.now(),
     });
@@ -893,7 +908,7 @@ export class ProjectManager {
           respond(false, { error: { message: 'Missing milestone_id' } });
           return;
         }
-        const ms = this.getMilestones().find((i) => i.id === milestoneId);
+        const ms = this.milestones.getById(milestoneId);
         if (!ms) {
           respond(false, { error: { message: `Milestone not found: ${milestoneId}` } });
           return;
@@ -1479,8 +1494,7 @@ export class ProjectManager {
     this.setPersistedTasks(remainingTasks);
     const remainingTickets = this.getTickets().filter((t) => t.projectId !== id);
     this.setTickets(remainingTickets);
-    const remainingMilestones = this.getMilestones().filter((i) => i.projectId !== id);
-    this.setMilestones(remainingMilestones);
+    this.milestones.removeAllForProject(id);
     this.pages.removeAllForProject(id);
   };
 
@@ -1813,81 +1827,27 @@ export class ProjectManager {
 
   // #endregion
 
-  // #region Milestones (persisted in electron-store)
-
-  private getMilestones = (): Milestone[] => {
-    return this.store.get('milestones') ?? [];
-  };
-
-  private setMilestones = (items: Milestone[]): void => {
-    this.store.set('milestones', items);
-    this.sendToWindow('store:changed', this.store.store);
-  };
+  // #region Milestones (delegated to MilestoneManager)
 
   getMilestonesByProject = (projectId: ProjectId): Milestone[] => {
-    return this.getMilestones().filter((i) => i.projectId === projectId);
+    return this.milestones.getByProject(projectId);
   };
 
   addMilestone = (input: Omit<Milestone, 'id' | 'createdAt' | 'updatedAt'>): Milestone => {
-    const now = Date.now();
-    const milestone: Milestone = { ...input, id: nanoid(), createdAt: now, updatedAt: now };
-    const milestones = this.getMilestones();
-    milestones.push(milestone);
-    this.setMilestones(milestones);
-    return milestone;
+    return this.milestones.add(input);
   };
 
   updateMilestone = (id: MilestoneId, patch: Partial<Omit<Milestone, 'id' | 'projectId' | 'createdAt'>>): void => {
-    const milestones = this.getMilestones();
-    const index = milestones.findIndex((i) => i.id === id);
-    if (index === -1) {
-      return;
-    }
-    const prev = milestones[index]!;
-    const next = { ...prev, ...patch, updatedAt: Date.now() };
-    // Stamp completedAt on first transition into 'completed'; clear it on transition out.
-    if (patch.status === 'completed' && prev.status !== 'completed' && next.completedAt === undefined) {
-      next.completedAt = Date.now();
-    } else if (patch.status !== undefined && patch.status !== 'completed' && prev.status === 'completed') {
-      next.completedAt = undefined;
-    }
-    milestones[index] = next;
-    this.setMilestones(milestones);
+    this.milestones.update(id, patch);
   };
 
   removeMilestone = (id: MilestoneId): void => {
-    const milestones = this.getMilestones();
-    const target = milestones.find((i) => i.id === id);
-    if (!target) {
-      return;
-    }
-    // Clear milestoneId on orphaned tickets
-    const tickets = this.getTickets();
-    let ticketsChanged = false;
-    for (const ticket of tickets) {
-      if (ticket.milestoneId === id) {
-        ticket.milestoneId = undefined;
-        ticket.updatedAt = Date.now();
-        ticketsChanged = true;
-      }
-    }
-    if (ticketsChanged) {
-      this.setTickets(tickets);
-    }
-    this.setMilestones(milestones.filter((i) => i.id !== id));
+    this.milestones.remove(id);
   };
-
 
   /** Resolve the effective branch for a ticket (ticket.branch ?? milestone.branch ?? undefined). */
   resolveTicketBranch = (ticket: Ticket): string | undefined => {
-    if (ticket.branch) {
-      return ticket.branch;
-    }
-    if (!ticket.milestoneId) {
-      return undefined;
-    }
-    const milestone = this.getMilestones().find((i) => i.id === ticket.milestoneId);
-    return milestone?.branch;
+    return this.milestones.resolveTicketBranch(ticket);
   };
 
   // #endregion
