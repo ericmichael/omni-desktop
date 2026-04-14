@@ -13,7 +13,8 @@
  *   - processManager.statusFallback wiring
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -1810,6 +1811,135 @@ describe('ProjectManager integration', () => {
       expect(store.get('tickets', []).map((t) => t.id)).toEqual(['t-unrelated']);
       expect(store.get('milestones', []).map((m) => m.id)).toEqual(['m2']);
       expect(store.get('pages', []).map((p) => p.id)).toEqual(['p2']);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // T8 — getFilesChanged against a real git tmpdir repo
+  // -------------------------------------------------------------------------
+  describe('getFilesChanged (real git tmpdir)', () => {
+    let repoDir: string;
+
+    const git = (...args: string[]): string =>
+      execFileSync('git', ['-C', repoDir, ...args], { encoding: 'utf-8' }).trim();
+
+    beforeEach(() => {
+      // Tests in this block need real wall-clock time for exec() callbacks.
+      vi.useRealTimers();
+      repoDir = mkdtempSync(join(tmpdir(), 'pm-git-'));
+      execFileSync('git', ['init', '-q', repoDir]);
+      execFileSync('git', ['-C', repoDir, 'config', 'user.email', 'test@example.com']);
+      execFileSync('git', ['-C', repoDir, 'config', 'user.name', 'Test User']);
+      execFileSync('git', ['-C', repoDir, 'config', 'commit.gpgsign', 'false']);
+    });
+
+    afterEach(() => {
+      rmSync(repoDir, { recursive: true, force: true });
+      vi.useFakeTimers();
+    });
+
+    const makePmForRepo = (): PmCtx =>
+      makePm({
+        source: { kind: 'local', workspaceDir: repoDir },
+        tickets: [{ id: 't1' }],
+      });
+
+    it('returns empty result for a fresh repo with no files', async () => {
+      const { pm } = makePmForRepo();
+      const result = await pm.getFilesChanged('t1');
+      expect(result.hasChanges).toBe(false);
+      expect(result.files).toEqual([]);
+    });
+
+    it('detects untracked files in a zero-commit repo as untracked + synthesizes a patch', async () => {
+      const { pm } = makePmForRepo();
+      writeFileSync(join(repoDir, 'new.txt'), 'hello\nworld\n');
+
+      const result = await pm.getFilesChanged('t1');
+
+      expect(result.hasChanges).toBe(true);
+      expect(result.files).toHaveLength(1);
+      const file = result.files[0]!;
+      expect(file.path).toBe('new.txt');
+      expect(file.status).toBe('untracked');
+      // Synthesized patch should include the added lines.
+      expect(file.patch).toContain('+hello');
+      expect(file.patch).toContain('+world');
+      expect(file.additions).toBe(2);
+    });
+
+    it('reports uncommitted modifications when HEAD exists but there is no upstream', async () => {
+      writeFileSync(join(repoDir, 'a.txt'), 'original\n');
+      git('add', 'a.txt');
+      git('commit', '-q', '-m', 'init');
+
+      // Modify it
+      writeFileSync(join(repoDir, 'a.txt'), 'modified\n');
+
+      const { pm } = makePmForRepo();
+      const result = await pm.getFilesChanged('t1');
+
+      expect(result.hasChanges).toBe(true);
+      const file = result.files.find((f) => f.path === 'a.txt')!;
+      expect(file.status).toBe('modified');
+      expect(file.additions).toBeGreaterThan(0);
+      expect(file.deletions).toBeGreaterThan(0);
+    });
+
+    it('reports staged additions alongside modifications', async () => {
+      writeFileSync(join(repoDir, 'a.txt'), 'a\n');
+      git('add', 'a.txt');
+      git('commit', '-q', '-m', 'init');
+
+      writeFileSync(join(repoDir, 'b.txt'), 'b\n');
+      git('add', 'b.txt');
+
+      const { pm } = makePmForRepo();
+      const result = await pm.getFilesChanged('t1');
+
+      const b = result.files.find((f) => f.path === 'b.txt')!;
+      expect(b.status).toBe('added');
+    });
+
+    it('reports staged deletions', async () => {
+      writeFileSync(join(repoDir, 'a.txt'), 'a\n');
+      git('add', 'a.txt');
+      git('commit', '-q', '-m', 'init');
+      git('rm', '-q', 'a.txt');
+
+      const { pm } = makePmForRepo();
+      const result = await pm.getFilesChanged('t1');
+
+      const a = result.files.find((f) => f.path === 'a.txt')!;
+      expect(a.status).toBe('deleted');
+    });
+
+    it('marks binary files as isBinary and does not produce a patch', async () => {
+      git('commit', '-q', '--allow-empty', '-m', 'init');
+      // Write a file with NUL bytes — the binary-detection heuristic checks
+      // the first 8KB for a 0x00 byte.
+      const buf = Buffer.concat([Buffer.from('header\0'), Buffer.alloc(100, 0xff)]);
+      writeFileSync(join(repoDir, 'bin.dat'), buf);
+
+      const { pm } = makePmForRepo();
+      const result = await pm.getFilesChanged('t1');
+
+      const bin = result.files.find((f) => f.path === 'bin.dat')!;
+      expect(bin.isBinary).toBe(true);
+      expect(bin.patch).toBeUndefined();
+    });
+
+    it('returns empty when the ticket does not exist', async () => {
+      const { pm } = makePmForRepo();
+      const result = await pm.getFilesChanged('nope' as TicketId);
+      expect(result.hasChanges).toBe(false);
+    });
+
+    it('returns empty when the project workspaceDir no longer exists on disk', async () => {
+      const { pm } = makePmForRepo();
+      rmSync(repoDir, { recursive: true, force: true });
+      const result = await pm.getFilesChanged('t1');
+      expect(result.hasChanges).toBe(false);
     });
   });
 
