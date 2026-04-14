@@ -1,36 +1,22 @@
 import { readFileSync } from 'fs';
-import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
-import { homedir } from 'os';
-import { dirname, join } from 'path';
-import { WebSocket as WsWebSocket } from 'ws';
+import { join } from 'path';
 
-import { createProcessManager } from '@/main/process-manager';
 import { createConsoleManager } from '@/main/console-manager';
 import { createExtensionManager } from '@/main/extension-manager';
-import { createProjectManager } from '@/main/project-manager';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
-import { isEnterpriseBuild, mapSandboxProfiles, PLATFORM_URL, createPlatformClient } from '@/main/platform-mode';
 import { PlatformClient } from '@/main/platform-client';
-import { listSkills, readSkillContent, createSkill, removeSkill, writeSkillContent } from '@/main/skills';
-import {
-  checkModelsConfigured,
-  ensureDirectory,
-  getCliSymlinkPath,
-  getDefaultWorkspaceDir,
-  getOmniConfigDir,
-  getOmniRuntimeInfo,
-  getOperatingSystem,
-  installCliToPath,
-  isCliInstalledInPath,
-  isDirectory,
-  isFile,
-  pathExists,
-  testModelConnection,
-  validateConfigPath,
-} from '@/main/util';
+import { createPlatformClient,isEnterpriseBuild, mapSandboxProfiles, PLATFORM_URL } from '@/main/platform-mode';
+import { createProcessManager } from '@/main/process-manager';
+import { createProjectManager } from '@/main/project-manager';
+import { getOmniConfigDir } from '@/main/util';
 import { ServerIpcAdapter } from '@/server/ipc-adapter';
 import type { ServerStore } from '@/server/store';
 import type { WsHandler } from '@/server/ws-handler';
+import {
+  registerConfigHandlers,
+  registerSkillsHandlers,
+  registerUtilHandlers,
+} from '@/shared/ipc-handlers';
 import type { IpcRendererEvents } from '@/shared/types';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -118,34 +104,6 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
   ipc.handle('main-process:get-status', () => mainStatus);
   ipc.handle('main-process:exit', () => {});
 
-  // Util handlers
-  ipc.handle('util:get-default-install-dir', () => join(homedir(), 'omni'));
-  ipc.handle('util:get-default-workspace-dir', () => getDefaultWorkspaceDir());
-  ipc.handle('util:ensure-directory', (_, dirPath) => ensureDirectory(dirPath));
-
-  // Desktop-only handlers — stubbed for browser mode
-  ipc.handle('util:select-directory', () => null);
-  ipc.handle('util:select-file', () => null);
-  ipc.handle('util:open-directory', () => '');
-
-  ipc.handle('util:list-directory', async (_, dirPath) => {
-    try {
-      const entries = await readdir(dirPath, { withFileTypes: true });
-      return entries
-        .filter((e) => !e.name.startsWith('.'))
-        .filter((e) => e.isDirectory())
-        .map((e) => ({ name: e.name, path: join(dirPath, e.name), isDirectory: true }))
-        .sort((a, b) => a.name.localeCompare(b.name));
-    } catch {
-      return [];
-    }
-  });
-  ipc.handle('util:get-home-directory', () => homedir());
-  ipc.handle('util:get-is-directory', (_, path) => isDirectory(path));
-  ipc.handle('util:get-is-file', (_, path) => isFile(path));
-  ipc.handle('util:get-path-exists', (_, path) => pathExists(path));
-  ipc.handle('util:get-os', () => getOperatingSystem());
-
   // Read version from package.json at startup
   let launcherVersion = '0.0.0';
   try {
@@ -154,114 +112,17 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
   } catch {
     // fallback
   }
-  ipc.handle('util:get-launcher-version', () => launcherVersion);
-  ipc.handle('util:get-omni-runtime-info', () => getOmniRuntimeInfo());
-  ipc.handle('util:install-cli-to-path', () => installCliToPath());
-  ipc.handle('util:get-cli-in-path-status', async () => {
-    const installed = await isCliInstalledInPath();
-    return { installed, symlinkPath: getCliSymlinkPath() };
-  });
-  ipc.handle('util:check-models-configured', () => checkModelsConfigured());
-  ipc.handle('util:test-model-connection', (_, modelRef) => testModelConnection(modelRef));
-  ipc.handle('util:rebuild-sandbox-image', async () => {
-    // Sandbox Dockerfiles now live in omni-code. Trigger rebuild via the CLI.
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const execFilePromise = promisify(execFile);
-    try {
-      await execFilePromise('omni', ['sandbox', '--rebuild', '--output', 'json'], { timeout: 600_000 });
-      return { success: true };
-    } catch (e) {
-      return { success: false, error: (e as Error).message };
-    }
-  });
 
-  ipc.handle('util:check-url', async (_, url) => {
-    try {
-      const response = await globalThis.fetch(url, { method: 'GET' });
-      return response.status < 500;
-    } catch {
-      return false;
-    }
-  });
-
-  ipc.handle('util:check-ws', async (_, url) => {
-    try {
-      return await new Promise<boolean>((resolve) => {
-        let settled = false;
-
-        const settle = (result: boolean, socket?: WsWebSocket, timer?: ReturnType<typeof setTimeout>) => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          if (timer) {
-            clearTimeout(timer);
-          }
-          if (socket) {
-            try {
-              socket.close();
-            } catch {
-              /* ignore */
-            }
-          }
-          resolve(result);
-        };
-
-        const socket = new WsWebSocket(url);
-        const timer = setTimeout(() => settle(false, socket), 2000);
-
-        socket.on('open', () => settle(true, socket, timer));
-        socket.on('error', () => settle(false, socket, timer));
-        socket.on('close', () => settle(false, socket, timer));
-      });
-    } catch {
-      return false;
-    }
-  });
-
-  // Config file I/O
+  // Shared IPC handlers (config:*, util:*, skills:*) — identical across Electron and server.
   const OMNI_CONFIG_DIR = getOmniConfigDir();
-  ipc.handle('config:get-omni-config-dir', () => OMNI_CONFIG_DIR);
-  ipc.handle('config:get-env-file-path', () => join(OMNI_CONFIG_DIR, '.env'));
+  registerConfigHandlers(ipc, OMNI_CONFIG_DIR);
+  registerUtilHandlers(ipc, { fetchFn: globalThis.fetch, launcherVersion });
+  registerSkillsHandlers(ipc, OMNI_CONFIG_DIR);
 
-  ipc.handle('config:read-json-file', async (_, filePath) => {
-    validateConfigPath(filePath, OMNI_CONFIG_DIR);
-    try {
-      const content = await readFile(filePath, 'utf-8');
-      return JSON.parse(content) as unknown;
-    } catch {
-      return null;
-    }
-  });
-
-  ipc.handle('config:write-json-file', async (_, filePath, data) => {
-    validateConfigPath(filePath, OMNI_CONFIG_DIR);
-    await mkdir(dirname(filePath), { recursive: true });
-    await writeFile(filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf-8');
-  });
-
-  ipc.handle('config:read-text-file', async (_, filePath) => {
-    validateConfigPath(filePath, OMNI_CONFIG_DIR);
-    try {
-      return await readFile(filePath, 'utf-8');
-    } catch {
-      return null;
-    }
-  });
-
-  ipc.handle('config:write-text-file', async (_, filePath, content) => {
-    validateConfigPath(filePath, OMNI_CONFIG_DIR);
-    await mkdir(dirname(filePath), { recursive: true });
-    await writeFile(filePath, content, 'utf-8');
-  });
-
-  // Skills API
-  ipc.handle('skills:list', () => listSkills(OMNI_CONFIG_DIR));
-  ipc.handle('skills:read', (_, skillPath) => readSkillContent(skillPath));
-  ipc.handle('skills:create', (_, name, description) => createSkill(OMNI_CONFIG_DIR, name, description));
-  ipc.handle('skills:remove', (_, skillPath) => removeSkill(skillPath));
-  ipc.handle('skills:write-content', (_, skillPath, content) => writeSkillContent(skillPath, content));
+  // Desktop-only handlers — stubbed for browser mode
+  ipc.handle('util:select-directory', () => null);
+  ipc.handle('util:select-file', () => null);
+  ipc.handle('util:open-directory', () => '');
 
   // Platform handlers
 
@@ -274,7 +135,9 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
       );
       client.onTokenRefresh = (newToken) => {
         const current = store.get('platform');
-        if (current) store.set('platform', { ...current, accessToken: newToken });
+        if (current) {
+store.set('platform', { ...current, accessToken: newToken });
+}
       };
       const policy = await client.getPolicy('omni_code');
       const profiles = mapSandboxProfiles(policy.sandbox_profiles ?? []);
@@ -320,7 +183,9 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
             await fetchAndApplyPolicy(credentials);
             return;
           }
-          if (result.status === 'expired') return;
+          if (result.status === 'expired') {
+return;
+}
         } catch {
           // keep polling
         }
@@ -349,7 +214,9 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
 
   ipc.handle('platform:get-dashboards', async () => {
     const creds = store.get('platform');
-    if (!creds?.accessToken || !isEnterpriseBuild()) return [];
+    if (!creds?.accessToken || !isEnterpriseBuild()) {
+return [];
+}
 
     try {
       const client = new PlatformClient({

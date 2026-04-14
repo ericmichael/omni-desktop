@@ -3,8 +3,7 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 import { app, dialog, net, protocol, shell } from 'electron';
-import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
-import { dirname, join, resolve } from 'path';
+import { resolve } from 'path';
 import { assert } from 'tsafe';
 import { pathToFileURL } from 'url';
 
@@ -19,25 +18,19 @@ import { createProcessManager } from '@/main/process-manager';
 import { createProjectManager } from '@/main/project-manager';
 import { store } from '@/main/store';
 import {
-  checkModelsConfigured,
   ensureDirectory,
-  getCliSymlinkPath,
   getDefaultWorkspaceDir,
-  getHomeDirectory,
-  getOmniCliPath,
   getOmniConfigDir,
-  getOmniRuntimeInfo,
-  getOperatingSystem,
   getProjectsDir,
-  installCliToPath,
-  isCliInstalledInPath,
   isDirectory,
   isFile,
-  pathExists,
-  testModelConnection,
-  validateConfigPath,
 } from '@/main/util';
 import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
+import {
+  registerConfigHandlers,
+  registerSkillsHandlers,
+  registerUtilHandlers,
+} from '@/shared/ipc-handlers';
 
 // Register artifact: protocol as privileged before app is ready
 protocol.registerSchemesAsPrivileged([
@@ -301,11 +294,19 @@ app.on('before-quit', (event) => {
 
 //#endregion
 
-//#region Util API
+//#region Shared IPC handlers (config:*, util:*, skills:*)
 
-main.ipc.handle('util:get-default-install-dir', () => join(getHomeDirectory(), 'omni'));
-main.ipc.handle('util:get-default-workspace-dir', () => getDefaultWorkspaceDir());
-main.ipc.handle('util:ensure-directory', (_, dirPath) => ensureDirectory(dirPath));
+registerConfigHandlers(main.ipc, OMNI_CONFIG_DIR);
+registerUtilHandlers(main.ipc, {
+  fetchFn: ((input, init) => net.fetch(input as string, init)) as typeof globalThis.fetch,
+  launcherVersion: app.getVersion(),
+});
+registerSkillsHandlers(main.ipc, OMNI_CONFIG_DIR);
+
+//#endregion
+
+//#region Electron-only util handlers (dialog, shell)
+
 main.ipc.handle('util:select-directory', async (_, path) => {
   const mainWindow = main.getWindow();
   assert(mainWindow !== null, 'Main window is not initialized');
@@ -332,147 +333,6 @@ main.ipc.handle('util:select-file', async (_, path) => {
 
   return result.filePaths[0] ?? null;
 });
-main.ipc.handle('util:list-directory', async (_, dirPath) => {
-  try {
-    const entries = await readdir(dirPath, { withFileTypes: true });
-    return entries
-      .filter((e) => !e.name.startsWith('.'))
-      .filter((e) => e.isDirectory())
-      .map((e) => ({ name: e.name, path: join(dirPath, e.name), isDirectory: true }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  } catch {
-    return [];
-  }
-});
-main.ipc.handle('util:get-home-directory', () => getHomeDirectory());
-main.ipc.handle('util:get-is-directory', (_, path) => isDirectory(path));
-main.ipc.handle('util:get-is-file', (_, path) => isFile(path));
-main.ipc.handle('util:get-path-exists', (_, path) => pathExists(path));
-main.ipc.handle('util:get-os', () => getOperatingSystem());
 main.ipc.handle('util:open-directory', (_, path) => shell.openPath(path));
-main.ipc.handle('util:get-launcher-version', () => app.getVersion());
-main.ipc.handle('util:get-omni-runtime-info', () => getOmniRuntimeInfo());
-main.ipc.handle('util:install-cli-to-path', () => installCliToPath());
-main.ipc.handle('util:get-cli-in-path-status', async () => {
-  const installed = await isCliInstalledInPath();
-  return { installed, symlinkPath: getCliSymlinkPath() };
-});
-main.ipc.handle('util:check-models-configured', () => checkModelsConfigured());
-main.ipc.handle('util:test-model-connection', (_, modelRef) => testModelConnection(modelRef));
-main.ipc.handle('util:rebuild-sandbox-image', async () => {
-  // Sandbox Dockerfiles now live in omni-code. Trigger rebuild via the CLI.
-  const omniPath = getOmniCliPath();
-  try {
-    const { execFile: execFileAsync } = await import('child_process');
-    const { promisify } = await import('util');
-    const execFilePromise = promisify(execFileAsync);
-    await execFilePromise(omniPath, ['sandbox', '--rebuild', '--output', 'json'], { timeout: 600_000 });
-    return { success: true };
-  } catch (e) {
-    return { success: false, error: (e as Error).message };
-  }
-});
-main.ipc.handle('util:check-url', async (_, url) => {
-  try {
-    const response = await net.fetch(url, { method: 'GET' });
-    return response.status < 500;
-  } catch {
-    return false;
-  }
-});
-main.ipc.handle('util:check-ws', async (_, url) => {
-  try {
-    return await new Promise<boolean>((resolve) => {
-      let settled = false;
-
-      const settle = (result: boolean, socket?: WebSocket, timer?: ReturnType<typeof setTimeout>) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        if (timer) {
-          clearTimeout(timer);
-        }
-        if (socket) {
-          socket.onopen = null;
-          socket.onerror = null;
-          socket.onclose = null;
-          try {
-            socket.close();
-          } catch {
-            // ignore
-          }
-        }
-        resolve(result);
-      };
-
-      const socket = new WebSocket(url);
-      const timer = setTimeout(() => {
-        settle(false, socket);
-      }, 2000);
-
-      socket.onopen = () => {
-        settle(true, socket, timer);
-      };
-      socket.onerror = () => {
-        settle(false, socket, timer);
-      };
-      socket.onclose = () => {
-        settle(false, socket, timer);
-      };
-    });
-  } catch {
-    return false;
-  }
-});
-//#endregion
-
-//#region Config file I/O API
-
-main.ipc.handle('config:get-omni-config-dir', () => OMNI_CONFIG_DIR);
-main.ipc.handle('config:get-env-file-path', () => join(OMNI_CONFIG_DIR, '.env'));
-
-main.ipc.handle('config:read-json-file', async (_, filePath) => {
-  validateConfigPath(filePath, OMNI_CONFIG_DIR);
-  try {
-    const content = await readFile(filePath, 'utf-8');
-    return JSON.parse(content) as unknown;
-  } catch {
-    return null;
-  }
-});
-
-main.ipc.handle('config:write-json-file', async (_, filePath, data) => {
-  validateConfigPath(filePath, OMNI_CONFIG_DIR);
-  await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf-8');
-});
-
-main.ipc.handle('config:read-text-file', async (_, filePath) => {
-  validateConfigPath(filePath, OMNI_CONFIG_DIR);
-  try {
-    return await readFile(filePath, 'utf-8');
-  } catch {
-    return null;
-  }
-});
-
-main.ipc.handle('config:write-text-file', async (_, filePath, content) => {
-  validateConfigPath(filePath, OMNI_CONFIG_DIR);
-  await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, content, 'utf-8');
-});
-
-//#endregion
-
-//#region Skills API
-
-import { createSkill, listSkills, readSkillContent, removeSkill, writeSkillContent } from '@/main/skills';
-
-main.ipc.handle('skills:list', () => listSkills(OMNI_CONFIG_DIR));
-main.ipc.handle('skills:read', (_, skillPath) => readSkillContent(skillPath));
-main.ipc.handle('skills:create', (_, name, description) => createSkill(OMNI_CONFIG_DIR, name, description));
-main.ipc.handle('skills:remove', (_, skillPath) => removeSkill(skillPath));
-main.ipc.handle('skills:write-content', (_, skillPath, content) => writeSkillContent(skillPath, content));
 
 //#endregion
