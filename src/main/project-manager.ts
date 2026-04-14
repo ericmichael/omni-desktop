@@ -89,97 +89,6 @@ const DEFAULT_BRIEF_TEMPLATE = `## Problem
 
 `;
 
-// #region JSON-RPC helper
-
-const SAFE_TOOL_OVERRIDES = { safe_tool_patterns: ['.*'] };
-
-const sendStartRunOnce = (wsUrl: string, prompt: string, timeoutMs = 15_000): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const url = wsUrl;
-    const ws = new WebSocket(url);
-    let settled = false;
-
-    const settle = (fn: () => void): void => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      fn();
-    };
-
-    const timer = setTimeout(() => {
-      settle(() => {
-        ws.close();
-        reject(new Error('start_run timed out'));
-      });
-    }, timeoutMs);
-
-    ws.addEventListener('open', () => {
-      ws.send(
-        JSON.stringify({
-          jsonrpc: '2.0',
-          id: '1',
-          method: 'start_run',
-          params: { prompt, safe_tool_overrides: SAFE_TOOL_OVERRIDES },
-        })
-      );
-    });
-
-    ws.addEventListener('message', (event) => {
-      try {
-        const data = JSON.parse(String(event.data)) as {
-          id?: string;
-          result?: { session_id?: string };
-          error?: { message?: string };
-        };
-        if (data.id !== '1') {
-          return;
-        }
-        settle(() => {
-          ws.close();
-          if (data.error) {
-            reject(new Error(data.error.message ?? 'start_run RPC error'));
-          } else if (!data.result?.session_id) {
-            reject(new Error('No session_id in start_run response'));
-          } else {
-            resolve(data.result.session_id);
-          }
-        });
-      } catch {
-        // Ignore unparseable messages
-      }
-    });
-
-    ws.addEventListener('error', (err) => {
-      settle(() => reject(new Error(`WebSocket error: ${(err as ErrorEvent).message ?? 'unknown'}`)));
-    });
-
-    ws.addEventListener('close', () => {
-      settle(() => reject(new Error('WebSocket closed before response')));
-    });
-  });
-};
-
-const sendStartRun = async (wsUrl: string, prompt: string, maxRetries = 10, retryDelayMs = 2_000): Promise<string> => {
-  let lastError: Error | undefined;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      return await sendStartRunOnce(wsUrl, prompt);
-    } catch (error) {
-      lastError = error as Error;
-      if (attempt < maxRetries) {
-        await new Promise<void>((resolve) => {
-          setTimeout(resolve, retryDelayMs);
-        });
-      }
-    }
-  }
-  throw lastError ?? new Error('sendStartRun failed');
-};
-
-// #endregion
-
 // #region Name generator
 
 const ADJECTIVES = [
@@ -3607,24 +3516,6 @@ entry.machine.setWsUrl(wsUrl);
 
     if (dirty) {
       this.setTickets(patched);
-    }
-  };
-
-  // #endregion
-
-  // #region Task session initialization
-
-  private initializeTaskSession = async (taskId: TaskId, wsUrl: string, prompt: string): Promise<void> => {
-    try {
-      const sessionId = await sendStartRun(wsUrl, prompt);
-      const existing = this.tasks.get(taskId);
-      if (existing) {
-        existing.task = { ...existing.task, sessionId };
-        this.persistTask(existing.task);
-        this.sendToWindow('project:task-session', taskId, sessionId);
-      }
-    } catch (error) {
-      console.warn(`Failed to initialize task session for ${taskId}: ${(error as Error).message}`);
     }
   };
 
