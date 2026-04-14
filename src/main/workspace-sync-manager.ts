@@ -13,8 +13,9 @@
  */
 
 import { readdir, readFile, stat, writeFile, mkdir, unlink } from 'node:fs/promises';
-import { watch, type FSWatcher } from 'node:fs';
-import { dirname, join, posix, sep } from 'node:path';
+import { dirname, join, posix } from 'node:path';
+
+import chokidar, { type FSWatcher } from 'chokidar';
 
 import type { PlatformClient } from '@/main/platform-client';
 import { encryptFile, decryptFile } from '@/main/workspace-crypto';
@@ -527,14 +528,24 @@ export class WorkspaceSyncManager {
 
   private startWatcher(session: SyncSession): void {
     try {
-      const watcher = watch(session.workspaceDir, { recursive: true }, (_event, filename) => {
-        if (!filename || session.suppressWatcher) return;
-        // Normalize path separators
-        const normalized = filename.split(sep).join('/');
-        if (this.shouldIgnore(normalized)) return;
-        session.pendingChanges.add(normalized);
+      const watcher = chokidar.watch(session.workspaceDir, {
+        ignoreInitial: true,
+        persistent: true,
+        ignored: /(^|[/\\])\../, // ignore hidden files/dirs
+        awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 100 },
+      });
+
+      watcher.on('all', (_event, filePath) => {
+        if (!filePath || session.suppressWatcher) return;
+        // chokidar gives absolute paths — compute relative path
+        const relative = filePath.startsWith(session.workspaceDir)
+          ? filePath.slice(session.workspaceDir.length).replace(/^[\\/]/, '').split('\\').join('/')
+          : filePath;
+        if (this.shouldIgnore(relative)) return;
+        session.pendingChanges.add(relative);
         this.debouncePush(session);
       });
+
       session.watcher = watcher;
     } catch (e) {
       console.warn(`[WorkspaceSync] Watcher failed:`, sanitizeUrl((e as Error).message));
@@ -708,7 +719,7 @@ export class WorkspaceSyncManager {
 
   private teardownSession(session: SyncSession): void {
     if (session.watcher) {
-      session.watcher.close();
+      void session.watcher.close();
       session.watcher = null;
     }
     if (session.pollTimer) {
