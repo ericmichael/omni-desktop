@@ -8,6 +8,7 @@ import path from 'path';
 import { promisify } from 'util';
 
 import { getArtifactsDir } from '@/lib/artifacts';
+import { listArtifactEntries, readArtifactFile, resolveArtifactPath } from '@/lib/artifacts-fs';
 import { buildAutopilotVariables, buildInteractiveVariables } from '@/lib/client-tools';
 import { buildContinuationPrompt } from '@/lib/continuation-prompt';
 import { getGitFilesChanged, resolveWorkspaceMergeBase, resolveWorktreeMergeBase } from '@/lib/git-files-changed';
@@ -1857,73 +1858,19 @@ export class ProjectManager {
   // #region Artifacts
 
   private getArtifactsRoot = (ticketId: TicketId): string => {
-    const configDir = getOmniConfigDir();
-    return getArtifactsDir(configDir, ticketId);
-  };
-
-  private validateArtifactPath = (ticketId: TicketId, relativePath: string): string => {
-    const root = this.getArtifactsRoot(ticketId);
-    const fullPath = path.resolve(root, relativePath);
-    if (!fullPath.startsWith(root)) {
-      throw new Error('Path traversal detected');
-    }
-    return fullPath;
+    return getArtifactsDir(getOmniConfigDir(), ticketId);
   };
 
   listArtifacts = async (ticketId: TicketId, dirPath?: string): Promise<ArtifactFileEntry[]> => {
-    const root = this.getArtifactsRoot(ticketId);
-    const targetDir = dirPath ? this.validateArtifactPath(ticketId, dirPath) : root;
-
-    try {
-      const entries = await fs.readdir(targetDir, { withFileTypes: true });
-      const results: ArtifactFileEntry[] = [];
-
-      for (const entry of entries) {
-        const relPath = dirPath ? path.join(dirPath, entry.name) : entry.name;
-        const fullPath = path.join(targetDir, entry.name);
-        try {
-          const stat = await fs.stat(fullPath);
-          results.push({
-            relativePath: relPath,
-            name: entry.name,
-            isDirectory: entry.isDirectory(),
-            size: stat.size,
-            modifiedAt: stat.mtimeMs,
-          });
-        } catch {
-          // Skip entries we can't stat
-        }
-      }
-
-      // Sort: directories first, then alphabetical
-      results.sort((a, b) => {
-        if (a.isDirectory !== b.isDirectory) {
-          return a.isDirectory ? -1 : 1;
-        }
-        return a.name.localeCompare(b.name);
-      });
-
-      return results;
-    } catch {
-      return [];
-    }
+    return listArtifactEntries(this.getArtifactsRoot(ticketId), dirPath);
   };
 
   readArtifact = async (ticketId: TicketId, relativePath: string): Promise<ArtifactFileContent> => {
-    const fullPath = this.validateArtifactPath(ticketId, relativePath);
-    const stat = await fs.stat(fullPath);
-    const mimeType = getMimeType(relativePath);
-
-    if (isTextMime(mimeType) && stat.size <= 512_000) {
-      const textContent = await fs.readFile(fullPath, 'utf-8');
-      return { relativePath, mimeType, textContent, size: stat.size };
-    }
-
-    return { relativePath, mimeType, textContent: null, size: stat.size };
+    return readArtifactFile(this.getArtifactsRoot(ticketId), relativePath);
   };
 
   openArtifactExternal = async (ticketId: TicketId, relativePath: string): Promise<void> => {
-    const fullPath = this.validateArtifactPath(ticketId, relativePath);
+    const fullPath = resolveArtifactPath(this.getArtifactsRoot(ticketId), relativePath);
     await shell.openPath(fullPath);
   };
 
