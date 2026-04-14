@@ -22,6 +22,7 @@ import type {
   IWorkflowLoader,
   ProjectManagerDeps,
 } from '@/lib/project-manager-deps';
+import { runMigrations as runSchemaMigrations } from '@/lib/project-migrations';
 import type { FailureClass } from '@/lib/run-end';
 import { decideRunEndAction } from '@/lib/run-end';
 import type { TemplateVariables } from '@/lib/template';
@@ -3636,264 +3637,31 @@ export class ProjectManager {
   // #region Migration
 
   /**
-   * Migrate existing tickets to supervisor schema (version 2 → 3).
-   * Strips legacy phase/loop fields and normalizes to new structure.
+   * Migrate the store through every schema version up to the current one.
+   * Pure logic lives in `@/lib/project-migrations` — this wrapper injects
+   * the fs side-effects (v10 brief → context.md, v12 Personal dir) that
+   * can't run in the pure module.
    */
   static migrateToSupervisor(store: Store<StoreData>): void {
-    const version = store.get('schemaVersion', 0);
-
-    // v3 → v4: replace supervisorStatus + runPhase with phase
-    if (version === 3) {
-      console.log('[ProjectManager] Migrating to phase schema (→ v4)');
-      const tickets = store.get('tickets', []) as Record<string, unknown>[];
-      const migrated = tickets.map((raw) => {
-        const { supervisorStatus, runPhase, ...rest } = raw;
-        return { ...rest, phase: 'idle' };
-      });
-      store.set('tickets', migrated);
-      store.set('schemaVersion', 4);
-      console.log(`[ProjectManager] v4 migration complete: ${migrated.length} tickets`);
-      // Fall through to v4→v5 migration
-    }
-
-    // v4 → v5: create default milestones per project, assign tickets
-    if (version === 4 || store.get('schemaVersion', 0) === 4) {
-      console.log('[ProjectManager] Migrating to milestone schema (→ v5)');
-      const projects = store.get('projects', []) as Array<{ id: string }>;
-      const tickets = store.get('tickets', []) as Record<string, unknown>[];
-
-      const milestones: Milestone[] = [];
-      const projectToDefaultMilestone = new Map<string, string>();
-
-      for (const proj of projects) {
-        const msId = nanoid();
-        projectToDefaultMilestone.set(proj.id, msId);
-        const now = Date.now();
-        milestones.push({
-          id: msId,
-          projectId: proj.id,
-          title: 'General',
-          description: 'Default milestone',
-          status: 'active',
-          createdAt: now,
-          updatedAt: now,
-        });
-      }
-
-      const migratedTickets = tickets.map((raw) => ({
-        ...raw,
-        milestoneId: projectToDefaultMilestone.get(raw.projectId as string) ?? '',
-      }));
-
-      store.set('milestones', milestones);
-      store.set('tickets', migratedTickets);
-      store.set('schemaVersion', 5);
-      console.log(
-        `[ProjectManager] v5 migration complete: ${milestones.length} milestones, ${migratedTickets.length} tickets`
-      );
-      // Fall through to v5→v6 migration
-    }
-
-    // v5 → v6: migrate inbox 'deferred' status to 'iceboxed', add wipLimit
-    if (version === 5 || store.get('schemaVersion', 0) === 5) {
-      console.log('[ProjectManager] Migrating inbox deferred → iceboxed, adding wipLimit (→ v6)');
-      const inboxItems = store.get('inboxItems' as never, []) as Record<string, unknown>[];
-      const migratedInbox = inboxItems.map((item) => ({
-        ...item,
-        status: (item.status as string) === 'deferred' ? 'iceboxed' : item.status,
-      }));
-      store.set('inboxItems' as never, migratedInbox);
-      if (store.get('wipLimit') === undefined) {
-        store.set('wipLimit', 3);
-      }
-      store.set('schemaVersion', 6);
-      console.log(`[ProjectManager] v6 migration complete: ${migratedInbox.length} inbox items`);
-      // Fall through to v6→v7 migration
-    }
-
-    // v6 → v7: migrate Project.workspaceDir to Project.source
-    if (version === 6 || store.get('schemaVersion', 0) === 6) {
-      console.log('[ProjectManager] Migrating projects to ProjectSource (→ v7)');
-      const projects = store.get('projects', []) as Record<string, unknown>[];
-      const migrated = projects.map((raw) => {
-        // Already migrated (defensive)
-        if (raw.source && typeof raw.source === 'object') {
-          return raw;
-        }
-        const { workspaceDir, ...rest } = raw;
-        return {
-          ...rest,
-          source: { kind: 'local', workspaceDir: workspaceDir as string },
-        };
-      });
-      store.set('projects', migrated);
-      store.set('schemaVersion', 7);
-      console.log(`[ProjectManager] v7 migration complete: ${migrated.length} projects`);
-      // Fall through to v7→v8 migration
-    }
-
-    // v7 → v8: rename initiatives → milestones, strip isDefault, rename ticket.initiativeId → milestoneId
-    if (version === 7 || store.get('schemaVersion', 0) === 7) {
-      console.log('[ProjectManager] Migrating initiatives → milestones (→ v8)');
-
-      // Rename initiatives store key → milestones and strip isDefault
-      // Handle both old key ('initiatives') and already-renamed key ('milestones')
-      const legacyInitiatives = store.get('initiatives' as never, []) as Record<string, unknown>[];
-      const existingMilestones = store.get('milestones', []) as Record<string, unknown>[];
-      const rawItems = legacyInitiatives.length > 0 ? legacyInitiatives : existingMilestones;
-      const milestones = rawItems.map((raw) => {
-        const { isDefault, ...rest } = raw;
-        return rest;
-      });
-      if (legacyInitiatives.length > 0) {
-        store.delete('initiatives' as never);
-      }
-      store.set('milestones', milestones);
-
-      // Rename ticket.initiativeId → milestoneId (skip if already renamed)
-      const tickets = store.get('tickets', []) as Record<string, unknown>[];
-      const migratedTickets = tickets.map((raw) => {
-        const { initiativeId, ...rest } = raw;
-        if (initiativeId !== undefined && !('milestoneId' in raw)) {
-          return { ...rest, milestoneId: initiativeId };
-        }
-        return raw;
-      });
-      store.set('tickets', migratedTickets);
-
-      // Rename inboxItem.linkedInitiativeId → linkedMilestoneId
-      const inboxItems = store.get('inboxItems' as never, []) as Record<string, unknown>[];
-      const migratedInbox = inboxItems.map((raw) => {
-        const { linkedInitiativeId, ...rest } = raw;
-        return linkedInitiativeId ? { ...rest, linkedMilestoneId: linkedInitiativeId } : rest;
-      });
-      store.set('inboxItems' as never, migratedInbox);
-
-      store.set('schemaVersion', 8);
-      console.log(
-        `[ProjectManager] v8 migration complete: ${milestones.length} milestones, ${migratedTickets.length} tickets`
-      );
-      // Fall through to v8→v9 migration
-    }
-
-    // v8 → v9: add slug to projects, make source optional
-    if (version === 8 || store.get('schemaVersion', 0) === 8) {
-      console.log('[ProjectManager] Adding slug to projects (→ v9)');
-      const projects = store.get('projects', []) as Record<string, unknown>[];
-      const migrated = projects.map((raw) => {
-        if (raw.slug) {
-          return raw;
-        }
-        const label = (raw.label as string) ?? 'project';
-        const slug =
-          label
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, '-')
-            .replace(/^-|-$/g, '') || 'project';
-        return { ...raw, slug };
-      });
-      store.set('projects', migrated);
-      store.set('schemaVersion', 9);
-      console.log(`[ProjectManager] v9 migration complete: ${migrated.length} projects`);
-      // Fall through to v9→v10 migration
-    }
-
-    // v9 → v10: add pages collection, create root page per project,
-    // and backfill each project's legacy brief into <projectDir>/context.md
-    // so the root page has content on first open.
-    if (version === 9 || store.get('schemaVersion', 0) === 9) {
-      console.log('[ProjectManager] Adding pages collection (→ v10)');
-      const projects = store.get('projects', []) as Array<{
-        id: string;
-        label: string;
-        slug?: string;
-        isPersonal?: boolean;
-        brief?: string;
-      }>;
-      const now = Date.now();
-      const pages = projects.map((project) => ({
-        id: nanoid(),
-        projectId: project.id,
-        parentId: null,
-        title: project.label,
-        sortOrder: 0,
-        isRoot: true,
-        createdAt: now,
-        updatedAt: now,
-      }));
-      store.set('pages', pages);
-
-      let briefsWritten = 0;
-      for (const project of projects) {
-        const dir = project.isPersonal ? getDefaultWorkspaceDir() : getProjectDir(project.slug ?? 'project');
+    runSchemaMigrations(store as unknown as Parameters<typeof runSchemaMigrations>[0], {
+      newId: () => nanoid(),
+      now: () => Date.now(),
+      writeProjectContextBrief: (project) => {
+        const dir = project.isPersonal
+          ? getDefaultWorkspaceDir()
+          : getProjectDir(project.slug ?? 'project');
         const contextPath = path.join(dir, 'context.md');
         try {
           if (existsSync(contextPath)) {
-            continue;
+            return;
           }
           mkdirSync(dir, { recursive: true });
           writeFileSync(contextPath, project.brief ?? DEFAULT_BRIEF_TEMPLATE, 'utf-8');
-          briefsWritten++;
         } catch (err) {
           console.warn(`[ProjectManager] v10: failed to write context.md for ${project.id}:`, err);
         }
-      }
-
-      store.set('schemaVersion', 10);
-      console.log(
-        `[ProjectManager] v10 migration complete: ${pages.length} root pages, ${briefsWritten} briefs backfilled`
-      );
-      // Fall through to v10→v11 migration
-    }
-
-    // v10 → v11: strip legacy `brief` field from project records. The v10 migration
-    // already copied each project's brief to `<projectDir>/context.md`, so the field
-    // is now dead weight in the store.
-    if (version === 10 || store.get('schemaVersion', 0) === 10) {
-      console.log('[ProjectManager] Stripping legacy project.brief field (→ v11)');
-      const projects = store.get('projects', []) as Record<string, unknown>[];
-      let stripped = 0;
-      const cleaned = projects.map((raw) => {
-        if ('brief' in raw) {
-          stripped++;
-          const { brief: _brief, ...rest } = raw;
-          return rest;
-        }
-        return raw;
-      });
-      store.set('projects', cleaned);
-      store.set('schemaVersion', 11);
-      console.log(`[ProjectManager] v11 migration complete: stripped brief from ${stripped} projects`);
-      // Fall through to v11→v12 migration
-    }
-
-    // v11 → v12: migrate InboxItems to Pages with properties. Also ensure a
-    // Personal project exists to act as the physical home for loose inbox pages.
-    if (version === 11 || store.get('schemaVersion', 0) === 11) {
-      console.log('[ProjectManager] Upgrading legacy inbox records (→ v12)');
-      const projects = store.get('projects', []) as Array<{
-        id: string;
-        label: string;
-        isPersonal?: boolean;
-        slug?: string;
-      }>;
-      const legacyItems = store.get('inboxItems' as never, []) as Array<Record<string, unknown>>;
-      const now = Date.now();
-
-      // Ensure a Personal project exists as the implicit home for projectless
-      // inbox items. The inbox itself remains a flat global list — Personal
-      // only matters when the user promotes an item without selecting a target.
-      let personal = projects.find((p) => p.isPersonal);
-      if (!personal) {
-        personal = {
-          id: nanoid(),
-          label: 'Personal',
-          slug: 'personal',
-          isPersonal: true,
-        };
-        (personal as unknown as { createdAt: number }).createdAt = now;
-        projects.push(personal);
-        store.set('projects', projects);
+      },
+      ensurePersonalProjectDir: () => {
         try {
           mkdirSync(getDefaultWorkspaceDir(), { recursive: true });
           const contextPath = path.join(getDefaultWorkspaceDir(), 'context.md');
@@ -3903,182 +3671,8 @@ export class ProjectManager {
         } catch (err) {
           console.warn('[ProjectManager] v12: failed to ensure Personal project dir:', err);
         }
-        console.log('[ProjectManager] v12: created Personal project');
-      }
-
-      const upgraded = upgradeLegacyInbox(legacyItems, now, () => nanoid());
-      store.set('inboxItems', upgraded);
-      store.set('schemaVersion', 13);
-      console.log(`[ProjectManager] v12/v13 migration complete: ${upgraded.length} legacy inbox records upgraded`);
-      // Fall through to v13→v14 recovery.
-    }
-
-    // v13 → v14: recover orphaned inbox data from `pages`. The pre-refactor
-    // v12 migration moved legacy InboxItems into `pages` with a `properties`
-    // object. Step 1 of the type split removed `Page.properties`, stranding
-    // that data. This step converts any page still carrying `properties`
-    // into a new-model `InboxItem` and removes the stale page.
-    if (version === 13 || store.get('schemaVersion', 0) === 13) {
-      const pagesRaw = store.get('pages', []) as Array<Record<string, unknown>>;
-      const existingInbox = (store.get('inboxItems') ?? []) as InboxItem[];
-      const recovered: InboxItem[] = [];
-      const keptPages: Array<Record<string, unknown>> = [];
-      const now = Date.now();
-
-      for (const pageRaw of pagesRaw) {
-        const props = pageRaw.properties as Record<string, unknown> | undefined;
-        if (!props || Object.keys(props).length === 0) {
-          // Not inbox data — keep it as a page but drop the empty properties key.
-          const { properties, ...rest } = pageRaw;
-          void properties;
-          keptPages.push(rest);
-          continue;
-        }
-
-        const legacyStatus = props.status;
-        // `done` was terminal in the old model; drop those entirely on recovery.
-        if (legacyStatus === 'done') {
-          continue;
-        }
-
-        const hasOutcome = typeof props.outcome === 'string' && (props.outcome as string).trim().length > 0;
-        const hasShaping = hasOutcome || props.size !== undefined || typeof props.notDoing === 'string';
-        // Map old PageStatus → new InboxItemStatus. `doing` becomes a shaped
-        // actionable item the user can promote to a ticket.
-        let status: InboxItem['status'] = 'new';
-        if (legacyStatus === 'later') {
-          status = 'later';
-        } else if (legacyStatus === 'ready' || legacyStatus === 'doing' || hasShaping) {
-          status = 'shaped';
-        }
-
-        const appetite: InboxShaping['appetite'] =
-          props.size === 'small' || props.size === 'medium' || props.size === 'large' || props.size === 'xl'
-            ? props.size
-            : 'medium';
-        const shaping: InboxShaping | undefined = hasShaping
-          ? {
-              outcome: (props.outcome as string | undefined)?.trim() ?? '',
-              appetite,
-              ...(typeof props.notDoing === 'string' && (props.notDoing as string).trim()
-                ? { notDoing: (props.notDoing as string).trim() }
-                : {}),
-            }
-          : undefined;
-
-        const item: InboxItem = {
-          id: (pageRaw.id as string) ?? nanoid(),
-          title: (pageRaw.title as string | undefined)?.trim() || 'Untitled',
-          status,
-          projectId: typeof props.projectId === 'string' ? (props.projectId as string) : null,
-          createdAt: typeof pageRaw.createdAt === 'number' ? (pageRaw.createdAt as number) : now,
-          updatedAt: typeof pageRaw.updatedAt === 'number' ? (pageRaw.updatedAt as number) : now,
-        };
-        if (shaping) {
-          item.shaping = shaping;
-        }
-        if (status === 'later') {
-          item.laterAt = typeof props.laterAt === 'number' ? (props.laterAt as number) : now;
-        }
-        recovered.push(item);
-      }
-
-      if (recovered.length > 0 || keptPages.length !== pagesRaw.length) {
-        store.set('inboxItems', [...existingInbox, ...recovered]);
-        store.set('pages', keptPages);
-        console.log(
-          `[ProjectManager] v14 recovery: ${recovered.length} pages → inbox items, ${pagesRaw.length - keptPages.length - recovered.length} dropped`
-        );
-      }
-      store.set('schemaVersion', 14);
-      // Fall through to v14→v15 migration
-    }
-
-    // v14 → v15: backfill activity timestamps for dashboard ranking/risk.
-    // - Ticket.phaseChangedAt / columnChangedAt / resolvedAt: backfilled from updatedAt
-    // - Milestone.completedAt: backfilled from updatedAt iff status === 'completed'
-    // Also drop the legacy 'home' layoutMode (Now tab is going away).
-    if (version === 14 || store.get('schemaVersion', 0) === 14) {
-      console.log('[ProjectManager] Backfilling activity timestamps (→ v15)');
-      const tickets = store.get('tickets', []) as Record<string, unknown>[];
-      const migratedTickets = tickets.map((raw) => {
-        const updatedAt = typeof raw.updatedAt === 'number' ? (raw.updatedAt as number) : Date.now();
-        const next: Record<string, unknown> = { ...raw };
-        if (next.phaseChangedAt === undefined) {
-          next.phaseChangedAt = updatedAt;
-        }
-        if (next.columnChangedAt === undefined) {
-          next.columnChangedAt = updatedAt;
-        }
-        if (raw.resolution !== undefined && next.resolvedAt === undefined) {
-          next.resolvedAt = updatedAt;
-        }
-        return next;
-      });
-      store.set('tickets', migratedTickets);
-
-      const milestones = store.get('milestones', []) as Record<string, unknown>[];
-      const migratedMilestones = milestones.map((raw) => {
-        if (raw.status === 'completed' && raw.completedAt === undefined) {
-          const updatedAt = typeof raw.updatedAt === 'number' ? (raw.updatedAt as number) : Date.now();
-          return { ...raw, completedAt: updatedAt };
-        }
-        return raw;
-      });
-      store.set('milestones', migratedMilestones);
-
-      if ((store.get('layoutMode' as never) as string) === 'home') {
-        store.set('layoutMode' as never, 'chat');
-      }
-
-      store.set('schemaVersion', 15);
-      console.log(
-        `[ProjectManager] v15 migration complete: ${migratedTickets.length} tickets, ${migratedMilestones.length} milestones`
-      );
-      return;
-    }
-
-    if (version >= 15) {
-      return;
-    }
-
-    console.log('[ProjectManager] Migrating to supervisor schema (→ v3)');
-
-    const tickets = store.get('tickets', []) as Record<string, unknown>[];
-    const migrated: Record<string, unknown>[] = [];
-
-    for (const raw of tickets) {
-      // Strip all legacy fields and normalize (milestoneId added in v5 migration)
-      const ticket: Record<string, unknown> = {
-        id: (raw.id as string) ?? nanoid(),
-        projectId: (raw.projectId as string) ?? '',
-        title: (raw.title as string) ?? '',
-        description: (raw.description as string) ?? '',
-        priority: (raw.priority as TicketPriority) ?? 'medium',
-        blockedBy: (raw.blockedBy as TicketId[]) ?? [],
-        createdAt: (raw.createdAt as number) ?? Date.now(),
-        updatedAt: (raw.updatedAt as number) ?? Date.now(),
-        columnId: (raw.columnId as ColumnId) ?? 'backlog',
-      };
-
-      // Map legacy status to columnId if not set
-      if (!ticket.columnId) {
-        const status = raw.status as string;
-        if (status === 'in_progress') {
-          ticket.columnId = 'implementation';
-        } else if (status === 'completed' || status === 'closed') {
-          ticket.columnId = 'completed';
-        }
-      }
-
-      migrated.push(ticket);
-    }
-
-    store.set('tickets', migrated);
-    store.set('schemaVersion', 4);
-    console.log(`[ProjectManager] Migration complete: ${migrated.length} tickets migrated`);
-    // Re-enter to run v4→v5 migration
-    ProjectManager.migrateToSupervisor(store);
+      },
+    });
   }
 
   // #endregion
