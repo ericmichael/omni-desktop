@@ -88,11 +88,10 @@ async function download() {
       }).trim();
       tag = output;
     } catch {
-      console.error(
-        `\x1b[31mERROR: Could not determine latest release. Ensure 'gh' CLI is installed and authenticated.\x1b[0m`,
+      console.warn(
+        `\x1b[33mWARNING: No release found in ${REPO} — skipping omni-sandbox download.\x1b[0m`,
       );
-      console.error(`Alternatively, pass --version <tag> explicitly.`);
-      process.exit(1);
+      process.exit(0);
     }
   }
 
