@@ -119,6 +119,7 @@ type MockMachine = ITicketMachine & {
   setWsUrl: ReturnType<typeof vi.fn>;
   createSession: ReturnType<typeof vi.fn>;
   startRun: ReturnType<typeof vi.fn>;
+  sendMessage: ReturnType<typeof vi.fn>;
   dispose: ReturnType<typeof vi.fn>;
   recordActivity: ReturnType<typeof vi.fn>;
   cancelRetryTimer: ReturnType<typeof vi.fn>;
@@ -159,6 +160,7 @@ const makeMachineFactory = (): MakeFactoryReturn => {
         setWsUrl: vi.fn() as unknown as MockMachine['setWsUrl'],
         createSession: vi.fn(async () => 'stub-session') as unknown as MockMachine['createSession'],
         startRun: vi.fn(async () => ({ sessionId: 'stub-session' })) as unknown as MockMachine['startRun'],
+        sendMessage: vi.fn(async () => {}) as unknown as MockMachine['sendMessage'],
         stop: vi.fn(async () => {
           mock.phase = 'idle';
         }) as unknown as MockMachine['stop'],
@@ -1330,6 +1332,114 @@ describe('ProjectManager integration', () => {
       await expect(ensurePromise).resolves.toBe('rejected');
 
       expect(mock.dispose).toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // T6 — sendSupervisorMessage + resetSupervisorSession
+  // -------------------------------------------------------------------------
+  describe('sendSupervisorMessage', () => {
+    const LOCAL_SOURCE = { kind: 'local' as const, workspaceDir: '/tmp/fake' };
+
+    const setupWithMachine = (phase: TicketPhase): { ctx: PmCtx; mock: MockMachine } => {
+      const ctx = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
+      const mach = internals(ctx.pm).createMachine('t1');
+      internals(ctx.pm).machines.set('t1', { machine: mach, sandbox: null });
+      const mock = ctx.machines.get('t1')!;
+      mock.phase = phase;
+      return { ctx, mock };
+    };
+
+    for (const phase of ['idle', 'error', 'ready', 'awaiting_input'] as TicketPhase[]) {
+      it(`starts a new run via startRun when the machine is in "${phase}"`, async () => {
+        const { ctx, mock } = setupWithMachine(phase);
+        await ctx.pm.sendSupervisorMessage('t1', 'hello');
+        expect(mock.startRun).toHaveBeenCalled();
+        expect(mock.sendMessage).not.toHaveBeenCalled();
+      });
+    }
+
+    it('forwards via machine.sendMessage when the machine is streaming', async () => {
+      const { ctx, mock } = setupWithMachine('running');
+      await ctx.pm.sendSupervisorMessage('t1', 'hello mid-run');
+      expect(mock.sendMessage).toHaveBeenCalledWith('hello mid-run');
+      expect(mock.startRun).not.toHaveBeenCalled();
+    });
+
+    it('is a no-op (does not throw) when sendMessage rejects mid-stream', async () => {
+      const { ctx, mock } = setupWithMachine('running');
+      (mock.sendMessage as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('ws closed'));
+      await expect(ctx.pm.sendSupervisorMessage('t1', 'hi')).resolves.toBeUndefined();
+    });
+
+    it('throws when no machine exists and the ticket is unknown', async () => {
+      const { pm } = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
+      await expect(pm.sendSupervisorMessage('nope' as TicketId, 'hi')).rejects.toThrow(/not found/i);
+    });
+
+    it('throws when no machine exists and concurrency is saturated', async () => {
+      const { pm, machines } = makePm({
+        source: LOCAL_SOURCE,
+        tickets: [
+          { id: 't1' },
+          ...Array.from({ length: 5 }, (_, i) => ({ id: `busy-${i}` })),
+        ],
+      });
+      for (let i = 0; i < 5; i++) {
+        const m = internals(pm).createMachine(`busy-${i}` as TicketId);
+        internals(pm).machines.set(`busy-${i}` as TicketId, { machine: m, sandbox: null });
+        machines.get(`busy-${i}` as TicketId)!.phase = 'running';
+      }
+
+      await expect(pm.sendSupervisorMessage('t1', 'hi')).rejects.toThrow(/concurrency/i);
+    });
+
+    it('routes through ensureSupervisorInfra when no machine exists and slots are available', async () => {
+      const { pm } = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
+      // Stub ensureSupervisorInfra so we don't touch fs/sandbox.
+      const ensureSpy = vi.fn(async () => {
+        // Simulate ensureSupervisorInfra registering a fresh machine.
+        const mach = internals(pm).createMachine('t1');
+        internals(pm).machines.set('t1', { machine: mach, sandbox: null });
+        return { machine: mach, sandbox: null };
+      });
+      (pm as unknown as { ensureSupervisorInfra: typeof ensureSpy }).ensureSupervisorInfra = ensureSpy;
+
+      await pm.sendSupervisorMessage('t1', 'hi');
+
+      expect(ensureSpy).toHaveBeenCalledWith('t1');
+    });
+  });
+
+  describe('resetSupervisorSession', () => {
+    it('stops the machine, creates a new session, and persists its id on the ticket', async () => {
+      const ctx = makePm({
+        source: { kind: 'local', workspaceDir: '/tmp/fake' },
+        tickets: [{ id: 't1' }],
+      });
+      const mach = internals(ctx.pm).createMachine('t1');
+      internals(ctx.pm).machines.set('t1', { machine: mach, sandbox: null });
+      const mock = ctx.machines.get('t1')!;
+      mock.phase = 'running';
+
+      (mock.createSession as ReturnType<typeof vi.fn>).mockImplementation(async () => 'new-session-id');
+
+      await ctx.pm.resetSupervisorSession('t1');
+
+      expect(mock.stop).toHaveBeenCalled();
+      expect(mock.createSession).toHaveBeenCalled();
+      const ticket = ctx.store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
+      // The new session id is generated inside PM via crypto.randomUUID, so we
+      // just verify *something* got persisted and it isn't undefined.
+      expect(ticket.supervisorSessionId).toBeTruthy();
+    });
+
+    it('is a no-op when no machine exists', async () => {
+      const { pm } = makePm({
+        source: { kind: 'local', workspaceDir: '/tmp/fake' },
+        tickets: [{ id: 't1' }],
+      });
+      await expect(pm.resetSupervisorSession('t1')).resolves.toBeUndefined();
     });
   });
 

@@ -33,11 +33,13 @@ export interface ITicketMachine {
   forcePhase(phase: TicketPhase): void;
 
   setWsUrl(url: string): void;
-  createSession(variables?: Record<string, unknown>): Promise<string>;
+  createSession(variables?: Record<string, unknown>, sessionId?: string): Promise<string>;
   startRun(
     prompt: string,
     opts?: { sessionId?: string; variables?: Record<string, unknown> }
   ): Promise<{ sessionId: string }>;
+  /** Send a user message into a running session (streaming phases only). */
+  sendMessage(message: string): Promise<void>;
   stop(): Promise<void>;
   dispose(): void;
 
