@@ -1206,6 +1206,28 @@ export class SupervisorOrchestrator {
   };
 
   /**
+   * IPC entry point: ensure supervisor infrastructure exists for a ticket.
+   * Wraps `ensureSupervisorInfra` in the per-ticket lock so concurrent IPC
+   * calls don't race against the lifecycle methods.
+   */
+  ensureSupervisorInfraLocked = (ticketId: TicketId): Promise<void> => {
+    return this.withTicketLock(ticketId, async () => {
+      await this.ensureSupervisorInfra(ticketId);
+    });
+  };
+
+  /**
+   * IPC entry point: resolve (or create) the on-disk workspace directory
+   * for a ticket. Wraps `resolveTicketWorkspace` in the per-ticket lock.
+   */
+  getTicketWorkspaceLocked = (ticketId: TicketId): Promise<string> => {
+    return this.withTicketLock(ticketId, async () => {
+      const resolved = await this.resolveTicketWorkspace(ticketId);
+      return resolved.workspaceDir;
+    });
+  };
+
+  /**
    * Start the autonomous supervisor — sends the full supervisor prompt as the user turn.
    * Triggered by the Play button.
    */

@@ -1027,7 +1027,7 @@ describe('SupervisorOrchestrator integration', () => {
     for (const phase of ['idle', 'error', 'ready', 'awaiting_input'] as TicketPhase[]) {
       it(`starts a new run via startRun when the machine is in "${phase}"`, async () => {
         const { ctx, mock } = setupWithMachine(phase);
-        await ctx.pm.sendSupervisorMessage('t1', 'hello');
+        await orch(ctx.pm).sendSupervisorMessage('t1', 'hello');
         expect(mock.startRun).toHaveBeenCalled();
         expect(mock.sendMessage).not.toHaveBeenCalled();
       });
@@ -1035,7 +1035,7 @@ describe('SupervisorOrchestrator integration', () => {
 
     it('forwards via machine.sendMessage when the machine is streaming', async () => {
       const { ctx, mock } = setupWithMachine('running');
-      await ctx.pm.sendSupervisorMessage('t1', 'hello mid-run');
+      await orch(ctx.pm).sendSupervisorMessage('t1', 'hello mid-run');
       expect(mock.sendMessage).toHaveBeenCalledWith('hello mid-run');
       expect(mock.startRun).not.toHaveBeenCalled();
     });
@@ -1043,12 +1043,12 @@ describe('SupervisorOrchestrator integration', () => {
     it('is a no-op (does not throw) when sendMessage rejects mid-stream', async () => {
       const { ctx, mock } = setupWithMachine('running');
       (mock.sendMessage as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('ws closed'));
-      await expect(ctx.pm.sendSupervisorMessage('t1', 'hi')).resolves.toBeUndefined();
+      await expect(orch(ctx.pm).sendSupervisorMessage('t1', 'hi')).resolves.toBeUndefined();
     });
 
     it('throws when no machine exists and the ticket is unknown', async () => {
       const { pm } = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
-      await expect(pm.sendSupervisorMessage('nope' as TicketId, 'hi')).rejects.toThrow(/not found/i);
+      await expect(orch(pm).sendSupervisorMessage('nope' as TicketId, 'hi')).rejects.toThrow(/not found/i);
     });
 
     it('throws when no machine exists and concurrency is saturated', async () => {
@@ -1062,7 +1062,7 @@ describe('SupervisorOrchestrator integration', () => {
         machines.get(`busy-${i}` as TicketId)!.phase = 'running';
       }
 
-      await expect(pm.sendSupervisorMessage('t1', 'hi')).rejects.toThrow(/concurrency/i);
+      await expect(orch(pm).sendSupervisorMessage('t1', 'hi')).rejects.toThrow(/concurrency/i);
     });
 
     it('routes through ensureSupervisorInfra when no machine exists and slots are available', async () => {
@@ -1076,7 +1076,7 @@ describe('SupervisorOrchestrator integration', () => {
       });
       (orch(pm) as unknown as { ensureSupervisorInfra: typeof ensureSpy }).ensureSupervisorInfra = ensureSpy;
 
-      await pm.sendSupervisorMessage('t1', 'hi');
+      await orch(pm).sendSupervisorMessage('t1', 'hi');
 
       expect(ensureSpy).toHaveBeenCalledWith('t1');
     });
@@ -1095,7 +1095,7 @@ describe('SupervisorOrchestrator integration', () => {
 
       (mock.createSession as ReturnType<typeof vi.fn>).mockImplementation(async () => 'new-session-id');
 
-      await ctx.pm.resetSupervisorSession('t1');
+      await orch(ctx.pm).resetSupervisorSession('t1');
 
       expect(mock.stop).toHaveBeenCalled();
       expect(mock.createSession).toHaveBeenCalled();
@@ -1110,7 +1110,7 @@ describe('SupervisorOrchestrator integration', () => {
         source: { kind: 'local', workspaceDir: '/tmp/fake' },
         tickets: [{ id: 't1' }],
       });
-      await expect(pm.resetSupervisorSession('t1')).resolves.toBeUndefined();
+      await expect(orch(pm).resetSupervisorSession('t1')).resolves.toBeUndefined();
     });
   });
 
@@ -1136,7 +1136,7 @@ describe('SupervisorOrchestrator integration', () => {
       const { pm, store } = makePm({ tickets: [{ id: 't1' }] });
       store.set('tasks', [makeTask('task-1', 'running')]);
 
-      pm.restorePersistedTasks();
+      orch(pm).restorePersistedTasks();
 
       const tasks = store.get('tasks', []);
       expect(tasks[0]!.status.type).toBe('exited');
@@ -1146,7 +1146,7 @@ describe('SupervisorOrchestrator integration', () => {
       const { pm, store } = makePm({ tickets: [{ id: 't1' }] });
       store.set('tasks', [makeTask('task-exited', 'exited'), makeTask('task-error', 'error')]);
 
-      pm.restorePersistedTasks();
+      orch(pm).restorePersistedTasks();
 
       const tasks = store.get('tasks', []);
       expect(tasks.map((t) => t.status.type).sort()).toEqual(['error', 'exited']);
@@ -1161,7 +1161,7 @@ describe('SupervisorOrchestrator integration', () => {
         ],
       });
 
-      pm.restorePersistedTasks();
+      orch(pm).restorePersistedTasks();
 
       const tickets = store.get('tickets', []);
       for (const t of tickets) {
@@ -1172,7 +1172,7 @@ describe('SupervisorOrchestrator integration', () => {
     it('preserves completed phase across restart', () => {
       const { pm, store } = makePm({ tickets: [{ id: 't1', phase: 'completed' }] });
 
-      pm.restorePersistedTasks();
+      orch(pm).restorePersistedTasks();
 
       const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
       expect(ticket.phase).toBe('completed');
@@ -1185,7 +1185,7 @@ describe('SupervisorOrchestrator integration', () => {
       // both the comment and this test together.
       const { pm, store } = makePm({ tickets: [{ id: 't1', phase: 'error' }] });
 
-      pm.restorePersistedTasks();
+      orch(pm).restorePersistedTasks();
 
       const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
       expect(ticket.phase).toBe('idle');
@@ -1194,7 +1194,7 @@ describe('SupervisorOrchestrator integration', () => {
     it('preserves idle phase', () => {
       const { pm, store } = makePm({ tickets: [{ id: 't1', phase: 'idle' }] });
 
-      pm.restorePersistedTasks();
+      orch(pm).restorePersistedTasks();
 
       const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
       expect(ticket.phase).toBe('idle');
@@ -1204,7 +1204,7 @@ describe('SupervisorOrchestrator integration', () => {
       const { pm, store } = makePm({ tickets: [{ id: 't1' }] });
       store.set('tasks', [makeTask('orphan-task', 'exited', { ticketId: 'deleted-ticket' as TicketId })]);
 
-      pm.restorePersistedTasks();
+      orch(pm).restorePersistedTasks();
       // startupTerminalCleanup is fire-and-forget; flush the microtask queue.
       await vi.runOnlyPendingTimersAsync();
 
@@ -1222,7 +1222,7 @@ describe('SupervisorOrchestrator integration', () => {
       store.set('tickets', tickets);
       store.set('tasks', [makeTask('task-1', 'exited', { ticketId: 't1' as TicketId })]);
 
-      pm.restorePersistedTasks();
+      orch(pm).restorePersistedTasks();
       await vi.runOnlyPendingTimersAsync();
 
       const tasksAfter = store.get('tasks', []);

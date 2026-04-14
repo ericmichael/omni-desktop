@@ -11,14 +11,7 @@ import { getArtifactsDir } from '@/lib/artifacts';
 import { listArtifactEntries, readArtifactFile, resolveArtifactPath } from '@/lib/artifacts-fs';
 import { getGitFilesChanged, resolveWorkspaceMergeBase, resolveWorktreeMergeBase } from '@/lib/git-files-changed';
 import { INBOX_SWEEP_INTERVAL_MS } from '@/lib/inbox-expiry';
-import type {
-  IMachineFactory,
-  ISandbox,
-  ISandboxFactory,
-  ITicketMachine,
-  IWorkflowLoader,
-  ProjectManagerDeps,
-} from '@/lib/project-manager-deps';
+import type { IMachineFactory, ISandboxFactory, IWorkflowLoader, ProjectManagerDeps } from '@/lib/project-manager-deps';
 import { runMigrations as runSchemaMigrations } from '@/lib/project-migrations';
 import { type HistoryRow, parseSessionHistoryRows } from '@/lib/session-history';
 import { AgentProcess } from '@/main/agent-process';
@@ -35,10 +28,8 @@ import { checkGitRepo } from '@/main/worktree-ops';
 import type { IIpcListener } from '@/shared/ipc-listener';
 import { DEFAULT_PIPELINE, SIMPLE_PIPELINE } from '@/shared/pipeline-defaults';
 import type {
-  AgentProcessStatus,
   ArtifactFileContent,
   ArtifactFileEntry,
-  CodeTabId,
   ColumnId,
   DiffResponse,
   InboxItem,
@@ -55,7 +46,6 @@ import type {
   Ticket,
   TicketId,
   TicketPriority,
-  WithTimestamp,
 } from '@/shared/types';
 
 const execFileAsync = promisify(execFile);
@@ -93,7 +83,6 @@ const DEFAULT_BRIEF_TEMPLATE = `## Problem
 export class ProjectManager {
   private store: Store<StoreData>;
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
-  private pages: PageManager;
 
   /** Workflow file loader (FLEET.md) per project. */
   private workflowLoader: IWorkflowLoader;
@@ -108,18 +97,24 @@ export class ProjectManager {
   /** Optional ProcessManager — when set, supervisor reuses Code tab sandboxes. */
   private processManager?: ProcessManager;
 
+  /** Page lifecycle owner — CRUD, file I/O, root-page seeding, watcher. */
+  readonly pages: PageManager;
+
   /** Inbox lifecycle owner — CRUD, shape, defer, promote, sweep, gc. */
-  private inbox: InboxManager;
+  readonly inbox: InboxManager;
 
   /** Milestone lifecycle owner — CRUD, completedAt stamping, orphan-ticket clear, branch fallback. */
-  private milestones: MilestoneManager;
+  readonly milestones: MilestoneManager;
 
   /**
-   * Supervisor lifecycle owner. Sprint C2c is extracting methods into this
-   * class in regression-green increments. Currently owns effective-config,
-   * concurrency checks, active-WIP roll-up, and `isAutoDispatchEnabled`.
+   * Supervisor lifecycle owner. Owns machines, retry queue, stall detection,
+   * infra provisioning, dispatch preflight + auto-dispatch loop, task
+   * persistence + boot recovery, tool dispatch, and supervisor prompt
+   * assembly. Sprint C2c moved every concern listed above out of
+   * ProjectManager into this class; only the IPC wiring still funnels
+   * through PM.
    */
-  private supervisors: SupervisorOrchestrator;
+  readonly supervisors: SupervisorOrchestrator;
 
   constructor(
     arg: { store: Store<StoreData>; sendToWindow: ProjectManager['sendToWindow']; processManager?: ProcessManager },
@@ -128,9 +123,11 @@ export class ProjectManager {
     this.store = arg.store;
     this.sendToWindow = arg.sendToWindow;
     this.processManager = arg.processManager;
-    // Let ProcessManager fall back to supervisor sandbox status for ticket-linked tabs
+    // Let ProcessManager fall back to supervisor sandbox status for ticket-linked tabs.
+    // The orchestrator may not exist yet at this point in the constructor — defer
+    // the lookup with an arrow function.
     if (this.processManager) {
-      this.processManager.statusFallback = (processId) => this.getSupervisorStatusForCodeTab(processId);
+      this.processManager.statusFallback = (processId) => this.supervisors.getSupervisorStatusForCodeTab(processId);
     }
     this.workflowLoader =
       deps?.workflowLoader ??
@@ -224,11 +221,11 @@ export class ProjectManager {
         isTerminalColumn: (projectId, columnId) => this.isTerminalColumn(projectId, columnId),
         getColumn: (projectId, columnId) => this.getColumn(projectId, columnId),
         getPipeline: (projectId) => this.getPipeline(projectId),
-        resolveTicketBranch: (ticket) => this.resolveTicketBranch(ticket),
+        resolveTicketBranch: (ticket) => this.milestones.resolveTicketBranch(ticket),
         getNextTicket: (projectId) => this.getNextTicket(projectId),
         moveTicketToColumn: (ticketId, columnId) => this.moveTicketToColumn(ticketId, columnId),
         updateProject: (projectId, patch) => this.updateProject(projectId, patch),
-        getMilestonesByProject: (projectId) => this.getMilestonesByProject(projectId),
+        getMilestonesByProject: (projectId) => this.milestones.getByProject(projectId),
         getMilestoneById: (milestoneId) => this.milestones.getById(milestoneId),
         getPagesByProject: (projectId) => this.pages.getByProject(projectId),
         getPageById: (pageId) => this.pages.getById(pageId),
@@ -247,58 +244,11 @@ export class ProjectManager {
     this.startInboxSweep();
   }
 
-  /** Public accessor for IPC wiring. */
-  getInboxManager = (): InboxManager => this.inbox;
-
-  /** Public accessor for IPC wiring. */
-  getPageManager = (): PageManager => this.pages;
-
   /** Public accessor used by IPC wiring to resolve a project's working directory. */
   getProjectDir = (projectId: ProjectId): string | null => {
     const project = this.getProjects().find((p) => p.id === projectId);
     return project ? this.getProjectDirPath(project) : null;
   };
-
-  // #region Machine factory / lifecycle — delegated to SupervisorOrchestrator
-
-  /** Delegating wrapper — orchestrator owns the mutex in C2c.3. */
-  private withTicketLock<T>(ticketId: TicketId, fn: () => Promise<T>): Promise<T> {
-    return this.supervisors.withTicketLock(ticketId, fn);
-  }
-
-  // handleClientToolCall + supervisor prompt assembly (buildFullSupervisorPrompt,
-  // buildRunVariables, buildContinuationPromptForTicket) now live in
-  // SupervisorOrchestrator (C2c.8). PM exposes the read-side accessors they
-  // need (page/milestone/project-dir lookups) via the orchestrator's host
-  // surface; no PM-side delegators remain because nothing outside the
-  // orchestrator calls them.
-
-  // handleMachineRunEnd now lives in SupervisorOrchestrator (C2c.3).
-
-  // #endregion
-
-  // Effective-config accessors (getEffectiveStallTimeout, getEffectiveMaxRetries,
-  // getEffectiveMaxContinuationTurns, isAutoDispatchEnabled, getColumnMaxConcurrent)
-  // moved into SupervisorOrchestrator (C2c.1/C2c.7). PM no longer needs the
-  // delegators since every caller (retry/stall/autoDispatch/preflight) is now
-  // inside the orchestrator too.
-
-  // Stall detection now lives in SupervisorOrchestrator (C2c.2).
-
-  // #region Concurrency control — delegated to SupervisorOrchestrator
-
-  /**
-   * All tickets with active supervisor phases across every project.
-   * Used for WIP limit enforcement and the "Right Now" view.
-   */
-  getActiveWipTickets = (): Ticket[] => this.supervisors.getActiveWipTickets();
-
-  // #endregion
-
-  // Retry queue (scheduleRetry / handleRetryFired / cancelRetry /
-  // cancelAllRetries) now lives in SupervisorOrchestrator (C2c.2).
-
-  // #endregion
 
   // #region Projects (persisted in electron-store)
 
@@ -682,30 +632,8 @@ export class ProjectManager {
 
   // #endregion
 
-  // #region Milestones (delegated to MilestoneManager)
-
-  getMilestonesByProject = (projectId: ProjectId): Milestone[] => {
-    return this.milestones.getByProject(projectId);
-  };
-
-  addMilestone = (input: Omit<Milestone, 'id' | 'createdAt' | 'updatedAt'>): Milestone => {
-    return this.milestones.add(input);
-  };
-
-  updateMilestone = (id: MilestoneId, patch: Partial<Omit<Milestone, 'id' | 'projectId' | 'createdAt'>>): void => {
-    this.milestones.update(id, patch);
-  };
-
-  removeMilestone = (id: MilestoneId): void => {
-    this.milestones.remove(id);
-  };
-
-  /** Resolve the effective branch for a ticket (ticket.branch ?? milestone.branch ?? undefined). */
-  resolveTicketBranch = (ticket: Ticket): string | undefined => {
-    return this.milestones.resolveTicketBranch(ticket);
-  };
-
-  // #endregion
+  // Milestones — reach via `pm.milestones.*` directly. The PM-side delegators
+  // were dropped in Sprint C3.
 
   // #region Artifacts
 
@@ -762,7 +690,7 @@ export class ProjectManager {
     // Case 1: task has a worktree → diff worktree against its base branch
     // Case 2: no worktree (supervisor mode) → diff project workspaceDir against upstream tracking branch
     const worktreePath = ticket.worktreePath ?? task?.worktreePath;
-    const worktreeBranch = this.resolveTicketBranch(ticket) ?? task?.branch;
+    const worktreeBranch = this.milestones.resolveTicketBranch(ticket) ?? task?.branch;
 
     let gitDir: string;
     let mergeBase: string;
@@ -841,12 +769,12 @@ export class ProjectManager {
         console.log(
           `[ProjectManager] Ticket ${ticketId} moved to terminal column "${columnId}" — stopping supervisor and cleaning up workspace.`
         );
-        void this.withTicketLock(ticketId, async () => {
+        void this.supervisors.withTicketLock(ticketId, async () => {
           await entry.machine.stop();
-          await this.cleanupTicketWorkspace(ticketId);
+          await this.supervisors.cleanupTicketWorkspace(ticketId);
         });
       } else {
-        void this.cleanupTicketWorkspace(ticketId);
+        void this.supervisors.cleanupTicketWorkspace(ticketId);
       }
     }
 
@@ -857,7 +785,7 @@ export class ProjectManager {
       if (entry) {
         console.log(`[ProjectManager] Ticket ${ticketId} moved to backlog — stopping supervisor.`);
         this.supervisors.cancelRetry(ticketId);
-        void this.stopSupervisor(ticketId);
+        void this.supervisors.stopSupervisor(ticketId);
       }
     }
 
@@ -868,7 +796,7 @@ export class ProjectManager {
       if (entry) {
         console.log(`[ProjectManager] Ticket ${ticketId} entered gated column "${columnId}" — stopping supervisor.`);
         this.supervisors.cancelRetry(ticketId);
-        void this.stopSupervisor(ticketId);
+        void this.supervisors.stopSupervisor(ticketId);
       }
     }
   };
@@ -877,71 +805,10 @@ export class ProjectManager {
 
   // #endregion
 
-  // #region Supervisor lifecycle
-
-  // ensureSupervisorInfra / resolveTicketWorkspace / ensureSession /
-  // getCodeTabWsUrl / getSupervisorStatusForCodeTab now live in
-  // SupervisorOrchestrator (C2c.4). Thin delegators below keep the
-  // existing PM call sites and IPC handlers wired.
-
-  /** Locked version of ensureSupervisorInfra for external callers (IPC). */
-  ensureSupervisorInfraLocked = (ticketId: TicketId): Promise<void> => {
-    return this.withTicketLock(ticketId, async () => {
-      await this.supervisors.ensureSupervisorInfra(ticketId);
-    });
-  };
-
-  ensureSupervisorInfra = (ticketId: TicketId): Promise<{ machine: ITicketMachine; sandbox: ISandbox | null }> =>
-    this.supervisors.ensureSupervisorInfra(ticketId);
-
-  getSupervisorStatusForCodeTab = (tabId: CodeTabId): WithTimestamp<AgentProcessStatus> | null =>
-    this.supervisors.getSupervisorStatusForCodeTab(tabId);
-
-  getTicketWorkspaceLocked = (ticketId: TicketId): Promise<string> => {
-    return this.withTicketLock(ticketId, async () => {
-      const resolved = await this.supervisors.resolveTicketWorkspace(ticketId);
-      return resolved.workspaceDir;
-    });
-  };
-
-  private getCodeTabWsUrl = (ticketId: TicketId): string | null => this.supervisors.getCodeTabWsUrl(ticketId);
-
-  // validateDispatchPreflight + auto-dispatch loop now live in
-  // SupervisorOrchestrator (C2c.7). PM keeps `setAutoDispatch` as a thin
-  // delegator since the IPC handler `project:set-auto-dispatch` calls it.
-
-  // startSupervisor / stopSupervisor / sendSupervisorMessage /
-  // resetSupervisorSession / startMachineRun / cleanupTicketWorkspace /
-  // sendUserRunMessage now live in SupervisorOrchestrator (C2c.5). PM keeps
-  // thin delegators for the public methods that IPC handlers and PM internals
-  // (autoDispatchTick, moveTicketToColumn) still call.
-
-  startSupervisor = (ticketId: TicketId): Promise<void> => this.supervisors.startSupervisor(ticketId);
-
-  stopSupervisor = (ticketId: TicketId): Promise<void> => this.supervisors.stopSupervisor(ticketId);
-
-  resetSupervisorSession = (ticketId: TicketId): Promise<void> => this.supervisors.resetSupervisorSession(ticketId);
-
-  sendSupervisorMessage = (ticketId: TicketId, message: string): Promise<void> =>
-    this.supervisors.sendSupervisorMessage(ticketId, message);
-
-  private cleanupTicketWorkspace = (ticketId: TicketId): Promise<void> =>
-    this.supervisors.cleanupTicketWorkspace(ticketId);
-
-  // #endregion
-
-  // #region Task persistence
-
-  // Task persistence (`tasks` map, persistTask, removePersistedTask,
-  // restorePersistedTasks, startupTerminalCleanup, resetStaleTicketStates),
-  // task-CRUD helpers, removeAllTasksForProject, and exitAllTasks all live
-  // in SupervisorOrchestrator (C2c.6). PM keeps `restorePersistedTasks` as
-  // a thin delegator since `createProjectManager` calls it on boot.
-  // Dead-code `stopTask` / `removeTask` (unreferenced anywhere) deleted.
-
-  restorePersistedTasks = (): void => this.supervisors.restorePersistedTasks();
-
-  // #endregion
+  // Supervisor lifecycle, task persistence, auto-dispatch, dispatch preflight,
+  // tool dispatch, and supervisor prompt assembly all live in
+  // SupervisorOrchestrator. Reach via `pm.supervisors.*` directly. The PM-side
+  // delegators were dropped in Sprint C3.
 
   // #region Migration
 
@@ -1067,13 +934,6 @@ export class ProjectManager {
 
   // #endregion
 
-  // #region Auto-dispatch — delegated to SupervisorOrchestrator (C2c.7)
-
-  setAutoDispatch = (projectId: ProjectId, enabled: boolean): void =>
-    this.supervisors.setAutoDispatch(projectId, enabled);
-
-  // #endregion
-
   exit = async (): Promise<void> => {
     this.supervisors.stopStallDetection();
     this.supervisors.stopAutoDispatch();
@@ -1107,7 +967,8 @@ export const createProjectManager = (arg: {
   ProjectManager.migrateToSupervisor(store);
 
   const projectManager = new ProjectManager({ store, sendToWindow, processManager });
-  projectManager.restorePersistedTasks();
+  const { supervisors, milestones, inbox, pages: pageManager } = projectManager;
+  supervisors.restorePersistedTasks();
 
   // Project handlers
   ipc.handle('project:add-project', (_, project) => projectManager.addProject(project));
@@ -1120,8 +981,8 @@ export const createProjectManager = (arg: {
   ipc.handle('project:update-ticket', (_, id, patch) => projectManager.updateTicket(id, patch));
   ipc.handle('project:remove-ticket', (_, id) => projectManager.removeTicket(id));
   ipc.handle('project:get-tickets', (_, projectId) => projectManager.getTicketsByProject(projectId));
-  ipc.handle('project:get-ticket-workspace', (_, ticketId) => projectManager.getTicketWorkspaceLocked(ticketId));
-  ipc.handle('project:get-tasks', () => projectManager.getTasks());
+  ipc.handle('project:get-ticket-workspace', (_, ticketId) => supervisors.getTicketWorkspaceLocked(ticketId));
+  ipc.handle('project:get-tasks', () => supervisors.listTasks());
   ipc.handle('project:get-next-ticket', (_, projectId) => projectManager.getNextTicket(projectId));
 
   // Kanban
@@ -1148,22 +1009,16 @@ export const createProjectManager = (arg: {
   ipc.handle('project:get-files-changed', (_, ticketId) => projectManager.getFilesChanged(ticketId));
 
   // Supervisor handlers
-  ipc.handle('project:ensure-supervisor-infra', async (_, ticketId) => {
-    await projectManager.ensureSupervisorInfraLocked(ticketId);
-  });
-  ipc.handle('project:start-supervisor', (_, ticketId) => projectManager.startSupervisor(ticketId));
-  ipc.handle('project:stop-supervisor', (_, ticketId) => projectManager.stopSupervisor(ticketId));
+  ipc.handle('project:ensure-supervisor-infra', (_, ticketId) => supervisors.ensureSupervisorInfraLocked(ticketId));
+  ipc.handle('project:start-supervisor', (_, ticketId) => supervisors.startSupervisor(ticketId));
+  ipc.handle('project:stop-supervisor', (_, ticketId) => supervisors.stopSupervisor(ticketId));
   ipc.handle('project:send-supervisor-message', (_, ticketId, message) =>
-    projectManager.sendSupervisorMessage(ticketId, message)
+    supervisors.sendSupervisorMessage(ticketId, message)
   );
-  ipc.handle('project:reset-supervisor-session', (_, ticketId) => projectManager.resetSupervisorSession(ticketId));
-  ipc.handle('project:set-auto-dispatch', (_, projectId, enabled) =>
-    projectManager.setAutoDispatch(projectId, enabled)
-  );
-  ipc.handle('project:get-supervisor-sandbox-status', (_, tabId) =>
-    projectManager.getSupervisorStatusForCodeTab(tabId)
-  );
-  ipc.handle('project:get-active-wip-tickets', () => projectManager.getActiveWipTickets());
+  ipc.handle('project:reset-supervisor-session', (_, ticketId) => supervisors.resetSupervisorSession(ticketId));
+  ipc.handle('project:set-auto-dispatch', (_, projectId, enabled) => supervisors.setAutoDispatch(projectId, enabled));
+  ipc.handle('project:get-supervisor-sandbox-status', (_, tabId) => supervisors.getSupervisorStatusForCodeTab(tabId));
+  ipc.handle('project:get-active-wip-tickets', () => supervisors.getActiveWipTickets());
   ipc.handle('project:read-context', (_, projectId) => projectManager.readContext(projectId));
   ipc.handle('project:write-context', (_, projectId, content) => projectManager.writeContext(projectId, content));
   ipc.handle('project:list-project-files', (_, projectId) => projectManager.listProjectFiles(projectId));
@@ -1172,16 +1027,13 @@ export const createProjectManager = (arg: {
     projectManager.openProjectFile(projectId, relativePath)
   );
 
-  // Inbox handlers
-
   // Milestones
-  ipc.handle('milestone:get-items', (_, projectId) => projectManager.getMilestonesByProject(projectId));
-  ipc.handle('milestone:add-item', (_, item) => projectManager.addMilestone(item));
-  ipc.handle('milestone:update-item', (_, id, patch) => projectManager.updateMilestone(id, patch));
-  ipc.handle('milestone:remove-item', (_, id) => projectManager.removeMilestone(id));
+  ipc.handle('milestone:get-items', (_, projectId) => milestones.getByProject(projectId));
+  ipc.handle('milestone:add-item', (_, item) => milestones.add(item));
+  ipc.handle('milestone:update-item', (_, id, patch) => milestones.update(id, patch));
+  ipc.handle('milestone:remove-item', (_, id) => milestones.remove(id));
 
   // Pages — delegated to PageManager.
-  const pageManager = projectManager.getPageManager();
   ipc.handle('page:get-items', (_, projectId) => pageManager.getByProject(projectId));
   ipc.handle('page:get-all', () => pageManager.getAll());
   ipc.handle('page:add-item', (_, item, template) => pageManager.add(item, template));
@@ -1237,7 +1089,6 @@ export const createProjectManager = (arg: {
   });
 
   // Inbox
-  const inbox = projectManager.getInboxManager();
   ipc.handle('inbox:get-all', () => inbox.getAll());
   ipc.handle('inbox:get-active', () => inbox.getActive());
   ipc.handle('inbox:add', (_, input) => inbox.add(input));

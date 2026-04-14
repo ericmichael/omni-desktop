@@ -95,25 +95,25 @@ describe('ProjectManager', () => {
   describe('milestone CRUD', () => {
     it('addMilestone persists the new milestone', () => {
       const { pm, store } = makePm({ tickets: [] });
-      const ms = pm.addMilestone({
+      const ms = pm.milestones.add({
         projectId: 'proj-1',
         title: 'Sprint 1',
         description: '',
         status: 'active',
-      } as Parameters<typeof pm.addMilestone>[0]);
+      } as Parameters<typeof pm.milestones.add>[0]);
 
       const stored = store.get('milestones', []);
       expect(stored).toHaveLength(1);
       expect(stored[0]!.id).toBe(ms.id);
     });
 
-    it('getMilestonesByProject filters by projectId', () => {
+    it('getByProject filters by projectId', () => {
       const { pm, store } = makePm({ tickets: [] });
       store.set('milestones', [
         { id: 'm1', projectId: 'proj-1', title: 'A', description: '', status: 'active', createdAt: 0, updatedAt: 0 },
         { id: 'm2', projectId: 'other', title: 'B', description: '', status: 'active', createdAt: 0, updatedAt: 0 },
       ] as never);
-      expect(pm.getMilestonesByProject('proj-1').map((m) => m.id)).toEqual(['m1']);
+      expect(pm.milestones.getByProject('proj-1').map((m) => m.id)).toEqual(['m1']);
     });
 
     it('updateMilestone stamps completedAt when transitioning into completed', () => {
@@ -122,7 +122,7 @@ describe('ProjectManager', () => {
         { id: 'm1', projectId: 'proj-1', title: 'A', description: '', status: 'active', createdAt: 0, updatedAt: 0 },
       ] as never);
 
-      pm.updateMilestone('m1' as never, { status: 'completed' });
+      pm.milestones.update('m1' as never, { status: 'completed' });
 
       const ms = store.get('milestones', [])[0]!;
       expect(ms.status).toBe('completed');
@@ -144,7 +144,7 @@ describe('ProjectManager', () => {
         },
       ] as never);
 
-      pm.updateMilestone('m1' as never, { status: 'active' });
+      pm.milestones.update('m1' as never, { status: 'active' });
 
       const ms = store.get('milestones', [])[0]!;
       expect(ms.status).toBe('active');
@@ -163,7 +163,7 @@ describe('ProjectManager', () => {
         { id: 'm1', projectId: 'proj-1', title: 'A', description: '', status: 'active', createdAt: 0, updatedAt: 0 },
       ] as never);
 
-      pm.removeMilestone('m1' as never);
+      pm.milestones.remove('m1' as never);
 
       const t = store.get('tickets', []).find((x: Ticket) => x.id === 't-orphan')!;
       expect(t.milestoneId).toBeUndefined();
@@ -173,7 +173,7 @@ describe('ProjectManager', () => {
     it('removeMilestone is a no-op for unknown id', () => {
       const { pm, store } = makePm({ tickets: [] });
       store.set('milestones', [] as never);
-      expect(() => pm.removeMilestone('nope' as never)).not.toThrow();
+      expect(() => pm.milestones.remove('nope' as never)).not.toThrow();
     });
   });
 
