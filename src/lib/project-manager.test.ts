@@ -1444,6 +1444,127 @@ describe('ProjectManager integration', () => {
   });
 
   // -------------------------------------------------------------------------
+  // T7 — restorePersistedTasks + startup cleanup
+  // -------------------------------------------------------------------------
+  describe('restorePersistedTasks', () => {
+    const makeTask = (
+      id: string,
+      statusType: AgentProcessStatus['type'],
+      extra: Partial<import('@/shared/types').Task> = {}
+    ): import('@/shared/types').Task =>
+      ({
+        id,
+        projectId: 'proj-1',
+        taskDescription: 'test',
+        status: { type: statusType, timestamp: Date.now() } as unknown as WithTimestamp<AgentProcessStatus>,
+        createdAt: Date.now(),
+        ...extra,
+      }) as unknown as import('@/shared/types').Task;
+
+    it('marks running tasks as exited', () => {
+      const { pm, store } = makePm({ tickets: [{ id: 't1' }] });
+      store.set('tasks', [makeTask('task-1', 'running')]);
+
+      pm.restorePersistedTasks();
+
+      const tasks = store.get('tasks', []);
+      expect(tasks[0]!.status.type).toBe('exited');
+    });
+
+    it('preserves already-exited and errored tasks', () => {
+      const { pm, store } = makePm({ tickets: [{ id: 't1' }] });
+      store.set('tasks', [
+        makeTask('task-exited', 'exited'),
+        makeTask('task-error', 'error'),
+      ]);
+
+      pm.restorePersistedTasks();
+
+      const tasks = store.get('tasks', []);
+      expect(tasks.map((t) => t.status.type).sort()).toEqual(['error', 'exited']);
+    });
+
+    it('resets active ticket phases to idle', () => {
+      const { pm, store } = makePm({
+        tickets: [
+          { id: 't-running', phase: 'running' },
+          { id: 't-provisioning', phase: 'provisioning' },
+          { id: 't-awaiting', phase: 'awaiting_input' },
+        ],
+      });
+
+      pm.restorePersistedTasks();
+
+      const tickets = store.get('tickets', []);
+      for (const t of tickets) {
+        expect(t.phase).toBe('idle');
+      }
+    });
+
+    it('preserves completed phase across restart', () => {
+      const { pm, store } = makePm({ tickets: [{ id: 't1', phase: 'completed' }] });
+
+      pm.restorePersistedTasks();
+
+      const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
+      expect(ticket.phase).toBe('completed');
+    });
+
+    it('resets error phase to idle on restart (documented behavior, not a preservation)', () => {
+      // NOTE: The comment in resetStaleTicketStates explains this is intentional —
+      // error states from prior sessions are considered stale because the in-memory
+      // retry counters are gone. If this behavior changes in the future, update
+      // both the comment and this test together.
+      const { pm, store } = makePm({ tickets: [{ id: 't1', phase: 'error' }] });
+
+      pm.restorePersistedTasks();
+
+      const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
+      expect(ticket.phase).toBe('idle');
+    });
+
+    it('preserves idle phase', () => {
+      const { pm, store } = makePm({ tickets: [{ id: 't1', phase: 'idle' }] });
+
+      pm.restorePersistedTasks();
+
+      const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
+      expect(ticket.phase).toBe('idle');
+    });
+
+    it('removes orphaned persisted tasks that reference a deleted ticket', async () => {
+      const { pm, store } = makePm({ tickets: [{ id: 't1' }] });
+      store.set('tasks', [
+        makeTask('orphan-task', 'exited', { ticketId: 'deleted-ticket' as TicketId }),
+      ]);
+
+      pm.restorePersistedTasks();
+      // startupTerminalCleanup is fire-and-forget; flush the microtask queue.
+      await vi.runOnlyPendingTimersAsync();
+
+      const tasks = store.get('tasks', []);
+      expect(tasks.find((t) => t.id === 'orphan-task')).toBeUndefined();
+    });
+
+    it('removes persisted tasks whose ticket is in a terminal column', async () => {
+      const { pm, store } = makePm({
+        tickets: [{ id: 't1', columnId: 'done' }],
+      });
+      // Ticket references a task; both should be cleaned up.
+      const tickets = store.get('tickets', []);
+      tickets[0]!.supervisorTaskId = 'task-1' as never;
+      store.set('tickets', tickets);
+      store.set('tasks', [makeTask('task-1', 'exited', { ticketId: 't1' as TicketId })]);
+
+      pm.restorePersistedTasks();
+      await vi.runOnlyPendingTimersAsync();
+
+      const tasksAfter = store.get('tasks', []);
+      expect(tasksAfter.find((t) => t.id === 'task-1')).toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // processManager wiring
   // -------------------------------------------------------------------------
   describe('processManager integration', () => {
