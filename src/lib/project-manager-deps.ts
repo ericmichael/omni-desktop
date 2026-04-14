@@ -76,6 +76,7 @@ export { type WorkflowConfig } from '@/lib/workflow';
 
 export interface IWorkflowLoader {
   load(projectId: string, workspaceDir: string): Promise<unknown>;
+  loadFromRemote(projectId: string, repoUrl: string, branch?: string): Promise<unknown>;
   get(projectId: string): unknown | null;
   getConfig(projectId: string): WorkflowConfig;
   getPromptTemplate(projectId: string): string;

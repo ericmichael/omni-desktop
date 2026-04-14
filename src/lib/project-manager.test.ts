@@ -224,6 +224,7 @@ const makeWorkflowLoader = (configOverride: Partial<WorkflowConfig> = {}): IWork
   const config: WorkflowConfig = { ...configOverride };
   return {
     load: vi.fn(async () => ({})),
+    loadFromRemote: vi.fn(async () => ({})),
     get: vi.fn(() => null),
     getConfig: vi.fn(() => config),
     getPromptTemplate: vi.fn(() => 'stub prompt template'),
