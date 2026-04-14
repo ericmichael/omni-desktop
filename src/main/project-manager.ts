@@ -331,6 +331,10 @@ const MAX_CONTINUATION_TURNS = 10;
 export class ProjectManager {
   private tasks = new Map<TaskId, { task: Task; sandbox: ISandbox }>();
   private machines = new Map<TicketId, { machine: TicketMachine; sandbox: ISandbox | null }>();
+  /** Wall-clock time each active run started, keyed by ticketId. Read in handleMachineRunEnd
+   *  so persisted TicketRun.startedAt reflects the actual run start, not ticket.updatedAt
+   *  (which can be bumped by any intervening updateTicket call, e.g., onTokenUsage). */
+  private runStartedAt = new Map<TicketId, number>();
   private ticketLocks = new Map<TicketId, Promise<void>>();
   private store: Store<StoreData>;
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
@@ -1020,17 +1024,22 @@ return;
         maxContinuationTurns: maxTurns,
       });
 
-      // Persist run record
+      // Persist run record. startedAt comes from runStartedAt (set in startMachineRun)
+      // — falling back to updatedAt is a last-resort approximation, since token-usage
+      // updates bump updatedAt and would otherwise collapse startedAt onto endedAt.
       if (ticket) {
+        const endedAt = Date.now();
+        const runStartedAt = this.runStartedAt.get(ticketId) ?? ticket.updatedAt;
         const run = {
           id: nanoid(),
-          startedAt: ticket.updatedAt, // best approximation — updated when run starts
-          endedAt: Date.now(),
+          startedAt: runStartedAt,
+          endedAt,
           endReason: reason,
           tokenUsage: ticket.tokenUsage ? { ...ticket.tokenUsage } : undefined,
         };
         const existingRuns = ticket.runs ?? [];
         this.updateTicket(ticketId, { runs: [...existingRuns, run] });
+        this.runStartedAt.delete(ticketId);
       }
 
       switch (action.type) {
@@ -3234,6 +3243,9 @@ return;
       console.warn(`[ProjectManager] startMachineRun: no machine entry for ${ticketId}`);
       return;
     }
+
+    // Stamp the real run-start time so the eventual TicketRun record is accurate.
+    this.runStartedAt.set(ticketId, Date.now());
 
     console.log(`[ProjectManager] startMachineRun: starting run for ${ticketId} (phase: ${entry.machine.getPhase()})`);
     void entry.machine.startRun(prompt, { sessionId: opts?.sessionId, variables: opts?.variables }).then(

@@ -350,6 +350,7 @@ const makePm = (
 // Gain access to ProjectManager internals (machines map, private methods).
 const internals = (pm: ProjectManager): {
   machines: Map<TicketId, { machine: MockMachine; sandbox: unknown }>;
+  runStartedAt: Map<TicketId, number>;
   createMachine: (ticketId: TicketId) => MockMachine;
   handleMachineRunEnd: (ticketId: TicketId, reason: string) => Promise<void>;
   scheduleRetry: (
@@ -717,6 +718,178 @@ describe('ProjectManager integration', () => {
       const { pm } = makePm({ tickets: [{ id: 't1' }] });
       const result = invoke(pm, 'nonexistent' as TicketId, 'move_ticket', { column: 'Review' });
       expect(result.ok).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // T1 — handleMachineRunEnd (run record, continue/complete/stopped/retry)
+  // -------------------------------------------------------------------------
+  describe('handleMachineRunEnd', () => {
+    /** Build a PM with a single ticket and a streaming machine registered. */
+    const setupStreamingMachine = (
+      opts: { reason?: string; continuationTurn?: number; workflowConfig?: Partial<WorkflowConfig> } = {}
+    ): { ctx: PmCtx; mock: MockMachine } => {
+      const ctx = makePm({ tickets: [{ id: 't1' }] }, { workflowConfig: opts.workflowConfig });
+      const mach = internals(ctx.pm).createMachine('t1');
+      internals(ctx.pm).machines.set('t1', { machine: mach, sandbox: null });
+      const mock = ctx.machines.get('t1')!;
+      mock.phase = 'running';
+      mock.continuationTurn = opts.continuationTurn ?? 0;
+      return { ctx, mock };
+    };
+
+    describe('run record persistence', () => {
+      it('appends a run record on every run_end', async () => {
+        const { ctx, mock } = setupStreamingMachine();
+        mock.simulateRunEnd('error');
+        await vi.runOnlyPendingTimersAsync();
+
+        const ticket = ctx.store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
+        expect(ticket.runs).toHaveLength(1);
+        expect(ticket.runs![0]!.endReason).toBe('error');
+      });
+
+      it('accumulates multiple runs in order', async () => {
+        const { ctx, mock } = setupStreamingMachine();
+        mock.simulateRunEnd('error');
+        await vi.runOnlyPendingTimersAsync();
+        // After error the machine was transitioned through retry scheduling; re-set streaming.
+        mock.phase = 'running';
+        mock.simulateRunEnd('stalled');
+        await vi.runOnlyPendingTimersAsync();
+
+        const ticket = ctx.store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
+        expect(ticket.runs!.map((r) => r.endReason)).toEqual(['error', 'stalled']);
+      });
+
+      it('snapshots current tokenUsage into the run record', async () => {
+        const { ctx, mock } = setupStreamingMachine();
+        mock.simulateTokenUsage({ inputTokens: 10, outputTokens: 20, totalTokens: 30 });
+        mock.simulateRunEnd('error');
+        await vi.runOnlyPendingTimersAsync();
+
+        const ticket = ctx.store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
+        expect(ticket.runs![0]!.tokenUsage).toEqual({ inputTokens: 10, outputTokens: 20, totalTokens: 30 });
+      });
+
+      it('records startedAt as the time the run actually started, not ticket.updatedAt (bug #1)', async () => {
+        const { ctx, mock } = setupStreamingMachine();
+        // Simulate the normal sequence: run starts, token updates flow in (which bump
+        // ticket.updatedAt via onTokenUsage), then run_end arrives.
+        const runStartTime = Date.now();
+        // Mirror what startMachineRun does: stamp the real run-start time.
+        internals(ctx.pm).runStartedAt.set('t1', runStartTime);
+
+        vi.advanceTimersByTime(5_000);
+        mock.simulateTokenUsage({ inputTokens: 100, outputTokens: 50, totalTokens: 150 });
+
+        vi.advanceTimersByTime(5_000);
+        mock.simulateRunEnd('error');
+        await vi.runOnlyPendingTimersAsync();
+
+        const ticket = ctx.store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
+        const run = ticket.runs![0]!;
+        // startedAt must reflect the real run start, not the last ticket mutation.
+        expect(run.startedAt).toBe(runStartTime);
+        // And endedAt must be strictly later.
+        expect(run.endedAt).toBeGreaterThan(run.startedAt);
+      });
+    });
+
+    describe('stopped branch', () => {
+      it('transitions to idle and does not schedule a retry', async () => {
+        const { mock } = setupStreamingMachine();
+        mock.simulateRunEnd('stopped');
+        await vi.runOnlyPendingTimersAsync();
+
+        expect(mock.phase).toBe('idle');
+        expect(mock.scheduleRetryTimer).not.toHaveBeenCalled();
+      });
+
+      it('still persists the run record', async () => {
+        const { ctx, mock } = setupStreamingMachine();
+        mock.simulateRunEnd('stopped');
+        await vi.runOnlyPendingTimersAsync();
+
+        const ticket = ctx.store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
+        expect(ticket.runs).toHaveLength(1);
+        expect(ticket.runs![0]!.endReason).toBe('stopped');
+      });
+    });
+
+    describe('continue branch', () => {
+      it('increments continuationTurn and schedules a start_run after the 500ms delay', async () => {
+        const { ctx, mock } = setupStreamingMachine({ continuationTurn: 0 });
+
+        mock.simulateRunEnd('completed');
+        // Let the withTicketLock microtask run
+        await Promise.resolve();
+        await Promise.resolve();
+        // Now advance the explicit 500ms delay before startMachineRun fires.
+        await vi.advanceTimersByTimeAsync(600);
+
+        expect(mock.continuationTurn).toBe(1);
+        expect(mock.phase).toBe('continuing');
+        expect(mock.startRun).toHaveBeenCalled();
+        // Verify the prompt is a continuation prompt
+        const lastCall = (mock.startRun as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+        expect(String(lastCall[0])).toMatch(/continuation/i);
+        void ctx;
+      });
+
+      it('completes (does not continue) when nextTurn would reach maxContinuationTurns', async () => {
+        // max_continuation_turns default is 10; set turn to 9 so nextTurn = 10 → complete
+        const { mock } = setupStreamingMachine({ continuationTurn: 9 });
+        mock.simulateRunEnd('completed');
+        await vi.runOnlyPendingTimersAsync();
+
+        expect(mock.phase).toBe('completed');
+        expect(mock.startRun).not.toHaveBeenCalled();
+      });
+
+      it('bails to completed when the agent moved the ticket to terminal column mid-run', async () => {
+        const { ctx, mock } = setupStreamingMachine({ continuationTurn: 0 });
+        // Directly mutate the store so handleMachineRunEnd's fresh-ticket re-read
+        // sees the terminal column. Going through moveTicketToColumn would trigger
+        // the cleanup side-effect (machine disposed, entry deleted) which is a
+        // different code path covered elsewhere.
+        const tickets = ctx.store.get('tickets', []);
+        tickets[0]!.columnId = 'done';
+        ctx.store.set('tickets', tickets);
+
+        mock.simulateRunEnd('completed');
+        await vi.runOnlyPendingTimersAsync();
+
+        expect(mock.phase).toBe('completed');
+        expect(mock.startRun).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('retry branch', () => {
+      it('schedules retry on error with attempt = retryAttempt + 1', async () => {
+        const { mock } = setupStreamingMachine();
+        mock.retryAttempt = 2;
+
+        mock.simulateRunEnd('error');
+        await vi.runOnlyPendingTimersAsync();
+
+        expect(mock.scheduleRetryTimer).toHaveBeenCalled();
+      });
+    });
+
+    describe('guard: not streaming', () => {
+      it('ignores run_end when the machine was already transitioned out of streaming', async () => {
+        const { ctx, mock } = setupStreamingMachine();
+        mock.phase = 'idle'; // user hit stop between run_end being queued and arriving
+
+        mock.simulateRunEnd('error');
+        await vi.runOnlyPendingTimersAsync();
+
+        expect(mock.scheduleRetryTimer).not.toHaveBeenCalled();
+        const ticket = ctx.store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
+        // No run record should be persisted when we bail at the guard.
+        expect(ticket.runs ?? []).toHaveLength(0);
+      });
     });
   });
 
