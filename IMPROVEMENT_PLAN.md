@@ -30,7 +30,10 @@ Phases must be executed in order; within a phase, fixes are independent unless n
 | 6 | 6.3 Sprint A — PageManager extraction | ✅ | `44fe1d4` |
 | 6 | 6.3 Sprint A.1 — Migrations extraction (bonus) | ✅ | `0a6ed05` |
 | 6 | 6.3 Sprint B — MilestoneManager extraction | ✅ | (this commit) |
-| 6 | 6.3 Sprint C — SupervisorOrchestrator split | ⏳ | — |
+| 6 | 6.3 Sprint C1 — Pure helper extraction | ✅ | (continuation-prompt + session-history) |
+| 6 | 6.3 Sprint C2a — getGitFilesChanged extraction | ✅ | (git-files-changed.ts) |
+| 6 | 6.3 Sprint C2b — Artifacts fs extraction | ✅ | (artifacts-fs.ts) |
+| 6 | 6.3 Sprint C2c — SupervisorOrchestrator state/lifecycle | 🟡 | In progress |
 
 ### Deep testing wave (follow-up to Phase 5)
 
@@ -704,25 +707,48 @@ using the same narrow-store-adapter pattern as `InboxManager` / `PageManager`.
 existing callsite (IPC handlers, `handleClientToolCall`, supervisor branch resolution)
 stays identical. The T9 milestone-CRUD tests still pass unchanged.
 
-**Sprint C — SupervisorOrchestrator split** ⏳ PENDING. The ~2500 lines of ticket
-lifecycle, retry queue, stall detection, auto-dispatch, client tool dispatch,
-worktree management, and files-changed diffing. This is the XL refactor the whole
-test wave was building safety nets for. Suggested execution plan when ready:
+**Sprint C — SupervisorOrchestrator split** 🟡 IN PROGRESS. Landed in atomic
+increments rather than one mega-commit because the test suite (105 PM tests)
+accesses private state via an `internals(pm)` escape hatch; moving the
+`machines` map + retry queue wholesale requires coordinated test updates.
 
-- **C1:** Move pure helpers out (`buildContinuationPrompt`, `getSessionHistory`,
-  worktree helpers, migrations — migrations already done). Delta: ~600 lines.
-- **C2:** Create `SupervisorOrchestrator` class in-file first, then move to
+Completed increments (each commit ships regression-green with `npm test`):
+
+- **C1:** `buildContinuationPrompt` → `src/lib/continuation-prompt.ts` (+6 tests)
+  and the JSON-row shaping half of `getSessionHistory` →
+  `src/lib/session-history.ts` (+12 tests). The sqlite3 query side-effect
+  stays in PM. Delta: -132 lines.
+- **C2a:** 330-line `getFilesChanged` git CLI dance →
+  `src/lib/git-files-changed.ts` with `resolveWorktreeMergeBase` /
+  `resolveWorkspaceMergeBase` helpers. PM keeps a ~50-line wrapper that does
+  the ticket → task → gitDir lookup and delegates. Delta: -278 lines.
+- **C2b:** Artifact filesystem ops (`listArtifacts`, `readArtifact`,
+  `openArtifactExternal`) → `src/lib/artifacts-fs.ts`. Also consolidated the
+  path-traversal guard into `resolveArtifactPath` so it's enforced
+  uniformly. Delta: -53 lines.
+
+Cumulative file-size delta: `project-manager.ts` 3937 → 3474 lines (-463).
+Test count 812 → 831.
+
+Remaining execution plan:
+
+- **C2c:** Create `SupervisorOrchestrator` class in-file first, then move to
   `src/main/supervisor-orchestrator.ts`. Transfer: `machines` map, `tasks` map,
   `ticketLocks`, timers, `ensureSupervisorInfra`, `startSupervisor`,
   `stopSupervisor`, `sendSupervisorMessage`, `resetSupervisorSession`,
   `cleanupTicketWorkspace`, `handleMachineRunEnd`, `startMachineRun`,
   `sendUserRunMessage`, retry queue, stall detection, auto-dispatch,
   `handleClientToolCall`, `validateDispatchPreflight`, concurrency helpers,
-  `getFilesChanged`, artifact helpers, `resolveTicketWorkspace`, `ensureSession`.
+  `resolveTicketWorkspace`, `ensureSession`. Task: the 105-test `internals()`
+  accessor in `project-manager.test.ts` will need to reach through a
+  `pm.supervisors` reference or the class will need to keep bound delegators
+  that forward to `this.supervisors.*`. Delegator approach is cheaper and
+  preserves every test.
 - **C3:** Thin `ProjectManager` to a coordinator that owns project CRUD +
   `getProjectDirPath` + pipeline helpers, and delegates via references to
-  `PageManager`, `InboxManager`, `MilestoneManager` (if done), `SupervisorOrchestrator`.
-- **C4:** Split `registerProjectHandlers` into per-module IPC registration functions.
+  `PageManager`, `InboxManager`, `MilestoneManager`, `SupervisorOrchestrator`.
+- **C4:** Split `registerProjectHandlers` into per-module IPC registration
+  functions.
 
 Prerequisite: all 812 current tests green (they are). Any Sprint C step that breaks
 a test must be rolled back or fixed in the same commit — no red states allowed during
@@ -766,7 +792,10 @@ built the safety net it needs.
 | 6.3 Sprint A PageManager | 6 | M | ✅ | 348 lines moved out |
 | 6.3 Migrations extraction (bonus) | 6 | M | ✅ | 440 lines moved to pure lib |
 | 6.3 Sprint B MilestoneManager | 6 | S | ✅ | ~120 lines extracted via narrow store adapter |
-| 6.3 Sprint C SupervisorOrchestrator split | 6 | XL | ⏳ | Remaining ~2500 lines; safety net in place |
+| 6.3 Sprint C1 Pure helpers | 6 | S | ✅ | continuation-prompt + session-history + 18 tests |
+| 6.3 Sprint C2a getGitFilesChanged | 6 | M | ✅ | 330 lines → pure lib |
+| 6.3 Sprint C2b Artifacts fs | 6 | S | ✅ | listArtifacts + readArtifact + openArtifactExternal |
+| 6.3 Sprint C2c–C4 Orchestrator split | 6 | XL | 🟡 | ~2000 lines remaining; C2a–b landed as safety net |
 | T1–T11 deep testing wave (follow-up) | 5+ | L | ✅ | +92 tests, 7 bugs fixed |
 
 ---
