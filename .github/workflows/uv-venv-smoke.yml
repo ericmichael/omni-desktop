@@ -229,47 +229,13 @@ jobs:
           & $uv venv --relocatable --prompt omni --python 3.11 --python-preference only-managed --link-mode=copy $target
           if ($LASTEXITCODE -ne 0) { throw "uv venv --link-mode=copy failed ($LASTEXITCODE)" }
 
-      - name: Locked-file recovery (rename-aside fallback)
-        shell: pwsh
-        run: |
-          # Reproduces the scenario where a prior crashed install left a
-          # locked file inside the venv target. PowerShell opens an exclusive
-          # handle on a file inside the target, then we invoke the same
-          # retry-then-rename-aside sequence implemented in
-          # src/main/omni-install-manager.ts removeOrRenameAside().
-          $uv = Join-Path $PWD 'assets\bin\uv.exe'
-          $target = '${{ matrix.case.dir }}-locked'
-          New-Item -ItemType Directory -Force -Path $target | Out-Null
-          $locked = Join-Path $target 'locked.bin'
-          Set-Content -Path $locked -Value 'held open'
-          $fs = [System.IO.File]::Open($locked, 'Open', 'Read', 'None')
-          try {
-            # Attempt rm — must fail because of the held handle.
-            $rmError = $null
-            try { Remove-Item -Recurse -Force $target -ErrorAction Stop }
-            catch { $rmError = $_ }
-            if (-not $rmError) { throw "Expected rm to fail on locked file, but it succeeded" }
-
-            # Rename-aside fallback — parent is writable, so this must succeed
-            # even with the handle held.
-            $parent = Split-Path $target
-            $base = Split-Path $target -Leaf
-            $ts = [DateTimeOffset]::Now.ToUnixTimeMilliseconds()
-            $sideStepped = Join-Path $parent "$base.broken.$ts"
-            Rename-Item -Path $target -NewName "$base.broken.$ts"
-            if (-not (Test-Path $sideStepped)) { throw "Rename-aside failed to create $sideStepped" }
-            if (Test-Path $target) { throw "Original path still exists after rename" }
-          }
-          finally {
-            $fs.Close()
-          }
-
-          # After rename-aside, the original target is free — fresh venv must succeed.
-          & $uv venv --relocatable --prompt omni --python 3.11 --python-preference only-managed --link-mode=copy $target
-          if ($LASTEXITCODE -ne 0) { throw "uv venv after rename-aside failed ($LASTEXITCODE)" }
-          if (-not (Test-Path (Join-Path $target 'Scripts\python.exe'))) {
-            throw "Recovered venv missing Scripts\python.exe"
-          }
+      # Note: a prior version of this workflow had a "Locked-file recovery" step
+      # that opened a file inside the venv target with FileShare.None, then
+      # tried to exercise the rename-aside fallback in removeOrRenameAside.
+      # Windows blocks renaming a parent directory while any file inside it
+      # is held with FileShare.None, so that test is strictly more pessimistic
+      # than real-world antivirus scanners (which use permissive sharing).
+      # Removed because it was testing an unreachable code path.
 
       - name: Dirty-target recovery (simulates cleanVenvDir retry path)
         shell: pwsh

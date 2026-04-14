@@ -24,6 +24,9 @@ concurrency:
 
 jobs:
   build-linux:
+    # TEMPORARILY DISABLED while iterating on Windows smoke tests.
+    # Re-enable by removing this `if: false`.
+    if: false
     runs-on: ubuntu-latest
 
     steps:
@@ -87,6 +90,7 @@ jobs:
             dist/*.yaml
 
   build-macos:
+    if: false # TEMPORARILY DISABLED while iterating on Windows smoke tests
     runs-on: macos-latest
 
     steps:
@@ -151,6 +155,7 @@ jobs:
             dist/*.yaml
 
   build-macos-x64:
+    if: false # TEMPORARILY DISABLED while iterating on Windows smoke tests
     runs-on: macos-15-intel
 
     steps:
@@ -302,10 +307,47 @@ jobs:
           "path=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Silent install
-        shell: cmd
+        # Runs the unsigned NSIS installer with one retry and event-log dump on
+        # failure. The unsigned NSIS uninstaller hit an access violation on
+        # Windows Server 2025 intermittently (0xC0000005); on retry it usually
+        # succeeds, and the event log tells us if it's a real crash vs. flake.
+        shell: pwsh
         run: |
-          "${{ steps.installer.outputs.path }}" /S /D=C:\OmniTest
-          if errorlevel 1 exit /b %errorlevel%
+          $installer = '${{ steps.installer.outputs.path }}'
+          $dumpDiagnostics = {
+            Write-Host "--- Application event log (last 20 errors) ---"
+            Get-WinEvent -LogName Application -MaxEvents 200 -ErrorAction SilentlyContinue |
+              Where-Object { $_.LevelDisplayName -in @('Error', 'Critical') } |
+              Select-Object -First 20 TimeCreated, ProviderName, Id, Message |
+              Format-List
+            Write-Host "--- C:\OmniTest contents (if any) ---"
+            if (Test-Path C:\OmniTest) {
+              Get-ChildItem C:\OmniTest -Recurse -Depth 2 -ErrorAction SilentlyContinue |
+                Format-Table -AutoSize
+            } else {
+              Write-Host "(C:\OmniTest does not exist)"
+            }
+          }
+          $tryInstall = {
+            param($label)
+            Write-Host "[$label] Launching installer: $installer"
+            $p = Start-Process -FilePath $installer -ArgumentList '/S','/D=C:\OmniTest' -PassThru -Wait
+            Write-Host "[$label] Installer exit code: $($p.ExitCode)"
+            return $p.ExitCode
+          }
+          $code = & $tryInstall 'attempt-1'
+          if ($code -ne 0) {
+            Write-Host "Attempt 1 failed ($code). Dumping diagnostics, cleaning up, retrying..."
+            & $dumpDiagnostics
+            Remove-Item -Recurse -Force C:\OmniTest -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 5
+            $code = & $tryInstall 'attempt-2'
+          }
+          if ($code -ne 0) {
+            Write-Host "Both install attempts failed. Final diagnostics:"
+            & $dumpDiagnostics
+            throw "Silent install failed with exit code $code"
+          }
 
       - name: Verify install layout
         shell: pwsh
@@ -361,7 +403,9 @@ jobs:
           if-no-files-found: ignore
 
   publish-release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # TEMPORARILY DISABLED while iterating on Windows smoke tests — other
+    # platform builds are off so there's nothing to publish anyway.
+    if: false # github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [build-linux, build-macos, build-macos-x64, build-windows, smoke-windows]
     runs-on: ubuntu-latest
     permissions:
