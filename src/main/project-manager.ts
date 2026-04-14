@@ -15,16 +15,18 @@ import type { IMachineFactory, ISandboxFactory, IWorkflowLoader, ProjectManagerD
 import { runMigrations as runSchemaMigrations } from '@/lib/project-migrations';
 import { type HistoryRow, parseSessionHistoryRows } from '@/lib/session-history';
 import { AgentProcess } from '@/main/agent-process';
-import { writeMarimoAiConfig } from '@/main/extensions/marimo-config';
-import { ensureNotebookCssReference, writeGlassCss } from '@/main/extensions/marimo-glass';
+import { registerInboxHandlers } from '@/main/inbox-handlers';
 import { InboxManager, type InboxManagerStore } from '@/main/inbox-manager';
+import { registerMilestoneHandlers } from '@/main/milestone-handlers';
 import { MilestoneManager, type MilestoneManagerStore } from '@/main/milestone-manager';
+import { registerPageHandlers } from '@/main/page-handlers';
 import { PageManager, type PageManagerStore } from '@/main/page-manager';
 import type { ProcessManager } from '@/main/process-manager';
+import { registerProjectHandlers } from '@/main/project-handlers';
+import { registerSupervisorHandlers } from '@/main/supervisor-handlers';
 import { SupervisorOrchestrator } from '@/main/supervisor-orchestrator';
 import { ensureDirectory, getDefaultWorkspaceDir, getOmniConfigDir, getProjectDir } from '@/main/util';
 import { WorkflowLoader } from '@/main/workflow-loader';
-import { checkGitRepo } from '@/main/worktree-ops';
 import type { IIpcListener } from '@/shared/ipc-listener';
 import { DEFAULT_PIPELINE, SIMPLE_PIPELINE } from '@/shared/pipeline-defaults';
 import type {
@@ -967,199 +969,25 @@ export const createProjectManager = (arg: {
   ProjectManager.migrateToSupervisor(store);
 
   const projectManager = new ProjectManager({ store, sendToWindow, processManager });
-  const { supervisors, milestones, inbox, pages: pageManager } = projectManager;
+  const { supervisors, milestones, inbox, pages } = projectManager;
   supervisors.restorePersistedTasks();
 
-  // Project handlers
-  ipc.handle('project:add-project', (_, project) => projectManager.addProject(project));
-  ipc.handle('project:update-project', (_, id, patch) => projectManager.updateProject(id, patch));
-  ipc.handle('project:remove-project', (_, id) => projectManager.removeProject(id));
-  ipc.handle('project:check-git-repo', (_, workspaceDir) => checkGitRepo(workspaceDir));
-
-  // Ticket handlers
-  ipc.handle('project:add-ticket', (_, ticket) => projectManager.addTicket(ticket));
-  ipc.handle('project:update-ticket', (_, id, patch) => projectManager.updateTicket(id, patch));
-  ipc.handle('project:remove-ticket', (_, id) => projectManager.removeTicket(id));
-  ipc.handle('project:get-tickets', (_, projectId) => projectManager.getTicketsByProject(projectId));
-  ipc.handle('project:get-ticket-workspace', (_, ticketId) => supervisors.getTicketWorkspaceLocked(ticketId));
-  ipc.handle('project:get-tasks', () => supervisors.listTasks());
-  ipc.handle('project:get-next-ticket', (_, projectId) => projectManager.getNextTicket(projectId));
-
-  // Kanban
-  ipc.handle('project:move-ticket-to-column', (_, ticketId, columnId) =>
-    projectManager.moveTicketToColumn(ticketId, columnId)
-  );
-  ipc.handle('project:resolve-ticket', (_, ticketId, resolution) => projectManager.resolveTicket(ticketId, resolution));
-  ipc.handle('project:get-pipeline', async (_, projectId) => {
-    await projectManager.ensureWorkflowLoaded(projectId);
-    return projectManager.getPipeline(projectId);
-  });
-
-  // Session history
-  ipc.handle('project:get-session-history', (_, sessionId) => projectManager.getSessionHistory(sessionId));
-
-  // Artifacts
-  ipc.handle('project:list-artifacts', (_, ticketId, dirPath) => projectManager.listArtifacts(ticketId, dirPath));
-  ipc.handle('project:read-artifact', (_, ticketId, relativePath) =>
-    projectManager.readArtifact(ticketId, relativePath)
-  );
-  ipc.handle('project:open-artifact-external', (_, ticketId, relativePath) =>
-    projectManager.openArtifactExternal(ticketId, relativePath)
-  );
-  ipc.handle('project:get-files-changed', (_, ticketId) => projectManager.getFilesChanged(ticketId));
-
-  // Supervisor handlers
-  ipc.handle('project:ensure-supervisor-infra', (_, ticketId) => supervisors.ensureSupervisorInfraLocked(ticketId));
-  ipc.handle('project:start-supervisor', (_, ticketId) => supervisors.startSupervisor(ticketId));
-  ipc.handle('project:stop-supervisor', (_, ticketId) => supervisors.stopSupervisor(ticketId));
-  ipc.handle('project:send-supervisor-message', (_, ticketId, message) =>
-    supervisors.sendSupervisorMessage(ticketId, message)
-  );
-  ipc.handle('project:reset-supervisor-session', (_, ticketId) => supervisors.resetSupervisorSession(ticketId));
-  ipc.handle('project:set-auto-dispatch', (_, projectId, enabled) => supervisors.setAutoDispatch(projectId, enabled));
-  ipc.handle('project:get-supervisor-sandbox-status', (_, tabId) => supervisors.getSupervisorStatusForCodeTab(tabId));
-  ipc.handle('project:get-active-wip-tickets', () => supervisors.getActiveWipTickets());
-  ipc.handle('project:read-context', (_, projectId) => projectManager.readContext(projectId));
-  ipc.handle('project:write-context', (_, projectId, content) => projectManager.writeContext(projectId, content));
-  ipc.handle('project:list-project-files', (_, projectId) => projectManager.listProjectFiles(projectId));
-  ipc.handle('project:get-context-preview', (_, projectId) => projectManager.getContextPreview(projectId));
-  ipc.handle('project:open-project-file', (_, projectId, relativePath) =>
-    projectManager.openProjectFile(projectId, relativePath)
-  );
-
-  // Milestones
-  ipc.handle('milestone:get-items', (_, projectId) => milestones.getByProject(projectId));
-  ipc.handle('milestone:add-item', (_, item) => milestones.add(item));
-  ipc.handle('milestone:update-item', (_, id, patch) => milestones.update(id, patch));
-  ipc.handle('milestone:remove-item', (_, id) => milestones.remove(id));
-
-  // Pages — delegated to PageManager.
-  ipc.handle('page:get-items', (_, projectId) => pageManager.getByProject(projectId));
-  ipc.handle('page:get-all', () => pageManager.getAll());
-  ipc.handle('page:add-item', (_, item, template) => pageManager.add(item, template));
-  ipc.handle('page:update-item', (_, id, patch) => pageManager.update(id, patch));
-  ipc.handle('page:remove-item', (_, id) => pageManager.remove(id));
-  ipc.handle('page:read-content', (_, pageId) => pageManager.readContent(pageId));
-  ipc.handle('page:write-content', (_, pageId, content) => pageManager.writeContent(pageId, content));
-  ipc.handle('page:reorder', (_, pageId, newParentId, newSortOrder) =>
-    pageManager.reorder(pageId, newParentId, newSortOrder)
-  );
-  ipc.handle('page:watch', (_, pageId) => pageManager.watch(pageId));
-  ipc.handle('page:unwatch', (_, pageId) => pageManager.unwatch(pageId));
-  ipc.handle('page:get-notebook-paths', (_, pageId) => {
-    const filePath = pageManager.getNotebookFilePath(pageId);
-    if (!filePath) {
-      return null;
-    }
-    const page = pageManager.getById(pageId);
-    if (!page) {
-      return null;
-    }
-    const projectDir = projectManager.getProjectDir(page.projectId);
-    if (!projectDir) {
-      return null;
-    }
-    return { filePath, projectDir };
-  });
-  ipc.handle('page:prepare-notebook', async (_, pageId, glassEnabled) => {
-    const filePath = pageManager.getNotebookFilePath(pageId);
-    if (!filePath) {
-      return;
-    }
-    const pagesDir = path.dirname(filePath);
-    await writeGlassCss(pagesDir, glassEnabled);
-    await ensureNotebookCssReference(filePath);
-    // Wire the launcher's default model into marimo via .marimo.toml in the
-    // project directory (marimo searches up from cwd for it). Only writes
-    // when a default model with an api key is configured; refuses to
-    // clobber any pre-existing user-authored .marimo.toml.
-    const page = pageManager.getById(pageId);
-    if (page) {
-      const projectDir = projectManager.getProjectDir(page.projectId);
-      if (projectDir) {
-        await writeMarimoAiConfig(projectDir);
-      }
-    }
-  });
-  ipc.handle('page:set-notebook-glass', async (_, projectDir, enabled) => {
-    // The renderer passes the project's working directory; notebook files
-    // (and the glass CSS) live in `<projectDir>/pages/`.
-    const pagesDir = path.join(projectDir, 'pages');
-    await writeGlassCss(pagesDir, enabled);
-  });
-
-  // Inbox
-  ipc.handle('inbox:get-all', () => inbox.getAll());
-  ipc.handle('inbox:get-active', () => inbox.getActive());
-  ipc.handle('inbox:add', (_, input) => inbox.add(input));
-  ipc.handle('inbox:update', (_, id, patch) => inbox.update(id, patch));
-  ipc.handle('inbox:remove', (_, id) => inbox.remove(id));
-  ipc.handle('inbox:shape', (_, id, shaping) => inbox.shape(id, shaping));
-  ipc.handle('inbox:defer', (_, id) => inbox.defer(id));
-  ipc.handle('inbox:reactivate', (_, id) => inbox.reactivate(id));
-  ipc.handle('inbox:promote-to-ticket', (_, id, opts) => inbox.promoteToTicket(id, opts));
-  ipc.handle('inbox:promote-to-project', (_, id, opts) => inbox.promoteToProject(id, opts));
-  ipc.handle('inbox:sweep', () => inbox.sweepExpired());
-  ipc.handle('inbox:gc-promoted', () => inbox.gcPromoted());
+  // Per-module IPC handler registration. Each helper returns the channel
+  // names it registered so the cleanup loop below can remove them all in
+  // one pass without a 50-line removeHandler block.
+  const channels = [
+    ...registerProjectHandlers(ipc, projectManager),
+    ...registerSupervisorHandlers(ipc, supervisors),
+    ...registerMilestoneHandlers(ipc, milestones),
+    ...registerPageHandlers(ipc, pages, (projectId) => projectManager.getProjectDir(projectId)),
+    ...registerInboxHandlers(ipc, inbox),
+  ];
 
   const cleanup = async () => {
     await projectManager.exit();
-    ipcMain.removeHandler('project:add-project');
-    ipcMain.removeHandler('project:update-project');
-    ipcMain.removeHandler('project:remove-project');
-    ipcMain.removeHandler('project:check-git-repo');
-    ipcMain.removeHandler('project:add-ticket');
-    ipcMain.removeHandler('project:update-ticket');
-    ipcMain.removeHandler('project:remove-ticket');
-    ipcMain.removeHandler('project:get-tickets');
-    ipcMain.removeHandler('project:get-ticket-workspace');
-    ipcMain.removeHandler('project:get-next-ticket');
-    ipcMain.removeHandler('project:move-ticket-to-column');
-    ipcMain.removeHandler('project:get-pipeline');
-    ipcMain.removeHandler('project:get-session-history');
-    ipcMain.removeHandler('project:list-artifacts');
-    ipcMain.removeHandler('project:read-artifact');
-    ipcMain.removeHandler('project:open-artifact-external');
-    ipcMain.removeHandler('project:get-files-changed');
-    ipcMain.removeHandler('project:ensure-supervisor-infra');
-    ipcMain.removeHandler('project:start-supervisor');
-    ipcMain.removeHandler('project:stop-supervisor');
-    ipcMain.removeHandler('project:send-supervisor-message');
-    ipcMain.removeHandler('project:reset-supervisor-session');
-    ipcMain.removeHandler('project:set-auto-dispatch');
-    ipcMain.removeHandler('project:get-supervisor-sandbox-status');
-    ipcMain.removeHandler('project:get-active-wip-tickets');
-    ipcMain.removeHandler('project:read-context');
-    ipcMain.removeHandler('project:write-context');
-    ipcMain.removeHandler('milestone:get-items');
-    ipcMain.removeHandler('milestone:add-item');
-    ipcMain.removeHandler('milestone:update-item');
-    ipcMain.removeHandler('milestone:remove-item');
-    ipcMain.removeHandler('page:get-items');
-    ipcMain.removeHandler('page:get-all');
-    ipcMain.removeHandler('page:add-item');
-    ipcMain.removeHandler('page:update-item');
-    ipcMain.removeHandler('page:remove-item');
-    ipcMain.removeHandler('page:read-content');
-    ipcMain.removeHandler('page:write-content');
-    ipcMain.removeHandler('page:reorder');
-    ipcMain.removeHandler('page:watch');
-    ipcMain.removeHandler('page:unwatch');
-    ipcMain.removeHandler('page:get-notebook-paths');
-    ipcMain.removeHandler('page:prepare-notebook');
-    ipcMain.removeHandler('page:set-notebook-glass');
-    ipcMain.removeHandler('inbox:get-all');
-    ipcMain.removeHandler('inbox:get-active');
-    ipcMain.removeHandler('inbox:add');
-    ipcMain.removeHandler('inbox:update');
-    ipcMain.removeHandler('inbox:remove');
-    ipcMain.removeHandler('inbox:shape');
-    ipcMain.removeHandler('inbox:defer');
-    ipcMain.removeHandler('inbox:reactivate');
-    ipcMain.removeHandler('inbox:promote-to-ticket');
-    ipcMain.removeHandler('inbox:promote-to-project');
-    ipcMain.removeHandler('inbox:sweep');
-    ipcMain.removeHandler('inbox:gc-promoted');
+    for (const channel of channels) {
+      ipcMain.removeHandler(channel);
+    }
   };
 
   return [projectManager, cleanup] as const;
