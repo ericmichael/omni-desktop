@@ -4217,6 +4217,7 @@ next.columnChangedAt = updatedAt;
       const firstColumnId = this.getFirstColumnId(project.id);
       const terminalColumnId = this.getTerminalColumnId(project.id);
       const firstActiveColumn = pipeline.columns.find((c) => c.id !== firstColumnId && c.id !== terminalColumnId);
+      const originalColumnId = nextTicket.columnId;
       if (firstActiveColumn) {
         this.moveTicketToColumn(nextTicket.id, firstActiveColumn.id);
       }
@@ -4227,6 +4228,11 @@ next.columnChangedAt = updatedAt;
         );
         await this.startSupervisor(nextTicket.id);
       } catch (error) {
+        // Revert the column move so the ticket is re-picked on the next tick
+        // instead of being stranded in column 2 with no running supervisor.
+        if (firstActiveColumn && originalColumnId !== firstActiveColumn.id) {
+          this.moveTicketToColumn(nextTicket.id, originalColumnId);
+        }
         console.warn(`[ProjectManager] Auto-dispatch failed for ${nextTicket.id}:`, (error as Error).message);
       }
     }

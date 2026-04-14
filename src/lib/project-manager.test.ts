@@ -635,6 +635,43 @@ describe('ProjectManager integration', () => {
       expect(startSpy).toHaveBeenCalledWith('t-ready');
     });
 
+    it('autoDispatchTick reverts the column move when startSupervisor rejects (bug #2)', async () => {
+      const { pm, store } = makePm({
+        autoDispatch: true,
+        tickets: [{ id: 't-ready', columnId: 'backlog' }],
+      });
+      // startSupervisor throws — e.g., preflight failed, hook failed, etc.
+      const startSpy = vi.fn(async () => {
+        throw new Error('preflight failed');
+      });
+      (pm as unknown as { startSupervisor: typeof startSpy }).startSupervisor = startSpy;
+
+      await internals(pm).autoDispatchTick();
+
+      // The pre-move put it in 'in_progress'; the failure must revert so the
+      // next tick can re-pick it from the backlog.
+      const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't-ready')!;
+      expect(ticket.columnId).toBe('backlog');
+    });
+
+    it('autoDispatchTick skips tickets whose supervisor is already active', async () => {
+      const { pm, machines } = makePm({
+        autoDispatch: true,
+        // A ticket in backlog that is ALSO active (e.g., leftover from a half-failed cycle).
+        tickets: [{ id: 't-ready', columnId: 'backlog' }],
+      });
+      const mach = internals(pm).createMachine('t-ready');
+      internals(pm).machines.set('t-ready', { machine: mach, sandbox: null });
+      machines.get('t-ready')!.phase = 'running';
+
+      const startSpy = vi.fn(async () => {});
+      (pm as unknown as { startSupervisor: typeof startSpy }).startSupervisor = startSpy;
+
+      await internals(pm).autoDispatchTick();
+
+      expect(startSpy).not.toHaveBeenCalled();
+    });
+
     it('autoDispatchTick does not dispatch when global MAX_CONCURRENT_SUPERVISORS is reached', async () => {
       const { pm, machines } = makePm({
         autoDispatch: true,
