@@ -33,7 +33,8 @@ Phases must be executed in order; within a phase, fixes are independent unless n
 | 6 | 6.3 Sprint C1 — Pure helper extraction | ✅ | (continuation-prompt + session-history) |
 | 6 | 6.3 Sprint C2a — getGitFilesChanged extraction | ✅ | (git-files-changed.ts) |
 | 6 | 6.3 Sprint C2b — Artifacts fs extraction | ✅ | (artifacts-fs.ts) |
-| 6 | 6.3 Sprint C2c — SupervisorOrchestrator state/lifecycle | 🟡 | In progress |
+| 6 | 6.3 Sprint C2c.1 — Orchestrator scaffold + config/concurrency | ✅ | (supervisor-orchestrator.ts) |
+| 6 | 6.3 Sprint C2c.2+ — Lifecycle/state migration | 🟡 | In progress |
 
 ### Deep testing wave (follow-up to Phase 5)
 
@@ -726,24 +727,66 @@ Completed increments (each commit ships regression-green with `npm test`):
   `openArtifactExternal`) → `src/lib/artifacts-fs.ts`. Also consolidated the
   path-traversal guard into `resolveArtifactPath` so it's enforced
   uniformly. Delta: -53 lines.
+- **C2c.1 — SupervisorOrchestrator scaffold + config/concurrency:** Created
+  `src/main/supervisor-orchestrator.ts` with the narrow-adapter pattern
+  (`SupervisorOrchestratorStore` + `SupervisorOrchestratorHost` + deps) used
+  by `PageManager`/`InboxManager`/`MilestoneManager`. `ProjectManager` now
+  instantiates `this.supervisors` in its constructor and delegates:
+  effective-config accessors (`getEffectiveStallTimeout`,
+  `getEffectiveMaxConcurrent`, `getEffectiveMaxRetries`,
+  `getEffectiveMaxContinuationTurns`, `getColumnMaxConcurrent`),
+  `isAutoDispatchEnabled`, `canStartSupervisor`, and `getActiveWipTickets`.
+  Operational constants (`MAX_CONCURRENT_SUPERVISORS`, `STALL_TIMEOUT_MS`,
+  `RETRY_BASE_DELAY_MS`, etc.) moved to the orchestrator module and re-imported
+  into PM. Temporary `countActiveMachines` / `countActiveMachinesInColumn`
+  host callbacks bridge to PM's `machines` map while it still lives there
+  — these disappear once the map moves in a later step. Tests gained an
+  `orch(pm)` helper pointing at `pm.supervisors`; the three `canStartSupervisor`
+  sites migrated off the `internals()` cast. Added two new tests
+  (`getEffectiveMaxConcurrent clamps`, `isAutoDispatchEnabled reads project
+  flag before FLEET.md override`) that construct their assertions entirely
+  through the orchestrator, proving the pattern. Delta: -80 lines from PM,
+  +180 lines in the new file. Test count 831 → 833.
 
-Cumulative file-size delta: `project-manager.ts` 3937 → 3474 lines (-463).
-Test count 812 → 831.
+Cumulative file-size delta: `project-manager.ts` 3937 → 3391 lines (-546).
+Test count 812 → 833.
 
-Remaining execution plan:
+Remaining execution plan (tests migrate off the `internals()` cast onto
+`orch(pm)` as each piece moves; the cast shrinks every commit and disappears
+entirely after the last step):
 
-- **C2c:** Create `SupervisorOrchestrator` class in-file first, then move to
-  `src/main/supervisor-orchestrator.ts`. Transfer: `machines` map, `tasks` map,
-  `ticketLocks`, timers, `ensureSupervisorInfra`, `startSupervisor`,
-  `stopSupervisor`, `sendSupervisorMessage`, `resetSupervisorSession`,
-  `cleanupTicketWorkspace`, `handleMachineRunEnd`, `startMachineRun`,
-  `sendUserRunMessage`, retry queue, stall detection, auto-dispatch,
-  `handleClientToolCall`, `validateDispatchPreflight`, concurrency helpers,
-  `resolveTicketWorkspace`, `ensureSession`. Task: the 105-test `internals()`
-  accessor in `project-manager.test.ts` will need to reach through a
-  `pm.supervisors` reference or the class will need to keep bound delegators
-  that forward to `this.supervisors.*`. Delegator approach is cheaper and
-  preserves every test.
+- **C2c.2 — Retry queue + stall detection.** Move `scheduleRetry`,
+  `handleRetryFired`, `cancelRetry`, `cancelAllRetries`,
+  `startStallDetection`, `checkForStalledSupervisors`. Needs temporary host
+  callbacks for `ensureSupervisorInfra` and `startMachineRun` (which still
+  live on PM at this point) — both disappear in C2c.4.
+- **C2c.3 — `createMachine` + `handleMachineRunEnd` + `withTicketLock` +
+  `machines`/`runStartedAt` ownership transfer.** Biggest single state move:
+  the `machines` Map relocates into the orchestrator. The temporary
+  `countActiveMachines*` host callbacks from C2c.1 get deleted (orchestrator
+  iterates its own map). Test sites that currently do
+  `internals(pm).machines.set(...)` switch to `orch(pm).getMachineEntry(id)` /
+  a test-only `seedMachineEntry` helper.
+- **C2c.4 — `ensureSupervisorInfra` + `resolveTicketWorkspace` +
+  `ensureSession` + `getCodeTabWsUrl`.** Provisioning core. Removes the
+  host callback added in C2c.2.
+- **C2c.5 — `startSupervisor` / `stopSupervisor` /
+  `sendSupervisorMessage` / `sendUserRunMessage` / `resetSupervisorSession` /
+  `startMachineRun` / `cleanupTicketWorkspace`.** Lifecycle entry points.
+  PM's IPC handlers now forward directly to `this.supervisors.*`.
+- **C2c.6 — Task persistence + `restorePersistedTasks` +
+  `startupTerminalCleanup` + `resetStaleTicketStates` + `stopTask` +
+  `removeTask` + `tasks` map.** The second state-ownership transfer.
+- **C2c.7 — `validateDispatchPreflight` + `autoDispatchTick` +
+  `setAutoDispatch` + `getFilesChanged`.** Auto-dispatch loop.
+- **C2c.8 — `handleClientToolCall` (~450 lines) + `buildFullSupervisorPrompt`
+  + `buildRunVariables` + `buildContinuationPromptForTicket`.** Largest
+  single move by line count, but fully self-contained once the host
+  surface exposes `getPagesByProject` / `readPageContent` / milestone
+  accessors.
+- **C2c.9 — Final cleanup.** Delete the `internals()` cast entirely and
+  split `project-manager.test.ts` into a slimmer PM test plus a new
+  `supervisor-orchestrator.test.ts` for the migrated coverage.
 - **C3:** Thin `ProjectManager` to a coordinator that owns project CRUD +
   `getProjectDirPath` + pipeline helpers, and delegates via references to
   `PageManager`, `InboxManager`, `MilestoneManager`, `SupervisorOrchestrator`.
@@ -795,7 +838,10 @@ built the safety net it needs.
 | 6.3 Sprint C1 Pure helpers | 6 | S | ✅ | continuation-prompt + session-history + 18 tests |
 | 6.3 Sprint C2a getGitFilesChanged | 6 | M | ✅ | 330 lines → pure lib |
 | 6.3 Sprint C2b Artifacts fs | 6 | S | ✅ | listArtifacts + readArtifact + openArtifactExternal |
-| 6.3 Sprint C2c–C4 Orchestrator split | 6 | XL | 🟡 | ~2000 lines remaining; C2a–b landed as safety net |
+| 6.3 Sprint C2c.1 Orchestrator scaffold | 6 | M | ✅ | config/concurrency/WIP + 2 new tests through `orch(pm)` |
+| 6.3 Sprint C2c.2–9 Lifecycle/state migration | 6 | XL | 🟡 | retry queue, machines map, ensureSupervisorInfra, tool dispatch, handlers |
+| 6.3 Sprint C3 PM → coordinator | 6 | L | ⏳ | depends on C2c |
+| 6.3 Sprint C4 IPC handler split | 6 | M | ⏳ | depends on C3 |
 | T1–T11 deep testing wave (follow-up) | 5+ | L | ✅ | +92 tests, 7 bugs fixed |
 
 ---

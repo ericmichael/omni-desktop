@@ -24,16 +24,17 @@ import type {
   IMachineFactory,
   ISandbox,
   ISandboxFactory,
-  ITicketMachine,
   IStore,
+  ITicketMachine,
   IWorkflowLoader,
   MachineCallbacks,
   ProjectManagerDeps,
 } from '@/lib/project-manager-deps';
+import type { WorkflowConfig } from '@/lib/workflow';
 import { ProjectManager } from '@/main/project-manager';
+import type { SupervisorOrchestrator } from '@/main/supervisor-orchestrator';
 import type { TicketPhase } from '@/shared/ticket-phase';
 import type { AgentProcessStatus, Pipeline, Project, StoreData, Ticket, TicketId, WithTimestamp } from '@/shared/types';
-import type { WorkflowConfig } from '@/lib/workflow';
 
 // ---------------------------------------------------------------------------
 // Store stub
@@ -378,7 +379,6 @@ const internals = (
   ) => Promise<void>;
   checkForStalledSupervisors: () => void;
   autoDispatchTick: () => Promise<void>;
-  canStartSupervisor: (projectId?: string, columnId?: string) => boolean;
   handleClientToolCall: (
     ticketId: TicketId,
     fn: string,
@@ -388,6 +388,16 @@ const internals = (
   validateDispatchPreflight: (ticketId: TicketId) => string | null;
   ensureSupervisorInfra: (ticketId: TicketId) => Promise<unknown>;
 } => pm as unknown as never;
+
+/**
+ * Clean handle on the extracted SupervisorOrchestrator. Prefer this over the
+ * `internals()` cast above — anything reachable through `orch()` is a real
+ * method on a real class with a real dep contract. As Sprint C2c migrates
+ * more behavior into `SupervisorOrchestrator`, `internals()` shrinks and
+ * eventually disappears.
+ */
+const orch = (pm: ProjectManager): SupervisorOrchestrator =>
+  (pm as unknown as { supervisors: SupervisorOrchestrator }).supervisors;
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -701,7 +711,7 @@ describe('ProjectManager integration', () => {
         machines.get(`t${i}` as TicketId)!.phase = 'running';
       }
 
-      expect(internals(pm).canStartSupervisor('proj-1', 'in_progress')).toBe(false);
+      expect(orch(pm).canStartSupervisor('proj-1', 'in_progress')).toBe(false);
     });
 
     it('canStartSupervisor returns false when per-column limit is reached (Wave 1 fix 4.5)', () => {
@@ -719,14 +729,37 @@ describe('ProjectManager integration', () => {
       machines.get('t1')!.phase = 'running';
 
       // Second ticket in same column — should be blocked by per-column limit
-      expect(internals(pm).canStartSupervisor('proj-1', 'in_progress')).toBe(false);
+      expect(orch(pm).canStartSupervisor('proj-1', 'in_progress')).toBe(false);
       // But a different column (no limit) is still OK
-      expect(internals(pm).canStartSupervisor('proj-1', 'review')).toBe(true);
+      expect(orch(pm).canStartSupervisor('proj-1', 'review')).toBe(true);
     });
 
     it('canStartSupervisor returns true when slots are available', () => {
       const { pm } = makePm({ tickets: [{ id: 't1' }] });
-      expect(internals(pm).canStartSupervisor('proj-1', 'in_progress')).toBe(true);
+      expect(orch(pm).canStartSupervisor('proj-1', 'in_progress')).toBe(true);
+    });
+
+    it('getEffectiveMaxConcurrent clamps FLEET.md override to global limit', () => {
+      const { pm } = makePm(
+        { tickets: [] },
+        { workflowConfig: { supervisor: { max_concurrent: 99 } } }
+      );
+      // Global MAX_CONCURRENT_SUPERVISORS is 5; override clamped down.
+      expect(orch(pm).getEffectiveMaxConcurrent('proj-1')).toBe(5);
+    });
+
+    it('isAutoDispatchEnabled reads project flag before FLEET.md override', () => {
+      const { pm: pmOn } = makePm({ autoDispatch: true });
+      expect(orch(pmOn).isAutoDispatchEnabled('proj-1')).toBe(true);
+
+      const { pm: pmWorkflow } = makePm(
+        { autoDispatch: false },
+        { workflowConfig: { supervisor: { auto_dispatch: true } } }
+      );
+      expect(orch(pmWorkflow).isAutoDispatchEnabled('proj-1')).toBe(true);
+
+      const { pm: pmOff } = makePm({ autoDispatch: false });
+      expect(orch(pmOff).isAutoDispatchEnabled('proj-1')).toBe(false);
     });
 
     it('autoDispatchTick skips projects with auto-dispatch disabled', async () => {

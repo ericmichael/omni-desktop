@@ -13,7 +13,6 @@ import { buildAutopilotVariables, buildInteractiveVariables } from '@/lib/client
 import { buildContinuationPrompt } from '@/lib/continuation-prompt';
 import { getGitFilesChanged, resolveWorkspaceMergeBase, resolveWorktreeMergeBase } from '@/lib/git-files-changed';
 import { INBOX_SWEEP_INTERVAL_MS } from '@/lib/inbox-expiry';
-import { getMimeType, isTextMime } from '@/lib/mime-types';
 import type {
   IMachineFactory,
   ISandbox,
@@ -24,7 +23,7 @@ import type {
 import { runMigrations as runSchemaMigrations } from '@/lib/project-migrations';
 import type { FailureClass } from '@/lib/run-end';
 import { decideRunEndAction } from '@/lib/run-end';
-import { parseSessionHistoryRows, type HistoryRow } from '@/lib/session-history';
+import { type HistoryRow,parseSessionHistoryRows } from '@/lib/session-history';
 import type { TemplateVariables } from '@/lib/template';
 import { hasTemplateExpressions, renderTemplate } from '@/lib/template';
 import { decideWorktreeAction } from '@/lib/worktree';
@@ -36,6 +35,17 @@ import { MilestoneManager, type MilestoneManagerStore } from '@/main/milestone-m
 import { PageManager, type PageManagerStore } from '@/main/page-manager';
 import { createPlatformClient } from '@/main/platform-mode';
 import type { ProcessManager } from '@/main/process-manager';
+import {
+  MAX_CONCURRENT_SUPERVISORS,
+  MAX_CONTINUATION_TURNS,
+  MAX_RETRY_ATTEMPTS,
+  MAX_RETRY_BACKOFF_MS,
+  RETRY_BASE_DELAY_MS,
+  STALL_CHECK_INTERVAL_MS,
+  STALL_TIMEOUT_MS,
+  STREAMING_STALL_TIMEOUT_MS,
+  SupervisorOrchestrator,
+} from '@/main/supervisor-orchestrator';
 import type { SupervisorContext } from '@/main/supervisor-prompt';
 import { buildSupervisorPrompt } from '@/main/supervisor-prompt';
 import type { ClientFunctionResponder } from '@/main/ticket-machine';
@@ -46,7 +56,6 @@ import type { IIpcListener } from '@/shared/ipc-listener';
 import { DEFAULT_PIPELINE, SIMPLE_PIPELINE } from '@/shared/pipeline-defaults';
 import { getLocalWorkspaceDir, requireLocalWorkspaceDir } from '@/shared/project-source';
 import type { TicketPhase } from '@/shared/ticket-phase';
-import { isActivePhase } from '@/shared/ticket-phase';
 import type {
   AgentProcessStatus,
   ArtifactFileContent,
@@ -294,39 +303,11 @@ const removeWorktree = async (workspaceDir: string, worktreePath: string, worktr
 
 // #endregion
 
-// --- Symphony-inspired operational constants ---
-
-/** Maximum number of supervisors that can run concurrently across all projects. */
-const MAX_CONCURRENT_SUPERVISORS = 5;
-
-/** If no supervisor message is received within this window, the run is considered stalled. */
-const STALL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-
-/**
- * Safety-net timeout for streaming phases (running/continuing). Normally the
- * primary stall check skips streaming phases because legitimate long tool calls
- * can silence the message stream for minutes. But if the supervisor crashes
- * silently — no exit event, no run_end, no error — a streaming machine would
- * hang forever. This backstop fires only after a very long silence.
- */
-const STREAMING_STALL_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
-
-/** How often to check for stalled supervisors. */
-const STALL_CHECK_INTERVAL_MS = 30_000; // 30 seconds
-
-/** Base delay for exponential backoff on failure-driven retries. */
-const RETRY_BASE_DELAY_MS = 10_000;
-
-/** Maximum backoff delay for failure retries. */
-const MAX_RETRY_BACKOFF_MS = 5 * 60 * 1000; // 5 minutes
-
-/** Maximum retry attempts before giving up. */
-const MAX_RETRY_ATTEMPTS = 5;
-
-/** Maximum continuation turns (successful run → re-check → continue). */
-const MAX_CONTINUATION_TURNS = 10;
-
-// classifyRunEndReason, decideRunEndAction, isWorkComplete imported from @/lib/run-end
+// Operational constants (MAX_CONCURRENT_SUPERVISORS, STALL_TIMEOUT_MS, etc.)
+// now live in `@/main/supervisor-orchestrator` and are re-imported at the top
+// of this file while the retry / stall / auto-dispatch methods still reside
+// in ProjectManager. classifyRunEndReason / decideRunEndAction imported from
+// @/lib/run-end.
 
 export class ProjectManager {
   private tasks = new Map<TaskId, { task: Task; sandbox: ISandbox }>();
@@ -363,6 +344,13 @@ export class ProjectManager {
 
   /** Milestone lifecycle owner — CRUD, completedAt stamping, orphan-ticket clear, branch fallback. */
   private milestones: MilestoneManager;
+
+  /**
+   * Supervisor lifecycle owner. Sprint C2c is extracting methods into this
+   * class in regression-green increments. Currently owns effective-config,
+   * concurrency checks, active-WIP roll-up, and `isAutoDispatchEnabled`.
+   */
+  private supervisors: SupervisorOrchestrator;
 
   constructor(
     arg: { store: Store<StoreData>; sendToWindow: ProjectManager['sendToWindow']; processManager?: ProcessManager },
@@ -442,6 +430,39 @@ export class ProjectManager {
       store: milestoneStore,
       newId: () => nanoid(),
       now: () => Date.now(),
+    });
+
+    this.supervisors = new SupervisorOrchestrator({
+      store: {
+        getTickets: () => this.getTickets(),
+        getProjects: () => this.getProjects(),
+        getWipLimit: () => this.store.get('wipLimit') ?? 3,
+      },
+      host: {
+        countActiveMachines: () => {
+          let count = 0;
+          for (const [, entry] of this.machines) {
+            if (entry.machine.isActive()) {
+              count++;
+            }
+          }
+          return count;
+        },
+        countActiveMachinesInColumn: (projectId, columnId) => {
+          let count = 0;
+          for (const [ticketId, entry] of this.machines) {
+            if (!entry.machine.isActive()) {
+              continue;
+            }
+            const ticket = this.getTicketById(ticketId);
+            if (ticket && ticket.projectId === projectId && ticket.columnId === columnId) {
+              count++;
+            }
+          }
+          return count;
+        },
+      },
+      workflowLoader: this.workflowLoader,
     });
 
     this.startStallDetection();
@@ -1119,51 +1140,20 @@ export class ProjectManager {
 
   // #endregion
 
-  // #region Effective config (FLEET.md overrides → defaults)
+  // #region Effective config — delegated to SupervisorOrchestrator
 
-  /**
-   * Get the effective stall timeout for a project, respecting FLEET.md overrides.
-   */
-  private getEffectiveStallTimeout = (projectId: ProjectId): number => {
-    return this.workflowLoader.getConfig(projectId).supervisor?.stall_timeout_ms ?? STALL_TIMEOUT_MS;
-  };
+  private getEffectiveStallTimeout = (projectId: ProjectId): number =>
+    this.supervisors.getEffectiveStallTimeout(projectId);
 
-  /**
-   * Get the effective max concurrent supervisors, respecting FLEET.md overrides.
-   * Uses the minimum of global limit and per-project limit (if set).
-   */
-  private getEffectiveMaxConcurrent = (projectId?: ProjectId): number => {
-    if (!projectId) {
-      return MAX_CONCURRENT_SUPERVISORS;
-    }
-    const projectLimit = this.workflowLoader.getConfig(projectId).supervisor?.max_concurrent;
-    if (projectLimit !== undefined) {
-      return Math.min(projectLimit, MAX_CONCURRENT_SUPERVISORS);
-    }
-    return MAX_CONCURRENT_SUPERVISORS;
-  };
+  private getEffectiveMaxRetries = (projectId: ProjectId): number => this.supervisors.getEffectiveMaxRetries(projectId);
 
-  private getEffectiveMaxRetries = (projectId: ProjectId): number => {
-    return this.workflowLoader.getConfig(projectId).supervisor?.max_retry_attempts ?? MAX_RETRY_ATTEMPTS;
-  };
+  private getEffectiveMaxContinuationTurns = (projectId: ProjectId): number =>
+    this.supervisors.getEffectiveMaxContinuationTurns(projectId);
 
-  private getEffectiveMaxContinuationTurns = (projectId: ProjectId): number => {
-    return this.workflowLoader.getConfig(projectId).supervisor?.max_continuation_turns ?? MAX_CONTINUATION_TURNS;
-  };
+  private isAutoDispatchEnabled = (projectId: ProjectId): boolean => this.supervisors.isAutoDispatchEnabled(projectId);
 
-  /** Check if auto-dispatch is enabled for a project (FLEET.md or project setting). */
-  private isAutoDispatchEnabled = (projectId: ProjectId): boolean => {
-    const project = this.getProjects().find((p) => p.id === projectId);
-    if (project?.autoDispatch) {
-      return true;
-    }
-    return this.workflowLoader.getConfig(projectId).supervisor?.auto_dispatch ?? false;
-  };
-
-  /** Get per-column concurrency limit from FLEET.md config. */
-  private getColumnMaxConcurrent = (projectId: ProjectId, columnId: ColumnId): number | undefined => {
-    return this.workflowLoader.getConfig(projectId).supervisor?.max_concurrent_by_column?.[columnId];
-  };
+  private getColumnMaxConcurrent = (projectId: ProjectId, columnId: ColumnId): number | undefined =>
+    this.supervisors.getColumnMaxConcurrent(projectId, columnId);
 
   // #endregion
 
@@ -1232,9 +1222,9 @@ export class ProjectManager {
 
   // #endregion
 
-  // #region Concurrency control (Symphony-inspired)
+  // #region Concurrency control — delegated to SupervisorOrchestrator
 
-  /** Returns the number of supervisors currently active. */
+  /** Number of supervisors currently active across all projects. */
   private getRunningSupervisorCount = (): number => {
     let count = 0;
     for (const [, entry] of this.machines) {
@@ -1245,7 +1235,7 @@ export class ProjectManager {
     return count;
   };
 
-  /** Count active supervisors in a specific column for a project. */
+  /** Active supervisors in a specific column for a project. Used by validateDispatchPreflight. */
   private getRunningSupervisorCountByColumn = (projectId: ProjectId, columnId: ColumnId): number => {
     let count = 0;
     for (const [ticketId, entry] of this.machines) {
@@ -1261,27 +1251,14 @@ export class ProjectManager {
   };
 
   /**
-   * Get all tickets with active supervisor phases across all projects.
+   * All tickets with active supervisor phases across every project.
    * Used for WIP limit enforcement and the "Right Now" view.
    */
-  getActiveWipTickets = (): Ticket[] => {
-    return this.getTickets().filter((t) => t.phase && isActivePhase(t.phase));
-  };
+  getActiveWipTickets = (): Ticket[] => this.supervisors.getActiveWipTickets();
 
-  /** Check if a new supervisor can be started within global and per-column concurrency limits. */
-  private canStartSupervisor = (projectId?: ProjectId, columnId?: ColumnId): boolean => {
-    if (this.getRunningSupervisorCount() >= MAX_CONCURRENT_SUPERVISORS) {
-      return false;
-    }
-    // Check per-column limit if applicable
-    if (projectId && columnId) {
-      const columnLimit = this.getColumnMaxConcurrent(projectId, columnId);
-      if (columnLimit !== undefined) {
-        return this.getRunningSupervisorCountByColumn(projectId, columnId) < columnLimit;
-      }
-    }
-    return true;
-  };
+  /** Check if a new supervisor can be started within global + per-column concurrency limits. */
+  private canStartSupervisor = (projectId?: ProjectId, columnId?: ColumnId): boolean =>
+    this.supervisors.canStartSupervisor(projectId, columnId);
 
   // #endregion
 
