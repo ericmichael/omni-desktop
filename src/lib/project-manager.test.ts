@@ -357,19 +357,11 @@ const makePm = (
 };
 
 // Gain access to ProjectManager private methods still not yet migrated to
-// SupervisorOrchestrator. Shrinks each sprint; disappears after C2c.9.
-// Machine state, retry/stall, infra provisioning, lifecycle entry points,
-// task persistence, validateDispatchPreflight, and the auto-dispatch loop
-// have all migrated — reach those via `orch(pm)` instead.
+// SupervisorOrchestrator. After C2c.8 only `ensureSupervisorInfra` remains;
+// disappears entirely in C2c.9. Everything else is reachable via `orch(pm)`.
 const internals = (
   pm: ProjectManager
 ): {
-  handleClientToolCall: (
-    ticketId: TicketId,
-    fn: string,
-    args: Record<string, unknown>,
-    respond: (ok: boolean, result?: Record<string, unknown>) => void
-  ) => void;
   ensureSupervisorInfra: (ticketId: TicketId) => Promise<unknown>;
 } => pm as unknown as never;
 
@@ -840,14 +832,9 @@ describe('ProjectManager integration', () => {
       toolArgs: Record<string, unknown>
     ): { ok: boolean; result?: Record<string, unknown> } => {
       let captured: { ok: boolean; result?: Record<string, unknown> } = { ok: false };
-      internals(pm).handleClientToolCall(
-        ticketId,
-        'tool.call',
-        { tool: toolName, arguments: toolArgs },
-        (ok, result) => {
-          captured = { ok, result };
-        }
-      );
+      orch(pm).handleClientToolCall(ticketId, 'tool.call', { tool: toolName, arguments: toolArgs }, (ok, result) => {
+        captured = { ok, result };
+      });
       return captured;
     };
 
@@ -879,7 +866,7 @@ describe('ProjectManager integration', () => {
     it('responds with ok=false when tool name is missing', () => {
       const { pm } = makePm({ tickets: [{ id: 't1' }] });
       let captured: { ok: boolean; result?: Record<string, unknown> } = { ok: true };
-      internals(pm).handleClientToolCall('t1', 'tool.call', {}, (ok, result) => {
+      orch(pm).handleClientToolCall('t1', 'tool.call', {}, (ok, result) => {
         captured = { ok, result };
       });
       expect(captured.ok).toBe(false);
