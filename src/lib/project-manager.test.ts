@@ -356,21 +356,10 @@ const makePm = (
   return { pm, store, machines, send, workflow, machineFactory };
 };
 
-// Gain access to ProjectManager private methods still not yet migrated to
-// SupervisorOrchestrator. After C2c.8 only `ensureSupervisorInfra` remains;
-// disappears entirely in C2c.9. Everything else is reachable via `orch(pm)`.
-const internals = (
-  pm: ProjectManager
-): {
-  ensureSupervisorInfra: (ticketId: TicketId) => Promise<unknown>;
-} => pm as unknown as never;
-
 /**
- * Clean handle on the extracted SupervisorOrchestrator. Prefer this over the
- * `internals()` cast above — anything reachable through `orch()` is a real
- * method on a real class with a real dep contract. As Sprint C2c migrates
- * more behavior into `SupervisorOrchestrator`, `internals()` shrinks and
- * eventually disappears.
+ * Clean handle on the extracted SupervisorOrchestrator. Every supervisor-
+ * lifecycle behavior the tests assert against is a real public method on the
+ * orchestrator with a real dep contract — no private-method casts left.
  */
 const orch = (pm: ProjectManager): SupervisorOrchestrator =>
   (pm as unknown as { supervisors: SupervisorOrchestrator }).supervisors;
@@ -1291,7 +1280,7 @@ describe('ProjectManager integration', () => {
       const mock = machines.get('t1')!;
       mock.phase = 'running';
 
-      const result = (await internals(pm).ensureSupervisorInfra('t1')) as {
+      const result = (await orch(pm).ensureSupervisorInfra('t1')) as {
         machine: unknown;
         sandbox: unknown;
       };
@@ -1324,7 +1313,7 @@ describe('ProjectManager integration', () => {
       const mock = machines.get('t1')!;
       mock.phase = 'ready';
 
-      await internals(pm).ensureSupervisorInfra('t1');
+      await orch(pm).ensureSupervisorInfra('t1');
       expect(mock.createSession).not.toHaveBeenCalled();
     });
 
@@ -1350,7 +1339,7 @@ describe('ProjectManager integration', () => {
       // build a fresh sandbox. Our mock factory never fires onStatusChange,
       // so sandboxReady hangs until the 120s safety timeout rejects it.
       // Run the call + timer advance concurrently so the rejection flows.
-      const ensurePromise = internals(pm)
+      const ensurePromise = orch(pm)
         .ensureSupervisorInfra('t1')
         .catch(() => 'rejected');
       await vi.advanceTimersByTimeAsync(121_000);
