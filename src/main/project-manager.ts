@@ -32,7 +32,7 @@ import { InboxManager, type InboxManagerStore } from '@/main/inbox-manager';
 import { MilestoneManager, type MilestoneManagerStore } from '@/main/milestone-manager';
 import { PageManager, type PageManagerStore } from '@/main/page-manager';
 import type { ProcessManager } from '@/main/process-manager';
-import { MAX_CONCURRENT_SUPERVISORS, SupervisorOrchestrator } from '@/main/supervisor-orchestrator';
+import { SupervisorOrchestrator } from '@/main/supervisor-orchestrator';
 import type { SupervisorContext } from '@/main/supervisor-prompt';
 import { buildSupervisorPrompt } from '@/main/supervisor-prompt';
 import { ensureDirectory, getDefaultWorkspaceDir, getOmniConfigDir, getProjectDir } from '@/main/util';
@@ -104,9 +104,6 @@ export class ProjectManager {
 
   /** Workflow file loader (FLEET.md) per project. */
   private workflowLoader: IWorkflowLoader;
-
-  /** Interval handle for auto-dispatch polling. */
-  private autoDispatchTimer: ReturnType<typeof setInterval> | null = null;
 
   /** Interval handle for inbox expiry sweep. */
   private inboxSweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -231,8 +228,11 @@ export class ProjectManager {
         updateTicket: (ticketId, patch) => this.updateTicket(ticketId, patch),
         isTerminalColumn: (projectId, columnId) => this.isTerminalColumn(projectId, columnId),
         getColumn: (projectId, columnId) => this.getColumn(projectId, columnId),
+        getPipeline: (projectId) => this.getPipeline(projectId),
         resolveTicketBranch: (ticket) => this.resolveTicketBranch(ticket),
-        validateDispatchPreflight: (ticketId) => this.validateDispatchPreflight(ticketId),
+        getNextTicket: (projectId) => this.getNextTicket(projectId),
+        moveTicketToColumn: (ticketId, columnId) => this.moveTicketToColumn(ticketId, columnId),
+        updateProject: (projectId, patch) => this.updateProject(projectId, patch),
         buildRunVariables: (ticketId, mode) => this.buildRunVariables(ticketId, mode),
         buildContinuationPromptForTicket: (ticketId, turn, maxTurns) =>
           this.buildContinuationPromptForTicket(ticketId, turn, maxTurns),
@@ -247,7 +247,7 @@ export class ProjectManager {
     });
 
     this.supervisors.startStallDetection();
-    this.startAutoDispatch();
+    this.supervisors.startAutoDispatch();
     this.startInboxSweep();
   }
 
@@ -743,62 +743,21 @@ export class ProjectManager {
 
   // #endregion
 
-  // #region Effective config — delegated to SupervisorOrchestrator
-
-  private getEffectiveStallTimeout = (projectId: ProjectId): number =>
-    this.supervisors.getEffectiveStallTimeout(projectId);
-
-  private getEffectiveMaxRetries = (projectId: ProjectId): number => this.supervisors.getEffectiveMaxRetries(projectId);
-
-  private getEffectiveMaxContinuationTurns = (projectId: ProjectId): number =>
-    this.supervisors.getEffectiveMaxContinuationTurns(projectId);
-
-  private isAutoDispatchEnabled = (projectId: ProjectId): boolean => this.supervisors.isAutoDispatchEnabled(projectId);
-
-  private getColumnMaxConcurrent = (projectId: ProjectId, columnId: ColumnId): number | undefined =>
-    this.supervisors.getColumnMaxConcurrent(projectId, columnId);
-
-  // #endregion
+  // Effective-config accessors (getEffectiveStallTimeout, getEffectiveMaxRetries,
+  // getEffectiveMaxContinuationTurns, isAutoDispatchEnabled, getColumnMaxConcurrent)
+  // moved into SupervisorOrchestrator (C2c.1/C2c.7). PM no longer needs the
+  // delegators since every caller (retry/stall/autoDispatch/preflight) is now
+  // inside the orchestrator too.
 
   // Stall detection now lives in SupervisorOrchestrator (C2c.2).
 
   // #region Concurrency control — delegated to SupervisorOrchestrator
-
-  /** Number of supervisors currently active across all projects. */
-  private getRunningSupervisorCount = (): number => {
-    let count = 0;
-    for (const [, entry] of this.supervisors.machines) {
-      if (entry.machine.isActive()) {
-        count++;
-      }
-    }
-    return count;
-  };
-
-  /** Active supervisors in a specific column for a project. Used by validateDispatchPreflight. */
-  private getRunningSupervisorCountByColumn = (projectId: ProjectId, columnId: ColumnId): number => {
-    let count = 0;
-    for (const [ticketId, entry] of this.supervisors.machines) {
-      if (!entry.machine.isActive()) {
-        continue;
-      }
-      const ticket = this.getTicketById(ticketId);
-      if (ticket && ticket.projectId === projectId && ticket.columnId === columnId) {
-        count++;
-      }
-    }
-    return count;
-  };
 
   /**
    * All tickets with active supervisor phases across every project.
    * Used for WIP limit enforcement and the "Right Now" view.
    */
   getActiveWipTickets = (): Ticket[] => this.supervisors.getActiveWipTickets();
-
-  /** Check if a new supervisor can be started within global + per-column concurrency limits. */
-  private canStartSupervisor = (projectId?: ProjectId, columnId?: ColumnId): boolean =>
-    this.supervisors.canStartSupervisor(projectId, columnId);
 
   // #endregion
 
@@ -1413,69 +1372,9 @@ export class ProjectManager {
 
   private getCodeTabWsUrl = (ticketId: TicketId): string | null => this.supervisors.getCodeTabWsUrl(ticketId);
 
-  /**
-   * Dispatch preflight: validate that we can start a supervisor for this ticket.
-   * Returns an error string if validation fails, or null if OK.
-   */
-  private validateDispatchPreflight = (ticketId: TicketId): string | null => {
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket) {
-      return `Ticket not found: ${ticketId}`;
-    }
-
-    const project = this.getProjects().find((p) => p.id === ticket.projectId);
-    if (!project) {
-      return `Project not found: ${ticket.projectId}`;
-    }
-
-    // Personal / context-only projects have no source and cannot run supervisors:
-    // there's no workspace to mount and no workflow to execute. Reject explicitly
-    // so the user sees a clear message instead of a downstream mount failure.
-    if (!project.source) {
-      return `Project "${project.label}" has no repository — supervisors require a workspace or git remote`;
-    }
-    if (project.source.kind === 'local' && !project.source.workspaceDir) {
-      return `Project "${project.label}" has no workspace directory configured`;
-    }
-    if (project.source.kind === 'git-remote' && !project.source.repoUrl) {
-      return `Project "${project.label}" has no repository URL configured`;
-    }
-
-    if (this.isTerminalColumn(ticket.projectId, ticket.columnId)) {
-      return `Ticket is in terminal column "${ticket.columnId}" — cannot start supervisor`;
-    }
-
-    // Check machine to prevent duplicate dispatch — allow starting from 'ready' (manual session)
-    const machineEntry = this.supervisors.machines.get(ticketId);
-    if (machineEntry) {
-      const phase = machineEntry.machine.getPhase();
-      if (phase !== 'idle' && phase !== 'ready' && phase !== 'error' && phase !== 'completed') {
-        return `Ticket ${ticketId} is already active (phase: ${phase})`;
-      }
-    }
-
-    if (!this.canStartSupervisor(ticket.projectId, ticket.columnId)) {
-      const columnLimit = this.getColumnMaxConcurrent(ticket.projectId, ticket.columnId);
-      if (columnLimit !== undefined) {
-        const columnCount = this.getRunningSupervisorCountByColumn(ticket.projectId, ticket.columnId);
-        if (columnCount >= columnLimit) {
-          return `Per-column concurrency limit reached for "${ticket.columnId}" (${columnCount}/${columnLimit})`;
-        }
-      }
-      return `Concurrency limit reached (${MAX_CONCURRENT_SUPERVISORS} supervisors running). Stop another supervisor first.`;
-    }
-
-    // WIP limit check (cognitive limit, cross-project)
-    const wipLimit = this.store.get('wipLimit') ?? 3;
-    const activeWip = this.getActiveWipTickets();
-    // Don't count the ticket itself if it's already active (e.g. retrying)
-    const wipCount = activeWip.filter((t) => t.id !== ticketId).length;
-    if (wipCount >= wipLimit) {
-      return `WIP_LIMIT:${wipLimit}`;
-    }
-
-    return null;
-  };
+  // validateDispatchPreflight + auto-dispatch loop now live in
+  // SupervisorOrchestrator (C2c.7). PM keeps `setAutoDispatch` as a thin
+  // delegator since the IPC handler `project:set-auto-dispatch` calls it.
 
   /**
    * Build the full supervisor prompt, incorporating FLEET.md custom prompt if present.
@@ -1776,94 +1675,16 @@ export class ProjectManager {
 
   // #endregion
 
-  // #region Auto-dispatch (Symphony-inspired polling)
+  // #region Auto-dispatch — delegated to SupervisorOrchestrator (C2c.7)
 
-  /** Auto-dispatch poll interval — check every 30s for eligible tickets. */
-  private static AUTO_DISPATCH_INTERVAL_MS = 30_000;
-
-  private startAutoDispatch = (): void => {
-    this.autoDispatchTimer = setInterval(() => this.autoDispatchTick(), ProjectManager.AUTO_DISPATCH_INTERVAL_MS);
-  };
-
-  /**
-   * Set auto-dispatch on/off for a project. Persists the setting on the project.
-   */
-  setAutoDispatch = (projectId: ProjectId, enabled: boolean): void => {
-    this.updateProject(projectId, { autoDispatch: enabled });
-    if (enabled) {
-      // Fire an immediate tick when enabling
-      void this.autoDispatchTick();
-    }
-  };
-
-  /**
-   * One auto-dispatch tick: for each project with auto-dispatch enabled,
-   * find the next eligible ticket and start its supervisor.
-   */
-  private autoDispatchTick = async (): Promise<void> => {
-    const projects = this.getProjects();
-
-    for (const project of projects) {
-      if (!this.isAutoDispatchEnabled(project.id)) {
-        continue;
-      }
-
-      // Check if we have global capacity
-      if (this.getRunningSupervisorCount() >= MAX_CONCURRENT_SUPERVISORS) {
-        break;
-      }
-
-      // Find the next eligible ticket (priority-sorted, not blocked, in backlog)
-      const nextTicket = this.getNextTicket(project.id);
-      if (!nextTicket) {
-        continue;
-      }
-
-      // Skip if already active
-      const machineEntry = this.supervisors.machines.get(nextTicket.id);
-      if (machineEntry && machineEntry.machine.isActive()) {
-        continue;
-      }
-
-      // Check global + per-column WIP limits
-      if (!this.canStartSupervisor(project.id, nextTicket.columnId)) {
-        continue;
-      }
-
-      // Move from first column to second column (first active column) to start work
-      const pipeline = this.getPipeline(project.id);
-      const firstColumnId = this.getFirstColumnId(project.id);
-      const terminalColumnId = this.getTerminalColumnId(project.id);
-      const firstActiveColumn = pipeline.columns.find((c) => c.id !== firstColumnId && c.id !== terminalColumnId);
-      const originalColumnId = nextTicket.columnId;
-      if (firstActiveColumn) {
-        this.moveTicketToColumn(nextTicket.id, firstActiveColumn.id);
-      }
-
-      try {
-        console.log(
-          `[ProjectManager] Auto-dispatching ticket ${nextTicket.id} ("${nextTicket.title}") for project ${project.label}`
-        );
-        await this.startSupervisor(nextTicket.id);
-      } catch (error) {
-        // Revert the column move so the ticket is re-picked on the next tick
-        // instead of being stranded in column 2 with no running supervisor.
-        if (firstActiveColumn && originalColumnId !== firstActiveColumn.id) {
-          this.moveTicketToColumn(nextTicket.id, originalColumnId);
-        }
-        console.warn(`[ProjectManager] Auto-dispatch failed for ${nextTicket.id}:`, (error as Error).message);
-      }
-    }
-  };
+  setAutoDispatch = (projectId: ProjectId, enabled: boolean): void =>
+    this.supervisors.setAutoDispatch(projectId, enabled);
 
   // #endregion
 
   exit = async (): Promise<void> => {
     this.supervisors.stopStallDetection();
-    if (this.autoDispatchTimer) {
-      clearInterval(this.autoDispatchTimer);
-      this.autoDispatchTimer = null;
-    }
+    this.supervisors.stopAutoDispatch();
     if (this.inboxSweepTimer) {
       clearInterval(this.inboxSweepTimer);
       this.inboxSweepTimer = null;

@@ -39,7 +39,8 @@ Phases must be executed in order; within a phase, fixes are independent unless n
 | 6     | 6.3 Sprint C2c.4 — ensureSupervisorInfra + resolveTicketWorkspace + session + codetab  | ✅     | (supervisor-orchestrator.ts + worktree-ops.ts) |
 | 6     | 6.3 Sprint C2c.5 — Lifecycle entry points (start/stop/send/reset/cleanup)              | ✅     | (supervisor-orchestrator.ts)                   |
 | 6     | 6.3 Sprint C2c.6 — Task map + persistence + restore + startup cleanup                  | ✅     | (supervisor-orchestrator.ts)                   |
-| 6     | 6.3 Sprint C2c.7+ — autodispatch + preflight + tool dispatch + prompt assembly         | 🟡     | In progress                                    |
+| 6     | 6.3 Sprint C2c.7 — validateDispatchPreflight + auto-dispatch loop                      | ✅     | (supervisor-orchestrator.ts)                   |
+| 6     | 6.3 Sprint C2c.8+ — handleClientToolCall + supervisor prompt assembly                  | 🟡     | In progress                                    |
 
 ### Deep testing wave (follow-up to Phase 5)
 
@@ -855,6 +856,31 @@ Completed increments (each commit ships regression-green with `npm test`):
   `orch(pm)`; their entries dropped from the `internals()` cast type along
   with `checkForStalledSupervisors`. The cast surface shrank from 13 methods
   to 10. Test count: 833 (no new tests — migration only).
+- **C2c.7 — Dispatch preflight + auto-dispatch loop:** Moved
+  `validateDispatchPreflight`, `autoDispatchTick`, `setAutoDispatch`,
+  `startAutoDispatch`, `stopAutoDispatch`, and the
+  `AUTO_DISPATCH_INTERVAL_MS` constant into `SupervisorOrchestrator`,
+  along with the `autoDispatchTimer` field and the per-column /
+  global concurrency-count helpers used by preflight. The host
+  surface gained `getNextTicket`, `getPipeline`, `moveTicketToColumn`,
+  and `updateProject`; `host.validateDispatchPreflight` was removed
+  (orchestrator's `startSupervisor` now calls its own preflight
+  directly). PM dropped its private `getRunningSupervisorCount` /
+  `getRunningSupervisorCountByColumn` / `canStartSupervisor`
+  helpers, the `getEffective*` / `isAutoDispatchEnabled` /
+  `getColumnMaxConcurrent` delegators (every caller is now inside the
+  orchestrator), and the `MAX_CONCURRENT_SUPERVISORS` import. PM's
+  constructor delegates to `this.supervisors.startAutoDispatch()`;
+  `exit()` calls `this.supervisors.stopAutoDispatch()`. PM keeps a
+  one-line `setAutoDispatch` delegator for the
+  `project:set-auto-dispatch` IPC handler. Five test sites that
+  stubbed `pm.startSupervisor` migrated to stub
+  `orch(pm).startSupervisor`; sixteen `internals(pm).validateDispatchPreflight`
+  + five `internals(pm).autoDispatchTick` references migrated to
+  `orch(pm).*`. The `internals()` cast type shrank from 4 methods to
+  2 (kept: `handleClientToolCall`, `ensureSupervisorInfra`).
+  `project-manager.ts` dropped 2102 → 1923 lines (-179). Test count:
+  833 (no behavior change — move only).
 - **C2c.6 — Task map + persistence + boot recovery:** Moved the
   `tasks` Map, `persistTask` / `removePersistedTask` / `getPersistedTasks`
   / `setPersistedTasks` helpers, `restorePersistedTasks` (public),
@@ -896,15 +922,13 @@ Completed increments (each commit ships regression-green with `npm test`):
   `orch(pm).ensureSupervisorInfra` instead. `project-manager.ts` dropped
   2519 → 2292 lines (-227). Test count: 833 (no behavior change — move only).
 
-Cumulative file-size delta: `project-manager.ts` 3937 → 2102 lines (-1835).
+Cumulative file-size delta: `project-manager.ts` 3937 → 1923 lines (-2014).
 Test count 812 → 833.
 
 Remaining execution plan (tests migrate off the `internals()` cast onto
 `orch(pm)` as each piece moves; the cast shrinks every commit and disappears
 entirely after the last step):
 
-- **C2c.7 — `validateDispatchPreflight` + `autoDispatchTick` +
-  `setAutoDispatch` + `getFilesChanged`.** Auto-dispatch loop.
 - \*\*C2c.8 — `handleClientToolCall` (~450 lines) + `buildFullSupervisorPrompt`
   - `buildRunVariables` + `buildContinuationPromptForTicket`.\*\* Largest
     single move by line count, but fully self-contained once the host
@@ -970,7 +994,8 @@ built the safety net it needs.
 | 6.3 Sprint C2c.4 Infra provisioning + worktree-ops extraction  | 6     | L    | ✅     | -508 PM lines; new worktree-ops.ts; SupervisorTaskRegistry adapter |
 | 6.3 Sprint C2c.5 Lifecycle entry points                        | 6     | L    | ✅     | -227 PM lines; start/stop/send/reset/cleanup all in orchestrator   |
 | 6.3 Sprint C2c.6 Task map + persistence                        | 6     | L    | ✅     | -190 PM lines; tasks map + restore + startup cleanup migrated      |
-| 6.3 Sprint C2c.7–9 Remaining state migration                   | 6     | L    | 🟡     | autodispatch, preflight, tool dispatch, prompt assembly            |
+| 6.3 Sprint C2c.7 Preflight + auto-dispatch                     | 6     | M    | ✅     | -179 PM lines; preflight + autoDispatchTick + setAutoDispatch      |
+| 6.3 Sprint C2c.8–9 Final state migration                       | 6     | L    | 🟡     | tool dispatch, prompt assembly, internals() cast removal           |
 | 6.3 Sprint C3 PM → coordinator                                 | 6     | L    | ⏳     | depends on C2c                                                     |
 | 6.3 Sprint C4 IPC handler split                                | 6     | M    | ⏳     | depends on C3                                                      |
 | T1–T11 deep testing wave (follow-up)                           | 5+    | L    | ✅     | +92 tests, 7 bugs fixed                                            |

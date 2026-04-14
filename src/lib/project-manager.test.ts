@@ -358,19 +358,18 @@ const makePm = (
 
 // Gain access to ProjectManager private methods still not yet migrated to
 // SupervisorOrchestrator. Shrinks each sprint; disappears after C2c.9.
-// Machine state (machines map, runStartedAt, createMachine, handleMachineRunEnd)
-// migrated in C2c.3 — reach those via `orch(pm)` instead.
+// Machine state, retry/stall, infra provisioning, lifecycle entry points,
+// task persistence, validateDispatchPreflight, and the auto-dispatch loop
+// have all migrated — reach those via `orch(pm)` instead.
 const internals = (
   pm: ProjectManager
 ): {
-  autoDispatchTick: () => Promise<void>;
   handleClientToolCall: (
     ticketId: TicketId,
     fn: string,
     args: Record<string, unknown>,
     respond: (ok: boolean, result?: Record<string, unknown>) => void
   ) => void;
-  validateDispatchPreflight: (ticketId: TicketId) => string | null;
   ensureSupervisorInfra: (ticketId: TicketId) => Promise<unknown>;
 } => pm as unknown as never;
 
@@ -751,9 +750,9 @@ describe('ProjectManager integration', () => {
       });
       // Stub startSupervisor to avoid real sandbox construction
       const startSpy = vi.fn(async () => {});
-      (pm as unknown as { startSupervisor: typeof startSpy }).startSupervisor = startSpy;
+      (orch(pm) as unknown as { startSupervisor: typeof startSpy }).startSupervisor = startSpy;
 
-      await internals(pm).autoDispatchTick();
+      await orch(pm).autoDispatchTick();
 
       expect(startSpy).not.toHaveBeenCalled();
     });
@@ -764,9 +763,9 @@ describe('ProjectManager integration', () => {
         tickets: [{ id: 't-ready', columnId: 'backlog' }],
       });
       const startSpy = vi.fn(async () => {});
-      (pm as unknown as { startSupervisor: typeof startSpy }).startSupervisor = startSpy;
+      (orch(pm) as unknown as { startSupervisor: typeof startSpy }).startSupervisor = startSpy;
 
-      await internals(pm).autoDispatchTick();
+      await orch(pm).autoDispatchTick();
 
       expect(startSpy).toHaveBeenCalledWith('t-ready');
     });
@@ -780,9 +779,9 @@ describe('ProjectManager integration', () => {
       const startSpy = vi.fn(async () => {
         throw new Error('preflight failed');
       });
-      (pm as unknown as { startSupervisor: typeof startSpy }).startSupervisor = startSpy;
+      (orch(pm) as unknown as { startSupervisor: typeof startSpy }).startSupervisor = startSpy;
 
-      await internals(pm).autoDispatchTick();
+      await orch(pm).autoDispatchTick();
 
       // The pre-move put it in 'in_progress'; the failure must revert so the
       // next tick can re-pick it from the backlog.
@@ -801,9 +800,9 @@ describe('ProjectManager integration', () => {
       machines.get('t-ready')!.phase = 'running';
 
       const startSpy = vi.fn(async () => {});
-      (pm as unknown as { startSupervisor: typeof startSpy }).startSupervisor = startSpy;
+      (orch(pm) as unknown as { startSupervisor: typeof startSpy }).startSupervisor = startSpy;
 
-      await internals(pm).autoDispatchTick();
+      await orch(pm).autoDispatchTick();
 
       expect(startSpy).not.toHaveBeenCalled();
     });
@@ -822,9 +821,9 @@ describe('ProjectManager integration', () => {
         machines.get(`busy-${i}` as TicketId)!.phase = 'running';
       }
       const startSpy = vi.fn(async () => {});
-      (pm as unknown as { startSupervisor: typeof startSpy }).startSupervisor = startSpy;
+      (orch(pm) as unknown as { startSupervisor: typeof startSpy }).startSupervisor = startSpy;
 
-      await internals(pm).autoDispatchTick();
+      await orch(pm).autoDispatchTick();
 
       expect(startSpy).not.toHaveBeenCalled();
     });
@@ -1179,13 +1178,13 @@ describe('ProjectManager integration', () => {
 
     it('rejects an unknown ticket', () => {
       const { pm } = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
-      const err = internals(pm).validateDispatchPreflight('nope' as TicketId);
+      const err = orch(pm).validateDispatchPreflight('nope' as TicketId);
       expect(err).toMatch(/not found/i);
     });
 
     it('rejects a project with no source', () => {
       const { pm } = makePm({ tickets: [{ id: 't1' }] });
-      const err = internals(pm).validateDispatchPreflight('t1');
+      const err = orch(pm).validateDispatchPreflight('t1');
       expect(err).toMatch(/no repository/i);
     });
 
@@ -1194,7 +1193,7 @@ describe('ProjectManager integration', () => {
         source: { kind: 'local', workspaceDir: '' },
         tickets: [{ id: 't1' }],
       });
-      const err = internals(pm).validateDispatchPreflight('t1');
+      const err = orch(pm).validateDispatchPreflight('t1');
       expect(err).toMatch(/workspace directory/i);
     });
 
@@ -1203,7 +1202,7 @@ describe('ProjectManager integration', () => {
         source: { kind: 'git-remote', repoUrl: '' },
         tickets: [{ id: 't1' }],
       });
-      const err = internals(pm).validateDispatchPreflight('t1');
+      const err = orch(pm).validateDispatchPreflight('t1');
       expect(err).toMatch(/repository url/i);
     });
 
@@ -1212,7 +1211,7 @@ describe('ProjectManager integration', () => {
         source: LOCAL_SOURCE,
         tickets: [{ id: 't1', columnId: 'done' }],
       });
-      const err = internals(pm).validateDispatchPreflight('t1');
+      const err = orch(pm).validateDispatchPreflight('t1');
       expect(err).toMatch(/terminal column/i);
     });
 
@@ -1222,7 +1221,7 @@ describe('ProjectManager integration', () => {
       orch(pm).machines.set('t1', { machine: mach, sandbox: null });
       machines.get('t1')!.phase = 'running';
 
-      const err = internals(pm).validateDispatchPreflight('t1');
+      const err = orch(pm).validateDispatchPreflight('t1');
       expect(err).toMatch(/already active/i);
     });
 
@@ -1233,7 +1232,7 @@ describe('ProjectManager integration', () => {
 
       for (const phase of ['idle', 'ready', 'error', 'completed'] as TicketPhase[]) {
         machines.get('t1')!.phase = phase;
-        expect(internals(pm).validateDispatchPreflight('t1')).toBeNull();
+        expect(orch(pm).validateDispatchPreflight('t1')).toBeNull();
       }
     });
 
@@ -1247,7 +1246,7 @@ describe('ProjectManager integration', () => {
         orch(pm).machines.set(`t${i}` as TicketId, { machine: m, sandbox: null });
         machines.get(`t${i}` as TicketId)!.phase = 'running';
       }
-      const err = internals(pm).validateDispatchPreflight('t5');
+      const err = orch(pm).validateDispatchPreflight('t5');
       expect(err).toMatch(/concurrency limit/i);
     });
 
@@ -1260,7 +1259,7 @@ describe('ProjectManager integration', () => {
           { id: 't-active', phase: 'running' }, // isActivePhase → counts toward WIP
         ],
       });
-      const err = internals(pm).validateDispatchPreflight('t1');
+      const err = orch(pm).validateDispatchPreflight('t1');
       expect(err).toBe('WIP_LIMIT:1');
     });
 
@@ -1271,12 +1270,12 @@ describe('ProjectManager integration', () => {
         tickets: [{ id: 't1', phase: 'running' }],
       });
       // t1 retrying its own dispatch: WIP count excludes self, so it's allowed.
-      expect(internals(pm).validateDispatchPreflight('t1')).toBeNull();
+      expect(orch(pm).validateDispatchPreflight('t1')).toBeNull();
     });
 
     it('returns null on the happy path', () => {
       const { pm } = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
-      expect(internals(pm).validateDispatchPreflight('t1')).toBeNull();
+      expect(orch(pm).validateDispatchPreflight('t1')).toBeNull();
     });
   });
 
