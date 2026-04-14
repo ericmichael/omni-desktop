@@ -515,6 +515,12 @@ export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, va
   const styles = useStyles();
   const surfaceSrc = activeApp === 'code' ? codeServerSrc : activeApp === 'desktop' ? vncSrc : activeApp === 'browser' ? previewUrl : undefined;
 
+  useEffect(() => {
+    if ((activeApp === 'code' && !codeServerSrc) || (activeApp === 'desktop' && !vncSrc)) {
+      onActiveAppChange?.('chat');
+    }
+  }, [activeApp, codeServerSrc, vncSrc, onActiveAppChange]);
+
   const [dockTarget, setDockTarget] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => {
     if (!dockTargetId) {

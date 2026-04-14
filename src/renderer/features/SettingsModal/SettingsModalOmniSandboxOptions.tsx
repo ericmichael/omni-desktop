@@ -160,8 +160,8 @@ return;
   }, []);
 
   const currentBackend = store.sandboxBackend ?? 'none';
-  const showRebuild = (import.meta.env.MODE === 'development' || store.previewFeatures)
-    && (currentBackend === 'docker' || currentBackend === 'podman');
+  const showSandboxSection = isEnterprise || store.previewFeatures || import.meta.env.MODE === 'development';
+  const showRebuild = showSandboxSection && (currentBackend === 'docker' || currentBackend === 'podman');
 
   return (
     <div className={styles.root}>
@@ -175,23 +175,27 @@ return;
         </FormField>
       </Card>
 
-      <SectionLabel className={styles.sectionLabelSpaced}>Sandbox</SectionLabel>
-      <Card>
-        <FormField label="Sandbox backend">
-          <Select value={currentBackend} onChange={onChangeSandboxBackend}>
-            {availableBackends.map((b) => (
-              <option key={b} value={b}>{BACKEND_LABELS[b]}</option>
-            ))}
-          </Select>
-        </FormField>
-        {showRebuild && (
-          <FormField label={`Rebuild ${currentBackend === 'podman' ? 'Podman' : 'Docker'} image`}>
-            <Button size="sm" variant="ghost" onClick={rebuildDockerImage} isDisabled={isRebuilding}>
-              {isRebuilding ? 'Rebuilding\u2026' : 'Rebuild'}
-            </Button>
-          </FormField>
-        )}
-      </Card>
+      {showSandboxSection && (
+        <>
+          <SectionLabel className={styles.sectionLabelSpaced}>Sandbox</SectionLabel>
+          <Card>
+            <FormField label="Sandbox backend">
+              <Select value={currentBackend} onChange={onChangeSandboxBackend}>
+                {availableBackends.map((b) => (
+                  <option key={b} value={b}>{BACKEND_LABELS[b]}</option>
+                ))}
+              </Select>
+            </FormField>
+            {showRebuild && (
+              <FormField label={`Rebuild ${currentBackend === 'podman' ? 'Podman' : 'Docker'} image`}>
+                <Button size="sm" variant="ghost" onClick={rebuildDockerImage} isDisabled={isRebuilding}>
+                  {isRebuilding ? 'Rebuilding\u2026' : 'Rebuild'}
+                </Button>
+              </FormField>
+            )}
+          </Card>
+        </>
+      )}
 
       <SectionLabel className={styles.sectionLabelSpaced}>Display</SectionLabel>
       <Card>

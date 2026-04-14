@@ -1,9 +1,10 @@
 import { makeStyles, tokens } from '@fluentui/react-components';
 import { Eye20Filled } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 
 import { Checkbox, FormField } from '@/renderer/ds';
+import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 
 const useStyles = makeStyles({
@@ -20,13 +21,17 @@ const useStyles = makeStyles({
 export const SettingsModalPreviewFeatures = memo(() => {
   const styles = useStyles();
   const { previewFeatures } = useStore(persistedStoreApi.$atom);
+  const [isEnterprise, setIsEnterprise] = useState(false);
+  useEffect(() => {
+    emitter.invoke('platform:is-enterprise').then(setIsEnterprise);
+  }, []);
   const onChange = useCallback((checked: boolean) => {
     persistedStoreApi.setKey('previewFeatures', checked);
-    if (!checked) {
-      // Reset to chat mode when disabling preview features to avoid being stuck on a hidden tab
-      persistedStoreApi.setKey('layoutMode', 'chat');
+    // GA users should not run with any sandbox backend. Enterprise policy drives its own backend.
+    if (!checked && !isEnterprise) {
+      persistedStoreApi.setKey('sandboxBackend', 'none');
     }
-  }, []);
+  }, [isEnterprise]);
 
   return (
     <div className={styles.root}>
@@ -41,8 +46,7 @@ export const SettingsModalPreviewFeatures = memo(() => {
         <Checkbox checked={previewFeatures} onCheckedChange={onChange} />
       </FormField>
       <span className={styles.hint}>
-        Unlock experimental features such as Projects, Work, and Code tabs. These features are under active development and
-        may be unstable or change without notice.
+        Unlock experimental features that are under active development and may be unstable or change without notice.
       </span>
     </div>
   );

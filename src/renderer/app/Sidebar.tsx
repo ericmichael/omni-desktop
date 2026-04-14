@@ -27,8 +27,8 @@ const ALL_TABS: {
   pinBottom?: boolean;
 }[] = [
   { value: 'chat', label: 'Chat', icon: <Chat24Filled />, alwaysVisible: true },
-  { value: 'code', label: 'Code', icon: <Code24Regular /> },
-  { value: 'projects', label: 'Projects', icon: <Rocket24Filled /> },
+  { value: 'code', label: 'Code', icon: <Code24Regular />, alwaysVisible: true },
+  { value: 'projects', label: 'Projects', icon: <Rocket24Filled />, alwaysVisible: true },
   { value: 'dashboards', label: 'Dashboards', icon: <DataBarVertical24Regular />, enterprise: true },
   { value: 'settings', label: 'Settings', icon: <Settings24Filled />, alwaysVisible: true, pinBottom: true },
 ];
@@ -234,12 +234,9 @@ return true;
       if (t.enterprise) {
 return isEnterprise;
 }
-      if (t.value !== 'chat') {
-return import.meta.env.MODE === 'development' || store.previewFeatures;
-}
       return true;
     });
-  }, [store.previewFeatures, isEnterprise]);
+  }, [isEnterprise]);
 
   const topTabs = useMemo(() => visibleTabs.filter((t) => !t.pinBottom), [visibleTabs]);
   const bottomTabs = useMemo(() => visibleTabs.filter((t) => t.pinBottom), [visibleTabs]);

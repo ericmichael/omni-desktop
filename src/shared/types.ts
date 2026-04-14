@@ -200,8 +200,8 @@ export const schema: Schema<StoreData> = {
 
   layoutMode: {
     type: 'string',
-    enum: ['home', 'chat', 'code', 'projects'],
-    default: 'home',
+    enum: ['chat', 'code', 'projects', 'dashboards', 'settings', 'more'],
+    default: 'chat',
   },
   theme: {
     type: 'string',

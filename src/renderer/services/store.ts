@@ -122,8 +122,10 @@ const init = async () => {
   await persistedStoreApi.sync();
   const store = persistedStoreApi.get();
 
-  if (import.meta.env.MODE !== 'development' && !store.previewFeatures && store.layoutMode !== 'chat') {
-    await persistedStoreApi.setKey('layoutMode', 'chat');
+  // GA users (no preview features, no enterprise policy) must not run with any sandbox backend.
+  // Enterprise installs are identified by `sandboxProfiles` being populated from policy.
+  if (!store.previewFeatures && !store.sandboxProfiles && store.sandboxBackend && store.sandboxBackend !== 'none') {
+    await persistedStoreApi.setKey('sandboxBackend', 'none');
   }
 
   // Migrate legacy layoutMode values to current valid modes

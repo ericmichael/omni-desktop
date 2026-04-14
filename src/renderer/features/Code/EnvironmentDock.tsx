@@ -147,6 +147,9 @@ return;
       {APP_ITEMS.map(({ app, label, Icon, availabilityKey }) => {
         const isActive = activeApp === app;
         const isAvailable = availabilityKey ? !!availability[availabilityKey] : true;
+        if (availabilityKey && !isAvailable) {
+          return null;
+        }
         return (
           <button
             key={app}
