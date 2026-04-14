@@ -1,5 +1,6 @@
 import c from 'ansi-colors';
 import { ipcMain } from 'electron';
+import { createWriteStream, type WriteStream } from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
 import { serializeError } from 'serialize-error';
@@ -10,12 +11,26 @@ import { OMNI_CODE_VERSION } from '@/lib/omni-version';
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { withResultAsync } from '@/lib/result';
 import { SimpleLogger } from '@/lib/simple-logger';
-import { getOmniRuntimeDir, getOmniVenvPath, getUVExecutablePath, isFile, pathExists } from '@/main/util';
+import {
+  getOmniLogsDir,
+  getOmniRuntimeDir,
+  getOmniVenvPath,
+  getUVExecutablePath,
+  isFile,
+  pathExists,
+} from '@/main/util';
 import type { IIpcListener } from '@/shared/ipc-listener';
 import type { IpcRendererEvents, LogEntry, OmniInstallProcessStatus, WithTimestamp } from '@/shared/types';
 
 const PYTHON_VERSION = '3.11';
 const EXTRA_INDEX_URL = 'https://pypi.fury.io/ericmichael/';
+const MAX_INSTALL_LOGS = 5;
+
+// Strip common ANSI CSI sequences so the on-disk log is readable in plain
+// text editors. Not exhaustive — just good enough for uv/pip progress output.
+// eslint-disable-next-line no-control-regex
+const ANSI_CSI_RE = /\x1b\[[0-9;]*[a-zA-Z]/g;
+const stripAnsi = (s: string): string => s.replace(ANSI_CSI_RE, '');
 
 export class OmniInstallManager {
   private status: WithTimestamp<OmniInstallProcessStatus>;
@@ -27,6 +42,8 @@ export class OmniInstallManager {
   private cols: number | undefined;
   private rows: number | undefined;
   private isCancellationRequested: boolean;
+  private installLogStream: WriteStream | null = null;
+  private installLogPath: string | null = null;
 
   constructor(arg: {
     ipcLogger: OmniInstallManager['ipcLogger'];
@@ -39,11 +56,66 @@ export class OmniInstallManager {
     this.commandRunner = new CommandRunner();
     this.status = { type: 'uninitialized', timestamp: Date.now() };
     this.log = new SimpleLogger((entry) => {
-      this.ipcRawOutput(entry.message);
+      this.emitOutput(entry.message);
       console[entry.level](entry.message);
     });
     this.isCancellationRequested = false;
   }
+
+  private emitOutput = (data: string): void => {
+    this.ipcRawOutput(data);
+    if (this.installLogStream) {
+      this.installLogStream.write(stripAnsi(data));
+    }
+  };
+
+  private rotateInstallLogs = async (logsDir: string): Promise<void> => {
+    try {
+      const entries = await fs.readdir(logsDir);
+      const installLogs = entries.filter((f) => f.startsWith('omni-install-') && f.endsWith('.log')).sort();
+      const keep = MAX_INSTALL_LOGS - 1;
+      const toDelete = installLogs.slice(0, Math.max(0, installLogs.length - keep));
+      await Promise.all(toDelete.map((f) => fs.unlink(path.join(logsDir, f)).catch(() => undefined)));
+    } catch {
+      // Logs dir may not exist yet on first run — nothing to rotate.
+    }
+  };
+
+  private openInstallLog = async (): Promise<void> => {
+    try {
+      const logsDir = getOmniLogsDir();
+      await fs.mkdir(logsDir, { recursive: true });
+      await this.rotateInstallLogs(logsDir);
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      const logPath = path.join(logsDir, `omni-install-${ts}.log`);
+      const stream = createWriteStream(logPath, { flags: 'a' });
+      stream.write(`=== Omni Code install log ${new Date().toISOString()} ===\n`);
+      stream.write(`platform=${process.platform} arch=${process.arch} node=${process.version}\n`);
+      stream.write(`runtimeDir=${getOmniRuntimeDir()}\n`);
+      stream.write(`venvPath=${getOmniVenvPath()}\n`);
+      stream.write(`uvPath=${getUVExecutablePath()}\n`);
+      stream.write(`userProfile=${process.env.USERPROFILE ?? process.env.HOME ?? '<unset>'}\n\n`);
+      this.installLogStream = stream;
+      this.installLogPath = logPath;
+      this.log.info(c.gray(`Install log: ${logPath}\r\n`));
+    } catch (err) {
+      // Never let logging setup block the install itself.
+      console.error('Failed to open install log:', err);
+      this.installLogStream = null;
+      this.installLogPath = null;
+    }
+  };
+
+  private closeInstallLog = (): void => {
+    if (this.installLogStream) {
+      try {
+        this.installLogStream.end();
+      } catch {
+        // swallow — stream may already be closed
+      }
+      this.installLogStream = null;
+    }
+  };
 
   private runCommand = async (
     command: string,
@@ -66,7 +138,7 @@ export class OmniInstallManager {
         },
         {
           onData: (data) => {
-            this.ipcRawOutput(data);
+            this.emitOutput(data);
             process.stdout.write(data);
           },
         }
@@ -124,7 +196,10 @@ export class OmniInstallManager {
       this.log.error(c.red(`Failed to install Python: ${result.error.message}\r\n`));
       this.updateStatus({
         type: 'error',
-        error: { message: 'Failed to install Python', context: serializeError(result.error) },
+        error: {
+          message: `Failed to install Python (uv python install: ${result.error.message})`,
+          context: serializeError(result.error),
+        },
       });
       return 'error';
     }
@@ -144,21 +219,35 @@ export class OmniInstallManager {
     this.log.error(c.red(`Failed to install Python: ${retryResult.error.message}\r\n`));
     this.updateStatus({
       type: 'error',
-      error: { message: 'Failed to install Python', context: serializeError(retryResult.error) },
+      error: {
+        message: `Failed to install Python (uv python install --reinstall: ${retryResult.error.message})`,
+        context: serializeError(retryResult.error),
+      },
     });
     return 'error';
   };
 
   private cleanVenvDir = async (venvPath: string, force: boolean): Promise<void> => {
+    const tryRm = async (): Promise<void> => {
+      try {
+        await fs.rm(venvPath, { recursive: true, force: true });
+      } catch (err) {
+        // Surface to the install log so dirty-dir failures stop being invisible.
+        // We don't rethrow: uv venv will fail with its own message if the dir
+        // is still dirty, and that message is more informative than ours.
+        this.log.warn(c.yellow(`Failed to remove existing venv dir at ${venvPath}: ${(err as Error).message}\r\n`));
+      }
+    };
+
     if (force) {
-      await fs.rm(venvPath, { recursive: true, force: true }).catch(() => undefined);
+      await tryRm();
       return;
     }
 
     const activatePath = path.join(venvPath, process.platform === 'win32' ? 'Scripts' : 'bin', 'activate');
     const isValidVenv = await isFile(activatePath);
     if (!isValidVenv && (await pathExists(venvPath))) {
-      await fs.rm(venvPath, { recursive: true, force: true }).catch(() => undefined);
+      await tryRm();
     }
   };
 
@@ -170,6 +259,11 @@ export class OmniInstallManager {
   ): Promise<'success' | 'canceled' | 'error'> => {
     await this.cleanVenvDir(venvPath, !!repair);
 
+    // --link-mode=copy sidesteps two Windows failure modes seen on unsigned
+    // builds: (1) antivirus briefly locking the managed python.exe while uv
+    // tries to hardlink it into the venv, and (2) hardlinks silently failing
+    // across reparse points (e.g. OneDrive-redirected %APPDATA%). Costs ~30MB
+    // of disk per venv in exchange for reliability.
     const venvArgs = [
       'venv',
       '--relocatable',
@@ -179,6 +273,8 @@ export class OmniInstallManager {
       PYTHON_VERSION,
       '--python-preference',
       'only-managed',
+      '--link-mode',
+      'copy',
       venvPath,
     ];
 
@@ -195,7 +291,10 @@ export class OmniInstallManager {
       this.log.error(c.red(`Failed to create virtual environment: ${result.error.message}\r\n`));
       this.updateStatus({
         type: 'error',
-        error: { message: 'Failed to create virtual environment', context: serializeError(result.error) },
+        error: {
+          message: `Failed to create virtual environment at ${venvPath} (uv venv: ${result.error.message})`,
+          context: serializeError(result.error),
+        },
       });
       return 'error';
     }
@@ -214,7 +313,10 @@ export class OmniInstallManager {
     this.log.error(c.red(`Failed to create virtual environment: ${retryResult.error.message}\r\n`));
     this.updateStatus({
       type: 'error',
-      error: { message: 'Failed to create virtual environment', context: serializeError(retryResult.error) },
+      error: {
+        message: `Failed to create virtual environment at ${venvPath} after retry (uv venv: ${retryResult.error.message})`,
+        context: serializeError(retryResult.error),
+      },
     });
     return 'error';
   };
@@ -249,7 +351,10 @@ export class OmniInstallManager {
     this.log.error(c.red(`Failed to install omni-code: ${result.error.message}\r\n`));
     this.updateStatus({
       type: 'error',
-      error: { message: 'Failed to install omni-code', context: serializeError(result.error) },
+      error: {
+        message: `Failed to install omni-code==${OMNI_CODE_VERSION} (uv pip install: ${result.error.message})`,
+        context: serializeError(result.error),
+      },
     });
     return 'error';
   };
@@ -258,77 +363,113 @@ export class OmniInstallManager {
     this.isCancellationRequested = false;
     this.updateStatus({ type: 'starting' });
 
-    const uvPath = getUVExecutablePath();
+    await this.openInstallLog();
 
-    const uvPathCheck = await withResultAsync(async () => {
-      await fs.access(uvPath);
-      if (!(await isFile(uvPath))) {
-        throw new Error(`UV executable is not a file: ${uvPath}`);
-      }
-    });
+    try {
+      const uvPath = getUVExecutablePath();
 
-    if (uvPathCheck.isErr()) {
-      this.log.error(c.red(`Failed to access uv executable: ${uvPathCheck.error.message}\r\n`));
-      this.updateStatus({
-        type: 'error',
-        error: { message: 'Failed to access uv executable', context: serializeError(uvPathCheck.error) },
+      const uvPathCheck = await withResultAsync(async () => {
+        await fs.access(uvPath);
+        if (!(await isFile(uvPath))) {
+          throw new Error(`UV executable is not a file: ${uvPath}`);
+        }
       });
-      return;
+
+      if (uvPathCheck.isErr()) {
+        this.log.error(c.red(`Failed to access uv executable: ${uvPathCheck.error.message}\r\n`));
+        this.updateStatus({
+          type: 'error',
+          error: {
+            message: `Failed to access uv executable at ${uvPath}: ${uvPathCheck.error.message}`,
+            context: serializeError(uvPathCheck.error),
+          },
+        });
+        return;
+      }
+
+      await fs.mkdir(getOmniRuntimeDir(), { recursive: true });
+
+      if (this.commandRunner.isRunning()) {
+        this.commandRunner.kill();
+      }
+
+      // shell-env spawns a login shell to inherit PATH — a macOS-only workaround
+      // for GUI-launched apps. On Windows it's useless (and has been observed to
+      // hang or return garbage depending on COMSPEC / PowerShell policy), so skip it.
+      const inheritedShellEnv = process.platform === 'win32' ? {} : shellEnvSync();
+      const runProcessOptions = {
+        env: { ...process.env, ...DEFAULT_ENV, ...inheritedShellEnv } as Record<string, string>,
+        cwd: getOmniRuntimeDir(),
+      };
+
+      // Probe uv before committing to the install. If SmartScreen or antivirus
+      // is blocking the unsigned binary, this gives us a distinctive error up
+      // front instead of a confusing "venv creation failed" two steps later.
+      this.log.info(c.cyan('Verifying uv executable...\r\n'));
+      this.log.info(`> ${uvPath} --version\r\n`);
+      const uvProbe = await withResultAsync(() => this.runCommand(uvPath, ['--version'], runProcessOptions));
+      if (uvProbe.isErr()) {
+        this.log.error(c.red(`uv executable failed to run: ${uvProbe.error.message}\r\n`));
+        this.updateStatus({
+          type: 'error',
+          error: {
+            message: `uv executable at ${uvPath} failed to run — antivirus or SmartScreen may be blocking it (${uvProbe.error.message})`,
+            context: serializeError(uvProbe.error),
+          },
+        });
+        return;
+      }
+      if (uvProbe.value === 'canceled') {
+        this.log.warn(c.yellow('Installation canceled\r\n'));
+        this.updateStatus({ type: 'canceled' });
+        return;
+      }
+
+      this.updateStatus({ type: 'installing' });
+
+      const pythonInstallResult = await this.installPython(uvPath, runProcessOptions, repair);
+
+      if (pythonInstallResult === 'error') {
+        return;
+      }
+
+      if (pythonInstallResult === 'canceled') {
+        this.log.warn(c.yellow('Installation canceled\r\n'));
+        this.updateStatus({ type: 'canceled' });
+        return;
+      }
+
+      const venvPath = getOmniVenvPath();
+      const venvResult = await this.createVenv(uvPath, venvPath, runProcessOptions, repair);
+
+      if (venvResult === 'error') {
+        return;
+      }
+
+      if (venvResult === 'canceled') {
+        this.log.warn(c.yellow('Installation canceled\r\n'));
+        this.updateStatus({ type: 'canceled' });
+        return;
+      }
+
+      runProcessOptions.env.VIRTUAL_ENV = venvPath;
+      const installResult = await this.installOmniCode(uvPath, runProcessOptions, repair);
+
+      if (installResult === 'error') {
+        return;
+      }
+
+      if (installResult === 'canceled') {
+        this.log.warn(c.yellow('Installation canceled\r\n'));
+        this.updateStatus({ type: 'canceled' });
+        return;
+      }
+
+      this.updateStatus({ type: 'completed' });
+      this.log.info(c.green.bold('Installation completed successfully\r\n'));
+    } finally {
+      this.closeInstallLog();
     }
-
-    await fs.mkdir(getOmniRuntimeDir(), { recursive: true });
-
-    if (this.commandRunner.isRunning()) {
-      this.commandRunner.kill();
-    }
-
-    const runProcessOptions = {
-      env: { ...process.env, ...DEFAULT_ENV, ...shellEnvSync() } as Record<string, string>,
-      cwd: getOmniRuntimeDir(),
-    };
-
-    this.updateStatus({ type: 'installing' });
-
-    const pythonInstallResult = await this.installPython(uvPath, runProcessOptions, repair);
-
-    if (pythonInstallResult === 'error') {
-      return;
-    }
-
-    if (pythonInstallResult === 'canceled') {
-      this.log.warn(c.yellow('Installation canceled\r\n'));
-      this.updateStatus({ type: 'canceled' });
-      return;
-    }
-
-    const venvPath = getOmniVenvPath();
-    const venvResult = await this.createVenv(uvPath, venvPath, runProcessOptions, repair);
-
-    if (venvResult === 'error') {
-      return;
-    }
-
-    if (venvResult === 'canceled') {
-      this.log.warn(c.yellow('Installation canceled\r\n'));
-      this.updateStatus({ type: 'canceled' });
-      return;
-    }
-
-    runProcessOptions.env.VIRTUAL_ENV = venvPath;
-    const installResult = await this.installOmniCode(uvPath, runProcessOptions, repair);
-
-    if (installResult === 'error') {
-      return;
-    }
-
-    if (installResult === 'canceled') {
-      this.log.warn(c.yellow('Installation canceled\r\n'));
-      this.updateStatus({ type: 'canceled' });
-      return;
-    }
-
-    this.updateStatus({ type: 'completed' });
-    this.log.info(c.green.bold('Installation completed successfully\r\n'));
   };
 
   cancelInstall = async (): Promise<void> => {

@@ -26,11 +26,7 @@ import {
   isFile,
 } from '@/main/util';
 import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
-import {
-  registerConfigHandlers,
-  registerSkillsHandlers,
-  registerUtilHandlers,
-} from '@/shared/ipc-handlers';
+import { registerConfigHandlers, registerSkillsHandlers, registerUtilHandlers } from '@/shared/ipc-handlers';
 
 // Process-level crash visibility. Log only — do not exit. Killing the
 // Electron main process from an unhandled rejection would take the whole
@@ -121,8 +117,7 @@ const { cleanup: cleanupPlatform, refreshPolicy: refreshPlatformPolicy } = regis
 // Keep ProcessManager's platform client in sync with auth state.
 // On sign-in/sign-out, the platform client is updated so new sandboxes
 // use the correct mode without requiring an app restart.
-const platformFetchFn = (input: string | URL | Request, init?: RequestInit) =>
-  net.fetch(input as string, init);
+const platformFetchFn = (input: string | URL | Request, init?: RequestInit) => net.fetch(input as string, init);
 
 /** Attach onTokenRefresh so refreshed access tokens are persisted to the store. */
 const withTokenPersistence = (client: ReturnType<typeof createPlatformClient>) => {

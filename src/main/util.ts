@@ -50,6 +50,10 @@ export const getOmniRuntimeDir = (): string => {
   return path.join(app.getPath('userData'), 'omni');
 };
 
+export const getOmniLogsDir = (): string => {
+  return path.join(app.getPath('userData'), 'logs');
+};
+
 export const getOmniVenvPath = (): string => {
   return path.join(getOmniRuntimeDir(), '.venv');
 };
