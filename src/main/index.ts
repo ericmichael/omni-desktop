@@ -32,7 +32,13 @@ import {
   registerUtilHandlers,
 } from '@/shared/ipc-handlers';
 
-// Register artifact: protocol as privileged before app is ready
+// Register artifact: protocol as privileged before app is ready.
+// NOTE: `bypassCSP` is intentionally NOT set. Artifacts are agent-generated
+// content (Omni Code writes them into ticket workspaces) — bypassing CSP
+// would let a malicious or buggy artifact execute scripts with full renderer
+// privileges. The `protocol.handle` callback below sets a strict CSP header
+// on every artifact response that blocks script execution while still
+// allowing images, styles, fonts, and media to render.
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'artifact',
@@ -40,7 +46,6 @@ protocol.registerSchemesAsPrivileged([
       standard: true,
       secure: true,
       supportFetchAPI: true,
-      bypassCSP: true,
     },
   },
 ]);
@@ -222,7 +227,21 @@ app.on('ready', () => {
       if (!fullPath.startsWith(artifactsRoot)) {
         return new Response('Forbidden', { status: 403 });
       }
-      return await net.fetch(pathToFileURL(fullPath).toString());
+      const upstream = await net.fetch(pathToFileURL(fullPath).toString());
+      // Strict CSP: artifacts are agent-generated content, never trusted to
+      // run scripts. `default-src 'none'` blocks script execution by default;
+      // we explicitly re-enable images, styles, fonts, and media so typical
+      // markdown/HTML artifacts still render.
+      const headers = new Headers(upstream.headers);
+      headers.set(
+        'Content-Security-Policy',
+        "default-src 'none'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
+      );
+      return new Response(upstream.body, {
+        status: upstream.status,
+        statusText: upstream.statusText,
+        headers,
+      });
     } catch {
       return new Response('Not found', { status: 404 });
     }
