@@ -5,8 +5,8 @@ import React, { useCallback,useEffect, useMemo, useState } from 'react'
 import { getGreeting } from '@/renderer/omniagents-ui/greeting'
 
 import { ActivityGroup as ActivityGroupComponent } from './ActivityGroup'
-import type { ActivityGroupData } from './activityGroup'
-import { groupItems } from './activityGroup'
+import type { ActivityGroupData } from './activity-group'
+import { groupItems } from './activity-group'
 import {
   Artifact,
   ArtifactAction,

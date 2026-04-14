@@ -2,8 +2,8 @@ import { AnimatePresence,motion } from 'framer-motion'
 import { ChevronDownIcon } from 'lucide-react'
 import React, { useMemo, useState } from 'react'
 
-import type { ActivityGroupData } from './activityGroup'
-import { computeGroupSummary, formatGroupSummary } from './activityGroup'
+import type { ActivityGroupData } from './activity-group'
+import { computeGroupSummary, formatGroupSummary } from './activity-group'
 import { formatArgsPreview,ToolCard } from './MessageList'
 
 export function ActivityGroup({ group, statusText }: { group: ActivityGroupData; statusText?: string }) {
