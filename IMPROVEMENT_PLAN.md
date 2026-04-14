@@ -34,7 +34,8 @@ Phases must be executed in order; within a phase, fixes are independent unless n
 | 6 | 6.3 Sprint C2a — getGitFilesChanged extraction | ✅ | (git-files-changed.ts) |
 | 6 | 6.3 Sprint C2b — Artifacts fs extraction | ✅ | (artifacts-fs.ts) |
 | 6 | 6.3 Sprint C2c.1 — Orchestrator scaffold + config/concurrency | ✅ | (supervisor-orchestrator.ts) |
-| 6 | 6.3 Sprint C2c.2+ — Lifecycle/state migration | 🟡 | In progress |
+| 6 | 6.3 Sprint C2c.2 — Retry queue + stall detection | ✅ | (supervisor-orchestrator.ts) |
+| 6 | 6.3 Sprint C2c.3+ — Lifecycle/state migration | 🟡 | In progress |
 
 ### Deep testing wave (follow-up to Phase 5)
 
@@ -732,34 +733,40 @@ Completed increments (each commit ships regression-green with `npm test`):
   (`SupervisorOrchestratorStore` + `SupervisorOrchestratorHost` + deps) used
   by `PageManager`/`InboxManager`/`MilestoneManager`. `ProjectManager` now
   instantiates `this.supervisors` in its constructor and delegates:
-  effective-config accessors (`getEffectiveStallTimeout`,
-  `getEffectiveMaxConcurrent`, `getEffectiveMaxRetries`,
-  `getEffectiveMaxContinuationTurns`, `getColumnMaxConcurrent`),
-  `isAutoDispatchEnabled`, `canStartSupervisor`, and `getActiveWipTickets`.
-  Operational constants (`MAX_CONCURRENT_SUPERVISORS`, `STALL_TIMEOUT_MS`,
-  `RETRY_BASE_DELAY_MS`, etc.) moved to the orchestrator module and re-imported
-  into PM. Temporary `countActiveMachines` / `countActiveMachinesInColumn`
-  host callbacks bridge to PM's `machines` map while it still lives there
-  — these disappear once the map moves in a later step. Tests gained an
-  `orch(pm)` helper pointing at `pm.supervisors`; the three `canStartSupervisor`
-  sites migrated off the `internals()` cast. Added two new tests
-  (`getEffectiveMaxConcurrent clamps`, `isAutoDispatchEnabled reads project
-  flag before FLEET.md override`) that construct their assertions entirely
-  through the orchestrator, proving the pattern. Delta: -80 lines from PM,
-  +180 lines in the new file. Test count 831 → 833.
+  effective-config accessors, `isAutoDispatchEnabled`, `canStartSupervisor`,
+  and `getActiveWipTickets`. Operational constants moved to the orchestrator
+  module. Tests gained an `orch(pm)` helper — the three `canStartSupervisor`
+  sites migrated off the `internals()` cast, plus two new direct-to-orchestrator
+  assertions. Test count 831 → 833.
+- **C2c.2 — Retry queue + stall detection:** Moved `scheduleRetry`,
+  `handleRetryFired`, `cancelRetry`, `cancelAllRetries`, `startStallDetection`,
+  `stopStallDetection`, and `checkForStalledSupervisors` out of
+  `ProjectManager` into `SupervisorOrchestrator`. Expanded the host surface
+  with `getMachineEntry`, `iterateMachines`, `getTicketById`,
+  `isTerminalColumn`, `withTicketLock`, `ensureSupervisorInfra`,
+  `startMachineRun`, `buildRunVariables` — these are temporary bridges while
+  PM still owns the corresponding state or lifecycle methods, and all
+  disappear across C2c.3–C2c.5 as ownership transfers. The temporary
+  `countActiveMachines*` callbacks from C2c.1 went away: orchestrator's
+  `canStartSupervisor` now iterates via `iterateMachines` instead, so the
+  one indirection layer consolidates. Added `getLastActivity()` to the
+  `ITicketMachine` interface (previously a gap — the real class and the
+  test mock both implemented it, but the interface didn't declare it).
+  PM's `handleMachineRunEnd` now calls `this.supervisors.scheduleRetry(...)`;
+  `moveTicketToColumn` calls `this.supervisors.cancelRetry(...)`; `exit()`
+  calls `stopStallDetection` + `cancelAllRetries`. Six test sites for
+  `scheduleRetry` / `handleRetryFired` migrated from `internals(pm)` to
+  `orch(pm)`; their entries dropped from the `internals()` cast type along
+  with `checkForStalledSupervisors`. The cast surface shrank from 13 methods
+  to 10. Test count: 833 (no new tests — migration only).
 
-Cumulative file-size delta: `project-manager.ts` 3937 → 3391 lines (-546).
+Cumulative file-size delta: `project-manager.ts` 3937 → 3204 lines (-733).
 Test count 812 → 833.
 
 Remaining execution plan (tests migrate off the `internals()` cast onto
 `orch(pm)` as each piece moves; the cast shrinks every commit and disappears
 entirely after the last step):
 
-- **C2c.2 — Retry queue + stall detection.** Move `scheduleRetry`,
-  `handleRetryFired`, `cancelRetry`, `cancelAllRetries`,
-  `startStallDetection`, `checkForStalledSupervisors`. Needs temporary host
-  callbacks for `ensureSupervisorInfra` and `startMachineRun` (which still
-  live on PM at this point) — both disappear in C2c.4.
 - **C2c.3 — `createMachine` + `handleMachineRunEnd` + `withTicketLock` +
   `machines`/`runStartedAt` ownership transfer.** Biggest single state move:
   the `machines` Map relocates into the orchestrator. The temporary
@@ -839,7 +846,8 @@ built the safety net it needs.
 | 6.3 Sprint C2a getGitFilesChanged | 6 | M | ✅ | 330 lines → pure lib |
 | 6.3 Sprint C2b Artifacts fs | 6 | S | ✅ | listArtifacts + readArtifact + openArtifactExternal |
 | 6.3 Sprint C2c.1 Orchestrator scaffold | 6 | M | ✅ | config/concurrency/WIP + 2 new tests through `orch(pm)` |
-| 6.3 Sprint C2c.2–9 Lifecycle/state migration | 6 | XL | 🟡 | retry queue, machines map, ensureSupervisorInfra, tool dispatch, handlers |
+| 6.3 Sprint C2c.2 Retry queue + stall | 6 | M | ✅ | retry/stall moved; 6 test sites migrated; cast surface 13 → 10 |
+| 6.3 Sprint C2c.3–9 Lifecycle/state migration | 6 | XL | 🟡 | machines map, ensureSupervisorInfra, tool dispatch, handlers |
 | 6.3 Sprint C3 PM → coordinator | 6 | L | ⏳ | depends on C2c |
 | 6.3 Sprint C4 IPC handler split | 6 | M | ⏳ | depends on C3 |
 | T1–T11 deep testing wave (follow-up) | 5+ | L | ✅ | +92 tests, 7 bugs fixed |

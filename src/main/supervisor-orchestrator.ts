@@ -9,30 +9,32 @@
  *
  * The extraction is landing incrementally — each commit moves a slice of
  * behavior out of `project-manager.ts` with matching test migrations. The dep
- * contract grows and shrinks as logic moves: `countActiveMachines` is a
- * temporary callback used while PM still owns the `machines` map, and will
- * disappear once ownership transfers.
+ * contract grows and shrinks as logic moves: callbacks like `ensureSupervisorInfra`
+ * and `startMachineRun` are temporary while PM still owns those methods and
+ * will disappear once they migrate in.
  *
  * Currently owns:
  *   - Effective-config accessors (stall timeout, concurrency, retry, turns)
  *   - `canStartSupervisor` — global + per-column concurrency check
  *   - `getActiveWipTickets` — cross-project active-phase roll-up
  *   - `isAutoDispatchEnabled` — project flag + FLEET.md override
+ *   - Retry queue (`scheduleRetry`, `handleRetryFired`, `cancelRetry`, `cancelAllRetries`)
+ *   - Stall detection (`startStallDetection`, `stopStallDetection`, `checkForStalledSupervisors`)
  *
  * Does NOT own (yet — still in ProjectManager):
  *   - `machines` / `tasks` / `runStartedAt` / `ticketLocks` state
  *   - Ticket machine factory + callbacks
- *   - Retry queue / stall detection / auto-dispatch loop
+ *   - Auto-dispatch loop
  *   - `handleMachineRunEnd` / `handleClientToolCall`
  *   - `ensureSupervisorInfra` / `startSupervisor` / `stopSupervisor` / `sendSupervisorMessage`
  *   - Supervisor prompt assembly
  *   - Task persistence + startup cleanup
  */
 
-import type { IWorkflowLoader } from '@/lib/project-manager-deps';
-import type { TicketPhase } from '@/shared/ticket-phase';
+import type { ISandbox, ITicketMachine, IWorkflowLoader } from '@/lib/project-manager-deps';
+import type { FailureClass } from '@/lib/run-end';
 import { isActivePhase } from '@/shared/ticket-phase';
-import type { ColumnId, Project, ProjectId, Ticket } from '@/shared/types';
+import type { ColumnId, Project, ProjectId, Ticket, TicketId } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
 // Operational constants — referenced by SupervisorOrchestrator and eventually
@@ -70,6 +72,21 @@ export const MAX_RETRY_ATTEMPTS = 5;
 export const MAX_CONTINUATION_TURNS = 10;
 
 // ---------------------------------------------------------------------------
+// Shared types
+// ---------------------------------------------------------------------------
+
+export interface MachineEntry {
+  machine: ITicketMachine;
+  sandbox: ISandbox | null;
+}
+
+export interface RetryOpts {
+  attempt?: number;
+  continuationTurn?: number;
+  error?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Narrow store surface — just the slices the orchestrator reads and writes.
 // Grows as more state moves in.
 // ---------------------------------------------------------------------------
@@ -83,14 +100,31 @@ export interface SupervisorOrchestratorStore {
 // ---------------------------------------------------------------------------
 // Host surface — behavior the orchestrator needs from its collaborators.
 //
-// `countActiveMachines` / `countActiveMachinesInColumn` are temporary callbacks
-// used while PM still owns the `machines` map. They disappear once the map
-// moves into the orchestrator.
+// Several of these are temporary callbacks while PM still owns the `machines`
+// map, withTicketLock, and lifecycle entry points. They disappear as those
+// concerns migrate in subsequent sprints.
 // ---------------------------------------------------------------------------
 
 export interface SupervisorOrchestratorHost {
-  countActiveMachines(): number;
-  countActiveMachinesInColumn(projectId: ProjectId, columnId: ColumnId): number;
+  // Machines map access — removed in C2c.3 when ownership transfers.
+  getMachineEntry(ticketId: TicketId): MachineEntry | undefined;
+  iterateMachines(): Iterable<[TicketId, MachineEntry]>;
+
+  // Ticket lookups + pipeline semantics — PM retains ticket CRUD long-term.
+  getTicketById(ticketId: TicketId): Ticket | undefined;
+  isTerminalColumn(projectId: ProjectId, columnId: ColumnId): boolean;
+
+  // Per-ticket async mutex — moves in C2c.3 with machines map.
+  withTicketLock<T>(ticketId: TicketId, fn: () => Promise<T>): Promise<T>;
+
+  // Lifecycle entry points still owned by PM — removed in C2c.4/C2c.5.
+  ensureSupervisorInfra(ticketId: TicketId): Promise<unknown>;
+  startMachineRun(
+    ticketId: TicketId,
+    prompt: string,
+    opts?: { sessionId?: string; variables?: Record<string, unknown> }
+  ): void;
+  buildRunVariables(ticketId: TicketId, mode?: 'autopilot' | 'interactive'): Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -108,6 +142,8 @@ export interface SupervisorOrchestratorDeps {
 // ---------------------------------------------------------------------------
 
 export class SupervisorOrchestrator {
+  private stallCheckTimer: ReturnType<typeof setInterval> | null = null;
+
   constructor(private readonly deps: SupervisorOrchestratorDeps) {}
 
   // -------------------------------------------------------------------------
@@ -163,17 +199,30 @@ export class SupervisorOrchestrator {
 
   /**
    * Check if a new supervisor can be started within global and per-column
-   * concurrency limits. Reads live machine counts through the host callbacks
-   * — those disappear once the `machines` map moves into this class.
+   * concurrency limits.
    */
   canStartSupervisor(projectId?: ProjectId, columnId?: ColumnId): boolean {
-    if (this.deps.host.countActiveMachines() >= MAX_CONCURRENT_SUPERVISORS) {
+    let total = 0;
+    let columnCount = 0;
+    for (const [ticketId, entry] of this.deps.host.iterateMachines()) {
+      if (!entry.machine.isActive()) {
+        continue;
+      }
+      total++;
+      if (projectId && columnId) {
+        const ticket = this.deps.host.getTicketById(ticketId);
+        if (ticket && ticket.projectId === projectId && ticket.columnId === columnId) {
+          columnCount++;
+        }
+      }
+    }
+    if (total >= MAX_CONCURRENT_SUPERVISORS) {
       return false;
     }
     if (projectId && columnId) {
       const columnLimit = this.getColumnMaxConcurrent(projectId, columnId);
       if (columnLimit !== undefined) {
-        return this.deps.host.countActiveMachinesInColumn(projectId, columnId) < columnLimit;
+        return columnCount < columnLimit;
       }
     }
     return true;
@@ -185,8 +234,247 @@ export class SupervisorOrchestrator {
    * `validateDispatchPreflight`.
    */
   getActiveWipTickets(): Ticket[] {
-    return this.deps.store.getTickets().filter((t): t is Ticket & { phase: TicketPhase } => {
-      return t.phase !== undefined && isActivePhase(t.phase);
+    return this.deps.store.getTickets().filter((t) => t.phase !== undefined && isActivePhase(t.phase));
+  }
+
+  // -------------------------------------------------------------------------
+  // Retry queue (Symphony-inspired exponential backoff)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Schedule a retry for a ticket's supervisor after a failed run.
+   *
+   * Uses exponential backoff. `decideRunEndAction` only emits the retry action
+   * for `error` and `stalled` reasons — `completed` / `max_turns` are handled
+   * by the `continue` branch in `handleMachineRunEnd`, which dispatches the
+   * next run directly without going through this queue.
+   */
+  scheduleRetry(ticketId: TicketId, failureClass: FailureClass, opts: RetryOpts): void {
+    const entry = this.deps.host.getMachineEntry(ticketId);
+    if (!entry) {
+      return;
+    }
+    const { machine } = entry;
+
+    const attempt = opts.attempt ?? 0;
+    const continuationTurn = opts.continuationTurn ?? 0;
+
+    machine.retryAttempt = attempt;
+    machine.continuationTurn = continuationTurn;
+
+    const ticket = this.deps.host.getTicketById(ticketId);
+    const maxRetryAttempts = ticket ? this.getEffectiveMaxRetries(ticket.projectId) : MAX_RETRY_ATTEMPTS;
+
+    if (attempt >= maxRetryAttempts) {
+      console.log(
+        `[SupervisorOrchestrator] Ticket ${ticketId} reached max retry attempts (${maxRetryAttempts}). Giving up.`
+      );
+      machine.transition('error');
+      return;
+    }
+
+    const delayMs = Math.min(RETRY_BASE_DELAY_MS * Math.pow(2, attempt), MAX_RETRY_BACKOFF_MS);
+
+    console.log(
+      `[SupervisorOrchestrator] Scheduling retry for ${ticketId} (attempt=${attempt}, turn=${continuationTurn}) ` +
+        `in ${Math.round(delayMs / 1000)}s${opts.error ? ` (reason: ${opts.error})` : ''}`
+    );
+
+    machine.scheduleRetryTimer(delayMs, () => {
+      void this.handleRetryFired(ticketId, failureClass, attempt, continuationTurn);
     });
+  }
+
+  /**
+   * Handle a retry timer firing. Re-check ticket state and re-dispatch if
+   * still eligible.
+   */
+  handleRetryFired(
+    ticketId: TicketId,
+    failureClass: FailureClass,
+    attempt: number,
+    continuationTurn: number
+  ): Promise<void> {
+    return this.deps.host.withTicketLock(ticketId, async () => {
+      const ticket = this.deps.host.getTicketById(ticketId);
+      const entry = this.deps.host.getMachineEntry(ticketId);
+      if (!ticket || !entry) {
+        console.log(
+          `[SupervisorOrchestrator] Retry fired for ${ticketId} but ticket/machine no longer exists. Releasing.`
+        );
+        return;
+      }
+      const { machine } = entry;
+
+      // Don't retry if ticket is now in a terminal column
+      if (this.deps.host.isTerminalColumn(ticket.projectId, ticket.columnId)) {
+        console.log(
+          `[SupervisorOrchestrator] Retry fired for ${ticketId} but ticket is in terminal column. Releasing.`
+        );
+        machine.transition('idle');
+        return;
+      }
+
+      // Check concurrency (including per-column limits)
+      if (!this.canStartSupervisor(ticket.projectId, ticket.columnId)) {
+        console.log(`[SupervisorOrchestrator] No slots available for retry of ${ticketId}. Requeuing.`);
+        this.scheduleRetry(ticketId, failureClass, {
+          attempt: attempt + 1,
+          continuationTurn,
+          error: 'no available supervisor slots',
+        });
+        return;
+      }
+
+      // Re-dispatch
+      console.log(
+        `[SupervisorOrchestrator] Retry firing for ${ticketId} (${failureClass}, attempt=${attempt}, turn=${continuationTurn}). Re-dispatching.`
+      );
+
+      try {
+        const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId);
+        if (!project) {
+          return;
+        }
+
+        let hookOk = true;
+        if (project.source?.kind === 'local') {
+          hookOk = await this.deps.workflowLoader.runHook(
+            ticket.projectId,
+            'before_run',
+            project.source?.workspaceDir
+          );
+        } else {
+          const hookScript = this.deps.workflowLoader.getConfig(ticket.projectId).hooks?.before_run;
+          if (hookScript) {
+            const currentEntry = this.deps.host.getMachineEntry(ticketId);
+            if (currentEntry?.sandbox) {
+              hookOk = await currentEntry.sandbox.execInContainer(hookScript, '/home/user/workspace');
+            }
+          }
+        }
+        if (!hookOk) {
+          console.warn(
+            `[SupervisorOrchestrator] before_run hook failed during retry for ${ticketId}. Scheduling another retry.`
+          );
+          this.scheduleRetry(ticketId, 'error', {
+            attempt: attempt + 1,
+            continuationTurn,
+            error: 'before_run hook failed',
+          });
+          return;
+        }
+
+        const sessionId = ticket.supervisorSessionId ?? undefined;
+        const prompt = 'The previous run failed. Please review the current state and continue working on this ticket.';
+        const variables = this.deps.host.buildRunVariables(ticketId);
+
+        machine.recordActivity();
+        await this.deps.host.ensureSupervisorInfra(ticketId);
+        this.deps.host.startMachineRun(ticketId, prompt, { sessionId, variables });
+      } catch (error) {
+        console.error(`[SupervisorOrchestrator] Retry dispatch failed for ${ticketId}:`, error);
+        this.scheduleRetry(ticketId, 'error', {
+          attempt: attempt + 1,
+          continuationTurn,
+          error: (error as Error).message,
+        });
+      }
+    });
+  }
+
+  /** Cancel any pending retry timer for a single ticket. */
+  cancelRetry(ticketId: TicketId): void {
+    const entry = this.deps.host.getMachineEntry(ticketId);
+    if (entry) {
+      entry.machine.cancelRetryTimer();
+    }
+  }
+
+  /** Cancel all pending retry timers — called from PM.exit(). */
+  cancelAllRetries(): void {
+    for (const [, entry] of this.deps.host.iterateMachines()) {
+      entry.machine.cancelRetryTimer();
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Stall detection
+  // -------------------------------------------------------------------------
+
+  /** Start the periodic stall-check timer. Idempotent. */
+  startStallDetection(): void {
+    if (this.stallCheckTimer) {
+      return;
+    }
+    this.stallCheckTimer = setInterval(() => this.checkForStalledSupervisors(), STALL_CHECK_INTERVAL_MS);
+  }
+
+  /** Stop the stall-check timer. Idempotent. */
+  stopStallDetection(): void {
+    if (this.stallCheckTimer) {
+      clearInterval(this.stallCheckTimer);
+      this.stallCheckTimer = null;
+    }
+  }
+
+  /**
+   * One stall-check tick. Any active machine that hasn't recorded activity
+   * within its effective timeout is stopped and handed to the retry queue.
+   * Streaming phases get a much longer safety-net timeout because legitimate
+   * long tool calls can silence the message stream for many minutes.
+   */
+  checkForStalledSupervisors(): void {
+    const now = Date.now();
+
+    for (const [ticketId, entry] of this.deps.host.iterateMachines()) {
+      const { machine } = entry;
+      const phase = machine.getPhase();
+
+      if (!machine.isActive()) {
+        continue;
+      }
+      // Skip phases that have their own timeouts or are waiting intentionally.
+      // 'ready' means the session exists but no autonomous run was started — the user
+      // may be using the workspace manually, so don't treat it as stalled.
+      if (phase === 'retrying' || phase === 'awaiting_input' || phase === 'ready') {
+        continue;
+      }
+
+      const ticket = this.deps.host.getTicketById(ticketId);
+      const stallTimeout = machine.isStreaming()
+        ? STREAMING_STALL_TIMEOUT_MS
+        : ticket
+          ? this.getEffectiveStallTimeout(ticket.projectId)
+          : STALL_TIMEOUT_MS;
+
+      const elapsed = now - machine.getLastActivity();
+      if (elapsed > stallTimeout) {
+        void this.deps.host.withTicketLock(ticketId, async () => {
+          // Re-check under lock
+          if (!machine.isActive()) {
+            return;
+          }
+          if (machine.getPhase() === 'retrying' || machine.getPhase() === 'awaiting_input') {
+            return;
+          }
+          const elapsedNow = Date.now() - machine.getLastActivity();
+          if (elapsedNow <= stallTimeout) {
+            return;
+          }
+
+          console.warn(
+            `[SupervisorOrchestrator] Supervisor stalled for ticket ${ticketId} in phase "${machine.getPhase()}" (${Math.round(elapsedNow / 1000)}s since last activity). Stopping and scheduling retry.`
+          );
+          await machine.stop();
+
+          this.scheduleRetry(ticketId, 'stalled', {
+            attempt: machine.retryAttempt + 1,
+            continuationTurn: machine.continuationTurn,
+            error: `stalled in phase ${machine.getPhase()} for ${Math.round(elapsedNow / 1000)}s`,
+          });
+        });
+      }
+    }
   }
 }

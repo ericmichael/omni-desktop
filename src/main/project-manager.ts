@@ -21,7 +21,6 @@ import type {
   ProjectManagerDeps,
 } from '@/lib/project-manager-deps';
 import { runMigrations as runSchemaMigrations } from '@/lib/project-migrations';
-import type { FailureClass } from '@/lib/run-end';
 import { decideRunEndAction } from '@/lib/run-end';
 import { type HistoryRow,parseSessionHistoryRows } from '@/lib/session-history';
 import type { TemplateVariables } from '@/lib/template';
@@ -35,17 +34,7 @@ import { MilestoneManager, type MilestoneManagerStore } from '@/main/milestone-m
 import { PageManager, type PageManagerStore } from '@/main/page-manager';
 import { createPlatformClient } from '@/main/platform-mode';
 import type { ProcessManager } from '@/main/process-manager';
-import {
-  MAX_CONCURRENT_SUPERVISORS,
-  MAX_CONTINUATION_TURNS,
-  MAX_RETRY_ATTEMPTS,
-  MAX_RETRY_BACKOFF_MS,
-  RETRY_BASE_DELAY_MS,
-  STALL_CHECK_INTERVAL_MS,
-  STALL_TIMEOUT_MS,
-  STREAMING_STALL_TIMEOUT_MS,
-  SupervisorOrchestrator,
-} from '@/main/supervisor-orchestrator';
+import { MAX_CONCURRENT_SUPERVISORS, MAX_CONTINUATION_TURNS, SupervisorOrchestrator } from '@/main/supervisor-orchestrator';
 import type { SupervisorContext } from '@/main/supervisor-prompt';
 import { buildSupervisorPrompt } from '@/main/supervisor-prompt';
 import type { ClientFunctionResponder } from '@/main/ticket-machine';
@@ -320,8 +309,6 @@ export class ProjectManager {
   private store: Store<StoreData>;
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   private pages: PageManager;
-  /** Interval handle for periodic stall checks. */
-  private stallCheckTimer: ReturnType<typeof setInterval> | null = null;
 
   /** Workflow file loader (FLEET.md) per project. */
   private workflowLoader: IWorkflowLoader;
@@ -439,33 +426,19 @@ export class ProjectManager {
         getWipLimit: () => this.store.get('wipLimit') ?? 3,
       },
       host: {
-        countActiveMachines: () => {
-          let count = 0;
-          for (const [, entry] of this.machines) {
-            if (entry.machine.isActive()) {
-              count++;
-            }
-          }
-          return count;
-        },
-        countActiveMachinesInColumn: (projectId, columnId) => {
-          let count = 0;
-          for (const [ticketId, entry] of this.machines) {
-            if (!entry.machine.isActive()) {
-              continue;
-            }
-            const ticket = this.getTicketById(ticketId);
-            if (ticket && ticket.projectId === projectId && ticket.columnId === columnId) {
-              count++;
-            }
-          }
-          return count;
-        },
+        getMachineEntry: (ticketId) => this.machines.get(ticketId),
+        iterateMachines: () => this.machines,
+        getTicketById: (ticketId) => this.getTicketById(ticketId),
+        isTerminalColumn: (projectId, columnId) => this.isTerminalColumn(projectId, columnId),
+        withTicketLock: (ticketId, fn) => this.withTicketLock(ticketId, fn),
+        ensureSupervisorInfra: (ticketId) => this.ensureSupervisorInfra(ticketId),
+        startMachineRun: (ticketId, prompt, opts) => this.startMachineRun(ticketId, prompt, opts),
+        buildRunVariables: (ticketId, mode) => this.buildRunVariables(ticketId, mode),
       },
       workflowLoader: this.workflowLoader,
     });
 
-    this.startStallDetection();
+    this.supervisors.startStallDetection();
     this.startAutoDispatch();
     this.startInboxSweep();
   }
@@ -1128,7 +1101,7 @@ export class ProjectManager {
         }
 
         case 'retry':
-          this.scheduleRetry(ticketId, action.failureClass, {
+          this.supervisors.scheduleRetry(ticketId, action.failureClass, {
             attempt: machine.retryAttempt + 1,
             continuationTurn: machine.continuationTurn,
             error: reason,
@@ -1157,70 +1130,7 @@ export class ProjectManager {
 
   // #endregion
 
-  // #region Stall detection (Symphony-inspired)
-
-  private startStallDetection = (): void => {
-    this.stallCheckTimer = setInterval(() => this.checkForStalledSupervisors(), STALL_CHECK_INTERVAL_MS);
-  };
-
-  private checkForStalledSupervisors = (): void => {
-    const now = Date.now();
-
-    for (const [ticketId, entry] of this.machines) {
-      const { machine } = entry;
-      const phase = machine.getPhase();
-
-      if (!machine.isActive()) {
-        continue;
-      }
-      // Skip phases that have their own timeouts or are waiting intentionally.
-      // 'ready' means the session exists but no autonomous run was started — the user
-      // may be using the workspace manually, so don't treat it as stalled.
-      if (phase === 'retrying' || phase === 'awaiting_input' || phase === 'ready') {
-        continue;
-      }
-
-      const ticket = this.getTicketById(ticketId);
-      // Streaming phases get a much longer safety-net timeout because legitimate
-      // long tool calls can silence the message stream for many minutes. Non-streaming
-      // active phases (provisioning, connecting) use the shorter project stall timeout.
-      const stallTimeout = machine.isStreaming()
-        ? STREAMING_STALL_TIMEOUT_MS
-        : ticket
-          ? this.getEffectiveStallTimeout(ticket.projectId)
-          : STALL_TIMEOUT_MS;
-
-      const elapsed = now - machine.getLastActivity();
-      if (elapsed > stallTimeout) {
-        void this.withTicketLock(ticketId, async () => {
-          // Re-check under lock
-          if (!machine.isActive()) {
-            return;
-          }
-          if (machine.getPhase() === 'retrying' || machine.getPhase() === 'awaiting_input') {
-            return;
-          }
-          const elapsedNow = Date.now() - machine.getLastActivity();
-          if (elapsedNow <= stallTimeout) {
-            return;
-          }
-
-          console.warn(
-            `[ProjectManager] Supervisor stalled for ticket ${ticketId} in phase "${machine.getPhase()}" (${Math.round(elapsedNow / 1000)}s since last activity). Stopping and scheduling retry.`
-          );
-          await machine.stop();
-
-          this.scheduleRetry(ticketId, 'stalled', {
-            attempt: machine.retryAttempt + 1,
-            continuationTurn: machine.continuationTurn,
-            error: `stalled in phase ${machine.getPhase()} for ${Math.round(elapsedNow / 1000)}s`,
-          });
-        });
-      }
-    }
-  };
-
-  // #endregion
+  // Stall detection now lives in SupervisorOrchestrator (C2c.2).
 
   // #region Concurrency control — delegated to SupervisorOrchestrator
 
@@ -1262,157 +1172,8 @@ export class ProjectManager {
 
   // #endregion
 
-  // #region Retry queue (Symphony-inspired)
-
-  /**
-   * Schedule a retry for a ticket's supervisor after a failed run.
-   *
-   * Uses exponential backoff. `decideRunEndAction` only emits the retry action
-   * for `error` and `stalled` reasons — `completed` / `max_turns` are handled
-   * by the `continue` branch in `handleMachineRunEnd`, which dispatches the
-   * next run directly without going through this queue.
-   */
-  private scheduleRetry = (
-    ticketId: TicketId,
-    failureClass: FailureClass,
-    opts: { attempt?: number; continuationTurn?: number; error?: string }
-  ): void => {
-    const entry = this.machines.get(ticketId);
-    if (!entry) {
-      return;
-    }
-    const { machine } = entry;
-
-    const attempt = opts.attempt ?? 0;
-    const continuationTurn = opts.continuationTurn ?? 0;
-
-    machine.retryAttempt = attempt;
-    machine.continuationTurn = continuationTurn;
-
-    const ticket = this.getTicketById(ticketId);
-    const maxRetryAttempts = ticket ? this.getEffectiveMaxRetries(ticket.projectId) : MAX_RETRY_ATTEMPTS;
-
-    if (attempt >= maxRetryAttempts) {
-      console.log(`[ProjectManager] Ticket ${ticketId} reached max retry attempts (${maxRetryAttempts}). Giving up.`);
-      machine.transition('error');
-      return;
-    }
-
-    const delayMs = Math.min(RETRY_BASE_DELAY_MS * Math.pow(2, attempt), MAX_RETRY_BACKOFF_MS);
-
-    console.log(
-      `[ProjectManager] Scheduling retry for ${ticketId} (attempt=${attempt}, turn=${continuationTurn}) ` +
-        `in ${Math.round(delayMs / 1000)}s${opts.error ? ` (reason: ${opts.error})` : ''}`
-    );
-
-    machine.scheduleRetryTimer(delayMs, () => {
-      void this.handleRetryFired(ticketId, failureClass, attempt, continuationTurn);
-    });
-  };
-
-  /**
-   * Handle a retry timer firing. Re-check ticket state and re-dispatch if still eligible.
-   */
-  private handleRetryFired = (
-    ticketId: TicketId,
-    failureClass: FailureClass,
-    attempt: number,
-    continuationTurn: number
-  ): Promise<void> => {
-    return this.withTicketLock(ticketId, async () => {
-      const ticket = this.getTicketById(ticketId);
-      const entry = this.machines.get(ticketId);
-      if (!ticket || !entry) {
-        console.log(`[ProjectManager] Retry fired for ${ticketId} but ticket/machine no longer exists. Releasing.`);
-        return;
-      }
-      const { machine } = entry;
-
-      // Don't retry if ticket is now in a terminal column
-      if (this.isTerminalColumn(ticket.projectId, ticket.columnId)) {
-        console.log(`[ProjectManager] Retry fired for ${ticketId} but ticket is in terminal column. Releasing.`);
-        machine.transition('idle');
-        return;
-      }
-
-      // Check concurrency (including per-column limits)
-      if (!this.canStartSupervisor(ticket.projectId, ticket.columnId)) {
-        console.log(`[ProjectManager] No slots available for retry of ${ticketId}. Requeuing.`);
-        this.scheduleRetry(ticketId, failureClass, {
-          attempt: attempt + 1,
-          continuationTurn,
-          error: 'no available supervisor slots',
-        });
-        return;
-      }
-
-      // Re-dispatch
-      console.log(
-        `[ProjectManager] Retry firing for ${ticketId} (${failureClass}, attempt=${attempt}, turn=${continuationTurn}). Re-dispatching.`
-      );
-
-      try {
-        const project = this.getProjects().find((p) => p.id === ticket.projectId);
-        if (!project) {
-          return;
-        }
-
-        let hookOk = true;
-        if (project.source?.kind === 'local') {
-          hookOk = await this.workflowLoader.runHook(ticket.projectId, 'before_run', project.source?.workspaceDir);
-        } else {
-          const hookScript = this.workflowLoader.getConfig(ticket.projectId).hooks?.before_run;
-          if (hookScript) {
-            const entry = this.machines.get(ticketId);
-            if (entry?.sandbox) {
-              hookOk = await entry.sandbox.execInContainer(hookScript, '/home/user/workspace');
-            }
-          }
-        }
-        if (!hookOk) {
-          console.warn(
-            `[ProjectManager] before_run hook failed during retry for ${ticketId}. Scheduling another retry.`
-          );
-          this.scheduleRetry(ticketId, 'error', {
-            attempt: attempt + 1,
-            continuationTurn,
-            error: 'before_run hook failed',
-          });
-          return;
-        }
-
-        const sessionId = ticket.supervisorSessionId ?? undefined;
-        const prompt = 'The previous run failed. Please review the current state and continue working on this ticket.';
-        const variables = this.buildRunVariables(ticketId);
-
-        machine.recordActivity();
-        await this.ensureSupervisorInfra(ticketId);
-        this.startMachineRun(ticketId, prompt, { sessionId, variables });
-      } catch (error) {
-        console.error(`[ProjectManager] Retry dispatch failed for ${ticketId}:`, error);
-        this.scheduleRetry(ticketId, 'error', {
-          attempt: attempt + 1,
-          continuationTurn,
-          error: (error as Error).message,
-        });
-      }
-    });
-  };
-
-  private cancelRetry = (ticketId: TicketId): void => {
-    const entry = this.machines.get(ticketId);
-    if (entry) {
-      entry.machine.cancelRetryTimer();
-    }
-  };
-
-  private cancelAllRetries = (): void => {
-    for (const [, entry] of this.machines) {
-      entry.machine.cancelRetryTimer();
-    }
-  };
-
-  // #endregion
+  // Retry queue (scheduleRetry / handleRetryFired / cancelRetry /
+  // cancelAllRetries) now lives in SupervisorOrchestrator (C2c.2).
 
   // #endregion
 
@@ -1960,7 +1721,7 @@ export class ProjectManager {
     // Reconciliation: stop supervisor and clean up workspace when ticket moves to a terminal column
     if (this.isTerminalColumn(ticket.projectId, columnId)) {
       // Cancel any pending retry timer first to prevent re-dispatch races
-      this.cancelRetry(ticketId);
+      this.supervisors.cancelRetry(ticketId);
       const entry = this.machines.get(ticketId);
       if (entry) {
         console.log(
@@ -1981,7 +1742,7 @@ export class ProjectManager {
       const entry = this.machines.get(ticketId);
       if (entry) {
         console.log(`[ProjectManager] Ticket ${ticketId} moved to backlog — stopping supervisor.`);
-        this.cancelRetry(ticketId);
+        this.supervisors.cancelRetry(ticketId);
         void this.stopSupervisor(ticketId);
       }
     }
@@ -1992,7 +1753,7 @@ export class ProjectManager {
       const entry = this.machines.get(ticketId);
       if (entry) {
         console.log(`[ProjectManager] Ticket ${ticketId} entered gated column "${columnId}" — stopping supervisor.`);
-        this.cancelRetry(ticketId);
+        this.supervisors.cancelRetry(ticketId);
         void this.stopSupervisor(ticketId);
       }
     }
@@ -3203,10 +2964,7 @@ export class ProjectManager {
   // #endregion
 
   exit = async (): Promise<void> => {
-    if (this.stallCheckTimer) {
-      clearInterval(this.stallCheckTimer);
-      this.stallCheckTimer = null;
-    }
+    this.supervisors.stopStallDetection();
     if (this.autoDispatchTimer) {
       clearInterval(this.autoDispatchTimer);
       this.autoDispatchTimer = null;
@@ -3215,7 +2973,7 @@ export class ProjectManager {
       clearInterval(this.inboxSweepTimer);
       this.inboxSweepTimer = null;
     }
-    this.cancelAllRetries();
+    this.supervisors.cancelAllRetries();
     this.workflowLoader.dispose();
     await this.pages.dispose();
 

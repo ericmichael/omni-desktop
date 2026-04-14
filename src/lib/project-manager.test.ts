@@ -366,18 +366,6 @@ const internals = (
   runStartedAt: Map<TicketId, number>;
   createMachine: (ticketId: TicketId) => MockMachine;
   handleMachineRunEnd: (ticketId: TicketId, reason: string) => Promise<void>;
-  scheduleRetry: (
-    ticketId: TicketId,
-    failureClass: string,
-    opts: { attempt?: number; continuationTurn?: number; error?: string }
-  ) => void;
-  handleRetryFired: (
-    ticketId: TicketId,
-    failureClass: string,
-    attempt: number,
-    continuationTurn: number
-  ) => Promise<void>;
-  checkForStalledSupervisors: () => void;
   autoDispatchTick: () => Promise<void>;
   handleClientToolCall: (
     ticketId: TicketId,
@@ -493,7 +481,7 @@ describe('ProjectManager integration', () => {
       const { ctx, mock } = setupRunningMachine();
 
       // Directly invoke scheduleRetry with attempt >= MAX_RETRY_ATTEMPTS (=5)
-      internals(ctx.pm).scheduleRetry('t1', 'error', { attempt: 5 });
+      orch(ctx.pm).scheduleRetry('t1', 'error', { attempt: 5 });
 
       expect(mock.phase).toBe('error');
       expect(mock.scheduleRetryTimer).not.toHaveBeenCalled();
@@ -521,7 +509,7 @@ describe('ProjectManager integration', () => {
         const { ctx, mock } = setupRunningMachine();
         const expected = [10_000, 20_000, 40_000, 80_000, 160_000];
         for (let attempt = 0; attempt < expected.length; attempt++) {
-          internals(ctx.pm).scheduleRetry('t1', 'error', { attempt });
+          orch(ctx.pm).scheduleRetry('t1', 'error', { attempt });
           expect(getDelay(mock, attempt)).toBe(expected[attempt]);
         }
       });
@@ -537,7 +525,7 @@ describe('ProjectManager integration', () => {
         const mock = machines.get('t1')!;
         mock.phase = 'running';
 
-        internals(pm).scheduleRetry('t1', 'error', { attempt: 10 });
+        orch(pm).scheduleRetry('t1', 'error', { attempt: 10 });
         const calls = (mock.scheduleRetryTimer as ReturnType<typeof vi.fn>).mock.calls;
         expect(calls[0]![0]).toBe(5 * 60 * 1000);
       });
@@ -572,7 +560,7 @@ describe('ProjectManager integration', () => {
         tickets[0]!.columnId = 'done';
         ctx.store.set('tickets', tickets);
 
-        await internals(ctx.pm).handleRetryFired('t1', 'error', 1, 0);
+        await orch(ctx.pm).handleRetryFired('t1', 'error', 1, 0);
 
         expect(mock.phase).toBe('idle');
         // Must not re-arm a new timer
@@ -592,7 +580,7 @@ describe('ProjectManager integration', () => {
         })();
         void machines;
 
-        await internals(ctx.pm).handleRetryFired('t1', 'error', 2, 0);
+        await orch(ctx.pm).handleRetryFired('t1', 'error', 2, 0);
 
         // Timer re-armed with attempt+1 delay = 10_000 * 2^3 = 80_000
         const calls = (mock.scheduleRetryTimer as ReturnType<typeof vi.fn>).mock.calls;
@@ -606,7 +594,7 @@ describe('ProjectManager integration', () => {
         ctx.store.set('tickets', []);
         internals(ctx.pm).machines.delete('t1');
 
-        await expect(internals(ctx.pm).handleRetryFired('t1', 'error', 1, 0)).resolves.toBeUndefined();
+        await expect(orch(ctx.pm).handleRetryFired('t1', 'error', 1, 0)).resolves.toBeUndefined();
       });
     });
   });

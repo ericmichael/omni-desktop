@@ -5,18 +5,18 @@
  * instead of requiring real Docker containers, WebSocket servers, and file systems.
  */
 
-import type { TicketPhase } from '@/shared/ticket-phase';
 import type { WorkflowConfig } from '@/lib/workflow';
 import type { AgentProcessMode, AgentProcessStartArg } from '@/main/agent-process';
 import type { PlatformClient } from '@/main/platform-client';
+import type { TicketPhase } from '@/shared/ticket-phase';
 import type {
+  AgentProcessStatus,
+  IpcRendererEvents,
   SessionMessage,
+  StoreData,
   TicketId,
   TokenUsage,
-  IpcRendererEvents,
-  StoreData,
   WithTimestamp,
-  AgentProcessStatus,
 } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
@@ -44,6 +44,7 @@ export interface ITicketMachine {
   dispose(): void;
 
   recordActivity(): void;
+  getLastActivity(): number;
   cancelRetryTimer(): void;
   scheduleRetryTimer(delayMs: number, callback: () => void): void;
 
