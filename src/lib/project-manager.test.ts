@@ -258,6 +258,12 @@ type SeedArgs = {
   projectId?: string;
   pipeline?: Pipeline;
   autoDispatch?: boolean;
+  /** When set, the seeded project gets a local or git-remote source. */
+  source?:
+    | { kind: 'local'; workspaceDir: string }
+    | { kind: 'git-remote'; repoUrl: string; defaultBranch?: string };
+  /** When set, overrides wipLimit (defaults to 100 so WIP doesn't block tests). */
+  wipLimit?: number;
   tickets?: Array<Partial<Ticket> & { id: string; columnId?: string }>;
 };
 
@@ -270,7 +276,7 @@ const seedStore = (args: SeedArgs = {}): IStore => {
     createdAt: Date.now(),
     pipeline,
     autoDispatch: args.autoDispatch ?? false,
-    // No source → startSupervisor would reject, but we aren't calling it.
+    source: args.source,
   } as unknown as Project;
 
   const tickets: Ticket[] = (args.tickets ?? []).map(
@@ -295,6 +301,7 @@ const seedStore = (args: SeedArgs = {}): IStore => {
   return makeStore({
     projects: [project],
     tickets,
+    ...(args.wipLimit !== undefined ? { wipLimit: args.wipLimit } : {}),
   });
 };
 
@@ -371,6 +378,8 @@ const internals = (
     args: Record<string, unknown>,
     respond: (ok: boolean, result?: Record<string, unknown>) => void
   ) => void;
+  validateDispatchPreflight: (ticketId: TicketId) => string | null;
+  ensureSupervisorInfra: (ticketId: TicketId) => Promise<unknown>;
 } => pm as unknown as never;
 
 // ---------------------------------------------------------------------------
@@ -1127,6 +1136,200 @@ describe('ProjectManager integration', () => {
       ctx.pm.moveTicketToColumn('t1', 'no-such-column');
       const ticket = ctx.store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
       expect(ticket.columnId).toBe('in_progress');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // T5 — validateDispatchPreflight + ensureSupervisorInfra idempotency
+  // -------------------------------------------------------------------------
+  describe('validateDispatchPreflight', () => {
+    const LOCAL_SOURCE = { kind: 'local' as const, workspaceDir: '/tmp/fake-workspace' };
+
+    it('rejects an unknown ticket', () => {
+      const { pm } = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
+      const err = internals(pm).validateDispatchPreflight('nope' as TicketId);
+      expect(err).toMatch(/not found/i);
+    });
+
+    it('rejects a project with no source', () => {
+      const { pm } = makePm({ tickets: [{ id: 't1' }] });
+      const err = internals(pm).validateDispatchPreflight('t1');
+      expect(err).toMatch(/no repository/i);
+    });
+
+    it('rejects a local project with empty workspaceDir', () => {
+      const { pm } = makePm({
+        source: { kind: 'local', workspaceDir: '' },
+        tickets: [{ id: 't1' }],
+      });
+      const err = internals(pm).validateDispatchPreflight('t1');
+      expect(err).toMatch(/workspace directory/i);
+    });
+
+    it('rejects a git-remote project with empty repoUrl', () => {
+      const { pm } = makePm({
+        source: { kind: 'git-remote', repoUrl: '' },
+        tickets: [{ id: 't1' }],
+      });
+      const err = internals(pm).validateDispatchPreflight('t1');
+      expect(err).toMatch(/repository url/i);
+    });
+
+    it('rejects a ticket in the terminal column', () => {
+      const { pm } = makePm({
+        source: LOCAL_SOURCE,
+        tickets: [{ id: 't1', columnId: 'done' }],
+      });
+      const err = internals(pm).validateDispatchPreflight('t1');
+      expect(err).toMatch(/terminal column/i);
+    });
+
+    it('rejects when a machine is already active (not idle/ready/error/completed)', () => {
+      const { pm, machines } = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
+      const mach = internals(pm).createMachine('t1');
+      internals(pm).machines.set('t1', { machine: mach, sandbox: null });
+      machines.get('t1')!.phase = 'running';
+
+      const err = internals(pm).validateDispatchPreflight('t1');
+      expect(err).toMatch(/already active/i);
+    });
+
+    it('allows dispatch when machine is in idle/ready/error/completed', () => {
+      const { pm, machines } = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
+      const mach = internals(pm).createMachine('t1');
+      internals(pm).machines.set('t1', { machine: mach, sandbox: null });
+
+      for (const phase of ['idle', 'ready', 'error', 'completed'] as TicketPhase[]) {
+        machines.get('t1')!.phase = phase;
+        expect(internals(pm).validateDispatchPreflight('t1')).toBeNull();
+      }
+    });
+
+    it('rejects when global MAX_CONCURRENT_SUPERVISORS is reached', () => {
+      const { pm, machines } = makePm({
+        source: LOCAL_SOURCE,
+        tickets: Array.from({ length: 6 }, (_, i) => ({ id: `t${i}` })),
+      });
+      for (let i = 0; i < 5; i++) {
+        const m = internals(pm).createMachine(`t${i}` as TicketId);
+        internals(pm).machines.set(`t${i}` as TicketId, { machine: m, sandbox: null });
+        machines.get(`t${i}` as TicketId)!.phase = 'running';
+      }
+      const err = internals(pm).validateDispatchPreflight('t5');
+      expect(err).toMatch(/concurrency limit/i);
+    });
+
+    it('rejects when WIP limit is reached', () => {
+      const { pm } = makePm({
+        source: LOCAL_SOURCE,
+        wipLimit: 1,
+        tickets: [
+          { id: 't1' },
+          { id: 't-active', phase: 'running' }, // isActivePhase → counts toward WIP
+        ],
+      });
+      const err = internals(pm).validateDispatchPreflight('t1');
+      expect(err).toBe('WIP_LIMIT:1');
+    });
+
+    it('does not count the ticket itself toward WIP (retry case)', () => {
+      const { pm } = makePm({
+        source: LOCAL_SOURCE,
+        wipLimit: 1,
+        tickets: [{ id: 't1', phase: 'running' }],
+      });
+      // t1 retrying its own dispatch: WIP count excludes self, so it's allowed.
+      expect(internals(pm).validateDispatchPreflight('t1')).toBeNull();
+    });
+
+    it('returns null on the happy path', () => {
+      const { pm } = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
+      expect(internals(pm).validateDispatchPreflight('t1')).toBeNull();
+    });
+  });
+
+  describe('ensureSupervisorInfra idempotency', () => {
+    it('returns the existing entry unchanged when the machine is already streaming', async () => {
+      const { pm, machines } = makePm({
+        source: { kind: 'local', workspaceDir: '/tmp/fake' },
+        tickets: [{ id: 't1' }],
+      });
+      const mach = internals(pm).createMachine('t1');
+      // Fake a "running sandbox" via a stub ISandbox.
+      const fakeSandbox: ISandbox = {
+        mode: 'none',
+        start: () => {},
+        stop: async () => {},
+        exit: async () => {},
+        execInContainer: async () => true,
+        getStatus: () =>
+          ({ type: 'running', timestamp: Date.now(), data: { wsUrl: 'ws://fake' } }) as unknown as WithTimestamp<AgentProcessStatus>,
+      };
+      internals(pm).machines.set('t1', { machine: mach, sandbox: fakeSandbox });
+      const mock = machines.get('t1')!;
+      mock.phase = 'running';
+
+      const result = (await internals(pm).ensureSupervisorInfra('t1')) as {
+        machine: unknown;
+        sandbox: unknown;
+      };
+      expect(result.sandbox).toBe(fakeSandbox);
+      // Streaming machine must not get re-provisioned.
+      expect(mock.forcePhase).not.toHaveBeenCalled();
+      expect(mock.setWsUrl).not.toHaveBeenCalled();
+    });
+
+    it('reuses a ready machine with a session', async () => {
+      const { pm, machines } = makePm({
+        source: { kind: 'local', workspaceDir: '/tmp/fake' },
+        tickets: [{ id: 't1' }],
+      });
+      const mach = internals(pm).createMachine('t1');
+      const fakeSandbox: ISandbox = {
+        mode: 'none',
+        start: () => {},
+        stop: async () => {},
+        exit: async () => {},
+        execInContainer: async () => true,
+        getStatus: () =>
+          ({ type: 'running', timestamp: Date.now(), data: { wsUrl: 'ws://fake' } }) as unknown as WithTimestamp<AgentProcessStatus>,
+      };
+      internals(pm).machines.set('t1', { machine: mach, sandbox: fakeSandbox });
+      const mock = machines.get('t1')!;
+      mock.phase = 'ready';
+
+      await internals(pm).ensureSupervisorInfra('t1');
+      expect(mock.createSession).not.toHaveBeenCalled();
+    });
+
+    it('disposes a stale machine whose sandbox is not running', async () => {
+      const { pm, machines } = makePm({
+        source: { kind: 'local', workspaceDir: '/tmp/fake' },
+        tickets: [{ id: 't1' }],
+      });
+      const mach = internals(pm).createMachine('t1');
+      const deadSandbox: ISandbox = {
+        mode: 'none',
+        start: () => {},
+        stop: async () => {},
+        exit: async () => {},
+        execInContainer: async () => true,
+        getStatus: () =>
+          ({ type: 'exited', timestamp: Date.now() }) as unknown as WithTimestamp<AgentProcessStatus>,
+      };
+      internals(pm).machines.set('t1', { machine: mach, sandbox: deadSandbox });
+      const mock = machines.get('t1')!;
+      mock.phase = 'idle';
+
+      // After disposing the stale entry, ensureSupervisorInfra proceeds to
+      // build a fresh sandbox. Our mock factory never fires onStatusChange,
+      // so sandboxReady hangs until the 120s safety timeout rejects it.
+      // Run the call + timer advance concurrently so the rejection flows.
+      const ensurePromise = internals(pm).ensureSupervisorInfra('t1').catch(() => 'rejected');
+      await vi.advanceTimersByTimeAsync(121_000);
+      await expect(ensurePromise).resolves.toBe('rejected');
+
+      expect(mock.dispose).toHaveBeenCalled();
     });
   });
 
