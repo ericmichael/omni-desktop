@@ -12,9 +12,7 @@ import { buildAutopilotVariables, buildInteractiveVariables } from '@/lib/client
 import { INBOX_SWEEP_INTERVAL_MS } from '@/lib/inbox-expiry';
 import { upgradeLegacyInbox } from '@/lib/inbox-migration';
 import { getMimeType, isTextMime } from '@/lib/mime-types';
-import { computePagesToDelete } from '@/lib/page-cascade';
-import { getTemplate, type TemplateKey } from '@/lib/page-templates';
-import { PageWatcherManager } from '@/lib/page-watcher';
+import type { TemplateKey } from '@/lib/page-templates';
 import type {
   IMachineFactory,
   ISandbox,
@@ -29,10 +27,10 @@ import type { TemplateVariables } from '@/lib/template';
 import { hasTemplateExpressions, renderTemplate } from '@/lib/template';
 import { decideWorktreeAction } from '@/lib/worktree';
 import { AgentProcess } from '@/main/agent-process';
-import { MARIMO_NOTEBOOK_TEMPLATE } from '@/main/extensions/marimo';
 import { writeMarimoAiConfig } from '@/main/extensions/marimo-config';
 import { ensureNotebookCssReference, writeGlassCss } from '@/main/extensions/marimo-glass';
 import { InboxManager, type InboxManagerStore } from '@/main/inbox-manager';
+import { PageManager, type PageManagerStore } from '@/main/page-manager';
 import { createPlatformClient } from '@/main/platform-mode';
 import type { ProcessManager } from '@/main/process-manager';
 import type { SupervisorContext } from '@/main/supervisor-prompt';
@@ -340,7 +338,7 @@ export class ProjectManager {
   private ticketLocks = new Map<TicketId, Promise<void>>();
   private store: Store<StoreData>;
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
-  private pageWatcher: PageWatcherManager;
+  private pages: PageManager;
   /** Interval handle for periodic stall checks. */
   private stallCheckTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -397,25 +395,20 @@ export class ProjectManager {
       create: (opts) => new AgentProcess(opts),
     };
     this.machineFactory = deps?.machineFactory;
-    this.pageWatcher = new PageWatcherManager(
-      {
-        onExternalChange: (filePath, content) => {
-          const pageId = this.pageIdForFilePath(filePath);
-          if (!pageId) {
-            return;
-          }
-          this.sendToWindow('page:content-changed', pageId, content);
-        },
-        onExternalDelete: (filePath) => {
-          const pageId = this.pageIdForFilePath(filePath);
-          if (!pageId) {
-            return;
-          }
-          this.sendToWindow('page:content-deleted', pageId);
-        },
+
+    const pageStore: PageManagerStore = {
+      getPages: () => (this.store.get('pages') ?? []) as Page[],
+      setPages: (items) => {
+        this.store.set('pages', items);
+        this.sendToWindow('store:changed', this.store.store);
       },
-      { debug: process.env['DEBUG_PAGE_WATCHER'] === '1' || process.env['NODE_ENV'] === 'development' }
-    );
+      getProjects: () => this.getProjects(),
+    };
+    this.pages = new PageManager({
+      store: pageStore,
+      sendToWindow: this.sendToWindow,
+      resolveProjectDir: (project) => this.getProjectDirPath(project),
+    });
     const inboxStore: InboxManagerStore = {
       getInboxItems: () => (this.store.get('inboxItems') ?? []) as InboxItem[],
       setInboxItems: (items) => {
@@ -441,20 +434,13 @@ export class ProjectManager {
   /** Public accessor for IPC wiring. */
   getInboxManager = (): InboxManager => this.inbox;
 
-  /** Reverse-lookup a pageId from its on-disk file path. */
-  private pageIdForFilePath = (filePath: string): PageId | null => {
-    const pages = this.getPages();
-    const projects = this.getProjects();
-    for (const page of pages) {
-      const project = projects.find((p) => p.id === page.projectId);
-      if (!project) {
-        continue;
-      }
-      if (this.getPageFilePath(project, page) === filePath) {
-        return page.id;
-      }
-    }
-    return null;
+  /** Public accessor for IPC wiring. */
+  getPageManager = (): PageManager => this.pages;
+
+  /** Public accessor used by IPC wiring to resolve a project's working directory. */
+  getProjectDir = (projectId: ProjectId): string | null => {
+    const project = this.getProjects().find((p) => p.id === projectId);
+    return project ? this.getProjectDirPath(project) : null;
   };
 
   // #region Machine factory
@@ -861,7 +847,7 @@ export class ProjectManager {
           respond(false, { error: { message: `Project not found: ${projectId}` } });
           return;
         }
-        const pages = this.getPages().filter((p) => p.projectId === projectId);
+        const pages = this.pages.getByProject(projectId);
         respond(true, {
           pages: pages.map((p) => ({
             id: p.id,
@@ -882,12 +868,12 @@ export class ProjectManager {
           respond(false, { error: { message: 'Missing page_id' } });
           return;
         }
-        const page = this.getPages().find((p) => p.id === pageId);
+        const page = this.pages.getById(pageId);
         if (!page) {
           respond(false, { error: { message: `Page not found: ${pageId}` } });
           return;
         }
-        void this.readPageContent(pageId).then(
+        void this.pages.readContent(pageId).then(
           (content) =>
             respond(true, {
               id: page.id,
@@ -1455,21 +1441,8 @@ export class ProjectManager {
     const projects = this.getProjects();
     projects.push(project);
     this.setProjects(projects);
-    // Create root page for this project
-    const now = Date.now();
-    const rootPage: Page = {
-      id: nanoid(),
-      projectId: project.id,
-      parentId: null,
-      title: project.label,
-      sortOrder: 0,
-      isRoot: true,
-      createdAt: now,
-      updatedAt: now,
-    };
-    const pages = this.getPages();
-    pages.push(rootPage);
-    this.setPages(pages);
+    // Seed the project's root page through PageManager.
+    this.pages.seedRootPage(project);
     // Create project directory and context.md
     void this.ensureProjectDir(project);
     // Eagerly load FLEET.md so the pipeline is ready when the UI fetches it.
@@ -1508,8 +1481,7 @@ export class ProjectManager {
     this.setTickets(remainingTickets);
     const remainingMilestones = this.getMilestones().filter((i) => i.projectId !== id);
     this.setMilestones(remainingMilestones);
-    const remainingPages = this.getPages().filter((p) => p.projectId !== id);
-    this.setPages(remainingPages);
+    this.pages.removeAllForProject(id);
   };
 
   // #endregion
@@ -1905,203 +1877,6 @@ export class ProjectManager {
     this.setMilestones(milestones.filter((i) => i.id !== id));
   };
 
-  // #region Pages
-
-  getPages = (): Page[] => {
-    return this.store.get('pages') ?? [];
-  };
-
-  private setPages = (items: Page[]): void => {
-    this.store.set('pages', items);
-    this.sendToWindow('store:changed', this.store.store);
-  };
-
-  getPagesByProject = (projectId: ProjectId): Page[] => {
-    return this.getPages().filter((p) => p.projectId === projectId);
-  };
-
-  addPage = (input: Omit<Page, 'id' | 'createdAt' | 'updatedAt'>, template?: TemplateKey): Page => {
-    const now = Date.now();
-    const page: Page = { ...input, id: nanoid(), createdAt: now, updatedAt: now };
-    const pages = this.getPages();
-    pages.push(page);
-    this.setPages(pages);
-    // Seed the .md file on disk. If a template is provided, its markdown is
-    // the initial body; otherwise the file is empty. The template note is
-    // recorded via notePendingWrite so the watcher's echo-suppression keeps
-    // working for the first external-change check.
-    const project = this.getProjects().find((p) => p.id === page.projectId);
-    if (project) {
-      const filePath = this.getPageFilePath(project, page);
-      const initialContent = page.kind === 'notebook' ? MARIMO_NOTEBOOK_TEMPLATE : getTemplate(template);
-      this.pageWatcher.notePendingWrite(filePath, initialContent);
-      void ensureDirectory(path.dirname(filePath)).then(() =>
-        fs.writeFile(filePath, initialContent, 'utf-8').catch(() => {})
-      );
-      // Notebook pages also need the glass CSS sidecar file so marimo's
-      // `css_file=` reference resolves on first open. Default to glass-off;
-      // the renderer will rewrite the contents based on current glass mode
-      // immediately before launching the marimo webview.
-      if (page.kind === 'notebook') {
-        void writeGlassCss(path.dirname(filePath), false).catch(() => {});
-      }
-    }
-    return page;
-  };
-
-  updatePage = (id: PageId, patch: Partial<Omit<Page, 'id' | 'projectId' | 'createdAt'>>): void => {
-    const pages = this.getPages();
-    const index = pages.findIndex((p) => p.id === id);
-    if (index === -1) {
-      return;
-    }
-    pages[index] = { ...pages[index]!, ...patch, updatedAt: Date.now() };
-    this.setPages(pages);
-  };
-
-  removePage = (id: PageId): void => {
-    const pages = this.getPages();
-    const target = pages.find((p) => p.id === id);
-    if (!target) {
-      return;
-    }
-    const toDelete = computePagesToDelete(pages, id);
-    if (toDelete.size === 0) {
-      return;
-    } // target is root or not found
-
-    // Delete .md files from disk. Unsubscribe the watcher for each path BEFORE
-    // the rm so chokidar's unlink event doesn't reach the manager and emit a
-    // phantom `page:content-deleted` to any renderer that was watching.
-    const project = this.getProjects().find((p) => p.id === target.projectId);
-    if (project) {
-      for (const pageId of toDelete) {
-        const page = pages.find((p) => p.id === pageId);
-        if (page) {
-          const filePath = this.getPageFilePath(project, page);
-          this.pageWatcher.unsubscribe(filePath);
-          void fs.rm(filePath, { force: true }).catch(() => {});
-        }
-      }
-    }
-
-    this.setPages(pages.filter((p) => !toDelete.has(p.id)));
-  };
-
-  /**
-   * Get the file path for a page's content. Root pages always use context.md.
-   * Doc pages are markdown (`pages/<id>.md`); notebook pages are Python files
-   * (`pages/<id>.py`) edited by the marimo extension.
-   */
-  private getPageFilePath = (project: Project, page: Page): string => {
-    const dir = this.getProjectDirPath(project);
-    if (page.isRoot) {
-      return path.join(dir, 'context.md');
-    }
-    const ext = page.kind === 'notebook' ? '.py' : '.md';
-    return path.join(dir, 'pages', `${page.id}${ext}`);
-  };
-
-  /** Public accessor used by the extension layer to resolve a project's working directory. */
-  getProjectDir = (projectId: ProjectId): string | null => {
-    const project = this.getProjects().find((p) => p.id === projectId);
-    return project ? this.getProjectDirPath(project) : null;
-  };
-
-  /** Public accessor for a notebook page's absolute file path. */
-  getNotebookFilePath = (pageId: PageId): string | null => {
-    const page = this.getPages().find((p) => p.id === pageId);
-    if (!page || page.kind !== 'notebook') {
-      return null;
-    }
-    const project = this.getProjects().find((p) => p.id === page.projectId);
-    if (!project) {
-      return null;
-    }
-    return this.getPageFilePath(project, page);
-  };
-
-  readPageContent = async (pageId: PageId): Promise<string> => {
-    const pages = this.getPages();
-    const page = pages.find((p) => p.id === pageId);
-    if (!page) {
-      return '';
-    }
-    const project = this.getProjects().find((p) => p.id === page.projectId);
-    if (!project) {
-      return '';
-    }
-    const filePath = this.getPageFilePath(project, page);
-    try {
-      return await fs.readFile(filePath, 'utf-8');
-    } catch {
-      return '';
-    }
-  };
-
-  writePageContent = async (pageId: PageId, content: string): Promise<void> => {
-    const pages = this.getPages();
-    const page = pages.find((p) => p.id === pageId);
-    if (!page) {
-      return;
-    }
-    const project = this.getProjects().find((p) => p.id === page.projectId);
-    if (!project) {
-      return;
-    }
-    const filePath = this.getPageFilePath(project, page);
-    await ensureDirectory(path.dirname(filePath));
-    // Record the pending write BEFORE touching disk so the resulting chokidar
-    // event is recognized as our own echo and suppressed.
-    this.pageWatcher.notePendingWrite(filePath, content);
-    await fs.writeFile(filePath, content, 'utf-8');
-  };
-
-  /** Renderer-facing: start watching a page's file for external edits. */
-  watchPage = async (pageId: PageId): Promise<{ content: string } | null> => {
-    const page = this.getPages().find((p) => p.id === pageId);
-    if (!page) {
-      return null;
-    }
-    const project = this.getProjects().find((p) => p.id === page.projectId);
-    if (!project) {
-      return null;
-    }
-    const filePath = this.getPageFilePath(project, page);
-    await this.pageWatcher.subscribe(filePath);
-    let content = '';
-    try {
-      content = await fs.readFile(filePath, 'utf-8');
-    } catch {
-      // File may not exist yet; subscriber will be notified if it appears.
-    }
-    return { content };
-  };
-
-  unwatchPage = (pageId: PageId): void => {
-    const page = this.getPages().find((p) => p.id === pageId);
-    if (!page) {
-      return;
-    }
-    const project = this.getProjects().find((p) => p.id === page.projectId);
-    if (!project) {
-      return;
-    }
-    const filePath = this.getPageFilePath(project, page);
-    this.pageWatcher.unsubscribe(filePath);
-  };
-
-  reorderPage = (pageId: PageId, newParentId: PageId | null, newSortOrder: number): void => {
-    const pages = this.getPages();
-    const index = pages.findIndex((p) => p.id === pageId);
-    if (index === -1) {
-      return;
-    }
-    pages[index] = { ...pages[index]!, parentId: newParentId, sortOrder: newSortOrder, updatedAt: Date.now() };
-    this.setPages(pages);
-  };
-
-  // #endregion
 
   /** Resolve the effective branch for a ticket (ticket.branch ?? milestone.branch ?? undefined). */
   resolveTicketBranch = (ticket: Ticket): string | undefined => {
@@ -3042,8 +2817,7 @@ export class ProjectManager {
     const context: SupervisorContext = {};
 
     // Project brief: read the root page's context.md (sync-safe since we pre-load it)
-    const pages = this.getPages().filter((p) => p.projectId === ticket.projectId);
-    const rootPage = pages.find((p) => p.isRoot);
+    const rootPage = this.pages.getByProject(ticket.projectId).find((p) => p.isRoot);
     if (rootPage) {
       // Read context.md synchronously from the project dir if available
       try {
@@ -3872,7 +3646,7 @@ export class ProjectManager {
     }
     this.cancelAllRetries();
     this.workflowLoader.dispose();
-    await this.pageWatcher.dispose();
+    await this.pages.dispose();
 
     // Dispose all machines
     for (const [ticketId, entry] of this.machines) {
@@ -3971,25 +3745,26 @@ export const createProjectManager = (arg: {
   ipc.handle('milestone:update-item', (_, id, patch) => projectManager.updateMilestone(id, patch));
   ipc.handle('milestone:remove-item', (_, id) => projectManager.removeMilestone(id));
 
-  // Pages
-  ipc.handle('page:get-items', (_, projectId) => projectManager.getPagesByProject(projectId));
-  ipc.handle('page:get-all', () => projectManager.getPages());
-  ipc.handle('page:add-item', (_, item, template) => projectManager.addPage(item, template));
-  ipc.handle('page:update-item', (_, id, patch) => projectManager.updatePage(id, patch));
-  ipc.handle('page:remove-item', (_, id) => projectManager.removePage(id));
-  ipc.handle('page:read-content', (_, pageId) => projectManager.readPageContent(pageId));
-  ipc.handle('page:write-content', (_, pageId, content) => projectManager.writePageContent(pageId, content));
+  // Pages — delegated to PageManager.
+  const pageManager = projectManager.getPageManager();
+  ipc.handle('page:get-items', (_, projectId) => pageManager.getByProject(projectId));
+  ipc.handle('page:get-all', () => pageManager.getAll());
+  ipc.handle('page:add-item', (_, item, template) => pageManager.add(item, template));
+  ipc.handle('page:update-item', (_, id, patch) => pageManager.update(id, patch));
+  ipc.handle('page:remove-item', (_, id) => pageManager.remove(id));
+  ipc.handle('page:read-content', (_, pageId) => pageManager.readContent(pageId));
+  ipc.handle('page:write-content', (_, pageId, content) => pageManager.writeContent(pageId, content));
   ipc.handle('page:reorder', (_, pageId, newParentId, newSortOrder) =>
-    projectManager.reorderPage(pageId, newParentId, newSortOrder)
+    pageManager.reorder(pageId, newParentId, newSortOrder)
   );
-  ipc.handle('page:watch', (_, pageId) => projectManager.watchPage(pageId));
-  ipc.handle('page:unwatch', (_, pageId) => projectManager.unwatchPage(pageId));
+  ipc.handle('page:watch', (_, pageId) => pageManager.watch(pageId));
+  ipc.handle('page:unwatch', (_, pageId) => pageManager.unwatch(pageId));
   ipc.handle('page:get-notebook-paths', (_, pageId) => {
-    const filePath = projectManager.getNotebookFilePath(pageId);
+    const filePath = pageManager.getNotebookFilePath(pageId);
     if (!filePath) {
       return null;
     }
-    const page = projectManager.getPages().find((p) => p.id === pageId);
+    const page = pageManager.getById(pageId);
     if (!page) {
       return null;
     }
@@ -4000,7 +3775,7 @@ export const createProjectManager = (arg: {
     return { filePath, projectDir };
   });
   ipc.handle('page:prepare-notebook', async (_, pageId, glassEnabled) => {
-    const filePath = projectManager.getNotebookFilePath(pageId);
+    const filePath = pageManager.getNotebookFilePath(pageId);
     if (!filePath) {
       return;
     }
@@ -4011,7 +3786,7 @@ export const createProjectManager = (arg: {
     // project directory (marimo searches up from cwd for it). Only writes
     // when a default model with an api key is configured; refuses to
     // clobber any pre-existing user-authored .marimo.toml.
-    const page = projectManager.getPages().find((p) => p.id === pageId);
+    const page = pageManager.getById(pageId);
     if (page) {
       const projectDir = projectManager.getProjectDir(page.projectId);
       if (projectDir) {
