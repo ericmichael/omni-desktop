@@ -26,6 +26,7 @@ import {
   isFile,
   pathExists,
   testModelConnection,
+  validateConfigPath,
 } from '@/main/util';
 import { ServerIpcAdapter } from '@/server/ipc-adapter';
 import type { ServerStore } from '@/server/store';
@@ -51,11 +52,6 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
 
   // Project manager — shared across all clients so machines/sandboxes survive reconnections
   const sendToAll: typeof wsHandler.sendToAll = wsHandler.sendToAll.bind(wsHandler);
-  const [, cleanupProject] = createProjectManager({
-    ipc: ipc as any,
-    sendToWindow: sendToAll,
-    store: store as any,
-  });
 
   // --- Global managers (survive WS reconnections) ---
 
@@ -64,6 +60,7 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
     sendToWindow: sendToAll,
   });
 
+  // processManager must be created before createProjectManager so it can be passed in
   const [processManager, cleanupProcessManager] = createProcessManager({
     ipc: ipc as any,
     sendToWindow: sendToAll,
@@ -73,6 +70,13 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
       sandboxProfiles: store.get('sandboxProfiles') ?? null,
       selectedMachineId: store.get('selectedMachineId') ?? null,
     }),
+  });
+
+  const [, cleanupProject] = createProjectManager({
+    ipc: ipc as any,
+    sendToWindow: sendToAll,
+    store: store as any,
+    processManager,
   });
 
   const [, cleanupExtensions] = createExtensionManager({
@@ -222,6 +226,7 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
   ipc.handle('config:get-env-file-path', () => join(OMNI_CONFIG_DIR, '.env'));
 
   ipc.handle('config:read-json-file', async (_, filePath) => {
+    validateConfigPath(filePath, OMNI_CONFIG_DIR);
     try {
       const content = await readFile(filePath, 'utf-8');
       return JSON.parse(content) as unknown;
@@ -231,11 +236,13 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
   });
 
   ipc.handle('config:write-json-file', async (_, filePath, data) => {
+    validateConfigPath(filePath, OMNI_CONFIG_DIR);
     await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf-8');
   });
 
   ipc.handle('config:read-text-file', async (_, filePath) => {
+    validateConfigPath(filePath, OMNI_CONFIG_DIR);
     try {
       return await readFile(filePath, 'utf-8');
     } catch {
@@ -244,6 +251,7 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
   });
 
   ipc.handle('config:write-text-file', async (_, filePath, content) => {
+    validateConfigPath(filePath, OMNI_CONFIG_DIR);
     await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, content, 'utf-8');
   });

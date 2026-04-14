@@ -114,6 +114,28 @@ export const getTorchPlatform = (gpuType: GpuType): 'cuda' | 'rocm' | 'cpu' => {
 
 //#endregion
 
+//#region Path validation
+
+/**
+ * Validates that filePath is within configDir. Throws if not.
+ * Protects config:* IPC handlers from path traversal attacks.
+ */
+export function validateConfigPath(filePath: string, configDir: string): void {
+  const resolvedFile = path.resolve(filePath);
+  const resolvedConfig = path.resolve(configDir);
+  if (
+    !resolvedFile.startsWith(resolvedConfig + path.sep) &&
+    resolvedFile !== resolvedConfig
+  ) {
+    throw new Error('Access denied: path is outside the config directory');
+  }
+  if (filePath.includes('\0')) {
+    throw new Error('Invalid path: contains null byte');
+  }
+}
+
+//#endregion
+
 //#region Convention defaults
 
 /**

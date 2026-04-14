@@ -35,6 +35,7 @@ import {
   isFile,
   pathExists,
   testModelConnection,
+  validateConfigPath,
 } from '@/main/util';
 import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
 
@@ -432,6 +433,7 @@ main.ipc.handle('config:get-omni-config-dir', () => OMNI_CONFIG_DIR);
 main.ipc.handle('config:get-env-file-path', () => join(OMNI_CONFIG_DIR, '.env'));
 
 main.ipc.handle('config:read-json-file', async (_, filePath) => {
+  validateConfigPath(filePath, OMNI_CONFIG_DIR);
   try {
     const content = await readFile(filePath, 'utf-8');
     return JSON.parse(content) as unknown;
@@ -441,11 +443,13 @@ main.ipc.handle('config:read-json-file', async (_, filePath) => {
 });
 
 main.ipc.handle('config:write-json-file', async (_, filePath, data) => {
+  validateConfigPath(filePath, OMNI_CONFIG_DIR);
   await mkdir(dirname(filePath), { recursive: true });
   await writeFile(filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf-8');
 });
 
 main.ipc.handle('config:read-text-file', async (_, filePath) => {
+  validateConfigPath(filePath, OMNI_CONFIG_DIR);
   try {
     return await readFile(filePath, 'utf-8');
   } catch {
@@ -454,6 +458,7 @@ main.ipc.handle('config:read-text-file', async (_, filePath) => {
 });
 
 main.ipc.handle('config:write-text-file', async (_, filePath, content) => {
+  validateConfigPath(filePath, OMNI_CONFIG_DIR);
   await mkdir(dirname(filePath), { recursive: true });
   await writeFile(filePath, content, 'utf-8');
 });
