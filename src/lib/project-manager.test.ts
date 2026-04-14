@@ -27,15 +27,7 @@ import type {
 } from '@/lib/project-manager-deps';
 import { ProjectManager } from '@/main/project-manager';
 import type { TicketPhase } from '@/shared/ticket-phase';
-import type {
-  AgentProcessStatus,
-  Pipeline,
-  Project,
-  StoreData,
-  Ticket,
-  TicketId,
-  WithTimestamp,
-} from '@/shared/types';
+import type { AgentProcessStatus, Pipeline, Project, StoreData, Ticket, TicketId, WithTimestamp } from '@/shared/types';
 import type { WorkflowConfig } from '@/lib/workflow';
 
 // ---------------------------------------------------------------------------
@@ -54,34 +46,35 @@ const ACTIVE_PHASES: TicketPhase[] = [
 ];
 const STREAMING_PHASES: TicketPhase[] = ['running', 'continuing'];
 
-const defaultStoreData = (): StoreData => ({
-  sandboxBackend: 'none',
-  sandboxProfiles: null,
-  selectedMachineId: null,
-  optInToLauncherPrereleases: false,
-  previewFeatures: false,
-  layoutMode: 'fleet',
-  theme: 'omni',
-  onboardingComplete: true,
-  projects: [],
-  milestones: [],
-  pages: [],
-  inboxItems: [],
-  tasks: [],
-  tickets: [],
-  wipLimit: 100,
-  weeklyReviewDay: 5,
-  lastWeeklyReviewAt: null,
-  schemaVersion: 4,
-  chatSessionId: null,
-  chatProjectId: null,
-  codeTabs: [],
-  activeCodeTabId: null,
-  codeLayoutMode: 'deck',
-  codeDeckBackground: null,
-  activeTicketId: null,
-  enabledExtensions: {},
-} as unknown as StoreData);
+const defaultStoreData = (): StoreData =>
+  ({
+    sandboxBackend: 'none',
+    sandboxProfiles: null,
+    selectedMachineId: null,
+    optInToLauncherPrereleases: false,
+    previewFeatures: false,
+    layoutMode: 'fleet',
+    theme: 'omni',
+    onboardingComplete: true,
+    projects: [],
+    milestones: [],
+    pages: [],
+    inboxItems: [],
+    tasks: [],
+    tickets: [],
+    wipLimit: 100,
+    weeklyReviewDay: 5,
+    lastWeeklyReviewAt: null,
+    schemaVersion: 4,
+    chatSessionId: null,
+    chatProjectId: null,
+    codeTabs: [],
+    activeCodeTabId: null,
+    codeLayoutMode: 'deck',
+    codeDeckBackground: null,
+    activeTicketId: null,
+    enabledExtensions: {},
+  }) as unknown as StoreData;
 
 const makeStore = (overrides: Partial<StoreData> = {}): IStore => {
   const data: StoreData = { ...defaultStoreData(), ...overrides };
@@ -280,21 +273,24 @@ const seedStore = (args: SeedArgs = {}): IStore => {
     // No source → startSupervisor would reject, but we aren't calling it.
   } as unknown as Project;
 
-  const tickets: Ticket[] = (args.tickets ?? []).map((t) => ({
-    id: t.id,
-    projectId,
-    title: t.title ?? `Ticket ${t.id}`,
-    description: '',
-    priority: t.priority ?? 'medium',
-    columnId: t.columnId ?? pipeline.columns[0]!.id,
-    blockedBy: t.blockedBy ?? [],
-    createdAt: t.createdAt ?? Date.now(),
-    updatedAt: t.updatedAt ?? Date.now(),
-    comments: t.comments ?? [],
-    runs: t.runs ?? [],
-    phase: t.phase,
-    tokenUsage: t.tokenUsage,
-  } as unknown as Ticket));
+  const tickets: Ticket[] = (args.tickets ?? []).map(
+    (t) =>
+      ({
+        id: t.id,
+        projectId,
+        title: t.title ?? `Ticket ${t.id}`,
+        description: '',
+        priority: t.priority ?? 'medium',
+        columnId: t.columnId ?? pipeline.columns[0]!.id,
+        blockedBy: t.blockedBy ?? [],
+        createdAt: t.createdAt ?? Date.now(),
+        updatedAt: t.updatedAt ?? Date.now(),
+        comments: t.comments ?? [],
+        runs: t.runs ?? [],
+        phase: t.phase,
+        tokenUsage: t.tokenUsage,
+      }) as unknown as Ticket
+  );
 
   return makeStore({
     projects: [project],
@@ -348,7 +344,9 @@ const makePm = (
 };
 
 // Gain access to ProjectManager internals (machines map, private methods).
-const internals = (pm: ProjectManager): {
+const internals = (
+  pm: ProjectManager
+): {
   machines: Map<TicketId, { machine: MockMachine; sandbox: unknown }>;
   runStartedAt: Map<TicketId, number>;
   createMachine: (ticketId: TicketId) => MockMachine;
@@ -358,6 +356,12 @@ const internals = (pm: ProjectManager): {
     failureClass: string,
     opts: { attempt?: number; continuationTurn?: number; error?: string }
   ) => void;
+  handleRetryFired: (
+    ticketId: TicketId,
+    failureClass: string,
+    attempt: number,
+    continuationTurn: number
+  ) => Promise<void>;
   checkForStalledSupervisors: () => void;
   autoDispatchTick: () => Promise<void>;
   canStartSupervisor: (projectId?: string, columnId?: string) => boolean;
@@ -478,6 +482,107 @@ describe('ProjectManager integration', () => {
       expect(mock.scheduleRetryTimer).not.toHaveBeenCalled();
       expect(mock.phase).toBe('idle');
     });
+
+    // ---- T2 wave -------------------------------------------------------
+
+    describe('backoff ladder', () => {
+      const getDelay = (mock: MockMachine, call: number): number => {
+        const calls = (mock.scheduleRetryTimer as ReturnType<typeof vi.fn>).mock.calls;
+        return calls[call]![0] as number;
+      };
+
+      it('produces 10s, 20s, 40s, 80s, 160s for attempts 0..4', () => {
+        const { ctx, mock } = setupRunningMachine();
+        const expected = [10_000, 20_000, 40_000, 80_000, 160_000];
+        for (let attempt = 0; attempt < expected.length; attempt++) {
+          internals(ctx.pm).scheduleRetry('t1', 'error', { attempt });
+          expect(getDelay(mock, attempt)).toBe(expected[attempt]);
+        }
+      });
+
+      it('clamps the delay at MAX_RETRY_BACKOFF_MS (5 minutes) for very large attempts', () => {
+        // Use a workflow config that raises maxRetries so attempt=10 doesn't hit the error branch.
+        const { pm, machines } = makePm(
+          { tickets: [{ id: 't1' }] },
+          { workflowConfig: { supervisor: { max_retry_attempts: 100 } } }
+        );
+        const mach = internals(pm).createMachine('t1');
+        internals(pm).machines.set('t1', { machine: mach, sandbox: null });
+        const mock = machines.get('t1')!;
+        mock.phase = 'running';
+
+        internals(pm).scheduleRetry('t1', 'error', { attempt: 10 });
+        const calls = (mock.scheduleRetryTimer as ReturnType<typeof vi.fn>).mock.calls;
+        expect(calls[0]![0]).toBe(5 * 60 * 1000);
+      });
+
+      it('never calls scheduleRetry with failureClass="completed" from the run-end path', async () => {
+        // decideRunEndAction never returns {type: retry, failureClass: completed}
+        // — continuations go through startMachineRun directly. This test pins
+        // that behavior so the dead "completed" branch in scheduleRetry can be
+        // safely removed.
+        const { ctx, mock } = setupRunningMachine();
+        const schedSpy = vi.fn();
+        (ctx.pm as unknown as { scheduleRetry: typeof schedSpy }).scheduleRetry = schedSpy;
+
+        // Fire every "continuation-like" reason classify_run_end recognizes
+        for (const reason of ['completed', 'done', 'finished', 'success', 'max_turns']) {
+          mock.phase = 'running';
+          mock.simulateRunEnd(reason);
+          await vi.runOnlyPendingTimersAsync();
+        }
+
+        for (const call of schedSpy.mock.calls) {
+          expect(call[1]).not.toBe('completed');
+        }
+      });
+    });
+
+    describe('handleRetryFired', () => {
+      it('bails silently when the ticket has reached a terminal column', async () => {
+        const { ctx, mock } = setupRunningMachine();
+        // Move ticket directly in the store (avoid moveTicketToColumn's cleanup side-effects).
+        const tickets = ctx.store.get('tickets', []);
+        tickets[0]!.columnId = 'done';
+        ctx.store.set('tickets', tickets);
+
+        await internals(ctx.pm).handleRetryFired('t1', 'error', 1, 0);
+
+        expect(mock.phase).toBe('idle');
+        // Must not re-arm a new timer
+        expect(mock.scheduleRetryTimer).not.toHaveBeenCalled();
+      });
+
+      it('requeues with attempt+1 when no concurrency slots are available', async () => {
+        const { ctx, mock, machines } = (() => {
+          const base = setupRunningMachine();
+          // Saturate global concurrency by creating 4 more running machines
+          for (let i = 0; i < 4; i++) {
+            const m = internals(base.ctx.pm).createMachine(`other-${i}` as TicketId);
+            internals(base.ctx.pm).machines.set(`other-${i}` as TicketId, { machine: m, sandbox: null });
+            base.ctx.machines.get(`other-${i}` as TicketId)!.phase = 'running';
+          }
+          return { ctx: base.ctx, mock: base.mock, machines: base.ctx.machines };
+        })();
+        void machines;
+
+        await internals(ctx.pm).handleRetryFired('t1', 'error', 2, 0);
+
+        // Timer re-armed with attempt+1 delay = 10_000 * 2^3 = 80_000
+        const calls = (mock.scheduleRetryTimer as ReturnType<typeof vi.fn>).mock.calls;
+        expect(calls.length).toBeGreaterThan(0);
+        expect(calls[calls.length - 1]![0]).toBe(80_000);
+      });
+
+      it('silently releases when the ticket or machine no longer exists', async () => {
+        const { ctx } = setupRunningMachine();
+        // Remove the ticket entirely
+        ctx.store.set('tickets', []);
+        internals(ctx.pm).machines.delete('t1');
+
+        await expect(internals(ctx.pm).handleRetryFired('t1', 'error', 1, 0)).resolves.toBeUndefined();
+      });
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -540,7 +645,7 @@ describe('ProjectManager integration', () => {
       // Silent for 10 minutes — well past the 5-minute non-streaming timeout,
       // but far below the 30-minute streaming safety-net.
       mock.phase = 'running';
-      mock.lastActivityAt = Date.now() - (10 * 60 * 1000);
+      mock.lastActivityAt = Date.now() - 10 * 60 * 1000;
 
       await vi.advanceTimersByTimeAsync(STALL_CHECK_INTERVAL_MS + 100);
 
@@ -944,9 +1049,7 @@ describe('ProjectManager integration', () => {
     };
 
     /** Seed a PM + machine in 'running' phase with a stubbed retry timer. */
-    const setupWithRetryArmed = (
-      pipeline: Pipeline = TEST_PIPELINE
-    ): { ctx: PmCtx; mock: MockMachine } => {
+    const setupWithRetryArmed = (pipeline: Pipeline = TEST_PIPELINE): { ctx: PmCtx; mock: MockMachine } => {
       const ctx = makePm({
         pipeline,
         tickets: [{ id: 't1', columnId: 'in_progress' }],

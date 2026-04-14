@@ -15,7 +15,13 @@ import { getMimeType, isTextMime } from '@/lib/mime-types';
 import { computePagesToDelete } from '@/lib/page-cascade';
 import { getTemplate, type TemplateKey } from '@/lib/page-templates';
 import { PageWatcherManager } from '@/lib/page-watcher';
-import type { IMachineFactory, ISandbox, ISandboxFactory, IWorkflowLoader,ProjectManagerDeps } from '@/lib/project-manager-deps';
+import type {
+  IMachineFactory,
+  ISandbox,
+  ISandboxFactory,
+  IWorkflowLoader,
+  ProjectManagerDeps,
+} from '@/lib/project-manager-deps';
 import type { FailureClass } from '@/lib/run-end';
 import { decideRunEndAction } from '@/lib/run-end';
 import type { TemplateVariables } from '@/lib/template';
@@ -309,11 +315,6 @@ const STREAMING_STALL_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 /** How often to check for stalled supervisors. */
 const STALL_CHECK_INTERVAL_MS = 30_000; // 30 seconds
 
-
-
-/** Short delay before a continuation retry after a normal run end. */
-const CONTINUATION_RETRY_DELAY_MS = 3_000;
-
 /** Base delay for exponential backoff on failure-driven retries. */
 const RETRY_BASE_DELAY_MS = 10_000;
 
@@ -372,22 +373,25 @@ export class ProjectManager {
     if (this.processManager) {
       this.processManager.statusFallback = (processId) => this.getSupervisorStatusForCodeTab(processId);
     }
-    this.workflowLoader = deps?.workflowLoader ?? new WorkflowLoader({
-      onChange: (projectId, workflow) => {
-        console.log(
-          `[ProjectManager] FLEET.md reloaded for project ${projectId}${ 
-            workflow.promptTemplate ? ' (has custom prompt)' : '' 
-            }${workflow.config.supervisor ? ' (has supervisor config)' : '' 
+    this.workflowLoader =
+      deps?.workflowLoader ??
+      new WorkflowLoader({
+        onChange: (projectId, workflow) => {
+          console.log(
+            `[ProjectManager] FLEET.md reloaded for project ${projectId}${
+              workflow.promptTemplate ? ' (has custom prompt)' : ''
+            }${
+              workflow.config.supervisor ? ' (has supervisor config)' : ''
             }${workflow.config.hooks ? ' (has hooks)' : ''}`
-        );
-        // Push updated pipeline to the renderer so the UI reflects FLEET.md changes
-        const pipeline = this.getPipeline(projectId);
-        this.sendToWindow('project:pipeline', projectId, pipeline);
+          );
+          // Push updated pipeline to the renderer so the UI reflects FLEET.md changes
+          const pipeline = this.getPipeline(projectId);
+          this.sendToWindow('project:pipeline', projectId, pipeline);
 
-        // Migrate tickets whose columnId no longer exists in the new pipeline
-        this.migrateOrphanedTickets(projectId, pipeline);
-      },
-    });
+          // Migrate tickets whose columnId no longer exists in the new pipeline
+          this.migrateOrphanedTickets(projectId, pipeline);
+        },
+      });
     this.sandboxFactory = deps?.sandboxFactory ?? {
       create: (opts) => new AgentProcess(opts),
     };
@@ -397,15 +401,15 @@ export class ProjectManager {
         onExternalChange: (filePath, content) => {
           const pageId = this.pageIdForFilePath(filePath);
           if (!pageId) {
-return;
-}
+            return;
+          }
           this.sendToWindow('page:content-changed', pageId, content);
         },
         onExternalDelete: (filePath) => {
           const pageId = this.pageIdForFilePath(filePath);
           if (!pageId) {
-return;
-}
+            return;
+          }
           this.sendToWindow('page:content-deleted', pageId);
         },
       },
@@ -443,8 +447,8 @@ return;
     for (const page of pages) {
       const project = projects.find((p) => p.id === page.projectId);
       if (!project) {
-continue;
-}
+        continue;
+      }
       if (this.getPageFilePath(project, page) === filePath) {
         return page.id;
       }
@@ -469,8 +473,8 @@ continue;
       onTokenUsage: (tid: TicketId, usage: { inputTokens: number; outputTokens: number; totalTokens: number }) => {
         const ticket = this.getTicketById(tid);
         if (!ticket) {
-return;
-}
+          return;
+        }
         const prev = ticket.tokenUsage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
         const updated = {
           inputTokens: prev.inputTokens + usage.inputTokens,
@@ -482,7 +486,12 @@ return;
           this.sendToWindow('project:token-usage', tid, updated);
         }
       },
-      onClientRequest: (tid: TicketId, functionName: string, args: Record<string, unknown>, respond: ClientFunctionResponder) => {
+      onClientRequest: (
+        tid: TicketId,
+        functionName: string,
+        args: Record<string, unknown>,
+        respond: ClientFunctionResponder
+      ) => {
         // Auto-approve tool approval requests (project agents run unattended)
         if (functionName === 'ui.request_tool_approval') {
           respond(true, { approved: true, always_approve: true });
@@ -527,7 +536,9 @@ return;
     args: Record<string, unknown>,
     respond: (ok: boolean, result?: Record<string, unknown>) => void
   ): void {
-    console.log(`[ProjectManager] handleClientToolCall: ticketId=${ticketId}, function=${functionName}, args=${JSON.stringify(args)}`);
+    console.log(
+      `[ProjectManager] handleClientToolCall: ticketId=${ticketId}, function=${functionName}, args=${JSON.stringify(args)}`
+    );
 
     if (functionName !== 'tool.call') {
       // Not a tool call — ignore (other client_request functions handled elsewhere)
@@ -707,8 +718,8 @@ return;
         if (columnFilter) {
           const col = pl.columns.find((c) => c.label.toLowerCase() === columnFilter.toLowerCase());
           if (col) {
-tickets = tickets.filter((t) => t.columnId === col.id);
-}
+            tickets = tickets.filter((t) => t.columnId === col.id);
+          }
         }
         const priorityFilter = toolArgs.priority as string | undefined;
         if (priorityFilter) {
@@ -748,7 +759,11 @@ tickets = tickets.filter((t) => t.columnId === col.id);
           priority: (toolArgs.priority as TicketPriority) ?? 'medium',
           blockedBy: [],
         });
-        respond(true, { id: newTicket.id, title: newTicket.title, column: this.getPipeline(projectId).columns[0]?.label });
+        respond(true, {
+          id: newTicket.id,
+          title: newTicket.title,
+          column: this.getPipeline(projectId).columns[0]?.label,
+        });
         break;
       }
       case 'update_ticket': {
@@ -764,26 +779,26 @@ tickets = tickets.filter((t) => t.columnId === col.id);
         }
         const patch: Record<string, unknown> = {};
         if (toolArgs.title) {
-patch.title = toolArgs.title;
-}
+          patch.title = toolArgs.title;
+        }
         if (toolArgs.description !== undefined) {
-patch.description = toolArgs.description;
-}
+          patch.description = toolArgs.description;
+        }
         if (toolArgs.priority) {
-patch.priority = toolArgs.priority;
-}
+          patch.priority = toolArgs.priority;
+        }
         if (toolArgs.branch !== undefined) {
-patch.branch = toolArgs.branch;
-}
+          patch.branch = toolArgs.branch;
+        }
         // Dependency management
         if (toolArgs.add_blocked_by || toolArgs.remove_blocked_by) {
           const current = new Set(target.blockedBy ?? []);
           for (const id of (toolArgs.add_blocked_by as string[]) ?? []) {
-current.add(id);
-}
+            current.add(id);
+          }
           for (const id of (toolArgs.remove_blocked_by as string[]) ?? []) {
-current.delete(id);
-}
+            current.delete(id);
+          }
           patch.blockedBy = [...current];
         }
         this.updateTicket(targetId, patch);
@@ -838,10 +853,12 @@ current.delete(id);
       case 'list_pages': {
         const projectId = (toolArgs.project_id as string) ?? '';
         if (!projectId) {
- respond(false, { error: { message: 'Missing project_id' } }); return;
-}
+          respond(false, { error: { message: 'Missing project_id' } });
+          return;
+        }
         if (!this.getProjects().find((p) => p.id === projectId)) {
-          respond(false, { error: { message: `Project not found: ${projectId}` } }); return;
+          respond(false, { error: { message: `Project not found: ${projectId}` } });
+          return;
         }
         const pages = this.getPages().filter((p) => p.projectId === projectId);
         respond(true, {
@@ -861,12 +878,14 @@ current.delete(id);
       case 'read_page': {
         const pageId = (toolArgs.page_id as string) ?? '';
         if (!pageId) {
- respond(false, { error: { message: 'Missing page_id' } }); return;
-}
+          respond(false, { error: { message: 'Missing page_id' } });
+          return;
+        }
         const page = this.getPages().find((p) => p.id === pageId);
         if (!page) {
- respond(false, { error: { message: `Page not found: ${pageId}` } }); return;
-}
+          respond(false, { error: { message: `Page not found: ${pageId}` } });
+          return;
+        }
         void this.readPageContent(pageId).then(
           (content) =>
             respond(true, {
@@ -985,15 +1004,13 @@ current.delete(id);
 
       const entry = this.machines.get(ticketId);
       if (!entry) {
-return;
-}
+        return;
+      }
       const { machine } = entry;
 
       // Guard: ignore if machine was already stopped/transitioned (e.g., user clicked Stop)
       if (!machine.isStreaming()) {
-        console.log(
-          `[ProjectManager] Ignoring run_end for ${ticketId} — machine in phase ${machine.getPhase()}`
-        );
+        console.log(`[ProjectManager] Ignoring run_end for ${ticketId} — machine in phase ${machine.getPhase()}`);
         return;
       }
 
@@ -1014,9 +1031,7 @@ return;
         }
       }
 
-      const maxTurns = ticket
-        ? this.getEffectiveMaxContinuationTurns(ticket.projectId)
-        : MAX_CONTINUATION_TURNS;
+      const maxTurns = ticket ? this.getEffectiveMaxContinuationTurns(ticket.projectId) : MAX_CONTINUATION_TURNS;
 
       const action = decideRunEndAction({
         reason,
@@ -1063,7 +1078,9 @@ return;
             }
             const col = this.getColumn(freshTicket.projectId, freshTicket.columnId);
             if (col?.gate) {
-              console.log(`[ProjectManager] Ticket ${ticketId} is in gated column "${freshTicket.columnId}" — not continuing.`);
+              console.log(
+                `[ProjectManager] Ticket ${ticketId} is in gated column "${freshTicket.columnId}" — not continuing.`
+              );
               machine.transition('idle');
               return;
             }
@@ -1073,9 +1090,7 @@ return;
           machine.transition('continuing');
           machine.recordActivity();
 
-          console.log(
-            `[ProjectManager] Continuing ticket ${ticketId} (turn ${action.nextTurn}/${maxTurns}).`
-          );
+          console.log(`[ProjectManager] Continuing ticket ${ticketId} (turn ${action.nextTurn}/${maxTurns}).`);
 
           const sessionId = machine.getSessionId() ?? undefined;
           const continuationPrompt = this.buildContinuationPrompt(ticketId, action.nextTurn + 1, maxTurns);
@@ -1161,14 +1176,14 @@ return;
       const phase = machine.getPhase();
 
       if (!machine.isActive()) {
-continue;
-}
+        continue;
+      }
       // Skip phases that have their own timeouts or are waiting intentionally.
       // 'ready' means the session exists but no autonomous run was started — the user
       // may be using the workspace manually, so don't treat it as stalled.
       if (phase === 'retrying' || phase === 'awaiting_input' || phase === 'ready') {
-continue;
-}
+        continue;
+      }
 
       const ticket = this.getTicketById(ticketId);
       // Streaming phases get a much longer safety-net timeout because legitimate
@@ -1176,22 +1191,24 @@ continue;
       // active phases (provisioning, connecting) use the shorter project stall timeout.
       const stallTimeout = machine.isStreaming()
         ? STREAMING_STALL_TIMEOUT_MS
-        : (ticket ? this.getEffectiveStallTimeout(ticket.projectId) : STALL_TIMEOUT_MS);
+        : ticket
+          ? this.getEffectiveStallTimeout(ticket.projectId)
+          : STALL_TIMEOUT_MS;
 
       const elapsed = now - machine.getLastActivity();
       if (elapsed > stallTimeout) {
         void this.withTicketLock(ticketId, async () => {
           // Re-check under lock
           if (!machine.isActive()) {
-return;
-}
+            return;
+          }
           if (machine.getPhase() === 'retrying' || machine.getPhase() === 'awaiting_input') {
-return;
-}
+            return;
+          }
           const elapsedNow = Date.now() - machine.getLastActivity();
           if (elapsedNow <= stallTimeout) {
-return;
-}
+            return;
+          }
 
           console.warn(
             `[ProjectManager] Supervisor stalled for ticket ${ticketId} in phase "${machine.getPhase()}" (${Math.round(elapsedNow / 1000)}s since last activity). Stopping and scheduling retry.`
@@ -1217,8 +1234,8 @@ return;
     let count = 0;
     for (const [, entry] of this.machines) {
       if (entry.machine.isActive()) {
-count++;
-}
+        count++;
+      }
     }
     return count;
   };
@@ -1228,8 +1245,8 @@ count++;
     let count = 0;
     for (const [ticketId, entry] of this.machines) {
       if (!entry.machine.isActive()) {
-continue;
-}
+        continue;
+      }
       const ticket = this.getTicketById(ticketId);
       if (ticket && ticket.projectId === projectId && ticket.columnId === columnId) {
         count++;
@@ -1266,9 +1283,12 @@ continue;
   // #region Retry queue (Symphony-inspired)
 
   /**
-   * Schedule a retry for a ticket's supervisor.
-   * Continuation retries (after normal completion) use a short fixed delay.
-   * Failure retries use exponential backoff.
+   * Schedule a retry for a ticket's supervisor after a failed run.
+   *
+   * Uses exponential backoff. `decideRunEndAction` only emits the retry action
+   * for `error` and `stalled` reasons — `completed` / `max_turns` are handled
+   * by the `continue` branch in `handleMachineRunEnd`, which dispatches the
+   * next run directly without going through this queue.
    */
   private scheduleRetry = (
     ticketId: TicketId,
@@ -1277,51 +1297,30 @@ continue;
   ): void => {
     const entry = this.machines.get(ticketId);
     if (!entry) {
-return;
-}
+      return;
+    }
     const { machine } = entry;
 
     const attempt = opts.attempt ?? 0;
     const continuationTurn = opts.continuationTurn ?? 0;
 
-    // Update machine counters
     machine.retryAttempt = attempt;
     machine.continuationTurn = continuationTurn;
 
-    // Get per-project limits from FLEET.md
     const ticket = this.getTicketById(ticketId);
-    const maxContinuationTurns = ticket
-      ? this.getEffectiveMaxContinuationTurns(ticket.projectId)
-      : MAX_CONTINUATION_TURNS;
     const maxRetryAttempts = ticket ? this.getEffectiveMaxRetries(ticket.projectId) : MAX_RETRY_ATTEMPTS;
 
-    // Check limits
-    if (failureClass === 'completed' && continuationTurn >= maxContinuationTurns) {
-      console.log(
-        `[ProjectManager] Ticket ${ticketId} reached max continuation turns (${maxContinuationTurns}). Stopping.`
-      );
-      machine.transition('idle');
-      return;
-    }
-
-    if (failureClass !== 'completed' && attempt >= maxRetryAttempts) {
+    if (attempt >= maxRetryAttempts) {
       console.log(`[ProjectManager] Ticket ${ticketId} reached max retry attempts (${maxRetryAttempts}). Giving up.`);
       machine.transition('error');
       return;
     }
 
-    // Calculate delay
-    let delayMs: number;
-    if (failureClass === 'completed') {
-      delayMs = CONTINUATION_RETRY_DELAY_MS;
-    } else {
-      delayMs = Math.min(RETRY_BASE_DELAY_MS * Math.pow(2, attempt), MAX_RETRY_BACKOFF_MS);
-    }
+    const delayMs = Math.min(RETRY_BASE_DELAY_MS * Math.pow(2, attempt), MAX_RETRY_BACKOFF_MS);
 
     console.log(
-      `[ProjectManager] Scheduling ${failureClass === 'completed' ? 'continuation' : 'retry'} for ${ticketId} ` +
-        `(attempt=${attempt}, turn=${continuationTurn}) in ${Math.round(delayMs / 1000)}s${ 
-        opts.error ? ` (reason: ${opts.error})` : ''}`
+      `[ProjectManager] Scheduling retry for ${ticketId} (attempt=${attempt}, turn=${continuationTurn}) ` +
+        `in ${Math.round(delayMs / 1000)}s${opts.error ? ` (reason: ${opts.error})` : ''}`
     );
 
     machine.scheduleRetryTimer(delayMs, () => {
@@ -1373,8 +1372,8 @@ return;
       try {
         const project = this.getProjects().find((p) => p.id === ticket.projectId);
         if (!project) {
-return;
-}
+          return;
+        }
 
         let hookOk = true;
         if (project.source?.kind === 'local') {
@@ -1401,14 +1400,8 @@ return;
         }
 
         const sessionId = ticket.supervisorSessionId ?? undefined;
-        const isContinuation = failureClass === 'completed';
-        const maxTurns = this.getEffectiveMaxContinuationTurns(ticket.projectId);
-        const prompt = isContinuation
-          ? this.buildContinuationPrompt(ticketId, continuationTurn + 1, maxTurns)
-          : 'The previous run failed. Please review the current state and continue working on this ticket.';
-        const variables = isContinuation
-          ? undefined
-          : this.buildRunVariables(ticketId);
+        const prompt = 'The previous run failed. Please review the current state and continue working on this ticket.';
+        const variables = this.buildRunVariables(ticketId);
 
         machine.recordActivity();
         await this.ensureSupervisorInfra(ticketId);
@@ -1547,8 +1540,8 @@ return;
   readContext = async (projectId: ProjectId): Promise<string> => {
     const project = this.getProjects().find((p) => p.id === projectId);
     if (!project) {
-return '';
-}
+      return '';
+    }
     const contextPath = path.join(this.getProjectDirPath(project), 'context.md');
     try {
       return await fs.readFile(contextPath, 'utf-8');
@@ -1561,8 +1554,8 @@ return '';
   writeContext = async (projectId: ProjectId, content: string): Promise<void> => {
     const project = this.getProjects().find((p) => p.id === projectId);
     if (!project) {
-return;
-}
+      return;
+    }
     const dir = this.getProjectDirPath(project);
     await ensureDirectory(dir);
     await fs.writeFile(path.join(dir, 'context.md'), content, 'utf-8');
@@ -1572,8 +1565,8 @@ return;
   listProjectFiles = async (projectId: ProjectId): Promise<ArtifactFileEntry[]> => {
     const project = this.getProjects().find((p) => p.id === projectId);
     if (!project) {
-return [];
-}
+      return [];
+    }
     const dir = this.getProjectDirPath(project);
 
     try {
@@ -1582,8 +1575,8 @@ return [];
 
       for (const entry of entries) {
         if (entry.name === 'context.md') {
-continue;
-}
+          continue;
+        }
         const fullPath = path.join(dir, entry.name);
         try {
           const stat = await fs.stat(fullPath);
@@ -1601,8 +1594,8 @@ continue;
 
       results.sort((a, b) => {
         if (a.isDirectory !== b.isDirectory) {
-return a.isDirectory ? -1 : 1;
-}
+          return a.isDirectory ? -1 : 1;
+        }
         return a.name.localeCompare(b.name);
       });
 
@@ -1622,8 +1615,8 @@ return a.isDirectory ? -1 : 1;
   openProjectFile = async (projectId: ProjectId, relativePath: string): Promise<void> => {
     const project = this.getProjects().find((p) => p.id === projectId);
     if (!project) {
-return;
-}
+      return;
+    }
     const dir = this.getProjectDirPath(project);
     const fullPath = path.resolve(dir, relativePath);
     // Validate no directory traversal
@@ -1644,8 +1637,8 @@ return;
     }
     const project = this.getProjects().find((p) => p.id === projectId);
     if (!project) {
-return;
-}
+      return;
+    }
 
     if (project.source?.kind === 'local') {
       await this.workflowLoader.load(projectId, project.source?.workspaceDir);
@@ -1670,8 +1663,8 @@ return;
     }
     const project = this.getProjects().find((p) => p.id === projectId);
     if (project?.pipeline) {
-return project.pipeline;
-}
+      return project.pipeline;
+    }
     // Projects with a linked repo get the full dev pipeline; others get the simple one
     return project?.source ? DEFAULT_PIPELINE : SIMPLE_PIPELINE;
   };
@@ -1708,14 +1701,16 @@ return project.pipeline;
     const columnIds = new Set(pipeline.columns.map((c) => c.id));
     const firstColumnId = pipeline.columns[0]?.id;
     if (!firstColumnId) {
-return;
-}
+      return;
+    }
 
     const tickets = this.getTickets();
     let changed = false;
     for (const ticket of tickets) {
       if (ticket.projectId === projectId && ticket.columnId && !columnIds.has(ticket.columnId)) {
-        console.log(`[ProjectManager] Migrating ticket ${ticket.id} from orphaned column "${ticket.columnId}" to "${firstColumnId}"`);
+        console.log(
+          `[ProjectManager] Migrating ticket ${ticket.id} from orphaned column "${ticket.columnId}" to "${firstColumnId}"`
+        );
         ticket.columnId = firstColumnId;
         changed = true;
       }
@@ -1873,8 +1868,8 @@ return;
     const milestones = this.getMilestones();
     const index = milestones.findIndex((i) => i.id === id);
     if (index === -1) {
-return;
-}
+      return;
+    }
     const prev = milestones[index]!;
     const next = { ...prev, ...patch, updatedAt: Date.now() };
     // Stamp completedAt on first transition into 'completed'; clear it on transition out.
@@ -1891,8 +1886,8 @@ return;
     const milestones = this.getMilestones();
     const target = milestones.find((i) => i.id === id);
     if (!target) {
-return;
-}
+      return;
+    }
     // Clear milestoneId on orphaned tickets
     const tickets = this.getTickets();
     let ticketsChanged = false;
@@ -1904,8 +1899,8 @@ return;
       }
     }
     if (ticketsChanged) {
-this.setTickets(tickets);
-}
+      this.setTickets(tickets);
+    }
     this.setMilestones(milestones.filter((i) => i.id !== id));
   };
 
@@ -1957,8 +1952,8 @@ this.setTickets(tickets);
     const pages = this.getPages();
     const index = pages.findIndex((p) => p.id === id);
     if (index === -1) {
-return;
-}
+      return;
+    }
     pages[index] = { ...pages[index]!, ...patch, updatedAt: Date.now() };
     this.setPages(pages);
   };
@@ -1967,12 +1962,12 @@ return;
     const pages = this.getPages();
     const target = pages.find((p) => p.id === id);
     if (!target) {
-return;
-}
+      return;
+    }
     const toDelete = computePagesToDelete(pages, id);
     if (toDelete.size === 0) {
-return;
-} // target is root or not found
+      return;
+    } // target is root or not found
 
     // Delete .md files from disk. Unsubscribe the watcher for each path BEFORE
     // the rm so chokidar's unlink event doesn't reach the manager and emit a
@@ -2016,12 +2011,12 @@ return;
   getNotebookFilePath = (pageId: PageId): string | null => {
     const page = this.getPages().find((p) => p.id === pageId);
     if (!page || page.kind !== 'notebook') {
-return null;
-}
+      return null;
+    }
     const project = this.getProjects().find((p) => p.id === page.projectId);
     if (!project) {
-return null;
-}
+      return null;
+    }
     return this.getPageFilePath(project, page);
   };
 
@@ -2029,12 +2024,12 @@ return null;
     const pages = this.getPages();
     const page = pages.find((p) => p.id === pageId);
     if (!page) {
-return '';
-}
+      return '';
+    }
     const project = this.getProjects().find((p) => p.id === page.projectId);
     if (!project) {
-return '';
-}
+      return '';
+    }
     const filePath = this.getPageFilePath(project, page);
     try {
       return await fs.readFile(filePath, 'utf-8');
@@ -2047,12 +2042,12 @@ return '';
     const pages = this.getPages();
     const page = pages.find((p) => p.id === pageId);
     if (!page) {
-return;
-}
+      return;
+    }
     const project = this.getProjects().find((p) => p.id === page.projectId);
     if (!project) {
-return;
-}
+      return;
+    }
     const filePath = this.getPageFilePath(project, page);
     await ensureDirectory(path.dirname(filePath));
     // Record the pending write BEFORE touching disk so the resulting chokidar
@@ -2065,12 +2060,12 @@ return;
   watchPage = async (pageId: PageId): Promise<{ content: string } | null> => {
     const page = this.getPages().find((p) => p.id === pageId);
     if (!page) {
-return null;
-}
+      return null;
+    }
     const project = this.getProjects().find((p) => p.id === page.projectId);
     if (!project) {
-return null;
-}
+      return null;
+    }
     const filePath = this.getPageFilePath(project, page);
     await this.pageWatcher.subscribe(filePath);
     let content = '';
@@ -2085,12 +2080,12 @@ return null;
   unwatchPage = (pageId: PageId): void => {
     const page = this.getPages().find((p) => p.id === pageId);
     if (!page) {
-return;
-}
+      return;
+    }
     const project = this.getProjects().find((p) => p.id === page.projectId);
     if (!project) {
-return;
-}
+      return;
+    }
     const filePath = this.getPageFilePath(project, page);
     this.pageWatcher.unsubscribe(filePath);
   };
@@ -2099,8 +2094,8 @@ return;
     const pages = this.getPages();
     const index = pages.findIndex((p) => p.id === pageId);
     if (index === -1) {
-return;
-}
+      return;
+    }
     pages[index] = { ...pages[index]!, parentId: newParentId, sortOrder: newSortOrder, updatedAt: Date.now() };
     this.setPages(pages);
   };
@@ -2110,11 +2105,11 @@ return;
   /** Resolve the effective branch for a ticket (ticket.branch ?? milestone.branch ?? undefined). */
   resolveTicketBranch = (ticket: Ticket): string | undefined => {
     if (ticket.branch) {
-return ticket.branch;
-}
+      return ticket.branch;
+    }
     if (!ticket.milestoneId) {
-return undefined;
-}
+      return undefined;
+    }
     const milestone = this.getMilestones().find((i) => i.id === ticket.milestoneId);
     return milestone?.branch;
   };
@@ -2317,13 +2312,13 @@ return undefined;
         // fields (old\0new) but renames are impossible with no commits.
         for (const entry of lsOutput.split('\0')) {
           if (!entry || entry.length < 4) {
-continue;
-}
+            continue;
+          }
           const xy = entry.slice(0, 2);
           const filePath = entry.slice(3);
           if (!filePath) {
-continue;
-}
+            continue;
+          }
           const status: FileDiff['status'] = xy.includes('?') ? 'untracked' : 'added';
           files.push({ path: filePath, status, additions: 0, deletions: 0, isBinary: false });
         }
@@ -2344,13 +2339,13 @@ continue;
           for (let i = 0; i < entries.length; i++) {
             const entry = entries[i]!;
             if (!entry || entry.length < 4) {
-continue;
-}
+              continue;
+            }
             const xy = entry.slice(0, 2);
             const filePath = entry.slice(3);
             if (!filePath) {
-continue;
-}
+              continue;
+            }
 
             let status: FileDiff['status'];
             if (xy.includes('?')) {
@@ -2381,8 +2376,8 @@ continue;
           for (let i = 0; i < parts.length; i++) {
             const statusField = parts[i];
             if (!statusField) {
-continue;
-}
+              continue;
+            }
             const statusChar = statusField.charAt(0);
             const filePath = parts[++i] ?? '';
             let oldPath: string | undefined;
@@ -2390,7 +2385,14 @@ continue;
               oldPath = filePath;
               i++;
               const newPath = parts[i] ?? '';
-              files.push({ path: newPath, oldPath, status: statusChar === 'R' ? 'renamed' : 'copied', additions: 0, deletions: 0, isBinary: false });
+              files.push({
+                path: newPath,
+                oldPath,
+                status: statusChar === 'R' ? 'renamed' : 'copied',
+                additions: 0,
+                deletions: 0,
+                isBinary: false,
+              });
               continue;
             }
 
@@ -2432,8 +2434,8 @@ continue;
       for (let fi = 0; fi < files.length; fi++) {
         const file = files[fi]!;
         if (fi >= MAX_PATCH_FILES) {
-break;
-}
+          break;
+        }
 
         try {
           if (file.status === 'untracked') {
@@ -2528,12 +2530,12 @@ break;
   resolveTicket = (ticketId: TicketId, resolution: import('@/shared/types').TicketResolution): void => {
     const ticket = this.getTicketById(ticketId);
     if (!ticket) {
-return;
-}
+      return;
+    }
     const patch: Partial<Ticket> = { resolution };
     if (ticket.resolvedAt === undefined) {
-patch.resolvedAt = Date.now();
-}
+      patch.resolvedAt = Date.now();
+    }
     this.updateTicket(ticketId, patch);
     const terminalColumnId = this.getTerminalColumnId(ticket.projectId);
     if (ticket.columnId !== terminalColumnId) {
@@ -2566,7 +2568,9 @@ patch.resolvedAt = Date.now();
       this.cancelRetry(ticketId);
       const entry = this.machines.get(ticketId);
       if (entry) {
-        console.log(`[ProjectManager] Ticket ${ticketId} moved to terminal column "${columnId}" — stopping supervisor and cleaning up workspace.`);
+        console.log(
+          `[ProjectManager] Ticket ${ticketId} moved to terminal column "${columnId}" — stopping supervisor and cleaning up workspace.`
+        );
         void this.withTicketLock(ticketId, async () => {
           await entry.machine.stop();
           await this.cleanupTicketWorkspace(ticketId);
@@ -2617,9 +2621,7 @@ patch.resolvedAt = Date.now();
     });
   };
 
-  ensureSupervisorInfra = async (
-    ticketId: TicketId
-  ): Promise<{ machine: TicketMachine; sandbox: ISandbox | null }> => {
+  ensureSupervisorInfra = async (ticketId: TicketId): Promise<{ machine: TicketMachine; sandbox: ISandbox | null }> => {
     const ticket = this.getTicketById(ticketId);
     if (!ticket) {
       throw new Error(`Ticket not found: ${ticketId}`);
@@ -2635,27 +2637,30 @@ patch.resolvedAt = Date.now();
     if (existing) {
       const sbStatus = existing.sandbox?.getStatus();
       // Machine is using a Code tab sandbox (sandbox === null) — check if still viable
-      const isRunning = existing.sandbox
-        ? sbStatus?.type === 'running'
-        : this.getCodeTabWsUrl(ticketId) !== null;
+      const isRunning = existing.sandbox ? sbStatus?.type === 'running' : this.getCodeTabWsUrl(ticketId) !== null;
 
       if (isRunning) {
         const phase = existing.machine.getPhase();
 
         // Already streaming — don't interfere
         if (existing.machine.isStreaming()) {
-          console.log(`[ProjectManager] ensureSupervisorInfra: machine ${ticketId} already streaming (${phase}), returning.`);
+          console.log(
+            `[ProjectManager] ensureSupervisorInfra: machine ${ticketId} already streaming (${phase}), returning.`
+          );
           return existing;
         }
 
         // Machine has a session and is ready — reuse as-is
         if (phase === 'ready' && existing.machine.getSessionId()) {
-          console.log(`[ProjectManager] ensureSupervisorInfra: machine ${ticketId} already ready with session, returning.`);
+          console.log(
+            `[ProjectManager] ensureSupervisorInfra: machine ${ticketId} already ready with session, returning.`
+          );
           return existing;
         }
 
         // Machine is in a non-streaming state without a session — re-provision
-        const wsUrl = (existing.sandbox && sbStatus?.type === 'running') ? sbStatus.data.wsUrl! : this.getCodeTabWsUrl(ticketId)!;
+        const wsUrl =
+          existing.sandbox && sbStatus?.type === 'running' ? sbStatus.data.wsUrl! : this.getCodeTabWsUrl(ticketId)!;
         console.log(`[ProjectManager] ensureSupervisorInfra: re-provisioning ${ticketId} from phase "${phase}".`);
         existing.machine.forcePhase('provisioning');
         existing.machine.setWsUrl(wsUrl);
@@ -2674,7 +2679,9 @@ patch.resolvedAt = Date.now();
     // If so, reuse it instead of spinning up a second container.
     const codeTabWsUrl = this.getCodeTabWsUrl(ticketId);
     if (codeTabWsUrl) {
-      console.log(`[ProjectManager] ensureSupervisorInfra: reusing Code tab sandbox for ${ticketId} (ws: ${codeTabWsUrl})`);
+      console.log(
+        `[ProjectManager] ensureSupervisorInfra: reusing Code tab sandbox for ${ticketId} (ws: ${codeTabWsUrl})`
+      );
       const machine = this.createMachine(ticketId);
       machine.transition('provisioning');
 
@@ -2736,12 +2743,17 @@ patch.resolvedAt = Date.now();
     const sandboxBackend = this.store.get('sandboxBackend') as import('@/shared/types').SandboxBackend | undefined;
     const platformClient = createPlatformClient(this.store.get('platform'));
     const mode: import('@/main/agent-process').AgentProcessMode =
-      sandboxBackend === 'platform' ? 'platform'
-      : sandboxBackend === 'docker' ? 'sandbox'
-      : sandboxBackend === 'podman' ? 'podman'
-      : sandboxBackend === 'vm' ? 'vm'
-      : sandboxBackend === 'local' ? 'local'
-      : 'none';
+      sandboxBackend === 'platform'
+        ? 'platform'
+        : sandboxBackend === 'docker'
+          ? 'sandbox'
+          : sandboxBackend === 'podman'
+            ? 'podman'
+            : sandboxBackend === 'vm'
+              ? 'vm'
+              : sandboxBackend === 'local'
+                ? 'local'
+                : 'none';
     const sandbox = this.sandboxFactory.create({
       mode,
       platformClient: platformClient ?? undefined,
@@ -2815,12 +2827,12 @@ patch.resolvedAt = Date.now();
     const codeTabs = this.store.get('codeTabs', []) as Array<{ id: string; ticketId?: string }>;
     const tab = codeTabs.find((t) => t.id === tabId);
     if (!tab?.ticketId) {
-return null;
-}
+      return null;
+    }
     const entry = this.machines.get(tab.ticketId as TicketId);
     if (!entry?.sandbox) {
-return null;
-}
+      return null;
+    }
     return entry.sandbox.getStatus();
   }
 
@@ -2834,13 +2846,15 @@ return null;
   /** Check if a Code tab has a running sandbox for this ticket. */
   private getCodeTabWsUrl(ticketId: TicketId): string | null {
     if (!this.processManager) {
-return null;
-}
+      return null;
+    }
     const codeTabs = this.store.get('codeTabs', []) as Array<{ id: string; ticketId?: string }>;
     return this.processManager.getRunningWsUrlForTicket(ticketId, codeTabs);
   }
 
-  private resolveTicketWorkspace = async (ticketId: TicketId): Promise<{
+  private resolveTicketWorkspace = async (
+    ticketId: TicketId
+  ): Promise<{
     workspaceDir: string;
     worktreePath?: string;
     worktreeName?: string;
@@ -2881,8 +2895,7 @@ return null;
       try {
         await fs.access(ticket.worktreePath);
         worktreeExists = true;
-      } catch {
-      }
+      } catch {}
     }
 
     const wtAction = decideWorktreeAction(ticket, worktreeExists, effectiveBranch);
@@ -2914,8 +2927,8 @@ return null;
   private ensureSession = async (ticketId: TicketId): Promise<void> => {
     const ticket = this.getTicketById(ticketId);
     if (!ticket) {
-return;
-}
+      return;
+    }
 
     // If the machine is already in 'ready' state with a session, nothing to do
     const existingEntry = this.machines.get(ticketId);
@@ -2925,8 +2938,8 @@ return;
 
     const entry = this.machines.get(ticketId);
     if (!entry) {
-return;
-}
+      return;
+    }
 
     const variables = this.buildRunVariables(ticketId, 'interactive');
 
@@ -3038,10 +3051,12 @@ return;
         if (existsSync(contextPath)) {
           const brief = require('fs').readFileSync(contextPath, 'utf-8') as string;
           if (brief.trim()) {
-            context.projectBrief = brief.length > 500 ? `${brief.slice(0, 500)  }\n…(truncated)` : brief;
+            context.projectBrief = brief.length > 500 ? `${brief.slice(0, 500)}\n…(truncated)` : brief;
           }
         }
-      } catch { /* non-critical */ }
+      } catch {
+        /* non-critical */
+      }
     }
 
     // Recent comments (last 5)
@@ -3094,7 +3109,8 @@ return;
           },
           project: {
             label: project.label,
-            workspaceDir: (project.source?.kind === 'local' ? project.source?.workspaceDir : project.source?.repoUrl) ?? '',
+            workspaceDir:
+              (project.source?.kind === 'local' ? project.source?.workspaceDir : project.source?.repoUrl) ?? '',
           },
           attempt,
         };
@@ -3102,7 +3118,9 @@ return;
         try {
           rendered = renderTemplate(customPrompt, vars);
         } catch (err) {
-          console.warn(`[ProjectManager] Template render failed for ${ticketId}: ${(err as Error).message}. Using raw prompt.`);
+          console.warn(
+            `[ProjectManager] Template render failed for ${ticketId}: ${(err as Error).message}. Using raw prompt.`
+          );
           rendered = customPrompt;
         }
       }
@@ -3121,7 +3139,10 @@ return;
    * - 'autopilot': ticket tools only (automated runs, retries, continuations)
    * - 'interactive': broader project-management tools for human-driven ticket sessions
    */
-  private buildRunVariables = (ticketId: TicketId, mode: 'autopilot' | 'interactive' = 'autopilot'): Record<string, unknown> => {
+  private buildRunVariables = (
+    ticketId: TicketId,
+    mode: 'autopilot' | 'interactive' = 'autopilot'
+  ): Record<string, unknown> => {
     const ticket = this.getTicketById(ticketId);
     const opts = {
       projectId: ticket?.projectId,
@@ -3133,9 +3154,7 @@ return;
     const toolInstructions = (vars.additional_instructions as string) ?? '';
     return {
       ...vars,
-      additional_instructions: toolInstructions
-        ? `${supervisorPrompt}\n\n${toolInstructions}`
-        : supervisorPrompt,
+      additional_instructions: toolInstructions ? `${supervisorPrompt}\n\n${toolInstructions}` : supervisorPrompt,
     };
   };
 
@@ -3166,7 +3185,7 @@ return;
     const comments = ticket?.comments ?? [];
     const lastComment = comments.length > 0 ? comments[comments.length - 1] : undefined;
     const lastCommentLine = lastComment
-      ? `- Last comment [${lastComment.author}]: ${lastComment.content.length > 200 ? `${lastComment.content.slice(0, 200)  }…` : lastComment.content}`
+      ? `- Last comment [${lastComment.author}]: ${lastComment.content.length > 200 ? `${lastComment.content.slice(0, 200)}…` : lastComment.content}`
       : '';
 
     return [
@@ -3181,7 +3200,9 @@ return;
       `- Your ticket is currently in column "${currentColumn}". If you have completed the work, call \`move_ticket\` to advance it. Valid columns: ${columnLabels}.`,
       `- Before continuing, use \`add_ticket_comment\` to briefly record what you accomplished so far and what remains. This helps future runs (and humans) understand the state of work.`,
       `- Use \`notify\` to send the human a heads-up without stopping. Use \`escalate\` only when you truly cannot proceed without human input.`,
-    ].filter(Boolean).join('\n');
+    ]
+      .filter(Boolean)
+      .join('\n');
   }
 
   /**
@@ -3215,7 +3236,9 @@ return;
 
       console.log(`[ProjectManager] startSupervisor: ensureSupervisorInfra for ${ticketId}...`);
       const { machine, sandbox } = await this.ensureSupervisorInfra(ticketId);
-      console.log(`[ProjectManager] startSupervisor: ensureSupervisorInfra done. Phase: ${machine.getPhase()}, sessionId: ${machine.getSessionId()}`);
+      console.log(
+        `[ProjectManager] startSupervisor: ensureSupervisorInfra done. Phase: ${machine.getPhase()}, sessionId: ${machine.getSessionId()}`
+      );
 
       // For git-remote projects, run before_run hook inside the container via sandbox exec
       if (project.source?.kind === 'git-remote') {
@@ -3232,7 +3255,9 @@ return;
       // Use the session ID from the machine (may have been freshly created by ensureSupervisorInfra)
       const sessionId = machine.getSessionId() ?? undefined;
       const variables = this.buildRunVariables(ticketId);
-      console.log(`[ProjectManager] startSupervisor: calling startMachineRun for ${ticketId} (sessionId: ${sessionId})`);
+      console.log(
+        `[ProjectManager] startSupervisor: calling startMachineRun for ${ticketId} (sessionId: ${sessionId})`
+      );
       this.startMachineRun(ticketId, 'Begin working on this ticket.', { sessionId, variables });
     });
   };
@@ -3270,8 +3295,8 @@ return;
     return this.withTicketLock(ticketId, async () => {
       const entry = this.machines.get(ticketId);
       if (!entry) {
-return;
-}
+        return;
+      }
 
       await entry.machine.stop();
     });
@@ -3334,8 +3359,8 @@ return;
     return this.withTicketLock(ticketId, async () => {
       const entry = this.machines.get(ticketId);
       if (!entry) {
-return;
-}
+        return;
+      }
 
       await entry.machine.stop();
 
@@ -3351,8 +3376,8 @@ return;
       } else {
         const wsUrl = this.getCodeTabWsUrl(ticketId);
         if (wsUrl) {
-entry.machine.setWsUrl(wsUrl);
-}
+          entry.machine.setWsUrl(wsUrl);
+        }
       }
 
       // Create a new session, then update the ticket so the renderer
@@ -3401,8 +3426,8 @@ entry.machine.setWsUrl(wsUrl);
   private sendUserRunMessage = async (ticketId: TicketId, message: string): Promise<void> => {
     const entry = this.machines.get(ticketId);
     if (!entry) {
-return;
-}
+      return;
+    }
 
     if (entry.sandbox) {
       const sbStatus = entry.sandbox.getStatus();
@@ -3412,8 +3437,8 @@ return;
     } else {
       const wsUrl = this.getCodeTabWsUrl(ticketId);
       if (wsUrl) {
-entry.machine.setWsUrl(wsUrl);
-}
+        entry.machine.setWsUrl(wsUrl);
+      }
     }
 
     const sessionId = entry.machine.getSessionId() ?? undefined;
@@ -3693,8 +3718,8 @@ entry.machine.setWsUrl(wsUrl);
       const migrated = projects.map((raw) => {
         // Already migrated (defensive)
         if (raw.source && typeof raw.source === 'object') {
-return raw;
-}
+          return raw;
+        }
         const { workspaceDir, ...rest } = raw;
         return {
           ...rest,
@@ -3757,14 +3782,14 @@ return raw;
       const projects = store.get('projects', []) as Record<string, unknown>[];
       const migrated = projects.map((raw) => {
         if (raw.slug) {
-return raw;
-}
+          return raw;
+        }
         const label = (raw.label as string) ?? 'project';
-        const slug = label
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, '-')
-          .replace(/^-|-$/g, '')
-          || 'project';
+        const slug =
+          label
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-|-$/g, '') || 'project';
         return { ...raw, slug };
       });
       store.set('projects', migrated);
@@ -3800,14 +3825,12 @@ return raw;
 
       let briefsWritten = 0;
       for (const project of projects) {
-        const dir = project.isPersonal
-          ? getDefaultWorkspaceDir()
-          : getProjectDir(project.slug ?? 'project');
+        const dir = project.isPersonal ? getDefaultWorkspaceDir() : getProjectDir(project.slug ?? 'project');
         const contextPath = path.join(dir, 'context.md');
         try {
           if (existsSync(contextPath)) {
-continue;
-}
+            continue;
+          }
           mkdirSync(dir, { recursive: true });
           writeFileSync(contextPath, project.brief ?? DEFAULT_BRIEF_TEMPLATE, 'utf-8');
           briefsWritten++;
@@ -3848,7 +3871,12 @@ continue;
     // Personal project exists to act as the physical home for loose inbox pages.
     if (version === 11 || store.get('schemaVersion', 0) === 11) {
       console.log('[ProjectManager] Upgrading legacy inbox records (→ v12)');
-      const projects = store.get('projects', []) as Array<{ id: string; label: string; isPersonal?: boolean; slug?: string }>;
+      const projects = store.get('projects', []) as Array<{
+        id: string;
+        label: string;
+        isPersonal?: boolean;
+        slug?: string;
+      }>;
       const legacyItems = store.get('inboxItems' as never, []) as Array<Record<string, unknown>>;
       const now = Date.now();
 
@@ -3881,9 +3909,7 @@ continue;
       const upgraded = upgradeLegacyInbox(legacyItems, now, () => nanoid());
       store.set('inboxItems', upgraded);
       store.set('schemaVersion', 13);
-      console.log(
-        `[ProjectManager] v12/v13 migration complete: ${upgraded.length} legacy inbox records upgraded`
-      );
+      console.log(`[ProjectManager] v12/v13 migration complete: ${upgraded.length} legacy inbox records upgraded`);
       // Fall through to v13→v14 recovery.
     }
 
@@ -3912,8 +3938,8 @@ continue;
         const legacyStatus = props.status;
         // `done` was terminal in the old model; drop those entirely on recovery.
         if (legacyStatus === 'done') {
-continue;
-}
+          continue;
+        }
 
         const hasOutcome = typeof props.outcome === 'string' && (props.outcome as string).trim().length > 0;
         const hasShaping = hasOutcome || props.size !== undefined || typeof props.notDoing === 'string';
@@ -3921,16 +3947,13 @@ continue;
         // actionable item the user can promote to a ticket.
         let status: InboxItem['status'] = 'new';
         if (legacyStatus === 'later') {
-status = 'later';
-} else if (legacyStatus === 'ready' || legacyStatus === 'doing' || hasShaping) {
-status = 'shaped';
-}
+          status = 'later';
+        } else if (legacyStatus === 'ready' || legacyStatus === 'doing' || hasShaping) {
+          status = 'shaped';
+        }
 
         const appetite: InboxShaping['appetite'] =
-          props.size === 'small' ||
-          props.size === 'medium' ||
-          props.size === 'large' ||
-          props.size === 'xl'
+          props.size === 'small' || props.size === 'medium' || props.size === 'large' || props.size === 'xl'
             ? props.size
             : 'medium';
         const shaping: InboxShaping | undefined = hasShaping
@@ -3952,8 +3975,8 @@ status = 'shaped';
           updatedAt: typeof pageRaw.updatedAt === 'number' ? (pageRaw.updatedAt as number) : now,
         };
         if (shaping) {
-item.shaping = shaping;
-}
+          item.shaping = shaping;
+        }
         if (status === 'later') {
           item.laterAt = typeof props.laterAt === 'number' ? (props.laterAt as number) : now;
         }
@@ -3982,11 +4005,11 @@ item.shaping = shaping;
         const updatedAt = typeof raw.updatedAt === 'number' ? (raw.updatedAt as number) : Date.now();
         const next: Record<string, unknown> = { ...raw };
         if (next.phaseChangedAt === undefined) {
-next.phaseChangedAt = updatedAt;
-}
+          next.phaseChangedAt = updatedAt;
+        }
         if (next.columnChangedAt === undefined) {
-next.columnChangedAt = updatedAt;
-}
+          next.columnChangedAt = updatedAt;
+        }
         if (raw.resolution !== undefined && next.resolvedAt === undefined) {
           next.resolvedAt = updatedAt;
         }
@@ -4302,9 +4325,7 @@ export const createProjectManager = (arg: {
   ipc.handle('project:move-ticket-to-column', (_, ticketId, columnId) =>
     projectManager.moveTicketToColumn(ticketId, columnId)
   );
-  ipc.handle('project:resolve-ticket', (_, ticketId, resolution) =>
-    projectManager.resolveTicket(ticketId, resolution)
-  );
+  ipc.handle('project:resolve-ticket', (_, ticketId, resolution) => projectManager.resolveTicket(ticketId, resolution));
   ipc.handle('project:get-pipeline', async (_, projectId) => {
     await projectManager.ensureWorkflowLoaded(projectId);
     return projectManager.getPipeline(projectId);
@@ -4315,7 +4336,9 @@ export const createProjectManager = (arg: {
 
   // Artifacts
   ipc.handle('project:list-artifacts', (_, ticketId, dirPath) => projectManager.listArtifacts(ticketId, dirPath));
-  ipc.handle('project:read-artifact', (_, ticketId, relativePath) => projectManager.readArtifact(ticketId, relativePath));
+  ipc.handle('project:read-artifact', (_, ticketId, relativePath) =>
+    projectManager.readArtifact(ticketId, relativePath)
+  );
   ipc.handle('project:open-artifact-external', (_, ticketId, relativePath) =>
     projectManager.openArtifactExternal(ticketId, relativePath)
   );
@@ -4370,16 +4393,16 @@ export const createProjectManager = (arg: {
   ipc.handle('page:get-notebook-paths', (_, pageId) => {
     const filePath = projectManager.getNotebookFilePath(pageId);
     if (!filePath) {
-return null;
-}
+      return null;
+    }
     const page = projectManager.getPages().find((p) => p.id === pageId);
     if (!page) {
-return null;
-}
+      return null;
+    }
     const projectDir = projectManager.getProjectDir(page.projectId);
     if (!projectDir) {
-return null;
-}
+      return null;
+    }
     return { filePath, projectDir };
   });
   ipc.handle('page:prepare-notebook', async (_, pageId, glassEnabled) => {
