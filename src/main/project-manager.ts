@@ -37,7 +37,7 @@ import type { SupervisorContext } from '@/main/supervisor-prompt';
 import { buildSupervisorPrompt } from '@/main/supervisor-prompt';
 import { ensureDirectory, getDefaultWorkspaceDir, getOmniConfigDir, getProjectDir } from '@/main/util';
 import { WorkflowLoader } from '@/main/workflow-loader';
-import { checkGitRepo, removeWorktree } from '@/main/worktree-ops';
+import { checkGitRepo } from '@/main/worktree-ops';
 import type { IIpcListener } from '@/shared/ipc-listener';
 import { DEFAULT_PIPELINE, SIMPLE_PIPELINE } from '@/shared/pipeline-defaults';
 import { getLocalWorkspaceDir } from '@/shared/project-source';
@@ -59,7 +59,6 @@ import type {
   SessionMessage,
   StoreData,
   Task,
-  TaskId,
   Ticket,
   TicketId,
   TicketPriority,
@@ -99,7 +98,6 @@ const DEFAULT_BRIEF_TEMPLATE = `## Problem
 // @/lib/run-end.
 
 export class ProjectManager {
-  private tasks = new Map<TaskId, { task: Task; sandbox: ISandbox }>();
   private store: Store<StoreData>;
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   private pages: PageManager;
@@ -216,11 +214,17 @@ export class ProjectManager {
     this.supervisors = new SupervisorOrchestrator({
       store: {
         getTickets: () => this.getTickets(),
+        setTickets: (tickets) => this.setTickets(tickets),
         getProjects: () => this.getProjects(),
         getWipLimit: () => this.store.get('wipLimit') ?? 3,
         getSandboxBackend: () => this.store.get('sandboxBackend'),
         getPlatformCredentials: () => this.store.get('platform'),
         getCodeTabs: () => (this.store.get('codeTabs', []) ?? []) as Array<{ id: string; ticketId?: string }>,
+        getPersistedTasks: () => this.store.get('tasks', []) as Task[],
+        setPersistedTasks: (tasks) => {
+          this.store.set('tasks', tasks);
+          this.sendToWindow('store:changed', this.store.store);
+        },
       },
       host: {
         getTicketById: (ticketId) => this.getTicketById(ticketId),
@@ -234,25 +238,6 @@ export class ProjectManager {
           this.buildContinuationPromptForTicket(ticketId, turn, maxTurns),
         handleClientToolCall: (ticketId, functionName, args, respond) =>
           this.handleClientToolCall(ticketId, functionName, args, respond),
-      },
-      taskRegistry: {
-        register: (taskId, task, sandbox) => {
-          this.tasks.set(taskId, { task, sandbox });
-          this.persistTask(task);
-        },
-        get: (taskId) => this.tasks.get(taskId),
-        patchTask: (taskId, patch) => {
-          const entry = this.tasks.get(taskId);
-          if (!entry) {
-            return;
-          }
-          entry.task = { ...entry.task, ...patch };
-          this.persistTask(entry.task);
-        },
-        unregister: (taskId) => {
-          this.tasks.delete(taskId);
-          this.removePersistedTask(taskId);
-        },
       },
       workflowLoader: this.workflowLoader,
       sendToWindow: this.sendToWindow,
@@ -868,16 +853,9 @@ export class ProjectManager {
   };
 
   removeProject = async (id: ProjectId): Promise<void> => {
-    for (const [taskId, entry] of this.tasks) {
-      if (entry.task.projectId === id) {
-        await entry.sandbox.exit();
-        this.tasks.delete(taskId);
-      }
-    }
+    await this.supervisors.removeAllTasksForProject(id);
     const projects = this.getProjects().filter((p) => p.id !== id);
     this.setProjects(projects);
-    const remainingTasks = this.getPersistedTasks().filter((t) => t.projectId !== id);
-    this.setPersistedTasks(remainingTasks);
     const remainingTickets = this.getTickets().filter((t) => t.projectId !== id);
     this.setTickets(remainingTickets);
     this.milestones.removeAllForProject(id);
@@ -1154,9 +1132,7 @@ export class ProjectManager {
     return this.getTickets().filter((t) => t.projectId === projectId);
   };
 
-  getTasks = (): Task[] => {
-    return Array.from(this.tasks.values()).map((entry) => entry.task);
-  };
+  getTasks = (): Task[] => this.supervisors.listTasks();
 
   private static PRIORITY_ORDER: Record<TicketPriority, number> = {
     critical: 0,
@@ -1272,11 +1248,11 @@ export class ProjectManager {
     // Find the task associated with this ticket (via supervisorTaskId or ticketId on task)
     let task: Task | undefined;
     if (ticket.supervisorTaskId) {
-      task = this.tasks.get(ticket.supervisorTaskId)?.task;
+      task = this.supervisors.tasks.get(ticket.supervisorTaskId)?.task;
     }
     if (!task) {
       // Fallback: search all tasks for one matching this ticketId
-      for (const [, entry] of this.tasks) {
+      for (const [, entry] of this.supervisors.tasks) {
         if (entry.task.ticketId === ticketId) {
           task = entry.task;
           break;
@@ -1647,7 +1623,7 @@ export class ProjectManager {
   // resetSupervisorSession / startMachineRun / cleanupTicketWorkspace /
   // sendUserRunMessage now live in SupervisorOrchestrator (C2c.5). PM keeps
   // thin delegators for the public methods that IPC handlers and PM internals
-  // (autoDispatchTick, moveTicketToColumn, removeTask) still call.
+  // (autoDispatchTick, moveTicketToColumn) still call.
 
   startSupervisor = (ticketId: TicketId): Promise<void> => this.supervisors.startSupervisor(ticketId);
 
@@ -1665,178 +1641,14 @@ export class ProjectManager {
 
   // #region Task persistence
 
-  private getPersistedTasks = (): Task[] => {
-    return this.store.get('tasks', []);
-  };
+  // Task persistence (`tasks` map, persistTask, removePersistedTask,
+  // restorePersistedTasks, startupTerminalCleanup, resetStaleTicketStates),
+  // task-CRUD helpers, removeAllTasksForProject, and exitAllTasks all live
+  // in SupervisorOrchestrator (C2c.6). PM keeps `restorePersistedTasks` as
+  // a thin delegator since `createProjectManager` calls it on boot.
+  // Dead-code `stopTask` / `removeTask` (unreferenced anywhere) deleted.
 
-  private setPersistedTasks = (tasks: Task[]): void => {
-    this.store.set('tasks', tasks);
-    this.sendToWindow('store:changed', this.store.store);
-  };
-
-  private persistTask = (task: Task): void => {
-    const tasks = this.getPersistedTasks();
-    const index = tasks.findIndex((t) => t.id === task.id);
-    if (index === -1) {
-      tasks.push(task);
-    } else {
-      tasks[index] = task;
-    }
-    this.setPersistedTasks(tasks);
-  };
-
-  private removePersistedTask = (taskId: TaskId): void => {
-    const tasks = this.getPersistedTasks().filter((t) => t.id !== taskId);
-    this.setPersistedTasks(tasks);
-  };
-
-  restorePersistedTasks = (): void => {
-    const tasks = this.getPersistedTasks();
-    const updated: Task[] = [];
-    for (const task of tasks) {
-      if (task.status.type !== 'exited' && task.status.type !== 'error') {
-        updated.push({ ...task, status: { type: 'exited', timestamp: Date.now() } });
-      } else {
-        updated.push(task);
-      }
-    }
-    this.setPersistedTasks(updated);
-
-    // Reset stale supervisor states on tickets
-    this.resetStaleTicketStates();
-
-    // Startup sweep: clean up stale workspaces for tickets already in terminal columns
-    void this.startupTerminalCleanup();
-  };
-
-  /**
-   * Startup sweep: find persisted tasks whose tickets are in terminal columns
-   * and clean up their worktrees. Prevents stale workspaces from accumulating after restarts.
-   */
-  private startupTerminalCleanup = async (): Promise<void> => {
-    const tickets = this.getTickets();
-    let cleaned = 0;
-
-    for (const ticket of tickets) {
-      if (!this.isTerminalColumn(ticket.projectId, ticket.columnId)) {
-        continue;
-      }
-
-      // Clean up worktree from the ticket
-      if (ticket.worktreePath && ticket.worktreeName) {
-        const project = this.getProjects().find((p) => p.id === ticket.projectId);
-        if (project?.source?.kind === 'local') {
-          await removeWorktree(project.source?.workspaceDir, ticket.worktreePath, ticket.worktreeName);
-        }
-        this.updateTicket(ticket.id, { worktreePath: undefined, worktreeName: undefined });
-        cleaned++;
-      }
-
-      // Clean up orphaned task record
-      if (ticket.supervisorTaskId) {
-        this.removePersistedTask(ticket.supervisorTaskId);
-      }
-    }
-
-    // Also clean up orphaned tasks with no matching ticket
-    const tasks = this.getPersistedTasks();
-    const ticketIds = new Set(tickets.map((t) => t.id));
-    for (const task of tasks) {
-      if (task.ticketId && !ticketIds.has(task.ticketId)) {
-        if (task.worktreePath && task.worktreeName) {
-          const project = this.getProjects().find((p) => p.id === task.projectId);
-          if (project?.source?.kind === 'local') {
-            await removeWorktree(project.source?.workspaceDir, task.worktreePath, task.worktreeName);
-          }
-        }
-        this.removePersistedTask(task.id);
-        cleaned++;
-      }
-    }
-
-    if (cleaned > 0) {
-      console.log(`[ProjectManager] Startup cleanup: removed ${cleaned} stale workspace(s) for terminal tickets.`);
-    }
-  };
-
-  private resetStaleTicketStates = (): void => {
-    const tickets = this.getTickets();
-    let dirty = false;
-    const patched = tickets.map((ticket) => {
-      // On startup, reset everything except 'idle' and 'completed' back to 'idle'.
-      // Error states from previous sessions are stale — the infrastructure is gone,
-      // so presenting old errors on fresh launch is confusing. Only 'completed'
-      // persists because the work is actually done.
-      if (ticket.phase && ticket.phase !== 'idle' && ticket.phase !== 'completed') {
-        dirty = true;
-        return { ...ticket, phase: 'idle' as const };
-      }
-      return ticket;
-    });
-
-    if (dirty) {
-      this.setTickets(patched);
-    }
-  };
-
-  // #endregion
-
-  // #region Tasks (in-memory sandboxes + persisted records)
-
-  private stopTask = async (taskId: TaskId): Promise<void> => {
-    const entry = this.tasks.get(taskId);
-    if (!entry) {
-      return;
-    }
-
-    // If this task belongs to a machine, stop it too
-    if (entry.task.ticketId) {
-      const machineEntry = this.supervisors.machines.get(entry.task.ticketId);
-      if (machineEntry) {
-        await this.stopSupervisor(entry.task.ticketId);
-      }
-    }
-
-    await entry.sandbox.stop();
-  };
-
-  private removeTask = async (taskId: TaskId): Promise<void> => {
-    const entry = this.tasks.get(taskId);
-    if (!entry) {
-      return;
-    }
-
-    // If this task belongs to a machine, clean it up
-    if (entry.task.ticketId) {
-      const machineEntry = this.supervisors.machines.get(entry.task.ticketId);
-      if (machineEntry) {
-        await machineEntry.machine.dispose();
-        this.supervisors.machines.delete(entry.task.ticketId);
-      }
-    }
-
-    await entry.sandbox.exit();
-
-    // Remove worktree — check ticket first (source of truth), fall back to task
-    if (entry.task.ticketId) {
-      const ticket = this.getTicketById(entry.task.ticketId);
-      if (ticket?.worktreePath && ticket.worktreeName) {
-        const project = this.getProjects().find((p) => p.id === ticket.projectId);
-        if (project?.source?.kind === 'local') {
-          await removeWorktree(project.source?.workspaceDir, ticket.worktreePath, ticket.worktreeName);
-        }
-        this.updateTicket(ticket.id, { worktreePath: undefined, worktreeName: undefined });
-      }
-    } else if (entry.task.worktreePath && entry.task.worktreeName) {
-      const project = this.getProjects().find((p) => p.id === entry.task.projectId);
-      if (project?.source?.kind === 'local') {
-        await removeWorktree(project.source?.workspaceDir, entry.task.worktreePath, entry.task.worktreeName);
-      }
-    }
-
-    this.tasks.delete(taskId);
-    this.removePersistedTask(taskId);
-  };
+  restorePersistedTasks = (): void => this.supervisors.restorePersistedTasks();
 
   // #endregion
 
@@ -2066,9 +1878,7 @@ export class ProjectManager {
       this.supervisors.machines.delete(ticketId);
     }
 
-    const exits = [...this.tasks.values()].map((entry) => entry.sandbox.exit());
-    await Promise.allSettled(exits);
-    this.tasks.clear();
+    await this.supervisors.exitAllTasks();
   };
 }
 

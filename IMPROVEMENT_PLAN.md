@@ -38,7 +38,8 @@ Phases must be executed in order; within a phase, fixes are independent unless n
 | 6     | 6.3 Sprint C2c.3 — machines map + createMachine + handleMachineRunEnd + withTicketLock | ✅     | (supervisor-orchestrator.ts)                   |
 | 6     | 6.3 Sprint C2c.4 — ensureSupervisorInfra + resolveTicketWorkspace + session + codetab  | ✅     | (supervisor-orchestrator.ts + worktree-ops.ts) |
 | 6     | 6.3 Sprint C2c.5 — Lifecycle entry points (start/stop/send/reset/cleanup)              | ✅     | (supervisor-orchestrator.ts)                   |
-| 6     | 6.3 Sprint C2c.6+ — Task map / autodispatch / tool dispatch / prompt assembly          | 🟡     | In progress                                    |
+| 6     | 6.3 Sprint C2c.6 — Task map + persistence + restore + startup cleanup                  | ✅     | (supervisor-orchestrator.ts)                   |
+| 6     | 6.3 Sprint C2c.7+ — autodispatch + preflight + tool dispatch + prompt assembly         | 🟡     | In progress                                    |
 
 ### Deep testing wave (follow-up to Phase 5)
 
@@ -854,6 +855,28 @@ Completed increments (each commit ships regression-green with `npm test`):
   `orch(pm)`; their entries dropped from the `internals()` cast type along
   with `checkForStalledSupervisors`. The cast surface shrank from 13 methods
   to 10. Test count: 833 (no new tests — migration only).
+- **C2c.6 — Task map + persistence + boot recovery:** Moved the
+  `tasks` Map, `persistTask` / `removePersistedTask` / `getPersistedTasks`
+  / `setPersistedTasks` helpers, `restorePersistedTasks` (public),
+  `startupTerminalCleanup` (private), `resetStaleTicketStates` (private),
+  plus new `removeAllTasksForProject` / `exitAllTasks` / `listTasks`
+  methods into `SupervisorOrchestrator`. Dropped the temporary
+  `SupervisorTaskRegistry` adapter entirely — orchestrator's
+  `ensureSupervisorInfra` / `cleanupTicketWorkspace` / sandbox status
+  callback now touch `this.tasks` and `this.persistTask` directly. The
+  store adapter gained four new methods (`setTickets`, `getPersistedTasks`,
+  `setPersistedTasks`) so the orchestrator's persistence + reset paths
+  can read/write the store without going through PM. PM keeps a one-line
+  `restorePersistedTasks` delegator (called once from
+  `createProjectManager`); `getTasks` becomes
+  `this.supervisors.listTasks()`; `removeProject` calls
+  `this.supervisors.removeAllTasksForProject(id)`; `exit` calls
+  `this.supervisors.exitAllTasks()`; `getFilesChanged` reads
+  `this.supervisors.tasks` instead of `this.tasks`. Dead-code `stopTask`
+  and `removeTask` private methods (unreferenced everywhere) were
+  deleted rather than migrated. PM also dropped the now-unused
+  `removeWorktree` import. `project-manager.ts` dropped 2292 → 2102
+  lines (-190). Test count: 833 (no behavior change — move only).
 - **C2c.5 — Lifecycle entry points:** Moved `startSupervisor`,
   `stopSupervisor`, `sendSupervisorMessage`, `sendUserRunMessage` (private),
   `resetSupervisorSession`, `startMachineRun`, and `cleanupTicketWorkspace`
@@ -873,16 +896,13 @@ Completed increments (each commit ships regression-green with `npm test`):
   `orch(pm).ensureSupervisorInfra` instead. `project-manager.ts` dropped
   2519 → 2292 lines (-227). Test count: 833 (no behavior change — move only).
 
-Cumulative file-size delta: `project-manager.ts` 3937 → 2292 lines (-1645).
+Cumulative file-size delta: `project-manager.ts` 3937 → 2102 lines (-1835).
 Test count 812 → 833.
 
 Remaining execution plan (tests migrate off the `internals()` cast onto
 `orch(pm)` as each piece moves; the cast shrinks every commit and disappears
 entirely after the last step):
 
-- **C2c.6 — Task persistence + `restorePersistedTasks` +
-  `startupTerminalCleanup` + `resetStaleTicketStates` + `stopTask` +
-  `removeTask` + `tasks` map.** The second state-ownership transfer.
 - **C2c.7 — `validateDispatchPreflight` + `autoDispatchTick` +
   `setAutoDispatch` + `getFilesChanged`.** Auto-dispatch loop.
 - \*\*C2c.8 — `handleClientToolCall` (~450 lines) + `buildFullSupervisorPrompt`
@@ -949,7 +969,8 @@ built the safety net it needs.
 | 6.3 Sprint C2c.3 Machines map + createMachine + run-end + lock | 6     | L    | ✅     | -182 PM lines; cast surface 10 → 6; machines ownership transferred |
 | 6.3 Sprint C2c.4 Infra provisioning + worktree-ops extraction  | 6     | L    | ✅     | -508 PM lines; new worktree-ops.ts; SupervisorTaskRegistry adapter |
 | 6.3 Sprint C2c.5 Lifecycle entry points                        | 6     | L    | ✅     | -227 PM lines; start/stop/send/reset/cleanup all in orchestrator   |
-| 6.3 Sprint C2c.6–9 Remaining state migration                   | 6     | L    | 🟡     | task map, autodispatch, tool dispatch, prompt assembly             |
+| 6.3 Sprint C2c.6 Task map + persistence                        | 6     | L    | ✅     | -190 PM lines; tasks map + restore + startup cleanup migrated      |
+| 6.3 Sprint C2c.7–9 Remaining state migration                   | 6     | L    | 🟡     | autodispatch, preflight, tool dispatch, prompt assembly            |
 | 6.3 Sprint C3 PM → coordinator                                 | 6     | L    | ⏳     | depends on C2c                                                     |
 | 6.3 Sprint C4 IPC handler split                                | 6     | M    | ⏳     | depends on C3                                                      |
 | T1–T11 deep testing wave (follow-up)                           | 5+    | L    | ✅     | +92 tests, 7 bugs fixed                                            |

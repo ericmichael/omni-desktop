@@ -25,12 +25,13 @@
  *   - Infra provisioning (`ensureSupervisorInfra`, `resolveTicketWorkspace`, `ensureSession`)
  *   - Lifecycle entry points (`startSupervisor`, `stopSupervisor`, `sendSupervisorMessage`,
  *     `resetSupervisorSession`, `startMachineRun`, `cleanupTicketWorkspace`)
+ *   - `tasks` map + persisted task list, `restorePersistedTasks`,
+ *     `startupTerminalCleanup`, `resetStaleTicketStates`,
+ *     `removeAllTasksForProject`, `exitAllTasks`, `listTasks`
  *
  * Does NOT own (yet — still in ProjectManager):
- *   - `tasks` map + persisted task list (registry adapter only — moves in C2c.6)
  *   - `handleClientToolCall` + supervisor prompt assembly (moves in C2c.8)
  *   - Auto-dispatch loop + `validateDispatchPreflight` (moves in C2c.7)
- *   - Task persistence + startup cleanup (moves in C2c.6)
  */
 
 import { randomUUID } from 'crypto';
@@ -130,24 +131,14 @@ export interface RetryOpts {
 
 export interface SupervisorOrchestratorStore {
   getTickets(): Ticket[];
+  setTickets(tickets: Ticket[]): void;
   getProjects(): Project[];
   getWipLimit(): number;
   getSandboxBackend(): SandboxBackend | undefined;
   getPlatformCredentials(): PlatformCredentials | undefined;
   getCodeTabs(): Array<{ id: string; ticketId?: string }>;
-}
-
-/**
- * Task registry adapter — thin surface over PM's in-memory `tasks` Map and
- * persisted task list. Removed in C2c.6 when task ownership transfers into
- * the orchestrator wholesale.
- */
-export interface SupervisorTaskRegistry {
-  register(taskId: TaskId, task: Task, sandbox: ISandbox): void;
-  get(taskId: TaskId): { task: Task; sandbox: ISandbox } | undefined;
-  patchTask(taskId: TaskId, patch: Partial<Task>): void;
-  /** Drop the task from the in-memory map and the persisted store. */
-  unregister(taskId: TaskId): void;
+  getPersistedTasks(): Task[];
+  setPersistedTasks(tasks: Task[]): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -189,7 +180,6 @@ export interface SupervisorOrchestratorHost {
 export interface SupervisorOrchestratorDeps {
   store: SupervisorOrchestratorStore;
   host: SupervisorOrchestratorHost;
-  taskRegistry: SupervisorTaskRegistry;
   workflowLoader: IWorkflowLoader;
   sendToWindow: IWindowSender;
   sandboxFactory: ISandboxFactory;
@@ -224,7 +214,43 @@ export class SupervisorOrchestrator {
   /** Per-ticket async mutex chain. Public for the same reason as `machines`. */
   readonly ticketLocks = new Map<TicketId, Promise<void>>();
 
+  /**
+   * In-memory sandbox tasks keyed by taskId. Each entry pairs a `Task` record
+   * (also persisted in the store) with the live `ISandbox` that owns the
+   * underlying container/process. Public so ProjectManager's
+   * `getFilesChanged` / `getTasks` / `removeProject` / `exit` paths can
+   * iterate without a cast — same pattern as `machines`.
+   */
+  readonly tasks = new Map<TaskId, { task: Task; sandbox: ISandbox }>();
+
   constructor(private readonly deps: SupervisorOrchestratorDeps) {}
+
+  // -------------------------------------------------------------------------
+  // Task persistence (in-memory + store)
+  // -------------------------------------------------------------------------
+
+  /** Insert or update a persisted task record. */
+  private persistTask(task: Task): void {
+    const tasks = this.deps.store.getPersistedTasks();
+    const index = tasks.findIndex((t) => t.id === task.id);
+    if (index === -1) {
+      tasks.push(task);
+    } else {
+      tasks[index] = task;
+    }
+    this.deps.store.setPersistedTasks(tasks);
+  }
+
+  /** Drop a persisted task by id. No-op if absent. */
+  private removePersistedTask(taskId: TaskId): void {
+    const tasks = this.deps.store.getPersistedTasks().filter((t) => t.id !== taskId);
+    this.deps.store.setPersistedTasks(tasks);
+  }
+
+  /** Snapshot of all in-memory tasks (for IPC `project:get-tasks`). */
+  listTasks(): Task[] {
+    return Array.from(this.tasks.values()).map((entry) => entry.task);
+  }
 
   // -------------------------------------------------------------------------
   // Machine factory
@@ -1059,7 +1085,7 @@ export class SupervisorOrchestrator {
       platformClient: platformClient ?? undefined,
       ipcRawOutput: () => {},
       onStatusChange: (status) => {
-        const taskEntry = this.deps.taskRegistry.get(taskId);
+        const taskEntry = this.tasks.get(taskId);
         if (taskEntry) {
           const patch: Partial<Task> = { status };
           if (status.type === 'running') {
@@ -1069,7 +1095,8 @@ export class SupervisorOrchestrator {
               noVncUrl: status.data.noVncUrl,
             };
           }
-          this.deps.taskRegistry.patchTask(taskId, patch);
+          taskEntry.task = { ...taskEntry.task, ...patch };
+          this.persistTask(taskEntry.task);
         }
         this.deps.sendToWindow('project:task-status', taskId, status);
 
@@ -1090,7 +1117,8 @@ export class SupervisorOrchestrator {
       },
     });
 
-    this.deps.taskRegistry.register(taskId, task, sandbox);
+    this.tasks.set(taskId, { task, sandbox });
+    this.persistTask(task);
     this.deps.host.updateTicket(ticketId, { supervisorTaskId: taskId });
 
     this.machines.set(ticketId, { machine, sandbox });
@@ -1267,11 +1295,12 @@ export class SupervisorOrchestrator {
 
     // Stop and exit the container
     if (taskId) {
-      const taskEntry = this.deps.taskRegistry.get(taskId);
+      const taskEntry = this.tasks.get(taskId);
       if (taskEntry) {
         await taskEntry.sandbox.exit();
       }
-      this.deps.taskRegistry.unregister(taskId);
+      this.tasks.delete(taskId);
+      this.removePersistedTask(taskId);
     }
 
     // Remove worktree (source of truth is the ticket, not the task)
@@ -1378,5 +1407,130 @@ export class SupervisorOrchestrator {
     } catch (error) {
       console.error(`[SupervisorOrchestrator] Machine message failed for ${ticketId}:`, error);
     }
+  };
+
+  // -------------------------------------------------------------------------
+  // Boot / shutdown (C2c.6)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Boot-time recovery: mark stranded persisted tasks as `exited`, reset
+   * stale ticket phases, and sweep stale workspaces for tickets that are
+   * already in a terminal column. Called once from `createProjectManager`.
+   */
+  restorePersistedTasks = (): void => {
+    const tasks = this.deps.store.getPersistedTasks();
+    const updated: Task[] = [];
+    for (const task of tasks) {
+      if (task.status.type !== 'exited' && task.status.type !== 'error') {
+        updated.push({ ...task, status: { type: 'exited', timestamp: Date.now() } });
+      } else {
+        updated.push(task);
+      }
+    }
+    this.deps.store.setPersistedTasks(updated);
+
+    // Reset stale supervisor states on tickets
+    this.resetStaleTicketStates();
+
+    // Startup sweep: clean up stale workspaces for tickets already in terminal columns
+    void this.startupTerminalCleanup();
+  };
+
+  /**
+   * Startup sweep: find persisted tasks whose tickets are in terminal
+   * columns (or whose tickets no longer exist) and clean up their worktrees.
+   * Prevents stale workspaces from accumulating across restarts.
+   */
+  private startupTerminalCleanup = async (): Promise<void> => {
+    const tickets = this.deps.store.getTickets();
+    let cleaned = 0;
+
+    for (const ticket of tickets) {
+      if (!this.deps.host.isTerminalColumn(ticket.projectId, ticket.columnId)) {
+        continue;
+      }
+
+      // Clean up worktree from the ticket
+      if (ticket.worktreePath && ticket.worktreeName) {
+        const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId);
+        if (project?.source?.kind === 'local') {
+          await removeWorktree(requireLocalWorkspaceDir(project.source), ticket.worktreePath, ticket.worktreeName);
+        }
+        this.deps.host.updateTicket(ticket.id, { worktreePath: undefined, worktreeName: undefined });
+        cleaned++;
+      }
+
+      // Clean up orphaned task record
+      if (ticket.supervisorTaskId) {
+        this.removePersistedTask(ticket.supervisorTaskId);
+      }
+    }
+
+    // Also clean up orphaned tasks with no matching ticket
+    const persisted = this.deps.store.getPersistedTasks();
+    const ticketIds = new Set(tickets.map((t) => t.id));
+    for (const task of persisted) {
+      if (task.ticketId && !ticketIds.has(task.ticketId)) {
+        if (task.worktreePath && task.worktreeName) {
+          const project = this.deps.store.getProjects().find((p) => p.id === task.projectId);
+          if (project?.source?.kind === 'local') {
+            await removeWorktree(requireLocalWorkspaceDir(project.source), task.worktreePath, task.worktreeName);
+          }
+        }
+        this.removePersistedTask(task.id);
+        cleaned++;
+      }
+    }
+
+    if (cleaned > 0) {
+      console.log(`[SupervisorOrchestrator] Startup cleanup: removed ${cleaned} stale workspace(s) for terminal tickets.`);
+    }
+  };
+
+  /**
+   * Reset every non-`idle`, non-`completed` ticket phase to `idle` on boot.
+   * Error states from a previous session are stale because in-memory retry
+   * counters are gone — leaving them surfaced would confuse the user. Only
+   * `completed` persists because the work is genuinely done. (Pinned by
+   * tests so a future change to this rule must update both.)
+   */
+  private resetStaleTicketStates = (): void => {
+    const tickets = this.deps.store.getTickets();
+    let dirty = false;
+    const patched = tickets.map((ticket) => {
+      if (ticket.phase && ticket.phase !== 'idle' && ticket.phase !== 'completed') {
+        dirty = true;
+        return { ...ticket, phase: 'idle' as const };
+      }
+      return ticket;
+    });
+
+    if (dirty) {
+      this.deps.store.setTickets(patched);
+    }
+  };
+
+  /**
+   * Tear down every in-memory task for a project: exit each sandbox, drop
+   * the in-memory entries, then clear matching persisted tasks. Called by
+   * `ProjectManager.removeProject`.
+   */
+  removeAllTasksForProject = async (projectId: ProjectId): Promise<void> => {
+    for (const [taskId, entry] of this.tasks) {
+      if (entry.task.projectId === projectId) {
+        await entry.sandbox.exit();
+        this.tasks.delete(taskId);
+      }
+    }
+    const remaining = this.deps.store.getPersistedTasks().filter((t) => t.projectId !== projectId);
+    this.deps.store.setPersistedTasks(remaining);
+  };
+
+  /** Exit every in-memory sandbox and clear the map. Called from PM.exit(). */
+  exitAllTasks = async (): Promise<void> => {
+    const exits = [...this.tasks.values()].map((entry) => entry.sandbox.exit());
+    await Promise.allSettled(exits);
+    this.tasks.clear();
   };
 }
