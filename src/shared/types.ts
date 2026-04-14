@@ -415,6 +415,7 @@ export const schema: Schema<StoreData> = {
         phaseChangedAt: { type: 'number' },
         columnChangedAt: { type: 'number' },
         resolvedAt: { type: 'number' },
+        archivedAt: { type: 'number' },
         // Kanban fields
         columnId: { type: 'string' },
         currentPhaseId: { type: ['string', 'null'] },
@@ -728,6 +729,16 @@ export type Milestone = {
  */
 export type PageKind = 'doc' | 'notebook';
 
+export type PageProperties = {
+  status?: string;
+  size?: string;
+  projectId?: ProjectId;
+  milestoneId?: MilestoneId;
+  outcome?: string;
+  notDoing?: string;
+  laterAt?: number;
+};
+
 export type Page = {
   id: PageId;
   projectId: ProjectId;
@@ -746,6 +757,8 @@ export type Page = {
    * extension's webview surface. Root pages are always 'doc'.
    */
   kind?: PageKind;
+  /** Structured metadata fields (status, size, outcome, etc.) for this page. */
+  properties?: PageProperties;
   createdAt: number;
   updatedAt: number;
 };
@@ -863,6 +876,8 @@ export type Ticket = {
   tokenUsage?: TokenUsage;
   /** Resolution reason when ticket is closed. Undefined means open. */
   resolution?: TicketResolution;
+  /** Timestamp when the ticket was archived from active views. */
+  archivedAt?: number;
   /** Agent/human comments — serves as persistent memory across runs. */
   comments?: TicketComment[];
   /** History of supervisor runs on this ticket. */

@@ -235,6 +235,18 @@ const MilestoneMetaSchema = z.object({
   updatedAt: Timestamp,
 });
 
+const PagePropertiesSchema = z
+  .object({
+    status: z.string().optional(),
+    size: z.string().optional(),
+    projectId: z.string().optional(),
+    milestoneId: z.string().optional(),
+    outcome: z.string().optional(),
+    notDoing: z.string().optional(),
+    laterAt: z.number().optional(),
+  })
+  .optional();
+
 /** Frontmatter schema for a page file. Body holds the page content. */
 const PageMetaSchema = z.object({
   title: z.string(),
@@ -242,6 +254,7 @@ const PageMetaSchema = z.object({
   icon: z.string().optional(),
   sortOrder: z.number(),
   isRoot: z.boolean().optional(),
+  properties: PagePropertiesSchema,
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -381,6 +394,11 @@ export function parsePageFile(
   const parsed = parseWith(PageMetaSchema, yamlResult.value);
   if (parsed.isErr()) return parsed;
   const m = parsed.value;
+  // Only include properties if defined and has at least one non-undefined value.
+  const rawProps = m.properties;
+  const hasProps =
+    rawProps !== undefined &&
+    Object.values(rawProps).some((v) => v !== undefined);
   const page: Page = {
     id,
     projectId,
@@ -389,6 +407,7 @@ export function parsePageFile(
     icon: m.icon,
     sortOrder: m.sortOrder,
     isRoot: m.isRoot,
+    ...(hasProps ? { properties: rawProps } : {}),
     createdAt: m.createdAt,
     updatedAt: m.updatedAt,
   };
@@ -508,12 +527,18 @@ export function serializeMilestoneFile(milestone: Milestone): string {
 }
 
 export function serializePageFile(page: Page, body: string): string {
+  // Only include properties when defined and has at least one non-undefined value.
+  const rawProps = page.properties;
+  const hasProps =
+    rawProps !== undefined &&
+    Object.values(rawProps).some((v) => v !== undefined);
   const meta = compact({
     title: page.title,
     parentId: page.parentId,
     icon: page.icon,
     sortOrder: page.sortOrder,
     isRoot: page.isRoot,
+    ...(hasProps ? { properties: compact(rawProps as Record<string, unknown>) } : {}),
     createdAt: msToIso(page.createdAt),
     updatedAt: msToIso(page.updatedAt),
   });
