@@ -297,6 +297,15 @@ const MAX_CONCURRENT_SUPERVISORS = 5;
 /** If no supervisor message is received within this window, the run is considered stalled. */
 const STALL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
+/**
+ * Safety-net timeout for streaming phases (running/continuing). Normally the
+ * primary stall check skips streaming phases because legitimate long tool calls
+ * can silence the message stream for minutes. But if the supervisor crashes
+ * silently — no exit event, no run_end, no error — a streaming machine would
+ * hang forever. This backstop fires only after a very long silence.
+ */
+const STREAMING_STALL_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
 /** How often to check for stalled supervisors. */
 const STALL_CHECK_INTERVAL_MS = 30_000; // 30 seconds
 
@@ -1142,11 +1151,7 @@ return;
       const { machine } = entry;
       const phase = machine.getPhase();
 
-      // Only check for stalls in non-terminal phases that aren't actively running.
-      // An active run (running/continuing) is never stalled — the agent may be
-      // executing long tool calls. We only detect stalls in phases where the
-      // machine is stuck without progressing (e.g. provisioning, connecting).
-      if (!machine.isActive() || machine.isStreaming()) {
+      if (!machine.isActive()) {
 continue;
 }
       // Skip phases that have their own timeouts or are waiting intentionally.
@@ -1157,13 +1162,18 @@ continue;
 }
 
       const ticket = this.getTicketById(ticketId);
-      const stallTimeout = ticket ? this.getEffectiveStallTimeout(ticket.projectId) : STALL_TIMEOUT_MS;
+      // Streaming phases get a much longer safety-net timeout because legitimate
+      // long tool calls can silence the message stream for many minutes. Non-streaming
+      // active phases (provisioning, connecting) use the shorter project stall timeout.
+      const stallTimeout = machine.isStreaming()
+        ? STREAMING_STALL_TIMEOUT_MS
+        : (ticket ? this.getEffectiveStallTimeout(ticket.projectId) : STALL_TIMEOUT_MS);
 
       const elapsed = now - machine.getLastActivity();
       if (elapsed > stallTimeout) {
         void this.withTicketLock(ticketId, async () => {
           // Re-check under lock
-          if (!machine.isActive() || machine.isStreaming()) {
+          if (!machine.isActive()) {
 return;
 }
           if (machine.getPhase() === 'retrying' || machine.getPhase() === 'awaiting_input') {

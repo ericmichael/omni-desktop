@@ -530,18 +530,36 @@ describe('ProjectManager integration', () => {
       expect(mock.stop).not.toHaveBeenCalled();
     });
 
-    it('skips stall checking for streaming phases', async () => {
+    it('uses extended timeout for streaming phases (short silence is not a stall)', async () => {
       const { pm, machines } = makePm({ tickets: [{ id: 't1' }] });
       const mach = internals(pm).createMachine('t1');
       internals(pm).machines.set('t1', { machine: mach, sandbox: null });
       const mock = machines.get('t1')!;
 
+      // Silent for 10 minutes — well past the 5-minute non-streaming timeout,
+      // but far below the 30-minute streaming safety-net.
       mock.phase = 'running';
-      mock.lastActivityAt = Date.now() - (STALL_TIMEOUT_MS + 10_000);
+      mock.lastActivityAt = Date.now() - (10 * 60 * 1000);
 
       await vi.advanceTimersByTimeAsync(STALL_CHECK_INTERVAL_MS + 100);
 
       expect(mock.stop).not.toHaveBeenCalled();
+    });
+
+    it('fires safety-net for streaming phases that exceed STREAMING_STALL_TIMEOUT_MS', async () => {
+      const STREAMING_STALL_TIMEOUT_MS = 30 * 60 * 1000;
+      const { pm, machines } = makePm({ tickets: [{ id: 't1' }] });
+      const mach = internals(pm).createMachine('t1');
+      internals(pm).machines.set('t1', { machine: mach, sandbox: null });
+      const mock = machines.get('t1')!;
+
+      // Silent for 31 minutes — past the streaming safety-net.
+      mock.phase = 'running';
+      mock.lastActivityAt = Date.now() - (STREAMING_STALL_TIMEOUT_MS + 60_000);
+
+      await vi.advanceTimersByTimeAsync(STALL_CHECK_INTERVAL_MS + 100);
+
+      expect(mock.stop).toHaveBeenCalled();
     });
   });
 
