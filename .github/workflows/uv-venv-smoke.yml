@@ -20,6 +20,116 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Drives uv.exe through node-pty with useConpty:false — exactly how the
+  # packaged app runs it in production (see src/lib/pty-utils.ts). The matrix
+  # above exercises uv directly from PowerShell; this job exercises the
+  # winpty code path that is our top suspect for non-ASCII-path failures on
+  # personal laptops. If this job fails while the matrix passes, winpty is
+  # the culprit and we need to flip useConpty:true (F7).
+  node-pty-winpty-smoke:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - 'C:\omni-pty-smoke\ascii\runtime'
+          - 'C:\omni-pty-smoke\José María\Ω-runtime'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Generate lockfile hash without version
+        id: lockfile-hash
+        shell: bash
+        run: echo "hash=$(node .github/scripts/generate-lockfile-hash.js)" >> $GITHUB_OUTPUT
+
+      - name: Cache node modules
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            ~/.electron
+            ~/.electron-gyp
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-modules-${{ steps.lockfile-hash.outputs.hash }}
+
+      - name: Install deps
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - name: Get UV hash
+        id: uv-hash
+        shell: bash
+        run: echo "hash=$(node -e "console.log(require('./package.json').uv.win.sha256)")" >> $GITHUB_OUTPUT
+
+      - name: Cache UV binary
+        id: cache-uv
+        uses: actions/cache@v4
+        with:
+          path: assets/bin
+          key: ${{ runner.os }}-uv-${{ steps.uv-hash.outputs.hash }}
+
+      - name: Download uv
+        if: steps.cache-uv.outputs.cache-hit != 'true'
+        run: npm run download win
+
+      - name: Create venv via node-pty + winpty
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          $script = @'
+          const pty = require('node-pty');
+          const path = require('path');
+          const fs = require('fs');
+
+          const target = process.env.TARGET;
+          const uv = path.resolve('assets/bin/uv.exe');
+          const parent = path.dirname(target);
+          fs.mkdirSync(parent, { recursive: true });
+
+          const args = [
+            'venv', '--relocatable', '--prompt', 'omni',
+            '--python', '3.11', '--python-preference', 'only-managed',
+            '--link-mode', 'copy',
+            target,
+          ];
+
+          // Mirrors src/lib/pty-utils.ts createPtyProcess exactly.
+          const proc = pty.spawn(uv, args, {
+            name: 'xterm-color',
+            cwd: process.cwd(),
+            env: { ...process.env, FORCE_COLOR: '1', PYTHONUNBUFFERED: '1' },
+            useConpty: false,
+          });
+
+          let output = '';
+          proc.onData((d) => { output += d; process.stdout.write(d); });
+          proc.onExit(({ exitCode }) => {
+            if (exitCode !== 0) {
+              console.error(`\n[FAIL] uv venv exited with code ${exitCode}`);
+              console.error(`[FAIL] Target was: ${target}`);
+              process.exit(exitCode || 1);
+            }
+            const pythonExe = path.join(target, 'Scripts', 'python.exe');
+            if (!fs.existsSync(pythonExe)) {
+              console.error(`\n[FAIL] venv created but ${pythonExe} missing`);
+              process.exit(1);
+            }
+            console.log(`\n[OK] venv created at ${target}`);
+            process.exit(0);
+          });
+          '@
+          $script | Out-File -Encoding utf8 pty-venv-test.js
+          node pty-venv-test.js
+          if ($LASTEXITCODE -ne 0) { throw "node-pty venv test failed ($LASTEXITCODE)" }
+
   uv-venv-smoke:
     runs-on: windows-latest
     strategy:
@@ -39,6 +149,13 @@ jobs:
           - name: junction-reparse
             dir: 'C:\omni-smoke-link\runtime'
             reparse_source: 'C:\omni-smoke\real-target'
+          # Reproduces the failure mode where a user's %USERPROFILE% contains
+          # non-ASCII characters (accents, diacritics, non-Latin scripts).
+          # winpty (node-pty's useConpty:false fallback) is known to mangle
+          # non-ASCII args and cwd, so this is the cheapest way to reproduce
+          # or rule out that class of bug for personal-laptop test users.
+          - name: non-ascii-path
+            dir: 'C:\omni-smoke\José María\Ω-runtime'
 
     steps:
       - uses: actions/checkout@v4
@@ -93,6 +210,16 @@ jobs:
             throw "venv created but Scripts\python.exe missing at $target"
           }
 
+      - name: Verify target path round-trips through PowerShell
+        shell: pwsh
+        run: |
+          # Sanity check that the target path we just created actually exists
+          # with the expected non-ASCII bytes — catches filesystem encoding
+          # weirdness on the runner itself before we blame uv or node-pty.
+          $target = '${{ matrix.case.dir }}'
+          if (-not (Test-Path $target)) { throw "Target path not found after uv venv: $target" }
+          Get-ChildItem -LiteralPath $target | Select-Object Name, Length | Format-Table -AutoSize
+
       - name: Create venv with --link-mode=copy (mitigation check)
         shell: pwsh
         run: |
@@ -101,3 +228,65 @@ jobs:
           New-Item -ItemType Directory -Force -Path (Split-Path $target) | Out-Null
           & $uv venv --relocatable --prompt omni --python 3.11 --python-preference only-managed --link-mode=copy $target
           if ($LASTEXITCODE -ne 0) { throw "uv venv --link-mode=copy failed ($LASTEXITCODE)" }
+
+      - name: Locked-file recovery (rename-aside fallback)
+        shell: pwsh
+        run: |
+          # Reproduces the scenario where a prior crashed install left a
+          # locked file inside the venv target. PowerShell opens an exclusive
+          # handle on a file inside the target, then we invoke the same
+          # retry-then-rename-aside sequence implemented in
+          # src/main/omni-install-manager.ts removeOrRenameAside().
+          $uv = Join-Path $PWD 'assets\bin\uv.exe'
+          $target = '${{ matrix.case.dir }}-locked'
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+          $locked = Join-Path $target 'locked.bin'
+          Set-Content -Path $locked -Value 'held open'
+          $fs = [System.IO.File]::Open($locked, 'Open', 'Read', 'None')
+          try {
+            # Attempt rm — must fail because of the held handle.
+            $rmError = $null
+            try { Remove-Item -Recurse -Force $target -ErrorAction Stop }
+            catch { $rmError = $_ }
+            if (-not $rmError) { throw "Expected rm to fail on locked file, but it succeeded" }
+
+            # Rename-aside fallback — parent is writable, so this must succeed
+            # even with the handle held.
+            $parent = Split-Path $target
+            $base = Split-Path $target -Leaf
+            $ts = [DateTimeOffset]::Now.ToUnixTimeMilliseconds()
+            $sideStepped = Join-Path $parent "$base.broken.$ts"
+            Rename-Item -Path $target -NewName "$base.broken.$ts"
+            if (-not (Test-Path $sideStepped)) { throw "Rename-aside failed to create $sideStepped" }
+            if (Test-Path $target) { throw "Original path still exists after rename" }
+          }
+          finally {
+            $fs.Close()
+          }
+
+          # After rename-aside, the original target is free — fresh venv must succeed.
+          & $uv venv --relocatable --prompt omni --python 3.11 --python-preference only-managed --link-mode=copy $target
+          if ($LASTEXITCODE -ne 0) { throw "uv venv after rename-aside failed ($LASTEXITCODE)" }
+          if (-not (Test-Path (Join-Path $target 'Scripts\python.exe'))) {
+            throw "Recovered venv missing Scripts\python.exe"
+          }
+
+      - name: Dirty-target recovery (simulates cleanVenvDir retry path)
+        shell: pwsh
+        run: |
+          $uv = Join-Path $PWD 'assets\bin\uv.exe'
+          $target = '${{ matrix.case.dir }}-dirty'
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+          # Drop junk files that make the target look like a non-venv directory —
+          # the exact state omni-install-manager's cleanVenvDir is supposed to recover from.
+          Set-Content -Path (Join-Path $target 'not-a-venv.txt') -Value 'stale'
+          New-Item -ItemType Directory -Force -Path (Join-Path $target 'random-subdir') | Out-Null
+          Set-Content -Path (Join-Path $target 'random-subdir\file.txt') -Value 'more stale'
+          # Mirror the manager's force-clean-then-retry flow.
+          Remove-Item -Recurse -Force $target
+          if (Test-Path $target) { throw "Failed to force-clean dirty target $target" }
+          & $uv venv --relocatable --prompt omni --python 3.11 --python-preference only-managed --link-mode=copy $target
+          if ($LASTEXITCODE -ne 0) { throw "uv venv after force-clean failed ($LASTEXITCODE)" }
+          if (-not (Test-Path (Join-Path $target 'Scripts\python.exe'))) {
+            throw "Recovered venv missing Scripts\python.exe"
+          }

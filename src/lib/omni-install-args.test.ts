@@ -28,4 +28,21 @@ describe('omni-install-manager', () => {
     expect(managerSource).toContain('openInstallLog');
     expect(managerSource).toContain('closeInstallLog');
   });
+
+  test('dirty-venv recovery falls back to rename-aside', () => {
+    expect(managerSource).toContain('removeOrRenameAside');
+    expect(managerSource).toContain('.broken.');
+    expect(managerSource).toContain('sweepBrokenVenvs');
+  });
+
+  test('preflight checks are called before the install runs', () => {
+    expect(managerSource).toContain('checkLongPathsEnabled');
+    expect(managerSource).toContain('checkDiskSpace');
+    expect(managerSource).toContain('checkNetworkReachability');
+  });
+
+  test('LongPathsEnabled warning points users to the correct registry fix', () => {
+    expect(managerSource).toContain('LongPathsEnabled');
+    expect(managerSource).toMatch(/reg add.*LongPathsEnabled/);
+  });
 });

@@ -1,10 +1,14 @@
 import c from 'ansi-colors';
-import { ipcMain } from 'electron';
+import { execFile } from 'child_process';
+import { ipcMain, net } from 'electron';
 import { createWriteStream, type WriteStream } from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
 import { serializeError } from 'serialize-error';
 import { shellEnvSync } from 'shell-env';
+import { promisify } from 'util';
+
+const execFileAsync = promisify(execFile);
 
 import { CommandRunner } from '@/lib/command-runner';
 import { OMNI_CODE_VERSION } from '@/lib/omni-version';
@@ -227,27 +231,164 @@ export class OmniInstallManager {
     return 'error';
   };
 
-  private cleanVenvDir = async (venvPath: string, force: boolean): Promise<void> => {
-    const tryRm = async (): Promise<void> => {
-      try {
-        await fs.rm(venvPath, { recursive: true, force: true });
-      } catch (err) {
-        // Surface to the install log so dirty-dir failures stop being invisible.
-        // We don't rethrow: uv venv will fail with its own message if the dir
-        // is still dirty, and that message is more informative than ours.
-        this.log.warn(c.yellow(`Failed to remove existing venv dir at ${venvPath}: ${(err as Error).message}\r\n`));
-      }
-    };
+  // Remove venvPath with retries, then fall back to renaming it aside.
+  //
+  // Why: on Windows, fs.rm fails when a file inside .venv is locked — typically
+  // because antivirus is mid-scan on a freshly-extracted binary, or because a
+  // stray process from a prior crashed run still holds a handle. Retrying with
+  // backoff clears the AV case. If even that fails, renaming the directory
+  // only requires the *parent* to be writable, not exclusive access to the
+  // contents — so it recovers from genuinely locked files too. The renamed
+  // directory becomes garbage for the next startInstall to sweep.
+  private removeOrRenameAside = async (targetPath: string): Promise<void> => {
+    const RM_ATTEMPTS = 3;
+    const RM_BACKOFF_MS = [0, 500, 1500];
 
+    for (let attempt = 0; attempt < RM_ATTEMPTS; attempt++) {
+      if (RM_BACKOFF_MS[attempt] > 0) {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, RM_BACKOFF_MS[attempt]);
+        });
+      }
+      try {
+        await fs.rm(targetPath, { recursive: true, force: true });
+        return;
+      } catch (err) {
+        const msg = (err as Error).message;
+        if (attempt < RM_ATTEMPTS - 1) {
+          this.log.warn(
+            c.yellow(`Failed to remove ${targetPath} (attempt ${attempt + 1}/${RM_ATTEMPTS}): ${msg} — retrying\r\n`)
+          );
+        } else {
+          this.log.warn(
+            c.yellow(`Failed to remove ${targetPath} after ${RM_ATTEMPTS} attempts: ${msg} — renaming aside\r\n`)
+          );
+        }
+      }
+    }
+
+    // Rename-aside fallback. Uses the parent dir + a timestamped name so even
+    // if multiple broken venvs accumulate, each gets a unique sidestepped path.
+    const parent = path.dirname(targetPath);
+    const base = path.basename(targetPath);
+    const ts = Date.now();
+    const sideStepped = path.join(parent, `${base}.broken.${ts}`);
+    try {
+      await fs.rename(targetPath, sideStepped);
+      this.log.info(c.gray(`Renamed unremovable venv to ${sideStepped}\r\n`));
+    } catch (renameErr) {
+      // If even rename fails the parent is probably not writable or the path
+      // is under a reparse point we can't traverse. Surface it loudly — uv
+      // venv will fail next and the error context will point here.
+      this.log.error(
+        c.red(
+          `Could not remove or rename ${targetPath}: ${(renameErr as Error).message}\r\n` +
+            `The install will likely fail. Close any running Omni Code processes and try again.\r\n`
+        )
+      );
+    }
+  };
+
+  // Preflight: read HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled.
+  // Returns true if set to 1, false if set to 0, null if it can't be read.
+  // A `false` result means deep site-packages paths will break during
+  // `uv pip install omni-code` with a cryptic "path too long" error. We can't
+  // enable it ourselves (requires admin), but surfacing the state lets users
+  // and us correlate the failure to its root cause.
+  private checkLongPathsEnabled = async (): Promise<boolean | null> => {
+    if (process.platform !== 'win32') {
+      return null;
+    }
+    try {
+      const { stdout } = await execFileAsync('reg', [
+        'query',
+        'HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem',
+        '/v',
+        'LongPathsEnabled',
+      ]);
+      const match = stdout.match(/LongPathsEnabled\s+REG_DWORD\s+0x([0-9a-f]+)/i);
+      if (!match) {
+        return null;
+      }
+      return parseInt(match[1], 16) === 1;
+    } catch {
+      return null;
+    }
+  };
+
+  // Preflight: ensure there's enough free space in the runtime dir for
+  // managed Python (~200MB) + omni-code + its transitive deps + a venv
+  // copy of python (~80MB with --link-mode=copy). 1GB is a safe floor
+  // for the cold-install case.
+  private checkDiskSpace = async (runtimeDir: string): Promise<{ freeBytes: number } | null> => {
+    try {
+      const stats = await fs.statfs(runtimeDir);
+      return { freeBytes: stats.bavail * stats.bsize };
+    } catch {
+      return null;
+    }
+  };
+
+  // Preflight: check that the two network endpoints uv will hit during
+  // install are reachable. Short timeout — we don't want to add more than
+  // a couple seconds to the happy path. A failure here turns a downstream
+  // "uv python install: connection refused" into a distinctive "network
+  // unreachable (check VPN/proxy/firewall)" error.
+  private checkNetworkReachability = async (): Promise<{ ok: boolean; failedUrl?: string; error?: string }> => {
+    const urls = [
+      // uv downloads managed Python from this host.
+      'https://astral.sh/',
+      // omni-code is published to this private index.
+      'https://pypi.fury.io/ericmichael/',
+    ];
+    for (const url of urls) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5000);
+        try {
+          const resp = await net.fetch(url, { signal: controller.signal, method: 'HEAD' });
+          // 2xx/3xx/4xx all prove reachability; we only care about hard failures.
+          if (resp.status >= 500) {
+            return { ok: false, failedUrl: url, error: `HTTP ${resp.status}` };
+          }
+        } finally {
+          clearTimeout(timer);
+        }
+      } catch (err) {
+        return { ok: false, failedUrl: url, error: (err as Error).message };
+      }
+    }
+    return { ok: true };
+  };
+
+  // Best-effort cleanup of old .venv.broken.<ts> sidesteps left behind by
+  // removeOrRenameAside. Runs once per install start. Silent on failure.
+  private sweepBrokenVenvs = async (venvPath: string): Promise<void> => {
+    try {
+      const parent = path.dirname(venvPath);
+      const base = path.basename(venvPath);
+      const entries = await fs.readdir(parent);
+      const broken = entries.filter((e) => e.startsWith(`${base}.broken.`));
+      for (const entry of broken) {
+        await fs.rm(path.join(parent, entry), { recursive: true, force: true }).catch(() => undefined);
+      }
+    } catch {
+      // parent may not exist yet — nothing to sweep
+    }
+  };
+
+  private cleanVenvDir = async (venvPath: string, force: boolean): Promise<void> => {
     if (force) {
-      await tryRm();
+      if (await pathExists(venvPath)) {
+        await this.removeOrRenameAside(venvPath);
+      }
       return;
     }
 
     const activatePath = path.join(venvPath, process.platform === 'win32' ? 'Scripts' : 'bin', 'activate');
     const isValidVenv = await isFile(activatePath);
     if (!isValidVenv && (await pathExists(venvPath))) {
-      await tryRm();
+      await this.removeOrRenameAside(venvPath);
     }
   };
 
@@ -388,6 +529,66 @@ export class OmniInstallManager {
       }
 
       await fs.mkdir(getOmniRuntimeDir(), { recursive: true });
+
+      // Sweep any .venv.broken.<ts> directories left behind by a prior
+      // install that had to rename-aside an unremovable venv.
+      await this.sweepBrokenVenvs(getOmniVenvPath());
+
+      // Preflight checks — fast, no side effects, turn downstream cryptic
+      // failures into up-front distinctive errors.
+
+      const diskSpace = await this.checkDiskSpace(getOmniRuntimeDir());
+      if (diskSpace !== null) {
+        const MIN_FREE_BYTES = 1024 * 1024 * 1024; // 1 GB
+        const freeMB = Math.floor(diskSpace.freeBytes / (1024 * 1024));
+        this.log.info(c.gray(`Free disk space in runtime dir: ${freeMB} MB\r\n`));
+        if (diskSpace.freeBytes < MIN_FREE_BYTES) {
+          this.log.error(c.red(`Insufficient disk space: ${freeMB} MB free, need at least 1024 MB\r\n`));
+          this.updateStatus({
+            type: 'error',
+            error: {
+              message: `Insufficient disk space in ${getOmniRuntimeDir()}: ${freeMB} MB free, need at least 1024 MB`,
+              context: { freeBytes: diskSpace.freeBytes },
+            },
+          });
+          return;
+        }
+      }
+
+      if (process.platform === 'win32') {
+        const longPaths = await this.checkLongPathsEnabled();
+        if (longPaths === true) {
+          this.log.info(c.gray('Windows LongPathsEnabled: yes\r\n'));
+        } else if (longPaths === false) {
+          // Warn but don't fail — some installs squeak through under MAX_PATH.
+          // If omni-code install later fails with ENAMETOOLONG, this warning
+          // is the breadcrumb that explains why.
+          this.log.warn(
+            c.yellow(
+              'Windows long paths are NOT enabled. Deep Python package paths may fail.\r\n' +
+                'To enable: run as admin, `reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem" /v LongPathsEnabled /t REG_DWORD /d 1 /f`\r\n' +
+                'See https://learn.microsoft.com/windows/win32/fileio/maximum-file-path-limitation\r\n'
+            )
+          );
+        } else {
+          this.log.info(c.gray('Windows LongPathsEnabled: unknown (could not read registry)\r\n'));
+        }
+      }
+
+      this.log.info(c.cyan('Checking network reachability...\r\n'));
+      const reach = await this.checkNetworkReachability();
+      if (!reach.ok) {
+        this.log.error(c.red(`Network unreachable: ${reach.failedUrl} (${reach.error})\r\n`));
+        this.updateStatus({
+          type: 'error',
+          error: {
+            message: `Network unreachable: cannot reach ${reach.failedUrl} (${reach.error}). Check your VPN, proxy, or firewall.`,
+            context: { failedUrl: reach.failedUrl, error: reach.error },
+          },
+        });
+        return;
+      }
+      this.log.info(c.gray('Network: reachable\r\n'));
 
       if (this.commandRunner.isRunning()) {
         this.commandRunner.kill();
