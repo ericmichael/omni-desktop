@@ -26,6 +26,7 @@ import {
   pathExists,
   testModelConnection,
   validateConfigPath,
+  validateUserPath,
 } from '@/main/util';
 import type { IIpcListener } from '@/shared/ipc-listener';
 
@@ -93,8 +94,17 @@ export function registerUtilHandlers(ipc: IIpcListener, opts: UtilHandlerOptions
 
   ipc.handle('util:get-default-install-dir', () => join(getHomeDirectory(), 'omni'));
   ipc.handle('util:get-default-workspace-dir', () => getDefaultWorkspaceDir());
-  ipc.handle('util:ensure-directory', (_: unknown, dirPath: string) => ensureDirectory(dirPath));
+  ipc.handle('util:ensure-directory', async (_: unknown, dirPath: string) => {
+    // Cap depth on writes so a misbehaving (or hostile) client can't ask
+    // the main process to mkdir thousands of nested directories. Fix 2.1
+    // doesn't apply here — DirectoryBrowserDialog legitimately needs to
+    // pick locations outside the config dir — so this is the cheap floor:
+    // null bytes and depth, no path-prefix restriction.
+    validateUserPath(dirPath, { checkDepth: true });
+    return ensureDirectory(dirPath);
+  });
   ipc.handle('util:list-directory', async (_: unknown, dirPath: string) => {
+    validateUserPath(dirPath);
     try {
       const entries = await readdir(dirPath, { withFileTypes: true });
       return entries
@@ -107,9 +117,18 @@ export function registerUtilHandlers(ipc: IIpcListener, opts: UtilHandlerOptions
     }
   });
   ipc.handle('util:get-home-directory', () => getHomeDirectory());
-  ipc.handle('util:get-is-directory', (_: unknown, path: string) => isDirectory(path));
-  ipc.handle('util:get-is-file', (_: unknown, path: string) => isFile(path));
-  ipc.handle('util:get-path-exists', (_: unknown, path: string) => pathExists(path));
+  ipc.handle('util:get-is-directory', async (_: unknown, path: string) => {
+    validateUserPath(path);
+    return isDirectory(path);
+  });
+  ipc.handle('util:get-is-file', async (_: unknown, path: string) => {
+    validateUserPath(path);
+    return isFile(path);
+  });
+  ipc.handle('util:get-path-exists', async (_: unknown, path: string) => {
+    validateUserPath(path);
+    return pathExists(path);
+  });
   ipc.handle('util:get-os', () => getOperatingSystem());
   ipc.handle('util:get-launcher-version', () => launcherVersion);
   ipc.handle('util:get-omni-runtime-info', () => getOmniRuntimeInfo());

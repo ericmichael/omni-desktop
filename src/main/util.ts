@@ -123,14 +123,44 @@ export const getTorchPlatform = (gpuType: GpuType): 'cuda' | 'rocm' | 'cpu' => {
 export function validateConfigPath(filePath: string, configDir: string): void {
   const resolvedFile = path.resolve(filePath);
   const resolvedConfig = path.resolve(configDir);
-  if (
-    !resolvedFile.startsWith(resolvedConfig + path.sep) &&
-    resolvedFile !== resolvedConfig
-  ) {
+  if (!resolvedFile.startsWith(resolvedConfig + path.sep) && resolvedFile !== resolvedConfig) {
     throw new Error('Access denied: path is outside the config directory');
   }
   if (filePath.includes('\0')) {
     throw new Error('Invalid path: contains null byte');
+  }
+}
+
+/** Maximum number of path segments accepted by `util:ensure-directory`. */
+export const MAX_USER_PATH_DEPTH = 32;
+
+/**
+ * Light validation for user-controlled paths handed to `util:*` IPC
+ * handlers (e.g., `DirectoryBrowserDialog` browses arbitrary filesystem
+ * locations to let the user pick a workspace dir).
+ *
+ * Deliberately weaker than `validateConfigPath` — it has to allow paths
+ * outside the config dir because that's the whole point of the directory
+ * browser. Catches the cheap, no-false-positive footguns:
+ *
+ *   - null bytes in the path (truncation attack against C-string APIs)
+ *   - resource-abuse depth: rejecting `a/a/a/.../a` chains so a malicious
+ *     client can't ask the main process to mkdir thousands of nested
+ *     directories. Only relevant for `ensureDirectory` callers.
+ *
+ * Does not constrain the path to any particular root — picking arbitrary
+ * locations is the legitimate use case.
+ */
+export function validateUserPath(filePath: string, opts: { checkDepth?: boolean } = {}): void {
+  if (filePath.includes('\0')) {
+    throw new Error('Invalid path: contains null byte');
+  }
+  if (opts.checkDepth) {
+    const resolved = path.resolve(filePath);
+    const segments = resolved.split(path.sep).filter(Boolean);
+    if (segments.length > MAX_USER_PATH_DEPTH) {
+      throw new Error(`Invalid path: exceeds maximum depth of ${MAX_USER_PATH_DEPTH} segments`);
+    }
   }
 }
 
@@ -167,11 +197,13 @@ export const getProjectDir = (slug: string): string => {
 
 /** Generate a filesystem-safe slug from a project label. */
 export const slugify = (label: string): string => {
-  return label
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 60) || 'project';
+  return (
+    label
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 60) || 'project'
+  );
 };
 
 export const getWorktreesDir = (): string => {
