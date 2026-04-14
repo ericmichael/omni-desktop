@@ -42,6 +42,8 @@ Phases must be executed in order; within a phase, fixes are independent unless n
 | 6     | 6.3 Sprint C2c.7 — validateDispatchPreflight + auto-dispatch loop                      | ✅     | (supervisor-orchestrator.ts)                   |
 | 6     | 6.3 Sprint C2c.8 — handleClientToolCall + supervisor prompt assembly                   | ✅     | `251ba74`                                      |
 | 6     | 6.3 Sprint C2c.9 — Drop `internals()` cast + split test file                           | ✅     | `bffe5c0` + `4461555`                          |
+| 6     | 6.3 Sprint C3 — Thin PM to coordinator, expose managers                                | ✅     | `5e41723`                                      |
+| 6     | 6.3 Sprint C4 — Split IPC handler registration per module                              | ✅     | `b79ea22`                                      |
 
 ### Deep testing wave (follow-up to Phase 5)
 
@@ -949,16 +951,45 @@ Completed increments (each commit ships regression-green with `npm test`):
   CRUD, project + page CRUD against tmpdir HOME, getFilesChanged real-git
   adapter, processManager wiring). Test count: 833 unchanged.
 
-Cumulative file-size delta: `project-manager.ts` 3937 → 1315 lines (-2622).
-Test count 812 → 833.
+- **C3 — Thin PM to coordinator:** Promoted `pages`, `inbox`, `milestones`,
+  and `supervisors` from private fields to public readonly. Dropped the
+  thin pass-through delegators PM had been keeping for IPC and tests
+  (`getMilestonesByProject` / `addMilestone` / `updateMilestone` /
+  `removeMilestone` / `resolveTicketBranch`; `startSupervisor` /
+  `stopSupervisor` / `sendSupervisorMessage` / `resetSupervisorSession` /
+  `ensureSupervisorInfra` / `ensureSupervisorInfraLocked` /
+  `getSupervisorStatusForCodeTab` / `getTicketWorkspaceLocked` /
+  `getCodeTabWsUrl` / `getActiveWipTickets` / `restorePersistedTasks` /
+  `cleanupTicketWorkspace` / `setAutoDispatch` / `getTasks` /
+  `withTicketLock`; `getInboxManager` / `getPageManager`). Moved
+  `ensureSupervisorInfraLocked` and `getTicketWorkspaceLocked` into
+  `SupervisorOrchestrator` since the IPC entry points were the only
+  reason PM still wrapped `withTicketLock`. PM internals
+  (`moveTicketToColumn`, `getFilesChanged`, constructor host wiring,
+  `processManager.statusFallback`) updated to call managers directly.
+  Test migrations: `pm.addMilestone` → `pm.milestones.add` and siblings;
+  `ctx.pm.sendSupervisorMessage` / `pm.restorePersistedTasks` →
+  `orch(ctx.pm).*`. `project-manager.ts` dropped 1315 → 1166 lines (-149).
+- **C4 — IPC handler split:** Extracted the inline `ipc.handle` blocks
+  in `createProjectManager` into five per-module register functions in
+  their own files: `project-handlers.ts` (project + ticket + pipeline +
+  artifacts + context + files + session history, 22 channels),
+  `supervisor-handlers.ts` (lifecycle + auto-dispatch + WIP + tasks,
+  10 channels), `milestone-handlers.ts` (4 channels),
+  `page-handlers.ts` (page CRUD + notebook helpers, 13 channels — the
+  notebook handlers take a `getProjectDir` callback so the module
+  doesn't reach back into PM), `inbox-handlers.ts` (12 channels). Each
+  register function returns the array of channel names it registered;
+  `createProjectManager` collects all five and tears them down in a
+  single loop instead of the 50-line `ipcMain.removeHandler` block.
+  `createProjectManager` went from ~230 lines to ~30. PM dropped
+  1166 → 994 lines (-172, breaks below 1000 for the first time).
 
-Remaining execution plan:
-
-- **C3:** Thin `ProjectManager` to a coordinator that owns project CRUD +
-  `getProjectDirPath` + pipeline helpers, and delegates via references to
-  `PageManager`, `InboxManager`, `MilestoneManager`, `SupervisorOrchestrator`.
-- **C4:** Split `registerProjectHandlers` into per-module IPC registration
-  functions.
+Cumulative file-size delta: `project-manager.ts` 3937 → 994 lines (-2943).
+Test count 812 → 833. Sprint C2c + C3 + C4 are all done — the supervisor
+lifecycle, tool dispatch, prompt assembly, task persistence, dispatch
+preflight, auto-dispatch, infra provisioning, and IPC registration all
+live in dedicated modules with narrow dep contracts.
 
 Prerequisite: all 812 current tests green (they are). Any Sprint C step that breaks
 a test must be rolled back or fixed in the same commit — no red states allowed during
@@ -1014,8 +1045,8 @@ built the safety net it needs.
 | 6.3 Sprint C2c.7 Preflight + auto-dispatch                     | 6     | M    | ✅     | -179 PM lines; preflight + autoDispatchTick + setAutoDispatch      |
 | 6.3 Sprint C2c.8 Tool dispatch + prompt assembly               | 6     | L    | ✅     | -608 PM lines; host gained 8 read-side accessors                   |
 | 6.3 Sprint C2c.9 Cast removal + test split                     | 6     | M    | ✅     | internals() gone; tests split into PM + orchestrator suites        |
-| 6.3 Sprint C3 PM → coordinator                                 | 6     | L    | ⏳     | depends on C2c                                                     |
-| 6.3 Sprint C4 IPC handler split                                | 6     | M    | ⏳     | depends on C3                                                      |
+| 6.3 Sprint C3 PM → coordinator                                 | 6     | L    | ✅     | -149 PM lines; managers public; thin delegators dropped            |
+| 6.3 Sprint C4 IPC handler split                                | 6     | M    | ✅     | -172 PM lines; 5 per-module register functions                     |
 | T1–T11 deep testing wave (follow-up)                           | 5+    | L    | ✅     | +92 tests, 7 bugs fixed                                            |
 
 ---
