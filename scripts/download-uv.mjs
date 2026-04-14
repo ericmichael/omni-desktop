@@ -36,4 +36,5 @@ console.log(`Downloading uv for ${platform}...`);
 execFileSync('npx', ['ts-node', 'download_uv.ts', platform], {
   cwd: projectRoot,
   stdio: 'inherit',
+  shell: true,
 });
