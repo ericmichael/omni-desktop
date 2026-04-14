@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
 
@@ -50,20 +50,35 @@ export class ServerStore {
   }
 
   private load(): StoreData {
-    try {
-      if (existsSync(STORE_PATH)) {
-        const raw = readFileSync(STORE_PATH, 'utf-8');
-        return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<StoreData>) };
-      }
-    } catch {
-      // Corrupted file — use defaults
+    if (!existsSync(STORE_PATH)) {
+      return { ...DEFAULTS };
     }
-    return { ...DEFAULTS };
+    try {
+      const raw = readFileSync(STORE_PATH, 'utf-8');
+      return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<StoreData>) };
+    } catch (err) {
+      // Don't silently discard a corrupted store — back it up under a
+      // timestamped name so the operator can recover by hand and we leave
+      // a loud breadcrumb instead of pretending all user state vanished.
+      const backupPath = `${STORE_PATH}.corrupt-${Date.now()}`;
+      try {
+        renameSync(STORE_PATH, backupPath);
+        console.error(`[store] corrupted config.json backed up to ${backupPath}:`, err);
+      } catch (backupErr) {
+        console.error('[store] failed to back up corrupted config.json:', backupErr);
+      }
+      return { ...DEFAULTS };
+    }
   }
 
   private persist(): void {
+    // Atomic write: serialize to a temp file, then rename. A crash mid-write
+    // leaves the original config.json intact instead of leaving the user with
+    // a half-written file that load() would treat as corrupted.
     mkdirSync(dirname(STORE_PATH), { recursive: true });
-    writeFileSync(STORE_PATH, JSON.stringify(this.data, null, 2), 'utf-8');
+    const tmpPath = `${STORE_PATH}.tmp`;
+    writeFileSync(tmpPath, JSON.stringify(this.data, null, 2), 'utf-8');
+    renameSync(tmpPath, STORE_PATH);
   }
 
   private notify(): void {
