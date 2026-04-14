@@ -19,8 +19,27 @@ const HOST = process.env['HOST'] ?? '0.0.0.0';
 const main = async () => {
   const fastify = Fastify({ logger: true });
 
+  // Generate (or read) a WebSocket auth token. Clients must present this as
+  // a ?token= query param on the /ws connection. Loopback browser clients
+  // can fetch it via GET /api/ws-token; non-browser clients should use the
+  // OMNI_WS_TOKEN env var printed below.
+  const wsToken = process.env['OMNI_WS_TOKEN'] ?? crypto.randomUUID();
+  console.log('[auth] WS token:', wsToken);
+
   // WebSocket plugin
   await fastify.register(fastifyWebsocket);
+
+  // Loopback-only endpoint so the browser SPA can pick up the token before
+  // opening its WebSocket connection.
+  fastify.get('/api/ws-token', (request, reply) => {
+    const addr = request.socket.remoteAddress ?? '';
+    const isLoopback = addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
+    if (!isLoopback) {
+      reply.code(403).send({ error: 'Forbidden' });
+      return;
+    }
+    reply.send({ token: wsToken });
+  });
 
   // Serve the built browser renderer as static files
   const staticDir = resolve(__dirname, '../browser');
@@ -49,6 +68,11 @@ const main = async () => {
   await fastify.register(async function wsRoutes(f) {
     f.get('/ws', { websocket: true }, (socket, request) => {
       const url = new URL(request.url, `http://${request.hostname}`);
+      const token = url.searchParams.get('token');
+      if (token !== wsToken) {
+        socket.close(4401, 'Unauthorized');
+        return;
+      }
       const sessionId = url.searchParams.get('sessionId') ?? undefined;
 
       wsHandler.addClient(

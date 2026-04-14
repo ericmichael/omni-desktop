@@ -57,18 +57,43 @@ export class WsTransportEmitter implements TransportEmitter {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private messageQueue: string[] = [];
   private sessionId = getOrCreateSessionId();
+  private authToken: string | null = null;
 
   constructor() {
-    this.connect();
+    void this.connect();
   }
 
-  private getWsUrl(): string {
+  private async fetchAuthToken(): Promise<string> {
+    if (this.authToken) {
+      return this.authToken;
+    }
+    const res = await fetch('/api/ws-token', { credentials: 'same-origin' });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch WS auth token: ${res.status} ${res.statusText}`);
+    }
+    const data = (await res.json()) as { token?: string };
+    if (!data.token) {
+      throw new Error('WS auth token response missing token');
+    }
+    this.authToken = data.token;
+    return data.token;
+  }
+
+  private getWsUrl(token: string): string {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${location.host}/ws?sessionId=${encodeURIComponent(this.sessionId)}`;
+    return `${protocol}//${location.host}/ws?sessionId=${encodeURIComponent(this.sessionId)}&token=${encodeURIComponent(token)}`;
   }
 
-  private connect(): void {
-    const ws = new WebSocket(this.getWsUrl());
+  private async connect(): Promise<void> {
+    let token: string;
+    try {
+      token = await this.fetchAuthToken();
+    } catch (err) {
+      console.error('[ws-transport]', err);
+      this.scheduleReconnect();
+      return;
+    }
+    const ws = new WebSocket(this.getWsUrl(token));
 
     ws.onopen = () => {
       this.ws = ws;
@@ -131,7 +156,7 @@ export class WsTransportEmitter implements TransportEmitter {
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.reconnectDelay = Math.min(MAX_RECONNECT_DELAY, Math.round(this.reconnectDelay * 1.5));
-      this.connect();
+      void this.connect();
     }, this.reconnectDelay);
   }
 
