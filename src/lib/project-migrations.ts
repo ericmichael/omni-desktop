@@ -55,6 +55,12 @@ export interface MigrationDeps {
    * and has a default context.md. No-op by default.
    */
   ensurePersonalProjectDir?: () => void;
+  /**
+   * Post-migration repair pass: re-seed missing root pages and re-create
+   * any missing context.md files. Called after each schema-version bump
+   * and once on the idempotent v-current path. No-op by default.
+   */
+  repairProjectRoots?: () => void;
 }
 
 const DEFAULT_BRIEF_TEMPLATE = `## Problem
@@ -408,10 +414,27 @@ export function runMigrations(store: IMigrationStore, deps: MigrationDeps): void
     }
 
     store.set('schemaVersion', 15);
+    deps.repairProjectRoots?.();
+    // Fall through to v15→v16.
+  }
+
+  // v15 → v16: add ticket archive support (archivedAt field).
+  if (version === 15 || (store.get('schemaVersion', 0) as number) === 15) {
+    const tickets = (store.get('tickets', []) as Record<string, unknown>[]) ?? [];
+    const migratedTickets = tickets.map((raw) => {
+      if ('archivedAt' in raw) {
+        return raw;
+      }
+      return { ...raw, archivedAt: undefined };
+    });
+    store.set('tickets', migratedTickets);
+    store.set('schemaVersion', 16);
+    deps.repairProjectRoots?.();
     return;
   }
 
-  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 15) {
+  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 16) {
+    deps.repairProjectRoots?.();
     return;
   }
 

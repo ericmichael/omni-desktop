@@ -1116,6 +1116,16 @@ describe('ProjectManager integration', () => {
       expect(mock.cancelRetryTimer).toHaveBeenCalled();
     });
 
+    it('moving to the terminal column auto-resolves the ticket as completed', async () => {
+      const { ctx } = setupWithRetryArmed();
+      ctx.pm.moveTicketToColumn('t1', 'done');
+      await vi.runOnlyPendingTimersAsync();
+
+      const ticket = ctx.store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
+      expect(ticket.resolution).toBe('completed');
+      expect(ticket.resolvedAt).toBeGreaterThan(0);
+    });
+
     it('reopen (terminal → non-terminal) clears resolution and resolvedAt', async () => {
       const { ctx } = setupWithRetryArmed();
       ctx.pm.resolveTicket('t1', 'done');

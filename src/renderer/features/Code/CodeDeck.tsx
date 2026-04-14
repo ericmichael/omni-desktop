@@ -12,7 +12,7 @@ import { persistedStoreApi } from '@/renderer/services/store';
 import type { CodeLayoutMode, CodeTab, CodeTabId, TicketId, TicketResolution } from '@/shared/types';
 
 import { CodeTabContent } from './CodeTabContent';
-import type { DockPane } from './EnvironmentDock';
+import type { WorkspaceApp } from './EnvironmentDock';
 import { TicketBannerActions, TicketColumnBadge, TicketResolutionBadge } from '@/renderer/features/Tickets/TicketControls';
 import { type TicketPanel, TicketPanelOverlay } from '@/renderer/features/Tickets/TicketPanelOverlay';
 import { ticketApi } from '@/renderer/features/Tickets/state';
@@ -637,9 +637,8 @@ const CodeSessionPane = memo(
     actions,
     onClose,
     isVisible,
-    overlayPane,
-    onCloseOverlay,
-    onOpenOverlay,
+    activeApp,
+    onActiveAppChange,
     uiMinimal,
     headerActionsTargetId,
     headerActionsCompact,
@@ -656,9 +655,8 @@ const CodeSessionPane = memo(
     actions?: React.ReactNode;
     onClose: (id: CodeTabId) => void;
     isVisible: boolean;
-    overlayPane: DockPane;
-    onCloseOverlay: () => void;
-    onOpenOverlay?: (pane: Exclude<DockPane, 'none'>) => void;
+    activeApp: WorkspaceApp;
+    onActiveAppChange?: (app: WorkspaceApp) => void;
     uiMinimal?: boolean;
     headerActionsTargetId?: string;
     headerActionsCompact?: boolean;
@@ -688,9 +686,8 @@ const CodeSessionPane = memo(
           <CodeTabContent
             tab={tab}
             isVisible={isVisible}
-            overlayPane={overlayPane}
-            onCloseOverlay={onCloseOverlay}
-            onOpenOverlay={onOpenOverlay}
+            activeApp={activeApp}
+            onActiveAppChange={onActiveAppChange}
             uiMinimal={uiMinimal}
             headerActionsTargetId={headerActionsTargetId}
             headerActionsCompact={headerActionsCompact}
@@ -772,7 +769,7 @@ export const CodeDeck = memo(() => {
   const layoutMode = store.codeLayoutMode ?? 'deck';
   const activeTabId = store.activeCodeTabId ?? tabs[0]?.id ?? null;
   const deckBackground = store.codeDeckBackground ?? null;
-  const [overlayTarget, setOverlayTarget] = useState<{ tabId: CodeTabId; pane: Exclude<DockPane, 'none'> } | null>(null);
+  const [activeApps, setActiveApps] = useState<Record<CodeTabId, WorkspaceApp>>({});
   const [previewUrls, setPreviewUrls] = useState<Record<CodeTabId, string>>({});
   const [expandedTabId, setExpandedTabId] = useState<CodeTabId | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
@@ -811,7 +808,7 @@ export const CodeDeck = memo(() => {
     const targetTabId = (previewRequest.tabId as CodeTabId | undefined) ?? activeTabId ?? tabs[0]?.id;
     if (!targetTabId) return;
     setPreviewUrls((prev) => ({ ...prev, [targetTabId]: previewRequest.url }));
-    setOverlayTarget({ tabId: targetTabId, pane: 'preview' });
+    setActiveApps((prev) => ({ ...prev, [targetTabId]: 'browser' }));
     clearPreviewRequest();
   }, [previewRequest, activeTabId, tabs]);
 
@@ -879,21 +876,21 @@ export const CodeDeck = memo(() => {
   }, []);
 
   const handleClose = useCallback((id: CodeTabId) => {
-    setOverlayTarget((current) => (current?.tabId === id ? null : current));
+    setActiveApps((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
     setExpandedTabId((current) => (current === id ? null : current));
     codeApi.removeTab(id);
   }, []);
 
-  const handleOpenOverlay = useCallback((tabId: CodeTabId, pane: Exclude<DockPane, 'none'>) => {
-    setOverlayTarget({ tabId, pane });
+  const handleActiveAppChange = useCallback((tabId: CodeTabId, app: WorkspaceApp) => {
+    setActiveApps((prev) => ({ ...prev, [tabId]: app }));
   }, []);
 
   const handlePreviewUrlChange = useCallback((tabId: CodeTabId, url: string) => {
     setPreviewUrls((prev) => ({ ...prev, [tabId]: url }));
-  }, []);
-
-  const handleCloseOverlay = useCallback(() => {
-    setOverlayTarget(null);
   }, []);
 
   const handleDragEnd = useCallback(
@@ -1034,9 +1031,8 @@ export const CodeDeck = memo(() => {
                         <CodeTabContent
                           tab={tab}
                           isVisible
-                          overlayPane={overlayTarget?.tabId === tab.id ? overlayTarget.pane : 'none'}
-                          onCloseOverlay={handleCloseOverlay}
-                          onOpenOverlay={(pane) => handleOpenOverlay(tab.id, pane)}
+                          activeApp={activeApps[tab.id] ?? 'chat'}
+                          onActiveAppChange={(app) => handleActiveAppChange(tab.id, app)}
                           uiMinimal
                           headerActionsTargetId={`code-deck-header-actions-${tab.id}`}
                           headerActionsCompact
@@ -1138,9 +1134,8 @@ export const CodeDeck = memo(() => {
                       actions={renderSessionActions(tab)}
                       onClose={handleClose}
                       isVisible={tab.id === activeTab?.id}
-                      overlayPane={overlayTarget?.tabId === tab.id ? overlayTarget.pane : 'none'}
-                      onCloseOverlay={handleCloseOverlay}
-                      onOpenOverlay={(pane) => handleOpenOverlay(tab.id, pane)}
+                      activeApp={activeApps[tab.id] ?? 'chat'}
+                      onActiveAppChange={(app) => handleActiveAppChange(tab.id, app)}
                       uiMinimal
                       headerActionsTargetId={undefined}
                       headerActionsCompact

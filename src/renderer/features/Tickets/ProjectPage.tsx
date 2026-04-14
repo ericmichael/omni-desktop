@@ -1,6 +1,7 @@
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
 import {
+  ArrowLeft20Regular,
   Delete20Regular,
   MoreHorizontal20Regular,
   Settings20Regular,
@@ -9,6 +10,7 @@ import {
 import { makeStyles, tokens } from '@fluentui/react-components';
 
 import {
+  Caption1,
   ConfirmDialog,
   IconButton,
   Menu,
@@ -17,6 +19,7 @@ import {
   MenuList,
   MenuPopover,
   MenuTrigger,
+  Subtitle2,
 } from '@/renderer/ds';
 import { $pages } from '@/renderer/features/Pages/state';
 import { PageView } from '@/renderer/features/Pages/PageView';
@@ -34,11 +37,39 @@ const useStyles = makeStyles({
     width: '100%',
     height: '100%',
   },
-  overflowBtn: {
+  desktopHeader: {
+    display: 'none',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
+    '@media (min-width: 640px)': {
+      display: 'flex',
+    },
+  },
+  headerTitle: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    minWidth: 0,
+    flex: '1 1 0',
+  },
+  mobileOverflowBtn: {
     position: 'absolute',
     top: tokens.spacingVerticalM,
     right: tokens.spacingHorizontalL,
     zIndex: 1,
+    '@media (min-width: 640px)': {
+      display: 'none',
+    },
+  },
+  body: {
+    flex: '1 1 0',
+    minHeight: 0,
+    position: 'relative',
   },
 });
 
@@ -62,12 +93,20 @@ export const ProjectPage = memo(({ projectId }: { projectId: ProjectId }) => {
     ticketApi.goToDashboard();
   }, [projectId]);
 
+  const handleBack = useCallback(() => {
+    ticketApi.goToDashboard();
+  }, []);
+
   if (!project) return null;
 
   return (
-    <div className={styles.root} style={{ position: 'relative' }}>
-      {/* Overflow menu — floating top-right */}
-      <div className={styles.overflowBtn}>
+    <div className={styles.root}>
+      <div className={styles.desktopHeader}>
+        <IconButton aria-label="Back to Home" icon={<ArrowLeft20Regular />} size="sm" onClick={handleBack} />
+        <div className={styles.headerTitle}>
+          <Caption1>Projects</Caption1>
+          <Subtitle2>{project.label}</Subtitle2>
+        </div>
         <Menu positioning={{ position: 'below', align: 'end' }}>
           <MenuTrigger>
             <IconButton aria-label="Project actions" icon={<MoreHorizontal20Regular />} size="sm" />
@@ -99,8 +138,42 @@ export const ProjectPage = memo(({ projectId }: { projectId: ProjectId }) => {
         </Menu>
       </div>
 
-      {/* Full-bleed root page */}
-      {rootPage && <PageView pageId={rootPage.id} projectId={projectId} />}
+      <div className={styles.body}>
+        <div className={styles.mobileOverflowBtn}>
+          <Menu positioning={{ position: 'below', align: 'end' }}>
+            <MenuTrigger>
+              <IconButton aria-label="Project actions" icon={<MoreHorizontal20Regular />} size="sm" />
+            </MenuTrigger>
+            <MenuPopover>
+              <MenuList>
+                <MenuItem icon={<Board20Regular />} onClick={() => ticketApi.goToBoard(projectId)}>
+                  Board
+                </MenuItem>
+                <MenuDivider />
+                <MenuItem icon={<Settings20Regular />} onClick={() => setEditFormOpen(true)}>
+                  Project settings
+                </MenuItem>
+                {project?.source != null && (
+                  <MenuItem icon={<Settings20Regular />} onClick={() => setPipelineSettingsOpen(true)}>
+                    Pipeline settings
+                  </MenuItem>
+                )}
+                {!project.isPersonal && (
+                  <>
+                    <MenuDivider />
+                    <MenuItem icon={<Delete20Regular />} onClick={() => setDeleteConfirmOpen(true)}>
+                      Delete project
+                    </MenuItem>
+                  </>
+                )}
+              </MenuList>
+            </MenuPopover>
+          </Menu>
+        </div>
+
+        {/* Full-bleed root page */}
+        {rootPage && <PageView pageId={rootPage.id} projectId={projectId} />}
+      </div>
 
       {/* Dialogs */}
       {editFormOpen && <ProjectForm open={editFormOpen} onClose={() => setEditFormOpen(false)} editProject={project} />}

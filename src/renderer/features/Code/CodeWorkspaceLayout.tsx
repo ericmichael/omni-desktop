@@ -2,12 +2,12 @@ import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-co
 import { AnimatePresence, motion } from 'framer-motion';
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft20Regular, ArrowRight20Regular, ArrowClockwise20Regular, Code20Regular, Desktop20Regular, Dismiss20Regular, DismissCircle20Regular, Globe20Regular, WindowConsole20Regular, WindowDevTools20Regular } from '@fluentui/react-icons';
+import { ArrowLeft20Regular, ArrowRight20Regular, ArrowClockwise20Regular, Code20Regular, Desktop20Regular, DismissCircle20Regular, Globe20Regular, WindowConsole20Regular, WindowDevTools20Regular } from '@fluentui/react-icons';
 
 import { resolvePreviewUrl, reverseProxyUrl } from '@/renderer/features/Tickets/preview-bridge';
 
 import { Webview } from '@/renderer/common/Webview';
-import type { WebviewHandle, ConsoleMessage } from '@/renderer/common/Webview';
+import type { ConsoleMessage, WebviewHandle } from '@/renderer/common/Webview';
 import { ConsoleStarted } from '@/renderer/features/Console/ConsoleRunning';
 import { $terminals, createTerminal } from '@/renderer/features/Console/state';
 import { OmniAgentsApp } from '@/renderer/omniagents-ui';
@@ -15,10 +15,10 @@ import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { WebPreview, WebPreviewConsole, WebPreviewUrl, useWebPreviewContext } from '@/renderer/omniagents-ui/components/ai/web-preview';
 import { persistedStoreApi } from '@/renderer/services/store';
 
-import type { DockPane } from './EnvironmentDock';
+import type { WorkspaceApp } from './EnvironmentDock';
 import { EnvironmentDock } from './EnvironmentDock';
 
-type OverlayPane = DockPane;
+type SurfaceApp = Exclude<WorkspaceApp, 'chat'>;
 
 type CodeWorkspaceLayoutProps = {
   uiSrc: string;
@@ -29,9 +29,8 @@ type CodeWorkspaceLayoutProps = {
   vncSrc?: string;
   previewUrl?: string;
   onPreviewUrlChange?: (url: string) => void;
-  overlayPane?: OverlayPane;
-  onCloseOverlay?: () => void;
-  onOpenOverlay?: (pane: Exclude<OverlayPane, 'none'>) => void;
+  activeApp?: WorkspaceApp;
+  onActiveAppChange?: (app: WorkspaceApp) => void;
   onReady?: () => void;
   headerActionsTargetId?: string;
   headerActionsCompact?: boolean;
@@ -44,31 +43,41 @@ type CodeWorkspaceLayoutProps = {
 };
 
 const useStyles = makeStyles({
-  backdrop: { position: 'absolute', inset: 0, zIndex: 30, backgroundColor: 'rgba(0, 0, 0, 0.45)' },
-  overlayCard: {
+  surfaceCard: {
     position: 'absolute',
-    inset: '4px',
+    inset: 0,
     zIndex: 40,
     overflow: 'hidden',
-    borderRadius: tokens.borderRadiusXLarge,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
     backgroundColor: tokens.colorNeutralBackground1,
-    boxShadow: tokens.shadow64,
-    '@media (min-width: 640px)': { inset: '12px' },
+    boxShadow: `0 1px 0 rgba(255,255,255,0.04) inset`,
   },
-  overlayInner: { display: 'flex', height: '100%', flexDirection: 'column' },
-  overlayHeader: {
+  surfaceCardGlass: {
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 18%, transparent)`,
+    backdropFilter: 'blur(36px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+    boxShadow: `0 1px 0 rgba(255,255,255,0.10) inset, 0 -1px 0 rgba(255,255,255,0.04) inset`,
+  },
+  surfaceInner: { display: 'flex', height: '100%', flexDirection: 'column', backgroundColor: 'inherit' },
+  surfaceHeader: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
     ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
     backgroundColor: tokens.colorNeutralBackground2,
+    minHeight: '44px',
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    gap: tokens.spacingHorizontalM,
   },
-  overlayHeaderLeft: {
+  surfaceHeaderGlass: {
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground2} 14%, transparent)`,
+    backdropFilter: 'blur(24px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(24px) saturate(160%)',
+    borderBottomColor: 'rgba(255, 255, 255, 0.14)',
+  },
+  surfaceHeaderLeft: {
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
@@ -77,25 +86,34 @@ const useStyles = makeStyles({
     flex: '1 1 0',
     minWidth: 0,
   },
-  overlayCloseBtn: {
-    display: 'inline-flex',
-    width: '36px',
-    height: '36px',
+  surfaceHeaderTitle: {
+    display: 'flex',
     alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: tokens.borderRadiusLarge,
-    color: tokens.colorNeutralForeground2,
-    transitionProperty: 'color, background-color',
-    transitionDuration: '150ms',
-    border: 'none',
-    backgroundColor: 'transparent',
-    cursor: 'pointer',
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
+    gap: tokens.spacingHorizontalS,
+    flexShrink: 0,
   },
-  overlayNavBtn: {
+  surfaceTitleText: {
+    color: tokens.colorNeutralForeground1,
+    fontWeight: tokens.fontWeightMedium,
+    letterSpacing: '-0.01em',
+  },
+  surfaceHeaderToolbar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    flex: '1 1 0',
+    minWidth: 0,
+  },
+  surfaceHeaderActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    flexShrink: 0,
+  },
+  surfaceNavBtn: {
     display: 'inline-flex',
-    width: '28px',
-    height: '28px',
+    width: '30px',
+    height: '30px',
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: tokens.borderRadiusMedium,
@@ -107,11 +125,6 @@ const useStyles = makeStyles({
     cursor: 'pointer',
     flexShrink: 0,
     ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
-  },
-  overlayNavBtnDisabled: {
-    opacity: 0.3,
-    cursor: 'default',
-    ':hover': { backgroundColor: 'transparent', color: tokens.colorNeutralForeground3 },
   },
   loadingBar: {
     position: 'absolute',
@@ -129,7 +142,12 @@ const useStyles = makeStyles({
     animationTimingFunction: 'ease-out',
     animationFillMode: 'forwards',
   },
-  overlayBody: { minHeight: 0, flex: '1 1 0' },
+  surfaceBody: { minHeight: 0, flex: '1 1 0', position: 'relative', display: 'flex', flexDirection: 'column', backgroundColor: tokens.colorNeutralBackground1 },
+  surfaceBodyGlass: {
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 10%, transparent)`,
+  },
+  surfaceContentFill: { flex: '1 1 0', minHeight: 0, minWidth: 0 },
+  browserUrlWrap: { minWidth: '240px', flex: '1 1 360px' },
   root: {
     position: 'relative',
     display: 'flex',
@@ -143,6 +161,15 @@ const useStyles = makeStyles({
   },
   mainArea: { position: 'relative', minHeight: 0, flex: '1 1 0' },
   mainContent: { height: '100%', width: '100%', minWidth: 0 },
+  mainContentHidden: { display: 'none' },
+  unavailableState: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
+    color: tokens.colorNeutralForeground4,
+    fontSize: tokens.fontSizeBase300,
+  },
   glassChatSurfaces: {
     '& .bg-surface, & .bg-card, & .bg-background, & .bg-bgColumn, & .bg-bgCard, & .bg-bgCardAlt, & .bg-bgMain': {
       backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
@@ -198,25 +225,23 @@ const transition = { type: 'spring' as const, duration: 0.28, bounce: 0.08 };
 type ConsoleLog = { level: 'log' | 'warn' | 'error' | 'result'; message: string; timestamp: Date };
 const MAX_CONSOLE_LOGS = 500;
 
-export type PreviewState = {
+type PreviewState = {
   loading: boolean;
   title: string;
   error: { code: number; description: string; url: string } | null;
 };
 
-/** Reads the URL from WebPreview context, resolves it through the proxy in browser mode, and renders via the platform-aware Webview. */
 const PreviewWebview = memo(({ webviewRef: externalRef, onStateChange }: { webviewRef?: React.Ref<WebviewHandle>; onStateChange?: (state: PreviewState) => void }) => {
   const { url, setUrl } = useWebPreviewContext();
   const [resolvedUrl, setResolvedUrl] = useState<string | undefined>(undefined);
   const [webviewKey, setWebviewKey] = useState(0);
   const [logs, setLogs] = useState<ConsoleLog[]>([]);
-  const [previewState, setPreviewState] = useState<PreviewState>({ loading: false, title: '', error: null });
+  const [, setPreviewState] = useState<PreviewState>({ loading: false, title: '', error: null });
   const internalRef = useRef<WebviewHandle>(null);
   const navigatedUrlRef = useRef<string | null>(null);
   const onStateRef = useRef(onStateChange);
   useEffect(() => { onStateRef.current = onStateChange; }, [onStateChange]);
 
-  // Forward the internal ref to external ref if provided
   useEffect(() => {
     if (!externalRef) return;
     if (typeof externalRef === 'function') {
@@ -239,8 +264,6 @@ const PreviewWebview = memo(({ webviewRef: externalRef, onStateChange }: { webvi
       setResolvedUrl(undefined);
       return;
     }
-    // If this URL came from in-frame navigation, the iframe is already showing the
-    // right content — only the URL bar needed updating, don't touch resolvedUrl.
     if (navigatedUrlRef.current === url) {
       navigatedUrlRef.current = null;
       return;
@@ -249,18 +272,17 @@ const PreviewWebview = memo(({ webviewRef: externalRef, onStateChange }: { webvi
     void resolvePreviewUrl(url).then((resolved) => {
       if (!cancelled) {
         setResolvedUrl(resolved);
-        // Bump key to force iframe remount when upstream changes but proxy path is identical
-        setWebviewKey((k) => k + 1);
+        setWebviewKey((current) => current + 1);
       }
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [url]);
 
-  // Clear logs when the user explicitly navigates (not in-frame clicks)
   const prevUrlRef = useRef(url);
   useEffect(() => {
     if (url !== prevUrlRef.current) {
-      // Only clear if this wasn't an in-frame navigation
       if (navigatedUrlRef.current !== url) {
         setLogs([]);
       }
@@ -269,9 +291,7 @@ const PreviewWebview = memo(({ webviewRef: externalRef, onStateChange }: { webvi
   }, [url]);
 
   const handleNavigate = useCallback((navigatedUrl: string) => {
-    // Reverse-map proxy URLs back to the original upstream URL for display
     const displayUrl = reverseProxyUrl(navigatedUrl);
-    // Update the URL bar without triggering a re-resolve
     navigatedUrlRef.current = displayUrl;
     setUrl(displayUrl);
   }, [setUrl]);
@@ -304,9 +324,7 @@ const PreviewWebview = memo(({ webviewRef: externalRef, onStateChange }: { webvi
   }, []);
 
   const handleExecute = useCallback((code: string) => {
-    // Log the input
     appendLog({ level: 'log', message: `> ${code}`, timestamp: new Date() });
-    // Execute in the webview/iframe
     const handle = internalRef.current;
     if (!handle) return;
     void handle.executeScript(code).then(
@@ -339,7 +357,6 @@ const PreviewWebview = memo(({ webviewRef: externalRef, onStateChange }: { webvi
 });
 PreviewWebview.displayName = 'PreviewWebview';
 
-/** Toolbar button that toggles the console panel via WebPreview context. */
 const ConsoleToggleButton = memo(({ className }: { className?: string }) => {
   const { consoleOpen, setConsoleOpen } = useWebPreviewContext();
   return (
@@ -356,135 +373,142 @@ const ConsoleToggleButton = memo(({ className }: { className?: string }) => {
 });
 ConsoleToggleButton.displayName = 'ConsoleToggleButton';
 
-const PANE_META: Record<Exclude<OverlayPane, 'none'>, { title: string; Icon: typeof Code20Regular }> = {
+const APP_META: Record<SurfaceApp, { title: string; Icon: typeof Code20Regular }> = {
   code: { title: 'VS Code', Icon: Code20Regular },
-  vnc: { title: "Omni's PC", Icon: Desktop20Regular },
-  preview: { title: 'Preview', Icon: Globe20Regular },
+  desktop: { title: "Omni's PC", Icon: Desktop20Regular },
+  browser: { title: 'Browser', Icon: Globe20Regular },
   terminal: { title: 'Terminal', Icon: WindowConsole20Regular },
 };
 
-const OverlayPaneView = memo(
-  ({ pane, src, onClose, onUrlChange }: { pane: Exclude<OverlayPane, 'none'>; src?: string; onClose: () => void; onUrlChange?: (url: string) => void }) => {
-    const styles = useStyles();
-    const { title, Icon } = PANE_META[pane];
-    const webviewRef = useRef<WebviewHandle>(null);
-    const [pState, setPState] = useState<PreviewState>({ loading: false, title: '', error: null });
-    const urlBarRef = useRef<HTMLInputElement>(null);
+const SurfaceFrame = memo(({ app, isGlass, children }: { app: Exclude<SurfaceApp, 'browser'>; isGlass?: boolean; children: React.ReactNode }) => {
+  const styles = useStyles();
+  const { title, Icon } = APP_META[app];
 
-    // Keyboard shortcuts for the preview overlay
-    useEffect(() => {
-      if (pane !== 'preview') return;
-      const handler = (e: KeyboardEvent) => {
-        const mod = e.metaKey || e.ctrlKey;
-        if (mod && e.key.toLowerCase() === 'r') {
-          e.preventDefault();
-          webviewRef.current?.reload();
-        } else if (mod && e.key.toLowerCase() === 'l') {
-          e.preventDefault();
-          urlBarRef.current?.focus();
-          urlBarRef.current?.select();
-        } else if (e.key === 'Escape') {
-          if (pState.loading) {
-            webviewRef.current?.stop();
-          }
-        } else if (mod && e.key === '[') {
-          e.preventDefault();
-          webviewRef.current?.goBack();
-        } else if (mod && e.key === ']') {
-          e.preventDefault();
-          webviewRef.current?.goForward();
+  return (
+    <div className={mergeClasses(styles.surfaceInner)}>
+      <div className={mergeClasses(styles.surfaceHeader, isGlass && styles.surfaceHeaderGlass)}>
+        <div className={styles.surfaceHeaderTitle}>
+          <Icon style={{ width: 14, height: 14 }} />
+          <span className={styles.surfaceTitleText}>{title}</span>
+        </div>
+        <div className={styles.surfaceHeaderActions} />
+      </div>
+      <div className={mergeClasses(styles.surfaceBody, isGlass && styles.surfaceBodyGlass)}>
+        <div className={styles.surfaceContentFill}>{children}</div>
+      </div>
+    </div>
+  );
+});
+SurfaceFrame.displayName = 'SurfaceFrame';
+
+const BrowserSurface = memo(({ src, onUrlChange, isGlass }: { src?: string; onUrlChange?: (url: string) => void; isGlass?: boolean }) => {
+  const styles = useStyles();
+  const webviewRef = useRef<WebviewHandle>(null);
+  const [previewState, setPreviewState] = useState<PreviewState>({ loading: false, title: '', error: null });
+  const urlBarRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const mod = event.metaKey || event.ctrlKey;
+      if (mod && event.key.toLowerCase() === 'r') {
+        event.preventDefault();
+        webviewRef.current?.reload();
+      } else if (mod && event.key.toLowerCase() === 'l') {
+        event.preventDefault();
+        urlBarRef.current?.focus();
+        urlBarRef.current?.select();
+      } else if (event.key === 'Escape') {
+        if (previewState.loading) {
+          webviewRef.current?.stop();
         }
-      };
-      window.addEventListener('keydown', handler);
-      return () => window.removeEventListener('keydown', handler);
-    }, [pane, pState.loading]);
+      } else if (mod && event.key === '[') {
+        event.preventDefault();
+        webviewRef.current?.goBack();
+      } else if (mod && event.key === ']') {
+        event.preventDefault();
+        webviewRef.current?.goForward();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [previewState.loading]);
 
-    return (
-      <>
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={transition}
-          className={styles.backdrop}
-          onClick={onClose}
-        />
-        <motion.div
-          initial={{ opacity: 0, scale: 0.97 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.97 }}
-          transition={transition}
-          className={styles.overlayCard}
-        >
-          {pane === 'terminal' ? (
-            <ConsoleStarted />
-          ) : pane === 'preview' ? (
-            <WebPreview defaultUrl={src ?? ''} onUrlChange={onUrlChange} className="size-full rounded-none border-0">
-              <div className={styles.overlayHeader} style={{ position: 'relative' }}>
-                {pState.loading && <div className={styles.loadingBar} />}
-                <div className={styles.overlayHeaderLeft}>
-                  <button type="button" onClick={() => webviewRef.current?.goBack()} className={styles.overlayNavBtn} aria-label="Go back" title="Back (Ctrl+[)">
-                    <ArrowLeft20Regular style={{ width: 14, height: 14 }} />
-                  </button>
-                  <button type="button" onClick={() => webviewRef.current?.goForward()} className={styles.overlayNavBtn} aria-label="Go forward" title="Forward (Ctrl+])">
-                    <ArrowRight20Regular style={{ width: 14, height: 14 }} />
-                  </button>
-                  {pState.loading ? (
-                    <button type="button" onClick={() => webviewRef.current?.stop()} className={styles.overlayNavBtn} aria-label="Stop" title="Stop (Esc)">
-                      <DismissCircle20Regular style={{ width: 14, height: 14 }} />
-                    </button>
-                  ) : (
-                    <button type="button" onClick={() => webviewRef.current?.reload()} className={styles.overlayNavBtn} aria-label="Reload" title="Reload (Ctrl+R)">
-                      <ArrowClockwise20Regular style={{ width: 14, height: 14 }} />
-                    </button>
-                  )}
-                  <WebPreviewUrl ref={urlBarRef} />
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-                  <ConsoleToggleButton className={styles.overlayNavBtn} />
-                  <button
-                    type="button"
-                    onClick={onClose}
-                    className={styles.overlayCloseBtn}
-                    aria-label="Close overlay"
-                  >
-                    <Dismiss20Regular style={{ width: 14, height: 14 }} />
-                  </button>
-                </div>
-              </div>
-              <PreviewWebview webviewRef={webviewRef} onStateChange={setPState} />
-            </WebPreview>
-          ) : (
-            <div className={styles.overlayInner}>
-              <div className={styles.overlayHeader}>
-                <div className={styles.overlayHeaderLeft}>
-                  <Icon style={{ width: 14, height: 14 }} />
-                  <span>{title}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className={styles.overlayCloseBtn}
-                  aria-label="Close overlay"
-                >
-                  <Dismiss20Regular style={{ width: 14, height: 14 }} />
-                </button>
-              </div>
-              <div className={styles.overlayBody}>
-                <Webview src={src ?? ''} showUnavailable={false} />
-              </div>
+  return (
+    <WebPreview defaultUrl={src ?? ''} onUrlChange={onUrlChange} className="size-full rounded-none border-0">
+      <div className={mergeClasses(styles.surfaceHeader, isGlass && styles.surfaceHeaderGlass)} style={{ position: 'relative' }}>
+        {previewState.loading && <div className={styles.loadingBar} />}
+        <div className={styles.surfaceHeaderLeft}>
+          <div className={styles.surfaceHeaderTitle}>
+            <Globe20Regular style={{ width: 14, height: 14 }} />
+            <span className={styles.surfaceTitleText}>Browser</span>
+          </div>
+          <div className={styles.surfaceHeaderToolbar}>
+            <button type="button" onClick={() => webviewRef.current?.goBack()} className={styles.surfaceNavBtn} aria-label="Go back" title="Back (Ctrl+[)">
+              <ArrowLeft20Regular style={{ width: 14, height: 14 }} />
+            </button>
+            <button type="button" onClick={() => webviewRef.current?.goForward()} className={styles.surfaceNavBtn} aria-label="Go forward" title="Forward (Ctrl+])">
+              <ArrowRight20Regular style={{ width: 14, height: 14 }} />
+            </button>
+            {previewState.loading ? (
+              <button type="button" onClick={() => webviewRef.current?.stop()} className={styles.surfaceNavBtn} aria-label="Stop" title="Stop (Esc)">
+                <DismissCircle20Regular style={{ width: 14, height: 14 }} />
+              </button>
+            ) : (
+              <button type="button" onClick={() => webviewRef.current?.reload()} className={styles.surfaceNavBtn} aria-label="Reload" title="Reload (Ctrl+R)">
+                <ArrowClockwise20Regular style={{ width: 14, height: 14 }} />
+              </button>
+            )}
+            <div className={styles.browserUrlWrap}>
+              <WebPreviewUrl ref={urlBarRef} />
             </div>
-          )}
-        </motion.div>
-      </>
+          </div>
+        </div>
+        <div className={styles.surfaceHeaderActions}>
+          <ConsoleToggleButton className={styles.surfaceNavBtn} />
+        </div>
+      </div>
+      <div className={mergeClasses(styles.surfaceBody, isGlass && styles.surfaceBodyGlass)}>
+        <PreviewWebview webviewRef={webviewRef} onStateChange={setPreviewState} />
+      </div>
+    </WebPreview>
+  );
+});
+BrowserSurface.displayName = 'BrowserSurface';
+
+const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass }: { app: SurfaceApp; src?: string; onUrlChange?: (url: string) => void; isGlass?: boolean }) => {
+  const styles = useStyles();
+
+  if (app === 'browser') {
+    return (
+      <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
+        <BrowserSurface src={src} onUrlChange={onUrlChange} isGlass={isGlass} />
+      </motion.div>
     );
   }
-);
-OverlayPaneView.displayName = 'OverlayPaneView';
 
-export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, variables, codeServerSrc, vncSrc, previewUrl, onPreviewUrlChange, overlayPane = 'none', onCloseOverlay, onOpenOverlay, onReady, headerActionsTargetId, headerActionsCompact, sandboxLabel, onClientToolCall, pendingPlan, onPlanDecision, dockTargetId, isGlass }: CodeWorkspaceLayoutProps) => {
+  if (app === 'terminal') {
+    return (
+      <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
+        <SurfaceFrame app="terminal" isGlass={isGlass}>
+          <ConsoleStarted />
+        </SurfaceFrame>
+      </motion.div>
+    );
+  }
+
+  return (
+    <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
+      <SurfaceFrame app={app} isGlass={isGlass}>
+        {src ? <Webview src={src} showUnavailable={false} /> : <div className={styles.unavailableState}>{APP_META[app].title} is unavailable for this workspace.</div>}
+      </SurfaceFrame>
+    </motion.div>
+  );
+});
+AppSurfaceView.displayName = 'AppSurfaceView';
+
+export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, variables, codeServerSrc, vncSrc, previewUrl, onPreviewUrlChange, activeApp = 'chat', onActiveAppChange, onReady, headerActionsTargetId, headerActionsCompact, sandboxLabel, onClientToolCall, pendingPlan, onPlanDecision, dockTargetId, isGlass }: CodeWorkspaceLayoutProps) => {
   const styles = useStyles();
-  const overlaySrc = overlayPane === 'code' ? codeServerSrc : overlayPane === 'vnc' ? vncSrc : overlayPane === 'preview' ? previewUrl : undefined;
+  const surfaceSrc = activeApp === 'code' ? codeServerSrc : activeApp === 'desktop' ? vncSrc : activeApp === 'browser' ? previewUrl : undefined;
 
   const [dockTarget, setDockTarget] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => {
@@ -499,44 +523,31 @@ export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, va
     onReady?.();
   }, [onReady]);
 
-  const closeOverlay = useCallback(() => {
-    onCloseOverlay?.();
-  }, [onCloseOverlay]);
-
   const handleDockSelect = useCallback(
-    (pane: DockPane) => {
-      if (pane === 'none') {
-        onCloseOverlay?.();
-      } else if (pane === 'terminal') {
-        // Auto-create a terminal if none exist when opening the pane
-        if ($terminals.get().length === 0) {
-          const cwd = persistedStoreApi.$atom.get().workspaceDir ?? undefined;
-          createTerminal(cwd);
-        }
-        onOpenOverlay?.(pane);
-      } else {
-        onOpenOverlay?.(pane);
+    (app: WorkspaceApp) => {
+      if (app === 'terminal' && $terminals.get().length === 0) {
+        const cwd = persistedStoreApi.$atom.get().workspaceDir ?? undefined;
+        createTerminal(cwd);
       }
+      onActiveAppChange?.(app);
     },
-    [onCloseOverlay, onOpenOverlay]
+    [onActiveAppChange]
   );
-
-  const showOverlay = overlayPane !== 'none' && (overlaySrc || overlayPane === 'preview' || overlayPane === 'terminal');
 
   return (
     <div className={mergeClasses(styles.root, isGlass && styles.rootGlass, isGlass && styles.glassChatSurfaces)}>
       <div className={styles.mainArea}>
-        <div className={styles.mainContent}>
+        <div className={mergeClasses(styles.mainContent, activeApp !== 'chat' && styles.mainContentHidden)}>
           <OmniAgentsApp uiUrl={uiSrc} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables} onReady={handleUiReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} sandboxLabel={sandboxLabel} onClientToolCall={onClientToolCall} pendingPlan={pendingPlan} onPlanDecision={onPlanDecision} />
         </div>
         <AnimatePresence>
-          {showOverlay && <OverlayPaneView pane={overlayPane as Exclude<OverlayPane, 'none'>} src={overlaySrc} onClose={closeOverlay} onUrlChange={overlayPane === 'preview' ? onPreviewUrlChange : undefined} />}
+          {activeApp !== 'chat' && <AppSurfaceView app={activeApp} src={surfaceSrc} onUrlChange={activeApp === 'browser' ? onPreviewUrlChange : undefined} isGlass={isGlass} />}
         </AnimatePresence>
       </div>
       {(() => {
         const dock = (
           <EnvironmentDock
-            activePane={overlayPane}
+            activeApp={activeApp}
             onSelect={handleDockSelect}
             codeAvailable={!!codeServerSrc}
             desktopAvailable={!!vncSrc}

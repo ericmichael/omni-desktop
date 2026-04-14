@@ -67,7 +67,7 @@ describe('runMigrations', () => {
         expect(t.phase).toBe('idle');
       }
       // Fall-through means schemaVersion ends up at the current version.
-      expect(store.get('schemaVersion')).toBe(15);
+      expect(store.get('schemaVersion')).toBe(16);
     });
   });
 
@@ -422,19 +422,19 @@ describe('runMigrations', () => {
   });
 
   describe('full ladder and idempotency', () => {
-    it('runs v0 → v15 end-to-end without throwing', () => {
+    it('runs v0 → v16 end-to-end without throwing', () => {
       const store = makeStore({
         // schemaVersion undefined → takes the initial boot path.
         tickets: [{ id: 't1', status: 'in_progress' }],
         projects: [{ id: 'p1', label: 'A', workspaceDir: '/tmp/w' }],
       });
       expect(() => runMigrations(store, makeDeps())).not.toThrow();
-      expect(store.get('schemaVersion')).toBe(15);
+      expect(store.get('schemaVersion')).toBe(16);
     });
 
-    it('is a no-op on an already-migrated v15 store', () => {
+    it('is a no-op on an already-migrated v16 store', () => {
       const store = makeStore({
-        schemaVersion: 15,
+        schemaVersion: 16,
         tickets: [{ id: 't1', phase: 'idle' }],
         projects: [],
         milestones: [],
@@ -444,8 +444,39 @@ describe('runMigrations', () => {
       const deps = makeDeps();
       runMigrations(store, deps);
 
-      expect(store.get('schemaVersion')).toBe(15);
+      expect(store.get('schemaVersion')).toBe(16);
       expect(deps.writeProjectContextBrief).not.toHaveBeenCalled();
+    });
+
+    it('calls repairProjectRoots on idempotent v-current boot', () => {
+      const store = makeStore({
+        schemaVersion: 16,
+        tickets: [],
+        projects: [],
+        milestones: [],
+        pages: [],
+      });
+      const repair = vi.fn();
+      runMigrations(store, makeDeps({ repairProjectRoots: repair }));
+      expect(repair).toHaveBeenCalled();
+    });
+  });
+
+  describe('v15 → v16: ticket archive support', () => {
+    it('adds archivedAt=undefined to tickets that lack it', () => {
+      const store = makeStore({
+        schemaVersion: 15,
+        tickets: [{ id: 't1' }, { id: 't2', archivedAt: 12345 }],
+      });
+      runMigrations(store, makeDeps());
+
+      const tickets = store.get('tickets') as Array<Record<string, unknown>>;
+      const t1 = tickets.find((t) => t.id === 't1')!;
+      expect('archivedAt' in t1).toBe(true);
+      expect(t1.archivedAt).toBeUndefined();
+      // Existing archivedAt is preserved.
+      const t2 = tickets.find((t) => t.id === 't2')!;
+      expect(t2.archivedAt).toBe(12345);
     });
   });
 });

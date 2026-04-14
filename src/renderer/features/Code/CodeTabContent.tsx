@@ -15,7 +15,7 @@ import type { CodeTab, CodeTabId, TicketId } from '@/shared/types';
 
 import { CodeEmptyState } from './CodeEmptyState';
 import { CodeWorkspaceLayout } from './CodeWorkspaceLayout';
-import type { DockPane } from './EnvironmentDock';
+import type { WorkspaceApp } from './EnvironmentDock';
 import { $codeTabErrors, $codeTabStatuses, codeApi } from './state';
 import { useCodeAutoLaunch } from './use-code-auto-launch';
 
@@ -67,9 +67,8 @@ const CodeRunningView = memo(
     sessionId,
     onSessionChange,
     variables,
-    overlayPane,
-    onCloseOverlay,
-    onOpenOverlay,
+    activeApp,
+    onActiveAppChange,
     onReady,
     uiMinimal,
     headerActionsTargetId,
@@ -85,9 +84,8 @@ const CodeRunningView = memo(
     sessionId?: string;
     onSessionChange?: (sessionId: string | undefined) => void;
     variables?: Record<string, unknown>;
-    overlayPane: DockPane;
-    onCloseOverlay: () => void;
-    onOpenOverlay?: (pane: Exclude<DockPane, 'none'>) => void;
+    activeApp: WorkspaceApp;
+    onActiveAppChange?: (app: WorkspaceApp) => void;
     onReady: () => void;
     uiMinimal?: boolean;
     headerActionsTargetId?: string;
@@ -129,9 +127,8 @@ const CodeRunningView = memo(
             vncSrc={vncSrc}
             previewUrl={previewUrl}
             onPreviewUrlChange={onPreviewUrlChange}
-            overlayPane={overlayPane}
-            onCloseOverlay={onCloseOverlay}
-            onOpenOverlay={onOpenOverlay}
+            activeApp={activeApp}
+            onActiveAppChange={onActiveAppChange}
             onReady={onReady}
             headerActionsTargetId={headerActionsTargetId}
             headerActionsCompact={headerActionsCompact}
@@ -152,9 +149,8 @@ CodeRunningView.displayName = 'CodeRunningView';
 type CodeTabContentProps = {
   tab: CodeTab;
   isVisible: boolean;
-  overlayPane?: DockPane;
-  onCloseOverlay?: () => void;
-  onOpenOverlay?: (pane: Exclude<DockPane, 'none'>) => void;
+  activeApp?: WorkspaceApp;
+  onActiveAppChange?: (app: WorkspaceApp) => void;
   uiMinimal?: boolean;
   headerActionsTargetId?: string;
   headerActionsCompact?: boolean;
@@ -165,7 +161,7 @@ type CodeTabContentProps = {
 };
 
 export const CodeTabContent = memo(
-  ({ tab, isVisible, overlayPane = 'none', onCloseOverlay, onOpenOverlay, uiMinimal, headerActionsTargetId, headerActionsCompact, previewUrl, onPreviewUrlChange, dockTargetId, isGlass }: CodeTabContentProps) => {
+  ({ tab, isVisible, activeApp = 'chat', onActiveAppChange, uiMinimal, headerActionsTargetId, headerActionsCompact, previewUrl, onPreviewUrlChange, dockTargetId, isGlass }: CodeTabContentProps) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
     const project = useMemo(
@@ -190,10 +186,6 @@ export const CodeTabContent = memo(
       }
       return sandboxStatus.data;
     }, [sandboxStatus]);
-
-    const handleCloseOverlay = useCallback(() => {
-      onCloseOverlay?.();
-    }, [onCloseOverlay]);
 
     const handleSessionChange = useCallback(
       (sessionId: string | undefined) => {
@@ -245,9 +237,8 @@ export const CodeTabContent = memo(
             sessionId={tab.sessionId}
             onSessionChange={handleSessionChange}
             variables={clientToolVariables}
-            overlayPane={overlayPane}
-            onCloseOverlay={handleCloseOverlay}
-            onOpenOverlay={onOpenOverlay}
+            activeApp={activeApp}
+            onActiveAppChange={onActiveAppChange}
             onReady={() => {}}
             uiMinimal={uiMinimal}
             headerActionsTargetId={headerActionsTargetId}

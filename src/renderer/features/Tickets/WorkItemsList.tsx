@@ -1,26 +1,38 @@
-import { useStore } from '@nanostores/react';
-import { memo, useCallback, useMemo, useState } from 'react';
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import {
   Add16Regular,
+  ArrowLeft20Regular,
   ArrowSync20Regular,
   Board20Regular,
   List20Regular,
   Open20Regular,
   Play20Filled,
 } from '@fluentui/react-icons';
-import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
+import { useStore } from '@nanostores/react';
+import { memo, useCallback, useMemo, useState } from 'react';
 
-import { Badge, Caption1, IconButton, SectionLabel } from '@/renderer/ds';
+import { Badge, Caption1, IconButton, SectionLabel, SegmentedControl, Subtitle2 } from '@/renderer/ds';
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { isActivePhase } from '@/shared/ticket-phase';
 import type { ProjectId, Ticket, TicketId } from '@/shared/types';
 
-import { PHASE_COLORS, PHASE_LABELS, RESOLUTION_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './ticket-constants';
 import { KanbanBoard } from './KanbanBoard';
 import { $activeMilestoneId, $pipeline, $tickets, ticketApi } from './state';
+import { PHASE_COLORS, PHASE_LABELS, TICKET_PRIORITY_LABELS } from './ticket-constants';
 
 type ViewMode = 'list' | 'board';
+type VisibilityFilter = 'active' | 'resolved' | 'archived' | 'all';
+type TicketRowProps = {
+  ticket: Ticket;
+  selected: boolean;
+  hovered: boolean;
+  milestoneTitle?: string;
+  columnLabel: string;
+  columnBadgeColor: 'blue' | 'green' | 'default';
+  onSelect: (ticketId: TicketId) => void;
+  onHoverChange: (ticketId: TicketId | null) => void;
+};
 
 const PRIORITY_DOT_COLORS: Record<string, string> = {
   critical: tokens.colorPaletteRedForeground1,
@@ -45,6 +57,17 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalS,
     ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
     flexShrink: 0,
+  },
+  headerTitle: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    minWidth: 0,
+  },
+  controls: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
   },
   flex1: {
     flex: '1 1 0',
@@ -156,19 +179,94 @@ const useStyles = makeStyles({
   },
 });
 
+const TicketRow = memo(({ ticket, selected, hovered, milestoneTitle, columnLabel, columnBadgeColor, onSelect, onHoverChange }: TicketRowProps) => {
+  const styles = useStyles();
+  const phase = ticket.phase;
+  const isRunning = phase !== undefined && phase !== null && isActivePhase(phase);
+
+  const handleClick = useCallback(() => {
+    onSelect(ticket.id);
+  }, [onSelect, ticket.id]);
+
+  const handleMouseEnter = useCallback(() => {
+    onHoverChange(ticket.id);
+  }, [onHoverChange, ticket.id]);
+
+  const handleMouseLeave = useCallback(() => {
+    onHoverChange(null);
+  }, [onHoverChange]);
+
+  const handleOpenInCode = useCallback(() => {
+    void openTicketInCode(ticket.id);
+  }, [ticket.id]);
+
+  const handleAutopilot = useCallback(() => {
+    void openTicketInCode(ticket.id);
+    void ticketApi.startSupervisor(ticket.id);
+  }, [ticket.id]);
+
+  const handleStopPropagation = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+  }, []);
+
+  return (
+    <button
+      type="button"
+      className={`${styles.row} ${selected ? styles.rowSelected : ''} ${ticket.resolution ? styles.rowResolved : ''}`}
+      onClick={handleClick}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
+      <span
+        className={styles.priorityDot}
+        style={{ backgroundColor: PRIORITY_DOT_COLORS[ticket.priority] ?? tokens.colorNeutralForeground3 }}
+        title={TICKET_PRIORITY_LABELS[ticket.priority]}
+      />
+      <span className={styles.title}>{ticket.title}</span>
+      <span className={styles.cellColumn}>
+        <Badge color={columnBadgeColor}>{columnLabel}</Badge>
+      </span>
+      {milestoneTitle && (
+        <span className={styles.cellMilestone}>
+          <Badge color="purple" truncate maxWidth={160}>{milestoneTitle}</Badge>
+        </span>
+      )}
+      {phase && phase !== 'idle' && !ticket.resolution && (
+        <span className={styles.cellPhase}>
+          <Badge color={PHASE_COLORS[phase] ?? 'default'}>
+            {isRunning && <ArrowSync20Regular style={{ width: 12, height: 12 }} />}
+            {PHASE_LABELS[phase] ?? phase}
+          </Badge>
+        </span>
+      )}
+      {hovered && !ticket.resolution && !isRunning && (
+        <span className={styles.cellActions} style={{ opacity: 1 }} onClick={handleStopPropagation}>
+          <IconButton icon={<Open20Regular />} size="sm" aria-label="Open in Code" onClick={handleOpenInCode} />
+          <IconButton icon={<Play20Filled />} size="sm" aria-label="Autopilot" onClick={handleAutopilot} />
+        </span>
+      )}
+    </button>
+  );
+});
+TicketRow.displayName = 'TicketRow';
+
 type WorkItemsListProps = {
   projectId: ProjectId;
   selectedTicketId?: TicketId | null;
   onSelectTicket?: (ticketId: TicketId) => void;
+  title?: string;
+  contextLabel?: string;
+  onBack?: () => void;
 };
 
-export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket }: WorkItemsListProps) => {
+export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket, title = 'Items', contextLabel, onBack }: WorkItemsListProps) => {
   const styles = useStyles();
   const ticketMap = useStore($tickets);
   const pipeline = useStore($pipeline);
   const milestones = useStore($milestones);
   const activeMilestoneId = useStore($activeMilestoneId);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [visibilityFilter, setVisibilityFilter] = useState<VisibilityFilter>('active');
   const [hoveredId, setHoveredId] = useState<TicketId | null>(null);
 
   const columnLabels = useMemo(() => {
@@ -183,12 +281,25 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
 
   const sortedTickets = useMemo(() => {
     const all = Object.values(ticketMap).filter((t) => {
-      if (t.projectId !== projectId) return false;
-      if (activeMilestoneId !== 'all' && t.milestoneId !== activeMilestoneId) return false;
+      if (t.projectId !== projectId) {
+        return false;
+      }
+      if (activeMilestoneId !== 'all' && t.milestoneId !== activeMilestoneId) {
+        return false;
+      }
+      if (visibilityFilter === 'active') {
+        return !t.resolution && !t.archivedAt;
+      }
+      if (visibilityFilter === 'resolved') {
+        return !!t.resolution && !t.archivedAt;
+      }
+      if (visibilityFilter === 'archived') {
+        return !!t.archivedAt;
+      }
       return true;
     });
     return all.sort((a, b) => a.createdAt - b.createdAt);
-  }, [ticketMap, projectId, activeMilestoneId]);
+  }, [ticketMap, projectId, activeMilestoneId, visibilityFilter]);
 
   const handleNewTicket = useCallback(async () => {
     const ticket = await ticketApi.addTicket({
@@ -218,26 +329,52 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
   }, []);
 
   const getColumnBadgeColor = (ticket: Ticket): 'blue' | 'green' | 'default' => {
-    if (!pipeline) return 'default';
+    if (!pipeline) {
+      return 'default';
+    }
     const lastCol = pipeline.columns[pipeline.columns.length - 1];
-    if (ticket.columnId === lastCol?.id) return 'green';
+    if (ticket.columnId === lastCol?.id) {
+      return 'green';
+    }
     const firstCol = pipeline.columns[0];
-    if (ticket.columnId === firstCol?.id || !ticket.columnId) return 'default';
+    if (ticket.columnId === firstCol?.id || !ticket.columnId) {
+      return 'default';
+    }
     return 'blue';
   };
 
   return (
     <div className={styles.root}>
       <div className={styles.header}>
-        <SectionLabel>Items</SectionLabel>
+        {onBack ? <IconButton aria-label="Back" icon={<ArrowLeft20Regular />} size="sm" onClick={onBack} /> : null}
+        {contextLabel || title !== 'Items' ? (
+          <div className={styles.headerTitle}>
+            {contextLabel ? <Caption1>{contextLabel}</Caption1> : null}
+            <Subtitle2>{title}</Subtitle2>
+          </div>
+        ) : (
+          <SectionLabel>{title}</SectionLabel>
+        )}
         <Caption1 style={{ color: tokens.colorNeutralForeground3 }}>({sortedTickets.length})</Caption1>
         <div className={styles.flex1} />
-        <IconButton
-          aria-label={viewMode === 'list' ? 'Board view' : 'List view'}
-          icon={viewMode === 'list' ? <Board20Regular /> : <List20Regular />}
-          size="sm"
-          onClick={toggleView}
-        />
+        <div className={styles.controls}>
+          <SegmentedControl
+            value={visibilityFilter}
+            options={[
+              { value: 'active', label: 'Active' },
+              { value: 'resolved', label: 'Resolved' },
+              { value: 'archived', label: 'Archived' },
+              { value: 'all', label: 'All' },
+            ]}
+            onChange={setVisibilityFilter}
+          />
+          <IconButton
+            aria-label={viewMode === 'list' ? 'Board view' : 'List view'}
+            icon={viewMode === 'list' ? <Board20Regular /> : <List20Regular />}
+            size="sm"
+            onClick={toggleView}
+          />
+        </div>
       </div>
 
       {viewMode === 'list' ? (
@@ -246,96 +383,33 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
             <p className={styles.emptyHint}>No items yet</p>
           )}
           {sortedTickets.map((ticket) => {
-            const phase = ticket.phase;
-            const isRunning = phase != null && isActivePhase(phase);
             const isHovered = hoveredId === ticket.id;
             const milestone = ticket.milestoneId ? milestones[ticket.milestoneId] : undefined;
 
             return (
-              <button
+              <TicketRow
                 key={ticket.id}
-                type="button"
-                className={`${styles.row} ${selectedTicketId === ticket.id ? styles.rowSelected : ''} ${ticket.resolution ? styles.rowResolved : ''}`}
-                onClick={() => handleTicketClick(ticket.id)}
-                onMouseEnter={() => setHoveredId(ticket.id)}
-                onMouseLeave={() => setHoveredId(null)}
-              >
-                {/* Priority dot */}
-                <span
-                  className={styles.priorityDot}
-                  style={{
-                    backgroundColor: PRIORITY_DOT_COLORS[ticket.priority] ?? tokens.colorNeutralForeground3,
-                  }}
-                  title={TICKET_PRIORITY_LABELS[ticket.priority]}
-                />
-
-                {/* Title */}
-                <span className={styles.title}>{ticket.title}</span>
-
-                {/* Column badge */}
-                <span className={styles.cellColumn}>
-                  <Badge color={getColumnBadgeColor(ticket)}>
-                    {columnLabels[ticket.columnId] ?? 'Backlog'}
-                  </Badge>
-                </span>
-
-                {/* Milestone badge */}
-                {milestone && (
-                  <span className={styles.cellMilestone}>
-                    <Badge color="purple" truncate maxWidth={160}>{milestone.title}</Badge>
-                  </span>
-                )}
-
-                {/* Phase indicator */}
-                {phase && phase !== 'idle' && !ticket.resolution && (
-                  <span className={styles.cellPhase}>
-                    <Badge color={PHASE_COLORS[phase] ?? 'default'}>
-                      {isRunning && <ArrowSync20Regular style={{ width: 12, height: 12 }} />}
-                      {PHASE_LABELS[phase] ?? phase}
-                    </Badge>
-                  </span>
-                )}
-
-                {/* Resolution — omitted; column badge already conveys resolved status
-                   and the row is dimmed via rowResolved. */}
-
-                {/* Hover actions */}
-                {isHovered && !ticket.resolution && !isRunning && (
-                  <span
-                    className={styles.cellActions}
-                    style={{ opacity: 1 }}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <IconButton
-                      icon={<Open20Regular />}
-                      size="sm"
-                      aria-label="Open in Code"
-                      onClick={() => void openTicketInCode(ticket.id)}
-                    />
-                    <IconButton
-                      icon={<Play20Filled />}
-                      size="sm"
-                      aria-label="Autopilot"
-                      onClick={() => {
-                        void openTicketInCode(ticket.id);
-                        void ticketApi.startSupervisor(ticket.id);
-                      }}
-                    />
-                  </span>
-                )}
-              </button>
+                ticket={ticket}
+                selected={selectedTicketId === ticket.id}
+                hovered={isHovered}
+                milestoneTitle={milestone?.title}
+                columnLabel={columnLabels[ticket.columnId] ?? 'Backlog'}
+                columnBadgeColor={getColumnBadgeColor(ticket)}
+                onSelect={handleTicketClick}
+                onHoverChange={setHoveredId}
+              />
             );
           })}
 
           {/* + New at bottom */}
-          <button type="button" className={styles.newBtn} onClick={() => void handleNewTicket()}>
+          <button type="button" className={styles.newBtn} onClick={handleNewTicket}>
             <Add16Regular />
             New
           </button>
         </div>
       ) : (
         <div className={styles.boardWrap}>
-          <KanbanBoard projectId={projectId} />
+          <KanbanBoard projectId={projectId} visibilityFilter={visibilityFilter} />
         </div>
       )}
     </div>

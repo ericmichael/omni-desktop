@@ -108,12 +108,15 @@ export const ProjectCardsGrid = memo(() => {
   }, [projects]);
 
   const ticketCounts = useMemo(() => {
-    const counts: Record<string, { active: number; total: number }> = {};
+    const counts: Record<string, { active: number; resolved: number; archived: number }> = {};
     for (const ticket of store.tickets) {
-      const entry = counts[ticket.projectId] ?? { active: 0, total: 0 };
-      entry.total++;
-      if (!ticket.resolution) {
+      const entry = counts[ticket.projectId] ?? { active: 0, resolved: 0, archived: 0 };
+      if (ticket.archivedAt) {
+        entry.archived++;
+      } else if (!ticket.resolution) {
         entry.active++;
+      } else {
+        entry.resolved++;
       }
       counts[ticket.projectId] = entry;
     }
@@ -160,8 +163,14 @@ export const ProjectCardsGrid = memo(() => {
         const preview = previews[project.id] ?? '';
         const counts = ticketCounts[project.id];
         const countLabel = counts
-          ? `${counts.active} active / ${counts.total} total`
-          : '0 items';
+          ? counts.active > 0
+            ? `${counts.active} active`
+            : counts.resolved > 0
+              ? `${counts.resolved} resolved`
+              : counts.archived > 0
+                ? `${counts.archived} archived`
+                : '0 active'
+          : '0 active';
 
         return (
           <button

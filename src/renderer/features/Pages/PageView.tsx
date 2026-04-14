@@ -6,7 +6,7 @@ import { lazy, memo, Suspense, useCallback, useEffect, useMemo,useReducer, useRe
 import { currentContent, editorReducer, type EditorState } from '@/lib/page-editor-state';
 import { IconButton } from '@/renderer/ds';
 import { NotebookView } from '@/renderer/features/Notebooks/NotebookView';
-import { $previousTicketsView, ticketApi } from '@/renderer/features/Tickets/state';
+import { ticketApi } from '@/renderer/features/Tickets/state';
 import type { PageId, ProjectId } from '@/shared/types';
 
 import { PageBreadcrumb } from './Breadcrumb';
@@ -221,6 +221,10 @@ const useStyles = makeStyles({
   skelLine2: { width: '78%' },
   skelLine3: { width: '88%' },
   skelLine4: { width: '65%' },
+  notebookBody: {
+    flex: '1 1 0',
+    minHeight: 0,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -232,42 +236,30 @@ type PageViewProps = {
   projectId: ProjectId;
 };
 
+const navigateUpPageHierarchy = (pageId: PageId, projectId: ProjectId, pages: ReturnType<typeof $pages.get>) => {
+  const page = pages[pageId];
+  if (!page?.parentId) {
+    ticketApi.goToProject(projectId);
+    return;
+  }
+
+  const parent = pages[page.parentId];
+  if (parent?.isRoot) {
+    ticketApi.goToProject(projectId);
+    return;
+  }
+
+  ticketApi.goToPage(page.parentId, projectId);
+};
+
 const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
   const styles = useStyles();
   const pages = useStore($pages);
   const page = pages[pageId];
-  const previousView = useStore($previousTicketsView);
 
   const handleBack = useCallback(() => {
-    if (!previousView) {
-      ticketApi.goToProject(projectId);
-      return;
-    }
-    // Re-navigate to the previous view. This is a shallow replay.
-    switch (previousView.type) {
-      case 'inbox':
-        ticketApi.goToInbox(previousView.selectedItemId);
-        break;
-      case 'dashboard':
-        ticketApi.goToDashboard();
-        break;
-      case 'project':
-        ticketApi.goToProject(previousView.projectId);
-        break;
-      case 'page':
-        ticketApi.goToPage(previousView.pageId, previousView.projectId);
-        break;
-      case 'milestone':
-        ticketApi.goToMilestone(previousView.milestoneId, previousView.projectId);
-        break;
-      case 'board':
-        ticketApi.goToBoard(previousView.projectId);
-        break;
-      case 'ticket':
-        ticketApi.goToTicket(previousView.ticketId);
-        break;
-    }
-  }, [previousView, projectId]);
+    navigateUpPageHierarchy(pageId, projectId, pages);
+  }, [pageId, projectId, pages]);
 
   const [state, dispatch] = useReducer(editorReducer, { kind: 'loading' } as EditorState);
   /** Key used to force the ContextEditor to remount with new content after an auto-reload or conflict resolution. */
@@ -543,6 +535,74 @@ return null;
 });
 DocPageView.displayName = 'DocPageView';
 
+const NotebookPageView = memo(({ pageId, projectId }: PageViewProps) => {
+  const styles = useStyles();
+  const pages = useStore($pages);
+  const page = pages[pageId];
+  const [title, setTitle] = useState(page?.title ?? '');
+
+  useEffect(() => {
+    if (page) {
+      setTitle(page.title);
+    }
+  }, [page]);
+
+  const handleBack = useCallback(() => {
+    navigateUpPageHierarchy(pageId, projectId, pages);
+  }, [pageId, projectId, pages]);
+
+  const handleTitleBlur = useCallback(() => {
+    const trimmed = title.trim();
+    if (trimmed && page && trimmed !== page.title) {
+      void pageApi.updatePage(pageId, { title: trimmed });
+      if (page.isRoot) {
+        void ticketApi.updateProject(projectId, { label: trimmed });
+      }
+    }
+  }, [title, page, pageId, projectId]);
+
+  const handleTitleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleTitleBlur();
+      }
+    },
+    [handleTitleBlur]
+  );
+
+  if (!page) {
+    return null;
+  }
+
+  return (
+    <div className={styles.root}>
+      <div className={styles.header}>
+        {!page.isRoot && (
+          <div className={styles.backRow}>
+            <IconButton aria-label="Back" icon={<ArrowLeft20Regular />} size="sm" onClick={handleBack} />
+            <PageBreadcrumb projectId={projectId} pageId={pageId} />
+          </div>
+        )}
+        <div className={styles.titleRow}>
+          <input
+            className={page.isRoot ? styles.titleInputLarge : styles.titleInput}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={handleTitleBlur}
+            onKeyDown={handleTitleKeyDown}
+            placeholder="Untitled"
+          />
+        </div>
+      </div>
+      <div className={styles.notebookBody}>
+        <NotebookView pageId={pageId} />
+      </div>
+    </div>
+  );
+});
+NotebookPageView.displayName = 'NotebookPageView';
+
 /**
  * Dispatch on `page.kind`: notebook pages mount the marimo extension webview;
  * everything else uses the Yoopta-based DocPageView. Keeps hook order stable
@@ -552,7 +612,7 @@ export const PageView = memo(({ pageId, projectId }: PageViewProps) => {
   const pages = useStore($pages);
   const page = pages[pageId];
   if (page?.kind === 'notebook') {
-    return <NotebookView pageId={pageId} />;
+    return <NotebookPageView pageId={pageId} projectId={projectId} />;
   }
   return <DocPageView pageId={pageId} projectId={projectId} />;
 });

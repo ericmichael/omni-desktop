@@ -1,24 +1,23 @@
+import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import type { CSSProperties } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
-
-import { persistedStoreApi } from '@/renderer/services/store';
 
 import { CounterBadge, Tab, TabList, TopAppBar } from '@/renderer/ds';
 import { InboxView } from '@/renderer/features/Inbox/InboxView';
 import { $activeInboxCount } from '@/renderer/features/Inbox/state';
-import { $pages, pageApi } from '@/renderer/features/Pages/state';
 import { PageView } from '@/renderer/features/Pages/PageView';
+import { $pages, pageApi } from '@/renderer/features/Pages/state';
+import { persistedStoreApi } from '@/renderer/services/store';
 
 import { MilestoneDetail } from './MilestoneDetail';
-import { ProjectsDashboard } from './ProjectsDashboard';
 import { ProjectPage } from './ProjectPage';
-import { WorkItemsList } from './WorkItemsList';
+import { ProjectsDashboard } from './ProjectsDashboard';
 import { TicketsSidebar } from './Sidebar';
-import { TicketDetail } from './TicketDetail';
 import { $activeWipTickets, $ticketsView, $wipDialogPendingTicket, ticketApi } from './state';
+import { TicketDetail } from './TicketDetail';
 import { WipLimitDialog } from './WipLimitDialog';
+import { WorkItemsList } from './WorkItemsList';
 
 const useStyles = makeStyles({
   root: {
@@ -113,8 +112,21 @@ export const Tickets = memo(() => {
   const [mobileTab, setMobileTab] = useState<MobileTab>(view.type === 'inbox' ? 'inbox' : 'projects');
 
   const pages = useStore($pages);
+  const tickets = persistedStore.tickets;
 
   const openInboxCount = useStore($activeInboxCount);
+  const activeTicket = useMemo(
+    () => (view.type === 'ticket' ? tickets.find((ticket) => ticket.id === view.ticketId) ?? null : null),
+    [view, tickets]
+  );
+  const activeProject = useMemo(() => {
+    const projectId =
+      view.type === 'project' || view.type === 'page' || view.type === 'milestone' || view.type === 'board'
+        ? view.projectId
+        : activeTicket?.projectId;
+    return projectId ? persistedStore.projects.find((project) => project.id === projectId) ?? null : null;
+  }, [view, activeTicket?.projectId, persistedStore.projects]);
+
   const isViewingProject = view.type === 'project' || view.type === 'page' || view.type === 'milestone' || view.type === 'board';
 
   // Context-aware back navigation for mobile
@@ -127,8 +139,12 @@ export const Tickets = memo(() => {
       }
       return 'Project';
     }
-    if (view.type === 'milestone') return 'Project';
-    if (view.type === 'board') return 'Project';
+    if (view.type === 'milestone') {
+      return 'Project';
+    }
+    if (view.type === 'board') {
+      return 'Project';
+    }
     return 'Projects';
   }, [view, pages]);
 
@@ -159,6 +175,10 @@ export const Tickets = memo(() => {
     ticketApi.goToDashboard();
   }, [view, pages]);
 
+  const handleTicketBack = useCallback(() => {
+    ticketApi.goBackToPrevious(activeTicket?.projectId);
+  }, [activeTicket?.projectId]);
+
   // Keyboard shortcut: Cmd/Ctrl+N → new page in current project
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -169,11 +189,15 @@ export const Tickets = memo(() => {
           : view.type === 'milestone' ? view.projectId
           : view.type === 'board' ? view.projectId
           : null;
-        if (!projectId) return;
+        if (!projectId) {
+          return;
+        }
         e.preventDefault();
         const allPages = $pages.get();
         const rootPage = Object.values(allPages).find((p) => p.projectId === projectId && p.isRoot);
-        if (!rootPage) return;
+        if (!rootPage) {
+          return;
+        }
         const siblings = Object.values(allPages).filter((p) => p.parentId === rootPage.id);
         const maxSort = siblings.reduce((max, p) => Math.max(max, p.sortOrder), 0);
         void pageApi.addPage({
@@ -224,8 +248,11 @@ export const Tickets = memo(() => {
                 onTabSelect={(_e, data) => {
                   const tab = data.value as MobileTab;
                   setMobileTab(tab);
-                  if (tab === 'inbox') ticketApi.goToInbox();
-                  else ticketApi.goToDashboard();
+                  if (tab === 'inbox') {
+                    ticketApi.goToInbox();
+                  } else {
+                    ticketApi.goToDashboard();
+                  }
                 }}
                 appearance="subtle"
                 style={{ width: '100%' }}
@@ -248,20 +275,22 @@ export const Tickets = memo(() => {
         <div className={mergeClasses(styles.contentArea, isGlass && styles.contentAreaGlass)}>
           {isDesktop ? (
             <div className={styles.desktopContent}>
-              {view.type === 'inbox' && <InboxView />}
+              {view.type === 'inbox' && <InboxView selectedItemId={view.selectedItemId} />}
               {view.type === 'project' && <ProjectPage projectId={view.projectId} />}
               {view.type === 'page' && <PageView key={view.pageId} pageId={view.pageId} projectId={view.projectId} />}
               {view.type === 'milestone' && <MilestoneDetail milestoneId={view.milestoneId} projectId={view.projectId} />}
-              {view.type === 'board' && <WorkItemsList projectId={view.projectId} />}
-              {view.type === 'ticket' && <TicketDetail ticketId={view.ticketId} onClose={() => ticketApi.goToDashboard()} />}
+              {view.type === 'board' && (
+                <WorkItemsList projectId={view.projectId} title="Board" contextLabel={activeProject?.label} onBack={handleBack} />
+              )}
+              {view.type === 'ticket' && <TicketDetail ticketId={view.ticketId} onClose={handleTicketBack} closeBehavior="back" />}
               {view.type === 'dashboard' && <ProjectsDashboard />}
             </div>
           ) : (
             <div className={styles.mobileContent}>
-              {mobileTab === 'inbox' && <InboxView />}
+              {mobileTab === 'inbox' && <InboxView selectedItemId={view.type === 'inbox' ? view.selectedItemId : undefined} />}
               {mobileTab === 'projects' && (
                 view.type === 'ticket'
-                  ? <TicketDetail ticketId={view.ticketId} onClose={() => ticketApi.goToDashboard()} />
+                  ? <TicketDetail ticketId={view.ticketId} onClose={handleTicketBack} closeBehavior="back" />
                   : view.type === 'page'
                     ? <PageView key={view.pageId} pageId={view.pageId} projectId={view.projectId} />
                     : view.type === 'milestone'
@@ -304,7 +333,9 @@ const WipLimitOverlay = memo(() => {
     $wipDialogPendingTicket.set(null);
   }, []);
 
-  if (!pendingTicket) return null;
+  if (!pendingTicket) {
+    return null;
+  }
 
   return (
     <WipLimitDialog

@@ -7,15 +7,17 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
+import { makeStyles, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
-import { makeStyles, tokens } from '@fluentui/react-components';
 
 import type { Column, ColumnId, ProjectId, Ticket, TicketId } from '@/shared/types';
 
 import { KanbanCard } from './KanbanCard';
 import { KanbanColumn } from './KanbanColumn';
 import { $activeMilestoneId, $pipeline, $tickets, ticketApi } from './state';
+
+type VisibilityFilter = 'active' | 'resolved' | 'archived' | 'all';
 
 const useStyles = makeStyles({
   loading: {
@@ -47,7 +49,7 @@ const useStyles = makeStyles({
   },
 });
 
-export const KanbanBoard = memo(({ projectId }: { projectId: ProjectId }) => {
+export const KanbanBoard = memo(({ projectId, visibilityFilter = 'active' }: { projectId: ProjectId; visibilityFilter?: VisibilityFilter }) => {
   const styles = useStyles();
   const pipeline = useStore($pipeline);
   const tickets = useStore($tickets);
@@ -60,9 +62,26 @@ export const KanbanBoard = memo(({ projectId }: { projectId: ProjectId }) => {
   const projectTickets = useMemo(
     () =>
       Object.values(tickets).filter(
-        (t) => t.projectId === projectId && (activeMilestoneId === 'all' || t.milestoneId === activeMilestoneId)
+        (t) => {
+          if (t.projectId !== projectId) {
+            return false;
+          }
+          if (activeMilestoneId !== 'all' && t.milestoneId !== activeMilestoneId) {
+            return false;
+          }
+          if (visibilityFilter === 'active') {
+            return !t.resolution && !t.archivedAt;
+          }
+          if (visibilityFilter === 'resolved') {
+            return !!t.resolution && !t.archivedAt;
+          }
+          if (visibilityFilter === 'archived') {
+            return !!t.archivedAt;
+          }
+          return true;
+        }
       ),
-    [tickets, projectId, activeMilestoneId]
+    [tickets, projectId, activeMilestoneId, visibilityFilter]
   );
 
   const ticketsByColumn = useMemo(() => {
