@@ -1,11 +1,11 @@
-import type { IpcListener } from '@electron-toolkit/typed-ipc/main';
 import { ipcMain } from 'electron';
 import { nanoid } from 'nanoid';
 
 import type { PtyCallbacks, PtyEntry } from '@/lib/pty-utils';
 import { createPtyBuffer, createPtyProcess, killPtyProcessAsync, setupPtyCallbacks } from '@/lib/pty-utils';
 import { getActivateVenvCommand, getBundledBinPath, getHomeDirectory, getShell, isDirectory } from '@/main/util';
-import type { IpcEvents, IpcRendererEvents } from '@/shared/types';
+import type { IIpcListener } from '@/shared/ipc-listener';
+import type { IpcRendererEvents } from '@/shared/types';
 
 /**
  * ConsoleManager manages multiple interactive shell PTYs for the terminal/console.
@@ -136,7 +136,7 @@ export class ConsoleManager {
  * Returns the manager instance and a cleanup function
  */
 export const createConsoleManager = (arg: {
-  ipc: IpcListener<IpcEvents>;
+  ipc: IIpcListener;
   sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
 }): [ConsoleManager, () => void] => {
   const { ipc, sendToWindow } = arg;

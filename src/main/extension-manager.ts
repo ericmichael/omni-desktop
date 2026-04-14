@@ -1,4 +1,3 @@
-import type { IpcListener } from '@electron-toolkit/typed-ipc/main';
 import { type ChildProcess,spawn } from 'child_process';
 import { ipcMain, net } from 'electron';
 
@@ -13,7 +12,8 @@ import type {
   ExtensionEnsureResult,
   ExtensionInstanceState,
 } from '@/shared/extensions';
-import type { IpcEvents, IpcRendererEvents } from '@/shared/types';
+import type { IIpcListener } from '@/shared/ipc-listener';
+import type { IpcRendererEvents } from '@/shared/types';
 
 /**
  * Stderr ring buffer cap per instance. Keeps memory bounded while preserving
@@ -344,7 +344,7 @@ const sleep = (ms: number): Promise<void> =>
 // ---------------------------------------------------------------------------
 
 export const createExtensionManager = (args: {
-  ipc: IpcListener<IpcEvents>;
+  ipc: IIpcListener;
   store: Store;
   sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
 }) => {

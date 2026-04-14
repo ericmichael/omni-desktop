@@ -1,4 +1,3 @@
-import type { IpcListener } from '@electron-toolkit/typed-ipc/main';
 import { execFile } from 'child_process';
 import { ipcMain, shell } from 'electron';
 import type Store from 'electron-store';
@@ -36,6 +35,7 @@ import { TicketMachine } from '@/main/ticket-machine';
 import { ensureDirectory, getDefaultWorkspaceDir, getOmniConfigDir, getProjectDir, getWorktreesDir } from '@/main/util';
 import { WorkflowLoader } from '@/main/workflow-loader';
 import { DEFAULT_PIPELINE, SIMPLE_PIPELINE } from '@/shared/pipeline-defaults';
+import type { IIpcListener } from '@/shared/ipc-listener';
 import { getLocalWorkspaceDir, requireLocalWorkspaceDir } from '@/shared/project-source';
 import type { TicketPhase } from '@/shared/ticket-phase';
 import { isActivePhase } from '@/shared/ticket-phase';
@@ -50,7 +50,6 @@ import type {
   GitRepoInfo,
   InboxItem,
   InboxShaping,
-  IpcEvents,
   IpcRendererEvents,
   Milestone,
   MilestoneId,
@@ -4346,7 +4345,7 @@ next.columnChangedAt = updatedAt;
 }
 
 export const createProjectManager = (arg: {
-  ipc: IpcListener<IpcEvents>;
+  ipc: IIpcListener;
   sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   store: Store<StoreData>;
   processManager?: ProcessManager;

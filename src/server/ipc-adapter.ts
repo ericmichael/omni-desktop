@@ -1,3 +1,5 @@
+import type { IIpcListener } from '@/shared/ipc-listener';
+
 type HandleFn = (channel: string, handler: (...args: unknown[]) => unknown | Promise<unknown>) => void;
 
 /**
@@ -8,7 +10,7 @@ type HandleFn = (channel: string, handler: (...args: unknown[]) => unknown | Pro
  * Can target either global handlers (for shared handlers like store/util)
  * or per-session handlers (for client-scoped handlers like terminal/sandbox).
  */
-export class ServerIpcAdapter {
+export class ServerIpcAdapter implements IIpcListener {
   constructor(private handleFn: HandleFn) {}
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

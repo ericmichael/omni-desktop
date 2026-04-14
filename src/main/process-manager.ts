@@ -1,12 +1,11 @@
-import type { IpcListener } from '@electron-toolkit/typed-ipc/main';
 import { ipcMain } from 'electron';
 
 import { AgentProcess, type AgentProcessMode, type AgentProcessStartArg, type FetchFn } from '@/main/agent-process';
 import type { PlatformClient } from '@/main/platform-client';
+import type { IIpcListener } from '@/shared/ipc-listener';
 import type {
   AgentProcessStartOptions,
   AgentProcessStatus,
-  IpcEvents,
   IpcRendererEvents,
   SandboxBackend,
   SandboxProfile,
@@ -167,7 +166,7 @@ export class ProcessManager {
 }
 
 export const createProcessManager = (arg: {
-  ipc: IpcListener<IpcEvents>;
+  ipc: IIpcListener;
   sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   fetchFn?: FetchFn;
   getStoreData?: () => ProcessManagerStoreData;

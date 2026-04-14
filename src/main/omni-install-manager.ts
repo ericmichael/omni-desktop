@@ -1,4 +1,3 @@
-import type { IpcListener } from '@electron-toolkit/typed-ipc/main';
 import c from 'ansi-colors';
 import { ipcMain } from 'electron';
 import fs from 'fs/promises';
@@ -12,7 +11,8 @@ import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { withResultAsync } from '@/lib/result';
 import { SimpleLogger } from '@/lib/simple-logger';
 import { getOmniRuntimeDir, getOmniVenvPath, getUVExecutablePath, isFile, pathExists } from '@/main/util';
-import type { IpcEvents, IpcRendererEvents, LogEntry, OmniInstallProcessStatus, WithTimestamp } from '@/shared/types';
+import type { IIpcListener } from '@/shared/ipc-listener';
+import type { IpcRendererEvents, LogEntry, OmniInstallProcessStatus, WithTimestamp } from '@/shared/types';
 
 const PYTHON_VERSION = '3.11';
 const EXTRA_INDEX_URL = 'https://pypi.fury.io/ericmichael/';
@@ -350,7 +350,7 @@ export class OmniInstallManager {
 }
 
 export const createOmniInstallManager = (arg: {
-  ipc: IpcListener<IpcEvents>;
+  ipc: IIpcListener;
   sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
 }) => {
   const { ipc, sendToWindow } = arg;

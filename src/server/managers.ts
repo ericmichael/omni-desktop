@@ -56,13 +56,13 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
   // --- Global managers (survive WS reconnections) ---
 
   const [omniInstall, cleanupOmniInstall] = createOmniInstallManager({
-    ipc: ipc as any,
+    ipc,
     sendToWindow: sendToAll,
   });
 
   // processManager must be created before createProjectManager so it can be passed in
   const [processManager, cleanupProcessManager] = createProcessManager({
-    ipc: ipc as any,
+    ipc,
     sendToWindow: sendToAll,
     fetchFn: globalThis.fetch,
     getStoreData: () => ({
@@ -73,14 +73,14 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
   });
 
   const [, cleanupProject] = createProjectManager({
-    ipc: ipc as any,
+    ipc,
     sendToWindow: sendToAll,
     store: store as any,
     processManager,
   });
 
   const [, cleanupExtensions] = createExtensionManager({
-    ipc: ipc as any,
+    ipc,
     store: store as any,
     sendToWindow: sendToAll,
   });
@@ -410,7 +410,7 @@ export const wireClientManagers = (arg: {
 
   // Console (PTY) is truly per-session — each browser tab gets its own terminal
   const [, cleanupConsole] = createConsoleManager({
-    ipc: ipc as any,
+    ipc,
     sendToWindow,
   });
 
