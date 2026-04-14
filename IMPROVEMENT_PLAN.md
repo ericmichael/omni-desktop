@@ -40,7 +40,8 @@ Phases must be executed in order; within a phase, fixes are independent unless n
 | 6     | 6.3 Sprint C2c.5 — Lifecycle entry points (start/stop/send/reset/cleanup)              | ✅     | (supervisor-orchestrator.ts)                   |
 | 6     | 6.3 Sprint C2c.6 — Task map + persistence + restore + startup cleanup                  | ✅     | (supervisor-orchestrator.ts)                   |
 | 6     | 6.3 Sprint C2c.7 — validateDispatchPreflight + auto-dispatch loop                      | ✅     | (supervisor-orchestrator.ts)                   |
-| 6     | 6.3 Sprint C2c.8+ — handleClientToolCall + supervisor prompt assembly                  | 🟡     | In progress                                    |
+| 6     | 6.3 Sprint C2c.8 — handleClientToolCall + supervisor prompt assembly                   | ✅     | `251ba74`                                      |
+| 6     | 6.3 Sprint C2c.9 — Drop `internals()` cast + split test file                           | ✅     | `bffe5c0` + `4461555`                          |
 
 ### Deep testing wave (follow-up to Phase 5)
 
@@ -922,21 +923,37 @@ Completed increments (each commit ships regression-green with `npm test`):
   `orch(pm).ensureSupervisorInfra` instead. `project-manager.ts` dropped
   2519 → 2292 lines (-227). Test count: 833 (no behavior change — move only).
 
-Cumulative file-size delta: `project-manager.ts` 3937 → 1923 lines (-2014).
+- **C2c.8 — Tool dispatch + supervisor prompt assembly:** Moved
+  `handleClientToolCall` (~460 lines), `buildFullSupervisorPrompt`,
+  `buildRunVariables`, and `buildContinuationPromptForTicket` into
+  `SupervisorOrchestrator`. The orchestrator's `createMachine.onClientRequest`
+  callback now dispatches tool calls directly, and the run-end / retry /
+  lifecycle paths call `this.buildRunVariables` /
+  `this.buildContinuationPromptForTicket` on the orchestrator itself.
+  Host surface lost three temporary callbacks and gained eight read-side
+  accessors so the moved code can resolve tickets, milestones, pages, and
+  project directories without reaching back into PM (`getTicketsByProject`,
+  `addTicket`, `getMilestonesByProject`, `getMilestoneById`,
+  `getPagesByProject`, `getPageById`, `readPageContent`,
+  `getProjectDirPath`). `internals()` test cast shrank from 2 entries to 1.
+  `project-manager.ts` dropped 1923 → 1315 lines (-608). Test count: 833.
+- **C2c.9 — Cast removal + test split:** Migrated the last three
+  `internals(pm).ensureSupervisorInfra` test sites onto
+  `orch(pm).ensureSupervisorInfra` and deleted the `internals()` cast
+  entirely (the cast was the last vestige of pre-extraction scaffolding).
+  Then split the 1996-line `project-manager.test.ts` into three files:
+  `project-manager-test-helpers.ts` (~360 lines of shared in-memory
+  fixtures), `supervisor-orchestrator.test.ts` (83 tests covering
+  orchestrator-owned behavior), and a slimmer `project-manager.test.ts`
+  (24 tests for PM's remaining surface area: getNextTicket, milestone
+  CRUD, project + page CRUD against tmpdir HOME, getFilesChanged real-git
+  adapter, processManager wiring). Test count: 833 unchanged.
+
+Cumulative file-size delta: `project-manager.ts` 3937 → 1315 lines (-2622).
 Test count 812 → 833.
 
-Remaining execution plan (tests migrate off the `internals()` cast onto
-`orch(pm)` as each piece moves; the cast shrinks every commit and disappears
-entirely after the last step):
+Remaining execution plan:
 
-- \*\*C2c.8 — `handleClientToolCall` (~450 lines) + `buildFullSupervisorPrompt`
-  - `buildRunVariables` + `buildContinuationPromptForTicket`.\*\* Largest
-    single move by line count, but fully self-contained once the host
-    surface exposes `getPagesByProject` / `readPageContent` / milestone
-    accessors.
-- **C2c.9 — Final cleanup.** Delete the `internals()` cast entirely and
-  split `project-manager.test.ts` into a slimmer PM test plus a new
-  `supervisor-orchestrator.test.ts` for the migrated coverage.
 - **C3:** Thin `ProjectManager` to a coordinator that owns project CRUD +
   `getProjectDirPath` + pipeline helpers, and delegates via references to
   `PageManager`, `InboxManager`, `MilestoneManager`, `SupervisorOrchestrator`.
@@ -995,7 +1012,8 @@ built the safety net it needs.
 | 6.3 Sprint C2c.5 Lifecycle entry points                        | 6     | L    | ✅     | -227 PM lines; start/stop/send/reset/cleanup all in orchestrator   |
 | 6.3 Sprint C2c.6 Task map + persistence                        | 6     | L    | ✅     | -190 PM lines; tasks map + restore + startup cleanup migrated      |
 | 6.3 Sprint C2c.7 Preflight + auto-dispatch                     | 6     | M    | ✅     | -179 PM lines; preflight + autoDispatchTick + setAutoDispatch      |
-| 6.3 Sprint C2c.8–9 Final state migration                       | 6     | L    | 🟡     | tool dispatch, prompt assembly, internals() cast removal           |
+| 6.3 Sprint C2c.8 Tool dispatch + prompt assembly               | 6     | L    | ✅     | -608 PM lines; host gained 8 read-side accessors                   |
+| 6.3 Sprint C2c.9 Cast removal + test split                     | 6     | M    | ✅     | internals() gone; tests split into PM + orchestrator suites        |
 | 6.3 Sprint C3 PM → coordinator                                 | 6     | L    | ⏳     | depends on C2c                                                     |
 | 6.3 Sprint C4 IPC handler split                                | 6     | M    | ⏳     | depends on C3                                                      |
 | T1–T11 deep testing wave (follow-up)                           | 5+    | L    | ✅     | +92 tests, 7 bugs fixed                                            |
