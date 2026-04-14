@@ -13,6 +13,10 @@
  *   - processManager.statusFallback wiring
  */
 
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
@@ -1561,6 +1565,251 @@ describe('ProjectManager integration', () => {
 
       const tasksAfter = store.get('tasks', []);
       expect(tasksAfter.find((t) => t.id === 'task-1')).toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // T11 — getNextTicket (priority ordering, blocked-by, first-column filter)
+  // -------------------------------------------------------------------------
+  describe('getNextTicket', () => {
+    it('returns null when no tickets are in the first column', () => {
+      const { pm } = makePm({
+        tickets: [{ id: 't1', columnId: 'in_progress' }],
+      });
+      expect(pm.getNextTicket('proj-1')).toBeNull();
+    });
+
+    it('picks the highest-priority ticket first', () => {
+      const { pm } = makePm({
+        tickets: [
+          { id: 'low', priority: 'low', createdAt: 1000 },
+          { id: 'crit', priority: 'critical', createdAt: 2000 },
+          { id: 'med', priority: 'medium', createdAt: 500 },
+        ],
+      });
+      expect(pm.getNextTicket('proj-1')?.id).toBe('crit');
+    });
+
+    it('breaks priority ties by createdAt ascending (oldest first)', () => {
+      const { pm } = makePm({
+        tickets: [
+          { id: 'newer', priority: 'medium', createdAt: 2000 },
+          { id: 'older', priority: 'medium', createdAt: 1000 },
+        ],
+      });
+      expect(pm.getNextTicket('proj-1')?.id).toBe('older');
+    });
+
+    it('skips tickets blocked by a non-terminal blocker', () => {
+      const { pm } = makePm({
+        tickets: [
+          { id: 'blocker', columnId: 'in_progress' },
+          { id: 'blocked', blockedBy: ['blocker' as TicketId] },
+          { id: 'free' },
+        ],
+      });
+      expect(pm.getNextTicket('proj-1')?.id).toBe('free');
+    });
+
+    it('ignores blocked-by when the blocker is already terminal', () => {
+      const { pm } = makePm({
+        tickets: [
+          { id: 'blocker', columnId: 'done' },
+          { id: 'blocked', blockedBy: ['blocker' as TicketId] },
+        ],
+      });
+      expect(pm.getNextTicket('proj-1')?.id).toBe('blocked');
+    });
+
+    it('ignores unknown blocker ids', () => {
+      const { pm } = makePm({
+        tickets: [{ id: 't1', blockedBy: ['does-not-exist' as TicketId] }],
+      });
+      expect(pm.getNextTicket('proj-1')?.id).toBe('t1');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // T9 — Milestone CRUD (in-memory only, no fs)
+  // -------------------------------------------------------------------------
+  describe('milestone CRUD', () => {
+    it('addMilestone persists the new milestone', () => {
+      const { pm, store } = makePm({ tickets: [] });
+      const ms = pm.addMilestone({
+        projectId: 'proj-1',
+        title: 'Sprint 1',
+        description: '',
+        status: 'active',
+      } as Parameters<typeof pm.addMilestone>[0]);
+
+      const stored = store.get('milestones', []);
+      expect(stored).toHaveLength(1);
+      expect(stored[0]!.id).toBe(ms.id);
+    });
+
+    it('getMilestonesByProject filters by projectId', () => {
+      const { pm, store } = makePm({ tickets: [] });
+      store.set('milestones', [
+        { id: 'm1', projectId: 'proj-1', title: 'A', description: '', status: 'active', createdAt: 0, updatedAt: 0 },
+        { id: 'm2', projectId: 'other', title: 'B', description: '', status: 'active', createdAt: 0, updatedAt: 0 },
+      ] as never);
+      expect(pm.getMilestonesByProject('proj-1').map((m) => m.id)).toEqual(['m1']);
+    });
+
+    it('updateMilestone stamps completedAt when transitioning into completed', () => {
+      const { pm, store } = makePm({ tickets: [] });
+      store.set('milestones', [
+        { id: 'm1', projectId: 'proj-1', title: 'A', description: '', status: 'active', createdAt: 0, updatedAt: 0 },
+      ] as never);
+
+      pm.updateMilestone('m1' as never, { status: 'completed' });
+
+      const ms = store.get('milestones', [])[0]!;
+      expect(ms.status).toBe('completed');
+      expect(ms.completedAt).toBeGreaterThan(0);
+    });
+
+    it('updateMilestone clears completedAt when transitioning out of completed', () => {
+      const { pm, store } = makePm({ tickets: [] });
+      store.set('milestones', [
+        {
+          id: 'm1',
+          projectId: 'proj-1',
+          title: 'A',
+          description: '',
+          status: 'completed',
+          completedAt: 12345,
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ] as never);
+
+      pm.updateMilestone('m1' as never, { status: 'active' });
+
+      const ms = store.get('milestones', [])[0]!;
+      expect(ms.status).toBe('active');
+      expect(ms.completedAt).toBeUndefined();
+    });
+
+    it('removeMilestone clears milestoneId on orphaned tickets', () => {
+      const { pm, store } = makePm({
+        tickets: [
+          { id: 't-orphan' },
+          { id: 't-other' },
+        ],
+      });
+      // Attach milestoneId to t-orphan.
+      const tickets = store.get('tickets', []);
+      tickets[0]!.milestoneId = 'm1' as never;
+      store.set('tickets', tickets);
+      store.set('milestones', [
+        { id: 'm1', projectId: 'proj-1', title: 'A', description: '', status: 'active', createdAt: 0, updatedAt: 0 },
+      ] as never);
+
+      pm.removeMilestone('m1' as never);
+
+      const t = store.get('tickets', []).find((x: Ticket) => x.id === 't-orphan')!;
+      expect(t.milestoneId).toBeUndefined();
+      expect(store.get('milestones', [])).toHaveLength(0);
+    });
+
+    it('removeMilestone is a no-op for unknown id', () => {
+      const { pm, store } = makePm({ tickets: [] });
+      store.set('milestones', [] as never);
+      expect(() => pm.removeMilestone('nope' as never)).not.toThrow();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // T9 — Project + Page CRUD (fs-touching paths against tmpdir $HOME)
+  // -------------------------------------------------------------------------
+  describe('project + page CRUD (tmpdir)', () => {
+    let originalHome: string | undefined;
+    let homeDir: string;
+
+    beforeEach(() => {
+      // electron-shim uses os.homedir() which on Linux resolves $HOME.
+      // Point $HOME at a tmpdir so ensureProjectDir / addPage don't write
+      // into the operator's real home.
+      originalHome = process.env['HOME'];
+      homeDir = mkdtempSync(join(tmpdir(), 'pm-test-'));
+      process.env['HOME'] = homeDir;
+      // addProject fires-and-forgets ensureProjectDir(); real I/O runs async.
+      // The outer describe uses fake timers, but fs I/O doesn't schedule on
+      // the timer queue — it resolves through libuv. Swap to real timers for
+      // this block so we can flush pending microtasks before rmSync.
+      vi.useRealTimers();
+    });
+
+    afterEach(async () => {
+      // Let any pending void-chained fs writes from addProject complete
+      // before we rm the tmpdir, otherwise mkdir(recursive:true) re-creates
+      // the directory tree after cleanup. 50ms is generous for local fs.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      if (originalHome !== undefined) {
+        process.env['HOME'] = originalHome;
+      } else {
+        delete process.env['HOME'];
+      }
+      rmSync(homeDir, { recursive: true, force: true });
+      vi.useFakeTimers();
+    });
+
+    it('addProject seeds a root page for the new project', () => {
+      const { pm, store } = makePm({ tickets: [] });
+      // Wipe the seeded project so addProject starts clean.
+      store.set('projects', []);
+
+      const project = pm.addProject({
+        label: 'New Project',
+        slug: 'new-project',
+        source: { kind: 'local', workspaceDir: join(homeDir, 'work') },
+      } as unknown as Parameters<typeof pm.addProject>[0]);
+
+      const pages = store.get('pages', []);
+      const rootPage = pages.find((p) => p.projectId === project.id && p.isRoot);
+      expect(rootPage).toBeDefined();
+      expect(rootPage!.parentId).toBeNull();
+    });
+
+    it('removeProject cascades to tickets, milestones, and pages', async () => {
+      const { pm, store } = makePm({
+        tickets: [
+          { id: 't-target' },
+          { id: 't-unrelated' },
+        ],
+      });
+      // Seed a second project so we can verify the cascade doesn't overreach.
+      const projects = store.get('projects', []);
+      projects.push({
+        id: 'other-proj',
+        label: 'Other',
+        slug: 'other',
+        createdAt: Date.now(),
+      } as unknown as Project);
+      store.set('projects', projects);
+
+      // Move t-unrelated to the other project.
+      const tickets = store.get('tickets', []);
+      tickets.find((t: Ticket) => t.id === 't-unrelated')!.projectId = 'other-proj' as never;
+      store.set('tickets', tickets);
+
+      store.set('milestones', [
+        { id: 'm1', projectId: 'proj-1', title: 'A', description: '', status: 'active', createdAt: 0, updatedAt: 0 },
+        { id: 'm2', projectId: 'other-proj', title: 'B', description: '', status: 'active', createdAt: 0, updatedAt: 0 },
+      ] as never);
+      store.set('pages', [
+        { id: 'p1', projectId: 'proj-1', parentId: null, title: 'root1', sortOrder: 0, isRoot: true, createdAt: 0, updatedAt: 0 },
+        { id: 'p2', projectId: 'other-proj', parentId: null, title: 'root2', sortOrder: 0, isRoot: true, createdAt: 0, updatedAt: 0 },
+      ] as never);
+
+      await pm.removeProject('proj-1');
+
+      expect(store.get('projects', []).map((p) => p.id)).toEqual(['other-proj']);
+      expect(store.get('tickets', []).map((t) => t.id)).toEqual(['t-unrelated']);
+      expect(store.get('milestones', []).map((m) => m.id)).toEqual(['m2']);
+      expect(store.get('pages', []).map((p) => p.id)).toEqual(['p2']);
     });
   });
 
