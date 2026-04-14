@@ -282,7 +282,7 @@ export const Tickets = memo(() => {
               {view.type === 'board' && (
                 <WorkItemsList projectId={view.projectId} title="Board" contextLabel={activeProject?.label} onBack={handleBack} />
               )}
-              {view.type === 'ticket' && <TicketDetail ticketId={view.ticketId} onClose={handleTicketBack} closeBehavior="back" />}
+              {view.type === 'ticket' && <TicketDetail key={view.ticketId} ticketId={view.ticketId} onClose={handleTicketBack} closeBehavior="back" />}
               {view.type === 'dashboard' && <ProjectsDashboard />}
             </div>
           ) : (
@@ -290,7 +290,7 @@ export const Tickets = memo(() => {
               {mobileTab === 'inbox' && <InboxView selectedItemId={view.type === 'inbox' ? view.selectedItemId : undefined} />}
               {mobileTab === 'projects' && (
                 view.type === 'ticket'
-                  ? <TicketDetail ticketId={view.ticketId} onClose={handleTicketBack} closeBehavior="back" />
+                  ? <TicketDetail key={view.ticketId} ticketId={view.ticketId} onClose={handleTicketBack} closeBehavior="back" />
                   : view.type === 'page'
                     ? <PageView key={view.pageId} pageId={view.pageId} projectId={view.projectId} />
                     : view.type === 'milestone'

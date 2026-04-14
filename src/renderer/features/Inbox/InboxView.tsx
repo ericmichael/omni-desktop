@@ -193,8 +193,16 @@ export const InboxView = memo(({ selectedItemId }: { selectedItemId?: InboxItemI
   }, [selectedItemId]);
 
   // Detail view takes over the panel when an item is selected.
+  //
+  // Keying on `selectedItem.id` forces a full remount when the user navigates
+  // to a different item. Without the key, InboxItemDetail held per-item edit
+  // buffers in component-local state tied to a prop, so switching items
+  // either (a) silently dropped unsaved edits, or (b) wrote the previous
+  // item's draft onto the newly-selected item via a stale `onBlur` closure.
+  // Remount gives every item a fresh component lifecycle and makes the
+  // buffers structurally incapable of crossing item boundaries.
   if (selectedItem) {
-    return <InboxItemDetail item={selectedItem} onBack={handleBack} />;
+    return <InboxItemDetail key={selectedItem.id} item={selectedItem} onBack={handleBack} />;
   }
 
   return (

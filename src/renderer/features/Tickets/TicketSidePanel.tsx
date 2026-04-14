@@ -99,7 +99,7 @@ export const TicketSidePanel = memo(({ ticketId, onClose }: TicketSidePanelProps
           <IconButton aria-label="Close panel" icon={<Dismiss20Regular />} size="sm" onClick={onClose} />
         </div>
         <div className={styles.panelBody}>
-          <TicketDetail ticketId={ticketId} compact onClose={onClose} />
+          <TicketDetail key={ticketId} ticketId={ticketId} compact onClose={onClose} />
         </div>
       </div>
     </div>

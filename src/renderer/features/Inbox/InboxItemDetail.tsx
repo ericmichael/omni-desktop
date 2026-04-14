@@ -266,9 +266,16 @@ export const InboxItemDetail = memo(({ item, onBack }: InboxItemDetailProps) => 
 
   const isArchived = !!item.promotedTo;
 
-  // Local edit buffers. Seeded from props; updated on prop changes so
-  // external store-sync broadcasts don't stomp in-progress edits (we only
-  // snap to the store when the user hasn't touched that field yet).
+  // Local edit buffers — seeded once from props on mount. The parent keys
+  // this component on `item.id`, so navigating to a different item gives
+  // us a fresh lifecycle with fresh initial state. That keying is what
+  // makes the buffers safe: useState initializers run on mount, so there
+  // is no code path where a stale buffer from a previous item can end up
+  // associated with a different item's id.
+  //
+  // Same-id external updates (store broadcasts) intentionally do NOT
+  // refresh these buffers — clobbering a user's in-progress edit would be
+  // worse than showing slightly stale data.
   const [title, setTitle] = useState(item.title);
   const [note, setNote] = useState(item.note ?? '');
   const [outcome, setOutcome] = useState(item.shaping?.outcome ?? '');
@@ -276,21 +283,6 @@ export const InboxItemDetail = memo(({ item, onBack }: InboxItemDetailProps) => 
     item.shaping?.appetite ?? 'medium'
   );
   const [notDoing, setNotDoing] = useState(item.shaping?.notDoing ?? '');
-
-  // Ref-captured version of the item id so effects that resync buffers only
-  // fire when the user actually navigates to a different item, not on every
-  // store update for the same item.
-  const lastSyncedId = useRef(item.id);
-  useEffect(() => {
-    if (lastSyncedId.current !== item.id) {
-      lastSyncedId.current = item.id;
-      setTitle(item.title);
-      setNote(item.note ?? '');
-      setOutcome(item.shaping?.outcome ?? '');
-      setAppetite(item.shaping?.appetite ?? 'medium');
-      setNotDoing(item.shaping?.notDoing ?? '');
-    }
-  }, [item]);
 
   // -------------------------------------------------------------------------
   // Save handlers (auto-save on blur)
@@ -352,6 +344,31 @@ return;
     },
     [isArchived, item]
   );
+
+  // -------------------------------------------------------------------------
+  // Flush-on-unmount.
+  //
+  // If the user types in a field and navigates away without blurring
+  // (clicks another inbox item, hits the back button, closes the panel),
+  // the in-progress edit would otherwise be lost. The latest save closures
+  // are captured in a ref on every render so the unmount cleanup can call
+  // the most recent version — which closes over the current buffers AND
+  // the current `item.id`, so the write always lands on the right row.
+  //
+  // The cleanup effect has an empty dep array so it only fires once on
+  // real unmount (i.e. when the parent swaps our `key` for a new item or
+  // when the panel closes), not after every keystroke.
+  // -------------------------------------------------------------------------
+  const flushRef = useRef<() => void>(() => {});
+  flushRef.current = () => {
+    saveTitleNote();
+    saveShaping();
+  };
+  useEffect(() => {
+    return () => {
+      flushRef.current();
+    };
+  }, []);
 
   // -------------------------------------------------------------------------
   // Actions

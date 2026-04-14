@@ -1,11 +1,12 @@
 import { makeStyles, shorthands,Skeleton, SkeletonItem, tokens } from '@fluentui/react-components';
 import { ArrowLeft20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo,useReducer, useRef, useState } from 'react';
+import { useSelector } from '@xstate/react';
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { currentContent, editorReducer, type EditorState } from '@/lib/page-editor-state';
 import { IconButton } from '@/renderer/ds';
 import { NotebookView } from '@/renderer/features/Notebooks/NotebookView';
+import { acquirePageEditor, releasePageEditor } from '@/renderer/features/Pages/page-editor-registry';
 import { ticketApi } from '@/renderer/features/Tickets/state';
 import type { PageId, ProjectId } from '@/shared/types';
 
@@ -26,8 +27,6 @@ import { $pages, pageApi } from './state';
 const contextEditorPromise = import('@/renderer/features/Tickets/ContextEditor');
 const ContextEditor = lazy(() => contextEditorPromise.then((m) => ({ default: m.ContextEditor })));
 
-/** Debounce for auto-save after a local edit. Short enough to feel instant. */
-const SAVE_DEBOUNCE_MS = 400;
 /** How long the "Saved" affordance stays visible after a successful save. */
 const SAVED_AFFORDANCE_MS = 1200;
 
@@ -261,16 +260,71 @@ const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
     navigateUpPageHierarchy(pageId, projectId, pages);
   }, [pageId, projectId, pages]);
 
-  const [state, dispatch] = useReducer(editorReducer, { kind: 'loading' } as EditorState);
-  /** Key used to force the ContextEditor to remount with new content after an auto-reload or conflict resolution. */
-  const [editorKey, setEditorKey] = useState(0);
-  /** Brief "Saved" affordance visibility. */
-  const [justSaved, setJustSaved] = useState(false);
+  // -------------------------------------------------------------------------
+  // Per-page editor actor.
+  //
+  // The actor owns the editor's content, dirty/clean/conflict state, the
+  // file watcher, and the debounced save. It lives in a module-level
+  // registry keyed by pageId, NOT inside this component, which is what
+  // makes navigation races safe: switching pageId means acquiring a
+  // different actor, not reusing this component's closures on new data.
+  //
+  // useMemo gives us a stable reference for the lifetime of this pageId;
+  // the cleanup effect releases it when pageId changes or on unmount.
+  // -------------------------------------------------------------------------
+  const actor = useMemo(() => acquirePageEditor(pageId), [pageId]);
+  useEffect(() => {
+    return () => releasePageEditor(pageId);
+  }, [pageId]);
 
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** Latest local content — mirrors state for use inside stable callbacks. */
-  const latestLocal = useRef('');
+  const phase = useSelector(actor, (s) => {
+    // `s.value` is a string in top-level states and `{ dirty: 'debouncing' | 'saving' }`
+    // while dirty — collapse both to a flat phase for the view.
+    if (typeof s.value === 'object' && s.value !== null && 'dirty' in s.value) {
+      return 'dirty' as const;
+    }
+    return s.value as 'loading' | 'clean' | 'conflict' | 'flushing' | 'disposed';
+  });
+  const isSaving = useSelector(actor, (s) => s.matches({ dirty: 'saving' }));
+  const content = useSelector(actor, (s) => s.context.content);
+  const revision = useSelector(actor, (s) => s.context.revision);
+
+  const handleMarkdownChange = useCallback(
+    (md: string) => {
+      actor.send({ type: 'LOCAL_EDIT', content: md });
+    },
+    [actor],
+  );
+
+  // -------------------------------------------------------------------------
+  // "Saved" affordance — flashes briefly on dirty → clean transitions.
+  // -------------------------------------------------------------------------
+  const [justSaved, setJustSaved] = useState(false);
+  useEffect(() => {
+    let wasDirty = false;
+    let flashTimer: ReturnType<typeof setTimeout> | null = null;
+    const sub = actor.subscribe((s) => {
+      const isDirty = typeof s.value === 'object' && s.value !== null && 'dirty' in s.value;
+      if (isDirty) {
+        wasDirty = true;
+        return;
+      }
+      if (s.matches('clean') && wasDirty) {
+        wasDirty = false;
+        setJustSaved(true);
+        if (flashTimer) {
+          clearTimeout(flashTimer);
+        }
+        flashTimer = setTimeout(() => setJustSaved(false), SAVED_AFFORDANCE_MS);
+      }
+    });
+    return () => {
+      sub.unsubscribe();
+      if (flashTimer) {
+        clearTimeout(flashTimer);
+      }
+    };
+  }, [actor]);
 
   // Title editing state
   const [title, setTitle] = useState(page?.title ?? '');
@@ -279,92 +333,6 @@ const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
 setTitle(page.title);
 }
   }, [page]);
-
-  // -------------------------------------------------------------------------
-  // Subscribe to the page file on mount; unsubscribe on unmount.
-  // -------------------------------------------------------------------------
-  useEffect(() => {
-    let cancelled = false;
-    // State stays in `loading` until the disk read completes. That means the
-    // editor never mounts with transient empty content — it mounts exactly
-    // once with the real content, no remount flash on first open.
-    void pageApi.watch(pageId).then((content) => {
-      if (cancelled) {
-return;
-}
-      dispatch({ type: 'loaded', content });
-      latestLocal.current = content;
-    });
-
-    const offChange = pageApi.onExternalChange(pageId, (content) => {
-      dispatch({ type: 'external-change', content });
-      // If we were clean, the reducer auto-reloads and we bump the editor key
-      // so the ContextEditor picks up the new content. When dirty, we stay
-      // dirty and show the banner; the editor key stays the same so the user
-      // keeps their in-progress edits.
-      setEditorKey((k) => k + 1);
-    });
-
-    const offDelete = pageApi.onExternalDelete(pageId, () => {
-      dispatch({ type: 'external-delete' });
-      setEditorKey((k) => k + 1);
-    });
-
-    return () => {
-      cancelled = true;
-      offChange();
-      offDelete();
-      // Flush any pending save before unsubscribing.
-      if (saveTimer.current) {
-        clearTimeout(saveTimer.current);
-        saveTimer.current = null;
-        void pageApi.writeContent(pageId, latestLocal.current);
-      }
-      void pageApi.unwatch(pageId);
-    };
-  }, [pageId]);
-
-  // -------------------------------------------------------------------------
-  // Debounced save — fires whenever the editor becomes dirty.
-  // -------------------------------------------------------------------------
-  const scheduleSave = useCallback(
-    (content: string) => {
-      if (saveTimer.current) {
-clearTimeout(saveTimer.current);
-}
-      saveTimer.current = setTimeout(() => {
-        saveTimer.current = null;
-        dispatch({ type: 'save-start' });
-        void pageApi.writeContent(pageId, content).then(() => {
-          dispatch({ type: 'save-done' });
-          setJustSaved(true);
-          if (savedTimer.current) {
-clearTimeout(savedTimer.current);
-}
-          savedTimer.current = setTimeout(() => setJustSaved(false), SAVED_AFFORDANCE_MS);
-        });
-      }, SAVE_DEBOUNCE_MS);
-    },
-    [pageId]
-  );
-
-  const handleMarkdownChange = useCallback(
-    (md: string) => {
-      latestLocal.current = md;
-      dispatch({ type: 'local-edit', content: md });
-      scheduleSave(md);
-    },
-    [scheduleSave]
-  );
-
-  // Cleanup the "Saved" timer on unmount.
-  useEffect(() => {
-    return () => {
-      if (savedTimer.current) {
-clearTimeout(savedTimer.current);
-}
-    };
-  }, []);
 
   // -------------------------------------------------------------------------
   // Title save — for root pages, also update the project label.
@@ -390,30 +358,15 @@ clearTimeout(savedTimer.current);
   );
 
   // -------------------------------------------------------------------------
-  // Conflict resolution
+  // Conflict resolution — delegated to the machine.
   // -------------------------------------------------------------------------
   const handleUseDisk = useCallback(() => {
-    if (state.kind !== 'conflict') {
-return;
-}
-    // Cancel any pending save — we're dropping the local copy.
-    if (saveTimer.current) {
-      clearTimeout(saveTimer.current);
-      saveTimer.current = null;
-    }
-    latestLocal.current = state.diskContent;
-    dispatch({ type: 'resolve-use-disk' });
-    setEditorKey((k) => k + 1);
-  }, [state]);
+    actor.send({ type: 'RESOLVE_USE_DISK' });
+  }, [actor]);
 
   const handleKeepLocal = useCallback(() => {
-    if (state.kind !== 'conflict') {
-return;
-}
-    dispatch({ type: 'resolve-keep-local' });
-    // Schedule an immediate save so local wins on disk.
-    scheduleSave(state.localContent);
-  }, [state, scheduleSave]);
+    actor.send({ type: 'RESOLVE_KEEP_LOCAL' });
+  }, [actor]);
 
   // -------------------------------------------------------------------------
   // Child pages
@@ -435,12 +388,11 @@ return;
 return null;
 }
 
-  const showConflict = state.kind === 'conflict';
-  const editorContent = currentContent(state);
+  const showConflict = phase === 'conflict';
   const saveLabel =
-    state.kind === 'dirty' && state.saving
+    phase === 'dirty' && isSaving
       ? 'Saving…'
-      : state.kind === 'dirty'
+      : phase === 'dirty'
         ? 'Unsaved'
         : justSaved
           ? 'Saved'
@@ -500,13 +452,19 @@ return null;
       {/* Editor body */}
       <div className={styles.body}>
         <div className={styles.bodyInner}>
-          {state.kind === 'loading' ? (
+          {phase === 'loading' ? (
             <EditorSkeleton />
           ) : (
             <Suspense fallback={<EditorSkeleton />}>
               <ContextEditor
-                key={`${pageId}-${editorKey}`}
-                initialMarkdown={editorContent}
+                // Keying on revision forces a remount whenever the machine
+                // swaps content out from under the editor (initial load,
+                // silent auto-reload from external change, resolve-use-disk).
+                // Keying additionally on pageId is defensive: the registry
+                // already gives us a different actor per pageId, but the
+                // key pins the invariant at the React layer too.
+                key={`${pageId}-${revision}`}
+                initialMarkdown={content}
                 onChangeMarkdown={handleMarkdownChange}
               />
             </Suspense>

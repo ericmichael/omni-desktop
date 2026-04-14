@@ -146,6 +146,17 @@ setEnabled(marimo?.enabled ?? false);
     };
   }, []);
 
+  // Reset status whenever the open notebook changes. Without this, `status`
+  // continues to reflect the previous notebook's running state until a fresh
+  // `extension:status-changed` event arrives — which means `webviewSrc`
+  // briefly composes the old marimo URL with the new file path, flashing
+  // the wrong notebook in the iframe. Clearing to `idle` shows the
+  // "Preparing…" spinner instead, which is honest: we genuinely don't know
+  // this notebook's state yet.
+  useEffect(() => {
+    setStatus({ state: 'idle' });
+  }, [paths]);
+
   // Subscribe to live status updates for this instance.
   useEffect(() => {
     if (!paths) {
@@ -167,6 +178,7 @@ return;
 }
     const cwd = paths.projectDir;
     cwdRef.current = cwd;
+    let cancelled = false;
     let released = false;
 
     void (async () => {
@@ -174,8 +186,18 @@ return;
         // Prime the marimo glass CSS sidecar and migrate the notebook to
         // reference it. Idempotent — safe to call on every open.
         await emitter.invoke('page:prepare-notebook', pageId, isGlassRef.current);
-        // Pre-fetch current status so we render correctly even before the first event.
+        if (cancelled) {
+          return;
+        }
+        // Pre-fetch current status so we render correctly even before the
+        // first event. The `cancelled` guard is load-bearing: without it, a
+        // late resolve from this effect's closure could clobber a newer
+        // status update that arrived via `extension:status-changed` on the
+        // next effect run (e.g. rapid notebook switches or glass toggles).
         const current = await emitter.invoke('extension:get-instance-status', MARIMO_EXTENSION_ID, cwd);
+        if (cancelled) {
+          return;
+        }
         setStatus(current);
         await emitter.invoke('extension:ensure-instance', MARIMO_EXTENSION_ID, cwd);
       } catch {
@@ -184,6 +206,7 @@ return;
     })();
 
     return () => {
+      cancelled = true;
       if (released) {
 return;
 }

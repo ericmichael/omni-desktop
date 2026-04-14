@@ -20,7 +20,13 @@ export default defineConfig({
         entry: resolve('src/main/index.ts'),
       },
       rollupOptions: {
-        external: ['node-pty'],
+        // `ws` has optional native deps (`bufferutil`, `utf-8-validate`) that
+        // it requires inside a try/catch and falls back to pure JS when
+        // missing. Rollup tries to statically resolve them during bundling
+        // and errors out if they're not installed. Marking them external
+        // lets the runtime `require` fail gracefully into the JS fallback,
+        // which is exactly what `ws` is designed for.
+        external: ['node-pty', 'bufferutil', 'utf-8-validate'],
       },
     },
   },

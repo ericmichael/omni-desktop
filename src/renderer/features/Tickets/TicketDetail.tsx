@@ -13,7 +13,7 @@ import {
   ReOrderDotsVertical20Regular,
 } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { SelectTabData } from '@/renderer/ds';
 import { Badge, Body1, Button, Caption1, IconButton, Input, Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger, Select, Tab, TabList } from '@/renderer/ds';
@@ -262,6 +262,36 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, closeBehavior = 
 
   const handleTabSelect = useCallback((_e: unknown, data: SelectTabData) => {
     setActiveTab(data.value as TicketTab);
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // Flush-on-unmount.
+  //
+  // The parent keys this component on `ticketId`, so navigating to a
+  // different ticket fully remounts us — edit buffers (`editTitle`,
+  // `editBranch`) can never cross ticket boundaries. But a mid-edit user
+  // who navigates away without pressing Enter or blurring the input would
+  // otherwise lose that edit. On unmount we call the latest save closures,
+  // which close over the current buffers AND the current `ticketId`, so
+  // any pending title/branch change lands on the right ticket.
+  //
+  // The save handlers are already idempotent: `handleSaveTitle` no-ops when
+  // trimmed/unchanged, and `handleSaveBranch` only fires when we're
+  // actively in edit mode (guarded below). Safe to call unconditionally.
+  // -------------------------------------------------------------------------
+  const flushRef = useRef<() => void>(() => {});
+  flushRef.current = () => {
+    if (editingTitle) {
+      handleSaveTitle();
+    }
+    if (editingBranch) {
+      handleSaveBranch();
+    }
+  };
+  useEffect(() => {
+    return () => {
+      flushRef.current();
+    };
   }, []);
 
   if (!ticket) {

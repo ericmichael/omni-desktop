@@ -400,7 +400,6 @@ export const schema: Schema<StoreData> = {
         title: { type: 'string' },
         description: { type: 'string' },
         priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
-        status: { type: 'string', enum: ['open', 'in_progress', 'completed', 'closed'] },
         blockedBy: { type: 'array', items: { type: 'string' } },
         shaping: {
           type: 'object',
@@ -433,7 +432,6 @@ export const schema: Schema<StoreData> = {
         'title',
         'description',
         'priority',
-        'status',
         'blockedBy',
         'createdAt',
         'updatedAt',
