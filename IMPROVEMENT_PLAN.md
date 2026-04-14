@@ -9,33 +9,36 @@ Phases must be executed in order; within a phase, fixes are independent unless n
 
 **✅ = done · 🟡 = partial · ⏳ = pending**
 
-| Phase | Fix | Status | Landed in |
-|-------|-----|--------|-----------|
-| 1 | 1.1 Page.properties roundtrip | ✅ | `8bc6349` |
-| 2 | 2.1 Config path validation | ✅ | `43ffc29` |
-| 2 | 2.2 SSRF proxy auth | ✅ | `955cd14` |
-| 2 | 2.3 WS authentication | ✅ | `fb32f41` |
-| 3 | 3.1 processManager in server mode | ✅ | `43ffc29` |
-| 3 | 3.2 Token accumulation | ✅ | `34535ea` |
-| 4 | 4.1 Eliminate `as any` | ✅ | `b978f72` |
-| 4 | 4.2 `respond(false)` on errors | ✅ | `34535ea` |
-| 4 | 4.3 chokidar in WorkspaceSyncManager | ✅ | `8e79e18` |
-| 4 | 4.4 rpcIdCounter → instance field | ✅ | `61f0810` |
-| 4 | 4.5 Auto-dispatch column WIP limit | ✅ | `34535ea` |
-| 5 | 5.1 WsHandler tests | ✅ | `d784b88` |
-| 5 | 5.2 ProjectManager tests (initial) | ✅ | `e6fda0d` |
-| 5 | 5.3 AgentProcess tests | ✅ | `a295a04` |
-| 6 | 6.1 sendStartRun dedup | ✅ | `6ab8c07` |
-| 6 | 6.2 Shared handler extraction | ✅ | `42aaae3` |
-| 6 | 6.3 Sprint A — PageManager extraction | ✅ | `44fe1d4` |
-| 6 | 6.3 Sprint A.1 — Migrations extraction (bonus) | ✅ | `0a6ed05` |
-| 6 | 6.3 Sprint B — MilestoneManager extraction | ✅ | (this commit) |
-| 6 | 6.3 Sprint C1 — Pure helper extraction | ✅ | (continuation-prompt + session-history) |
-| 6 | 6.3 Sprint C2a — getGitFilesChanged extraction | ✅ | (git-files-changed.ts) |
-| 6 | 6.3 Sprint C2b — Artifacts fs extraction | ✅ | (artifacts-fs.ts) |
-| 6 | 6.3 Sprint C2c.1 — Orchestrator scaffold + config/concurrency | ✅ | (supervisor-orchestrator.ts) |
-| 6 | 6.3 Sprint C2c.2 — Retry queue + stall detection | ✅ | (supervisor-orchestrator.ts) |
-| 6 | 6.3 Sprint C2c.3+ — Lifecycle/state migration | 🟡 | In progress |
+| Phase | Fix                                                                                    | Status | Landed in                                      |
+| ----- | -------------------------------------------------------------------------------------- | ------ | ---------------------------------------------- |
+| 1     | 1.1 Page.properties roundtrip                                                          | ✅     | `8bc6349`                                      |
+| 2     | 2.1 Config path validation                                                             | ✅     | `43ffc29`                                      |
+| 2     | 2.2 SSRF proxy auth                                                                    | ✅     | `955cd14`                                      |
+| 2     | 2.3 WS authentication                                                                  | ✅     | `fb32f41`                                      |
+| 3     | 3.1 processManager in server mode                                                      | ✅     | `43ffc29`                                      |
+| 3     | 3.2 Token accumulation                                                                 | ✅     | `34535ea`                                      |
+| 4     | 4.1 Eliminate `as any`                                                                 | ✅     | `b978f72`                                      |
+| 4     | 4.2 `respond(false)` on errors                                                         | ✅     | `34535ea`                                      |
+| 4     | 4.3 chokidar in WorkspaceSyncManager                                                   | ✅     | `8e79e18`                                      |
+| 4     | 4.4 rpcIdCounter → instance field                                                      | ✅     | `61f0810`                                      |
+| 4     | 4.5 Auto-dispatch column WIP limit                                                     | ✅     | `34535ea`                                      |
+| 5     | 5.1 WsHandler tests                                                                    | ✅     | `d784b88`                                      |
+| 5     | 5.2 ProjectManager tests (initial)                                                     | ✅     | `e6fda0d`                                      |
+| 5     | 5.3 AgentProcess tests                                                                 | ✅     | `a295a04`                                      |
+| 6     | 6.1 sendStartRun dedup                                                                 | ✅     | `6ab8c07`                                      |
+| 6     | 6.2 Shared handler extraction                                                          | ✅     | `42aaae3`                                      |
+| 6     | 6.3 Sprint A — PageManager extraction                                                  | ✅     | `44fe1d4`                                      |
+| 6     | 6.3 Sprint A.1 — Migrations extraction (bonus)                                         | ✅     | `0a6ed05`                                      |
+| 6     | 6.3 Sprint B — MilestoneManager extraction                                             | ✅     | (this commit)                                  |
+| 6     | 6.3 Sprint C1 — Pure helper extraction                                                 | ✅     | (continuation-prompt + session-history)        |
+| 6     | 6.3 Sprint C2a — getGitFilesChanged extraction                                         | ✅     | (git-files-changed.ts)                         |
+| 6     | 6.3 Sprint C2b — Artifacts fs extraction                                               | ✅     | (artifacts-fs.ts)                              |
+| 6     | 6.3 Sprint C2c.1 — Orchestrator scaffold + config/concurrency                          | ✅     | (supervisor-orchestrator.ts)                   |
+| 6     | 6.3 Sprint C2c.2 — Retry queue + stall detection                                       | ✅     | (supervisor-orchestrator.ts)                   |
+| 6     | 6.3 Sprint C2c.3 — machines map + createMachine + handleMachineRunEnd + withTicketLock | ✅     | (supervisor-orchestrator.ts)                   |
+| 6     | 6.3 Sprint C2c.4 — ensureSupervisorInfra + resolveTicketWorkspace + session + codetab  | ✅     | (supervisor-orchestrator.ts + worktree-ops.ts) |
+| 6     | 6.3 Sprint C2c.5 — Lifecycle entry points (start/stop/send/reset/cleanup)              | ✅     | (supervisor-orchestrator.ts)                   |
+| 6     | 6.3 Sprint C2c.6+ — Task map / autodispatch / tool dispatch / prompt assembly          | 🟡     | In progress                                    |
 
 ### Deep testing wave (follow-up to Phase 5)
 
@@ -43,32 +46,33 @@ After Phase 5 landed, a full testing pass was run assuming the code was buggy. E
 major orchestration surface is now covered, and the test suite grew from 720 → 812 tests.
 **Seven bugs were discovered and fixed along the way:**
 
-| # | Bug | Found in wave | Fixed in |
-|---|-----|---------------|----------|
-| 1 | `TicketRun.startedAt` collapsed onto `endedAt` because every `onTokenUsage` callback bumped `ticket.updatedAt` — UI always showed ~0ms run durations. Fixed by tracking `runStartedAt` per ticket in a private Map. | T1 | `3ca8817` |
-| 2 | Auto-dispatch moved a ticket into column 2 **before** calling `startSupervisor`. If `startSupervisor` rejected (hook failure, concurrency lost mid-tick, preflight failure), the ticket was stranded in column 2 and `getNextTicket` would never re-pick it. Fixed by reverting the column move on failure. | T4 | `0218c01` |
-| 3 | `moveTicketToColumn` only cancelled pending retry timers on terminal moves. Shelving a ticket back to backlog or advancing it into a gated column stopped the supervisor but left the retry timer armed — a shelved ticket could revive itself. Fixed with `cancelRetry` on both branches. | T3 | `cb92d95` |
-| 4 | `ITicketMachine` interface was missing `sendMessage` entirely and had a narrower `createSession` signature than the real `TicketMachine` class — the streaming-branch call site was only type-checked against the concrete class, and tests couldn't mock it. Fixed by widening the interface. | T6 | `ba30db6` |
-| 5 | `scheduleRetry`'s `failureClass === 'completed'` branches were unreachable dead code (`decideRunEndAction` never returns `retry` with a completed failure class — completions take the `continue` path directly). Removed dead branches + the unused `CONTINUATION_RETRY_DELAY_MS` constant. | T2 | `197364a` |
-| 6 | v13→v14 schema migration stripped empty `properties: {}` keys from pages into a local `keptPages` array but only persisted the cleaned version when `recovered.length > 0 \|\| keptPages.length !== pagesRaw.length`. If every page had an empty `properties: {}` and none moved to inbox, neither condition held and the cleaned version was silently discarded. Fixed with a `strippedAny` flag. | T10 | `0a6ed05` |
-| 7 | `resetStaleTicketStates` wipes `error` phase → `idle` on boot. Documented as intentional (in-memory retry counters are gone) but now pinned by a test so future changes update both the comment and the test in lockstep. | T7 | `b98e2e5` (test only) |
+| #   | Bug                                                                                                                                                                                                                                                                                                                                                                                                | Found in wave | Fixed in              |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | --------------------- |
+| 1   | `TicketRun.startedAt` collapsed onto `endedAt` because every `onTokenUsage` callback bumped `ticket.updatedAt` — UI always showed ~0ms run durations. Fixed by tracking `runStartedAt` per ticket in a private Map.                                                                                                                                                                                | T1            | `3ca8817`             |
+| 2   | Auto-dispatch moved a ticket into column 2 **before** calling `startSupervisor`. If `startSupervisor` rejected (hook failure, concurrency lost mid-tick, preflight failure), the ticket was stranded in column 2 and `getNextTicket` would never re-pick it. Fixed by reverting the column move on failure.                                                                                        | T4            | `0218c01`             |
+| 3   | `moveTicketToColumn` only cancelled pending retry timers on terminal moves. Shelving a ticket back to backlog or advancing it into a gated column stopped the supervisor but left the retry timer armed — a shelved ticket could revive itself. Fixed with `cancelRetry` on both branches.                                                                                                         | T3            | `cb92d95`             |
+| 4   | `ITicketMachine` interface was missing `sendMessage` entirely and had a narrower `createSession` signature than the real `TicketMachine` class — the streaming-branch call site was only type-checked against the concrete class, and tests couldn't mock it. Fixed by widening the interface.                                                                                                     | T6            | `ba30db6`             |
+| 5   | `scheduleRetry`'s `failureClass === 'completed'` branches were unreachable dead code (`decideRunEndAction` never returns `retry` with a completed failure class — completions take the `continue` path directly). Removed dead branches + the unused `CONTINUATION_RETRY_DELAY_MS` constant.                                                                                                       | T2            | `197364a`             |
+| 6   | v13→v14 schema migration stripped empty `properties: {}` keys from pages into a local `keptPages` array but only persisted the cleaned version when `recovered.length > 0 \|\| keptPages.length !== pagesRaw.length`. If every page had an empty `properties: {}` and none moved to inbox, neither condition held and the cleaned version was silently discarded. Fixed with a `strippedAny` flag. | T10           | `0a6ed05`             |
+| 7   | `resetStaleTicketStates` wipes `error` phase → `idle` on boot. Documented as intentional (in-memory retry counters are gone) but now pinned by a test so future changes update both the comment and the test in lockstep.                                                                                                                                                                          | T7            | `b98e2e5` (test only) |
 
 ### Test waves executed
 
-| Wave | Coverage added | Tests |
-|------|----------------|-------|
-| T1 | `handleMachineRunEnd` — run record persistence, stopped/continue/retry branches, continuation delay, max-turns, mid-run terminal column bail, not-streaming guard | 11 |
-| T2 | Retry backoff ladder (0→4), MAX_RETRY_BACKOFF_MS clamping, `handleRetryFired` terminal/no-slots, dead-code pin for `completed` branch | 6 |
-| T3 | `moveTicketToColumn` — terminal cancels retry + cleanup, backlog/gated cancel retry (bug #3), reopen clears resolution, no-op guards, auto-resolve on terminal (added during merge) | 8 |
-| T4 | `autoDispatchTick` — revert on start failure (bug #2), already-active skip | 2 |
-| T5 | `validateDispatchPreflight` every branch + `ensureSupervisorInfra` idempotency (streaming/ready/stale paths) | 14 |
-| T6 | `sendSupervisorMessage` (idle/error/ready/awaiting_input → startRun, streaming → sendMessage, rejection swallowed, no-machine path), `resetSupervisorSession` | 11 |
-| T7 | `restorePersistedTasks` + startup cleanup (orphan task removal, terminal-column worktree cleanup, phase reset) | 8 |
-| T11/T9 | `getNextTicket` priority/blocked-by, milestone CRUD with orphan clear, project CRUD cascade against tmpdir `$HOME` | 14 |
-| T10 | All v3→v16 migration steps individually + full ladder + v-current idempotency + repair callback | 25 |
-| T8 | `getFilesChanged` against a real tmpdir git repo — untracked/modified/added/deleted/binary/zero-commit paths | 8 |
+| Wave   | Coverage added                                                                                                                                                                      | Tests |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| T1     | `handleMachineRunEnd` — run record persistence, stopped/continue/retry branches, continuation delay, max-turns, mid-run terminal column bail, not-streaming guard                   | 11    |
+| T2     | Retry backoff ladder (0→4), MAX_RETRY_BACKOFF_MS clamping, `handleRetryFired` terminal/no-slots, dead-code pin for `completed` branch                                               | 6     |
+| T3     | `moveTicketToColumn` — terminal cancels retry + cleanup, backlog/gated cancel retry (bug #3), reopen clears resolution, no-op guards, auto-resolve on terminal (added during merge) | 8     |
+| T4     | `autoDispatchTick` — revert on start failure (bug #2), already-active skip                                                                                                          | 2     |
+| T5     | `validateDispatchPreflight` every branch + `ensureSupervisorInfra` idempotency (streaming/ready/stale paths)                                                                        | 14    |
+| T6     | `sendSupervisorMessage` (idle/error/ready/awaiting_input → startRun, streaming → sendMessage, rejection swallowed, no-machine path), `resetSupervisorSession`                       | 11    |
+| T7     | `restorePersistedTasks` + startup cleanup (orphan task removal, terminal-column worktree cleanup, phase reset)                                                                      | 8     |
+| T11/T9 | `getNextTicket` priority/blocked-by, milestone CRUD with orphan clear, project CRUD cascade against tmpdir `$HOME`                                                                  | 14    |
+| T10    | All v3→v16 migration steps individually + full ladder + v-current idempotency + repair callback                                                                                     | 25    |
+| T8     | `getFilesChanged` against a real tmpdir git repo — untracked/modified/added/deleted/binary/zero-commit paths                                                                        | 8     |
 
 **Also landed during the testing wave:**
+
 - `vitest.config.ts` aliases `electron` → `src/server/electron-shim.ts` so main-process modules run under plain Node tests.
 - Extracted `runMigrations` from the 440-line `ProjectManager.migrateToSupervisor` static method into pure `src/lib/project-migrations.ts` with dependency injection for fs side effects — gives ~440 lines of file-size relief and makes each migration step testable in isolation. This wasn't in the original 6.3 plan but was the right seam to extract first.
 - Merged upstream's v15→v16 schema migration + `archivedAt` + auto-resolve-on-terminal behavior through the pure migrations module.
@@ -86,10 +90,12 @@ major orchestration surface is now covered, and the test suite grew from 720 →
 **Root cause:** `Page` has no `properties` field in the type or schema. `serializePageFile`/`parsePageFile` don't know about it, so properties (milestoneId, status, size, outcome, notDoing, laterAt) are silently dropped on write→read, corrupting user data.
 
 **Files to change:**
+
 - `src/shared/types.ts`
 - `src/lib/project-files.ts`
 
 **`src/shared/types.ts`** — add before the `Page` type:
+
 ```ts
 export type PageProperties = {
   status?: string;
@@ -101,9 +107,11 @@ export type PageProperties = {
   laterAt?: number;
 };
 ```
+
 Add `properties?: PageProperties` to the `Page` type.
 
 **`src/lib/project-files.ts`:**
+
 1. Add a `PagePropertiesSchema` Zod object above `PageMetaSchema` with all the same optional fields.
 2. Add `properties: PagePropertiesSchema` to `PageMetaSchema`.
 3. In `parsePageFile`, assign `page.properties = m.properties ?? undefined` (omit key entirely if empty object).
@@ -128,17 +136,18 @@ Add `properties?: PageProperties` to the `Page` type.
 Note: the `artifact:` protocol handler in `main/index.ts` already has correct path traversal protection — apply the same pattern here.
 
 **Files to change:**
+
 - `src/main/util.ts` (add helper)
 - `src/server/managers.ts` (4 handlers)
 - `src/main/index.ts` (4 handlers, defense-in-depth)
 
 **`src/main/util.ts`** — add:
+
 ```ts
 export function validateConfigPath(filePath: string, configDir: string): void {
   const resolvedFile = path.resolve(filePath);
   const resolvedConfig = path.resolve(configDir);
-  if (!resolvedFile.startsWith(resolvedConfig + path.sep) &&
-      resolvedFile !== resolvedConfig) {
+  if (!resolvedFile.startsWith(resolvedConfig + path.sep) && resolvedFile !== resolvedConfig) {
     throw new Error(`Access denied: path is outside config directory`);
   }
   if (filePath.includes('\0')) {
@@ -150,6 +159,7 @@ export function validateConfigPath(filePath: string, configDir: string): void {
 **`src/server/managers.ts` and `src/main/index.ts`** — add `validateConfigPath(filePath, OMNI_CONFIG_DIR)` as the first line of each `config:read-json-file`, `config:write-json-file`, `config:read-text-file`, `config:write-text-file` handler. The throw propagates through `WsHandler.handleMessage`'s existing try/catch and returns an error response to the client.
 
 **Tests to write:** `src/lib/util-config-path.test.ts`
+
 - Path inside config dir → passes
 - Path using `../` traversal → throws
 - Sibling directory path → throws
@@ -165,6 +175,7 @@ export function validateConfigPath(filePath: string, configDir: string): void {
 **Root cause:** `POST /proxy/_register` in `proxy-rewriter.ts` accepts any `{ name, upstream }` from any HTTP client with no authentication. Any client that can reach the Fastify port can register `upstream=http://169.254.169.254/` (cloud metadata), `upstream=http://localhost:5432/` (internal Postgres), etc., then retrieve it through `/proxy/{name}/`.
 
 **Files to change:**
+
 - `src/server/proxy-rewriter.ts`
 
 **Change:** Restrict `_register` to loopback-only connections. Add an `onRequest` hook:
@@ -173,10 +184,7 @@ export function validateConfigPath(filePath: string, configDir: string): void {
 fastify.post('/proxy/_register', {
   onRequest: (req, reply, done) => {
     const addr = req.socket.remoteAddress ?? '';
-    const isLoopback =
-      addr === '127.0.0.1' ||
-      addr === '::1' ||
-      addr === '::ffff:127.0.0.1';
+    const isLoopback = addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
     if (!isLoopback && !process.env['OMNI_ALLOW_EXTERNAL_REGISTER']) {
       reply.code(403).send({ error: 'Forbidden: only loopback clients may register upstreams' });
       return;
@@ -192,6 +200,7 @@ fastify.post('/proxy/_register', {
 The `OMNI_ALLOW_EXTERNAL_REGISTER` env var is an escape hatch for deployments that genuinely need remote registration (should document that callers must be trusted).
 
 **Tests to write:** Add to a new `src/server/proxy-rewriter.test.ts`:
+
 - Request from `127.0.0.1` → 200
 - Request from external IP → 403
 - With `OMNI_ALLOW_EXTERNAL_REGISTER=1` from external IP → 200
@@ -205,6 +214,7 @@ The `OMNI_ALLOW_EXTERNAL_REGISTER` env var is an escape hatch for deployments th
 **Root cause:** `WsHandler` accepts any WebSocket connection with no token, no origin check, no rate limiting. In server mode, anyone reaching the Fastify port gets full access to all IPC handlers: `store:set` (overwrite all app state), `agent-process:start` (spawn processes), `config:write-text-file` (file I/O).
 
 **Files to change:**
+
 - `src/server/index.ts` (token generation + WS route guard)
 - `src/renderer/transport/ws-transport.ts` (token acquisition + URL construction)
 
@@ -240,6 +250,7 @@ if (token !== wsToken) {
 On startup, fetch `GET /api/ws-token` (loopback, so this is safe). Append the token to the WebSocket URL: `ws://localhost:PORT/ws?token=${token}`. Store the token in a module-level variable; do not expose it to the renderer beyond the transport module.
 
 **Tests to write:** Add to `src/server/ws-handler.test.ts` (see Fix 5.1):
+
 - Connection without token → close with 4401
 - Connection with wrong token → close with 4401
 - Connection with correct token → proceeds normally
@@ -255,6 +266,7 @@ On startup, fetch `GET /api/ws-token` (loopback, so this is safe). Append the to
 **Root cause:** In `server/managers.ts`, `createProjectManager` is called before `createProcessManager`, so `processManager` is never passed. In server mode, `ProjectManager.processManager` is always `undefined`, which means `statusFallback` is never wired. Code tabs linked to a supervisor ticket cannot reuse the supervisor's running sandbox — status is always `uninitialized`. The bug is completely silent (no error thrown).
 
 **Files to change:**
+
 - `src/server/managers.ts`
 
 **Change:** Reorder calls so `createProcessManager` runs first, then pass `processManager` into `createProjectManager`:
@@ -287,9 +299,11 @@ const [, cleanupProject] = createProjectManager({
 **Root cause:** `project-manager.ts` lines 552–555 use `Math.max` to update token counts. The intent is to accumulate tokens across continuation turns, but `Math.max` only keeps the peak value from a single streaming update. Multi-run tickets show the highest single-update count, not the running total.
 
 **Files to change:**
+
 - `src/main/project-manager.ts`
 
 **Change:**
+
 ```ts
 // Before (wrong — keeps peak, not total):
 const updated = {
@@ -323,11 +337,13 @@ These are independent and can be done in any order.
 **Root cause:** `ServerIpcAdapter` doesn't satisfy the `IpcListener<IpcEvents>` interface from `@electron-toolkit/typed-ipc`, so all 7 manager factory calls use `as any` to bypass the type system. Broken handler signatures in server mode are invisible to the TypeScript compiler.
 
 **Files to change:**
+
 - `src/shared/ipc-listener.ts` (new file)
 - `src/server/ipc-adapter.ts`
 - `src/main/process-manager.ts`, `src/main/console-manager.ts`, `src/main/project-manager.ts`, `src/main/extension-manager.ts`, `src/main/omni-install-manager.ts` (factory signatures)
 
 **New `src/shared/ipc-listener.ts`:**
+
 ```ts
 /**
  * Minimal IPC listener interface satisfied by both Electron's IpcListener
@@ -352,11 +368,13 @@ Change each manager factory's `ipc` parameter type from `IpcListener<IpcEvents>`
 **Root cause:** `handleClientToolCall` in `project-manager.ts` has ~20 error branches that call `respond(true, { error: 'message' })`. The first argument signals success to the agent. The agent receives `ok=true` and must inspect the result object to detect failure — an unreliable contract.
 
 **Files to change:**
+
 - `src/main/project-manager.ts`
 
 **Change:** Replace all `respond(true, { error: ... })` with `respond(false, { error: { message: '...' } })` — matching the structure of the one already-correct `respond(false, ...)` call in the file.
 
 Example:
+
 ```ts
 // Before
 respond(true, { error: `Unknown column: "${columnLabel}". Valid columns: ${valid}` });
@@ -376,9 +394,11 @@ respond(false, { error: { message: `Unknown column: "${columnLabel}". Valid colu
 **Root cause:** `WorkspaceSyncManager` uses Node's `fs.watch({ recursive: true })` to watch the workspace directory. On Linux, inotify does not support recursive watching — `recursive: true` is silently ignored (it's a macOS/Windows-only option). File changes in subdirectories are missed, breaking incremental sync. chokidar is already a dependency and already used in `src/lib/page-watcher.ts`.
 
 **Files to change:**
+
 - `src/main/workspace-sync-manager.ts`
 
 **Change:** Replace:
+
 ```ts
 import { watch, type FSWatcher } from 'node:fs';
 // ...
@@ -388,17 +408,20 @@ const watcher = watch(session.workspaceDir, { recursive: true }, (_event, filena
 ```
 
 With:
+
 ```ts
 import chokidar from 'chokidar';
 // ...
-const watcher = chokidar.watch(session.workspaceDir, {
-  ignoreInitial: true,
-  persistent: true,
-  ignored: /(^|[/\\])\../,  // hidden files/dirs
-  awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 100 },
-}).on('all', (_event, filePath) => {
-  // handle change — filePath is the full absolute path
-});
+const watcher = chokidar
+  .watch(session.workspaceDir, {
+    ignoreInitial: true,
+    persistent: true,
+    ignored: /(^|[/\\])\../, // hidden files/dirs
+    awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 100 },
+  })
+  .on('all', (_event, filePath) => {
+    // handle change — filePath is the full absolute path
+  });
 ```
 
 Update `session.watcher` type from `FSWatcher` (node:fs) to `chokidar.FSWatcher`. Cleanup: `await session.watcher.close()` (chokidar's `close()` returns a Promise).
@@ -412,11 +435,13 @@ Update `session.watcher` type from `FSWatcher` (node:fs) to `chokidar.FSWatcher`
 **Root cause:** `let rpcIdCounter = 0` in `ticket-machine.ts` is module-global state, shared across all `TicketMachine` instances. Under test parallelism, RPC IDs are non-deterministic. Under a long-running server, integer growth is unbounded (not a practical issue but semantically wrong).
 
 **Files to change:**
+
 - `src/main/ticket-machine.ts`
 
 **Change:** Delete the module-level `let rpcIdCounter = 0` and `const nextRpcId`. Add `private rpcIdCounter = 0` as an instance field. Replace all `nextRpcId()` call sites with `String(++this.rpcIdCounter)`.
 
 **Tests:** Add to `src/lib/ticket-machine.test.ts`:
+
 ```ts
 it('RPC ID sequences are independent across instances', () => {
   const m1 = new TicketMachine('t1', callbacks);
@@ -436,9 +461,11 @@ it('RPC ID sequences are independent across instances', () => {
 **Root cause:** `autoDispatchTick` checks `MAX_CONCURRENT_SUPERVISORS` globally but does not call `canStartSupervisor(projectId, columnId)`. The `canStartSupervisor` method already handles both global and per-column limits. Auto-dispatch can therefore exceed a column's configured WIP limit.
 
 **Files to change:**
+
 - `src/main/project-manager.ts`
 
 **Change:** In `autoDispatchTick`, replace the inline global count check with:
+
 ```ts
 if (!this.canStartSupervisor(project.id, nextTicket.columnId)) {
   continue;
@@ -516,7 +543,13 @@ Build minimal stubs implementing the dep-injection interfaces:
 // src/lib/project-manager.test.ts
 
 import { vi, describe, it, expect, beforeEach } from 'vitest';
-import type { ITicketMachine, ISandbox, IMachineFactory, ISandboxFactory, MachineCallbacks } from './project-manager-deps';
+import type {
+  ITicketMachine,
+  ISandbox,
+  IMachineFactory,
+  ISandboxFactory,
+  MachineCallbacks,
+} from './project-manager-deps';
 import type { StoreData, TicketId } from '@/shared/types';
 import type { TicketPhase } from '@/shared/ticket-phase';
 
@@ -525,8 +558,12 @@ const makeStore = (initial: Partial<StoreData>) => {
   const data = { ...defaultStoreData, ...initial };
   return {
     get: (k: keyof StoreData) => data[k] as any,
-    set: (k: keyof StoreData, v: any) => { data[k] = v; },
-    get store() { return data; },
+    set: (k: keyof StoreData, v: any) => {
+      data[k] = v;
+    },
+    get store() {
+      return data;
+    },
   };
 };
 
@@ -535,11 +572,17 @@ const makeMachineStub = (ticketId: TicketId, callbacks: MachineCallbacks): ITick
   let phase: TicketPhase = 'idle';
   return {
     getPhase: () => phase,
-    isActive: () => ['provisioning','connecting','running','continuing','retrying','awaiting_input'].includes(phase),
-    isStreaming: () => ['running','continuing'].includes(phase),
+    isActive: () =>
+      ['provisioning', 'connecting', 'running', 'continuing', 'retrying', 'awaiting_input'].includes(phase),
+    isStreaming: () => ['running', 'continuing'].includes(phase),
     getSessionId: () => 'stub-session',
-    transition: (to) => { phase = to; callbacks.onPhaseChange(ticketId, to); },
-    forcePhase: (to) => { phase = to; },
+    transition: (to) => {
+      phase = to;
+      callbacks.onPhaseChange(ticketId, to);
+    },
+    forcePhase: (to) => {
+      phase = to;
+    },
     setWsUrl: vi.fn(),
     createSession: vi.fn().mockResolvedValue('stub-session'),
     startRun: vi.fn().mockResolvedValue({ sessionId: 'stub-session' }),
@@ -547,7 +590,9 @@ const makeMachineStub = (ticketId: TicketId, callbacks: MachineCallbacks): ITick
     dispose: vi.fn(),
     recordActivity: vi.fn(),
     cancelRetryTimer: vi.fn(),
-    scheduleRetryTimer: vi.fn((ms, cb) => { setTimeout(cb, ms); }),
+    scheduleRetryTimer: vi.fn((ms, cb) => {
+      setTimeout(cb, ms);
+    }),
     continuationTurn: 0,
     retryAttempt: 0,
     lastActivityAt: Date.now(),
@@ -652,9 +697,11 @@ describe('AgentProcess')
 **Root cause:** `project-manager.ts` (lines 97–180) contains its own WebSocket + JSON-RPC + retry implementation that predates `TicketMachine`. There are now two parallel retry systems with different parameters: `TicketMachine.startRun()` (used for fleet tickets) and `sendStartRun()` (used for task-mode runs). They can drift independently.
 
 **Files to change:**
+
 - `src/main/project-manager.ts`
 
 **Approach:**
+
 1. Audit every `sendStartRun` call site in `ProjectManager`. Each should be replaceable with `machine.startRun(prompt)` — `TicketMachine` already owns the WS URL after `setWsUrl()` is called.
 2. Verify retry behavior equivalence: `sendStartRun` uses `maxRetries=10, retryDelayMs=2000`. If `TicketMachine.startRun` behavior differs, adjust it first.
 3. Remove `sendStartRunOnce`, `sendStartRun`, and the duplicate `SAFE_TOOL_OVERRIDES` constant (it also exists in `ticket-machine.ts`).
@@ -668,6 +715,7 @@ describe('AgentProcess')
 **Root cause:** `config:*` and `util:*` handlers are copy-pasted verbatim between `main/index.ts` (~30 handlers) and `server/managers.ts` (~30 handlers). Fixes to either (e.g., path validation from Fix 2.1) must be applied twice, and drift is inevitable.
 
 **Files to change:**
+
 - `src/shared/ipc-handlers.ts` (new file — extracted registration functions)
 - `src/main/index.ts` (replace inline registrations with calls)
 - `src/server/managers.ts` (replace inline registrations with calls)
@@ -679,7 +727,7 @@ describe('AgentProcess')
 export function registerConfigHandlers(ipc: IIpcListener, configDir: string): void {
   ipc.handle('config:get-omni-config-dir', () => configDir);
   ipc.handle('config:read-json-file', async (_, filePath) => {
-    validateConfigPath(filePath, configDir);  // Fix 2.1 lives here — applied once
+    validateConfigPath(filePath, configDir); // Fix 2.1 lives here — applied once
     // ...
   });
   // etc.
@@ -738,6 +786,53 @@ Completed increments (each commit ships regression-green with `npm test`):
   module. Tests gained an `orch(pm)` helper — the three `canStartSupervisor`
   sites migrated off the `internals()` cast, plus two new direct-to-orchestrator
   assertions. Test count 831 → 833.
+- \*\*C2c.4 — `ensureSupervisorInfra` + `resolveTicketWorkspace` + `ensureSession`
+  - `getCodeTabWsUrl` + `getSupervisorStatusForCodeTab`:\*\* Provisioning core
+    moved. The orchestrator's store adapter grew three readers
+    (`getSandboxBackend`, `getPlatformCredentials`, `getCodeTabs`); deps gained
+    `sandboxFactory` and optional `processManager`; host gained
+    `resolveTicketBranch` and lost `ensureSupervisorInfra` (orchestrator calls
+    its own method from `handleRetryFired` now). A new `SupervisorTaskRegistry`
+    adapter was introduced so the orchestrator can register / patch
+    supervisor-owned tasks while the `tasks` Map stays in PM until C2c.6 — PM
+    implements `register` / `get` / `patchTask` as thin wrappers over
+    `this.tasks` + `this.persistTask`. The orchestrator's `sandbox.onStatusChange`
+    closure routes task updates through the registry and forwards the
+    `project:task-status` / `agent-process:status` IPC events through its own
+    `sendToWindow` dep. The 200 lines of worktree helpers
+    (`generateWorktreeName`, `createWorktree`, `removeWorktree`, plus
+    `checkGitRepo`) were extracted into a new `src/main/worktree-ops.ts` so
+    both PM and the orchestrator can import them — PM still uses `removeWorktree`
+    from five cleanup sites and `checkGitRepo` from one IPC handler. PM keeps
+    one-line delegators for the five moved methods (`ensureSupervisorInfra`,
+    `ensureSupervisorInfraLocked`, `getSupervisorStatusForCodeTab`,
+    `getTicketWorkspaceLocked`, `getCodeTabWsUrl`) so existing IPC handlers
+    and PM internals stay wired. `project-manager.ts` dropped 3027 → 2519
+    lines (-508). Test count: 833 (no behavior change — move only).
+- \*\*C2c.3 — `machines` / `runStartedAt` / `ticketLocks` state + `createMachine`
+  - `withTicketLock` + `handleMachineRunEnd`:\*\* The biggest single state move
+    to date. The three maps are now public `readonly` fields on
+    `SupervisorOrchestrator`, and the three methods are public on the class.
+    PM's `this.machines` / `this.runStartedAt` access points (~30 sites) are
+    rewritten to `this.supervisors.machines` / `this.supervisors.runStartedAt`.
+    PM keeps a thin `withTicketLock` delegator for its own internal callers
+    (startSupervisor, stopSupervisor, etc.) — the body just forwards to
+    `this.supervisors.withTicketLock`. The orchestrator's host surface gained
+    four new accessors that PM still owns for now: `updateTicket`, `getColumn`,
+    `buildContinuationPromptForTicket`, and `handleClientToolCall`. It also
+    gained `sendToWindow` on deps (needed by `createMachine`'s callbacks) and
+    an optional `machineFactory` slot (threaded through from PM's DI). The old
+    host callbacks `getMachineEntry`, `iterateMachines`, and `withTicketLock`
+    are gone — orchestrator's internal methods (`canStartSupervisor`,
+    `scheduleRetry`, `handleRetryFired`, `cancelRetry`, `cancelAllRetries`,
+    `checkForStalledSupervisors`) now touch `this.machines` / `this.withTicketLock`
+    directly. Test sites that seeded machines via
+    `internals(pm).createMachine(...)` + `internals(pm).machines.set(...)` now
+    use `orch(pm).createMachine(...)` + `orch(pm).machines.set(...)`. The
+    `internals()` cast shrank from 10 methods to 6 (kept: `autoDispatchTick`,
+    `handleClientToolCall`, `validateDispatchPreflight`, `ensureSupervisorInfra`).
+    `project-manager.ts` dropped 3209 → 3027 lines (-182). Test count: 833 (no
+    behavior change — move only).
 - **C2c.2 — Retry queue + stall detection:** Moved `scheduleRetry`,
   `handleRetryFired`, `cancelRetry`, `cancelAllRetries`, `startStallDetection`,
   `stopStallDetection`, and `checkForStalledSupervisors` out of
@@ -759,38 +854,42 @@ Completed increments (each commit ships regression-green with `npm test`):
   `orch(pm)`; their entries dropped from the `internals()` cast type along
   with `checkForStalledSupervisors`. The cast surface shrank from 13 methods
   to 10. Test count: 833 (no new tests — migration only).
+- **C2c.5 — Lifecycle entry points:** Moved `startSupervisor`,
+  `stopSupervisor`, `sendSupervisorMessage`, `sendUserRunMessage` (private),
+  `resetSupervisorSession`, `startMachineRun`, and `cleanupTicketWorkspace`
+  into `SupervisorOrchestrator`. PM keeps thin one-line delegators for
+  `startSupervisor`/`stopSupervisor`/`sendSupervisorMessage`/
+  `resetSupervisorSession`/`cleanupTicketWorkspace` so existing IPC handlers
+  and PM internal call sites (`autoDispatchTick`, `moveTicketToColumn`,
+  `removeTask`) stay wired without churn. The `runStartedAt.set` stamp now
+  lives inside the orchestrator's `startMachineRun`. `handleMachineRunEnd`'s
+  continue branch and `handleRetryFired`'s re-dispatch path now call
+  `this.startMachineRun(...)` directly, so the temporary
+  `host.startMachineRun` callback was removed. The host surface gained
+  `validateDispatchPreflight` (still owned by PM until C2c.7) and
+  `taskRegistry` gained `unregister(taskId)` (delete + removePersisted)
+  for `cleanupTicketWorkspace`. One test that stubbed
+  `pm.ensureSupervisorInfra` migrated to stub
+  `orch(pm).ensureSupervisorInfra` instead. `project-manager.ts` dropped
+  2519 → 2292 lines (-227). Test count: 833 (no behavior change — move only).
 
-Cumulative file-size delta: `project-manager.ts` 3937 → 3204 lines (-733).
+Cumulative file-size delta: `project-manager.ts` 3937 → 2292 lines (-1645).
 Test count 812 → 833.
 
 Remaining execution plan (tests migrate off the `internals()` cast onto
 `orch(pm)` as each piece moves; the cast shrinks every commit and disappears
 entirely after the last step):
 
-- **C2c.3 — `createMachine` + `handleMachineRunEnd` + `withTicketLock` +
-  `machines`/`runStartedAt` ownership transfer.** Biggest single state move:
-  the `machines` Map relocates into the orchestrator. The temporary
-  `countActiveMachines*` host callbacks from C2c.1 get deleted (orchestrator
-  iterates its own map). Test sites that currently do
-  `internals(pm).machines.set(...)` switch to `orch(pm).getMachineEntry(id)` /
-  a test-only `seedMachineEntry` helper.
-- **C2c.4 — `ensureSupervisorInfra` + `resolveTicketWorkspace` +
-  `ensureSession` + `getCodeTabWsUrl`.** Provisioning core. Removes the
-  host callback added in C2c.2.
-- **C2c.5 — `startSupervisor` / `stopSupervisor` /
-  `sendSupervisorMessage` / `sendUserRunMessage` / `resetSupervisorSession` /
-  `startMachineRun` / `cleanupTicketWorkspace`.** Lifecycle entry points.
-  PM's IPC handlers now forward directly to `this.supervisors.*`.
 - **C2c.6 — Task persistence + `restorePersistedTasks` +
   `startupTerminalCleanup` + `resetStaleTicketStates` + `stopTask` +
   `removeTask` + `tasks` map.** The second state-ownership transfer.
 - **C2c.7 — `validateDispatchPreflight` + `autoDispatchTick` +
   `setAutoDispatch` + `getFilesChanged`.** Auto-dispatch loop.
-- **C2c.8 — `handleClientToolCall` (~450 lines) + `buildFullSupervisorPrompt`
-  + `buildRunVariables` + `buildContinuationPromptForTicket`.** Largest
-  single move by line count, but fully self-contained once the host
-  surface exposes `getPagesByProject` / `readPageContent` / milestone
-  accessors.
+- \*\*C2c.8 — `handleClientToolCall` (~450 lines) + `buildFullSupervisorPrompt`
+  - `buildRunVariables` + `buildContinuationPromptForTicket`.\*\* Largest
+    single move by line count, but fully self-contained once the host
+    surface exposes `getPagesByProject` / `readPageContent` / milestone
+    accessors.
 - **C2c.9 — Final cleanup.** Delete the `internals()` cast entirely and
   split `project-manager.test.ts` into a slimmer PM test plus a new
   `supervisor-orchestrator.test.ts` for the migrated coverage.
@@ -821,36 +920,39 @@ built the safety net it needs.
 
 ## Effort Estimates
 
-| Fix | Phase | Size | Status | Notes |
-|-----|-------|------|--------|-------|
-| 1.1 Page.properties roundtrip | 1 | S | ✅ | Type + schema + serialize/parse |
-| 2.1 Config path validation | 2 | S | ✅ | Helper + 8 use sites (4 handlers × 2 files) |
-| 2.2 SSRF proxy auth | 2 | S | ✅ | Loopback IP check on `_register` |
-| 2.3 WS authentication | 2 | M | ✅ | Token gen + route guard + renderer change |
-| 3.1 processManager in server mode | 3 | S | ✅ | Reorder + pass one arg |
-| 3.2 Token accumulation | 3 | XS | ✅ | 3-line change |
-| 4.1 Eliminate `as any` | 4 | M | ✅ | New interface + thread through factories |
-| 4.2 `respond(false)` on errors | 4 | S | ✅ | Mechanical, ~20 sites |
-| 4.3 chokidar in WorkspaceSyncManager | 4 | S | ✅ | Swap import + API |
-| 4.4 rpcIdCounter → instance field | 4 | XS | ✅ | Move to instance |
-| 4.5 Auto-dispatch column WIP limit | 4 | XS | ✅ | One `canStartSupervisor` call |
-| 5.1 WsHandler tests | 5 | M | ✅ | ~200 lines |
-| 5.2 ProjectManager tests | 5 | L | ✅ | Initial ~500 lines; then T1–T11 wave to 105 tests |
-| 5.3 AgentProcess tests | 5 | M | ✅ | ~250 lines |
-| 6.1 sendStartRun dedup | 6 | M | ✅ | Audit + remove |
-| 6.2 Shared handler extraction | 6 | M | ✅ | Mechanical extraction |
-| 6.3 Sprint A PageManager | 6 | M | ✅ | 348 lines moved out |
-| 6.3 Migrations extraction (bonus) | 6 | M | ✅ | 440 lines moved to pure lib |
-| 6.3 Sprint B MilestoneManager | 6 | S | ✅ | ~120 lines extracted via narrow store adapter |
-| 6.3 Sprint C1 Pure helpers | 6 | S | ✅ | continuation-prompt + session-history + 18 tests |
-| 6.3 Sprint C2a getGitFilesChanged | 6 | M | ✅ | 330 lines → pure lib |
-| 6.3 Sprint C2b Artifacts fs | 6 | S | ✅ | listArtifacts + readArtifact + openArtifactExternal |
-| 6.3 Sprint C2c.1 Orchestrator scaffold | 6 | M | ✅ | config/concurrency/WIP + 2 new tests through `orch(pm)` |
-| 6.3 Sprint C2c.2 Retry queue + stall | 6 | M | ✅ | retry/stall moved; 6 test sites migrated; cast surface 13 → 10 |
-| 6.3 Sprint C2c.3–9 Lifecycle/state migration | 6 | XL | 🟡 | machines map, ensureSupervisorInfra, tool dispatch, handlers |
-| 6.3 Sprint C3 PM → coordinator | 6 | L | ⏳ | depends on C2c |
-| 6.3 Sprint C4 IPC handler split | 6 | M | ⏳ | depends on C3 |
-| T1–T11 deep testing wave (follow-up) | 5+ | L | ✅ | +92 tests, 7 bugs fixed |
+| Fix                                                            | Phase | Size | Status | Notes                                                              |
+| -------------------------------------------------------------- | ----- | ---- | ------ | ------------------------------------------------------------------ |
+| 1.1 Page.properties roundtrip                                  | 1     | S    | ✅     | Type + schema + serialize/parse                                    |
+| 2.1 Config path validation                                     | 2     | S    | ✅     | Helper + 8 use sites (4 handlers × 2 files)                        |
+| 2.2 SSRF proxy auth                                            | 2     | S    | ✅     | Loopback IP check on `_register`                                   |
+| 2.3 WS authentication                                          | 2     | M    | ✅     | Token gen + route guard + renderer change                          |
+| 3.1 processManager in server mode                              | 3     | S    | ✅     | Reorder + pass one arg                                             |
+| 3.2 Token accumulation                                         | 3     | XS   | ✅     | 3-line change                                                      |
+| 4.1 Eliminate `as any`                                         | 4     | M    | ✅     | New interface + thread through factories                           |
+| 4.2 `respond(false)` on errors                                 | 4     | S    | ✅     | Mechanical, ~20 sites                                              |
+| 4.3 chokidar in WorkspaceSyncManager                           | 4     | S    | ✅     | Swap import + API                                                  |
+| 4.4 rpcIdCounter → instance field                              | 4     | XS   | ✅     | Move to instance                                                   |
+| 4.5 Auto-dispatch column WIP limit                             | 4     | XS   | ✅     | One `canStartSupervisor` call                                      |
+| 5.1 WsHandler tests                                            | 5     | M    | ✅     | ~200 lines                                                         |
+| 5.2 ProjectManager tests                                       | 5     | L    | ✅     | Initial ~500 lines; then T1–T11 wave to 105 tests                  |
+| 5.3 AgentProcess tests                                         | 5     | M    | ✅     | ~250 lines                                                         |
+| 6.1 sendStartRun dedup                                         | 6     | M    | ✅     | Audit + remove                                                     |
+| 6.2 Shared handler extraction                                  | 6     | M    | ✅     | Mechanical extraction                                              |
+| 6.3 Sprint A PageManager                                       | 6     | M    | ✅     | 348 lines moved out                                                |
+| 6.3 Migrations extraction (bonus)                              | 6     | M    | ✅     | 440 lines moved to pure lib                                        |
+| 6.3 Sprint B MilestoneManager                                  | 6     | S    | ✅     | ~120 lines extracted via narrow store adapter                      |
+| 6.3 Sprint C1 Pure helpers                                     | 6     | S    | ✅     | continuation-prompt + session-history + 18 tests                   |
+| 6.3 Sprint C2a getGitFilesChanged                              | 6     | M    | ✅     | 330 lines → pure lib                                               |
+| 6.3 Sprint C2b Artifacts fs                                    | 6     | S    | ✅     | listArtifacts + readArtifact + openArtifactExternal                |
+| 6.3 Sprint C2c.1 Orchestrator scaffold                         | 6     | M    | ✅     | config/concurrency/WIP + 2 new tests through `orch(pm)`            |
+| 6.3 Sprint C2c.2 Retry queue + stall                           | 6     | M    | ✅     | retry/stall moved; 6 test sites migrated; cast surface 13 → 10     |
+| 6.3 Sprint C2c.3 Machines map + createMachine + run-end + lock | 6     | L    | ✅     | -182 PM lines; cast surface 10 → 6; machines ownership transferred |
+| 6.3 Sprint C2c.4 Infra provisioning + worktree-ops extraction  | 6     | L    | ✅     | -508 PM lines; new worktree-ops.ts; SupervisorTaskRegistry adapter |
+| 6.3 Sprint C2c.5 Lifecycle entry points                        | 6     | L    | ✅     | -227 PM lines; start/stop/send/reset/cleanup all in orchestrator   |
+| 6.3 Sprint C2c.6–9 Remaining state migration                   | 6     | L    | 🟡     | task map, autodispatch, tool dispatch, prompt assembly             |
+| 6.3 Sprint C3 PM → coordinator                                 | 6     | L    | ⏳     | depends on C2c                                                     |
+| 6.3 Sprint C4 IPC handler split                                | 6     | M    | ⏳     | depends on C3                                                      |
+| T1–T11 deep testing wave (follow-up)                           | 5+    | L    | ✅     | +92 tests, 7 bugs fixed                                            |
 
 ---
 

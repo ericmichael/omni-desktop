@@ -17,34 +17,30 @@ import type {
   IMachineFactory,
   ISandbox,
   ISandboxFactory,
+  ITicketMachine,
   IWorkflowLoader,
   ProjectManagerDeps,
 } from '@/lib/project-manager-deps';
 import { runMigrations as runSchemaMigrations } from '@/lib/project-migrations';
-import { decideRunEndAction } from '@/lib/run-end';
-import { type HistoryRow,parseSessionHistoryRows } from '@/lib/session-history';
+import { type HistoryRow, parseSessionHistoryRows } from '@/lib/session-history';
 import type { TemplateVariables } from '@/lib/template';
 import { hasTemplateExpressions, renderTemplate } from '@/lib/template';
-import { decideWorktreeAction } from '@/lib/worktree';
 import { AgentProcess } from '@/main/agent-process';
 import { writeMarimoAiConfig } from '@/main/extensions/marimo-config';
 import { ensureNotebookCssReference, writeGlassCss } from '@/main/extensions/marimo-glass';
 import { InboxManager, type InboxManagerStore } from '@/main/inbox-manager';
 import { MilestoneManager, type MilestoneManagerStore } from '@/main/milestone-manager';
 import { PageManager, type PageManagerStore } from '@/main/page-manager';
-import { createPlatformClient } from '@/main/platform-mode';
 import type { ProcessManager } from '@/main/process-manager';
-import { MAX_CONCURRENT_SUPERVISORS, MAX_CONTINUATION_TURNS, SupervisorOrchestrator } from '@/main/supervisor-orchestrator';
+import { MAX_CONCURRENT_SUPERVISORS, SupervisorOrchestrator } from '@/main/supervisor-orchestrator';
 import type { SupervisorContext } from '@/main/supervisor-prompt';
 import { buildSupervisorPrompt } from '@/main/supervisor-prompt';
-import type { ClientFunctionResponder } from '@/main/ticket-machine';
-import { TicketMachine } from '@/main/ticket-machine';
-import { ensureDirectory, getDefaultWorkspaceDir, getOmniConfigDir, getProjectDir, getWorktreesDir } from '@/main/util';
+import { ensureDirectory, getDefaultWorkspaceDir, getOmniConfigDir, getProjectDir } from '@/main/util';
 import { WorkflowLoader } from '@/main/workflow-loader';
+import { checkGitRepo, removeWorktree } from '@/main/worktree-ops';
 import type { IIpcListener } from '@/shared/ipc-listener';
 import { DEFAULT_PIPELINE, SIMPLE_PIPELINE } from '@/shared/pipeline-defaults';
-import { getLocalWorkspaceDir, requireLocalWorkspaceDir } from '@/shared/project-source';
-import type { TicketPhase } from '@/shared/ticket-phase';
+import { getLocalWorkspaceDir } from '@/shared/project-source';
 import type {
   AgentProcessStatus,
   ArtifactFileContent,
@@ -52,7 +48,6 @@ import type {
   CodeTabId,
   ColumnId,
   DiffResponse,
-  GitRepoInfo,
   InboxItem,
   IpcRendererEvents,
   Milestone,
@@ -92,205 +87,10 @@ const DEFAULT_BRIEF_TEMPLATE = `## Problem
 
 `;
 
-// #region Name generator
-
-const ADJECTIVES = [
-  'bold',
-  'calm',
-  'cool',
-  'dark',
-  'deep',
-  'dry',
-  'fast',
-  'firm',
-  'flat',
-  'free',
-  'full',
-  'glad',
-  'gold',
-  'good',
-  'gray',
-  'hale',
-  'keen',
-  'kind',
-  'last',
-  'lean',
-  'long',
-  'loud',
-  'mild',
-  'neat',
-  'pale',
-  'pure',
-  'rare',
-  'rich',
-  'ripe',
-  'safe',
-  'slim',
-  'soft',
-  'sure',
-  'tall',
-  'tame',
-  'tidy',
-  'tiny',
-  'true',
-  'vast',
-  'warm',
-  'wide',
-  'wild',
-  'wise',
-  'aged',
-  'airy',
-  'apt',
-  'bare',
-  'blue',
-  'busy',
-  'cold',
-];
-
-const NOUNS = [
-  'ant',
-  'ape',
-  'bat',
-  'bear',
-  'bee',
-  'bird',
-  'boar',
-  'buck',
-  'bull',
-  'calf',
-  'cat',
-  'clam',
-  'cod',
-  'colt',
-  'crab',
-  'crow',
-  'deer',
-  'dog',
-  'dove',
-  'duck',
-  'eagle',
-  'eel',
-  'elk',
-  'fawn',
-  'finch',
-  'fish',
-  'flea',
-  'fly',
-  'fox',
-  'frog',
-  'goat',
-  'goose',
-  'gull',
-  'hare',
-  'hawk',
-  'hen',
-  'hog',
-  'horse',
-  'jay',
-  'lark',
-  'lion',
-  'lynx',
-  'mare',
-  'mink',
-  'mole',
-  'moth',
-  'mule',
-  'newt',
-  'owl',
-  'ox',
-  'pike',
-  'pony',
-  'puma',
-  'ram',
-  'rat',
-  'rook',
-  'seal',
-  'slug',
-  'snail',
-  'swan',
-];
-
-const generateWorktreeName = (): string => {
-  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)]!;
-  const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)]!;
-  return `${adj}-${noun}`;
-};
-
-// #endregion
-
-// #region Git helpers
-
-const checkGitRepo = async (workspaceDir: string): Promise<GitRepoInfo> => {
-  try {
-    await execFileAsync('git', ['-C', workspaceDir, 'rev-parse', '--is-inside-work-tree'], {
-      encoding: 'utf8',
-      timeout: 5_000,
-    });
-  } catch {
-    return { isGitRepo: false };
-  }
-
-  try {
-    const [branchResult, currentResult] = await Promise.all([
-      execFileAsync('git', ['-C', workspaceDir, 'branch', '--list', '--format=%(refname:short)'], {
-        encoding: 'utf8',
-        timeout: 5_000,
-      }),
-      execFileAsync('git', ['-C', workspaceDir, 'branch', '--show-current'], {
-        encoding: 'utf8',
-        timeout: 5_000,
-      }),
-    ]);
-
-    const branches = branchResult.stdout
-      .split('\n')
-      .map((b) => b.trim())
-      .filter(Boolean);
-
-    const currentBranch = currentResult.stdout.trim();
-
-    return { isGitRepo: true, branches, currentBranch };
-  } catch {
-    return { isGitRepo: false };
-  }
-};
-
-const createWorktree = async (workspaceDir: string, branch: string, name: string): Promise<string> => {
-  const worktreesDir = getWorktreesDir();
-  await fs.mkdir(worktreesDir, { recursive: true });
-
-  const worktreePath = path.join(worktreesDir, name);
-  const ticketBranch = `ticket/${name}`;
-
-  await execFileAsync('git', ['-C', workspaceDir, 'worktree', 'add', '-b', ticketBranch, worktreePath, branch], {
-    encoding: 'utf8',
-    timeout: 30_000,
-  });
-
-  return worktreePath;
-};
-
-const removeWorktree = async (workspaceDir: string, worktreePath: string, worktreeName: string): Promise<void> => {
-  try {
-    await execFileAsync('git', ['-C', workspaceDir, 'worktree', 'remove', '--force', worktreePath], {
-      encoding: 'utf8',
-      timeout: 10_000,
-    });
-  } catch (error) {
-    console.warn(`Failed to remove worktree ${worktreePath}: ${error}`);
-  }
-
-  try {
-    await execFileAsync('git', ['-C', workspaceDir, 'branch', '-D', `ticket/${worktreeName}`], {
-      encoding: 'utf8',
-      timeout: 5_000,
-    });
-  } catch (error) {
-    console.warn(`Failed to delete branch ticket/${worktreeName}: ${error}`);
-  }
-};
-
-// #endregion
+// Worktree helpers (generateWorktreeName, createWorktree, removeWorktree,
+// ADJECTIVES/NOUNS) moved to `@/main/worktree-ops` in Sprint C2c.4.
+// `checkGitRepo` moved too — it is imported from the new module and re-exported
+// via the IPC handler.
 
 // Operational constants (MAX_CONCURRENT_SUPERVISORS, STALL_TIMEOUT_MS, etc.)
 // now live in `@/main/supervisor-orchestrator` and are re-imported at the top
@@ -300,12 +100,6 @@ const removeWorktree = async (workspaceDir: string, worktreePath: string, worktr
 
 export class ProjectManager {
   private tasks = new Map<TaskId, { task: Task; sandbox: ISandbox }>();
-  private machines = new Map<TicketId, { machine: TicketMachine; sandbox: ISandbox | null }>();
-  /** Wall-clock time each active run started, keyed by ticketId. Read in handleMachineRunEnd
-   *  so persisted TicketRun.startedAt reflects the actual run start, not ticket.updatedAt
-   *  (which can be bumped by any intervening updateTicket call, e.g., onTokenUsage). */
-  private runStartedAt = new Map<TicketId, number>();
-  private ticketLocks = new Map<TicketId, Promise<void>>();
   private store: Store<StoreData>;
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   private pages: PageManager;
@@ -424,18 +218,47 @@ export class ProjectManager {
         getTickets: () => this.getTickets(),
         getProjects: () => this.getProjects(),
         getWipLimit: () => this.store.get('wipLimit') ?? 3,
+        getSandboxBackend: () => this.store.get('sandboxBackend'),
+        getPlatformCredentials: () => this.store.get('platform'),
+        getCodeTabs: () => (this.store.get('codeTabs', []) ?? []) as Array<{ id: string; ticketId?: string }>,
       },
       host: {
-        getMachineEntry: (ticketId) => this.machines.get(ticketId),
-        iterateMachines: () => this.machines,
         getTicketById: (ticketId) => this.getTicketById(ticketId),
+        updateTicket: (ticketId, patch) => this.updateTicket(ticketId, patch),
         isTerminalColumn: (projectId, columnId) => this.isTerminalColumn(projectId, columnId),
-        withTicketLock: (ticketId, fn) => this.withTicketLock(ticketId, fn),
-        ensureSupervisorInfra: (ticketId) => this.ensureSupervisorInfra(ticketId),
-        startMachineRun: (ticketId, prompt, opts) => this.startMachineRun(ticketId, prompt, opts),
+        getColumn: (projectId, columnId) => this.getColumn(projectId, columnId),
+        resolveTicketBranch: (ticket) => this.resolveTicketBranch(ticket),
+        validateDispatchPreflight: (ticketId) => this.validateDispatchPreflight(ticketId),
         buildRunVariables: (ticketId, mode) => this.buildRunVariables(ticketId, mode),
+        buildContinuationPromptForTicket: (ticketId, turn, maxTurns) =>
+          this.buildContinuationPromptForTicket(ticketId, turn, maxTurns),
+        handleClientToolCall: (ticketId, functionName, args, respond) =>
+          this.handleClientToolCall(ticketId, functionName, args, respond),
+      },
+      taskRegistry: {
+        register: (taskId, task, sandbox) => {
+          this.tasks.set(taskId, { task, sandbox });
+          this.persistTask(task);
+        },
+        get: (taskId) => this.tasks.get(taskId),
+        patchTask: (taskId, patch) => {
+          const entry = this.tasks.get(taskId);
+          if (!entry) {
+            return;
+          }
+          entry.task = { ...entry.task, ...patch };
+          this.persistTask(entry.task);
+        },
+        unregister: (taskId) => {
+          this.tasks.delete(taskId);
+          this.removePersistedTask(taskId);
+        },
       },
       workflowLoader: this.workflowLoader,
+      sendToWindow: this.sendToWindow,
+      sandboxFactory: this.sandboxFactory,
+      machineFactory: this.machineFactory,
+      processManager: this.processManager,
     });
 
     this.supervisors.startStallDetection();
@@ -455,73 +278,11 @@ export class ProjectManager {
     return project ? this.getProjectDirPath(project) : null;
   };
 
-  // #region Machine factory
+  // #region Machine factory / lifecycle — delegated to SupervisorOrchestrator
 
-  private createMachine(ticketId: TicketId): TicketMachine {
-    const callbacks = {
-      onPhaseChange: (tid: TicketId, phase: TicketPhase) => {
-        this.updateTicket(tid, { phase, phaseChangedAt: Date.now() });
-        this.sendToWindow('project:phase', tid, phase);
-      },
-      onMessage: (tid: TicketId, msg: SessionMessage) => {
-        this.sendToWindow('project:supervisor-message', tid, msg);
-      },
-      onRunEnd: (tid: TicketId, reason: string) => {
-        void this.handleMachineRunEnd(tid, reason);
-      },
-      onTokenUsage: (tid: TicketId, usage: { inputTokens: number; outputTokens: number; totalTokens: number }) => {
-        const ticket = this.getTicketById(tid);
-        if (!ticket) {
-          return;
-        }
-        const prev = ticket.tokenUsage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
-        const updated = {
-          inputTokens: prev.inputTokens + usage.inputTokens,
-          outputTokens: prev.outputTokens + usage.outputTokens,
-          totalTokens: prev.totalTokens + usage.totalTokens,
-        };
-        if (updated.totalTokens !== prev.totalTokens) {
-          this.updateTicket(tid, { tokenUsage: updated });
-          this.sendToWindow('project:token-usage', tid, updated);
-        }
-      },
-      onClientRequest: (
-        tid: TicketId,
-        functionName: string,
-        args: Record<string, unknown>,
-        respond: ClientFunctionResponder
-      ) => {
-        // Auto-approve tool approval requests (project agents run unattended)
-        if (functionName === 'ui.request_tool_approval') {
-          respond(true, { approved: true, always_approve: true });
-          return;
-        }
-        this.handleClientToolCall(tid, functionName, args, respond);
-      },
-    };
-
-    if (this.machineFactory) {
-      return this.machineFactory.create(ticketId, callbacks) as unknown as TicketMachine;
-    }
-
-    return new TicketMachine(ticketId, callbacks);
-  }
-
-  /**
-   * Serialize async operations per ticket to prevent races between
-   * start/stop/retry/stall-check for the same ticket.
-   */
+  /** Delegating wrapper — orchestrator owns the mutex in C2c.3. */
   private withTicketLock<T>(ticketId: TicketId, fn: () => Promise<T>): Promise<T> {
-    const prev = this.ticketLocks.get(ticketId) ?? Promise.resolve();
-    const next = prev.then(fn, fn);
-    this.ticketLocks.set(
-      ticketId,
-      next.then(
-        () => {},
-        () => {}
-      )
-    );
-    return next;
+    return this.supervisors.withTicketLock(ticketId, fn);
   }
 
   /**
@@ -626,7 +387,7 @@ export class ProjectManager {
           title: `Agent needs help: ${ticket.title}`,
           description: message,
         });
-        const entry = this.machines.get(ticketId);
+        const entry = this.supervisors.machines.get(ticketId);
         if (entry?.machine.isStreaming()) {
           void entry.machine.stop().then(() => {
             entry.machine.forcePhase('awaiting_input');
@@ -993,123 +754,7 @@ export class ProjectManager {
     }
   }
 
-  /**
-   * Handle a run_end notification from a machine. Decides whether to continue,
-   * retry, or stop based on the run end reason and ticket state.
-   */
-  private handleMachineRunEnd = (ticketId: TicketId, reason: string): Promise<void> => {
-    return this.withTicketLock(ticketId, async () => {
-      console.log(`[ProjectManager] Machine run ended for ${ticketId}: ${reason}`);
-
-      const entry = this.machines.get(ticketId);
-      if (!entry) {
-        return;
-      }
-      const { machine } = entry;
-
-      // Guard: ignore if machine was already stopped/transitioned (e.g., user clicked Stop)
-      if (!machine.isStreaming()) {
-        console.log(`[ProjectManager] Ignoring run_end for ${ticketId} — machine in phase ${machine.getPhase()}`);
-        return;
-      }
-
-      // Run after_run hook (best-effort)
-      const ticket = this.getTicketById(ticketId);
-      if (ticket) {
-        const project = this.getProjects().find((p) => p.id === ticket.projectId);
-        if (project?.source?.kind === 'local') {
-          void this.workflowLoader.runHook(ticket.projectId, 'after_run', project.source?.workspaceDir);
-        } else if (project?.source?.kind === 'git-remote') {
-          const hookScript = this.workflowLoader.getConfig(ticket.projectId).hooks?.after_run;
-          if (hookScript) {
-            const entry = this.machines.get(ticketId);
-            if (entry?.sandbox) {
-              void entry.sandbox.execInContainer(hookScript, '/home/user/workspace');
-            }
-          }
-        }
-      }
-
-      const maxTurns = ticket ? this.getEffectiveMaxContinuationTurns(ticket.projectId) : MAX_CONTINUATION_TURNS;
-
-      const action = decideRunEndAction({
-        reason,
-        continuationTurn: machine.continuationTurn,
-        maxContinuationTurns: maxTurns,
-      });
-
-      // Persist run record. startedAt comes from runStartedAt (set in startMachineRun)
-      // — falling back to updatedAt is a last-resort approximation, since token-usage
-      // updates bump updatedAt and would otherwise collapse startedAt onto endedAt.
-      if (ticket) {
-        const endedAt = Date.now();
-        const runStartedAt = this.runStartedAt.get(ticketId) ?? ticket.updatedAt;
-        const run = {
-          id: nanoid(),
-          startedAt: runStartedAt,
-          endedAt,
-          endReason: reason,
-          tokenUsage: ticket.tokenUsage ? { ...ticket.tokenUsage } : undefined,
-        };
-        const existingRuns = ticket.runs ?? [];
-        this.updateTicket(ticketId, { runs: [...existingRuns, run] });
-        this.runStartedAt.delete(ticketId);
-      }
-
-      switch (action.type) {
-        case 'stopped':
-          machine.transition('idle');
-          return;
-
-        case 'complete':
-          console.log(`[ProjectManager] Ticket ${ticketId} work complete.`);
-          machine.transition('completed');
-          return;
-
-        case 'continue': {
-          // Re-read ticket — the agent may have moved it during the run
-          const freshTicket = this.getTicketById(ticketId);
-          if (freshTicket) {
-            if (this.isTerminalColumn(freshTicket.projectId, freshTicket.columnId)) {
-              console.log(`[ProjectManager] Ticket ${ticketId} is in terminal column — not continuing.`);
-              machine.transition('completed');
-              return;
-            }
-            const col = this.getColumn(freshTicket.projectId, freshTicket.columnId);
-            if (col?.gate) {
-              console.log(
-                `[ProjectManager] Ticket ${ticketId} is in gated column "${freshTicket.columnId}" — not continuing.`
-              );
-              machine.transition('idle');
-              return;
-            }
-          }
-
-          machine.continuationTurn = action.nextTurn;
-          machine.transition('continuing');
-          machine.recordActivity();
-
-          console.log(`[ProjectManager] Continuing ticket ${ticketId} (turn ${action.nextTurn}/${maxTurns}).`);
-
-          const sessionId = machine.getSessionId() ?? undefined;
-          const continuationPrompt = this.buildContinuationPromptForTicket(ticketId, action.nextTurn + 1, maxTurns);
-          // Brief delay to let the server's worker task finish cleanup (clear current_task)
-          // before we send the next start_run, avoiding "Run already active" race.
-          await new Promise((r) => setTimeout(r, 500));
-          this.startMachineRun(ticketId, continuationPrompt, { sessionId });
-          return;
-        }
-
-        case 'retry':
-          this.supervisors.scheduleRetry(ticketId, action.failureClass, {
-            attempt: machine.retryAttempt + 1,
-            continuationTurn: machine.continuationTurn,
-            error: reason,
-          });
-          return;
-      }
-    });
-  };
+  // handleMachineRunEnd now lives in SupervisorOrchestrator (C2c.3).
 
   // #endregion
 
@@ -1137,7 +782,7 @@ export class ProjectManager {
   /** Number of supervisors currently active across all projects. */
   private getRunningSupervisorCount = (): number => {
     let count = 0;
-    for (const [, entry] of this.machines) {
+    for (const [, entry] of this.supervisors.machines) {
       if (entry.machine.isActive()) {
         count++;
       }
@@ -1148,7 +793,7 @@ export class ProjectManager {
   /** Active supervisors in a specific column for a project. Used by validateDispatchPreflight. */
   private getRunningSupervisorCountByColumn = (projectId: ProjectId, columnId: ColumnId): number => {
     let count = 0;
-    for (const [ticketId, entry] of this.machines) {
+    for (const [ticketId, entry] of this.supervisors.machines) {
       if (!entry.machine.isActive()) {
         continue;
       }
@@ -1494,11 +1139,11 @@ export class ProjectManager {
 
   removeTicket = (id: TicketId): void => {
     // Stop machine if running
-    const machineEntry = this.machines.get(id);
+    const machineEntry = this.supervisors.machines.get(id);
     if (machineEntry) {
       void machineEntry.machine.dispose();
       void machineEntry.sandbox?.exit();
-      this.machines.delete(id);
+      this.supervisors.machines.delete(id);
     }
 
     const tickets = this.getTickets().filter((t) => t.id !== id);
@@ -1722,7 +1367,7 @@ export class ProjectManager {
     if (this.isTerminalColumn(ticket.projectId, columnId)) {
       // Cancel any pending retry timer first to prevent re-dispatch races
       this.supervisors.cancelRetry(ticketId);
-      const entry = this.machines.get(ticketId);
+      const entry = this.supervisors.machines.get(ticketId);
       if (entry) {
         console.log(
           `[ProjectManager] Ticket ${ticketId} moved to terminal column "${columnId}" — stopping supervisor and cleaning up workspace.`
@@ -1739,7 +1384,7 @@ export class ProjectManager {
     // Also stop if moving back to the first column (user is shelving the ticket).
     // Cancel any pending retry so an armed timer doesn't revive a shelved ticket.
     if (this.isFirstColumn(ticket.projectId, columnId)) {
-      const entry = this.machines.get(ticketId);
+      const entry = this.supervisors.machines.get(ticketId);
       if (entry) {
         console.log(`[ProjectManager] Ticket ${ticketId} moved to backlog — stopping supervisor.`);
         this.supervisors.cancelRetry(ticketId);
@@ -1750,7 +1395,7 @@ export class ProjectManager {
     // Stop supervisor (preserve workspace) when entering a gated column.
     // Same retry-timer concern as the backlog path above.
     if (column.gate) {
-      const entry = this.machines.get(ticketId);
+      const entry = this.supervisors.machines.get(ticketId);
       if (entry) {
         console.log(`[ProjectManager] Ticket ${ticketId} entered gated column "${columnId}" — stopping supervisor.`);
         this.supervisors.cancelRetry(ticketId);
@@ -1765,361 +1410,32 @@ export class ProjectManager {
 
   // #region Supervisor lifecycle
 
-  /**
-   * Ensure sandbox + machine infrastructure exists for a ticket.
-   * Idempotent — if a machine is already provisioned with a running sandbox, returns immediately.
-   * Returns only after the sandbox is running and a session is established.
-   */
+  // ensureSupervisorInfra / resolveTicketWorkspace / ensureSession /
+  // getCodeTabWsUrl / getSupervisorStatusForCodeTab now live in
+  // SupervisorOrchestrator (C2c.4). Thin delegators below keep the
+  // existing PM call sites and IPC handlers wired.
+
   /** Locked version of ensureSupervisorInfra for external callers (IPC). */
   ensureSupervisorInfraLocked = (ticketId: TicketId): Promise<void> => {
     return this.withTicketLock(ticketId, async () => {
-      await this.ensureSupervisorInfra(ticketId);
+      await this.supervisors.ensureSupervisorInfra(ticketId);
     });
   };
 
-  ensureSupervisorInfra = async (ticketId: TicketId): Promise<{ machine: TicketMachine; sandbox: ISandbox | null }> => {
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket) {
-      throw new Error(`Ticket not found: ${ticketId}`);
-    }
+  ensureSupervisorInfra = (ticketId: TicketId): Promise<{ machine: ITicketMachine; sandbox: ISandbox | null }> =>
+    this.supervisors.ensureSupervisorInfra(ticketId);
 
-    const project = this.getProjects().find((p) => p.id === ticket.projectId);
-    if (!project) {
-      throw new Error(`Project not found: ${ticket.projectId}`);
-    }
-
-    // Idempotent: if machine already exists with a running sandbox, ensure session and return
-    const existing = this.machines.get(ticketId);
-    if (existing) {
-      const sbStatus = existing.sandbox?.getStatus();
-      // Machine is using a Code tab sandbox (sandbox === null) — check if still viable
-      const isRunning = existing.sandbox ? sbStatus?.type === 'running' : this.getCodeTabWsUrl(ticketId) !== null;
-
-      if (isRunning) {
-        const phase = existing.machine.getPhase();
-
-        // Already streaming — don't interfere
-        if (existing.machine.isStreaming()) {
-          console.log(
-            `[ProjectManager] ensureSupervisorInfra: machine ${ticketId} already streaming (${phase}), returning.`
-          );
-          return existing;
-        }
-
-        // Machine has a session and is ready — reuse as-is
-        if (phase === 'ready' && existing.machine.getSessionId()) {
-          console.log(
-            `[ProjectManager] ensureSupervisorInfra: machine ${ticketId} already ready with session, returning.`
-          );
-          return existing;
-        }
-
-        // Machine is in a non-streaming state without a session — re-provision
-        const wsUrl =
-          existing.sandbox && sbStatus?.type === 'running' ? sbStatus.data.wsUrl! : this.getCodeTabWsUrl(ticketId)!;
-        console.log(`[ProjectManager] ensureSupervisorInfra: re-provisioning ${ticketId} from phase "${phase}".`);
-        existing.machine.forcePhase('provisioning');
-        existing.machine.setWsUrl(wsUrl);
-        await this.ensureSession(ticketId);
-        return existing;
-      }
-      // Existing sandbox not running — clean up stale machine and create fresh
-      console.log(
-        `[ProjectManager] ensureSupervisorInfra: stale machine for ${ticketId} (sandbox status: ${sbStatus?.type ?? 'unknown'}, phase: ${existing.machine.getPhase()}). Cleaning up.`
-      );
-      await existing.machine.dispose();
-      this.machines.delete(ticketId);
-    }
-
-    // Check if a Code tab already has a running sandbox for this ticket.
-    // If so, reuse it instead of spinning up a second container.
-    const codeTabWsUrl = this.getCodeTabWsUrl(ticketId);
-    if (codeTabWsUrl) {
-      console.log(
-        `[ProjectManager] ensureSupervisorInfra: reusing Code tab sandbox for ${ticketId} (ws: ${codeTabWsUrl})`
-      );
-      const machine = this.createMachine(ticketId);
-      machine.transition('provisioning');
-
-      // We don't own the sandbox — the Code tab's ProcessManager entry owns the lifecycle.
-      this.machines.set(ticketId, { machine, sandbox: null });
-
-      machine.setWsUrl(codeTabWsUrl);
-      await this.ensureSession(ticketId);
-
-      return { machine, sandbox: null };
-    }
-
-    // No Code tab sandbox available — create a dedicated supervisor sandbox.
-    const machine = this.createMachine(ticketId);
-    machine.transition('provisioning');
-
-    // Deferred: resolves when sandbox becomes 'running'
-    let resolveReady!: (wsUrl: string) => void;
-    let rejectReady!: (err: Error) => void;
-    const sandboxReady = new Promise<string>((resolve, reject) => {
-      resolveReady = resolve;
-      rejectReady = reject;
-    });
-
-    const startTimeout = setTimeout(() => {
-      rejectReady(new Error('Sandbox start timeout (120s)'));
-    }, 120_000);
-
-    const resolvedWorkspace = await this.resolveTicketWorkspace(ticketId);
-    let workspaceDir = resolvedWorkspace.workspaceDir;
-    const taskId = nanoid();
-    const { worktreePath, worktreeName, action } = resolvedWorkspace;
-
-    // Run after_create hook only when a new worktree was created (not on reuse)
-    if (action === 'create') {
-      const afterCreateOk = await this.workflowLoader.runHook(ticket.projectId, 'after_create', workspaceDir);
-      if (!afterCreateOk) {
-        clearTimeout(startTimeout);
-        if (worktreePath && worktreeName) {
-          await removeWorktree(requireLocalWorkspaceDir(project.source), worktreePath, worktreeName);
-        }
-        machine.transition('error');
-        throw new Error('after_create hook failed');
-      }
-    }
-
-    const task: Task = {
-      id: taskId,
-      projectId: ticket.projectId,
-      taskDescription: `Supervisor for: ${ticket.title}`,
-      status: { type: 'starting', timestamp: Date.now() },
-      createdAt: Date.now(),
-      ticketId,
-      branch: this.resolveTicketBranch(ticket),
-      worktreePath,
-      worktreeName,
-    };
-
-    const sandboxBackend = this.store.get('sandboxBackend') as import('@/shared/types').SandboxBackend | undefined;
-    const platformClient = createPlatformClient(this.store.get('platform'));
-    const mode: import('@/main/agent-process').AgentProcessMode =
-      sandboxBackend === 'platform'
-        ? 'platform'
-        : sandboxBackend === 'docker'
-          ? 'sandbox'
-          : sandboxBackend === 'podman'
-            ? 'podman'
-            : sandboxBackend === 'vm'
-              ? 'vm'
-              : sandboxBackend === 'local'
-                ? 'local'
-                : 'none';
-    const sandbox = this.sandboxFactory.create({
-      mode,
-      platformClient: platformClient ?? undefined,
-      ipcRawOutput: () => {},
-      onStatusChange: (status) => {
-        const taskEntry = this.tasks.get(taskId);
-        if (taskEntry) {
-          const patch: Partial<Task> = { status };
-          if (status.type === 'running') {
-            patch.lastUrls = {
-              uiUrl: status.data.uiUrl,
-              codeServerUrl: status.data.codeServerUrl,
-              noVncUrl: status.data.noVncUrl,
-            };
-          }
-          taskEntry.task = { ...taskEntry.task, ...patch };
-          this.persistTask(taskEntry.task);
-        }
-        this.sendToWindow('project:task-status', taskId, status);
-
-        // Forward to linked Code tab so the UI connects to the supervisor's sandbox
-        // instead of launching a separate one.
-        const codeTabs = this.store.get('codeTabs', []) as Array<{ id: string; ticketId?: string }>;
-        const codeTab = codeTabs.find((t) => t.ticketId === ticketId);
-        if (codeTab) {
-          this.sendToWindow('agent-process:status', codeTab.id as CodeTabId, status);
-        }
-
-        // Resolve/reject the startup promise (only effective on first call)
-        if (status.type === 'running') {
-          resolveReady(status.data.wsUrl!);
-        } else if (status.type === 'error') {
-          rejectReady(new Error('Sandbox failed to start'));
-        }
-      },
-    });
-
-    this.tasks.set(taskId, { task, sandbox });
-    this.persistTask(task);
-    this.updateTicket(ticketId, { supervisorTaskId: taskId });
-
-    this.machines.set(ticketId, { machine, sandbox });
-
-    sandbox.start({
-      workspaceDir,
-      sandboxVariant: 'work',
-      sandboxConfig: project.sandbox,
-      gitRepo: resolvedWorkspace.gitRepo,
-    });
-
-    // Await sandbox readiness
-    let wsUrl: string;
-    try {
-      wsUrl = await sandboxReady;
-    } catch (error) {
-      clearTimeout(startTimeout);
-      machine.transition('error');
-      throw error;
-    }
-    clearTimeout(startTimeout);
-
-    // Set WS URL and ensure session
-    machine.setWsUrl(wsUrl);
-    await this.ensureSession(ticketId);
-
-    return { machine, sandbox };
-  };
-
-  /** Return the supervisor sandbox status for a Code tab linked to a ticket. */
-  getSupervisorStatusForCodeTab(tabId: CodeTabId): WithTimestamp<AgentProcessStatus> | null {
-    const codeTabs = this.store.get('codeTabs', []) as Array<{ id: string; ticketId?: string }>;
-    const tab = codeTabs.find((t) => t.id === tabId);
-    if (!tab?.ticketId) {
-      return null;
-    }
-    const entry = this.machines.get(tab.ticketId as TicketId);
-    if (!entry?.sandbox) {
-      return null;
-    }
-    return entry.sandbox.getStatus();
-  }
+  getSupervisorStatusForCodeTab = (tabId: CodeTabId): WithTimestamp<AgentProcessStatus> | null =>
+    this.supervisors.getSupervisorStatusForCodeTab(tabId);
 
   getTicketWorkspaceLocked = (ticketId: TicketId): Promise<string> => {
     return this.withTicketLock(ticketId, async () => {
-      const resolved = await this.resolveTicketWorkspace(ticketId);
+      const resolved = await this.supervisors.resolveTicketWorkspace(ticketId);
       return resolved.workspaceDir;
     });
   };
 
-  /** Check if a Code tab has a running sandbox for this ticket. */
-  private getCodeTabWsUrl(ticketId: TicketId): string | null {
-    if (!this.processManager) {
-      return null;
-    }
-    const codeTabs = this.store.get('codeTabs', []) as Array<{ id: string; ticketId?: string }>;
-    return this.processManager.getRunningWsUrlForTicket(ticketId, codeTabs);
-  }
-
-  private resolveTicketWorkspace = async (
-    ticketId: TicketId
-  ): Promise<{
-    workspaceDir: string;
-    worktreePath?: string;
-    worktreeName?: string;
-    action: 'reuse' | 'create' | 'none';
-    /** For git-remote projects: repo info so the container can clone. */
-    gitRepo?: { url: string; branch?: string };
-  }> => {
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket) {
-      throw new Error(`Ticket not found: ${ticketId}`);
-    }
-
-    const project = this.getProjects().find((p) => p.id === ticket.projectId);
-    if (!project) {
-      throw new Error(`Project not found: ${ticket.projectId}`);
-    }
-
-    // Git-remote projects: container clones the repo — no local workspace or worktrees
-    if (project.source?.kind === 'git-remote') {
-      const effectiveBranch = this.resolveTicketBranch(ticket) ?? project.source?.defaultBranch;
-      return {
-        workspaceDir: '/home/user/workspace', // container-side path (not local)
-        action: 'none',
-        gitRepo: {
-          url: project.source?.repoUrl,
-          branch: effectiveBranch,
-        },
-      };
-    }
-
-    let workspaceDir = requireLocalWorkspaceDir(project.source);
-    let worktreePath: string | undefined;
-    let worktreeName: string | undefined;
-    const effectiveBranch = this.resolveTicketBranch(ticket);
-
-    let worktreeExists = false;
-    if (ticket.worktreePath) {
-      try {
-        await fs.access(ticket.worktreePath);
-        worktreeExists = true;
-      } catch {}
-    }
-
-    const wtAction = decideWorktreeAction(ticket, worktreeExists, effectiveBranch);
-    if (wtAction.action === 'reuse') {
-      worktreePath = wtAction.worktreePath;
-      worktreeName = wtAction.worktreeName;
-      workspaceDir = worktreePath;
-      console.log(`[ProjectManager] Reusing existing worktree "${worktreeName}" for ticket ${ticketId}`);
-    } else if (wtAction.action === 'create') {
-      worktreeName = generateWorktreeName();
-      worktreePath = await createWorktree(requireLocalWorkspaceDir(project.source), effectiveBranch!, worktreeName);
-      workspaceDir = worktreePath;
-      this.updateTicket(ticketId, { worktreePath, worktreeName });
-    }
-
-    return {
-      workspaceDir,
-      worktreePath,
-      worktreeName,
-      action: wtAction.action,
-    };
-  };
-
-  /**
-   * Ensure a session exists for the ticket. Generates the session ID upfront
-   * and persists it on the ticket BEFORE the RPC completes, so the renderer
-   * can include ?session= in the embedded UI URL immediately (progressive load).
-   */
-  private ensureSession = async (ticketId: TicketId): Promise<void> => {
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket) {
-      return;
-    }
-
-    // If the machine is already in 'ready' state with a session, nothing to do
-    const existingEntry = this.machines.get(ticketId);
-    if (existingEntry?.machine.getPhase() === 'ready' && existingEntry.machine.getSessionId()) {
-      return;
-    }
-
-    const entry = this.machines.get(ticketId);
-    if (!entry) {
-      return;
-    }
-
-    const variables = this.buildRunVariables(ticketId, 'interactive');
-
-    const sessionId = crypto.randomUUID();
-
-    try {
-      console.log(`[ProjectManager] Creating session ${sessionId} for ticket ${ticketId}`);
-      await entry.machine.createSession(variables, sessionId);
-      console.log(`[ProjectManager] Session created: ${sessionId} for ticket ${ticketId}`);
-      // Only publish the session ID after it actually exists in the server,
-      // so the renderer's getSessionHistory call won't fail on a non-existent session.
-      this.updateTicket(ticketId, { supervisorSessionId: sessionId });
-    } catch (error) {
-      console.error(`[ProjectManager] Failed to create session for ${ticketId}:`, error);
-      // Clear the optimistic session ID since creation failed
-      this.updateTicket(ticketId, { supervisorSessionId: undefined });
-      // Recover from stuck connecting/session_creating phase so the UI doesn't show
-      // "Connecting…" indefinitely. Reset to idle so the user can retry.
-      const phase = entry.machine.getPhase();
-      if (phase === 'connecting' || phase === 'session_creating') {
-        entry.machine.forcePhase('idle');
-      }
-    }
-  };
+  private getCodeTabWsUrl = (ticketId: TicketId): string | null => this.supervisors.getCodeTabWsUrl(ticketId);
 
   /**
    * Dispatch preflight: validate that we can start a supervisor for this ticket.
@@ -2154,7 +1470,7 @@ export class ProjectManager {
     }
 
     // Check machine to prevent duplicate dispatch — allow starting from 'ready' (manual session)
-    const machineEntry = this.machines.get(ticketId);
+    const machineEntry = this.supervisors.machines.get(ticketId);
     if (machineEntry) {
       const phase = machineEntry.machine.getPhase();
       if (phase !== 'idle' && phase !== 'ready' && phase !== 'error' && phase !== 'completed') {
@@ -2327,254 +1643,23 @@ export class ProjectManager {
     return buildContinuationPrompt({ ticket, pipeline, customContinuation, turn, maxTurns });
   };
 
-  /**
-   * Start the autonomous supervisor — sends the full supervisor prompt as the user turn.
-   * Triggered by the Play button.
-   */
-  startSupervisor = (ticketId: TicketId): Promise<void> => {
-    return this.withTicketLock(ticketId, async () => {
-      const preflightError = this.validateDispatchPreflight(ticketId);
-      if (preflightError) {
-        console.warn(`[ProjectManager] Dispatch preflight failed for ${ticketId}: ${preflightError}`);
-        throw new Error(preflightError);
-      }
+  // startSupervisor / stopSupervisor / sendSupervisorMessage /
+  // resetSupervisorSession / startMachineRun / cleanupTicketWorkspace /
+  // sendUserRunMessage now live in SupervisorOrchestrator (C2c.5). PM keeps
+  // thin delegators for the public methods that IPC handlers and PM internals
+  // (autoDispatchTick, moveTicketToColumn, removeTask) still call.
 
-      const ticket = this.getTicketById(ticketId)!;
-      const project = this.getProjects().find((p) => p.id === ticket.projectId)!;
+  startSupervisor = (ticketId: TicketId): Promise<void> => this.supervisors.startSupervisor(ticketId);
 
-      // Load FLEET.md workflow (from local dir or git remote)
-      if (project.source?.kind === 'local') {
-        await this.workflowLoader.load(ticket.projectId, project.source?.workspaceDir);
+  stopSupervisor = (ticketId: TicketId): Promise<void> => this.supervisors.stopSupervisor(ticketId);
 
-        const hookOk = await this.workflowLoader.runHook(ticket.projectId, 'before_run', project.source?.workspaceDir);
-        if (!hookOk) {
-          console.warn(`[ProjectManager] before_run hook failed for ${ticketId}. Aborting start.`);
-          throw new Error('before_run hook failed');
-        }
-      } else if (project.source?.kind === 'git-remote') {
-        const effectiveBranch = this.resolveTicketBranch(ticket) ?? project.source?.defaultBranch;
-        await this.workflowLoader.loadFromRemote(ticket.projectId, project.source?.repoUrl, effectiveBranch);
-      }
+  resetSupervisorSession = (ticketId: TicketId): Promise<void> => this.supervisors.resetSupervisorSession(ticketId);
 
-      console.log(`[ProjectManager] startSupervisor: ensureSupervisorInfra for ${ticketId}...`);
-      const { machine, sandbox } = await this.ensureSupervisorInfra(ticketId);
-      console.log(
-        `[ProjectManager] startSupervisor: ensureSupervisorInfra done. Phase: ${machine.getPhase()}, sessionId: ${machine.getSessionId()}`
-      );
+  sendSupervisorMessage = (ticketId: TicketId, message: string): Promise<void> =>
+    this.supervisors.sendSupervisorMessage(ticketId, message);
 
-      // For git-remote projects, run before_run hook inside the container via sandbox exec
-      if (project.source?.kind === 'git-remote') {
-        const hookScript = this.workflowLoader.getConfig(ticket.projectId).hooks?.before_run;
-        if (hookScript && sandbox) {
-          const hookOk = await sandbox.execInContainer(hookScript, '/home/user/workspace');
-          if (!hookOk) {
-            console.warn(`[ProjectManager] before_run hook failed in container for ${ticketId}. Aborting start.`);
-            throw new Error('before_run hook failed');
-          }
-        }
-      }
-
-      // Use the session ID from the machine (may have been freshly created by ensureSupervisorInfra)
-      const sessionId = machine.getSessionId() ?? undefined;
-      const variables = this.buildRunVariables(ticketId);
-      console.log(
-        `[ProjectManager] startSupervisor: calling startMachineRun for ${ticketId} (sessionId: ${sessionId})`
-      );
-      this.startMachineRun(ticketId, 'Begin working on this ticket.', { sessionId, variables });
-    });
-  };
-
-  private startMachineRun = (
-    ticketId: TicketId,
-    prompt: string,
-    opts?: { sessionId?: string; variables?: Record<string, unknown> }
-  ): void => {
-    const entry = this.machines.get(ticketId);
-    if (!entry) {
-      console.warn(`[ProjectManager] startMachineRun: no machine entry for ${ticketId}`);
-      return;
-    }
-
-    // Stamp the real run-start time so the eventual TicketRun record is accurate.
-    this.runStartedAt.set(ticketId, Date.now());
-
-    console.log(`[ProjectManager] startMachineRun: starting run for ${ticketId} (phase: ${entry.machine.getPhase()})`);
-    void entry.machine.startRun(prompt, { sessionId: opts?.sessionId, variables: opts?.variables }).then(
-      (result) => {
-        this.updateTicket(ticketId, { supervisorSessionId: result.sessionId });
-      },
-      (error) => {
-        console.error(`[ProjectManager] Machine start failed for ${ticketId}:`, error);
-        // Ensure machine transitions to error if startRun didn't already
-        if (entry.machine.isActive() && entry.machine.getPhase() !== 'error') {
-          entry.machine.transition('error');
-        }
-      }
-    );
-  };
-
-  stopSupervisor = (ticketId: TicketId): Promise<void> => {
-    return this.withTicketLock(ticketId, async () => {
-      const entry = this.machines.get(ticketId);
-      if (!entry) {
-        return;
-      }
-
-      await entry.machine.stop();
-    });
-  };
-
-  /**
-   * Clean up a ticket's workspace: stop and remove its container, delete its worktree,
-   * and run the before_remove hook. Called when a ticket reaches a terminal column.
-   */
-  private cleanupTicketWorkspace = async (ticketId: TicketId): Promise<void> => {
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket) {
-      return;
-    }
-
-    const project = this.getProjects().find((p) => p.id === ticket.projectId);
-    const taskId = ticket.supervisorTaskId;
-
-    // Run before_remove hook
-    if (project?.source?.kind === 'local') {
-      const workspaceDir = ticket.worktreePath ?? project.source?.workspaceDir;
-      await this.workflowLoader.runHook(ticket.projectId, 'before_remove', workspaceDir);
-    } else if (project?.source?.kind === 'git-remote') {
-      const hookScript = this.workflowLoader.getConfig(ticket.projectId).hooks?.before_remove;
-      if (hookScript) {
-        const machineEntry = this.machines.get(ticketId);
-        if (machineEntry?.sandbox) {
-          await machineEntry.sandbox.execInContainer(hookScript, '/home/user/workspace');
-        }
-      }
-    }
-
-    // Dispose machine if still registered
-    const machineEntry = this.machines.get(ticketId);
-    if (machineEntry) {
-      await machineEntry.machine.dispose();
-      this.machines.delete(ticketId);
-    }
-
-    // Stop and exit the container
-    if (taskId) {
-      const taskEntry = this.tasks.get(taskId);
-      if (taskEntry) {
-        await taskEntry.sandbox.exit();
-        this.tasks.delete(taskId);
-      }
-      this.removePersistedTask(taskId);
-    }
-
-    // Remove worktree (source of truth is the ticket, not the task)
-    if (ticket.worktreePath && ticket.worktreeName && project && project.source?.kind === 'local') {
-      await removeWorktree(project.source?.workspaceDir, ticket.worktreePath, ticket.worktreeName);
-      this.updateTicket(ticketId, { worktreePath: undefined, worktreeName: undefined });
-    }
-
-    console.log(`[ProjectManager] Cleaned up workspace for ticket ${ticketId}.`);
-  };
-
-  resetSupervisorSession = (ticketId: TicketId): Promise<void> => {
-    return this.withTicketLock(ticketId, async () => {
-      const entry = this.machines.get(ticketId);
-      if (!entry) {
-        return;
-      }
-
-      await entry.machine.stop();
-
-      // Build fresh variables (includes FLEET.md custom prompt + client tools)
-      const variables = this.buildRunVariables(ticketId, 'interactive');
-
-      // Ensure WS URL is set
-      if (entry.sandbox) {
-        const sbStatus = entry.sandbox.getStatus();
-        if (sbStatus?.type === 'running' && sbStatus.data.wsUrl) {
-          entry.machine.setWsUrl(sbStatus.data.wsUrl);
-        }
-      } else {
-        const wsUrl = this.getCodeTabWsUrl(ticketId);
-        if (wsUrl) {
-          entry.machine.setWsUrl(wsUrl);
-        }
-      }
-
-      // Create a new session, then update the ticket so the renderer
-      // only switches to the new session URL after it actually exists.
-      const newSessionId = crypto.randomUUID();
-      await entry.machine.createSession(variables, newSessionId);
-      this.updateTicket(ticketId, { supervisorSessionId: newSessionId });
-    });
-  };
-
-  sendSupervisorMessage = (ticketId: TicketId, message: string): Promise<void> => {
-    return this.withTicketLock(ticketId, async () => {
-      const entry = this.machines.get(ticketId);
-      if (!entry) {
-        // No active machine — check concurrency before spinning up
-        const ticket = this.getTicketById(ticketId);
-        if (!ticket) {
-          throw new Error(`Ticket not found: ${ticketId}`);
-        }
-        if (!this.canStartSupervisor(ticket.projectId, ticket.columnId)) {
-          throw new Error('Concurrency limit reached');
-        }
-
-        await this.ensureSupervisorInfra(ticketId);
-        await this.sendUserRunMessage(ticketId, message);
-        return;
-      }
-
-      const phase = entry.machine.getPhase();
-
-      if (phase === 'idle' || phase === 'error' || phase === 'ready' || phase === 'awaiting_input') {
-        await this.sendUserRunMessage(ticketId, message);
-      } else if (entry.machine.isStreaming()) {
-        try {
-          await entry.machine.sendMessage(message);
-        } catch (error) {
-          console.error(`[ProjectManager] Machine send_user_message failed for ${ticketId}:`, error);
-        }
-      }
-    });
-  };
-
-  /**
-   * Start a run with the user's message as the prompt.
-   */
-  private sendUserRunMessage = async (ticketId: TicketId, message: string): Promise<void> => {
-    const entry = this.machines.get(ticketId);
-    if (!entry) {
-      return;
-    }
-
-    if (entry.sandbox) {
-      const sbStatus = entry.sandbox.getStatus();
-      if (sbStatus?.type === 'running' && sbStatus.data.wsUrl) {
-        entry.machine.setWsUrl(sbStatus.data.wsUrl);
-      }
-    } else {
-      const wsUrl = this.getCodeTabWsUrl(ticketId);
-      if (wsUrl) {
-        entry.machine.setWsUrl(wsUrl);
-      }
-    }
-
-    const sessionId = entry.machine.getSessionId() ?? undefined;
-
-    const ticket = this.getTicketById(ticketId);
-    const variables = ticket ? this.buildRunVariables(ticketId, 'interactive') : undefined;
-
-    try {
-      const result = await entry.machine.startRun(message, { sessionId, variables });
-      this.updateTicket(ticketId, { supervisorSessionId: result.sessionId });
-    } catch (error) {
-      console.error(`[ProjectManager] Machine message failed for ${ticketId}:`, error);
-    }
-  };
+  private cleanupTicketWorkspace = (ticketId: TicketId): Promise<void> =>
+    this.supervisors.cleanupTicketWorkspace(ticketId);
 
   // #endregion
 
@@ -2706,7 +1791,7 @@ export class ProjectManager {
 
     // If this task belongs to a machine, stop it too
     if (entry.task.ticketId) {
-      const machineEntry = this.machines.get(entry.task.ticketId);
+      const machineEntry = this.supervisors.machines.get(entry.task.ticketId);
       if (machineEntry) {
         await this.stopSupervisor(entry.task.ticketId);
       }
@@ -2723,10 +1808,10 @@ export class ProjectManager {
 
     // If this task belongs to a machine, clean it up
     if (entry.task.ticketId) {
-      const machineEntry = this.machines.get(entry.task.ticketId);
+      const machineEntry = this.supervisors.machines.get(entry.task.ticketId);
       if (machineEntry) {
         await machineEntry.machine.dispose();
-        this.machines.delete(entry.task.ticketId);
+        this.supervisors.machines.delete(entry.task.ticketId);
       }
     }
 
@@ -2768,9 +1853,7 @@ export class ProjectManager {
       newId: () => nanoid(),
       now: () => Date.now(),
       writeProjectContextBrief: (project) => {
-        const dir = project.isPersonal
-          ? getDefaultWorkspaceDir()
-          : getProjectDir(project.slug ?? 'project');
+        const dir = project.isPersonal ? getDefaultWorkspaceDir() : getProjectDir(project.slug ?? 'project');
         const contextPath = path.join(dir, 'context.md');
         try {
           if (existsSync(contextPath)) {
@@ -2925,7 +2008,7 @@ export class ProjectManager {
       }
 
       // Skip if already active
-      const machineEntry = this.machines.get(nextTicket.id);
+      const machineEntry = this.supervisors.machines.get(nextTicket.id);
       if (machineEntry && machineEntry.machine.isActive()) {
         continue;
       }
@@ -2978,9 +2061,9 @@ export class ProjectManager {
     await this.pages.dispose();
 
     // Dispose all machines
-    for (const [ticketId, entry] of this.machines) {
+    for (const [ticketId, entry] of this.supervisors.machines) {
       await entry.machine.dispose();
-      this.machines.delete(ticketId);
+      this.supervisors.machines.delete(ticketId);
     }
 
     const exits = [...this.tasks.values()].map((entry) => entry.sandbox.exit());

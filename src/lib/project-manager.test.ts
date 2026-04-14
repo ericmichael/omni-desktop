@@ -267,9 +267,7 @@ type SeedArgs = {
   pipeline?: Pipeline;
   autoDispatch?: boolean;
   /** When set, the seeded project gets a local or git-remote source. */
-  source?:
-    | { kind: 'local'; workspaceDir: string }
-    | { kind: 'git-remote'; repoUrl: string; defaultBranch?: string };
+  source?: { kind: 'local'; workspaceDir: string } | { kind: 'git-remote'; repoUrl: string; defaultBranch?: string };
   /** When set, overrides wipLimit (defaults to 100 so WIP doesn't block tests). */
   wipLimit?: number;
   tickets?: Array<Partial<Ticket> & { id: string; columnId?: string }>;
@@ -358,14 +356,13 @@ const makePm = (
   return { pm, store, machines, send, workflow, machineFactory };
 };
 
-// Gain access to ProjectManager internals (machines map, private methods).
+// Gain access to ProjectManager private methods still not yet migrated to
+// SupervisorOrchestrator. Shrinks each sprint; disappears after C2c.9.
+// Machine state (machines map, runStartedAt, createMachine, handleMachineRunEnd)
+// migrated in C2c.3 — reach those via `orch(pm)` instead.
 const internals = (
   pm: ProjectManager
 ): {
-  machines: Map<TicketId, { machine: MockMachine; sandbox: unknown }>;
-  runStartedAt: Map<TicketId, number>;
-  createMachine: (ticketId: TicketId) => MockMachine;
-  handleMachineRunEnd: (ticketId: TicketId, reason: string) => Promise<void>;
   autoDispatchTick: () => Promise<void>;
   handleClientToolCall: (
     ticketId: TicketId,
@@ -415,9 +412,9 @@ describe('ProjectManager integration', () => {
       });
 
       // Create machine via internal path (uses our factory)
-      const mach = internals(pm).createMachine('t1');
+      const mach = orch(pm).createMachine('t1');
       // Register in machines map so nothing assumes external registration
-      internals(pm).machines.set('t1', { machine: mach, sandbox: null });
+      orch(pm).machines.set('t1', { machine: mach, sandbox: null });
 
       const mock = machines.get('t1')!;
       mock.simulateTokenUsage({ inputTokens: 100, outputTokens: 50, totalTokens: 150 });
@@ -433,8 +430,8 @@ describe('ProjectManager integration', () => {
 
     it('is a no-op when delta is zero', () => {
       const { pm, store, machines } = makePm({ tickets: [{ id: 't1' }] });
-      const mach = internals(pm).createMachine('t1');
-      internals(pm).machines.set('t1', { machine: mach, sandbox: null });
+      const mach = orch(pm).createMachine('t1');
+      orch(pm).machines.set('t1', { machine: mach, sandbox: null });
       const mock = machines.get('t1')!;
 
       mock.simulateTokenUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
@@ -453,8 +450,8 @@ describe('ProjectManager integration', () => {
       mock: MockMachine;
     } => {
       const ctx = makePm({ tickets: [{ id: 't1' }] });
-      const mach = internals(ctx.pm).createMachine('t1');
-      internals(ctx.pm).machines.set('t1', { machine: mach, sandbox: null });
+      const mach = orch(ctx.pm).createMachine('t1');
+      orch(ctx.pm).machines.set('t1', { machine: mach, sandbox: null });
       const mock = ctx.machines.get('t1')!;
       mock.phase = 'running';
       return { ctx, mock };
@@ -520,8 +517,8 @@ describe('ProjectManager integration', () => {
           { tickets: [{ id: 't1' }] },
           { workflowConfig: { supervisor: { max_retry_attempts: 100 } } }
         );
-        const mach = internals(pm).createMachine('t1');
-        internals(pm).machines.set('t1', { machine: mach, sandbox: null });
+        const mach = orch(pm).createMachine('t1');
+        orch(pm).machines.set('t1', { machine: mach, sandbox: null });
         const mock = machines.get('t1')!;
         mock.phase = 'running';
 
@@ -572,8 +569,8 @@ describe('ProjectManager integration', () => {
           const base = setupRunningMachine();
           // Saturate global concurrency by creating 4 more running machines
           for (let i = 0; i < 4; i++) {
-            const m = internals(base.ctx.pm).createMachine(`other-${i}` as TicketId);
-            internals(base.ctx.pm).machines.set(`other-${i}` as TicketId, { machine: m, sandbox: null });
+            const m = orch(base.ctx.pm).createMachine(`other-${i}` as TicketId);
+            orch(base.ctx.pm).machines.set(`other-${i}` as TicketId, { machine: m, sandbox: null });
             base.ctx.machines.get(`other-${i}` as TicketId)!.phase = 'running';
           }
           return { ctx: base.ctx, mock: base.mock, machines: base.ctx.machines };
@@ -592,7 +589,7 @@ describe('ProjectManager integration', () => {
         const { ctx } = setupRunningMachine();
         // Remove the ticket entirely
         ctx.store.set('tickets', []);
-        internals(ctx.pm).machines.delete('t1');
+        orch(ctx.pm).machines.delete('t1');
 
         await expect(orch(ctx.pm).handleRetryFired('t1', 'error', 1, 0)).resolves.toBeUndefined();
       });
@@ -608,8 +605,8 @@ describe('ProjectManager integration', () => {
 
     it('transitions a stalled non-streaming active machine by stopping it', async () => {
       const { pm, machines } = makePm({ tickets: [{ id: 't1' }] });
-      const mach = internals(pm).createMachine('t1');
-      internals(pm).machines.set('t1', { machine: mach, sandbox: null });
+      const mach = orch(pm).createMachine('t1');
+      orch(pm).machines.set('t1', { machine: mach, sandbox: null });
       const mock = machines.get('t1')!;
 
       // Active but non-streaming → eligible for stall detection
@@ -624,8 +621,8 @@ describe('ProjectManager integration', () => {
 
     it('does not stall a machine with recent activity', async () => {
       const { pm, machines } = makePm({ tickets: [{ id: 't1' }] });
-      const mach = internals(pm).createMachine('t1');
-      internals(pm).machines.set('t1', { machine: mach, sandbox: null });
+      const mach = orch(pm).createMachine('t1');
+      orch(pm).machines.set('t1', { machine: mach, sandbox: null });
       const mock = machines.get('t1')!;
 
       mock.phase = 'provisioning';
@@ -638,8 +635,8 @@ describe('ProjectManager integration', () => {
 
     it('does not stall idle/terminal machines', async () => {
       const { pm, machines } = makePm({ tickets: [{ id: 't1' }] });
-      const mach = internals(pm).createMachine('t1');
-      internals(pm).machines.set('t1', { machine: mach, sandbox: null });
+      const mach = orch(pm).createMachine('t1');
+      orch(pm).machines.set('t1', { machine: mach, sandbox: null });
       const mock = machines.get('t1')!;
 
       mock.phase = 'idle';
@@ -652,8 +649,8 @@ describe('ProjectManager integration', () => {
 
     it('uses extended timeout for streaming phases (short silence is not a stall)', async () => {
       const { pm, machines } = makePm({ tickets: [{ id: 't1' }] });
-      const mach = internals(pm).createMachine('t1');
-      internals(pm).machines.set('t1', { machine: mach, sandbox: null });
+      const mach = orch(pm).createMachine('t1');
+      orch(pm).machines.set('t1', { machine: mach, sandbox: null });
       const mock = machines.get('t1')!;
 
       // Silent for 10 minutes — well past the 5-minute non-streaming timeout,
@@ -669,8 +666,8 @@ describe('ProjectManager integration', () => {
     it('fires safety-net for streaming phases that exceed STREAMING_STALL_TIMEOUT_MS', async () => {
       const STREAMING_STALL_TIMEOUT_MS = 30 * 60 * 1000;
       const { pm, machines } = makePm({ tickets: [{ id: 't1' }] });
-      const mach = internals(pm).createMachine('t1');
-      internals(pm).machines.set('t1', { machine: mach, sandbox: null });
+      const mach = orch(pm).createMachine('t1');
+      orch(pm).machines.set('t1', { machine: mach, sandbox: null });
       const mock = machines.get('t1')!;
 
       // Silent for 31 minutes — past the streaming safety-net.
@@ -694,8 +691,8 @@ describe('ProjectManager integration', () => {
 
       // Pre-populate 5 running machines (= MAX_CONCURRENT_SUPERVISORS)
       for (let i = 0; i < 5; i++) {
-        const mach = internals(pm).createMachine(`t${i}` as TicketId);
-        internals(pm).machines.set(`t${i}` as TicketId, { machine: mach, sandbox: null });
+        const mach = orch(pm).createMachine(`t${i}` as TicketId);
+        orch(pm).machines.set(`t${i}` as TicketId, { machine: mach, sandbox: null });
         machines.get(`t${i}` as TicketId)!.phase = 'running';
       }
 
@@ -712,8 +709,8 @@ describe('ProjectManager integration', () => {
         }
       );
 
-      const mach = internals(pm).createMachine('t1');
-      internals(pm).machines.set('t1', { machine: mach, sandbox: null });
+      const mach = orch(pm).createMachine('t1');
+      orch(pm).machines.set('t1', { machine: mach, sandbox: null });
       machines.get('t1')!.phase = 'running';
 
       // Second ticket in same column — should be blocked by per-column limit
@@ -728,10 +725,7 @@ describe('ProjectManager integration', () => {
     });
 
     it('getEffectiveMaxConcurrent clamps FLEET.md override to global limit', () => {
-      const { pm } = makePm(
-        { tickets: [] },
-        { workflowConfig: { supervisor: { max_concurrent: 99 } } }
-      );
+      const { pm } = makePm({ tickets: [] }, { workflowConfig: { supervisor: { max_concurrent: 99 } } });
       // Global MAX_CONCURRENT_SUPERVISORS is 5; override clamped down.
       expect(orch(pm).getEffectiveMaxConcurrent('proj-1')).toBe(5);
     });
@@ -802,8 +796,8 @@ describe('ProjectManager integration', () => {
         // A ticket in backlog that is ALSO active (e.g., leftover from a half-failed cycle).
         tickets: [{ id: 't-ready', columnId: 'backlog' }],
       });
-      const mach = internals(pm).createMachine('t-ready');
-      internals(pm).machines.set('t-ready', { machine: mach, sandbox: null });
+      const mach = orch(pm).createMachine('t-ready');
+      orch(pm).machines.set('t-ready', { machine: mach, sandbox: null });
       machines.get('t-ready')!.phase = 'running';
 
       const startSpy = vi.fn(async () => {});
@@ -823,8 +817,8 @@ describe('ProjectManager integration', () => {
         ],
       });
       for (let i = 0; i < 5; i++) {
-        const mach = internals(pm).createMachine(`busy-${i}` as TicketId);
-        internals(pm).machines.set(`busy-${i}` as TicketId, { machine: mach, sandbox: null });
+        const mach = orch(pm).createMachine(`busy-${i}` as TicketId);
+        orch(pm).machines.set(`busy-${i}` as TicketId, { machine: mach, sandbox: null });
         machines.get(`busy-${i}` as TicketId)!.phase = 'running';
       }
       const startSpy = vi.fn(async () => {});
@@ -909,8 +903,8 @@ describe('ProjectManager integration', () => {
       opts: { reason?: string; continuationTurn?: number; workflowConfig?: Partial<WorkflowConfig> } = {}
     ): { ctx: PmCtx; mock: MockMachine } => {
       const ctx = makePm({ tickets: [{ id: 't1' }] }, { workflowConfig: opts.workflowConfig });
-      const mach = internals(ctx.pm).createMachine('t1');
-      internals(ctx.pm).machines.set('t1', { machine: mach, sandbox: null });
+      const mach = orch(ctx.pm).createMachine('t1');
+      orch(ctx.pm).machines.set('t1', { machine: mach, sandbox: null });
       const mock = ctx.machines.get('t1')!;
       mock.phase = 'running';
       mock.continuationTurn = opts.continuationTurn ?? 0;
@@ -957,7 +951,7 @@ describe('ProjectManager integration', () => {
         // ticket.updatedAt via onTokenUsage), then run_end arrives.
         const runStartTime = Date.now();
         // Mirror what startMachineRun does: stamp the real run-start time.
-        internals(ctx.pm).runStartedAt.set('t1', runStartTime);
+        orch(ctx.pm).runStartedAt.set('t1', runStartTime);
 
         vi.advanceTimersByTime(5_000);
         mock.simulateTokenUsage({ inputTokens: 100, outputTokens: 50, totalTokens: 150 });
@@ -1091,8 +1085,8 @@ describe('ProjectManager integration', () => {
         pipeline,
         tickets: [{ id: 't1', columnId: 'in_progress' }],
       });
-      const mach = internals(ctx.pm).createMachine('t1');
-      internals(ctx.pm).machines.set('t1', { machine: mach, sandbox: null });
+      const mach = orch(ctx.pm).createMachine('t1');
+      orch(ctx.pm).machines.set('t1', { machine: mach, sandbox: null });
       const mock = ctx.machines.get('t1')!;
       mock.phase = 'running';
       return { ctx, mock };
@@ -1114,7 +1108,7 @@ describe('ProjectManager integration', () => {
       ctx.pm.moveTicketToColumn('t1', 'done');
       await vi.runOnlyPendingTimersAsync();
 
-      expect(internals(ctx.pm).machines.has('t1')).toBe(false);
+      expect(orch(ctx.pm).machines.has('t1')).toBe(false);
     });
 
     it('backlog move cancels the retry timer (bug #3)', async () => {
@@ -1224,8 +1218,8 @@ describe('ProjectManager integration', () => {
 
     it('rejects when a machine is already active (not idle/ready/error/completed)', () => {
       const { pm, machines } = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
-      const mach = internals(pm).createMachine('t1');
-      internals(pm).machines.set('t1', { machine: mach, sandbox: null });
+      const mach = orch(pm).createMachine('t1');
+      orch(pm).machines.set('t1', { machine: mach, sandbox: null });
       machines.get('t1')!.phase = 'running';
 
       const err = internals(pm).validateDispatchPreflight('t1');
@@ -1234,8 +1228,8 @@ describe('ProjectManager integration', () => {
 
     it('allows dispatch when machine is in idle/ready/error/completed', () => {
       const { pm, machines } = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
-      const mach = internals(pm).createMachine('t1');
-      internals(pm).machines.set('t1', { machine: mach, sandbox: null });
+      const mach = orch(pm).createMachine('t1');
+      orch(pm).machines.set('t1', { machine: mach, sandbox: null });
 
       for (const phase of ['idle', 'ready', 'error', 'completed'] as TicketPhase[]) {
         machines.get('t1')!.phase = phase;
@@ -1249,8 +1243,8 @@ describe('ProjectManager integration', () => {
         tickets: Array.from({ length: 6 }, (_, i) => ({ id: `t${i}` })),
       });
       for (let i = 0; i < 5; i++) {
-        const m = internals(pm).createMachine(`t${i}` as TicketId);
-        internals(pm).machines.set(`t${i}` as TicketId, { machine: m, sandbox: null });
+        const m = orch(pm).createMachine(`t${i}` as TicketId);
+        orch(pm).machines.set(`t${i}` as TicketId, { machine: m, sandbox: null });
         machines.get(`t${i}` as TicketId)!.phase = 'running';
       }
       const err = internals(pm).validateDispatchPreflight('t5');
@@ -1292,7 +1286,7 @@ describe('ProjectManager integration', () => {
         source: { kind: 'local', workspaceDir: '/tmp/fake' },
         tickets: [{ id: 't1' }],
       });
-      const mach = internals(pm).createMachine('t1');
+      const mach = orch(pm).createMachine('t1');
       // Fake a "running sandbox" via a stub ISandbox.
       const fakeSandbox: ISandbox = {
         mode: 'none',
@@ -1301,9 +1295,13 @@ describe('ProjectManager integration', () => {
         exit: async () => {},
         execInContainer: async () => true,
         getStatus: () =>
-          ({ type: 'running', timestamp: Date.now(), data: { wsUrl: 'ws://fake' } }) as unknown as WithTimestamp<AgentProcessStatus>,
+          ({
+            type: 'running',
+            timestamp: Date.now(),
+            data: { wsUrl: 'ws://fake' },
+          }) as unknown as WithTimestamp<AgentProcessStatus>,
       };
-      internals(pm).machines.set('t1', { machine: mach, sandbox: fakeSandbox });
+      orch(pm).machines.set('t1', { machine: mach, sandbox: fakeSandbox });
       const mock = machines.get('t1')!;
       mock.phase = 'running';
 
@@ -1322,7 +1320,7 @@ describe('ProjectManager integration', () => {
         source: { kind: 'local', workspaceDir: '/tmp/fake' },
         tickets: [{ id: 't1' }],
       });
-      const mach = internals(pm).createMachine('t1');
+      const mach = orch(pm).createMachine('t1');
       const fakeSandbox: ISandbox = {
         mode: 'none',
         start: () => {},
@@ -1330,9 +1328,13 @@ describe('ProjectManager integration', () => {
         exit: async () => {},
         execInContainer: async () => true,
         getStatus: () =>
-          ({ type: 'running', timestamp: Date.now(), data: { wsUrl: 'ws://fake' } }) as unknown as WithTimestamp<AgentProcessStatus>,
+          ({
+            type: 'running',
+            timestamp: Date.now(),
+            data: { wsUrl: 'ws://fake' },
+          }) as unknown as WithTimestamp<AgentProcessStatus>,
       };
-      internals(pm).machines.set('t1', { machine: mach, sandbox: fakeSandbox });
+      orch(pm).machines.set('t1', { machine: mach, sandbox: fakeSandbox });
       const mock = machines.get('t1')!;
       mock.phase = 'ready';
 
@@ -1345,17 +1347,16 @@ describe('ProjectManager integration', () => {
         source: { kind: 'local', workspaceDir: '/tmp/fake' },
         tickets: [{ id: 't1' }],
       });
-      const mach = internals(pm).createMachine('t1');
+      const mach = orch(pm).createMachine('t1');
       const deadSandbox: ISandbox = {
         mode: 'none',
         start: () => {},
         stop: async () => {},
         exit: async () => {},
         execInContainer: async () => true,
-        getStatus: () =>
-          ({ type: 'exited', timestamp: Date.now() }) as unknown as WithTimestamp<AgentProcessStatus>,
+        getStatus: () => ({ type: 'exited', timestamp: Date.now() }) as unknown as WithTimestamp<AgentProcessStatus>,
       };
-      internals(pm).machines.set('t1', { machine: mach, sandbox: deadSandbox });
+      orch(pm).machines.set('t1', { machine: mach, sandbox: deadSandbox });
       const mock = machines.get('t1')!;
       mock.phase = 'idle';
 
@@ -1363,7 +1364,9 @@ describe('ProjectManager integration', () => {
       // build a fresh sandbox. Our mock factory never fires onStatusChange,
       // so sandboxReady hangs until the 120s safety timeout rejects it.
       // Run the call + timer advance concurrently so the rejection flows.
-      const ensurePromise = internals(pm).ensureSupervisorInfra('t1').catch(() => 'rejected');
+      const ensurePromise = internals(pm)
+        .ensureSupervisorInfra('t1')
+        .catch(() => 'rejected');
       await vi.advanceTimersByTimeAsync(121_000);
       await expect(ensurePromise).resolves.toBe('rejected');
 
@@ -1379,8 +1382,8 @@ describe('ProjectManager integration', () => {
 
     const setupWithMachine = (phase: TicketPhase): { ctx: PmCtx; mock: MockMachine } => {
       const ctx = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
-      const mach = internals(ctx.pm).createMachine('t1');
-      internals(ctx.pm).machines.set('t1', { machine: mach, sandbox: null });
+      const mach = orch(ctx.pm).createMachine('t1');
+      orch(ctx.pm).machines.set('t1', { machine: mach, sandbox: null });
       const mock = ctx.machines.get('t1')!;
       mock.phase = phase;
       return { ctx, mock };
@@ -1416,14 +1419,11 @@ describe('ProjectManager integration', () => {
     it('throws when no machine exists and concurrency is saturated', async () => {
       const { pm, machines } = makePm({
         source: LOCAL_SOURCE,
-        tickets: [
-          { id: 't1' },
-          ...Array.from({ length: 5 }, (_, i) => ({ id: `busy-${i}` })),
-        ],
+        tickets: [{ id: 't1' }, ...Array.from({ length: 5 }, (_, i) => ({ id: `busy-${i}` }))],
       });
       for (let i = 0; i < 5; i++) {
-        const m = internals(pm).createMachine(`busy-${i}` as TicketId);
-        internals(pm).machines.set(`busy-${i}` as TicketId, { machine: m, sandbox: null });
+        const m = orch(pm).createMachine(`busy-${i}` as TicketId);
+        orch(pm).machines.set(`busy-${i}` as TicketId, { machine: m, sandbox: null });
         machines.get(`busy-${i}` as TicketId)!.phase = 'running';
       }
 
@@ -1432,14 +1432,14 @@ describe('ProjectManager integration', () => {
 
     it('routes through ensureSupervisorInfra when no machine exists and slots are available', async () => {
       const { pm } = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
-      // Stub ensureSupervisorInfra so we don't touch fs/sandbox.
+      // Stub ensureSupervisorInfra on the orchestrator so we don't touch fs/sandbox.
       const ensureSpy = vi.fn(async () => {
         // Simulate ensureSupervisorInfra registering a fresh machine.
-        const mach = internals(pm).createMachine('t1');
-        internals(pm).machines.set('t1', { machine: mach, sandbox: null });
+        const mach = orch(pm).createMachine('t1');
+        orch(pm).machines.set('t1', { machine: mach, sandbox: null });
         return { machine: mach, sandbox: null };
       });
-      (pm as unknown as { ensureSupervisorInfra: typeof ensureSpy }).ensureSupervisorInfra = ensureSpy;
+      (orch(pm) as unknown as { ensureSupervisorInfra: typeof ensureSpy }).ensureSupervisorInfra = ensureSpy;
 
       await pm.sendSupervisorMessage('t1', 'hi');
 
@@ -1453,8 +1453,8 @@ describe('ProjectManager integration', () => {
         source: { kind: 'local', workspaceDir: '/tmp/fake' },
         tickets: [{ id: 't1' }],
       });
-      const mach = internals(ctx.pm).createMachine('t1');
-      internals(ctx.pm).machines.set('t1', { machine: mach, sandbox: null });
+      const mach = orch(ctx.pm).createMachine('t1');
+      orch(ctx.pm).machines.set('t1', { machine: mach, sandbox: null });
       const mock = ctx.machines.get('t1')!;
       mock.phase = 'running';
 
@@ -1509,10 +1509,7 @@ describe('ProjectManager integration', () => {
 
     it('preserves already-exited and errored tasks', () => {
       const { pm, store } = makePm({ tickets: [{ id: 't1' }] });
-      store.set('tasks', [
-        makeTask('task-exited', 'exited'),
-        makeTask('task-error', 'error'),
-      ]);
+      store.set('tasks', [makeTask('task-exited', 'exited'), makeTask('task-error', 'error')]);
 
       pm.restorePersistedTasks();
 
@@ -1570,9 +1567,7 @@ describe('ProjectManager integration', () => {
 
     it('removes orphaned persisted tasks that reference a deleted ticket', async () => {
       const { pm, store } = makePm({ tickets: [{ id: 't1' }] });
-      store.set('tasks', [
-        makeTask('orphan-task', 'exited', { ticketId: 'deleted-ticket' as TicketId }),
-      ]);
+      store.set('tasks', [makeTask('orphan-task', 'exited', { ticketId: 'deleted-ticket' as TicketId })]);
 
       pm.restorePersistedTasks();
       // startupTerminalCleanup is fire-and-forget; flush the microtask queue.
@@ -1725,10 +1720,7 @@ describe('ProjectManager integration', () => {
 
     it('removeMilestone clears milestoneId on orphaned tickets', () => {
       const { pm, store } = makePm({
-        tickets: [
-          { id: 't-orphan' },
-          { id: 't-other' },
-        ],
+        tickets: [{ id: 't-orphan' }, { id: 't-other' }],
       });
       // Attach milestoneId to t-orphan.
       const tickets = store.get('tickets', []);
@@ -1807,10 +1799,7 @@ describe('ProjectManager integration', () => {
 
     it('removeProject cascades to tickets, milestones, and pages', async () => {
       const { pm, store } = makePm({
-        tickets: [
-          { id: 't-target' },
-          { id: 't-unrelated' },
-        ],
+        tickets: [{ id: 't-target' }, { id: 't-unrelated' }],
       });
       // Seed a second project so we can verify the cascade doesn't overreach.
       const projects = store.get('projects', []);
@@ -1829,11 +1818,37 @@ describe('ProjectManager integration', () => {
 
       store.set('milestones', [
         { id: 'm1', projectId: 'proj-1', title: 'A', description: '', status: 'active', createdAt: 0, updatedAt: 0 },
-        { id: 'm2', projectId: 'other-proj', title: 'B', description: '', status: 'active', createdAt: 0, updatedAt: 0 },
+        {
+          id: 'm2',
+          projectId: 'other-proj',
+          title: 'B',
+          description: '',
+          status: 'active',
+          createdAt: 0,
+          updatedAt: 0,
+        },
       ] as never);
       store.set('pages', [
-        { id: 'p1', projectId: 'proj-1', parentId: null, title: 'root1', sortOrder: 0, isRoot: true, createdAt: 0, updatedAt: 0 },
-        { id: 'p2', projectId: 'other-proj', parentId: null, title: 'root2', sortOrder: 0, isRoot: true, createdAt: 0, updatedAt: 0 },
+        {
+          id: 'p1',
+          projectId: 'proj-1',
+          parentId: null,
+          title: 'root1',
+          sortOrder: 0,
+          isRoot: true,
+          createdAt: 0,
+          updatedAt: 0,
+        },
+        {
+          id: 'p2',
+          projectId: 'other-proj',
+          parentId: null,
+          title: 'root2',
+          sortOrder: 0,
+          isRoot: true,
+          createdAt: 0,
+          updatedAt: 0,
+        },
       ] as never);
 
       await pm.removeProject('proj-1');
