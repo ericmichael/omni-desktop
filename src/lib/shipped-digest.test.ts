@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { computeShippedDigest, localBoundaries } from './shipped-digest';
 import type { Milestone, Ticket } from '@/shared/types';
+
+import { computeShippedDigest, localBoundaries } from './shipped-digest';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const START_OF_WEEK = 1_700_000_000_000;

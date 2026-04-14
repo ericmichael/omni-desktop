@@ -1,12 +1,11 @@
-import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
-import { useStore } from '@nanostores/react';
-import { atom } from 'nanostores';
-import { AnimatePresence, motion } from 'framer-motion';
-import { memo, useCallback, useRef, useState } from 'react';
+import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
 import { ArrowUp20Regular, MailInbox20Regular } from '@fluentui/react-icons';
+import { useStore } from '@nanostores/react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { atom } from 'nanostores';
+import { memo, useCallback, useRef, useState } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 
-import { cn } from '@/renderer/ds';
 import { inboxApi } from '@/renderer/features/Inbox/state';
 
 /** Whether the global quick-capture overlay is open. Exported for any future callers. */
@@ -173,7 +172,9 @@ export const QuickCapture = memo(() => {
 
   const submit = useCallback(async () => {
     const trimmed = value.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+return;
+}
 
     // Capture lands as a global inbox item with no project context. Shaping
     // and promotion happen later from the Inbox view.
@@ -214,7 +215,9 @@ export const QuickCapture = memo(() => {
           transition={{ duration: 0.15 }}
           className={styles.overlay}
           onClick={(e) => {
-            if (e.target === e.currentTarget) close();
+            if (e.target === e.currentTarget) {
+close();
+}
           }}
         >
           {/* Backdrop */}

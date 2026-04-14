@@ -1,12 +1,12 @@
-import { createActor, getNextSnapshot } from 'xstate';
 import { describe, expect, it } from 'vitest';
+import { createActor, getNextSnapshot } from 'xstate';
 
 import {
   INITIAL_RECONNECT_DELAY_MS,
   MAX_RECONNECT_ATTEMPTS,
   MAX_RECONNECT_DELAY_MS,
-  rpcClientMachine,
   type RPCClientEvent,
+  rpcClientMachine,
 } from './rpc-client.machine';
 
 const input = { url: 'ws://localhost:8080', token: 'test-token' };

@@ -1,8 +1,8 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
 import { Webview } from '@/renderer/common/Webview';
-import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import { cn } from '@/renderer/ds';
+import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 
 const MIN_SIDEBAR_PERCENT = 20;
 const MAX_SIDEBAR_PERCENT = 50;

@@ -2,13 +2,17 @@ import type { Project, ProjectSource } from '@/shared/types';
 
 /** Extract the local workspace directory from a ProjectSource. Returns undefined for git-remote or undefined source. */
 export function getLocalWorkspaceDir(source: ProjectSource | undefined): string | undefined {
-  if (source?.kind === 'local') return source.workspaceDir;
+  if (source?.kind === 'local') {
+return source.workspaceDir;
+}
   return undefined;
 }
 
 /** Assert source is local and return workspaceDir. Throws for git-remote or undefined source. */
 export function requireLocalWorkspaceDir(source: ProjectSource | undefined): string {
-  if (source?.kind === 'local') return source.workspaceDir;
+  if (source?.kind === 'local') {
+return source.workspaceDir;
+}
   throw new Error(`Operation requires a local project source, but got "${source?.kind ?? 'none'}"`);
 }
 

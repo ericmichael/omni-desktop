@@ -1,8 +1,8 @@
 import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { WindowConsole20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { WindowConsole20Regular } from '@fluentui/react-icons';
 
 import { cn, IconButton } from '@/renderer/ds';
 import { $isConsoleOpen, $terminalHasNewOutput } from '@/renderer/features/Console/state';

@@ -1,29 +1,34 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Terminal } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
-import { createActor } from 'xstate'
 import '@xterm/xterm/css/xterm.css'
 
-import { useRPCClient, useRPCConnected } from '../rpc-context'
-import { useUiConfig } from '../ui-config'
+import { FitAddon } from '@xterm/addon-fit'
+import { Terminal } from '@xterm/xterm'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createActor } from 'xstate'
+
+import { useRPCClient, useRPCConnected } from '@/renderer/omniagents-ui/rpc-context'
+import { useUiConfig } from '@/renderer/omniagents-ui/ui-config'
 import { createMachineLogger } from '@/shared/machines/machine-logger'
 import {
   getTerminalConnectionStatus,
-  terminalTabMachine,
-  type TerminalTabActor,
   type TerminalConnectionStatus,
+  type TerminalTabActor,
+  terminalTabMachine,
 } from '@/shared/machines/terminal-tab.machine'
 
 function base64Encode(bytes: Uint8Array): string {
   let binary = ''
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+  for (let i = 0; i < bytes.length; i++) {
+binary += String.fromCharCode(bytes[i])
+}
   return btoa(binary)
 }
 
 function base64Decode(value: string): Uint8Array {
   const binary = atob(value)
   const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  for (let i = 0; i < binary.length; i++) {
+bytes[i] = binary.charCodeAt(i)
+}
   return bytes
 }
 
@@ -48,7 +53,9 @@ type TerminalTabRuntime = {
 function makeTabId(): string {
   try {
     const value = (globalThis as any)?.crypto?.randomUUID?.()
-    if (value) return String(value)
+    if (value) {
+return String(value)
+}
   } catch {}
   return `term_${Date.now()}_${Math.random().toString(16).slice(2)}`
 }
@@ -86,11 +93,21 @@ export function TerminalPanel({
       const ids = Array.from(runtimeRef.current.keys())
       ids.forEach((id) => {
         const rt = runtimeRef.current.get(id)
-        if (!rt) return
+        if (!rt) {
+return
+}
         rt.actor.stop()
-        try { rt.socket?.close() } catch {}
-        rt.disposables.forEach((d) => { try { d.dispose() } catch {} })
-        try { rt.terminal.dispose() } catch {}
+        try {
+ rt.socket?.close() 
+} catch {}
+        rt.disposables.forEach((d) => {
+ try {
+ d.dispose() 
+} catch {} 
+})
+        try {
+ rt.terminal.dispose() 
+} catch {}
       })
       runtimeRef.current.clear()
       containersRef.current.clear()
@@ -99,26 +116,40 @@ export function TerminalPanel({
 
   const ensureSession = useCallback(async (): Promise<string> => {
     const existing = String(sessionId || '').trim()
-    if (existing) return existing
+    if (existing) {
+return existing
+}
     const res: any = await client.serverCall('session.ensure', {})
     const sid = String(res?.session_id || '').trim()
-    if (!sid) throw new Error('Session unavailable')
-    try { onSessionId?.(sid) } catch {}
+    if (!sid) {
+throw new Error('Session unavailable')
+}
+    try {
+ onSessionId?.(sid) 
+} catch {}
     return sid
   }, [client, onSessionId, sessionId])
 
   const sendFrame = useCallback((tabId: string, payload: any) => {
     const rt = runtimeRef.current.get(tabId)
-    if (!rt) return
+    if (!rt) {
+return
+}
     const ws = rt.socket
-    if (!ws || ws.readyState !== WebSocket.OPEN) return
-    try { ws.send(JSON.stringify(payload)) } catch {}
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+return
+}
+    try {
+ ws.send(JSON.stringify(payload)) 
+} catch {}
   }, [])
 
   const ensureRuntime = useCallback(
     (tabId: string): TerminalTabRuntime => {
       const existing = runtimeRef.current.get(tabId)
-      if (existing) return existing
+      if (existing) {
+return existing
+}
 
       const terminal = new Terminal({
         convertEol: true,
@@ -171,14 +202,18 @@ export function TerminalPanel({
       rt.disposables.push(
         terminal.onData((data) => {
           const bytes = encoderRef.current.encode(data)
-          if (!bytes.length) return
+          if (!bytes.length) {
+return
+}
           sendFrame(tabId, { type: 'input', data: base64Encode(bytes) })
         })
       )
 
       rt.disposables.push(
         terminal.onResize(({ cols, rows }) => {
-          if (!cols || !rows) return
+          if (!cols || !rows) {
+return
+}
           sendFrame(tabId, { type: 'resize', cols, rows })
         })
       )
@@ -193,9 +228,13 @@ export function TerminalPanel({
   const openInContainer = useCallback(
     (tabId: string) => {
       const rt = ensureRuntime(tabId)
-      if (rt.opened) return
+      if (rt.opened) {
+return
+}
       const container = containersRef.current.get(tabId)
-      if (!container) return
+      if (!container) {
+return
+}
       try {
         rt.terminal.open(container)
         rt.fit.fit()
@@ -217,7 +256,9 @@ export function TerminalPanel({
       const status = getTerminalConnectionStatus(snap.value as string)
 
       // Only connect if disconnected
-      if (status !== 'disconnected') return
+      if (status !== 'disconnected') {
+return
+}
 
       // Tell machine we're starting
       rt.actor.send({ type: 'CONNECT' })
@@ -260,7 +301,9 @@ export function TerminalPanel({
         url.searchParams.set('session_id', created?.session_id || sid)
         url.searchParams.set('terminal_id', terminalId)
         url.searchParams.set('terminal_token', terminalToken)
-        if (authToken) url.searchParams.set('token', authToken)
+        if (authToken) {
+url.searchParams.set('token', authToken)
+}
 
         const ws = new WebSocket(url.toString())
         rt.socket = ws
@@ -276,12 +319,20 @@ export function TerminalPanel({
 
         ws.onmessage = (ev) => {
           let msg: any = null
-          try { msg = JSON.parse(String(ev.data)) } catch { return }
-          if (!msg || typeof msg !== 'object') return
+          try {
+ msg = JSON.parse(String(ev.data)) 
+} catch {
+ return 
+}
+          if (!msg || typeof msg !== 'object') {
+return
+}
           const type = String(msg.type || '')
           if (type === 'output') {
             const data = typeof msg.data === 'string' ? msg.data : ''
-            if (!data) return
+            if (!data) {
+return
+}
             try {
               const bytes = base64Decode(data)
               const text = decoderRef.current.decode(bytes)
@@ -295,7 +346,9 @@ export function TerminalPanel({
               rt.terminal.writeln(`\r\n[process exited${code == null ? '' : `: ${code}`}]`)
             } catch {}
             rt.actor.send({ type: 'EXIT', code: typeof code === 'number' ? code : undefined })
-            try { rt.socket?.close() } catch {}
+            try {
+ rt.socket?.close() 
+} catch {}
             rt.socket = null
             return
           }
@@ -303,7 +356,9 @@ export function TerminalPanel({
 
         ws.onerror = () => {
           rt.actor.send({ type: 'WS_ERROR', error: 'Terminal connection error' })
-          try { rt.socket?.close() } catch {}
+          try {
+ rt.socket?.close() 
+} catch {}
           rt.socket = null
         }
 
@@ -337,10 +392,14 @@ export function TerminalPanel({
 
   // Use refs for unstable callbacks to prevent the main effect from re-firing
   const connectTabRef = useRef(connectTab)
-  useEffect(() => { connectTabRef.current = connectTab }, [connectTab])
+  useEffect(() => {
+ connectTabRef.current = connectTab 
+}, [connectTab])
 
   const openInContainerRef = useRef(openInContainer)
-  useEffect(() => { openInContainerRef.current = openInContainer }, [openInContainer])
+  useEffect(() => {
+ openInContainerRef.current = openInContainer 
+}, [openInContainer])
 
   const addTab = useCallback(() => {
     const id = makeTabId()
@@ -365,8 +424,12 @@ export function TerminalPanel({
         rt.actor.send({ type: 'CLOSE' })
         rt.actor.stop()
 
-        try { sendFrame(tabId, { type: 'close' }) } catch {}
-        try { rt.socket?.close() } catch {}
+        try {
+ sendFrame(tabId, { type: 'close' }) 
+} catch {}
+        try {
+ rt.socket?.close() 
+} catch {}
         rt.socket = null
 
         const snap = rt.actor.getSnapshot()
@@ -381,8 +444,14 @@ export function TerminalPanel({
           } catch {}
         }
 
-        rt.disposables.forEach((d) => { try { d.dispose() } catch {} })
-        try { rt.terminal.dispose() } catch {}
+        rt.disposables.forEach((d) => {
+ try {
+ d.dispose() 
+} catch {} 
+})
+        try {
+ rt.terminal.dispose() 
+} catch {}
         runtimeRef.current.delete(tabId)
         containersRef.current.delete(tabId)
       }
@@ -391,8 +460,12 @@ export function TerminalPanel({
         const idx = prev.findIndex((t) => t.id === tabId)
         const nextTabs = prev.filter((t) => t.id !== tabId)
         setActiveId((current) => {
-          if (current !== tabId) return current
-          if (!nextTabs.length) return undefined
+          if (current !== tabId) {
+return current
+}
+          if (!nextTabs.length) {
+return undefined
+}
           const pick = Math.max(0, idx - 1)
           return nextTabs[pick]?.id || nextTabs[0].id
         })
@@ -404,7 +477,9 @@ export function TerminalPanel({
 
   // Auto-create first tab
   useEffect(() => {
-    if (!tabs.length) addTab()
+    if (!tabs.length) {
+addTab()
+}
   }, [addTab, tabs.length])
 
   const activeTab = useMemo(() => {
@@ -417,12 +492,16 @@ export function TerminalPanel({
   // while sandboxes are still starting up.
   const activeTabId = activeTab?.id
   useEffect(() => {
-    if (!activeTabId || !open || !rpcConnected) return
+    if (!activeTabId || !open || !rpcConnected) {
+return
+}
     setActiveId(activeTabId)
     openInContainerRef.current(activeTabId)
     const rt = runtimeRef.current.get(activeTabId)
     if (rt && rt.opened) {
-      try { rt.fit.fit() } catch {}
+      try {
+ rt.fit.fit() 
+} catch {}
       sendFrame(activeTabId, {
         type: 'resize',
         cols: rt.terminal.cols,
@@ -434,12 +513,20 @@ export function TerminalPanel({
 
   useEffect(() => {
     const onWindowResize = () => {
-      if (!open) return
+      if (!open) {
+return
+}
       const id = activeId
-      if (!id) return
+      if (!id) {
+return
+}
       const rt = runtimeRef.current.get(id)
-      if (!rt || !rt.opened) return
-      try { rt.fit.fit() } catch {}
+      if (!rt || !rt.opened) {
+return
+}
+      try {
+ rt.fit.fit() 
+} catch {}
       sendFrame(id, {
         type: 'resize',
         cols: rt.terminal.cols,
@@ -451,8 +538,11 @@ export function TerminalPanel({
   }, [activeId, open, sendFrame])
 
   const setContainer = useCallback((tabId: string, el: HTMLDivElement | null) => {
-    if (el) containersRef.current.set(tabId, el)
-    else containersRef.current.delete(tabId)
+    if (el) {
+containersRef.current.set(tabId, el)
+} else {
+containersRef.current.delete(tabId)
+}
   }, [])
 
   const statusLabel = (tab: TerminalTabMeta) => {

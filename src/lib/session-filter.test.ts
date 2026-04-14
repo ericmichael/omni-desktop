@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { acceptStrictEvent, acceptLooseEvent, type SessionFilterState } from './session-filter';
+import { describe, expect,it } from 'vitest';
+
+import { acceptLooseEvent, acceptStrictEvent, type SessionFilterState } from './session-filter';
 
 // ---------------------------------------------------------------------------
 // acceptStrictEvent

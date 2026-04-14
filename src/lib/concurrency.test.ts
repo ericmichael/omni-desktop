@@ -4,7 +4,7 @@
  * mechanism in isolation — no real SandboxManager, TicketMachine, or
  * electron-store is involved.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { TicketPhase } from '@/shared/ticket-phase';
 import { isValidTransition } from '@/shared/ticket-phase';
@@ -185,7 +185,9 @@ describe('supervisor lifecycle races', () => {
     async stopSupervisor(ticketId: string): Promise<void> {
       return this.lock.withLock(ticketId, async () => {
         const machine = this.machines.get(ticketId);
-        if (!machine) return;
+        if (!machine) {
+return;
+}
         await machine.stop();
       });
     }
@@ -193,10 +195,14 @@ describe('supervisor lifecycle races', () => {
     handleRunEnd(ticketId: string, action: 'continue' | 'complete' | 'retry'): Promise<void> {
       return this.lock.withLock(ticketId, async () => {
         const machine = this.machines.get(ticketId);
-        if (!machine) return;
+        if (!machine) {
+return;
+}
 
         // Guard: ignore if no longer streaming
-        if (!machine.isStreaming()) return;
+        if (!machine.isStreaming()) {
+return;
+}
 
         if (action === 'complete') {
           machine.phase = 'completed';
@@ -315,7 +321,9 @@ describe('supervisor lifecycle races', () => {
     const pStop = fm.stopSupervisor('t1');
     const pStall = fm.lock.withLock('t1', async () => {
       // Re-check under lock (mirrors checkForStalledSupervisors fix)
-      if (!machine.isStreaming()) return;
+      if (!machine.isStreaming()) {
+return;
+}
       machine.phase = 'retrying';
     });
 

@@ -1,6 +1,8 @@
 import React from 'react'
+
+import { cn } from '@/renderer/omniagents-ui/lib/utils'
+
 import { Conversation, ConversationContent, ConversationScrollButton } from './ai/conversation'
-import { cn } from '../lib/utils'
 
 type ConversationProps = React.ComponentProps<typeof Conversation>
 type ConversationContentProps = React.ComponentProps<typeof ConversationContent>

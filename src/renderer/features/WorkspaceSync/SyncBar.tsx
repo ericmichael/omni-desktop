@@ -1,9 +1,9 @@
-import { makeStyles, mergeClasses, tokens, ProgressBar, Tooltip } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, ProgressBar, tokens, Tooltip } from '@fluentui/react-components';
 import {
   ArrowSync20Regular,
   Checkmark20Regular,
-  CloudArrowUp20Regular,
   CloudArrowDown20Regular,
+  CloudArrowUp20Regular,
   ErrorCircle20Regular,
 } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
@@ -81,15 +81,21 @@ const useStyles = makeStyles({
 });
 
 function formatEta(seconds: number): string {
-  if (seconds < 60) return `${seconds}s left`;
+  if (seconds < 60) {
+return `${seconds}s left`;
+}
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
   return secs > 0 ? `${mins}m ${secs}s left` : `${mins}m left`;
 }
 
 function formatRate(bytesPerSecond: number): string {
-  if (bytesPerSecond < 1024) return `${Math.round(bytesPerSecond)} B/s`;
-  if (bytesPerSecond < 1024 * 1024) return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`;
+  if (bytesPerSecond < 1024) {
+return `${Math.round(bytesPerSecond)} B/s`;
+}
+  if (bytesPerSecond < 1024 * 1024) {
+return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`;
+}
   return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`;
 }
 
@@ -97,7 +103,9 @@ function formatRate(bytesPerSecond: number): string {
 function useAggregateStatus(statuses: Record<string, WorkspaceSyncStatus>) {
   return useMemo(() => {
     const entries = Object.values(statuses);
-    if (entries.length === 0) return null;
+    if (entries.length === 0) {
+return null;
+}
 
     // Find the most "active" status
     const error = entries.find((s) => s.state === 'error');
@@ -163,7 +171,9 @@ export const SyncBar = memo(() => {
   const styles = useStyles();
   const agg = useAggregateStatus(statuses);
 
-  if (!agg) return null;
+  if (!agg) {
+return null;
+}
 
   const icon =
     agg.type === 'error' ? (

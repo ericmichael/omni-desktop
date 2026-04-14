@@ -1,21 +1,20 @@
-import { useStore } from '@nanostores/react';
-import { memo, useCallback, useMemo, useState } from 'react';
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import {
   Add20Regular,
+  ArchiveRegular,
   BranchFork20Regular,
+  Checkmark12Regular,
   ChevronDown12Regular,
   ChevronRight12Regular,
-  Checkmark12Regular,
-  ArchiveRegular,
 } from '@fluentui/react-icons';
-import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
+import { useStore } from '@nanostores/react';
+import { memo, useCallback, useMemo, useState } from 'react';
 
 import { Badge, Button, Caption1, IconButton, Input, ProgressBar, SectionLabel, Textarea } from '@/renderer/ds';
 import { $milestones, milestoneApi } from '@/renderer/features/Initiatives/state';
-import { persistedStoreApi } from '@/renderer/services/store';
-import type { GitRepoInfo, Milestone, MilestoneId, ProjectId } from '@/shared/types';
+import type { Milestone, MilestoneId, ProjectId } from '@/shared/types';
 
-import { $activeMilestoneId, $tickets, ticketApi } from './state';
+import { $activeMilestoneId, $tickets } from './state';
 
 const useStyles = makeStyles({
   root: {
@@ -285,7 +284,9 @@ export const MilestoneSection = memo(({ projectId }: { projectId: ProjectId }) =
           // Active first, then completed, then archived
           const order = { active: 0, completed: 1, archived: 2 };
           const diff = order[a.status] - order[b.status];
-          if (diff !== 0) return diff;
+          if (diff !== 0) {
+return diff;
+}
           return a.createdAt - b.createdAt;
         }),
     [milestones, projectId]

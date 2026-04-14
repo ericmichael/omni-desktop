@@ -7,7 +7,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-import { runMigrations, type IMigrationStore, type MigrationDeps } from '@/lib/project-migrations';
+import { type IMigrationStore, type MigrationDeps,runMigrations } from '@/lib/project-migrations';
 
 // ---------------------------------------------------------------------------
 // In-memory migration store

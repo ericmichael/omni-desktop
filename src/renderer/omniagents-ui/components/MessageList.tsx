@@ -1,40 +1,42 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
-import { CheckCircleIcon, CopyIcon, ThumbsUpIcon, ThumbsDownIcon, PaperclipIcon } from 'lucide-react'
+import { CheckCircleIcon, CopyIcon, PaperclipIcon,ThumbsDownIcon, ThumbsUpIcon } from 'lucide-react'
+import React, { useCallback,useEffect, useMemo, useState } from 'react'
+
+import { getGreeting } from '@/renderer/omniagents-ui/greeting'
+
+import { ActivityGroup as ActivityGroupComponent } from './ActivityGroup'
+import type { ActivityGroupData } from './activityGroup'
+import { groupItems } from './activityGroup'
+import {
+  Artifact,
+  ArtifactAction,
+  ArtifactActions,
+  ArtifactContent,
+  ArtifactHeader,
+  ArtifactTitle,
+} from './ai/artifact'
+import { CodeBlock } from './ai/code-block'
 import { MessageResponse } from './ai/message'
+import {
+  Plan,
+  PlanContent,
+  PlanDescription,
+  PlanFooter,
+  PlanHeader,
+  PlanTitle,
+} from './ai/plan'
 import { Shimmer } from './ai/shimmer'
 import {
   Tool,
-  ToolHeader,
   ToolContent,
+  ToolHeader,
   ToolInput,
   ToolOutput,
 } from './ai/tool'
-import { CodeBlock } from './ai/code-block'
-import {
-  Plan,
-  PlanHeader,
-  PlanTitle,
-  PlanDescription,
-  PlanContent,
-  PlanFooter,
-} from './ai/plan'
-import {
-  Artifact,
-  ArtifactHeader,
-  ArtifactTitle,
-  ArtifactContent,
-  ArtifactActions,
-  ArtifactAction,
-} from './ai/artifact'
-import { Markdown } from './promptkit/markdown'
 import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } from './ChatContainer'
-import { groupItems } from './activityGroup'
-import type { ActivityGroupData } from './activityGroup'
-import { ActivityGroup as ActivityGroupComponent } from './ActivityGroup'
-import { getGreeting } from '../greeting'
+import { Markdown } from './promptkit/markdown'
 
-export type { Attachment, ApprovalItem, ArtifactItem, ChatMessage, MessageItem, PlanItem, ToolItem } from '@/shared/chat-types'
+export type { ApprovalItem, ArtifactItem, Attachment, ChatMessage, MessageItem, PlanItem, ToolItem } from '@/shared/chat-types'
 import type { ApprovalItem, ArtifactItem, Attachment, ChatMessage, MessageItem, PlanItem, ToolItem } from '@/shared/chat-types'
 
 export function MessageList({ items, greeting: greetingProp, statusText, thinking, statusSpinner, preambleText, welcomeText, onApprovalDecision, pendingPlan, onPlanDecision, statusItalic, onReaction, currentRunId, toolStatusText }:
@@ -56,14 +58,18 @@ export function MessageList({ items, greeting: greetingProp, statusText, thinkin
   }, [])
   const handleFeedbackSubmit = useCallback((index: number, text: string) => {
     const type = reactions[index]
-    if (type) onReaction?.(type, text)
+    if (type) {
+onReaction?.(type, text)
+}
     setFeedbackIndex(undefined)
   }, [reactions, onReaction])
   const handleFeedbackDismiss = useCallback(() => {
     const idx = feedbackIndex
     if (idx !== undefined) {
       const type = reactions[idx]
-      if (type) onReaction?.(type)
+      if (type) {
+onReaction?.(type)
+}
     }
     setFeedbackIndex(undefined)
   }, [feedbackIndex, reactions, onReaction])
@@ -100,11 +106,21 @@ export function MessageList({ items, greeting: greetingProp, statusText, thinkin
       <ChatContainerContent className="container-chat px-3 py-3 space-y-3 md:space-y-4">
         {(
           displayItems.map((m, i) => {
-            if (m.type === 'activity_group') return <ActivityGroupComponent key={(m as any).runId + '-' + i} group={m as any} statusText={tickerStatus} />
-            if (m.type === 'chat') return <MessageBubble key={i} index={i} role={(m as ChatMessage).role} content={(m as ChatMessage).content} attachments={(m as ChatMessage).attachments} reactions={reactions} onReact={handleReaction} feedbackIndex={feedbackIndex} onFeedbackSubmit={handleFeedbackSubmit} onFeedbackDismiss={handleFeedbackDismiss} />
-            if (m.type === 'tool') return <ToolCard key={(m as ToolItem).call_id || i} item={m as ToolItem} />
-            if (m.type === 'artifact') return <InlineArtifact key={(m as ArtifactItem).artifact_id || i} item={m as ArtifactItem} />
-            if (m.type === 'approval') return <ApprovalCard key={(m as ApprovalItem).request_id} item={m as ApprovalItem} onDecision={onApprovalDecision} />
+            if (m.type === 'activity_group') {
+return <ActivityGroupComponent key={`${(m as any).runId  }-${  i}`} group={m as any} statusText={tickerStatus} />
+}
+            if (m.type === 'chat') {
+return <MessageBubble key={i} index={i} role={(m as ChatMessage).role} content={(m as ChatMessage).content} attachments={(m as ChatMessage).attachments} reactions={reactions} onReact={handleReaction} feedbackIndex={feedbackIndex} onFeedbackSubmit={handleFeedbackSubmit} onFeedbackDismiss={handleFeedbackDismiss} />
+}
+            if (m.type === 'tool') {
+return <ToolCard key={(m as ToolItem).call_id || i} item={m as ToolItem} />
+}
+            if (m.type === 'artifact') {
+return <InlineArtifact key={(m as ArtifactItem).artifact_id || i} item={m as ArtifactItem} />
+}
+            if (m.type === 'approval') {
+return <ApprovalCard key={(m as ApprovalItem).request_id} item={m as ApprovalItem} onDecision={onApprovalDecision} />
+}
             return null
           })
         )}
@@ -175,7 +191,11 @@ function MessageBubble({ index, role, content, attachments, reactions, onReact, 
           </div>
           <div className="mt-1 flex items-center gap-1">
             <button
-              onClick={() => { try { navigator.clipboard.writeText(content) } catch {} }}
+              onClick={() => {
+ try {
+ navigator.clipboard.writeText(content) 
+} catch {} 
+}}
               className="hover:bg-accent rounded p-1 text-muted-foreground hover:text-foreground active:opacity-50"
               aria-label="Copy"
             >
@@ -216,13 +236,17 @@ function MessageBubble({ index, role, content, attachments, reactions, onReact, 
                 className="flex-1 h-9 px-3 rounded-lg bg-secondary text-sm text-foreground placeholder-muted-foreground border border-transparent focus:border-primary focus:outline-none"
               />
               <button
-                onClick={() => { onFeedbackSubmit?.(index, feedbackText); setFeedbackText('') }}
+                onClick={() => {
+ onFeedbackSubmit?.(index, feedbackText); setFeedbackText('') 
+}}
                 className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm hover:brightness-110"
               >
                 Submit
               </button>
               <button
-                onClick={() => { onFeedbackDismiss?.(); setFeedbackText('') }}
+                onClick={() => {
+ onFeedbackDismiss?.(); setFeedbackText('') 
+}}
                 className="h-9 px-3 rounded-lg text-muted-foreground text-sm hover:text-foreground hover:bg-accent"
               >
                 Skip
@@ -238,7 +262,9 @@ function MessageBubble({ index, role, content, attachments, reactions, onReact, 
 function InlineArtifact({ item }: { item: ArtifactItem }) {
   const [copied, setCopied] = useState(false)
   const handleCopy = useCallback(() => {
-    try { navigator.clipboard.writeText(item.content) } catch {}
+    try {
+ navigator.clipboard.writeText(item.content) 
+} catch {}
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }, [item.content])
@@ -341,7 +367,9 @@ function AttachmentChip({ attachment }: { attachment: Attachment }) {
 }
 
 function PreambleRow({ text }: { text?: string }) {
-  if (!text) return null
+  if (!text) {
+return null
+}
   return (
     <div className="flex items-start gap-2">
       <span className="text-warning animate-pulse mt-[2px]">✶</span>
@@ -353,7 +381,9 @@ function PreambleRow({ text }: { text?: string }) {
 }
 
 function StatusRow({ text, spinner, italic }: { text?: string; spinner?: boolean; italic?: boolean }) {
-  if (!text) return null
+  if (!text) {
+return null
+}
   if (spinner) {
     return (
       <div className="text-xs">
@@ -375,21 +405,31 @@ export function ToolCard({ item }: { item: ToolItem }) {
   const headerTitle = useMemo(() => {
     const meta = item.metadata
     const sum = meta && typeof meta === 'object' ? String(meta.summary || '') : ''
-    if (sum && sum.trim().length > 0) return sum.trim()
+    if (sum && sum.trim().length > 0) {
+return sum.trim()
+}
     return item.tool
   }, [item.tool, item.metadata])
 
   const headerPreview = useMemo(() => {
     const meta = item.metadata
     const sum = meta && typeof meta === 'object' ? String(meta.summary || '') : ''
-    if (sum && sum.trim().length > 0) return undefined
+    if (sum && sum.trim().length > 0) {
+return undefined
+}
     return formatArgsPreview(item.input || '', 80) || undefined
   }, [item.input, item.metadata])
 
   const richBody = useMemo(() => renderMetadata(item.metadata, item.output || ''), [item.metadata, item.output])
   const parsedInput = useMemo(() => {
-    if (!item.input) return undefined
-    try { return JSON.parse(item.input) } catch { return undefined }
+    if (!item.input) {
+return undefined
+}
+    try {
+ return JSON.parse(item.input) 
+} catch {
+ return undefined 
+}
   }, [item.input])
 
   return (
@@ -487,18 +527,28 @@ function PlanCard({ item, onDecision }: { item: PlanItem; onDecision?: (approved
 }
 
 export function formatArgsPreview(args: string, maxLen: number) {
-  if (!args) return ''
+  if (!args) {
+return ''
+}
   let parsed: any
-  try { parsed = JSON.parse(args) } catch {}
+  try {
+ parsed = JSON.parse(args) 
+} catch {}
   let text: string
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
     const parts: string[] = []
     Object.entries(parsed).forEach(([k, v]) => {
       let vs: string
-      if (typeof v === 'string') vs = `"${v}"`
-      else if (typeof v === 'number' || typeof v === 'boolean') vs = String(v)
-      else {
-        try { vs = JSON.stringify(v) } catch { vs = String(v) }
+      if (typeof v === 'string') {
+vs = `"${v}"`
+} else if (typeof v === 'number' || typeof v === 'boolean') {
+vs = String(v)
+} else {
+        try {
+ vs = JSON.stringify(v) 
+} catch {
+ vs = String(v) 
+}
       }
       parts.push(`${k}: ${vs}`)
     })
@@ -506,23 +556,45 @@ export function formatArgsPreview(args: string, maxLen: number) {
   } else {
     text = args.replace(/\s+/g, ' ').trim()
   }
-  if (text.length > maxLen) return text.slice(0, maxLen - 3) + '...'
+  if (text.length > maxLen) {
+return `${text.slice(0, maxLen - 3)  }...`
+}
   return text
 }
 
 function renderMetadata(meta: any, fallbackText: string): React.ReactNode | null {
   if (meta && typeof meta === 'object' && meta.display_type) {
     const dt = meta.display_type as string
-    if (dt === 'diff') return diffView(linesFromDiff(meta))
-    if (dt === 'table') return tableView(meta)
-    if (dt === 'file_write') return codeBlockView((meta.value as string) || fallbackText, meta.metadata?.language)
-    if (dt === 'command') return commandView(meta, fallbackText)
-    if (dt === 'file_content') return fileContentView(meta, fallbackText)
-    if (dt === 'directory_listing') return directoryListingView(meta, fallbackText)
-    if (dt === 'search_results') return searchResultsView(meta, fallbackText)
-    if (dt === 'web_content') return webContentView(meta, fallbackText)
-    if (dt === 'error') return errorView(meta, fallbackText)
-    if (typeof meta.preview === 'string' && meta.preview.trim().length > 0) return codeBlockView(meta.preview)
+    if (dt === 'diff') {
+return diffView(linesFromDiff(meta))
+}
+    if (dt === 'table') {
+return tableView(meta)
+}
+    if (dt === 'file_write') {
+return codeBlockView((meta.value as string) || fallbackText, meta.metadata?.language)
+}
+    if (dt === 'command') {
+return commandView(meta, fallbackText)
+}
+    if (dt === 'file_content') {
+return fileContentView(meta, fallbackText)
+}
+    if (dt === 'directory_listing') {
+return directoryListingView(meta, fallbackText)
+}
+    if (dt === 'search_results') {
+return searchResultsView(meta, fallbackText)
+}
+    if (dt === 'web_content') {
+return webContentView(meta, fallbackText)
+}
+    if (dt === 'error') {
+return errorView(meta, fallbackText)
+}
+    if (typeof meta.preview === 'string' && meta.preview.trim().length > 0) {
+return codeBlockView(meta.preview)
+}
   }
   return null
 }
@@ -531,7 +603,11 @@ function linesFromDiff(metadata: any): string[] {
   const v = metadata?.value
   const acc: string[] = []
   if (v && typeof v === 'object' && Array.isArray(v.diff_lines)) {
-    for (const s of v.diff_lines) if (typeof s === 'string') acc.push(s)
+    for (const s of v.diff_lines) {
+if (typeof s === 'string') {
+acc.push(s)
+}
+}
   }
   return acc
 }
@@ -572,33 +648,53 @@ function codeBlockView(content: string, language?: string) {
 function commandView(metadata: any, plainOutput: string) {
   const meta = metadata?.metadata || {}
   let command = plainOutput || ''
-  if (typeof meta?.command === 'string') command = meta.command
+  if (typeof meta?.command === 'string') {
+command = meta.command
+}
   let output = ''
   const value = metadata?.value
-  if (typeof value === 'string' && value.trim().length > 0) output = value
-  else if (typeof metadata?.preview === 'string' && metadata.preview.trim().length > 0) output = metadata.preview
-  else {
+  if (typeof value === 'string' && value.trim().length > 0) {
+output = value
+} else if (typeof metadata?.preview === 'string' && metadata.preview.trim().length > 0) {
+output = metadata.preview
+} else {
     const stdout = meta?.stdout
     const stderr = meta?.stderr
     const parts: string[] = []
-    if (typeof stdout === 'string' && stdout.trim().length > 0) parts.push(stdout)
-    if (typeof stderr === 'string' && stderr.trim().length > 0) parts.push('[stderr]\n' + stderr)
-    if (parts.length) output = parts.join('\n')
-    if (!output && plainOutput && plainOutput.trim().length > 0) output = plainOutput
+    if (typeof stdout === 'string' && stdout.trim().length > 0) {
+parts.push(stdout)
+}
+    if (typeof stderr === 'string' && stderr.trim().length > 0) {
+parts.push(`[stderr]\n${  stderr}`)
+}
+    if (parts.length) {
+output = parts.join('\n')
+}
+    if (!output && plainOutput && plainOutput.trim().length > 0) {
+output = plainOutput
+}
   }
   const status: string[] = []
-  if (typeof meta?.success === 'boolean') status.push(meta.success ? 'success' : 'failed')
-  if (typeof meta?.exit_code === 'number') status.push('exit ' + String(meta.exit_code))
-  if (typeof meta?.wall_time_ms === 'number') status.push(meta.wall_time_ms + 'ms')
+  if (typeof meta?.success === 'boolean') {
+status.push(meta.success ? 'success' : 'failed')
+}
+  if (typeof meta?.exit_code === 'number') {
+status.push(`exit ${  String(meta.exit_code)}`)
+}
+  if (typeof meta?.wall_time_ms === 'number') {
+status.push(`${meta.wall_time_ms  }ms`)
+}
   if (typeof meta?.was_truncated === 'boolean' && meta.was_truncated) {
     const charsTruncated = meta?.chars_truncated
     status.push(typeof charsTruncated === 'number' ? `${charsTruncated.toLocaleString()} chars truncated` : 'truncated')
   }
-  if (typeof meta?.has_stderr === 'boolean' && meta.has_stderr) status.push('stderr captured')
+  if (typeof meta?.has_stderr === 'boolean' && meta.has_stderr) {
+status.push('stderr captured')
+}
   const statusColor = meta?.success === false ? 'text-destructive' : 'text-muted-foreground'
   return (
     <div className="space-y-2">
-      <CodeBlock code={'$ ' + String(command)} language="bash" />
+      <CodeBlock code={`$ ${  String(command)}`} language="bash" />
       {status.length ? <div className={['text-[12px]', statusColor].join(' ')}>{status.join(' \u00b7 ')}</div> : null}
       {output.trim().length ? <CodeBlock code={output.trimEnd()} language="text" /> : null}
     </div>
@@ -609,8 +705,12 @@ function fileContentView(metadata: any, plainOutput: string) {
   const meta = metadata?.metadata || {}
   const preview = typeof metadata?.preview === 'string' ? metadata.preview : plainOutput
   const stats: string[] = []
-  if (typeof meta?.total_file_lines === 'number') stats.push(`${meta.total_file_lines.toLocaleString()} lines total`)
-  if (typeof meta?.lines_truncated_count === 'number' && meta.lines_truncated_count > 0) stats.push(`${meta.lines_truncated_count} long lines truncated`)
+  if (typeof meta?.total_file_lines === 'number') {
+stats.push(`${meta.total_file_lines.toLocaleString()} lines total`)
+}
+  if (typeof meta?.lines_truncated_count === 'number' && meta.lines_truncated_count > 0) {
+stats.push(`${meta.lines_truncated_count} long lines truncated`)
+}
   if (typeof meta?.start_line === 'number' && typeof meta?.end_line === 'number') {
     stats.push(`showing L${meta.start_line}-${meta.end_line}`)
   }
@@ -627,11 +727,21 @@ function directoryListingView(metadata: any, plainOutput: string) {
   const meta = metadata?.metadata || {}
   const preview = typeof metadata?.preview === 'string' ? metadata.preview : plainOutput
   const stats: string[] = []
-  if (typeof meta?.total_entries === 'number') stats.push(`${meta.total_entries.toLocaleString()} entries`)
-  if (typeof meta?.file_count === 'number') stats.push(`${meta.file_count} files`)
-  if (typeof meta?.dir_count === 'number') stats.push(`${meta.dir_count} dirs`)
-  if (typeof meta?.symlink_count === 'number' && meta.symlink_count > 0) stats.push(`${meta.symlink_count} symlinks`)
-  if (typeof meta?.was_truncated === 'boolean' && meta.was_truncated) stats.push('truncated')
+  if (typeof meta?.total_entries === 'number') {
+stats.push(`${meta.total_entries.toLocaleString()} entries`)
+}
+  if (typeof meta?.file_count === 'number') {
+stats.push(`${meta.file_count} files`)
+}
+  if (typeof meta?.dir_count === 'number') {
+stats.push(`${meta.dir_count} dirs`)
+}
+  if (typeof meta?.symlink_count === 'number' && meta.symlink_count > 0) {
+stats.push(`${meta.symlink_count} symlinks`)
+}
+  if (typeof meta?.was_truncated === 'boolean' && meta.was_truncated) {
+stats.push('truncated')
+}
 
   return (
     <div className="space-y-2">
@@ -645,11 +755,21 @@ function searchResultsView(metadata: any, plainOutput: string) {
   const meta = metadata?.metadata || {}
   const preview = typeof metadata?.preview === 'string' ? metadata.preview : plainOutput
   const stats: string[] = []
-  if (typeof meta?.files_with_matches === 'number') stats.push(`${meta.files_with_matches} files with matches`)
-  if (typeof meta?.files_searched === 'number') stats.push(`${meta.files_searched.toLocaleString()} files searched`)
-  if (typeof meta?.elapsed_ms === 'number') stats.push(`${meta.elapsed_ms}ms`)
-  if (typeof meta?.timed_out === 'boolean' && meta.timed_out) stats.push('timed out')
-  if (typeof metadata?.truncated === 'boolean' && metadata.truncated) stats.push('truncated')
+  if (typeof meta?.files_with_matches === 'number') {
+stats.push(`${meta.files_with_matches} files with matches`)
+}
+  if (typeof meta?.files_searched === 'number') {
+stats.push(`${meta.files_searched.toLocaleString()} files searched`)
+}
+  if (typeof meta?.elapsed_ms === 'number') {
+stats.push(`${meta.elapsed_ms}ms`)
+}
+  if (typeof meta?.timed_out === 'boolean' && meta.timed_out) {
+stats.push('timed out')
+}
+  if (typeof metadata?.truncated === 'boolean' && metadata.truncated) {
+stats.push('truncated')
+}
 
   return (
     <div className="space-y-2">
@@ -663,9 +783,15 @@ function webContentView(metadata: any, plainOutput: string) {
   const meta = metadata?.metadata || {}
   const preview = typeof metadata?.preview === 'string' ? metadata.preview : plainOutput
   const stats: string[] = []
-  if (typeof meta?.title === 'string' && meta.title.trim()) stats.push(meta.title)
-  if (typeof meta?.elapsed_ms === 'number') stats.push(`${meta.elapsed_ms}ms`)
-  if (typeof meta?.link_count === 'number') stats.push(`${meta.link_count} links`)
+  if (typeof meta?.title === 'string' && meta.title.trim()) {
+stats.push(meta.title)
+}
+  if (typeof meta?.elapsed_ms === 'number') {
+stats.push(`${meta.elapsed_ms}ms`)
+}
+  if (typeof meta?.link_count === 'number') {
+stats.push(`${meta.link_count} links`)
+}
   if (typeof meta?.links_truncated === 'boolean' && meta.links_truncated && typeof meta?.total_links === 'number') {
     stats.push(`(${meta.total_links} total)`)
   }
@@ -700,7 +826,9 @@ function errorView(metadata: any, plainOutput: string) {
 
 /** Guess language from file extension for syntax highlighting */
 function guessLanguage(filePath?: string): string | undefined {
-  if (!filePath) return undefined
+  if (!filePath) {
+return undefined
+}
   const ext = filePath.split('.').pop()?.toLowerCase()
   const map: Record<string, string> = {
     ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx',

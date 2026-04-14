@@ -1,6 +1,6 @@
-import type { SessionMessage, TicketId, TokenUsage } from '@/shared/types';
 import type { TicketPhase } from '@/shared/ticket-phase';
-import { isValidTransition, isActivePhase, isStreamingPhase } from '@/shared/ticket-phase';
+import { isActivePhase, isStreamingPhase,isValidTransition } from '@/shared/ticket-phase';
+import type { SessionMessage, TicketId, TokenUsage } from '@/shared/types';
 
 // --- Constants ---
 
@@ -121,7 +121,9 @@ export class TicketMachine {
    * Broadcasts the phase change to the callback.
    */
   transition(to: TicketPhase): void {
-    if (this.phase === to) return;
+    if (this.phase === to) {
+return;
+}
     if (!isValidTransition(this.phase, to)) {
       console.warn(
         `[TicketMachine] Invalid transition for ${this.ticketId}: ${this.phase} → ${to}. Ignoring.`

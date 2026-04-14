@@ -1,6 +1,6 @@
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 
 import { Button, Input, Select, Textarea } from '@/renderer/ds';
 import { $milestones } from '@/renderer/features/Initiatives/state';
@@ -76,8 +76,12 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
 
   // Only fetch git info when project has a local repo
   useEffect(() => {
-    if (!project) return;
-    if (project.source?.kind !== 'local') return;
+    if (!project) {
+return;
+}
+    if (project.source?.kind !== 'local') {
+return;
+}
     ticketApi.checkGitRepo(project.source.workspaceDir).then((info) => {
       setGitInfo(info);
       if (info.isGitRepo) {

@@ -1,13 +1,13 @@
 import {
-  Toolbar,
-  ToolbarButton,
   makeStyles,
   mergeClasses,
-  tokens,
   Subtitle2,
+  tokens,
+  Toolbar,
+  ToolbarButton,
 } from '@fluentui/react-components';
-import type { ReactNode } from 'react';
 import { ArrowLeft20Regular } from '@fluentui/react-icons';
+import type { ReactNode } from 'react';
 
 type TopAppBarProps = {
   title: ReactNode;

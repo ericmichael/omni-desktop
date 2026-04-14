@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { useRPCClient } from '../rpc-context'
+
+import { useRPCClient } from '@/renderer/omniagents-ui/rpc-context'
 
 type DirEntry = {
   name: string
@@ -120,7 +121,9 @@ export function WorkspacePicker({
             onClick={async () => {
               try {
                 const res = await client.serverCall('fs_get_home', {}, sessionId) as any
-                if (res?.path) load(res.path)
+                if (res?.path) {
+load(res.path)
+}
               } catch {}
             }}
             className="flex-shrink-0 text-textSubtle hover:text-textHeading p-1 rounded"
@@ -135,14 +138,20 @@ export function WorkspacePicker({
           {editingPath ? (
             <form
               className="flex-1 flex items-center gap-1"
-              onSubmit={(e) => { e.preventDefault(); handleManualGo() }}
+              onSubmit={(e) => {
+ e.preventDefault(); handleManualGo() 
+}}
             >
               <input
                 type="text"
                 value={manualInput}
                 onChange={(e) => setManualInput(e.target.value)}
                 onBlur={() => setEditingPath(false)}
-                onKeyDown={(e) => { if (e.key === 'Escape') setEditingPath(false) }}
+                onKeyDown={(e) => {
+ if (e.key === 'Escape') {
+setEditingPath(false)
+} 
+}}
                 autoFocus
                 className="flex-1 bg-bgCard text-textHeading text-xs rounded px-2 py-1 border border-bgCardAlt outline-none focus:border-tweetBlue"
               />

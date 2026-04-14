@@ -1,22 +1,22 @@
-import { useStore } from '@nanostores/react';
-import { memo, useCallback, useMemo, useState } from 'react';
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import {
+  ArchiveRegular,
   ArrowLeft20Regular,
   BranchFork20Regular,
   Calendar20Regular,
   Checkmark12Regular,
-  ArchiveRegular,
   Delete20Regular,
 } from '@fluentui/react-icons';
-import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
+import { useStore } from '@nanostores/react';
+import { memo, useCallback, useMemo } from 'react';
 
-import { Badge, Button, Caption1, IconButton, ProgressBar, Subtitle2 } from '@/renderer/ds';
+import { Badge, Button, Caption1, IconButton, Subtitle2 } from '@/renderer/ds';
 import { $milestones, milestoneApi } from '@/renderer/features/Initiatives/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { MilestoneId, ProjectId } from '@/shared/types';
 
-import { WorkItemsList } from './WorkItemsList';
 import { $activeMilestoneId, ticketApi } from './state';
+import { WorkItemsList } from './WorkItemsList';
 
 const useStyles = makeStyles({
   root: {
@@ -181,7 +181,9 @@ export const MilestoneDetail = memo(({ milestoneId, projectId }: MilestoneDetail
     ticketApi.goToProject(projectId);
   }, [milestoneId, projectId]);
 
-  if (!milestone) return null;
+  if (!milestone) {
+return null;
+}
 
   return (
     <div className={styles.root}>

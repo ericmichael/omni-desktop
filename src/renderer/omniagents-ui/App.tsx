@@ -422,7 +422,9 @@ setWorkspaceLocked(true)
   }, [client, sessionId, variablesProp, submit, submitError, workspacePath, workspaceSupported])
 
   const handleStop = useCallback(() => {
-    if (!runId) return
+    if (!runId) {
+return
+}
     stop()
     client.stopRun(runId).catch(() => {})
   }, [client, stop, runId])

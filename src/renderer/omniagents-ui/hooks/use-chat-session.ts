@@ -7,15 +7,14 @@
 import { useActorRef, useSelector } from '@xstate/react';
 import { useCallback, useEffect } from 'react';
 
+import type { RPCClient } from '@/renderer/omniagents-ui/rpc/client';
 import type { Attachment } from '@/shared/chat-types';
-import { createMachineLogger } from '@/shared/machines/machine-logger';
 import {
   chatSessionMachine,
-  isThinking,
-  type ChatSessionActor,
   type ChatSessionPhase,
+  isThinking,
 } from '@/shared/machines/chat-session.machine';
-import type { RPCClient } from '../rpc/client';
+import { createMachineLogger } from '@/shared/machines/machine-logger';
 
 // ---------------------------------------------------------------------------
 // Hook
@@ -31,7 +30,9 @@ export function useChatSession(client: RPCClient) {
     const offs = [
       client.on('message_output', (p: any) => {
         const content = String(p?.content ?? '');
-        if (!content) return;
+        if (!content) {
+return;
+}
         actor.send({
           type: 'MESSAGE_OUTPUT',
           content,
@@ -101,7 +102,9 @@ export function useChatSession(client: RPCClient) {
         if (fn === 'ui.request_tool_approval') {
           const args = p?.args || {};
           const request_id = String(p?.request_id ?? '');
-          if (!request_id) return;
+          if (!request_id) {
+return;
+}
           actor.send({
             type: 'REQUEST_APPROVAL',
             request_id,

@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import React, { useCallback, useEffect, useMemo,useRef, useState } from 'react'
+
+import { RealtimeRPCClient } from '@/renderer/omniagents-ui/rpc/realtime'
+import { useUiConfig } from '@/renderer/omniagents-ui/ui-config'
+
 import Orb from './Orb'
-import { RealtimeRPCClient } from '../rpc/realtime'
 import type { VoiceNotification } from './VoiceNotificationCenter'
-import { useUiConfig } from '../ui-config'
 
 /**
  * Orb visual states for voice interaction
@@ -54,7 +56,9 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
 
   // Track actual audio playback state by checking audio context time vs scheduled time
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen) {
+return
+}
 
     const checkPlayback = () => {
       const ctx = audioContextRef.current
@@ -82,7 +86,9 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
 
   // Animation loop for breathing pulse effects
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen) {
+return
+}
 
     const animate = () => {
       // Force re-render for time-based animations in IDLE, THINKING states, or when tool overlay is active
@@ -105,15 +111,21 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
 
   // Monitor tool linger expiration and turn off overlay when done
   useEffect(() => {
-    if (!isOpen || !isUsingTool) return
+    if (!isOpen || !isUsingTool) {
+return
+}
 
-    if (debugEnabled) console.log('[VoiceModal] Setting up tool linger interval')
+    if (debugEnabled) {
+console.log('[VoiceModal] Setting up tool linger interval')
+}
 
     const checkExpiration = () => {
       // Only check if we're in linger mode (toolUseEndTimeRef.current > 0 means linger started)
       if (toolUseEndTimeRef.current > 0) {
         const timeSinceEnd = Date.now() - toolUseEndTimeRef.current
-        if (debugEnabled) console.log('[VoiceModal] Checking linger expiration:', { timeSinceEnd, threshold: toolUseLingerMs })
+        if (debugEnabled) {
+console.log('[VoiceModal] Checking linger expiration:', { timeSinceEnd, threshold: toolUseLingerMs })
+}
         if (timeSinceEnd >= toolUseLingerMs) {
           console.log('[VoiceModal] Tool linger expired, disabling overlay')
           setIsUsingTool(false)
@@ -125,7 +137,9 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
     // Check every 100ms if linger period has expired
     const interval = setInterval(checkExpiration, 100)
     return () => {
-      if (debugEnabled) console.log('[VoiceModal] Clearing tool linger interval')
+      if (debugEnabled) {
+console.log('[VoiceModal] Clearing tool linger interval')
+}
       clearInterval(interval)
     }
   }, [isOpen, isUsingTool])
@@ -147,7 +161,9 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
   }, [elapsedSeconds])
 
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen) {
+return
+}
 
     let mounted = true
     isMutedRef.current = true
@@ -176,7 +192,9 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
         streamRef.current = stream
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
         audioContextRef.current = audioContext
-        if (debugEnabled) console.log('[ui] audio ctx', { sampleRate: audioContext.sampleRate })
+        if (debugEnabled) {
+console.log('[ui] audio ctx', { sampleRate: audioContext.sampleRate })
+}
 
         const analyzer = audioContext.createAnalyser()
         analyzer.fftSize = 256
@@ -217,9 +235,15 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
           node.connect(sink)
           sink.connect(audioContext.destination)
           const onAudioFloats = (inFloats: Float32Array) => {
-            if (!mounted) return
-            if (isMutedRef.current) return
-            if (duplexHoldRef.current) return
+            if (!mounted) {
+return
+}
+            if (isMutedRef.current) {
+return
+}
+            if (duplexHoldRef.current) {
+return
+}
             const res = resampleTo24k(inFloats, audioContext.sampleRate)
             const q = bufferQueueRef.current
             q.chunks.push(res)
@@ -258,9 +282,15 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
           proc.connect(sink)
           sink.connect(audioContext.destination)
           proc.onaudioprocess = (ev: AudioProcessingEvent) => {
-            if (!mounted) return
-            if (isMutedRef.current) return
-            if (duplexHoldRef.current) return
+            if (!mounted) {
+return
+}
+            if (isMutedRef.current) {
+return
+}
+            if (duplexHoldRef.current) {
+return
+}
             const inBuf = ev.inputBuffer.getChannelData(0)
             const res = resampleTo24k(inBuf, audioContext.sampleRate)
             const q = bufferQueueRef.current
@@ -291,8 +321,12 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
           const out = new Int16Array(input.length)
           for (let i = 0; i < input.length; i++) {
             let s = input[i]
-            if (s < -1) s = -1
-            if (s > 1) s = 1
+            if (s < -1) {
+s = -1
+}
+            if (s > 1) {
+s = 1
+}
             out[i] = s < 0 ? s * 0x8000 : s * 0x7fff
           }
           return new Uint8Array(out.buffer)
@@ -314,7 +348,9 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
         }
 
         const encodeAndSend = async (floats: Float32Array, commit: boolean = false) => {
-          if (!clientRef.current || !sessionIdRef.current) return
+          if (!clientRef.current || !sessionIdRef.current) {
+return
+}
           const bytes = floatTo16(floats)
 
           // Convert bytes to binary string efficiently using chunking to avoid stack overflow
@@ -327,7 +363,9 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
 
           const b64 = btoa(binary)
           try {
-            if (debugEnabled) console.log('[ui] send audio', { samples: floats.length, bytes: bytes.length, b64: b64.length, commit })
+            if (debugEnabled) {
+console.log('[ui] send audio', { samples: floats.length, bytes: bytes.length, b64: b64.length, commit })
+}
             await clientRef.current.sendAudio(sessionIdRef.current, b64, commit)
           } catch (error) {
             console.error('Failed to send audio:', error)
@@ -346,16 +384,24 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
           let midSum = 0
           let highSum = 0
 
-          for (let i = 0; i < bassThird; i++) bassSum += data[i] * 2.0  // Weight bass more
-          for (let i = bassThird; i < midThird; i++) midSum += data[i] * 1.5  // Voice range
-          for (let i = midThird; i < len; i++) highSum += data[i] * 0.8  // De-emphasize high
+          for (let i = 0; i < bassThird; i++) {
+bassSum += data[i] * 2.0
+}  // Weight bass more
+          for (let i = bassThird; i < midThird; i++) {
+midSum += data[i] * 1.5
+}  // Voice range
+          for (let i = midThird; i < len; i++) {
+highSum += data[i] * 0.8
+}  // De-emphasize high
 
           const weighted = (bassSum + midSum + highSum) / (len * 1.5)  // Normalize
           return Math.min(weighted / 128, 1)
         }
 
         const updateAudioLevel = () => {
-          if (!mounted || !analyzerRef.current) return
+          if (!mounted || !analyzerRef.current) {
+return
+}
 
           analyzer.getByteFrequencyData(dataArray)
           const normalized = calculateWeightedAudioLevel(dataArray)
@@ -389,13 +435,17 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
         streamRef.current.getTracks().forEach(track => track.stop())
       }
       if (processorRef.current) {
-        try { processorRef.current.disconnect() } catch {}
+        try {
+ processorRef.current.disconnect() 
+} catch {}
       }
       if (audioContextRef.current) {
         audioContextRef.current.close()
       }
       if (workletUrlRef.current) {
-        try { URL.revokeObjectURL(workletUrlRef.current) } catch {}
+        try {
+ URL.revokeObjectURL(workletUrlRef.current) 
+} catch {}
         workletUrlRef.current = null
       }
     }
@@ -410,18 +460,24 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
   }, [isMuted])
 
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen) {
+return
+}
 
     // Initialize to idle state when modal opens
     setOrbState(OrbState.IDLE)
 
     const client = new RealtimeRPCClient(wsRealtimeUrl, token, debugEnabled)
-    if (debugEnabled) console.log('[ui] VoiceModal init', { base: wsRealtimeUrl, token, debug: debugEnabled })
+    if (debugEnabled) {
+console.log('[ui] VoiceModal init', { base: wsRealtimeUrl, token, debug: debugEnabled })
+}
     clientRef.current = client
     let active = true
     const onEvent = client.on('realtime_event', (p: any) => {
       const t = String(p?.type || '')
-      if (debugEnabled) console.log('[ui] event', t, p)
+      if (debugEnabled) {
+console.log('[ui] event', t, p)
+}
 
       // State machine transitions based on realtime events:
       // IDLE → LISTENING (user unmutes)
@@ -522,17 +578,25 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
         duplexHoldRef.current = true
         try {
           const tracks = streamRef.current?.getAudioTracks() || []
-          tracks.forEach(tr => { if (tr.enabled) { tr.enabled = false; micDisabledByPlaybackRef.current = true } })
+          tracks.forEach(tr => {
+ if (tr.enabled) {
+ tr.enabled = false; micDisabledByPlaybackRef.current = true 
+} 
+})
         } catch {}
       }
       if (t === 'realtime_audio') {
         // Don't set SPEAKING state here - let actual playback drive it
         const b64 = String(p?.audio_base64 || '')
-        if (!b64) return
+        if (!b64) {
+return
+}
         try {
           const bin = atob(b64)
           const bytes = new Uint8Array(bin.length)
-          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+          for (let i = 0; i < bin.length; i++) {
+bytes[i] = bin.charCodeAt(i)
+}
           const view = new DataView(bytes.buffer)
           const samples = new Float32Array(bytes.length / 2)
           for (let i = 0; i < samples.length; i++) {
@@ -540,8 +604,12 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
             samples[i] = s / 0x8000
           }
           const ctx = audioContextRef.current
-          if (!ctx) return
-          try { ctx.resume().catch(() => {}) } catch {}
+          if (!ctx) {
+return
+}
+          try {
+ ctx.resume().catch(() => {}) 
+} catch {}
           const buffer = ctx.createBuffer(1, samples.length, 24000)
           buffer.getChannelData(0).set(samples)
           const src = ctx.createBufferSource()
@@ -557,9 +625,13 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
           }
 
           src.connect(ctx.destination)
-          try { src.start(startAt) } catch {}
+          try {
+ src.start(startAt) 
+} catch {}
           scheduledTimeRef.current = startAt + buffer.duration
-          if (debugEnabled) console.log('[ui] play audio', { bytes: bytes.length, samples: samples.length, startAt, scheduledEnd: scheduledTimeRef.current })
+          if (debugEnabled) {
+console.log('[ui] play audio', { bytes: bytes.length, samples: samples.length, startAt, scheduledEnd: scheduledTimeRef.current })
+}
         } catch {}
       }
       if (t === 'realtime_audio_end') {
@@ -570,7 +642,9 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
           try {
             const tracks = streamRef.current?.getAudioTracks() || []
             if (micDisabledByPlaybackRef.current) {
-              tracks.forEach(tr => { tr.enabled = true })
+              tracks.forEach(tr => {
+ tr.enabled = true 
+})
               micDisabledByPlaybackRef.current = false
             }
           } catch {}
@@ -580,7 +654,9 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
       if (t === 'realtime_audio_interrupted') {
         // Interrupted - stop all audio sources immediately
         activeAudioSourcesRef.current.forEach(src => {
-          try { src.stop() } catch {}
+          try {
+ src.stop() 
+} catch {}
         })
         activeAudioSourcesRef.current.clear()
         scheduledTimeRef.current = 0
@@ -591,22 +667,36 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
     })
     client.connect()
       .then(async () => {
-        if (!active) return
+        if (!active) {
+return
+}
         try {
           const res = await client.startSession(sessionId)
           const newSid = String(res?.session_id || '')
           sessionIdRef.current = newSid
-          if (!sessionId && newSid && onSessionCreated) onSessionCreated(newSid)
-          if (debugEnabled) console.log('[ui] session started', res)
+          if (!sessionId && newSid && onSessionCreated) {
+onSessionCreated(newSid)
+}
+          if (debugEnabled) {
+console.log('[ui] session started', res)
+}
         } catch {}
       })
-      .catch((e) => { if (debugEnabled) console.error('[ui] connect failed', e) })
+      .catch((e) => {
+ if (debugEnabled) {
+console.error('[ui] connect failed', e)
+} 
+})
     return () => {
       active = false
       onEvent()
       const sid = sessionIdRef.current
-      if (debugEnabled) console.log('[ui] cleanup', { sid })
-      if (sid && clientRef.current) clientRef.current.stopSession(sid).catch(() => {})
+      if (debugEnabled) {
+console.log('[ui] cleanup', { sid })
+}
+      if (sid && clientRef.current) {
+clientRef.current.stopSession(sid).catch(() => {})
+}
       client.disconnect()
       clientRef.current = null
       sessionIdRef.current = null
@@ -614,7 +704,9 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
       toolUseEndTimeRef.current = 0  // Clear tool linger state
       // Stop all audio sources
       activeAudioSourcesRef.current.forEach(src => {
-        try { src.stop() } catch {}
+        try {
+ src.stop() 
+} catch {}
       })
       activeAudioSourcesRef.current.clear()
       setIsActuallyPlayingAudio(false)
@@ -640,7 +732,9 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
 
   const handleSendText = useCallback((text: string) => {
     const trimmed = text.trim()
-    if (!trimmed || !clientRef.current || !sessionIdRef.current) return
+    if (!trimmed || !clientRef.current || !sessionIdRef.current) {
+return
+}
     // Add user message to transcript immediately
     setTranscripts(prev => [...prev, {
       id: `user_${Date.now()}`,
@@ -659,8 +753,12 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
 
   const sidebarItems = useMemo<SidebarItem[]>(() => {
     const items: SidebarItem[] = []
-    for (const t of transcripts) items.push({ kind: 'transcript', ...t })
-    for (const n of notifications) items.push({ kind: 'notification', data: n, timestamp: n.timestamp })
+    for (const t of transcripts) {
+items.push({ kind: 'transcript', ...t })
+}
+    for (const n of notifications) {
+items.push({ kind: 'notification', data: n, timestamp: n.timestamp })
+}
     items.sort((a, b) => a.timestamp - b.timestamp)
     return items
   }, [transcripts, notifications])
@@ -672,7 +770,9 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
     }
   }, [sidebarItems])
 
-  if (!isOpen) return null
+  if (!isOpen) {
+return null
+}
 
   // Tool overlay is controlled entirely by isUsingTool state
   // The useEffect will automatically turn it off after 1.8s linger period
@@ -696,14 +796,18 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
   if (isActuallyPlayingAudio) {
     // Override to SPEAKING when audio is actually playing
     effectiveState = OrbState.SPEAKING
-    if (debugEnabled) console.log('[VoiceModal] → SPEAKING (audio playing)')
+    if (debugEnabled) {
+console.log('[VoiceModal] → SPEAKING (audio playing)')
+}
   } else if (orbState === OrbState.SPEAKING) {
     // Audio finished but state hasn't updated yet - transition back
     const shouldBeIdle = isMutedRef.current
     effectiveState = shouldBeIdle ? OrbState.IDLE : OrbState.LISTENING
     // Update the actual state to match
     if (orbState !== effectiveState) {
-      if (debugEnabled) console.log('[VoiceModal] SPEAKING finished, transition to', effectiveState)
+      if (debugEnabled) {
+console.log('[VoiceModal] SPEAKING finished, transition to', effectiveState)
+}
       setOrbState(effectiveState)
     }
   }
@@ -895,15 +999,35 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
                   {toolOverlayActive && <span className="text-purple-400"> | Tool Overlay: ON</span>}
                 </div>
                 <div className="flex flex-wrap gap-2 justify-center max-w-xl">
-                  <button onClick={() => { setOrbState(OrbState.IDLE); setIsActuallyPlayingAudio(false); toolUseEndTimeRef.current = 0 }} className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded">→ IDLE</button>
-                  <button onClick={() => { setOrbState(OrbState.LISTENING); setIsMuted(false); isMutedRef.current = false; setIsActuallyPlayingAudio(false); toolUseEndTimeRef.current = 0 }} className="px-3 py-1 text-xs bg-green-700 hover:bg-green-600 text-white rounded">→ LISTENING</button>
-                  <button onClick={() => { setOrbState(OrbState.THINKING); setIsActuallyPlayingAudio(false); toolUseEndTimeRef.current = 0 }} className="px-3 py-1 text-xs bg-blue-700 hover:bg-blue-600 text-white rounded">→ THINKING</button>
-                  <button onClick={() => { setIsActuallyPlayingAudio(true); toolUseEndTimeRef.current = 0 }} className="px-3 py-1 text-xs bg-orange-700 hover:bg-orange-600 text-white rounded">→ SPEAKING (start)</button>
-                  <button onClick={() => { setIsActuallyPlayingAudio(false) }} className="px-3 py-1 text-xs bg-orange-900 hover:bg-orange-800 text-white rounded">SPEAKING (stop)</button>
-                  <button onClick={() => { setIsUsingTool(true); toolUseEndTimeRef.current = 0 }} className="px-3 py-1 text-xs bg-purple-700 hover:bg-purple-600 text-white rounded">Tool Overlay ON</button>
-                  <button onClick={() => { setIsUsingTool(true); toolUseEndTimeRef.current = Date.now() }} className="px-3 py-1 text-xs bg-purple-900 hover:bg-purple-800 text-white rounded">Tool Overlay (linger)</button>
-                  <button onClick={() => { setIsUsingTool(false); toolUseEndTimeRef.current = 0 }} className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded">Tool Overlay OFF</button>
-                  <button onClick={() => { const fluctuate = () => setAudioLevel(Math.random() * 0.8 + 0.2); const iv = setInterval(fluctuate, 100); setTimeout(() => { clearInterval(iv); setAudioLevel(0) }, 3000) }} className="px-3 py-1 text-xs bg-yellow-700 hover:bg-yellow-600 text-white rounded">Simulate Audio (3s)</button>
+                  <button onClick={() => {
+ setOrbState(OrbState.IDLE); setIsActuallyPlayingAudio(false); toolUseEndTimeRef.current = 0 
+}} className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded">→ IDLE</button>
+                  <button onClick={() => {
+ setOrbState(OrbState.LISTENING); setIsMuted(false); isMutedRef.current = false; setIsActuallyPlayingAudio(false); toolUseEndTimeRef.current = 0 
+}} className="px-3 py-1 text-xs bg-green-700 hover:bg-green-600 text-white rounded">→ LISTENING</button>
+                  <button onClick={() => {
+ setOrbState(OrbState.THINKING); setIsActuallyPlayingAudio(false); toolUseEndTimeRef.current = 0 
+}} className="px-3 py-1 text-xs bg-blue-700 hover:bg-blue-600 text-white rounded">→ THINKING</button>
+                  <button onClick={() => {
+ setIsActuallyPlayingAudio(true); toolUseEndTimeRef.current = 0 
+}} className="px-3 py-1 text-xs bg-orange-700 hover:bg-orange-600 text-white rounded">→ SPEAKING (start)</button>
+                  <button onClick={() => {
+ setIsActuallyPlayingAudio(false) 
+}} className="px-3 py-1 text-xs bg-orange-900 hover:bg-orange-800 text-white rounded">SPEAKING (stop)</button>
+                  <button onClick={() => {
+ setIsUsingTool(true); toolUseEndTimeRef.current = 0 
+}} className="px-3 py-1 text-xs bg-purple-700 hover:bg-purple-600 text-white rounded">Tool Overlay ON</button>
+                  <button onClick={() => {
+ setIsUsingTool(true); toolUseEndTimeRef.current = Date.now() 
+}} className="px-3 py-1 text-xs bg-purple-900 hover:bg-purple-800 text-white rounded">Tool Overlay (linger)</button>
+                  <button onClick={() => {
+ setIsUsingTool(false); toolUseEndTimeRef.current = 0 
+}} className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded">Tool Overlay OFF</button>
+                  <button onClick={() => {
+ const fluctuate = () => setAudioLevel(Math.random() * 0.8 + 0.2); const iv = setInterval(fluctuate, 100); setTimeout(() => {
+ clearInterval(iv); setAudioLevel(0) 
+}, 3000) 
+}} className="px-3 py-1 text-xs bg-yellow-700 hover:bg-yellow-600 text-white rounded">Simulate Audio (3s)</button>
                 </div>
               </div>
             )}
@@ -922,7 +1046,9 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
                     }
                   } else {
                     setOrbState(OrbState.LISTENING)
-                    try { await audioContextRef.current?.resume() } catch {}
+                    try {
+ await audioContextRef.current?.resume() 
+} catch {}
                   }
                 }}
                 className="h-16 w-16 rounded-full bg-tweetBlue hover:brightness-110 flex items-center justify-center shadow-lg"
@@ -1006,7 +1132,9 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
           {/* Text input */}
           <div className="px-3 pb-3 pt-2 border-t border-white/[0.06] flex-shrink-0">
             <form
-              onSubmit={e => { e.preventDefault(); handleSendText(chatInput) }}
+              onSubmit={e => {
+ e.preventDefault(); handleSendText(chatInput) 
+}}
               className="flex gap-2"
             >
               <input
@@ -1068,11 +1196,15 @@ function SidebarActivityCard({ notification: n, onApprove, onReject, onDismiss }
     : <ToolActivityIcon type="approval" />
 
   const truncate = (text: string | undefined, max: number): string => {
-    if (!text) return ''
+    if (!text) {
+return ''
+}
     const s = text.length > 200 ? text.slice(0, 200) : text
     const lines = s.split('\n')
-    if (lines.length > 3) return lines.slice(0, 3).join('\n') + '\n...'
-    return s.length >= max ? s.slice(0, max) + '...' : s
+    if (lines.length > 3) {
+return `${lines.slice(0, 3).join('\n')  }\n...`
+}
+    return s.length >= max ? `${s.slice(0, max)  }...` : s
   }
 
   return (
@@ -1113,13 +1245,17 @@ function SidebarActivityCard({ notification: n, onApprove, onReject, onDismiss }
           )}
           <div className="flex gap-2 mt-2.5">
             <button
-              onClick={(e) => { e.stopPropagation(); onApprove?.(n.request_id!) }}
+              onClick={(e) => {
+ e.stopPropagation(); onApprove?.(n.request_id!) 
+}}
               className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-green-500/20 text-green-400 hover:bg-green-500/30 border border-green-500/20 transition-colors"
             >
               Approve
             </button>
             <button
-              onClick={(e) => { e.stopPropagation(); onReject?.(n.request_id!) }}
+              onClick={(e) => {
+ e.stopPropagation(); onReject?.(n.request_id!) 
+}}
               className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/20 transition-colors"
             >
               Reject

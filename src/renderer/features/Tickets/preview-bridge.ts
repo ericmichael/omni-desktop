@@ -24,12 +24,16 @@ export function reverseProxyUrl(url: string): string {
   try {
     const parsed = new URL(url, window.location.origin);
     const pathMatch = parsed.pathname.match(/^\/proxy\/([^/]+)(\/.*)?$/);
-    if (!pathMatch) return url;
+    if (!pathMatch) {
+return url;
+}
 
     const proxyName = pathMatch[1] as string;
     const remainder = pathMatch[2] ?? '/';
     const upstream = proxyToUpstream.get(proxyName);
-    if (!upstream) return url;
+    if (!upstream) {
+return url;
+}
 
     return upstream + remainder + parsed.search + parsed.hash;
   } catch {
@@ -54,7 +58,9 @@ export const $previewRequest = atom<PreviewRequest | null>(null);
  * In Electron mode, return the URL as-is (webview can reach localhost directly).
  */
 export async function resolvePreviewUrl(url: string, tabId?: string): Promise<string> {
-  if (isElectron) return url;
+  if (isElectron) {
+return url;
+}
 
   try {
     const proxyName = `preview-${tabId ?? 'default'}`;

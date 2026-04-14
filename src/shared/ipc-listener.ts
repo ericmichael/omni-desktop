@@ -6,7 +6,7 @@
  * adapter without `as any` casts while Electron's real listener still
  * works via structural typing.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export interface IIpcListener {
   // The event parameter is typed `any` deliberately: Electron's real
   // IpcListener passes an `IpcMainInvokeEvent`, while ServerIpcAdapter

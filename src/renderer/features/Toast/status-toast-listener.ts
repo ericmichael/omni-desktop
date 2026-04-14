@@ -1,5 +1,5 @@
-import { $omniInstallProcessStatus } from '@/renderer/features/Omni/state';
 import { $chatProcessStatus } from '@/renderer/features/Chat/state';
+import { $omniInstallProcessStatus } from '@/renderer/features/Omni/state';
 import { toast } from '@/renderer/features/Toast/state';
 
 /**

@@ -10,6 +10,8 @@
  * than electron-store directly so it can be tested with an in-memory fake.
  * Wiring to the real store + IPC happens in project-manager.ts (step 5).
  */
+import { sweepInbox } from '@/lib/inbox-expiry';
+import { DEFAULT_PIPELINE, SIMPLE_PIPELINE } from '@/shared/pipeline-defaults';
 import type {
   InboxItem,
   InboxItemId,
@@ -23,8 +25,6 @@ import type {
   Ticket,
   TicketId,
 } from '@/shared/types';
-import { DEFAULT_PIPELINE, SIMPLE_PIPELINE } from '@/shared/pipeline-defaults';
-import { sweepInbox } from '@/lib/inbox-expiry';
 
 /**
  * 30 days — how long a promoted tombstone sticks around before GC. Long
@@ -108,8 +108,12 @@ export class InboxManager {
       createdAt: now,
       updatedAt: now,
     };
-    if (input.note && input.note.trim()) item.note = input.note.trim();
-    if (input.attachments && input.attachments.length > 0) item.attachments = input.attachments;
+    if (input.note && input.note.trim()) {
+item.note = input.note.trim();
+}
+    if (input.attachments && input.attachments.length > 0) {
+item.attachments = input.attachments;
+}
 
     const items = [...this.deps.store.getInboxItems(), item];
     this.deps.store.setInboxItems(items);
@@ -122,10 +126,18 @@ export class InboxManager {
   ): void {
     this.patchItem(id, (item) => {
       const next: InboxItem = { ...item, updatedAt: this.deps.now() };
-      if (patch.title !== undefined) next.title = patch.title.trim() || 'Untitled';
-      if (patch.note !== undefined) next.note = patch.note.trim() || undefined;
-      if (patch.projectId !== undefined) next.projectId = patch.projectId;
-      if (patch.attachments !== undefined) next.attachments = patch.attachments;
+      if (patch.title !== undefined) {
+next.title = patch.title.trim() || 'Untitled';
+}
+      if (patch.note !== undefined) {
+next.note = patch.note.trim() || undefined;
+}
+      if (patch.projectId !== undefined) {
+next.projectId = patch.projectId;
+}
+      if (patch.attachments !== undefined) {
+next.attachments = patch.attachments;
+}
       return next;
     });
   }
@@ -133,7 +145,9 @@ export class InboxManager {
   remove(id: InboxItemId): void {
     const items = this.deps.store.getInboxItems();
     const filtered = items.filter((i) => i.id !== id);
-    if (filtered.length === items.length) throw new InboxItemNotFoundError(id);
+    if (filtered.length === items.length) {
+throw new InboxItemNotFoundError(id);
+}
     this.deps.store.setInboxItems(filtered);
   }
 
@@ -152,7 +166,9 @@ export class InboxManager {
         shaping: { ...shaping, outcome: shaping.outcome.trim() },
         updatedAt: this.deps.now(),
       };
-      if (item.status !== 'later') next.status = 'shaped';
+      if (item.status !== 'later') {
+next.status = 'shaped';
+}
       return next;
     });
   }
@@ -160,7 +176,9 @@ export class InboxManager {
   /** Move to `later`. No-op if already later. */
   defer(id: InboxItemId): void {
     this.patchItem(id, (item) => {
-      if (item.promotedTo) throw new InboxPromotionError(`Cannot defer promoted item ${id}`);
+      if (item.promotedTo) {
+throw new InboxPromotionError(`Cannot defer promoted item ${id}`);
+}
       const now = this.deps.now();
       return { ...item, status: 'later', laterAt: now, updatedAt: now };
     });
@@ -172,7 +190,9 @@ export class InboxManager {
    */
   reactivate(id: InboxItemId): void {
     this.patchItem(id, (item) => {
-      if (item.promotedTo) throw new InboxPromotionError(`Cannot reactivate promoted item ${id}`);
+      if (item.promotedTo) {
+throw new InboxPromotionError(`Cannot reactivate promoted item ${id}`);
+}
       const nextStatus: InboxItemStatus = item.shaping ? 'shaped' : 'new';
       const next: InboxItem = { ...item, status: nextStatus, updatedAt: this.deps.now() };
       delete next.laterAt;
@@ -266,9 +286,13 @@ export class InboxManager {
     const swept = sweepInbox(items, this.deps.now());
     let changed = 0;
     for (let i = 0; i < items.length; i++) {
-      if (swept[i] !== items[i]) changed++;
+      if (swept[i] !== items[i]) {
+changed++;
+}
     }
-    if (changed > 0) this.deps.store.setInboxItems(swept);
+    if (changed > 0) {
+this.deps.store.setInboxItems(swept);
+}
     return changed;
   }
 
@@ -280,7 +304,9 @@ export class InboxManager {
       (i) => !i.promotedTo || now - i.promotedTo.at < PROMOTED_TOMBSTONE_TTL_MS
     );
     const removed = items.length - kept.length;
-    if (removed > 0) this.deps.store.setInboxItems(kept);
+    if (removed > 0) {
+this.deps.store.setInboxItems(kept);
+}
     return removed;
   }
 
@@ -290,7 +316,9 @@ export class InboxManager {
 
   private requireItem(id: InboxItemId): InboxItem {
     const item = this.deps.store.getInboxItems().find((i) => i.id === id);
-    if (!item) throw new InboxItemNotFoundError(id);
+    if (!item) {
+throw new InboxItemNotFoundError(id);
+}
     return item;
   }
 
@@ -298,11 +326,15 @@ export class InboxManager {
     const items = this.deps.store.getInboxItems();
     let found = false;
     const next = items.map((item) => {
-      if (item.id !== id) return item;
+      if (item.id !== id) {
+return item;
+}
       found = true;
       return fn(item);
     });
-    if (!found) throw new InboxItemNotFoundError(id);
+    if (!found) {
+throw new InboxItemNotFoundError(id);
+}
     this.deps.store.setInboxItems(next);
   }
 

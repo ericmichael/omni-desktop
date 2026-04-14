@@ -114,7 +114,9 @@ export const DatabaseView = memo(
 
     const submit = useCallback(async () => {
       const title = draft.trim();
-      if (!title || !onCreate) return;
+      if (!title || !onCreate) {
+return;
+}
       await onCreate({ title });
       setDraft('');
     }, [draft, onCreate]);
@@ -167,8 +169,14 @@ function formatRelative(ms: number): string {
   const minute = 60 * 1000;
   const hour = 60 * minute;
   const day = 24 * hour;
-  if (delta < minute) return 'just now';
-  if (delta < hour) return `${Math.floor(delta / minute)}m`;
-  if (delta < day) return `${Math.floor(delta / hour)}h`;
+  if (delta < minute) {
+return 'just now';
+}
+  if (delta < hour) {
+return `${Math.floor(delta / minute)}m`;
+}
+  if (delta < day) {
+return `${Math.floor(delta / hour)}h`;
+}
   return `${Math.floor(delta / day)}d`;
 }

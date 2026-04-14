@@ -1,4 +1,4 @@
-import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
 import Linkify from 'linkify-react';
 import type { Opts as LinkifyOpts } from 'linkifyjs';
 import type { HTMLAttributes, PropsWithChildren } from 'react';

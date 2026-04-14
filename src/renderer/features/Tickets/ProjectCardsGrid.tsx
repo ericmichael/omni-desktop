@@ -1,7 +1,7 @@
+import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
+import { Add20Regular, Star20Filled } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Add20Regular, Star20Filled } from '@fluentui/react-icons';
-import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 
 import { Caption1, Input, Subtitle2 } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';

@@ -77,9 +77,11 @@ export class PageWatcherManager {
   }
 
   private log(event: string, fields: Record<string, unknown> = {}): void {
-    if (!this.debug) return;
+    if (!this.debug) {
+return;
+}
     const parts = Object.entries(fields).map(([k, v]) => `${k}=${JSON.stringify(v)}`);
-    console.log(`[PageWatcher] ${event}${parts.length ? ' ' + parts.join(' ') : ''}`);
+    console.log(`[PageWatcher] ${event}${parts.length ? ` ${  parts.join(' ')}` : ''}`);
   }
 
   private ensureWatcher(): FSWatcher {
@@ -104,7 +106,9 @@ export class PageWatcherManager {
 
   /** Subscribe to a file. Idempotent + ref-counted. */
   async subscribe(filePath: string): Promise<void> {
-    if (this.closed) return;
+    if (this.closed) {
+return;
+}
     const count = this.refCounts.get(filePath) ?? 0;
     this.refCounts.set(filePath, count + 1);
     this.stats.subscribes++;
@@ -127,7 +131,9 @@ export class PageWatcherManager {
   /** Unsubscribe. When the last subscriber leaves, the file is actually unwatched. */
   unsubscribe(filePath: string): void {
     const count = this.refCounts.get(filePath) ?? 0;
-    if (count === 0) return;
+    if (count === 0) {
+return;
+}
     this.stats.unsubscribes++;
     if (count <= 1) {
       this.refCounts.delete(filePath);
@@ -151,7 +157,9 @@ export class PageWatcherManager {
   }
 
   private async handleChange(filePath: string): Promise<void> {
-    if (!this.refCounts.has(filePath)) return;
+    if (!this.refCounts.has(filePath)) {
+return;
+}
     let content: string;
     try {
       content = await this.readFileImpl(filePath);
@@ -170,7 +178,9 @@ export class PageWatcherManager {
   }
 
   private handleUnlink(filePath: string): void {
-    if (!this.refCounts.has(filePath)) return;
+    if (!this.refCounts.has(filePath)) {
+return;
+}
     this.lastContent.set(filePath, '');
     this.stats.externalDeletes++;
     this.log('external-delete', { filePath });

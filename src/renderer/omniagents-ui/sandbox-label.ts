@@ -19,8 +19,12 @@ export const buildSandboxLabel = (
 ): string => {
   const base = BACKEND_LABELS[backend] ?? backend;
   const tags: string[] = [];
-  if (import.meta.env.MODE === 'development') tags.push('dev');
-  if (options?.custom) tags.push('custom');
+  if (import.meta.env.MODE === 'development') {
+tags.push('dev');
+}
+  if (options?.custom) {
+tags.push('custom');
+}
   return tags.length > 0 ? `${base} (${tags.join(', ')})` : base;
 };
 

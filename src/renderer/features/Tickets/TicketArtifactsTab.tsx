@@ -1,6 +1,6 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
 import { ArrowSync20Regular, FolderOpen20Regular } from '@fluentui/react-icons';
-import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
 import { IconButton } from '@/renderer/ds';
 import type { ArtifactFileEntry, TicketId } from '@/shared/types';

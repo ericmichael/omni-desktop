@@ -34,7 +34,9 @@ let installUnsub: (() => void) | null = null;
 
 export const ensureRuntimeReady = () => {
   const current = $omniRuntimeReadiness.get();
-  if (current.status === 'checking' || current.status === 'installing' || current.status === 'ready') return;
+  if (current.status === 'checking' || current.status === 'installing' || current.status === 'ready') {
+return;
+}
 
   $omniRuntimeReadiness.set({ status: 'checking' });
 

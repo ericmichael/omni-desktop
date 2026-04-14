@@ -7,7 +7,7 @@
  * Pure definition — no React, no IPC, no DOM imports.
  * Session filtering reuses the pure guards from `@/lib/session-filter`.
  */
-import { type ActorRefFrom, type SnapshotFrom, assign, setup } from 'xstate';
+import { type ActorRefFrom, assign, setup,type SnapshotFrom } from 'xstate';
 
 import { acceptLooseEvent, acceptStrictEvent } from '@/lib/session-filter';
 import type {
@@ -358,7 +358,9 @@ export const chatSessionMachine = setup({
       items: ({ context, event }) => {
         const e = event as Extract<ChatSessionEvent, { type: 'HISTORY_LOADED' }>;
         // Merge any pending approvals that arrived during history loading
-        if (context.pendingApprovals.size === 0) return e.items;
+        if (context.pendingApprovals.size === 0) {
+return e.items;
+}
         const approvalItems = [...context.pendingApprovals.values()].filter(
           (a) =>
             !e.items.some(

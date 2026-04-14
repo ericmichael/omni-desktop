@@ -1,7 +1,7 @@
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { ArrowSync20Regular, BranchRequest20Regular } from '@fluentui/react-icons';
 import { memo, useCallback, useEffect, useState } from 'react';
 import Markdown from 'react-markdown';
-import { ArrowSync20Regular, BranchRequest20Regular } from '@fluentui/react-icons';
-import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 
 import { CardSkeleton, IconButton } from '@/renderer/ds';
 import type { TicketId } from '@/shared/types';

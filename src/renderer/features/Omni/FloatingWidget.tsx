@@ -1,12 +1,10 @@
-import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
-import { AnimatePresence, motion } from 'framer-motion';
-import type { ComponentType } from 'react';
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
 import type { FluentIcon } from '@fluentui/react-icons';
-import { PanelLeft20Regular, Dismiss20Regular } from '@fluentui/react-icons';
+import { Dismiss20Regular,PanelLeft20Regular } from '@fluentui/react-icons';
+import { AnimatePresence, motion } from 'framer-motion';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
 import { Webview } from '@/renderer/common/Webview';
-import { cn } from '@/renderer/ds';
 
 const useStyles = makeStyles({
   backdrop: { position: 'absolute', inset: 0, zIndex: 30, backgroundColor: 'rgba(0, 0, 0, 0.4)' },

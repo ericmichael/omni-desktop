@@ -1,18 +1,17 @@
-import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
+import { ArrowClockwise20Regular, ArrowLeft20Regular, ArrowRight20Regular, Code20Regular, Desktop20Regular, DismissCircle20Regular, Globe20Regular, WindowConsole20Regular, WindowDevTools20Regular } from '@fluentui/react-icons';
 import { AnimatePresence, motion } from 'framer-motion';
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft20Regular, ArrowRight20Regular, ArrowClockwise20Regular, Code20Regular, Desktop20Regular, DismissCircle20Regular, Globe20Regular, WindowConsole20Regular, WindowDevTools20Regular } from '@fluentui/react-icons';
 
-import { resolvePreviewUrl, reverseProxyUrl } from '@/renderer/features/Tickets/preview-bridge';
-
-import { Webview } from '@/renderer/common/Webview';
 import type { ConsoleMessage, WebviewHandle } from '@/renderer/common/Webview';
+import { Webview } from '@/renderer/common/Webview';
 import { ConsoleStarted } from '@/renderer/features/Console/ConsoleRunning';
 import { $terminals, createTerminal } from '@/renderer/features/Console/state';
+import { resolvePreviewUrl, reverseProxyUrl } from '@/renderer/features/Tickets/preview-bridge';
 import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
-import { WebPreview, WebPreviewConsole, WebPreviewUrl, useWebPreviewContext } from '@/renderer/omniagents-ui/components/ai/web-preview';
+import { useWebPreviewContext,WebPreview, WebPreviewConsole, WebPreviewUrl } from '@/renderer/omniagents-ui/components/ai/web-preview';
 import { persistedStoreApi } from '@/renderer/services/store';
 
 import type { WorkspaceApp } from './EnvironmentDock';
@@ -240,10 +239,14 @@ const PreviewWebview = memo(({ webviewRef: externalRef, onStateChange }: { webvi
   const internalRef = useRef<WebviewHandle>(null);
   const navigatedUrlRef = useRef<string | null>(null);
   const onStateRef = useRef(onStateChange);
-  useEffect(() => { onStateRef.current = onStateChange; }, [onStateChange]);
+  useEffect(() => {
+ onStateRef.current = onStateChange; 
+}, [onStateChange]);
 
   useEffect(() => {
-    if (!externalRef) return;
+    if (!externalRef) {
+return;
+}
     if (typeof externalRef === 'function') {
       externalRef(internalRef.current);
     } else {
@@ -326,7 +329,9 @@ const PreviewWebview = memo(({ webviewRef: externalRef, onStateChange }: { webvi
   const handleExecute = useCallback((code: string) => {
     appendLog({ level: 'log', message: `> ${code}`, timestamp: new Date() });
     const handle = internalRef.current;
-    if (!handle) return;
+    if (!handle) {
+return;
+}
     void handle.executeScript(code).then(
       (result) => {
         const display = result === undefined ? 'undefined' : typeof result === 'string' ? result : JSON.stringify(result, null, 2);

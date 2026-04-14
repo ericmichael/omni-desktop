@@ -62,7 +62,9 @@ export class ConsoleManager {
    */
   private async initializeConsole(id: string, cwd?: string): Promise<void> {
     const entry = this.entries.get(id);
-    if (!entry) return;
+    if (!entry) {
+return;
+}
 
     // Add the bundled bin dir to the PATH env var
     if (process.platform === 'win32') {
@@ -102,7 +104,9 @@ export class ConsoleManager {
    */
   async disposeOne(id: string): Promise<void> {
     const entry = this.entries.get(id);
-    if (!entry) return;
+    if (!entry) {
+return;
+}
     this.entries.delete(id);
     await killPtyProcessAsync(entry.process);
     entry.ansiSequenceBuffer.clear();

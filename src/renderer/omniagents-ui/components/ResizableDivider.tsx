@@ -50,19 +50,25 @@ export function ResizableDivider({
   const onTouchStart = useCallback(
     (e: React.TouchEvent) => {
       const touch = e.touches[0]
-      if (!touch) return
+      if (!touch) {
+return
+}
       beginDrag(touch.clientX)
     },
     [beginDrag],
   )
 
   useEffect(() => {
-    if (!dragging) return
+    if (!dragging) {
+return
+}
 
     const handleMouseMove = (e: MouseEvent) => updateDrag(e.clientX)
     const handleTouchMove = (e: TouchEvent) => {
       const touch = e.touches[0]
-      if (touch) updateDrag(touch.clientX)
+      if (touch) {
+updateDrag(touch.clientX)
+}
     }
     const handleEnd = () => endDrag()
 

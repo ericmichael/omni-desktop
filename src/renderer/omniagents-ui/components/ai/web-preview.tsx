@@ -1,10 +1,11 @@
-import { Button } from '../ui/button'
-import { Input } from '../ui/input'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
-import { cn } from '../../lib/utils'
-import { CopyIcon, Trash2Icon, CheckIcon, PlayIcon, XIcon } from 'lucide-react'
+import { CheckIcon, CopyIcon, PlayIcon, Trash2Icon, XIcon } from 'lucide-react'
 import type { ComponentProps, ReactNode } from 'react'
 import { createContext, forwardRef, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+
+import { Button } from '@/renderer/omniagents-ui/components/ui/button'
+import { Input } from '@/renderer/omniagents-ui/components/ui/input'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/renderer/omniagents-ui/components/ui/tooltip'
+import { cn } from '@/renderer/omniagents-ui/lib/utils'
 
 export interface WebPreviewContextValue {
   url: string
@@ -244,7 +245,9 @@ export const WebPreviewConsole = ({ className, logs = [], onClear, onExecute, ch
 
   const handleExec = useCallback(() => {
     const code = scriptInput.trim()
-    if (!code) return
+    if (!code) {
+return
+}
     onExecute?.(code)
     setScriptInput('')
   }, [scriptInput, onExecute])
@@ -269,7 +272,9 @@ export const WebPreviewConsole = ({ className, logs = [], onClear, onExecute, ch
   }, [height])
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    if (!draggingRef.current) return
+    if (!draggingRef.current) {
+return
+}
     const delta = startYRef.current - e.clientY
     setHeight(Math.min(MAX_CONSOLE_HEIGHT, Math.max(MIN_CONSOLE_HEIGHT, startHeightRef.current + delta)))
   }, [])
@@ -278,7 +283,9 @@ export const WebPreviewConsole = ({ className, logs = [], onClear, onExecute, ch
     draggingRef.current = false
   }, [])
 
-  if (!consoleOpen) return null
+  if (!consoleOpen) {
+return null
+}
 
   return (
     <div className={cn('flex flex-col border-t bg-muted/50 font-mono text-sm', className)} style={{ height }} {...props}>

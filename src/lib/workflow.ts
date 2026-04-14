@@ -302,22 +302,32 @@ const applyValue = (config: WorkflowConfig, section: string, key: string, value:
     const numValue = Number(value);
     switch (key) {
       case 'max_concurrent':
-        if (!isNaN(numValue) && numValue > 0) config.supervisor.max_concurrent = numValue;
+        if (!isNaN(numValue) && numValue > 0) {
+config.supervisor.max_concurrent = numValue;
+}
         break;
       case 'stall_timeout_ms':
-        if (!isNaN(numValue) && numValue > 0) config.supervisor.stall_timeout_ms = numValue;
+        if (!isNaN(numValue) && numValue > 0) {
+config.supervisor.stall_timeout_ms = numValue;
+}
         break;
       case 'max_retry_attempts':
-        if (!isNaN(numValue) && numValue > 0) config.supervisor.max_retry_attempts = numValue;
+        if (!isNaN(numValue) && numValue > 0) {
+config.supervisor.max_retry_attempts = numValue;
+}
         break;
       case 'max_continuation_turns':
-        if (!isNaN(numValue) && numValue > 0) config.supervisor.max_continuation_turns = numValue;
+        if (!isNaN(numValue) && numValue > 0) {
+config.supervisor.max_continuation_turns = numValue;
+}
         break;
       case 'auto_dispatch':
         config.supervisor.auto_dispatch = value === 'true';
         break;
       case 'continuation_prompt':
-        if (value) config.supervisor.continuation_prompt = value;
+        if (value) {
+config.supervisor.continuation_prompt = value;
+}
         break;
     }
   } else if (section === 'max_concurrent_by_column') {
@@ -350,7 +360,9 @@ const applyValue = (config: WorkflowConfig, section: string, key: string, value:
         break;
       case 'timeout_ms': {
         const numValue = Number(value);
-        if (!isNaN(numValue) && numValue > 0) config.hooks.timeout_ms = numValue;
+        if (!isNaN(numValue) && numValue > 0) {
+config.hooks.timeout_ms = numValue;
+}
         break;
       }
     }

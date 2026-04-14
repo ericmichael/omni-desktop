@@ -1,5 +1,5 @@
-import { memo, useCallback, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { memo, useCallback, useState } from 'react';
 
 import { Input } from './components/Input';
 import { getGreeting } from './greeting';

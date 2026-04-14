@@ -33,13 +33,17 @@ export function editorReducer(state: EditorState, event: EditorEvent): EditorSta
       return { kind: 'clean', content: event.content };
 
     case 'local-edit':
-      if (state.kind === 'loading') return state;
+      if (state.kind === 'loading') {
+return state;
+}
       if (state.kind === 'conflict') {
         // User kept typing through the banner — treat as "Keep my version":
         // local becomes authoritative, disk copy is discarded.
         return { kind: 'dirty', content: event.content, saving: false };
       }
-      if (state.kind === 'clean' && state.content === event.content) return state;
+      if (state.kind === 'clean' && state.content === event.content) {
+return state;
+}
       return {
         kind: 'dirty',
         content: event.content,
@@ -47,11 +51,15 @@ export function editorReducer(state: EditorState, event: EditorEvent): EditorSta
       };
 
     case 'save-start':
-      if (state.kind !== 'dirty') return state;
+      if (state.kind !== 'dirty') {
+return state;
+}
       return { ...state, saving: true };
 
     case 'save-done':
-      if (state.kind !== 'dirty') return state;
+      if (state.kind !== 'dirty') {
+return state;
+}
       return { kind: 'clean', content: state.content };
 
     case 'external-change':
@@ -78,11 +86,15 @@ export function editorReducer(state: EditorState, event: EditorEvent): EditorSta
       return state;
 
     case 'resolve-use-disk':
-      if (state.kind !== 'conflict') return state;
+      if (state.kind !== 'conflict') {
+return state;
+}
       return { kind: 'clean', content: state.diskContent };
 
     case 'resolve-keep-local':
-      if (state.kind !== 'conflict') return state;
+      if (state.kind !== 'conflict') {
+return state;
+}
       return { kind: 'dirty', content: state.localContent, saving: false };
   }
 }

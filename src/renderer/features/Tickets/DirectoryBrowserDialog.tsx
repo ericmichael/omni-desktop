@@ -1,6 +1,6 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import { ArrowUp20Regular, Folder20Regular, Home20Regular } from '@fluentui/react-icons';
-import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
 import { AnimatedDialog, Button, DialogBody, DialogContent, DialogFooter, DialogHeader, Input, ListSkeleton } from '@/renderer/ds';
 import { emitter } from '@/renderer/services/ipc';

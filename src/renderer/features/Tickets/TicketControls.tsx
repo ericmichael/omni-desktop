@@ -1,7 +1,7 @@
+import { makeStyles, tokens } from '@fluentui/react-components';
+import { Add20Regular, ArrowSync20Regular, CheckmarkCircle20Regular, Play20Filled, Stop20Filled, Warning20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo } from 'react';
-import { ArrowSync20Regular, CheckmarkCircle20Regular, Play20Filled, Add20Regular, Stop20Filled, Warning20Regular } from '@fluentui/react-icons';
-import { makeStyles, tokens } from '@fluentui/react-components';
 
 import { Badge, Button, IconButton, Spinner } from '@/renderer/ds';
 import { $pipeline, $tasks, $tickets, ticketApi } from '@/renderer/features/Tickets/state';
@@ -114,13 +114,19 @@ export const TicketColumnBadge = memo(({ ticketId }: { ticketId: TicketId }) => 
   }, [pipeline, ticket?.projectId]);
 
   const columnLabel = useMemo(() => {
-    if (!ticket?.columnId || !pipeline) return null;
+    if (!ticket?.columnId || !pipeline) {
+return null;
+}
     return pipeline.columns.find((c) => c.id === ticket.columnId)?.label ?? null;
   }, [ticket?.columnId, pipeline]);
 
   // Hide when resolved — TicketResolutionBadge takes over.
-  if (ticket?.resolution) return null;
-  if (!columnLabel) return null;
+  if (ticket?.resolution) {
+return null;
+}
+  if (!columnLabel) {
+return null;
+}
 
   return (
     <span className={styles.columnBadge}>
@@ -145,7 +151,9 @@ export const TicketBannerActions = memo(({ ticketId }: { ticketId: TicketId }) =
   const { phase, handleStart, handleStop, handleReset } = useTicketAutomation(ticketId);
 
   // When the ticket has a resolution, TicketResolutionBadge handles the display.
-  if (ticket?.resolution) return null;
+  if (ticket?.resolution) {
+return null;
+}
 
   const isAutonomous = phase === 'running' || phase === 'continuing';
   const isProvisioning = phase === 'provisioning' || phase === 'connecting' || phase === 'session_creating';
@@ -216,7 +224,9 @@ export const TicketResolutionBadge = memo(({ ticketId }: { ticketId: TicketId })
   const tickets = useStore($tickets);
   const ticket = tickets[ticketId];
 
-  if (!ticket?.resolution) return null;
+  if (!ticket?.resolution) {
+return null;
+}
 
   return (
     <Badge color={RESOLUTION_COLORS[ticket.resolution]}>{RESOLUTION_LABELS[ticket.resolution]}</Badge>

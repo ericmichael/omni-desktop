@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { hasTemplateExpressions, renderTemplate, TemplateRenderError } from './template';
 import type { TemplateVariables } from './template';
+import { hasTemplateExpressions, renderTemplate, TemplateRenderError } from './template';
 
 const makeVars = (overrides?: Partial<TemplateVariables>): TemplateVariables => ({
   ticket: {

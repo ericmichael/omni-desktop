@@ -72,7 +72,9 @@ export function detectRisks(input: RiskInput): RiskSignal[] {
   // --- Per-ticket signals ---
   let activeCount = 0;
   for (const ticket of tickets) {
-    if (isDone(ticket)) continue;
+    if (isDone(ticket)) {
+continue;
+}
 
     const phase = ticket.phase;
     if (phase !== undefined && phase !== 'idle' && phase !== 'error' && phase !== 'completed') {
@@ -133,14 +135,18 @@ export function detectRisks(input: RiskInput): RiskSignal[] {
   // Group tickets by milestone for completion calc.
   const ticketsByMilestone = new Map<string, Ticket[]>();
   for (const t of tickets) {
-    if (!t.milestoneId) continue;
+    if (!t.milestoneId) {
+continue;
+}
     const arr = ticketsByMilestone.get(t.milestoneId) ?? [];
     arr.push(t);
     ticketsByMilestone.set(t.milestoneId, arr);
   }
 
   for (const milestone of milestones) {
-    if (milestone.status !== 'active') continue;
+    if (milestone.status !== 'active') {
+continue;
+}
 
     const msTickets = ticketsByMilestone.get(milestone.id) ?? [];
     const resolvedCount = msTickets.filter((t) => t.resolution !== undefined).length;
@@ -203,9 +209,15 @@ export function detectRisks(input: RiskInput): RiskSignal[] {
 
   // --- Inbox signals ---
   for (const item of inboxItems) {
-    if (item.status !== 'new' && item.status !== 'shaped') continue;
-    if (item.promotedTo !== undefined) continue;
-    if (item.status === 'shaped') continue; // shaped items don't expire, only unshaped
+    if (item.status !== 'new' && item.status !== 'shaped') {
+continue;
+}
+    if (item.promotedTo !== undefined) {
+continue;
+}
+    if (item.status === 'shaped') {
+continue;
+} // shaped items don't expire, only unshaped
 
     const daysLeft = inboxDaysRemaining(item.createdAt, now);
     if (daysLeft <= RISK_THRESHOLDS.inboxUrgentDaysLeft) {
@@ -238,7 +250,9 @@ export function detectRisks(input: RiskInput): RiskSignal[] {
   for (const project of projects) {
     const projectTickets = tickets.filter((t) => t.projectId === project.id);
     const projectInbox = inboxItems.filter((i) => i.projectId === project.id);
-    if (projectTickets.length === 0 && projectInbox.length === 0) continue;
+    if (projectTickets.length === 0 && projectInbox.length === 0) {
+continue;
+}
 
     const lastActivity = Math.max(
       ...projectTickets.map((t) => t.updatedAt),
@@ -261,7 +275,9 @@ export function detectRisks(input: RiskInput): RiskSignal[] {
   // Sort: severity first, then stable-ish by id.
   out.sort((a, b) => {
     const sev = SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity];
-    if (sev !== 0) return sev;
+    if (sev !== 0) {
+return sev;
+}
     return a.id.localeCompare(b.id);
   });
 

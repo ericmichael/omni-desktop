@@ -1,8 +1,8 @@
 import {
   Toast,
   ToastBody,
-  ToastTitle,
   Toaster,
+  ToastTitle,
   useId,
   useToastController,
 } from '@fluentui/react-components';

@@ -1,5 +1,5 @@
 import { useSelector } from '@xstate/react';
-import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react';
+import { createContext, type ReactNode,useContext, useEffect, useMemo } from 'react';
 
 import type { RPCClientActor } from '@/shared/machines/rpc-client.machine';
 
@@ -48,20 +48,26 @@ export const RPCClientProvider = ({ children }: { children: ReactNode }) => {
 /** Access the RPCClient instance for sending RPC calls. */
 export const useRPCClient = (): RPCClient => {
   const ctx = useContext(RPCClientContext);
-  if (!ctx) throw new Error('RPCClientProvider is missing');
+  if (!ctx) {
+throw new Error('RPCClientProvider is missing');
+}
   return ctx.client;
 };
 
 /** Reactive boolean — true only when the WebSocket is in the `connected` state. */
 export const useRPCConnected = (): boolean => {
   const ctx = useContext(RPCClientContext);
-  if (!ctx) throw new Error('RPCClientProvider is missing');
+  if (!ctx) {
+throw new Error('RPCClientProvider is missing');
+}
   return useSelector(ctx.actor, (snap) => snap.value === 'connected');
 };
 
 /** Reactive connection state string from the machine. */
 export const useRPCConnectionState = (): 'disconnected' | 'connecting' | 'connected' | 'reconnecting' => {
   const ctx = useContext(RPCClientContext);
-  if (!ctx) throw new Error('RPCClientProvider is missing');
+  if (!ctx) {
+throw new Error('RPCClientProvider is missing');
+}
   return useSelector(ctx.actor, (snap) => snap.value as 'disconnected' | 'connecting' | 'connected' | 'reconnecting');
 };

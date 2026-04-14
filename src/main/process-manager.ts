@@ -67,13 +67,17 @@ export class ProcessManager {
   /** Returns the selected Machine profile from the platform policy, if any. */
   private getSelectedProfile(): SandboxProfile | null {
     const { sandboxProfiles, selectedMachineId } = this.getStoreData();
-    if (!sandboxProfiles || !selectedMachineId) return null;
+    if (!sandboxProfiles || !selectedMachineId) {
+return null;
+}
     return sandboxProfiles.find((p) => p.resource_id === selectedMachineId) ?? null;
   }
 
   private getOrCreate(processId: string, mode: AgentProcessMode): AgentProcess {
     const existing = this.processes.get(processId);
-    if (existing && existing.mode === mode) return existing;
+    if (existing && existing.mode === mode) {
+return existing;
+}
 
     // Mode changed or first creation — clean up old process
     if (existing) {
@@ -110,7 +114,9 @@ export class ProcessManager {
 
   stop = async (processId: string): Promise<void> => {
     const proc = this.processes.get(processId);
-    if (!proc) return;
+    if (!proc) {
+return;
+}
     await proc.stop();
     this.processes.delete(processId);
   };
@@ -130,9 +136,13 @@ export class ProcessManager {
 
   getStatus = (processId: string): WithTimestamp<AgentProcessStatus> => {
     const proc = this.processes.get(processId);
-    if (proc) return proc.getStatus();
+    if (proc) {
+return proc.getStatus();
+}
     const fallback = this.statusFallback?.(processId);
-    if (fallback) return fallback;
+    if (fallback) {
+return fallback;
+}
     return { type: 'uninitialized', timestamp: Date.now() };
   };
 
@@ -146,9 +156,13 @@ export class ProcessManager {
    */
   getRunningWsUrlForTicket(ticketId: string, codeTabs: Array<{ id: string; ticketId?: string }>): string | null {
     for (const tab of codeTabs) {
-      if (tab.ticketId !== ticketId) continue;
+      if (tab.ticketId !== ticketId) {
+continue;
+}
       const proc = this.processes.get(tab.id);
-      if (!proc) continue;
+      if (!proc) {
+continue;
+}
       const status = proc.getStatus();
       if (status.type === 'running' && status.data.wsUrl) {
         return status.data.wsUrl;

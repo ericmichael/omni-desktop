@@ -20,11 +20,15 @@ interface Props {
 }
 
 function truncate(text: string | undefined, max: number): string {
-  if (!text) return ''
+  if (!text) {
+return ''
+}
   const s = text.length > 200 ? text.slice(0, 200) : text
   const lines = s.split('\n')
-  if (lines.length > 3) return lines.slice(0, 3).join('\n') + '\n...'
-  return s.length >= max ? s.slice(0, max) + '...' : s
+  if (lines.length > 3) {
+return `${lines.slice(0, 3).join('\n')  }\n...`
+}
+  return s.length >= max ? `${s.slice(0, max)  }...` : s
 }
 
 function ToolIcon() {
@@ -101,13 +105,17 @@ function NotificationCard({ n, onApprove, onReject, onDismiss }: {
           )}
           <div className="flex gap-2 mt-3">
             <button
-              onClick={(e) => { e.stopPropagation(); onApprove?.(n.request_id!) }}
+              onClick={(e) => {
+ e.stopPropagation(); onApprove?.(n.request_id!) 
+}}
               className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-green-500/20 text-green-400 hover:bg-green-500/30 border border-green-500/20 transition-colors"
             >
               Approve
             </button>
             <button
-              onClick={(e) => { e.stopPropagation(); onReject?.(n.request_id!) }}
+              onClick={(e) => {
+ e.stopPropagation(); onReject?.(n.request_id!) 
+}}
               className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/20 transition-colors"
             >
               Reject
@@ -147,12 +155,16 @@ export function VoiceNotificationCenter({ notifications, onApprove, onReject, on
   useEffect(() => {
     const timers = timerRefs.current
     return () => {
-      for (const timer of timers.values()) clearTimeout(timer)
+      for (const timer of timers.values()) {
+clearTimeout(timer)
+}
       timers.clear()
     }
   }, [])
 
-  if (notifications.length === 0) return null
+  if (notifications.length === 0) {
+return null
+}
 
   const visible = notifications.slice(0, 5)
 

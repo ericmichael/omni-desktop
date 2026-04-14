@@ -1,6 +1,6 @@
+import { makeStyles, tokens } from '@fluentui/react-components';
 import { memo } from 'react';
 
-import { makeStyles, tokens } from '@fluentui/react-components';
 import { SettingsModalOmniSandboxOptions } from '@/renderer/features/SettingsModal/SettingsModalOmniSandboxOptions';
 import { SettingsModalOptInToLauncherPrereleases } from '@/renderer/features/SettingsModal/SettingsModalOptInToLauncherPrereleases';
 import { SettingsModalPreviewFeatures } from '@/renderer/features/SettingsModal/SettingsModalPreviewFeatures';

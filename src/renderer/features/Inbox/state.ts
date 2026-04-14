@@ -20,7 +20,9 @@ import type {
  */
 export const $inboxItems = computed(persistedStoreApi.$atom, (store) => {
   const out: Record<InboxItemId, InboxItem> = {};
-  for (const item of store.inboxItems ?? []) out[item.id] = item;
+  for (const item of store.inboxItems ?? []) {
+out[item.id] = item;
+}
   return out;
 });
 

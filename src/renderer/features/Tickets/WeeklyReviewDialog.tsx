@@ -1,15 +1,15 @@
-import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
+import { CheckmarkCircle20Filled, Stop20Filled } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
-import { CheckmarkCircle20Filled, Stop20Filled } from '@fluentui/react-icons';
 
-import { AnimatedDialog, Badge, Button, cn, DialogBody, DialogContent, DialogFooter, DialogHeader } from '@/renderer/ds';
-import { APPETITE_COLORS, APPETITE_LABELS, PHASE_COLORS, PHASE_LABELS } from '@/renderer/features/Tickets/ticket-constants';
+import { daysRemaining as inboxDaysRemaining } from '@/lib/inbox-expiry';
+import { AnimatedDialog, Badge, Button, DialogBody, DialogContent, DialogFooter, DialogHeader } from '@/renderer/ds';
+import { $activeInbox } from '@/renderer/features/Inbox/state';
 import { ticketApi } from '@/renderer/features/Tickets/state';
+import { APPETITE_COLORS, APPETITE_LABELS, PHASE_COLORS, PHASE_LABELS } from '@/renderer/features/Tickets/ticket-constants';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { isActivePhase } from '@/shared/ticket-phase';
-import { daysRemaining as inboxDaysRemaining } from '@/lib/inbox-expiry';
-import { $activeInbox } from '@/renderer/features/Inbox/state';
 import type { InboxItem, Ticket } from '@/shared/types';
 
 const useStyles = makeStyles({
@@ -84,7 +84,9 @@ const CompletedStep = memo(({ tickets }: { tickets: Ticket[] }) => {
   const store = useStore(persistedStoreApi.$atom);
   const projectMap = useMemo(() => {
     const m: Record<string, string> = {};
-    for (const p of store.projects) m[p.id] = p.label;
+    for (const p of store.projects) {
+m[p.id] = p.label;
+}
     return m;
   }, [store.projects]);
 
@@ -126,7 +128,9 @@ const ActiveStep = memo(({ tickets }: { tickets: Ticket[] }) => {
   const store = useStore(persistedStoreApi.$atom);
   const projectMap = useMemo(() => {
     const m: Record<string, string> = {};
-    for (const p of store.projects) m[p.id] = p.label;
+    for (const p of store.projects) {
+m[p.id] = p.label;
+}
     return m;
   }, [store.projects]);
 

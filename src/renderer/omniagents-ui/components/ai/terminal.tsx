@@ -1,9 +1,10 @@
-import { Button } from '../ui/button'
-import { cn } from '../../lib/utils'
 import Ansi from 'ansi-to-react'
 import { CheckIcon, CopyIcon, TerminalIcon, Trash2Icon } from 'lucide-react'
 import type { ComponentProps, HTMLAttributes } from 'react'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+
+import { Button } from '@/renderer/omniagents-ui/components/ui/button'
+import { cn } from '@/renderer/omniagents-ui/lib/utils'
 
 interface TerminalContextType {
   output: string
@@ -39,7 +40,9 @@ export type TerminalStatusProps = HTMLAttributes<HTMLDivElement>
 
 export const TerminalStatus = ({ className, children, ...props }: TerminalStatusProps) => {
   const { isStreaming } = useContext(TerminalContext)
-  if (!isStreaming) return null
+  if (!isStreaming) {
+return null
+}
   return (
     <div className={cn('flex items-center gap-2 text-xs text-muted-foreground', className)} {...props}>
       {children}
@@ -107,7 +110,9 @@ export type TerminalClearButtonProps = ComponentProps<typeof Button>
 
 export const TerminalClearButton = ({ children, className, ...props }: TerminalClearButtonProps) => {
   const { onClear } = useContext(TerminalContext)
-  if (!onClear) return null
+  if (!onClear) {
+return null
+}
   return (
     <Button
       className={cn('size-7 shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground', className)}

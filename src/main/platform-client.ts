@@ -120,7 +120,9 @@ export class PlatformClient {
   static async initiateDeviceCode(platformUrl: string, fetchFn?: typeof fetch): Promise<DeviceCodeResponse> {
     const f = fetchFn ?? globalThis.fetch;
     const res = await f(`${platformUrl}/api/v1/auth/device_code`, { method: 'POST' });
-    if (!res.ok) throw new Error(`Device code request failed: ${res.status}`);
+    if (!res.ok) {
+throw new Error(`Device code request failed: ${res.status}`);
+}
     return res.json() as Promise<DeviceCodeResponse>;
   }
 
@@ -143,7 +145,9 @@ export class PlatformClient {
       method: 'POST',
       headers: { Authorization: `Bearer ${this.config.refreshToken}` },
     });
-    if (!res.ok) throw new Error(`Token refresh failed: ${res.status}`);
+    if (!res.ok) {
+throw new Error(`Token refresh failed: ${res.status}`);
+}
     const body = (await res.json()) as { access_token: string };
     this.config.accessToken = body.access_token;
     this.onTokenRefresh?.(body.access_token);
@@ -154,10 +158,14 @@ export class PlatformClient {
 
   async getPolicy(agentSlug: string, domain?: string): Promise<PlatformPolicy> {
     const url = new URL(`/api/v1/policy/${agentSlug}`, this.config.url);
-    if (domain) url.searchParams.set('domain', domain);
+    if (domain) {
+url.searchParams.set('domain', domain);
+}
 
     const res = await this.authedFetch(url.toString());
-    if (!res.ok) throw new Error(`Policy fetch failed: ${res.status}`);
+    if (!res.ok) {
+throw new Error(`Policy fetch failed: ${res.status}`);
+}
     return res.json() as Promise<PlatformPolicy>;
   }
 
@@ -169,10 +177,14 @@ export class PlatformClient {
     gitRepo?: { url: string; branch?: string }
   ): Promise<PlatformSession> {
     const body: Record<string, unknown> = { agent: agentSlug };
-    if (domain) body.domain = domain;
+    if (domain) {
+body.domain = domain;
+}
     if (gitRepo) {
       body.git_repo_url = gitRepo.url;
-      if (gitRepo.branch) body.git_branch = gitRepo.branch;
+      if (gitRepo.branch) {
+body.git_branch = gitRepo.branch;
+}
     }
 
     const res = await this.authedFetch(`${this.config.url}/api/v1/compute/start`, {
@@ -180,7 +192,9 @@ export class PlatformClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error(`Start session failed: ${res.status}`);
+    if (!res.ok) {
+throw new Error(`Start session failed: ${res.status}`);
+}
     const data = (await res.json()) as { session_id: string; runtime_token: string; status: string };
     return {
       sessionId: data.session_id,
@@ -193,7 +207,9 @@ export class PlatformClient {
     const res = await this.authedFetch(
       `${this.config.url}/api/v1/compute/status?session_id=${sessionId}`
     );
-    if (!res.ok) throw new Error(`Status poll failed: ${res.status}`);
+    if (!res.ok) {
+throw new Error(`Status poll failed: ${res.status}`);
+}
     const data = (await res.json()) as {
       session_id: string;
       status: string;
@@ -217,8 +233,12 @@ export class PlatformClient {
   async waitForSession(sessionId: string, maxAttempts = 120): Promise<PlatformSession> {
     for (let i = 0; i < maxAttempts; i++) {
       const session = await this.pollSessionStatus(sessionId);
-      if (session.status === 'active' && session.websocketUrl) return session;
-      if (session.status === 'failed') throw new Error(session.error || 'Session failed');
+      if (session.status === 'active' && session.websocketUrl) {
+return session;
+}
+      if (session.status === 'failed') {
+throw new Error(session.error || 'Session failed');
+}
       await new Promise<void>((r) => setTimeout(r, 2000));
     }
     throw new Error('Session did not become ready in time');
@@ -231,15 +251,21 @@ export class PlatformClient {
     timeout?: number
   ): Promise<{ success: boolean; exitCode: number; stdout: string; stderr: string }> {
     const body: Record<string, unknown> = { session_id: sessionId, command };
-    if (workdir) body.workdir = workdir;
-    if (timeout) body.timeout = timeout;
+    if (workdir) {
+body.workdir = workdir;
+}
+    if (timeout) {
+body.timeout = timeout;
+}
 
     const res = await this.authedFetch(`${this.config.url}/api/v1/compute/exec`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error(`Exec in session failed: ${res.status}`);
+    if (!res.ok) {
+throw new Error(`Exec in session failed: ${res.status}`);
+}
     const data = (await res.json()) as {
       success: boolean;
       exit_code: number;
@@ -273,7 +299,9 @@ export class PlatformClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ project_id: projectId }),
     });
-    if (!res.ok) throw new Error(`Project workspace request failed: ${res.status}`);
+    if (!res.ok) {
+throw new Error(`Project workspace request failed: ${res.status}`);
+}
     const data = (await res.json()) as { sas_url: string; share_name: string; expires_at: number };
     return { sasUrl: data.sas_url, shareName: data.share_name, expiresAt: data.expires_at };
   }
@@ -286,7 +314,9 @@ export class PlatformClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ project_id: projectId }),
     });
-    if (!res.ok) throw new Error(`Encryption key request failed: ${res.status}`);
+    if (!res.ok) {
+throw new Error(`Encryption key request failed: ${res.status}`);
+}
     const data = (await res.json()) as { key: string };
     return Buffer.from(data.key, 'base64');
   }
@@ -299,7 +329,9 @@ export class PlatformClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: sessionId }),
     });
-    if (!res.ok) throw new Error(`Prepare workspace failed: ${res.status}`);
+    if (!res.ok) {
+throw new Error(`Prepare workspace failed: ${res.status}`);
+}
     const data = (await res.json()) as { session_id: string; upload_sas_url: string; share_name: string };
     return { uploadSasUrl: data.upload_sas_url, shareName: data.share_name };
   }
@@ -310,7 +342,9 @@ export class PlatformClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: sessionId }),
     });
-    if (!res.ok) throw new Error(`Finalize workspace failed: ${res.status}`);
+    if (!res.ok) {
+throw new Error(`Finalize workspace failed: ${res.status}`);
+}
     const data = (await res.json()) as { session_id: string; download_sas_url: string };
     return { downloadSasUrl: data.download_sas_url };
   }
@@ -326,7 +360,9 @@ export class PlatformClient {
       timestamp: number;
     }>
   ): Promise<void> {
-    if (events.length === 0) return;
+    if (events.length === 0) {
+return;
+}
     const res = await this.authedFetch(`${this.config.url}/api/v1/audit/workspace`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

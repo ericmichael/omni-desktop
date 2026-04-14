@@ -1,10 +1,11 @@
+import 'katex/dist/katex.min.css'
+
 import React from 'react'
 import ReactMarkdown from 'react-markdown'
+import rehypeHighlight from 'rehype-highlight'
+import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
-import rehypeKatex from 'rehype-katex'
-import rehypeHighlight from 'rehype-highlight'
-import 'katex/dist/katex.min.css'
 
 type Props = {
   className?: string
@@ -15,7 +16,9 @@ type Props = {
 
 export function Markdown({ className, children, highlight = true, inheritTextColor = false }: Props) {
   const rehypePlugins: any[] = [[rehypeKatex, { strict: false }]]
-  if (highlight) rehypePlugins.push(rehypeHighlight)
+  if (highlight) {
+rehypePlugins.push(rehypeHighlight)
+}
   const colorClass = inheritTextColor ? '' : 'text-textPrimary'
 
   // Convert LaTeX-style math delimiters to KaTeX format

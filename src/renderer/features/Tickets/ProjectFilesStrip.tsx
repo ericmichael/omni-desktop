@@ -1,6 +1,6 @@
-import { memo, useEffect, useState } from 'react';
-import { Document20Regular, Folder20Regular } from '@fluentui/react-icons';
 import { makeStyles, tokens } from '@fluentui/react-components';
+import { Document20Regular, Folder20Regular } from '@fluentui/react-icons';
+import { memo, useEffect, useState } from 'react';
 
 import { Caption1 } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -64,8 +64,12 @@ const useStyles = makeStyles({
 });
 
 function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  if (bytes < 1024) {
+return `${bytes} B`;
+}
+  if (bytes < 1024 * 1024) {
+return `${(bytes / 1024).toFixed(0)} KB`;
+}
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 

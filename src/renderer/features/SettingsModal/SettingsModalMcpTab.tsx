@@ -1,8 +1,8 @@
+import { makeStyles, tokens } from '@fluentui/react-components';
+import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useState } from 'react';
-import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
 
-import { makeStyles, tokens } from '@fluentui/react-components';
 import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, Button, FormField, FormSkeleton, IconButton, Input, SaveBar, SectionLabel, Select } from '@/renderer/ds';
 import { configApi } from '@/renderer/services/config';
 import type { McpConfig, McpServerEntry } from '@/shared/types';

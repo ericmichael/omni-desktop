@@ -17,7 +17,9 @@ const xtermSubscriptions = new Map<string, Set<() => void>>();
 
 export const initializeTerminal = (processId: string): Terminal => {
   const existing = $agentXTerms.get()[processId];
-  if (existing) return existing;
+  if (existing) {
+return existing;
+}
 
   const xterm = new Terminal({ ...DEFAULT_XTERM_OPTIONS, disableStdin: true });
   const subs = new Set<() => void>();
@@ -110,10 +112,14 @@ const listen = () => {
   // Polling as fallback
   const poll = async (processId: string) => {
     const current = $agentStatuses.get()[processId];
-    if (current?.type === 'running') return;
+    if (current?.type === 'running') {
+return;
+}
     try {
       const status = await emitter.invoke('agent-process:get-status', processId);
-      if (!status || status.type === 'uninitialized') return;
+      if (!status || status.type === 'uninitialized') {
+return;
+}
       const old = $agentStatuses.get()[processId];
       if (!objectEquals(old, status)) {
         $agentStatuses.setKey(processId, status);
@@ -134,10 +140,14 @@ listen();
 /** Poll status for a specific processId. Exported for Code/state.ts to call for its tabs. */
 export const pollProcessStatus = async (processId: string): Promise<void> => {
   const current = $agentStatuses.get()[processId];
-  if (current?.type === 'running') return;
+  if (current?.type === 'running') {
+return;
+}
   try {
     const status = await emitter.invoke('agent-process:get-status', processId);
-    if (!status || status.type === 'uninitialized') return;
+    if (!status || status.type === 'uninitialized') {
+return;
+}
     const old = $agentStatuses.get()[processId];
     if (!objectEquals(old, status)) {
       $agentStatuses.setKey(processId, status);

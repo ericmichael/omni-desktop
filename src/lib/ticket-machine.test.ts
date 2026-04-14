@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocketServer } from 'ws';
 
-import { TicketMachine } from '@/main/ticket-machine';
 import type { TicketMachineCallbacks } from '@/main/ticket-machine';
+import { TicketMachine } from '@/main/ticket-machine';
 import type { TicketPhase } from '@/shared/ticket-phase';
 
 // --- Test WS server helpers ---
@@ -47,7 +47,9 @@ const stopServer = (): Promise<void> =>
 
 // Send a JSON-RPC notification to all connected clients
 const broadcastNotification = (method: string, params: Record<string, unknown>): void => {
-  if (!wss) return;
+  if (!wss) {
+return;
+}
   const msg = JSON.stringify({ method, params });
   for (const client of wss.clients) {
     client.send(msg);
@@ -160,7 +162,9 @@ describe('TicketMachine', () => {
   describe('createSession', () => {
     it('transitions provisioning → connecting → session_creating → ready', async () => {
       wsUrl = await startServer((method) => {
-        if (method === 'server_call') return { session_id: 'sess-1' };
+        if (method === 'server_call') {
+return { session_id: 'sess-1' };
+}
         return {};
       });
       const cb = makeCallbacks();
@@ -196,8 +200,12 @@ describe('TicketMachine', () => {
   describe('startRun', () => {
     it('transitions to running and returns session/run IDs', async () => {
       wsUrl = await startServer((method) => {
-        if (method === 'server_call') return { session_id: 'sess-1' };
-        if (method === 'start_run') return { session_id: 'sess-1', run_id: 'run-1' };
+        if (method === 'server_call') {
+return { session_id: 'sess-1' };
+}
+        if (method === 'start_run') {
+return { session_id: 'sess-1', run_id: 'run-1' };
+}
         return {};
       });
       const cb = makeCallbacks();
@@ -221,8 +229,12 @@ describe('TicketMachine', () => {
 
     it('allows starting from continuing phase', async () => {
       wsUrl = await startServer((method) => {
-        if (method === 'server_call') return { session_id: 'sess-1' };
-        if (method === 'start_run') return { session_id: 'sess-1', run_id: 'run-2' };
+        if (method === 'server_call') {
+return { session_id: 'sess-1' };
+}
+        if (method === 'start_run') {
+return { session_id: 'sess-1', run_id: 'run-2' };
+}
         return {};
       });
       const cb = makeCallbacks();
@@ -240,8 +252,12 @@ describe('TicketMachine', () => {
 
     it('allows starting from retrying phase', async () => {
       wsUrl = await startServer((method) => {
-        if (method === 'server_call') return { session_id: 'sess-1' };
-        if (method === 'start_run') return { session_id: 'sess-1', run_id: 'run-3' };
+        if (method === 'server_call') {
+return { session_id: 'sess-1' };
+}
+        if (method === 'start_run') {
+return { session_id: 'sess-1', run_id: 'run-3' };
+}
         return {};
       });
       const cb = makeCallbacks();
@@ -257,8 +273,12 @@ describe('TicketMachine', () => {
 
     it('allows starting from awaiting_input phase', async () => {
       wsUrl = await startServer((method) => {
-        if (method === 'server_call') return { session_id: 'sess-1' };
-        if (method === 'start_run') return { session_id: 'sess-1', run_id: 'run-4' };
+        if (method === 'server_call') {
+return { session_id: 'sess-1' };
+}
+        if (method === 'start_run') {
+return { session_id: 'sess-1', run_id: 'run-4' };
+}
         return {};
       });
       const cb = makeCallbacks();
@@ -274,7 +294,9 @@ describe('TicketMachine', () => {
 
     it('transitions to error on RPC failure', async () => {
       wsUrl = await startServer((method) => {
-        if (method === 'server_call') return { session_id: 'sess-1' };
+        if (method === 'server_call') {
+return { session_id: 'sess-1' };
+}
         // start_run returns no session_id
         return undefined;
       });
@@ -292,8 +314,12 @@ describe('TicketMachine', () => {
   describe('run_end notification', () => {
     it('fires onRunEnd callback and clears runId', async () => {
       wsUrl = await startServer((method) => {
-        if (method === 'server_call') return { session_id: 'sess-1' };
-        if (method === 'start_run') return { session_id: 'sess-1', run_id: 'run-1' };
+        if (method === 'server_call') {
+return { session_id: 'sess-1' };
+}
+        if (method === 'start_run') {
+return { session_id: 'sess-1', run_id: 'run-1' };
+}
         return {};
       });
       const cb = makeCallbacks();
@@ -321,8 +347,12 @@ describe('TicketMachine', () => {
   describe('message_output notification', () => {
     it('fires onMessage callback with content', async () => {
       wsUrl = await startServer((method) => {
-        if (method === 'server_call') return { session_id: 'sess-1' };
-        if (method === 'start_run') return { session_id: 'sess-1', run_id: 'run-1' };
+        if (method === 'server_call') {
+return { session_id: 'sess-1' };
+}
+        if (method === 'start_run') {
+return { session_id: 'sess-1', run_id: 'run-1' };
+}
         return {};
       });
       const cb = makeCallbacks();
@@ -340,8 +370,12 @@ describe('TicketMachine', () => {
 
     it('maps tool_name to tool_call role', async () => {
       wsUrl = await startServer((method) => {
-        if (method === 'server_call') return { session_id: 'sess-1' };
-        if (method === 'start_run') return { session_id: 'sess-1', run_id: 'run-1' };
+        if (method === 'server_call') {
+return { session_id: 'sess-1' };
+}
+        if (method === 'start_run') {
+return { session_id: 'sess-1', run_id: 'run-1' };
+}
         return {};
       });
       const cb = makeCallbacks();
@@ -363,8 +397,12 @@ describe('TicketMachine', () => {
 
     it('updates lastActivity on message', async () => {
       wsUrl = await startServer((method) => {
-        if (method === 'server_call') return { session_id: 'sess-1' };
-        if (method === 'start_run') return { session_id: 'sess-1', run_id: 'run-1' };
+        if (method === 'server_call') {
+return { session_id: 'sess-1' };
+}
+        if (method === 'start_run') {
+return { session_id: 'sess-1', run_id: 'run-1' };
+}
         return {};
       });
       const cb = makeCallbacks();
@@ -393,8 +431,12 @@ describe('TicketMachine', () => {
       const callOrder: string[] = [];
       wsUrl = await startServer((method) => {
         callOrder.push(method);
-        if (method === 'server_call') return { session_id: 'sess-1' };
-        if (method === 'start_run') return { session_id: 'sess-1', run_id: 'run-1' };
+        if (method === 'server_call') {
+return { session_id: 'sess-1' };
+}
+        if (method === 'start_run') {
+return { session_id: 'sess-1', run_id: 'run-1' };
+}
         return {};
       });
       const cb = makeCallbacks();
@@ -422,9 +464,15 @@ describe('TicketMachine', () => {
   describe('stop', () => {
     it('transitions to idle and clears runId', async () => {
       wsUrl = await startServer((method) => {
-        if (method === 'server_call') return { session_id: 'sess-1' };
-        if (method === 'start_run') return { session_id: 'sess-1', run_id: 'run-1' };
-        if (method === 'stop_run') return {};
+        if (method === 'server_call') {
+return { session_id: 'sess-1' };
+}
+        if (method === 'start_run') {
+return { session_id: 'sess-1', run_id: 'run-1' };
+}
+        if (method === 'stop_run') {
+return {};
+}
         return {};
       });
       const cb = makeCallbacks();
@@ -465,9 +513,15 @@ describe('TicketMachine', () => {
   describe('dispose', () => {
     it('closes WebSocket and force-sets idle', async () => {
       wsUrl = await startServer((method) => {
-        if (method === 'server_call') return { session_id: 'sess-1' };
-        if (method === 'start_run') return { session_id: 'sess-1', run_id: 'run-1' };
-        if (method === 'stop_run') return {};
+        if (method === 'server_call') {
+return { session_id: 'sess-1' };
+}
+        if (method === 'start_run') {
+return { session_id: 'sess-1', run_id: 'run-1' };
+}
+        if (method === 'stop_run') {
+return {};
+}
         return {};
       });
       const cb = makeCallbacks();

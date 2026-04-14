@@ -1,7 +1,3 @@
-import { Button } from '../ui/button'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
-import { cn } from '../../lib/utils'
-import type { UIMessage } from '../../ai-types'
 import { cjk } from '@streamdown/cjk'
 import { code } from '@streamdown/code'
 import { math } from '@streamdown/math'
@@ -10,6 +6,11 @@ import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
 import type { ComponentProps, HTMLAttributes, ReactElement } from 'react'
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { Streamdown } from 'streamdown'
+
+import type { UIMessage } from '@/renderer/omniagents-ui/ai-types'
+import { Button } from '@/renderer/omniagents-ui/components/ui/button'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/renderer/omniagents-ui/components/ui/tooltip'
+import { cn } from '@/renderer/omniagents-ui/lib/utils'
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage['role']
@@ -92,7 +93,9 @@ const MessageBranchContext = createContext<MessageBranchContextType | null>(null
 
 const useMessageBranch = () => {
   const context = useContext(MessageBranchContext)
-  if (!context) throw new Error('MessageBranch components must be used within MessageBranch')
+  if (!context) {
+throw new Error('MessageBranch components must be used within MessageBranch')
+}
   return context
 }
 
@@ -140,7 +143,9 @@ export const MessageBranchContent = ({ children, ...props }: MessageBranchConten
   const childrenArray = useMemo(() => (Array.isArray(children) ? children : [children]), [children])
 
   useEffect(() => {
-    if (branches.length !== childrenArray.length) setBranches(childrenArray)
+    if (branches.length !== childrenArray.length) {
+setBranches(childrenArray)
+}
   }, [childrenArray, branches, setBranches])
 
   return childrenArray.map((branch, index) => (
@@ -154,7 +159,9 @@ export type MessageBranchSelectorProps = ComponentProps<'div'>
 
 export const MessageBranchSelector = ({ className, ...props }: MessageBranchSelectorProps) => {
   const { totalBranches } = useMessageBranch()
-  if (totalBranches <= 1) return null
+  if (totalBranches <= 1) {
+return null
+}
   return <div className={cn('flex items-center gap-1', className)} {...props} />
 }
 

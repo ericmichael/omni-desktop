@@ -11,13 +11,13 @@
 
 import { nanoid } from 'nanoid';
 
-import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
-import { $milestones, milestoneApi } from '@/renderer/features/Initiatives/state';
 import { inboxApi } from '@/renderer/features/Inbox/state';
+import { $milestones, milestoneApi } from '@/renderer/features/Initiatives/state';
 import { pageApi } from '@/renderer/features/Pages/state';
-import { $tickets, ticketApi } from '@/renderer/features/Tickets/state';
 import { requestPlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
 import { requestPreviewOpen } from '@/renderer/features/Tickets/preview-bridge';
+import { $tickets, ticketApi } from '@/renderer/features/Tickets/state';
+import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type {
   InboxItem,
@@ -32,12 +32,16 @@ import type {
 } from '@/shared/types';
 
 function parseInboxStatus(input: unknown): InboxItemStatus | undefined {
-  if (input === 'new' || input === 'shaped' || input === 'later') return input;
+  if (input === 'new' || input === 'shaped' || input === 'later') {
+return input;
+}
   return undefined;
 }
 
 function parseAppetite(input: unknown): InboxShaping['appetite'] | undefined {
-  if (input === 'small' || input === 'medium' || input === 'large' || input === 'xl') return input;
+  if (input === 'small' || input === 'medium' || input === 'large' || input === 'xl') {
+return input;
+}
   return undefined;
 }
 
@@ -71,9 +75,13 @@ async function handleTicketTools(
   switch (toolName) {
     case 'get_ticket': {
       const lookupId = (toolArgs.ticket_id as string as TicketId) || currentTicketId;
-      if (!lookupId) return err('No ticket_id provided and no current ticket context');
+      if (!lookupId) {
+return err('No ticket_id provided and no current ticket context');
+}
       const ticket = $tickets.get()[lookupId];
-      if (!ticket) return err(`Ticket not found: ${lookupId}`);
+      if (!ticket) {
+return err(`Ticket not found: ${lookupId}`);
+}
       const pipeline = await ticketApi.getPipeline(ticket.projectId as ProjectId);
       const column = pipeline.columns.find((c) => c.id === ticket.columnId);
       const comments = (ticket.comments ?? []).map((c) => ({
@@ -109,7 +117,9 @@ async function handleTicketTools(
       });
     }
     case 'move_ticket': {
-      if (!currentTicketId || !currentProjectId) return err('No current ticket context for move_ticket');
+      if (!currentTicketId || !currentProjectId) {
+return err('No current ticket context for move_ticket');
+}
       const columnLabel = (toolArgs.column as string) ?? '';
       const pipeline = await ticketApi.getPipeline(currentProjectId);
       const col = pipeline.columns.find((c) => c.label.toLowerCase() === columnLabel.toLowerCase());
@@ -122,21 +132,31 @@ async function handleTicketTools(
     }
     case 'escalate': {
       const message = (toolArgs.message as string) ?? '';
-      if (!message) return err('Empty escalation message');
+      if (!message) {
+return err('Empty escalation message');
+}
       return ok({ ok: true, message: 'Escalated to human operator' });
     }
     case 'notify': {
       const message = (toolArgs.message as string) ?? '';
-      if (!message) return err('Empty notification message');
+      if (!message) {
+return err('Empty notification message');
+}
       return ok({ ok: true, message: 'Notification sent' });
     }
     case 'add_ticket_comment': {
       const commentTicketId = (toolArgs.ticket_id as string as TicketId) || currentTicketId;
-      if (!commentTicketId) return err('No ticket_id provided and no current ticket context');
+      if (!commentTicketId) {
+return err('No ticket_id provided and no current ticket context');
+}
       const content = (toolArgs.content as string) ?? '';
-      if (!content) return err('Missing content');
+      if (!content) {
+return err('Missing content');
+}
       const ticket = $tickets.get()[commentTicketId];
-      if (!ticket) return err(`Ticket not found: ${commentTicketId}`);
+      if (!ticket) {
+return err(`Ticket not found: ${commentTicketId}`);
+}
       const comment = { id: nanoid(), author: 'agent' as const, content, createdAt: Date.now() };
       const existingComments = ticket.comments ?? [];
       await ticketApi.updateTicket(commentTicketId, { comments: [...existingComments, comment] });
@@ -157,9 +177,13 @@ async function handleReadonlyContextTools(
   switch (toolName) {
     case 'list_tickets': {
       const projectId = (toolArgs.project_id as string) ?? '';
-      if (!projectId) return err('Missing project_id');
+      if (!projectId) {
+return err('Missing project_id');
+}
       const project = store.projects.find((p) => p.id === projectId);
-      if (!project) return err(`Project not found: ${projectId}`);
+      if (!project) {
+return err(`Project not found: ${projectId}`);
+}
       let pipeline: Pipeline;
       try {
         pipeline = await ticketApi.getPipeline(projectId);
@@ -168,14 +192,20 @@ async function handleReadonlyContextTools(
       }
       let tickets = store.tickets.filter((t) => t.projectId === projectId);
       const milestoneFilter = toolArgs.milestone_id as string | undefined;
-      if (milestoneFilter) tickets = tickets.filter((t) => t.milestoneId === milestoneFilter);
+      if (milestoneFilter) {
+tickets = tickets.filter((t) => t.milestoneId === milestoneFilter);
+}
       const columnFilter = toolArgs.column as string | undefined;
       if (columnFilter) {
         const col = pipeline.columns.find((c) => c.label.toLowerCase() === columnFilter.toLowerCase());
-        if (col) tickets = tickets.filter((t) => t.columnId === col.id);
+        if (col) {
+tickets = tickets.filter((t) => t.columnId === col.id);
+}
       }
       const priorityFilter = toolArgs.priority as string | undefined;
-      if (priorityFilter) tickets = tickets.filter((t) => t.priority === priorityFilter);
+      if (priorityFilter) {
+tickets = tickets.filter((t) => t.priority === priorityFilter);
+}
       const result = tickets.map((t) => ({
         id: t.id,
         title: t.title,
@@ -191,11 +221,15 @@ async function handleReadonlyContextTools(
     }
     case 'search_tickets': {
       const query = (toolArgs.query as string) ?? '';
-      if (!query) return err('Missing query');
+      if (!query) {
+return err('Missing query');
+}
       const q = query.toLowerCase();
       const projectFilter = toolArgs.project_id as string | undefined;
       let tickets = store.tickets;
-      if (projectFilter) tickets = tickets.filter((t) => t.projectId === projectFilter);
+      if (projectFilter) {
+tickets = tickets.filter((t) => t.projectId === projectFilter);
+}
       const matches = tickets.filter(
         (t) => t.title.toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q)
       );
@@ -228,7 +262,9 @@ async function handleReadonlyContextTools(
     }
     case 'list_milestones': {
       const projectId = (toolArgs.project_id as string) ?? '';
-      if (!projectId) return err('Missing project_id');
+      if (!projectId) {
+return err('Missing project_id');
+}
       await milestoneApi.fetchMilestones(projectId);
       const items = Object.values($milestones.get()).filter((i) => i.projectId === projectId);
       return ok({
@@ -245,16 +281,24 @@ async function handleReadonlyContextTools(
     }
     case 'read_milestone_brief': {
       const id = (toolArgs.milestone_id as string) ?? '';
-      if (!id) return err('Missing milestone_id');
+      if (!id) {
+return err('Missing milestone_id');
+}
       const existing = $milestones.get()[id];
-      if (!existing) return err(`Milestone not found: ${id}`);
+      if (!existing) {
+return err(`Milestone not found: ${id}`);
+}
       return ok({ brief: existing.brief ?? '' });
     }
     case 'get_ticket_comments': {
       const tid = (toolArgs.ticket_id as string) ?? '';
-      if (!tid) return err('Missing ticket_id');
+      if (!tid) {
+return err('Missing ticket_id');
+}
       const ticket = $tickets.get()[tid as TicketId];
-      if (!ticket) return err(`Ticket not found: ${tid}`);
+      if (!ticket) {
+return err(`Ticket not found: ${tid}`);
+}
       return ok({
         comments: (ticket.comments ?? []).map((c) => ({
           id: c.id,
@@ -266,9 +310,13 @@ async function handleReadonlyContextTools(
     }
     case 'get_ticket_history': {
       const tid = (toolArgs.ticket_id as string) ?? '';
-      if (!tid) return err('Missing ticket_id');
+      if (!tid) {
+return err('Missing ticket_id');
+}
       const ticket = $tickets.get()[tid as TicketId];
-      if (!ticket) return err(`Ticket not found: ${tid}`);
+      if (!ticket) {
+return err(`Ticket not found: ${tid}`);
+}
       const runs = (ticket.runs ?? []).map((r) => ({
         id: r.id,
         started_at: new Date(r.startedAt).toISOString(),
@@ -286,7 +334,9 @@ async function handleReadonlyContextTools(
     }
     case 'get_pipeline': {
       const projectId = (toolArgs.project_id as string) ?? '';
-      if (!projectId) return err('Missing project_id');
+      if (!projectId) {
+return err('Missing project_id');
+}
       let pipeline: Pipeline;
       try {
         pipeline = await ticketApi.getPipeline(projectId);
@@ -304,9 +354,13 @@ async function handleReadonlyContextTools(
     }
     case 'list_pages': {
       const projectId = (toolArgs.project_id as string) ?? '';
-      if (!projectId) return err('Missing project_id');
+      if (!projectId) {
+return err('Missing project_id');
+}
       const store = persistedStoreApi.$atom.get();
-      if (!store.projects.find((p) => p.id === projectId)) return err(`Project not found: ${projectId}`);
+      if (!store.projects.find((p) => p.id === projectId)) {
+return err(`Project not found: ${projectId}`);
+}
       await pageApi.fetchPages(projectId);
       const pages = store.pages.filter((p) => p.projectId === projectId);
       return ok({
@@ -324,10 +378,14 @@ async function handleReadonlyContextTools(
     }
     case 'read_page': {
       const pageId = (toolArgs.page_id as string) ?? '';
-      if (!pageId) return err('Missing page_id');
+      if (!pageId) {
+return err('Missing page_id');
+}
       const store = persistedStoreApi.$atom.get();
       const page = store.pages.find((p) => p.id === pageId);
-      if (!page) return err(`Page not found: ${pageId}`);
+      if (!page) {
+return err(`Page not found: ${pageId}`);
+}
       const content = await pageApi.readContent(pageId as PageId);
       return ok({
         id: page.id,
@@ -362,11 +420,15 @@ async function handleProjectTools(
     }
     case 'create_project': {
       const label = (toolArgs.label as string) ?? '';
-      if (!label) return err('Missing label');
+      if (!label) {
+return err('Missing label');
+}
       const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       const workspaceDir = toolArgs.workspace_dir as string | undefined;
       const repoUrl = toolArgs.repo_url as string | undefined;
-      if (workspaceDir && repoUrl) return err('Pass workspace_dir or repo_url, not both');
+      if (workspaceDir && repoUrl) {
+return err('Pass workspace_dir or repo_url, not both');
+}
       let source: import('@/shared/types').ProjectSource | undefined;
       if (workspaceDir) {
         source = { kind: 'local', workspaceDir };
@@ -396,9 +458,13 @@ async function handleProjectTools(
     }
     case 'update_project': {
       const projectId = (toolArgs.project_id as string) ?? '';
-      if (!projectId) return err('Missing project_id');
+      if (!projectId) {
+return err('Missing project_id');
+}
       const project = store.projects.find((p) => p.id === projectId);
-      if (!project) return err(`Project not found: ${projectId}`);
+      if (!project) {
+return err(`Project not found: ${projectId}`);
+}
       if (toolArgs.workspace_dir !== undefined && toolArgs.repo_url !== undefined) {
         return err('Pass workspace_dir or repo_url, not both');
       }
@@ -421,19 +487,29 @@ async function handleProjectTools(
     }
     case 'delete_project': {
       const projectId = (toolArgs.project_id as string) ?? '';
-      if (!projectId) return err('Missing project_id');
+      if (!projectId) {
+return err('Missing project_id');
+}
       const project = store.projects.find((p) => p.id === projectId);
-      if (!project) return err(`Project not found: ${projectId}`);
-      if (project.isPersonal) return err('Cannot delete the Personal project');
+      if (!project) {
+return err(`Project not found: ${projectId}`);
+}
+      if (project.isPersonal) {
+return err('Cannot delete the Personal project');
+}
       await ticketApi.removeProject(projectId as ProjectId);
       return ok({ ok: true });
     }
     case 'create_ticket': {
       const projectId = (toolArgs.project_id as string) ?? '';
       const title = (toolArgs.title as string) ?? '';
-      if (!projectId || !title) return err('Missing project_id or title');
+      if (!projectId || !title) {
+return err('Missing project_id or title');
+}
       const project = store.projects.find((p) => p.id === projectId);
-      if (!project) return err(`Project not found: ${projectId}`);
+      if (!project) {
+return err(`Project not found: ${projectId}`);
+}
       const created = await ticketApi.addTicket({
         projectId,
         milestoneId: (toolArgs.milestone_id as string) || undefined,
@@ -447,19 +523,35 @@ async function handleProjectTools(
     }
     case 'update_ticket': {
       const targetId = (toolArgs.ticket_id as string) ?? '';
-      if (!targetId) return err('Missing ticket_id');
+      if (!targetId) {
+return err('Missing ticket_id');
+}
       const target = store.tickets.find((t) => t.id === targetId);
-      if (!target) return err(`Ticket not found: ${targetId}`);
+      if (!target) {
+return err(`Ticket not found: ${targetId}`);
+}
       const patch: Record<string, unknown> = {};
-      if (toolArgs.title) patch.title = toolArgs.title;
-      if (toolArgs.description !== undefined) patch.description = toolArgs.description;
-      if (toolArgs.priority) patch.priority = toolArgs.priority;
-      if (toolArgs.branch !== undefined) patch.branch = toolArgs.branch;
+      if (toolArgs.title) {
+patch.title = toolArgs.title;
+}
+      if (toolArgs.description !== undefined) {
+patch.description = toolArgs.description;
+}
+      if (toolArgs.priority) {
+patch.priority = toolArgs.priority;
+}
+      if (toolArgs.branch !== undefined) {
+patch.branch = toolArgs.branch;
+}
       // Dependency management
       if (toolArgs.add_blocked_by || toolArgs.remove_blocked_by) {
         const current = new Set(target.blockedBy ?? []);
-        for (const id of (toolArgs.add_blocked_by as string[]) ?? []) current.add(id);
-        for (const id of (toolArgs.remove_blocked_by as string[]) ?? []) current.delete(id);
+        for (const id of (toolArgs.add_blocked_by as string[]) ?? []) {
+current.add(id);
+}
+        for (const id of (toolArgs.remove_blocked_by as string[]) ?? []) {
+current.delete(id);
+}
         patch.blockedBy = [...current];
       }
       await ticketApi.updateTicket(targetId as TicketId, patch);
@@ -467,7 +559,9 @@ async function handleProjectTools(
     }
     case 'start_ticket': {
       const targetId = (toolArgs.ticket_id as string) ?? '';
-      if (!targetId) return err('Missing ticket_id');
+      if (!targetId) {
+return err('Missing ticket_id');
+}
       try {
         await ticketApi.startSupervisor(targetId as TicketId);
         return ok({ ok: true });
@@ -477,7 +571,9 @@ async function handleProjectTools(
     }
     case 'stop_ticket': {
       const targetId = (toolArgs.ticket_id as string) ?? '';
-      if (!targetId) return err('Missing ticket_id');
+      if (!targetId) {
+return err('Missing ticket_id');
+}
       try {
         await ticketApi.stopSupervisor(targetId as TicketId);
         return ok({ ok: true });
@@ -487,18 +583,28 @@ async function handleProjectTools(
     }
     case 'archive_ticket': {
       const targetId = (toolArgs.ticket_id as string) ?? '';
-      if (!targetId) return err('Missing ticket_id');
+      if (!targetId) {
+return err('Missing ticket_id');
+}
       const target = store.tickets.find((t) => t.id === targetId);
-      if (!target) return err(`Ticket not found: ${targetId}`);
-      if (!target.resolution) return err('Only resolved tickets can be archived');
+      if (!target) {
+return err(`Ticket not found: ${targetId}`);
+}
+      if (!target.resolution) {
+return err('Only resolved tickets can be archived');
+}
       await ticketApi.updateTicket(targetId as TicketId, { archivedAt: Date.now() });
       return ok({ ok: true });
     }
     case 'unarchive_ticket': {
       const targetId = (toolArgs.ticket_id as string) ?? '';
-      if (!targetId) return err('Missing ticket_id');
+      if (!targetId) {
+return err('Missing ticket_id');
+}
       const target = store.tickets.find((t) => t.id === targetId);
-      if (!target) return err(`Ticket not found: ${targetId}`);
+      if (!target) {
+return err(`Ticket not found: ${targetId}`);
+}
       await ticketApi.updateTicket(targetId as TicketId, { archivedAt: undefined });
       return ok({ ok: true });
     }
@@ -515,9 +621,13 @@ async function handlePageTools(
     case 'create_page': {
       const projectId = (toolArgs.project_id as string) ?? '';
       const title = (toolArgs.title as string) ?? '';
-      if (!projectId || !title) return err('Missing project_id or title');
+      if (!projectId || !title) {
+return err('Missing project_id or title');
+}
       const store = persistedStoreApi.$atom.get();
-      if (!store.projects.find((p) => p.id === projectId)) return err(`Project not found: ${projectId}`);
+      if (!store.projects.find((p) => p.id === projectId)) {
+return err(`Project not found: ${projectId}`);
+}
       const parentId = (toolArgs.parent_id as string as PageId) || null;
       const icon = toolArgs.icon as string | undefined;
       const created = await pageApi.addPage({
@@ -535,14 +645,22 @@ async function handlePageTools(
     }
     case 'update_page': {
       const pageId = (toolArgs.page_id as string) ?? '';
-      if (!pageId) return err('Missing page_id');
+      if (!pageId) {
+return err('Missing page_id');
+}
       const store = persistedStoreApi.$atom.get();
       const page = store.pages.find((p) => p.id === pageId);
-      if (!page) return err(`Page not found: ${pageId}`);
+      if (!page) {
+return err(`Page not found: ${pageId}`);
+}
       // Metadata patch
       const metaPatch: Record<string, unknown> = {};
-      if (toolArgs.title !== undefined) metaPatch.title = toolArgs.title;
-      if (toolArgs.icon !== undefined) metaPatch.icon = toolArgs.icon;
+      if (toolArgs.title !== undefined) {
+metaPatch.title = toolArgs.title;
+}
+      if (toolArgs.icon !== undefined) {
+metaPatch.icon = toolArgs.icon;
+}
       if (Object.keys(metaPatch).length > 0) {
         await pageApi.updatePage(pageId as PageId, metaPatch);
       }
@@ -580,7 +698,9 @@ async function handleInboxTools(
     }
     case 'create_inbox_item': {
       const title = (toolArgs.title as string) ?? '';
-      if (!title) return err('Missing title');
+      if (!title) {
+return err('Missing title');
+}
       const created = await inboxApi.add({
         title,
         note: (toolArgs.description as string) || undefined,
@@ -590,12 +710,20 @@ async function handleInboxTools(
     }
     case 'update_inbox_item': {
       const itemId = (toolArgs.item_id as string) ?? '';
-      if (!itemId) return err('Missing item_id');
+      if (!itemId) {
+return err('Missing item_id');
+}
 
       const patch: Parameters<typeof inboxApi.update>[1] = {};
-      if (toolArgs.title !== undefined) patch.title = toolArgs.title as string;
-      if (toolArgs.description !== undefined) patch.note = toolArgs.description as string;
-      if (toolArgs.project_id !== undefined) patch.projectId = (toolArgs.project_id as string) || null;
+      if (toolArgs.title !== undefined) {
+patch.title = toolArgs.title as string;
+}
+      if (toolArgs.description !== undefined) {
+patch.note = toolArgs.description as string;
+}
+      if (toolArgs.project_id !== undefined) {
+patch.projectId = (toolArgs.project_id as string) || null;
+}
       if (Object.keys(patch).length > 0) {
         await inboxApi.update(itemId as InboxItemId, patch);
       }
@@ -618,7 +746,9 @@ async function handleInboxTools(
       }
 
       // Explicit status transition.
-      if (toolArgs.status === 'later') await inboxApi.defer(itemId as InboxItemId);
+      if (toolArgs.status === 'later') {
+await inboxApi.defer(itemId as InboxItemId);
+}
       if (toolArgs.status === 'new' || toolArgs.status === 'shaped') {
         await inboxApi.reactivate(itemId as InboxItemId);
       }
@@ -626,14 +756,18 @@ async function handleInboxTools(
     }
     case 'delete_inbox_item': {
       const itemId = (toolArgs.item_id as string) ?? '';
-      if (!itemId) return err('Missing item_id');
+      if (!itemId) {
+return err('Missing item_id');
+}
       await inboxApi.remove(itemId as InboxItemId);
       return ok({ ok: true });
     }
     case 'inbox_to_tickets': {
       const itemId = (toolArgs.item_id as string) ?? '';
       const projectId = (toolArgs.project_id as string) ?? '';
-      if (!itemId || !projectId) return err('Missing item_id or project_id');
+      if (!itemId || !projectId) {
+return err('Missing item_id or project_id');
+}
       const milestoneId = (toolArgs.milestone_id as string) || undefined;
       const ticket = await inboxApi.promoteToTicket(itemId as InboxItemId, {
         projectId: projectId as ProjectId,
@@ -643,7 +777,9 @@ async function handleInboxTools(
     }
     case 'inbox_to_project': {
       const itemId = (toolArgs.item_id as string) ?? '';
-      if (!itemId) return err('Missing item_id');
+      if (!itemId) {
+return err('Missing item_id');
+}
       const label = (toolArgs.label as string) ?? '';
       const project = await inboxApi.promoteToProject(itemId as InboxItemId, { label });
       return ok({ ok: true, project_id: project.id, label: project.label, slug: project.slug });
@@ -658,9 +794,15 @@ async function handleMilestoneTools(
   toolArgs: Record<string, unknown>
 ): Promise<ClientToolResult | null> {
   const parseDueDate = (value: unknown): { kind: 'unset' | 'clear' | 'value' | 'invalid'; value?: number } => {
-    if (value === undefined) return { kind: 'unset' };
-    if (value === null || value === '') return { kind: 'clear' };
-    if (typeof value !== 'string') return { kind: 'invalid' };
+    if (value === undefined) {
+return { kind: 'unset' };
+}
+    if (value === null || value === '') {
+return { kind: 'clear' };
+}
+    if (typeof value !== 'string') {
+return { kind: 'invalid' };
+}
     const parsed = Date.parse(value);
     return Number.isNaN(parsed) ? { kind: 'invalid' } : { kind: 'value', value: parsed };
   };
@@ -669,9 +811,13 @@ async function handleMilestoneTools(
     case 'create_milestone': {
       const projectId = (toolArgs.project_id as string) ?? '';
       const title = (toolArgs.title as string) ?? '';
-      if (!projectId || !title) return err('Missing project_id or title');
+      if (!projectId || !title) {
+return err('Missing project_id or title');
+}
       const store = persistedStoreApi.$atom.get();
-      if (!store.projects.find((p) => p.id === projectId)) return err(`Project not found: ${projectId}`);
+      if (!store.projects.find((p) => p.id === projectId)) {
+return err(`Project not found: ${projectId}`);
+}
       const dueDate = parseDueDate(toolArgs.due_date);
       if (dueDate.kind === 'invalid' || dueDate.kind === 'clear') {
         return err('Invalid due_date. Use an ISO date like 2026-04-30.');
@@ -688,19 +834,39 @@ async function handleMilestoneTools(
     }
     case 'update_milestone': {
       const id = (toolArgs.milestone_id as string) ?? '';
-      if (!id) return err('Missing milestone_id');
+      if (!id) {
+return err('Missing milestone_id');
+}
       const existing = $milestones.get()[id];
-      if (!existing) return err(`Milestone not found: ${id}`);
+      if (!existing) {
+return err(`Milestone not found: ${id}`);
+}
       const patch: Record<string, unknown> = {};
       const dueDate = parseDueDate(toolArgs.due_date);
-      if (dueDate.kind === 'invalid') return err('Invalid due_date. Use an ISO date like 2026-04-30, or empty string to clear it.');
-      if (toolArgs.title !== undefined) patch.title = toolArgs.title;
-      if (toolArgs.description !== undefined) patch.description = toolArgs.description;
-      if (toolArgs.branch !== undefined) patch.branch = toolArgs.branch;
-      if (toolArgs.status !== undefined) patch.status = toolArgs.status;
-      if (toolArgs.brief !== undefined) patch.brief = toolArgs.brief;
-      if (dueDate.kind === 'value') patch.dueDate = dueDate.value;
-      if (dueDate.kind === 'clear') patch.dueDate = undefined;
+      if (dueDate.kind === 'invalid') {
+return err('Invalid due_date. Use an ISO date like 2026-04-30, or empty string to clear it.');
+}
+      if (toolArgs.title !== undefined) {
+patch.title = toolArgs.title;
+}
+      if (toolArgs.description !== undefined) {
+patch.description = toolArgs.description;
+}
+      if (toolArgs.branch !== undefined) {
+patch.branch = toolArgs.branch;
+}
+      if (toolArgs.status !== undefined) {
+patch.status = toolArgs.status;
+}
+      if (toolArgs.brief !== undefined) {
+patch.brief = toolArgs.brief;
+}
+      if (dueDate.kind === 'value') {
+patch.dueDate = dueDate.value;
+}
+      if (dueDate.kind === 'clear') {
+patch.dueDate = undefined;
+}
       await milestoneApi.updateMilestone(id as MilestoneId, patch);
       return ok({ ok: true });
     }
@@ -717,7 +883,9 @@ async function handleUITools(
   switch (toolName) {
     case 'open_preview': {
       const url = (toolArgs.url as string) ?? '';
-      if (!url) return err('Missing url');
+      if (!url) {
+return err('Missing url');
+}
       requestPreviewOpen(url, tabId);
       return ok({ ok: true, url });
     }
@@ -749,25 +917,39 @@ export function buildClientToolHandler(opts?: {
 }): ClientToolCallHandler {
   return async (toolName: string, toolArgs: Record<string, unknown>) => {
     const ticketResult = await handleTicketTools(toolName, toolArgs, opts?.ticketId, opts?.projectId);
-    if (ticketResult) return ticketResult;
+    if (ticketResult) {
+return ticketResult;
+}
 
     const contextResult = await handleReadonlyContextTools(toolName, toolArgs);
-    if (contextResult) return contextResult;
+    if (contextResult) {
+return contextResult;
+}
 
     const milestoneResult = await handleMilestoneTools(toolName, toolArgs);
-    if (milestoneResult) return milestoneResult;
+    if (milestoneResult) {
+return milestoneResult;
+}
 
     const pageResult = await handlePageTools(toolName, toolArgs);
-    if (pageResult) return pageResult;
+    if (pageResult) {
+return pageResult;
+}
 
     const inboxResult = await handleInboxTools(toolName, toolArgs);
-    if (inboxResult) return inboxResult;
+    if (inboxResult) {
+return inboxResult;
+}
 
     const projectResult = await handleProjectTools(toolName, toolArgs);
-    if (projectResult) return projectResult;
+    if (projectResult) {
+return projectResult;
+}
 
     const uiResult = await handleUITools(toolName, toolArgs, opts?.tabId);
-    if (uiResult) return uiResult;
+    if (uiResult) {
+return uiResult;
+}
 
     return err(`Unknown tool: ${toolName}`);
   };

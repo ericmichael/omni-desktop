@@ -1,9 +1,9 @@
-import { memo, useCallback, useRef, useState } from 'react';
-import { Document20Regular, Image20Regular, Folder20Regular, FolderOpen20Regular } from '@fluentui/react-icons';
 import { makeStyles, tokens } from '@fluentui/react-components';
+import { Document20Regular, Folder20Regular, FolderOpen20Regular,Image20Regular } from '@fluentui/react-icons';
+import { memo, useCallback, useRef, useState } from 'react';
 
-import { Tree, TreeItem, TreeItemLayout } from '@/renderer/ds';
 import type { TreeItemOpenChangeData } from '@/renderer/ds';
+import { Tree, TreeItem, TreeItemLayout } from '@/renderer/ds';
 import type { ArtifactFileEntry, TicketId } from '@/shared/types';
 
 import { ticketApi } from './state';

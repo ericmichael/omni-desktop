@@ -6,10 +6,10 @@
  */
 
 import { execFile } from 'node:child_process';
-import { readFile, stat, unlink, writeFile, mkdir } from 'node:fs/promises';
-import { join, posix, dirname } from 'node:path';
-import { promisify } from 'node:util';
+import {readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import {join, posix } from 'node:path';
+import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
@@ -95,7 +95,9 @@ async function runWithConcurrency<T>(tasks: (() => Promise<T>)[], limit: number)
     while (idx < tasks.length) {
       const currentIdx = idx++;
       const task = tasks[currentIdx];
-      if (task) results[currentIdx] = await task();
+      if (task) {
+results[currentIdx] = await task();
+}
     }
   }
 
@@ -240,7 +242,9 @@ function parseListXml(xml: string): RawListEntry[] {
   const dirRegex = /<Directory><Name>(.*?)<\/Name><\/Directory>/g;
   let match: RegExpExecArray | null;
   while ((match = dirRegex.exec(xml)) !== null) {
-    if (match[1]) entries.push({ type: 'directory', name: match[1] });
+    if (match[1]) {
+entries.push({ type: 'directory', name: match[1] });
+}
   }
 
   const fileRegex = /<File><Name>(.*?)<\/Name><Properties>(?:.*?<Content-Length>(\d+)<\/Content-Length>)?(?:.*?<Last-Modified>(.*?)<\/Last-Modified>)?.*?<\/Properties><\/File>/gs;
@@ -287,10 +291,14 @@ export async function listRemoteFiles(
     for (const entry of entries) {
       const relativePath = dirPath ? posix.join(dirPath, entry.name) : entry.name;
       if (entry.type === 'directory') {
-        if (IGNORE_DIRS.has(entry.name)) continue;
+        if (IGNORE_DIRS.has(entry.name)) {
+continue;
+}
         await recurse(relativePath);
       } else {
-        if (IGNORE_FILES.has(entry.name) || entry.name === ARCHIVE_NAME) continue;
+        if (IGNORE_FILES.has(entry.name) || entry.name === ARCHIVE_NAME) {
+continue;
+}
         files.push({
           relativePath,
           size: entry.size ?? 0,
@@ -337,7 +345,9 @@ export async function uploadWorkspace(
 
     onProgress?.(`Upload complete: ${sizeMB} MB`);
   } finally {
-    try { await unlink(tarPath); } catch { /* ignore */ }
+    try {
+ await unlink(tarPath); 
+} catch { /* ignore */ }
   }
 }
 
@@ -387,6 +397,8 @@ export async function downloadWorkspace(
 
     onProgress?.(`Download complete: ${sizeMB} MB`);
   } finally {
-    try { await unlink(tarPath); } catch { /* ignore */ }
+    try {
+ await unlink(tarPath); 
+} catch { /* ignore */ }
   }
 }

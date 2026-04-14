@@ -1,10 +1,11 @@
-import { Badge } from '../ui/badge'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible'
-import { cn } from '../../lib/utils'
-import type { DynamicToolUIPart, ToolUIPart } from '../../ai-types'
 import { CheckCircleIcon, ChevronDownIcon, CircleIcon, ClockIcon, WrenchIcon, XCircleIcon } from 'lucide-react'
 import type { ComponentProps, ReactNode } from 'react'
 import { isValidElement } from 'react'
+
+import type { DynamicToolUIPart, ToolUIPart } from '@/renderer/omniagents-ui/ai-types'
+import { Badge } from '@/renderer/omniagents-ui/components/ui/badge'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/renderer/omniagents-ui/components/ui/collapsible'
+import { cn } from '@/renderer/omniagents-ui/lib/utils'
 
 import { CodeBlock } from './code-block'
 
@@ -101,7 +102,9 @@ export type ToolOutputProps = ComponentProps<'div'> & {
 }
 
 export const ToolOutput = ({ className, output, errorText, ...props }: ToolOutputProps) => {
-  if (!(output || errorText)) return null
+  if (!(output || errorText)) {
+return null
+}
 
   let Output = <div>{output as ReactNode}</div>
 

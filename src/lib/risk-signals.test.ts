@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { detectRisks, RISK_THRESHOLDS } from './risk-signals';
 import type { InboxItem, Milestone, Ticket } from '@/shared/types';
+
+import { detectRisks, RISK_THRESHOLDS } from './risk-signals';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const NOW = 1_700_000_000_000;

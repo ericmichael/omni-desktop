@@ -1,7 +1,7 @@
+import { makeStyles, tokens } from '@fluentui/react-components';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback } from 'react';
 
-import { makeStyles, tokens } from '@fluentui/react-components';
 import { Body1Strong, Button, Caption1, Input } from '@/renderer/ds';
 import type { ProviderEntry } from '@/shared/types';
 

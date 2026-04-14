@@ -20,7 +20,7 @@ import {
   MenuTrigger,
 } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { InboxItem, InboxItemId, InboxShaping, ProjectId } from '@/shared/types';
+import type { InboxItem, InboxShaping, ProjectId } from '@/shared/types';
 
 import { inboxApi } from './state';
 
@@ -297,12 +297,16 @@ export const InboxItemDetail = memo(({ item, onBack }: InboxItemDetailProps) => 
   // -------------------------------------------------------------------------
 
   const saveTitleNote = useCallback(() => {
-    if (isArchived) return;
+    if (isArchived) {
+return;
+}
     const nextTitle = title.trim() || 'Untitled';
     const nextNote = note.trim();
     const titleChanged = nextTitle !== item.title;
     const noteChanged = nextNote !== (item.note ?? '');
-    if (!titleChanged && !noteChanged) return;
+    if (!titleChanged && !noteChanged) {
+return;
+}
     void inboxApi.update(item.id, {
       ...(titleChanged ? { title: nextTitle } : {}),
       ...(noteChanged ? { note: nextNote } : {}),
@@ -310,13 +314,19 @@ export const InboxItemDetail = memo(({ item, onBack }: InboxItemDetailProps) => 
   }, [isArchived, title, note, item]);
 
   const saveShaping = useCallback(() => {
-    if (isArchived) return;
+    if (isArchived) {
+return;
+}
     const trimmedOutcome = outcome.trim();
     // Can't save shaping without an outcome — it's the one required field.
     // Silently skip; the user can come back and fill it in.
-    if (!trimmedOutcome) return;
+    if (!trimmedOutcome) {
+return;
+}
     const next: InboxShaping = { outcome: trimmedOutcome, appetite };
-    if (notDoing.trim()) next.notDoing = notDoing.trim();
+    if (notDoing.trim()) {
+next.notDoing = notDoing.trim();
+}
     // Skip if nothing changed.
     const existing = item.shaping;
     if (
@@ -332,8 +342,12 @@ export const InboxItemDetail = memo(({ item, onBack }: InboxItemDetailProps) => 
 
   const setProjectId = useCallback(
     (id: ProjectId | null) => {
-      if (isArchived) return;
-      if ((item.projectId ?? null) === id) return;
+      if (isArchived) {
+return;
+}
+      if ((item.projectId ?? null) === id) {
+return;
+}
       void inboxApi.update(item.id, { projectId: id });
     },
     [isArchived, item]
@@ -354,7 +368,7 @@ export const InboxItemDetail = memo(({ item, onBack }: InboxItemDetailProps) => 
   const handlePromoteToTicket = useCallback(() => {
     const projectId = item.projectId ?? store.projects.find((p) => p.isPersonal)?.id ?? store.projects[0]?.id;
     if (!projectId) {
-      // eslint-disable-next-line no-console
+       
       console.warn('[Inbox] No project available to promote to');
       return;
     }

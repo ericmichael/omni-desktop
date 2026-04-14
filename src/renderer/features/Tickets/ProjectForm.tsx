@@ -1,7 +1,7 @@
+import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
 import { memo, useCallback, useState } from 'react';
-import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 
-import { AnimatedDialog, Button, cn, DialogBody, DialogContent, DialogFooter, DialogHeader, Input, Switch } from '@/renderer/ds';
+import { AnimatedDialog, Button, DialogBody, DialogContent, DialogFooter, DialogHeader, Input, Switch } from '@/renderer/ds';
 import type { Project, SandboxConfig } from '@/shared/types';
 
 import { DirectoryBrowserDialog } from './DirectoryBrowserDialog';
@@ -128,14 +128,22 @@ const useStyles = makeStyles({
 type SandboxMode = 'default' | 'image' | 'dockerfile';
 
 function deriveSandboxMode(sandbox?: SandboxConfig | null): SandboxMode {
-  if (sandbox?.image) return 'image';
-  if (sandbox?.dockerfile) return 'dockerfile';
+  if (sandbox?.image) {
+return 'image';
+}
+  if (sandbox?.dockerfile) {
+return 'dockerfile';
+}
   return 'default';
 }
 
 function deriveSandboxValue(sandbox?: SandboxConfig | null, mode?: SandboxMode): string {
-  if (mode === 'image') return sandbox?.image ?? '';
-  if (mode === 'dockerfile') return sandbox?.dockerfile ?? '';
+  if (mode === 'image') {
+return sandbox?.image ?? '';
+}
+  if (mode === 'dockerfile') {
+return sandbox?.dockerfile ?? '';
+}
   return '';
 }
 
@@ -202,7 +210,9 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
     setRepoUrl(e.target.value);
     if (!label.trim()) {
       const match = e.target.value.match(/\/([^/]+?)(?:\.git)?$/);
-      if (match?.[1]) setLabel(match[1]);
+      if (match?.[1]) {
+setLabel(match[1]);
+}
     }
   }, [label]);
 
@@ -212,7 +222,9 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
 
   const handleSandboxModeChange = useCallback((mode: SandboxMode) => {
     setSandboxMode(mode);
-    if (mode === 'default') setSandboxValue('');
+    if (mode === 'default') {
+setSandboxValue('');
+}
   }, []);
 
   const handleSandboxValueChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {

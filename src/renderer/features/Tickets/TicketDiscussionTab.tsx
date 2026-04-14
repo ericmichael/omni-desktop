@@ -1,7 +1,7 @@
-import { memo, useCallback, useRef, useState } from 'react';
-import { Send20Regular, Bot20Regular, Person20Regular } from '@fluentui/react-icons';
 import { makeStyles, tokens } from '@fluentui/react-components';
+import { Bot20Regular, Person20Regular,Send20Regular } from '@fluentui/react-icons';
 import { nanoid } from 'nanoid';
+import { memo, useCallback, useRef, useState } from 'react';
 
 import { Body1, IconButton, Textarea } from '@/renderer/ds';
 import type { Ticket, TicketComment } from '@/shared/types';
@@ -102,7 +102,9 @@ function formatTime(ts: number): string {
   const now = new Date();
   const isToday = d.toDateString() === now.toDateString();
   const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-  if (isToday) return time;
+  if (isToday) {
+return time;
+}
   return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${time}`;
 }
 
@@ -140,7 +142,9 @@ export const TicketDiscussionTab = memo(({ ticket }: { ticket: Ticket }) => {
 
   const handleSend = useCallback(async () => {
     const content = draft.trim();
-    if (!content || sending) return;
+    if (!content || sending) {
+return;
+}
 
     const comment: TicketComment = {
       id: nanoid(),

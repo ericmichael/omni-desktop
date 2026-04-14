@@ -1,8 +1,8 @@
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
 
-import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 import { Button, Card, Checkbox, FormField, FormSkeleton, IconButton, Input, SaveBar, SectionLabel, Switch } from '@/renderer/ds';
 import { configApi } from '@/renderer/services/config';
 import type { NetworkConfig } from '@/shared/types';

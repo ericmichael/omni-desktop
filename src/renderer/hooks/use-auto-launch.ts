@@ -6,13 +6,13 @@ import { fromCallback } from 'xstate';
 import {
   $omniRuntimeReadiness,
   ensureRuntimeReady,
-  retryRuntimeCheck,
   type OmniRuntimeReadiness,
+  retryRuntimeCheck,
 } from '@/renderer/features/Omni/state';
 import { $agentStatuses, agentProcessApi } from '@/renderer/services/agent-process';
 import { emitter } from '@/renderer/services/ipc';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
-import { autoLaunchMachine, type AutoLaunchEvent, type AutoLaunchPhase } from '@/shared/machines/auto-launch.machine';
+import { type AutoLaunchEvent, autoLaunchMachine, type AutoLaunchPhase } from '@/shared/machines/auto-launch.machine';
 import { createMachineLogger } from '@/shared/machines/machine-logger';
 
 export type { AutoLaunchPhase };
@@ -56,26 +56,41 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
   const actors = useMemo(() => ({
     checkRuntime: fromCallback<AutoLaunchEvent>(({ sendBack }) => {
       const check = (val: OmniRuntimeReadiness) => {
-        if (val.status === 'ready') { sendBack({ type: 'RUNTIME_READY' }); return true; }
-        if (val.status === 'installing') { sendBack({ type: 'RUNTIME_OUTDATED' }); return true; }
-        if (val.status === 'error') { sendBack({ type: 'RUNTIME_CHECK_FAILED', error: val.error }); return true; }
+        if (val.status === 'ready') {
+ sendBack({ type: 'RUNTIME_READY' }); return true; 
+}
+        if (val.status === 'installing') {
+ sendBack({ type: 'RUNTIME_OUTDATED' }); return true; 
+}
+        if (val.status === 'error') {
+ sendBack({ type: 'RUNTIME_CHECK_FAILED', error: val.error }); return true; 
+}
         return false;
       };
 
       const current = $omniRuntimeReadiness.get();
-      if (current.status === 'idle') ensureRuntimeReady();
-      else if (current.status === 'error') retryRuntimeCheck();
+      if (current.status === 'idle') {
+ensureRuntimeReady();
+} else if (current.status === 'error') {
+retryRuntimeCheck();
+}
 
-      if (check($omniRuntimeReadiness.get())) return () => {};
+      if (check($omniRuntimeReadiness.get())) {
+return () => {};
+}
       const unsub = $omniRuntimeReadiness.subscribe((val) => check(val));
       return unsub;
     }),
 
     watchInstallStatus: fromCallback<AutoLaunchEvent>(({ sendBack }) => {
       const unsub = $omniRuntimeReadiness.subscribe((val) => {
-        if (val.status === 'ready') sendBack({ type: 'INSTALL_COMPLETED' });
-        else if (val.status === 'error') sendBack({ type: 'INSTALL_FAILED', error: val.error });
-        else if (val.status === 'idle') sendBack({ type: 'INSTALL_CANCELLED' });
+        if (val.status === 'ready') {
+sendBack({ type: 'INSTALL_COMPLETED' });
+} else if (val.status === 'error') {
+sendBack({ type: 'INSTALL_FAILED', error: val.error });
+} else if (val.status === 'idle') {
+sendBack({ type: 'INSTALL_CANCELLED' });
+}
       });
       return unsub;
     }),
@@ -94,16 +109,22 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
             providers?: Record<string, unknown>;
           } | null;
           const hasProviders = modelsConfig?.providers && Object.keys(modelsConfig.providers).length > 0;
-          if (cancelled) return;
+          if (cancelled) {
+return;
+}
           if (!hasProviders) {
             await persistedStoreApi.setKey('onboardingComplete', false);
             sendBack({ type: 'CONFIG_MISSING' });
             return;
           }
         } catch {
-          if (cancelled) return;
+          if (cancelled) {
+return;
+}
         }
-        if (cancelled) return;
+        if (cancelled) {
+return;
+}
 
         // If supervisor-aware, check for an existing supervisor sandbox first
         if (supervisorAwareRef.current) {
@@ -120,13 +141,17 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
               return;
             }
           } catch { /* no supervisor sandbox */ }
-          if (cancelled) return;
+          if (cancelled) {
+return;
+}
         }
 
         agentProcessApi.start(processIdRef.current, { workspaceDir: wd });
         sendBack({ type: 'CONFIG_OK' });
       })();
-      return () => { cancelled = true; };
+      return () => {
+ cancelled = true; 
+};
     }),
 
     watchProcessStatus: fromCallback<AutoLaunchEvent>(({ sendBack }) => {
@@ -135,14 +160,18 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
 
       // Seed with current server-side status
       emitter.invoke('agent-process:get-status', processIdRef.current).then((status) => {
-        if (cancelled || !status || status.type === 'uninitialized') return;
+        if (cancelled || !status || status.type === 'uninitialized') {
+return;
+}
         $agentStatuses.setKey(processIdRef.current, status);
       }).catch(() => {});
 
       // Also check supervisor sandbox if applicable
       if (supervisorAwareRef.current) {
         emitter.invoke('project:get-supervisor-sandbox-status', processIdRef.current).then((status) => {
-          if (cancelled || !status || status.type === 'uninitialized') return;
+          if (cancelled || !status || status.type === 'uninitialized') {
+return;
+}
           const current = $agentStatuses.get()[processIdRef.current];
           if (!current || current.type === 'uninitialized') {
             $agentStatuses.setKey(processIdRef.current, status);
@@ -152,16 +181,26 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
 
       const unsub = $agentStatuses.subscribe((allStatuses) => {
         const status = allStatuses[processIdRef.current];
-        if (!status) return;
-        if (status.type === lastSentType) return;
+        if (!status) {
+return;
+}
+        if (status.type === lastSentType) {
+return;
+}
         lastSentType = status.type;
-        if (status.type === 'running' || status.type === 'connecting') sendBack({ type: 'SANDBOX_RUNNING' });
-        else if (status.type === 'error') sendBack({ type: 'SANDBOX_ERROR', error: status.error.message });
-        else if (status.type === 'exited') sendBack({ type: 'SANDBOX_EXITED' });
+        if (status.type === 'running' || status.type === 'connecting') {
+sendBack({ type: 'SANDBOX_RUNNING' });
+} else if (status.type === 'error') {
+sendBack({ type: 'SANDBOX_ERROR', error: status.error.message });
+} else if (status.type === 'exited') {
+sendBack({ type: 'SANDBOX_EXITED' });
+}
       });
-      return () => { cancelled = true; unsub(); };
+      return () => {
+ cancelled = true; unsub(); 
+};
     }),
-  }), []); // eslint-disable-line react-hooks/exhaustive-deps -- reads from refs
+  }), []);  
 
   const inspect = useMemo(() => createMachineLogger(logLabel ?? `autoLaunch:${processId}`, {
     tags: { sandbox: store.sandboxBackend ?? 'none' },
@@ -186,7 +225,9 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
 
   // Trigger: send LAUNCH when initialized + workspace available
   useEffect(() => {
-    if (!initialized || !opts.workspaceDir) return;
+    if (!initialized || !opts.workspaceDir) {
+return;
+}
     const snap = actor.getSnapshot();
     if (snap.value === 'idle' && !snap.context.hasLaunched) {
       actor.send({ type: 'LAUNCH' });
@@ -213,13 +254,19 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
         } catch {}
       }
 
-      if (cancelled) return;
+      if (cancelled) {
+return;
+}
       await agentProcessApi.stop(processIdRef.current);
-      if (cancelled) return;
+      if (cancelled) {
+return;
+}
       actor.send({ type: 'RESET' });
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+ cancelled = true; 
+};
   }, [initialized, opts.workspaceDir, actor]);
 
   const retry = useCallback(() => {
@@ -227,7 +274,9 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
   }, [actor]);
 
   const launch = useCallback(() => {
-    if (!opts.workspaceDir) return;
+    if (!opts.workspaceDir) {
+return;
+}
     actor.send({ type: 'RELAUNCH' });
   }, [opts.workspaceDir, actor]);
 

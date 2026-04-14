@@ -1,8 +1,8 @@
 import {
+  makeStyles,
   MessageBar,
   MessageBarActions,
   MessageBarBody,
-  makeStyles,
   tokens,
 } from '@fluentui/react-components';
 import { memo } from 'react';
@@ -31,7 +31,9 @@ const useStyles = makeStyles({
 export const SaveBar = memo(({ onSave, dirty, saving, error }: SaveBarProps) => {
   const styles = useStyles();
 
-  if (!dirty && !error && !saving) return null;
+  if (!dirty && !error && !saving) {
+return null;
+}
 
   return (
     <div className={styles.root}>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { isActivePhase, isStreamingPhase, isValidTransition } from '@/shared/ticket-phase';
 import type { TicketPhase } from '@/shared/ticket-phase';
+import { isActivePhase, isStreamingPhase, isValidTransition } from '@/shared/ticket-phase';
 
 const ALL_PHASES: TicketPhase[] = [
   'idle',
@@ -68,7 +68,9 @@ describe('isValidTransition', () => {
 
   it('every phase can reach idle (directly or transitively)', () => {
     for (const phase of ALL_PHASES) {
-      if (phase === 'idle') continue;
+      if (phase === 'idle') {
+continue;
+}
       expect(isValidTransition(phase, 'idle')).toBe(true);
     }
   });

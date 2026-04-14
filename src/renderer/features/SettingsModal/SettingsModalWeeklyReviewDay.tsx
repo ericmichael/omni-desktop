@@ -1,9 +1,9 @@
+import { makeStyles, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback } from 'react';
 
-import { makeStyles, tokens } from '@fluentui/react-components';
-import { SectionLabel, Select } from '@/renderer/ds';
 import { DAY_OPTIONS } from '@/lib/weekly-review';
+import { SectionLabel, Select } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
 
 const useStyles = makeStyles({

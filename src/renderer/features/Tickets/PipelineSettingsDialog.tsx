@@ -1,7 +1,7 @@
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { Add20Regular, ArrowDown20Regular, ArrowUp20Regular, Delete20Filled } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
-import { ArrowDown20Regular, ArrowUp20Regular, Add20Regular, Delete20Filled } from '@fluentui/react-icons';
-import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 
 import {
   AnimatedDialog,
@@ -16,8 +16,8 @@ import {
 } from '@/renderer/ds';
 import type { Column, ProjectId } from '@/shared/types';
 
-import { getColumnColors } from './ticket-constants';
 import { $pipeline, ticketApi } from './state';
+import { getColumnColors } from './ticket-constants';
 
 const useStyles = makeStyles({
   columnCard: {
@@ -266,14 +266,18 @@ export const PipelineSettingsDialog = memo(
 
     const handleGateChange = useCallback((columnId: string, checked: boolean) => {
       setEditColumns((prev) => {
-        if (!prev) return prev;
+        if (!prev) {
+return prev;
+}
         return prev.map((col) => (col.id !== columnId ? col : { ...col, gate: checked }));
       });
     }, []);
 
     const handleDescriptionChange = useCallback((columnId: string, value: string) => {
       setEditColumns((prev) => {
-        if (!prev) return prev;
+        if (!prev) {
+return prev;
+}
         return prev.map((col) => (col.id !== columnId ? col : { ...col, description: value || undefined }));
       });
     }, []);

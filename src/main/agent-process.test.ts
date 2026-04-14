@@ -217,7 +217,7 @@ describe('AgentProcess', () => {
     it('is a no-op when already in connecting state', async () => {
       const h = makeHarness('sandbox');
       await h.proc.start(START_ARG);
-      h.child.emitStdout(SANDBOX_PAYLOAD + '\n');
+      h.child.emitStdout(`${SANDBOX_PAYLOAD  }\n`);
       expect(lastStatus(h.statuses).type).toBe('connecting');
 
       await h.proc.start(START_ARG);
@@ -230,7 +230,7 @@ describe('AgentProcess', () => {
     it('transitions to connecting on a valid sandbox JSON payload', async () => {
       const h = makeHarness('sandbox');
       await h.proc.start(START_ARG);
-      h.child.emitStdout(SANDBOX_PAYLOAD + '\n');
+      h.child.emitStdout(`${SANDBOX_PAYLOAD  }\n`);
 
       const last = lastStatus(h.statuses);
       expect(last.type).toBe('connecting');
@@ -262,7 +262,7 @@ describe('AgentProcess', () => {
       const mid = Math.floor(SANDBOX_PAYLOAD.length / 2);
       h.child.emitStdout(SANDBOX_PAYLOAD.slice(0, mid));
       expect(h.statuses.length).toBe(before);
-      h.child.emitStdout(SANDBOX_PAYLOAD.slice(mid) + '\n');
+      h.child.emitStdout(`${SANDBOX_PAYLOAD.slice(mid)  }\n`);
 
       const connectingCount = h.statuses.filter((s) => s.type === 'connecting').length;
       expect(connectingCount).toBe(1);
@@ -272,8 +272,8 @@ describe('AgentProcess', () => {
     it('only parses the first valid JSON payload (jsonEmitted guard)', async () => {
       const h = makeHarness('sandbox');
       await h.proc.start(START_ARG);
-      h.child.emitStdout(SANDBOX_PAYLOAD + '\n');
-      h.child.emitStdout(SANDBOX_PAYLOAD + '\n');
+      h.child.emitStdout(`${SANDBOX_PAYLOAD  }\n`);
+      h.child.emitStdout(`${SANDBOX_PAYLOAD  }\n`);
       const connectingCount = h.statuses.filter((s) => s.type === 'connecting').length;
       expect(connectingCount).toBe(1);
       await h.proc.exit();

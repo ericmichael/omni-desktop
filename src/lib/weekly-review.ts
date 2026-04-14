@@ -25,9 +25,13 @@ export const isReviewDue = (
   now: number = Date.now()
 ): boolean => {
   const today = new Date(now).getDay();
-  if (today !== reviewDay) return false;
+  if (today !== reviewDay) {
+return false;
+}
 
-  if (lastReviewAt == null) return true;
+  if (lastReviewAt == null) {
+return true;
+}
 
   const daysSinceLastReview = (now - lastReviewAt) / (24 * 60 * 60 * 1000);
   return daysSinceLastReview >= 5;

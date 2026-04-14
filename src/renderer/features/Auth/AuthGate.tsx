@@ -1,4 +1,4 @@
-import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import { memo, useCallback, useEffect, useState } from 'react';
 
 import { Button, Spinner } from '@/renderer/ds';
@@ -110,7 +110,9 @@ export const AuthGate = memo(({ children }: { children: React.ReactNode }) => {
 
   const [copied, setCopied] = useState(false);
   const handleCopyCode = useCallback(() => {
-    if (flow.step !== 'pending') return;
+    if (flow.step !== 'pending') {
+return;
+}
     try {
       // Secure context (HTTPS / localhost)
       navigator.clipboard.writeText(flow.userCode);

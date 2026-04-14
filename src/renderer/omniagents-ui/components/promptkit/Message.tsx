@@ -1,7 +1,9 @@
 import React from 'react'
-import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
-import { cn } from '../../lib/utils'
+
+import { Avatar, AvatarFallback, AvatarImage } from '@/renderer/omniagents-ui/components/ui/avatar'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/renderer/omniagents-ui/components/ui/tooltip'
+import { cn } from '@/renderer/omniagents-ui/lib/utils'
+
 import { Markdown } from './markdown'
 
 export type MessageProps = {

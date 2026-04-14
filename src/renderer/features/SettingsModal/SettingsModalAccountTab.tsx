@@ -1,6 +1,6 @@
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 import { Button, Card, FormField, FormSkeleton, MessageBar, MessageBarBody, SectionLabel, Spinner } from '@/renderer/ds';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import type { PlatformCredentials } from '@/shared/types';
@@ -103,7 +103,9 @@ export const SettingsModalAccountTab = memo(() => {
 
   const [copied, setCopied] = useState(false);
   const handleCopyCode = useCallback(() => {
-    if (flow.step !== 'pending') return;
+    if (flow.step !== 'pending') {
+return;
+}
     try {
       navigator.clipboard.writeText(flow.userCode);
     } catch {

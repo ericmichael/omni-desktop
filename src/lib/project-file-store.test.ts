@@ -1,10 +1,10 @@
-import { mkdtemp, readFile, rm, writeFile, mkdir, unlink } from 'fs/promises';
+import { mkdir, mkdtemp, readFile, rm, unlink,writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { ProjectFileError } from '@/lib/project-files';
 import { ProjectFileStore, type ProjectFileStoreEvents } from '@/lib/project-file-store';
+import { ProjectFileError } from '@/lib/project-files';
 import type {
   Milestone,
   MilestoneId,
@@ -94,7 +94,9 @@ function makeCollector(): Collector {
   };
   const waitFor = (predicate: () => boolean, timeoutMs = 2500): Promise<void> =>
     new Promise((resolve, reject) => {
-      if (predicate()) return resolve();
+      if (predicate()) {
+return resolve();
+}
       const timer = setTimeout(() => reject(new Error('timeout waiting for predicate')), timeoutMs);
       const check = () => {
         if (predicate()) {
@@ -434,7 +436,7 @@ describe('external changes', () => {
       content: 'external comment',
       createdAt: '2026-04-12T14:00:00Z',
     });
-    await writeFile(path.join(dir, 'tickets', 'tkt-1.comments.jsonl'), line + '\n');
+    await writeFile(path.join(dir, 'tickets', 'tkt-1.comments.jsonl'), `${line  }\n`);
     await collector.waitFor(() => collector.tickets.length > before);
     const last = collector.tickets[collector.tickets.length - 1]!;
     expect(last.comments).toHaveLength(1);

@@ -1,6 +1,6 @@
 import * as React from 'react'
 
-import { cn } from '../../lib/utils'
+import { cn } from '@/renderer/omniagents-ui/lib/utils'
 
 function Card({ className, ...props }: React.ComponentProps<'div'>) {
   return <div data-slot="card" className={cn('rounded-lg border bg-card text-card-foreground shadow-sm', className)} {...props} />
@@ -30,4 +30,4 @@ function CardFooter({ className, ...props }: React.ComponentProps<'div'>) {
   return <div data-slot="card-footer" className={cn('flex items-center p-6 pt-0', className)} {...props} />
 }
 
-export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardAction, CardContent }
+export { Card, CardAction, CardContent,CardDescription, CardFooter, CardHeader, CardTitle }

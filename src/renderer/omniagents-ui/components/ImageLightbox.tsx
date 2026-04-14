@@ -19,7 +19,9 @@ export function ImageLightbox({ src, alt, onClose }: Props) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+onClose()
+}
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -31,14 +33,18 @@ export function ImageLightbox({ src, alt, onClose }: Props) {
   }, [])
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
-    if (scale <= 1) return
+    if (scale <= 1) {
+return
+}
     dragging.current = true
     lastPos.current = { x: e.clientX, y: e.clientY }
     ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
   }, [scale])
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
-    if (!dragging.current) return
+    if (!dragging.current) {
+return
+}
     const dx = e.clientX - lastPos.current.x
     const dy = e.clientY - lastPos.current.y
     lastPos.current = { x: e.clientX, y: e.clientY }
@@ -100,7 +106,9 @@ export function ImageLightbox({ src, alt, onClose }: Props) {
         draggable={false}
         onClick={(e) => {
           e.stopPropagation()
-          if (scale <= 1) setScale(2)
+          if (scale <= 1) {
+setScale(2)
+}
         }}
         onWheel={onWheel}
         onPointerDown={onPointerDown}

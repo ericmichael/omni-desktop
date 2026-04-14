@@ -1,13 +1,13 @@
-import { useStore } from '@nanostores/react';
-import { memo, useCallback, useMemo, useState } from 'react';
+import { makeStyles, tokens } from '@fluentui/react-components';
 import {
   ArrowLeft20Regular,
+  Board20Regular,
   Delete20Regular,
   MoreHorizontal20Regular,
   Settings20Regular,
-  Board20Regular,
 } from '@fluentui/react-icons';
-import { makeStyles, tokens } from '@fluentui/react-components';
+import { useStore } from '@nanostores/react';
+import { memo, useCallback, useMemo, useState } from 'react';
 
 import {
   Caption1,
@@ -21,8 +21,8 @@ import {
   MenuTrigger,
   Subtitle2,
 } from '@/renderer/ds';
-import { $pages } from '@/renderer/features/Pages/state';
 import { PageView } from '@/renderer/features/Pages/PageView';
+import { $pages } from '@/renderer/features/Pages/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { ProjectId } from '@/shared/types';
 
@@ -97,7 +97,9 @@ export const ProjectPage = memo(({ projectId }: { projectId: ProjectId }) => {
     ticketApi.goToDashboard();
   }, []);
 
-  if (!project) return null;
+  if (!project) {
+return null;
+}
 
   return (
     <div className={styles.root}>

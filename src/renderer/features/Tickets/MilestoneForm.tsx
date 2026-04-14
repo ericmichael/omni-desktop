@@ -1,5 +1,5 @@
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 
 import { Button, Input, Select, Textarea } from '@/renderer/ds';
 import { milestoneApi } from '@/renderer/features/Initiatives/state';
@@ -58,8 +58,12 @@ export const MilestoneForm = memo(({
   );
 
   useEffect(() => {
-    if (!project) return;
-    if (project.source?.kind !== 'local') return;
+    if (!project) {
+return;
+}
+    if (project.source?.kind !== 'local') {
+return;
+}
     ticketApi.checkGitRepo(project.source.workspaceDir).then((info) => {
       setGitInfo(info);
     });
@@ -73,7 +77,9 @@ export const MilestoneForm = memo(({
   }, [editMilestone]);
 
   const handleSubmit = useCallback(async () => {
-    if (!title.trim() || isSubmitting) return;
+    if (!title.trim() || isSubmitting) {
+return;
+}
     setIsSubmitting(true);
     try {
       const dueDateMs = fromInputDate(dueDate);
@@ -164,8 +170,12 @@ function toInputDate(ms: number): string {
 
 /** Parse a YYYY-MM-DD input value into an epoch-ms at local midnight, or undefined. */
 function fromInputDate(value: string): number | undefined {
-  if (!value) return undefined;
+  if (!value) {
+return undefined;
+}
   const [y, m, d] = value.split('-').map(Number);
-  if (!y || !m || !d) return undefined;
+  if (!y || !m || !d) {
+return undefined;
+}
   return new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
 }

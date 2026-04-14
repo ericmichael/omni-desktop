@@ -1,7 +1,7 @@
-import * as React from 'react'
 import { ScrollArea as ScrollAreaPrimitive } from 'radix-ui'
+import * as React from 'react'
 
-import { cn } from '../../lib/utils'
+import { cn } from '@/renderer/omniagents-ui/lib/utils'
 
 function ScrollArea({ className, children, ...props }: React.ComponentProps<typeof ScrollAreaPrimitive.Root>) {
   return (

@@ -35,10 +35,18 @@ export function getGreeting(): string {
   const hour = now.getHours();
   const day = now.getDay(); // 0 = Sunday, 6 = Saturday
 
-  if (day === 5 && hour >= 6 && hour < 17) return pick(FRIDAY);
-  if (day === 0 || day === 6) return pick(WEEKEND);
+  if (day === 5 && hour >= 6 && hour < 17) {
+return pick(FRIDAY);
+}
+  if (day === 0 || day === 6) {
+return pick(WEEKEND);
+}
 
-  if (hour < 12) return pick(MORNING);
-  if (hour < 17) return pick(AFTERNOON);
+  if (hour < 12) {
+return pick(MORNING);
+}
+  if (hour < 17) {
+return pick(AFTERNOON);
+}
   return pick(EVENING);
 }

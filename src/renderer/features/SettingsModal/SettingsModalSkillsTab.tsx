@@ -1,8 +1,8 @@
+import { makeStyles, tokens } from '@fluentui/react-components';
+import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useState } from 'react';
-import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
 
-import { makeStyles, tokens } from '@fluentui/react-components';
 import {
   Accordion,
   AccordionHeader,
@@ -113,7 +113,9 @@ export const SettingsModalSkillsTab = memo(() => {
   const addSkill = useCallback(async () => {
     const name = newName.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
     const description = newDescription.trim();
-    if (!name || !description) return;
+    if (!name || !description) {
+return;
+}
     await emitter.invoke('skills:create', name, description);
     setNewName('');
     setNewDescription('');
@@ -124,7 +126,9 @@ export const SettingsModalSkillsTab = memo(() => {
   const removeSkill = useCallback(
     async (entry: SkillEntry) => {
       await emitter.invoke('skills:remove', entry.path);
-      if (expandedSkill === entry.name) setExpandedSkill(null);
+      if (expandedSkill === entry.name) {
+setExpandedSkill(null);
+}
       await load();
     },
     [expandedSkill, load]
@@ -138,7 +142,9 @@ export const SettingsModalSkillsTab = memo(() => {
     setNewDescription(e.target.value);
   }, []);
 
-  if (loading) return <FormSkeleton fields={4} />;
+  if (loading) {
+return <FormSkeleton fields={4} />;
+}
 
   return (
     <div className={styles.root}>
@@ -218,7 +224,9 @@ const SkillRow = memo(
     const [loaded, setLoaded] = useState(false);
 
     const loadContent = useCallback(async () => {
-      if (loaded) return;
+      if (loaded) {
+return;
+}
       const text = await emitter.invoke('skills:read', skill.path);
       setContent(text);
       setLoaded(true);
@@ -236,7 +244,9 @@ const SkillRow = memo(
     );
 
     const save = useCallback(async () => {
-      if (!content) return;
+      if (!content) {
+return;
+}
       setSaving(true);
       try {
         await emitter.invoke('skills:write-content', skill.path, content);

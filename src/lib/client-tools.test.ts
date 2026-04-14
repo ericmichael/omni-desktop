@@ -12,17 +12,17 @@ import { WebSocketServer } from 'ws';
 
 import {
   buildAutopilotVariables,
-  buildInteractiveVariables,
   buildCodeVariables,
+  buildInteractiveVariables,
   extractSafeToolNames,
-  TICKET_CLIENT_TOOLS,
-  READONLY_CONTEXT_TOOLS,
-  PROJECT_CLIENT_TOOLS,
-  PAGE_CLIENT_TOOLS,
   INBOX_CLIENT_TOOLS,
+  PAGE_CLIENT_TOOLS,
+  PROJECT_CLIENT_TOOLS,
+  READONLY_CONTEXT_TOOLS,
+  TICKET_CLIENT_TOOLS,
 } from '@/lib/client-tools';
+import type { ClientFunctionResponder,TicketMachineCallbacks } from '@/main/ticket-machine';
 import { TicketMachine } from '@/main/ticket-machine';
-import type { TicketMachineCallbacks, ClientFunctionResponder } from '@/main/ticket-machine';
 import type { TicketPhase } from '@/shared/ticket-phase';
 import type { TicketId } from '@/shared/types';
 
@@ -72,7 +72,9 @@ function handleClientToolCall(
   respond: (ok: boolean, result?: Record<string, unknown>) => void,
   ctx: ToolCallCtx
 ): void {
-  if (functionName !== 'tool.call') return;
+  if (functionName !== 'tool.call') {
+return;
+}
 
   const toolName = args.tool as string | undefined;
   const toolArgs = (args.arguments ?? {}) as Record<string, unknown>;
@@ -154,16 +156,22 @@ function handleClientToolCall(
     }
     case 'list_tickets': {
       const projectId = (toolArgs.project_id as string) ?? '';
-      if (!projectId) { respond(true, { error: 'Missing project_id' }); return; }
+      if (!projectId) {
+ respond(true, { error: 'Missing project_id' }); return; 
+}
       const pl = ctx.getPipeline(projectId);
       let tickets = ctx.getTicketsByProject?.(projectId) ?? [];
       const columnFilter = toolArgs.column as string | undefined;
       if (columnFilter) {
         const col = pl.columns.find((c) => c.label.toLowerCase() === columnFilter.toLowerCase());
-        if (col) tickets = tickets.filter((t) => t.columnId === col.id);
+        if (col) {
+tickets = tickets.filter((t) => t.columnId === col.id);
+}
       }
       const priorityFilter = toolArgs.priority as string | undefined;
-      if (priorityFilter) tickets = tickets.filter((t) => t.priority === priorityFilter);
+      if (priorityFilter) {
+tickets = tickets.filter((t) => t.priority === priorityFilter);
+}
       const result = tickets.map((t) => ({
         id: t.id, title: t.title, description: t.description || '', priority: t.priority,
         column: pl.columns.find((c) => c.id === t.columnId)?.label ?? t.columnId, phase: t.phase,
@@ -174,9 +182,13 @@ function handleClientToolCall(
     case 'create_ticket': {
       const projectId = (toolArgs.project_id as string) ?? '';
       const title = (toolArgs.title as string) ?? '';
-      if (!projectId || !title) { respond(true, { error: 'Missing project_id or title' }); return; }
+      if (!projectId || !title) {
+ respond(true, { error: 'Missing project_id or title' }); return; 
+}
       const proj = (ctx.getProjects?.() ?? []).find((p) => p.id === projectId);
-      if (!proj) { respond(true, { error: `Project not found: ${projectId}` }); return; }
+      if (!proj) {
+ respond(true, { error: `Project not found: ${projectId}` }); return; 
+}
       const newTicket = ctx.addTicket?.({
         projectId, title,
         description: (toolArgs.description as string) ?? '',
@@ -190,20 +202,32 @@ function handleClientToolCall(
     }
     case 'update_ticket': {
       const targetId = (toolArgs.ticket_id as string) ?? '';
-      if (!targetId) { respond(true, { error: 'Missing ticket_id' }); return; }
+      if (!targetId) {
+ respond(true, { error: 'Missing ticket_id' }); return; 
+}
       const target = ctx.getTicketById(targetId);
-      if (!target) { respond(true, { error: `Ticket not found: ${targetId}` }); return; }
+      if (!target) {
+ respond(true, { error: `Ticket not found: ${targetId}` }); return; 
+}
       const patch: Record<string, unknown> = {};
-      if (toolArgs.title) patch.title = toolArgs.title;
-      if (toolArgs.description !== undefined) patch.description = toolArgs.description;
-      if (toolArgs.priority) patch.priority = toolArgs.priority;
+      if (toolArgs.title) {
+patch.title = toolArgs.title;
+}
+      if (toolArgs.description !== undefined) {
+patch.description = toolArgs.description;
+}
+      if (toolArgs.priority) {
+patch.priority = toolArgs.priority;
+}
       ctx.updateTicket?.(targetId, patch);
       respond(true, { ok: true });
       break;
     }
     case 'start_ticket': {
       const targetId = (toolArgs.ticket_id as string) ?? '';
-      if (!targetId) { respond(true, { error: 'Missing ticket_id' }); return; }
+      if (!targetId) {
+ respond(true, { error: 'Missing ticket_id' }); return; 
+}
       void ctx.startSupervisor?.(targetId).then(
         () => respond(true, { ok: true }),
         (err) => respond(true, { error: String(err) })
@@ -212,7 +236,9 @@ function handleClientToolCall(
     }
     case 'stop_ticket': {
       const targetId = (toolArgs.ticket_id as string) ?? '';
-      if (!targetId) { respond(true, { error: 'Missing ticket_id' }); return; }
+      if (!targetId) {
+ respond(true, { error: 'Missing ticket_id' }); return; 
+}
       void ctx.stopSupervisor?.(targetId).then(
         () => respond(true, { ok: true }),
         (err) => respond(true, { error: String(err) })
@@ -221,7 +247,9 @@ function handleClientToolCall(
     }
     case 'notify': {
       const message = (toolArgs.message as string) ?? '';
-      if (!message) { respond(true, { error: 'Empty notification message' }); return; }
+      if (!message) {
+ respond(true, { error: 'Empty notification message' }); return; 
+}
       ctx.sendToWindow('toast:show', { level: 'info', title: `Agent note: ${ticket.title}`, description: message });
       respond(true, { ok: true, message: 'Notification sent' });
       break;
@@ -229,9 +257,13 @@ function handleClientToolCall(
     case 'add_ticket_comment': {
       const commentTicketId = (toolArgs.ticket_id as string) || ticketId;
       const content = (toolArgs.content as string) ?? '';
-      if (!content) { respond(true, { error: 'Missing content' }); return; }
+      if (!content) {
+ respond(true, { error: 'Missing content' }); return; 
+}
       const target = ctx.getTicketById(commentTicketId);
-      if (!target) { respond(true, { error: `Ticket not found: ${commentTicketId}` }); return; }
+      if (!target) {
+ respond(true, { error: `Ticket not found: ${commentTicketId}` }); return; 
+}
       const comment = { id: 'comment-1', author: 'agent' as const, content, createdAt: Date.now() };
       const existing = (target as MockTicket & { comments?: unknown[] }).comments ?? [];
       ctx.updateTicket?.(commentTicketId, { comments: [...existing, comment] });
@@ -240,15 +272,21 @@ function handleClientToolCall(
     }
     case 'get_ticket_comments': {
       const commentsTicketId = (toolArgs.ticket_id as string) ?? '';
-      if (!commentsTicketId) { respond(true, { error: 'Missing ticket_id' }); return; }
+      if (!commentsTicketId) {
+ respond(true, { error: 'Missing ticket_id' }); return; 
+}
       const target = ctx.getTicketById(commentsTicketId);
-      if (!target) { respond(true, { error: `Ticket not found: ${commentsTicketId}` }); return; }
+      if (!target) {
+ respond(true, { error: `Ticket not found: ${commentsTicketId}` }); return; 
+}
       respond(true, { comments: (target as MockTicket & { comments?: { id: string; author: string; content: string; createdAt: number }[] }).comments ?? [] });
       break;
     }
     case 'search_tickets': {
       const query = (toolArgs.query as string) ?? '';
-      if (!query) { respond(true, { error: 'Missing query' }); return; }
+      if (!query) {
+ respond(true, { error: 'Missing query' }); return; 
+}
       const q = query.toLowerCase();
       const allTickets = ctx.getTicketsByProject?.(ticket.projectId) ?? [];
       const matches = allTickets.filter((t) => t.title.toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q));
@@ -257,15 +295,21 @@ function handleClientToolCall(
     }
     case 'get_ticket_history': {
       const historyId = (toolArgs.ticket_id as string) ?? '';
-      if (!historyId) { respond(true, { error: 'Missing ticket_id' }); return; }
+      if (!historyId) {
+ respond(true, { error: 'Missing ticket_id' }); return; 
+}
       const target = ctx.getTicketById(historyId);
-      if (!target) { respond(true, { error: `Ticket not found: ${historyId}` }); return; }
+      if (!target) {
+ respond(true, { error: `Ticket not found: ${historyId}` }); return; 
+}
       respond(true, { ticket_id: target.id, run_count: 0, runs: [] });
       break;
     }
     case 'get_pipeline': {
       const pipelineProjectId = (toolArgs.project_id as string) ?? '';
-      if (!pipelineProjectId) { respond(true, { error: 'Missing project_id' }); return; }
+      if (!pipelineProjectId) {
+ respond(true, { error: 'Missing project_id' }); return; 
+}
       const pl = ctx.getPipeline(pipelineProjectId);
       respond(true, { columns: pl.columns.map((c) => ({ id: c.id, label: c.label, gate: false })) });
       break;
@@ -877,7 +921,9 @@ const stopServer = (): Promise<void> =>
   new Promise((resolve) => {
     serverSockets = [];
     if (wss) {
-      for (const client of wss.clients) client.terminate();
+      for (const client of wss.clients) {
+client.terminate();
+}
       wss.close(() => resolve());
       wss = null;
     } else {
@@ -887,9 +933,13 @@ const stopServer = (): Promise<void> =>
 
 /** Send a JSON-RPC notification from server to all connected clients. */
 const broadcastNotification = (method: string, params: Record<string, unknown>): void => {
-  if (!wss) return;
+  if (!wss) {
+return;
+}
   const msg = JSON.stringify({ method, params });
-  for (const client of wss.clients) client.send(msg);
+  for (const client of wss.clients) {
+client.send(msg);
+}
 };
 
 const makeCallbacks = (): TicketMachineCallbacks & {
@@ -919,8 +969,12 @@ describe('WebSocket client_request → client_response round-trip', () => {
 
   it('delivers client_request to onClientRequest callback', async () => {
     const wsUrl = await startServer((method) => {
-      if (method === 'server_call') return { session_id: 'sess-1' };
-      if (method === 'start_run') return { session_id: 'sess-1', run_id: 'run-1' };
+      if (method === 'server_call') {
+return { session_id: 'sess-1' };
+}
+      if (method === 'start_run') {
+return { session_id: 'sess-1', run_id: 'run-1' };
+}
       return {};
     });
     const cb = makeCallbacks();
@@ -947,8 +1001,12 @@ describe('WebSocket client_request → client_response round-trip', () => {
     const serverReceived: { method: string; params: Record<string, unknown> }[] = [];
 
     const wsUrl = await startServer((method, params) => {
-      if (method === 'server_call') return { session_id: 'sess-1' };
-      if (method === 'start_run') return { session_id: 'sess-1', run_id: 'run-1' };
+      if (method === 'server_call') {
+return { session_id: 'sess-1' };
+}
+      if (method === 'start_run') {
+return { session_id: 'sess-1', run_id: 'run-1' };
+}
       // Capture client_response calls
       if (method === 'client_response') {
         serverReceived.push({ method, params });
@@ -991,8 +1049,12 @@ describe('WebSocket client_request → client_response round-trip', () => {
 
   it('handles multiple concurrent client_requests independently', async () => {
     const wsUrl = await startServer((method) => {
-      if (method === 'server_call') return { session_id: 'sess-1' };
-      if (method === 'start_run') return { session_id: 'sess-1', run_id: 'run-1' };
+      if (method === 'server_call') {
+return { session_id: 'sess-1' };
+}
+      if (method === 'start_run') {
+return { session_id: 'sess-1', run_id: 'run-1' };
+}
       return {};
     });
     const cb = makeCallbacks();
@@ -1022,8 +1084,12 @@ describe('WebSocket client_request → client_response round-trip', () => {
 
   it('ignores client_request with missing function or request_id', async () => {
     const wsUrl = await startServer((method) => {
-      if (method === 'server_call') return { session_id: 'sess-1' };
-      if (method === 'start_run') return { session_id: 'sess-1', run_id: 'run-1' };
+      if (method === 'server_call') {
+return { session_id: 'sess-1' };
+}
+      if (method === 'start_run') {
+return { session_id: 'sess-1', run_id: 'run-1' };
+}
       return {};
     });
     const cb = makeCallbacks();

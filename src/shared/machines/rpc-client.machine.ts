@@ -7,7 +7,7 @@
  * This is a pure machine definition — no DOM or Node imports.
  * The actual WebSocket is injected via the `actors` option at creation time.
  */
-import { type ActorRefFrom, assign, fromCallback, fromPromise, setup } from 'xstate';
+import { type ActorRefFrom, assign, setup } from 'xstate';
 
 // ---------------------------------------------------------------------------
 // Constants

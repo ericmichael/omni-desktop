@@ -1,13 +1,13 @@
-import { memo, useCallback } from 'react';
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import { Stop20Filled } from '@fluentui/react-icons';
-import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
+import { memo, useCallback } from 'react';
 
 import { AnimatedDialog, Badge, Button, DialogBody, DialogContent, DialogFooter, DialogHeader } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { Ticket, TicketId } from '@/shared/types';
 
-import { APPETITE_COLORS, APPETITE_LABELS, PHASE_COLORS, PHASE_LABELS } from './ticket-constants';
 import { ticketApi } from './state';
+import { APPETITE_COLORS, APPETITE_LABELS, PHASE_COLORS, PHASE_LABELS } from './ticket-constants';
 
 const useStyles = makeStyles({
   description: {

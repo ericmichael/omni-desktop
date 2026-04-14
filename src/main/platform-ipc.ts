@@ -10,9 +10,9 @@ import type { IpcListener } from '@electron-toolkit/typed-ipc/main';
 import { ipcMain } from 'electron';
 import type Store from 'electron-store';
 
+import type { FetchFn } from '@/main/agent-process';
 import { PlatformClient } from '@/main/platform-client';
 import { isEnterpriseBuild, mapSandboxProfiles, PLATFORM_URL } from '@/main/platform-mode';
-import type { FetchFn } from '@/main/agent-process';
 import type { IpcEvents, IpcRendererEvents, PlatformCredentials, StoreData } from '@/shared/types';
 
 export function registerPlatformIpc(arg: {
@@ -28,7 +28,9 @@ export function registerPlatformIpc(arg: {
   });
 
   ipc.handle('platform:get-auth', () => {
-    if (!isEnterpriseBuild()) return null;
+    if (!isEnterpriseBuild()) {
+return null;
+}
     return store.get('platform') ?? null;
   });
 
@@ -61,7 +63,9 @@ export function registerPlatformIpc(arg: {
 
   ipc.handle('platform:get-dashboards', async () => {
     const creds = store.get('platform');
-    if (!creds?.accessToken || !isEnterpriseBuild()) return [];
+    if (!creds?.accessToken || !isEnterpriseBuild()) {
+return [];
+}
 
     try {
       const client = new PlatformClient({

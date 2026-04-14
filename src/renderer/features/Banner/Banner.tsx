@@ -1,4 +1,4 @@
-import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import { memo } from 'react';
 
 import { AsciiLogo } from '@/renderer/common/AsciiLogo';

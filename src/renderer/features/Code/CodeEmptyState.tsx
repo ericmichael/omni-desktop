@@ -1,7 +1,7 @@
-import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { Add20Regular,FolderOpen20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useState } from 'react';
-import { FolderOpen20Regular, Add20Regular } from '@fluentui/react-icons';
 
 import { Button, Heading } from '@/renderer/ds';
 import { ProjectForm } from '@/renderer/features/Projects/ProjectForm';

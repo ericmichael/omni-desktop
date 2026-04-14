@@ -40,8 +40,12 @@ function isEnabled(machineName: string): boolean {
           ? process.env.DEBUG_MACHINES
           : null;
 
-    if (!flag) return false;
-    if (flag === '1' || flag === 'true' || flag === '*') return true;
+    if (!flag) {
+return false;
+}
+    if (flag === '1' || flag === 'true' || flag === '*') {
+return true;
+}
 
     // Comma-separated filter: "rpc,terminal"
     const filters = flag.split(',').map((s) => s.trim().toLowerCase());
@@ -59,10 +63,12 @@ function isEnabled(machineName: string): boolean {
 function formatTags(tags: Record<string, string | number | boolean | null | undefined>): string {
   const parts: string[] = [];
   for (const [k, v] of Object.entries(tags)) {
-    if (v == null || v === '') continue;
+    if (v == null || v === '') {
+continue;
+}
     parts.push(`${k}=${v}`);
   }
-  return parts.length > 0 ? ' ' + parts.join(' ') : '';
+  return parts.length > 0 ? ` ${  parts.join(' ')}` : '';
 }
 
 // ---------------------------------------------------------------------------
@@ -89,14 +95,18 @@ export function createMachineLogger(machineName: string, opts?: MachineLoggerOpt
 
   return (inspectionEvent: InspectionEvent) => {
     // Re-check on each event so you can toggle at runtime
-    if (!isEnabled(machineName)) return;
+    if (!isEnabled(machineName)) {
+return;
+}
 
     if (inspectionEvent.type === '@xstate.snapshot') {
       const { event, snapshot } = inspectionEvent;
       const snap = snapshot as any;
 
       // Only log actual transitions (skip internal init events)
-      if (event.type === 'xstate.init') return;
+      if (event.type === 'xstate.init') {
+return;
+}
 
       const now = Date.now();
       const delta = now - lastTransitionTime;
@@ -109,11 +119,21 @@ export function createMachineLogger(machineName: string, opts?: MachineLoggerOpt
       const ctx = snap.context;
       const contextParts: string[] = [];
       if (ctx) {
-        if (ctx.error) contextParts.push(`error="${ctx.error}"`);
-        if (ctx.reconnectAttempt > 0) contextParts.push(`attempt=${ctx.reconnectAttempt}`);
-        if (ctx.pendingCount > 0) contextParts.push(`pending=${ctx.pendingCount}`);
-        if (ctx.phase) contextParts.push(`phase=${ctx.phase}`);
-        if (ctx.exitCode != null) contextParts.push(`exitCode=${ctx.exitCode}`);
+        if (ctx.error) {
+contextParts.push(`error="${ctx.error}"`);
+}
+        if (ctx.reconnectAttempt > 0) {
+contextParts.push(`attempt=${ctx.reconnectAttempt}`);
+}
+        if (ctx.pendingCount > 0) {
+contextParts.push(`pending=${ctx.pendingCount}`);
+}
+        if (ctx.phase) {
+contextParts.push(`phase=${ctx.phase}`);
+}
+        if (ctx.exitCode != null) {
+contextParts.push(`exitCode=${ctx.exitCode}`);
+}
       }
       const contextStr = contextParts.length > 0 ? `  {${contextParts.join(', ')}}` : '';
 

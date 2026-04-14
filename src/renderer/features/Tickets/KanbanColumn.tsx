@@ -1,13 +1,13 @@
 import { useDroppable } from '@dnd-kit/core';
-import { memo, useCallback, useMemo } from 'react';
+import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
 import { Add16Regular } from '@fluentui/react-icons';
-import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
+import { memo, useCallback, useMemo } from 'react';
 
 import { Body1 } from '@/renderer/ds';
 import type { Column, ColumnId, Ticket } from '@/shared/types';
 
-import { getColumnColors } from './ticket-constants';
 import { KanbanCard } from './KanbanCard';
+import { getColumnColors } from './ticket-constants';
 
 const useStyles = makeStyles({
   column: {

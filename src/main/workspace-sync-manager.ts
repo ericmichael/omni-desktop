@@ -12,25 +12,25 @@
  *   4. Conflict resolution — last-writer-wins by mtime
  */
 
-import { readdir, readFile, stat, writeFile, mkdir, unlink } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, unlink,writeFile } from 'node:fs/promises';
 import { dirname, join, posix } from 'node:path';
 
 import chokidar, { type FSWatcher } from 'chokidar';
 
 import type { PlatformClient } from '@/main/platform-client';
-import { encryptFile, decryptFile } from '@/main/workspace-crypto';
+import { decryptFile,encryptFile } from '@/main/workspace-crypto';
 import {
-  type FetchFn,
-  type ParsedSasUrl,
-  type RemoteFileEntry,
-  parseSasUrl,
-  sanitizeUrl,
-  listRemoteFiles,
-  uploadRemoteFile,
-  downloadRemoteFile,
   deleteRemoteFile,
+  downloadRemoteFile,
+  type FetchFn,
   IGNORE_DIRS,
   IGNORE_FILES,
+  listRemoteFiles,
+  type ParsedSasUrl,
+  parseSasUrl,
+  type RemoteFileEntry,
+  sanitizeUrl,
+  uploadRemoteFile,
 } from '@/main/workspace-sync';
 import type { WorkspaceSyncState, WorkspaceSyncStatus } from '@/shared/types';
 
@@ -209,7 +209,9 @@ export class WorkspaceSyncManager {
 
   async stopSync(projectId: string): Promise<void> {
     const session = this.sessions.get(projectId);
-    if (!session) return;
+    if (!session) {
+return;
+}
 
     // Decrement ref count — only tear down when no consumers remain
     const refs = Math.max(0, (this.refCounts.get(projectId) ?? 1) - 1);
@@ -282,7 +284,9 @@ export class WorkspaceSyncManager {
   }
 
   private tickProgress(session: SyncSession, bytes: number): void {
-    if (!session.progress) return;
+    if (!session.progress) {
+return;
+}
     session.progress.completedFiles++;
     const elapsed = (Date.now() - session.progress.startedAt) / 1000;
     if (elapsed > 0.5) {
@@ -311,13 +315,17 @@ export class WorkspaceSyncManager {
 
   /** Encrypt contents before upload. Throws if no key — never upload plaintext. */
   private encrypt(session: SyncSession, contents: Buffer): Buffer {
-    if (!session.encryptionKey) throw new Error('Cannot sync without encryption key');
+    if (!session.encryptionKey) {
+throw new Error('Cannot sync without encryption key');
+}
     return encryptFile(contents, session.encryptionKey);
   }
 
   /** Decrypt contents after download. Throws if no key — never write unverified data. */
   private decrypt(session: SyncSession, contents: Buffer): Buffer {
-    if (!session.encryptionKey) throw new Error('Cannot sync without encryption key');
+    if (!session.encryptionKey) {
+throw new Error('Cannot sync without encryption key');
+}
     return decryptFile(contents, session.encryptionKey);
   }
 
@@ -342,7 +350,9 @@ export class WorkspaceSyncManager {
   }
 
   private async flushAudit(session: SyncSession): Promise<void> {
-    if (session.auditBuffer.length === 0 || !this.platformClient) return;
+    if (session.auditBuffer.length === 0 || !this.platformClient) {
+return;
+}
     const events = session.auditBuffer.splice(0);
     try {
       await this.platformClient.reportWorkspaceAuditEvents(events);
@@ -356,13 +366,17 @@ export class WorkspaceSyncManager {
   // --- Manifest persistence ---
 
   private manifestPath(projectId: string): string | null {
-    if (!this.manifestDir) return null;
+    if (!this.manifestDir) {
+return null;
+}
     return join(this.manifestDir, 'sync-manifests', `${projectId}.json`);
   }
 
   private async loadManifest(session: SyncSession): Promise<void> {
     const path = this.manifestPath(session.projectId);
-    if (!path) return;
+    if (!path) {
+return;
+}
     try {
       const raw = await readFile(path, 'utf-8');
       const entries = JSON.parse(raw) as Array<[string, ManifestEntry]>;
@@ -375,7 +389,9 @@ export class WorkspaceSyncManager {
 
   private async saveManifest(session: SyncSession): Promise<void> {
     const path = this.manifestPath(session.projectId);
-    if (!path) return;
+    if (!path) {
+return;
+}
     try {
       await mkdir(dirname(path), { recursive: true });
       const entries = [...session.manifest.entries()];
@@ -388,9 +404,13 @@ export class WorkspaceSyncManager {
   // --- SAS management ---
 
   private async ensureSas(session: SyncSession): Promise<void> {
-    if (session.sasExpiresAt - Date.now() > SAS_REFRESH_MARGIN_MS) return;
+    if (session.sasExpiresAt - Date.now() > SAS_REFRESH_MARGIN_MS) {
+return;
+}
 
-    if (!this.platformClient) throw new Error('Platform client not available');
+    if (!this.platformClient) {
+throw new Error('Platform client not available');
+}
 
     const result = await this.platformClient.getProjectWorkspace(session.projectId);
     session.shareName = result.shareName;
@@ -489,7 +509,9 @@ export class WorkspaceSyncManager {
       console.log(`[WorkspaceSync] Pushing ${toPush.length} files...`);
       const pushTasks = toPush.map((path) => async () => {
         const local = localMap.get(path);
-        if (!local) return;
+        if (!local) {
+return;
+}
         const plaintext = await readFile(local.absolutePath);
         const contents = this.encrypt(session, plaintext);
         await this.ensureSas(session);
@@ -536,12 +558,16 @@ export class WorkspaceSyncManager {
       });
 
       watcher.on('all', (_event, filePath) => {
-        if (!filePath || session.suppressWatcher) return;
+        if (!filePath || session.suppressWatcher) {
+return;
+}
         // chokidar gives absolute paths — compute relative path
         const relative = filePath.startsWith(session.workspaceDir)
           ? filePath.slice(session.workspaceDir.length).replace(/^[\\/]/, '').split('\\').join('/')
           : filePath;
-        if (this.shouldIgnore(relative)) return;
+        if (this.shouldIgnore(relative)) {
+return;
+}
         session.pendingChanges.add(relative);
         this.debouncePush(session);
       });
@@ -553,14 +579,18 @@ export class WorkspaceSyncManager {
   }
 
   private debouncePush(session: SyncSession): void {
-    if (session.debounceTimer) clearTimeout(session.debounceTimer);
+    if (session.debounceTimer) {
+clearTimeout(session.debounceTimer);
+}
     session.debounceTimer = setTimeout(() => {
       void this.pushPending(session);
     }, DEBOUNCE_MS);
   }
 
   private async pushPending(session: SyncSession): Promise<void> {
-    if (session.pendingChanges.size === 0) return;
+    if (session.pendingChanges.size === 0) {
+return;
+}
     const paths = [...session.pendingChanges];
     session.pendingChanges.clear();
 
@@ -641,7 +671,9 @@ export class WorkspaceSyncManager {
         if (!remoteMap.has(path)) {
           const localPath = join(session.workspaceDir, ...path.split('/'));
           session.suppressWatcher = true;
-          try { await unlink(localPath); } catch { /* ignore */ }
+          try {
+ await unlink(localPath); 
+} catch { /* ignore */ }
           session.suppressWatcher = false;
           session.manifest.delete(path);
         }
@@ -685,10 +717,14 @@ export class WorkspaceSyncManager {
   private shouldIgnore(relativePath: string): boolean {
     const parts = relativePath.split('/');
     for (const part of parts) {
-      if (IGNORE_DIRS.has(part)) return true;
+      if (IGNORE_DIRS.has(part)) {
+return true;
+}
     }
     const filename = parts[parts.length - 1];
-    if (filename && IGNORE_FILES.has(filename)) return true;
+    if (filename && IGNORE_FILES.has(filename)) {
+return true;
+}
     return false;
   }
 
@@ -703,10 +739,14 @@ export class WorkspaceSyncManager {
         const absPath = join(currentDir, name);
 
         if (entry.isDirectory()) {
-          if (IGNORE_DIRS.has(name)) continue;
+          if (IGNORE_DIRS.has(name)) {
+continue;
+}
           await walk(absPath, relPath);
         } else if (entry.isFile()) {
-          if (IGNORE_FILES.has(name)) continue;
+          if (IGNORE_FILES.has(name)) {
+continue;
+}
           const info = await stat(absPath);
           results.push({ relativePath: relPath, absolutePath: absPath, mtime: info.mtimeMs, size: info.size });
         }
@@ -749,7 +789,9 @@ async function runConcurrent(tasks: (() => Promise<void>)[], limit: number): Pro
     while (idx < tasks.length) {
       const currentIdx = idx++;
       const task = tasks[currentIdx];
-      if (task) await task();
+      if (task) {
+await task();
+}
     }
   }
   const workers: Promise<void>[] = [];

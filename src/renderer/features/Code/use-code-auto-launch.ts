@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 
-import { useAutoLaunch, type AutoLaunchPhase } from '@/renderer/hooks/use-auto-launch';
+import { type AutoLaunchPhase,useAutoLaunch } from '@/renderer/hooks/use-auto-launch';
 import type { CodeTabId } from '@/shared/types';
 
 import { $codeTabErrors, $codeTabPhases } from './state';

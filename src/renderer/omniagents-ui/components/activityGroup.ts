@@ -29,7 +29,9 @@ export function groupItems(
   let accRunId: string | undefined = undefined
 
   const flush = () => {
-    if (acc.length === 0) return
+    if (acc.length === 0) {
+return
+}
     if (accRunId) {
       result.push({
         type: 'activity_group',
@@ -39,7 +41,9 @@ export function groupItems(
       })
     } else {
       // No runId — render individually (session history)
-      for (const t of acc) result.push(t)
+      for (const t of acc) {
+result.push(t)
+}
     }
     acc = []
     accRunId = undefined
@@ -79,10 +83,18 @@ const COMMAND_PATTERNS = /^(bash|shell|exec|run|command|terminal|cmd|npm|pip|mak
 const SEARCH_PATTERNS = /^(search|find|grep|rg|ripgrep|glob|locate)/i
 
 function categorize(toolName: string): keyof Omit<GroupSummary, 'total' | 'errors'> {
-  if (SEARCH_PATTERNS.test(toolName)) return 'searches'
-  if (READ_PATTERNS.test(toolName)) return 'reads'
-  if (EDIT_PATTERNS.test(toolName)) return 'edits'
-  if (COMMAND_PATTERNS.test(toolName)) return 'commands'
+  if (SEARCH_PATTERNS.test(toolName)) {
+return 'searches'
+}
+  if (READ_PATTERNS.test(toolName)) {
+return 'reads'
+}
+  if (EDIT_PATTERNS.test(toolName)) {
+return 'edits'
+}
+  if (COMMAND_PATTERNS.test(toolName)) {
+return 'commands'
+}
   return 'other'
 }
 
@@ -90,17 +102,29 @@ export function computeGroupSummary(tools: ToolItem[]): GroupSummary {
   const s: GroupSummary = { total: tools.length, reads: 0, edits: 0, commands: 0, searches: 0, other: 0, errors: 0 }
   for (const t of tools) {
     s[categorize(t.tool)]++
-    if (t.metadata?.display_type === 'error') s.errors++
+    if (t.metadata?.display_type === 'error') {
+s.errors++
+}
   }
   return s
 }
 
 export function formatGroupSummary(s: GroupSummary): string {
   const parts = [`${s.total} tool${s.total === 1 ? '' : 's'}`]
-  if (s.reads) parts.push(`${s.reads} read${s.reads === 1 ? '' : 's'}`)
-  if (s.edits) parts.push(`${s.edits} edit${s.edits === 1 ? '' : 's'}`)
-  if (s.commands) parts.push(`${s.commands} command${s.commands === 1 ? '' : 's'}`)
-  if (s.searches) parts.push(`${s.searches} search${s.searches === 1 ? '' : 'es'}`)
-  if (s.errors) parts.push(`${s.errors} error${s.errors === 1 ? '' : 's'}`)
+  if (s.reads) {
+parts.push(`${s.reads} read${s.reads === 1 ? '' : 's'}`)
+}
+  if (s.edits) {
+parts.push(`${s.edits} edit${s.edits === 1 ? '' : 's'}`)
+}
+  if (s.commands) {
+parts.push(`${s.commands} command${s.commands === 1 ? '' : 's'}`)
+}
+  if (s.searches) {
+parts.push(`${s.searches} search${s.searches === 1 ? '' : 'es'}`)
+}
+  if (s.errors) {
+parts.push(`${s.errors} error${s.errors === 1 ? '' : 's'}`)
+}
   return parts.join(' \u00b7 ')
 }

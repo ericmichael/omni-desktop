@@ -1,12 +1,10 @@
-import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
+import { Cube20Regular, Globe20Regular, Lightbulb20Regular, Person20Regular, PlugConnected20Regular, PuzzlePiece20Regular,Settings20Regular, WindowConsole20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import type { CSSProperties } from 'react';
 import { memo, useCallback, useState } from 'react';
-import { Settings20Regular, WindowConsole20Regular, Cube20Regular, PlugConnected20Regular, Globe20Regular, Person20Regular, Lightbulb20Regular, PuzzlePiece20Regular } from '@fluentui/react-icons';
 
 import { Subtitle2 } from '@/renderer/ds';
-import { persistedStoreApi } from '@/renderer/services/store';
-
 import { SettingsModalAccountTab } from '@/renderer/features/SettingsModal/SettingsModalAccountTab';
 import { SettingsModalEnvironmentTab } from '@/renderer/features/SettingsModal/SettingsModalEnvironmentTab';
 import { SettingsModalExtensionsTab } from '@/renderer/features/SettingsModal/SettingsModalExtensionsTab';
@@ -16,6 +14,7 @@ import { SettingsModalModelsTab } from '@/renderer/features/SettingsModal/Settin
 import { SettingsModalNetworkTab } from '@/renderer/features/SettingsModal/SettingsModalNetworkTab';
 import { SettingsModalResetButton } from '@/renderer/features/SettingsModal/SettingsModalResetButton';
 import { SettingsModalSkillsTab } from '@/renderer/features/SettingsModal/SettingsModalSkillsTab';
+import { persistedStoreApi } from '@/renderer/services/store';
 
 const TABS = [
   { value: 'General', label: 'General', icon: <Settings20Regular style={{ width: 18, height: 18 }} /> },

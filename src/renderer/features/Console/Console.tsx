@@ -1,4 +1,4 @@
-import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { MouseEvent } from 'react';

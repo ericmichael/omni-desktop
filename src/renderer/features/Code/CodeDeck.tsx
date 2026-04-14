@@ -1,22 +1,22 @@
-import { DndContext, PointerSensor, type DragEndEvent, useSensor, useSensors } from '@dnd-kit/core';
-import { SortableContext, arrayMove, horizontalListSortingStrategy, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { arrayMove, horizontalListSortingStrategy, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
+import { Add20Regular, ArrowMaximize20Regular, ArrowMinimize20Regular, BranchFork20Regular, MoreHorizontal20Regular, Navigation20Regular,ReOrderDotsVertical20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowMinimize20Regular, ArrowMaximize20Regular, ReOrderDotsVertical20Regular, MoreHorizontal20Regular, BranchFork20Regular, Add20Regular, Navigation20Regular } from '@fluentui/react-icons';
 
 import { uuidv4 } from '@/lib/uuid';
-import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
-import { Button, cn, Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger, SegmentedControl } from '@/renderer/ds';
+import { Button, Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger, SegmentedControl } from '@/renderer/ds';
+import { $previewRequest, clearPreviewRequest } from '@/renderer/features/Tickets/preview-bridge';
+import { ticketApi } from '@/renderer/features/Tickets/state';
+import { TicketBannerActions, TicketColumnBadge, TicketResolutionBadge } from '@/renderer/features/Tickets/TicketControls';
+import { type TicketPanel, TicketPanelOverlay } from '@/renderer/features/Tickets/TicketPanelOverlay';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { CodeLayoutMode, CodeTab, CodeTabId, TicketId, TicketResolution } from '@/shared/types';
 
 import { CodeTabContent } from './CodeTabContent';
 import type { WorkspaceApp } from './EnvironmentDock';
-import { TicketBannerActions, TicketColumnBadge, TicketResolutionBadge } from '@/renderer/features/Tickets/TicketControls';
-import { type TicketPanel, TicketPanelOverlay } from '@/renderer/features/Tickets/TicketPanelOverlay';
-import { ticketApi } from '@/renderer/features/Tickets/state';
-import { $previewRequest, clearPreviewRequest } from '@/renderer/features/Tickets/preview-bridge';
 import { $codeTabStatuses, codeApi } from './state';
 
 const COLUMN_WIDTH = 480;
@@ -784,7 +784,9 @@ export const CodeDeck = memo(() => {
   useEffect(() => {
     if (tabs.length === 0 && !addingFirstTab.current) {
       addingFirstTab.current = true;
-      codeApi.addTab().finally(() => { addingFirstTab.current = false; });
+      codeApi.addTab().finally(() => {
+ addingFirstTab.current = false; 
+});
     }
   }, [tabs.length]);
 
@@ -804,9 +806,13 @@ export const CodeDeck = memo(() => {
   // React to agent-triggered preview requests
   const previewRequest = useStore($previewRequest);
   useEffect(() => {
-    if (!previewRequest) return;
+    if (!previewRequest) {
+return;
+}
     const targetTabId = (previewRequest.tabId as CodeTabId | undefined) ?? activeTabId ?? tabs[0]?.id;
-    if (!targetTabId) return;
+    if (!targetTabId) {
+return;
+}
     setPreviewUrls((prev) => ({ ...prev, [targetTabId]: previewRequest.url }));
     setActiveApps((prev) => ({ ...prev, [targetTabId]: 'browser' }));
     clearPreviewRequest();
@@ -824,7 +830,9 @@ export const CodeDeck = memo(() => {
 
   const resolveLabel = useCallback(
     (tab: CodeTab) => {
-      if (!tab.projectId) return 'New Session';
+      if (!tab.projectId) {
+return 'New Session';
+}
       return projectMap.get(tab.projectId)?.label ?? 'Unknown';
     },
     [projectMap]
@@ -837,9 +845,13 @@ export const CodeDeck = memo(() => {
 
   const resolveSubLabel = useCallback(
     (tab: CodeTab) => {
-      if (!tab.projectId) return null;
+      if (!tab.projectId) {
+return null;
+}
       const workspaceDir = projectMap.get(tab.projectId)?.workspaceDir;
-      if (!workspaceDir) return null;
+      if (!workspaceDir) {
+return null;
+}
       const segments = workspaceDir.split('/').filter(Boolean);
       return segments.slice(-2).join('/');
     },
@@ -859,9 +871,15 @@ export const CodeDeck = memo(() => {
 
   const getColumnWidth = useCallback(
     (tabId: CodeTabId) => {
-      if (expandedTabId === tabId) return EXPANDED_COLUMN_WIDTH;
-      if (viewportWidth <= SNAP_SCROLL_WIDTH) return Math.round(viewportWidth * 0.92);
-      if (viewportWidth <= NARROW_DECK_WIDTH) return COLUMN_WIDTH_SMALL;
+      if (expandedTabId === tabId) {
+return EXPANDED_COLUMN_WIDTH;
+}
+      if (viewportWidth <= SNAP_SCROLL_WIDTH) {
+return Math.round(viewportWidth * 0.92);
+}
+      if (viewportWidth <= NARROW_DECK_WIDTH) {
+return COLUMN_WIDTH_SMALL;
+}
       return COLUMN_WIDTH;
     },
     [expandedTabId, viewportWidth]
@@ -917,8 +935,12 @@ export const CodeDeck = memo(() => {
       const target = event.target as HTMLElement | null;
       const tagName = target?.tagName?.toLowerCase();
       const isEditable = target?.isContentEditable || tagName === 'input' || tagName === 'textarea' || tagName === 'select';
-      if (isEditable) return;
-      if (!activeTabId) return;
+      if (isEditable) {
+return;
+}
+      if (!activeTabId) {
+return;
+}
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'e') {
         event.preventDefault();
         setExpandedTabId((current) => (current === activeTabId ? null : activeTabId));
@@ -948,7 +970,9 @@ export const CodeDeck = memo(() => {
 
   const renderTicketColumnBadge = useCallback(
     (tab: CodeTab) => {
-      if (!tab.ticketId) return undefined;
+      if (!tab.ticketId) {
+return undefined;
+}
       return <TicketColumnBadge ticketId={tab.ticketId} />;
     },
     []
@@ -956,7 +980,9 @@ export const CodeDeck = memo(() => {
 
   const renderTicketBannerActions = useCallback(
     (tab: CodeTab) => {
-      if (!tab.ticketId) return undefined;
+      if (!tab.ticketId) {
+return undefined;
+}
       return (
         <>
           <TicketBannerActions ticketId={tab.ticketId} />

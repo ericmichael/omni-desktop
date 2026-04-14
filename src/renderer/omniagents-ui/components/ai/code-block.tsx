@@ -1,12 +1,3 @@
-import { Button } from '../ui/button'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../ui/select'
-import { cn } from '../../lib/utils'
 import { CheckIcon, CopyIcon } from 'lucide-react'
 import type { ComponentProps, CSSProperties, HTMLAttributes } from 'react'
 import {
@@ -22,12 +13,22 @@ import {
 import type { BundledLanguage, BundledTheme, HighlighterGeneric, ThemedToken } from 'shiki'
 import { createHighlighter } from 'shiki'
 
+import { Button } from '@/renderer/omniagents-ui/components/ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/renderer/omniagents-ui/components/ui/select'
+import { cn } from '@/renderer/omniagents-ui/lib/utils'
+
 // Shiki uses bitflags for font styles: 1=italic, 2=bold, 4=underline
-// eslint-disable-next-line no-bitwise
+ 
 const isItalic = (fontStyle: number | undefined) => fontStyle && fontStyle & 1
-// eslint-disable-next-line no-bitwise
+ 
 const isBold = (fontStyle: number | undefined) => fontStyle && fontStyle & 2
-// eslint-disable-next-line no-bitwise
+ 
 const isUnderline = (fontStyle: number | undefined) => fontStyle && fontStyle & 4
 
 interface KeyedToken {
@@ -117,7 +118,9 @@ const getTokensCacheKey = (code: string, language: BundledLanguage) => {
 
 const getHighlighter = (language: BundledLanguage): Promise<HighlighterGeneric<BundledLanguage, BundledTheme>> => {
   const cached = highlighterCache.get(language)
-  if (cached) return cached
+  if (cached) {
+return cached
+}
 
   const highlighterPromise = createHighlighter({
     langs: [language],
@@ -142,7 +145,9 @@ export const highlightCode = (
   const tokensCacheKey = getTokensCacheKey(code, language)
 
   const cached = tokensCache.get(tokensCacheKey)
-  if (cached) return cached
+  if (cached) {
+return cached
+}
 
   if (callback) {
     if (!subscribers.has(tokensCacheKey)) {
@@ -171,7 +176,9 @@ export const highlightCode = (
 
       const subs = subscribers.get(tokensCacheKey)
       if (subs) {
-        for (const sub of subs) sub(tokenized)
+        for (const sub of subs) {
+sub(tokenized)
+}
         subscribers.delete(tokensCacheKey)
       }
     })
@@ -264,7 +271,9 @@ export const CodeBlockContent = ({
   useEffect(() => {
     let cancelled = false
     highlightCode(code, language as BundledLanguage, (result) => {
-      if (!cancelled) setAsyncTokens(result)
+      if (!cancelled) {
+setAsyncTokens(result)
+}
     })
     return () => {
       cancelled = true

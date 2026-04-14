@@ -1,5 +1,5 @@
+import { CodeIcon, FileTextIcon, GlobeIcon,ImageIcon } from 'lucide-react'
 import React, { useMemo } from 'react'
-import { FileTextIcon, ImageIcon, CodeIcon, GlobeIcon } from 'lucide-react'
 
 import type { ArtifactItem } from '@/shared/chat-types'
 export type { ArtifactItem } from '@/shared/chat-types'
@@ -42,7 +42,9 @@ export function ArtifactsPanel({
     return copy
   }, [artifacts])
 
-  if (!items.length) return null
+  if (!items.length) {
+return null
+}
 
   const list = (
     <div className="flex-1 overflow-y-auto p-2 space-y-0.5">

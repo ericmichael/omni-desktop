@@ -10,23 +10,35 @@ function getSkillsDir(configDir: string): string {
 }
 
 function parseFrontmatter(content: string): { name: string; description: string } | null {
-  if (!content.startsWith('---')) return null;
+  if (!content.startsWith('---')) {
+return null;
+}
   const parts = content.split('---', 3);
-  if (parts.length < 3) return null;
+  if (parts.length < 3) {
+return null;
+}
 
   const lines = parts[1]!.trim().split('\n');
   let name = '';
   let description = '';
   for (const line of lines) {
     const match = line.match(/^(\w[\w-]*):\s*(.+)/);
-    if (!match) continue;
+    if (!match) {
+continue;
+}
     const key = match[1];
     const value = match[2] ?? '';
-    if (key === 'name') name = value.trim().replace(/^["']|["']$/g, '');
-    if (key === 'description') description = value.trim().replace(/^["']|["']$/g, '');
+    if (key === 'name') {
+name = value.trim().replace(/^["']|["']$/g, '');
+}
+    if (key === 'description') {
+description = value.trim().replace(/^["']|["']$/g, '');
+}
   }
 
-  if (!name || !description) return null;
+  if (!name || !description) {
+return null;
+}
   return { name, description };
 }
 

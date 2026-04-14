@@ -1,6 +1,4 @@
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible'
-import { cn } from '../../lib/utils'
 import { cjk } from '@streamdown/cjk'
 import { code } from '@streamdown/code'
 import { math } from '@streamdown/math'
@@ -9,6 +7,9 @@ import { BrainIcon, ChevronDownIcon } from 'lucide-react'
 import type { ComponentProps, ReactNode } from 'react'
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Streamdown } from 'streamdown'
+
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/renderer/omniagents-ui/components/ui/collapsible'
+import { cn } from '@/renderer/omniagents-ui/lib/utils'
 
 import { Shimmer } from './shimmer'
 
@@ -23,7 +24,9 @@ const ReasoningContext = createContext<ReasoningContextValue | null>(null)
 
 export const useReasoning = () => {
   const context = useContext(ReasoningContext)
-  if (!context) throw new Error('Reasoning components must be used within Reasoning')
+  if (!context) {
+throw new Error('Reasoning components must be used within Reasoning')
+}
   return context
 }
 
@@ -60,7 +63,9 @@ export const Reasoning = memo(
     useEffect(() => {
       if (isStreaming) {
         hasEverStreamedRef.current = true
-        if (startTimeRef.current === null) startTimeRef.current = Date.now()
+        if (startTimeRef.current === null) {
+startTimeRef.current = Date.now()
+}
       } else if (startTimeRef.current !== null) {
         setDuration(Math.ceil((Date.now() - startTimeRef.current) / MS_IN_S))
         startTimeRef.current = null
@@ -68,7 +73,9 @@ export const Reasoning = memo(
     }, [isStreaming, setDuration])
 
     useEffect(() => {
-      if (isStreaming && !isOpen && !isExplicitlyClosed) setIsOpen(true)
+      if (isStreaming && !isOpen && !isExplicitlyClosed) {
+setIsOpen(true)
+}
     }, [isStreaming, isOpen, setIsOpen, isExplicitlyClosed])
 
     useEffect(() => {
@@ -100,8 +107,12 @@ export type ReasoningTriggerProps = ComponentProps<typeof CollapsibleTrigger> & 
 }
 
 const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number) => {
-  if (isStreaming || duration === 0) return <Shimmer duration={1}>Thinking...</Shimmer>
-  if (duration === undefined) return <p>Thought for a few seconds</p>
+  if (isStreaming || duration === 0) {
+return <Shimmer duration={1}>Thinking...</Shimmer>
+}
+  if (duration === undefined) {
+return <p>Thought for a few seconds</p>
+}
   return <p>Thought for {duration} seconds</p>
 }
 

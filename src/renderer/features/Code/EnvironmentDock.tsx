@@ -1,6 +1,6 @@
-import { memo, useCallback } from 'react';
 import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { Chat20Regular, Code20Regular, Desktop20Regular, Globe20Regular, WindowConsole20Regular } from '@fluentui/react-icons';
+import { memo, useCallback } from 'react';
 
 export type WorkspaceApp = 'chat' | 'code' | 'desktop' | 'browser' | 'terminal';
 
@@ -134,7 +134,9 @@ export const EnvironmentDock = memo(({ activeApp, onSelect, codeAvailable, deskt
 
   const handleAppClick = useCallback(
     (app: WorkspaceApp, isAvailable: boolean) => {
-      if (!isAvailable) return;
+      if (!isAvailable) {
+return;
+}
       onSelect(app);
     },
     [onSelect]

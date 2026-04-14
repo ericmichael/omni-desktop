@@ -1,7 +1,7 @@
-import * as React from 'react'
 import { Avatar as AvatarPrimitive } from 'radix-ui'
+import * as React from 'react'
 
-import { cn } from '../../lib/utils'
+import { cn } from '@/renderer/omniagents-ui/lib/utils'
 
 function Avatar({
   className,
@@ -40,4 +40,4 @@ function AvatarFallback({ className, ...props }: React.ComponentProps<typeof Ava
   )
 }
 
-export { Avatar, AvatarImage, AvatarFallback }
+export { Avatar, AvatarFallback,AvatarImage }

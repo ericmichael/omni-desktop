@@ -1,6 +1,5 @@
-import { WebSocket as WsWebSocket } from 'ws';
-
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { WebSocket as WsWebSocket } from 'ws';
 
 import type { WsHandler } from '@/server/ws-handler';
 
@@ -32,7 +31,7 @@ export const setupProxyRewriter = (fastify: FastifyInstance, wsHandler: WsHandle
         return handleHttpProxy(request, reply);
       },
       wsHandler: (clientSocket, request) => {
-        const upstreamPath = '/' + (request.params as { '*': string })['*'];
+        const upstreamPath = `/${  (request.params as { '*': string })['*']}`;
         handleWsProxy(clientSocket, request, upstreamPath);
       },
     });
@@ -137,7 +136,9 @@ function rewriteHtmlUrls(html: string, upstream: string, proxyName: string): str
   const proxyPrefix = `/proxy/${proxyName}`;
 
   let upstreamHost = '';
-  try { upstreamHost = new URL(upstream).host; } catch { /* skip */ }
+  try {
+ upstreamHost = new URL(upstream).host; 
+} catch { /* skip */ }
 
   // Single regex: match URL-bearing HTML attributes whose value starts with
   // the upstream origin, a protocol-relative //host, or a root-relative /path.
@@ -199,8 +200,12 @@ async function handleHttpProxy(request: FastifyRequest, reply: FastifyReply): Pr
   try {
     const headers: Record<string, string> = {};
     for (const [key, value] of Object.entries(request.headers)) {
-      if (key === 'host' || key === 'connection') continue;
-      if (typeof value === 'string') headers[key] = value;
+      if (key === 'host' || key === 'connection') {
+continue;
+}
+      if (typeof value === 'string') {
+headers[key] = value;
+}
     }
 
     const response = await globalThis.fetch(targetUrl, {
@@ -216,10 +221,14 @@ async function handleHttpProxy(request: FastifyRequest, reply: FastifyReply): Pr
 
     reply.status(response.status);
     for (const [key, value] of response.headers.entries()) {
-      if (key === 'transfer-encoding' || key === 'content-security-policy' || key === 'x-frame-options') continue;
+      if (key === 'transfer-encoding' || key === 'content-security-policy' || key === 'x-frame-options') {
+continue;
+}
       // Strip content-encoding and content-length: fetch() auto-decompresses, so the
       // upstream's compressed content-length/encoding no longer match the decompressed body
-      if (key === 'content-encoding' || key === 'content-length') continue;
+      if (key === 'content-encoding' || key === 'content-length') {
+continue;
+}
       reply.header(key, value);
     }
 

@@ -1,6 +1,6 @@
-import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
-import { memo, useCallback, useEffect, useState } from 'react';
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import { ArrowLeft20Regular, DataBarVertical20Regular, Open20Regular } from '@fluentui/react-icons';
+import { memo, useCallback, useEffect, useState } from 'react';
 
 import { emitter } from '@/renderer/services/ipc';
 import type { PlatformDashboard } from '@/shared/types';

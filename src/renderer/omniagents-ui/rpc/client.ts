@@ -4,8 +4,8 @@ import { createMachineLogger } from '@/shared/machines/machine-logger';
 import {
   MAX_PENDING_CALLS,
   RPC_CALL_TIMEOUT_MS,
-  rpcClientMachine,
   type RPCClientActor,
+  rpcClientMachine,
 } from '@/shared/machines/rpc-client.machine';
 
 type JSONRPCId = number | string
@@ -73,13 +73,17 @@ export class RPCClient {
 
   /** Send event to the machine only if not disposed. */
   private send(event: import('@/shared/machines/rpc-client.machine').RPCClientEvent): void {
-    if (this.disposed) return
+    if (this.disposed) {
+return
+}
     this.actor.send(event)
   }
 
   /** Current connection state from the machine. */
   get connectionState(): 'disconnected' | 'connecting' | 'connected' | 'reconnecting' {
-    if (this.disposed) return 'disconnected'
+    if (this.disposed) {
+return 'disconnected'
+}
     return this.actor.getSnapshot().value as any
   }
 
@@ -89,14 +93,18 @@ export class RPCClient {
   }
 
   async connect(): Promise<void> {
-    if (this.disposed) throw new Error('RPCClient is disposed')
+    if (this.disposed) {
+throw new Error('RPCClient is disposed')
+}
 
     if (this.connectInFlight) {
       return this.connectInFlight
     }
 
     // If already connected, noop
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) return
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+return
+}
     if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
       return
     }
@@ -112,7 +120,9 @@ export class RPCClient {
   }
 
   private async connectImpl(): Promise<void> {
-    if (this.disposed) throw new Error('RPCClient is disposed')
+    if (this.disposed) {
+throw new Error('RPCClient is disposed')
+}
 
     // Clean up any previous WebSocket that isn't open (e.g. CLOSING, CLOSED,
     // or still CONNECTING from a previous failed attempt) to avoid leaking
@@ -121,7 +131,9 @@ export class RPCClient {
       this.ws.onmessage = null
       this.ws.onclose = null
       this.ws.onerror = null
-      try { this.ws.close() } catch {}
+      try {
+ this.ws.close() 
+} catch {}
       this.ws = null
     }
 
@@ -137,19 +149,25 @@ export class RPCClient {
       const isStale = () => this.ws !== ws
       const onOpen = () => {
         cleanup()
-        if (isStale()) return
+        if (isStale()) {
+return
+}
         this.send({ type: 'WS_OPEN' })
         resolve()
       }
       const onError = () => {
         cleanup()
-        if (isStale()) { reject(new Error('WebSocket replaced')); return }
+        if (isStale()) {
+ reject(new Error('WebSocket replaced')); return 
+}
         this.send({ type: 'WS_ERROR', error: 'WebSocket connection error' })
         reject(new Error('WebSocket error'))
       }
       const onClose = () => {
         cleanup()
-        if (isStale()) { reject(new Error('WebSocket replaced')); return }
+        if (isStale()) {
+ reject(new Error('WebSocket replaced')); return 
+}
         this.send({ type: 'WS_CLOSE' })
         reject(new Error('WebSocket closed during connect'))
       }
@@ -163,7 +181,9 @@ export class RPCClient {
       ws.addEventListener('close', onClose)
     })
 
-    if (!this.ws) throw new Error('WebSocket disconnected')
+    if (!this.ws) {
+throw new Error('WebSocket disconnected')
+}
 
     // Wire up ongoing message handling
     this.ws.onmessage = (ev) => {
@@ -222,8 +242,12 @@ export class RPCClient {
    * Rejects if the machine gives up (max attempts) or on timeout.
    */
   async connectAndWait(timeoutMs = 60_000): Promise<void> {
-    if (this.disposed) throw new Error('RPCClient is disposed')
-    if (this.isConnected) return
+    if (this.disposed) {
+throw new Error('RPCClient is disposed')
+}
+    if (this.isConnected) {
+return
+}
 
     // Kick off the initial connection attempt
     this.connect().catch(() => {})
@@ -260,7 +284,9 @@ export class RPCClient {
   }
 
   on(event: string, handler: Listener): () => void {
-    if (!this.listeners.has(event)) this.listeners.set(event, new Set())
+    if (!this.listeners.has(event)) {
+this.listeners.set(event, new Set())
+}
     const set = this.listeners.get(event)!
     set.add(handler)
     return () => set.delete(handler)
@@ -268,9 +294,13 @@ export class RPCClient {
 
   private emitEvent(event: string, payload: any): void {
     const set = this.listeners.get(event)
-    if (!set) return
+    if (!set) {
+return
+}
     for (const fn of set) {
-      try { fn(payload) } catch {}
+      try {
+ fn(payload) 
+} catch {}
     }
   }
 
@@ -324,14 +354,22 @@ export class RPCClient {
 
   async startRun(prompt: string, sessionId?: string, variables?: Record<string, unknown>, content?: unknown): Promise<{ run_id: string; session_id: string }> {
     const params: Record<string, unknown> = { prompt }
-    if (sessionId) params.session_id = sessionId
+    if (sessionId) {
+params.session_id = sessionId
+}
     if (variables) {
       // Extract safe_tool_overrides — it's a top-level start_run param, not a variable
       const { safe_tool_overrides, ...rest } = variables
-      if (Object.keys(rest).length > 0) params.variables = rest
-      if (safe_tool_overrides) params.safe_tool_overrides = safe_tool_overrides
+      if (Object.keys(rest).length > 0) {
+params.variables = rest
+}
+      if (safe_tool_overrides) {
+params.safe_tool_overrides = safe_tool_overrides
+}
     }
-    if (content != null) params.content = content
+    if (content != null) {
+params.content = content
+}
     return this.call('start_run', params)
   }
 
@@ -353,8 +391,12 @@ export class RPCClient {
 
   async clientResponse(requestId: string, ok: boolean, result?: Record<string, unknown>, error?: Record<string, unknown>): Promise<void> {
     const params: Record<string, unknown> = { request_id: requestId, ok }
-    if (result) params.result = result
-    if (error) params.error = error
+    if (result) {
+params.result = result
+}
+    if (error) {
+params.error = error
+}
     await this.call('client_response', params)
   }
 
@@ -364,8 +406,12 @@ export class RPCClient {
 
   async serverCall(func: string, args?: Record<string, unknown>, sessionId?: string): Promise<Record<string, unknown>> {
     const params: Record<string, unknown> = { function: func }
-    if (args) params.args = args
-    if (sessionId) params.session_id = sessionId
+    if (args) {
+params.args = args
+}
+    if (sessionId) {
+params.session_id = sessionId
+}
     return this.call('server_call', params)
   }
 

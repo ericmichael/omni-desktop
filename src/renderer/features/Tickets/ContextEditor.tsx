@@ -1,44 +1,41 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import YooptaEditor, { createYooptaEditor, Blocks, Marks, useYooptaEditor } from '@yoopta/editor';
-import type { RenderBlockProps, SlateElement, YooptaContentValue, YooptaPlugin } from '@yoopta/editor';
-import Paragraph from '@yoopta/paragraph';
-import { HeadingOne, HeadingTwo, HeadingThree } from '@yoopta/headings';
-import { BulletedList, NumberedList, TodoList } from '@yoopta/lists';
+import { makeStyles, tokens } from '@fluentui/react-components';
+import Accordion from '@yoopta/accordion';
 import Blockquote from '@yoopta/blockquote';
 import Callout from '@yoopta/callout';
-import Divider from '@yoopta/divider';
 import Code from '@yoopta/code';
-import Link from '@yoopta/link';
-import Table from '@yoopta/table';
-import Accordion from '@yoopta/accordion';
-import { Bold, Italic, Underline, Strike, CodeMark, Highlight } from '@yoopta/marks';
+import Divider from '@yoopta/divider';
+import type { RenderBlockProps, SlateElement, YooptaContentValue, YooptaPlugin } from '@yoopta/editor';
+import YooptaEditor, { Blocks, createYooptaEditor, Marks, useYooptaEditor } from '@yoopta/editor';
 import { markdown } from '@yoopta/exports';
+import { HeadingOne, HeadingThree,HeadingTwo } from '@yoopta/headings';
+import Link from '@yoopta/link';
+import { BulletedList, NumberedList, TodoList } from '@yoopta/lists';
+import { Bold, CodeMark, Highlight,Italic, Strike, Underline } from '@yoopta/marks';
+import Paragraph from '@yoopta/paragraph';
+import Table from '@yoopta/table';
 import { applyTheme } from '@yoopta/themes-shadcn';
-
+import { ActionMenuList } from '@yoopta/ui/action-menu-list';
+import { BlockDndContext, DragHandle,SortableBlock } from '@yoopta/ui/block-dnd';
+import { BlockOptions, useBlockActions } from '@yoopta/ui/block-options';
+import { FloatingBlockActions } from '@yoopta/ui/floating-block-actions';
 // UI components
 import { FloatingToolbar } from '@yoopta/ui/floating-toolbar';
-import { SlashCommandMenu } from '@yoopta/ui/slash-command-menu';
-import { FloatingBlockActions } from '@yoopta/ui/floating-block-actions';
-import { BlockOptions, useBlockActions } from '@yoopta/ui/block-options';
-import { ActionMenuList } from '@yoopta/ui/action-menu-list';
-import { SelectionBox } from '@yoopta/ui/selection-box';
-import { BlockDndContext, SortableBlock, DragHandle } from '@yoopta/ui/block-dnd';
 import { HighlightColorPicker } from '@yoopta/ui/highlight-color-picker';
-
+import { SelectionBox } from '@yoopta/ui/selection-box';
+import { SlashCommandMenu } from '@yoopta/ui/slash-command-menu';
 // Icons
 import {
   BoldIcon,
-  ItalicIcon,
-  Underline as UnderlineIcon,
-  Strikethrough,
-  CodeIcon,
-  HighlighterIcon,
   ChevronDownIcon,
+  CodeIcon,
   GripVertical,
+  HighlighterIcon,
+  ItalicIcon,
   PlusIcon,
+  Strikethrough,
+  Underline as UnderlineIcon,
 } from 'lucide-react';
-
-import { makeStyles, tokens } from '@fluentui/react-components';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 // ---------------------------------------------------------------------------
 // Plugins & Marks
@@ -225,7 +222,9 @@ const EditorBlockOptions = ({ open, onOpenChange, blockId, anchor }: BlockOption
 
   const onActionMenuClose = (menuOpen: boolean) => {
     setActionMenuOpen(menuOpen);
-    if (!menuOpen) onOpenChange(false);
+    if (!menuOpen) {
+onOpenChange(false);
+}
   };
 
   return (
@@ -241,7 +240,9 @@ const EditorBlockOptions = ({ open, onOpenChange, blockId, anchor }: BlockOption
           <BlockOptions.Group>
             <BlockOptions.Item
               onSelect={() => {
-                if (blockId) duplicateBlock(blockId);
+                if (blockId) {
+duplicateBlock(blockId);
+}
                 onOpenChange(false);
               }}
             >
@@ -249,7 +250,9 @@ const EditorBlockOptions = ({ open, onOpenChange, blockId, anchor }: BlockOption
             </BlockOptions.Item>
             <BlockOptions.Item
               onSelect={() => {
-                if (blockId) copyBlockLink(blockId);
+                if (blockId) {
+copyBlockLink(blockId);
+}
                 onOpenChange(false);
               }}
             >
@@ -258,7 +261,9 @@ const EditorBlockOptions = ({ open, onOpenChange, blockId, anchor }: BlockOption
             <BlockOptions.Item
               variant="destructive"
               onSelect={() => {
-                if (blockId) deleteBlock(blockId);
+                if (blockId) {
+deleteBlock(blockId);
+}
                 onOpenChange(false);
               }}
             >
@@ -289,16 +294,24 @@ const EditorFloatingBlockActions = () => {
   const [blockOptionsOpen, setBlockOptionsOpen] = useState(false);
 
   const onPlusClick = (blockId: string | null) => {
-    if (!blockId) return;
+    if (!blockId) {
+return;
+}
     const block = Blocks.getBlock(editor, { id: blockId });
-    if (!block) return;
+    if (!block) {
+return;
+}
     editor.insertBlock('Paragraph', { at: block.meta.order + 1, focus: true });
   };
 
   const onDragClick = (blockId: string | null) => {
-    if (!blockId) return;
+    if (!blockId) {
+return;
+}
     const block = Blocks.getBlock(editor, { id: blockId });
-    if (!block) return;
+    if (!block) {
+return;
+}
     editor.setPath({ current: block.meta.order });
     setBlockOptionsOpen(true);
   };
@@ -373,12 +386,14 @@ export const ContextEditor = memo(({ initialMarkdown, onChangeMarkdown }: Contex
 
   const editor = useMemo(
     () => createYooptaEditor({ plugins, marks }),
-    [] // eslint-disable-line react-hooks/exhaustive-deps
+    []  
   );
 
   // Load initial markdown content
   useEffect(() => {
-    if (initializedRef.current) return;
+    if (initializedRef.current) {
+return;
+}
     initializedRef.current = true;
 
     if (initialMarkdown.trim()) {

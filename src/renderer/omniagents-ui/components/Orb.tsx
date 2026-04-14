@@ -1,7 +1,9 @@
-import { useEffect, useRef } from 'react';
-import { Renderer, Program, Mesh, Triangle, Vec3 } from 'ogl';
 import './Orb.css';
-import { useUiConfig } from '../ui-config';
+
+import { Mesh, Program, Renderer, Triangle, Vec3 } from 'ogl';
+import { useEffect, useRef } from 'react';
+
+import { useUiConfig } from '@/renderer/omniagents-ui/ui-config';
 
 export default function Orb({ hue = 0, hoverIntensity = 0.2, rotateOnHover = true, forceHoverState = false, animationSpeed = 1.0, noiseScale = 0.65, noiseAmplitude = 1.0, innerRadius = 0.6 }) {
   const { debug } = useUiConfig()
@@ -198,7 +200,9 @@ export default function Orb({ hue = 0, hoverIntensity = 0.2, rotateOnHover = tru
 
   useEffect(() => {
     const container = ctnDom.current;
-    if (!container) return;
+    if (!container) {
+return;
+}
 
     const renderer = new Renderer({ alpha: true, premultipliedAlpha: false });
     const gl = renderer.gl;
@@ -228,13 +232,15 @@ export default function Orb({ hue = 0, hoverIntensity = 0.2, rotateOnHover = tru
     const mesh = new Mesh(gl, { geometry, program });
 
     function resize() {
-      if (!container) return;
+      if (!container) {
+return;
+}
       const dpr = window.devicePixelRatio || 1;
       const width = container.clientWidth;
       const height = container.clientHeight;
       renderer.setSize(width * dpr, height * dpr);
-      gl.canvas.style.width = width + 'px';
-      gl.canvas.style.height = height + 'px';
+      gl.canvas.style.width = `${width  }px`;
+      gl.canvas.style.height = `${height  }px`;
       program.uniforms.iResolution.value.set(gl.canvas.width, gl.canvas.height, gl.canvas.width / gl.canvas.height);
     }
     window.addEventListener('resize', resize);

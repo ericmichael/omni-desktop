@@ -1,19 +1,18 @@
-import { Tooltip, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-
-import { CounterBadge } from '@/renderer/ds';
+import { makeStyles, mergeClasses, tokens,Tooltip } from '@fluentui/react-components';
+import {
+  Chat24Filled,
+  Code24Regular,
+  DataBarVertical24Regular,
+  MoreHorizontal24Filled,
+  Rocket24Filled,
+  Settings24Filled,
+} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import type { KeyboardEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Chat24Filled,
-  DataBarVertical24Regular,
-  Code24Regular,
-  MoreHorizontal24Filled,
-  Settings24Filled,
-  Rocket24Filled,
-} from '@fluentui/react-icons';
 
 import { OmniLogo } from '@/renderer/common/AsciiLogo';
+import { CounterBadge } from '@/renderer/ds';
 import { $activeInboxCount } from '@/renderer/features/Inbox/state';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -229,9 +228,15 @@ export const Sidebar = memo(() => {
 
   const visibleTabs = useMemo(() => {
     return ALL_TABS.filter((t) => {
-      if (t.alwaysVisible) return true;
-      if (t.enterprise) return isEnterprise;
-      if (t.value !== 'chat') return import.meta.env.MODE === 'development' || store.previewFeatures;
+      if (t.alwaysVisible) {
+return true;
+}
+      if (t.enterprise) {
+return isEnterprise;
+}
+      if (t.value !== 'chat') {
+return import.meta.env.MODE === 'development' || store.previewFeatures;
+}
       return true;
     });
   }, [store.previewFeatures, isEnterprise]);
@@ -245,10 +250,14 @@ export const Sidebar = memo(() => {
   const navRef = useRef<HTMLElement>(null);
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLElement>) => {
     const nav = navRef.current;
-    if (!nav) return;
+    if (!nav) {
+return;
+}
     const buttons = Array.from(nav.querySelectorAll<HTMLButtonElement>('button[role="tab"]'));
     const current = buttons.indexOf(e.target as HTMLButtonElement);
-    if (current === -1) return;
+    if (current === -1) {
+return;
+}
 
     let next = -1;
     if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {

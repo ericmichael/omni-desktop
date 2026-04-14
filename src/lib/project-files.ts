@@ -18,6 +18,7 @@ import yaml from 'yaml';
 import { z } from 'zod';
 
 import { Err, Ok } from '@/lib/result';
+import type { TicketPhase } from '@/shared/ticket-phase';
 import type {
   Milestone,
   MilestoneId,
@@ -35,7 +36,6 @@ import type {
   TicketRun,
   TokenUsage,
 } from '@/shared/types';
-import type { TicketPhase } from '@/shared/ticket-phase';
 
 // ---------------------------------------------------------------------------
 // Constants shared by parsers and tests
@@ -68,7 +68,9 @@ const TICKET_PHASES = [
 /** Parse an ISO 8601 string to a ms-since-epoch number. Throws on invalid. */
 const isoToMs = (iso: string): number => {
   const t = Date.parse(iso);
-  if (Number.isNaN(t)) throw new Error(`invalid ISO timestamp: ${iso}`);
+  if (Number.isNaN(t)) {
+throw new Error(`invalid ISO timestamp: ${iso}`);
+}
   return t;
 };
 
@@ -81,7 +83,9 @@ const msToIso = (ms: number): string => new Date(ms).toISOString().replace(/\.\d
  * records during migration without an explicit conversion step.
  */
 const Timestamp = z.union([z.string(), z.number()]).transform((v, ctx) => {
-  if (typeof v === 'number') return v;
+  if (typeof v === 'number') {
+return v;
+}
   try {
     return isoToMs(v);
   } catch (e) {
@@ -142,14 +146,18 @@ export function joinFrontmatter(meta: Record<string, unknown>, body: string): st
  * returns an `Err` if it does not parse or is not a plain object.
  */
 export function parseFrontmatterYaml(text: string | null): Ok<Record<string, unknown>> | Err<Error> {
-  if (text === null || text.trim() === '') return new Ok({});
+  if (text === null || text.trim() === '') {
+return new Ok({});
+}
   let parsed: unknown;
   try {
     parsed = yaml.parse(text);
   } catch (e) {
     return new Err(new Error(`frontmatter YAML parse failed: ${(e as Error).message}`));
   }
-  if (parsed === null || parsed === undefined) return new Ok({});
+  if (parsed === null || parsed === undefined) {
+return new Ok({});
+}
   if (typeof parsed !== 'object' || Array.isArray(parsed)) {
     return new Err(new Error(`frontmatter must be a YAML mapping, got ${typeof parsed}`));
   }
@@ -329,9 +337,13 @@ export function parseTicketFile(
 ): Ok<Ticket> | Err<ProjectFileError> {
   const { meta, body } = splitFrontmatter(text);
   const yamlResult = parseFrontmatterYaml(meta);
-  if (yamlResult.isErr()) return fail(yamlResult.error.message);
+  if (yamlResult.isErr()) {
+return fail(yamlResult.error.message);
+}
   const parsed = parseWith(TicketMetaSchema, yamlResult.value);
-  if (parsed.isErr()) return parsed;
+  if (parsed.isErr()) {
+return parsed;
+}
   const m = parsed.value;
   return new Ok({
     id,
@@ -365,9 +377,13 @@ export function parseMilestoneFile(
 ): Ok<Milestone> | Err<ProjectFileError> {
   const { meta, body } = splitFrontmatter(text);
   const yamlResult = parseFrontmatterYaml(meta);
-  if (yamlResult.isErr()) return fail(yamlResult.error.message);
+  if (yamlResult.isErr()) {
+return fail(yamlResult.error.message);
+}
   const parsed = parseWith(MilestoneMetaSchema, yamlResult.value);
-  if (parsed.isErr()) return parsed;
+  if (parsed.isErr()) {
+return parsed;
+}
   const m = parsed.value;
   const brief = body.replace(/^\n+/, '').replace(/\n+$/, '');
   return new Ok({
@@ -390,9 +406,13 @@ export function parsePageFile(
 ): Ok<{ page: Page; body: string }> | Err<ProjectFileError> {
   const { meta, body } = splitFrontmatter(text);
   const yamlResult = parseFrontmatterYaml(meta);
-  if (yamlResult.isErr()) return fail(yamlResult.error.message);
+  if (yamlResult.isErr()) {
+return fail(yamlResult.error.message);
+}
   const parsed = parseWith(PageMetaSchema, yamlResult.value);
-  if (parsed.isErr()) return parsed;
+  if (parsed.isErr()) {
+return parsed;
+}
   const m = parsed.value;
   // Only include properties if defined and has at least one non-undefined value.
   const rawProps = m.properties;
@@ -425,7 +445,9 @@ export function parseProjectConfig(text: string): Ok<Project> | Err<ProjectFileE
     return fail('project.yml must be a YAML mapping');
   }
   const parsed = parseWith(ProjectConfigSchema, raw as Record<string, unknown>);
-  if (parsed.isErr()) return parsed;
+  if (parsed.isErr()) {
+return parsed;
+}
   const c = parsed.value;
   return new Ok({
     id: c.id as ProjectId,
@@ -454,7 +476,9 @@ export function parseJsonl<T>(
   const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i]!;
-    if (raw.trim() === '') continue;
+    if (raw.trim() === '') {
+continue;
+}
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
@@ -487,7 +511,9 @@ export const parseTicketRuns = (text: string) => parseJsonl(text, TicketRunLineS
 const compact = <T extends Record<string, unknown>>(obj: T): Partial<T> => {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(obj)) {
-    if (v !== undefined) out[k] = v;
+    if (v !== undefined) {
+out[k] = v;
+}
   }
   return out as Partial<T>;
 };
@@ -560,7 +586,7 @@ export function serializeProjectConfig(project: Project): string {
   return yaml.stringify(meta, { lineWidth: 0 });
 }
 
-const jsonlLine = (obj: Record<string, unknown>): string => JSON.stringify(obj) + '\n';
+const jsonlLine = (obj: Record<string, unknown>): string => `${JSON.stringify(obj)  }\n`;
 
 export const serializeTicketComment = (c: TicketComment): string =>
   jsonlLine({

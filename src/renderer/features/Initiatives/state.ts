@@ -17,7 +17,9 @@ export const milestoneApi = {
     const current = $milestones.get();
     const next: Record<MilestoneId, Milestone> = {};
     for (const [id, milestone] of Object.entries(current)) {
-      if (milestone.projectId !== projectId) next[id] = milestone;
+      if (milestone.projectId !== projectId) {
+next[id] = milestone;
+}
     }
     for (const item of items) {
       next[item.id] = item;

@@ -75,7 +75,9 @@ export function rankFocus({
   const openTicketIds = new Set<TicketId>(tickets.filter((t) => !isDone(t)).map((t) => t.id));
 
   for (const ticket of tickets) {
-    if (isDone(ticket)) continue;
+    if (isDone(ticket)) {
+continue;
+}
 
     const phase = ticket.phase;
 
@@ -155,10 +157,14 @@ export function rankFocus({
   // Sort each tier. Within a tier, higher score first; tiebreak by oldest
   // columnChangedAt (closer to "sitting still"), then oldest createdAt.
   const byScoreThenAge = (a: FocusItem, b: FocusItem): number => {
-    if (b.score !== a.score) return b.score - a.score;
+    if (b.score !== a.score) {
+return b.score - a.score;
+}
     const aAge = a.ticket.columnChangedAt ?? a.ticket.updatedAt;
     const bAge = b.ticket.columnChangedAt ?? b.ticket.updatedAt;
-    if (aAge !== bAge) return aAge - bAge;
+    if (aAge !== bAge) {
+return aAge - bAge;
+}
     return a.ticket.createdAt - b.ticket.createdAt;
   };
 
@@ -199,8 +205,14 @@ export function focusHeader(args: {
   shapedInboxCount: number;
 }): FocusHeader {
   const { ranked, wipUsed, wipLimit, shapedInboxCount } = args;
-  if (wipUsed > 0) return { kind: 'in_flight', activeCount: wipUsed };
-  if (ranked.length > 0) return { kind: 'start', openSlots: Math.max(0, wipLimit - wipUsed) };
-  if (shapedInboxCount > 0) return { kind: 'shape_inbox', shapedCount: shapedInboxCount };
+  if (wipUsed > 0) {
+return { kind: 'in_flight', activeCount: wipUsed };
+}
+  if (ranked.length > 0) {
+return { kind: 'start', openSlots: Math.max(0, wipLimit - wipUsed) };
+}
+  if (shapedInboxCount > 0) {
+return { kind: 'shape_inbox', shapedCount: shapedInboxCount };
+}
   return { kind: 'empty' };
 }

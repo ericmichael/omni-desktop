@@ -20,14 +20,20 @@ import type { InboxItem, InboxItemStatus, InboxShaping } from '@/shared/types';
 
 /** Map legacy InboxItemStatus to new InboxItemStatus. Returns null for statuses that should be dropped. */
 export function mapLegacyStatus(raw: unknown): InboxItemStatus | null {
-  if (raw === 'done') return null; // dropped — terminal completion without a promotion target
-  if (raw === 'deferred' || raw === 'iceboxed') return 'later';
+  if (raw === 'done') {
+return null;
+} // dropped — terminal completion without a promotion target
+  if (raw === 'deferred' || raw === 'iceboxed') {
+return 'later';
+}
   return 'new'; // default for 'open' and anything unrecognized
 }
 
 /** Map a legacy shaping block to the new InboxShaping, or undefined if the legacy item was unshaped. */
 export function mapLegacyShaping(rawShaping: unknown): InboxShaping | undefined {
-  if (!rawShaping || typeof rawShaping !== 'object') return undefined;
+  if (!rawShaping || typeof rawShaping !== 'object') {
+return undefined;
+}
   const s = rawShaping as Record<string, unknown>;
   const outcome = typeof s.doneLooksLike === 'string' ? s.doneLooksLike.trim() : '';
   const appetite = s.appetite;
@@ -57,7 +63,9 @@ export function upgradeLegacyInboxItem(
   idGen: () => string
 ): InboxItem | null {
   const status = mapLegacyStatus(raw.status);
-  if (status === null) return null;
+  if (status === null) {
+return null;
+}
 
   const shaping = mapLegacyShaping(raw.shaping);
   // A legacy item with a shaping block and still-open status is "shaped" in the new model.
@@ -81,8 +89,12 @@ export function upgradeLegacyInboxItem(
     createdAt,
     updatedAt,
   };
-  if (note) item.note = note;
-  if (shaping) item.shaping = shaping;
+  if (note) {
+item.note = note;
+}
+  if (shaping) {
+item.shaping = shaping;
+}
   if (resolvedStatus === 'later') {
     item.laterAt = updatedAt;
   }
@@ -104,7 +116,9 @@ export function upgradeLegacyInbox(
   const upgraded: InboxItem[] = [];
   for (const raw of rawItems) {
     const item = upgradeLegacyInboxItem(raw, now, idGen);
-    if (item) upgraded.push(item);
+    if (item) {
+upgraded.push(item);
+}
   }
   return upgraded;
 }

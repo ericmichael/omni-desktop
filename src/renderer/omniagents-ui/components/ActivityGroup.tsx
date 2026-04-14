@@ -1,10 +1,10 @@
-import React, { useMemo, useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { AnimatePresence,motion } from 'framer-motion'
 import { ChevronDownIcon } from 'lucide-react'
+import React, { useMemo, useState } from 'react'
+
 import type { ActivityGroupData } from './activityGroup'
 import { computeGroupSummary, formatGroupSummary } from './activityGroup'
-import { ToolCard, formatArgsPreview } from './MessageList'
-import type { ToolItem } from './MessageList'
+import { formatArgsPreview,ToolCard } from './MessageList'
 
 export function ActivityGroup({ group, statusText }: { group: ActivityGroupData; statusText?: string }) {
   // Singleton without grouping — render as plain ToolCard
@@ -35,7 +35,7 @@ function GroupCard({ group, statusText }: { group: ActivityGroupData; statusText
               <AnimatePresence mode="wait">
                 {statusText ? (
                   <motion.span
-                    key={'status-' + statusText}
+                    key={`status-${  statusText}`}
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -8 }}

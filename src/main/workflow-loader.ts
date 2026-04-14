@@ -6,9 +6,9 @@
  * - Invalid reloads keep the last known good config
  * - Provides merged config (workflow overrides → defaults)
  */
+import { exec, execFile } from 'child_process';
 import type { FSWatcher } from 'fs';
 import { watch } from 'fs';
-import { exec, execFile } from 'child_process';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -87,7 +87,9 @@ export class WorkflowLoader {
 
     try {
       const cloneArgs = ['clone', '--depth', '1', '--no-checkout', '--filter=blob:none'];
-      if (branch) cloneArgs.push('--branch', branch);
+      if (branch) {
+cloneArgs.push('--branch', branch);
+}
       cloneArgs.push(repoUrl, tmpDir);
 
       await execFileAsync('git', cloneArgs, { timeout: 30_000 });

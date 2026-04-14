@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
-import { ensureSessionId } from './session-submit';
+import { describe, expect, it, vi } from 'vitest';
+
 import { acceptStrictEvent, type SessionFilterState } from './session-filter';
+import { ensureSessionId } from './session-submit';
 
 describe('ensureSessionId', () => {
   it('returns existing session ID without generating', () => {

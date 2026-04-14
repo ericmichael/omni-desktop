@@ -12,8 +12,8 @@
  *   await mgr.close();
  */
 
-import path from 'path';
 import { mkdir, rm } from 'fs/promises';
+import path from 'path';
 
 import { ProjectFileStore, type ProjectFileStoreEvents } from '@/lib/project-file-store';
 import type { ProjectFileError } from '@/lib/project-files';
@@ -101,12 +101,26 @@ export class ProjectFileStoreManager {
   async removeProject(projectId: ProjectId, options: { deleteFiles?: boolean } = {}): Promise<void> {
     const store = this.stores.get(projectId);
     const dir = this.dirs.get(projectId);
-    if (store) await store.close();
+    if (store) {
+await store.close();
+}
     this.stores.delete(projectId);
     this.dirs.delete(projectId);
-    for (const [tid, pid] of [...this.ticketIndex]) if (pid === projectId) this.ticketIndex.delete(tid);
-    for (const [mid, pid] of [...this.milestoneIndex]) if (pid === projectId) this.milestoneIndex.delete(mid);
-    for (const [pgid, pid] of [...this.pageIndex]) if (pid === projectId) this.pageIndex.delete(pgid);
+    for (const [tid, pid] of [...this.ticketIndex]) {
+if (pid === projectId) {
+this.ticketIndex.delete(tid);
+}
+}
+    for (const [mid, pid] of [...this.milestoneIndex]) {
+if (pid === projectId) {
+this.milestoneIndex.delete(mid);
+}
+}
+    for (const [pgid, pid] of [...this.pageIndex]) {
+if (pid === projectId) {
+this.pageIndex.delete(pgid);
+}
+}
     if (options.deleteFiles && dir) {
       await rm(dir, { recursive: true, force: true });
     }
@@ -126,7 +140,9 @@ export class ProjectFileStoreManager {
     const out: Project[] = [];
     for (const store of this.stores.values()) {
       const p = store.getProject();
-      if (p) out.push(p);
+      if (p) {
+out.push(p);
+}
     }
     return out;
   }
@@ -140,15 +156,21 @@ export class ProjectFileStoreManager {
   }
 
   listTickets(projectId?: ProjectId): Ticket[] {
-    if (projectId) return this.stores.get(projectId)?.listTickets() ?? [];
+    if (projectId) {
+return this.stores.get(projectId)?.listTickets() ?? [];
+}
     const out: Ticket[] = [];
-    for (const store of this.stores.values()) out.push(...store.listTickets());
+    for (const store of this.stores.values()) {
+out.push(...store.listTickets());
+}
     return out;
   }
 
   getTicket(id: TicketId): Ticket | null {
     const pid = this.ticketIndex.get(id);
-    if (!pid) return null;
+    if (!pid) {
+return null;
+}
     return this.stores.get(pid)?.getTicket(id) ?? null;
   }
 
@@ -158,45 +180,63 @@ export class ProjectFileStoreManager {
 
   getTicketComments(id: TicketId): TicketComment[] {
     const pid = this.ticketIndex.get(id);
-    if (!pid) return [];
+    if (!pid) {
+return [];
+}
     return this.stores.get(pid)?.getTicketComments(id) ?? [];
   }
 
   getTicketRuns(id: TicketId): TicketRun[] {
     const pid = this.ticketIndex.get(id);
-    if (!pid) return [];
+    if (!pid) {
+return [];
+}
     return this.stores.get(pid)?.getTicketRuns(id) ?? [];
   }
 
   listMilestones(projectId?: ProjectId): Milestone[] {
-    if (projectId) return this.stores.get(projectId)?.listMilestones() ?? [];
+    if (projectId) {
+return this.stores.get(projectId)?.listMilestones() ?? [];
+}
     const out: Milestone[] = [];
-    for (const store of this.stores.values()) out.push(...store.listMilestones());
+    for (const store of this.stores.values()) {
+out.push(...store.listMilestones());
+}
     return out;
   }
 
   getMilestone(id: MilestoneId): Milestone | null {
     const pid = this.milestoneIndex.get(id);
-    if (!pid) return null;
+    if (!pid) {
+return null;
+}
     return this.stores.get(pid)?.getMilestone(id) ?? null;
   }
 
   listPages(projectId?: ProjectId): Page[] {
-    if (projectId) return this.stores.get(projectId)?.listPages() ?? [];
+    if (projectId) {
+return this.stores.get(projectId)?.listPages() ?? [];
+}
     const out: Page[] = [];
-    for (const store of this.stores.values()) out.push(...store.listPages());
+    for (const store of this.stores.values()) {
+out.push(...store.listPages());
+}
     return out;
   }
 
   getPage(id: PageId): Page | null {
     const pid = this.pageIndex.get(id);
-    if (!pid) return null;
+    if (!pid) {
+return null;
+}
     return this.stores.get(pid)?.getPage(id) ?? null;
   }
 
   getPageBody(id: PageId): string | null {
     const pid = this.pageIndex.get(id);
-    if (!pid) return null;
+    if (!pid) {
+return null;
+}
     return this.stores.get(pid)?.getPageBody(id) ?? null;
   }
 
@@ -236,33 +276,43 @@ export class ProjectFileStoreManager {
 
   async appendTicketComment(ticketId: TicketId, comment: TicketComment): Promise<void> {
     const pid = this.ticketIndex.get(ticketId);
-    if (!pid) throw new Error(`unknown ticket: ${ticketId}`);
+    if (!pid) {
+throw new Error(`unknown ticket: ${ticketId}`);
+}
     await this.stores.get(pid)!.appendTicketComment(ticketId, comment);
   }
 
   async appendTicketRun(ticketId: TicketId, run: TicketRun): Promise<void> {
     const pid = this.ticketIndex.get(ticketId);
-    if (!pid) throw new Error(`unknown ticket: ${ticketId}`);
+    if (!pid) {
+throw new Error(`unknown ticket: ${ticketId}`);
+}
     await this.stores.get(pid)!.appendTicketRun(ticketId, run);
   }
 
   async deleteTicket(id: TicketId): Promise<void> {
     const pid = this.ticketIndex.get(id);
-    if (!pid) return;
+    if (!pid) {
+return;
+}
     await this.stores.get(pid)!.deleteTicket(id);
     this.ticketIndex.delete(id);
   }
 
   async deleteMilestone(id: MilestoneId): Promise<void> {
     const pid = this.milestoneIndex.get(id);
-    if (!pid) return;
+    if (!pid) {
+return;
+}
     await this.stores.get(pid)!.deleteMilestone(id);
     this.milestoneIndex.delete(id);
   }
 
   async deletePage(id: PageId): Promise<void> {
     const pid = this.pageIndex.get(id);
-    if (!pid) return;
+    if (!pid) {
+return;
+}
     await this.stores.get(pid)!.deletePage(id);
     this.pageIndex.delete(id);
   }
@@ -271,20 +321,30 @@ export class ProjectFileStoreManager {
 
   private async openOne(ref: ManagedProjectRef): Promise<ProjectFileStore> {
     const existing = this.stores.get(ref.id);
-    if (existing) return existing;
+    if (existing) {
+return existing;
+}
     const store = new ProjectFileStore(ref.dir, ref.id, this.wrapEvents(ref.id), this.options);
     this.stores.set(ref.id, store);
     this.dirs.set(ref.id, path.resolve(ref.dir));
     await store.open();
-    for (const t of store.listTickets()) this.ticketIndex.set(t.id, ref.id);
-    for (const m of store.listMilestones()) this.milestoneIndex.set(m.id, ref.id);
-    for (const p of store.listPages()) this.pageIndex.set(p.id, ref.id);
+    for (const t of store.listTickets()) {
+this.ticketIndex.set(t.id, ref.id);
+}
+    for (const m of store.listMilestones()) {
+this.milestoneIndex.set(m.id, ref.id);
+}
+    for (const p of store.listPages()) {
+this.pageIndex.set(p.id, ref.id);
+}
     return store;
   }
 
   private requireStore(projectId: ProjectId): ProjectFileStore {
     const s = this.stores.get(projectId);
-    if (!s) throw new Error(`unknown project: ${projectId}`);
+    if (!s) {
+throw new Error(`unknown project: ${projectId}`);
+}
     return s;
   }
 

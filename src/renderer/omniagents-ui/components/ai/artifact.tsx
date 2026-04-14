@@ -1,9 +1,10 @@
-import { Button } from '../ui/button'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
-import { cn } from '../../lib/utils'
 import type { LucideIcon } from 'lucide-react'
 import { XIcon } from 'lucide-react'
 import type { ComponentProps, HTMLAttributes } from 'react'
+
+import { Button } from '@/renderer/omniagents-ui/components/ui/button'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/renderer/omniagents-ui/components/ui/tooltip'
+import { cn } from '@/renderer/omniagents-ui/lib/utils'
 
 export type ArtifactProps = HTMLAttributes<HTMLDivElement>
 

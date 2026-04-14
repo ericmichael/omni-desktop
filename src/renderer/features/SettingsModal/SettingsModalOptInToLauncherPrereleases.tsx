@@ -1,8 +1,8 @@
+import { makeStyles, tokens } from '@fluentui/react-components';
+import { Beaker20Filled } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback } from 'react';
-import { Beaker20Filled } from '@fluentui/react-icons';
 
-import { makeStyles, tokens } from '@fluentui/react-components';
 import { Checkbox, FormField } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
 

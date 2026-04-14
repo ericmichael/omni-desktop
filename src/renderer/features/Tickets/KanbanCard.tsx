@@ -1,15 +1,15 @@
 import { useDraggable } from '@dnd-kit/core';
-import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
+import { ArrowSync20Regular, Open20Regular, Play20Filled,ReOrderDotsVertical20Regular } from '@fluentui/react-icons';
 import { memo, useCallback } from 'react';
-import { ArrowSync20Regular, Open20Regular, ReOrderDotsVertical20Regular, Play20Filled } from '@fluentui/react-icons';
 
 import { Badge, Body1, IconButton } from '@/renderer/ds';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { isActivePhase } from '@/shared/ticket-phase';
 import type { Ticket, TicketPhase } from '@/shared/types';
 
-import { APPETITE_COLORS, APPETITE_LABELS, PHASE_COLORS, PHASE_LABELS, RESOLUTION_COLORS, RESOLUTION_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './ticket-constants';
 import { ticketApi } from './state';
+import { APPETITE_COLORS, APPETITE_LABELS, PHASE_COLORS, PHASE_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './ticket-constants';
 
 const canStart = (phase: TicketPhase | undefined) => !phase || !isActivePhase(phase);
 

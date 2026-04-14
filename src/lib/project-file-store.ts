@@ -23,10 +23,9 @@
  */
 
 import chokidar, { type FSWatcher } from 'chokidar';
-import { readFile, writeFile, mkdir, unlink, readdir, stat } from 'fs/promises';
+import { mkdir, readdir, readFile, stat,unlink, writeFile } from 'fs/promises';
 import path from 'path';
 
-import { Err, Ok } from '@/lib/result';
 import {
   parseMilestoneFile,
   parsePageFile,
@@ -42,6 +41,7 @@ import {
   serializeTicketFile,
   serializeTicketRun,
 } from '@/lib/project-files';
+import { Err, Ok } from '@/lib/result';
 import type {
   Milestone,
   MilestoneId,
@@ -140,8 +140,12 @@ type FileKind =
   | { kind: 'unknown' };
 
 const classifyFile = (filePath: string, layout: Layout): FileKind => {
-  if (filePath === layout.projectFile) return { kind: 'project-config' };
-  if (filePath === layout.contextFile) return { kind: 'context' };
+  if (filePath === layout.projectFile) {
+return { kind: 'project-config' };
+}
+  if (filePath === layout.contextFile) {
+return { kind: 'context' };
+}
   const inDir = (dir: string) => filePath.startsWith(dir + path.sep);
   if (inDir(layout.ticketsDir)) {
     const name = path.basename(filePath);
@@ -239,7 +243,9 @@ export class ProjectFileStore {
    * calls are no-ops.
    */
   async open(): Promise<void> {
-    if (this.opened || this.closed) return;
+    if (this.opened || this.closed) {
+return;
+}
     this.opened = true;
 
     await this.ensureDirectories();
@@ -254,7 +260,9 @@ export class ProjectFileStore {
 
   /** Stop watching and release resources. Safe to call multiple times. */
   async close(): Promise<void> {
-    if (this.closed) return;
+    if (this.closed) {
+return;
+}
     this.closed = true;
     if (this.watcher) {
       await this.watcher.close();
@@ -355,7 +363,9 @@ export class ProjectFileStore {
   }
 
   async appendTicketComment(ticketId: TicketId, comment: TicketComment): Promise<void> {
-    if (!this.tickets.has(ticketId)) throw new Error(`unknown ticket: ${ticketId}`);
+    if (!this.tickets.has(ticketId)) {
+throw new Error(`unknown ticket: ${ticketId}`);
+}
     const current = this.comments.get(ticketId) ?? [];
     const next = [...current, comment];
     const text = next.map(serializeTicketComment).join('');
@@ -364,7 +374,9 @@ export class ProjectFileStore {
   }
 
   async appendTicketRun(ticketId: TicketId, run: TicketRun): Promise<void> {
-    if (!this.tickets.has(ticketId)) throw new Error(`unknown ticket: ${ticketId}`);
+    if (!this.tickets.has(ticketId)) {
+throw new Error(`unknown ticket: ${ticketId}`);
+}
     const current = this.runs.get(ticketId) ?? [];
     const next = [...current, run];
     const text = next.map(serializeTicketRun).join('');
@@ -442,7 +454,9 @@ export class ProjectFileStore {
 
   private async scanProjectConfig(): Promise<void> {
     const text = await readIfExists(this.layout.projectFile);
-    if (text === null) return;
+    if (text === null) {
+return;
+}
     const parsed = parseProjectConfig(text);
     if (parsed.isErr()) {
       this.emitParseError(this.layout.projectFile, parsed.error);
@@ -475,7 +489,9 @@ export class ProjectFileStore {
 
   private async loadTicket(id: TicketId, filePath: string): Promise<void> {
     const text = await readIfExists(filePath);
-    if (text === null) return;
+    if (text === null) {
+return;
+}
     const parsed = parseTicketFile(text, id, this.projectId);
     if (parsed.isErr()) {
       this.emitParseError(filePath, parsed.error);
@@ -487,7 +503,9 @@ export class ProjectFileStore {
 
   private async loadTicketComments(id: TicketId, filePath: string): Promise<void> {
     const text = await readIfExists(filePath);
-    if (text === null) return;
+    if (text === null) {
+return;
+}
     const { items, errors } = parseTicketComments(text);
     this.comments.set(id, items);
     for (const e of errors) {
@@ -497,7 +515,9 @@ export class ProjectFileStore {
 
   private async loadTicketRuns(id: TicketId, filePath: string): Promise<void> {
     const text = await readIfExists(filePath);
-    if (text === null) return;
+    if (text === null) {
+return;
+}
     const { items, errors } = parseTicketRuns(text);
     this.runs.set(id, items);
     for (const e of errors) {
@@ -508,11 +528,15 @@ export class ProjectFileStore {
   private async scanMilestones(): Promise<void> {
     const entries = await listDir(this.layout.milestonesDir);
     for (const name of entries) {
-      if (!name.endsWith(TICKET_MD_SUFFIX)) continue;
+      if (!name.endsWith(TICKET_MD_SUFFIX)) {
+continue;
+}
       const id = name.slice(0, -TICKET_MD_SUFFIX.length) as MilestoneId;
       const full = path.join(this.layout.milestonesDir, name);
       const text = await readIfExists(full);
-      if (text === null) continue;
+      if (text === null) {
+continue;
+}
       const parsed = parseMilestoneFile(text, id, this.projectId);
       if (parsed.isErr()) {
         this.emitParseError(full, parsed.error);
@@ -525,11 +549,15 @@ export class ProjectFileStore {
   private async scanPages(): Promise<void> {
     const entries = await listDir(this.layout.pagesDir);
     for (const name of entries) {
-      if (!name.endsWith(TICKET_MD_SUFFIX)) continue;
+      if (!name.endsWith(TICKET_MD_SUFFIX)) {
+continue;
+}
       const id = name.slice(0, -TICKET_MD_SUFFIX.length) as PageId;
       const full = path.join(this.layout.pagesDir, name);
       const text = await readIfExists(full);
-      if (text === null) continue;
+      if (text === null) {
+continue;
+}
       const parsed = parsePageFile(text, id, this.projectId);
       if (parsed.isErr()) {
         this.emitParseError(full, parsed.error);
@@ -568,7 +596,9 @@ export class ProjectFileStore {
     await new Promise<void>((resolve) => {
       let settled = false;
       const done = () => {
-        if (settled) return;
+        if (settled) {
+return;
+}
         settled = true;
         resolve();
       };
@@ -580,9 +610,13 @@ export class ProjectFileStore {
   }
 
   private async handleAddOrChange(filePath: string): Promise<void> {
-    if (this.closed) return;
+    if (this.closed) {
+return;
+}
     const text = await readIfExists(filePath);
-    if (text === null) return;
+    if (text === null) {
+return;
+}
     if (this.pendingWrites.get(filePath) === text) {
       this.pendingWrites.delete(filePath);
       this.stats.echoesSuppressed++;
@@ -595,7 +629,9 @@ export class ProjectFileStore {
     switch (kind.kind) {
       case 'project-config': {
         const parsed = parseProjectConfig(text);
-        if (parsed.isErr()) return this.emitParseError(filePath, parsed.error);
+        if (parsed.isErr()) {
+return this.emitParseError(filePath, parsed.error);
+}
         this.project = { ...parsed.value, id: this.projectId };
         this.events.onProjectChanged(this.project);
         return;
@@ -607,7 +643,9 @@ export class ProjectFileStore {
       }
       case 'ticket': {
         const parsed = parseTicketFile(text, kind.id, this.projectId);
-        if (parsed.isErr()) return this.emitParseError(filePath, parsed.error);
+        if (parsed.isErr()) {
+return this.emitParseError(filePath, parsed.error);
+}
         this.tickets.set(kind.id, this.stripAssembled(parsed.value));
         this.ticketBodies.set(kind.id, parsed.value.description ?? '');
         this.events.onTicketChanged(this.assembleTicket(parsed.value));
@@ -620,7 +658,9 @@ export class ProjectFileStore {
           this.emitParseError(filePath, new ProjectFileError(`line ${e.line}: ${e.message}`));
         }
         const base = this.tickets.get(kind.id);
-        if (base) this.events.onTicketChanged(this.assembleTicket(base));
+        if (base) {
+this.events.onTicketChanged(this.assembleTicket(base));
+}
         return;
       }
       case 'ticket-runs': {
@@ -630,19 +670,25 @@ export class ProjectFileStore {
           this.emitParseError(filePath, new ProjectFileError(`line ${e.line}: ${e.message}`));
         }
         const base = this.tickets.get(kind.id);
-        if (base) this.events.onTicketChanged(this.assembleTicket(base));
+        if (base) {
+this.events.onTicketChanged(this.assembleTicket(base));
+}
         return;
       }
       case 'milestone': {
         const parsed = parseMilestoneFile(text, kind.id, this.projectId);
-        if (parsed.isErr()) return this.emitParseError(filePath, parsed.error);
+        if (parsed.isErr()) {
+return this.emitParseError(filePath, parsed.error);
+}
         this.milestones.set(kind.id, parsed.value);
         this.events.onMilestoneChanged(parsed.value);
         return;
       }
       case 'page': {
         const parsed = parsePageFile(text, kind.id, this.projectId);
-        if (parsed.isErr()) return this.emitParseError(filePath, parsed.error);
+        if (parsed.isErr()) {
+return this.emitParseError(filePath, parsed.error);
+}
         this.pages.set(kind.id, parsed.value.page);
         this.pageBodies.set(kind.id, parsed.value.body);
         this.events.onPageChanged(parsed.value.page, parsed.value.body);
@@ -654,7 +700,9 @@ export class ProjectFileStore {
   }
 
   private handleUnlink(filePath: string): void {
-    if (this.closed) return;
+    if (this.closed) {
+return;
+}
     this.pendingWrites.delete(filePath);
     this.stats.externalDeletes++;
     const kind = classifyFile(filePath, this.layout);
@@ -667,13 +715,17 @@ export class ProjectFileStore {
       case 'ticket-comments': {
         this.comments.delete(kind.id);
         const base = this.tickets.get(kind.id);
-        if (base) this.events.onTicketChanged(this.assembleTicket(base));
+        if (base) {
+this.events.onTicketChanged(this.assembleTicket(base));
+}
         return;
       }
       case 'ticket-runs': {
         this.runs.delete(kind.id);
         const base = this.tickets.get(kind.id);
-        if (base) this.events.onTicketChanged(this.assembleTicket(base));
+        if (base) {
+this.events.onTicketChanged(this.assembleTicket(base));
+}
         return;
       }
       case 'milestone':
@@ -707,7 +759,9 @@ export class ProjectFileStore {
     try {
       await unlink(filePath);
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+return;
+}
       throw err;
     }
   }
@@ -719,9 +773,11 @@ export class ProjectFileStore {
   }
 
   private log(event: string, fields: Record<string, unknown> = {}): void {
-    if (!this.debug) return;
+    if (!this.debug) {
+return;
+}
     const parts = Object.entries(fields).map(([k, v]) => `${k}=${JSON.stringify(v)}`);
-    console.log(`[ProjectFileStore:${this.projectId}] ${event}${parts.length ? ' ' + parts.join(' ') : ''}`);
+    console.log(`[ProjectFileStore:${this.projectId}] ${event}${parts.length ? ` ${  parts.join(' ')}` : ''}`);
   }
 }
 
@@ -733,7 +789,9 @@ async function readIfExists(filePath: string): Promise<string | null> {
   try {
     return await readFile(filePath, 'utf-8');
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+return null;
+}
     throw err;
   }
 }
@@ -742,7 +800,9 @@ async function listDir(dirPath: string): Promise<string[]> {
   try {
     return await readdir(dirPath);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+return [];
+}
     throw err;
   }
 }

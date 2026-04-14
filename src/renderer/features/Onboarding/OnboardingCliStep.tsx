@@ -37,7 +37,9 @@ export const OnboardingCliStep = memo(({ onBack, onFinish }: Props) => {
     setError(null);
     try {
       const result = await emitter.invoke('util:install-cli-to-path');
-      if (!result.success) setError(result.error);
+      if (!result.success) {
+setError(result.error);
+}
       await checkStatus();
     } finally {
       setInstalling(false);

@@ -1,10 +1,10 @@
+import { makeStyles, tokens } from '@fluentui/react-components';
+import { ChevronRight12Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo } from 'react';
-import { ChevronRight12Regular } from '@fluentui/react-icons';
-import { makeStyles, tokens } from '@fluentui/react-components';
 
-import { persistedStoreApi } from '@/renderer/services/store';
 import { ticketApi } from '@/renderer/features/Tickets/state';
+import { persistedStoreApi } from '@/renderer/services/store';
 import type { PageId, ProjectId } from '@/shared/types';
 
 import { $pages } from './state';
@@ -76,7 +76,9 @@ export const PageBreadcrumb = memo(({ projectId, pageId }: BreadcrumbProps) => {
     [projectId]
   );
 
-  if (!project) return null;
+  if (!project) {
+return null;
+}
 
   return (
     <nav className={styles.root}>

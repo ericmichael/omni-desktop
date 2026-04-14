@@ -84,7 +84,9 @@ const connectClient = async (sessionId?: string): Promise<WebSocket> => {
 };
 
 const closeClient = async (ws: WebSocket): Promise<void> => {
-  if (ws.readyState === WebSocket.CLOSED) return;
+  if (ws.readyState === WebSocket.CLOSED) {
+return;
+}
   await new Promise<void>((resolve) => {
     ws.once('close', () => resolve());
     ws.close();
@@ -292,7 +294,7 @@ describe('WsHandler - cleanupAllSessions', () => {
     let onConnectCalls = 0;
     onConnectImpl = (session) => {
       onConnectCalls += 1;
-      session.handle('test:ping', () => 'v' + onConnectCalls);
+      session.handle('test:ping', () => `v${  onConnectCalls}`);
     };
     await connectClient('reuse-me');
     await handler.cleanupAllSessions();

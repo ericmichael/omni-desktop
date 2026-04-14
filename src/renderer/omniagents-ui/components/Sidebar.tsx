@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react'
+
+import { cn,formatRelativeTime, generateSessionTitle } from '@/renderer/omniagents-ui/lib/utils'
+
 import type { SessionItem } from './SessionList'
-import { formatRelativeTime, generateSessionTitle, cn } from '../lib/utils'
 
 export function Sidebar({ open, sessions, selectedId, onClose, onNewChat, onSelect, onDelete }:
   {
@@ -26,7 +28,9 @@ export function Sidebar({ open, sessions, selectedId, onClose, onNewChat, onSele
   const nonEmpty = useMemo(() => ordered.filter(s => s.message_count > 0), [ordered])
 
   const filtered = useMemo(() => {
-    if (!searchQuery.trim()) return nonEmpty
+    if (!searchQuery.trim()) {
+return nonEmpty
+}
     const query = searchQuery.toLowerCase()
     return nonEmpty.filter(s => {
       const title = generateSessionTitle(s).toLowerCase()
@@ -45,7 +49,9 @@ export function Sidebar({ open, sessions, selectedId, onClose, onNewChat, onSele
         <button
           onClick={() => {
             onSelect(s.id)
-            if (closeOnClick) onClose()
+            if (closeOnClick) {
+onClose()
+}
           }}
           className={cn(
             'relative w-full text-left px-3 py-2.5 rounded-lg transition-all group border',

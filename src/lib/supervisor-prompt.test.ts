@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Pipeline, Project, Ticket } from '@/shared/types';
-
 import { buildSupervisorPrompt } from '@/main/supervisor-prompt';
+import type { Pipeline, Project, Ticket } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
 // Fixtures

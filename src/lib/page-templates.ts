@@ -28,6 +28,8 @@ const TEMPLATES: Record<TemplateKey, string> = {
 
 /** Get template content by key. Returns empty string for unknown keys. */
 export function getTemplate(key: TemplateKey | undefined): string {
-  if (!key) return '';
+  if (!key) {
+return '';
+}
   return TEMPLATES[key] ?? '';
 }

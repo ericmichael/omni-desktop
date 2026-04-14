@@ -1,5 +1,5 @@
-import { memo, useCallback } from 'react';
 import { Settings20Filled } from '@fluentui/react-icons';
+import { memo, useCallback } from 'react';
 
 import { IconButton } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';

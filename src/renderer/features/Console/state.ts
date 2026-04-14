@@ -54,7 +54,9 @@ $isConsoleOpen.listen((isConsoleOpen) => {
 onMount($terminals, () => {
   task(async () => {
     const terminalIds = await emitter.invoke('terminal:list');
-    if (terminalIds.length === 0) return;
+    if (terminalIds.length === 0) {
+return;
+}
 
     const terminals = terminalIds.map((id) => buildTerminalState(id));
     $terminals.set(terminals);
@@ -72,11 +74,15 @@ export const createTerminal = async (cwd?: string) => {
 
 export const destroyTerminal = async (id?: string) => {
   const targetId = id ?? $activeTerminalId.get();
-  if (!targetId) return;
+  if (!targetId) {
+return;
+}
 
   const terminals = $terminals.get();
   const target = terminals.find((t) => t.id === targetId);
-  if (!target) return;
+  if (!target) {
+return;
+}
 
   await emitter.invoke('terminal:dispose', targetId);
   target.xterm.dispose();

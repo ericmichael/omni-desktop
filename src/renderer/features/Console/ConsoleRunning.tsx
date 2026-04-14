@@ -1,14 +1,14 @@
-import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
+import { Add20Regular, Dismiss12Regular, Dismiss20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback } from 'react';
-import { Add20Regular, Dismiss12Regular, Dismiss20Regular } from '@fluentui/react-icons';
 
 import { IconButton } from '@/renderer/ds';
 import { ConsoleXterm } from '@/renderer/features/Console/ConsoleXterm';
 import {
+  $activeTerminalId,
   $isConsoleOpen,
   $terminals,
-  $activeTerminalId,
   createTerminal,
   destroyTerminal,
   setActiveTerminal,

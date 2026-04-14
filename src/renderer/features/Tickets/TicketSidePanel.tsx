@@ -1,12 +1,12 @@
-import { memo, useCallback, useEffect, useRef } from 'react';
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import { ArrowMaximize20Regular, Dismiss20Regular } from '@fluentui/react-icons';
-import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
+import { memo, useCallback, useEffect, useRef } from 'react';
 
 import { IconButton } from '@/renderer/ds';
 import type { TicketId } from '@/shared/types';
 
-import { TicketDetail } from './TicketDetail';
 import { ticketApi } from './state';
+import { TicketDetail } from './TicketDetail';
 
 const PANEL_WIDTH = '480px';
 

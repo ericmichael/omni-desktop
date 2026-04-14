@@ -1,7 +1,7 @@
-import { createActor, fromCallback, getNextSnapshot } from 'xstate';
 import { describe, expect, it } from 'vitest';
+import { createActor, fromCallback, getNextSnapshot } from 'xstate';
 
-import { autoLaunchMachine, type AutoLaunchEvent } from './auto-launch.machine';
+import { type AutoLaunchEvent,autoLaunchMachine } from './auto-launch.machine';
 
 function next(snapshot: any, event: AutoLaunchEvent) {
   return getNextSnapshot(autoLaunchMachine, snapshot, event);
@@ -444,7 +444,9 @@ describe('autoLaunchMachine', () => {
         actors: {
           ...silentActors,
           checkRuntime: fromCallback<AutoLaunchEvent>(() => {
-            return () => { cleanedUp = true; };
+            return () => {
+ cleanedUp = true; 
+};
           }),
         },
       });

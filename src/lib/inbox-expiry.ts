@@ -38,8 +38,12 @@ export function sweepInbox(
   expiryMs: number = INBOX_EXPIRY_MS
 ): InboxItem[] {
   return items.map((item) => {
-    if (item.status !== 'new') return item;
-    if (!hasExpired(item.createdAt, nowMs, expiryMs)) return item;
+    if (item.status !== 'new') {
+return item;
+}
+    if (!hasExpired(item.createdAt, nowMs, expiryMs)) {
+return item;
+}
     return { ...item, status: 'later', laterAt: nowMs, updatedAt: nowMs };
   });
 }

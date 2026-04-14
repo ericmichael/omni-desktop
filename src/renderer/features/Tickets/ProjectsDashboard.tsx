@@ -1,16 +1,16 @@
-import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
-import { useStore } from '@nanostores/react';
-import { memo, useCallback, useMemo, useState } from 'react';
+import { makeStyles, mergeClasses,tokens } from '@fluentui/react-components';
 import {
   CalendarCheckmark20Regular,
-  Flash20Filled,
-  Warning20Regular,
   CheckmarkCircle20Regular,
   ChevronDown16Regular,
   ChevronRight16Regular,
+  Flash20Filled,
+  Warning20Regular,
 } from '@fluentui/react-icons';
+import { useStore } from '@nanostores/react';
+import { memo, useCallback, useMemo, useState } from 'react';
 
-import { focusHeader, rankFocus, type FocusItem } from '@/lib/focus-ranker';
+import { focusHeader, type FocusItem,rankFocus } from '@/lib/focus-ranker';
 import { detectRisks, type RiskSeverity, type RiskSignal } from '@/lib/risk-signals';
 import { computeShippedDigest, localBoundaries, type ShippedItem } from '@/lib/shipped-digest';
 import { dayName, isReviewDue } from '@/lib/weekly-review';
@@ -23,8 +23,8 @@ import { DEFAULT_PIPELINE } from '@/shared/pipeline-defaults';
 import { isActivePhase } from '@/shared/ticket-phase';
 import type { ColumnId } from '@/shared/types';
 
-import { PHASE_COLORS, PHASE_LABELS } from './ticket-constants';
 import { $wipDialogPendingTicket, ticketApi } from './state';
+import { PHASE_COLORS, PHASE_LABELS } from './ticket-constants';
 import { WeeklyReviewDialog } from './WeeklyReviewDialog';
 
 /* ---------- Styles ---------- */
@@ -318,8 +318,12 @@ FocusRow.displayName = 'FocusRow';
 /* ---------- Risk row ---------- */
 
 const severityClass = (sev: RiskSeverity, styles: ReturnType<typeof useStyles>) => {
-  if (sev === 'high') return styles.sevHigh;
-  if (sev === 'medium') return styles.sevMedium;
+  if (sev === 'high') {
+return styles.sevHigh;
+}
+  if (sev === 'medium') {
+return styles.sevMedium;
+}
   return styles.sevLow;
 };
 
@@ -437,7 +441,9 @@ export const ProjectsDashboard = memo(() => {
 
   const projectLabels = useMemo(() => {
     const map: Record<string, string> = {};
-    for (const p of store.projects) map[p.id] = p.label;
+    for (const p of store.projects) {
+map[p.id] = p.label;
+}
     return map;
   }, [store.projects]);
 
@@ -456,7 +462,9 @@ export const ProjectsDashboard = memo(() => {
     for (const project of store.projects) {
       const columns = project.pipeline?.columns ?? DEFAULT_PIPELINE.columns;
       const last = columns[columns.length - 1];
-      if (last) set.add(last.id);
+      if (last) {
+set.add(last.id);
+}
     }
     return set;
   }, [store.projects]);

@@ -1,6 +1,7 @@
+import { ArrowUpIcon, FolderIcon, Loader2Icon, LockIcon,MicIcon, MonitorIcon, PaperclipIcon, SquareIcon, XIcon } from 'lucide-react'
 import React, { useCallback, useMemo, useRef, useState } from 'react'
-import { PaperclipIcon, FolderIcon, MonitorIcon, MicIcon, ArrowUpIcon, SquareIcon, XIcon, Loader2Icon, LockIcon } from 'lucide-react'
-import { PromptInput, PromptInputTextarea, PromptInputActions } from './promptkit/PromptInput'
+
+import { PromptInput, PromptInputActions,PromptInputTextarea } from './promptkit/PromptInput'
 import { VoiceModal } from './VoiceModal'
 
 export function Input({ disabled, thinking, onStop, onSubmit, voiceEnabled, workspacePath, workspaceLocked, onWorkspaceClick, sandboxLabel, sandboxLoading, sessionId, onVoiceSessionCreated, onVoiceClose }:
@@ -18,20 +19,26 @@ export function Input({ disabled, thinking, onStop, onSubmit, voiceEnabled, work
 
   const insertNewlineAtCursor = useCallback((el?: HTMLTextAreaElement) => {
     const target = el ?? taRef.current
-    if (!target) return
+    if (!target) {
+return
+}
     const start = target.selectionStart ?? text.length
     const end = target.selectionEnd ?? text.length
-    const next = text.slice(0, start) + '\n' + text.slice(end)
+    const next = `${text.slice(0, start)  }\n${  text.slice(end)}`
     setText(next)
     const pos = start + 1
     requestAnimationFrame(() => {
-      try { target.setSelectionRange(pos, pos) } catch {}
+      try {
+ target.setSelectionRange(pos, pos) 
+} catch {}
     })
   }, [text])
 
   const handleSubmit = useCallback(() => {
     const t = text.trim()
-    if (!t && files.length === 0) return
+    if (!t && files.length === 0) {
+return
+}
     onSubmit(t, files)
     setHistory(h => h.length && h[h.length - 1] === t ? h : [...h, t])
     setHistoryIndex(0)
@@ -66,23 +73,33 @@ export function Input({ disabled, thinking, onStop, onSubmit, voiceEnabled, work
       const caretAtEnd = (el.selectionStart ?? 0) === text.length && (el.selectionEnd ?? 0) === text.length
       if (e.key === 'ArrowUp' && caretAtStart) {
         e.preventDefault()
-        if (historyIndex === 0) setHistoryDraft(text)
+        if (historyIndex === 0) {
+setHistoryDraft(text)
+}
         const nextIndex = Math.min(history.length, historyIndex + 1)
         setHistoryIndex(nextIndex)
         const replacement = nextIndex > 0 ? history[history.length - nextIndex] : historyDraft
-        if (replacement != null) setText(replacement)
+        if (replacement != null) {
+setText(replacement)
+}
         requestAnimationFrame(() => {
-          try { el.setSelectionRange(0, 0) } catch {}
+          try {
+ el.setSelectionRange(0, 0) 
+} catch {}
         })
       } else if (e.key === 'ArrowDown' && caretAtEnd) {
         e.preventDefault()
         const nextIndex = Math.max(0, historyIndex - 1)
         setHistoryIndex(nextIndex)
         const replacement = nextIndex > 0 ? history[history.length - nextIndex] : historyDraft
-        if (replacement != null) setText(replacement)
+        if (replacement != null) {
+setText(replacement)
+}
         requestAnimationFrame(() => {
           const pos = (replacement ?? '').length
-          try { el.setSelectionRange(pos, pos) } catch {}
+          try {
+ el.setSelectionRange(pos, pos) 
+} catch {}
         })
       }
     }
@@ -90,7 +107,9 @@ export function Input({ disabled, thinking, onStop, onSubmit, voiceEnabled, work
 
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items
-    if (!items) return
+    if (!items) {
+return
+}
     const imageFiles: File[] = []
     for (const item of items) {
       if (item.type.startsWith('image/')) {
@@ -136,7 +155,9 @@ export function Input({ disabled, thinking, onStop, onSubmit, voiceEnabled, work
                     <img src={URL.createObjectURL(f)} alt="" className="h-20 max-w-[160px] rounded-lg object-cover border border-border" />
                     <button onClick={() => {
                       setFiles(prev => prev.filter((_, idx) => idx !== i))
-                      if (fileInputRef.current) fileInputRef.current.value = ''
+                      if (fileInputRef.current) {
+fileInputRef.current.value = ''
+}
                     }} className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-card border border-border text-muted-foreground hover:text-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                       <XIcon size={12} />
                     </button>
@@ -147,7 +168,9 @@ export function Input({ disabled, thinking, onStop, onSubmit, voiceEnabled, work
                     <span className="max-w-[120px] truncate text-foreground" title={f.name}>{f.name}</span>
                     <button onClick={() => {
                       setFiles(prev => prev.filter((_, idx) => idx !== i))
-                      if (fileInputRef.current) fileInputRef.current.value = ''
+                      if (fileInputRef.current) {
+fileInputRef.current.value = ''
+}
                     }} className="hover:bg-accent rounded-full p-1">
                       <XIcon size={16} className="text-foreground" />
                     </button>
@@ -263,7 +286,9 @@ export function Input({ disabled, thinking, onStop, onSubmit, voiceEnabled, work
           isOpen={isVoiceModalOpen}
           sessionId={sessionId}
           onSessionCreated={onVoiceSessionCreated}
-          onClose={() => { setIsVoiceModalOpen(false); onVoiceClose?.(); }}
+          onClose={() => {
+ setIsVoiceModalOpen(false); onVoiceClose?.(); 
+}}
         />
       )}
     </div>

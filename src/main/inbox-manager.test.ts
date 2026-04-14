@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   InboxItemNotFoundError,
   InboxManager,
+  type InboxManagerStore,
   InboxPromotionError,
   PROMOTED_TOMBSTONE_TTL_MS,
-  type InboxManagerStore,
 } from '@/main/inbox-manager';
 import type { InboxItem, InboxShaping, Project, Ticket } from '@/shared/types';
 

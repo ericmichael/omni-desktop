@@ -12,7 +12,9 @@ export type SupervisorContext = {
 
 /** Render optional context sections (project brief, comments, blockers). */
 const buildContextSection = (ctx?: SupervisorContext): string => {
-  if (!ctx) return '';
+  if (!ctx) {
+return '';
+}
   const parts: string[] = [];
 
   if (ctx.projectBrief) {

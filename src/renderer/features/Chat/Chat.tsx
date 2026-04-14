@@ -1,16 +1,16 @@
-import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { Desktop20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { Desktop20Regular } from '@fluentui/react-icons';
 
 import { buildInteractiveVariables } from '@/lib/client-tools';
-import { OmniAgentsApp, OmniAgentsHostApp } from '@/renderer/omniagents-ui';
-import { buildSandboxLabel } from '@/renderer/omniagents-ui/sandbox-label';
+import { FloatingWidget } from '@/renderer/features/Omni/FloatingWidget';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
+import { OmniAgentsApp, OmniAgentsHostApp } from '@/renderer/omniagents-ui';
 import { ChatShell } from '@/renderer/omniagents-ui/ChatShell';
 import { getGreeting } from '@/renderer/omniagents-ui/greeting';
-import { FloatingWidget } from '@/renderer/features/Omni/FloatingWidget';
+import { buildSandboxLabel } from '@/renderer/omniagents-ui/sandbox-label';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
 import type { ProjectId } from '@/shared/types';
 
@@ -106,7 +106,9 @@ const ChatProjectPicker = memo(() => {
     persistedStoreApi.setKey('chatProjectId', value || null);
   }, []);
 
-  if (projects.length === 0) return null;
+  if (projects.length === 0) {
+return null;
+}
 
   return (
     <select
@@ -246,7 +248,9 @@ export const Chat = memo(() => {
   }, [chatStatus]);
 
   const localUiUrl = useMemo(() => {
-    if (!chatData) return null;
+    if (!chatData) {
+return null;
+}
     const url = new URL(chatData.uiUrl, window.location.origin);
     if (theme !== 'default') {
       url.searchParams.set('theme', theme);
@@ -256,7 +260,9 @@ export const Chat = memo(() => {
 
   // Reset when URLs go away
   useEffect(() => {
-    if (!chatData) setRunningMounted(false);
+    if (!chatData) {
+setRunningMounted(false);
+}
   }, [chatData]);
 
   const handleRunningReady = useCallback(() => {
@@ -294,7 +300,9 @@ export const Chat = memo(() => {
           <div
             className={styles.absoluteInsetZ10}
             ref={(el) => {
-              if (el) handleRunningReady();
+              if (el) {
+handleRunningReady();
+}
             }}
           >
             <SandboxRunningView sandboxUrls={chatData} theme={theme} greeting={greeting} sandboxLabel={sandboxLabel} sessionId={chatSessionId} onSessionChange={handleSessionChange} variables={variables} onClientToolCall={toolHandler} />

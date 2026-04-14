@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react'
 
 type PromptInputContextType = {
   isLoading: boolean
@@ -23,7 +23,9 @@ const PromptInputContext = createContext<PromptInputContextType>({
 
 function usePromptInput() {
   const context = useContext(PromptInputContext)
-  if (!context) throw new Error('usePromptInput must be used within a PromptInput')
+  if (!context) {
+throw new Error('usePromptInput must be used within a PromptInput')
+}
   return context
 }
 
@@ -77,9 +79,15 @@ export function PromptInputTextarea({ className, onKeyDown, disableAutosize = fa
   const { value, setValue, maxHeight, onSubmit, disabled, textareaRef } = usePromptInput()
 
   useEffect(() => {
-    if (disableAutosize) return
-    if (!textareaRef.current) return
-    if (textareaRef.current.scrollTop === 0) textareaRef.current.style.height = 'auto'
+    if (disableAutosize) {
+return
+}
+    if (!textareaRef.current) {
+return
+}
+    if (textareaRef.current.scrollTop === 0) {
+textareaRef.current.style.height = 'auto'
+}
     textareaRef.current.style.height =
       typeof maxHeight === 'number'
         ? `${Math.min(textareaRef.current.scrollHeight, maxHeight)}px`
@@ -88,7 +96,9 @@ export function PromptInputTextarea({ className, onKeyDown, disableAutosize = fa
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     onKeyDown?.(e)
-    if (e.defaultPrevented) return
+    if (e.defaultPrevented) {
+return
+}
     if (
       e.key === 'Enter' &&
       !e.shiftKey &&

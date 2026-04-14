@@ -11,9 +11,10 @@ import { shellEnvSync } from 'shell-env';
 import { assert } from 'tsafe';
 import { WebSocket as WsWebSocket } from 'ws';
 
-import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { OMNI_CODE_VERSION } from '@/lib/omni-version';
+import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
+import type { PlatformClient } from '@/main/platform-client';
 import {
   ensureDirectory,
   getBundledBinPath,
@@ -24,8 +25,7 @@ import {
   isFile,
   pathExists,
 } from '@/main/util';
-import type { PlatformClient } from '@/main/platform-client';
-import { uploadWorkspace, downloadWorkspace } from '@/main/workspace-sync';
+import { downloadWorkspace,uploadWorkspace } from '@/main/workspace-sync';
 import type {
   AgentProcessData,
   AgentProcessStatus,
@@ -167,10 +167,14 @@ export class AgentProcess {
     // Pre-flight checks
     if (this.mode === 'sandbox') {
       const dockerOk = await this.checkDocker(env);
-      if (!dockerOk) return;
+      if (!dockerOk) {
+return;
+}
     } else if (this.mode === 'podman') {
       const podmanOk = await this.checkPodman(env);
-      if (!podmanOk) return;
+      if (!podmanOk) {
+return;
+}
     }
 
     // Git-remote projects don't have a local workspace dir — the container clones the repo
@@ -272,13 +276,17 @@ export class AgentProcess {
       child.stderr.on('data', this.handleStderr);
 
       child.on('error', (error: Error) => {
-        if (this.childProcess && this.childProcess !== child) return;
+        if (this.childProcess && this.childProcess !== child) {
+return;
+}
         this.childProcess = null;
         this.updateStatus({ type: 'error', error: { message: error.message } });
       });
 
       child.on('close', (exitCode, signal) => {
-        if (this.childProcess && this.childProcess !== child) return;
+        if (this.childProcess && this.childProcess !== child) {
+return;
+}
         this.childProcess = null;
 
         if (this.status.type === 'exiting' || this.status.type === 'stopping') {
@@ -327,7 +335,7 @@ export class AgentProcess {
             this.ipcRawOutput('Finalizing workspace download...\r\n');
             const { downloadSasUrl } = await this.platformClient.finalizeWorkspace(sessionId);
             await downloadWorkspace(this.lastStartArg.workspaceDir, downloadSasUrl, this.fetchFn, (msg) =>
-              this.ipcRawOutput(msg + '\r\n')
+              this.ipcRawOutput(`${msg  }\r\n`)
             );
             this.ipcRawOutput('Workspace downloaded successfully\r\n');
           } catch (error) {
@@ -398,7 +406,7 @@ export class AgentProcess {
         this.log.info(c.cyan(`Preparing workspace upload for session ${session.sessionId}...\r\n`));
         const { uploadSasUrl } = await this.platformClient.prepareWorkspace(session.sessionId);
         await uploadWorkspace(arg.workspaceDir, uploadSasUrl, this.fetchFn, (msg) =>
-          this.ipcRawOutput(msg + '\r\n')
+          this.ipcRawOutput(`${msg  }\r\n`)
         );
         this.log.info(c.cyan('Workspace uploaded successfully\r\n'));
       }
@@ -407,7 +415,9 @@ export class AgentProcess {
       this.updateStatus({ type: 'connecting', data: { uiUrl: '' } });
 
       const ready = await this.platformClient.waitForSession(session.sessionId);
-      if (this.isStopping()) return;
+      if (this.isStopping()) {
+return;
+}
 
       const wsUrl = ready.websocketUrl!;
       let uiUrl = wsUrl.replace(/^wss?:/, 'https:').replace(/\/ws$/, '');
@@ -430,7 +440,9 @@ export class AgentProcess {
       this.log.info(c.cyan('Waiting for platform container services to accept connections...\r\n'));
       await this.waitForReady(data);
     } catch (error) {
-      if (this.isStopping()) return;
+      if (this.isStopping()) {
+return;
+}
       this.updateStatus({ type: 'error', error: { message: (error as Error).message } });
     }
   };
@@ -541,7 +553,9 @@ export class AgentProcess {
       const libDir = join(pythonRoot, 'lib');
       const libEntries = await readdir(libDir);
       const pythonDir = libEntries.find((e) => e.startsWith('python'));
-      if (!pythonDir) return [];
+      if (!pythonDir) {
+return [];
+}
 
       const spDir = join(libDir, pythonDir, 'site-packages');
       const spEntries = await readdir(spDir);
@@ -577,20 +591,28 @@ export class AgentProcess {
     try {
       const dotGit = join(workspaceDir, '.git');
       const st = await stat(dotGit);
-      if (!st.isFile()) return null;
+      if (!st.isFile()) {
+return null;
+}
 
       const content = (await readFile(dotGit, 'utf-8')).trim();
-      if (!content.startsWith('gitdir:')) return null;
+      if (!content.startsWith('gitdir:')) {
+return null;
+}
 
       const gitdirValue = content.slice('gitdir:'.length).trim();
       const gitdirPath = resolve(workspaceDir, gitdirValue);
 
       // Expect: …/.git/worktrees/<name> — parent must be "worktrees"
       const parent = resolve(gitdirPath, '..');
-      if (basename(parent) !== 'worktrees') return null;
+      if (basename(parent) !== 'worktrees') {
+return null;
+}
 
       const parentGitDir = resolve(parent, '..');
-      if (!(await isDirectory(parentGitDir))) return null;
+      if (!(await isDirectory(parentGitDir))) {
+return null;
+}
 
       return parentGitDir;
     } catch {
@@ -698,7 +720,9 @@ export class AgentProcess {
     this.ipcRawOutput(str);
     process.stdout.write(str);
 
-    if (this.jsonEmitted) return;
+    if (this.jsonEmitted) {
+return;
+}
 
     this.stdoutBuffer += str;
     const lines = this.stdoutBuffer.split(/\r?\n/);
@@ -716,7 +740,9 @@ export class AgentProcess {
   };
 
   private tryParseStdoutLine = (line: string): void => {
-    if (this.jsonEmitted) return;
+    if (this.jsonEmitted) {
+return;
+}
 
     const trimmed = line.trim();
 
@@ -730,14 +756,18 @@ export class AgentProcess {
       }
 
       if (this.mode === 'sandbox' || this.mode === 'podman' || this.mode === 'vm') {
-        if (!('sandbox_url' in parsed) || !('ui_url' in parsed)) return;
+        if (!('sandbox_url' in parsed) || !('ui_url' in parsed)) {
+return;
+}
         const data = sandboxPayloadToData(parsed as unknown as SandboxJsonPayload);
         this.jsonEmitted = true;
         this.updateStatus({ type: 'connecting', data });
         this.log.info(c.cyan('Waiting for services to accept connections...\r\n'));
         void this.waitForReady(data);
       } else {
-        if (typeof parsed.url !== 'string' || typeof parsed.port !== 'number') return;
+        if (typeof parsed.url !== 'string' || typeof parsed.port !== 'number') {
+return;
+}
         const data: AgentProcessData = { uiUrl: parsed.url as string, port: parsed.port as number };
         this.jsonEmitted = true;
         this.updateStatus({ type: 'connecting', data });
@@ -769,10 +799,14 @@ export class AgentProcess {
           let settled = false;
           const socket = new WsWebSocket(url);
           const finish = (result: boolean): void => {
-            if (settled) return;
+            if (settled) {
+return;
+}
             settled = true;
             clearTimeout(timer);
-            try { socket.close(); } catch {}
+            try {
+ socket.close(); 
+} catch {}
             resolve(result);
           };
           const timer = setTimeout(() => finish(false), 2_000);
@@ -801,13 +835,17 @@ export class AgentProcess {
     }
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      if (this.isStopping()) return;
+      if (this.isStopping()) {
+return;
+}
 
       const httpOk = await checkHttp(data.uiUrl);
       const wsOk = wsCheckUrl ? await checkWs(wsCheckUrl) : true;
 
       if (httpOk && wsOk) {
-        if (this.isStopping()) return;
+        if (this.isStopping()) {
+return;
+}
         this.updateStatus({ type: 'running', data });
         const label = this.mode === 'sandbox' ? 'Sandbox' : this.mode === 'podman' ? 'Sandbox (Podman)' : this.mode === 'vm' ? 'VM sandbox' : this.mode === 'platform' ? 'Platform sandbox' : 'Agent';
         this.log.info(c.green.bold(`${label} started\r\n`));
@@ -817,7 +855,9 @@ export class AgentProcess {
       await new Promise<void>((r) => setTimeout(r, 1000));
     }
 
-    if (this.isStopping()) return;
+    if (this.isStopping()) {
+return;
+}
 
     // Timeout
     if (this.mode === 'sandbox' || this.mode === 'podman') {
@@ -890,13 +930,17 @@ export class AgentProcess {
   };
 
   private getActiveContainerRef = (): string | null => {
-    if (this.status.type !== 'running' && this.status.type !== 'connecting') return null;
+    if (this.status.type !== 'running' && this.status.type !== 'connecting') {
+return null;
+}
     return this.status.data.containerName ?? this.status.data.containerId ?? null;
   };
 
   private stopActiveContainer = async (env: Record<string, string>): Promise<void> => {
     const containerRef = this.getActiveContainerRef();
-    if (!containerRef) return;
+    if (!containerRef) {
+return;
+}
     try {
       await execFileAsync(this.containerBin, ['stop', containerRef], { encoding: 'utf8', timeout: 15_000, env });
     } catch {
@@ -922,7 +966,9 @@ export class AgentProcess {
           cwd,
           Math.floor(timeoutMs / 1000)
         );
-        if (result.stderr) this.log.info(`[exec] ${result.stderr.trim()}`);
+        if (result.stderr) {
+this.log.info(`[exec] ${result.stderr.trim()}`);
+}
         return result.success;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -933,7 +979,7 @@ export class AgentProcess {
 
     // Local/none modes have no container to exec into
     if (this.mode === 'local' || this.mode === 'none') {
-      this.log.warn('execInContainer not supported for mode: ' + this.mode);
+      this.log.warn(`execInContainer not supported for mode: ${  this.mode}`);
       return true;
     }
 
@@ -944,7 +990,9 @@ export class AgentProcess {
       return false;
     }
     const args = ['exec'];
-    if (cwd) args.push('-w', cwd);
+    if (cwd) {
+args.push('-w', cwd);
+}
     args.push(containerRef, '/bin/sh', '-c', command);
 
     try {
@@ -954,7 +1002,9 @@ export class AgentProcess {
         timeout: timeoutMs,
         env,
       });
-      if (stderr) this.log.info(`[exec] ${stderr.trim()}`);
+      if (stderr) {
+this.log.info(`[exec] ${stderr.trim()}`);
+}
       return true;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

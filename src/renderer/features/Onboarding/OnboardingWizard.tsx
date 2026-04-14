@@ -1,7 +1,7 @@
 import { makeStyles, tokens } from '@fluentui/react-components';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Body1, Caption1, Card, ProgressBar, Subtitle1 } from '@/renderer/ds';
+import { Caption1, Card, ProgressBar, Subtitle1 } from '@/renderer/ds';
 import { OnboardingCliStep } from '@/renderer/features/Onboarding/OnboardingCliStep';
 import { OnboardingCredentialsStep } from '@/renderer/features/Onboarding/OnboardingCredentialsStep';
 import { OnboardingModelStep } from '@/renderer/features/Onboarding/OnboardingModelStep';
@@ -17,7 +17,9 @@ const FULL_STEP_ORDER: Step[] = ['provider', 'credentials', 'model', 'validate',
 const SHORT_STEP_ORDER: Step[] = ['cli'];
 
 const hasProviders = (config: ModelsConfig | null): boolean => {
-  if (!config || config.version !== 3) return false;
+  if (!config || config.version !== 3) {
+return false;
+}
   return Object.keys(config.providers).length > 0;
 };
 
@@ -83,7 +85,9 @@ export const OnboardingWizard = memo(() => {
   const handleModelBack = useCallback(() => goToStep('credentials'), [goToStep]);
 
   const handleModelNext = useCallback(async () => {
-    if (!providerType || !modelId.trim()) return;
+    if (!providerType || !modelId.trim()) {
+return;
+}
 
     const providerName = DEFAULT_PROVIDER_NAMES[providerType] ?? 'openai';
     const modelKey = modelId.split('/').pop() || modelId;
@@ -97,8 +101,12 @@ export const OnboardingWizard = memo(() => {
 
     const provider: ProviderEntry = config.providers[providerName] ?? { type: providerType, models: {} };
     provider.type = providerType;
-    if (apiKey.trim()) provider.api_key = apiKey.trim();
-    if (baseUrl.trim()) provider.base_url = baseUrl.trim();
+    if (apiKey.trim()) {
+provider.api_key = apiKey.trim();
+}
+    if (baseUrl.trim()) {
+provider.base_url = baseUrl.trim();
+}
 
     provider.models[modelKey] = {
       model: modelId.trim(),
@@ -109,7 +117,9 @@ export const OnboardingWizard = memo(() => {
     };
 
     config.providers[providerName] = provider;
-    if (!config.default) config.default = `${providerName}/${modelKey}`;
+    if (!config.default) {
+config.default = `${providerName}/${modelKey}`;
+}
 
     await configApi.writeJsonFile(`${configDir}/models.json`, config);
     goToStep('validate');
@@ -123,7 +133,9 @@ export const OnboardingWizard = memo(() => {
     await persistedStoreApi.setKey('onboardingComplete', true);
   }, []);
 
-  if (!step) return null;
+  if (!step) {
+return null;
+}
 
   return (
     <div className={styles.root}>

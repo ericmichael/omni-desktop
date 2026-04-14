@@ -12,7 +12,9 @@ export const openTicketInCode = async (ticketId: TicketId): Promise<void> => {
   let ticket = $tickets.get()[ticketId];
   if (!ticket) {
     const persisted = persistedStoreApi.$atom.get().tickets.find((t) => t.id === ticketId);
-    if (!persisted) return;
+    if (!persisted) {
+return;
+}
     $tickets.setKey(ticketId, persisted);
     ticket = persisted;
   }
@@ -39,9 +41,13 @@ const startSessionSync = (): void => {
   $tickets.subscribe((tickets) => {
     const codeTabs = persistedStoreApi.getKey('codeTabs') ?? [];
     for (const tab of codeTabs) {
-      if (!tab.ticketId) continue;
+      if (!tab.ticketId) {
+continue;
+}
       const ticket = tickets[tab.ticketId];
-      if (!ticket) continue;
+      if (!ticket) {
+continue;
+}
       const prev = prevSessionIds.get(tab.ticketId);
       if (ticket.supervisorSessionId !== prev) {
         prevSessionIds.set(tab.ticketId, ticket.supervisorSessionId);

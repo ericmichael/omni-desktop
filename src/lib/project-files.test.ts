@@ -164,7 +164,9 @@ describe('ticket file roundtrip', () => {
     const text = serializeTicketFile(t);
     const parsed = parseTicketFile(text, t.id, t.projectId);
     expect(parsed.isOk()).toBe(true);
-    if (parsed.isOk()) expect(parsed.value).toEqual(t);
+    if (parsed.isOk()) {
+expect(parsed.value).toEqual(t);
+}
   });
 
   it('uses ISO strings for timestamps in the file', () => {
@@ -240,7 +242,9 @@ describe('milestone file roundtrip', () => {
     const text = serializeMilestoneFile(m);
     const parsed = parseMilestoneFile(text, m.id, m.projectId);
     expect(parsed.isOk()).toBe(true);
-    if (parsed.isOk()) expect(parsed.value).toEqual(m);
+    if (parsed.isOk()) {
+expect(parsed.value).toEqual(m);
+}
   });
 
   it('roundtrips a milestone with a brief body', () => {
@@ -248,7 +252,9 @@ describe('milestone file roundtrip', () => {
     const text = serializeMilestoneFile(m);
     const parsed = parseMilestoneFile(text, m.id, m.projectId);
     expect(parsed.isOk()).toBe(true);
-    if (parsed.isOk()) expect(parsed.value).toEqual(m);
+    if (parsed.isOk()) {
+expect(parsed.value).toEqual(m);
+}
   });
 
   it('rejects invalid status', () => {
@@ -343,7 +349,9 @@ describe('project config roundtrip', () => {
     const text = serializeProjectConfig(p);
     const parsed = parseProjectConfig(text);
     expect(parsed.isOk()).toBe(true);
-    if (parsed.isOk()) expect(parsed.value).toEqual(p);
+    if (parsed.isOk()) {
+expect(parsed.value).toEqual(p);
+}
   });
 
   it('roundtrips a project with local source and pipeline', () => {
@@ -362,7 +370,9 @@ describe('project config roundtrip', () => {
     const text = serializeProjectConfig(p);
     const parsed = parseProjectConfig(text);
     expect(parsed.isOk()).toBe(true);
-    if (parsed.isOk()) expect(parsed.value).toEqual(p);
+    if (parsed.isOk()) {
+expect(parsed.value).toEqual(p);
+}
   });
 
   it('roundtrips a project with git-remote source', () => {
@@ -372,7 +382,9 @@ describe('project config roundtrip', () => {
     const text = serializeProjectConfig(p);
     const parsed = parseProjectConfig(text);
     expect(parsed.isOk()).toBe(true);
-    if (parsed.isOk()) expect(parsed.value).toEqual(p);
+    if (parsed.isOk()) {
+expect(parsed.value).toEqual(p);
+}
   });
 
   it('rejects an unknown source kind', () => {
@@ -409,7 +421,7 @@ describe('ticket comments JSONL', () => {
   });
 
   it('collects errors for bad lines without dropping good ones', () => {
-    const text = serializeTicketComment(comment) + 'not-json\n' + serializeTicketComment({ ...comment, id: 'c2' });
+    const text = `${serializeTicketComment(comment)  }not-json\n${  serializeTicketComment({ ...comment, id: 'c2' })}`;
     const { items, errors } = parseTicketComments(text);
     expect(items).toHaveLength(2);
     expect(errors).toHaveLength(1);
@@ -417,7 +429,7 @@ describe('ticket comments JSONL', () => {
   });
 
   it('tolerates trailing blank lines', () => {
-    const text = serializeTicketComment(comment) + '\n\n';
+    const text = `${serializeTicketComment(comment)  }\n\n`;
     const { items, errors } = parseTicketComments(text);
     expect(items).toHaveLength(1);
     expect(errors).toEqual([]);

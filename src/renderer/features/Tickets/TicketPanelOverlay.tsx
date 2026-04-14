@@ -1,8 +1,8 @@
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { BranchRequest20Regular, Dismiss20Regular,DocumentMultiple20Regular, Info20Regular } from '@fluentui/react-icons';
+import { useStore } from '@nanostores/react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { memo } from 'react';
-import { useStore } from '@nanostores/react';
-import { DocumentMultiple20Regular, BranchRequest20Regular, Info20Regular, Dismiss20Regular } from '@fluentui/react-icons';
-import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
 
 import type { TicketId } from '@/shared/types';
 
@@ -96,7 +96,9 @@ const PanelContent = memo(({ panel, ticketId }: { panel: TicketPanel; ticketId: 
   const ticket = tickets[ticketId];
 
   if (panel === 'overview') {
-    if (!ticket) return null;
+    if (!ticket) {
+return null;
+}
     return (
       <div className={styles.overviewScroll}>
         <TicketOverviewTab ticket={ticket} />

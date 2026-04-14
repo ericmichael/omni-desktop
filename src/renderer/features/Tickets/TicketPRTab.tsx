@@ -1,13 +1,13 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
 import { ArrowSync20Regular, BranchCompare20Regular } from '@fluentui/react-icons';
-import { makeStyles, mergeClasses, tokens, shorthands } from '@fluentui/react-components';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
-import { IconButton, ListSkeleton, Spinner, Tab, TabList } from '@/renderer/ds';
 import type { SelectTabData } from '@/renderer/ds';
+import { IconButton, ListSkeleton, Tab, TabList } from '@/renderer/ds';
 import type { DiffResponse, FileDiff, TicketId } from '@/shared/types';
 
-import { TicketPROverview } from './TicketPROverview';
 import { ticketApi } from './state';
+import { TicketPROverview } from './TicketPROverview';
 
 const POLL_INTERVAL_MS = 5_000;
 const MIN_LIST_PERCENT = 20;

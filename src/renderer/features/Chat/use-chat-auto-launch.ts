@@ -1,6 +1,6 @@
 import { useStore } from '@nanostores/react';
 
-import { useAutoLaunch, type AutoLaunchPhase } from '@/renderer/hooks/use-auto-launch';
+import { type AutoLaunchPhase,useAutoLaunch } from '@/renderer/hooks/use-auto-launch';
 import { persistedStoreApi } from '@/renderer/services/store';
 
 export type ChatAutoLaunchPhase = AutoLaunchPhase;

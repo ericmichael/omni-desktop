@@ -56,7 +56,9 @@ export const BottomSheet = ({ open, onClose, className, children }: PropsWithChi
 
   const handleOpenChange = useCallback(
     (_event: unknown, data: { open: boolean }) => {
-      if (!data.open) onClose();
+      if (!data.open) {
+onClose();
+}
     },
     [onClose]
   );

@@ -1,4 +1,4 @@
-import type { Appetite, TicketPriority, TicketResolution, TicketPhase } from '@/shared/types';
+import type { Appetite, TicketPhase,TicketPriority, TicketResolution } from '@/shared/types';
 
 
 export const TICKET_PRIORITY_LABELS: Record<TicketPriority, string> = {

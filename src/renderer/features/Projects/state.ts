@@ -1,5 +1,5 @@
 import { emitter } from '@/renderer/services/ipc';
-import type { Project, ProjectId, GitRepoInfo } from '@/shared/types';
+import type { GitRepoInfo,Project, ProjectId } from '@/shared/types';
 
 export const projectsApi = {
   addProject: (project: Omit<Project, 'id' | 'createdAt'>): Promise<Project> => {

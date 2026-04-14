@@ -1,14 +1,13 @@
-import { createActor, getNextSnapshot } from 'xstate';
 import { describe, expect, it } from 'vitest';
+import { createActor, getNextSnapshot } from 'xstate';
 
 import type { MessageItem } from '@/shared/chat-types';
 
 import {
-  chatSessionMachine,
-  isThinking,
   type ChatSessionContext,
   type ChatSessionEvent,
-  type ChatSessionPhase,
+  chatSessionMachine,
+  isThinking,
 } from './chat-session.machine';
 
 // ---------------------------------------------------------------------------

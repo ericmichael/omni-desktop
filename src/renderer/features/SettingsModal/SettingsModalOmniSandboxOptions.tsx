@@ -1,16 +1,16 @@
+import { makeStyles, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
-import { makeStyles, tokens } from '@fluentui/react-components';
 import { Button, Card, FormField, MessageBar, MessageBarBody, SectionLabel, Select } from '@/renderer/ds';
 import { $launcherVersion } from '@/renderer/features/Banner/state';
+import { $chatProcessStatus } from '@/renderer/features/Chat/state';
 import {
   $omniInstallProcessStatus,
   $omniRuntimeInfo,
   omniInstallApi,
 } from '@/renderer/features/Omni/state';
-import { $chatProcessStatus } from '@/renderer/features/Chat/state';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi, selectWorkspaceDir } from '@/renderer/services/store';
 import type { OmniTheme, SandboxBackend } from '@/shared/types';
@@ -137,7 +137,9 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
   const onDeckBackgroundFile = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (!file) return;
+    if (!file) {
+return;
+}
     if (!file.type.startsWith('image/')) {
       window.alert('Please choose an image file.');
       return;

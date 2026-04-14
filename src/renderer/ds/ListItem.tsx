@@ -1,6 +1,6 @@
 import { Body1, Caption1, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import type { ReactNode } from 'react';
 import { ChevronRight20Regular } from '@fluentui/react-icons';
+import type { ReactNode } from 'react';
 
 type ListItemProps = {
   icon?: ReactNode;

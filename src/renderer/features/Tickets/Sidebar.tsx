@@ -1,13 +1,13 @@
 import {
+  makeStyles,
   NavDrawer,
   NavDrawerBody,
-  makeStyles,
-  tokens,
   Subtitle2,
+  tokens,
 } from '@fluentui/react-components';
+import { Add20Regular, ChevronDown12Regular, ChevronRight12Regular, Home16Regular, MailInbox16Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
-import { Add20Regular, ChevronDown12Regular, ChevronRight12Regular, Home16Regular, MailInbox16Regular } from '@fluentui/react-icons';
 
 import { AnimatedDialog, Caption1, DialogBody, DialogContent, DialogHeader, IconButton, Tree, TreeItem, TreeItemLayout } from '@/renderer/ds';
 import { $activeInbox } from '@/renderer/features/Inbox/state';
@@ -94,13 +94,27 @@ const useStyles = makeStyles({
 
 /** Build a unique selectedValue from the current view state. */
 function viewToNavValue(view: ReturnType<typeof $ticketsView.get>): string | undefined {
-  if (view.type === 'dashboard') return 'home';
-  if (view.type === 'inbox') return view.selectedItemId ? `inbox:${view.selectedItemId}` : 'inbox';
-  if (view.type === 'project') return `project:${view.projectId}`;
-  if (view.type === 'ticket') return `ticket:${view.ticketId}`;
-  if (view.type === 'page') return `page:${view.pageId}:${view.projectId}`;
-  if (view.type === 'milestone') return `milestone:${view.milestoneId}:${view.projectId}`;
-  if (view.type === 'board') return `board:${view.projectId}`;
+  if (view.type === 'dashboard') {
+return 'home';
+}
+  if (view.type === 'inbox') {
+return view.selectedItemId ? `inbox:${view.selectedItemId}` : 'inbox';
+}
+  if (view.type === 'project') {
+return `project:${view.projectId}`;
+}
+  if (view.type === 'ticket') {
+return `ticket:${view.ticketId}`;
+}
+  if (view.type === 'page') {
+return `page:${view.pageId}:${view.projectId}`;
+}
+  if (view.type === 'milestone') {
+return `milestone:${view.milestoneId}:${view.projectId}`;
+}
+  if (view.type === 'board') {
+return `board:${view.projectId}`;
+}
   return undefined;
 }
 

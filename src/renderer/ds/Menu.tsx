@@ -1,3 +1,4 @@
+export type { MenuItemProps, MenuProps, MenuTriggerProps } from '@fluentui/react-components';
 export {
   Menu,
   MenuDivider,
@@ -6,4 +7,3 @@ export {
   MenuPopover,
   MenuTrigger,
 } from '@fluentui/react-components';
-export type { MenuItemProps, MenuProps, MenuTriggerProps } from '@fluentui/react-components';

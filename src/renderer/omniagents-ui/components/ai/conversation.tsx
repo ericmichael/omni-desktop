@@ -1,10 +1,11 @@
-import { Button } from '../ui/button'
-import { cn } from '../../lib/utils'
-import type { UIMessage } from '../../ai-types'
 import { ArrowDownIcon, DownloadIcon } from 'lucide-react'
 import type { ComponentProps } from 'react'
 import { useCallback } from 'react'
 import { StickToBottom, useStickToBottomContext } from 'use-stick-to-bottom'
+
+import type { UIMessage } from '@/renderer/omniagents-ui/ai-types'
+import { Button } from '@/renderer/omniagents-ui/components/ui/button'
+import { cn } from '@/renderer/omniagents-ui/lib/utils'
 
 export type ConversationProps = ComponentProps<typeof StickToBottom>
 

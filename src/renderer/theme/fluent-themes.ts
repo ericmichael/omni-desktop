@@ -1,5 +1,5 @@
-import { createDarkTheme, createLightTheme } from '@fluentui/react-components';
 import type { BrandVariants, Theme } from '@fluentui/react-components';
+import { createDarkTheme, createLightTheme } from '@fluentui/react-components';
 
 import type { OmniTheme } from '@/shared/types';
 

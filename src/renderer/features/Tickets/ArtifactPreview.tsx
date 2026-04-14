@@ -1,6 +1,6 @@
-import { memo, useCallback, useEffect, useState } from 'react';
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import { Open20Regular } from '@fluentui/react-icons';
-import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
+import { memo, useCallback, useEffect, useState } from 'react';
 
 import { isTextMime } from '@/lib/mime-types';
 import { Button } from '@/renderer/ds';

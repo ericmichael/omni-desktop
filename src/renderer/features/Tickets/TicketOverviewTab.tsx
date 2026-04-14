@@ -1,14 +1,14 @@
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { Dismiss20Regular,Edit20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
-import { Edit20Regular, Dismiss20Regular } from '@fluentui/react-icons';
-import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 
 import { Badge, Button, IconButton, SectionLabel, Select, Textarea } from '@/renderer/ds';
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import type { Ticket, TicketPriority, TicketResolution } from '@/shared/types';
 
-import { APPETITE_COLORS, APPETITE_DESCRIPTIONS, APPETITE_LABELS, getColumnColors, RESOLUTION_COLORS, RESOLUTION_LABELS } from './ticket-constants';
 import { $pipeline, $tickets, ticketApi } from './state';
+import { APPETITE_COLORS, APPETITE_DESCRIPTIONS, APPETITE_LABELS, getColumnColors, RESOLUTION_COLORS, RESOLUTION_LABELS } from './ticket-constants';
 
 const useStyles = makeStyles({
   root: {
@@ -149,7 +149,9 @@ export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
   const [editDescription, setEditDescription] = useState('');
 
   const currentColumn = useMemo(() => {
-    if (!ticket.columnId || !pipeline) return undefined;
+    if (!ticket.columnId || !pipeline) {
+return undefined;
+}
     return pipeline.columns.find((c) => c.id === ticket.columnId);
   }, [ticket, pipeline]);
 
@@ -198,7 +200,9 @@ export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
   const handleAddBlocker = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       const blockerId = e.target.value;
-      if (!blockerId) return;
+      if (!blockerId) {
+return;
+}
       void ticketApi.updateTicket(ticket.id, { blockedBy: [...ticket.blockedBy, blockerId] });
     },
     [ticket.id, ticket.blockedBy]

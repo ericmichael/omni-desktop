@@ -1,9 +1,10 @@
-import { Alert, AlertDescription } from '../ui/alert'
-import { Button } from '../ui/button'
-import { cn } from '../../lib/utils'
-import type { ToolUIPart } from '../../ai-types'
 import type { ComponentProps, ReactNode } from 'react'
 import { createContext, useContext, useMemo } from 'react'
+
+import type { ToolUIPart } from '@/renderer/omniagents-ui/ai-types'
+import { Alert, AlertDescription } from '@/renderer/omniagents-ui/components/ui/alert'
+import { Button } from '@/renderer/omniagents-ui/components/ui/button'
+import { cn } from '@/renderer/omniagents-ui/lib/utils'
 
 type ToolUIPartApproval =
   | { id: string; approved?: never; reason?: never }
@@ -21,7 +22,9 @@ const ConfirmationContext = createContext<ConfirmationContextValue | null>(null)
 
 const useConfirmation = () => {
   const context = useContext(ConfirmationContext)
-  if (!context) throw new Error('Confirmation components must be used within Confirmation')
+  if (!context) {
+throw new Error('Confirmation components must be used within Confirmation')
+}
   return context
 }
 
@@ -33,7 +36,9 @@ export type ConfirmationProps = ComponentProps<typeof Alert> & {
 export const Confirmation = ({ className, approval, state, ...props }: ConfirmationProps) => {
   const contextValue = useMemo(() => ({ approval, state }), [approval, state])
 
-  if (!approval || state === 'input-streaming' || state === 'input-available') return null
+  if (!approval || state === 'input-streaming' || state === 'input-available') {
+return null
+}
 
   return (
     <ConfirmationContext.Provider value={contextValue}>
@@ -54,7 +59,9 @@ export interface ConfirmationRequestProps {
 
 export const ConfirmationRequest = ({ children }: ConfirmationRequestProps) => {
   const { state } = useConfirmation()
-  if (state !== 'approval-requested') return null
+  if (state !== 'approval-requested') {
+return null
+}
   return children
 }
 
@@ -64,7 +71,9 @@ export interface ConfirmationAcceptedProps {
 
 export const ConfirmationAccepted = ({ children }: ConfirmationAcceptedProps) => {
   const { approval, state } = useConfirmation()
-  if (!approval?.approved || (state !== 'approval-responded' && state !== 'output-denied' && state !== 'output-available')) return null
+  if (!approval?.approved || (state !== 'approval-responded' && state !== 'output-denied' && state !== 'output-available')) {
+return null
+}
   return children
 }
 
@@ -74,7 +83,9 @@ export interface ConfirmationRejectedProps {
 
 export const ConfirmationRejected = ({ children }: ConfirmationRejectedProps) => {
   const { approval, state } = useConfirmation()
-  if (approval?.approved !== false || (state !== 'approval-responded' && state !== 'output-denied' && state !== 'output-available')) return null
+  if (approval?.approved !== false || (state !== 'approval-responded' && state !== 'output-denied' && state !== 'output-available')) {
+return null
+}
   return children
 }
 
@@ -82,7 +93,9 @@ export type ConfirmationActionsProps = ComponentProps<'div'>
 
 export const ConfirmationActions = ({ className, ...props }: ConfirmationActionsProps) => {
   const { state } = useConfirmation()
-  if (state !== 'approval-requested') return null
+  if (state !== 'approval-requested') {
+return null
+}
   return <div className={cn('flex items-center justify-end gap-2 self-end', className)} {...props} />
 }
 

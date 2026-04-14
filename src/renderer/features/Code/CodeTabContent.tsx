@@ -4,13 +4,13 @@ import { motion } from 'framer-motion';
 import { memo, useCallback, useMemo } from 'react';
 
 import { buildCodeVariables } from '@/lib/client-tools';
-import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { SessionStartupShell } from '@/renderer/common/SessionStartupShell';
 import { Button } from '@/renderer/ds';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
-import { persistedStoreApi } from '@/renderer/services/store';
+import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { buildSandboxLabel, isCustomSandbox } from '@/renderer/omniagents-ui/sandbox-label';
+import { persistedStoreApi } from '@/renderer/services/store';
 import type { CodeTab, CodeTabId, TicketId } from '@/shared/types';
 
 import { CodeEmptyState } from './CodeEmptyState';

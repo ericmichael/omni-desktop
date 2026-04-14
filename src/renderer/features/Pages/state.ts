@@ -18,7 +18,9 @@ export const pageApi = {
     const current = $pages.get();
     const next: Record<PageId, Page> = {};
     for (const [id, page] of Object.entries(current)) {
-      if (page.projectId !== projectId) next[id] = page;
+      if (page.projectId !== projectId) {
+next[id] = page;
+}
     }
     for (const item of items) {
       next[item.id] = item;
@@ -101,13 +103,17 @@ export const pageApi = {
    */
   onExternalChange: (pageId: PageId, handler: (content: string) => void): (() => void) => {
     return ipc.on('page:content-changed', (id, content) => {
-      if (id === pageId) handler(content);
+      if (id === pageId) {
+handler(content);
+}
     });
   },
 
   onExternalDelete: (pageId: PageId, handler: () => void): (() => void) => {
     return ipc.on('page:content-deleted', (id) => {
-      if (id === pageId) handler();
+      if (id === pageId) {
+handler();
+}
     });
   },
 };

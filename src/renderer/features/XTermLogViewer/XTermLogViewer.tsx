@@ -1,5 +1,7 @@
 import '@xterm/xterm/css/xterm.css';
 
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { ChevronDown20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { FitAddon } from '@xterm/addon-fit';
 import type { Terminal } from '@xterm/xterm';
@@ -7,9 +9,7 @@ import { debounce } from 'es-toolkit/compat';
 import type { Atom } from 'nanostores';
 import type { PropsWithChildren } from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronDown20Regular } from '@fluentui/react-icons';
 
-import { makeStyles, tokens, shorthands } from '@fluentui/react-components';
 import { $XTERM_THEME } from '@/renderer/constants';
 import { IconButton } from '@/renderer/ds';
 

@@ -1,8 +1,8 @@
 import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { Info20Regular, Settings20Filled, WindowConsole20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import type { CSSProperties } from 'react';
 import { memo, useCallback, useEffect, useState } from 'react';
-import { Settings20Filled, Info20Regular, WindowConsole20Regular } from '@fluentui/react-icons';
 
 import { Sidebar } from '@/renderer/app/Sidebar';
 import { Caption1, ListItem, Subtitle2 } from '@/renderer/ds';
@@ -11,9 +11,9 @@ import { Chat } from '@/renderer/features/Chat/Chat';
 import { Code } from '@/renderer/features/Code/Code';
 import { $isConsoleOpen } from '@/renderer/features/Console/state';
 import { Dashboards } from '@/renderer/features/Dashboards/Dashboards';
+import { OnboardingWizard } from '@/renderer/features/Onboarding/OnboardingWizard';
 import { SettingsPage } from '@/renderer/features/SettingsModal/SettingsPage';
 import { Tickets } from '@/renderer/features/Tickets/Tickets';
-import { OnboardingWizard } from '@/renderer/features/Onboarding/OnboardingWizard';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { LayoutMode } from '@/shared/types';
 
@@ -132,7 +132,9 @@ export const MainContent = memo(() => {
 
   useEffect(() => {
     setMounted((prev) => {
-      if (prev.has(active)) return prev;
+      if (prev.has(active)) {
+return prev;
+}
       const next = new Set(prev);
       next.add(active);
       return next;

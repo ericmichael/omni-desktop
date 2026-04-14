@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { daysRemaining, hasExpired, INBOX_EXPIRY_MS, sweepInbox } from './inbox-expiry';
 import type { InboxItem } from '@/shared/types';
+
+import { daysRemaining, hasExpired, INBOX_EXPIRY_MS, sweepInbox } from './inbox-expiry';
 
 describe('hasExpired', () => {
   it('returns false for a fresh item', () => {

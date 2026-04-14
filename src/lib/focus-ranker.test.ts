@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { focusHeader, rankFocus, type FocusItem } from './focus-ranker';
-import type { Milestone, Ticket, TicketPriority } from '@/shared/types';
+import type { Milestone, Ticket } from '@/shared/types';
+
+import { focusHeader, type FocusItem,rankFocus } from './focus-ranker';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const NOW = 1_700_000_000_000;

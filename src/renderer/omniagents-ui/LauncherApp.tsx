@@ -1,11 +1,12 @@
+import './styles/index.css';
+
 import type { ReactNode } from 'react';
 import { useEffect, useMemo } from 'react';
 
-import { App as OmniAgentsCore } from './App';
 import type { ClientToolCallHandler } from './App';
+import { App as OmniAgentsCore } from './App';
 import type { PendingMessage } from './ChatShell';
 import { RPCClientProvider } from './rpc-context';
-import './styles/index.css';
 import { UiConfigProvider, useUiConfig } from './ui-config';
 
 type OmniAgentsAppProps = {
