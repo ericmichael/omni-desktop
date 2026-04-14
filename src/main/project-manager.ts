@@ -2576,20 +2576,24 @@ patch.resolvedAt = Date.now();
       }
     }
 
-    // Also stop if moving back to the first column (user is shelving the ticket)
+    // Also stop if moving back to the first column (user is shelving the ticket).
+    // Cancel any pending retry so an armed timer doesn't revive a shelved ticket.
     if (this.isFirstColumn(ticket.projectId, columnId)) {
       const entry = this.machines.get(ticketId);
       if (entry) {
         console.log(`[ProjectManager] Ticket ${ticketId} moved to backlog — stopping supervisor.`);
+        this.cancelRetry(ticketId);
         void this.stopSupervisor(ticketId);
       }
     }
 
-    // Stop supervisor (preserve workspace) when entering a gated column
+    // Stop supervisor (preserve workspace) when entering a gated column.
+    // Same retry-timer concern as the backlog path above.
     if (column.gate) {
       const entry = this.machines.get(ticketId);
       if (entry) {
         console.log(`[ProjectManager] Ticket ${ticketId} entered gated column "${columnId}" — stopping supervisor.`);
+        this.cancelRetry(ticketId);
         void this.stopSupervisor(ticketId);
       }
     }

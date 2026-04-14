@@ -894,6 +894,103 @@ describe('ProjectManager integration', () => {
   });
 
   // -------------------------------------------------------------------------
+  // T3 — moveTicketToColumn side effects
+  // -------------------------------------------------------------------------
+  describe('moveTicketToColumn', () => {
+    const GATED_PIPELINE: Pipeline = {
+      columns: [
+        { id: 'backlog', label: 'Backlog' },
+        { id: 'in_progress', label: 'In Progress' },
+        { id: 'review', label: 'Review', gate: true },
+        { id: 'done', label: 'Done' },
+      ],
+    };
+
+    /** Seed a PM + machine in 'running' phase with a stubbed retry timer. */
+    const setupWithRetryArmed = (
+      pipeline: Pipeline = TEST_PIPELINE
+    ): { ctx: PmCtx; mock: MockMachine } => {
+      const ctx = makePm({
+        pipeline,
+        tickets: [{ id: 't1', columnId: 'in_progress' }],
+      });
+      const mach = internals(ctx.pm).createMachine('t1');
+      internals(ctx.pm).machines.set('t1', { machine: mach, sandbox: null });
+      const mock = ctx.machines.get('t1')!;
+      mock.phase = 'running';
+      return { ctx, mock };
+    };
+
+    it('terminal-column move cancels the retry timer and stops the supervisor', async () => {
+      const { ctx, mock } = setupWithRetryArmed();
+
+      ctx.pm.moveTicketToColumn('t1', 'done');
+      await vi.runOnlyPendingTimersAsync();
+
+      expect(mock.cancelRetryTimer).toHaveBeenCalled();
+      expect(mock.stop).toHaveBeenCalled();
+    });
+
+    it('terminal-column move deletes the machine entry (workspace cleanup)', async () => {
+      const { ctx } = setupWithRetryArmed();
+
+      ctx.pm.moveTicketToColumn('t1', 'done');
+      await vi.runOnlyPendingTimersAsync();
+
+      expect(internals(ctx.pm).machines.has('t1')).toBe(false);
+    });
+
+    it('backlog move cancels the retry timer (bug #3)', async () => {
+      const { ctx, mock } = setupWithRetryArmed();
+      // Put the ticket in an active column first so moving back to backlog is a real move.
+      ctx.pm.moveTicketToColumn('t1', 'backlog');
+      await vi.runOnlyPendingTimersAsync();
+
+      // A retry scheduled for this ticket must not be allowed to re-dispatch
+      // a shelved ticket later.
+      expect(mock.cancelRetryTimer).toHaveBeenCalled();
+    });
+
+    it('gated-column move cancels the retry timer (bug #3)', async () => {
+      const { ctx, mock } = setupWithRetryArmed(GATED_PIPELINE);
+
+      ctx.pm.moveTicketToColumn('t1', 'review');
+      await vi.runOnlyPendingTimersAsync();
+
+      expect(mock.cancelRetryTimer).toHaveBeenCalled();
+    });
+
+    it('reopen (terminal → non-terminal) clears resolution and resolvedAt', async () => {
+      const { ctx } = setupWithRetryArmed();
+      ctx.pm.resolveTicket('t1', 'done');
+      await vi.runOnlyPendingTimersAsync();
+
+      let ticket = ctx.store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
+      expect(ticket.resolution).toBe('done');
+      expect(ticket.resolvedAt).toBeGreaterThan(0);
+
+      // Reopen into an active column.
+      ctx.pm.moveTicketToColumn('t1', 'in_progress');
+
+      ticket = ctx.store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
+      expect(ticket.resolution).toBeUndefined();
+      expect(ticket.resolvedAt).toBeUndefined();
+    });
+
+    it('is a no-op for an unknown ticket', () => {
+      const { ctx } = setupWithRetryArmed();
+      expect(() => ctx.pm.moveTicketToColumn('nonexistent' as TicketId, 'done')).not.toThrow();
+    });
+
+    it('is a no-op for an unknown column', () => {
+      const { ctx } = setupWithRetryArmed();
+      ctx.pm.moveTicketToColumn('t1', 'no-such-column');
+      const ticket = ctx.store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
+      expect(ticket.columnId).toBe('in_progress');
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // processManager wiring
   // -------------------------------------------------------------------------
   describe('processManager integration', () => {
