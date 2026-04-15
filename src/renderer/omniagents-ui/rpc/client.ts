@@ -192,8 +192,18 @@ return
 throw new Error('WebSocket disconnected')
 }
 
+    // Capture the socket reference for stale-check guards on long-lived
+    // handlers. If another connect() replaces `this.ws` before these fire,
+    // they're events from an abandoned socket and must not be dispatched
+    // to the machine — otherwise we end up sending WS_CLOSE to a machine
+    // that's already connected via the replacement socket.
+    const attachedWs = this.ws
+
     // Wire up ongoing message handling
     this.ws.onmessage = (ev) => {
+      if (this.ws !== attachedWs) {
+return
+}
       try {
         const msg = JSON.parse(ev.data as string) as JSONRPCResponse | JSONRPCNotification
         if ('id' in msg) {
@@ -217,8 +227,12 @@ throw new Error('WebSocket disconnected')
       }
     }
 
-    // Handle unexpected close — reject all pending, notify machine
+    // Handle unexpected close — reject all pending, notify machine.
+    // Guard against stale sockets from a prior connect() still firing.
     this.ws.onclose = () => {
+      if (this.ws !== attachedWs) {
+return
+}
       this.rejectAllPending('WebSocket connection closed')
       this.ws = null
       this.send({ type: 'WS_CLOSE' })

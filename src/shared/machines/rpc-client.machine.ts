@@ -127,6 +127,8 @@ export const rpcClientMachine = setup({
     decrementPending: assign({
       pendingCount: ({ context }) => Math.max(0, context.pendingCount - 1),
     }),
+    /** No-op — used for idempotent events from stale sockets. */
+    noop: () => {},
   },
 }).createMachine({
   id: 'rpcClient',
@@ -186,11 +188,19 @@ export const rpcClientMachine = setup({
       },
     },
   },
-  // DISCONNECT is idempotent: valid from every state including disconnected
-  // (where it's a no-op self-transition). Lifting it to root lets the caller
-  // fire disconnect() unconditionally without the drop-event warning.
   on: {
+    // DISCONNECT is idempotent: valid from every state including disconnected
+    // (where it's a no-op self-transition). Lifting it to root lets the caller
+    // fire disconnect() unconditionally without the drop-event warning.
     DISCONNECT: '.disconnected',
+    // WS_OPEN / WS_CLOSE may arrive from stale sockets after this.ws has
+    // been replaced by a newer connect() attempt. State-level handlers
+    // still win for the meaningful transitions (WS_CLOSE in connected →
+    // reconnecting, WS_OPEN in connecting → connected). The root-level
+    // no-ops here only catch events from abandoned sockets so they don't
+    // show up as dropped events or mis-transition the machine.
+    WS_OPEN: { actions: 'noop' },
+    WS_CLOSE: { actions: 'noop' },
   },
 });
 
