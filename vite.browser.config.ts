@@ -11,35 +11,45 @@ import tsconfigPaths from 'vite-tsconfig-paths';
  */
 const SERVER_PORT = parseInt(process.env['PORT'] ?? '3001', 10);
 
-const platformDefines = {
-  __PLATFORM_URL__: JSON.stringify(process.env.OMNI_PLATFORM_URL || ''),
-};
+export default defineConfig(({ mode }) => {
+  const platformDefines = {
+    __PLATFORM_URL__: JSON.stringify(process.env.OMNI_PLATFORM_URL || ''),
+  };
 
-export default defineConfig({
-  server: {
-    port: 5173,
-    strictPort: true,
-    allowedHosts: true,
-    // Dev server proxy — forwards WS and API calls to the Fastify backend
-    proxy: {
-      '/ws': {
-        target: `http://localhost:${SERVER_PORT}`,
-        ws: true,
-      },
-      '/proxy': {
-        target: `http://localhost:${SERVER_PORT}`,
-        ws: true,
+  const cspScriptSrc = mode === 'development' ? "'self' 'unsafe-eval' 'wasm-unsafe-eval'" : "'self'";
+
+  return {
+    server: {
+      port: 5173,
+      strictPort: true,
+      allowedHosts: true,
+      proxy: {
+        '/api': {
+          target: `http://localhost:${SERVER_PORT}`,
+        },
+        '/ws': {
+          target: `http://localhost:${SERVER_PORT}`,
+          ws: true,
+        },
+        '/proxy': {
+          target: `http://localhost:${SERVER_PORT}`,
+          ws: true,
+        },
       },
     },
-  },
-  define: platformDefines,
-  plugins: [
-    tailwindcss(),
-    react(),
-    tsconfigPaths(),
-    createHtmlPlugin({
-      template: './index.html',
-    }),
+    define: platformDefines,
+    plugins: [
+      tailwindcss(),
+      react(),
+      tsconfigPaths(),
+      createHtmlPlugin({
+        template: './index.html',
+        inject: {
+          data: {
+            cspScriptSrc,
+          },
+        },
+      }),
     // Plugin to shim Electron-only imports to empty modules in browser builds
     {
       name: 'electron-shim',
@@ -61,20 +71,21 @@ export default defineConfig({
         return null;
       },
     },
-  ],
-  root: '.',
-  build: {
-    outDir: 'out/browser',
-    emptyOutDir: true,
-    rollupOptions: {
-      input: {
-        index: resolve('./index.html'),
+    ],
+    root: '.',
+    build: {
+      outDir: 'out/browser',
+      emptyOutDir: true,
+      rollupOptions: {
+        input: {
+          index: resolve('./index.html'),
+        },
       },
     },
-  },
-  resolve: {
-    alias: {
-      '@': resolve('src'),
+    resolve: {
+      alias: {
+        '@': resolve('src'),
+      },
     },
-  },
+  };
 });
