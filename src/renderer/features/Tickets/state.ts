@@ -183,6 +183,28 @@ export const ticketApi = {
       $tickets.setKey(id, { ...existing, ...patch, updatedAt: Date.now() });
     }
   },
+  archiveTicket: async (ticketId: TicketId): Promise<void> => {
+    const archivedAt = Date.now();
+    await emitter.invoke('project:update-ticket', ticketId, { archivedAt });
+    const existing = $tickets.get()[ticketId];
+    if (existing) {
+      $tickets.setKey(ticketId, { ...existing, archivedAt, updatedAt: Date.now() });
+    }
+  },
+  unarchiveTicket: async (ticketId: TicketId): Promise<void> => {
+    await emitter.invoke('project:update-ticket', ticketId, { archivedAt: undefined });
+    const existing = $tickets.get()[ticketId];
+    if (existing) {
+      $tickets.setKey(ticketId, { ...existing, archivedAt: undefined, updatedAt: Date.now() });
+    }
+  },
+  moveTicketToMilestone: async (ticketId: TicketId, milestoneId: MilestoneId | undefined): Promise<void> => {
+    await emitter.invoke('project:update-ticket', ticketId, { milestoneId });
+    const existing = $tickets.get()[ticketId];
+    if (existing) {
+      $tickets.setKey(ticketId, { ...existing, milestoneId, updatedAt: Date.now() });
+    }
+  },
   removeTicket: async (ticketId: TicketId): Promise<void> => {
     await emitter.invoke('project:remove-ticket', ticketId);
     const current = { ...$tickets.get() };

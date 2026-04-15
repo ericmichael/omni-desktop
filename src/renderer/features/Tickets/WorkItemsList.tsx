@@ -1,22 +1,26 @@
-import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
 import {
   Add16Regular,
+  Archive20Regular,
   ArrowLeft20Regular,
   ArrowSync20Regular,
   Board20Regular,
+  BranchFork16Regular,
+  Checkmark16Regular,
   Delete20Regular,
   List20Regular,
+  MoreHorizontal20Regular,
   Open20Regular,
   Play20Filled,
 } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
 
-import { Badge, Caption1, ConfirmDialog, IconButton, SectionLabel, SegmentedControl, Subtitle2 } from '@/renderer/ds';
+import { Badge, Caption1, ConfirmDialog, IconButton, Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger, SectionLabel, SegmentedControl, Subtitle2 } from '@/renderer/ds';
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { isActivePhase } from '@/shared/ticket-phase';
-import type { ProjectId, Ticket, TicketId } from '@/shared/types';
+import type { MilestoneId, Milestone, ProjectId, Ticket, TicketId } from '@/shared/types';
 
 import { KanbanBoard } from './KanbanBoard';
 import { $activeMilestoneId, $pipeline, $tickets, ticketApi } from './state';
@@ -29,6 +33,7 @@ type TicketRowProps = {
   selected: boolean;
   hovered: boolean;
   milestoneTitle?: string;
+  projectMilestones: Milestone[];
   columnLabel: string;
   columnBadgeColor: 'blue' | 'green' | 'default';
   onSelect: (ticketId: TicketId) => void;
@@ -149,7 +154,7 @@ const useStyles = makeStyles({
     transitionProperty: 'opacity',
     transitionDuration: tokens.durationFaster,
   },
-  cellDelete: {
+  cellMenu: {
     display: 'flex',
     alignItems: 'center',
     flexShrink: 0,
@@ -160,8 +165,29 @@ const useStyles = makeStyles({
       opacity: 0,
     },
   },
-  cellDeleteVisible: {
+  cellMenuVisible: {
     opacity: 1,
+  },
+  branchBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '2px',
+    flexShrink: 0,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    maxWidth: '140px',
+    overflow: 'hidden',
+    whiteSpace: 'nowrap',
+    textOverflow: 'ellipsis',
+  },
+  dangerMenuItem: {
+    color: tokens.colorPaletteRedForeground1,
+  },
+  checkmarkSlot: {
+    display: 'inline-flex',
+    width: '16px',
+    justifyContent: 'center',
+    marginRight: '4px',
   },
   newBtn: {
     display: 'flex',
@@ -195,7 +221,7 @@ const useStyles = makeStyles({
   },
 });
 
-const TicketRow = memo(({ ticket, selected, hovered, milestoneTitle, columnLabel, columnBadgeColor, onSelect, onHoverChange, onRequestDelete }: TicketRowProps) => {
+const TicketRow = memo(({ ticket, selected, hovered, milestoneTitle, projectMilestones, columnLabel, columnBadgeColor, onSelect, onHoverChange, onRequestDelete }: TicketRowProps) => {
   const styles = useStyles();
   const phase = ticket.phase;
   const isRunning = phase !== undefined && phase !== null && isActivePhase(phase);
@@ -229,6 +255,23 @@ const TicketRow = memo(({ ticket, selected, hovered, milestoneTitle, columnLabel
     onRequestDelete(ticket);
   }, [onRequestDelete, ticket]);
 
+  const handleToggleArchive = useCallback(() => {
+    if (ticket.archivedAt) {
+      void ticketApi.unarchiveTicket(ticket.id);
+    } else {
+      void ticketApi.archiveTicket(ticket.id);
+    }
+  }, [ticket.id, ticket.archivedAt]);
+
+  const handleMoveToMilestone = useCallback(
+    (milestoneId: MilestoneId | undefined) => {
+      void ticketApi.moveTicketToMilestone(ticket.id, milestoneId);
+    },
+    [ticket.id]
+  );
+
+  const truncatedBranch = ticket.branch && ticket.branch.length > 18 ? `${ticket.branch.slice(0, 17)}…` : ticket.branch;
+
   return (
     <button
       type="button"
@@ -243,6 +286,12 @@ const TicketRow = memo(({ ticket, selected, hovered, milestoneTitle, columnLabel
         title={TICKET_PRIORITY_LABELS[ticket.priority]}
       />
       <span className={styles.title}>{ticket.title}</span>
+      {ticket.branch && (
+        <span className={styles.branchBadge} title={ticket.branch}>
+          <BranchFork16Regular />
+          {truncatedBranch}
+        </span>
+      )}
       <span className={styles.cellColumn}>
         <Badge color={columnBadgeColor}>{columnLabel}</Badge>
       </span>
@@ -266,10 +315,53 @@ const TicketRow = memo(({ ticket, selected, hovered, milestoneTitle, columnLabel
         </span>
       )}
       <span
-        className={`${styles.cellDelete} ${hovered ? styles.cellDeleteVisible : ''}`}
+        className={mergeClasses(styles.cellMenu, hovered && styles.cellMenuVisible)}
         onClick={handleStopPropagation}
       >
-        <IconButton icon={<Delete20Regular />} size="sm" aria-label="Delete ticket" onClick={handleDelete} />
+        <Menu positioning={{ position: 'below', align: 'end' }}>
+          <MenuTrigger disableButtonEnhancement>
+            <IconButton icon={<MoreHorizontal20Regular />} size="sm" aria-label="Ticket actions" />
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              <Menu positioning={{ position: 'before', align: 'top' }}>
+                <MenuTrigger disableButtonEnhancement>
+                  <MenuItem>Move to milestone…</MenuItem>
+                </MenuTrigger>
+                <MenuPopover>
+                  <MenuList>
+                    <MenuItem onClick={() => handleMoveToMilestone(undefined)}>
+                      <span className={styles.checkmarkSlot}>
+                        {!ticket.milestoneId && <Checkmark16Regular />}
+                      </span>
+                      No milestone
+                    </MenuItem>
+                    {projectMilestones.length > 0 && <MenuDivider />}
+                    {projectMilestones.map((m) => (
+                      <MenuItem key={m.id} onClick={() => handleMoveToMilestone(m.id)}>
+                        <span className={styles.checkmarkSlot}>
+                          {ticket.milestoneId === m.id && <Checkmark16Regular />}
+                        </span>
+                        {m.title || 'Untitled milestone'}
+                      </MenuItem>
+                    ))}
+                  </MenuList>
+                </MenuPopover>
+              </Menu>
+              <MenuItem icon={<Archive20Regular />} onClick={handleToggleArchive}>
+                {ticket.archivedAt ? 'Unarchive' : 'Archive'}
+              </MenuItem>
+              <MenuDivider />
+              <MenuItem
+                icon={<Delete20Regular />}
+                onClick={handleDelete}
+                className={styles.dangerMenuItem}
+              >
+                Delete
+              </MenuItem>
+            </MenuList>
+          </MenuPopover>
+        </Menu>
       </span>
     </button>
   );
@@ -314,6 +406,11 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
   const deleteTitle = pendingIsUntitled
     ? 'Delete this untitled ticket?'
     : `Delete ticket "${pendingDelete?.title}"?`;
+
+  const projectMilestones = useMemo(
+    () => Object.values(milestones).filter((m) => m.projectId === projectId),
+    [milestones, projectId]
+  );
 
   const columnLabels = useMemo(() => {
     const map: Record<string, string> = {};
@@ -439,6 +536,7 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
                 selected={selectedTicketId === ticket.id}
                 hovered={isHovered}
                 milestoneTitle={milestone?.title}
+                projectMilestones={projectMilestones}
                 columnLabel={columnLabels[ticket.columnId] ?? 'Backlog'}
                 columnBadgeColor={getColumnBadgeColor(ticket)}
                 onSelect={handleTicketClick}

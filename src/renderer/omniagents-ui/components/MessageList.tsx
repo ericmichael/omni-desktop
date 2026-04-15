@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { CheckCircleIcon, CopyIcon, PaperclipIcon,ThumbsDownIcon, ThumbsUpIcon } from 'lucide-react'
+import { CheckCircleIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, PaperclipIcon,ThumbsDownIcon, ThumbsUpIcon } from 'lucide-react'
 import React, { useCallback,useEffect, useMemo, useState } from 'react'
 
 import { getGreeting } from '@/renderer/omniagents-ui/greeting'
@@ -104,8 +104,15 @@ onReaction?.(type)
   return (
     <ChatContainerRoot className="flex-1">
       <ChatContainerContent className="container-chat px-3 py-3 space-y-3 md:space-y-4">
-        {(
-          displayItems.map((m, i) => {
+        {(() => {
+          const pendingApprovalIds: string[] = []
+          for (const it of displayItems) {
+            if (it && (it as { type?: string }).type === 'approval') {
+              pendingApprovalIds.push((it as ApprovalItem).request_id)
+            }
+          }
+          const queueTotal = pendingApprovalIds.length
+          return displayItems.map((m, i) => {
             if (m.type === 'activity_group') {
 return <ActivityGroupComponent key={`${(m as any).runId  }-${  i}`} group={m as any} statusText={tickerStatus} />
 }
@@ -119,11 +126,14 @@ return <ToolCard key={(m as ToolItem).call_id || i} item={m as ToolItem} />
 return <InlineArtifact key={(m as ArtifactItem).artifact_id || i} item={m as ArtifactItem} />
 }
             if (m.type === 'approval') {
-return <ApprovalCard key={(m as ApprovalItem).request_id} item={m as ApprovalItem} onDecision={onApprovalDecision} />
-}
+              const reqId = (m as ApprovalItem).request_id
+              const idx = pendingApprovalIds.indexOf(reqId)
+              const queuePosition = idx >= 0 ? idx + 1 : 1
+              return <ApprovalCard key={reqId} item={m as ApprovalItem} onDecision={onApprovalDecision} queuePosition={queuePosition} queueTotal={queueTotal} />
+            }
             return null
           })
-        )}
+        })()}
         {pendingPlan ? <PlanCard key={pendingPlan.id} item={pendingPlan} onDecision={onPlanDecision} /> : null}
         {preambleText ? <PreambleRow text={preambleText} /> : null}
         {(thinking || statusRowText) ? (
@@ -462,20 +472,66 @@ return undefined
   )
 }
 
-function ApprovalCard({ item, onDecision }: { item: ApprovalItem; onDecision?: (request_id: string, value: 'yes' | 'always' | 'no') => void }) {
+const COLLAPSIBLE_DISPLAY_TYPES = new Set(['diff', 'file_write', 'file_content', 'search_results', 'command'])
+
+function ApprovalCard({ item, onDecision, queuePosition, queueTotal }: { item: ApprovalItem; onDecision?: (request_id: string, value: 'yes' | 'always' | 'no') => void; queuePosition?: number; queueTotal?: number }) {
   const meta = item.metadata
   const summary = meta && typeof meta === 'object' && typeof meta.summary === 'string' ? meta.summary : ''
   const richBody = renderMetadata(meta, item.argumentsText || '')
+  const [expanded, setExpanded] = useState(false)
+  const toggleExpanded = useCallback(() => setExpanded((v) => !v), [])
+
+  // Header
+  const displayType = meta && typeof meta === 'object' ? meta.display_type : undefined
+  const metaInner = meta && typeof meta === 'object' ? meta.metadata : undefined
+  let headerSuffix: React.ReactNode = null
+  if ((displayType === 'file_write' || displayType === 'diff') && metaInner && typeof metaInner.file_path === 'string' && metaInner.file_path) {
+    headerSuffix = <span className="font-mono text-xs text-warning/90"> — {metaInner.file_path}</span>
+  } else if (displayType === 'command' && metaInner && typeof metaInner.command === 'string' && metaInner.command) {
+    const cmd = metaInner.command
+    const truncated = cmd.length > 60 ? `${cmd.slice(0, 57)}...` : cmd
+    headerSuffix = <span className="font-mono text-xs text-warning/90"> — {truncated}</span>
+  }
+
+  const canCollapse = !!richBody && typeof displayType === 'string' && COLLAPSIBLE_DISPLAY_TYPES.has(displayType)
+  const showQueueBadge = typeof queueTotal === 'number' && queueTotal > 1
+
   return (
-    <div className="rounded-md border border-warning bg-secondary p-3">
-      <div className="text-sm font-semibold text-warning">Approve {item.tool}</div>
+    <div className="rounded-md border border-warning bg-secondary p-3 relative">
+      {showQueueBadge ? (
+        <div className="absolute top-2 right-2 text-[10px] uppercase tracking-wide text-warning bg-warning/10 border border-warning/40 rounded px-1.5 py-0.5">
+          {queuePosition} of {queueTotal} pending
+        </div>
+      ) : null}
+      <div className="text-sm font-semibold text-warning pr-24">
+        Approve {item.tool}
+        {headerSuffix}
+      </div>
       {summary ? <div className="text-xs text-muted-foreground mt-0.5">{summary}</div> : null}
       <div className="mt-2">
-        {richBody || (item.argumentsText ? (
+        {richBody ? (
+          <>
+            <div className={`${expanded ? 'max-h-none' : 'max-h-[40vh]'} overflow-auto`}>
+              {richBody}
+            </div>
+            {canCollapse ? (
+              <div className="mt-1 flex justify-end">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+                  onClick={toggleExpanded}
+                >
+                  {expanded ? <ChevronUpIcon className="size-3" /> : <ChevronDownIcon className="size-3" />}
+                  {expanded ? 'Collapse' : 'Show all'}
+                </button>
+              </div>
+            ) : null}
+          </>
+        ) : item.argumentsText ? (
           <CodeBlock code={item.argumentsText} language="json" />
         ) : (
           <div className="text-xs text-muted-foreground">No parameters</div>
-        ))}
+        )}
       </div>
       <div className="mt-3 flex gap-2 justify-end">
         <button className="px-3 py-1.5 text-xs rounded-md border border-destructive text-destructive bg-transparent hover:bg-destructive/20" onClick={() => onDecision && onDecision(item.request_id, 'no')}>Reject</button>

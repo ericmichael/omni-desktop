@@ -1,6 +1,6 @@
 import { useDraggable } from '@dnd-kit/core';
-import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
-import { ArrowSync20Regular, Open20Regular, Play20Filled,ReOrderDotsVertical20Regular } from '@fluentui/react-icons';
+import { makeStyles, mergeClasses, shorthands,tokens, Tooltip } from '@fluentui/react-components';
+import { ArrowSync20Regular, BranchFork16Regular, Open20Regular, Play20Filled,ReOrderDotsVertical20Regular } from '@fluentui/react-icons';
 import { memo, useCallback } from 'react';
 
 import { Badge, Body1, IconButton } from '@/renderer/ds';
@@ -73,6 +73,21 @@ const useStyles = makeStyles({
     alignItems: 'center',
     flexShrink: 0,
   },
+  branchBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '3px',
+    maxWidth: '18ch',
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    minWidth: 0,
+  },
+  branchLabel: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    minWidth: 0,
+  },
 });
 
 export const KanbanCard = memo(
@@ -106,6 +121,9 @@ export const KanbanCard = memo(
     );
 
     const phase = ticket.phase;
+    const titleText = ticket.title?.trim() ? ticket.title : 'Untitled';
+    const hasTitle = Boolean(ticket.title?.trim());
+    const branch = ticket.branch?.trim();
 
     return (
       <div
@@ -122,9 +140,17 @@ export const KanbanCard = memo(
               <ReOrderDotsVertical20Regular style={{ width: 16, height: 16 }} />
             </div>
           )}
-          <Body1 as="button" onClick={handleClick} className={styles.titleBtn}>
-            {ticket.title}
-          </Body1>
+          {hasTitle ? (
+            <Tooltip content={titleText} relationship="label" withArrow>
+              <Body1 as="button" onClick={handleClick} className={styles.titleBtn}>
+                {titleText}
+              </Body1>
+            </Tooltip>
+          ) : (
+            <Body1 as="button" onClick={handleClick} className={styles.titleBtn}>
+              {titleText}
+            </Body1>
+          )}
         </div>
 
         <div className={styles.badgeRow}>
@@ -143,6 +169,14 @@ export const KanbanCard = memo(
                 {isActivePhase(phase) && <ArrowSync20Regular style={{ width: 16, height: 16 }} />}
                 {PHASE_LABELS[phase] ?? phase}
               </Badge>
+            )}
+            {branch && (
+              <Tooltip content={branch} relationship="label" withArrow>
+                <span className={styles.branchBadge}>
+                  <BranchFork16Regular />
+                  <span className={styles.branchLabel}>{branch}</span>
+                </span>
+              </Tooltip>
             )}
           </div>
           {canStart(phase) && (

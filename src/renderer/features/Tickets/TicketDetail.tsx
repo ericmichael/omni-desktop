@@ -5,9 +5,11 @@ import {
   ArrowMinimize20Regular,
   BranchFork20Regular,
   Chat20Regular,
+  Checkmark16Regular,
   Delete20Regular,
   Dismiss20Regular,
   Edit20Regular,
+  Flag20Regular,
   MoreHorizontal20Filled,
   Play20Filled,
   ReOrderDotsVertical20Regular,
@@ -17,9 +19,10 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { SelectTabData } from '@/renderer/ds';
 import { Badge, Body1, Button, Caption1, IconButton, Input, Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger, Select, Tab, TabList } from '@/renderer/ds';
+import { $milestones } from '@/renderer/features/Initiatives/state';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { GitRepoInfo, TicketId, TicketPhase, TicketResolution } from '@/shared/types';
+import type { GitRepoInfo, MilestoneId, TicketId, TicketPhase, TicketResolution } from '@/shared/types';
 
 import { $pipeline, $tickets, ticketApi } from './state';
 import { RESOLUTION_LABELS } from './ticket-constants';
@@ -149,8 +152,14 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, closeBehavior = 
   const styles = useStyles();
   const tickets = useStore($tickets);
   const pipeline = useStore($pipeline);
+  const milestones = useStore($milestones);
   const store = useStore(persistedStoreApi.$atom);
   const ticket = tickets[ticketId];
+  const projectMilestones = useMemo(
+    () => Object.values(milestones).filter((m) => m.projectId === ticket?.projectId),
+    [milestones, ticket?.projectId]
+  );
+  const currentMilestone = ticket?.milestoneId ? milestones[ticket.milestoneId] : undefined;
   const project = useMemo(
     () => store.projects.find((p) => p.id === ticket?.projectId) ?? null,
     [store.projects, ticket?.projectId]
@@ -260,6 +269,13 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, closeBehavior = 
     void ticketApi.updateTicket(ticketId, { archivedAt: undefined });
   }, [ticketId]);
 
+  const handleSelectMilestone = useCallback(
+    (milestoneId: MilestoneId | undefined) => {
+      void ticketApi.moveTicketToMilestone(ticketId, milestoneId);
+    },
+    [ticketId]
+  );
+
   const handleTabSelect = useCallback((_e: unknown, data: SelectTabData) => {
     setActiveTab(data.value as TicketTab);
   }, []);
@@ -344,6 +360,39 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, closeBehavior = 
             <Edit20Regular className={mergeClasses(styles.editIcon, 'editIcon')} />
           </FluentButton>
         )}
+
+        <Menu positioning={{ position: 'below', align: 'end' }}>
+          <MenuTrigger disableButtonEnhancement>
+            <Button
+              size="sm"
+              variant="ghost"
+              leftIcon={<Flag20Regular />}
+              aria-label="Change milestone"
+            >
+              {currentMilestone?.title ?? 'No milestone'}
+            </Button>
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              <MenuItem
+                icon={!ticket.milestoneId ? <Checkmark16Regular /> : <span style={{ width: 16 }} />}
+                onClick={() => handleSelectMilestone(undefined)}
+              >
+                No milestone
+              </MenuItem>
+              {projectMilestones.length > 0 && <MenuDivider />}
+              {projectMilestones.map((m) => (
+                <MenuItem
+                  key={m.id}
+                  icon={ticket.milestoneId === m.id ? <Checkmark16Regular /> : <span style={{ width: 16 }} />}
+                  onClick={() => handleSelectMilestone(m.id)}
+                >
+                  {m.title || 'Untitled milestone'}
+                </MenuItem>
+              ))}
+            </MenuList>
+          </MenuPopover>
+        </Menu>
 
         <PhaseStatus phase={phase} onChat={handleOpenChat} onAutopilot={handleStartAutopilot} />
 
