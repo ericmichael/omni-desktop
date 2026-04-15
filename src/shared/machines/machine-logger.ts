@@ -84,27 +84,57 @@ continue;
  * Returns a no-op function when logging is disabled (zero overhead).
  */
 export function createMachineLogger(machineName: string, opts?: MachineLoggerOptions): InspectFn {
-  // Early exit — return no-op if disabled so there's zero runtime cost
-  if (!isEnabled(machineName)) {
-    return () => {};
-  }
-
+  const verbose = isEnabled(machineName);
   const tagStr = opts?.tags ? formatTags(opts.tags) : '';
   const prefix = `[machine:${machineName}${tagStr}]`;
   let lastTransitionTime = Date.now();
 
-  return (inspectionEvent: InspectionEvent) => {
-    // Re-check on each event so you can toggle at runtime
-    if (!isEnabled(machineName)) {
-return;
-}
+  // Dropped-event detection: XState silently ignores events that no state
+  // handles. Compare snapshot identity across @xstate.snapshot events — if
+  // neither the state value nor context reference changed, the event was a
+  // no-op. Rate-limited so a spammy no-op doesn't drown the console.
+  const dropCounts = new Map<string, number>();
+  let prevValue: unknown;
+  let prevContext: unknown;
+  const detectDrops = shouldDetectDrops();
+  const warnDrop = (eventType: string) => {
+    const count = (dropCounts.get(eventType) ?? 0) + 1;
+    dropCounts.set(eventType, count);
+    if (count <= 3) {
+      console.warn(
+        `${prefix} dropped event '${eventType}' — no handler in current state. ` +
+          `If this event should always apply, move it to the machine root's on: {}.`,
+      );
+    } else if (count === 4) {
+      console.warn(`${prefix} suppressing further '${eventType}' drop warnings`);
+    }
+  };
 
+  return (inspectionEvent: InspectionEvent) => {
     if (inspectionEvent.type === '@xstate.snapshot') {
       const { event, snapshot } = inspectionEvent;
       const snap = snapshot as any;
 
-      // Only log actual transitions (skip internal init events)
+      // Skip synthetic init events
       if (event.type === 'xstate.init') {
+        prevValue = snap.value;
+        prevContext = snap.context;
+        return;
+      }
+
+      // Dropped-event detection runs regardless of verbose logging
+      if (detectDrops) {
+        const sameValue = snap.value === prevValue ||
+          (typeof snap.value === 'string' && snap.value === prevValue);
+        const sameContext = snap.context === prevContext;
+        if (sameValue && sameContext) {
+          warnDrop(event.type);
+        }
+      }
+      prevValue = snap.value;
+      prevContext = snap.context;
+
+      if (!verbose || !isEnabled(machineName)) {
 return;
 }
 
@@ -148,6 +178,35 @@ contextParts.push(`exitCode=${ctx.exitCode}`);
       }
     }
   };
+}
+
+/**
+ * Whether dropped-event detection should run. Enabled in dev by default
+ * (Vite's `import.meta.env.DEV` or `process.env.NODE_ENV !== 'production'`),
+ * or explicitly via `localStorage.setItem('debug:machines:drops', '1')`.
+ * Explicit `0` disables it even in dev.
+ */
+function shouldDetectDrops(): boolean {
+  try {
+    const ls = typeof localStorage !== 'undefined' ? localStorage.getItem('debug:machines:drops') : null;
+    if (ls === '0' || ls === 'false') {
+return false;
+}
+    if (ls === '1' || ls === 'true') {
+return true;
+}
+    // Default: on in dev, off in prod
+    const viteEnv = (import.meta as unknown as { env?: { DEV?: boolean } }).env;
+    if (viteEnv && typeof viteEnv.DEV === 'boolean') {
+return viteEnv.DEV;
+}
+    if (typeof process !== 'undefined' && process.env) {
+      return process.env.NODE_ENV !== 'production';
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 /**

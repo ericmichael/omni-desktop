@@ -484,6 +484,30 @@ describe('chatSessionMachine', () => {
       expect(ctx(snap).items).toEqual(items);
     });
 
+    // These events are defined at the machine root so they apply from any
+    // state. XState silently drops unhandled events, and we've lost days to
+    // bugs in that class. If one of these regresses to state-scoped only,
+    // the assertion here should fail.
+    it('accepts root-level idempotent events from running and awaitingApproval', () => {
+      const items: MessageItem[] = [{ type: 'chat', role: 'user', content: 'hi' }];
+
+      // From running
+      let snap = runningSnap();
+      snap = next(snap, { type: 'SET_SESSION_ID', sessionId: 'sess-new' });
+      expect(ctx(snap).sessionId).toBe('sess-new');
+      snap = next(snap, { type: 'HISTORY_LOADED', items });
+      expect(ctx(snap).items).toEqual(items);
+      snap = next(snap, { type: 'APPEND_RESPONSE', content: 'from slash cmd' });
+      expect(ctx(snap).items.at(-1)).toMatchObject({ role: 'assistant', content: 'from slash cmd' });
+
+      // From awaitingApproval
+      let snap2 = awaitingApprovalSnap();
+      const before = ctx(snap2).sessionId;
+      snap2 = next(snap2, { type: 'SET_SESSION_ID', sessionId: 'sess-other' });
+      expect(ctx(snap2).sessionId).toBe('sess-other');
+      expect(ctx(snap2).sessionId).not.toBe(before);
+    });
+
     it('resets state on NEW_SESSION (stays idle)', () => {
       // First put some state in
       let snap = runningSnap();

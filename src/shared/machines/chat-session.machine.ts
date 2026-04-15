@@ -437,6 +437,23 @@ return e.items;
   initial: 'idle',
   context: { ...INITIAL_CONTEXT },
 
+  // Root-level event handlers — applied from any state unless a state
+  // defines its own handler for the same event (state-level wins).
+  //
+  // These are all idempotent, side-effect-free context mutations that
+  // should NEVER be silently dropped just because the machine happened
+  // to be in the "wrong" state. XState drops unhandled events without
+  // any warning, and we've lost days to that exact class of bug — the
+  // approval queue getting stuck, HISTORY_LOADED dropped on mount, etc.
+  // The rule: if an event only assigns context, it belongs at root.
+  on: {
+    SET_SESSION_ID: { actions: 'setSessionIdOnly' },
+    HISTORY_LOADED: { actions: 'setHistoryItems' },
+    APPEND_RESPONSE: { actions: 'appendResponse' },
+    ADD_ARTIFACT: { guard: 'acceptLoose', actions: 'addArtifact' },
+    APPROVAL_RESOLVED: { actions: 'removeApproval' },
+  },
+
   states: {
     // ----- Idle: waiting for user action -----
     idle: {
