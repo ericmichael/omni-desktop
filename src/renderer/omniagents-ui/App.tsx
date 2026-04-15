@@ -86,7 +86,7 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   const {
     actor,
     items, thinking, status, statusSpinner, statusItalic, preamble, toolStatus, runId, sessionId,
-    submit, submitError, stop, selectSession, historyLoaded, historyError, newSession, approvalDecided, appendResponse, addArtifact, setSessionId,
+    submit, submitError, stop, loadSession, selectSession, historyLoaded, historyError, newSession, approvalDecided, appendResponse, addArtifact, setSessionId,
   } = machine
 
   const refreshSessions = useCallback(async () => {
@@ -181,23 +181,14 @@ setUI('chat')
 }
           }
         } else {
-          if (sid) {
-            // Load history for the session so the UI rehydrates past messages
-            // on mount (e.g. after browser refresh).
-            selectSession(sid)
-            try {
-              const history = await client.getSessionHistory(sid)
-              if (!cancelled) {
-                const msgs = rehydrateHistory(history as Record<string, unknown>[]) as MessageItem[]
-                historyLoaded(msgs)
-              }
-            } catch {
-              if (!cancelled) {
-                historyError('Failed to load history')
-              }
-            }
+          if (sid && !cancelled) {
+            // One-call rehydration: drives SELECT_SESSION → fetch → HISTORY_LOADED
+            // so the mount path can't fall out of sync with handleSelectSession.
+            await loadSession(sid)
           }
-          setUI('chat')
+          if (!cancelled) {
+setUI('chat')
+}
         }
       })
       .catch(() => {
@@ -277,7 +268,7 @@ return
       offRunStarted(); offRunEnd(); offClientRequest(); offToken()
       client.disconnect()
     }
-  }, [client, actor, selectSession, historyLoaded, historyError, addArtifact, normalizeAgentName, refreshSessions, uiConfig])
+  }, [client, actor, loadSession, addArtifact, normalizeAgentName, refreshSessions, uiConfig])
 
   // Derive artifact index from the items stream (artifacts are now inline in conversation)
   const visibleArtifacts = useMemo(() => {
@@ -492,29 +483,24 @@ return
     if (!opts?.fromProp) {
 onSessionChange?.(id === undefined ? resolvedId : id)
 }
+    // Delegate the session-state choreography to the hook. The workspace
+    // restore that follows is a side-effect of the chosen session, not
+    // part of machine state, so it stays here.
+    await loadSession(id)
     if (id) {
-      // Resuming an existing session
-      selectSession(resolvedId)
-      try {
-        const history = await client.getSessionHistory(id)
-        const msgs = rehydrateHistory(history as Record<string, unknown>[]) as MessageItem[]
-        historyLoaded(msgs)
-        // Restore workspace from session and lock it
-        if (workspaceSupported) {
-          try {
-            const res = await client.serverCall('fs_get_workspace_root', {}, id) as any
-            if (res?.path) {
+      if (workspaceSupported) {
+        try {
+          const res = await client.serverCall('fs_get_workspace_root', {}, id) as any
+          if (res?.path) {
 setWorkspacePath(res.path)
 }
-          } catch {}
-          setWorkspaceLocked(true)
-        }
-      } catch {
-        historyError('Failed to load history')
+        } catch {}
+        setWorkspaceLocked(true)
       }
     } else {
-      // New chat
-      newSession(resolvedId)
+      // New chat: machine now in a fresh state; ensure we have the right sessionId
+      // and the workspace is unlocked.
+      setSessionId(resolvedId)
       setWorkspaceLocked(false)
       if (workspaceSupported) {
         try {
@@ -526,7 +512,7 @@ setWorkspacePath(res.path)
       }
     }
     setUI('chat')
-  }, [client, selectSession, historyLoaded, historyError, newSession, workspaceSupported, onSessionChange])
+  }, [client, loadSession, setSessionId, workspaceSupported, onSessionChange])
 
   useEffect(() => {
     if (urlSessionHandledRef.current) {

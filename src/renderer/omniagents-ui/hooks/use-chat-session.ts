@@ -7,12 +7,14 @@
 import { useActorRef, useSelector } from '@xstate/react';
 import { useCallback, useEffect } from 'react';
 
+import { rehydrateHistory } from '@/lib/rehydrate-history';
 import type { RPCClient } from '@/renderer/omniagents-ui/rpc/client';
-import type { Attachment } from '@/shared/chat-types';
+import type { Attachment, MessageItem } from '@/shared/chat-types';
 import {
   chatSessionMachine,
   type ChatSessionPhase,
   isThinking,
+  type SessionPhase,
 } from '@/shared/machines/chat-session.machine';
 import { createMachineLogger } from '@/shared/machines/machine-logger';
 
@@ -153,8 +155,20 @@ return;
   const statusSpinner = useSelector(actor, (s) => s.context.statusSpinner);
   const statusItalic = useSelector(actor, (s) => s.context.statusItalic);
   const toolStatus = useSelector(actor, (s) => s.context.toolStatus);
-  const phase = useSelector(actor, (s) => s.value as ChatSessionPhase);
-  const thinking = useSelector(actor, (s) => isThinking(s.value as ChatSessionPhase));
+  // Parallel-region snapshot value: { session: 'loading', run: 'running' }
+  const phase = useSelector(actor, (s) => {
+    const v = s.value as { session?: SessionPhase; run?: ChatSessionPhase } | string;
+    return (typeof v === 'string' ? v : (v?.run ?? 'idle')) as ChatSessionPhase;
+  });
+  const sessionPhase = useSelector(actor, (s) => {
+    const v = s.value as { session?: SessionPhase; run?: ChatSessionPhase } | string;
+    return (typeof v === 'object' && v ? (v.session ?? 'unloaded') : 'unloaded') as SessionPhase;
+  });
+  const thinking = useSelector(actor, (s) => {
+    const v = s.value as { session?: SessionPhase; run?: ChatSessionPhase } | string;
+    const p = (typeof v === 'string' ? v : (v?.run ?? 'idle')) as ChatSessionPhase;
+    return isThinking(p);
+  });
 
   // --- Action methods ---
 
@@ -244,6 +258,39 @@ return;
     [actor],
   );
 
+  /**
+   * High-level: load a session end-to-end. This is the ONE call every
+   * consumer should use. It owns the choreography that used to be
+   * repeated imperatively at every call site:
+   *
+   *   SELECT_SESSION → fetch history → HISTORY_LOADED / HISTORY_ERROR
+   *
+   * Passing `undefined` (or omitting the id) starts a fresh session.
+   *
+   * Forgetting a step in the imperative version was the root cause of the
+   * mount-rehydration bug; this API makes that mistake impossible.
+   */
+  const loadSession = useCallback(
+    async (id: string | undefined): Promise<void> => {
+      if (!id) {
+        // New session — caller supplies the id via the returned sessionId
+        // that subsequent calls will populate, or can set one explicitly.
+        // Leaving sessionId undefined tells the backend to mint one.
+        actor.send({ type: 'NEW_SESSION', sessionId: '' });
+        return;
+      }
+      actor.send({ type: 'SELECT_SESSION', id });
+      try {
+        const raw = await client.getSessionHistory(id);
+        const msgs = rehydrateHistory(raw as Record<string, unknown>[]) as MessageItem[];
+        actor.send({ type: 'HISTORY_LOADED', items: msgs });
+      } catch (err) {
+        actor.send({ type: 'HISTORY_ERROR', error: String((err as Error)?.message || err) });
+      }
+    },
+    [actor, client],
+  );
+
   return {
     // Actor (for advanced usage / subscriptions)
     actor,
@@ -257,8 +304,11 @@ return;
     statusItalic,
     toolStatus,
     phase,
+    sessionPhase,
     thinking,
-    // Actions
+    // High-level action
+    loadSession,
+    // Low-level actions (prefer loadSession where possible)
     submit,
     submitError,
     stop,

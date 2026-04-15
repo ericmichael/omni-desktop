@@ -24,13 +24,22 @@ import type {
 // Types
 // ---------------------------------------------------------------------------
 
+/**
+ * Phase of the run region. Exposed by the hook as `phase` for callers
+ * that want to know whether the agent is actively processing.
+ */
 export type ChatSessionPhase =
   | 'idle'
-  | 'loadingHistory'
   | 'starting'
   | 'running'
   | 'awaitingApproval'
   | 'stopping';
+
+/**
+ * Phase of the session region. Exposed as `sessionPhase` for callers that
+ * want to render loading / error UI during session swap.
+ */
+export type SessionPhase = 'unloaded' | 'loading' | 'loaded' | 'error';
 
 export type ChatSessionContext = {
   sessionId: string | undefined;
@@ -434,18 +443,18 @@ return e.items;
   },
 }).createMachine({
   id: 'chatSession',
-  initial: 'idle',
+  type: 'parallel',
   context: { ...INITIAL_CONTEXT },
 
-  // Root-level event handlers — applied from any state unless a state
-  // defines its own handler for the same event (state-level wins).
+  // Root-level event handlers — applied from any state unless a child
+  // state defines its own handler for the same event (child wins).
   //
-  // These are all idempotent, side-effect-free context mutations that
-  // should NEVER be silently dropped just because the machine happened
-  // to be in the "wrong" state. XState drops unhandled events without
-  // any warning, and we've lost days to that exact class of bug — the
-  // approval queue getting stuck, HISTORY_LOADED dropped on mount, etc.
-  // The rule: if an event only assigns context, it belongs at root.
+  // These are idempotent, side-effect-free context mutations that must
+  // NEVER be silently dropped just because the machine happens to be in
+  // the "wrong" state. XState drops unhandled events without any warning,
+  // and we've lost days to that exact class of bug — the approval queue
+  // getting stuck, HISTORY_LOADED dropped on mount, etc. The rule:
+  // if an event only assigns context, it belongs at root.
   on: {
     SET_SESSION_ID: { actions: 'setSessionIdOnly' },
     HISTORY_LOADED: { actions: 'setHistoryItems' },
@@ -455,126 +464,149 @@ return e.items;
   },
 
   states: {
-    // ----- Idle: waiting for user action -----
-    idle: {
+    // =====================================================================
+    // Session region — session identity and history load lifecycle.
+    // Progresses independently of the run region.
+    // =====================================================================
+    session: {
+      initial: 'unloaded',
+
+      // Region-level SELECT_SESSION / NEW_SESSION handlers apply from any
+      // sub-state. Today these are only valid from idle; under parallel
+      // regions the session swap can happen at any time and the run region
+      // observes the same event to abort any in-flight run.
       on: {
-        SUBMIT: { target: 'starting', actions: 'appendUserMessage' },
-        SELECT_SESSION: { target: 'loadingHistory', actions: 'resetSessionState' },
-        NEW_SESSION: { target: 'idle', actions: 'resetSessionState', reenter: true },
-        // Mount rehydration path: App sends SET_SESSION_ID then HISTORY_LOADED
-        // directly, without going through SELECT_SESSION / loadingHistory.
-        HISTORY_LOADED: { actions: 'setHistoryItems' },
-        // Late-arriving events from a previous run (session-filtered)
-        MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'bufferPreamble' },
-        APPROVAL_RESOLVED: { actions: 'removeApproval' },
-        ADD_ARTIFACT: { guard: 'acceptLoose', actions: 'addArtifact' },
-        // Direct manipulation (slash commands, external session updates)
-        APPEND_RESPONSE: { actions: 'appendResponse' },
-        SET_SESSION_ID: { actions: 'setSessionIdOnly' },
+        SELECT_SESSION: { target: '.loading', actions: 'resetSessionState' },
+        NEW_SESSION: { target: '.loaded', actions: 'resetSessionState' },
+      },
+
+      states: {
+        unloaded: {
+          on: {
+            // First SUBMIT auto-creates a session from the event's sessionId.
+            // appendUserMessage in the run region also assigns sessionId.
+            SUBMIT: { target: 'loaded' },
+          },
+        },
+        loading: {
+          on: {
+            HISTORY_LOADED: { target: 'loaded', actions: 'setHistoryItems' },
+            HISTORY_ERROR: { target: 'error' },
+          },
+        },
+        loaded: {},
+        error: {},
       },
     },
 
-    // ----- Loading history for a selected session -----
-    loadingHistory: {
-      on: {
-        HISTORY_LOADED: { target: 'idle', actions: 'setHistoryItems' },
-        HISTORY_ERROR: { target: 'idle' },
-      },
-    },
+    // =====================================================================
+    // Run region — agent run lifecycle. SELECT_SESSION/NEW_SESSION abort
+    // any in-flight run via a region-level handler targeting .idle.
+    // =====================================================================
+    run: {
+      initial: 'idle',
 
-    // ----- Starting: startRun called, waiting for run_started -----
-    starting: {
       on: {
-        RUN_STARTED: {
-          guard: 'acceptStrictOrStarting',
-          target: 'running',
-          actions: 'setRunStarted',
-        },
-        RUN_END: {
-          guard: 'acceptLoose',
-          target: 'idle',
-          actions: 'flushPreamble',
-        },
-        MESSAGE_OUTPUT: {
-          guard: 'acceptStrictOrStarting',
-          actions: 'bufferPreamble',
-        },
-        TOOL_CALLED: {
-          guard: 'acceptStrictOrStarting',
-          actions: 'appendToolItem',
-        },
-        TOOL_RESULT: {
-          guard: 'acceptStrictOrStarting',
-          actions: 'updateToolResult',
-        },
-        ADD_ARTIFACT: { guard: 'acceptLoose', actions: 'addArtifact' },
-        SUBMIT_ERROR: { target: 'idle', actions: 'setSubmitError' },
+        // Selecting or resetting a session aborts any in-flight run.
+        SELECT_SESSION: { target: '.idle', actions: 'clearRunState' },
+        NEW_SESSION: { target: '.idle', actions: 'clearRunState' },
       },
-    },
 
-    // ----- Running: agent is processing -----
-    running: {
-      on: {
-        MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'bufferPreamble' },
-        TOOL_CALLED: { guard: 'acceptStrict', actions: 'appendToolItem' },
-        TOOL_RESULT: { guard: 'acceptStrict', actions: 'updateToolResult' },
-        ADD_ARTIFACT: { guard: 'acceptLoose', actions: 'addArtifact' },
-        RUN_STATUS: { guard: 'acceptLoose', actions: 'updateRunStatus' },
-        TOKEN: { guard: 'acceptLoose' },
-        SET_STATUS: { guard: 'acceptLoose', actions: 'setStatusFromServer' },
-        REQUEST_APPROVAL: {
-          guard: 'acceptStrict',
-          target: 'awaitingApproval',
-          actions: 'addApproval',
+      states: {
+        idle: {
+          on: {
+            SUBMIT: { target: 'starting', actions: 'appendUserMessage' },
+            // Late-arriving events from a previous run (session-filtered)
+            MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'bufferPreamble' },
+          },
         },
-        RUN_END: {
-          guard: 'acceptLoose',
-          target: 'idle',
-          actions: ['flushPreamble', 'clearRunState'],
-        },
-        STOP: { target: 'stopping', actions: 'markStopping' },
-      },
-    },
 
-    // ----- Awaiting approval: thinking paused, waiting for user decision -----
-    awaitingApproval: {
-      on: {
-        APPROVAL_DECIDED: [
-          // Stay in awaitingApproval if more approvals are still queued
-          { guard: 'hasMoreApprovals', actions: 'removeApproval' },
-          { target: 'running', actions: 'removeApproval' },
-        ],
-        APPROVAL_RESOLVED: { actions: 'removeApproval' },
-        RUN_END: {
-          guard: 'acceptLoose',
-          target: 'idle',
-          actions: ['flushPreamble', 'clearRunState'],
+        starting: {
+          on: {
+            RUN_STARTED: {
+              guard: 'acceptStrictOrStarting',
+              target: 'running',
+              actions: 'setRunStarted',
+            },
+            RUN_END: {
+              guard: 'acceptLoose',
+              target: 'idle',
+              actions: 'flushPreamble',
+            },
+            MESSAGE_OUTPUT: {
+              guard: 'acceptStrictOrStarting',
+              actions: 'bufferPreamble',
+            },
+            TOOL_CALLED: {
+              guard: 'acceptStrictOrStarting',
+              actions: 'appendToolItem',
+            },
+            TOOL_RESULT: {
+              guard: 'acceptStrictOrStarting',
+              actions: 'updateToolResult',
+            },
+            SUBMIT_ERROR: { target: 'idle', actions: 'setSubmitError' },
+          },
         },
-        // Additional approvals can arrive while one is pending
-        REQUEST_APPROVAL: { guard: 'acceptStrict', actions: 'addApproval' },
-        // Events can still flow while awaiting approval
-        MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'bufferPreamble' },
-        TOOL_CALLED: { guard: 'acceptStrict', actions: 'appendToolItem' },
-        TOOL_RESULT: { guard: 'acceptStrict', actions: 'updateToolResult' },
-        ADD_ARTIFACT: { guard: 'acceptLoose', actions: 'addArtifact' },
-        RUN_STATUS: { guard: 'acceptLoose', actions: 'updateRunStatus' },
-        SET_STATUS: { guard: 'acceptLoose', actions: 'setStatusFromServer' },
-      },
-    },
 
-    // ----- Stopping: user requested stop, waiting for run_end -----
-    stopping: {
-      on: {
-        RUN_END: {
-          guard: 'acceptLoose',
-          target: 'idle',
-          actions: ['flushPreamble', 'clearRunState'],
+        running: {
+          on: {
+            MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'bufferPreamble' },
+            TOOL_CALLED: { guard: 'acceptStrict', actions: 'appendToolItem' },
+            TOOL_RESULT: { guard: 'acceptStrict', actions: 'updateToolResult' },
+            RUN_STATUS: { guard: 'acceptLoose', actions: 'updateRunStatus' },
+            TOKEN: { guard: 'acceptLoose' },
+            SET_STATUS: { guard: 'acceptLoose', actions: 'setStatusFromServer' },
+            REQUEST_APPROVAL: {
+              guard: 'acceptStrict',
+              target: 'awaitingApproval',
+              actions: 'addApproval',
+            },
+            RUN_END: {
+              guard: 'acceptLoose',
+              target: 'idle',
+              actions: ['flushPreamble', 'clearRunState'],
+            },
+            STOP: { target: 'stopping', actions: 'markStopping' },
+          },
         },
-        // Events can still arrive while stopping
-        MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'bufferPreamble' },
-        TOOL_CALLED: { guard: 'acceptStrict', actions: 'appendToolItem' },
-        TOOL_RESULT: { guard: 'acceptStrict', actions: 'updateToolResult' },
-        ADD_ARTIFACT: { guard: 'acceptLoose', actions: 'addArtifact' },
+
+        awaitingApproval: {
+          on: {
+            APPROVAL_DECIDED: [
+              // Stay in awaitingApproval if more approvals are still queued
+              { guard: 'hasMoreApprovals', actions: 'removeApproval' },
+              { target: 'running', actions: 'removeApproval' },
+            ],
+            RUN_END: {
+              guard: 'acceptLoose',
+              target: 'idle',
+              actions: ['flushPreamble', 'clearRunState'],
+            },
+            // Additional approvals can arrive while one is pending
+            REQUEST_APPROVAL: { guard: 'acceptStrict', actions: 'addApproval' },
+            // Events can still flow while awaiting approval
+            MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'bufferPreamble' },
+            TOOL_CALLED: { guard: 'acceptStrict', actions: 'appendToolItem' },
+            TOOL_RESULT: { guard: 'acceptStrict', actions: 'updateToolResult' },
+            RUN_STATUS: { guard: 'acceptLoose', actions: 'updateRunStatus' },
+            SET_STATUS: { guard: 'acceptLoose', actions: 'setStatusFromServer' },
+          },
+        },
+
+        stopping: {
+          on: {
+            RUN_END: {
+              guard: 'acceptLoose',
+              target: 'idle',
+              actions: ['flushPreamble', 'clearRunState'],
+            },
+            // Events can still arrive while stopping
+            MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'bufferPreamble' },
+            TOOL_CALLED: { guard: 'acceptStrict', actions: 'appendToolItem' },
+            TOOL_RESULT: { guard: 'acceptStrict', actions: 'updateToolResult' },
+          },
+        },
       },
     },
   },

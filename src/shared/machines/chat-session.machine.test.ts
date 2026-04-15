@@ -68,8 +68,18 @@ function ctx(snap: any): ChatSessionContext {
   return snap.context;
 }
 
+/** Returns the run-region phase — matches the legacy single-region behavior. */
 function phase(snap: any): string {
-  return snap.value as string;
+  const v = snap.value;
+  if (typeof v === 'string') {
+    return v;
+  }
+  return v?.run ?? 'unknown';
+}
+
+function sessionPhase(snap: any): string {
+  const v = snap.value;
+  return v?.session ?? 'unknown';
 }
 
 // ---------------------------------------------------------------------------
@@ -450,22 +460,25 @@ describe('chatSessionMachine', () => {
   // -----------------------------------------------------------------------
 
   describe('session management', () => {
-    it('transitions idle → loadingHistory on SELECT_SESSION', () => {
+    it('transitions session region → loading on SELECT_SESSION', () => {
       const snap = loadingHistorySnap();
-      expect(phase(snap)).toBe('loadingHistory');
+      expect(sessionPhase(snap)).toBe('loading');
+      expect(phase(snap)).toBe('idle');
       expect(ctx(snap).sessionId).toBe('sess-2');
       expect(ctx(snap).items).toEqual([]);
     });
 
-    it('transitions loadingHistory → idle on HISTORY_LOADED', () => {
+    it('transitions session loading → loaded on HISTORY_LOADED', () => {
       const items: MessageItem[] = [{ type: 'chat', role: 'user', content: 'old message' }];
       const snap = next(loadingHistorySnap(), { type: 'HISTORY_LOADED', items });
+      expect(sessionPhase(snap)).toBe('loaded');
       expect(phase(snap)).toBe('idle');
       expect(ctx(snap).items).toEqual(items);
     });
 
-    it('transitions loadingHistory → idle on HISTORY_ERROR', () => {
+    it('transitions session loading → error on HISTORY_ERROR', () => {
       const snap = next(loadingHistorySnap(), { type: 'HISTORY_ERROR', error: 'fail' });
+      expect(sessionPhase(snap)).toBe('error');
       expect(phase(snap)).toBe('idle');
     });
 
@@ -609,10 +622,88 @@ describe('chatSessionMachine', () => {
       expect(isThinking('stopping')).toBe(true);
     });
 
-    it('returns false for idle/loadingHistory/awaitingApproval', () => {
+    it('returns false for idle/awaitingApproval', () => {
       expect(isThinking('idle')).toBe(false);
-      expect(isThinking('loadingHistory')).toBe(false);
       expect(isThinking('awaitingApproval')).toBe(false);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Parallel regions: session and run lifecycles are independent
+  // -----------------------------------------------------------------------
+  //
+  // The machine exposes two orthogonal regions:
+  //   - `session`: unloaded → loading → loaded (driven by SELECT_SESSION /
+  //     HISTORY_LOADED / HISTORY_ERROR / NEW_SESSION)
+  //   - `run`: idle → starting → running → … (driven by SUBMIT / RUN_STARTED
+  //     / RUN_END / etc.)
+  //
+  // They must be able to progress independently so that loading history
+  // during a live run, or a run proceeding while a session swap is in
+  // flight, doesn't corrupt either region.
+
+  describe('parallel regions', () => {
+    it('initial snapshot exposes both region values', () => {
+      const snap = idleSnap();
+      expect(snap.value).toMatchObject({ session: 'unloaded', run: 'idle' });
+    });
+
+    it('SELECT_SESSION from any run state transitions session and resets run', () => {
+      // Policy: selecting a different session aborts any in-flight run.
+      // Both regions respond to SELECT_SESSION — session → loading, run → idle.
+      // Today SELECT_SESSION is only listed on idle, so from running it's
+      // silently dropped and sessionId never updates.
+      let snap = runningSnap('sess-1');
+      expect(ctx(snap).runId).toBe('run-1');
+
+      snap = next(snap, { type: 'SELECT_SESSION', id: 'sess-2' });
+      expect(snap.value).toMatchObject({ run: 'idle', session: 'loading' });
+      expect(ctx(snap).sessionId).toBe('sess-2');
+      expect(ctx(snap).runId).toBeUndefined();
+    });
+
+    it('HISTORY_LOADED after SELECT_SESSION populates items in the loaded state', () => {
+      let snap = next(idleSnap(), { type: 'SELECT_SESSION', id: 'sess-2' });
+      expect(snap.value).toMatchObject({ session: 'loading', run: 'idle' });
+
+      const items: MessageItem[] = [
+        { type: 'chat', role: 'user', content: 'old q' },
+        { type: 'chat', role: 'assistant', content: 'old a' },
+      ];
+      snap = next(snap, { type: 'HISTORY_LOADED', items });
+      expect(snap.value).toMatchObject({ session: 'loaded', run: 'idle' });
+      expect(ctx(snap).items).toEqual(items);
+    });
+
+    it('HISTORY_ERROR transitions session to error without touching run', () => {
+      let snap = next(idleSnap(), { type: 'SELECT_SESSION', id: 'sess-2' });
+      snap = next(snap, { type: 'HISTORY_ERROR', error: 'network' });
+      expect(snap.value).toMatchObject({ session: 'error', run: 'idle' });
+    });
+
+    it('SUBMIT from an unloaded session marks session loaded and run starting', () => {
+      // Session starts unloaded. SUBMIT should transition the session region
+      // to loaded (with the sessionId from the SUBMIT payload) and the run
+      // region to starting, simultaneously.
+      const snap = next(idleSnap(), { type: 'SUBMIT', text: 'hi', sessionId: 'sess-new' });
+      expect(snap.value).toMatchObject({ session: 'loaded', run: 'starting' });
+      expect(ctx(snap).sessionId).toBe('sess-new');
+    });
+
+    it('run lifecycle runs independently: SUBMIT → RUN_STARTED → running', () => {
+      // Once session is loaded, run region transitions idle → starting → running
+      // without touching the session region.
+      let snap = next(idleSnap(), { type: 'SELECT_SESSION', id: 'sess-1' });
+      const items: MessageItem[] = [];
+      snap = next(snap, { type: 'HISTORY_LOADED', items });
+      expect(snap.value).toMatchObject({ session: 'loaded', run: 'idle' });
+
+      snap = next(snap, { type: 'SUBMIT', text: 'hi', sessionId: 'sess-1' });
+      expect(snap.value).toMatchObject({ session: 'loaded', run: 'starting' });
+
+      snap = next(snap, { type: 'RUN_STARTED', run_id: 'r1', session_id: 'sess-1' });
+      expect(snap.value).toMatchObject({ session: 'loaded', run: 'running' });
+      expect(ctx(snap).runId).toBe('r1');
     });
   });
 
@@ -627,11 +718,11 @@ describe('chatSessionMachine', () => {
 
       // Submit
       actor.send({ type: 'SUBMIT', text: 'Do something', sessionId: sid });
-      expect(actor.getSnapshot().value).toBe('starting');
+      expect(phase(actor.getSnapshot())).toBe('starting');
 
       // Run started
       actor.send({ type: 'RUN_STARTED', run_id: 'r1', session_id: sid });
-      expect(actor.getSnapshot().value).toBe('running');
+      expect(phase(actor.getSnapshot())).toBe('running');
 
       // Tool called
       actor.send({
@@ -657,7 +748,7 @@ describe('chatSessionMachine', () => {
 
       // Run end — should flush preamble
       actor.send({ type: 'RUN_END', session_id: sid });
-      expect(actor.getSnapshot().value).toBe('idle');
+      expect(phase(actor.getSnapshot())).toBe('idle');
 
       const items = actor.getSnapshot().context.items;
       expect(items).toHaveLength(3); // user msg + tool + flushed assistant msg
