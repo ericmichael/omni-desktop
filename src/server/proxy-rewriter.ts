@@ -132,7 +132,7 @@ export const setupProxyRewriter = (fastify: FastifyInstance, wsHandler: WsHandle
  *
  * Targets: href, src, action, formaction, poster, data, srcset attributes.
  */
-function rewriteHtmlUrls(html: string, upstream: string, proxyName: string): string {
+export function rewriteHtmlUrls(html: string, upstream: string, proxyName: string): string {
   const proxyPrefix = `/proxy/${proxyName}`;
 
   let upstreamHost = '';
@@ -178,7 +178,7 @@ function rewriteHtmlUrls(html: string, upstream: string, proxyName: string): str
 }
 
 /** Escape a string for use in a RegExp. */
-function escapeForRegex(s: string): string {
+export function escapeForRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
@@ -411,7 +411,7 @@ function wsRewriteScript(proxyName: string): string {
 /**
  * Rewrite localhost URLs in a status data object to relative proxy paths and register upstreams.
  */
-const rewriteStatusUrls = (data: Record<string, string | undefined>, proxyName: string): void => {
+export const rewriteStatusUrls = (data: Record<string, string | undefined>, proxyName: string): void => {
   const urlFields = ['uiUrl', 'wsUrl', 'sandboxUrl', 'codeServerUrl', 'noVncUrl'];
 
   for (const field of urlFields) {

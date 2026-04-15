@@ -24,7 +24,7 @@ continue;
     if (!key) {
 continue;
 }
-    result[key] = raw.slice(eqIdx + 1);
+    result[key] = raw.slice(eqIdx + 1).replace(/\r$/, '');
   }
   return result;
 };

@@ -423,6 +423,305 @@ describe('ProjectManager', () => {
   });
 
   // -------------------------------------------------------------------------
+  // T-new — addTicket / updateTicket basics
+  // -------------------------------------------------------------------------
+  describe('addTicket / updateTicket', () => {
+    it('addTicket assigns the first column as default columnId', () => {
+      const { pm, store } = makePm({ tickets: [] });
+      const ticket = pm.addTicket({
+        projectId: 'proj-1',
+        title: 'New ticket',
+        description: '',
+        priority: 'medium',
+        blockedBy: [],
+        comments: [],
+        runs: [],
+      } as Parameters<typeof pm.addTicket>[0]);
+
+      expect(ticket.columnId).toBe('backlog'); // first column of TEST_PIPELINE
+      expect(ticket.id).toBeDefined();
+      expect(store.get('tickets', [])).toHaveLength(1);
+    });
+
+    it('updateTicket stamps updatedAt', () => {
+      vi.setSystemTime(new Date('2025-01-01T00:00:00Z'));
+      const { pm, store } = makePm({
+        tickets: [{ id: 't1' }],
+      });
+      const before = store.get('tickets', [])[0]!.updatedAt;
+
+      vi.setSystemTime(new Date('2025-06-01T00:00:00Z'));
+      pm.updateTicket('t1', { title: 'Updated' });
+
+      const after = store.get('tickets', [])[0]!.updatedAt;
+      expect(after).toBeGreaterThan(before);
+      expect(store.get('tickets', [])[0]!.title).toBe('Updated');
+    });
+
+    it('updateTicket is a no-op for unknown id', () => {
+      const { pm, store } = makePm({ tickets: [{ id: 't1' }] });
+      pm.updateTicket('nope' as never, { title: 'X' });
+      expect(store.get('tickets', [])[0]!.title).toBe('Ticket t1');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // T-new — getPipeline cascade
+  // -------------------------------------------------------------------------
+  describe('getPipeline', () => {
+    it('returns project.pipeline when no FLEET.md workflow is loaded', () => {
+      const { pm } = makePm({
+        pipeline: {
+          columns: [
+            { id: 'todo', label: 'To Do' },
+            { id: 'done', label: 'Done' },
+          ],
+        },
+        tickets: [],
+      });
+      const pipeline = pm.getPipeline('proj-1');
+      expect(pipeline.columns.map((c) => c.id)).toEqual(['todo', 'done']);
+    });
+
+    it('returns FLEET.md pipeline when workflow has one', () => {
+      const { pm } = makePm(
+        { tickets: [] },
+        {
+          workflowConfig: {
+            pipeline: {
+              columns: [
+                { id: 'inbox', label: 'Inbox' },
+                { id: 'shipped', label: 'Shipped' },
+              ],
+            },
+          },
+        }
+      );
+      const pipeline = pm.getPipeline('proj-1');
+      expect(pipeline.columns.map((c) => c.id)).toEqual(['inbox', 'shipped']);
+    });
+
+    it('falls back to SIMPLE_PIPELINE for projects without a source', () => {
+      const { pm, store } = makePm({ tickets: [] });
+      // Remove source from the project to simulate a "no source" project
+      const projects = store.get('projects', []);
+      delete (projects[0] as Record<string, unknown>).source;
+      // Also clear pipeline so we hit the final fallback
+      delete (projects[0] as Record<string, unknown>).pipeline;
+      store.set('projects', projects);
+
+      const pipeline = pm.getPipeline('proj-1');
+      // SIMPLE_PIPELINE has 3 columns: backlog, in_progress, done
+      expect(pipeline.columns).toHaveLength(3);
+      expect(pipeline.columns[0]!.id).toBe('backlog');
+      expect(pipeline.columns[2]!.id).toBe('done');
+    });
+
+    it('falls back to DEFAULT_PIPELINE for projects with a source but no pipeline', () => {
+      const { pm, store } = makePm({
+        tickets: [],
+        source: { kind: 'local', workspaceDir: '/tmp/work' },
+      });
+      // Remove pipeline from the project
+      const projects = store.get('projects', []);
+      delete (projects[0] as Record<string, unknown>).pipeline;
+      store.set('projects', projects);
+
+      const pipeline = pm.getPipeline('proj-1');
+      // DEFAULT_PIPELINE has ≥ 2 columns, starts with backlog, ends with completed
+      expect(pipeline.columns.length).toBeGreaterThanOrEqual(2);
+      expect(pipeline.columns[0]!.id).toBe('backlog');
+      expect(pipeline.columns[pipeline.columns.length - 1]!.id).toBe('completed');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // T-new — moveTicketToColumn
+  // -------------------------------------------------------------------------
+  describe('moveTicketToColumn', () => {
+    it('updates columnId and columnChangedAt', () => {
+      const { pm, store } = makePm({
+        tickets: [{ id: 't1', columnId: 'backlog' }],
+      });
+      pm.moveTicketToColumn('t1', 'in_progress');
+
+      const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
+      expect(ticket.columnId).toBe('in_progress');
+      expect(ticket.columnChangedAt).toBeGreaterThan(0);
+    });
+
+    it('auto-resolves as completed when moving to terminal column', () => {
+      const { pm, store } = makePm({
+        tickets: [{ id: 't1', columnId: 'in_progress' }],
+      });
+      pm.moveTicketToColumn('t1', 'done'); // terminal column of TEST_PIPELINE
+
+      const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
+      expect(ticket.resolution).toBe('completed');
+      expect(ticket.resolvedAt).toBeGreaterThan(0);
+    });
+
+    it('preserves existing resolution when moving to terminal column', () => {
+      const { pm, store } = makePm({
+        tickets: [{ id: 't1', columnId: 'in_progress' }],
+      });
+      // Pre-set a different resolution
+      pm.updateTicket('t1', { resolution: 'wont-do' as never });
+
+      pm.moveTicketToColumn('t1', 'done');
+
+      const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
+      // Should keep 'wont-do', not override with 'completed'
+      expect(ticket.resolution).toBe('wont-do');
+    });
+
+    it('clears resolution when moving away from terminal column (reopen)', () => {
+      const { pm, store } = makePm({
+        tickets: [{ id: 't1', columnId: 'done' }],
+      });
+      // Set resolution as if ticket was completed
+      pm.updateTicket('t1', { resolution: 'completed' as never, resolvedAt: Date.now() });
+
+      pm.moveTicketToColumn('t1', 'in_progress');
+
+      const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
+      expect(ticket.resolution).toBeUndefined();
+      expect(ticket.resolvedAt).toBeUndefined();
+    });
+
+    it('is a no-op for unknown ticketId', () => {
+      const { pm, store } = makePm({
+        tickets: [{ id: 't1', columnId: 'backlog' }],
+      });
+      pm.moveTicketToColumn('nope' as never, 'in_progress');
+      // t1 should be unchanged
+      expect(store.get('tickets', [])[0]!.columnId).toBe('backlog');
+    });
+
+    it('is a no-op for unknown columnId', () => {
+      const { pm, store } = makePm({
+        tickets: [{ id: 't1', columnId: 'backlog' }],
+      });
+      pm.moveTicketToColumn('t1', 'nonexistent' as never);
+      expect(store.get('tickets', [])[0]!.columnId).toBe('backlog');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // T-new — resolveTicket
+  // -------------------------------------------------------------------------
+  describe('resolveTicket', () => {
+    it('sets resolution and moves to terminal column', () => {
+      const { pm, store } = makePm({
+        tickets: [{ id: 't1', columnId: 'in_progress' }],
+      });
+      pm.resolveTicket('t1', 'completed' as never);
+
+      const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
+      expect(ticket.resolution).toBe('completed');
+      expect(ticket.columnId).toBe('done'); // terminal column
+      expect(ticket.resolvedAt).toBeGreaterThan(0);
+    });
+
+    it('does not overwrite resolvedAt if already set', () => {
+      const { pm, store } = makePm({
+        tickets: [{ id: 't1', columnId: 'in_progress' }],
+      });
+      // Pre-set resolvedAt
+      pm.updateTicket('t1', { resolvedAt: 12345 });
+
+      pm.resolveTicket('t1', 'wont-do' as never);
+
+      const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
+      expect(ticket.resolvedAt).toBe(12345);
+    });
+
+    it('is a no-op for unknown ticketId', () => {
+      const { pm } = makePm({ tickets: [{ id: 't1' }] });
+      expect(() => pm.resolveTicket('nope' as never, 'completed' as never)).not.toThrow();
+    });
+
+    it('does not move if ticket is already in terminal column', () => {
+      const { pm, store } = makePm({
+        tickets: [{ id: 't1', columnId: 'done' }],
+      });
+      // Spy on updateTicket calls indirectly through store changes
+      const before = store.get('tickets', [])[0]!.updatedAt;
+      vi.setSystemTime(new Date('2030-01-01T00:00:00Z'));
+
+      pm.resolveTicket('t1', 'completed' as never);
+
+      const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
+      expect(ticket.columnId).toBe('done'); // unchanged
+      expect(ticket.resolution).toBe('completed');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // T-new — migrateOrphanedTickets (via ensureWorkflowLoaded)
+  // -------------------------------------------------------------------------
+  describe('migrateOrphanedTickets', () => {
+    it('moves tickets with stale columnIds to the first column', () => {
+      const { pm, store } = makePm({
+        tickets: [
+          { id: 't1', columnId: 'stale-column' },
+          { id: 't2', columnId: 'backlog' },
+        ],
+      });
+
+      // Trigger migration by calling ensureWorkflowLoaded, which calls migrateOrphanedTickets
+      // Since migrateOrphanedTickets is private, we trigger it through the public interface
+      // Directly manipulate: set a ticket's columnId to something not in the pipeline
+      const tickets = store.get('tickets', []);
+      tickets[0]!.columnId = 'deleted-column' as never;
+      store.set('tickets', tickets);
+
+      // Force pipeline re-evaluation — calling getPipeline + manually invoking the method
+      // through a column move that triggers the pipeline check won't work directly.
+      // Instead, call ensureWorkflowLoaded which calls migrateOrphanedTickets.
+      void pm.ensureWorkflowLoaded('proj-1');
+
+      const updatedTickets = store.get('tickets', []);
+      expect(updatedTickets.find((t: Ticket) => t.id === 't1')!.columnId).toBe('backlog');
+      expect(updatedTickets.find((t: Ticket) => t.id === 't2')!.columnId).toBe('backlog');
+    });
+
+    it('does not touch tickets whose columnId is still valid', () => {
+      const { pm, store } = makePm({
+        tickets: [
+          { id: 't1', columnId: 'in_progress' },
+          { id: 't2', columnId: 'review' },
+        ],
+      });
+
+      void pm.ensureWorkflowLoaded('proj-1');
+
+      const updatedTickets = store.get('tickets', []);
+      expect(updatedTickets.find((t: Ticket) => t.id === 't1')!.columnId).toBe('in_progress');
+      expect(updatedTickets.find((t: Ticket) => t.id === 't2')!.columnId).toBe('review');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // T-new — removeTicket
+  // -------------------------------------------------------------------------
+  describe('removeTicket', () => {
+    it('removes the ticket from the store', () => {
+      const { pm, store } = makePm({
+        tickets: [{ id: 't1' }, { id: 't2' }],
+      });
+      pm.removeTicket('t1');
+      expect(store.get('tickets', []).map((t: Ticket) => t.id)).toEqual(['t2']);
+    });
+
+    it('is a no-op for unknown ticketId', () => {
+      const { pm, store } = makePm({ tickets: [{ id: 't1' }] });
+      pm.removeTicket('nope' as never);
+      expect(store.get('tickets', [])).toHaveLength(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // processManager wiring
   // -------------------------------------------------------------------------
   describe('processManager integration', () => {

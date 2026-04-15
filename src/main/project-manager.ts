@@ -415,8 +415,10 @@ export class ProjectManager {
     }
     const dir = this.getProjectDirPath(project);
     const fullPath = path.resolve(dir, relativePath);
-    // Validate no directory traversal
-    if (!fullPath.startsWith(dir)) {
+    // Validate no directory traversal — must use separator-terminated prefix
+    // to prevent sibling directory bypass (e.g. dir="/tmp/proj" matching "/tmp/proj-evil/secret")
+    const normalizedDir = dir.endsWith(path.sep) ? dir : dir + path.sep;
+    if (!fullPath.startsWith(normalizedDir) && fullPath !== dir) {
       throw new Error('Path traversal not allowed');
     }
     await shell.openPath(fullPath);

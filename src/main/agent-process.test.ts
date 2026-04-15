@@ -82,6 +82,17 @@ vi.mock('@/lib/simple-logger', () => ({
   },
 }));
 
+vi.mock('@/main/store', () => ({
+  store: {
+    get: vi.fn((_key: string) => undefined),
+    set: vi.fn(),
+  },
+  getStore: vi.fn(() => ({
+    get: vi.fn((_key: string) => undefined),
+    set: vi.fn(),
+  })),
+}));
+
 vi.mock('ws', async () => {
   const { EventEmitter } = await import('node:events');
   class FakeWebSocket extends EventEmitter {

@@ -22,7 +22,10 @@ const MAX_TEXT_PREVIEW_BYTES = 512_000;
  */
 export function resolveArtifactPath(rootDir: string, relativePath: string): string {
   const fullPath = path.resolve(rootDir, relativePath);
-  if (!fullPath.startsWith(rootDir)) {
+  // Ensure path separator boundary — without it, /tmp/artifacts-evil would
+  // pass a startsWith check against /tmp/artifacts.
+  const normalizedRoot = rootDir.endsWith(path.sep) ? rootDir : rootDir + path.sep;
+  if (!fullPath.startsWith(normalizedRoot) && fullPath !== rootDir) {
     throw new Error('Path traversal detected');
   }
   return fullPath;
