@@ -15,6 +15,7 @@ import { type SessionItem,SessionList } from './components/SessionList'
 import { Sidebar } from './components/Sidebar'
 import { WorkspacePicker } from './components/WorkspacePicker'
 import { OmniAgentsHeaderActionsPortal, OmniAgentsHeaderActionsProvider } from './header-actions'
+import { useChatBoot } from './hooks/use-chat-boot'
 import { useChatSession } from './hooks/use-chat-session'
 import { useRPCClient, useRPCConnected } from './rpc-context'
 import { useUiConfig } from './ui-config'
@@ -88,6 +89,18 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
     submit, submitError, stop, loadSession, selectSession, historyLoaded, historyError, newSession, approvalDecided, appendResponse, addArtifact, setSessionId,
   } = machine
 
+  // Boot orchestrator — composes server → RPC → bootstrap → session load into
+  // a single state machine with automatic teardown on disconnect. Replaces the
+  // imperative mount-effect chain that used to live here.
+  const initialBootSessionId = sessionIdProp || uiConfig.searchParams.get('session') || undefined
+  const bootState = useChatBoot({
+    client,
+    chatSession: machine,
+    sessionId: initialBootSessionId,
+    wsRealtimeUrl: uiConfig.wsRealtimeUrl,
+    token: uiConfig.token,
+  })
+
   const refreshSessions = useCallback(async () => {
     try {
       const list = await client.listSessions()
@@ -95,109 +108,56 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
     } catch {}
   }, [client])
 
+  // Sync capabilities from the boot machine into local state. The boot
+  // machine is the source of truth; these local useStates exist because
+  // downstream components consume them as plain values and some (like
+  // workspacePath) are also updated by session selection post-boot.
   useEffect(() => {
-      let cancelled = false
+    const caps = bootState.capabilities
+    if (!caps) {
+      return
+    }
+    setAgentName(caps.agentName)
+    setWelcomeText(caps.welcomeText)
+    setVoiceEnabled(caps.voiceEnabled)
+    setWorkspaceSupported(caps.workspaceSupported)
+    if (caps.workspacePath) {
+      setWorkspacePath(caps.workspacePath)
+    }
+    document.title = caps.agentName
+  }, [bootState.capabilities])
 
-      client.connectAndWait()
-        .then(async () => {
-        if (cancelled) {
-return
-}
-        try {
- await client.clientFunctions(1, [{ name: 'ui.request_tool_approval' }, { name: 'ui.set_status' }, { name: 'ui.add_artifact' }]) 
-} catch {}
-        if (cancelled) {
-return
-}
-        try {
-          const info = await client.getAgentInfo()
-          if (cancelled) {
-return
-}
-          const agentName = normalizeAgentName(String(info?.name || 'OmniAgent'))
-          setAgentName(agentName)
-          const wt = info?.welcome_text ? String(info.welcome_text) : undefined
-          setWelcomeText(wt)
-          document.title = agentName
-        } catch {}
-        if (cancelled) {
-return
-}
-        try {
-          const funcs = await client.listServerFunctions()
-          if (cancelled) {
-return
-}
-          const names = new Set(funcs.map(f => f.name))
-          if (names.has('fs_list_dir') && names.has('fs_get_workspace_root')) {
-            setWorkspaceSupported(true)
-            try {
-              const res = await client.serverCall('fs_get_cwd') as any
-              if (res?.path && !cancelled) {
-setWorkspacePath(res.path)
-}
-            } catch {}
-          }
-        } catch {}
-        if (cancelled) {
-return
-}
-        try {
-          const { RealtimeRPCClient } = await import('./rpc/realtime')
-          const rtc = new RealtimeRPCClient(uiConfig.wsRealtimeUrl, uiConfig.token)
-          await rtc.connect()
-          try {
-            const res: any = await rtc.startSession()
-            const sid = String(res?.session_id || '')
-            if (sid) {
-              setVoiceEnabled(true)
-              try {
- await rtc.stopSession(sid) 
-} catch {}
-            }
-          } finally {
- rtc.disconnect() 
-}
-        } catch {
- setVoiceEnabled(false) 
-}
-        if (cancelled) {
-return
-}
-        const resume = uiConfig.searchParams.get('resume') === 'true'
-        const sid = sessionIdProp || uiConfig.searchParams.get('session') || undefined
-        if (resume && !sid) {
-          try {
-            const list = await client.listSessions()
-            if (cancelled) {
-return
-}
-            setSessions(list)
-            setUI('resume')
-          } catch {
-            if (!cancelled) {
-setUI('chat')
-}
-          }
-        } else {
-          if (sid && !cancelled) {
-            // One-call rehydration: drives SELECT_SESSION → fetch → HISTORY_LOADED
-            // so the mount path can't fall out of sync with handleSelectSession.
-            await loadSession(sid)
-          }
-          if (!cancelled) {
-setUI('chat')
-}
-        }
-      })
-      .catch(() => {
- if (!cancelled) {
-setUI('error')
-} 
-})
+  // React to boot phase → drive the top-level UI mode. In resume mode
+  // (user explicitly asked to pick a session), show the session list
+  // once bootstrap is done. Otherwise, show chat as soon as boot is
+  // ready.
+  useEffect(() => {
+    if (bootState.phase === 'bootstrapError') {
+      setUI('error')
+      return
+    }
+    if (!bootState.ready) {
+      return
+    }
+    const resume = uiConfig.searchParams.get('resume') === 'true'
+    const sid = sessionIdProp || uiConfig.searchParams.get('session') || undefined
+    if (resume && !sid) {
+      client
+        .listSessions()
+        .then((list) => setSessions(list))
+        .catch(() => {})
+      setUI('resume')
+    } else {
+      setUI('chat')
+    }
+  }, [bootState.phase, bootState.ready, client, sessionIdProp, uiConfig.searchParams])
 
-    // Side-effect-only listeners for events the machine doesn't handle
-    // (session state + filtering is handled by the useChatSession hook)
+  // Side-effect-only listeners for events the machine doesn't handle
+  // (session state + filtering is handled by the useChatSession hook).
+  // These run for the lifetime of the component and are independent of
+  // the boot machine — they need to be live even before boot completes
+  // so that any early events aren't lost.
+  useEffect(() => {
     const offRunStarted = client.on('run_started', () => {
       onSessionChangeRef.current?.(actor.getSnapshot().context.sessionId)
       refreshSessions()
@@ -263,11 +223,10 @@ return
     })
 
     return () => {
-      cancelled = true
       offRunStarted(); offRunEnd(); offClientRequest(); offToken()
       client.disconnect()
     }
-  }, [client, actor, loadSession, addArtifact, normalizeAgentName, refreshSessions, uiConfig])
+  }, [client, actor, addArtifact, refreshSessions])
 
   // Derive artifact index from the items stream (artifacts are now inline in conversation)
   const visibleArtifacts = useMemo(() => {
@@ -688,7 +647,7 @@ args.text = text
                 </AnimatePresence>
               </div>
               <Input
-                disabled={!connected}
+                disabled={!connected || !bootState.ready}
                 thinking={thinking}
                 onStop={handleStop}
                 onSubmit={handleSubmit}
