@@ -24,9 +24,6 @@ concurrency:
 
 jobs:
   build-linux:
-    # TEMPORARILY DISABLED while iterating on Windows smoke tests.
-    # Re-enable by removing this `if: false`.
-    if: false
     runs-on: ubuntu-latest
 
     steps:
@@ -90,7 +87,6 @@ jobs:
             dist/*.yaml
 
   build-macos:
-    if: false # TEMPORARILY DISABLED while iterating on Windows smoke tests
     runs-on: macos-latest
 
     steps:
@@ -155,7 +151,6 @@ jobs:
             dist/*.yaml
 
   build-macos-x64:
-    if: false # TEMPORARILY DISABLED while iterating on Windows smoke tests
     runs-on: macos-15-intel
 
     steps:
@@ -384,7 +379,7 @@ jobs:
       - name: Verify venv on disk
         shell: pwsh
         run: |
-          $venv = Join-Path $env:APPDATA 'Omni Code\omni\.venv'
+          $venv = Join-Path $env:USERPROFILE '.omni\.venv'
           foreach ($rel in @('Scripts\python.exe', 'Scripts\activate', 'Scripts\omni.exe')) {
             $p = Join-Path $venv $rel
             if (-not (Test-Path $p)) { throw "Missing: $p" }
@@ -403,9 +398,7 @@ jobs:
           if-no-files-found: ignore
 
   publish-release:
-    # TEMPORARILY DISABLED while iterating on Windows smoke tests — other
-    # platform builds are off so there's nothing to publish anyway.
-    if: false # github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [build-linux, build-macos, build-macos-x64, build-windows, smoke-windows]
     runs-on: ubuntu-latest
     permissions:

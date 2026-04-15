@@ -47,6 +47,14 @@ export const getUVExecutablePath = (): string => {
 };
 
 export const getOmniRuntimeDir = (): string => {
+  // On Windows, use %USERPROFILE%\.omni — the shortest stable non-admin path.
+  // Deep site-packages paths inside the venv easily exceed 260 chars when
+  // LongPathsEnabled is off (the Windows default). ~/.omni follows the same
+  // convention as .cargo, .rustup, and .nuget which all use the home dir for
+  // the same MAX_PATH reason.
+  if (process.platform === 'win32') {
+    return path.join(app.getPath('home'), '.omni');
+  }
   return path.join(app.getPath('userData'), 'omni');
 };
 
@@ -347,7 +355,7 @@ export const getOmniRuntimeInfo = async (): Promise<OmniRuntimeInfo> => {
  */
 export const getCliInstallDir = (): string => {
   if (process.platform === 'win32') {
-    return path.join(app.getPath('appData'), '..', 'Local', 'omni');
+    return path.join(process.env.LOCALAPPDATA ?? path.join(app.getPath('home'), 'AppData', 'Local'), 'omni');
   }
   return path.join(app.getPath('home'), '.local', 'bin');
 };

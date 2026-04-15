@@ -1,6 +1,6 @@
 import c from 'ansi-colors';
 import { execFile } from 'child_process';
-import { ipcMain, net } from 'electron';
+import { app, ipcMain, net } from 'electron';
 import { createWriteStream, type WriteStream } from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
@@ -289,6 +289,40 @@ export class OmniInstallManager {
     }
   };
 
+  // One-time migration: move the legacy Windows runtime dir to the new shorter
+  // path. Old: %APPDATA%\Omni Code\omni → New: %LOCALAPPDATA%\omni.
+  // If the new location already has a .venv, skip (user already migrated or
+  // did a fresh install). On failure, log and continue — startInstall will
+  // just do a fresh install at the new path.
+  private migrateWindowsRuntimeDir = async (): Promise<void> => {
+    const newDir = getOmniRuntimeDir();
+    const legacyDir = path.join(app.getPath('userData'), 'omni');
+
+    // Same path (e.g. dev override) — nothing to do.
+    if (path.resolve(newDir) === path.resolve(legacyDir)) return;
+
+    const legacyVenv = path.join(legacyDir, '.venv');
+    const newVenv = path.join(newDir, '.venv');
+
+    if (!(await pathExists(legacyVenv))) return;
+    if (await pathExists(newVenv)) {
+      this.log.info(c.gray('Legacy venv found but new location already populated — skipping migration\r\n'));
+      return;
+    }
+
+    this.log.info(c.cyan(`Migrating runtime from ${legacyDir} → ${newDir}...\r\n`));
+    try {
+      await fs.mkdir(path.dirname(newDir), { recursive: true });
+      await fs.rename(legacyDir, newDir);
+      this.log.info(c.gray('Migration complete\r\n'));
+    } catch (err) {
+      // rename fails across drives — fall back to letting startInstall do a fresh install.
+      this.log.warn(
+        c.yellow(`Could not migrate legacy runtime dir: ${(err as Error).message} — will reinstall at new location\r\n`)
+      );
+    }
+  };
+
   // Preflight: read HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled.
   // Returns true if set to 1, false if set to 0, null if it can't be read.
   // A `false` result means deep site-packages paths will break during
@@ -526,6 +560,13 @@ export class OmniInstallManager {
           },
         });
         return;
+      }
+
+      // Migrate legacy Windows runtime dir (%APPDATA%\Omni Code\omni) to
+      // the new shorter path (%LOCALAPPDATA%\omni) if it exists and the new
+      // location doesn't. Avoids a redundant reinstall for existing users.
+      if (process.platform === 'win32') {
+        await this.migrateWindowsRuntimeDir();
       }
 
       await fs.mkdir(getOmniRuntimeDir(), { recursive: true });

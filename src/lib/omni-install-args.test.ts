@@ -9,6 +9,7 @@ import { describe, expect, test } from 'vitest';
 // in the vitest environment.
 
 const managerSource = fs.readFileSync(path.resolve(__dirname, '../main/omni-install-manager.ts'), 'utf8');
+const utilSource = fs.readFileSync(path.resolve(__dirname, '../main/util.ts'), 'utf8');
 
 describe('omni-install-manager', () => {
   test('uv venv is invoked with --link-mode=copy to avoid Windows hardlink failures', () => {
@@ -44,5 +45,15 @@ describe('omni-install-manager', () => {
   test('LongPathsEnabled warning points users to the correct registry fix', () => {
     expect(managerSource).toContain('LongPathsEnabled');
     expect(managerSource).toMatch(/reg add.*LongPathsEnabled/);
+  });
+
+  test('legacy Windows runtime dir is migrated on startInstall', () => {
+    expect(managerSource).toContain('migrateWindowsRuntimeDir');
+  });
+});
+
+describe('util - runtime dir', () => {
+  test('Windows runtime dir uses ~/.omni to stay under MAX_PATH', () => {
+    expect(utilSource).toContain("'.omni'");
   });
 });
