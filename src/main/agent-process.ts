@@ -309,7 +309,11 @@ return;
         }
 
         const reason = signal ? `signal ${signal}` : `code ${exitCode}`;
-        this.updateStatus({ type: 'error', error: { message: `Process exited (${reason})` } });
+        const tail = this.tailStderr();
+        const message = tail
+          ? `Process exited (${reason})\n\n${tail}`
+          : `Process exited (${reason})`;
+        this.updateStatus({ type: 'error', error: { message } });
       });
     } catch (error) {
       this.childProcess = null;
@@ -1023,5 +1027,16 @@ this.log.info(`[exec] ${stderr.trim()}`);
 
   private detectPortConflict = (): boolean => {
     return PORT_CONFLICT_PATTERNS.some((pattern) => pattern.test(this.stderrBuffer));
+  };
+
+  // eslint-disable-next-line no-control-regex
+  private static readonly ANSI_RE = /\x1b\[[0-9;]*[A-Za-z]/g;
+
+  private tailStderr = (maxLines = 20, maxChars = 2000): string => {
+    const cleaned = this.stderrBuffer.replace(AgentProcess.ANSI_RE, '');
+    const lines = cleaned.split(/\r?\n/).map((l) => l.trimEnd()).filter((l) => l.length > 0);
+    const tail = lines.slice(-maxLines).join('\n');
+    if (tail.length <= maxChars) return tail;
+    return `…${tail.slice(tail.length - maxChars)}`;
   };
 }

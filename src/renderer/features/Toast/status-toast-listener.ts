@@ -12,7 +12,10 @@ $chatProcessStatus.subscribe((status) => {
   prevChatType = status.type;
 
   if (status.type === 'error' && prev !== 'error') {
-    toast.error('Sandbox error', status.error.message);
+    const full = status.error.message;
+    // Show a short summary in the toast; keep the full error available for Copy.
+    const firstLine = full.split('\n').find((l) => l.trim().length > 0) ?? full;
+    toast.error('Omni Code error', firstLine, { copyText: full });
   }
 });
 
@@ -22,7 +25,9 @@ $omniInstallProcessStatus.subscribe((status) => {
   prevInstallType = status.type;
 
   if (status.type === 'error' && prev !== 'error') {
-    toast.error('Install error', status.error.message);
+    const full = status.error.message;
+    const firstLine = full.split('\n').find((l) => l.trim().length > 0) ?? full;
+    toast.error('Install error', firstLine, { copyText: full });
   }
 
   if (status.type === 'completed' && prev !== 'completed') {
