@@ -109,6 +109,15 @@ return
       return
     }
 
+    // Emit CONNECT only when we're actually leaving `disconnected`. When
+    // this is triggered by the machine's own reconnect delay (via the
+    // reconnectSub subscription), the machine has already moved itself
+    // into `connecting`, so re-emitting CONNECT would land in a state
+    // that doesn't list it and the dropped-event detector would warn.
+    if (this.actor.getSnapshot().value === 'disconnected') {
+      this.send({ type: 'CONNECT' })
+    }
+
     const connectPromise = this.connectImpl()
     this.connectInFlight = connectPromise
     connectPromise.finally(() => {
@@ -132,12 +141,10 @@ throw new Error('RPCClient is disposed')
       this.ws.onclose = null
       this.ws.onerror = null
       try {
- this.ws.close() 
+ this.ws.close()
 } catch {}
       this.ws = null
     }
-
-    this.send({ type: 'CONNECT' })
 
     const wsUrl = this.token ? `${this.url}?token=${encodeURIComponent(this.token)}` : this.url
     const ws = new WebSocket(wsUrl)
