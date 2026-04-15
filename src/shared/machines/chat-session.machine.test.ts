@@ -31,12 +31,18 @@ function getInitialSnapshot() {
   return snap;
 }
 
-function idleSnap() {
+/** Raw machine initial state — `initializing`. */
+function initializingSnap() {
   return getInitialSnapshot();
 }
 
+/** Move into `ready.idle` via NEW_SESSION. The default test starting point. */
+function idleSnap(sessionId = 'sess-1') {
+  return next(initializingSnap(), { type: 'NEW_SESSION', sessionId });
+}
+
 function startingSnap(sessionId = 'sess-1') {
-  return next(idleSnap(), { type: 'SUBMIT', text: 'hello', sessionId });
+  return next(idleSnap(sessionId), { type: 'SUBMIT', text: 'hello' });
 }
 
 function runningSnap(sessionId = 'sess-1') {
@@ -60,26 +66,29 @@ function stoppingSnap(sessionId = 'sess-1') {
   return next(runningSnap(sessionId), { type: 'STOP' });
 }
 
+/** Fire SELECT_SESSION from the initial state to enter `initializing`. */
 function loadingHistorySnap() {
-  return next(idleSnap(), { type: 'SELECT_SESSION', id: 'sess-2' });
+  return next(initializingSnap(), { type: 'SELECT_SESSION', id: 'sess-2' });
 }
 
 function ctx(snap: any): ChatSessionContext {
   return snap.context;
 }
 
-/** Returns the run-region phase — matches the legacy single-region behavior. */
+/**
+ * Flattened view of the hierarchical state. Returns the nested
+ * `ready.*` sub-state as a bare string when in `ready`, otherwise the
+ * top-level state name (`initializing`, `initError`).
+ */
 function phase(snap: any): string {
   const v = snap.value;
   if (typeof v === 'string') {
     return v;
   }
-  return v?.run ?? 'unknown';
-}
-
-function sessionPhase(snap: any): string {
-  const v = snap.value;
-  return v?.session ?? 'unknown';
+  if (v && typeof v === 'object' && typeof v.ready === 'string') {
+    return v.ready;
+  }
+  return JSON.stringify(v);
 }
 
 // ---------------------------------------------------------------------------
@@ -88,12 +97,12 @@ function sessionPhase(snap: any): string {
 
 describe('chatSessionMachine', () => {
   describe('initial state', () => {
-    it('starts in idle', () => {
-      expect(phase(idleSnap())).toBe('idle');
+    it('starts in initializing', () => {
+      expect(phase(initializingSnap())).toBe('initializing');
     });
 
-    it('has empty context', () => {
-      const c = ctx(idleSnap());
+    it('has empty context in initializing', () => {
+      const c = ctx(initializingSnap());
       expect(c.sessionId).toBeUndefined();
       expect(c.runId).toBeUndefined();
       expect(c.items).toEqual([]);
@@ -101,10 +110,16 @@ describe('chatSessionMachine', () => {
       expect(c.pendingApprovals.size).toBe(0);
       expect(c.status).toBeUndefined();
     });
+
+    it('idleSnap helper reaches ready.idle with sessionId from NEW_SESSION', () => {
+      const c = ctx(idleSnap('sess-abc'));
+      expect(phase(idleSnap('sess-abc'))).toBe('idle');
+      expect(c.sessionId).toBe('sess-abc');
+    });
   });
 
   // -----------------------------------------------------------------------
-  // SUBMIT: idle → starting
+  // SUBMIT: ready.idle → ready.starting
   // -----------------------------------------------------------------------
 
   describe('SUBMIT', () => {
@@ -115,11 +130,12 @@ describe('chatSessionMachine', () => {
 
     it('appends user message to items', () => {
       const snap = startingSnap();
+      // NEW_SESSION clears items, then SUBMIT appends exactly one user msg
       expect(ctx(snap).items).toHaveLength(1);
       expect(ctx(snap).items[0]).toMatchObject({ type: 'chat', role: 'user', content: 'hello' });
     });
 
-    it('sets sessionId from event', () => {
+    it('preserves sessionId from the prior NEW_SESSION / SELECT_SESSION', () => {
       const snap = startingSnap('my-session');
       expect(ctx(snap).sessionId).toBe('my-session');
     });
@@ -128,10 +144,18 @@ describe('chatSessionMachine', () => {
       const snap = next(idleSnap(), {
         type: 'SUBMIT',
         text: 'look',
-        sessionId: 's1',
         attachments: [{ type: 'image', url: 'data:...' }],
       });
       expect((ctx(snap).items[0] as any).attachments).toHaveLength(1);
+    });
+
+    it('is silently dropped from initializing (structural enforcement)', () => {
+      // SUBMIT only lives on ready.idle. From initializing, it's a no-op —
+      // the dropped-event detector will warn in dev, which is the correct
+      // signal that upstream loadSession was skipped.
+      const snap = next(initializingSnap(), { type: 'SUBMIT', text: 'hi' });
+      expect(phase(snap)).toBe('initializing');
+      expect(ctx(snap).items).toEqual([]);
     });
   });
 
@@ -460,26 +484,31 @@ describe('chatSessionMachine', () => {
   // -----------------------------------------------------------------------
 
   describe('session management', () => {
-    it('transitions session region → loading on SELECT_SESSION', () => {
+    it('SELECT_SESSION from initial → initializing', () => {
       const snap = loadingHistorySnap();
-      expect(sessionPhase(snap)).toBe('loading');
-      expect(phase(snap)).toBe('idle');
+      expect(phase(snap)).toBe('initializing');
       expect(ctx(snap).sessionId).toBe('sess-2');
       expect(ctx(snap).items).toEqual([]);
     });
 
-    it('transitions session loading → loaded on HISTORY_LOADED', () => {
+    it('HISTORY_LOADED in initializing → ready.idle with items', () => {
       const items: MessageItem[] = [{ type: 'chat', role: 'user', content: 'old message' }];
       const snap = next(loadingHistorySnap(), { type: 'HISTORY_LOADED', items });
-      expect(sessionPhase(snap)).toBe('loaded');
       expect(phase(snap)).toBe('idle');
       expect(ctx(snap).items).toEqual(items);
     });
 
-    it('transitions session loading → error on HISTORY_ERROR', () => {
+    it('HISTORY_ERROR in initializing → initError', () => {
       const snap = next(loadingHistorySnap(), { type: 'HISTORY_ERROR', error: 'fail' });
-      expect(sessionPhase(snap)).toBe('error');
-      expect(phase(snap)).toBe('idle');
+      expect(phase(snap)).toBe('initError');
+    });
+
+    it('SELECT_SESSION from initError re-enters initializing', () => {
+      let snap = next(loadingHistorySnap(), { type: 'HISTORY_ERROR', error: 'fail' });
+      expect(phase(snap)).toBe('initError');
+      snap = next(snap, { type: 'SELECT_SESSION', id: 'sess-3' });
+      expect(phase(snap)).toBe('initializing');
+      expect(ctx(snap).sessionId).toBe('sess-3');
     });
 
     it('applies HISTORY_LOADED while idle (mount rehydration path)', () => {
@@ -629,80 +658,58 @@ describe('chatSessionMachine', () => {
   });
 
   // -----------------------------------------------------------------------
-  // Parallel regions: session and run lifecycles are independent
+  // Hierarchical invariants — run lifecycle is nested inside `ready`
   // -----------------------------------------------------------------------
   //
-  // The machine exposes two orthogonal regions:
-  //   - `session`: unloaded → loading → loaded (driven by SELECT_SESSION /
-  //     HISTORY_LOADED / HISTORY_ERROR / NEW_SESSION)
-  //   - `run`: idle → starting → running → … (driven by SUBMIT / RUN_STARTED
-  //     / RUN_END / etc.)
-  //
-  // They must be able to progress independently so that loading history
-  // during a live run, or a run proceeding while a session swap is in
-  // flight, doesn't corrupt either region.
+  // Run sub-states exist only inside `ready`, which means being in
+  // `starting`, `running`, etc. structurally implies `context.sessionId`
+  // is defined. The only way out of `ready` is via SELECT_SESSION or
+  // NEW_SESSION at the root — both of which abort any in-flight run.
 
-  describe('parallel regions', () => {
-    it('initial snapshot exposes both region values', () => {
-      const snap = idleSnap();
-      expect(snap.value).toMatchObject({ session: 'unloaded', run: 'idle' });
-    });
-
-    it('SELECT_SESSION from any run state transitions session and resets run', () => {
-      // Policy: selecting a different session aborts any in-flight run.
-      // Both regions respond to SELECT_SESSION — session → loading, run → idle.
-      // Today SELECT_SESSION is only listed on idle, so from running it's
-      // silently dropped and sessionId never updates.
+  describe('hierarchical invariants', () => {
+    it('SELECT_SESSION from any ready sub-state aborts run and re-enters initializing', () => {
       let snap = runningSnap('sess-1');
+      expect(phase(snap)).toBe('running');
       expect(ctx(snap).runId).toBe('run-1');
 
       snap = next(snap, { type: 'SELECT_SESSION', id: 'sess-2' });
-      expect(snap.value).toMatchObject({ run: 'idle', session: 'loading' });
+      expect(phase(snap)).toBe('initializing');
       expect(ctx(snap).sessionId).toBe('sess-2');
       expect(ctx(snap).runId).toBeUndefined();
     });
 
-    it('HISTORY_LOADED after SELECT_SESSION populates items in the loaded state', () => {
-      let snap = next(idleSnap(), { type: 'SELECT_SESSION', id: 'sess-2' });
-      expect(snap.value).toMatchObject({ session: 'loading', run: 'idle' });
+    it('SELECT_SESSION from awaitingApproval aborts and clears the pending queue', () => {
+      let snap = awaitingApprovalSnap('sess-1');
+      expect(phase(snap)).toBe('awaitingApproval');
+      expect(ctx(snap).pendingApprovals.size).toBe(1);
 
-      const items: MessageItem[] = [
-        { type: 'chat', role: 'user', content: 'old q' },
-        { type: 'chat', role: 'assistant', content: 'old a' },
-      ];
-      snap = next(snap, { type: 'HISTORY_LOADED', items });
-      expect(snap.value).toMatchObject({ session: 'loaded', run: 'idle' });
-      expect(ctx(snap).items).toEqual(items);
+      snap = next(snap, { type: 'SELECT_SESSION', id: 'sess-2' });
+      expect(phase(snap)).toBe('initializing');
+      expect(ctx(snap).pendingApprovals.size).toBe(0);
     });
 
-    it('HISTORY_ERROR transitions session to error without touching run', () => {
-      let snap = next(idleSnap(), { type: 'SELECT_SESSION', id: 'sess-2' });
-      snap = next(snap, { type: 'HISTORY_ERROR', error: 'network' });
-      expect(snap.value).toMatchObject({ session: 'error', run: 'idle' });
+    it('NEW_SESSION from running aborts and lands in ready.idle', () => {
+      let snap = runningSnap('sess-1');
+      snap = next(snap, { type: 'NEW_SESSION', sessionId: 'sess-fresh' });
+      expect(phase(snap)).toBe('idle');
+      expect(ctx(snap).sessionId).toBe('sess-fresh');
+      expect(ctx(snap).runId).toBeUndefined();
+      expect(ctx(snap).items).toEqual([]);
     });
 
-    it('SUBMIT from an unloaded session marks session loaded and run starting', () => {
-      // Session starts unloaded. SUBMIT should transition the session region
-      // to loaded (with the sessionId from the SUBMIT payload) and the run
-      // region to starting, simultaneously.
-      const snap = next(idleSnap(), { type: 'SUBMIT', text: 'hi', sessionId: 'sess-new' });
-      expect(snap.value).toMatchObject({ session: 'loaded', run: 'starting' });
-      expect(ctx(snap).sessionId).toBe('sess-new');
-    });
+    it('full init → submit → run flow transitions through the hierarchy', () => {
+      // Mount path: SELECT_SESSION → HISTORY_LOADED → ready.idle → SUBMIT → starting → RUN_STARTED → running
+      let snap = next(initializingSnap(), { type: 'SELECT_SESSION', id: 'sess-1' });
+      expect(phase(snap)).toBe('initializing');
 
-    it('run lifecycle runs independently: SUBMIT → RUN_STARTED → running', () => {
-      // Once session is loaded, run region transitions idle → starting → running
-      // without touching the session region.
-      let snap = next(idleSnap(), { type: 'SELECT_SESSION', id: 'sess-1' });
-      const items: MessageItem[] = [];
-      snap = next(snap, { type: 'HISTORY_LOADED', items });
-      expect(snap.value).toMatchObject({ session: 'loaded', run: 'idle' });
+      snap = next(snap, { type: 'HISTORY_LOADED', items: [] });
+      expect(phase(snap)).toBe('idle');
 
-      snap = next(snap, { type: 'SUBMIT', text: 'hi', sessionId: 'sess-1' });
-      expect(snap.value).toMatchObject({ session: 'loaded', run: 'starting' });
+      snap = next(snap, { type: 'SUBMIT', text: 'hi' });
+      expect(phase(snap)).toBe('starting');
 
       snap = next(snap, { type: 'RUN_STARTED', run_id: 'r1', session_id: 'sess-1' });
-      expect(snap.value).toMatchObject({ session: 'loaded', run: 'running' });
+      expect(phase(snap)).toBe('running');
       expect(ctx(snap).runId).toBe('r1');
     });
   });
@@ -712,12 +719,16 @@ describe('chatSessionMachine', () => {
   // -----------------------------------------------------------------------
 
   describe('full lifecycle', () => {
-    it('idle → submit → run_started → tool → result → message → run_end → idle', () => {
+    it('init → new → submit → run_started → tool → result → message → run_end → idle', () => {
       const actor = createTestActor();
       const sid = 'lifecycle-session';
 
+      // Initialize a session so SUBMIT has a place to land
+      actor.send({ type: 'NEW_SESSION', sessionId: sid });
+      expect(phase(actor.getSnapshot())).toBe('idle');
+
       // Submit
-      actor.send({ type: 'SUBMIT', text: 'Do something', sessionId: sid });
+      actor.send({ type: 'SUBMIT', text: 'Do something' });
       expect(phase(actor.getSnapshot())).toBe('starting');
 
       // Run started

@@ -7,6 +7,8 @@
 import { useActorRef, useSelector } from '@xstate/react';
 import { useCallback, useEffect } from 'react';
 
+import { uuidv4 } from '@/lib/uuid';
+
 import { rehydrateHistory } from '@/lib/rehydrate-history';
 import type { RPCClient } from '@/renderer/omniagents-ui/rpc/client';
 import type { Attachment, MessageItem } from '@/shared/chat-types';
@@ -14,13 +16,30 @@ import {
   chatSessionMachine,
   type ChatSessionPhase,
   isThinking,
-  type SessionPhase,
 } from '@/shared/machines/chat-session.machine';
 import { createMachineLogger } from '@/shared/machines/machine-logger';
 
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
+
+/**
+ * Flatten the hierarchical machine state value into a single phase string.
+ * Top-level states (`initializing`, `initError`) pass through as-is; nested
+ * `ready.*` states are unwrapped to their sub-state name.
+ */
+function flattenPhase(value: unknown): ChatSessionPhase {
+  if (typeof value === 'string') {
+    return value as ChatSessionPhase;
+  }
+  if (value && typeof value === 'object' && 'ready' in value) {
+    const inner = (value as { ready?: unknown }).ready;
+    if (typeof inner === 'string') {
+      return inner as ChatSessionPhase;
+    }
+  }
+  return 'initializing';
+}
 
 export function useChatSession(client: RPCClient) {
   const actor = useActorRef(chatSessionMachine, {
@@ -155,27 +174,22 @@ return;
   const statusSpinner = useSelector(actor, (s) => s.context.statusSpinner);
   const statusItalic = useSelector(actor, (s) => s.context.statusItalic);
   const toolStatus = useSelector(actor, (s) => s.context.toolStatus);
-  // Parallel-region snapshot value: { session: 'loading', run: 'running' }
-  const phase = useSelector(actor, (s) => {
-    const v = s.value as { session?: SessionPhase; run?: ChatSessionPhase } | string;
-    return (typeof v === 'string' ? v : (v?.run ?? 'idle')) as ChatSessionPhase;
-  });
-  const sessionPhase = useSelector(actor, (s) => {
-    const v = s.value as { session?: SessionPhase; run?: ChatSessionPhase } | string;
-    return (typeof v === 'object' && v ? (v.session ?? 'unloaded') : 'unloaded') as SessionPhase;
-  });
-  const thinking = useSelector(actor, (s) => {
-    const v = s.value as { session?: SessionPhase; run?: ChatSessionPhase } | string;
-    const p = (typeof v === 'string' ? v : (v?.run ?? 'idle')) as ChatSessionPhase;
-    return isThinking(p);
-  });
+  // Hierarchical snapshot value: either a string (initializing, initError)
+  // or { ready: 'idle' | 'starting' | ... }. Flatten to a single union.
+  const phase = useSelector(actor, (s) => flattenPhase(s.value));
+  const thinking = useSelector(actor, (s) => isThinking(flattenPhase(s.value)));
 
   // --- Action methods ---
 
-  /** Send SUBMIT to the machine. Caller is responsible for calling client.startRun(). */
+  /**
+   * Send SUBMIT to the machine. The caller must still call
+   * `client.startRun()` using the `sessionId` from the hook's state — the
+   * machine no longer accepts a sessionId here because it's already bound
+   * to the session via the prior loadSession() call.
+   */
   const submit = useCallback(
-    (text: string, sessionId: string, attachments?: Attachment[]) => {
-      actor.send({ type: 'SUBMIT', text, sessionId, attachments });
+    (text: string, attachments?: Attachment[]) => {
+      actor.send({ type: 'SUBMIT', text, attachments });
     },
     [actor],
   );
@@ -271,13 +285,15 @@ return;
    * mount-rehydration bug; this API makes that mistake impossible.
    */
   const loadSession = useCallback(
-    async (id: string | undefined): Promise<void> => {
+    async (id: string | undefined): Promise<string> => {
       if (!id) {
-        // New session — caller supplies the id via the returned sessionId
-        // that subsequent calls will populate, or can set one explicitly.
-        // Leaving sessionId undefined tells the backend to mint one.
-        actor.send({ type: 'NEW_SESSION', sessionId: '' });
-        return;
+        // Fresh session — mint the UUID exactly once, here. This is the
+        // ONLY place in the client that generates a session id; every
+        // other caller (mount effect, "new chat" button, etc.) flows
+        // through loadSession so we can't drift.
+        const newId = uuidv4();
+        actor.send({ type: 'NEW_SESSION', sessionId: newId });
+        return newId;
       }
       actor.send({ type: 'SELECT_SESSION', id });
       try {
@@ -287,6 +303,7 @@ return;
       } catch (err) {
         actor.send({ type: 'HISTORY_ERROR', error: String((err as Error)?.message || err) });
       }
+      return id;
     },
     [actor, client],
   );
@@ -304,7 +321,6 @@ return;
     statusItalic,
     toolStatus,
     phase,
-    sessionPhase,
     thinking,
     // High-level action
     loadSession,

@@ -25,21 +25,24 @@ import type {
 // ---------------------------------------------------------------------------
 
 /**
- * Phase of the run region. Exposed by the hook as `phase` for callers
- * that want to know whether the agent is actively processing.
+ * Flattened view of the hierarchical state machine.
+ *
+ * The machine has three top-level states (`initializing`, `initError`,
+ * `ready`) and `ready` has nested run sub-states. We flatten both levels
+ * into one union for ergonomic UI rendering.
+ *
+ * Invariant: when `phase` is one of `idle`, `starting`, `running`,
+ * `awaitingApproval`, or `stopping`, the machine is inside `ready` and
+ * `context.sessionId` is guaranteed to be defined.
  */
 export type ChatSessionPhase =
+  | 'initializing'
+  | 'initError'
   | 'idle'
   | 'starting'
   | 'running'
   | 'awaitingApproval'
   | 'stopping';
-
-/**
- * Phase of the session region. Exposed as `sessionPhase` for callers that
- * want to render loading / error UI during session swap.
- */
-export type SessionPhase = 'unloaded' | 'loading' | 'loaded' | 'error';
 
 export type ChatSessionContext = {
   sessionId: string | undefined;
@@ -57,7 +60,7 @@ export type ChatSessionContext = {
 
 export type ChatSessionEvent =
   // User actions
-  | { type: 'SUBMIT'; text: string; sessionId: string; attachments?: Attachment[] }
+  | { type: 'SUBMIT'; text: string; attachments?: Attachment[] }
   | { type: 'SELECT_SESSION'; id: string }
   | { type: 'NEW_SESSION'; sessionId: string }
   | { type: 'STOP' }
@@ -178,6 +181,11 @@ export const chatSessionMachine = setup({
 
   // --- Actions ---
   actions: {
+    // SUBMIT only fires from ready.idle where context.sessionId is already
+    // set. We deliberately do NOT assign sessionId here — minting a session
+    // at submit time was the defensive hack that masked upstream load
+    // failures. See the machine-level comment on initialState for the
+    // enforced invariant.
     appendUserMessage: assign({
       items: ({ context, event }) => {
         const e = event as Extract<ChatSessionEvent, { type: 'SUBMIT' }>;
@@ -187,7 +195,6 @@ export const chatSessionMachine = setup({
         }
         return [...context.items, msg];
       },
-      sessionId: ({ event }) => (event as Extract<ChatSessionEvent, { type: 'SUBMIT' }>).sessionId,
       preambleBuffer: [],
       preamble: undefined,
       status: undefined,
@@ -443,7 +450,10 @@ return e.items;
   },
 }).createMachine({
   id: 'chatSession',
-  type: 'parallel',
+  // Initial state. Consumers MUST call `loadSession(id | undefined)` before
+  // user interaction — that's how we leave this state. No UI should allow
+  // submission until the machine has reached `ready`. See initError / ready.
+  initial: 'initializing',
   context: { ...INITIAL_CONTEXT },
 
   // Root-level event handlers — applied from any state unless a child
@@ -455,63 +465,53 @@ return e.items;
   // and we've lost days to that exact class of bug — the approval queue
   // getting stuck, HISTORY_LOADED dropped on mount, etc. The rule:
   // if an event only assigns context, it belongs at root.
+  //
+  // SELECT_SESSION and NEW_SESSION also live here: they're the one way to
+  // (re)initialize the session, valid from any state. Selecting a session
+  // mid-run aborts the run implicitly because the target state is outside
+  // `ready`.
   on: {
     SET_SESSION_ID: { actions: 'setSessionIdOnly' },
     HISTORY_LOADED: { actions: 'setHistoryItems' },
     APPEND_RESPONSE: { actions: 'appendResponse' },
     ADD_ARTIFACT: { guard: 'acceptLoose', actions: 'addArtifact' },
     APPROVAL_RESOLVED: { actions: 'removeApproval' },
+    SELECT_SESSION: {
+      target: '.initializing',
+      actions: 'resetSessionState',
+    },
+    NEW_SESSION: {
+      target: '.ready.idle',
+      actions: 'resetSessionState',
+    },
   },
 
   states: {
-    // =====================================================================
-    // Session region — session identity and history load lifecycle.
-    // Progresses independently of the run region.
-    // =====================================================================
-    session: {
-      initial: 'unloaded',
-
-      // Region-level SELECT_SESSION / NEW_SESSION handlers apply from any
-      // sub-state. Today these are only valid from idle; under parallel
-      // regions the session swap can happen at any time and the run region
-      // observes the same event to abort any in-flight run.
+    // -------------------------------------------------------------------
+    // Initializing — initial state. Waiting for HISTORY_LOADED (selected an
+    // existing session) or a direct transition via NEW_SESSION (fresh chat).
+    // The only valid transitions out are: to `ready` via HISTORY_LOADED /
+    // NEW_SESSION, or to `initError` on failure.
+    // -------------------------------------------------------------------
+    initializing: {
       on: {
-        SELECT_SESSION: { target: '.loading', actions: 'resetSessionState' },
-        NEW_SESSION: { target: '.loaded', actions: 'resetSessionState' },
-      },
-
-      states: {
-        unloaded: {
-          on: {
-            // First SUBMIT auto-creates a session from the event's sessionId.
-            // appendUserMessage in the run region also assigns sessionId.
-            SUBMIT: { target: 'loaded' },
-          },
-        },
-        loading: {
-          on: {
-            HISTORY_LOADED: { target: 'loaded', actions: 'setHistoryItems' },
-            HISTORY_ERROR: { target: 'error' },
-          },
-        },
-        loaded: {},
-        error: {},
+        HISTORY_LOADED: { target: 'ready.idle', actions: 'setHistoryItems' },
+        HISTORY_ERROR: { target: 'initError' },
       },
     },
 
-    // =====================================================================
-    // Run region — agent run lifecycle. SELECT_SESSION/NEW_SESSION abort
-    // any in-flight run via a region-level handler targeting .idle.
-    // =====================================================================
-    run: {
+    // -------------------------------------------------------------------
+    // InitError — history load failed. SELECT_SESSION / NEW_SESSION
+    // (handled at root) are the way out.
+    // -------------------------------------------------------------------
+    initError: {},
+
+    // -------------------------------------------------------------------
+    // Ready — session is loaded, context.sessionId is defined, all run
+    // operations are safe. Nested run lifecycle lives below.
+    // -------------------------------------------------------------------
+    ready: {
       initial: 'idle',
-
-      on: {
-        // Selecting or resetting a session aborts any in-flight run.
-        SELECT_SESSION: { target: '.idle', actions: 'clearRunState' },
-        NEW_SESSION: { target: '.idle', actions: 'clearRunState' },
-      },
-
       states: {
         idle: {
           on: {

@@ -3,7 +3,6 @@ import { AnimatePresence, motion } from 'framer-motion'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { rehydrateHistory } from '@/lib/rehydrate-history'
-import { uuidv4 } from '@/lib/uuid'
 import { persistedStoreApi } from '@/renderer/services/store'
 
 import type { PendingMessage } from './ChatShell'
@@ -341,10 +340,13 @@ args = { value: parsed }
       }
     }
     try {
-      // Ensure we always have a session ID before calling startRun.
-      const effectiveSessionId = sessionId ?? uuidv4()
+      // sessionId is guaranteed defined here — the machine only allows
+      // SUBMIT from ready.idle, which is only reachable after loadSession
+      // has populated context.sessionId. We rely on that invariant instead
+      // of the old defensive uuidv4() fallback.
       if (!sessionId) {
-        onSessionChangeRef.current?.(effectiveSessionId)
+        submitError('No active session — loadSession must run first')
+        return
       }
       let content: any | undefined = undefined
       let attachments: Attachment[] = []
@@ -398,8 +400,8 @@ param.filename = f.name
         attachments = processed.map(p => p.attachment)
         content = parts
       }
-      // Tell the machine we're submitting (appends user message, sets sessionId, transitions to starting)
-      submit(text, effectiveSessionId, attachments.length ? attachments : undefined)
+      // Tell the machine we're submitting (appends user message, transitions to starting)
+      submit(text, attachments.length ? attachments : undefined)
       // Merge parent-provided variables (e.g. client_tools) with workspace variables
       const workspaceVars = (workspacePath && workspaceSupported)
         ? { workspace_root: workspacePath }
@@ -407,7 +409,7 @@ param.filename = f.name
       const variables = (variablesProp || workspaceVars)
         ? { ...variablesProp, ...workspaceVars }
         : undefined
-      await client.startRun(text, effectiveSessionId, variables, content)
+      await client.startRun(text, sessionId, variables, content)
       if (workspaceSupported) {
 setWorkspaceLocked(true)
 }
@@ -476,17 +478,14 @@ return
   }, [client, approvalDecided])
 
   const handleSelectSession = useCallback(async (id?: string, opts?: { fromProp?: boolean }) => {
-    // When no id is provided (new chat), generate a fresh session id so the
-    // next startRun creates a brand-new session instead of reusing the last one.
-    const resolvedId = id ?? uuidv4()
-    // Notify parent of session change (skip if the change originated from the prop)
+    // loadSession owns the machine choreography AND the UUID mint for
+    // new chats. It returns the resolved id so we can notify the parent.
+    const resolvedId = await loadSession(id)
     if (!opts?.fromProp) {
-onSessionChange?.(id === undefined ? resolvedId : id)
-}
-    // Delegate the session-state choreography to the hook. The workspace
-    // restore that follows is a side-effect of the chosen session, not
-    // part of machine state, so it stays here.
-    await loadSession(id)
+      onSessionChange?.(resolvedId)
+    }
+    // Workspace restore is a side-effect of session selection, not part
+    // of machine state — it stays here.
     if (id) {
       if (workspaceSupported) {
         try {
@@ -498,9 +497,6 @@ setWorkspacePath(res.path)
         setWorkspaceLocked(true)
       }
     } else {
-      // New chat: machine now in a fresh state; ensure we have the right sessionId
-      // and the workspace is unlocked.
-      setSessionId(resolvedId)
       setWorkspaceLocked(false)
       if (workspaceSupported) {
         try {
@@ -512,7 +508,7 @@ setWorkspacePath(res.path)
       }
     }
     setUI('chat')
-  }, [client, loadSession, setSessionId, workspaceSupported, onSessionChange])
+  }, [client, loadSession, workspaceSupported, onSessionChange])
 
   useEffect(() => {
     if (urlSessionHandledRef.current) {
