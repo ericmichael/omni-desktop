@@ -90,12 +90,13 @@ export function createMachineLogger(machineName: string, opts?: MachineLoggerOpt
   let lastTransitionTime = Date.now();
 
   // Dropped-event detection: XState silently ignores events that no state
-  // handles. Compare snapshot identity across @xstate.snapshot events — if
-  // neither the state value nor context reference changed, the event was a
-  // no-op. Rate-limited so a spammy no-op doesn't drown the console.
+  // handles. Our previous heuristic (value/context reference equality) had
+  // false positives for explicit no-op handlers and self-transitions that
+  // land in the same state. Instead, we now use `actor.getSnapshot().can(event)`
+  // at @xstate.event time — BEFORE the event is processed — which is
+  // XState's own "is this event handled in the current state?" check.
+  // Rate-limited so a spammy true drop doesn't drown the console.
   const dropCounts = new Map<string, number>();
-  let prevValue: unknown;
-  let prevContext: unknown;
   const detectDrops = shouldDetectDrops();
   const warnDrop = (eventType: string) => {
     const count = (dropCounts.get(eventType) ?? 0) + 1;
@@ -111,32 +112,35 @@ export function createMachineLogger(machineName: string, opts?: MachineLoggerOpt
   };
 
   return (inspectionEvent: InspectionEvent) => {
+    // Dropped-event detection at @xstate.event — fires before processing.
+    if (inspectionEvent.type === '@xstate.event' && detectDrops) {
+      const { event, actorRef } = inspectionEvent as InspectionEvent & {
+        actorRef?: { getSnapshot?: () => { can?: (e: unknown) => boolean } };
+      };
+      // Skip XState-internal synthetic events
+      if (!event.type.startsWith('xstate.')) {
+        try {
+          const snap = actorRef?.getSnapshot?.();
+          if (snap && typeof snap.can === 'function' && !snap.can(event)) {
+            warnDrop(event.type);
+          }
+        } catch {
+          // Some inspection events (e.g. cross-actor relays) may not expose
+          // getSnapshot; we just skip detection in that case.
+        }
+      }
+    }
+
     if (inspectionEvent.type === '@xstate.snapshot') {
       const { event, snapshot } = inspectionEvent;
       const snap = snapshot as any;
 
-      // Skip XState-internal synthetic events — xstate.init, xstate.stop,
-      // xstate.error.*, etc. They're never user-fireable and get dropped
-      // by design when no state handles them.
-      if (event.type.startsWith('xstate.')) {
-        prevValue = snap.value;
-        prevContext = snap.context;
-        return;
-      }
-
-      // Dropped-event detection runs regardless of verbose logging
-      if (detectDrops) {
-        const sameValue = snap.value === prevValue ||
-          (typeof snap.value === 'string' && snap.value === prevValue);
-        const sameContext = snap.context === prevContext;
-        if (sameValue && sameContext) {
-          warnDrop(event.type);
-        }
-      }
-      prevValue = snap.value;
-      prevContext = snap.context;
-
       if (!verbose || !isEnabled(machineName)) {
+return;
+}
+
+      // Skip synthetic init events from verbose logging too
+      if (event.type === 'xstate.init') {
 return;
 }
 
