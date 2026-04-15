@@ -77,6 +77,9 @@ export const autoLaunchMachine = setup({
     clearError: assign({ error: null }),
     markLaunched: assign({ hasLaunched: true }),
     clearLaunched: assign({ hasLaunched: false }),
+    /** Explicit no-op — use for "I'm handling this and doing nothing" so
+     * the dropped-event detector (snap.can(event)) recognizes the handler. */
+    noop: () => {},
   },
   guards: {
     hasAlreadyLaunched: ({ context }) => context.hasLaunched,
@@ -167,11 +170,12 @@ export const autoLaunchMachine = setup({
     running: {
       invoke: { src: 'watchProcessStatus' },
       on: {
-        // No-op: the status watcher re-seeds after re-invoke on state
-        // transitions, which can re-send SANDBOX_RUNNING while we're
-        // already here. Acknowledge it explicitly so the drop-event
-        // detector doesn't warn.
-        SANDBOX_RUNNING: {},
+        // No-op handler: the status watcher re-seeds after re-invoke on
+        // state transitions (the invoker's subscription fires synchronously
+        // with the current value, which is still 'running'). Acknowledge
+        // the event explicitly with a registered no-op action so both
+        // XState and the drop-event detector recognize it as handled.
+        SANDBOX_RUNNING: { actions: 'noop' },
         SANDBOX_EXITED: 'idle',
         SANDBOX_ERROR: 'idle',
         RESET: { target: 'idle', actions: ['clearError', 'clearLaunched'] },
