@@ -444,6 +444,9 @@ return e.items;
         SUBMIT: { target: 'starting', actions: 'appendUserMessage' },
         SELECT_SESSION: { target: 'loadingHistory', actions: 'resetSessionState' },
         NEW_SESSION: { target: 'idle', actions: 'resetSessionState', reenter: true },
+        // Mount rehydration path: App sends SET_SESSION_ID then HISTORY_LOADED
+        // directly, without going through SELECT_SESSION / loadingHistory.
+        HISTORY_LOADED: { actions: 'setHistoryItems' },
         // Late-arriving events from a previous run (session-filtered)
         MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'bufferPreamble' },
         APPROVAL_RESOLVED: { actions: 'removeApproval' },

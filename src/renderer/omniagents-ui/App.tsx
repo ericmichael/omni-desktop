@@ -184,14 +184,18 @@ setUI('chat')
           if (sid) {
             // Load history for the session so the UI rehydrates past messages
             // on mount (e.g. after browser refresh).
-            setSessionId(sid)
+            selectSession(sid)
             try {
               const history = await client.getSessionHistory(sid)
               if (!cancelled) {
                 const msgs = rehydrateHistory(history as Record<string, unknown>[]) as MessageItem[]
                 historyLoaded(msgs)
               }
-            } catch {}
+            } catch {
+              if (!cancelled) {
+                historyError('Failed to load history')
+              }
+            }
           }
           setUI('chat')
         }
@@ -273,7 +277,7 @@ return
       offRunStarted(); offRunEnd(); offClientRequest(); offToken()
       client.disconnect()
     }
-  }, [client, actor, setSessionId, historyLoaded, addArtifact, normalizeAgentName, refreshSessions, uiConfig])
+  }, [client, actor, selectSession, historyLoaded, historyError, addArtifact, normalizeAgentName, refreshSessions, uiConfig])
 
   // Derive artifact index from the items stream (artifacts are now inline in conversation)
   const visibleArtifacts = useMemo(() => {

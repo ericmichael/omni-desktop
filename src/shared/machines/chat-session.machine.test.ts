@@ -469,6 +469,21 @@ describe('chatSessionMachine', () => {
       expect(phase(snap)).toBe('idle');
     });
 
+    it('applies HISTORY_LOADED while idle (mount rehydration path)', () => {
+      // On mount with a persisted sessionId, App.tsx sends SET_SESSION_ID
+      // (which does not transition out of idle) then HISTORY_LOADED. The
+      // machine must accept HISTORY_LOADED from idle so past messages show.
+      let snap = next(idleSnap(), { type: 'SET_SESSION_ID', sessionId: 'sess-mounted' });
+      expect(phase(snap)).toBe('idle');
+      const items: MessageItem[] = [
+        { type: 'chat', role: 'user', content: 'hi from last session' },
+        { type: 'chat', role: 'assistant', content: 'hello again' },
+      ];
+      snap = next(snap, { type: 'HISTORY_LOADED', items });
+      expect(phase(snap)).toBe('idle');
+      expect(ctx(snap).items).toEqual(items);
+    });
+
     it('resets state on NEW_SESSION (stays idle)', () => {
       // First put some state in
       let snap = runningSnap();
