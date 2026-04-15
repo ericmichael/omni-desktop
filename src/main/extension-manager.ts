@@ -4,9 +4,9 @@ import { ipcMain, net } from 'electron';
 import { getFreePort } from '@/lib/free-port';
 import { BUILTIN_EXTENSIONS, getManifest } from '@/main/extensions/registry';
 import type { ExtensionManifest } from '@/main/extensions/types';
-import type { store as storeInstance } from '@/main/store';
+import type { getStore } from '@/main/store';
 
-type Store = typeof storeInstance;
+type Store = ReturnType<typeof getStore>;
 import type {
   ExtensionDescriptor,
   ExtensionEnsureResult,

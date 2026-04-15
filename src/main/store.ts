@@ -1,26 +1,21 @@
 import Store from 'electron-store';
 
-import { schema } from '@/shared/types';
+import { schema, type StoreData } from '@/shared/types';
 
-let _store: Store | undefined;
+let _store: Store<StoreData> | undefined;
 
-/** Lazily-initialized singleton — avoids crashing in non-Electron contexts (vitest). */
-export function getStore(): Store {
+/**
+ * Lazily-initialized singleton. Lazy construction matters for two reasons:
+ * (1) tests import main-process modules without Electron's `app`, and
+ * (2) electron-store is backed by `conf`, which uses private class fields
+ *     accessed through an internal Proxy — wrapping the Store in another
+ *     Proxy (e.g. for a back-compat `store` export) breaks those reads
+ *     with "Cannot read private member #options". Always call `getStore()`
+ *     and use the returned instance directly.
+ */
+export function getStore(): Store<StoreData> {
   if (!_store) {
-    _store = new Store({ schema, clearInvalidConfig: true, watch: true });
+    _store = new Store<StoreData>({ schema, clearInvalidConfig: true, watch: true });
   }
   return _store;
 }
-
-/**
- * @deprecated Prefer `getStore()` for lazy initialization. This eager export
- * exists only for back-compat with call sites that use `store` directly.
- */
-export const store = new Proxy({} as Store, {
-  get(_target, prop, receiver) {
-    return Reflect.get(getStore(), prop, receiver);
-  },
-  set(_target, prop, value, receiver) {
-    return Reflect.set(getStore(), prop, value, receiver);
-  },
-});

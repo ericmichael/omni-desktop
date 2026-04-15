@@ -15,7 +15,7 @@ import { OMNI_CODE_VERSION } from '@/lib/omni-version';
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
 import type { PlatformClient } from '@/main/platform-client';
-import { store } from '@/main/store';
+import { getStore } from '@/main/store';
 import {
   ensureDirectory,
   getBundledBinPath,
@@ -677,6 +677,7 @@ return null;
 
     // Gated behind preview features: code-server and VNC desktop are experimental surfaces.
     // Enterprise policy also opts in via sandboxProfiles (same gate as the sandbox UI).
+    const store = getStore();
     const previewFeatures = store.get('previewFeatures') ?? false;
     const hasEnterpriseProfiles = (store.get('sandboxProfiles') ?? null) !== null;
     if (previewFeatures || hasEnterpriseProfiles) {

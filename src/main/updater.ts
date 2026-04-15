@@ -2,7 +2,7 @@ import type { BrowserWindow } from 'electron';
 import { dialog } from 'electron';
 import electronUpdater from 'electron-updater';
 
-import { store } from './store';
+import { getStore } from './store';
 
 const { autoUpdater } = electronUpdater;
 
@@ -12,7 +12,7 @@ autoUpdater.autoDownload = false;
 
 export const checkForUpdates = async (mainWindow: BrowserWindow) => {
   try {
-    autoUpdater.allowPrerelease = store.get('optInToLauncherPrereleases');
+    autoUpdater.allowPrerelease = getStore().get('optInToLauncherPrereleases');
     const updateCheckResult = await autoUpdater.checkForUpdates();
     if (!updateCheckResult) {
       return;

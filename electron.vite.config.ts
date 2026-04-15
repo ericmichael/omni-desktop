@@ -48,6 +48,14 @@ export default defineConfig({
       createHtmlPlugin({
         // index.dev.html has react devtools
         template: process.env.NODE_ENV === 'development' ? './index.dev.html' : './index.html',
+        inject: {
+          data: {
+            // Dev loads the renderer from the Vite HMR server (http + ws), so
+            // script-src must allow it. Prod is locked down to 'self' only.
+            cspScriptSrc:
+              process.env.NODE_ENV === 'development' ? "'self' 'unsafe-inline' http://localhost:5173" : "'self'",
+          },
+        },
       }),
     ],
     build: {

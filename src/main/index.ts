@@ -16,7 +16,7 @@ import { registerPlatformIpc } from '@/main/platform-ipc';
 import { createPlatformClient } from '@/main/platform-mode';
 import { createProcessManager } from '@/main/process-manager';
 import { createProjectManager } from '@/main/project-manager';
-import { store } from '@/main/store';
+import { getStore } from '@/main/store';
 import {
   ensureDirectory,
   getDefaultWorkspaceDir,
@@ -74,6 +74,7 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-backing-store-limit');
 
 const OMNI_CONFIG_DIR = getOmniConfigDir();
+const store = getStore();
 const main = new MainProcessManager({ store });
 let isShuttingDown = false;
 
