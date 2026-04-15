@@ -87,7 +87,7 @@ setText(replacement)
  el.setSelectionRange(0, 0) 
 } catch {}
         })
-      } else if (e.key === 'ArrowDown' && caretAtEnd) {
+      } else if (e.key === 'ArrowDown' && caretAtEnd && historyIndex > 0) {
         e.preventDefault()
         const nextIndex = Math.max(0, historyIndex - 1)
         setHistoryIndex(nextIndex)
@@ -152,7 +152,7 @@ return
               {files.map((f, i) => (
                 f.type.startsWith('image/') ? (
                   <div key={i} className="relative group">
-                    <img src={URL.createObjectURL(f)} alt="" className="h-20 max-w-[160px] rounded-lg object-cover border border-border" />
+                    <img src={URL.createObjectURL(f)} alt="" className="h-20 w-20 rounded-lg object-cover border border-border" />
                     <button onClick={() => {
                       setFiles(prev => prev.filter((_, idx) => idx !== i))
                       if (fileInputRef.current) {

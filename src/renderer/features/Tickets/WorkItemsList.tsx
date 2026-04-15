@@ -4,6 +4,7 @@ import {
   ArrowLeft20Regular,
   ArrowSync20Regular,
   Board20Regular,
+  Delete20Regular,
   List20Regular,
   Open20Regular,
   Play20Filled,
@@ -11,7 +12,7 @@ import {
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
 
-import { Badge, Caption1, IconButton, SectionLabel, SegmentedControl, Subtitle2 } from '@/renderer/ds';
+import { Badge, Caption1, ConfirmDialog, IconButton, SectionLabel, SegmentedControl, Subtitle2 } from '@/renderer/ds';
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { isActivePhase } from '@/shared/ticket-phase';
@@ -32,6 +33,7 @@ type TicketRowProps = {
   columnBadgeColor: 'blue' | 'green' | 'default';
   onSelect: (ticketId: TicketId) => void;
   onHoverChange: (ticketId: TicketId | null) => void;
+  onRequestDelete: (ticket: Ticket) => void;
 };
 
 const PRIORITY_DOT_COLORS: Record<string, string> = {
@@ -147,6 +149,20 @@ const useStyles = makeStyles({
     transitionProperty: 'opacity',
     transitionDuration: tokens.durationFaster,
   },
+  cellDelete: {
+    display: 'flex',
+    alignItems: 'center',
+    flexShrink: 0,
+    opacity: 1,
+    transitionProperty: 'opacity',
+    transitionDuration: tokens.durationFaster,
+    '@media (min-width: 768px)': {
+      opacity: 0,
+    },
+  },
+  cellDeleteVisible: {
+    opacity: 1,
+  },
   newBtn: {
     display: 'flex',
     alignItems: 'center',
@@ -179,7 +195,7 @@ const useStyles = makeStyles({
   },
 });
 
-const TicketRow = memo(({ ticket, selected, hovered, milestoneTitle, columnLabel, columnBadgeColor, onSelect, onHoverChange }: TicketRowProps) => {
+const TicketRow = memo(({ ticket, selected, hovered, milestoneTitle, columnLabel, columnBadgeColor, onSelect, onHoverChange, onRequestDelete }: TicketRowProps) => {
   const styles = useStyles();
   const phase = ticket.phase;
   const isRunning = phase !== undefined && phase !== null && isActivePhase(phase);
@@ -208,6 +224,10 @@ const TicketRow = memo(({ ticket, selected, hovered, milestoneTitle, columnLabel
   const handleStopPropagation = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
   }, []);
+
+  const handleDelete = useCallback(() => {
+    onRequestDelete(ticket);
+  }, [onRequestDelete, ticket]);
 
   return (
     <button
@@ -245,6 +265,12 @@ const TicketRow = memo(({ ticket, selected, hovered, milestoneTitle, columnLabel
           <IconButton icon={<Play20Filled />} size="sm" aria-label="Autopilot" onClick={handleAutopilot} />
         </span>
       )}
+      <span
+        className={`${styles.cellDelete} ${hovered ? styles.cellDeleteVisible : ''}`}
+        onClick={handleStopPropagation}
+      >
+        <IconButton icon={<Delete20Regular />} size="sm" aria-label="Delete ticket" onClick={handleDelete} />
+      </span>
     </button>
   );
 });
@@ -268,6 +294,26 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [visibilityFilter, setVisibilityFilter] = useState<VisibilityFilter>('active');
   const [hoveredId, setHoveredId] = useState<TicketId | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Ticket | null>(null);
+
+  const handleRequestDelete = useCallback((ticket: Ticket) => {
+    setPendingDelete(ticket);
+  }, []);
+
+  const handleCancelDelete = useCallback(() => {
+    setPendingDelete(null);
+  }, []);
+
+  const handleConfirmDelete = useCallback(() => {
+    if (pendingDelete) {
+      ticketApi.removeTicket(pendingDelete.id);
+    }
+  }, [pendingDelete]);
+
+  const pendingIsUntitled = !pendingDelete?.title || pendingDelete.title === 'Untitled';
+  const deleteTitle = pendingIsUntitled
+    ? 'Delete this untitled ticket?'
+    : `Delete ticket "${pendingDelete?.title}"?`;
 
   const columnLabels = useMemo(() => {
     const map: Record<string, string> = {};
@@ -397,6 +443,7 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
                 columnBadgeColor={getColumnBadgeColor(ticket)}
                 onSelect={handleTicketClick}
                 onHoverChange={setHoveredId}
+                onRequestDelete={handleRequestDelete}
               />
             );
           })}
@@ -412,6 +459,15 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
           <KanbanBoard projectId={projectId} visibilityFilter={visibilityFilter} />
         </div>
       )}
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onClose={handleCancelDelete}
+        onConfirm={handleConfirmDelete}
+        title={deleteTitle}
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        destructive
+      />
     </div>
   );
 });

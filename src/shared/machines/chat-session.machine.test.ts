@@ -382,6 +382,36 @@ describe('chatSessionMachine', () => {
       expect(ctx(snap).items.some((it) => it.type === 'approval')).toBe(false);
     });
 
+    it('approving one of multiple queued approvals leaves machine awaiting and allows approving the rest', () => {
+      // Two approvals queued
+      let snap = runningSnap();
+      snap = next(snap, {
+        type: 'REQUEST_APPROVAL',
+        request_id: 'req-1',
+        tool: 'bash',
+        session_id: 'sess-1',
+      });
+      snap = next(snap, {
+        type: 'REQUEST_APPROVAL',
+        request_id: 'req-2',
+        tool: 'bash',
+        session_id: 'sess-1',
+      });
+      expect(phase(snap)).toBe('awaitingApproval');
+      expect(ctx(snap).pendingApprovals.size).toBe(2);
+
+      // Decide first — should STAY in awaitingApproval
+      snap = next(snap, { type: 'APPROVAL_DECIDED', request_id: 'req-1', value: 'yes' });
+      expect(phase(snap)).toBe('awaitingApproval');
+      expect(ctx(snap).pendingApprovals.size).toBe(1);
+      expect(ctx(snap).pendingApprovals.has('req-2')).toBe(true);
+
+      // Decide second — now should transition to running
+      snap = next(snap, { type: 'APPROVAL_DECIDED', request_id: 'req-2', value: 'yes' });
+      expect(phase(snap)).toBe('running');
+      expect(ctx(snap).pendingApprovals.size).toBe(0);
+    });
+
     it('removes approval on APPROVAL_RESOLVED', () => {
       const snap = next(awaitingApprovalSnap(), {
         type: 'APPROVAL_RESOLVED',

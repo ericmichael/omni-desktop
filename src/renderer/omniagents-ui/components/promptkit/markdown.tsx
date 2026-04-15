@@ -33,7 +33,7 @@ rehypePlugins.push(rehypeHighlight)
   [children])
 
   return (
-    <div className={['prose prose-invert prose-sm max-w-none', 'prose-p:whitespace-pre-wrap prose-p:break-words', 'prose-code:font-mono prose-pre:bg-bgColumn prose-pre:border prose-pre:border-bgCardAlt', colorClass, className].filter(Boolean).join(' ')}>
+    <div className={['prose prose-invert prose-sm max-w-none', 'prose-p:whitespace-pre-wrap prose-p:break-words', 'prose-code:font-mono prose-pre:bg-bgColumn prose-pre:border prose-pre:border-bgCardAlt prose-pre:overflow-x-auto prose-pre:whitespace-pre prose-pre:max-w-full', colorClass, className].filter(Boolean).join(' ')}>
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={rehypePlugins}>
         {normalized}
       </ReactMarkdown>

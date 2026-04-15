@@ -162,6 +162,9 @@ export const chatSessionMachine = setup({
         { currentSessionId: context.sessionId, startingRun: false },
         sessionId(event as { session_id?: string }),
       ),
+
+    /** True when more than one approval is pending (so removing one still leaves queue non-empty). */
+    hasMoreApprovals: ({ context }) => context.pendingApprovals.size > 1,
   },
 
   // --- Actions ---
@@ -516,7 +519,11 @@ return e.items;
     // ----- Awaiting approval: thinking paused, waiting for user decision -----
     awaitingApproval: {
       on: {
-        APPROVAL_DECIDED: { target: 'running', actions: 'removeApproval' },
+        APPROVAL_DECIDED: [
+          // Stay in awaitingApproval if more approvals are still queued
+          { guard: 'hasMoreApprovals', actions: 'removeApproval' },
+          { target: 'running', actions: 'removeApproval' },
+        ],
         APPROVAL_RESOLVED: { actions: 'removeApproval' },
         RUN_END: {
           guard: 'acceptLoose',
