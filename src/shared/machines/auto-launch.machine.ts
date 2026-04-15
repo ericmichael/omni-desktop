@@ -167,6 +167,11 @@ export const autoLaunchMachine = setup({
     running: {
       invoke: { src: 'watchProcessStatus' },
       on: {
+        // No-op: the status watcher re-seeds after re-invoke on state
+        // transitions, which can re-send SANDBOX_RUNNING while we're
+        // already here. Acknowledge it explicitly so the drop-event
+        // detector doesn't warn.
+        SANDBOX_RUNNING: {},
         SANDBOX_EXITED: 'idle',
         SANDBOX_ERROR: 'idle',
         RESET: { target: 'idle', actions: ['clearError', 'clearLaunched'] },

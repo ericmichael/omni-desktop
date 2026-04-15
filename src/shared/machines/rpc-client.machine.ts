@@ -152,7 +152,6 @@ export const rpcClientMachine = setup({
         WS_OPEN: { target: 'connected', actions: 'resetReconnect' },
         WS_ERROR: { target: 'reconnecting' },
         WS_CLOSE: { target: 'reconnecting' },
-        DISCONNECT: 'disconnected',
       },
       after: {
         [WS_CONNECT_TIMEOUT_MS]: { target: 'reconnecting' },
@@ -163,7 +162,6 @@ export const rpcClientMachine = setup({
       on: {
         WS_CLOSE: 'reconnecting',
         WS_ERROR: 'reconnecting',
-        DISCONNECT: { target: 'disconnected' },
         CALL_STARTED: { actions: 'incrementPending' },
         CALL_SETTLED: { actions: 'decrementPending' },
       },
@@ -184,10 +182,15 @@ export const rpcClientMachine = setup({
         },
       },
       on: {
-        DISCONNECT: 'disconnected',
         RETRY: { target: 'connecting', actions: 'resetReconnect' },
       },
     },
+  },
+  // DISCONNECT is idempotent: valid from every state including disconnected
+  // (where it's a no-op self-transition). Lifting it to root lets the caller
+  // fire disconnect() unconditionally without the drop-event warning.
+  on: {
+    DISCONNECT: '.disconnected',
   },
 });
 

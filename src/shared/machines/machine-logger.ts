@@ -115,8 +115,10 @@ export function createMachineLogger(machineName: string, opts?: MachineLoggerOpt
       const { event, snapshot } = inspectionEvent;
       const snap = snapshot as any;
 
-      // Skip synthetic init events
-      if (event.type === 'xstate.init') {
+      // Skip XState-internal synthetic events — xstate.init, xstate.stop,
+      // xstate.error.*, etc. They're never user-fireable and get dropped
+      // by design when no state handles them.
+      if (event.type.startsWith('xstate.')) {
         prevValue = snap.value;
         prevContext = snap.context;
         return;
