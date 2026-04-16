@@ -9,7 +9,7 @@ function getSkillsDir(configDir: string): string {
   return join(configDir, 'skills');
 }
 
-function parseFrontmatter(content: string): { name: string; description: string } | null {
+export function parseFrontmatter(content: string): { name: string; description: string } | null {
   if (!content.startsWith('---')) {
 return null;
 }

@@ -46,19 +46,39 @@ type Instance = {
   stderrRing: string;
 };
 
-type ExtensionManagerArgs = {
+export type ExtensionManagerArgs = {
   store: Store;
   sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
+  /** Override the builtin extension list. Defaults to the real registry. */
+  builtinExtensions?: ExtensionManifest[];
+  /** Override manifest lookup. Defaults to the real registry. */
+  getManifest?: (id: string) => ExtensionManifest | null;
+  /** Override port allocation. Defaults to getFreePort(). */
+  getFreePort?: () => Promise<number>;
+  /** Override process spawning. Defaults to child_process.spawn. */
+  spawnFn?: typeof spawn;
+  /** Override readiness probe fetch. Defaults to net.fetch. */
+  fetchFn?: (url: string, init?: { method: string }) => Promise<{ status: number }>;
 };
 
 export class ExtensionManager {
   private store: Store;
   private sendToWindow: ExtensionManagerArgs['sendToWindow'];
   private instances = new Map<string, Instance>();
+  private _builtinExtensions: ExtensionManifest[];
+  private _getManifest: (id: string) => ExtensionManifest | null;
+  private _getFreePort: () => Promise<number>;
+  private _spawnFn: typeof spawn;
+  private _fetchFn: (url: string, init?: { method: string }) => Promise<{ status: number }>;
 
   constructor(args: ExtensionManagerArgs) {
     this.store = args.store;
     this.sendToWindow = args.sendToWindow;
+    this._builtinExtensions = args.builtinExtensions ?? BUILTIN_EXTENSIONS;
+    this._getManifest = args.getManifest ?? getManifest;
+    this._getFreePort = args.getFreePort ?? getFreePort;
+    this._spawnFn = args.spawnFn ?? spawn;
+    this._fetchFn = args.fetchFn ?? ((url, init) => net.fetch(url, init));
   }
 
   // ---------------------------------------------------------------------------
@@ -67,7 +87,7 @@ export class ExtensionManager {
 
   listDescriptors = (): ExtensionDescriptor[] => {
     const enabled = this.store.get('enabledExtensions') ?? {};
-    return BUILTIN_EXTENSIONS.map((m) => ({
+    return this._builtinExtensions.map((m) => ({
       id: m.id,
       name: m.name,
       description: m.description,
@@ -82,7 +102,7 @@ export class ExtensionManager {
   };
 
   setEnabled = async (id: string, enabled: boolean): Promise<void> => {
-    if (!getManifest(id)) {
+    if (!this._getManifest(id)) {
 return;
 }
     const current = this.store.get('enabledExtensions') ?? {};
@@ -113,7 +133,7 @@ return;
         new Error(`Extension '${id}' is not enabled. Enable it in Settings → Extensions.`)
       );
     }
-    const manifest = getManifest(id);
+    const manifest = this._getManifest(id);
     if (!manifest) {
       return Promise.reject(new Error(`Unknown extension '${id}'.`));
     }
@@ -170,7 +190,7 @@ return;
   // ---------------------------------------------------------------------------
 
   private startInstance = async (inst: Instance): Promise<ExtensionEnsureResult> => {
-    const port = await getFreePort();
+    const port = await this._getFreePort();
     this.transition(inst, { state: 'starting', port });
 
     const ctx = { cwd: inst.cwd, port };
@@ -189,7 +209,7 @@ return;
       }
     }
 
-    const proc = spawn(exe, args, {
+    const proc = this._spawnFn(exe, args, {
       cwd: inst.cwd,
       env: { ...process.env, ...extraEnv },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -230,7 +250,7 @@ return;
         throw new Error(err);
       }
       try {
-        const res = await net.fetch(probeUrl, { method: 'GET' });
+        const res = await this._fetchFn(probeUrl, { method: 'GET' });
         // Any response — even a redirect or 401 — proves the server is up.
         if (res.status > 0) {
           this.transition(inst, {

@@ -1,6 +1,7 @@
 import type { ReadableAtom } from 'nanostores';
 import { atom } from 'nanostores';
 
+import { enforceSandboxPolicy, migrateLayoutMode } from '@/lib/store-init';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import type { ModelsConfig, OperatingSystem, StoreData } from '@/shared/types';
 
@@ -123,19 +124,15 @@ const init = async () => {
   const store = persistedStoreApi.get();
 
   // GA users (no preview features, no enterprise policy) must not run with any sandbox backend.
-  // Enterprise installs are identified by `sandboxProfiles` being populated from policy.
-  if (!store.previewFeatures && !store.sandboxProfiles && store.sandboxBackend && store.sandboxBackend !== 'none') {
-    await persistedStoreApi.setKey('sandboxBackend', 'none');
+  const sandboxReset = enforceSandboxPolicy(store);
+  if (sandboxReset) {
+    await persistedStoreApi.setKey('sandboxBackend', sandboxReset);
   }
 
   // Migrate legacy layoutMode values to current valid modes
-  const lm = store.layoutMode as string;
-  if (lm === 'work' || lm === 'desktop') {
-    await persistedStoreApi.setKey('layoutMode', 'chat');
-  } else if (lm === 'home') {
-    await persistedStoreApi.setKey('layoutMode', 'chat');
-  } else if (!['chat', 'code', 'projects', 'dashboards', 'settings'].includes(lm)) {
-    await persistedStoreApi.setKey('layoutMode', 'chat');
+  const layoutReset = migrateLayoutMode(store.layoutMode as string);
+  if (layoutReset) {
+    await persistedStoreApi.setKey('layoutMode', layoutReset);
   }
 
   // Apply default workspace dir if user has never picked one

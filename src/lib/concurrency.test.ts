@@ -3,6 +3,17 @@
  * concurrency invariants it enforces. These tests exercise the lock
  * mechanism in isolation — no real SandboxManager, TicketMachine, or
  * electron-store is involved.
+ *
+ * NOTE: The TicketLock class below is a **copy** of the implementation in
+ * SupervisorOrchestrator.withTicketLock — it is not imported from production
+ * code. This is acceptable because: (1) the lock is 12 lines of code with a
+ * stable pattern, and (2) the 83-test supervisor-orchestrator integration
+ * suite exercises the real lock under production wiring. These unit tests
+ * provide focused coverage of edge cases (error propagation, cross-ticket
+ * independence, high contention) that are harder to trigger through the
+ * integration surface.
+ *
+ * If the production lock implementation changes, keep this copy in sync.
  */
 import { describe, expect, it } from 'vitest';
 

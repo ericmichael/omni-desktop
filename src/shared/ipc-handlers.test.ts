@@ -2,28 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { MAX_USER_PATH_DEPTH } from '@/main/util';
 import { registerConfigHandlers, registerUtilHandlers } from '@/shared/ipc-handlers';
-import type { IIpcListener } from '@/shared/ipc-listener';
-
-/**
- * Stub listener that records handlers so tests can invoke them directly.
- * This lets us verify the shared registration wires `validateConfigPath`
- * into the read/write handlers without spinning up Electron or the server.
- */
-class StubIpc implements IIpcListener {
-  public readonly handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
-
-  handle(channel: string, handler: (event: unknown, ...args: unknown[]) => unknown): void {
-    this.handlers.set(channel, handler);
-  }
-
-  invoke(channel: string, ...args: unknown[]): unknown {
-    const handler = this.handlers.get(channel);
-    if (!handler) {
-      throw new Error(`No handler for ${channel}`);
-    }
-    return handler(null, ...args);
-  }
-}
+import { StubIpc } from '@/test-helpers/stub-ipc';
 
 describe('registerConfigHandlers', () => {
   it('registers the expected config channels', () => {

@@ -2,102 +2,64 @@
  * Tests for ExtensionManager — descriptor listing, enable/disable,
  * instance status queries, refcount lifecycle, and cleanup.
  *
- * Mocks child_process.spawn, net.fetch, and the extension registry
- * so no real subprocesses or network calls occur.
+ * Uses injectable deps — zero vi.mock.
  */
+import { EventEmitter } from 'node:events';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// ---------------------------------------------------------------------------
-// Hoisted state
-// ---------------------------------------------------------------------------
-
-const hoisted = vi.hoisted(() => {
-  const TEST_MANIFEST = {
-    id: 'test-ext',
-    name: 'Test Extension',
-    description: 'A test extension',
-    command: {
-      buildExe: () => '/usr/bin/test-ext',
-      buildArgs: (ctx: { port: number }) => ['--port', String(ctx.port)],
-    },
-    readiness: { type: 'http' as const, path: '/health', timeoutMs: 5000 },
-    surface: {
-      type: 'webview' as const,
-      buildBaseUrl: (ctx: { port: number }) => `http://localhost:${ctx.port}`,
-      buildContentUrl: (ctx: { port: number }, p: string) => `http://localhost:${ctx.port}/${p}`,
-    },
-    contentTypes: [{ extension: '.test', label: 'Test File' }],
-    scope: 'per-cwd' as const,
-    idleShutdownMs: 30_000,
-  };
-
-  return {
-    spawnedProcs: [] as unknown[],
-    fetchResults: new Map<string, { status: number }>(),
-    TEST_MANIFEST,
-  };
-});
-
-// ---------------------------------------------------------------------------
-// Mocks
-// ---------------------------------------------------------------------------
-
-vi.mock('child_process', async () => {
-  const { EventEmitter: EE } = await import('node:events');
-  const spawnMock = vi.fn((_cmd: string, _args: string[], _opts: unknown) => {
-    const proc = new EE() as InstanceType<typeof EE> & {
-      pid: number;
-      exitCode: number | null;
-      stdout: InstanceType<typeof EE>;
-      stderr: InstanceType<typeof EE>;
-      kill: ReturnType<typeof vi.fn>;
-    };
-    proc.pid = 12345 + hoisted.spawnedProcs.length;
-    proc.exitCode = null;
-    proc.stdout = new EE();
-    proc.stderr = new EE();
-    proc.kill = vi.fn((signal?: string) => {
-      proc.exitCode = signal === 'SIGKILL' ? 137 : 0;
-      proc.emit('exit', proc.exitCode, signal);
-      return true;
-    });
-    hoisted.spawnedProcs.push(proc);
-    return proc;
-  });
-  return { spawn: spawnMock, default: { spawn: spawnMock } };
-});
-
-vi.mock('electron', () => ({
-  ipcMain: { removeHandler: vi.fn(), handle: vi.fn() },
-  net: {
-    fetch: vi.fn(async (url: string) => {
-      const result = hoisted.fetchResults.get(url);
-      if (result) {
-        return { status: result.status };
-      }
-      throw new Error('ECONNREFUSED');
-    }),
-  },
-}));
-
-vi.mock('@/main/store', () => ({
-  store: { get: vi.fn(() => undefined), set: vi.fn() },
-}));
-
-vi.mock('@/main/extensions/registry', () => ({
-  BUILTIN_EXTENSIONS: [hoisted.TEST_MANIFEST],
-  getManifest: (id: string) => (id === 'test-ext' ? hoisted.TEST_MANIFEST : null),
-}));
-
-vi.mock('@/lib/free-port', () => ({
-  getFreePort: vi.fn(async () => 9999),
-}));
-
-// ---------------------------------------------------------------------------
-// Imports (after mocks)
-// ---------------------------------------------------------------------------
-
+import type { ExtensionManagerArgs } from '@/main/extension-manager';
 import { ExtensionManager } from '@/main/extension-manager';
+import type { ExtensionManifest } from '@/main/extensions/types';
+
+// ---------------------------------------------------------------------------
+// Test manifest
+// ---------------------------------------------------------------------------
+
+const TEST_MANIFEST: ExtensionManifest = {
+  id: 'test-ext',
+  name: 'Test Extension',
+  description: 'A test extension',
+  command: {
+    buildExe: () => '/usr/bin/test-ext',
+    buildArgs: (ctx: { port: number }) => ['--port', String(ctx.port)],
+  },
+  readiness: { type: 'http' as const, path: '/health', timeoutMs: 5000 },
+  surface: {
+    type: 'webview' as const,
+    buildBaseUrl: (ctx: { port: number }) => `http://localhost:${ctx.port}`,
+    buildContentUrl: (ctx: { port: number }, p: string) => `http://localhost:${ctx.port}/${p}`,
+  },
+  contentTypes: [{ extension: '.test', label: 'Test File' }],
+  scope: 'per-cwd' as const,
+  idleShutdownMs: 30_000,
+} as unknown as ExtensionManifest;
+
+// ---------------------------------------------------------------------------
+// Fake process
+// ---------------------------------------------------------------------------
+
+type FakeProc = EventEmitter & {
+  pid: number;
+  exitCode: number | null;
+  stdout: EventEmitter;
+  stderr: EventEmitter;
+  kill: ReturnType<typeof vi.fn>;
+};
+
+function makeFakeProc(): FakeProc {
+  const proc = new EventEmitter() as FakeProc;
+  proc.pid = 12345;
+  proc.exitCode = null;
+  proc.stdout = new EventEmitter();
+  proc.stderr = new EventEmitter();
+  proc.kill = vi.fn((signal?: string) => {
+    proc.exitCode = signal === 'SIGKILL' ? 137 : 0;
+    proc.emit('exit', proc.exitCode, signal);
+    return true;
+  });
+  return proc;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -110,22 +72,38 @@ function makeStore() {
     set: vi.fn((key: string, value: unknown) => {
       data[key] = value;
     }),
-    _data: data,
   };
 }
 
 function makeMgr() {
-  hoisted.spawnedProcs = [];
-  hoisted.fetchResults.clear();
+  const spawnedProcs: FakeProc[] = [];
+  const fetchResults = new Map<string, { status: number }>();
   const store = makeStore();
   const sendCalls: Array<{ channel: string; args: unknown[] }> = [];
+
   const mgr = new ExtensionManager({
     store: store as never,
     sendToWindow: ((channel: string, ...args: unknown[]) => {
       sendCalls.push({ channel, args });
     }) as never,
-  });
-  return { mgr, store, sendCalls };
+    builtinExtensions: [TEST_MANIFEST],
+    getManifest: (id: string) => (id === 'test-ext' ? TEST_MANIFEST : null),
+    getFreePort: async () => 9999,
+    spawnFn: ((_cmd: unknown, _args: unknown, _opts: unknown) => {
+      const proc = makeFakeProc();
+      spawnedProcs.push(proc);
+      return proc;
+    }) as unknown as ExtensionManagerArgs['spawnFn'],
+    fetchFn: async (url: string) => {
+      const result = fetchResults.get(url);
+      if (result) {
+        return { status: result.status };
+      }
+      throw new Error('ECONNREFUSED');
+    },
+  } as ExtensionManagerArgs);
+
+  return { mgr, store, sendCalls, spawnedProcs, fetchResults };
 }
 
 // ---------------------------------------------------------------------------
@@ -192,7 +170,6 @@ describe('ExtensionManager', () => {
       const { mgr, store } = makeMgr();
       await mgr.setEnabled('nonexistent', true);
 
-      // Should not have called set (no-op for unknown)
       expect(store.set).not.toHaveBeenCalled();
     });
   });
@@ -225,19 +202,16 @@ describe('ExtensionManager', () => {
     });
 
     it('spawns process and transitions to running when readiness probe succeeds', async () => {
-      const { mgr, store, sendCalls } = makeMgr();
+      const { mgr, store, sendCalls, spawnedProcs, fetchResults } = makeMgr();
       store.set('enabledExtensions', { 'test-ext': true });
-
-      // Make readiness probe succeed immediately
-      hoisted.fetchResults.set('http://localhost:9999/health', { status: 200 });
+      fetchResults.set('http://localhost:9999/health', { status: 200 });
 
       const result = await mgr.ensureInstance('test-ext', '/tmp/ws');
 
       expect(result.url).toBe('http://localhost:9999');
       expect(result.port).toBe(9999);
-      expect(hoisted.spawnedProcs).toHaveLength(1);
+      expect(spawnedProcs).toHaveLength(1);
 
-      // Should have transitioned through starting → running
       const transitions = sendCalls.filter((c) => c.channel === 'extension:status-changed');
       expect(transitions.length).toBeGreaterThanOrEqual(2);
       const lastTransition = transitions[transitions.length - 1]!;
@@ -247,27 +221,25 @@ describe('ExtensionManager', () => {
     });
 
     it('returns cached result for already-running instance', async () => {
-      const { mgr, store } = makeMgr();
+      const { mgr, store, spawnedProcs, fetchResults } = makeMgr();
       store.set('enabledExtensions', { 'test-ext': true });
-      hoisted.fetchResults.set('http://localhost:9999/health', { status: 200 });
+      fetchResults.set('http://localhost:9999/health', { status: 200 });
 
       const first = await mgr.ensureInstance('test-ext', '/tmp/ws');
       const second = await mgr.ensureInstance('test-ext', '/tmp/ws');
 
-      // Same result, only 1 process spawned
       expect(first).toEqual(second);
-      expect(hoisted.spawnedProcs).toHaveLength(1);
+      expect(spawnedProcs).toHaveLength(1);
     });
 
     it('increments refcount on repeated ensure calls', async () => {
-      const { mgr, store } = makeMgr();
+      const { mgr, store, fetchResults } = makeMgr();
       store.set('enabledExtensions', { 'test-ext': true });
-      hoisted.fetchResults.set('http://localhost:9999/health', { status: 200 });
+      fetchResults.set('http://localhost:9999/health', { status: 200 });
 
       await mgr.ensureInstance('test-ext', '/tmp');
       await mgr.ensureInstance('test-ext', '/tmp');
 
-      // Release once — should not trigger shutdown yet
       mgr.releaseInstance('test-ext', '/tmp');
       const status = mgr.getInstanceStatus('test-ext', '/tmp');
       expect(status.state).toBe('running');
@@ -277,26 +249,22 @@ describe('ExtensionManager', () => {
   describe('releaseInstance', () => {
     it('is a no-op for unknown instance', () => {
       const { mgr } = makeMgr();
-      mgr.releaseInstance('test-ext', '/tmp'); // should not throw
+      mgr.releaseInstance('test-ext', '/tmp');
     });
   });
 
   describe('cleanup', () => {
     it('stops all running instances', async () => {
-      const { mgr, store } = makeMgr();
+      const { mgr, store, spawnedProcs, fetchResults } = makeMgr();
       store.set('enabledExtensions', { 'test-ext': true });
-      hoisted.fetchResults.set('http://localhost:9999/health', { status: 200 });
+      fetchResults.set('http://localhost:9999/health', { status: 200 });
 
       await mgr.ensureInstance('test-ext', '/tmp');
-      expect(hoisted.spawnedProcs).toHaveLength(1);
+      expect(spawnedProcs).toHaveLength(1);
 
       await mgr.cleanup();
 
-      // Process should have been killed
-      const proc = hoisted.spawnedProcs[0] as { kill: ReturnType<typeof vi.fn> };
-      expect(proc.kill).toHaveBeenCalled();
-
-      // Status should reset
+      expect(spawnedProcs[0]!.kill).toHaveBeenCalled();
       expect(mgr.getInstanceStatus('test-ext', '/tmp')).toEqual({ state: 'idle' });
     });
   });

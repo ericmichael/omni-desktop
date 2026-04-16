@@ -7,13 +7,46 @@ import { getActivateVenvCommand, getBundledBinPath, getHomeDirectory, getShell, 
 import type { IIpcListener } from '@/shared/ipc-listener';
 import type { IpcRendererEvents } from '@/shared/types';
 
+// ---------------------------------------------------------------------------
+// Injectable deps
+// ---------------------------------------------------------------------------
+
+export interface ConsoleManagerDeps {
+  createPty: typeof createPtyProcess;
+  createBuffer: typeof createPtyBuffer;
+  setupCallbacks: typeof setupPtyCallbacks;
+  killPty: typeof killPtyProcessAsync;
+  getShell: typeof getShell;
+  getHomeDir: typeof getHomeDirectory;
+  getBinPath: typeof getBundledBinPath;
+  getActivateCmd: typeof getActivateVenvCommand;
+  isDir: typeof isDirectory;
+  newId: () => string;
+}
+
+const defaultDeps = (): ConsoleManagerDeps => ({
+  createPty: createPtyProcess,
+  createBuffer: createPtyBuffer,
+  setupCallbacks: setupPtyCallbacks,
+  killPty: killPtyProcessAsync,
+  getShell,
+  getHomeDir: getHomeDirectory,
+  getBinPath: getBundledBinPath,
+  getActivateCmd: getActivateVenvCommand,
+  isDir: isDirectory,
+  newId: nanoid,
+});
+
 /**
  * ConsoleManager manages multiple interactive shell PTYs for the terminal/console.
  */
 export class ConsoleManager {
   private entries = new Map<string, PtyEntry>();
+  private deps: ConsoleManagerDeps;
 
-  constructor() {}
+  constructor(deps?: Partial<ConsoleManagerDeps>) {
+    this.deps = { ...defaultDeps(), ...deps };
+  }
 
   /**
    * Create a new console PTY.
@@ -26,14 +59,14 @@ export class ConsoleManager {
     },
     initialCwd?: string
   ): Promise<string> {
-    const id = nanoid();
-    const shell = getShell();
-    const ansiBuffer = createPtyBuffer();
+    const id = this.deps.newId();
+    const shell = this.deps.getShell();
+    const ansiBuffer = this.deps.createBuffer();
 
-    const process = createPtyProcess({
+    const process = this.deps.createPty({
       command: shell,
       args: [],
-      cwd: getHomeDirectory(),
+      cwd: this.deps.getHomeDir(),
     });
 
     const ptyCallbacks: PtyCallbacks = {
@@ -47,7 +80,7 @@ export class ConsoleManager {
       },
     };
 
-    setupPtyCallbacks(process, ptyCallbacks, ansiBuffer);
+    this.deps.setupCallbacks(process, ptyCallbacks, ansiBuffer);
 
     this.entries.set(id, { id, process, ansiSequenceBuffer: ansiBuffer });
 
@@ -67,19 +100,20 @@ return;
 }
 
     // Add the bundled bin dir to the PATH env var
+    const binPath = this.deps.getBinPath();
     if (process.platform === 'win32') {
-      entry.process.write(`$env:Path='${getBundledBinPath()};'+$env:Path\r`);
+      entry.process.write(`$env:Path='${binPath};'+$env:Path\r`);
     } else {
-      entry.process.write(`export PATH="${getBundledBinPath()}:$PATH"\r`);
+      entry.process.write(`export PATH="${binPath}:$PATH"\r`);
     }
 
-    if (cwd && (await isDirectory(cwd))) {
+    if (cwd && (await this.deps.isDir(cwd))) {
       entry.process.write(`cd ${cwd}\r`);
 
       // If the cwd contains a .venv, activate it
       const venvPath = `${cwd}/.venv`;
-      if (await isDirectory(venvPath)) {
-        const activateVenvCmd = getActivateVenvCommand(cwd);
+      if (await this.deps.isDir(venvPath)) {
+        const activateVenvCmd = this.deps.getActivateCmd(cwd);
         entry.process.write(`${activateVenvCmd}\r`);
       }
     }
@@ -108,7 +142,7 @@ return;
 return;
 }
     this.entries.delete(id);
-    await killPtyProcessAsync(entry.process);
+    await this.deps.killPty(entry.process);
     entry.ansiSequenceBuffer.clear();
   }
 
