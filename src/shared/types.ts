@@ -1089,7 +1089,33 @@ type ConfigIpcEvents = Namespaced<
  */
 export type SkillSource =
   | { kind: 'local' }
-  | { kind: 'file'; filename: string };
+  | { kind: 'file'; filename: string }
+  | { kind: 'marketplace'; repo: string; plugin: string; ref: string };
+
+/**
+ * One entry in a `.claude-plugin/marketplace.json` plugins[] array.
+ * Each plugin is a curated bundle of skill folders within the same repo.
+ */
+export type MarketplacePlugin = {
+  name: string;
+  description: string;
+  /** Relative root that `skills[]` paths are resolved against. */
+  source: string;
+  strict?: boolean;
+  /** Directory paths (relative to `source`) that contain a SKILL.md. */
+  skills: string[];
+};
+
+/**
+ * Shape of a `.claude-plugin/marketplace.json` file as published by
+ * Anthropic's skills repo and other Claude Code plugin marketplaces.
+ */
+export type MarketplaceManifest = {
+  name: string;
+  owner?: { name?: string; email?: string };
+  metadata?: { description?: string; version?: string };
+  plugins: MarketplacePlugin[];
+};
 
 /**
  * A discovered skill entry returned by the skills:list IPC handler.
@@ -1125,6 +1151,10 @@ type SkillsIpcEvents = Namespaced<
     install: (filePath: string) => SkillEntry;
     uninstall: (name: string) => void;
     'set-enabled': (name: string, enabled: boolean) => void;
+    /** Download a marketplace.json from a github repo and parse it. */
+    'fetch-marketplace': (repo: string) => MarketplaceManifest;
+    /** Install every skill in the named plugin from the given repo. */
+    'install-marketplace-plugin': (repo: string, pluginName: string) => SkillEntry[];
   }
 >;
 

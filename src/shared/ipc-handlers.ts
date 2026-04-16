@@ -11,6 +11,7 @@ import { WebSocket as WsWebSocket } from 'ws';
 
 import { installSkillFromFile, listSkills, setSkillEnabled, uninstallSkill } from '@/main/skills';
 import type { SkillStore } from '@/main/skills';
+import { fetchMarketplace, installMarketplacePlugin } from '@/main/skills-marketplace';
 import {
   checkModelsConfigured,
   ensureDirectory,
@@ -209,5 +210,9 @@ export function registerSkillsHandlers(ipc: IIpcListener, configDir: string, sto
   ipc.handle('skills:uninstall', (_: unknown, name: string) => uninstallSkill(configDir, name, store));
   ipc.handle('skills:set-enabled', (_: unknown, name: string, enabled: boolean) =>
     setSkillEnabled(configDir, name, enabled)
+  );
+  ipc.handle('skills:fetch-marketplace', (_: unknown, repo: string) => fetchMarketplace(repo));
+  ipc.handle('skills:install-marketplace-plugin', (_: unknown, repo: string, name: string) =>
+    installMarketplacePlugin(configDir, repo, name, store)
   );
 }

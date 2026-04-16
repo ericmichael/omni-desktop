@@ -1,10 +1,24 @@
 import { makeStyles, tokens } from '@fluentui/react-components';
-import { ArrowDownload20Regular, Delete20Regular } from '@fluentui/react-icons';
+import { ArrowDownload20Regular, Delete20Regular, Globe20Regular } from '@fluentui/react-icons';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Button, ConfirmDialog, FormSkeleton, IconButton, SectionLabel, Switch } from '@/renderer/ds';
+import {
+  AnimatedDialog,
+  Button,
+  ConfirmDialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  FormSkeleton,
+  IconButton,
+  Input,
+  SectionLabel,
+  Spinner,
+  Switch,
+} from '@/renderer/ds';
 import { emitter } from '@/renderer/services/ipc';
-import type { SkillEntry } from '@/shared/types';
+import type { MarketplaceManifest, MarketplacePlugin, SkillEntry } from '@/shared/types';
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalL },
@@ -12,12 +26,52 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalS,
+  },
+  headerActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
   },
   empty: {
     padding: tokens.spacingVerticalXXL,
     textAlign: 'center',
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase300,
+  },
+  featuredSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+  },
+  installedSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+  },
+  featuredCard: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+    padding: tokens.spacingHorizontalL,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+  featuredText: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+  },
+  featuredLabel: {
+    fontWeight: 600,
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+  },
+  featuredDescription: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
   },
   card: {
     display: 'flex',
@@ -58,9 +112,74 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteRedForeground1,
     fontSize: tokens.fontSizeBase200,
   },
+  marketplaceForm: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+  },
+  marketplaceList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+    maxHeight: '24rem',
+    overflowY: 'auto',
+  },
+  pluginRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    padding: tokens.spacingHorizontalM,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+  },
+  pluginRowHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+  },
+  pluginName: {
+    flex: 1,
+    fontWeight: 600,
+    fontSize: tokens.fontSizeBase300,
+  },
+  pluginDescription: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    lineHeight: tokens.lineHeightBase200,
+  },
+  pluginMeta: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground4,
+  },
 });
 
 const SKILL_FILE_FILTERS = [{ name: 'Skill packages', extensions: ['skill'] }];
+const DEFAULT_MARKETPLACE = 'anthropics/skills';
+
+/**
+ * Curated marketplaces to feature. Only the repo + display label are local;
+ * each marketplace's bundle list, names, and descriptions are pulled live
+ * from its `marketplace.json` so they can't drift from the source.
+ */
+type FeaturedMarketplace = {
+  /** Display heading shown above the bundle row. */
+  label: string;
+  /** Repo spec passed to `skills:fetch-marketplace` (e.g. `owner/repo`). */
+  repo: string;
+};
+
+const FEATURED_MARKETPLACES: FeaturedMarketplace[] = [
+  { label: 'Omni Official', repo: 'ericmichael/omni-plugins-official' },
+  { label: 'Anthropic', repo: 'anthropics/skills' },
+];
+
+/** Title-case a kebab-case plugin id for display ("git-workflow" → "Git Workflow"). */
+function formatPluginName(id: string): string {
+  return id
+    .split('-')
+    .map((word) => (word ? word.charAt(0).toUpperCase() + word.slice(1) : word))
+    .join(' ');
+}
 
 export const SettingsModalSkillsTab = memo(() => {
   const styles = useStyles();
@@ -68,6 +187,8 @@ export const SettingsModalSkillsTab = memo(() => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [uninstallTarget, setUninstallTarget] = useState<SkillEntry | null>(null);
+  const [marketplaceOpen, setMarketplaceOpen] = useState(false);
+  const [installingFeatured, setInstallingFeatured] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -106,6 +227,22 @@ export const SettingsModalSkillsTab = memo(() => {
     [load]
   );
 
+  const installFeatured = useCallback(
+    async (repo: string, plugin: string) => {
+      setError(null);
+      setInstallingFeatured(plugin);
+      try {
+        await emitter.invoke('skills:install-marketplace-plugin', repo, plugin);
+        await load();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to install plugin');
+      } finally {
+        setInstallingFeatured(null);
+      }
+    },
+    [load]
+  );
+
   const confirmUninstall = useCallback(async () => {
     if (!uninstallTarget) return;
     setError(null);
@@ -123,27 +260,40 @@ export const SettingsModalSkillsTab = memo(() => {
   return (
     <div className={styles.root}>
       <div className={styles.header}>
-        <SectionLabel>Installed Skills</SectionLabel>
-        <Button size="sm" variant="ghost" onClick={installFromFile}>
-          <ArrowDownload20Regular style={{ marginRight: 4 }} />
-          Install from file
-        </Button>
+        <SectionLabel>Skills</SectionLabel>
+        <div className={styles.headerActions}>
+          <Button size="sm" variant="ghost" onClick={() => setMarketplaceOpen(true)}>
+            <Globe20Regular style={{ marginRight: 4 }} />
+            Install from marketplace
+          </Button>
+          <Button size="sm" variant="ghost" onClick={installFromFile}>
+            <ArrowDownload20Regular style={{ marginRight: 4 }} />
+            Install from file
+          </Button>
+        </div>
       </div>
 
       {error && <div className={styles.errorBanner}>{error}</div>}
 
-      {skills.length === 0 && (
-        <div className={styles.empty}>No skills installed. Install a .skill file to get started.</div>
-      )}
+      <FeaturedBundles
+        skills={skills}
+        installingPlugin={installingFeatured}
+        onInstall={installFeatured}
+      />
 
-      {skills.map((skill) => (
-        <SkillCard
-          key={skill.name}
-          skill={skill}
-          onToggle={onToggle}
-          onUninstall={setUninstallTarget}
-        />
-      ))}
+      {skills.length > 0 && (
+        <div className={styles.installedSection}>
+          <SectionLabel>Installed</SectionLabel>
+          {skills.map((skill) => (
+            <SkillCard
+              key={skill.name}
+              skill={skill}
+              onToggle={onToggle}
+              onUninstall={setUninstallTarget}
+            />
+          ))}
+        </div>
+      )}
 
       <ConfirmDialog
         open={uninstallTarget !== null}
@@ -154,10 +304,120 @@ export const SettingsModalSkillsTab = memo(() => {
         confirmLabel="Uninstall"
         destructive
       />
+
+      <MarketplaceDialog
+        open={marketplaceOpen}
+        onClose={() => setMarketplaceOpen(false)}
+        onInstalled={load}
+      />
     </div>
   );
 });
 SettingsModalSkillsTab.displayName = 'SettingsModalSkillsTab';
+
+// ---------------------------------------------------------------------------
+// Featured Bundles
+// ---------------------------------------------------------------------------
+
+type FeaturedBundlesProps = {
+  skills: SkillEntry[];
+  installingPlugin: string | null;
+  onInstall: (repo: string, plugin: string) => void;
+};
+
+/** True if any installed skill came from this marketplace bundle. */
+function isBundleInstalled(skills: SkillEntry[], repo: string, plugin: string): boolean {
+  return skills.some(
+    (s) => s.source.kind === 'marketplace' && s.source.repo === repo && s.source.plugin === plugin
+  );
+}
+
+const FeaturedBundles = memo(({ skills, installingPlugin, onInstall }: FeaturedBundlesProps) => {
+  return (
+    <>
+      {FEATURED_MARKETPLACES.map((marketplace) => (
+        <FeaturedMarketplaceSection
+          key={marketplace.label}
+          marketplace={marketplace}
+          skills={skills}
+          installingPlugin={installingPlugin}
+          onInstall={onInstall}
+        />
+      ))}
+    </>
+  );
+});
+FeaturedBundles.displayName = 'FeaturedBundles';
+
+type FeaturedMarketplaceSectionProps = {
+  marketplace: FeaturedMarketplace;
+  skills: SkillEntry[];
+  installingPlugin: string | null;
+  onInstall: (repo: string, plugin: string) => void;
+};
+
+const FeaturedMarketplaceSection = memo(
+  ({ marketplace, skills, installingPlugin, onInstall }: FeaturedMarketplaceSectionProps) => {
+    const styles = useStyles();
+    const [manifest, setManifest] = useState<MarketplaceManifest | null>(null);
+    const [failed, setFailed] = useState(false);
+
+    useEffect(() => {
+      let cancelled = false;
+      setManifest(null);
+      setFailed(false);
+      emitter
+        .invoke('skills:fetch-marketplace', marketplace.repo)
+        .then((result) => {
+          if (!cancelled) setManifest(result);
+        })
+        .catch(() => {
+          if (!cancelled) setFailed(true);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, [marketplace.repo]);
+
+    // Hide the section entirely on fetch failure — the marketplace dialog is
+    // still available for users who want to retry manually.
+    if (failed) return null;
+
+    return (
+      <div className={styles.featuredSection}>
+        <SectionLabel>{marketplace.label}</SectionLabel>
+        {manifest === null ? (
+          <div className={styles.featuredCard}>
+            <Spinner size="sm" />
+          </div>
+        ) : (
+          manifest.plugins.map((plugin) => {
+              const installed = isBundleInstalled(skills, marketplace.repo, plugin.name);
+              const installing = installingPlugin === plugin.name;
+              const otherInstalling = installingPlugin !== null && !installing;
+              return (
+                <div key={plugin.name} className={styles.featuredCard}>
+                  <div className={styles.featuredText}>
+                    <span className={styles.featuredLabel}>{formatPluginName(plugin.name)}</span>
+                    <span className={styles.featuredDescription}>{plugin.description}</span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant={installed ? 'ghost' : 'primary'}
+                    onClick={() => onInstall(marketplace.repo, plugin.name)}
+                    isDisabled={installed || otherInstalling}
+                  >
+                    {installing ? <Spinner size="sm" /> : installed ? 'Installed' : 'Install'}
+                  </Button>
+                </div>
+              );
+            })
+        )}
+      </div>
+    );
+  }
+);
+FeaturedMarketplaceSection.displayName = 'FeaturedMarketplaceSection';
 
 // ---------------------------------------------------------------------------
 // Skill Card
@@ -174,6 +434,8 @@ function formatSource(skill: SkillEntry): string {
   if (skill.version) parts.push(`v${skill.version}`);
   if (skill.source.kind === 'file') {
     parts.push(`Installed from ${skill.source.filename}`);
+  } else if (skill.source.kind === 'marketplace') {
+    parts.push(`Installed from ${skill.source.repo} · ${skill.source.plugin}`);
   } else {
     parts.push('Local');
   }
@@ -208,3 +470,120 @@ const SkillCard = memo(({ skill, onToggle, onUninstall }: SkillCardProps) => {
   );
 });
 SkillCard.displayName = 'SkillCard';
+
+// ---------------------------------------------------------------------------
+// Marketplace Dialog
+// ---------------------------------------------------------------------------
+
+type MarketplaceDialogProps = {
+  open: boolean;
+  onClose: () => void;
+  onInstalled: () => void;
+};
+
+const MarketplaceDialog = memo(({ open, onClose, onInstalled }: MarketplaceDialogProps) => {
+  const styles = useStyles();
+  const [repo, setRepo] = useState(DEFAULT_MARKETPLACE);
+  const [manifest, setManifest] = useState<MarketplaceManifest | null>(null);
+  const [fetching, setFetching] = useState(false);
+  const [installingPlugin, setInstallingPlugin] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const onFetch = useCallback(async () => {
+    setError(null);
+    setManifest(null);
+    setFetching(true);
+    try {
+      const result = await emitter.invoke('skills:fetch-marketplace', repo);
+      setManifest(result);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load marketplace');
+    } finally {
+      setFetching(false);
+    }
+  }, [repo]);
+
+  useEffect(() => {
+    if (!open) {
+      setManifest(null);
+      setError(null);
+      setInstallingPlugin(null);
+      return;
+    }
+    // Auto-load the default marketplace so users don't have to click "Load" first.
+    if (repo === DEFAULT_MARKETPLACE) {
+      void onFetch();
+    }
+  }, [open, repo, onFetch]);
+
+  const onInstall = useCallback(
+    async (plugin: MarketplacePlugin) => {
+      setError(null);
+      setInstallingPlugin(plugin.name);
+      try {
+        await emitter.invoke('skills:install-marketplace-plugin', repo, plugin.name);
+        onInstalled();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to install plugin');
+      } finally {
+        setInstallingPlugin(null);
+      }
+    },
+    [repo, onInstalled]
+  );
+
+  return (
+    <AnimatedDialog open={open} onClose={onClose}>
+      <DialogContent>
+        <DialogHeader>Install from marketplace</DialogHeader>
+        <DialogBody>
+          <div className={styles.marketplaceForm}>
+            <div className={styles.headerActions}>
+              <Input
+                value={repo}
+                onChange={(e) => setRepo(e.target.value)}
+                placeholder="owner/repo"
+                aria-label="Marketplace repository"
+              />
+              <Button size="sm" onClick={onFetch} isDisabled={fetching || !repo.trim()}>
+                {fetching ? <Spinner size="sm" /> : 'Load'}
+              </Button>
+            </div>
+
+            {error && <div className={styles.errorBanner}>{error}</div>}
+
+            {manifest && (
+              <div className={styles.marketplaceList}>
+                {manifest.plugins.map((plugin) => (
+                  <div key={plugin.name} className={styles.pluginRow}>
+                    <div className={styles.pluginRowHeader}>
+                      <span className={styles.pluginName}>{plugin.name}</span>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onInstall(plugin)}
+                        isDisabled={installingPlugin !== null}
+                      >
+                        {installingPlugin === plugin.name ? <Spinner size="sm" /> : 'Install'}
+                      </Button>
+                    </div>
+                    <div className={styles.pluginDescription}>{plugin.description}</div>
+                    <div className={styles.pluginMeta}>
+                      {plugin.skills.length} skill{plugin.skills.length === 1 ? '' : 's'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </AnimatedDialog>
+  );
+});
+MarketplaceDialog.displayName = 'MarketplaceDialog';

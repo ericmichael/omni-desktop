@@ -172,6 +172,7 @@
     "chokidar": "^3.6.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "extract-zip": "^2.0.1",
     "fastify": "^5.3.2",
     "framer-motion": "^12.34.2",
     "katex": "^0.16.25",
