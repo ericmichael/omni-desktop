@@ -296,9 +296,23 @@ return;
         return newId;
       }
       actor.send({ type: 'SELECT_SESSION', id });
+      const profile =
+        typeof localStorage !== 'undefined' && localStorage.getItem('debug:profile') === '1';
       try {
+        const t0 = profile ? performance.now() : 0;
         const raw = await client.getSessionHistory(id);
+        const tFetched = profile ? performance.now() : 0;
         const msgs = rehydrateHistory(raw as Record<string, unknown>[]) as MessageItem[];
+        if (profile) {
+          const tEnd = performance.now();
+          const rawLen = Array.isArray(raw) ? raw.length : 0;
+
+          console.log(
+            `[profile] loadSession session=${id} fetch_ms=${(tFetched - t0).toFixed(1)} ` +
+              `rehydrate_ms=${(tEnd - tFetched).toFixed(1)} total_ms=${(tEnd - t0).toFixed(1)} ` +
+              `raw_items=${rawLen} rehydrated_items=${msgs.length}`,
+          );
+        }
         actor.send({ type: 'HISTORY_LOADED', items: msgs });
       } catch (err) {
         actor.send({ type: 'HISTORY_ERROR', error: String((err as Error)?.message || err) });

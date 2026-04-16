@@ -1,8 +1,32 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 
 import { cn,formatRelativeTime, generateSessionTitle } from '@/renderer/omniagents-ui/lib/utils'
 
 import type { SessionItem } from './SessionList'
+
+// Pick desktop vs mobile layout via matchMedia rather than relying on
+// `hidden md:flex` / `md:hidden` utilities. Those patterns are broken in this
+// app because a pre-compiled shadcn/ai-elements CSS bundle ships a plain
+// `.hidden{display:none}` rule that loads AFTER Tailwind v4's output and wins
+// the cascade over `.md:flex`, so the desktop-inline sidebar would stay
+// `display: none` at every viewport size.
+function useIsDesktop(breakpointPx = 768): boolean {
+  const [isDesktop, setIsDesktop] = useState(() =>
+    typeof window !== 'undefined'
+      ? window.matchMedia(`(min-width: ${breakpointPx}px)`).matches
+      : true
+  )
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+return
+}
+    const mql = window.matchMedia(`(min-width: ${breakpointPx}px)`)
+    const onChange = (e: MediaQueryListEvent) => setIsDesktop(e.matches)
+    mql.addEventListener('change', onChange)
+    return () => mql.removeEventListener('change', onChange)
+  }, [breakpointPx])
+  return isDesktop
+}
 
 export function Sidebar({ open, sessions, selectedId, onClose, onNewChat, onSelect, onDelete }:
   {
@@ -15,6 +39,7 @@ export function Sidebar({ open, sessions, selectedId, onClose, onNewChat, onSele
     onDelete?: (id: string) => void
   }) {
   const [searchQuery, setSearchQuery] = useState('')
+  const isDesktop = useIsDesktop()
 
   const ordered = useMemo(() => {
     const ts = (s: any) => {
@@ -45,7 +70,7 @@ return nonEmpty
     const isSelected = selectedId === s.id
 
     return (
-      <div key={s.id} className="relative">
+      <div key={s.id} className="relative group">
         <button
           onClick={() => {
             onSelect(s.id)
@@ -54,13 +79,13 @@ onClose()
 }
           }}
           className={cn(
-            'relative w-full text-left px-3 py-2.5 rounded-lg transition-all group border',
+            'relative w-full text-left px-3 py-2.5 rounded-lg transition-all border',
             isSelected
               ? 'bg-bgCard ring-1 ring-tweetBlue/30 shadow-sm border-transparent'
               : 'bg-bgCardAlt hover:bg-bgCard border-transparent hover:border-textSubtle/30'
           )}
         >
-          <div className="flex items-start justify-between gap-2">
+          <div className="flex items-start gap-2 pr-8">
             <div className="flex-1 min-w-0">
               <div className="text-sm font-medium text-textPrimary truncate mb-1">{title}</div>
               <div className="text-xs text-textSubtle flex items-center gap-2">
@@ -73,24 +98,25 @@ onClose()
                 )}
               </div>
             </div>
-            {onDelete && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  if (confirm('Delete this conversation?')) {
-                    onDelete(s.id)
-                  }
-                }}
-                className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-errorRed/10 rounded text-textSubtle hover:text-errorRed"
-                aria-label="Delete conversation"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              </button>
-            )}
           </div>
         </button>
+        {onDelete && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              if (confirm('Delete this conversation?')) {
+                onDelete(s.id)
+              }
+            }}
+            className="absolute top-1/2 right-2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-errorRed/10 rounded text-textSubtle hover:text-errorRed"
+            aria-label="Delete conversation"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
+        )}
       </div>
     )
   }
@@ -167,25 +193,27 @@ onClose()
     </>
   )
 
-  return (
-    <>
-      {/* Desktop/Tablet: Inline sidebar beside content */}
-      {open && (
-        <div className="hidden md:flex md:flex-col md:w-72 md:border-r md:border-bgCardAlt md:bg-bgColumn md:flex-shrink-0 md:h-full">
-          {sidebarContent(false)}
-        </div>
-      )}
+  if (!open) {
+return null
+}
 
-      {/* Mobile: Full overlay with backdrop */}
-      {open && (
-        <div className="fixed inset-0 z-40 md:hidden">
-          <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-          <div className="absolute left-0 top-0 bottom-0 w-[85vw] max-w-72 bg-bgColumn border-r border-bgCardAlt flex flex-col">
-            {sidebarContent(true)}
-          </div>
-        </div>
-      )}
-    </>
+  if (isDesktop) {
+    // Desktop/tablet: inline sidebar beside content
+    return (
+      <div className="flex flex-col w-72 border-r border-bgCardAlt bg-bgColumn flex-shrink-0 h-full">
+        {sidebarContent(false)}
+      </div>
+    )
+  }
+
+  // Mobile: full overlay with backdrop
+  return (
+    <div className="fixed inset-0 z-40">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute left-0 top-0 bottom-0 w-[85vw] max-w-72 bg-bgColumn border-r border-bgCardAlt flex flex-col">
+        {sidebarContent(true)}
+      </div>
+    </div>
   )
 }
 

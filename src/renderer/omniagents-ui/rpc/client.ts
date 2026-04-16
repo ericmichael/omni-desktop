@@ -38,6 +38,24 @@ type PendingEntry = {
   resolve: (v: any) => void
   reject: (e: Error) => void
   timer: ReturnType<typeof setTimeout>
+  method: string
+  startedAt: number
+  reqBytes: number
+}
+
+function profileEnabled(): boolean {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem('debug:profile') === '1'
+  } catch {
+    return false
+  }
+}
+
+function profileLog(msg: string): void {
+  if (profileEnabled()) {
+
+    console.log(`[profile] ${msg}`)
+  }
 }
 
 export class RPCClient {
@@ -204,23 +222,44 @@ throw new Error('WebSocket disconnected')
       if (this.ws !== attachedWs) {
 return
 }
+      const profile = profileEnabled()
+      const t0 = profile ? performance.now() : 0
+      const rawData = ev.data as string
+      const respBytes = profile && typeof rawData === 'string' ? rawData.length : -1
       try {
-        const msg = JSON.parse(ev.data as string) as JSONRPCResponse | JSONRPCNotification
+        const msg = JSON.parse(rawData) as JSONRPCResponse | JSONRPCNotification
+        const tParsed = profile ? performance.now() : 0
         if ('id' in msg) {
           const pending = this.pending.get(msg.id)
           if (pending) {
             clearTimeout(pending.timer)
             this.pending.delete(msg.id)
             this.send({ type: 'CALL_SETTLED' })
+            if (profile) {
+              const totalMs = performance.now() - pending.startedAt
+              profileLog(
+                `rpc.call method=${pending.method} id=${msg.id} ms=${totalMs.toFixed(1)} ` +
+                  `req_bytes=${pending.reqBytes} resp_bytes=${respBytes} parse_ms=${(tParsed - t0).toFixed(1)}`,
+              )
+            }
             if ((msg as JSONRPCResponse).error) {
               pending.reject(new Error((msg as JSONRPCResponse).error!.message))
             } else {
               pending.resolve((msg as JSONRPCResponse).result)
             }
+            if (profile) {
+              profileLog(`rpc.settle method=${pending.method} dispatch_ms=${(performance.now() - tParsed).toFixed(1)}`)
+            }
           }
         } else {
           const evt = msg as JSONRPCNotification
           this.emitEvent(evt.method, evt.params)
+          if (profile) {
+            profileLog(
+              `rpc.event method=${evt.method} resp_bytes=${respBytes} ` +
+                `parse_ms=${(tParsed - t0).toFixed(1)} dispatch_ms=${(performance.now() - tParsed).toFixed(1)}`,
+            )
+          }
         }
       } catch (e) {
         console.error('RPC parse error', e)
@@ -335,21 +374,31 @@ return
 
     const id = ++this.nextId
     const req: JSONRPCRequest = { jsonrpc: '2.0', id, method, params }
+    const serialized = JSON.stringify(req)
+    const startedAt = performance.now()
 
     const p = new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         if (this.pending.has(id)) {
           this.pending.delete(id)
           this.send({ type: 'CALL_SETTLED' })
+          profileLog(`rpc.timeout method=${method} id=${id} ms=${RPC_CALL_TIMEOUT_MS}`)
           reject(new Error(`RPC call '${method}' timed out after ${RPC_CALL_TIMEOUT_MS}ms`))
         }
       }, RPC_CALL_TIMEOUT_MS)
 
-      this.pending.set(id, { resolve: resolve as any, reject, timer })
+      this.pending.set(id, {
+        resolve: resolve as any,
+        reject,
+        timer,
+        method,
+        startedAt,
+        reqBytes: serialized.length,
+      })
       this.send({ type: 'CALL_STARTED' })
     })
 
-    this.ws.send(JSON.stringify(req))
+    this.ws.send(serialized)
     return p
   }
 

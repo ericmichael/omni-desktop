@@ -9,6 +9,7 @@ import { AnsiSequenceBuffer } from '@/lib/ansi-sequence-buffer';
 export const DEFAULT_ENV: Record<string, string> = {
   FORCE_COLOR: '1',
   PYTHONUNBUFFERED: '1',
+  ...(process.env.NODE_ENV === 'development' ? { OMNIAGENTS_DEBUG: '1' } : {}),
 };
 
 /**
