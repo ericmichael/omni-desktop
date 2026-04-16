@@ -33,6 +33,7 @@ const getDefaults = (): StoreData => ({
   weeklyReviewDay: 5,
   lastWeeklyReviewAt: null,
   enabledExtensions: {},
+  skillSources: {},
 });
 
 /**

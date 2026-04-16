@@ -143,6 +143,16 @@ export type StoreData = {
    * and never spawns a subprocess. Toggled from Settings → Extensions.
    */
   enabledExtensions: Record<string, boolean>;
+
+  /**
+   * How each skill was installed. Missing means discovered locally (user
+   * created the directory manually). Persists across sessions so the UI
+   * can show provenance (e.g. "Installed from pdf.skill").
+   *
+   * Enabled/disabled state is determined by directory location:
+   * `<configDir>/skills/` = active, `<configDir>/skills-disabled/` = disabled.
+   */
+  skillSources: Record<string, SkillSource>;
 };
 
 // The electron store uses JSON schema to validate its data.
@@ -452,6 +462,11 @@ export const schema: Schema<StoreData> = {
   enabledExtensions: {
     type: 'object',
     additionalProperties: { type: 'boolean' },
+    default: {},
+  },
+  skillSources: {
+    type: 'object',
+    additionalProperties: { type: 'object' },
     default: {},
   },
 };
@@ -1016,7 +1031,7 @@ type UtilIpcEvents = Namespaced<
   'util',
   {
     'select-directory': (path?: string) => string | null;
-    'select-file': (path?: string) => string | null;
+    'select-file': (path?: string, filters?: Array<{ name: string; extensions: string[] }>) => string | null;
     'get-home-directory': () => string;
     'get-is-directory': (path: string) => boolean;
     'get-is-file': (path: string) => boolean;
@@ -1069,6 +1084,14 @@ type ConfigIpcEvents = Namespaced<
 >;
 
 /**
+ * How a skill was installed. Drives the source line shown in the UI and
+ * determines whether the skill can be uninstalled by the user.
+ */
+export type SkillSource =
+  | { kind: 'local' }
+  | { kind: 'file'; filename: string };
+
+/**
  * A discovered skill entry returned by the skills:list IPC handler.
  */
 export type SkillEntry = {
@@ -1078,8 +1101,18 @@ export type SkillEntry = {
   description: string;
   /** Absolute path to the skill directory. */
   path: string;
-  /** Whether this skill lives in the global config dir (vs project-local). */
-  isGlobal: boolean;
+  /** Whether this skill is enabled for agent sessions. */
+  enabled: boolean;
+  /** How the skill was installed. */
+  source: SkillSource;
+  /** Skill version from frontmatter (optional). */
+  version?: string;
+  /** Skill author from frontmatter (optional). */
+  author?: string;
+  /** License identifier from frontmatter (optional). */
+  license?: string;
+  /** Environment/dependency requirements from frontmatter (optional). */
+  compatibility?: string;
 };
 
 /**
@@ -1089,10 +1122,9 @@ type SkillsIpcEvents = Namespaced<
   'skills',
   {
     list: () => SkillEntry[];
-    read: (skillPath: string) => string | null;
-    create: (name: string, description: string) => SkillEntry;
-    remove: (skillPath: string) => void;
-    'write-content': (skillPath: string, content: string) => void;
+    install: (filePath: string) => SkillEntry;
+    uninstall: (name: string) => void;
+    'set-enabled': (name: string, enabled: boolean) => void;
   }
 >;
 

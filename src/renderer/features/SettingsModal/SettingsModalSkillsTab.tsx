@@ -1,78 +1,17 @@
 import { makeStyles, tokens } from '@fluentui/react-components';
-import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
-import type { ChangeEvent } from 'react';
+import { ArrowDownload20Regular, Delete20Regular } from '@fluentui/react-icons';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import {
-  Accordion,
-  AccordionHeader,
-  AccordionItem,
-  AccordionPanel,
-  Button,
-  FormField,
-  FormSkeleton,
-  IconButton,
-  Input,
-  SectionLabel,
-  Textarea,
-} from '@/renderer/ds';
+import { Button, ConfirmDialog, FormSkeleton, IconButton, SectionLabel, Switch } from '@/renderer/ds';
 import { emitter } from '@/renderer/services/ipc';
 import type { SkillEntry } from '@/shared/types';
 
 const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
-  addRow: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-    padding: tokens.spacingVerticalL,
-  },
-  addFields: {
-    display: 'flex',
-    alignItems: 'flex-end',
-    gap: tokens.spacingHorizontalS,
-  },
-  flex1: { flex: '1 1 0' },
-  headerRow: {
+  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalL },
+  header: {
     display: 'flex',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    flex: '1 1 0',
-    minWidth: 0,
-  },
-  headerContent: { flex: '1 1 0', minWidth: 0 },
-  headerName: {
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightMedium,
-    color: tokens.colorNeutralForeground1,
-  },
-  headerDescription: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground2,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  panelBody: {
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingBottom: tokens.spacingVerticalL,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-  },
-  pathLabel: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    fontFamily: tokens.fontFamilyMonospace,
-    wordBreak: 'break-all',
-  },
-  monoTextarea: {
-    '& textarea': {
-      fontFamily: tokens.fontFamilyMonospace,
-      fontSize: tokens.fontSizeBase200,
-      minHeight: '200px',
-    },
+    justifyContent: 'space-between',
   },
   empty: {
     padding: tokens.spacingVerticalXXL,
@@ -80,27 +19,64 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase300,
   },
-  iconMr: { marginRight: tokens.spacingHorizontalXS },
-  saveRow: {
+  card: {
     display: 'flex',
-    justifyContent: 'flex-end',
-    gap: tokens.spacingHorizontalS,
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    padding: tokens.spacingHorizontalL,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+  cardHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+  },
+  cardTitle: {
+    flex: 1,
+    fontWeight: 600,
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+  },
+  cardDescription: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+    lineHeight: tokens.lineHeightBase200,
+  },
+  cardMeta: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground4,
+  },
+  errorBanner: {
+    padding: tokens.spacingVerticalM,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorPaletteRedBackground1,
+    color: tokens.colorPaletteRedForeground1,
+    fontSize: tokens.fontSizeBase200,
   },
 });
+
+const SKILL_FILE_FILTERS = [{ name: 'Skill packages', extensions: ['skill'] }];
 
 export const SettingsModalSkillsTab = memo(() => {
   const styles = useStyles();
   const [skills, setSkills] = useState<SkillEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
-  const [newName, setNewName] = useState('');
-  const [newDescription, setNewDescription] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [uninstallTarget, setUninstallTarget] = useState<SkillEntry | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const list = await emitter.invoke('skills:list');
       setSkills(list);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load skills');
     } finally {
       setLoading(false);
     }
@@ -110,190 +86,125 @@ export const SettingsModalSkillsTab = memo(() => {
     load();
   }, [load]);
 
-  const addSkill = useCallback(async () => {
-    const name = newName.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
-    const description = newDescription.trim();
-    if (!name || !description) {
-return;
-}
-    await emitter.invoke('skills:create', name, description);
-    setNewName('');
-    setNewDescription('');
-    setExpandedSkill(name);
-    await load();
-  }, [newName, newDescription, load]);
+  const installFromFile = useCallback(async () => {
+    setError(null);
+    const filePath = await emitter.invoke('util:select-file', undefined, SKILL_FILE_FILTERS);
+    if (!filePath) return;
+    try {
+      await emitter.invoke('skills:install', filePath);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to install skill');
+    }
+  }, [load]);
 
-  const removeSkill = useCallback(
-    async (entry: SkillEntry) => {
-      await emitter.invoke('skills:remove', entry.path);
-      if (expandedSkill === entry.name) {
-setExpandedSkill(null);
-}
+  const onToggle = useCallback(
+    async (name: string, enabled: boolean) => {
+      await emitter.invoke('skills:set-enabled', name, enabled);
       await load();
     },
-    [expandedSkill, load]
+    [load]
   );
 
-  const onChangeNewName = useCallback((e: ChangeEvent<HTMLInputElement>) => {
-    setNewName(e.target.value);
-  }, []);
+  const confirmUninstall = useCallback(async () => {
+    if (!uninstallTarget) return;
+    setError(null);
+    try {
+      await emitter.invoke('skills:uninstall', uninstallTarget.name);
+      setUninstallTarget(null);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to uninstall skill');
+    }
+  }, [uninstallTarget, load]);
 
-  const onChangeNewDescription = useCallback((e: ChangeEvent<HTMLInputElement>) => {
-    setNewDescription(e.target.value);
-  }, []);
-
-  if (loading) {
-return <FormSkeleton fields={4} />;
-}
+  if (loading) return <FormSkeleton fields={4} />;
 
   return (
     <div className={styles.root}>
-      <SectionLabel>Installed Skills</SectionLabel>
+      <div className={styles.header}>
+        <SectionLabel>Installed Skills</SectionLabel>
+        <Button size="sm" variant="ghost" onClick={installFromFile}>
+          <ArrowDownload20Regular style={{ marginRight: 4 }} />
+          Install from file
+        </Button>
+      </div>
+
+      {error && <div className={styles.errorBanner}>{error}</div>}
 
       {skills.length === 0 && (
-        <div className={styles.empty}>No skills installed. Add one below.</div>
+        <div className={styles.empty}>No skills installed. Install a .skill file to get started.</div>
       )}
 
-      <Accordion
-        collapsible
-        onToggle={(_e, data) => {
-          setExpandedSkill(
-            data.openItems.length > 0 ? String(data.openItems[data.openItems.length - 1]) : null
-          );
-        }}
-        openItems={expandedSkill ? [expandedSkill] : []}
-      >
-        {skills.map((skill) => (
-          <SkillRow
-            key={skill.path}
-            skill={skill}
-            onRemove={removeSkill}
-            onContentSaved={load}
-          />
-        ))}
-      </Accordion>
+      {skills.map((skill) => (
+        <SkillCard
+          key={skill.name}
+          skill={skill}
+          onToggle={onToggle}
+          onUninstall={setUninstallTarget}
+        />
+      ))}
 
-      <div className={styles.addRow}>
-        <SectionLabel>Add Skill</SectionLabel>
-        <div className={styles.addFields}>
-          <Input
-            type="text"
-            value={newName}
-            onChange={onChangeNewName}
-            placeholder="skill-name"
-            mono
-            className={styles.flex1}
-          />
-          <Input
-            type="text"
-            value={newDescription}
-            onChange={onChangeNewDescription}
-            placeholder="Short description"
-            className={styles.flex1}
-          />
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={addSkill}
-            isDisabled={!newName.trim() || !newDescription.trim()}
-          >
-            <Add20Regular className={styles.iconMr} />
-            Add
-          </Button>
-        </div>
-      </div>
+      <ConfirmDialog
+        open={uninstallTarget !== null}
+        onClose={() => setUninstallTarget(null)}
+        onConfirm={confirmUninstall}
+        title={`Uninstall "${uninstallTarget?.name}"?`}
+        description="This will permanently remove the skill and all its files."
+        confirmLabel="Uninstall"
+        destructive
+      />
     </div>
   );
 });
 SettingsModalSkillsTab.displayName = 'SettingsModalSkillsTab';
 
-const SkillRow = memo(
-  ({
-    skill,
-    onRemove,
-    onContentSaved,
-  }: {
-    skill: SkillEntry;
-    onRemove: (entry: SkillEntry) => void;
-    onContentSaved: () => void;
-  }) => {
-    const styles = useStyles();
-    const [content, setContent] = useState<string | null>(null);
-    const [dirty, setDirty] = useState(false);
-    const [saving, setSaving] = useState(false);
-    const [loaded, setLoaded] = useState(false);
+// ---------------------------------------------------------------------------
+// Skill Card
+// ---------------------------------------------------------------------------
 
-    const loadContent = useCallback(async () => {
-      if (loaded) {
-return;
-}
-      const text = await emitter.invoke('skills:read', skill.path);
-      setContent(text);
-      setLoaded(true);
-      setDirty(false);
-    }, [skill.path, loaded]);
+type SkillCardProps = {
+  skill: SkillEntry;
+  onToggle: (name: string, enabled: boolean) => void;
+  onUninstall: (skill: SkillEntry) => void;
+};
 
-    const onClickRemove = useCallback(() => onRemove(skill), [skill, onRemove]);
-
-    const onChangeContent = useCallback(
-      (e: ChangeEvent<HTMLTextAreaElement>) => {
-        setContent(e.target.value);
-        setDirty(true);
-      },
-      []
-    );
-
-    const save = useCallback(async () => {
-      if (!content) {
-return;
-}
-      setSaving(true);
-      try {
-        await emitter.invoke('skills:write-content', skill.path, content);
-        setDirty(false);
-        onContentSaved();
-      } finally {
-        setSaving(false);
-      }
-    }, [skill.path, content, onContentSaved]);
-
-    return (
-      <AccordionItem value={skill.name}>
-        <AccordionHeader expandIconPosition="end" onClick={loadContent}>
-          <div className={styles.headerRow}>
-            <div className={styles.headerContent}>
-              <div className={styles.headerName}>{skill.name}</div>
-              <div className={styles.headerDescription}>{skill.description}</div>
-            </div>
-            <IconButton
-              aria-label="Remove skill"
-              icon={<Delete20Regular />}
-              size="sm"
-              onClick={onClickRemove}
-            />
-          </div>
-        </AccordionHeader>
-        <AccordionPanel>
-          <div className={styles.panelBody}>
-            <div className={styles.pathLabel}>{skill.path}</div>
-            <FormField label="SKILL.md">
-              <Textarea
-                value={content ?? ''}
-                onChange={onChangeContent}
-                className={styles.monoTextarea}
-              />
-            </FormField>
-            {dirty && (
-              <div className={styles.saveRow}>
-                <Button size="sm" variant="primary" onClick={save} isDisabled={saving}>
-                  {saving ? 'Saving\u2026' : 'Save'}
-                </Button>
-              </div>
-            )}
-          </div>
-        </AccordionPanel>
-      </AccordionItem>
-    );
+function formatSource(skill: SkillEntry): string {
+  const parts: string[] = [];
+  if (skill.version) parts.push(`v${skill.version}`);
+  if (skill.source.kind === 'file') {
+    parts.push(`Installed from ${skill.source.filename}`);
+  } else {
+    parts.push('Local');
   }
-);
-SkillRow.displayName = 'SkillRow';
+  return parts.join(' · ');
+}
+
+const SkillCard = memo(({ skill, onToggle, onUninstall }: SkillCardProps) => {
+  const styles = useStyles();
+
+  const handleToggle = useCallback(
+    (checked: boolean) => onToggle(skill.name, checked),
+    [skill.name, onToggle]
+  );
+
+  const handleUninstall = useCallback(() => onUninstall(skill), [skill, onUninstall]);
+
+  return (
+    <div className={styles.card}>
+      <div className={styles.cardHeader}>
+        <span className={styles.cardTitle}>{skill.name}</span>
+        <IconButton
+          aria-label="Uninstall skill"
+          icon={<Delete20Regular />}
+          size="sm"
+          onClick={handleUninstall}
+        />
+        <Switch checked={skill.enabled} onCheckedChange={handleToggle} />
+      </div>
+      <div className={styles.cardDescription}>{skill.description}</div>
+      <div className={styles.cardMeta}>{formatSource(skill)}</div>
+    </div>
+  );
+});
+SkillCard.displayName = 'SkillCard';

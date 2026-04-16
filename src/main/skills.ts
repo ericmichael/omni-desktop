@@ -1,60 +1,82 @@
-import { mkdir, readdir, readFile, rm, writeFile } from 'fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, rename, rm, writeFile as writeFileAsync } from 'fs/promises';
+import { tmpdir } from 'os';
 import { join } from 'path';
+import extract from 'extract-zip';
 
-import type { SkillEntry } from '@/shared/types';
+import type { SkillEntry, SkillSource, StoreData } from '@/shared/types';
 
 const SKILL_FILENAME = 'SKILL.md';
 
-function getSkillsDir(configDir: string): string {
+export type SkillFrontmatter = {
+  name: string;
+  description: string;
+  version?: string;
+  author?: string;
+  license?: string;
+  compatibility?: string;
+};
+
+export type SkillStore = {
+  get<K extends keyof StoreData>(key: K): StoreData[K];
+  set<K extends keyof StoreData>(key: K, value: StoreData[K]): void;
+};
+
+/** Active skills — the runtime scans this directory. */
+export function getSkillsDir(configDir: string): string {
   return join(configDir, 'skills');
 }
 
-export function parseFrontmatter(content: string): { name: string; description: string } | null {
-  if (!content.startsWith('---')) {
-return null;
-}
-  const parts = content.split('---', 3);
-  if (parts.length < 3) {
-return null;
+/** Disabled skills are parked here — invisible to the runtime. */
+function getDisabledSkillsDir(configDir: string): string {
+  return join(configDir, 'skills-disabled');
 }
 
+export function parseFrontmatter(content: string): SkillFrontmatter | null {
+  if (!content.startsWith('---')) {
+    return null;
+  }
+  const parts = content.split('---', 3);
+  if (parts.length < 3) {
+    return null;
+  }
+
   const lines = parts[1]!.trim().split('\n');
-  let name = '';
-  let description = '';
+  const values: Record<string, string> = {};
   for (const line of lines) {
     const match = line.match(/^(\w[\w-]*):\s*(.+)/);
     if (!match) {
-continue;
-}
-    const key = match[1];
-    const value = match[2] ?? '';
-    if (key === 'name') {
-name = value.trim().replace(/^["']|["']$/g, '');
-}
-    if (key === 'description') {
-description = value.trim().replace(/^["']|["']$/g, '');
-}
+      continue;
+    }
+    const key = match[1]!;
+    const value = (match[2] ?? '').trim().replace(/^["']|["']$/g, '');
+    values[key] = value;
   }
 
-  if (!name || !description) {
-return null;
-}
-  return { name, description };
+  if (!values.name || !values.description) {
+    return null;
+  }
+
+  return {
+    name: values.name,
+    description: values.description,
+    version: values.version,
+    author: values.author,
+    license: values.license,
+    compatibility: values.compatibility,
+  };
 }
 
-export async function listSkills(configDir: string): Promise<SkillEntry[]> {
-  const skillsDir = getSkillsDir(configDir);
-  const entries: SkillEntry[] = [];
-
+async function scanSkillsIn(dir: string, enabled: boolean, sourceMap: Record<string, SkillSource>): Promise<SkillEntry[]> {
   let dirs: string[];
   try {
-    dirs = await readdir(skillsDir);
+    dirs = await readdir(dir);
   } catch {
-    return entries;
+    return [];
   }
 
+  const entries: SkillEntry[] = [];
   for (const dirName of dirs) {
-    const dirPath = join(skillsDir, dirName);
+    const dirPath = join(dir, dirName);
     const skillMdPath = join(dirPath, SKILL_FILENAME);
     try {
       const content = await readFile(skillMdPath, 'utf-8');
@@ -64,44 +86,112 @@ export async function listSkills(configDir: string): Promise<SkillEntry[]> {
           name: meta.name,
           description: meta.description,
           path: dirPath,
-          isGlobal: true,
+          enabled,
+          source: sourceMap[meta.name] ?? { kind: 'local' },
+          version: meta.version,
+          author: meta.author,
+          license: meta.license,
+          compatibility: meta.compatibility,
         });
       }
     } catch {
       // Skip dirs without a valid SKILL.md
     }
   }
-
-  return entries.sort((a, b) => a.name.localeCompare(b.name));
+  return entries;
 }
 
-export async function readSkillContent(skillPath: string): Promise<string | null> {
-  try {
-    return await readFile(join(skillPath, SKILL_FILENAME), 'utf-8');
-  } catch {
-    return null;
-  }
+export async function listSkills(configDir: string, store: SkillStore): Promise<SkillEntry[]> {
+  const sourceMap = store.get('skillSources') ?? {};
+  const active = await scanSkillsIn(getSkillsDir(configDir), true, sourceMap);
+  const disabled = await scanSkillsIn(getDisabledSkillsDir(configDir), false, sourceMap);
+  return [...active, ...disabled].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export async function createSkill(
+export async function installSkillFromFile(
   configDir: string,
-  name: string,
-  description: string
+  filePath: string,
+  store: SkillStore
 ): Promise<SkillEntry> {
   const skillsDir = getSkillsDir(configDir);
-  const dirPath = join(skillsDir, name);
-  await mkdir(dirPath, { recursive: true });
+  await mkdir(skillsDir, { recursive: true });
 
-  const content = `---\nname: ${name}\ndescription: ${description}\n---\n\n`;
-  await writeFile(join(dirPath, SKILL_FILENAME), content, 'utf-8');
+  // Extract to a temp dir first, then move the top-level folder into skillsDir.
+  // Expected layout inside the zip: <skill-name>/SKILL.md (+ other files).
+  const tmpDir = await mkdtemp(join(tmpdir(), 'skill-'));
+  try {
+    await extract(filePath, { dir: tmpDir });
+  } catch {
+    await rm(tmpDir, { recursive: true, force: true });
+    throw new Error('Invalid .skill file: failed to extract archive');
+  }
 
-  return { name, description, path: dirPath, isGlobal: true };
+  const extracted = await readdir(tmpDir);
+  const topDir = extracted[0];
+  if (!topDir || extracted.length === 0) {
+    await rm(tmpDir, { recursive: true, force: true });
+    throw new Error('Invalid .skill file: archive is empty');
+  }
+
+  // Move extracted skill folder into the skills directory
+  const destDir = join(skillsDir, topDir);
+  await rm(destDir, { recursive: true, force: true });
+  await rename(join(tmpDir, topDir), destDir);
+  await rm(tmpDir, { recursive: true, force: true });
+
+  // Validate the extracted skill
+  const dirPath = join(skillsDir, topDir);
+  const skillMdPath = join(dirPath, SKILL_FILENAME);
+  let content: string;
+  try {
+    content = await readFile(skillMdPath, 'utf-8');
+  } catch {
+    await rm(dirPath, { recursive: true, force: true });
+    throw new Error('Invalid .skill file: no SKILL.md found in archive');
+  }
+
+  const meta = parseFrontmatter(content);
+  if (!meta) {
+    await rm(dirPath, { recursive: true, force: true });
+    throw new Error('Invalid .skill file: SKILL.md has invalid or missing frontmatter');
+  }
+
+  // Persist source metadata
+  const filename = filePath.split('/').pop() ?? filePath;
+  const source: SkillSource = { kind: 'file', filename };
+  const sources = store.get('skillSources') ?? {};
+  store.set('skillSources', { ...sources, [meta.name]: source });
+
+  return {
+    name: meta.name,
+    description: meta.description,
+    path: dirPath,
+    enabled: true,
+    source,
+    version: meta.version,
+    author: meta.author,
+    license: meta.license,
+    compatibility: meta.compatibility,
+  };
 }
 
-export async function removeSkill(skillPath: string): Promise<void> {
-  await rm(skillPath, { recursive: true, force: true });
+export async function uninstallSkill(configDir: string, name: string, store: SkillStore): Promise<void> {
+  // Could be in either directory
+  await rm(join(getSkillsDir(configDir), name), { recursive: true, force: true });
+  await rm(join(getDisabledSkillsDir(configDir), name), { recursive: true, force: true });
+
+  // Clean store source metadata
+  const sources = store.get('skillSources') ?? {};
+  const { [name]: _, ...rest } = sources;
+  store.set('skillSources', rest);
 }
 
-export async function writeSkillContent(skillPath: string, content: string): Promise<void> {
-  await writeFile(join(skillPath, SKILL_FILENAME), content, 'utf-8');
+export async function setSkillEnabled(configDir: string, name: string, enabled: boolean): Promise<void> {
+  const fromDir = enabled ? getDisabledSkillsDir(configDir) : getSkillsDir(configDir);
+  const toDir = enabled ? getSkillsDir(configDir) : getDisabledSkillsDir(configDir);
+  const src = join(fromDir, name);
+  const dest = join(toDir, name);
+
+  await mkdir(toDir, { recursive: true });
+  await rename(src, dest);
 }

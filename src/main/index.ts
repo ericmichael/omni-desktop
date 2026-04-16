@@ -342,7 +342,7 @@ registerUtilHandlers(main.ipc, {
   fetchFn: ((input, init) => net.fetch(input as string, init)) as typeof globalThis.fetch,
   launcherVersion: app.getVersion(),
 });
-registerSkillsHandlers(main.ipc, OMNI_CONFIG_DIR);
+registerSkillsHandlers(main.ipc, OMNI_CONFIG_DIR, store);
 
 //#endregion
 
@@ -361,7 +361,7 @@ main.ipc.handle('util:select-directory', async (_, path) => {
 
   return result.filePaths[0] ?? null;
 });
-main.ipc.handle('util:select-file', async (_, path) => {
+main.ipc.handle('util:select-file', async (_, path, filters) => {
   const mainWindow = main.getWindow();
   assert(mainWindow !== null, 'Main window is not initialized');
 
@@ -370,6 +370,7 @@ main.ipc.handle('util:select-file', async (_, path) => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],
     defaultPath,
+    filters: filters ?? undefined,
   });
 
   return result.filePaths[0] ?? null;

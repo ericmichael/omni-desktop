@@ -9,7 +9,8 @@ import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';
 import { WebSocket as WsWebSocket } from 'ws';
 
-import { createSkill, listSkills, readSkillContent, removeSkill, writeSkillContent } from '@/main/skills';
+import { installSkillFromFile, listSkills, setSkillEnabled, uninstallSkill } from '@/main/skills';
+import type { SkillStore } from '@/main/skills';
 import {
   checkModelsConfigured,
   ensureDirectory,
@@ -202,14 +203,11 @@ export function registerUtilHandlers(ipc: IIpcListener, opts: UtilHandlerOptions
 /**
  * Register `skills:*` handlers. Skills live under the config dir.
  */
-export function registerSkillsHandlers(ipc: IIpcListener, configDir: string): void {
-  ipc.handle('skills:list', () => listSkills(configDir));
-  ipc.handle('skills:read', (_: unknown, skillPath: string) => readSkillContent(skillPath));
-  ipc.handle('skills:create', (_: unknown, name: string, description: string) =>
-    createSkill(configDir, name, description)
-  );
-  ipc.handle('skills:remove', (_: unknown, skillPath: string) => removeSkill(skillPath));
-  ipc.handle('skills:write-content', (_: unknown, skillPath: string, content: string) =>
-    writeSkillContent(skillPath, content)
+export function registerSkillsHandlers(ipc: IIpcListener, configDir: string, store: SkillStore): void {
+  ipc.handle('skills:list', () => listSkills(configDir, store));
+  ipc.handle('skills:install', (_: unknown, filePath: string) => installSkillFromFile(configDir, filePath, store));
+  ipc.handle('skills:uninstall', (_: unknown, name: string) => uninstallSkill(configDir, name, store));
+  ipc.handle('skills:set-enabled', (_: unknown, name: string, enabled: boolean) =>
+    setSkillEnabled(configDir, name, enabled)
   );
 }

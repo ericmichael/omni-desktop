@@ -33,6 +33,7 @@ const DEFAULTS: StoreData = {
   weeklyReviewDay: 5,
   lastWeeklyReviewAt: null,
   enabledExtensions: {},
+  skillSources: {},
 };
 
 type ChangeCallback = (data: StoreData | undefined) => void;

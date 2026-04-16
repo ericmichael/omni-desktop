@@ -117,7 +117,7 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
   const OMNI_CONFIG_DIR = getOmniConfigDir();
   registerConfigHandlers(ipc, OMNI_CONFIG_DIR);
   registerUtilHandlers(ipc, { fetchFn: globalThis.fetch, launcherVersion });
-  registerSkillsHandlers(ipc, OMNI_CONFIG_DIR);
+  registerSkillsHandlers(ipc, OMNI_CONFIG_DIR, store);
 
   // Desktop-only handlers — stubbed for browser mode
   ipc.handle('util:select-directory', () => null);
