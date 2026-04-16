@@ -2,10 +2,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import extract from 'extract-zip';
 import { https } from 'follow-redirects';
 import * as tar from 'tar';
 import tmp from 'tmp';
-import unzipper from 'unzipper';
 
 import packageJson from './package.json';
 
@@ -71,22 +71,14 @@ async function extractTarGz(filePath: string, destPath: string): Promise<[string
 }
 
 async function extractZip(filePath: string, destPath: string): Promise<[string, string]> {
-  const extractedFilePath = await new Promise<[string, string]>((resolve, reject) => {
-    fs.createReadStream(filePath)
-      .pipe(unzipper.Extract({ path: destPath }))
-      .on('close', () => {
-        const extractedFiles = fs.readdirSync(destPath);
-        for (const file of extractedFiles) {
-          if (file === 'uv' || file === 'uv.exe') {
-            resolve([file, path.join(destPath, file)]);
-            return;
-          }
-        }
-        reject(new Error('Required file (uv or uv.exe) not found in the zip archive'));
-      })
-      .on('error', reject);
-  });
-  return extractedFilePath;
+  await extract(filePath, { dir: destPath });
+  const extractedFiles = fs.readdirSync(destPath);
+  for (const file of extractedFiles) {
+    if (file === 'uv' || file === 'uv.exe') {
+      return [file, path.join(destPath, file)];
+    }
+  }
+  throw new Error('Required file (uv or uv.exe) not found in the zip archive');
 }
 
 async function download(platform: Platforms): Promise<void> {

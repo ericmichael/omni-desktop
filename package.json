@@ -16,8 +16,9 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "download:sandbox": "node scripts/download-sandbox.mjs --force",
-    "package": "npm run clean && npm run download:sandbox && npm run build && dotenv -e .env -- electron-builder --config electron-builder.config.ts --publish never",
-    "publish": "npm run clean && npm run download:sandbox && npm run build && dotenv -e .env -- electron-builder --config electron-builder.config.ts --publish always",
+    "download:vcredist": "node scripts/download-vcredist.mjs",
+    "package": "npm run clean && npm run download:sandbox && npm run download:vcredist && npm run build && dotenv -e .env -- electron-builder --config electron-builder.config.ts --publish never",
+    "publish": "npm run clean && npm run download:sandbox && npm run download:vcredist && npm run build && dotenv -e .env -- electron-builder --config electron-builder.config.ts --publish always",
     "start": "npm run build && npm run preview",
     "clean": "rimraf out/ dist/",
     "download": "ts-node download_uv.ts",
@@ -57,7 +58,6 @@
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",
     "@types/tmp": "^0.2.6",
-    "@types/unzipper": "^0.10.11",
     "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.39.0",
     "@typescript-eslint/parser": "^8.39.0",
@@ -196,6 +196,10 @@
     "ws": "^8.18.0",
     "xstate": "^5.30.0",
     "yaml": "^2.8.3"
+  },
+  "vcredist": {
+    "url": "https://aka.ms/vs/17/release/vc_redist.x64.exe",
+    "sha256": "cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b"
   },
   "uv": {
     "linux": {
