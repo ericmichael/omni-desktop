@@ -325,6 +325,14 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, closeBehavior = 
     <div className={styles.root}>
       {/* ── Row 1: Title ── */}
       <div className={styles.titleBar}>
+        {onClose && closeBehavior === 'back' && (
+          <IconButton
+            aria-label="Back"
+            icon={<ArrowLeft20Regular />}
+            size="sm"
+            onClick={onClose}
+          />
+        )}
         {dragHandleProps && (
           <FluentButton
             appearance="subtle"
@@ -404,10 +412,10 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, closeBehavior = 
             onClick={onToggleExpand}
           />
         )}
-        {onClose && (
+        {onClose && closeBehavior === 'close' && (
           <IconButton
-            aria-label={closeBehavior === 'back' ? 'Back' : 'Close'}
-            icon={closeBehavior === 'back' ? <ArrowLeft20Regular /> : <Dismiss20Regular />}
+            aria-label="Close"
+            icon={<Dismiss20Regular />}
             size="sm"
             onClick={onClose}
           />

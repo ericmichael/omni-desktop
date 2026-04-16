@@ -1,4 +1,3 @@
-import { getContainerArtifactsDir } from '@/lib/artifacts';
 import type { Pipeline, Project, Ticket } from '@/shared/types';
 
 export type SupervisorContext = {
@@ -47,7 +46,6 @@ export const buildSupervisorPrompt = (
   pipeline: Pipeline,
   context?: SupervisorContext
 ): string => {
-  const artifactsDir = getContainerArtifactsDir(ticket.id);
   const currentColumn = pipeline.columns.find((c) => c.id === ticket.columnId);
   const columnLabel = currentColumn?.label ?? ticket.columnId;
   const columnNames = pipeline.columns.map((c) => c.label).join(' → ');
@@ -76,13 +74,6 @@ ${columnNames}
 
 When your work for the current column is complete, use \`move_ticket\` to advance the ticket to the next column.
 Do not edit YAML files or configuration files to manage ticket state — use your project management tools instead.
-
-## Skills
-Use the \`omni-projects-tickets\` skill for guidance on project management workflows, tool usage patterns, and domain concepts (pipelines, gates, milestones, pages, inbox). Consult its references when you need to understand how tools work together or what the correct workflow is.
-
-## Artifacts Directory
-Persistent artifacts directory: ${artifactsDir}
-Use this for progress notes, research, scratch work, or any files that should persist.
 
 ## How to Work
 

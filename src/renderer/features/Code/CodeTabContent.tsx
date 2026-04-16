@@ -1,7 +1,7 @@
 import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { motion } from 'framer-motion';
-import { memo, useCallback, useMemo } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { buildCodeVariables } from '@/lib/client-tools';
 import { SessionStartupShell } from '@/renderer/common/SessionStartupShell';
@@ -10,6 +10,7 @@ import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-
 import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { buildSandboxLabel, isCustomSandbox } from '@/renderer/omniagents-ui/sandbox-label';
+import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { CodeTab, CodeTabId, TicketId } from '@/shared/types';
 
@@ -168,7 +169,28 @@ export const CodeTabContent = memo(
       () => store.projects.find((p) => p.id === tab.projectId) ?? null,
       [store.projects, tab.projectId]
     );
-    const workspaceDir = tab.workspaceDir ?? (project?.source?.kind === 'local' ? project.source.workspaceDir : null) ?? null;
+    // Projects without a linked local source still have a managed directory on
+    // disk (`Projects/<slug>/` or `~/Omni/Workspace/` for Personal). Resolve it
+    // lazily so the sandbox can start even when the user hasn't picked a
+    // workspace.
+    const linkedWorkspaceDir = tab.workspaceDir ?? (project?.source?.kind === 'local' ? project.source.workspaceDir : null) ?? null;
+    const [resolvedProjectDir, setResolvedProjectDir] = useState<string | null>(null);
+    useEffect(() => {
+      if (linkedWorkspaceDir || !tab.projectId) {
+        setResolvedProjectDir(null);
+        return;
+      }
+      let cancelled = false;
+      void emitter.invoke('project:get-dir', tab.projectId).then((dir) => {
+        if (!cancelled) {
+          setResolvedProjectDir(dir);
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [tab.projectId, linkedWorkspaceDir]);
+    const workspaceDir = linkedWorkspaceDir ?? resolvedProjectDir;
     const sandboxBackend = store.sandboxBackend ?? 'none';
     const sandboxLabel = useMemo(
       () => (sandboxBackend !== 'none' ? buildSandboxLabel(sandboxBackend, { custom: isCustomSandbox(project?.sandbox) }) : undefined),

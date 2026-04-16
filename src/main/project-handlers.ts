@@ -16,6 +16,7 @@ export function registerProjectHandlers(ipc: IIpcListener, projectManager: Proje
   ipc.handle('project:add-project', (_, project) => projectManager.addProject(project));
   ipc.handle('project:update-project', (_, id, patch) => projectManager.updateProject(id, patch));
   ipc.handle('project:remove-project', (_, id) => projectManager.removeProject(id));
+  ipc.handle('project:get-dir', (_, id) => projectManager.getProjectDir(id));
   ipc.handle('project:check-git-repo', (_, workspaceDir) => checkGitRepo(workspaceDir));
 
   // Ticket handlers
@@ -61,6 +62,7 @@ export function registerProjectHandlers(ipc: IIpcListener, projectManager: Proje
     'project:add-project',
     'project:update-project',
     'project:remove-project',
+    'project:get-dir',
     'project:check-git-repo',
     'project:add-ticket',
     'project:update-ticket',

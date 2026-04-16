@@ -780,6 +780,42 @@ export const CodeDeck = memo(() => {
     return () => window.removeEventListener('resize', handler);
   }, []);
 
+  // Mouse wheel → horizontal scroll on the deck (columns are laid out on a
+  // single row). Leaves trackpad horizontal gestures alone and ignores wheel
+  // events that originated inside a column (chat scrollbacks, etc.).
+  const deckScrollRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = deckScrollRef.current;
+    if (!el) {
+      return;
+    }
+    const handler = (e: WheelEvent) => {
+      if (e.deltaY === 0 || e.deltaX !== 0) {
+        return;
+      }
+      // Respect nested vertical scroll areas (chat, file panes): walk from the
+      // target up to the deck and bail if any ancestor can still scroll in
+      // the direction of this wheel event.
+      let node = e.target as HTMLElement | null;
+      while (node && node !== el) {
+        const cs = getComputedStyle(node);
+        const scrollable = cs.overflowY === 'auto' || cs.overflowY === 'scroll';
+        if (scrollable && node.scrollHeight > node.clientHeight) {
+          const canScrollDown = e.deltaY > 0 && node.scrollTop + node.clientHeight < node.scrollHeight - 1;
+          const canScrollUp = e.deltaY < 0 && node.scrollTop > 0;
+          if (canScrollDown || canScrollUp) {
+            return;
+          }
+        }
+        node = node.parentElement;
+      }
+      el.scrollLeft += e.deltaY;
+      e.preventDefault();
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, []);
+
   const addingFirstTab = useRef(false);
   useEffect(() => {
     if (tabs.length === 0 && !addingFirstTab.current) {
@@ -1031,7 +1067,7 @@ return undefined;
       {layoutMode === 'deck' && (
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
           <SortableContext items={tabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
-            <div className={styles.deckScroll}>
+            <div ref={deckScrollRef} className={styles.deckScroll}>
               <div className={styles.deckInner}>
                 {tabs.map((tab) => {
                   return (

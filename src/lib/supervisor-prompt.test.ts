@@ -69,10 +69,9 @@ describe('buildSupervisorPrompt', () => {
     expect(prompt).toContain('move_ticket');
   });
 
-  it('includes artifacts directory path', () => {
-    const prompt = buildSupervisorPrompt(makeTicket(), makeProject(), PIPELINE);
-    expect(prompt).toContain('/home/user/.config/omni_code/tickets/ticket-42/artifacts');
-  });
+  // Artifacts guidance now lives in `buildContextIdentifiers`
+  // (src/lib/client-tools.ts) so it covers both supervisor and non-supervisor
+  // ticket sessions. The supervisor prompt intentionally no longer duplicates it.
 
   it('includes pipeline column names', () => {
     const prompt = buildSupervisorPrompt(makeTicket(), makeProject(), PIPELINE);

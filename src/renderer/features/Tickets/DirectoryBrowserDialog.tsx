@@ -70,7 +70,6 @@ const useStyles = makeStyles({
   },
   listing: {
     height: '256px',
-    flex: '1 1 0',
     overflowY: 'auto',
     borderRadius: tokens.borderRadiusXLarge,
     ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),

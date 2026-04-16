@@ -1168,6 +1168,8 @@ type ProjectIpcEvents = Namespaced<
     'add-project': (project: Omit<Project, 'id' | 'createdAt'>) => Project;
     'update-project': (id: ProjectId, patch: Partial<Omit<Project, 'id' | 'createdAt'>>) => void;
     'remove-project': (id: ProjectId) => void;
+    /** Resolved project directory — `Projects/<slug>/` or the default workspace root for Personal. Null if the project is unknown. */
+    'get-dir': (projectId: ProjectId) => string | null;
     'check-git-repo': (workspaceDir: string) => GitRepoInfo;
     'add-ticket': (
       ticket: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'columnId'>

@@ -696,8 +696,10 @@ describe('client_tools shape', () => {
     expect(names).not.toContain('create_page');
     expect(names).not.toContain('update_page');
     expect(names).toHaveLength(14);
-    // additional_instructions points to the skill — no tool descriptions restated
-    expect(vars.additional_instructions).toContain('omni-projects-tickets');
+    // additional_instructions inlines behavioral guidance — not tool schemas
+    expect(vars.additional_instructions).toContain('Working with projects and tickets');
+    expect(vars.additional_instructions).toContain('escalate');
+    expect(vars.additional_instructions).toContain('Pipeline gates');
   });
 
   it('interactive variables contain all tools', () => {
@@ -749,8 +751,9 @@ describe('client_tools shape', () => {
     // Code-only tools should NOT be in interactive
     expect(names).not.toContain('open_preview');
     expect(names).toHaveLength(35);
-    // Points to skill, no tool descriptions restated
-    expect(vars.additional_instructions).toContain('omni-projects-tickets');
+    // Behavioral guidance inlined — no tool schemas restated
+    expect(vars.additional_instructions).toContain('Working with projects and tickets');
+    expect(vars.additional_instructions).toContain('escalate');
   });
 
   it('code variables include code-deck-only tools', () => {

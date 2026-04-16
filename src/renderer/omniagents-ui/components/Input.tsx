@@ -4,6 +4,14 @@ import React, { useCallback, useMemo, useRef, useState } from 'react'
 import { PromptInput, PromptInputActions,PromptInputTextarea } from './promptkit/PromptInput'
 import { VoiceModal } from './VoiceModal'
 
+/** Trailing path segment, tolerant of both `/` and `\` separators and trailing slashes. Falls back to the input when nothing would be left. */
+function basename(p: string): string {
+  const trimmed = p.replace(/[\\/]+$/, '')
+  const idx = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'))
+  const tail = idx === -1 ? trimmed : trimmed.slice(idx + 1)
+  return tail || p
+}
+
 export function Input({ disabled, thinking, onStop, onSubmit, voiceEnabled, workspacePath, workspaceLocked, onWorkspaceClick, sandboxLabel, sandboxLoading, sessionId, onVoiceSessionCreated, onVoiceClose }:
   { disabled?: boolean; thinking?: boolean; onStop?: () => void; onSubmit: (text: string, files?: File[]) => void; voiceEnabled?: boolean; workspacePath?: string | null; workspaceLocked?: boolean; onWorkspaceClick?: () => void; sandboxLabel?: string; sandboxLoading?: boolean; sessionId?: string; onVoiceSessionCreated?: (id: string) => void; onVoiceClose?: () => void }) {
   const [text, setText] = useState('')
@@ -220,7 +228,7 @@ fileInputRef.current.value = ''
                 >
                   <FolderIcon size={14} className={`shrink-0 ${workspaceLocked ? 'text-muted-foreground' : 'text-primary'}`} />
                   <span className="max-w-[120px] sm:max-w-[200px] truncate">
-                    {workspacePath ? workspacePath.split('/').pop() || workspacePath : 'Select workspace'}
+                    {workspacePath ? basename(workspacePath) : 'Select workspace'}
                   </span>
                   {workspaceLocked && (
                     <LockIcon size={10} className="text-muted-foreground flex-shrink-0" />

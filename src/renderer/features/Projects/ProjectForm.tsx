@@ -77,10 +77,13 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
 
   const [label, setLabel] = useState(editProject?.label ?? '');
   const [linkRepo, setLinkRepo] = useState(editProject?.source != null);
-  const [sourceKind, setSourceKind] = useState<SourceKind>(editProject?.source?.kind === 'git-remote' ? 'git-remote' : 'local');
   const [workspaceDir, setWorkspaceDir] = useState(editProject?.source?.kind === 'local' ? editProject.source.workspaceDir : '');
-  const [repoUrl, setRepoUrl] = useState(editProject?.source?.kind === 'git-remote' ? editProject.source.repoUrl : '');
-  const [defaultBranch, setDefaultBranch] = useState(editProject?.source?.kind === 'git-remote' ? (editProject.source.defaultBranch ?? '') : '');
+  // Git-remote source is preserved through edit but not mutable via this UI
+  // (feature is hidden). Existing git-remote projects submit with their
+  // original repoUrl/defaultBranch intact.
+  const sourceKind: SourceKind = editProject?.source?.kind === 'git-remote' ? 'git-remote' : 'local';
+  const repoUrl = editProject?.source?.kind === 'git-remote' ? editProject.source.repoUrl : '';
+  const defaultBranch = editProject?.source?.kind === 'git-remote' ? (editProject.source.defaultBranch ?? '') : '';
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [browseOpen, setBrowseOpen] = useState(false);
 
@@ -109,24 +112,6 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
     },
     [label]
   );
-
-  const handleSourceKindChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSourceKind(e.target.value as SourceKind);
-  }, []);
-
-  const handleRepoUrlChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setRepoUrl(e.target.value);
-    if (!label.trim()) {
-      const match = e.target.value.match(/\/([^/]+?)(?:\.git)?$/);
-      if (match?.[1]) {
-setLabel(match[1]);
-}
-    }
-  }, [label]);
-
-  const handleDefaultBranchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setDefaultBranch(e.target.value);
-  }, []);
 
   const handleSandboxModeChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     const mode = e.target.value as SandboxMode;
@@ -201,72 +186,38 @@ setSandboxValue('');
               />
             </div>
 
-            {/* Link a repository toggle */}
+            {/* Link a directory toggle. Existing git-remote projects keep
+                their source intact on submit — the UI only offers local. */}
             {!linkRepo && (
               <button
                 type="button"
                 className={styles.linkToggle}
                 onClick={() => setLinkRepo(true)}
               >
-                + Link a code repository
+                + Link a local directory
               </button>
             )}
 
-            {linkRepo && (
+            {linkRepo && sourceKind === 'local' && (
               <>
                 <div className={styles.field}>
-                  <label className={styles.label}>Source</label>
-                  <Select value={sourceKind} onChange={handleSourceKindChange} className={styles.fullWidth}>
-                    <option value="local">Local Directory</option>
-                    <option value="git-remote">Git Repository</option>
-                  </Select>
-                </div>
-
-                {sourceKind === 'local' && (
-                  <div className={styles.field}>
-                    <label className={styles.label}>Workspace Directory</label>
-                    <div className={styles.dirRow}>
-                      <span className={styles.dirDisplay}>
-                        {workspaceDir || 'No directory selected'}
-                      </span>
-                      <Button size="sm" variant="ghost" onClick={handleBrowseOpen}>
-                        Browse
-                      </Button>
-                    </div>
+                  <label className={styles.label}>Workspace Directory</label>
+                  <div className={styles.dirRow}>
+                    <span className={styles.dirDisplay}>
+                      {workspaceDir || 'No directory selected'}
+                    </span>
+                    <Button size="sm" variant="ghost" onClick={handleBrowseOpen}>
+                      Browse
+                    </Button>
                   </div>
-                )}
-
-                {sourceKind === 'git-remote' && (
-                  <>
-                    <div className={styles.field}>
-                      <label className={styles.label}>Repository URL</label>
-                      <Input
-                        type="text"
-                        value={repoUrl}
-                        onChange={handleRepoUrlChange}
-                        placeholder="https://github.com/org/repo.git"
-                        className={styles.fullWidth}
-                      />
-                    </div>
-                    <div className={styles.field}>
-                      <label className={styles.label}>Default Branch (optional)</label>
-                      <Input
-                        type="text"
-                        value={defaultBranch}
-                        onChange={handleDefaultBranchChange}
-                        placeholder="main"
-                        className={styles.fullWidth}
-                      />
-                    </div>
-                  </>
-                )}
+                </div>
 
                 <button
                   type="button"
                   className={styles.linkToggle}
                   onClick={() => setLinkRepo(false)}
                 >
-                  Remove repository link
+                  Remove linked directory
                 </button>
               </>
             )}

@@ -28,6 +28,7 @@ import type {
   PageId,
   Pipeline,
   ProjectId,
+  ProjectSource,
   TicketId,
 } from '@/shared/types';
 
@@ -425,20 +426,9 @@ return err('Missing label');
 }
       const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       const workspaceDir = toolArgs.workspace_dir as string | undefined;
-      const repoUrl = toolArgs.repo_url as string | undefined;
-      if (workspaceDir && repoUrl) {
-return err('Pass workspace_dir or repo_url, not both');
-}
-      let source: import('@/shared/types').ProjectSource | undefined;
-      if (workspaceDir) {
-        source = { kind: 'local', workspaceDir };
-      } else if (repoUrl) {
-        source = {
-          kind: 'git-remote',
-          repoUrl,
-          ...(toolArgs.default_branch ? { defaultBranch: toolArgs.default_branch as string } : {}),
-        };
-      }
+      const source: ProjectSource | undefined = workspaceDir
+        ? { kind: 'local', workspaceDir }
+        : undefined;
       const created = await ticketApi.addProject({ label, slug, source });
       const pipeline = await ticketApi.getPipeline(created.id);
       const rootPage = persistedStoreApi.$atom.get().pages.find(
@@ -448,10 +438,7 @@ return err('Pass workspace_dir or repo_url, not both');
         id: created.id,
         label: created.label,
         slug: created.slug,
-        source_kind: source?.kind ?? null,
         workspace_dir: source?.kind === 'local' ? source.workspaceDir : null,
-        repo_url: source?.kind === 'git-remote' ? source.repoUrl : null,
-        default_branch: source?.kind === 'git-remote' ? source.defaultBranch ?? null : null,
         pipeline: pipeline.columns.map((c) => c.label),
         root_page_id: rootPage?.id ?? null,
       });
@@ -465,9 +452,6 @@ return err('Missing project_id');
       if (!project) {
 return err(`Project not found: ${projectId}`);
 }
-      if (toolArgs.workspace_dir !== undefined && toolArgs.repo_url !== undefined) {
-        return err('Pass workspace_dir or repo_url, not both');
-      }
       const patch: Record<string, unknown> = {};
       if (toolArgs.label !== undefined) {
         patch.label = toolArgs.label;
@@ -476,11 +460,6 @@ return err(`Project not found: ${projectId}`);
       if (toolArgs.workspace_dir !== undefined) {
         const dir = toolArgs.workspace_dir as string;
         patch.source = dir ? { kind: 'local', workspaceDir: dir } : undefined;
-      } else if (toolArgs.repo_url !== undefined) {
-        const url = toolArgs.repo_url as string;
-        patch.source = url
-          ? { kind: 'git-remote', repoUrl: url, ...(toolArgs.default_branch ? { defaultBranch: toolArgs.default_branch as string } : {}) }
-          : undefined;
       }
       await ticketApi.updateProject(projectId as ProjectId, patch);
       return ok({ ok: true });

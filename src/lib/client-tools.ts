@@ -9,6 +9,8 @@
  * Human-interactive sessions get everything.
  */
 
+import { getContainerArtifactsDir } from '@/lib/artifacts';
+
 export const TICKET_CLIENT_TOOLS = [
   {
     name: 'get_ticket',
@@ -208,22 +210,14 @@ export const PROJECT_CLIENT_TOOLS = [
   {
     name: 'create_project',
     description:
-      'Create a new project. Optionally link a local directory or a remote git repo as the workspace. Pass workspace_dir for local, or repo_url for git-remote — not both.',
+      'Create a new project. Optionally link a local directory as the workspace.',
     parameters: {
       type: 'object',
       properties: {
         label: { type: 'string', description: 'Human-readable project name' },
         workspace_dir: {
           type: 'string',
-          description: 'Local directory to link as the project workspace (source kind "local").',
-        },
-        repo_url: {
-          type: 'string',
-          description: 'Git remote URL to clone inside the sandbox (source kind "git-remote"). The sandbox clones this repo at startup.',
-        },
-        default_branch: {
-          type: 'string',
-          description: 'Default branch for git-remote repos (e.g. "main"). Only used with repo_url.',
+          description: 'Local directory to link as the project workspace.',
         },
       },
       required: ['label'],
@@ -231,7 +225,7 @@ export const PROJECT_CLIENT_TOOLS = [
   },
   {
     name: 'update_project',
-    description: "Update a project's label, workspace directory, or git remote URL.",
+    description: "Update a project's label or linked workspace directory.",
     parameters: {
       type: 'object',
       properties: {
@@ -239,15 +233,7 @@ export const PROJECT_CLIENT_TOOLS = [
         label: { type: 'string', description: 'New project name' },
         workspace_dir: {
           type: 'string',
-          description: 'Set source to local with this directory. Pass an empty string to unlink.',
-        },
-        repo_url: {
-          type: 'string',
-          description: 'Set source to git-remote with this URL. Pass an empty string to unlink.',
-        },
-        default_branch: {
-          type: 'string',
-          description: 'Default branch for git-remote repos. Only used with repo_url.',
+          description: 'Set the linked local directory. Pass an empty string to unlink.',
         },
       },
       required: ['project_id'],
@@ -605,24 +591,76 @@ export const extractSafeToolNames = (tools: readonly ClientToolDef[]): string[] 
   tools.filter((t) => t.safe).map((t) => t.name);
 
 /**
- * Build context identifiers for additional_instructions.
- * Tool descriptions and workflow guidance are handled by the skill system and
- * tool definitions (name, description, parameters) already passed via client_tools.
- * We tell the agent which project/ticket it's operating in and which skill to use.
+ * Behavioral guidance inlined into `additional_instructions`. Covers the
+ * concepts tool schemas can't convey: channel choice (comment vs. notify vs.
+ * escalate), gate semantics, cross-session memory, and UI-visibility nuances.
+ *
+ * Kept short on purpose — tool names/params already come from `client_tools`,
+ * so this file should never redocument them. Anything here should be
+ * non-obvious from a tool's description alone.
+ */
+const PROJECT_GUIDANCE = [
+  '## Working with projects and tickets',
+  '',
+  'Hierarchy: **Project** → optional **Milestone** → **Ticket** in a pipeline column. Tickets are the unit of dispatchable agent work; tickets without a milestone live in the Backlog column.',
+  '',
+  '**Inbox** captures raw input. Items flow `new` (captured) → `shaped` (outcome filled) → promoted to a ticket (`inbox_to_tickets`) or a project (`inbox_to_project`). Capture first, shape later.',
+  '',
+  '**Pages** are markdown docs per project; the root page is the project brief.',
+  '',
+  '## Choose the right channel to talk to the human',
+  '',
+  '- `add_ticket_comment` — default. Persists across runs, no alert. Use for decisions, progress, findings, handoff notes.',
+  '- `notify` — heads-up, run continues. Use for time-sensitive but non-blocking info.',
+  '- `escalate` — **stops the run**. Use only when truly blocked (missing credentials, ambiguous requirements, external action).',
+  '',
+  'Before starting a ticket: read `get_ticket_comments` and `get_ticket_history` to see what prior runs learned and why they ended. Before ending work, write a comment summarizing decisions, blockers, and next steps — this is the cross-session memory for the next run.',
+  '',
+  '## Pipeline gates',
+  '',
+  'Columns with `gate: true` require human review. Move tickets *to* a gate column and escalate or notify — never advance past a gate automatically.',
+  '',
+  '## Known limitations',
+  '',
+  '- Ticket resolution (`completed` / `wont_do` / `duplicate` / `cancelled`) is UI-only; there is no client tool for it.',
+  '- `start_ticket` can fail with `WIP_LIMIT:` if too many tickets are already active. Tell the user and suggest a running ticket to stop.',
+  '- Pipelines come from a linked project\'s `FLEET.md` or the built-in default; not configurable via tools.',
+  '',
+  '## Visible to the human',
+  '',
+  'Your actions produce immediate visible changes in the launcher (sidebar tree, kanban board, inbox, phase badges). Briefly narrate significant mutations — "Created 3 tickets under the Auth milestone" — so the user can follow along.',
+].join('\n');
+
+/**
+ * Build context identifiers for `additional_instructions`. Starts with the
+ * behavioral guidance above, then appends the specific project/ticket the
+ * agent is operating in (when known) and per-ticket artifact-channel
+ * guidance.
  */
 const buildContextIdentifiers = (opts?: {
   projectId?: string;
   projectLabel?: string;
   ticketId?: string;
 }): string => {
-  const lines: string[] = [
-    'Use the `omni-projects-tickets` skill for guidance on project management workflows, tool usage patterns, and domain concepts (pipelines, gates, milestones, pages, inbox).',
-  ];
+  const lines: string[] = [PROJECT_GUIDANCE];
   if (opts?.projectId) {
+    lines.push('');
     lines.push(`Current project: ${opts.projectLabel ?? opts.projectId} (ID: ${opts.projectId})`);
   }
   if (opts?.ticketId) {
     lines.push(`Current ticket: ${opts.ticketId}`);
+    lines.push(
+      [
+        '',
+        '## Where to put output for the user',
+        'You have two distinct channels for surfacing information, and they serve different purposes:',
+        '',
+        `- **Persistent artifacts directory (human-visible): \`${getContainerArtifactsDir(opts.ticketId)}\`**. Files you write here survive across runs and appear in this ticket's **Artifacts** tab in the launcher UI. Use for progress notes, research, generated deliverables, or any work product that should stick around for the user to review later and doesn't belong in the repo or project folder.`,
+        '- **`display_artifact` tool** — renders content inline in the chat stream (markdown, HTML, etc.). Ephemeral, tied to the conversation. Use for "show this to the user now" — previews, summaries, diagrams responding to the current turn.',
+        '',
+        'Both are visible to the user. Choose by lifecycle: artifacts directory = "this should persist"; `display_artifact` = "show this now."',
+      ].join('\n')
+    );
   }
   return lines.join('\n');
 };
