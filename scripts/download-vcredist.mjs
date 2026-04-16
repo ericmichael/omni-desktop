@@ -27,6 +27,14 @@ const destPath = join(binDir, 'vc_redist.x64.exe');
 
 const force = process.argv.includes('--force');
 
+// Only the Windows NSIS installer bundles this binary. Skip on all other
+// runners (incl. Linux AppImage + macOS DMG CI jobs) — downloading 25 MB to
+// never use it just slows the build.
+if (process.platform !== 'win32') {
+  console.log(`Skipping vc_redist download on ${process.platform} (Windows-only).`);
+  process.exit(0);
+}
+
 const packageJson = JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf-8'));
 const config = packageJson.vcredist;
 
@@ -79,15 +87,24 @@ if (config.sha256) {
   );
 }
 
+// Exit explicitly so any keep-alive HTTPS sockets in the default agent don't
+// keep the event loop alive past the work we actually care about.
+process.exit(0);
+
 function httpsGet(url, maxRedirects = 5) {
   return new Promise((resolve, reject) => {
     https
       .get(url, { headers: { 'User-Agent': 'omni-code-launcher' } }, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          // Drain the redirect body so the socket closes instead of lingering
+          // in the keep-alive pool and holding the event loop open after the
+          // script finishes.
+          res.resume();
           if (maxRedirects <= 0) return reject(new Error('Too many redirects'));
           return httpsGet(res.headers.location, maxRedirects - 1).then(resolve, reject);
         }
         if (res.statusCode !== 200) {
+          res.resume();
           return reject(new Error(`HTTP ${res.statusCode} for ${url}`));
         }
         resolve(res);

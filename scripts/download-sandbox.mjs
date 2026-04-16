@@ -64,10 +64,15 @@ function httpsGet(url, maxRedirects = 5) {
     https
       .get(url, { headers: { 'User-Agent': 'omni-code-launcher' } }, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          // Drain the redirect body so the socket closes instead of lingering
+          // in Node's keep-alive pool and holding the event loop open after
+          // the script's real work is done.
+          res.resume();
           if (maxRedirects <= 0) return reject(new Error('Too many redirects'));
           return httpsGet(res.headers.location, maxRedirects - 1).then(resolve, reject);
         }
         if (res.statusCode !== 200) {
+          res.resume();
           return reject(new Error(`HTTP ${res.statusCode} for ${url}`));
         }
         resolve(res);
@@ -130,7 +135,13 @@ async function download() {
   }
 }
 
-download().catch((err) => {
-  console.error(`\x1b[31mFailed to download omni-sandbox: ${err.message}\x1b[0m`);
-  process.exit(1);
-});
+download()
+  .then(() => {
+    // Exit explicitly so any keep-alive HTTPS sockets in the default agent
+    // don't keep the event loop alive past the work we actually care about.
+    process.exit(0);
+  })
+  .catch((err) => {
+    console.error(`\x1b[31mFailed to download omni-sandbox: ${err.message}\x1b[0m`);
+    process.exit(1);
+  });
