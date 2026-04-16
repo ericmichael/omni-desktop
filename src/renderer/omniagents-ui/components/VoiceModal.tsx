@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo,useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import { RealtimeRPCClient } from '@/renderer/omniagents-ui/rpc/realtime'
 import { useUiConfig } from '@/renderer/omniagents-ui/ui-config'
@@ -918,8 +919,12 @@ console.log('[VoiceModal] SPEAKING finished, transition to', effectiveState)
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-50 bg-black flex flex-col">
+  // Portal to document.body so `position: fixed` is viewport-relative. Any
+  // ancestor with `transform`, `filter`, `backdrop-filter`, or `will-change`
+  // creates a new containing block and would otherwise trap a `fixed` child
+  // inside the composer's flow, clipping the overlay to the chat input area.
+  const modal = (
+    <div className="fixed inset-0 z-[9999] bg-black flex flex-col">
       {/* ── Top bar ── */}
       <div
         className="flex items-center justify-between px-5 py-3 border-b border-white/[0.06]"
@@ -1157,6 +1162,8 @@ console.log('[VoiceModal] SPEAKING finished, transition to', effectiveState)
       </div>
     </div>
   )
+
+  return typeof document === 'undefined' ? modal : createPortal(modal, document.body)
 }
 
 /* ── Sidebar transcript bubble ── */
