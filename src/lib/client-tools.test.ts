@@ -695,7 +695,7 @@ describe('client_tools shape', () => {
     expect(names).not.toContain('create_milestone');
     expect(names).not.toContain('create_page');
     expect(names).not.toContain('update_page');
-    expect(names).toHaveLength(14);
+    expect(names).toHaveLength(27);
     // additional_instructions inlines behavioral guidance — not tool schemas
     expect(vars.additional_instructions).toContain('Working with projects and tickets');
     expect(vars.additional_instructions).toContain('escalate');
@@ -750,7 +750,7 @@ describe('client_tools shape', () => {
     expect(names).toContain('update_page');
     // Code-only tools should NOT be in interactive
     expect(names).not.toContain('open_preview');
-    expect(names).toHaveLength(35);
+    expect(names).toHaveLength(48);
     // Behavioral guidance inlined — no tool schemas restated
     expect(vars.additional_instructions).toContain('Working with projects and tickets');
     expect(vars.additional_instructions).toContain('escalate');
@@ -761,7 +761,7 @@ describe('client_tools shape', () => {
     const names = vars.client_tools.map((t) => t.name);
     expect(names).toContain('open_preview');
     expect(names).toContain('display_plan');
-    expect(names).toHaveLength(36);
+    expect(names).toHaveLength(49);
   });
 
   it('interactive variables include safe_tool_overrides for read-only tools', () => {

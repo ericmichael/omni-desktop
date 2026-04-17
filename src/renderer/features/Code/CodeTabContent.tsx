@@ -80,6 +80,7 @@ const CodeRunningView = memo(
     onPreviewUrlChange,
     dockTargetId,
     isGlass,
+    tabId,
   }: {
     sandboxUrls: { uiUrl: string; codeServerUrl?: string; noVncUrl?: string };
     sessionId?: string;
@@ -97,6 +98,7 @@ const CodeRunningView = memo(
     onPreviewUrlChange?: (url: string) => void;
     dockTargetId?: string;
     isGlass?: boolean;
+    tabId?: string;
   }) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
@@ -139,6 +141,7 @@ const CodeRunningView = memo(
             onPlanDecision={resolvePlanApproval}
             dockTargetId={dockTargetId}
             isGlass={isGlass}
+            tabId={tabId}
           />
         </div>
       </div>
@@ -271,6 +274,7 @@ export const CodeTabContent = memo(
             onPreviewUrlChange={onPreviewUrlChange}
             dockTargetId={dockTargetId}
             isGlass={isGlass}
+            tabId={tab.id}
           />
         ) : phase === 'error' ? (
           <CodeErrorView tabId={tab.id} retry={retry} />

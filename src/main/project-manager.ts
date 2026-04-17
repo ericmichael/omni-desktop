@@ -99,6 +99,9 @@ export class ProjectManager {
   /** Optional ProcessManager — when set, supervisor reuses Code tab sandboxes. */
   private processManager?: ProcessManager;
 
+  /** Optional AppControlManager — when set, autopilot agents get the `app_*` client tools. */
+  private appControlManager?: import('@/main/app-control-manager').AppControlManager;
+
   /** Page lifecycle owner — CRUD, file I/O, root-page seeding, watcher. */
   readonly pages: PageManager;
 
@@ -119,12 +122,18 @@ export class ProjectManager {
   readonly supervisors: SupervisorOrchestrator;
 
   constructor(
-    arg: { store: Store<StoreData>; sendToWindow: ProjectManager['sendToWindow']; processManager?: ProcessManager },
+    arg: {
+      store: Store<StoreData>;
+      sendToWindow: ProjectManager['sendToWindow'];
+      processManager?: ProcessManager;
+      appControlManager?: import('@/main/app-control-manager').AppControlManager;
+    },
     deps?: Partial<ProjectManagerDeps>
   ) {
     this.store = arg.store;
     this.sendToWindow = arg.sendToWindow;
     this.processManager = arg.processManager;
+    this.appControlManager = arg.appControlManager;
     // Let ProcessManager fall back to supervisor sandbox status for ticket-linked tabs.
     // The orchestrator may not exist yet at this point in the constructor — defer
     // the lookup with an arrow function.
@@ -239,6 +248,7 @@ export class ProjectManager {
       sandboxFactory: this.sandboxFactory,
       machineFactory: this.machineFactory,
       processManager: this.processManager,
+      appControlManager: this.appControlManager,
     });
 
     this.supervisors.startStallDetection();
@@ -964,13 +974,14 @@ export const createProjectManager = (arg: {
   sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   store: Store<StoreData>;
   processManager?: ProcessManager;
+  appControlManager?: import('@/main/app-control-manager').AppControlManager;
 }) => {
-  const { ipc, sendToWindow, store, processManager } = arg;
+  const { ipc, sendToWindow, store, processManager, appControlManager } = arg;
 
   // Run migration
   ProjectManager.migrateToSupervisor(store);
 
-  const projectManager = new ProjectManager({ store, sendToWindow, processManager });
+  const projectManager = new ProjectManager({ store, sendToWindow, processManager, appControlManager });
   const { supervisors, milestones, inbox, pages } = projectManager;
   supervisors.restorePersistedTasks();
 

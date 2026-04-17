@@ -44,6 +44,9 @@ import path from 'path';
 
 import { buildAutopilotVariables, buildInteractiveVariables } from '@/lib/client-tools';
 import { buildContinuationPrompt } from '@/lib/continuation-prompt';
+import type { AppControlManager } from '@/main/app-control-manager';
+import type { AppClickButton, AppConsoleLevel } from '@/shared/app-control-types';
+import { makeAppHandleId } from '@/shared/app-control-types';
 import type {
   IMachineFactory,
   ISandbox,
@@ -209,6 +212,12 @@ export interface SupervisorOrchestratorDeps {
   machineFactory?: IMachineFactory;
   /** Optional ProcessManager — enables Code-tab sandbox reuse. */
   processManager?: ProcessManager;
+  /**
+   * Optional AppControlManager — when present, autopilot agents gain the
+   * `app_*` client tools scoped to their ticket's code tab (column-only,
+   * never global).
+   */
+  appControlManager?: AppControlManager;
 }
 
 // ---------------------------------------------------------------------------
@@ -2225,8 +2234,167 @@ export class SupervisorOrchestrator {
         break;
       }
       default:
+        if (toolName === 'list_apps' || toolName.startsWith('app_')) {
+          this.dispatchAppControlCall(ticketId, toolName, toolArgs, respond);
+          return;
+        }
         respond(false, { error: { message: `Unknown tool: ${toolName}` } });
     }
+  }
+
+  /**
+   * Dispatch an `app_*` / `list_apps` call from an autopilot agent. Resolves
+   * the caller's ticket → code tab, then column-scopes every lookup (autopilot
+   * never reaches global dock apps). Returns an error result for out-of-scope
+   * or non-controllable apps.
+   */
+  private dispatchAppControlCall(
+    ticketId: TicketId,
+    toolName: string,
+    toolArgs: Record<string, unknown>,
+    respond: ClientFunctionResponder
+  ): void {
+    const manager = this.deps.appControlManager;
+    if (!manager) {
+      respond(false, { error: { message: 'App control is not available in this session.' } });
+      return;
+    }
+
+    // Resolve the code tab bound to this ticket. Autopilot is strictly
+    // column-scoped — no global dock apps.
+    const tab = this.deps.store.getCodeTabs().find((t) => t.ticketId === ticketId);
+    if (!tab) {
+      respond(false, {
+        error: {
+          message: 'No code tab is associated with this ticket — open the ticket in the Code deck first.',
+        },
+      });
+      return;
+    }
+    const tabId = tab.id;
+
+    if (toolName === 'list_apps') {
+      const apps = manager
+        .list()
+        .filter((a) => a.scope === 'column' && a.tabId === tabId)
+        .map((a) => ({
+          id: a.appId,
+          kind: a.kind,
+          scope: a.scope,
+          url: a.url ?? null,
+          title: a.title ?? null,
+          label: a.label,
+          controllable: a.controllable,
+        }));
+      respond(true, { apps });
+      return;
+    }
+
+    const appId = (toolArgs.app_id as string | undefined) ?? '';
+    if (!appId) {
+      respond(false, { error: { message: 'Missing app_id — call list_apps first.' } });
+      return;
+    }
+    const handleId = makeAppHandleId('column', appId, tabId);
+    const snapshot = manager.list().find((a) => a.handleId === handleId);
+    if (!snapshot) {
+      respond(false, {
+        error: { message: `Unknown or out-of-scope app: "${appId}". Call list_apps to see what's available.` },
+      });
+      return;
+    }
+    if (!snapshot.controllable) {
+      respond(false, {
+        error: {
+          message: `App "${appId}" (${snapshot.kind}) is not a web surface. Only browser/code/desktop/webview apps can be driven.`,
+        },
+      });
+      return;
+    }
+
+    const run = async (): Promise<Record<string, unknown>> => {
+      switch (toolName) {
+        case 'app_navigate': {
+          const url = (toolArgs.url as string) ?? '';
+          if (!url) {
+            throw new Error('Missing url');
+          }
+          await manager.navigate(handleId, url);
+          return { ok: true };
+        }
+        case 'app_reload':
+          await manager.reload(handleId);
+          return { ok: true };
+        case 'app_back':
+          await manager.back(handleId);
+          return { ok: true };
+        case 'app_forward':
+          await manager.forward(handleId);
+          return { ok: true };
+        case 'app_eval': {
+          const code = (toolArgs.code as string) ?? '';
+          if (!code) {
+            throw new Error('Missing code');
+          }
+          const value = await manager.eval(handleId, code);
+          return { value: value ?? null };
+        }
+        case 'app_screenshot': {
+          const filepath = await manager.screenshot(handleId, { artifactsSubdir: ticketId });
+          return { path: filepath };
+        }
+        case 'app_console': {
+          const level = toolArgs.min_level as AppConsoleLevel | undefined;
+          const entries = await manager.console(handleId, level ? { minLevel: level } : {});
+          return { entries };
+        }
+        case 'app_snapshot': {
+          const tree = await manager.snapshot(handleId);
+          return { snapshot: tree };
+        }
+        case 'app_click': {
+          const ref = (toolArgs.ref as string) ?? '';
+          if (!ref) {
+            throw new Error('Missing ref — get one from app_snapshot.');
+          }
+          const button = toolArgs.button as AppClickButton | undefined;
+          await manager.click(handleId, ref, button ? { button } : {});
+          return { ok: true };
+        }
+        case 'app_fill': {
+          const ref = (toolArgs.ref as string) ?? '';
+          const text = (toolArgs.text as string) ?? '';
+          if (!ref) {
+            throw new Error('Missing ref');
+          }
+          await manager.fill(handleId, ref, text);
+          return { ok: true };
+        }
+        case 'app_type': {
+          const text = (toolArgs.text as string) ?? '';
+          if (!text) {
+            throw new Error('Missing text');
+          }
+          await manager.type(handleId, text);
+          return { ok: true };
+        }
+        case 'app_press': {
+          const key = (toolArgs.key as string) ?? '';
+          if (!key) {
+            throw new Error('Missing key');
+          }
+          await manager.press(handleId, key);
+          return { ok: true };
+        }
+        default:
+          throw new Error(`Unhandled app tool: ${toolName}`);
+      }
+    };
+
+    run().then(
+      (result) => respond(true, result),
+      (e) => respond(false, { error: { message: e instanceof Error ? e.message : String(e) } })
+    );
   }
 
   /**

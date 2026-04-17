@@ -33,4 +33,22 @@ describe('buildAppRegistry', () => {
     expect(registry[0].id).toBe('chat');
     expect(registry[1].id).toBe('x');
   });
+
+  it('defaults custom apps to columnScoped=false and respects opt-in', () => {
+    const custom: CustomAppEntry[] = [
+      { id: 'a', label: 'A', icon: 'Star20Regular', url: 'https://a.com', order: 50 },
+      { id: 'b', label: 'B', icon: 'Star20Regular', url: 'https://b.com', order: 60, columnScoped: true },
+    ];
+    const registry = buildAppRegistry(custom);
+    const a = registry.find((r) => r.id === 'a');
+    const b = registry.find((r) => r.id === 'b');
+    expect(a?.columnScoped).toBe(false);
+    expect(b?.columnScoped).toBe(true);
+  });
+
+  it('marks every builtin app as columnScoped', () => {
+    for (const app of BUILTIN_APPS) {
+      expect(app.columnScoped).toBe(true);
+    }
+  });
 });

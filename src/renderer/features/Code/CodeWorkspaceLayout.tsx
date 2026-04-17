@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import type { ConsoleMessage, WebviewHandle } from '@/renderer/common/Webview';
+import type { ConsoleMessage, WebviewHandle, WebviewRegistryProps } from '@/renderer/common/Webview';
 import { Webview } from '@/renderer/common/Webview';
 import { ConsoleStarted } from '@/renderer/features/Console/ConsoleRunning';
 import { $terminals, createTerminal } from '@/renderer/features/Console/state';
@@ -14,6 +14,7 @@ import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { useWebPreviewContext, WebPreview, WebPreviewConsole, WebPreviewUrl } from '@/renderer/omniagents-ui/components/ai/web-preview';
 import { persistedStoreApi } from '@/renderer/services/store';
+import { makeAppHandleId } from '@/shared/app-control-types';
 import type { AppDescriptor, AppId } from '@/shared/app-registry';
 import { buildAppRegistry } from '@/shared/app-registry';
 
@@ -40,7 +41,25 @@ type CodeWorkspaceLayoutProps = {
   onPlanDecision?: (approved: boolean) => void;
   dockTargetId?: string;
   isGlass?: boolean;
+  /**
+   * When provided, this layout hosts a column-scoped workspace and all its
+   * webviews register under `tab-<tabId>:*`. Omit for the global dock.
+   */
+  tabId?: string;
 };
+
+/** Build a `WebviewRegistryProps` entry from an AppDescriptor + layout scope. */
+function makeRegistryProps(app: AppDescriptor, tabId: string | undefined): WebviewRegistryProps {
+  const scope = tabId ? 'column' : 'global';
+  return {
+    handleId: makeAppHandleId(scope, app.id, tabId),
+    appId: app.id,
+    kind: app.kind,
+    scope,
+    tabId,
+    label: app.label,
+  };
+}
 
 const useStyles = makeStyles({
   surfaceCard: {
@@ -231,7 +250,7 @@ type PreviewState = {
   error: { code: number; description: string; url: string } | null;
 };
 
-const PreviewWebview = memo(({ webviewRef: externalRef, onStateChange }: { webviewRef?: React.Ref<WebviewHandle>; onStateChange?: (state: PreviewState) => void }) => {
+const PreviewWebview = memo(({ webviewRef: externalRef, onStateChange, registry }: { webviewRef?: React.Ref<WebviewHandle>; onStateChange?: (state: PreviewState) => void; registry?: WebviewRegistryProps }) => {
   const { url, setUrl } = useWebPreviewContext();
   const [resolvedUrl, setResolvedUrl] = useState<string | undefined>(undefined);
   const [webviewKey, setWebviewKey] = useState(0);
@@ -348,7 +367,7 @@ return;
     <>
       <div style={{ flex: '1 1 0', minHeight: 0 }}>
         {resolvedUrl ? (
-          <Webview key={webviewKey} ref={internalRef} src={resolvedUrl} showUnavailable={false} onConsoleMessage={handleConsoleMessage} onNavigate={handleNavigate} onLoadingChange={handleLoadingChange} onTitleChange={handleTitleChange} onError={handleError} />
+          <Webview key={webviewKey} ref={internalRef} src={resolvedUrl} showUnavailable={false} onConsoleMessage={handleConsoleMessage} onNavigate={handleNavigate} onLoadingChange={handleLoadingChange} onTitleChange={handleTitleChange} onError={handleError} registry={registry} />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12, color: tokens.colorNeutralForeground4 }}>
             <Globe20Regular style={{ width: 40, height: 40, opacity: 0.4 }} />
@@ -407,7 +426,7 @@ const SurfaceFrame = memo(({ app, isGlass, children }: { app: AppDescriptor; isG
 });
 SurfaceFrame.displayName = 'SurfaceFrame';
 
-const BrowserSurface = memo(({ src, onUrlChange, isGlass }: { src?: string; onUrlChange?: (url: string) => void; isGlass?: boolean }) => {
+const BrowserSurface = memo(({ src, onUrlChange, isGlass, registry }: { src?: string; onUrlChange?: (url: string) => void; isGlass?: boolean; registry?: WebviewRegistryProps }) => {
   const styles = useStyles();
   const webviewRef = useRef<WebviewHandle>(null);
   const [previewState, setPreviewState] = useState<PreviewState>({ loading: false, title: '', error: null });
@@ -474,20 +493,21 @@ const BrowserSurface = memo(({ src, onUrlChange, isGlass }: { src?: string; onUr
         </div>
       </div>
       <div className={mergeClasses(styles.surfaceBody, isGlass && styles.surfaceBodyGlass)}>
-        <PreviewWebview webviewRef={webviewRef} onStateChange={setPreviewState} />
+        <PreviewWebview webviewRef={webviewRef} onStateChange={setPreviewState} registry={registry} />
       </div>
     </WebPreview>
   );
 });
 BrowserSurface.displayName = 'BrowserSurface';
 
-const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass }: { app: AppDescriptor; src?: string; onUrlChange?: (url: string) => void; isGlass?: boolean }) => {
+const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass, tabId }: { app: AppDescriptor; src?: string; onUrlChange?: (url: string) => void; isGlass?: boolean; tabId?: string }) => {
   const styles = useStyles();
+  const registryProps = useMemo(() => makeRegistryProps(app, tabId), [app, tabId]);
 
   if (app.kind === 'builtin-browser') {
     return (
       <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
-        <BrowserSurface src={src} onUrlChange={onUrlChange} isGlass={isGlass} />
+        <BrowserSurface src={src} onUrlChange={onUrlChange} isGlass={isGlass} registry={registryProps} />
       </motion.div>
     );
   }
@@ -506,7 +526,7 @@ const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass }: { app: AppDescr
     return (
       <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
         <SurfaceFrame app={app} isGlass={isGlass}>
-          {app.url ? <Webview src={app.url} showUnavailable={false} /> : <div className={styles.unavailableState}>No URL configured.</div>}
+          {app.url ? <Webview src={app.url} showUnavailable={false} registry={registryProps} /> : <div className={styles.unavailableState}>No URL configured.</div>}
         </SurfaceFrame>
       </motion.div>
     );
@@ -516,17 +536,20 @@ const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass }: { app: AppDescr
   return (
     <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
       <SurfaceFrame app={app} isGlass={isGlass}>
-        {src ? <Webview src={src} showUnavailable={false} /> : <div className={styles.unavailableState}>{app.label} is unavailable for this workspace.</div>}
+        {src ? <Webview src={src} showUnavailable={false} registry={registryProps} /> : <div className={styles.unavailableState}>{app.label} is unavailable for this workspace.</div>}
       </SurfaceFrame>
     </motion.div>
   );
 });
 AppSurfaceView.displayName = 'AppSurfaceView';
 
-export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, variables, codeServerSrc, vncSrc, previewUrl, onPreviewUrlChange, activeApp = 'chat', onActiveAppChange, onReady, headerActionsTargetId, headerActionsCompact, sandboxLabel, onClientToolCall, pendingPlan, onPlanDecision, dockTargetId, isGlass }: CodeWorkspaceLayoutProps) => {
+export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, variables, codeServerSrc, vncSrc, previewUrl, onPreviewUrlChange, activeApp = 'chat', onActiveAppChange, onReady, headerActionsTargetId, headerActionsCompact, sandboxLabel, onClientToolCall, pendingPlan, onPlanDecision, dockTargetId, isGlass, tabId }: CodeWorkspaceLayoutProps) => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const registry = useMemo(() => buildAppRegistry(store.customApps ?? []), [store.customApps]);
+  // The dock only surfaces apps marked column-scoped. Global-only custom
+  // apps are opened via the app launcher as their own deck column instead.
+  const dockApps = useMemo(() => registry.filter((a) => a.columnScoped), [registry]);
   const activeDescriptor = useMemo(() => registry.find((a) => a.id === activeApp) ?? null, [registry, activeApp]);
 
   const sandboxUrls = useMemo(
@@ -587,6 +610,7 @@ export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, va
               src={surfaceSrc}
               onUrlChange={activeDescriptor.kind === 'builtin-browser' ? onPreviewUrlChange : undefined}
               isGlass={isGlass}
+              tabId={tabId}
             />
           )}
         </AnimatePresence>
@@ -594,7 +618,7 @@ export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, va
       {(() => {
         const dock = (
           <EnvironmentDock
-            apps={registry}
+            apps={dockApps}
             activeAppId={activeApp}
             onSelect={handleDockSelect}
             sandboxUrls={sandboxUrls}

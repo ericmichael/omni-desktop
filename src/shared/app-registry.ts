@@ -21,6 +21,12 @@ export type AppDescriptor = {
   sandboxUrlKey?: SandboxUrlKey;
   builtin: boolean;
   order: number;
+  /**
+   * When true, the app appears in a code session's `EnvironmentDock`.
+   * When false, the app is available only as a standalone global column (via
+   * the app launcher). Built-ins default to true.
+   */
+  columnScoped: boolean;
 };
 
 export type CustomAppEntry = {
@@ -29,10 +35,17 @@ export type CustomAppEntry = {
   icon: string;
   url: string;
   order: number;
+  /**
+   * When true, this custom app appears in every code session's dock and can
+   * be driven column-scoped by agents in that session. When false (default),
+   * the app is global-only — accessible as its own standalone deck column
+   * via the app launcher, but hidden from the dock.
+   */
+  columnScoped?: boolean;
 };
 
 export const BUILTIN_APPS: AppDescriptor[] = [
-  { id: 'chat', label: 'Chat', icon: 'Chat20Regular', kind: 'builtin-chat', scope: 'always', builtin: true, order: 0 },
+  { id: 'chat', label: 'Chat', icon: 'Chat20Regular', kind: 'builtin-chat', scope: 'always', builtin: true, order: 0, columnScoped: true },
   {
     id: 'code',
     label: 'Code',
@@ -42,6 +55,7 @@ export const BUILTIN_APPS: AppDescriptor[] = [
     builtin: true,
     order: 10,
     sandboxUrlKey: 'codeServerUrl',
+    columnScoped: true,
   },
   {
     id: 'desktop',
@@ -52,8 +66,9 @@ export const BUILTIN_APPS: AppDescriptor[] = [
     builtin: true,
     order: 20,
     sandboxUrlKey: 'noVncUrl',
+    columnScoped: true,
   },
-  { id: 'browser', label: 'Browser', icon: 'Globe20Regular', kind: 'builtin-browser', scope: 'always', builtin: true, order: 30 },
+  { id: 'browser', label: 'Browser', icon: 'Globe20Regular', kind: 'builtin-browser', scope: 'always', builtin: true, order: 30, columnScoped: true },
   {
     id: 'terminal',
     label: 'Terminal',
@@ -62,6 +77,7 @@ export const BUILTIN_APPS: AppDescriptor[] = [
     scope: 'always',
     builtin: true,
     order: 40,
+    columnScoped: true,
   },
 ];
 
@@ -71,6 +87,7 @@ export function buildAppRegistry(customApps: CustomAppEntry[]): AppDescriptor[] 
     kind: 'webview' as const,
     scope: 'always' as const,
     builtin: false,
+    columnScoped: c.columnScoped ?? false,
   }));
   return [...BUILTIN_APPS, ...custom].sort((a, b) => a.order - b.order);
 }

@@ -2,11 +2,12 @@ import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } f
 import { arrayMove, horizontalListSortingStrategy, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
-import { Add20Regular, Apps20Regular, ArrowMaximize20Regular, ArrowMinimize20Regular, BranchFork20Regular, Chat20Regular, MoreHorizontal20Regular, Navigation20Regular,ReOrderDotsVertical20Regular } from '@fluentui/react-icons';
+import { Add20Regular, Apps20Regular, ArrowClockwise20Regular, ArrowLeft20Regular, ArrowMaximize20Regular, ArrowMinimize20Regular, ArrowRight20Regular, BranchFork20Regular, Chat20Regular, Globe20Regular, MoreHorizontal20Regular, Navigation20Regular,ReOrderDotsVertical20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { uuidv4 } from '@/lib/uuid';
+import type { WebviewHandle } from '@/renderer/common/Webview';
 import { Webview } from '@/renderer/common/Webview';
 import { Button, Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger, SegmentedControl } from '@/renderer/ds';
 import { $previewRequest, clearPreviewRequest } from '@/renderer/features/Tickets/preview-bridge';
@@ -14,6 +15,8 @@ import { ticketApi } from '@/renderer/features/Tickets/state';
 import { TicketBannerActions, TicketColumnBadge, TicketResolutionBadge } from '@/renderer/features/Tickets/TicketControls';
 import { type TicketPanel, TicketPanelOverlay } from '@/renderer/features/Tickets/TicketPanelOverlay';
 import { persistedStoreApi } from '@/renderer/services/store';
+import type { AppHandleScope } from '@/shared/app-control-types';
+import { makeAppHandleId } from '@/shared/app-control-types';
 import type { AppId, CustomAppEntry } from '@/shared/app-registry';
 import type { CodeLayoutMode, CodeTab, CodeTabId, TicketId, TicketResolution } from '@/shared/types';
 
@@ -23,6 +26,38 @@ import { $codeTabStatuses, codeApi } from './state';
 
 /** Sentinel customAppId meaning "show the app launcher picker". */
 const APP_LAUNCHER_ID = '__launcher__';
+
+const BROWSER_APP_ID = 'browser';
+const BROWSER_START_URL = 'https://duckduckgo.com';
+
+/**
+ * Synthetic launcher entry for a global browser column. Rendered with a URL
+ * bar (see `BrowserColumn`) instead of a plain webview — it's the "address-bar
+ * browser" counterpart to per-session dock previews.
+ */
+const SYNTHETIC_BROWSER_APP: CustomAppEntry = {
+  id: BROWSER_APP_ID,
+  label: 'Browser',
+  icon: 'Globe20Regular',
+  url: BROWSER_START_URL,
+  order: -1,
+  columnScoped: false,
+};
+
+/** Coerce a typed address into a loadable URL. Treats bare terms as DDG searches. */
+function normalizeAddress(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return BROWSER_START_URL;
+  }
+  if (/^https?:\/\//i.test(trimmed) || /^file:\/\//i.test(trimmed) || /^about:/i.test(trimmed)) {
+    return trimmed;
+  }
+  if (/^[\w-]+(\.[\w-]+)+(\/.*)?$/.test(trimmed)) {
+    return `https://${trimmed}`;
+  }
+  return `https://duckduckgo.com/?q=${encodeURIComponent(trimmed)}`;
+}
 
 const COLUMN_WIDTH = 480;
 const COLUMN_WIDTH_SMALL = 360;
@@ -133,15 +168,15 @@ const useStyles = makeStyles({
     '@media (min-width: 640px)': { display: 'flex' },
   },
   deckColumn: {
-    display: 'flex',
-    height: '100%',
-    flexDirection: 'column',
+    display: 'grid',
+    gridTemplateRows: 'subgrid',
+    gridRow: 'span 2',
+    minHeight: 0,
     backgroundColor: 'transparent',
   },
   deckColumnBordered: {
     display: 'flex',
     flexDirection: 'column',
-    flex: '1 1 0',
     minHeight: 0,
     ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
     borderRadius: tokens.borderRadiusXLarge,
@@ -149,7 +184,7 @@ const useStyles = makeStyles({
     margin: tokens.spacingHorizontalS,
     backgroundColor: 'transparent',
   },
-  deckDockSlot: { flexShrink: 0 },
+  deckDockSlot: { minHeight: 0 },
   glassDeckHeader: {
     backgroundColor: 'transparent',
     backdropFilter: 'none',
@@ -207,6 +242,45 @@ const useStyles = makeStyles({
     boxShadow: `0 1px 0 0 rgba(255, 255, 255, 0.22) inset, 0 0 0 1px rgba(255, 255, 255, 0.06) inset, 0 30px 80px -24px rgba(0, 0, 0, 0.45), 0 12px 32px -12px rgba(0, 0, 0, 0.3)`,
   },
   deckColumnDragging: { opacity: 0.7 },
+  browserToolbar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: '6px',
+    paddingBottom: '6px',
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+  browserNavBtn: {
+    display: 'inline-flex',
+    width: '24px',
+    height: '24px',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: tokens.borderRadiusMedium,
+    color: tokens.colorNeutralForeground2,
+    border: 'none',
+    backgroundColor: 'transparent',
+    cursor: 'pointer',
+    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
+    ':disabled': { opacity: 0.4, cursor: 'not-allowed', ':hover': { backgroundColor: 'transparent' } },
+  },
+  browserUrlInput: {
+    flex: '1 1 0',
+    minWidth: 0,
+    height: '26px',
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground1,
+    backgroundColor: tokens.colorNeutralBackground1,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    borderRadius: tokens.borderRadiusMedium,
+    outline: 'none',
+    ':focus': { ...shorthands.borderColor(tokens.colorBrandStroke1) },
+  },
   dragHandle: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -257,10 +331,21 @@ const useStyles = makeStyles({
       WebkitOverflowScrolling: 'touch',
     },
   },
-  deckInner: { display: 'flex', height: '100%', minWidth: 'max-content', overflowY: 'hidden' },
-  deckColumnWrap: {
+  deckInner: {
+    display: 'grid',
+    gridAutoFlow: 'column',
+    gridAutoColumns: 'auto',
+    gridTemplateRows: '1fr auto',
+    justifyContent: 'start',
     height: '100%',
-    flexShrink: 0,
+    minWidth: 'max-content',
+    overflowY: 'hidden',
+  },
+  deckColumnWrap: {
+    display: 'grid',
+    gridTemplateRows: 'subgrid',
+    gridRow: 'span 2',
+    minHeight: 0,
     [`@media (max-width: ${SNAP_SCROLL_WIDTH}px)`]: {
       scrollSnapAlign: 'start',
     },
@@ -743,6 +828,17 @@ const AppColumn = memo(
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
     const style = { transform: CSS.Transform.toString(transform), transition };
     const styles = useStyles();
+    const registryProps = useMemo(() => {
+      const scope: AppHandleScope = app.columnScoped ? 'column' : 'global';
+      return {
+        handleId: makeAppHandleId(scope, app.id, scope === 'column' ? tab.id : undefined),
+        appId: app.id,
+        kind: 'webview' as const,
+        scope,
+        ...(scope === 'column' ? { tabId: tab.id } : {}),
+        label: app.label,
+      };
+    }, [app.id, app.label, app.columnScoped, tab.id]);
 
     return (
       <div ref={setNodeRef} style={style} className={mergeClasses(styles.deckColumn, isDragging && styles.deckColumnDragging)}>
@@ -770,14 +866,137 @@ const AppColumn = memo(
             </div>
           </div>
           <div className={styles.flex1MinH0Relative}>
-            <Webview src={app.url} showUnavailable={false} />
+            <Webview src={app.url} showUnavailable={false} registry={registryProps} />
           </div>
         </div>
+        <div className={styles.deckDockSlot} />
       </div>
     );
   }
 );
 AppColumn.displayName = 'AppColumn';
+
+/**
+ * URL-bar + back/forward/reload toolbar + <Webview>. Used both inside a full
+ * deck column chrome (`BrowserColumn`) and inlined into the focus layout.
+ */
+const BrowserBody = memo(({ tabId }: { tabId: CodeTabId }) => {
+  const styles = useStyles();
+  const [src, setSrc] = useState(BROWSER_START_URL);
+  const [addressInput, setAddressInput] = useState(BROWSER_START_URL);
+  const webviewRef = useRef<WebviewHandle>(null);
+
+  const handleNavigate = useCallback((url: string) => {
+    setAddressInput(url);
+  }, []);
+
+  const handleSubmit = useCallback((event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const next = normalizeAddress(addressInput);
+    setAddressInput(next);
+    setSrc(next);
+  }, [addressInput]);
+
+  const registryProps = useMemo(
+    () => ({
+      handleId: makeAppHandleId('global', BROWSER_APP_ID),
+      appId: BROWSER_APP_ID,
+      kind: 'webview' as const,
+      scope: 'global' as AppHandleScope,
+      label: 'Browser',
+    }),
+    []
+  );
+
+  return (
+    <div className={styles.flex1MinH0Relative} style={{ display: 'flex', flexDirection: 'column' }}>
+      <form className={styles.browserToolbar} onSubmit={handleSubmit}>
+        <button
+          type="button"
+          className={styles.browserNavBtn}
+          aria-label="Back"
+          title="Back"
+          onClick={() => webviewRef.current?.goBack()}
+        >
+          <ArrowLeft20Regular style={{ width: 14, height: 14 }} />
+        </button>
+        <button
+          type="button"
+          className={styles.browserNavBtn}
+          aria-label="Forward"
+          title="Forward"
+          onClick={() => webviewRef.current?.goForward()}
+        >
+          <ArrowRight20Regular style={{ width: 14, height: 14 }} />
+        </button>
+        <button
+          type="button"
+          className={styles.browserNavBtn}
+          aria-label="Reload"
+          title="Reload"
+          onClick={() => webviewRef.current?.reload()}
+        >
+          <ArrowClockwise20Regular style={{ width: 14, height: 14 }} />
+        </button>
+        <input
+          type="text"
+          className={styles.browserUrlInput}
+          value={addressInput}
+          onChange={(e) => setAddressInput(e.target.value)}
+          onFocus={(e) => e.currentTarget.select()}
+          placeholder="Search or enter URL"
+          spellCheck={false}
+          data-tab-id={tabId}
+        />
+      </form>
+      <div style={{ flex: '1 1 0', minHeight: 0 }}>
+        <Webview
+          ref={webviewRef}
+          src={src}
+          showUnavailable={false}
+          onNavigate={handleNavigate}
+          registry={registryProps}
+        />
+      </div>
+    </div>
+  );
+});
+BrowserBody.displayName = 'BrowserBody';
+
+const BrowserColumn = memo(
+  ({ tab, onClose, isExpanded, onToggleExpand, isGlass }: { tab: CodeTab; onClose: (id: CodeTabId) => void; isExpanded: boolean; onToggleExpand: (id: CodeTabId) => void; isGlass?: boolean }) => {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
+    const style = { transform: CSS.Transform.toString(transform), transition };
+    const styles = useStyles();
+
+    return (
+      <div ref={setNodeRef} style={style} className={mergeClasses(styles.deckColumn, isDragging && styles.deckColumnDragging)}>
+        <div className={mergeClasses(styles.deckColumnBordered, isGlass && styles.glassCard)}>
+          <div className={mergeClasses(styles.sessionHeader, isGlass && styles.glassSessionHeader)}>
+            <div className={mergeClasses(styles.flexItemsCenter, styles.gap2, styles.minW0)}>
+              <button type="button" className={styles.dragHandle} {...attributes} {...listeners} aria-label="Reorder">
+                <ReOrderDotsVertical20Regular style={{ width: 16, height: 16 }} />
+              </button>
+              <Globe20Regular style={{ width: 14, height: 14, color: tokens.colorNeutralForeground2 }} />
+              <span className={styles.sessionLabel}>Browser</span>
+            </div>
+            <div className={mergeClasses(styles.flexItemsCenter, styles.gap1)}>
+              <SessionActionButton
+                icon={isExpanded ? <ArrowMinimize20Regular style={{ width: 15, height: 15 }} /> : <ArrowMaximize20Regular style={{ width: 15, height: 15 }} />}
+                label={isExpanded ? 'Collapse column' : 'Expand column'}
+                onClick={() => onToggleExpand(tab.id)}
+              />
+              <SessionActionButton icon={<Add20Regular style={{ width: 14, height: 14, transform: 'rotate(45deg)' }} />} label="Close" onClick={() => onClose(tab.id)} />
+            </div>
+          </div>
+          <BrowserBody tabId={tab.id} />
+        </div>
+        <div className={styles.deckDockSlot} />
+      </div>
+    );
+  }
+);
+BrowserColumn.displayName = 'BrowserColumn';
 
 const LAUNCHER_CELL_MIN_PX = 64;
 const LAUNCHER_CELL_MAX_PX = 96;
@@ -951,6 +1170,7 @@ const AppLauncherColumn = memo(
             )}
           </div>
         </div>
+        <div className={styles.deckDockSlot} />
       </div>
     );
   }
@@ -1195,7 +1415,10 @@ return;
     return map;
   }, [store.projects]);
 
-  const customApps = store.customApps ?? [];
+  const customApps = useMemo(
+    () => [SYNTHETIC_BROWSER_APP, ...(store.customApps ?? [])],
+    [store.customApps]
+  );
 
   const resolveLabel = useCallback(
     (tab: CodeTab) => {
@@ -1424,6 +1647,8 @@ return undefined;
                     >
                       {isLauncher ? (
                         <AppLauncherColumn tab={tab} customApps={customApps} onClose={handleClose} isExpanded={expandedTabId === tab.id} onToggleExpand={handleToggleExpand} isGlass={!!deckBackground} />
+                      ) : appEntry?.id === BROWSER_APP_ID ? (
+                        <BrowserColumn tab={tab} onClose={handleClose} isExpanded={expandedTabId === tab.id} onToggleExpand={handleToggleExpand} isGlass={!!deckBackground} />
                       ) : appEntry ? (
                         <AppColumn tab={tab} app={appEntry} onClose={handleClose} isExpanded={expandedTabId === tab.id} onToggleExpand={handleToggleExpand} isGlass={!!deckBackground} />
                       ) : (
@@ -1556,10 +1781,29 @@ return undefined;
                       </div>
                     );
                   }
+                  if (appEntry?.id === BROWSER_APP_ID) {
+                    return (
+                      <div key={tab.id} style={{ width: '100%', height: '100%', display: tab.id === activeTab?.id ? 'flex' : 'none', flexDirection: 'column' }}>
+                        <BrowserBody tabId={tab.id} />
+                      </div>
+                    );
+                  }
                   if (appEntry) {
+                    const scope: AppHandleScope = appEntry.columnScoped ? 'column' : 'global';
                     return (
                       <div key={tab.id} style={{ width: '100%', height: '100%', display: tab.id === activeTab?.id ? 'block' : 'none' }}>
-                        <Webview src={appEntry.url} showUnavailable={false} />
+                        <Webview
+                          src={appEntry.url}
+                          showUnavailable={false}
+                          registry={{
+                            handleId: makeAppHandleId(scope, appEntry.id, scope === 'column' ? tab.id : undefined),
+                            appId: appEntry.id,
+                            kind: 'webview',
+                            scope,
+                            ...(scope === 'column' ? { tabId: tab.id } : {}),
+                            label: appEntry.label,
+                          }}
+                        />
                       </div>
                     );
                   }

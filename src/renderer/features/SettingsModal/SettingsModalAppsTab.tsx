@@ -15,7 +15,7 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
 import { uuidv4 } from '@/lib/uuid';
-import { Button, FormSkeleton, SectionLabel } from '@/renderer/ds';
+import { Button, FormSkeleton, SectionLabel, Switch } from '@/renderer/ds';
 import { FormField } from '@/renderer/ds/FormField';
 import { Input } from '@/renderer/ds/Input';
 import { AppIcon } from '@/renderer/features/Code/AppIcon';
@@ -135,6 +135,15 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorBrandBackground2,
     color: tokens.colorBrandForeground1,
   },
+  dockToggleLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    cursor: 'pointer',
+    userSelect: 'none',
+  },
   empty: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 },
   marketplaceGrid: {
     display: 'grid',
@@ -182,24 +191,50 @@ function isValidUrl(str: string): boolean {
 // Installed App Card
 // ---------------------------------------------------------------------------
 
-const AppCard = memo(({ app, onRemove }: { app: CustomAppEntry; onRemove: (id: string) => void }) => {
-  const styles = useStyles();
+const AppCard = memo(
+  ({
+    app,
+    onRemove,
+    onToggleColumnScoped,
+  }: {
+    app: CustomAppEntry;
+    onRemove: (id: string) => void;
+    onToggleColumnScoped: (id: string, value: boolean) => void;
+  }) => {
+    const styles = useStyles();
 
-  return (
-    <div className={styles.card}>
-      <div className={styles.cardIcon}>
-        <AppIcon icon={app.icon} size={20} />
+    return (
+      <div className={styles.card}>
+        <div className={styles.cardIcon}>
+          <AppIcon icon={app.icon} size={20} />
+        </div>
+        <div className={styles.cardInfo}>
+          <div className={styles.cardLabel}>{app.label}</div>
+          <div className={styles.cardUrl}>{app.url}</div>
+        </div>
+        <label
+          className={styles.dockToggleLabel}
+          title="Show in the session dock (column-scoped). When off, the app only opens as its own deck column."
+        >
+          <span>In dock</span>
+          <Switch
+            checked={app.columnScoped ?? false}
+            onCheckedChange={(v) => onToggleColumnScoped(app.id, v)}
+          />
+        </label>
+        <button
+          type="button"
+          className={styles.removeBtn}
+          onClick={() => onRemove(app.id)}
+          aria-label={`Remove ${app.label}`}
+          title="Remove"
+        >
+          <Delete20Regular style={{ width: 16, height: 16 }} />
+        </button>
       </div>
-      <div className={styles.cardInfo}>
-        <div className={styles.cardLabel}>{app.label}</div>
-        <div className={styles.cardUrl}>{app.url}</div>
-      </div>
-      <button type="button" className={styles.removeBtn} onClick={() => onRemove(app.id)} aria-label={`Remove ${app.label}`} title="Remove">
-        <Delete20Regular style={{ width: 16, height: 16 }} />
-      </button>
-    </div>
-  );
-});
+    );
+  }
+);
 AppCard.displayName = 'AppCard';
 
 // ---------------------------------------------------------------------------
@@ -222,6 +257,7 @@ function installMarketplaceApp(app: MarketplaceApp): void {
     icon: app.icon,
     url: app.url,
     order: maxOrder + 10,
+    columnScoped: app.columnScoped ?? false,
   };
   void persistedStoreApi.setKey('customApps', [...current, entry]);
 }
@@ -304,6 +340,7 @@ export const SettingsModalAppsTab = memo(() => {
   const [label, setLabel] = useState('');
   const [url, setUrl] = useState('');
   const [icon, setIcon] = useState('Globe20Regular');
+  const [columnScoped, setColumnScoped] = useState(false);
 
   const isValid = label.trim().length > 0 && isValidUrl(url);
 
@@ -319,24 +356,35 @@ export const SettingsModalAppsTab = memo(() => {
       icon,
       url: url.trim(),
       order: maxOrder + 10,
+      columnScoped,
     };
     void persistedStoreApi.setKey('customApps', [...current, entry]);
     setLabel('');
     setUrl('');
     setIcon('Globe20Regular');
+    setColumnScoped(false);
     setShowForm(false);
-  }, [isValid, label, url, icon]);
+  }, [isValid, label, url, icon, columnScoped]);
 
   const handleCancel = useCallback(() => {
     setLabel('');
     setUrl('');
     setIcon('Globe20Regular');
+    setColumnScoped(false);
     setShowForm(false);
   }, []);
 
   const handleRemove = useCallback((id: string) => {
     const current = persistedStoreApi.$atom.get().customApps ?? [];
     void persistedStoreApi.setKey('customApps', current.filter((a) => a.id !== id));
+  }, []);
+
+  const handleToggleColumnScoped = useCallback((id: string, value: boolean) => {
+    const current = persistedStoreApi.$atom.get().customApps ?? [];
+    void persistedStoreApi.setKey(
+      'customApps',
+      current.map((a) => (a.id === id ? { ...a, columnScoped: value } : a))
+    );
   }, []);
 
   return (
@@ -354,7 +402,12 @@ export const SettingsModalAppsTab = memo(() => {
         )}
 
         {customApps.map((app) => (
-          <AppCard key={app.id} app={app} onRemove={handleRemove} />
+          <AppCard
+            key={app.id}
+            app={app}
+            onRemove={handleRemove}
+            onToggleColumnScoped={handleToggleColumnScoped}
+          />
         ))}
 
         {showForm ? (
@@ -380,6 +433,16 @@ export const SettingsModalAppsTab = memo(() => {
                   </button>
                 ))}
               </div>
+            </FormField>
+            <FormField label="Show in session dock">
+              <label className={styles.dockToggleLabel}>
+                <Switch checked={columnScoped} onCheckedChange={setColumnScoped} />
+                <span>
+                  {columnScoped
+                    ? 'Available column-scoped — visible in each session\'s dock.'
+                    : 'Global only — opens as its own deck column via the app launcher.'}
+                </span>
+              </label>
             </FormField>
             <div className={styles.addFormActions}>
               <Button size="sm" variant="ghost" onClick={handleCancel}>Cancel</Button>

@@ -484,6 +484,7 @@ export const schema: Schema<StoreData> = {
         icon: { type: 'string' },
         url: { type: 'string' },
         order: { type: 'number' },
+        columnScoped: { type: 'boolean' },
       },
       required: ['id', 'label', 'icon', 'url', 'order'],
     },
@@ -1136,6 +1137,8 @@ export type MarketplaceApp = {
   label: string;
   icon: string;
   url: string;
+  /** When true, install the app as column-scoped (visible in each session's dock). */
+  columnScoped?: boolean;
 };
 
 export type MarketplaceManifest = {
@@ -1449,6 +1452,52 @@ type WorkspaceSyncIpcEvents = Namespaced<
 >;
 
 /**
+ * App-control events. Renderer registers every live `<Webview>` with main so
+ * agents can drive them via client tools (list_apps, app_click, app_snapshot,
+ * ...). See `src/shared/app-control-types.ts` for payload shapes.
+ */
+type AppControlIpcEvents = Namespaced<
+  'app',
+  {
+    register: (payload: import('@/shared/app-control-types').AppRegistrationPayload) => void;
+    update: (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      patch: Partial<import('@/shared/app-control-types').AppRegistrationPayload>
+    ) => void;
+    unregister: (handleId: import('@/shared/app-control-types').AppHandleId) => void;
+    list: () => import('@/shared/app-control-types').LiveAppSnapshot[];
+    navigate: (handleId: import('@/shared/app-control-types').AppHandleId, url: string) => void;
+    reload: (handleId: import('@/shared/app-control-types').AppHandleId) => void;
+    back: (handleId: import('@/shared/app-control-types').AppHandleId) => void;
+    forward: (handleId: import('@/shared/app-control-types').AppHandleId) => void;
+    eval: (handleId: import('@/shared/app-control-types').AppHandleId, code: string) => unknown;
+    screenshot: (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      options?: import('@/shared/app-control-types').AppScreenshotOptions
+    ) => string;
+    console: (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      options?: { minLevel?: import('@/shared/app-control-types').AppConsoleLevel; clear?: boolean }
+    ) => import('@/shared/app-control-types').AppConsoleEntry[];
+    snapshot: (
+      handleId: import('@/shared/app-control-types').AppHandleId
+    ) => import('@/shared/app-control-types').AxNode;
+    click: (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      ref: string,
+      options?: { button?: import('@/shared/app-control-types').AppClickButton }
+    ) => void;
+    fill: (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      ref: string,
+      text: string
+    ) => void;
+    type: (handleId: import('@/shared/app-control-types').AppHandleId, text: string) => void;
+    press: (handleId: import('@/shared/app-control-types').AppHandleId, key: string) => void;
+  }
+>;
+
+/**
  * Intersection of all the events that the renderer can invoke and main process can handle.
  */
 export type IpcEvents = MainProcessIpcEvents &
@@ -1465,7 +1514,8 @@ export type IpcEvents = MainProcessIpcEvents &
   InboxIpcEvents &
   PlatformIpcEvents &
   ExtensionIpcEvents &
-  WorkspaceSyncIpcEvents;
+  WorkspaceSyncIpcEvents &
+  AppControlIpcEvents;
 
 /**
  * Store events. Main process emits these events, renderer process listens to them.

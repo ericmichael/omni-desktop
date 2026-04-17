@@ -555,6 +555,189 @@ export const CODE_UI_TOOLS = [
   },
 ] as const;
 
+/**
+ * App-control tools — drive webviews (built-in browser, code-server, VNC
+ * desktop, and user-installed webview apps) via Playwright-flavoured
+ * commands. Every action takes an `app_id` from `list_apps`.
+ *
+ * Scoping rules (enforced by the handler, not the schema):
+ * - Autopilot agents can only reach column-scoped apps in their own tab.
+ * - Interactive agents reach global dock apps + their column.
+ * - Non-controllable apps (chat, terminal) show up in `list_apps` but all
+ *   action tools reject with a clear error.
+ */
+export const APP_CONTROL_TOOLS = [
+  {
+    name: 'list_apps',
+    safe: true,
+    description:
+      'List the web apps currently available in your workspace — the built-in browser, VS Code, VNC desktop, and any custom webview apps the user has installed. Returns `[{ id, kind, scope, url, title, controllable }]`. `controllable: false` means the app (e.g. terminal) is visible in the dock but cannot be driven via snapshot/click. Call this first before any other app_* tool to learn what ids exist.',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'app_snapshot',
+    safe: true,
+    description:
+      'Capture an accessibility-tree snapshot of an app. Returns a ref-tagged tree you can use with `app_click` and `app_fill`. Refs are per-snapshot — after any navigation you must re-snapshot to get fresh refs.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string', description: 'App id from `list_apps` (e.g. "browser").' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'app_navigate',
+    safe: true,
+    description: 'Load a URL in the given app (usually `browser`). Waits until the page finishes loading.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        url: { type: 'string', description: 'Fully qualified URL to navigate to.' },
+      },
+      required: ['app_id', 'url'],
+    },
+  },
+  {
+    name: 'app_click',
+    safe: true,
+    description: 'Click an element identified by a ref from `app_snapshot`.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        ref: { type: 'string', description: 'Element ref from the most recent `app_snapshot`.' },
+        button: {
+          type: 'string',
+          enum: ['left', 'right', 'middle'],
+          description: 'Mouse button (default: left).',
+        },
+      },
+      required: ['app_id', 'ref'],
+    },
+  },
+  {
+    name: 'app_fill',
+    safe: true,
+    description:
+      'Clear and type text into an input/textarea identified by a ref. Handles IME/composition correctly; prefer this over `app_type` when you know the target field.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        ref: { type: 'string' },
+        text: { type: 'string', description: 'Text to insert. Empty string clears the field.' },
+      },
+      required: ['app_id', 'ref', 'text'],
+    },
+  },
+  {
+    name: 'app_type',
+    safe: true,
+    description:
+      'Type text at the currently focused element — no ref targeting. Use `app_fill` if you want to replace a field\'s value; use `app_type` when the element is already focused (e.g. after a click).',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        text: { type: 'string' },
+      },
+      required: ['app_id', 'text'],
+    },
+  },
+  {
+    name: 'app_press',
+    safe: true,
+    description:
+      'Press a single key (e.g. `Enter`, `Escape`, `ArrowLeft`). Goes to the focused element.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        key: { type: 'string', description: 'Electron keyCode, e.g. "Enter", "Tab", "a".' },
+      },
+      required: ['app_id', 'key'],
+    },
+  },
+  {
+    name: 'app_screenshot',
+    safe: true,
+    description:
+      'Capture a PNG screenshot of the app\'s visible viewport and write it to the ticket\'s artifacts directory (or a default location). Returns the absolute file path — show the path to the user and/or attach it via `display_artifact`.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'app_eval',
+    safe: true,
+    description:
+      'Run a JavaScript expression in the app\'s page context and return the result. The expression must be serialisable (primitives, arrays, objects). Use sparingly — `app_snapshot` + `app_click` is usually better.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        code: { type: 'string', description: 'JavaScript expression or IIFE.' },
+      },
+      required: ['app_id', 'code'],
+    },
+  },
+  {
+    name: 'app_console',
+    safe: true,
+    description:
+      'Read recent console messages the app has emitted (up to the last 1000). Use to diagnose why a page or dev-server looks wrong.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        min_level: {
+          type: 'string',
+          enum: ['log', 'warn', 'error'],
+          description: 'Minimum severity to include. Default: log (all messages).',
+        },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'app_reload',
+    safe: true,
+    description: 'Reload the current page of an app.',
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' } },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'app_back',
+    safe: true,
+    description: 'Navigate back in the app\'s history, if possible.',
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' } },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'app_forward',
+    safe: true,
+    description: 'Navigate forward in the app\'s history, if possible.',
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' } },
+      required: ['app_id'],
+    },
+  },
+] as const;
+
 export const UI_CLIENT_TOOLS = [
   {
     name: 'display_plan',
@@ -629,6 +812,10 @@ const PROJECT_GUIDANCE = [
   '## Visible to the human',
   '',
   'Your actions produce immediate visible changes in the launcher (sidebar tree, kanban board, inbox, phase badges). Briefly narrate significant mutations — "Created 3 tickets under the Auth milestone" — so the user can follow along.',
+  '',
+  '## Driving apps (browser, webviews)',
+  '',
+  'The dock hosts web apps the user can see — the built-in browser, VS Code, a VNC desktop, and any custom webview apps they installed. You can drive them with `list_apps`, `app_snapshot`, `app_click`, `app_fill`, `app_type`, `app_press`, `app_screenshot`, `app_eval`, and `app_navigate`. Always `list_apps` first to find valid ids, then `app_snapshot` before clicking — refs are per-snapshot and invalidate after any navigation. Prefer `app_fill` for text fields (handles clearing); use `app_type` only when the element is already focused.',
 ].join('\n');
 
 /**
@@ -665,15 +852,19 @@ const buildContextIdentifiers = (opts?: {
   return lines.join('\n');
 };
 
-/** Autopilot sessions: ticket tools + read-only context tools for surrounding awareness. */
+/** Autopilot sessions: ticket tools + read-only context tools + column-scoped app control. */
 export const buildAutopilotVariables = (opts?: {
   projectId?: string;
   projectLabel?: string;
   ticketId?: string;
-}): Record<string, unknown> => ({
-  client_tools: [...TICKET_CLIENT_TOOLS, ...READONLY_CONTEXT_TOOLS],
-  additional_instructions: buildContextIdentifiers(opts),
-});
+}): Record<string, unknown> => {
+  const allTools = [...TICKET_CLIENT_TOOLS, ...READONLY_CONTEXT_TOOLS, ...APP_CONTROL_TOOLS];
+  return {
+    client_tools: allTools,
+    safe_tool_overrides: { safe_tool_names: extractSafeToolNames(allTools) },
+    additional_instructions: buildContextIdentifiers(opts),
+  };
+};
 
 /** Interactive sessions (Chat tab): all tools except code-deck-only tools. */
 export const buildInteractiveVariables = (opts?: {
@@ -690,6 +881,7 @@ export const buildInteractiveVariables = (opts?: {
     ...PAGE_CLIENT_TOOLS,
     ...INBOX_CLIENT_TOOLS,
     ...UI_CLIENT_TOOLS,
+    ...APP_CONTROL_TOOLS,
   ];
   return {
     client_tools: allTools,
@@ -714,6 +906,7 @@ export const buildCodeVariables = (opts?: {
     ...INBOX_CLIENT_TOOLS,
     ...UI_CLIENT_TOOLS,
     ...CODE_UI_TOOLS,
+    ...APP_CONTROL_TOOLS,
   ];
   return {
     client_tools: allTools,

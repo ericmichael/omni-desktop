@@ -8,6 +8,7 @@ import { assert } from 'tsafe';
 import { pathToFileURL } from 'url';
 
 import { getArtifactsDir } from '@/lib/artifacts';
+import { createAppControlManager } from '@/main/app-control-manager';
 import { createConsoleManager } from '@/main/console-manager';
 import { createExtensionManager } from '@/main/extension-manager';
 import { MainProcessManager } from '@/main/main-process-manager';
@@ -83,6 +84,9 @@ const [, cleanupConsole] = createConsoleManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
 });
+const [appControlManager, cleanupAppControl] = createAppControlManager({
+  ipc: main.ipc,
+});
 const [omniInstall, cleanupOmniInstall] = createOmniInstallManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
@@ -102,6 +106,7 @@ const [, cleanupProject] = createProjectManager({
   sendToWindow: main.sendToWindow,
   store,
   processManager,
+  appControlManager,
 });
 const [, cleanupExtensions] = createExtensionManager({
   ipc: main.ipc,
@@ -191,6 +196,7 @@ async function cleanup() {
   await syncManager.dispose();
   const results = await Promise.allSettled([
     cleanupConsole(),
+    cleanupAppControl(),
     cleanupOmniInstall(),
     cleanupProcessManager(),
     cleanupProject(),

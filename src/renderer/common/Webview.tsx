@@ -1,6 +1,23 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 
+import { registerApp, unregisterApp, updateApp } from '@/renderer/features/AppControl/live-registry';
+import type { AppHandleId, AppRegistrationPayload } from '@/shared/app-control-types';
+import { isControllableKind } from '@/shared/app-control-types';
+
 const isElectron = typeof window !== 'undefined' && 'electron' in window;
+
+/**
+ * Metadata a surface passes to `<Webview>` so it can self-register with the
+ * app-control registry. Omit to opt out (e.g. transient previews).
+ */
+export type WebviewRegistryProps = {
+  handleId: AppHandleId;
+  appId: AppRegistrationPayload['appId'];
+  kind: AppRegistrationPayload['kind'];
+  scope: AppRegistrationPayload['scope'];
+  tabId?: string;
+  label: string;
+};
 
 export type WebviewHandle = {
   reload: () => void;
@@ -32,6 +49,8 @@ export const Webview = forwardRef<WebviewHandle, {
   onTitleChange?: (title: string) => void;
   onError?: (error: { code: number; description: string; url: string }) => void;
   showUnavailable?: boolean;
+  /** If provided, this webview registers itself with the app-control registry. */
+  registry?: WebviewRegistryProps;
 }>(({
   src,
   onReady,
@@ -41,6 +60,7 @@ export const Webview = forwardRef<WebviewHandle, {
   onTitleChange,
   onError,
   showUnavailable = true,
+  registry,
 }, handleRef) => {
   const elementRef = useRef<HTMLElement | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -211,6 +231,22 @@ return;
       if (isElectron) {
         const el = node as unknown as Electron.WebviewTag;
 
+        // Register with the app-control registry as early as possible so
+        // list_apps sees the handle even before first load. webContentsId
+        // fills in on the first did-finish-load below.
+        if (registry) {
+          registerApp({
+            handleId: registry.handleId,
+            appId: registry.appId,
+            kind: registry.kind,
+            scope: registry.scope,
+            tabId: registry.tabId,
+            label: registry.label,
+            url: src,
+            controllable: isControllableKind(registry.kind),
+          });
+        }
+
         const onStartLoad = () => {
           onLoadingRef.current?.(true);
         };
@@ -223,6 +259,26 @@ return;
           if (!readyEmittedRef.current) {
             readyEmittedRef.current = true;
             onReadyRef.current?.();
+          }
+
+          if (registry) {
+            const webContentsId = (() => {
+              try {
+                return el.getWebContentsId?.();
+              } catch {
+                return undefined;
+              }
+            })();
+            updateApp(registry.handleId, {
+              webContentsId,
+              url: (() => {
+                try {
+                  return el.getURL?.();
+                } catch {
+                  return undefined;
+                }
+              })(),
+            });
           }
 
           // Read page title
@@ -264,14 +320,20 @@ return;
 }
           if (e.url) {
 onNavigateRef.current?.(e.url);
-}
+            if (registry) {
+              updateApp(registry.handleId, { url: e.url });
+            }
+          }
         };
 
         const onTitleUpdate = (event: unknown) => {
           const e = event as { title?: string };
           if (e.title) {
 onTitleRef.current?.(e.title);
-}
+            if (registry) {
+              updateApp(registry.handleId, { title: e.title });
+            }
+          }
         };
 
         el.addEventListener('did-start-loading', onStartLoad);
@@ -290,6 +352,9 @@ onTitleRef.current?.(e.title);
           el.removeEventListener('did-navigate', onNavigateEvent);
           el.removeEventListener('did-navigate-in-page', onNavigateEvent);
           el.removeEventListener('page-title-updated', onTitleUpdate);
+          if (registry) {
+            unregisterApp(registry.handleId);
+          }
         };
       } else {
         // Browser mode: use iframe events
@@ -355,7 +420,7 @@ return;
         };
       }
     },
-    [clearRetryTimer, scheduleRetry, src]
+    [clearRetryTimer, scheduleRetry, src, registry]
   );
 
   if (!src) {
