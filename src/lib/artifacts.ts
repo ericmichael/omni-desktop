@@ -11,5 +11,5 @@ export const getArtifactsDir = (configDir: string, ticketId: string): string => 
 
 /** Container-side path to a ticket's artifacts directory. */
 export const getContainerArtifactsDir = (ticketId: string): string => {
-  return path.posix.join(CONTAINER_CONFIG_ROOT, TICKETS_DIR, ticketId, ARTIFACTS_DIR);
+  return `${CONTAINER_CONFIG_ROOT}/${TICKETS_DIR}/${ticketId}/${ARTIFACTS_DIR}`;
 };
