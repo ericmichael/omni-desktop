@@ -1,14 +1,18 @@
 import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { Chat20Regular, Code20Regular, Desktop20Regular, Globe20Regular, WindowConsole20Regular } from '@fluentui/react-icons';
 import { memo, useCallback } from 'react';
 
-export type WorkspaceApp = 'chat' | 'code' | 'desktop' | 'browser' | 'terminal';
+import type { AppDescriptor, AppId } from '@/shared/app-registry';
+
+import { AppIcon } from './AppIcon';
+
+export { ICON_MAP } from './AppIcon';
+export type { AppId };
 
 type EnvironmentDockProps = {
-  activeApp: WorkspaceApp;
-  onSelect: (app: WorkspaceApp) => void;
-  codeAvailable: boolean;
-  desktopAvailable: boolean;
+  apps: AppDescriptor[];
+  activeAppId: AppId;
+  onSelect: (id: AppId) => void;
+  sandboxUrls?: Record<string, string | undefined>;
   isGlass?: boolean;
 };
 
@@ -36,14 +40,6 @@ const useStyles = makeStyles({
     backdropFilter: 'blur(36px) saturate(160%)',
     WebkitBackdropFilter: 'blur(36px) saturate(160%)',
     boxShadow: `0 1px 0 0 color-mix(in srgb, white 14%, transparent) inset, 0 0 0 1px color-mix(in srgb, ${tokens.colorNeutralStroke1} 40%, transparent), 0 12px 32px -12px rgba(0, 0, 0, 0.35)`,
-  },
-  separator: {
-    width: '1px',
-    height: '20px',
-    marginLeft: '4px',
-    marginRight: '4px',
-    backgroundColor: tokens.colorNeutralStroke2,
-    flexShrink: 0,
   },
   item: {
     position: 'relative',
@@ -78,18 +74,6 @@ const useStyles = makeStyles({
       color: tokens.colorBrandForeground1,
     },
   },
-  itemDisabled: {
-    opacity: 0.25,
-    cursor: 'default',
-    ':hover': {
-      backgroundColor: 'transparent',
-      color: tokens.colorNeutralForeground3,
-      transform: 'none',
-    },
-    ':active': {
-      transform: 'none',
-    },
-  },
   label: {
     fontSize: '10px',
     fontWeight: tokens.fontWeightMedium,
@@ -120,52 +104,38 @@ const useStyles = makeStyles({
   },
 });
 
-const APP_ITEMS: { app: WorkspaceApp; label: string; Icon: typeof Code20Regular; availabilityKey?: keyof Pick<EnvironmentDockProps, 'codeAvailable' | 'desktopAvailable'> }[] = [
-  { app: 'chat', label: 'Chat', Icon: Chat20Regular },
-  { app: 'code', label: 'Code', Icon: Code20Regular, availabilityKey: 'codeAvailable' },
-  { app: 'desktop', label: 'Desktop', Icon: Desktop20Regular, availabilityKey: 'desktopAvailable' },
-  { app: 'browser', label: 'Browser', Icon: Globe20Regular },
-  { app: 'terminal', label: 'Terminal', Icon: WindowConsole20Regular },
-];
-
-export const EnvironmentDock = memo(({ activeApp, onSelect, codeAvailable, desktopAvailable, isGlass }: EnvironmentDockProps) => {
+export const EnvironmentDock = memo(({ apps, activeAppId, onSelect, sandboxUrls, isGlass }: EnvironmentDockProps) => {
   const styles = useStyles();
-  const availability: Record<string, boolean> = { codeAvailable, desktopAvailable };
 
   const handleAppClick = useCallback(
-    (app: WorkspaceApp, isAvailable: boolean) => {
-      if (!isAvailable) {
-return;
-}
-      onSelect(app);
+    (id: AppId) => {
+      onSelect(id);
     },
     [onSelect]
   );
 
   return (
     <div className={mergeClasses(styles.dock, isGlass && styles.dockGlass)}>
-      {APP_ITEMS.map(({ app, label, Icon, availabilityKey }) => {
-        const isActive = activeApp === app;
-        const isAvailable = availabilityKey ? !!availability[availabilityKey] : true;
-        if (availabilityKey && !isAvailable) {
+      {apps.map((app) => {
+        const isActive = activeAppId === app.id;
+        const isAvailable =
+          app.scope === 'sandbox' ? !!sandboxUrls?.[app.sandboxUrlKey!] : true;
+
+        if (app.scope === 'sandbox' && !isAvailable) {
           return null;
         }
+
         return (
           <button
-            key={app}
+            key={app.id}
             type="button"
-            className={mergeClasses(
-              styles.item,
-              isActive && styles.itemActive,
-              !isAvailable && styles.itemDisabled,
-            )}
-            onClick={() => handleAppClick(app, isAvailable)}
-            disabled={!isAvailable}
-            aria-label={label}
-            title={!isAvailable ? `${label} (unavailable)` : label}
+            className={mergeClasses(styles.item, isActive && styles.itemActive)}
+            onClick={() => handleAppClick(app.id)}
+            aria-label={app.label}
+            title={app.label}
           >
-            <Icon className={styles.icon} style={{ width: 20, height: 20 }} />
-            <span className={styles.label}>{label}</span>
+            <AppIcon icon={app.icon} size={20} className={styles.icon} />
+            <span className={styles.label}>{app.label}</span>
             <span className={mergeClasses(styles.dot, !isActive && styles.dotHidden)} />
           </button>
         );

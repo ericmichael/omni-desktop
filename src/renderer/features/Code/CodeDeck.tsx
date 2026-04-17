@@ -2,22 +2,27 @@ import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } f
 import { arrayMove, horizontalListSortingStrategy, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
-import { Add20Regular, ArrowMaximize20Regular, ArrowMinimize20Regular, BranchFork20Regular, MoreHorizontal20Regular, Navigation20Regular,ReOrderDotsVertical20Regular } from '@fluentui/react-icons';
+import { Add20Regular, Apps20Regular, ArrowMaximize20Regular, ArrowMinimize20Regular, BranchFork20Regular, Chat20Regular, MoreHorizontal20Regular, Navigation20Regular,ReOrderDotsVertical20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { uuidv4 } from '@/lib/uuid';
+import { Webview } from '@/renderer/common/Webview';
 import { Button, Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger, SegmentedControl } from '@/renderer/ds';
 import { $previewRequest, clearPreviewRequest } from '@/renderer/features/Tickets/preview-bridge';
 import { ticketApi } from '@/renderer/features/Tickets/state';
 import { TicketBannerActions, TicketColumnBadge, TicketResolutionBadge } from '@/renderer/features/Tickets/TicketControls';
 import { type TicketPanel, TicketPanelOverlay } from '@/renderer/features/Tickets/TicketPanelOverlay';
 import { persistedStoreApi } from '@/renderer/services/store';
+import type { AppId, CustomAppEntry } from '@/shared/app-registry';
 import type { CodeLayoutMode, CodeTab, CodeTabId, TicketId, TicketResolution } from '@/shared/types';
 
+import { AppIcon } from './AppIcon';
 import { CodeTabContent } from './CodeTabContent';
-import type { WorkspaceApp } from './EnvironmentDock';
 import { $codeTabStatuses, codeApi } from './state';
+
+/** Sentinel customAppId meaning "show the app launcher picker". */
+const APP_LAUNCHER_ID = '__launcher__';
 
 const COLUMN_WIDTH = 480;
 const COLUMN_WIDTH_SMALL = 360;
@@ -360,10 +365,99 @@ const useStyles = makeStyles({
     color: 'rgb(192, 132, 252)',
     flexShrink: 0,
   },
+  launcherBody: {
+    flex: '1 1 0',
+    minHeight: 0,
+    overflowY: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: tokens.spacingVerticalXXXL,
+    paddingLeft: tokens.spacingHorizontalXXL,
+    paddingRight: tokens.spacingHorizontalXXL,
+    paddingBottom: tokens.spacingVerticalXXXL,
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+  launcherBodyGlass: {
+    backgroundColor: 'transparent',
+  },
+  launcherGrid: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '32px',
+    width: '100%',
+    maxWidth: '640px',
+  },
+  launcherRow: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(var(--launcher-cols), 1fr)',
+    columnGap: 'var(--launcher-col-gap)',
+  },
+  // Honeycomb: even-indexed rows shift right by half a cell so icons sit in
+  // the gaps of the row above. `translate` is used so per-item hover
+  // `transform` still composes.
+  launcherRowOffset: {
+    translate: 'calc((100% + var(--launcher-col-gap)) / (2 * var(--launcher-cols))) 0',
+  },
+  launcherItem: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: tokens.spacingVerticalS,
+    padding: 0,
+    border: 'none',
+    backgroundColor: 'transparent',
+    cursor: 'pointer',
+    transitionProperty: 'transform',
+    transitionDuration: '180ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    ':hover': {
+      transform: 'translateY(-2px) scale(1.04)',
+    },
+    ':active': {
+      transform: 'translateY(0) scale(0.98)',
+    },
+  },
+  launcherIconDisk: {
+    display: 'flex',
+    width: '64px',
+    height: '64px',
+    borderRadius: '50%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    color: tokens.colorNeutralForeground1,
+    backgroundImage: `linear-gradient(145deg, ${tokens.colorBrandBackground2}, ${tokens.colorNeutralBackground3})`,
+    boxShadow: `0 8px 20px -8px rgba(0, 0, 0, 0.35), inset 0 0 0 1px ${tokens.colorNeutralStroke2}`,
+  },
+  launcherIconDiskGlass: {
+    backgroundImage: 'none',
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
+    backdropFilter: 'blur(24px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(24px) saturate(160%)',
+    boxShadow: `inset 0 1px 0 0 rgba(255, 255, 255, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.10), 0 10px 24px -10px rgba(0, 0, 0, 0.45)`,
+  },
+  launcherItemLabel: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightMedium,
+    color: tokens.colorNeutralForeground1,
+    textAlign: 'center',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    maxWidth: '100%',
+  },
+  launcherEmpty: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+    textAlign: 'center',
+    paddingTop: tokens.spacingVerticalXXL,
+  },
 });
 
 const CodeDeckHeader = memo(
-  ({ layoutMode, onLayoutMode, onNewSession, isGlass }: { layoutMode: CodeLayoutMode; onLayoutMode: (mode: CodeLayoutMode) => void; onNewSession: () => void; isGlass?: boolean }) => {
+  ({ layoutMode, onLayoutMode, onNewSession, onOpenApps, isGlass }: { layoutMode: CodeLayoutMode; onLayoutMode: (mode: CodeLayoutMode) => void; onNewSession: () => void; onOpenApps: () => void; isGlass?: boolean }) => {
     const styles = useStyles();
     return (
       <div className={mergeClasses(styles.deckHeader, isGlass && styles.glassDeckHeader)}>
@@ -395,9 +489,25 @@ const CodeDeckHeader = memo(
             onChange={onLayoutMode}
             layoutId="code-layout-toggle"
           />
-          <Button size="sm" variant="ghost" leftIcon={<Add20Regular style={{ width: 13, height: 13 }} />} onClick={onNewSession}>
-            New Session
-          </Button>
+          <Menu positioning={{ position: 'below', align: 'end' }}>
+            <MenuTrigger>
+              <Button size="sm" variant="ghost" leftIcon={<Add20Regular style={{ width: 13, height: 13 }} />}>
+                New
+              </Button>
+            </MenuTrigger>
+            <MenuPopover>
+              <MenuList>
+                <MenuItem onClick={onNewSession}>
+                  <Chat20Regular style={{ width: 16, height: 16, marginRight: 6, verticalAlign: 'text-bottom' }} />
+                  Agent Session
+                </MenuItem>
+                <MenuItem onClick={onOpenApps}>
+                  <Apps20Regular style={{ width: 16, height: 16, marginRight: 6, verticalAlign: 'text-bottom' }} />
+                  Apps
+                </MenuItem>
+              </MenuList>
+            </MenuPopover>
+          </Menu>
         </div>
       </div>
     );
@@ -626,6 +736,161 @@ const DeckColumn = memo(
 );
 DeckColumn.displayName = 'DeckColumn';
 
+const AppColumn = memo(
+  ({ tab, app, onClose, isExpanded, onToggleExpand, isGlass }: { tab: CodeTab; app: CustomAppEntry; onClose: (id: CodeTabId) => void; isExpanded: boolean; onToggleExpand: (id: CodeTabId) => void; isGlass?: boolean }) => {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
+    const style = { transform: CSS.Transform.toString(transform), transition };
+    const styles = useStyles();
+
+    return (
+      <div ref={setNodeRef} style={style} className={mergeClasses(styles.deckColumn, isDragging && styles.deckColumnDragging)}>
+        <div className={mergeClasses(styles.deckColumnBordered, isGlass && styles.glassCard)}>
+          <div className={mergeClasses(styles.sessionHeader, isGlass && styles.glassSessionHeader)}>
+            <div className={mergeClasses(styles.flexItemsCenter, styles.gap2, styles.minW0)}>
+              <button
+                type="button"
+                className={styles.dragHandle}
+                {...attributes}
+                {...listeners}
+                aria-label="Reorder"
+              >
+                <ReOrderDotsVertical20Regular style={{ width: 16, height: 16 }} />
+              </button>
+              <span className={styles.sessionLabel}>{app.label}</span>
+            </div>
+            <div className={mergeClasses(styles.flexItemsCenter, styles.gap1)}>
+              <SessionActionButton
+                icon={isExpanded ? <ArrowMinimize20Regular style={{ width: 15, height: 15 }} /> : <ArrowMaximize20Regular style={{ width: 15, height: 15 }} />}
+                label={isExpanded ? 'Collapse column' : 'Expand column'}
+                onClick={() => onToggleExpand(tab.id)}
+              />
+              <SessionActionButton icon={<Add20Regular style={{ width: 14, height: 14, transform: 'rotate(45deg)' }} />} label="Close" onClick={() => onClose(tab.id)} />
+            </div>
+          </div>
+          <div className={styles.flex1MinH0Relative}>
+            <Webview src={app.url} showUnavailable={false} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+);
+AppColumn.displayName = 'AppColumn';
+
+const LAUNCHER_COL_GAP_PX = 40;
+const LAUNCHER_CELL_MIN_PX = 96;
+const LAUNCHER_COLS_MIN = 2;
+const LAUNCHER_COLS_MAX = 8;
+
+const AppLauncherGrid = memo(
+  ({ apps, onPick, isGlass }: { apps: CustomAppEntry[]; onPick: (appId: string) => void; isGlass?: boolean }) => {
+    const styles = useStyles();
+    const ref = useRef<HTMLDivElement>(null);
+    const [cols, setCols] = useState(4);
+
+    useEffect(() => {
+      const el = ref.current;
+      if (!el) {
+        return;
+      }
+      const compute = (width: number) => {
+        const n = Math.floor((width + LAUNCHER_COL_GAP_PX) / (LAUNCHER_CELL_MIN_PX + LAUNCHER_COL_GAP_PX));
+        return Math.max(LAUNCHER_COLS_MIN, Math.min(LAUNCHER_COLS_MAX, n));
+      };
+      setCols(compute(el.clientWidth));
+      const ro = new ResizeObserver(([entry]) => {
+        if (entry) {
+          setCols(compute(entry.contentRect.width));
+        }
+      });
+      ro.observe(el);
+      return () => ro.disconnect();
+    }, []);
+
+    const rows = useMemo(() => {
+      const out: CustomAppEntry[][] = [];
+      for (let i = 0; i < apps.length; i += cols) {
+        out.push(apps.slice(i, i + cols));
+      }
+      return out;
+    }, [apps, cols]);
+
+    return (
+      <div
+        ref={ref}
+        className={styles.launcherGrid}
+        style={{
+          ['--launcher-cols' as string]: cols,
+          ['--launcher-col-gap' as string]: `${LAUNCHER_COL_GAP_PX}px`,
+        }}
+      >
+        {rows.map((row, rowIndex) => (
+          <div
+            key={rowIndex}
+            className={mergeClasses(styles.launcherRow, rowIndex % 2 === 1 && styles.launcherRowOffset)}
+          >
+            {row.map((app) => (
+              <button key={app.id} type="button" className={styles.launcherItem} onClick={() => onPick(app.id)}>
+                <span className={mergeClasses(styles.launcherIconDisk, isGlass && styles.launcherIconDiskGlass)}>
+                  <AppIcon icon={app.icon} size={34} />
+                </span>
+                <span className={styles.launcherItemLabel}>{app.label}</span>
+              </button>
+            ))}
+          </div>
+        ))}
+      </div>
+    );
+  }
+);
+AppLauncherGrid.displayName = 'AppLauncherGrid';
+
+const AppLauncherColumn = memo(
+  ({ tab, customApps, onClose, isExpanded, onToggleExpand, isGlass }: { tab: CodeTab; customApps: CustomAppEntry[]; onClose: (id: CodeTabId) => void; isExpanded: boolean; onToggleExpand: (id: CodeTabId) => void; isGlass?: boolean }) => {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
+    const style = { transform: CSS.Transform.toString(transform), transition };
+    const styles = useStyles();
+
+    const handlePick = useCallback(
+      (appId: string) => {
+        void codeApi.setTabAppId(tab.id, appId);
+      },
+      [tab.id]
+    );
+
+    return (
+      <div ref={setNodeRef} style={style} className={mergeClasses(styles.deckColumn, isDragging && styles.deckColumnDragging)}>
+        <div className={mergeClasses(styles.deckColumnBordered, isGlass && styles.glassCard)}>
+          <div className={mergeClasses(styles.sessionHeader, isGlass && styles.glassSessionHeader)}>
+            <div className={mergeClasses(styles.flexItemsCenter, styles.gap2, styles.minW0)}>
+              <button type="button" className={styles.dragHandle} {...attributes} {...listeners} aria-label="Reorder">
+                <ReOrderDotsVertical20Regular style={{ width: 16, height: 16 }} />
+              </button>
+              <span className={styles.sessionLabel}>Apps</span>
+            </div>
+            <div className={mergeClasses(styles.flexItemsCenter, styles.gap1)}>
+              <SessionActionButton
+                icon={isExpanded ? <ArrowMinimize20Regular style={{ width: 15, height: 15 }} /> : <ArrowMaximize20Regular style={{ width: 15, height: 15 }} />}
+                label={isExpanded ? 'Collapse column' : 'Expand column'}
+                onClick={() => onToggleExpand(tab.id)}
+              />
+              <SessionActionButton icon={<Add20Regular style={{ width: 14, height: 14, transform: 'rotate(45deg)' }} />} label="Close" onClick={() => onClose(tab.id)} />
+            </div>
+          </div>
+          <div className={mergeClasses(styles.launcherBody, isGlass && styles.launcherBodyGlass)}>
+            {customApps.length === 0 ? (
+              <div className={styles.launcherEmpty}>No apps installed. Add apps in Settings.</div>
+            ) : (
+              <AppLauncherGrid apps={customApps} onPick={handlePick} isGlass={isGlass} />
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+);
+AppLauncherColumn.displayName = 'AppLauncherColumn';
+
 const CodeSessionPane = memo(
   ({
     tab,
@@ -655,8 +920,8 @@ const CodeSessionPane = memo(
     actions?: React.ReactNode;
     onClose: (id: CodeTabId) => void;
     isVisible: boolean;
-    activeApp: WorkspaceApp;
-    onActiveAppChange?: (app: WorkspaceApp) => void;
+    activeApp: AppId;
+    onActiveAppChange?: (app: AppId) => void;
     uiMinimal?: boolean;
     headerActionsTargetId?: string;
     headerActionsCompact?: boolean;
@@ -769,7 +1034,7 @@ export const CodeDeck = memo(() => {
   const layoutMode = store.codeLayoutMode ?? 'deck';
   const activeTabId = store.activeCodeTabId ?? tabs[0]?.id ?? null;
   const deckBackground = store.codeDeckBackground ?? null;
-  const [activeApps, setActiveApps] = useState<Record<CodeTabId, WorkspaceApp>>({});
+  const [activeApps, setActiveApps] = useState<Record<CodeTabId, AppId>>({});
   const [previewUrls, setPreviewUrls] = useState<Record<CodeTabId, string>>({});
   const [expandedTabId, setExpandedTabId] = useState<CodeTabId | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
@@ -864,14 +1129,23 @@ return;
     return map;
   }, [store.projects]);
 
+  const customApps = store.customApps ?? [];
+
   const resolveLabel = useCallback(
     (tab: CodeTab) => {
+      if (tab.customAppId === APP_LAUNCHER_ID) {
+        return 'Apps';
+      }
+      if (tab.customAppId) {
+        const app = customApps.find((a) => a.id === tab.customAppId);
+        return app?.label ?? 'App';
+      }
       if (!tab.projectId) {
 return 'New Session';
 }
       return projectMap.get(tab.projectId)?.label ?? 'Unknown';
     },
-    [projectMap]
+    [projectMap, customApps]
   );
 
   const resolveTicketTitle = useCallback(
@@ -903,6 +1177,10 @@ return null;
 
   const handleNewSession = useCallback(() => {
     codeApi.addTab();
+  }, []);
+
+  const handleOpenApps = useCallback(() => {
+    void codeApi.addAppTab(APP_LAUNCHER_ID);
   }, []);
 
   const getColumnWidth = useCallback(
@@ -939,7 +1217,7 @@ return COLUMN_WIDTH_SMALL;
     codeApi.removeTab(id);
   }, []);
 
-  const handleActiveAppChange = useCallback((tabId: CodeTabId, app: WorkspaceApp) => {
+  const handleActiveAppChange = useCallback((tabId: CodeTabId, app: AppId) => {
     setActiveApps((prev) => ({ ...prev, [tabId]: app }));
   }, []);
 
@@ -1063,47 +1341,55 @@ return undefined;
 
   return (
     <div className={styles.root}>
-      <CodeDeckHeader layoutMode={layoutMode} onLayoutMode={handleLayoutMode} onNewSession={handleNewSession} isGlass={!!deckBackground} />
+      <CodeDeckHeader layoutMode={layoutMode} onLayoutMode={handleLayoutMode} onNewSession={handleNewSession} onOpenApps={handleOpenApps} isGlass={!!deckBackground} />
       {layoutMode === 'deck' && (
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
           <SortableContext items={tabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
             <div ref={deckScrollRef} className={styles.deckScroll}>
               <div className={styles.deckInner}>
                 {tabs.map((tab) => {
+                  const isLauncher = tab.customAppId === APP_LAUNCHER_ID;
+                  const appEntry = tab.customAppId && !isLauncher ? customApps.find((a) => a.id === tab.customAppId) : undefined;
                   return (
                     <div
                       key={tab.id}
                       style={{ width: getColumnWidth(tab.id) }}
                       className={styles.deckColumnWrap}
                     >
-                      <DeckColumn
-                        tab={tab}
-                        label={resolveLabel(tab)}
-                        ticketTitle={resolveTicketTitle(tab)}
-                        ticketColumnBadge={renderTicketColumnBadge(tab)}
-                        ticketMetaBadge={renderTicketMetaBadge(tab)}
-                        ticketActions={renderTicketBannerActions(tab)}
-                        actions={renderSessionActions(tab)}
-                        onClose={handleClose}
-                        isExpanded={expandedTabId === tab.id}
-                        onToggleExpand={handleToggleExpand}
-                        headerActionsSlot={<div id={`code-deck-header-actions-${tab.id}`} />}
-                        isGlass={!!deckBackground}
-                      >
-                        <CodeTabContent
+                      {isLauncher ? (
+                        <AppLauncherColumn tab={tab} customApps={customApps} onClose={handleClose} isExpanded={expandedTabId === tab.id} onToggleExpand={handleToggleExpand} isGlass={!!deckBackground} />
+                      ) : appEntry ? (
+                        <AppColumn tab={tab} app={appEntry} onClose={handleClose} isExpanded={expandedTabId === tab.id} onToggleExpand={handleToggleExpand} isGlass={!!deckBackground} />
+                      ) : (
+                        <DeckColumn
                           tab={tab}
-                          isVisible
-                          activeApp={activeApps[tab.id] ?? 'chat'}
-                          onActiveAppChange={(app) => handleActiveAppChange(tab.id, app)}
-                          uiMinimal
-                          headerActionsTargetId={`code-deck-header-actions-${tab.id}`}
-                          headerActionsCompact
-                          previewUrl={previewUrls[tab.id]}
-                          onPreviewUrlChange={(url) => handlePreviewUrlChange(tab.id, url)}
-                          dockTargetId={`code-deck-dock-target-${tab.id}`}
+                          label={resolveLabel(tab)}
+                          ticketTitle={resolveTicketTitle(tab)}
+                          ticketColumnBadge={renderTicketColumnBadge(tab)}
+                          ticketMetaBadge={renderTicketMetaBadge(tab)}
+                          ticketActions={renderTicketBannerActions(tab)}
+                          actions={renderSessionActions(tab)}
+                          onClose={handleClose}
+                          isExpanded={expandedTabId === tab.id}
+                          onToggleExpand={handleToggleExpand}
+                          headerActionsSlot={<div id={`code-deck-header-actions-${tab.id}`} />}
                           isGlass={!!deckBackground}
-                        />
-                      </DeckColumn>
+                        >
+                          <CodeTabContent
+                            tab={tab}
+                            isVisible
+                            activeApp={activeApps[tab.id] ?? 'chat'}
+                            onActiveAppChange={(app) => handleActiveAppChange(tab.id, app)}
+                            uiMinimal
+                            headerActionsTargetId={`code-deck-header-actions-${tab.id}`}
+                            headerActionsCompact
+                            previewUrl={previewUrls[tab.id]}
+                            onPreviewUrlChange={(url) => handlePreviewUrlChange(tab.id, url)}
+                            dockTargetId={`code-deck-dock-target-${tab.id}`}
+                            isGlass={!!deckBackground}
+                          />
+                        </DeckColumn>
+                      )}
                     </div>
                   );
                 })}
@@ -1184,7 +1470,34 @@ return undefined;
                 </div>
               </div>
               <div className={styles.focusContent}>
-                {tabs.map((tab) => (
+                {tabs.map((tab) => {
+                  const isLauncher = tab.customAppId === APP_LAUNCHER_ID;
+                  const appEntry = tab.customAppId && !isLauncher ? customApps.find((a) => a.id === tab.customAppId) : undefined;
+                  if (isLauncher) {
+                    return (
+                      <div key={tab.id} style={{ width: '100%', height: '100%', display: tab.id === activeTab?.id ? 'flex' : 'none', flexDirection: 'column' }}>
+                        <div className={mergeClasses(styles.launcherBody, !!deckBackground && styles.launcherBodyGlass)}>
+                          {customApps.length === 0 ? (
+                            <div className={styles.launcherEmpty}>No apps installed. Add apps in Settings.</div>
+                          ) : (
+                            <AppLauncherGrid
+                              apps={customApps}
+                              onPick={(appId) => codeApi.setTabAppId(tab.id, appId)}
+                              isGlass={!!deckBackground}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  }
+                  if (appEntry) {
+                    return (
+                      <div key={tab.id} style={{ width: '100%', height: '100%', display: tab.id === activeTab?.id ? 'block' : 'none' }}>
+                        <Webview src={appEntry.url} showUnavailable={false} />
+                      </div>
+                    );
+                  }
+                  return (
                     <CodeSessionPane
                       key={tab.id}
                       tab={tab}
@@ -1205,7 +1518,8 @@ return undefined;
                       onPreviewUrlChange={(url) => handlePreviewUrlChange(tab.id, url)}
                       isGlass={!!deckBackground}
                     />
-                ))}
+                  );
+                })}
               </div>
             </div>
           </SortableContext>

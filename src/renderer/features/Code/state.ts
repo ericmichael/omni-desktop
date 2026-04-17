@@ -121,6 +121,20 @@ export const codeApi = {
     return tab;
   },
 
+  addAppTab: async (customAppId: string): Promise<CodeTab> => {
+    const tab: CodeTab = { id: nanoid(), projectId: null, customAppId, createdAt: Date.now() };
+    const tabs = [...(persistedStoreApi.getKey('codeTabs') ?? []), tab];
+    await persistedStoreApi.setKey('codeTabs', tabs);
+    return tab;
+  },
+
+  setTabAppId: async (tabId: CodeTabId, customAppId: string) => {
+    const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((t) =>
+      t.id === tabId ? { ...t, customAppId } : t
+    );
+    await persistedStoreApi.setKey('codeTabs', tabs);
+  },
+
   setTabSessionId: async (tabId: CodeTabId, sessionId: string | undefined) => {
     const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((t) =>
       t.id === tabId ? { ...t, sessionId } : t
@@ -134,6 +148,10 @@ const listen = () => {
   const pollStatuses = async () => {
     const tabs = persistedStoreApi.getKey('codeTabs') ?? [];
     for (const tab of tabs) {
+      // Skip polling for custom app tabs — they have no sandbox
+      if (tab.customAppId) {
+        continue;
+      }
       await pollProcessStatus(tab.id);
     }
   };

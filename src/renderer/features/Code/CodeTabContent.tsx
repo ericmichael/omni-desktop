@@ -12,11 +12,11 @@ import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { buildSandboxLabel, isCustomSandbox } from '@/renderer/omniagents-ui/sandbox-label';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
+import type { AppId } from '@/shared/app-registry';
 import type { CodeTab, CodeTabId, TicketId } from '@/shared/types';
 
 import { CodeEmptyState } from './CodeEmptyState';
 import { CodeWorkspaceLayout } from './CodeWorkspaceLayout';
-import type { WorkspaceApp } from './EnvironmentDock';
 import { $codeTabErrors, $codeTabStatuses, codeApi } from './state';
 import { useCodeAutoLaunch } from './use-code-auto-launch';
 
@@ -85,8 +85,8 @@ const CodeRunningView = memo(
     sessionId?: string;
     onSessionChange?: (sessionId: string | undefined) => void;
     variables?: Record<string, unknown>;
-    activeApp: WorkspaceApp;
-    onActiveAppChange?: (app: WorkspaceApp) => void;
+    activeApp: AppId;
+    onActiveAppChange?: (app: AppId) => void;
     onReady: () => void;
     uiMinimal?: boolean;
     headerActionsTargetId?: string;
@@ -150,8 +150,8 @@ CodeRunningView.displayName = 'CodeRunningView';
 type CodeTabContentProps = {
   tab: CodeTab;
   isVisible: boolean;
-  activeApp?: WorkspaceApp;
-  onActiveAppChange?: (app: WorkspaceApp) => void;
+  activeApp?: AppId;
+  onActiveAppChange?: (app: AppId) => void;
   uiMinimal?: boolean;
   headerActionsTargetId?: string;
   headerActionsCompact?: boolean;

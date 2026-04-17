@@ -75,11 +75,31 @@ async function readManifest(repoRoot: string): Promise<MarketplaceManifest> {
   return parsed;
 }
 
+/**
+ * Resolve relative icon paths (e.g. `./apps/icons/spotify.svg`) in
+ * marketplace apps to inline SVG content so the renderer can display
+ * them without a second fetch.
+ */
+async function resolveAppIcons(manifest: MarketplaceManifest, repoRoot: string): Promise<void> {
+  if (!manifest.apps) return;
+  for (const app of manifest.apps) {
+    if (app.icon && (app.icon.startsWith('./') || app.icon.startsWith('/'))) {
+      const svgPath = join(repoRoot, app.icon);
+      const svg = await readFile(svgPath, 'utf-8').catch(() => '');
+      if (svg) {
+        app.icon = svg;
+      }
+    }
+  }
+}
+
 export async function fetchMarketplace(spec: string): Promise<MarketplaceManifest> {
   const repoSpec = parseRepoSpec(spec);
   const root = await downloadRepo(repoSpec);
   try {
-    return await readManifest(root);
+    const manifest = await readManifest(root);
+    await resolveAppIcons(manifest, root);
+    return manifest;
   } finally {
     await rm(root, { recursive: true, force: true }).catch(() => {});
   }

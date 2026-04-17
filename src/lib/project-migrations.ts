@@ -430,10 +430,17 @@ export function runMigrations(store: IMigrationStore, deps: MigrationDeps): void
     store.set('tickets', migratedTickets);
     store.set('schemaVersion', 16);
     deps.repairProjectRoots?.();
+    // Fall through to v16→v17.
+  }
+
+  // v16 → v17: add customApps (trivial — default is [])
+  if (version === 16 || (store.get('schemaVersion', 0) as number) === 16) {
+    store.set('schemaVersion', 17);
+    deps.repairProjectRoots?.();
     return;
   }
 
-  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 16) {
+  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 17) {
     deps.repairProjectRoots?.();
     return;
   }

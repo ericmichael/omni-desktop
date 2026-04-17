@@ -1,7 +1,8 @@
-import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
-import { ArrowClockwise20Regular, ArrowLeft20Regular, ArrowRight20Regular, Code20Regular, Desktop20Regular, DismissCircle20Regular, Globe20Regular, WindowConsole20Regular, WindowDevTools20Regular } from '@fluentui/react-icons';
+import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
+import { ArrowClockwise20Regular, ArrowLeft20Regular, ArrowRight20Regular, DismissCircle20Regular, Globe20Regular, WindowDevTools20Regular } from '@fluentui/react-icons';
+import { useStore } from '@nanostores/react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import type { ConsoleMessage, WebviewHandle } from '@/renderer/common/Webview';
@@ -11,13 +12,13 @@ import { $terminals, createTerminal } from '@/renderer/features/Console/state';
 import { resolvePreviewUrl, reverseProxyUrl } from '@/renderer/features/Tickets/preview-bridge';
 import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
-import { useWebPreviewContext,WebPreview, WebPreviewConsole, WebPreviewUrl } from '@/renderer/omniagents-ui/components/ai/web-preview';
+import { useWebPreviewContext, WebPreview, WebPreviewConsole, WebPreviewUrl } from '@/renderer/omniagents-ui/components/ai/web-preview';
 import { persistedStoreApi } from '@/renderer/services/store';
+import type { AppDescriptor, AppId } from '@/shared/app-registry';
+import { buildAppRegistry } from '@/shared/app-registry';
 
-import type { WorkspaceApp } from './EnvironmentDock';
+import { AppIcon } from './AppIcon';
 import { EnvironmentDock } from './EnvironmentDock';
-
-type SurfaceApp = Exclude<WorkspaceApp, 'chat'>;
 
 type CodeWorkspaceLayoutProps = {
   uiSrc: string;
@@ -28,8 +29,8 @@ type CodeWorkspaceLayoutProps = {
   vncSrc?: string;
   previewUrl?: string;
   onPreviewUrlChange?: (url: string) => void;
-  activeApp?: WorkspaceApp;
-  onActiveAppChange?: (app: WorkspaceApp) => void;
+  activeApp?: AppId;
+  onActiveAppChange?: (app: AppId) => void;
   onReady?: () => void;
   headerActionsTargetId?: string;
   headerActionsCompact?: boolean;
@@ -378,22 +379,22 @@ const ConsoleToggleButton = memo(({ className }: { className?: string }) => {
 });
 ConsoleToggleButton.displayName = 'ConsoleToggleButton';
 
-const APP_META: Record<SurfaceApp, { title: string; Icon: typeof Code20Regular }> = {
-  code: { title: 'VS Code', Icon: Code20Regular },
-  desktop: { title: "Omni's PC", Icon: Desktop20Regular },
-  browser: { title: 'Browser', Icon: Globe20Regular },
-  terminal: { title: 'Terminal', Icon: WindowConsole20Regular },
+const BUILTIN_TITLES: Record<string, string> = {
+  code: 'VS Code',
+  desktop: "Omni's PC",
+  browser: 'Browser',
+  terminal: 'Terminal',
 };
 
-const SurfaceFrame = memo(({ app, isGlass, children }: { app: Exclude<SurfaceApp, 'browser'>; isGlass?: boolean; children: React.ReactNode }) => {
+const SurfaceFrame = memo(({ app, isGlass, children }: { app: AppDescriptor; isGlass?: boolean; children: React.ReactNode }) => {
   const styles = useStyles();
-  const { title, Icon } = APP_META[app];
+  const title = BUILTIN_TITLES[app.id] ?? app.label;
 
   return (
     <div className={mergeClasses(styles.surfaceInner)}>
       <div className={mergeClasses(styles.surfaceHeader, isGlass && styles.surfaceHeaderGlass)}>
         <div className={styles.surfaceHeaderTitle}>
-          <Icon style={{ width: 14, height: 14 }} />
+          <AppIcon icon={app.icon} size={14} />
           <span className={styles.surfaceTitleText}>{title}</span>
         </div>
         <div className={styles.surfaceHeaderActions} />
@@ -480,10 +481,10 @@ const BrowserSurface = memo(({ src, onUrlChange, isGlass }: { src?: string; onUr
 });
 BrowserSurface.displayName = 'BrowserSurface';
 
-const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass }: { app: SurfaceApp; src?: string; onUrlChange?: (url: string) => void; isGlass?: boolean }) => {
+const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass }: { app: AppDescriptor; src?: string; onUrlChange?: (url: string) => void; isGlass?: boolean }) => {
   const styles = useStyles();
 
-  if (app === 'browser') {
+  if (app.kind === 'builtin-browser') {
     return (
       <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
         <BrowserSurface src={src} onUrlChange={onUrlChange} isGlass={isGlass} />
@@ -491,20 +492,31 @@ const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass }: { app: SurfaceA
     );
   }
 
-  if (app === 'terminal') {
+  if (app.kind === 'builtin-terminal') {
     return (
       <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
-        <SurfaceFrame app="terminal" isGlass={isGlass}>
+        <SurfaceFrame app={app} isGlass={isGlass}>
           <ConsoleStarted />
         </SurfaceFrame>
       </motion.div>
     );
   }
 
+  if (app.kind === 'webview') {
+    return (
+      <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
+        <SurfaceFrame app={app} isGlass={isGlass}>
+          {app.url ? <Webview src={app.url} showUnavailable={false} /> : <div className={styles.unavailableState}>No URL configured.</div>}
+        </SurfaceFrame>
+      </motion.div>
+    );
+  }
+
+  // builtin-code, builtin-desktop
   return (
     <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
       <SurfaceFrame app={app} isGlass={isGlass}>
-        {src ? <Webview src={src} showUnavailable={false} /> : <div className={styles.unavailableState}>{APP_META[app].title} is unavailable for this workspace.</div>}
+        {src ? <Webview src={src} showUnavailable={false} /> : <div className={styles.unavailableState}>{app.label} is unavailable for this workspace.</div>}
       </SurfaceFrame>
     </motion.div>
   );
@@ -513,7 +525,24 @@ AppSurfaceView.displayName = 'AppSurfaceView';
 
 export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, variables, codeServerSrc, vncSrc, previewUrl, onPreviewUrlChange, activeApp = 'chat', onActiveAppChange, onReady, headerActionsTargetId, headerActionsCompact, sandboxLabel, onClientToolCall, pendingPlan, onPlanDecision, dockTargetId, isGlass }: CodeWorkspaceLayoutProps) => {
   const styles = useStyles();
-  const surfaceSrc = activeApp === 'code' ? codeServerSrc : activeApp === 'desktop' ? vncSrc : activeApp === 'browser' ? previewUrl : undefined;
+  const store = useStore(persistedStoreApi.$atom);
+  const registry = useMemo(() => buildAppRegistry(store.customApps ?? []), [store.customApps]);
+  const activeDescriptor = useMemo(() => registry.find((a) => a.id === activeApp) ?? null, [registry, activeApp]);
+
+  const sandboxUrls = useMemo(
+    () => ({ codeServerUrl: codeServerSrc, noVncUrl: vncSrc }),
+    [codeServerSrc, vncSrc]
+  );
+
+  const surfaceSrc = activeDescriptor
+    ? activeDescriptor.kind === 'builtin-code'
+      ? codeServerSrc
+      : activeDescriptor.kind === 'builtin-desktop'
+        ? vncSrc
+        : activeDescriptor.kind === 'builtin-browser'
+          ? previewUrl
+          : undefined
+    : undefined;
 
   useEffect(() => {
     if ((activeApp === 'code' && !codeServerSrc) || (activeApp === 'desktop' && !vncSrc)) {
@@ -535,12 +564,12 @@ export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, va
   }, [onReady]);
 
   const handleDockSelect = useCallback(
-    (app: WorkspaceApp) => {
-      if (app === 'terminal' && $terminals.get().length === 0) {
+    (id: AppId) => {
+      if (id === 'terminal' && $terminals.get().length === 0) {
         const cwd = persistedStoreApi.$atom.get().workspaceDir ?? undefined;
         createTerminal(cwd);
       }
-      onActiveAppChange?.(app);
+      onActiveAppChange?.(id);
     },
     [onActiveAppChange]
   );
@@ -552,16 +581,23 @@ export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, va
           <OmniAgentsApp uiUrl={uiSrc} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables} onReady={handleUiReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} sandboxLabel={sandboxLabel} onClientToolCall={onClientToolCall} pendingPlan={pendingPlan} onPlanDecision={onPlanDecision} />
         </div>
         <AnimatePresence>
-          {activeApp !== 'chat' && <AppSurfaceView app={activeApp} src={surfaceSrc} onUrlChange={activeApp === 'browser' ? onPreviewUrlChange : undefined} isGlass={isGlass} />}
+          {activeApp !== 'chat' && activeDescriptor && (
+            <AppSurfaceView
+              app={activeDescriptor}
+              src={surfaceSrc}
+              onUrlChange={activeDescriptor.kind === 'builtin-browser' ? onPreviewUrlChange : undefined}
+              isGlass={isGlass}
+            />
+          )}
         </AnimatePresence>
       </div>
       {(() => {
         const dock = (
           <EnvironmentDock
-            activeApp={activeApp}
+            apps={registry}
+            activeAppId={activeApp}
             onSelect={handleDockSelect}
-            codeAvailable={!!codeServerSrc}
-            desktopAvailable={!!vncSrc}
+            sandboxUrls={sandboxUrls}
             isGlass={isGlass}
           />
         );

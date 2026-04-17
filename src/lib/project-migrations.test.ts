@@ -67,7 +67,7 @@ describe('runMigrations', () => {
         expect(t.phase).toBe('idle');
       }
       // Fall-through means schemaVersion ends up at the current version.
-      expect(store.get('schemaVersion')).toBe(16);
+      expect(store.get('schemaVersion')).toBe(17);
     });
   });
 
@@ -422,19 +422,19 @@ describe('runMigrations', () => {
   });
 
   describe('full ladder and idempotency', () => {
-    it('runs v0 → v16 end-to-end without throwing', () => {
+    it('runs v0 → v17 end-to-end without throwing', () => {
       const store = makeStore({
         // schemaVersion undefined → takes the initial boot path.
         tickets: [{ id: 't1', status: 'in_progress' }],
         projects: [{ id: 'p1', label: 'A', workspaceDir: '/tmp/w' }],
       });
       expect(() => runMigrations(store, makeDeps())).not.toThrow();
-      expect(store.get('schemaVersion')).toBe(16);
+      expect(store.get('schemaVersion')).toBe(17);
     });
 
-    it('is a no-op on an already-migrated v16 store', () => {
+    it('is a no-op on an already-migrated v17 store', () => {
       const store = makeStore({
-        schemaVersion: 16,
+        schemaVersion: 17,
         tickets: [{ id: 't1', phase: 'idle' }],
         projects: [],
         milestones: [],
@@ -444,13 +444,13 @@ describe('runMigrations', () => {
       const deps = makeDeps();
       runMigrations(store, deps);
 
-      expect(store.get('schemaVersion')).toBe(16);
+      expect(store.get('schemaVersion')).toBe(17);
       expect(deps.writeProjectContextBrief).not.toHaveBeenCalled();
     });
 
     it('calls repairProjectRoots on idempotent v-current boot', () => {
       const store = makeStore({
-        schemaVersion: 16,
+        schemaVersion: 17,
         tickets: [],
         projects: [],
         milestones: [],

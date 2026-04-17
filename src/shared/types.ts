@@ -1,6 +1,7 @@
 import type { Rectangle } from 'electron/main';
 import type { Schema } from 'electron-store';
 
+import type { CustomAppEntry } from '@/shared/app-registry';
 import type {
   ExtensionDescriptor,
   ExtensionEnsureResult,
@@ -153,6 +154,9 @@ export type StoreData = {
    * `<configDir>/skills/` = active, `<configDir>/skills-disabled/` = disabled.
    */
   skillSources: Record<string, SkillSource>;
+
+  /** User-added custom apps for the workspace dock. */
+  customApps: CustomAppEntry[];
 };
 
 // The electron store uses JSON schema to validate its data.
@@ -469,6 +473,21 @@ export const schema: Schema<StoreData> = {
     additionalProperties: { type: 'object' },
     default: {},
   },
+  customApps: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        label: { type: 'string' },
+        icon: { type: 'string' },
+        url: { type: 'string' },
+        order: { type: 'number' },
+      },
+      required: ['id', 'label', 'icon', 'url', 'order'],
+    },
+  },
 };
 
 /**
@@ -606,6 +625,8 @@ export type CodeTab = {
   sessionId?: string;
   ticketTitle?: string;
   workspaceDir?: string;
+  /** When set, this tab renders as a global app column (webview) instead of an agent session. */
+  customAppId?: string;
   createdAt: number;
 };
 
@@ -1110,11 +1131,19 @@ export type MarketplacePlugin = {
  * Shape of a `.claude-plugin/marketplace.json` file as published by
  * Anthropic's skills repo and other Claude Code plugin marketplaces.
  */
+export type MarketplaceApp = {
+  id: string;
+  label: string;
+  icon: string;
+  url: string;
+};
+
 export type MarketplaceManifest = {
   name: string;
   owner?: { name?: string; email?: string };
   metadata?: { description?: string; version?: string };
   plugins: MarketplacePlugin[];
+  apps?: MarketplaceApp[];
 };
 
 /**
