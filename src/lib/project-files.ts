@@ -320,7 +320,7 @@ const parseWith = <T>(
   const result = schema.safeParse(meta);
   if (!result.success) {
     const issue = result.error.issues[0];
-    const path = issue?.path.join('.') || undefined;
+    const path = issue?.path?.join('.') || undefined;
     return fail(issue?.message ?? 'schema validation failed', path);
   }
   return new Ok(result.data);

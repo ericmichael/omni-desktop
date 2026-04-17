@@ -15,12 +15,18 @@ const getMessage = (error: unknown) => {
 };
 
 export const ErrorBoundaryFallback = memo(({ error, resetErrorBoundary }: FallbackProps) => {
+  const stack = error instanceof Error ? error.stack : undefined;
   return (
     <div className="flex flex-col w-full h-full items-center justify-center gap-4">
       <Heading>An error occurred.</Heading>
       <Heading size="sm" className="text-fg-error">
         Error: {getMessage(error)}
       </Heading>
+      {stack && (
+        <pre className="text-xs text-fg-subtle max-w-2xl max-h-48 overflow-auto whitespace-pre-wrap break-all px-4">
+          {stack}
+        </pre>
+      )}
       <Button onClick={resetErrorBoundary} className="mt-8">
         Reset
       </Button>
