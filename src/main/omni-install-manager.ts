@@ -48,6 +48,7 @@ export class OmniInstallManager {
   private isCancellationRequested: boolean;
   private installLogStream: WriteStream | null = null;
   private installLogPath: string | null = null;
+  private installInProgress: Promise<void> | null = null;
 
   constructor(arg: {
     ipcLogger: OmniInstallManager['ipcLogger'];
@@ -535,6 +536,22 @@ export class OmniInstallManager {
   };
 
   startInstall = async (repair?: boolean) => {
+    if (this.installInProgress) {
+      this.log.info(c.gray('Install already in progress — skipping duplicate request\r\n'));
+      await this.installInProgress;
+      return;
+    }
+
+    const run = this.runInstall(repair);
+    this.installInProgress = run;
+    try {
+      await run;
+    } finally {
+      this.installInProgress = null;
+    }
+  };
+
+  private runInstall = async (repair?: boolean) => {
     this.isCancellationRequested = false;
     this.updateStatus({ type: 'starting' });
 
