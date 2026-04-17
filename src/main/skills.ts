@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, readdir, readFile, rename, rm, writeFile as writeFileAs
 import { tmpdir } from 'os';
 import { join } from 'path';
 import extract from 'extract-zip';
+import { parse as parseYaml } from 'yaml';
 
 import type { SkillEntry, SkillSource, StoreData } from '@/shared/types';
 
@@ -35,34 +36,37 @@ export function parseFrontmatter(content: string): SkillFrontmatter | null {
   if (!content.startsWith('---')) {
     return null;
   }
-  const parts = content.split('---', 3);
-  if (parts.length < 3) {
+  const endIdx = content.indexOf('---', 3);
+  if (endIdx === -1) {
+    return null;
+  }
+  const yamlBlock = content.slice(3, endIdx);
+
+  let values: Record<string, unknown>;
+  try {
+    values = parseYaml(yamlBlock) as Record<string, unknown>;
+  } catch {
     return null;
   }
 
-  const lines = parts[1]!.trim().split('\n');
-  const values: Record<string, string> = {};
-  for (const line of lines) {
-    const match = line.match(/^(\w[\w-]*):\s*(.+)/);
-    if (!match) {
-      continue;
-    }
-    const key = match[1]!;
-    const value = (match[2] ?? '').trim().replace(/^["']|["']$/g, '');
-    values[key] = value;
+  if (!values || typeof values !== 'object') {
+    return null;
   }
 
-  if (!values.name || !values.description) {
+  const name = typeof values.name === 'string' ? values.name.trim() : undefined;
+  const description = typeof values.description === 'string' ? values.description.trim() : undefined;
+
+  if (!name || !description) {
     return null;
   }
 
   return {
-    name: values.name,
-    description: values.description,
-    version: values.version,
-    author: values.author,
-    license: values.license,
-    compatibility: values.compatibility,
+    name,
+    description,
+    version: typeof values.version === 'string' ? values.version : typeof values.version === 'number' ? String(values.version) : undefined,
+    author: typeof values.author === 'string' ? values.author : undefined,
+    license: typeof values.license === 'string' ? values.license : undefined,
+    compatibility: typeof values.compatibility === 'string' ? values.compatibility : undefined,
   };
 }
 

@@ -144,6 +144,23 @@ describe('parseFrontmatter', () => {
     expect(parseFrontmatter('')).toBeNull();
   });
 
+  it('parses multi-line YAML description', () => {
+    const content = [
+      '---',
+      'name: commit',
+      'description:',
+      '  Create a well-formed git commit from current changes using session history for',
+      '  rationale and summary.',
+      '---',
+      '',
+      '# Commit',
+    ].join('\n');
+    const result = parseFrontmatter(content);
+    expect(result).not.toBeNull();
+    expect(result!.name).toBe('commit');
+    expect(result!.description).toContain('well-formed git commit');
+  });
+
   it('leaves optional fields undefined when not present', () => {
     const result = parseFrontmatter('---\nname: test\ndescription: ok\n---\n');
     expect(result).toEqual({ name: 'test', description: 'ok' });
@@ -283,7 +300,7 @@ describe('setSkillEnabled', () => {
 describe('installSkillFromFile', () => {
   it('installs a valid .skill zip and returns SkillEntry', async () => {
     const zipPath = join(configDir, 'test.skill');
-    await createSkillZip(zipPath, 'test-skill', '---\nname: test-skill\ndescription: A test\nversion: 1.0\n---\n\nBody');
+    await createSkillZip(zipPath, 'test-skill', '---\nname: test-skill\ndescription: A test\nversion: "1.0"\n---\n\nBody');
 
     const store = createMockStore();
     const entry = await installSkillFromFile(configDir, zipPath, store);
