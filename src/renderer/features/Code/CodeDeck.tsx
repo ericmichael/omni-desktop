@@ -385,20 +385,20 @@ const useStyles = makeStyles({
   launcherGrid: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '32px',
+    alignItems: 'center',
+    gap: '24px',
     width: '100%',
-    maxWidth: '640px',
   },
   launcherRow: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(var(--launcher-cols), 1fr)',
-    columnGap: 'var(--launcher-col-gap)',
+    display: 'flex',
+    justifyContent: 'center',
+    gap: '20px',
   },
-  // Honeycomb: even-indexed rows shift right by half a cell so icons sit in
-  // the gaps of the row above. `translate` is used so per-item hover
+  // Fallback honeycomb offset for uniform-width rows (when no hex diamond
+  // fits the container). Uses the `translate` CSS property so per-item hover
   // `transform` still composes.
   launcherRowOffset: {
-    translate: 'calc((100% + var(--launcher-col-gap)) / (2 * var(--launcher-cols))) 0',
+    translate: 'calc((var(--launcher-cell-width) + 20px) / 2) 0',
   },
   launcherItem: {
     display: 'flex',
@@ -409,6 +409,8 @@ const useStyles = makeStyles({
     border: 'none',
     backgroundColor: 'transparent',
     cursor: 'pointer',
+    width: 'var(--launcher-cell-width)',
+    flexShrink: 0,
     transitionProperty: 'transform',
     transitionDuration: '180ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
@@ -777,57 +779,121 @@ const AppColumn = memo(
 );
 AppColumn.displayName = 'AppColumn';
 
-const LAUNCHER_COL_GAP_PX = 40;
-const LAUNCHER_CELL_MIN_PX = 96;
-const LAUNCHER_COLS_MIN = 2;
-const LAUNCHER_COLS_MAX = 8;
+const LAUNCHER_CELL_MIN_PX = 64;
+const LAUNCHER_CELL_MAX_PX = 96;
+const LAUNCHER_COL_GAP_PX = 20;
+const LAUNCHER_HEX_MAX_HEIGHT = 15;
+
+type LauncherLayout = { rows: number[]; cellWidth: number; uniform: boolean };
+
+/**
+ * Picks the smallest symmetric hex-diamond shape whose capacity ≥ n, then
+ * sizes cells to fit the container. A shape of height h (odd) and peak width
+ * k has rows [k-m, …, k-1, k, k-1, …, k-m] where m=(h-1)/2, capacity =
+ * k*h − m*(m+1). If the ideal shape's peak can't fit even at min cell width,
+ * falls back to a taller/narrower shape; ultimately to uniform rows with
+ * manual honeycomb offset.
+ */
+function computeLauncherLayout(n: number, containerWidth: number): LauncherLayout {
+  if (n <= 0) {
+    return { rows: [], cellWidth: LAUNCHER_CELL_MIN_PX, uniform: false };
+  }
+
+  type Candidate = { h: number; k: number; capacity: number; cellWidth: number };
+  const candidates: Candidate[] = [];
+
+  for (let h = 1; h <= LAUNCHER_HEX_MAX_HEIGHT; h += 2) {
+    const m = (h - 1) / 2;
+    const minK = m + 1;
+    const k = Math.max(minK, Math.ceil((n + m * (m + 1)) / h));
+    const capacity = k * h - m * (m + 1);
+    if (capacity < n) {
+      continue;
+    }
+    const cellWidth = (containerWidth - LAUNCHER_COL_GAP_PX * (k - 1)) / k;
+    if (cellWidth < LAUNCHER_CELL_MIN_PX) {
+      continue;
+    }
+    candidates.push({ h, k, capacity, cellWidth });
+  }
+
+  if (candidates.length > 0) {
+    // Prefer smallest capacity (fewest empty slots), tiebreak by fewest rows.
+    candidates.sort((a, b) => (a.capacity - b.capacity) || (a.h - b.h));
+    const { h, k, cellWidth } = candidates[0]!;
+    const m = (h - 1) / 2;
+    const rows: number[] = [];
+    for (let i = 0; i < h; i++) {
+      rows.push(k - Math.abs(i - m));
+    }
+    const uniform = rows.length === 1 || rows.every((w) => w === rows[0]);
+    return {
+      rows,
+      cellWidth: Math.min(LAUNCHER_CELL_MAX_PX, cellWidth),
+      uniform,
+    };
+  }
+
+  // Fallback: uniform rows at min cell width
+  const maxCols = Math.max(
+    2,
+    Math.floor((containerWidth + LAUNCHER_COL_GAP_PX) / (LAUNCHER_CELL_MIN_PX + LAUNCHER_COL_GAP_PX))
+  );
+  const rows: number[] = [];
+  let remaining = n;
+  while (remaining > 0) {
+    const w = Math.min(remaining, maxCols);
+    rows.push(w);
+    remaining -= w;
+  }
+  return { rows, cellWidth: LAUNCHER_CELL_MIN_PX, uniform: true };
+}
 
 const AppLauncherGrid = memo(
   ({ apps, onPick, isGlass }: { apps: CustomAppEntry[]; onPick: (appId: string) => void; isGlass?: boolean }) => {
     const styles = useStyles();
     const ref = useRef<HTMLDivElement>(null);
-    const [cols, setCols] = useState(4);
+    const [containerWidth, setContainerWidth] = useState(480);
 
     useEffect(() => {
       const el = ref.current;
       if (!el) {
         return;
       }
-      const compute = (width: number) => {
-        const n = Math.floor((width + LAUNCHER_COL_GAP_PX) / (LAUNCHER_CELL_MIN_PX + LAUNCHER_COL_GAP_PX));
-        return Math.max(LAUNCHER_COLS_MIN, Math.min(LAUNCHER_COLS_MAX, n));
-      };
-      setCols(compute(el.clientWidth));
+      setContainerWidth(el.clientWidth);
       const ro = new ResizeObserver(([entry]) => {
         if (entry) {
-          setCols(compute(entry.contentRect.width));
+          setContainerWidth(entry.contentRect.width);
         }
       });
       ro.observe(el);
       return () => ro.disconnect();
     }, []);
 
-    const rows = useMemo(() => {
-      const out: CustomAppEntry[][] = [];
-      for (let i = 0; i < apps.length; i += cols) {
-        out.push(apps.slice(i, i + cols));
+    const { rows, cellWidth, uniform } = useMemo(() => {
+      const layout = computeLauncherLayout(apps.length, containerWidth);
+      const chunked: CustomAppEntry[][] = [];
+      let idx = 0;
+      for (const count of layout.rows) {
+        chunked.push(apps.slice(idx, idx + count));
+        idx += count;
       }
-      return out;
-    }, [apps, cols]);
+      return { rows: chunked, cellWidth: layout.cellWidth, uniform: layout.uniform };
+    }, [apps, containerWidth]);
 
     return (
       <div
         ref={ref}
         className={styles.launcherGrid}
-        style={{
-          ['--launcher-cols' as string]: cols,
-          ['--launcher-col-gap' as string]: `${LAUNCHER_COL_GAP_PX}px`,
-        }}
+        style={{ ['--launcher-cell-width' as string]: `${cellWidth}px` }}
       >
         {rows.map((row, rowIndex) => (
           <div
             key={rowIndex}
-            className={mergeClasses(styles.launcherRow, rowIndex % 2 === 1 && styles.launcherRowOffset)}
+            className={mergeClasses(
+              styles.launcherRow,
+              uniform && rowIndex % 2 === 1 && styles.launcherRowOffset
+            )}
           >
             {row.map((app) => (
               <button key={app.id} type="button" className={styles.launcherItem} onClick={() => onPick(app.id)}>
