@@ -1,5 +1,6 @@
 import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import {
+  Add20Regular,
   ArchiveRegular,
   MailInbox20Regular,
   TagRegular,
@@ -8,6 +9,8 @@ import {
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
+import { IconButton } from '@/renderer/ds';
+import { $quickCaptureOpen } from '@/renderer/features/Inbox/QuickCapture';
 import { ticketApi } from '@/renderer/features/Tickets/state';
 import type { InboxItem, InboxItemId } from '@/shared/types';
 
@@ -192,6 +195,10 @@ export const InboxView = memo(({ selectedItemId }: { selectedItemId?: InboxItemI
     setSelectedId(null);
   }, [selectedItemId]);
 
+  const handleAdd = useCallback(() => {
+    $quickCaptureOpen.set(true);
+  }, []);
+
   // Detail view takes over the panel when an item is selected.
   //
   // Keying on `selectedItem.id` forces a full remount when the user navigates
@@ -211,6 +218,7 @@ export const InboxView = memo(({ selectedItemId }: { selectedItemId?: InboxItemI
         <MailInbox20Regular className={styles.headerIcon} />
         <span className={styles.title}>Inbox</span>
         <div className={styles.spacer} />
+        <IconButton aria-label="Add item" icon={<Add20Regular />} size="sm" onClick={handleAdd} />
         <div className={styles.tabs}>
           <TabBtn
             label="Inbox"
