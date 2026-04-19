@@ -18,14 +18,16 @@ import {
   Globe20Regular,
   Star20Filled,
   Star20Regular,
+  WindowDevTools20Regular,
 } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { fallbackTitle, parseOrigin } from '@/lib/url';
-import type { ContextMenuParams, FoundInPageResult, WebviewHandle } from '@/renderer/common/Webview';
+import type { ConsoleMessage, ContextMenuParams, FoundInPageResult, WebviewHandle } from '@/renderer/common/Webview';
 import { Webview } from '@/renderer/common/Webview';
 import { BookmarksBar } from '@/renderer/features/Browser/BookmarksBar';
+import { DevtoolsPanel } from '@/renderer/features/Browser/Devtools/DevtoolsPanel';
 import { DownloadsTray } from '@/renderer/features/Browser/DownloadsTray';
 import { FindBar } from '@/renderer/features/Browser/FindBar';
 import { HistoryPanel } from '@/renderer/features/Browser/HistoryPanel';
@@ -198,6 +200,17 @@ export const BrowserView = memo(
     const [historyOpen, setHistoryOpen] = useState(false);
     const [ctxMenu, setCtxMenu] = useState<ContextMenuParams | null>(null);
     const [readerKey, setReaderKey] = useState<string | null>(null);
+    const [devtoolsOpen, setDevtoolsOpen] = useState(false);
+    const [consoleLog, setConsoleLog] = useState<Array<ConsoleMessage & { timestamp: number }>>([]);
+
+    const handleConsoleMessage = useCallback((msg: ConsoleMessage) => {
+      setConsoleLog((prev) => {
+        const next = [...prev, { ...msg, timestamp: Date.now() }];
+        return next.length > 500 ? next.slice(-500) : next;
+      });
+    }, []);
+
+    const handleClearConsole = useCallback(() => setConsoleLog([]), []);
 
     const toggleReader = useCallback(async () => {
       const handle = webviewRef.current;
@@ -242,6 +255,7 @@ return;
     // tied to the specific webContents, which is remounted on tab switch.
     useEffect(() => {
       setReaderKey(null);
+      setConsoleLog([]);
     }, [activeTabId]);
 
     // Reset preview state on tab switch so stale errors/loading don't leak.
@@ -481,6 +495,9 @@ void browserApi.closeTab(tabsetId, activeTabId);
         } else if (event.altKey && key === 'r') {
           event.preventDefault();
           void toggleReader();
+        } else if (event.altKey && key === 'i') {
+          event.preventDefault();
+          setDevtoolsOpen((v) => !v);
         } else if (event.key === '=' || event.key === '+') {
           event.preventDefault();
           applyZoom(zoom + 0.1);
@@ -606,6 +623,16 @@ return undefined;
               <Star20Regular style={{ width: 14, height: 14 }} />
             )}
           </button>
+          <button
+            type="button"
+            className={styles.navBtn}
+            aria-label={devtoolsOpen ? 'Close devtools' : 'Open devtools'}
+            aria-pressed={devtoolsOpen}
+            title={devtoolsOpen ? 'Close devtools (Alt+I)' : 'Open devtools (Alt+I)'}
+            onClick={() => setDevtoolsOpen((v) => !v)}
+          >
+            <WindowDevTools20Regular style={{ width: 14, height: 14 }} />
+          </button>
           <DownloadsTray />
           <ProfileSwitcher tabsetId={tabsetId} profiles={state.profiles} currentProfileId={resolvedProfileId} />
         </div>
@@ -654,6 +681,7 @@ return undefined;
               onFaviconChange={handleFavicon}
               onFoundInPage={handleFoundInPage}
               onContextMenu={handleContextMenu}
+              onConsoleMessage={handleConsoleMessage}
               onError={handleError}
               registry={registryProps}
             />
@@ -662,6 +690,15 @@ return undefined;
             <PageContextMenu params={ctxMenu} actions={contextMenuActions} onClose={() => setCtxMenu(null)} />
           )}
           {findOpen && <FindBar webviewRef={webviewRef} onClose={closeFind} result={findResult} />}
+          {devtoolsOpen && registryProps && (
+            <DevtoolsPanel
+              handleId={registryProps.handleId}
+              activeOrigin={origin ? `${origin.scheme}://${origin.host}` : null}
+              consoleLog={consoleLog}
+              onClear={handleClearConsole}
+              onClose={() => setDevtoolsOpen(false)}
+            />
+          )}
           {historyOpen && (
             <HistoryPanel
               profileId={resolvedProfileId}
