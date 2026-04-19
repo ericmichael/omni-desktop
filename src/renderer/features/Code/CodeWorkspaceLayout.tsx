@@ -282,7 +282,7 @@ const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass, tabId }: { app: A
 
   if (app.kind === 'builtin-browser') {
     return (
-      <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
         <BrowserView
           tabsetId={tabId ? `dock:${tabId}` : 'dock:global'}
           isGlass={isGlass}
@@ -297,7 +297,7 @@ const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass, tabId }: { app: A
 
   if (app.kind === 'builtin-terminal') {
     return (
-      <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
         <SurfaceFrame app={app} isGlass={isGlass}>
           <ConsoleStarted />
         </SurfaceFrame>
@@ -307,7 +307,7 @@ const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass, tabId }: { app: A
 
   if (app.kind === 'webview') {
     return (
-      <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
         <SurfaceFrame app={app} isGlass={isGlass}>
           {app.url ? <Webview src={app.url} showUnavailable={false} registry={registryProps} /> : <div className={styles.unavailableState}>No URL configured.</div>}
         </SurfaceFrame>
@@ -317,7 +317,7 @@ const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass, tabId }: { app: A
 
   // builtin-code, builtin-desktop
   return (
-    <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
       <SurfaceFrame app={app} isGlass={isGlass}>
         {src ? <Webview src={src} showUnavailable={false} registry={registryProps} /> : <div className={styles.unavailableState}>{app.label} is unavailable for this workspace.</div>}
       </SurfaceFrame>
