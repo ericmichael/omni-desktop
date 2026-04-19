@@ -98,8 +98,20 @@ const [, cleanupConsole] = createConsoleManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
 });
+// Forward-reference for the BrowserManager — created further down, but
+// AppControlManager needs its popup callback at construction time so
+// `setWindowOpenHandler` can route `window.open` into `BrowserManager.createTab`.
+let browserManagerRef: ReturnType<typeof createBrowserManager>[0] | null = null;
 const [appControlManager, cleanupAppControl] = createAppControlManager({
   ipc: main.ipc,
+  onBrowserPopup: (tabsetId, url) => {
+    if (!browserManagerRef) return;
+    try {
+      browserManagerRef.createTab(tabsetId, { url, activate: true });
+    } catch {
+      // Tabset may not exist yet (race on first mount) — ignore.
+    }
+  },
 });
 const [omniInstall, cleanupOmniInstall] = createOmniInstallManager({
   ipc: main.ipc,
@@ -127,11 +139,12 @@ const [, cleanupExtensions] = createExtensionManager({
   store,
   sendToWindow: main.sendToWindow,
 });
-const [, cleanupBrowser] = createBrowserManager({
+const [browserManager, cleanupBrowser] = createBrowserManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
   store,
 });
+browserManagerRef = browserManager;
 const [, cleanupDownloads] = createDownloadsManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,

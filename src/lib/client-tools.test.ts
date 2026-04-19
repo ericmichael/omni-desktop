@@ -703,11 +703,12 @@ describe('client_tools shape', () => {
     expect(names).toContain('browser_wait_for');
     expect(names).toContain('browser_pdf');
     expect(names).toContain('browser_full_screenshot');
+    expect(names).toContain('browser_screenshot_element');
     expect(names).toContain('browser_cookies_get');
     expect(names).toContain('browser_storage_get');
     expect(names).toContain('browser_network_log');
     expect(names).toContain('app_snapshot_diff');
-    expect(names).toHaveLength(51);
+    expect(names).toHaveLength(52);
     // additional_instructions inlines behavioral guidance — not tool schemas
     expect(vars.additional_instructions).toContain('Working with projects and tickets');
     expect(vars.additional_instructions).toContain('escalate');
@@ -772,7 +773,8 @@ describe('client_tools shape', () => {
     expect(names).toContain('browser_storage_clear');
     expect(names).toContain('browser_network_log');
     expect(names).toContain('app_snapshot_diff');
-    expect(names).toHaveLength(72);
+    expect(names).toContain('browser_screenshot_element');
+    expect(names).toHaveLength(73);
     // Behavioral guidance inlined — no tool schemas restated
     expect(vars.additional_instructions).toContain('Working with projects and tickets');
     expect(vars.additional_instructions).toContain('escalate');
@@ -784,7 +786,7 @@ describe('client_tools shape', () => {
     expect(names).toContain('open_preview');
     expect(names).toContain('display_plan');
     expect(names).toContain('browser_list_tabsets');
-    expect(names).toHaveLength(73);
+    expect(names).toHaveLength(74);
   });
 
   it('interactive variables include safe_tool_overrides for read-only tools', () => {

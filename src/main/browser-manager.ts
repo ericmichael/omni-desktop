@@ -27,6 +27,9 @@ import type {
 /** Upper bound on persisted history. Older entries are pruned on insert. */
 export const HISTORY_CAP = 2000;
 
+/** Most recently closed tabs remembered per tabset for reopen (in-memory). */
+export const RECENTLY_CLOSED_CAP = 10;
+
 /** Built-in default profile id. Always present; cannot be removed. */
 export const DEFAULT_PROFILE_ID = 'default';
 
@@ -60,6 +63,9 @@ export class BrowserTabNotFoundError extends Error {
 }
 
 export class BrowserManager {
+  /** In-memory LIFO of closed tabs per tabset. Not persisted. */
+  private readonly recentlyClosed = new Map<BrowserTabsetId, BrowserTab[]>();
+
   constructor(private readonly deps: BrowserManagerDeps) {
     this.ensureDefaultProfile();
   }
@@ -172,6 +178,15 @@ return existing;
     return tabset;
   }
 
+  /** Reassign a tabset to a different profile (swaps its webview partition). */
+  setTabsetProfile(id: BrowserTabsetId, profileId: BrowserProfileId): void {
+    const profiles = this.deps.store.getProfiles();
+    if (!profiles.some((p) => p.id === profileId)) {
+      throw new Error(`Browser profile ${profileId} not found`);
+    }
+    this.mutateTabset(id, (ts) => ({ next: { ...ts, profileId } }));
+  }
+
   removeTabset(id: BrowserTabsetId): void {
     const tabsets = this.deps.store.getTabsets();
     if (!tabsets[id]) {
@@ -216,6 +231,15 @@ return;
       if (idx < 0) {
 throw new BrowserTabNotFoundError(tabsetId, tabId);
 }
+      // Remember the closed tab (minus any blank start-page tabs) so
+      // Cmd+Shift+T can resurrect it.
+      const closed = ts.tabs[idx]!;
+      if (closed.url && closed.url !== BROWSER_START_URL) {
+        const stack = this.recentlyClosed.get(tabsetId) ?? [];
+        stack.push(closed);
+        while (stack.length > RECENTLY_CLOSED_CAP) stack.shift();
+        this.recentlyClosed.set(tabsetId, stack);
+      }
       const tabs = ts.tabs.filter((t) => t.id !== tabId);
       let activeTabId = ts.activeTabId;
       if (activeTabId === tabId) {
@@ -235,6 +259,29 @@ throw new BrowserTabNotFoundError(tabsetId, tabId);
         return { next: { ...ts, tabs: [fresh], activeTabId: fresh.id } };
       }
       return { next: { ...ts, tabs, activeTabId } };
+    });
+  }
+
+  /**
+   * Pop the most recently closed tab off the tabset's LIFO and re-append it.
+   * Returns the restored tab, or null if the stack was empty.
+   */
+  reopenTab(tabsetId: BrowserTabsetId): BrowserTab | null {
+    const stack = this.recentlyClosed.get(tabsetId) ?? [];
+    const restored = stack.pop();
+    if (!restored) return null;
+    this.recentlyClosed.set(tabsetId, stack);
+    return this.mutateTabset(tabsetId, (ts) => {
+      const now = this.deps.now();
+      // Mint a fresh id — reusing the old one risks colliding with anything
+      // that still references the closed tab.
+      const tab: BrowserTab = {
+        ...restored,
+        id: this.deps.newId(),
+        createdAt: now,
+        lastActiveAt: now,
+      };
+      return { next: { ...ts, tabs: [...ts.tabs, tab], activeTabId: tab.id }, result: tab };
     });
   }
 
@@ -566,6 +613,10 @@ export function createBrowserManager(options: CreateBrowserManagerOptions): [Bro
     manager.removeTabset(id);
     broadcast();
   });
+  ipc.handle('browser:tabset-set-profile', (_: unknown, id: BrowserTabsetId, profileId: BrowserProfileId) => {
+    manager.setTabsetProfile(id, profileId);
+    broadcast();
+  });
 
   // Tabs
   ipc.handle(
@@ -625,6 +676,11 @@ export function createBrowserManager(options: CreateBrowserManagerOptions): [Bro
       return t;
     }
   );
+  ipc.handle('browser:tab-reopen', (_: unknown, tabsetId: BrowserTabsetId) => {
+    const t = manager.reopenTab(tabsetId);
+    if (t) broadcast();
+    return t;
+  });
 
   // History
   ipc.handle(

@@ -942,6 +942,17 @@ export const BROWSER_CLIENT_TOOLS = [
     },
   },
   {
+    name: 'browser_screenshot_element',
+    safe: true,
+    description:
+      'Capture a PNG clipped to a specific element identified by `ref` (from `app_snapshot`). Great for visual confirmation of a button, card, or error message without a full-page screenshot.',
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' }, ref: { type: 'string' } },
+      required: ['app_id', 'ref'],
+    },
+  },
+  {
     name: 'browser_set_viewport',
     safe: true,
     description:

@@ -32,6 +32,7 @@ import { HistoryPanel } from '@/renderer/features/Browser/HistoryPanel';
 import { Omnibox, type OmniboxHandle } from '@/renderer/features/Browser/Omnibox';
 import { PageContextMenu } from '@/renderer/features/Browser/PageContextMenu';
 import { PermissionsBar } from '@/renderer/features/Browser/PermissionsBar';
+import { ProfileSwitcher } from '@/renderer/features/Browser/ProfileSwitcher';
 import { READER_MODE_CSS } from '@/renderer/features/Browser/reader-mode';
 import { $browserState, browserApi, getActiveTab } from '@/renderer/features/Browser/state';
 import { TabStrip } from '@/renderer/features/Browser/TabStrip';
@@ -212,12 +213,6 @@ return;
       }
     }, [readerKey]);
 
-    // Reset reader state when the active tab changes — the injected CSS is
-    // tied to the specific webContents, which is remounted on tab switch.
-    useEffect(() => {
-      setReaderKey(null);
-    }, [activeTabId]);
-
     // Resolve the active profile & partition.
     const resolvedProfileId = profileId ?? tabset?.profileId ?? 'default';
     const profile = state.profiles.find((p) => p.id === resolvedProfileId);
@@ -242,6 +237,12 @@ return;
 
     const activeTab = useMemo(() => getActiveTab(tabset), [tabset]);
     const activeTabId = activeTab?.id;
+
+    // Reset reader state when the active tab changes — the injected CSS is
+    // tied to the specific webContents, which is remounted on tab switch.
+    useEffect(() => {
+      setReaderKey(null);
+    }, [activeTabId]);
 
     // Reset preview state on tab switch so stale errors/loading don't leak.
     useEffect(() => {
@@ -474,6 +475,9 @@ void browserApi.closeTab(tabsetId, activeTabId);
         } else if (event.shiftKey && key === 'h') {
           event.preventDefault();
           setHistoryOpen(true);
+        } else if (event.shiftKey && key === 't') {
+          event.preventDefault();
+          void browserApi.reopenTab(tabsetId);
         } else if (event.altKey && key === 'r') {
           event.preventDefault();
           void toggleReader();
@@ -515,8 +519,9 @@ return undefined;
         scope: registryScope,
         ...(registryScope === 'column' && registryTabId ? { tabId: registryTabId } : {}),
         label: 'Browser',
+        browserTabsetId: tabsetId,
       };
-    }, [activeTab, registryScope, registryTabId]);
+    }, [activeTab, registryScope, registryTabId, tabsetId]);
 
     if (!tabset || !activeTab) {
       return (
@@ -602,6 +607,7 @@ return undefined;
             )}
           </button>
           <DownloadsTray />
+          <ProfileSwitcher tabsetId={tabsetId} profiles={state.profiles} currentProfileId={resolvedProfileId} />
         </div>
         <BookmarksBar bookmarks={state.bookmarks} isGlass={isGlass} onOpen={navigateActive} />
         <PermissionsBar partition={partition} />

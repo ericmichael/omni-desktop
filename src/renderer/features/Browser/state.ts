@@ -48,6 +48,8 @@ export const browserApi = {
   ensureTabset: (id: BrowserTabsetId, opts?: { profileId?: BrowserProfileId; initialUrl?: string }) =>
     emitter.invoke('browser:tabset-ensure', id, opts),
   removeTabset: (id: BrowserTabsetId) => emitter.invoke('browser:tabset-remove', id),
+  setTabsetProfile: (id: BrowserTabsetId, profileId: BrowserProfileId) =>
+    emitter.invoke('browser:tabset-set-profile', id, profileId),
 
   addProfile: (input: { label: string; incognito?: boolean }) =>
     emitter.invoke('browser:profile-add', input),
@@ -72,6 +74,8 @@ export const browserApi = {
     emitter.invoke('browser:tab-pin', tabsetId, tabId, pinned),
   duplicateTab: (tabsetId: BrowserTabsetId, tabId: BrowserTabId): Promise<BrowserTab> =>
     emitter.invoke('browser:tab-duplicate', tabsetId, tabId),
+  reopenTab: (tabsetId: BrowserTabsetId): Promise<BrowserTab | null> =>
+    emitter.invoke('browser:tab-reopen', tabsetId),
 
   recordHistory: (entry: { url: string; title?: string; profileId: BrowserProfileId }) =>
     emitter.invoke('browser:history-record', entry),

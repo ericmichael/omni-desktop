@@ -922,6 +922,7 @@ async function handleAppControlTools(
     'browser_wait_for',
     'browser_pdf',
     'browser_full_screenshot',
+    'browser_screenshot_element',
     'browser_set_viewport',
     'browser_set_user_agent',
     'browser_set_zoom',
@@ -1116,6 +1117,17 @@ return err('Missing ref');
         const path = await emitter.invoke(
           'app:full-screenshot',
           handleId,
+          currentTicketId ? { artifactsSubdir: currentTicketId } : {}
+        );
+        return ok({ path });
+      }
+      case 'browser_screenshot_element': {
+        const ref = (toolArgs.ref as string) ?? '';
+        if (!ref) return err('Missing ref');
+        const path = await emitter.invoke(
+          'app:element-screenshot',
+          handleId,
+          ref,
           currentTicketId ? { artifactsSubdir: currentTicketId } : {}
         );
         return ok({ path });

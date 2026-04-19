@@ -17,6 +17,8 @@ export type WebviewRegistryProps = {
   scope: AppRegistrationPayload['scope'];
   tabId?: string;
   label: string;
+  /** For `builtin-browser` surfaces — routes `window.open` / target=_blank. */
+  browserTabsetId?: string;
 };
 
 export type WebviewHandle = {
@@ -340,6 +342,7 @@ return;
             label: registry.label,
             url: src,
             controllable: isControllableKind(registry.kind),
+            ...(registry.browserTabsetId ? { browserTabsetId: registry.browserTabsetId } : {}),
           });
         }
 

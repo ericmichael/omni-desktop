@@ -1698,6 +1698,11 @@ type AppControlIpcEvents = Namespaced<
       handleId: import('@/shared/app-control-types').AppHandleId,
       options?: import('@/shared/app-control-types').AppScreenshotOptions
     ) => string;
+    'element-screenshot': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      ref: string,
+      options?: import('@/shared/app-control-types').AppScreenshotOptions
+    ) => string;
     'set-viewport': (
       handleId: import('@/shared/app-control-types').AppHandleId,
       options:
@@ -1764,6 +1769,8 @@ type BrowserIpcEvents = Namespaced<
     /** Idempotent. Ensures a tabset exists and returns it; creates a blank tab on first call. */
     'tabset-ensure': (id: BrowserTabsetId, opts?: { profileId?: BrowserProfileId; initialUrl?: string }) => BrowserTabset;
     'tabset-remove': (id: BrowserTabsetId) => void;
+    /** Switch a tabset to a different profile; swaps its partition on remount. */
+    'tabset-set-profile': (id: BrowserTabsetId, profileId: BrowserProfileId) => void;
     /** Create a new tab. If `activate` is true (default), also activates it. */
     'tab-create': (
       tabsetId: BrowserTabsetId,
@@ -1780,6 +1787,8 @@ type BrowserIpcEvents = Namespaced<
     'tab-reorder': (tabsetId: BrowserTabsetId, tabIds: BrowserTabId[]) => void;
     'tab-pin': (tabsetId: BrowserTabsetId, tabId: BrowserTabId, pinned: boolean) => void;
     'tab-duplicate': (tabsetId: BrowserTabsetId, tabId: BrowserTabId) => BrowserTab;
+    /** Restore the most recently closed tab in this tabset (LIFO). */
+    'tab-reopen': (tabsetId: BrowserTabsetId) => BrowserTab | null;
     /** Record a visit. Dedupes against the most recent entry for the same URL. */
     'history-record': (entry: { url: string; title?: string; profileId: BrowserProfileId }) => void;
     'history-list': (opts?: { query?: string; limit?: number; profileId?: BrowserProfileId }) => BrowserHistoryEntry[];

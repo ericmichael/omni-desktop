@@ -19,6 +19,7 @@ import {
   clearNetworkLog,
   clearViewportOverride,
   diffSnapshots,
+  elementScreenshot,
   enableNetworkLog,
   ensureAttached,
   fillRef,
@@ -60,7 +61,12 @@ type AppEntry = {
   console: AppConsoleEntry[];
   /** Cleanup for `console-message` listener so we don't leak. */
   detachConsole?: () => void;
+  /** True once we've installed `setWindowOpenHandler` on this webContents. */
+  popupHandlerInstalled?: boolean;
 };
+
+/** Callback wired by `main/index.ts` to route popups into `BrowserManager`. */
+export type OnBrowserPopup = (tabsetId: string, url: string, disposition: string) => void;
 
 const LEVEL_RANK: Record<AppConsoleLevel, number> = {
   log: 0,
@@ -77,6 +83,11 @@ const MOUSE_BUTTON_MAP: Record<AppClickButton, 'left' | 'right' | 'middle'> = {
 
 export class AppControlManager {
   private entries = new Map<AppHandleId, AppEntry>();
+  private onBrowserPopup?: OnBrowserPopup;
+
+  constructor(options: { onBrowserPopup?: OnBrowserPopup } = {}) {
+    this.onBrowserPopup = options.onBrowserPopup;
+  }
 
   // -- registry sync -------------------------------------------------------
 
@@ -93,6 +104,7 @@ export class AppControlManager {
     };
     this.entries.set(payload.handleId, entry);
     this.attachConsoleListener(entry);
+    this.attachPopupHandler(entry);
   }
 
   update(handleId: AppHandleId, patch: Partial<AppRegistrationPayload>): void {
@@ -104,7 +116,9 @@ export class AppControlManager {
     if (patch.webContentsId !== undefined && patch.webContentsId !== entry.webContentsId) {
       entry.webContentsId = patch.webContentsId;
       entry.detachConsole?.();
+      entry.popupHandlerInstalled = false;
       this.attachConsoleListener(entry);
+      this.attachPopupHandler(entry);
     }
   }
 
@@ -151,6 +165,34 @@ export class AppControlManager {
       throw new Error(`App "${entry.registration.appId}" is closed.`);
     }
     return { entry, wc };
+  }
+
+  // -- popup handler ------------------------------------------------------
+
+  /**
+   * Install `setWindowOpenHandler` on a browser-kind webContents so
+   * `window.open` and `target="_blank"` create a new tab in the same tabset
+   * instead of opening a native OS window. Idempotent per webContents via
+   * the `popupHandlerInstalled` flag.
+   */
+  private attachPopupHandler(entry: AppEntry): void {
+    const tabsetId = entry.registration.browserTabsetId;
+    if (!tabsetId || entry.popupHandlerInstalled || !this.onBrowserPopup) {
+      return;
+    }
+    if (entry.webContentsId === undefined) {
+      return;
+    }
+    const wc = webContentsNS.fromId(entry.webContentsId);
+    if (!wc || wc.isDestroyed()) {
+      return;
+    }
+    const onPopup = this.onBrowserPopup;
+    wc.setWindowOpenHandler((details) => {
+      onPopup(tabsetId, details.url, details.disposition);
+      return { action: 'deny' };
+    });
+    entry.popupHandlerInstalled = true;
   }
 
   // -- console ring buffer ------------------------------------------------
@@ -455,6 +497,25 @@ return;
     return filepath;
   }
 
+  /** Per-element screenshot. `ref` comes from the most recent snapshot. */
+  async elementScreenshot(
+    handleId: AppHandleId,
+    ref: string,
+    options: AppScreenshotOptions = {}
+  ): Promise<string> {
+    const { entry, wc } = this.requireWebContents(handleId);
+    ensureAttached(wc);
+    const buffer = await elementScreenshot(wc, ref);
+    const rootDir = options.artifactsSubdir
+      ? getArtifactsDir(getOmniConfigDir(), options.artifactsSubdir)
+      : path.join(getOmniConfigDir(), 'app-control-screenshots');
+    await fs.mkdir(rootDir, { recursive: true });
+    const filename = `${entry.registration.appId}-element-${Date.now()}.png`;
+    const filepath = path.join(rootDir, filename);
+    await fs.writeFile(filepath, buffer);
+    return filepath;
+  }
+
   /** Full-page (scroll-and-stitch equivalent) screenshot via CDP. */
   async fullPageScreenshot(
     handleId: AppHandleId,
@@ -653,9 +714,10 @@ return { ok: true, matched: 'selector' };
 
 export const createAppControlManager = (arg: {
   ipc: IIpcListener;
+  onBrowserPopup?: OnBrowserPopup;
 }): [AppControlManager, () => void] => {
-  const { ipc } = arg;
-  const manager = new AppControlManager();
+  const { ipc, onBrowserPopup } = arg;
+  const manager = new AppControlManager({ ...(onBrowserPopup ? { onBrowserPopup } : {}) });
 
   ipc.handle('app:register', (_, payload) => manager.register(payload));
   ipc.handle('app:update', (_, handleId, patch) => manager.update(handleId, patch));
@@ -685,6 +747,7 @@ export const createAppControlManager = (arg: {
   ipc.handle('app:wait-for', (_, handleId, options) => manager.waitFor(handleId, options));
   ipc.handle('app:pdf', (_, handleId, options) => manager.pdf(handleId, options));
   ipc.handle('app:full-screenshot', (_, handleId, options) => manager.fullPageScreenshot(handleId, options));
+  ipc.handle('app:element-screenshot', (_, handleId, ref, options) => manager.elementScreenshot(handleId, ref, options));
   ipc.handle('app:set-viewport', (_, handleId, options) => manager.setViewport(handleId, options));
   ipc.handle('app:set-user-agent', (_, handleId, ua) => manager.setUserAgent(handleId, ua));
   ipc.handle('app:set-zoom', (_, handleId, factor) => manager.setZoom(handleId, factor));
@@ -725,6 +788,7 @@ export const createAppControlManager = (arg: {
       'app:wait-for',
       'app:pdf',
       'app:full-screenshot',
+      'app:element-screenshot',
       'app:set-viewport',
       'app:set-user-agent',
       'app:set-zoom',

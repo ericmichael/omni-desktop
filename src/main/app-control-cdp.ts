@@ -249,6 +249,41 @@ export async function scrollRefIntoView(wc: WebContents, ref: string): Promise<v
 }
 
 /**
+ * Per-element screenshot. Uses the snapshot ref → backendNodeId map to
+ * resolve the element's bounding box, then clips `Page.captureScreenshot` to
+ * just that rect. Returns a PNG buffer.
+ */
+export async function elementScreenshot(wc: WebContents, ref: string): Promise<Buffer> {
+  ensureAttached(wc);
+  const s = getState(wc);
+  const backendNodeId = s.refToBackendNodeId.get(ref);
+  if (backendNodeId === undefined) {
+    throw new Error(
+      `Unknown ref "${ref}" — snapshots are invalidated on navigation, re-snapshot the app and try again.`
+    );
+  }
+  const { object } = await send<{ object: { objectId: string } }>(wc, 'DOM.resolveNode', {
+    backendNodeId,
+  });
+  const { model } = await send<{ model: { content: number[] } }>(wc, 'DOM.getBoxModel', {
+    objectId: object.objectId,
+  });
+  const pts = model.content;
+  const xs = [pts[0]!, pts[2]!, pts[4]!, pts[6]!];
+  const ys = [pts[1]!, pts[3]!, pts[5]!, pts[7]!];
+  const x = Math.max(0, Math.min(...xs));
+  const y = Math.max(0, Math.min(...ys));
+  const width = Math.max(1, Math.max(...xs) - x);
+  const height = Math.max(1, Math.max(...ys) - y);
+  const result = await send<{ data: string }>(wc, 'Page.captureScreenshot', {
+    format: 'png',
+    captureBeyondViewport: true,
+    clip: { x, y, width, height, scale: 1 },
+  });
+  return Buffer.from(result.data, 'base64');
+}
+
+/**
  * Full-page screenshot via `Page.captureScreenshot` with
  * `captureBeyondViewport`. Returns a raw PNG buffer in base64.
  */

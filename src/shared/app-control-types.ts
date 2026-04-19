@@ -106,6 +106,12 @@ export type AppRegistrationPayload = {
    * in list_apps but can't drive it. Surfaces set this based on their kind.
    */
   controllable: boolean;
+  /**
+   * When set, `setWindowOpenHandler` is installed on the webContents so
+   * `target="_blank"` / `window.open` calls create new tabs in this tabset
+   * instead of spawning a native popup. Only meaningful for `builtin-browser`.
+   */
+  browserTabsetId?: string;
 };
 
 /**
