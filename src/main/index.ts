@@ -77,6 +77,17 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding');
 // windows open at a time so this should have no effect. But just in case, we disable the limit.
 app.commandLine.appendSwitch('disable-backing-store-limit');
 
+// Expose a Chrome DevTools Protocol endpoint in development so external tools
+// (chrome://inspect, puppeteer, `curl http://localhost:9222/json`) can attach
+// to the running renderer without restarting. Opt-in via OMNI_DEBUG_PORT.
+if (process.env.NODE_ENV === 'development' || process.env.OMNI_DEBUG_PORT) {
+  const port = process.env.OMNI_DEBUG_PORT ?? '9222';
+  app.commandLine.appendSwitch('remote-debugging-port', port);
+  // Chromium 111+ requires this to allow non-browser clients to connect.
+  app.commandLine.appendSwitch('remote-allow-origins', '*');
+  console.log(`[debug] Chrome DevTools Protocol listening on http://localhost:${port}`);
+}
+
 const OMNI_CONFIG_DIR = getOmniConfigDir();
 const store = getStore();
 const main = new MainProcessManager({ store });
