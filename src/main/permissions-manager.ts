@@ -7,8 +7,8 @@
  * The manager watches sessions (default + every browser partition the
  * renderer registers) and attaches a single handler per session.
  */
-import type { Session } from 'electron';
 import { session as sessionNS } from 'electron';
+import type { Session } from 'electron';
 
 import type { IIpcListener } from '@/shared/ipc-listener';
 import type { PermissionName, PermissionRequest } from '@/shared/permissions-types';
@@ -92,13 +92,14 @@ export function createPermissionsManager(options: {
   const emit = (list: PermissionRequest[]) => sendToWindow('browser:permissions-changed', list);
   const manager = new PermissionsManager(emit);
 
-  // Default session covers the shell's chrome. Browser partitions get
-  // subscribed lazily via the `permissions-watch-partition` IPC below.
-  try {
-    manager.watchSession(sessionNS.defaultSession);
-  } catch {
-    // Not ready yet — renderers will trigger session watching via mount.
-  }
+  // NOTE: we deliberately do NOT install a handler on the default session.
+  // The default session is used by the host BrowserWindow and by any webview
+  // without a `partition` attribute (VS Code, VNC, custom apps, the main
+  // React app itself). Intercepting those would stall any permission request
+  // from the shell — notifications, clipboard, fullscreen, display-capture —
+  // because only browser surfaces render the PermissionsBar UI. We only
+  // intercept browser partitions, which renderers register explicitly via
+  // `browser:permissions-watch-partition`.
 
   ipc.handle('browser:permissions-list', () => manager.list());
   ipc.handle('browser:permissions-decide', (_: unknown, id: string, allow: boolean) =>
