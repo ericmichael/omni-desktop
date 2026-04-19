@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
+import { createBrowserManager } from '@/main/browser-manager';
 import { createConsoleManager } from '@/main/console-manager';
 import { createExtensionManager } from '@/main/extension-manager';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
@@ -71,6 +72,25 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
     sendToWindow: sendToAll,
   });
 
+  const [, cleanupBrowser] = createBrowserManager({
+    ipc,
+    sendToWindow: sendToAll,
+    store: store as any,
+  });
+
+  // Downloads are an Electron-only feature (Chromium session.will-download).
+  // In server mode we register stubs so the renderer's tray UI quietly shows
+  // "no downloads" rather than erroring out on first invoke.
+  ipc.handle('browser:downloads-list', () => []);
+  ipc.handle('browser:downloads-clear', () => 0);
+  ipc.handle('browser:downloads-remove', () => {});
+  ipc.handle('browser:downloads-open-file', () => '');
+  ipc.handle('browser:downloads-show-in-folder', () => {});
+  ipc.handle('browser:downloads-watch-partition', () => {});
+  ipc.handle('browser:permissions-list', () => []);
+  ipc.handle('browser:permissions-decide', () => {});
+  ipc.handle('browser:permissions-watch-partition', () => {});
+
   // Wire platform client for enterprise mode
   const updatePlatformClients = () => {
     const platform = store.get('platform');
@@ -123,6 +143,7 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
   ipc.handle('util:select-directory', () => null);
   ipc.handle('util:select-file', () => null);
   ipc.handle('util:open-directory', () => '');
+  ipc.handle('util:open-external', () => {});
 
   // Platform handlers
 
@@ -247,6 +268,7 @@ return [];
       cleanupOmniInstall(),
       cleanupProcessManager(),
       cleanupExtensions(),
+      cleanupBrowser(),
     ]);
     const errors = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected').map((r) => r.reason);
     if (errors.length > 0) {

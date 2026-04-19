@@ -33,11 +33,51 @@ export type WebviewHandle = {
    */
   insertCSS: (css: string) => Promise<string | null>;
   removeInsertedCSS: (key: string) => Promise<void>;
+  /**
+   * Start / update an in-page find. Subsequent calls with `findNext: true`
+   * advance to the next match. No-op in iframe mode.
+   */
+  findInPage: (text: string, options?: { forward?: boolean; findNext?: boolean; matchCase?: boolean }) => void;
+  /** Stop the active find. `action` maps to Electron's `stopFindInPage` actions. */
+  stopFindInPage: (action?: 'clearSelection' | 'keepSelection' | 'activateSelection') => void;
+  /** Open Chromium DevTools against the guest page (Electron only). */
+  openDevTools: () => void;
 };
 
 export type ConsoleMessage = {
   level: 'log' | 'warn' | 'error';
   message: string;
+};
+
+export type FoundInPageResult = {
+  requestId: number;
+  activeMatchOrdinal: number;
+  matches: number;
+  finalUpdate: boolean;
+};
+
+/** Subset of Electron webview `context-menu` params we surface to callers. */
+export type ContextMenuParams = {
+  x: number;
+  y: number;
+  linkURL?: string;
+  linkText?: string;
+  pageURL?: string;
+  frameURL?: string;
+  srcURL?: string;
+  mediaType?: 'none' | 'image' | 'audio' | 'video' | 'canvas' | 'file' | 'plugin';
+  hasImageContents?: boolean;
+  isEditable?: boolean;
+  selectionText?: string;
+  titleText?: string;
+  editFlags?: {
+    canUndo?: boolean;
+    canRedo?: boolean;
+    canCut?: boolean;
+    canCopy?: boolean;
+    canPaste?: boolean;
+    canSelectAll?: boolean;
+  };
 };
 
 export const Webview = forwardRef<WebviewHandle, {
@@ -47,10 +87,19 @@ export const Webview = forwardRef<WebviewHandle, {
   onNavigate?: (url: string) => void;
   onLoadingChange?: (loading: boolean) => void;
   onTitleChange?: (title: string) => void;
+  onFaviconChange?: (favicon: string) => void;
+  onFoundInPage?: (result: FoundInPageResult) => void;
+  onContextMenu?: (params: ContextMenuParams) => void;
   onError?: (error: { code: number; description: string; url: string }) => void;
   showUnavailable?: boolean;
   /** If provided, this webview registers itself with the app-control registry. */
   registry?: WebviewRegistryProps;
+  /**
+   * Electron `<webview partition="…">`. Scopes cookies / localStorage / cache
+   * to the given profile. Names starting with `persist:` persist to disk; any
+   * other name is in-memory only (incognito). No-op in browser/iframe mode.
+   */
+  partition?: string;
 }>(({
   src,
   onReady,
@@ -58,9 +107,13 @@ export const Webview = forwardRef<WebviewHandle, {
   onNavigate,
   onLoadingChange,
   onTitleChange,
+  onFaviconChange,
+  onFoundInPage,
+  onContextMenu,
   onError,
   showUnavailable = true,
   registry,
+  partition,
 }, handleRef) => {
   const elementRef = useRef<HTMLElement | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -69,6 +122,9 @@ export const Webview = forwardRef<WebviewHandle, {
   const onNavigateRef = useRef(onNavigate);
   const onLoadingRef = useRef(onLoadingChange);
   const onTitleRef = useRef(onTitleChange);
+  const onFaviconRef = useRef(onFaviconChange);
+  const onFoundInPageRef = useRef(onFoundInPage);
+  const onContextMenuRef = useRef(onContextMenu);
   const onErrorRef = useRef(onError);
   const readyEmittedRef = useRef(false);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -87,10 +143,19 @@ export const Webview = forwardRef<WebviewHandle, {
  onLoadingRef.current = onLoadingChange; 
 }, [onLoadingChange]);
   useEffect(() => {
- onTitleRef.current = onTitleChange; 
+ onTitleRef.current = onTitleChange;
 }, [onTitleChange]);
   useEffect(() => {
- onErrorRef.current = onError; 
+ onFaviconRef.current = onFaviconChange;
+}, [onFaviconChange]);
+  useEffect(() => {
+ onFoundInPageRef.current = onFoundInPage;
+}, [onFoundInPage]);
+  useEffect(() => {
+ onContextMenuRef.current = onContextMenu;
+}, [onContextMenu]);
+  useEffect(() => {
+ onErrorRef.current = onError;
 }, [onError]);
 
   useImperativeHandle(handleRef, () => ({
@@ -182,6 +247,37 @@ return;
         await (el as unknown as Electron.WebviewTag).removeInsertedCSS(key);
       } catch {
         // ignore — webview may have navigated away
+      }
+    },
+    findInPage: (text, options) => {
+      const el = elementRef.current;
+      if (!el || !isElectron || !text) {
+        return;
+      }
+      try {
+        (el as unknown as Electron.WebviewTag).findInPage(text, options);
+      } catch {
+        // webview not ready — safe to ignore; caller will retry on next keystroke
+      }
+    },
+    stopFindInPage: (action = 'clearSelection') => {
+      const el = elementRef.current;
+      if (!el || !isElectron) {
+        return;
+      }
+      try {
+        (el as unknown as Electron.WebviewTag).stopFindInPage(action);
+      } catch {
+        // ignore
+      }
+    },
+    openDevTools: () => {
+      const el = elementRef.current;
+      if (!el || !isElectron) return;
+      try {
+        (el as unknown as Electron.WebviewTag).openDevTools();
+      } catch {
+        // ignore
       }
     },
   }), []);
@@ -336,6 +432,28 @@ onTitleRef.current?.(e.title);
           }
         };
 
+        const onFavicon = (event: unknown) => {
+          const e = event as { favicons?: string[] };
+          const favicon = e.favicons?.[0];
+          if (favicon) {
+            onFaviconRef.current?.(favicon);
+          }
+        };
+
+        const onFoundInPage = (event: unknown) => {
+          const e = event as { result?: FoundInPageResult };
+          if (e.result) {
+            onFoundInPageRef.current?.(e.result);
+          }
+        };
+
+        const onContextMenuEvent = (event: unknown) => {
+          const e = event as { params?: ContextMenuParams };
+          if (e.params) {
+            onContextMenuRef.current?.(e.params);
+          }
+        };
+
         el.addEventListener('did-start-loading', onStartLoad);
         el.addEventListener('did-finish-load', onLoad);
         el.addEventListener('did-fail-load', onFailLoad);
@@ -343,6 +461,9 @@ onTitleRef.current?.(e.title);
         el.addEventListener('did-navigate', onNavigateEvent);
         el.addEventListener('did-navigate-in-page', onNavigateEvent);
         el.addEventListener('page-title-updated', onTitleUpdate);
+        el.addEventListener('page-favicon-updated', onFavicon);
+        el.addEventListener('found-in-page', onFoundInPage);
+        el.addEventListener('context-menu', onContextMenuEvent);
 
         cleanupRef.current = () => {
           el.removeEventListener('did-start-loading', onStartLoad);
@@ -352,6 +473,9 @@ onTitleRef.current?.(e.title);
           el.removeEventListener('did-navigate', onNavigateEvent);
           el.removeEventListener('did-navigate-in-page', onNavigateEvent);
           el.removeEventListener('page-title-updated', onTitleUpdate);
+          el.removeEventListener('page-favicon-updated', onFavicon);
+          el.removeEventListener('found-in-page', onFoundInPage);
+          el.removeEventListener('context-menu', onContextMenuEvent);
           if (registry) {
             unregisterApp(registry.handleId);
           }
@@ -435,7 +559,18 @@ return;
   }
 
   if (isElectron) {
-    return <webview ref={callbackRef} src={src} style={{ width: '100%', height: '100%' }} />;
+    // `partition` must be set BEFORE the <webview> is inserted into the DOM;
+    // Electron ignores later changes. Keying on partition forces a remount so
+    // switching profiles actually takes effect.
+    return (
+      <webview
+        key={partition ?? 'default'}
+        ref={callbackRef}
+        src={src}
+        {...(partition ? { partition } : {})}
+        style={{ width: '100%', height: '100%' }}
+      />
+    );
   }
 
   return (

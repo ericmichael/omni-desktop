@@ -157,7 +157,96 @@ export type StoreData = {
 
   /** User-added custom apps for the workspace dock. */
   customApps: CustomAppEntry[];
+
+  /** Browser profiles (default + user-created). Always contains at least the built-in default. */
+  browserProfiles: BrowserProfile[];
+  /**
+   * Browser tabsets keyed by id. Conventional ids:
+   * - `col:<codeTabId>` — standalone browser column in the code deck.
+   * - `dock:<codeTabId>` — per-session browser surface inside the env dock.
+   */
+  browserTabsets: Record<BrowserTabsetId, BrowserTabset>;
+  /** Capped-length visit history, newest first. */
+  browserHistory: BrowserHistoryEntry[];
+  /** User-curated bookmarks. */
+  browserBookmarks: BrowserBookmark[];
 };
+
+// #region Browser types
+
+export type BrowserProfileId = string;
+export type BrowserTabsetId = string;
+export type BrowserTabId = string;
+
+/**
+ * A browser identity. Each profile maps to an Electron `partition` name so its
+ * cookies, localStorage, and cache are isolated from other profiles and from
+ * non-browser webviews in the app.
+ */
+export type BrowserProfile = {
+  id: BrowserProfileId;
+  label: string;
+  /** Electron webview `partition=` attribute, e.g. `persist:browser-default`. */
+  partition: string;
+  /** True for the built-in default profile. Cannot be deleted. */
+  builtin?: boolean;
+  /** Non-persistent partition (`partition` starts without `persist:`). */
+  incognito?: boolean;
+  createdAt: number;
+};
+
+/** One open tab within a tabset. */
+export type BrowserTab = {
+  id: BrowserTabId;
+  url: string;
+  title?: string;
+  favicon?: string;
+  /** Per-tab profile override. Falls back to the tabset's profile. */
+  profileId?: BrowserProfileId;
+  pinned?: boolean;
+  createdAt: number;
+  lastActiveAt: number;
+};
+
+/**
+ * A collection of tabs owned by one surface (e.g. one browser column in the
+ * code deck, or one per-session dock browser).
+ */
+export type BrowserTabset = {
+  id: BrowserTabsetId;
+  profileId: BrowserProfileId;
+  tabs: BrowserTab[];
+  activeTabId: BrowserTabId | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type BrowserHistoryEntry = {
+  id: string;
+  url: string;
+  title?: string;
+  profileId: BrowserProfileId;
+  visitedAt: number;
+};
+
+export type BrowserBookmark = {
+  id: string;
+  url: string;
+  title: string;
+  folder?: string;
+  createdAt: number;
+};
+
+/** Item returned by the omnibox suggestion service. */
+export type BrowserSuggestion = {
+  kind: 'history' | 'bookmark' | 'search';
+  url: string;
+  title?: string;
+  /** Higher = more relevant. Used only for sort. */
+  score: number;
+};
+
+// #endregion
 
 // The electron store uses JSON schema to validate its data.
 
@@ -487,6 +576,84 @@ export const schema: Schema<StoreData> = {
         columnScoped: { type: 'boolean' },
       },
       required: ['id', 'label', 'icon', 'url', 'order'],
+    },
+  },
+  browserProfiles: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        label: { type: 'string' },
+        partition: { type: 'string' },
+        builtin: { type: 'boolean' },
+        incognito: { type: 'boolean' },
+        createdAt: { type: 'number' },
+      },
+      required: ['id', 'label', 'partition', 'createdAt'],
+    },
+  },
+  browserTabsets: {
+    type: 'object',
+    default: {},
+    additionalProperties: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        profileId: { type: 'string' },
+        tabs: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              url: { type: 'string' },
+              title: { type: 'string' },
+              favicon: { type: 'string' },
+              profileId: { type: 'string' },
+              pinned: { type: 'boolean' },
+              createdAt: { type: 'number' },
+              lastActiveAt: { type: 'number' },
+            },
+            required: ['id', 'url', 'createdAt', 'lastActiveAt'],
+          },
+        },
+        activeTabId: { type: ['string', 'null'] },
+        createdAt: { type: 'number' },
+        updatedAt: { type: 'number' },
+      },
+      required: ['id', 'profileId', 'tabs', 'activeTabId', 'createdAt', 'updatedAt'],
+    },
+  },
+  browserHistory: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        url: { type: 'string' },
+        title: { type: 'string' },
+        profileId: { type: 'string' },
+        visitedAt: { type: 'number' },
+      },
+      required: ['id', 'url', 'profileId', 'visitedAt'],
+    },
+  },
+  browserBookmarks: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        url: { type: 'string' },
+        title: { type: 'string' },
+        folder: { type: 'string' },
+        createdAt: { type: 'number' },
+      },
+      required: ['id', 'url', 'title', 'createdAt'],
     },
   },
 };
@@ -1063,6 +1230,8 @@ type UtilIpcEvents = Namespaced<
     'get-default-workspace-dir': () => string;
     'ensure-directory': (path: string) => boolean;
     'open-directory': (path: string) => string;
+    /** Open a URL in the user's default browser via Electron `shell.openExternal`. */
+    'open-external': (url: string) => void;
     'get-launcher-version': () => string;
     'get-omni-runtime-info': () => OmniRuntimeInfo;
     'check-url': (url: string) => boolean;
@@ -1482,6 +1651,9 @@ type AppControlIpcEvents = Namespaced<
     snapshot: (
       handleId: import('@/shared/app-control-types').AppHandleId
     ) => import('@/shared/app-control-types').AxNode;
+    'snapshot-diff': (
+      handleId: import('@/shared/app-control-types').AppHandleId
+    ) => import('@/main/app-control-cdp').SnapshotDiff;
     click: (
       handleId: import('@/shared/app-control-types').AppHandleId,
       ref: string,
@@ -1494,8 +1666,170 @@ type AppControlIpcEvents = Namespaced<
     ) => void;
     type: (handleId: import('@/shared/app-control-types').AppHandleId, text: string) => void;
     press: (handleId: import('@/shared/app-control-types').AppHandleId, key: string) => void;
+    scroll: (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      options: { dx?: number; dy?: number; toTop?: boolean; toBottom?: boolean }
+    ) => void;
+    'inject-css': (handleId: import('@/shared/app-control-types').AppHandleId, css: string) => string;
+    'remove-inserted-css': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      key: string
+    ) => void;
+    find: (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      query: string,
+      options?: { caseSensitive?: boolean; forward?: boolean; findNext?: boolean }
+    ) => { matches: number; activeOrdinal: number };
+    'stop-find': (handleId: import('@/shared/app-control-types').AppHandleId) => void;
+    'wait-for': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      options: { selector?: string; urlIncludes?: string; networkIdle?: boolean; timeoutMs?: number }
+    ) => { ok: true; matched: 'selector' | 'url' | 'networkIdle' };
+    'scroll-to-ref': (handleId: import('@/shared/app-control-types').AppHandleId, ref: string) => void;
+    'network-log': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      options?: { limit?: number; since?: number; urlIncludes?: string; statusMin?: number; clear?: boolean }
+    ) => import('@/main/app-control-cdp').NetworkLogEntry[];
+    pdf: (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      options?: { artifactsSubdir?: string; landscape?: boolean; printBackground?: boolean }
+    ) => string;
+    'full-screenshot': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      options?: import('@/shared/app-control-types').AppScreenshotOptions
+    ) => string;
+    'set-viewport': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      options:
+        | { width: number; height: number; deviceScaleFactor?: number; mobile?: boolean }
+        | { clear: true }
+    ) => void;
+    'set-user-agent': (handleId: import('@/shared/app-control-types').AppHandleId, ua: string) => void;
+    'set-zoom': (handleId: import('@/shared/app-control-types').AppHandleId, factor: number) => void;
+    'cookies-get': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      filter?: { url?: string; name?: string; domain?: string; path?: string }
+    ) => unknown[];
+    'cookies-set': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      cookie: {
+        url: string;
+        name: string;
+        value: string;
+        domain?: string;
+        path?: string;
+        secure?: boolean;
+        httpOnly?: boolean;
+        expirationDate?: number;
+        sameSite?: 'unspecified' | 'no_restriction' | 'lax' | 'strict';
+      }
+    ) => void;
+    'cookies-clear': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      filter?: { url?: string; name?: string }
+    ) => number;
+    'storage-get': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      which: 'local' | 'session'
+    ) => Record<string, string>;
+    'storage-set': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      which: 'local' | 'session',
+      entries: Record<string, string>
+    ) => void;
+    'storage-clear': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      which: 'local' | 'session'
+    ) => void;
   }
 >;
+
+/**
+ * Browser API. Owns tabs, history, bookmarks, and profiles. Renderer invokes,
+ * main handles. State mutations broadcast `browser:state-changed` events so
+ * every open surface re-renders from the same source of truth.
+ */
+type BrowserIpcEvents = Namespaced<
+  'browser',
+  {
+    /** Full snapshot of the persisted browser state. Cheap — entire state lives in electron-store. */
+    'get-state': () => {
+      profiles: BrowserProfile[];
+      tabsets: Record<BrowserTabsetId, BrowserTabset>;
+      bookmarks: BrowserBookmark[];
+    };
+    /** Create a new profile. Partition is derived from id. */
+    'profile-add': (input: { label: string; incognito?: boolean }) => BrowserProfile;
+    'profile-remove': (id: BrowserProfileId) => void;
+    /** Idempotent. Ensures a tabset exists and returns it; creates a blank tab on first call. */
+    'tabset-ensure': (id: BrowserTabsetId, opts?: { profileId?: BrowserProfileId; initialUrl?: string }) => BrowserTabset;
+    'tabset-remove': (id: BrowserTabsetId) => void;
+    /** Create a new tab. If `activate` is true (default), also activates it. */
+    'tab-create': (
+      tabsetId: BrowserTabsetId,
+      opts?: { url?: string; activate?: boolean; profileId?: BrowserProfileId }
+    ) => BrowserTab;
+    'tab-close': (tabsetId: BrowserTabsetId, tabId: BrowserTabId) => void;
+    'tab-activate': (tabsetId: BrowserTabsetId, tabId: BrowserTabId) => void;
+    'tab-navigate': (tabsetId: BrowserTabsetId, tabId: BrowserTabId, url: string) => void;
+    'tab-update-meta': (
+      tabsetId: BrowserTabsetId,
+      tabId: BrowserTabId,
+      patch: { title?: string; favicon?: string; url?: string }
+    ) => void;
+    'tab-reorder': (tabsetId: BrowserTabsetId, tabIds: BrowserTabId[]) => void;
+    'tab-pin': (tabsetId: BrowserTabsetId, tabId: BrowserTabId, pinned: boolean) => void;
+    'tab-duplicate': (tabsetId: BrowserTabsetId, tabId: BrowserTabId) => BrowserTab;
+    /** Record a visit. Dedupes against the most recent entry for the same URL. */
+    'history-record': (entry: { url: string; title?: string; profileId: BrowserProfileId }) => void;
+    'history-list': (opts?: { query?: string; limit?: number; profileId?: BrowserProfileId }) => BrowserHistoryEntry[];
+    'history-clear': (opts?: { profileId?: BrowserProfileId }) => void;
+    'bookmark-add': (input: { url: string; title: string; folder?: string }) => BrowserBookmark;
+    'bookmark-remove': (id: string) => void;
+    /** Returns a ranked mix of history + bookmarks + a synthetic search entry. */
+    suggest: (query: string, opts?: { limit?: number; profileId?: BrowserProfileId }) => BrowserSuggestion[];
+    /** List in-memory downloads across every watched partition. Newest first. */
+    'downloads-list': () => BrowserDownloadEntry[];
+    'downloads-clear': () => number;
+    'downloads-remove': (id: string) => void;
+    /** Open a completed download with the OS default handler. */
+    'downloads-open-file': (id: string) => string;
+    /** Reveal a completed download in Finder / Explorer. */
+    'downloads-show-in-folder': (id: string) => void;
+    /**
+     * Signal that a new webview with this partition is about to render, so
+     * the main process attaches its `will-download` listener. Safe to call
+     * repeatedly — idempotent per-session.
+     */
+    'downloads-watch-partition': (partition: string) => void;
+    /** List all outstanding permission requests awaiting a decision. */
+    'permissions-list': () => import('@/shared/permissions-types').PermissionRequest[];
+    /** Allow or deny a pending permission request by id. */
+    'permissions-decide': (id: string, allow: boolean) => void;
+    /** Attach the permission handler to a new partition on first mount. */
+    'permissions-watch-partition': (partition: string) => void;
+  }
+>;
+
+/**
+ * Download tracking — one entry per `DownloadItem` observed via
+ * `session.will-download`. Lives in memory (not persisted), newest first.
+ */
+export type BrowserDownloadState = 'progressing' | 'interrupted' | 'paused' | 'completed' | 'cancelled';
+
+export type BrowserDownloadEntry = {
+  id: string;
+  url: string;
+  filename: string;
+  savePath?: string;
+  mimeType?: string;
+  totalBytes: number;
+  receivedBytes: number;
+  state: BrowserDownloadState;
+  startedAt: number;
+  endedAt?: number;
+  partition?: string;
+};
 
 /**
  * Intersection of all the events that the renderer can invoke and main process can handle.
@@ -1515,7 +1849,8 @@ export type IpcEvents = MainProcessIpcEvents &
   PlatformIpcEvents &
   ExtensionIpcEvents &
   WorkspaceSyncIpcEvents &
-  AppControlIpcEvents;
+  AppControlIpcEvents &
+  BrowserIpcEvents;
 
 /**
  * Store events. Main process emits these events, renderer process listens to them.
@@ -1660,6 +1995,26 @@ type WorkspaceSyncIpcRendererEvents = Namespaced<
 >;
 
 /**
+ * Browser events. Main process emits a full-state snapshot whenever any
+ * browser mutation lands — tabs, history, bookmarks, profiles. Renderers
+ * simply replace their atom.
+ */
+type BrowserIpcRendererEvents = Namespaced<
+  'browser',
+  {
+    'state-changed': [
+      {
+        profiles: BrowserProfile[];
+        tabsets: Record<BrowserTabsetId, BrowserTabset>;
+        bookmarks: BrowserBookmark[];
+      },
+    ];
+    'downloads-changed': [BrowserDownloadEntry[]];
+    'permissions-changed': [import('@/shared/permissions-types').PermissionRequest[]];
+  }
+>;
+
+/**
  * Intersection of all the events emitted by main process that the renderer can listen to.
  */
 export type IpcRendererEvents = TerminalIpcRendererEvents &
@@ -1673,7 +2028,8 @@ export type IpcRendererEvents = TerminalIpcRendererEvents &
   ToastIpcRendererEvents &
   PlatformIpcRendererEvents &
   ExtensionIpcRendererEvents &
-  WorkspaceSyncIpcRendererEvents;
+  WorkspaceSyncIpcRendererEvents &
+  BrowserIpcRendererEvents;
 
 // #region Config file types
 

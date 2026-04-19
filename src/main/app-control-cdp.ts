@@ -17,12 +17,38 @@ import type { AxNode } from '@/shared/app-control-types';
 const CDP_VERSION = '1.3';
 
 /**
- * Per-webContents state: attachment bookkeeping + the most recent snapshot's
- * ref → backendNodeId map so follow-up actions (click/fill) can resolve refs.
+ * Per-webContents state:
+ *  - attachment bookkeeping
+ *  - ref → backendNodeId map from the most recent snapshot
+ *  - optional network log ring buffer (enabled on first agent query)
+ *  - optional cached previous snapshot tree for diffs
  */
+export type NetworkLogEntry = {
+  requestId: string;
+  method: string;
+  url: string;
+  status?: number;
+  statusText?: string;
+  mimeType?: string;
+  errorText?: string;
+  /** DOMHighResTimestamp-ish seconds from CDP `timestamp`. */
+  startedAt: number;
+  endedAt?: number;
+  encodedDataLength?: number;
+  fromCache?: boolean;
+  resourceType?: string;
+};
+
 type AttachmentState = {
   attached: boolean;
   refToBackendNodeId: Map<string, number>;
+  lastSnapshotTree?: import('@/shared/app-control-types').AxNode;
+  network?: {
+    enabled: boolean;
+    entries: NetworkLogEntry[];
+    pending: Map<string, NetworkLogEntry>;
+    listener?: (event: unknown, method: string, params: unknown) => void;
+  };
 };
 
 const state = new WeakMap<WebContents, AttachmentState>();
@@ -34,6 +60,11 @@ function getState(wc: WebContents): AttachmentState {
     state.set(wc, s);
   }
   return s;
+}
+
+/** Expose the backendNodeId map to callers that persist their own diff state. */
+export function getInternalState(wc: WebContents): AttachmentState {
+  return getState(wc);
 }
 
 /**
@@ -203,6 +234,272 @@ export async function focusRef(wc: WebContents, ref: string): Promise<void> {
     throw new Error(`Unknown ref "${ref}"`);
   }
   await send(wc, 'DOM.focus', { backendNodeId });
+}
+
+/** Scroll the element identified by `ref` into the viewport. */
+export async function scrollRefIntoView(wc: WebContents, ref: string): Promise<void> {
+  const s = getState(wc);
+  const backendNodeId = s.refToBackendNodeId.get(ref);
+  if (backendNodeId === undefined) {
+    throw new Error(
+      `Unknown ref "${ref}" — snapshots are invalidated on navigation, re-snapshot the app and try again.`
+    );
+  }
+  await send(wc, 'DOM.scrollIntoViewIfNeeded', { backendNodeId });
+}
+
+/**
+ * Full-page screenshot via `Page.captureScreenshot` with
+ * `captureBeyondViewport`. Returns a raw PNG buffer in base64.
+ */
+export async function fullPageScreenshot(wc: WebContents): Promise<Buffer> {
+  ensureAttached(wc);
+  const metrics = await send<{
+    cssContentSize: { width: number; height: number };
+    cssLayoutViewport?: { clientWidth: number; clientHeight: number };
+    devicePixelRatio?: number;
+  }>(wc, 'Page.getLayoutMetrics');
+  const { width, height } = metrics.cssContentSize;
+  const result = await send<{ data: string }>(wc, 'Page.captureScreenshot', {
+    format: 'png',
+    captureBeyondViewport: true,
+    clip: { x: 0, y: 0, width, height, scale: 1 },
+  });
+  return Buffer.from(result.data, 'base64');
+}
+
+/**
+ * Thin wrapper around `Emulation.setDeviceMetricsOverride`. Pass
+ * `disable: true` to clear an active override (restores the real viewport).
+ */
+export async function setViewportOverride(
+  wc: WebContents,
+  options: { width: number; height: number; deviceScaleFactor?: number; mobile?: boolean }
+): Promise<void> {
+  await send(wc, 'Emulation.setDeviceMetricsOverride', {
+    width: options.width,
+    height: options.height,
+    deviceScaleFactor: options.deviceScaleFactor ?? 1,
+    mobile: options.mobile ?? false,
+  });
+}
+
+export async function clearViewportOverride(wc: WebContents): Promise<void> {
+  await send(wc, 'Emulation.clearDeviceMetricsOverride');
+}
+
+// ---------------------------------------------------------------------------
+// Network log — enable CDP Network, buffer request/response events
+// ---------------------------------------------------------------------------
+
+const NETWORK_LOG_CAP = 500;
+
+/**
+ * Enable network logging on the webContents. Idempotent — subsequent calls
+ * just ensure the debugger listener is in place without double-enabling.
+ */
+export async function enableNetworkLog(wc: WebContents): Promise<void> {
+  ensureAttached(wc);
+  const s = getState(wc);
+  if (!s.network) {
+    s.network = { enabled: false, entries: [], pending: new Map() };
+  }
+  if (s.network.enabled) {
+return;
+}
+
+  const listener = (_event: unknown, method: string, params: unknown) => {
+    const net = getState(wc).network;
+    if (!net) {
+return;
+}
+    try {
+      if (method === 'Network.requestWillBeSent') {
+        const p = params as {
+          requestId: string;
+          request: { method: string; url: string };
+          timestamp: number;
+          type?: string;
+        };
+        net.pending.set(p.requestId, {
+          requestId: p.requestId,
+          method: p.request.method,
+          url: p.request.url,
+          startedAt: p.timestamp,
+          resourceType: p.type,
+        });
+      } else if (method === 'Network.responseReceived') {
+        const p = params as {
+          requestId: string;
+          response: { status: number; statusText: string; mimeType: string; fromDiskCache?: boolean };
+        };
+        const entry = net.pending.get(p.requestId);
+        if (entry) {
+          entry.status = p.response.status;
+          entry.statusText = p.response.statusText;
+          entry.mimeType = p.response.mimeType;
+          entry.fromCache = p.response.fromDiskCache;
+        }
+      } else if (method === 'Network.loadingFinished') {
+        const p = params as { requestId: string; timestamp: number; encodedDataLength: number };
+        const entry = net.pending.get(p.requestId);
+        if (entry) {
+          entry.endedAt = p.timestamp;
+          entry.encodedDataLength = p.encodedDataLength;
+          pushEntry(net, entry);
+        }
+      } else if (method === 'Network.loadingFailed') {
+        const p = params as { requestId: string; timestamp: number; errorText: string };
+        const entry = net.pending.get(p.requestId);
+        if (entry) {
+          entry.endedAt = p.timestamp;
+          entry.errorText = p.errorText;
+          pushEntry(net, entry);
+        }
+      }
+    } catch {
+      // debugger events are best-effort — don't crash the main process.
+    }
+  };
+
+  wc.debugger.on('message', listener);
+  s.network.listener = listener;
+  s.network.enabled = true;
+  await send(wc, 'Network.enable');
+
+  // Drop our listener on destroy so a recreated wc (same pointer unlikely but
+  // safe) doesn't inherit stale state.
+  wc.once('destroyed', () => {
+    const cur = state.get(wc);
+    if (cur?.network?.listener) {
+      try {
+        wc.debugger.removeListener?.('message', cur.network.listener);
+      } catch {
+        // ignore
+      }
+    }
+  });
+}
+
+function pushEntry(
+  net: NonNullable<AttachmentState['network']>,
+  entry: NetworkLogEntry
+): void {
+  net.pending.delete(entry.requestId);
+  net.entries.push(entry);
+  if (net.entries.length > NETWORK_LOG_CAP) {
+    net.entries.splice(0, net.entries.length - NETWORK_LOG_CAP);
+  }
+}
+
+export function readNetworkLog(
+  wc: WebContents,
+  options: { limit?: number; since?: number; urlIncludes?: string; statusMin?: number } = {}
+): NetworkLogEntry[] {
+  const s = getState(wc);
+  const entries = s.network?.entries ?? [];
+  const limit = options.limit ?? 100;
+  let filtered = entries;
+  if (options.since !== undefined) {
+    filtered = filtered.filter((e) => e.startedAt >= options.since!);
+  }
+  if (options.urlIncludes) {
+    filtered = filtered.filter((e) => e.url.includes(options.urlIncludes!));
+  }
+  if (options.statusMin !== undefined) {
+    filtered = filtered.filter((e) => (e.status ?? 0) >= options.statusMin!);
+  }
+  // Newest last; callers usually want the tail.
+  return filtered.slice(-limit);
+}
+
+export function clearNetworkLog(wc: WebContents): void {
+  const s = getState(wc);
+  if (s.network) {
+    s.network.entries.length = 0;
+    s.network.pending.clear();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot diff — compare current vs cached previous tree
+// ---------------------------------------------------------------------------
+
+export type SnapshotDiffEntry = { role: string; name?: string; value?: string; ref?: string };
+export type SnapshotDiff = {
+  added: SnapshotDiffEntry[];
+  removed: SnapshotDiffEntry[];
+  unchanged: number;
+};
+
+function flatten(node: import('@/shared/app-control-types').AxNode, out: SnapshotDiffEntry[]): void {
+  out.push({
+    role: node.role,
+    ...(node.name ? { name: node.name } : {}),
+    ...(node.value ? { value: node.value } : {}),
+    ref: node.ref,
+  });
+  for (const c of node.children ?? []) {
+flatten(c, out);
+}
+}
+
+/**
+ * Diff a fresh snapshot against the one we cached on the last `snapshot()`
+ * call. Matching key is `role::name::value` — stable enough to catch "a
+ * toast appeared" or "a row went away" without being sensitive to layout
+ * changes. Updates the cache so the next diff is against this snapshot.
+ */
+export function diffSnapshots(
+  wc: WebContents,
+  current: import('@/shared/app-control-types').AxNode
+): SnapshotDiff {
+  const s = getState(wc);
+  const prev = s.lastSnapshotTree;
+  s.lastSnapshotTree = current;
+
+  if (!prev) {
+    const all: SnapshotDiffEntry[] = [];
+    flatten(current, all);
+    return { added: all, removed: [], unchanged: 0 };
+  }
+
+  const keyOf = (e: SnapshotDiffEntry) => `${e.role}::${e.name ?? ''}::${e.value ?? ''}`;
+  const prevCounts = new Map<string, number>();
+  const prevFlat: SnapshotDiffEntry[] = [];
+  flatten(prev, prevFlat);
+  for (const e of prevFlat) {
+    const k = keyOf(e);
+    prevCounts.set(k, (prevCounts.get(k) ?? 0) + 1);
+  }
+
+  const currFlat: SnapshotDiffEntry[] = [];
+  flatten(current, currFlat);
+
+  const added: SnapshotDiffEntry[] = [];
+  let unchanged = 0;
+  for (const e of currFlat) {
+    const k = keyOf(e);
+    const left = prevCounts.get(k) ?? 0;
+    if (left > 0) {
+      prevCounts.set(k, left - 1);
+      unchanged += 1;
+    } else {
+      added.push(e);
+    }
+  }
+
+  const removed: SnapshotDiffEntry[] = [];
+  for (const e of prevFlat) {
+    const k = keyOf(e);
+    const left = prevCounts.get(k) ?? 0;
+    if (left > 0) {
+      prevCounts.set(k, left - 1);
+      removed.push({ ...e, ref: undefined });
+    }
+  }
+
+  return { added, removed, unchanged };
 }
 
 /**

@@ -588,6 +588,17 @@ export const APP_CONTROL_TOOLS = [
     },
   },
   {
+    name: 'app_snapshot_diff',
+    safe: true,
+    description:
+      "Capture a fresh snapshot and return only what changed since the previous `app_snapshot_diff` call (first call returns everything as `added`). Use between steps of a long automation to save context — no need to re-send an entire tree when only a toast appeared or a row was removed.",
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' } },
+      required: ['app_id'],
+    },
+  },
+  {
     name: 'app_navigate',
     safe: true,
     description: 'Load a URL in the given app (usually `browser`). Waits until the page finishes loading.',
@@ -738,6 +749,353 @@ export const APP_CONTROL_TOOLS = [
   },
 ] as const;
 
+/**
+ * Browser-specific tools. Split out from APP_CONTROL_TOOLS because they
+ * operate on browser concepts (tabs, tabsets, stylesheets, find-in-page)
+ * rather than generic webviews. They still use the same `app_id` scheme for
+ * the active-tab operations so scoping stays consistent.
+ *
+ * `tabset_id` is an internal identifier:
+ *   - `col:<codeTabId>` — a standalone browser column in the code deck
+ *   - `dock:<codeTabId>` — the per-session dock browser inside a code tab
+ *   - `dock:global` — the shell's global dock browser (if present)
+ *
+ * Callers can fetch the full list with `browser_list_tabsets`.
+ */
+export const BROWSER_CLIENT_TOOLS = [
+  {
+    name: 'browser_list_tabsets',
+    safe: true,
+    description:
+      'List every browser tabset (each code-deck column and per-session dock) with its tabs, active tab, and profile. Use before `browser_tab_*` tools to learn valid `tabset_id` and `tab_id` values.',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'browser_tab_create',
+    safe: true,
+    description:
+      'Open a new tab in the given tabset. Optionally navigate it to `url` and/or leave the active tab unchanged with `activate: false`.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tabset_id: { type: 'string' },
+        url: { type: 'string' },
+        activate: { type: 'boolean' },
+      },
+      required: ['tabset_id'],
+    },
+  },
+  {
+    name: 'browser_tab_close',
+    safe: true,
+    description: 'Close a specific tab. If it was the only tab, the tabset retains one fresh blank tab.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tabset_id: { type: 'string' },
+        tab_id: { type: 'string' },
+      },
+      required: ['tabset_id', 'tab_id'],
+    },
+  },
+  {
+    name: 'browser_tab_activate',
+    safe: true,
+    description: 'Make the given tab the active one in its tabset.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tabset_id: { type: 'string' },
+        tab_id: { type: 'string' },
+      },
+      required: ['tabset_id', 'tab_id'],
+    },
+  },
+  {
+    name: 'browser_tab_navigate',
+    safe: true,
+    description:
+      'Navigate a specific tab (not just the active one) to a URL. Accepts anything `browser_tab_create.url` does — URLs, `localhost:PORT`, etc. Records a history entry.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tabset_id: { type: 'string' },
+        tab_id: { type: 'string' },
+        url: { type: 'string' },
+      },
+      required: ['tabset_id', 'tab_id', 'url'],
+    },
+  },
+  {
+    name: 'browser_scroll',
+    safe: true,
+    description:
+      "Scroll the active tab of a browser app. Pass one of: `to_top`, `to_bottom`, or `dx`/`dy` pixel offsets. `app_id` refers to a browser-kind app from `list_apps` (usually `\"browser\"`).",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        dx: { type: 'number' },
+        dy: { type: 'number' },
+        to_top: { type: 'boolean' },
+        to_bottom: { type: 'boolean' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'browser_inject_css',
+    safe: true,
+    description:
+      "Inject a stylesheet into the active tab's document. Returns a `key` you can pass to `browser_remove_inserted_css` to undo. The stylesheet persists until the page navigates.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        css: { type: 'string', description: 'CSS source to inject.' },
+      },
+      required: ['app_id', 'css'],
+    },
+  },
+  {
+    name: 'browser_remove_inserted_css',
+    safe: true,
+    description: 'Remove previously injected CSS by its key.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        key: { type: 'string' },
+      },
+      required: ['app_id', 'key'],
+    },
+  },
+  {
+    name: 'browser_find_in_page',
+    safe: true,
+    description:
+      "Search the active tab for `query`. Returns `{ matches, active_ordinal }`. Set `find_next: true` to advance to the next match after a prior call.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        query: { type: 'string' },
+        case_sensitive: { type: 'boolean' },
+        forward: { type: 'boolean' },
+        find_next: { type: 'boolean' },
+      },
+      required: ['app_id', 'query'],
+    },
+  },
+  {
+    name: 'browser_wait_for',
+    safe: true,
+    description:
+      "Block until a condition on the active tab is met. Supply one of: `selector` (CSS selector must match something), `url_includes` (substring of current URL), or `network_idle: true` (page finished loading). Times out after `timeout_ms` (default 10000).",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        selector: { type: 'string' },
+        url_includes: { type: 'string' },
+        network_idle: { type: 'boolean' },
+        timeout_ms: { type: 'number' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'browser_scroll_to_ref',
+    safe: true,
+    description:
+      'Scroll an element identified by a `ref` from `app_snapshot` into view. Use before clicks on far-down elements to avoid off-screen misses.',
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' }, ref: { type: 'string' } },
+      required: ['app_id', 'ref'],
+    },
+  },
+  {
+    name: 'browser_pdf',
+    safe: true,
+    description:
+      "Print the active tab to PDF and write it into the ticket's artifacts directory. Returns the absolute file path.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        landscape: { type: 'boolean' },
+        print_background: { type: 'boolean' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'browser_full_screenshot',
+    safe: true,
+    description:
+      'Capture a full-page PNG of the active tab (not just the viewport) using CDP. Returns the absolute file path in the ticket artifacts directory.',
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' } },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'browser_set_viewport',
+    safe: true,
+    description:
+      'Emulate a specific viewport size and/or device-scale/mobile flag on the active tab. Pass `clear: true` to restore the real viewport. Useful for responsive testing.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        width: { type: 'number' },
+        height: { type: 'number' },
+        device_scale_factor: { type: 'number' },
+        mobile: { type: 'boolean' },
+        clear: { type: 'boolean' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'browser_set_user_agent',
+    safe: true,
+    description:
+      'Override the User-Agent header the active tab sends. Pass an empty string to restore the default.',
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' }, user_agent: { type: 'string' } },
+      required: ['app_id', 'user_agent'],
+    },
+  },
+  {
+    name: 'browser_set_zoom',
+    safe: true,
+    description: 'Set the active tab\'s zoom factor (1.0 = 100%, range 0.25–5).',
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' }, factor: { type: 'number' } },
+      required: ['app_id', 'factor'],
+    },
+  },
+  {
+    name: 'browser_cookies_get',
+    safe: true,
+    description:
+      "Read cookies from the active tab's partition. Optional filter narrows by URL, name, domain, or path. Returns Electron Cookie objects.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        url: { type: 'string' },
+        name: { type: 'string' },
+        domain: { type: 'string' },
+        path: { type: 'string' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'browser_cookies_set',
+    safe: true,
+    description:
+      "Write or update a cookie in the active tab's partition. `url` is required by Electron to locate the cookie's host/scheme.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        url: { type: 'string' },
+        name: { type: 'string' },
+        value: { type: 'string' },
+        domain: { type: 'string' },
+        path: { type: 'string' },
+        secure: { type: 'boolean' },
+        http_only: { type: 'boolean' },
+        expiration_date: { type: 'number', description: 'Unix seconds.' },
+        same_site: { type: 'string', enum: ['unspecified', 'no_restriction', 'lax', 'strict'] },
+      },
+      required: ['app_id', 'url', 'name', 'value'],
+    },
+  },
+  {
+    name: 'browser_cookies_clear',
+    safe: true,
+    description: 'Remove cookies matching a filter. Returns the number removed.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        url: { type: 'string' },
+        name: { type: 'string' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'browser_storage_get',
+    safe: true,
+    description: 'Read all key/value pairs from localStorage or sessionStorage on the active tab.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        which: { type: 'string', enum: ['local', 'session'] },
+      },
+      required: ['app_id', 'which'],
+    },
+  },
+  {
+    name: 'browser_storage_set',
+    safe: true,
+    description: 'Write key/value pairs into localStorage or sessionStorage on the active tab.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        which: { type: 'string', enum: ['local', 'session'] },
+        entries: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+        },
+      },
+      required: ['app_id', 'which', 'entries'],
+    },
+  },
+  {
+    name: 'browser_storage_clear',
+    safe: true,
+    description: 'Clear all keys from localStorage or sessionStorage on the active tab.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        which: { type: 'string', enum: ['local', 'session'] },
+      },
+      required: ['app_id', 'which'],
+    },
+  },
+  {
+    name: 'browser_network_log',
+    safe: true,
+    description:
+      "Read the last N network requests the active tab made — method, URL, status, mimeType, timing. Useful for diagnosing failing fetches, authentication errors, or slow requests. Pass `clear: true` to reset the buffer after reading.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        limit: { type: 'number', description: 'Max entries to return (default 100, up to 500 buffered).' },
+        since: { type: 'number', description: 'CDP timestamp to filter from.' },
+        url_includes: { type: 'string' },
+        status_min: { type: 'number', description: 'Only entries with status >= this value (e.g. 400 to find failures).' },
+        clear: { type: 'boolean' },
+      },
+      required: ['app_id'],
+    },
+  },
+] as const;
+
 export const UI_CLIENT_TOOLS = [
   {
     name: 'display_plan',
@@ -858,7 +1216,12 @@ export const buildAutopilotVariables = (opts?: {
   projectLabel?: string;
   ticketId?: string;
 }): Record<string, unknown> => {
-  const allTools = [...TICKET_CLIENT_TOOLS, ...READONLY_CONTEXT_TOOLS, ...APP_CONTROL_TOOLS];
+  const allTools = [
+    ...TICKET_CLIENT_TOOLS,
+    ...READONLY_CONTEXT_TOOLS,
+    ...APP_CONTROL_TOOLS,
+    ...BROWSER_CLIENT_TOOLS,
+  ];
   return {
     client_tools: allTools,
     safe_tool_overrides: { safe_tool_names: extractSafeToolNames(allTools) },
@@ -882,6 +1245,7 @@ export const buildInteractiveVariables = (opts?: {
     ...INBOX_CLIENT_TOOLS,
     ...UI_CLIENT_TOOLS,
     ...APP_CONTROL_TOOLS,
+    ...BROWSER_CLIENT_TOOLS,
   ];
   return {
     client_tools: allTools,
@@ -907,6 +1271,7 @@ export const buildCodeVariables = (opts?: {
     ...UI_CLIENT_TOOLS,
     ...CODE_UI_TOOLS,
     ...APP_CONTROL_TOOLS,
+    ...BROWSER_CLIENT_TOOLS,
   ];
   return {
     client_tools: allTools,

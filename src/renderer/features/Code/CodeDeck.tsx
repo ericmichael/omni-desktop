@@ -11,11 +11,8 @@ import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-co
 import {
   Add20Regular,
   Apps20Regular,
-  ArrowClockwise20Regular,
-  ArrowLeft20Regular,
   ArrowMaximize20Regular,
   ArrowMinimize20Regular,
-  ArrowRight20Regular,
   BranchFork20Regular,
   Chat20Regular,
   Globe20Regular,
@@ -27,8 +24,8 @@ import { useStore } from '@nanostores/react';
 import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { uuidv4 } from '@/lib/uuid';
-import type { WebviewHandle } from '@/renderer/common/Webview';
 import { Webview } from '@/renderer/common/Webview';
+import { BrowserView } from '@/renderer/features/Browser/BrowserView';
 import {
   Button,
   Menu,
@@ -77,20 +74,8 @@ const SYNTHETIC_BROWSER_APP: CustomAppEntry = {
   columnScoped: false,
 };
 
-/** Coerce a typed address into a loadable URL. Treats bare terms as DDG searches. */
-function normalizeAddress(input: string): string {
-  const trimmed = input.trim();
-  if (!trimmed) {
-    return BROWSER_START_URL;
-  }
-  if (/^https?:\/\//i.test(trimmed) || /^file:\/\//i.test(trimmed) || /^about:/i.test(trimmed)) {
-    return trimmed;
-  }
-  if (/^[\w-]+(\.[\w-]+)+(\/.*)?$/.test(trimmed)) {
-    return `https://${trimmed}`;
-  }
-  return `https://duckduckgo.com/?q=${encodeURIComponent(trimmed)}`;
-}
+// URL normalization lives in `@/lib/url` so it's shared with the
+// main-process BrowserManager and testable without the DOM.
 
 const COLUMN_WIDTH = 480;
 const COLUMN_WIDTH_SMALL = 360;
@@ -733,6 +718,8 @@ const SessionActionButton = forwardRef<
     isDisabled?: boolean;
     onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
     className?: string;
+    'aria-pressed'?: boolean;
+    'aria-expanded'?: boolean;
   }
 >(({ icon, label, isDisabled, onClick, className, ...rest }, ref) => {
   const styles = useStyles();
@@ -806,7 +793,9 @@ const CodeSessionHeader = memo(
         >
           <div className={mergeClasses(styles.flexItemsCenter, styles.gap2, styles.minW0)}>
             {dragHandle}
-            <span className={styles.sessionLabel}>{label}</span>
+            <span className={styles.sessionLabel} title={label}>
+              {label}
+            </span>
           </div>
           <div className={mergeClasses(styles.flexItemsCenter, styles.gap1)}>
             {actions}
@@ -848,7 +837,9 @@ const CodeSessionHeader = memo(
         {ticketTitle && (
           <div className={mergeClasses(styles.ticketBanner, isGlass && styles.glassTicketBanner)}>
             <div className={mergeClasses(styles.flexItemsCenter, styles.gap2, styles.minW0)}>
-              <span className={styles.ticketTitle}>{ticketTitle}</span>
+              <span className={styles.ticketTitle} title={ticketTitle}>
+                {ticketTitle}
+              </span>
               <span className={styles.ticketBadges}>
                 {ticketColumnBadge}
                 {ticketMetaBadge}
@@ -930,6 +921,7 @@ const DeckColumn = memo(
                     )
                   }
                   label={isExpanded ? 'Collapse column' : 'Expand column'}
+                  aria-pressed={isExpanded}
                   onClick={() => onToggleExpand(tab.id)}
                   className={mergeClasses(styles.revealOnHover, 'revealOnHover')}
                 />
@@ -1017,7 +1009,9 @@ const AppColumn = memo(
               >
                 <ReOrderDotsVertical20Regular style={{ width: 16, height: 16 }} />
               </button>
-              <span className={styles.sessionLabel}>{app.label}</span>
+              <span className={styles.sessionLabel} title={app.label}>
+                {app.label}
+              </span>
             </div>
             <div className={mergeClasses(styles.flexItemsCenter, styles.gap1)}>
               <SessionActionButton
@@ -1029,6 +1023,7 @@ const AppColumn = memo(
                   )
                 }
                 label={isExpanded ? 'Collapse column' : 'Expand column'}
+                aria-pressed={isExpanded}
                 onClick={() => onToggleExpand(tab.id)}
                 className={mergeClasses(styles.revealOnHover, 'revealOnHover')}
               />
@@ -1051,95 +1046,10 @@ const AppColumn = memo(
 AppColumn.displayName = 'AppColumn';
 
 /**
- * URL-bar + back/forward/reload toolbar + <Webview>. Used both inside a full
- * deck column chrome (`BrowserColumn`) and inlined into the focus layout.
+ * Standalone browser deck column. Chrome (drag handle, expand/collapse, close)
+ * lives here; the browser itself is the shared `BrowserView` component so the
+ * standalone column and the per-session dock stay behaviorally identical.
  */
-const BrowserBody = memo(({ tabId }: { tabId: CodeTabId }) => {
-  const styles = useStyles();
-  const [src, setSrc] = useState(BROWSER_START_URL);
-  const [addressInput, setAddressInput] = useState(BROWSER_START_URL);
-  const webviewRef = useRef<WebviewHandle>(null);
-
-  const handleNavigate = useCallback((url: string) => {
-    setAddressInput(url);
-  }, []);
-
-  const handleSubmit = useCallback(
-    (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      const next = normalizeAddress(addressInput);
-      setAddressInput(next);
-      setSrc(next);
-    },
-    [addressInput]
-  );
-
-  const registryProps = useMemo(
-    () => ({
-      handleId: makeAppHandleId('global', BROWSER_APP_ID),
-      appId: BROWSER_APP_ID,
-      kind: 'webview' as const,
-      scope: 'global' as AppHandleScope,
-      label: 'Browser',
-    }),
-    []
-  );
-
-  return (
-    <div className={styles.flex1MinH0Relative} style={{ display: 'flex', flexDirection: 'column' }}>
-      <form className={styles.browserToolbar} onSubmit={handleSubmit}>
-        <button
-          type="button"
-          className={styles.browserNavBtn}
-          aria-label="Back"
-          title="Back"
-          onClick={() => webviewRef.current?.goBack()}
-        >
-          <ArrowLeft20Regular style={{ width: 14, height: 14 }} />
-        </button>
-        <button
-          type="button"
-          className={styles.browserNavBtn}
-          aria-label="Forward"
-          title="Forward"
-          onClick={() => webviewRef.current?.goForward()}
-        >
-          <ArrowRight20Regular style={{ width: 14, height: 14 }} />
-        </button>
-        <button
-          type="button"
-          className={styles.browserNavBtn}
-          aria-label="Reload"
-          title="Reload"
-          onClick={() => webviewRef.current?.reload()}
-        >
-          <ArrowClockwise20Regular style={{ width: 14, height: 14 }} />
-        </button>
-        <input
-          type="text"
-          className={styles.browserUrlInput}
-          value={addressInput}
-          onChange={(e) => setAddressInput(e.target.value)}
-          onFocus={(e) => e.currentTarget.select()}
-          placeholder="Search or enter URL"
-          spellCheck={false}
-          data-tab-id={tabId}
-        />
-      </form>
-      <div style={{ flex: '1 1 0', minHeight: 0 }}>
-        <Webview
-          ref={webviewRef}
-          src={src}
-          showUnavailable={false}
-          onNavigate={handleNavigate}
-          registry={registryProps}
-        />
-      </div>
-    </div>
-  );
-});
-BrowserBody.displayName = 'BrowserBody';
-
 const BrowserColumn = memo(
   ({
     tab,
@@ -1180,7 +1090,9 @@ const BrowserColumn = memo(
                 <ReOrderDotsVertical20Regular style={{ width: 16, height: 16 }} />
               </button>
               <Globe20Regular style={{ width: 14, height: 14, color: tokens.colorNeutralForeground2 }} />
-              <span className={styles.sessionLabel}>Browser</span>
+              <span className={styles.sessionLabel} title="Browser">
+                Browser
+              </span>
             </div>
             <div className={mergeClasses(styles.flexItemsCenter, styles.gap1)}>
               <SessionActionButton
@@ -1192,6 +1104,7 @@ const BrowserColumn = memo(
                   )
                 }
                 label={isExpanded ? 'Collapse column' : 'Expand column'}
+                aria-pressed={isExpanded}
                 onClick={() => onToggleExpand(tab.id)}
                 className={mergeClasses(styles.revealOnHover, 'revealOnHover')}
               />
@@ -1202,7 +1115,9 @@ const BrowserColumn = memo(
               />
             </div>
           </div>
-          <BrowserBody tabId={tab.id} />
+          <div className={styles.flex1MinH0Relative}>
+            <BrowserView tabsetId={`col:${tab.id}`} isGlass={isGlass} />
+          </div>
         </div>
         <div className={styles.deckDockSlot} />
       </div>
@@ -1321,7 +1236,13 @@ const AppLauncherGrid = memo(
             className={mergeClasses(styles.launcherRow, uniform && rowIndex % 2 === 1 && styles.launcherRowOffset)}
           >
             {row.map((app) => (
-              <button key={app.id} type="button" className={styles.launcherItem} onClick={() => onPick(app.id)}>
+              <button
+                key={app.id}
+                type="button"
+                className={styles.launcherItem}
+                onClick={() => onPick(app.id)}
+                title={app.label}
+              >
                 <span className={mergeClasses(styles.launcherIconDisk, isGlass && styles.launcherIconDiskGlass)}>
                   <AppIcon icon={app.icon} size={34} />
                 </span>
@@ -1384,7 +1305,9 @@ const AppLauncherColumn = memo(
               >
                 <ReOrderDotsVertical20Regular style={{ width: 16, height: 16 }} />
               </button>
-              <span className={styles.sessionLabel}>Apps</span>
+              <span className={styles.sessionLabel} title="Apps">
+                Apps
+              </span>
             </div>
             <div className={mergeClasses(styles.flexItemsCenter, styles.gap1)}>
               <SessionActionButton
@@ -1396,6 +1319,7 @@ const AppLauncherColumn = memo(
                   )
                 }
                 label={isExpanded ? 'Collapse column' : 'Expand column'}
+                aria-pressed={isExpanded}
                 onClick={() => onToggleExpand(tab.id)}
                 className={mergeClasses(styles.revealOnHover, 'revealOnHover')}
               />
@@ -1552,8 +1476,14 @@ const FocusListItem = memo(
           </button>
           <button type="button" onClick={() => onSelect(tab.id)} className={styles.focusListItemContent}>
             <div className={styles.focusListItemInner}>
-              <span className={styles.focusListItemLabel}>{label}</span>
-              {subLabel && <span className={styles.focusListItemSub}>{subLabel}</span>}
+              <span className={styles.focusListItemLabel} title={label}>
+                {label}
+              </span>
+              {subLabel && (
+                <span className={styles.focusListItemSub} title={subLabel}>
+                  {subLabel}
+                </span>
+              )}
             </div>
           </button>
           <Menu positioning={{ position: 'below', align: 'end', fallbackPositions: ['above-end'] }}>
@@ -1654,20 +1584,30 @@ export const CodeDeck = memo(() => {
     }
   }, [expandedTabId, tabs]);
 
-  // React to agent-triggered preview requests
-  const previewRequest = useStore($previewRequest);
+  // React to agent-triggered preview requests. We subscribe via `listen` rather
+  // than `useStore` so every atom update fires — a rapid burst of requests all
+  // get applied instead of being coalesced to the last-rendered value.
+  const activeTabIdRef = useRef(activeTabId);
+  const firstTabIdRef = useRef(tabs[0]?.id);
+  activeTabIdRef.current = activeTabId;
+  firstTabIdRef.current = tabs[0]?.id;
   useEffect(() => {
-    if (!previewRequest) {
-      return;
-    }
-    const targetTabId = (previewRequest.tabId as CodeTabId | undefined) ?? activeTabId ?? tabs[0]?.id;
-    if (!targetTabId) {
-      return;
-    }
-    setPreviewUrls((prev) => ({ ...prev, [targetTabId]: previewRequest.url }));
-    setActiveApps((prev) => ({ ...prev, [targetTabId]: 'browser' }));
-    clearPreviewRequest();
-  }, [previewRequest, activeTabId, tabs]);
+    const seen = new Set<string>();
+    const unsubscribe = $previewRequest.listen((req) => {
+      if (!req || seen.has(req.id)) {
+        return;
+      }
+      seen.add(req.id);
+      const targetTabId = (req.tabId as CodeTabId | undefined) ?? activeTabIdRef.current ?? firstTabIdRef.current;
+      if (!targetTabId) {
+        return;
+      }
+      setPreviewUrls((prev) => ({ ...prev, [targetTabId]: req.url }));
+      setActiveApps((prev) => ({ ...prev, [targetTabId]: 'browser' }));
+      clearPreviewRequest();
+    });
+    return unsubscribe;
+  }, []);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -1753,6 +1693,11 @@ export const CodeDeck = memo(() => {
 
   const handleClose = useCallback((id: CodeTabId) => {
     setActiveApps((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    setPreviewUrls((current) => {
       const next = { ...current };
       delete next[id];
       return next;
@@ -2079,7 +2024,7 @@ export const CodeDeck = memo(() => {
                           flexDirection: 'column',
                         }}
                       >
-                        <BrowserBody tabId={tab.id} />
+                        <BrowserView tabsetId={`col:${tab.id}`} isGlass={!!deckBackground} />
                       </div>
                     );
                   }

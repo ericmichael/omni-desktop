@@ -9,7 +9,10 @@ import { pathToFileURL } from 'url';
 
 import { getArtifactsDir } from '@/lib/artifacts';
 import { createAppControlManager } from '@/main/app-control-manager';
+import { createBrowserManager } from '@/main/browser-manager';
 import { createConsoleManager } from '@/main/console-manager';
+import { createDownloadsManager } from '@/main/downloads-manager';
+import { createPermissionsManager } from '@/main/permissions-manager';
 import { createExtensionManager } from '@/main/extension-manager';
 import { MainProcessManager } from '@/main/main-process-manager';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
@@ -113,6 +116,19 @@ const [, cleanupExtensions] = createExtensionManager({
   store,
   sendToWindow: main.sendToWindow,
 });
+const [, cleanupBrowser] = createBrowserManager({
+  ipc: main.ipc,
+  sendToWindow: main.sendToWindow,
+  store,
+});
+const [, cleanupDownloads] = createDownloadsManager({
+  ipc: main.ipc,
+  sendToWindow: main.sendToWindow,
+});
+const [, cleanupPermissions] = createPermissionsManager({
+  ipc: main.ipc,
+  sendToWindow: main.sendToWindow,
+});
 const { cleanup: cleanupPlatform, refreshPolicy: refreshPlatformPolicy } = registerPlatformIpc({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
@@ -201,6 +217,9 @@ async function cleanup() {
     cleanupProcessManager(),
     cleanupProject(),
     cleanupExtensions(),
+    cleanupBrowser(),
+    cleanupDownloads(),
+    cleanupPermissions(),
   ]);
   const errors = results
     .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
@@ -382,5 +401,6 @@ main.ipc.handle('util:select-file', async (_, path, filters) => {
   return result.filePaths[0] ?? null;
 });
 main.ipc.handle('util:open-directory', (_, path) => shell.openPath(path));
+main.ipc.handle('util:open-external', (_, url) => shell.openExternal(url));
 
 //#endregion

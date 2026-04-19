@@ -11,13 +11,13 @@
 
 import { nanoid } from 'nanoid';
 
+import { listLiveApps, resolveAppHandle } from '@/renderer/features/AppControl/live-registry';
 import { inboxApi } from '@/renderer/features/Inbox/state';
 import { $milestones, milestoneApi } from '@/renderer/features/Initiatives/state';
 import { pageApi } from '@/renderer/features/Pages/state';
 import { requestPlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
 import { requestPreviewOpen } from '@/renderer/features/Tickets/preview-bridge';
 import { $tickets, ticketApi } from '@/renderer/features/Tickets/state';
-import { listLiveApps, resolveAppHandle } from '@/renderer/features/AppControl/live-registry';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -911,7 +911,29 @@ async function handleAppControlTools(
     return ok({ apps });
   }
 
-  if (!toolName.startsWith('app_')) {
+  // Browser-active-tab tools share the `app_id` scheme even though they don't
+  // live under the `app_` prefix, so accept both families here.
+  const BROWSER_APP_TOOLS = new Set([
+    'browser_scroll',
+    'browser_scroll_to_ref',
+    'browser_inject_css',
+    'browser_remove_inserted_css',
+    'browser_find_in_page',
+    'browser_wait_for',
+    'browser_pdf',
+    'browser_full_screenshot',
+    'browser_set_viewport',
+    'browser_set_user_agent',
+    'browser_set_zoom',
+    'browser_cookies_get',
+    'browser_cookies_set',
+    'browser_cookies_clear',
+    'browser_storage_get',
+    'browser_storage_set',
+    'browser_storage_clear',
+    'browser_network_log',
+  ]);
+  if (!toolName.startsWith('app_') && !BROWSER_APP_TOOLS.has(toolName)) {
     return null;
   }
 
@@ -978,6 +1000,10 @@ async function handleAppControlTools(
         const tree = await emitter.invoke('app:snapshot', handleId);
         return ok({ snapshot: tree });
       }
+      case 'app_snapshot_diff': {
+        const diff = await emitter.invoke('app:snapshot-diff', handleId);
+        return ok(diff);
+      }
       case 'app_click': {
         const ref = (toolArgs.ref as string) ?? '';
         if (!ref) {
@@ -1010,6 +1036,271 @@ async function handleAppControlTools(
           return err('Missing key');
         }
         await emitter.invoke('app:press', handleId, key);
+        return ok({ ok: true });
+      }
+      case 'browser_scroll': {
+        const opts = {
+          dx: typeof toolArgs.dx === 'number' ? (toolArgs.dx as number) : undefined,
+          dy: typeof toolArgs.dy === 'number' ? (toolArgs.dy as number) : undefined,
+          toTop: toolArgs.to_top === true,
+          toBottom: toolArgs.to_bottom === true,
+        };
+        await emitter.invoke('app:scroll', handleId, opts);
+        return ok({ ok: true });
+      }
+      case 'browser_inject_css': {
+        const css = (toolArgs.css as string) ?? '';
+        if (!css) {
+return err('Missing css');
+}
+        const key = await emitter.invoke('app:inject-css', handleId, css);
+        return ok({ key });
+      }
+      case 'browser_remove_inserted_css': {
+        const key = (toolArgs.key as string) ?? '';
+        if (!key) {
+return err('Missing key');
+}
+        await emitter.invoke('app:remove-inserted-css', handleId, key);
+        return ok({ ok: true });
+      }
+      case 'browser_find_in_page': {
+        const query = (toolArgs.query as string) ?? '';
+        if (!query) {
+return err('Missing query');
+}
+        const result = await emitter.invoke('app:find', handleId, query, {
+          caseSensitive: toolArgs.case_sensitive === true,
+          forward: toolArgs.forward !== false,
+          findNext: toolArgs.find_next === true,
+        });
+        return ok({ matches: result.matches, active_ordinal: result.activeOrdinal });
+      }
+      case 'browser_wait_for': {
+        try {
+          const res = await emitter.invoke('app:wait-for', handleId, {
+            selector: typeof toolArgs.selector === 'string' ? (toolArgs.selector as string) : undefined,
+            urlIncludes:
+              typeof toolArgs.url_includes === 'string' ? (toolArgs.url_includes as string) : undefined,
+            networkIdle: toolArgs.network_idle === true,
+            timeoutMs: typeof toolArgs.timeout_ms === 'number' ? (toolArgs.timeout_ms as number) : undefined,
+          });
+          return ok(res);
+        } catch (e) {
+          return err(e instanceof Error ? e.message : String(e));
+        }
+      }
+      case 'browser_scroll_to_ref': {
+        const ref = (toolArgs.ref as string) ?? '';
+        if (!ref) {
+return err('Missing ref');
+}
+        await emitter.invoke('app:scroll-to-ref', handleId, ref);
+        return ok({ ok: true });
+      }
+      case 'browser_pdf': {
+        const path = await emitter.invoke(
+          'app:pdf',
+          handleId,
+          {
+            ...(currentTicketId ? { artifactsSubdir: currentTicketId } : {}),
+            ...(typeof toolArgs.landscape === 'boolean' ? { landscape: toolArgs.landscape as boolean } : {}),
+            ...(typeof toolArgs.print_background === 'boolean'
+              ? { printBackground: toolArgs.print_background as boolean }
+              : {}),
+          }
+        );
+        return ok({ path });
+      }
+      case 'browser_full_screenshot': {
+        const path = await emitter.invoke(
+          'app:full-screenshot',
+          handleId,
+          currentTicketId ? { artifactsSubdir: currentTicketId } : {}
+        );
+        return ok({ path });
+      }
+      case 'browser_set_viewport': {
+        if (toolArgs.clear === true) {
+          await emitter.invoke('app:set-viewport', handleId, { clear: true });
+          return ok({ ok: true });
+        }
+        const width = Number(toolArgs.width);
+        const height = Number(toolArgs.height);
+        if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+          return err('browser_set_viewport needs positive `width` + `height`, or `clear: true`.');
+        }
+        await emitter.invoke('app:set-viewport', handleId, {
+          width,
+          height,
+          ...(typeof toolArgs.device_scale_factor === 'number'
+            ? { deviceScaleFactor: toolArgs.device_scale_factor as number }
+            : {}),
+          ...(typeof toolArgs.mobile === 'boolean' ? { mobile: toolArgs.mobile as boolean } : {}),
+        });
+        return ok({ ok: true });
+      }
+      case 'browser_set_user_agent': {
+        const ua = (toolArgs.user_agent as string) ?? '';
+        await emitter.invoke('app:set-user-agent', handleId, ua);
+        return ok({ ok: true });
+      }
+      case 'browser_set_zoom': {
+        const factor = Number(toolArgs.factor);
+        if (!Number.isFinite(factor)) {
+return err('Missing numeric factor');
+}
+        await emitter.invoke('app:set-zoom', handleId, factor);
+        return ok({ ok: true });
+      }
+      case 'browser_cookies_get': {
+        const cookies = await emitter.invoke('app:cookies-get', handleId, {
+          ...(typeof toolArgs.url === 'string' ? { url: toolArgs.url as string } : {}),
+          ...(typeof toolArgs.name === 'string' ? { name: toolArgs.name as string } : {}),
+          ...(typeof toolArgs.domain === 'string' ? { domain: toolArgs.domain as string } : {}),
+          ...(typeof toolArgs.path === 'string' ? { path: toolArgs.path as string } : {}),
+        });
+        return ok({ cookies });
+      }
+      case 'browser_cookies_set': {
+        const url = (toolArgs.url as string) ?? '';
+        const name = (toolArgs.name as string) ?? '';
+        const value = (toolArgs.value as string) ?? '';
+        if (!url || !name) {
+return err('Missing url or name');
+}
+        await emitter.invoke('app:cookies-set', handleId, {
+          url,
+          name,
+          value,
+          ...(typeof toolArgs.domain === 'string' ? { domain: toolArgs.domain as string } : {}),
+          ...(typeof toolArgs.path === 'string' ? { path: toolArgs.path as string } : {}),
+          ...(typeof toolArgs.secure === 'boolean' ? { secure: toolArgs.secure as boolean } : {}),
+          ...(typeof toolArgs.http_only === 'boolean' ? { httpOnly: toolArgs.http_only as boolean } : {}),
+          ...(typeof toolArgs.expiration_date === 'number'
+            ? { expirationDate: toolArgs.expiration_date as number }
+            : {}),
+          ...(typeof toolArgs.same_site === 'string'
+            ? { sameSite: toolArgs.same_site as 'unspecified' | 'no_restriction' | 'lax' | 'strict' }
+            : {}),
+        });
+        return ok({ ok: true });
+      }
+      case 'browser_cookies_clear': {
+        const removed = await emitter.invoke('app:cookies-clear', handleId, {
+          ...(typeof toolArgs.url === 'string' ? { url: toolArgs.url as string } : {}),
+          ...(typeof toolArgs.name === 'string' ? { name: toolArgs.name as string } : {}),
+        });
+        return ok({ removed });
+      }
+      case 'browser_storage_get': {
+        const which = toolArgs.which as 'local' | 'session';
+        if (which !== 'local' && which !== 'session') {
+return err('which must be "local" or "session"');
+}
+        const entries = await emitter.invoke('app:storage-get', handleId, which);
+        return ok({ entries });
+      }
+      case 'browser_storage_set': {
+        const which = toolArgs.which as 'local' | 'session';
+        const entries = toolArgs.entries as Record<string, string> | undefined;
+        if (which !== 'local' && which !== 'session') {
+return err('which must be "local" or "session"');
+}
+        if (!entries || typeof entries !== 'object') {
+return err('Missing entries object');
+}
+        await emitter.invoke('app:storage-set', handleId, which, entries);
+        return ok({ ok: true });
+      }
+      case 'browser_storage_clear': {
+        const which = toolArgs.which as 'local' | 'session';
+        if (which !== 'local' && which !== 'session') {
+return err('which must be "local" or "session"');
+}
+        await emitter.invoke('app:storage-clear', handleId, which);
+        return ok({ ok: true });
+      }
+      case 'browser_network_log': {
+        const entries = await emitter.invoke('app:network-log', handleId, {
+          ...(typeof toolArgs.limit === 'number' ? { limit: toolArgs.limit as number } : {}),
+          ...(typeof toolArgs.since === 'number' ? { since: toolArgs.since as number } : {}),
+          ...(typeof toolArgs.url_includes === 'string' ? { urlIncludes: toolArgs.url_includes as string } : {}),
+          ...(typeof toolArgs.status_min === 'number' ? { statusMin: toolArgs.status_min as number } : {}),
+          ...(toolArgs.clear === true ? { clear: true } : {}),
+        });
+        return ok({ entries });
+      }
+      default:
+        return null;
+    }
+  } catch (e) {
+    return err(e instanceof Error ? e.message : String(e));
+  }
+}
+
+/**
+ * Browser-surface tools. These operate on tabsets/tabs in the BrowserManager
+ * directly — no app-control handle required.
+ */
+async function handleBrowserTools(
+  toolName: string,
+  toolArgs: Record<string, unknown>
+): Promise<ClientToolResult | null> {
+  try {
+    switch (toolName) {
+      case 'browser_list_tabsets': {
+        const snapshot = await emitter.invoke('browser:get-state');
+        const tabsets = Object.values(snapshot.tabsets).map((ts) => ({
+          id: ts.id,
+          profile_id: ts.profileId,
+          active_tab_id: ts.activeTabId,
+          tabs: ts.tabs.map((t) => ({
+            id: t.id,
+            url: t.url,
+            title: t.title ?? null,
+            pinned: !!t.pinned,
+          })),
+        }));
+        return ok({ tabsets });
+      }
+      case 'browser_tab_create': {
+        const tabsetId = (toolArgs.tabset_id as string) ?? '';
+        if (!tabsetId) {
+return err('Missing tabset_id');
+}
+        const tab = await emitter.invoke('browser:tab-create', tabsetId, {
+          ...(typeof toolArgs.url === 'string' ? { url: toolArgs.url as string } : {}),
+          ...(typeof toolArgs.activate === 'boolean' ? { activate: toolArgs.activate as boolean } : {}),
+        });
+        return ok({ tab_id: tab.id, url: tab.url });
+      }
+      case 'browser_tab_close': {
+        const tabsetId = (toolArgs.tabset_id as string) ?? '';
+        const tabId = (toolArgs.tab_id as string) ?? '';
+        if (!tabsetId || !tabId) {
+return err('Missing tabset_id or tab_id');
+}
+        await emitter.invoke('browser:tab-close', tabsetId, tabId);
+        return ok({ ok: true });
+      }
+      case 'browser_tab_activate': {
+        const tabsetId = (toolArgs.tabset_id as string) ?? '';
+        const tabId = (toolArgs.tab_id as string) ?? '';
+        if (!tabsetId || !tabId) {
+return err('Missing tabset_id or tab_id');
+}
+        await emitter.invoke('browser:tab-activate', tabsetId, tabId);
+        return ok({ ok: true });
+      }
+      case 'browser_tab_navigate': {
+        const tabsetId = (toolArgs.tabset_id as string) ?? '';
+        const tabId = (toolArgs.tab_id as string) ?? '';
+        const url = (toolArgs.url as string) ?? '';
+        if (!tabsetId || !tabId || !url) {
+return err('Missing tabset_id, tab_id, or url');
+}
+        await emitter.invoke('browser:tab-navigate', tabsetId, tabId, url);
         return ok({ ok: true });
       }
       default:
@@ -1069,6 +1360,11 @@ return projectResult;
     const uiResult = await handleUITools(toolName, toolArgs, opts?.tabId);
     if (uiResult) {
 return uiResult;
+}
+
+    const browserResult = await handleBrowserTools(toolName, toolArgs);
+    if (browserResult) {
+return browserResult;
 }
 
     const appResult = await handleAppControlTools(
