@@ -104,10 +104,13 @@ const [, cleanupConsole] = createConsoleManager({
 let browserManagerRef: ReturnType<typeof createBrowserManager>[0] | null = null;
 const [appControlManager, cleanupAppControl] = createAppControlManager({
   ipc: main.ipc,
-  onBrowserPopup: (tabsetId, url) => {
+  onBrowserPopup: (tabsetId, url, disposition) => {
     if (!browserManagerRef) return;
+    // `background-tab` maps to Cmd/Ctrl+click: open without stealing focus.
+    // Everything else (`foreground-tab`, `new-window`, `default`) activates.
+    const activate = disposition !== 'background-tab';
     try {
-      browserManagerRef.createTab(tabsetId, { url, activate: true });
+      browserManagerRef.createTab(tabsetId, { url, activate });
     } catch {
       // Tabset may not exist yet (race on first mount) — ignore.
     }

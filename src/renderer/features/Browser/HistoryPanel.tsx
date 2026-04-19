@@ -131,6 +131,21 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground4,
     fontSize: tokens.fontSizeBase200,
   },
+  destructiveBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+    height: '26px',
+    paddingLeft: '8px',
+    paddingRight: '8px',
+    borderRadius: tokens.borderRadiusMedium,
+    border: 'none',
+    backgroundColor: 'transparent',
+    color: tokens.colorPaletteRedForeground1,
+    cursor: 'pointer',
+    fontSize: tokens.fontSizeBase200,
+    ':hover': { backgroundColor: 'rgba(255, 80, 80, 0.08)' },
+  },
 });
 
 function formatTime(ts: number): string {
@@ -266,7 +281,7 @@ onClose();
           </div>
           <div className={styles.footer}>
             <span>{entries.length} entries</span>
-            <button type="button" className={styles.btn} onClick={handleClear}>
+            <button type="button" className={styles.destructiveBtn} onClick={handleClear}>
               <Delete16Regular style={{ width: 12, height: 12 }} />
               Clear history
             </button>

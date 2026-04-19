@@ -12,9 +12,10 @@ import {
   PersonAdd16Regular,
   PersonProhibited16Regular,
 } from '@fluentui/react-icons';
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useState } from 'react';
 
-import { Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@/renderer/ds';
+import { ConfirmDialog, Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@/renderer/ds';
+import { NewProfileDialog } from '@/renderer/features/Browser/ProfileDialog';
 import { browserApi } from '@/renderer/features/Browser/state';
 import type { BrowserProfile, BrowserProfileId, BrowserTabsetId } from '@/shared/types';
 
@@ -45,6 +46,7 @@ const useStyles = makeStyles({
     ...shorthands.border('1px', 'solid', 'rgba(130, 110, 210, 0.4)'),
   },
   label: { maxWidth: '90px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  destructive: { color: tokens.colorPaletteRedForeground1 },
 });
 
 export const ProfileSwitcher = memo(
@@ -60,6 +62,10 @@ export const ProfileSwitcher = memo(
     const styles = useStyles();
     const current = profiles.find((p) => p.id === currentProfileId) ?? profiles[0];
 
+    const [createOpen, setCreateOpen] = useState(false);
+    const [createIncognito, setCreateIncognito] = useState(false);
+    const [deleteOpen, setDeleteOpen] = useState(false);
+
     const handleSwitch = useCallback(
       (id: BrowserProfileId) => {
         if (id === currentProfileId) return;
@@ -68,12 +74,17 @@ export const ProfileSwitcher = memo(
       [currentProfileId, tabsetId]
     );
 
+    const openCreate = useCallback((incognito: boolean) => {
+      setCreateIncognito(incognito);
+      setCreateOpen(true);
+    }, []);
+
     const handleCreate = useCallback(
-      async (incognito: boolean) => {
-        const label = window.prompt(incognito ? 'New incognito profile name' : 'New profile name');
-        if (!label) return;
+      async (input: { label: string; incognito: boolean }) => {
         try {
-          const profile = await browserApi.addProfile({ label, ...(incognito ? { incognito: true } : {}) });
+          const profile = await browserApi.addProfile(
+            input.incognito ? { label: input.label, incognito: true } : { label: input.label }
+          );
           await browserApi.setTabsetProfile(tabsetId, profile.id);
         } catch {
           // ignore — fire-and-forget UX
@@ -82,78 +93,90 @@ export const ProfileSwitcher = memo(
       [tabsetId]
     );
 
-    const handleDelete = useCallback(
-      async (id: BrowserProfileId) => {
-        if (!window.confirm('Delete this profile? Any tabsets using it will revert to the default profile.')) {
-          return;
-        }
-        try {
-          await browserApi.removeProfile(id);
-        } catch {
-          // ignore
-        }
-      },
-      []
-    );
+    const confirmDelete = useCallback(() => {
+      if (!current || current.builtin) return;
+      void browserApi.removeProfile(current.id).catch(() => {});
+    }, [current]);
 
     if (!current) return null;
 
     return (
-      <Menu positioning={{ position: 'below', align: 'end' }}>
-        <MenuTrigger>
-          <button
-            type="button"
-            className={`${styles.trigger}${current.incognito ? ` ${styles.triggerIncognito}` : ''}`}
-            aria-label={`Profile: ${current.label}`}
-            title={`Profile: ${current.label}${current.incognito ? ' (incognito)' : ''}`}
-          >
-            {current.incognito ? (
-              <PersonProhibited16Regular style={{ width: 14, height: 14 }} />
-            ) : (
-              <Person20Regular style={{ width: 14, height: 14 }} />
-            )}
-            <span className={styles.label}>{current.label}</span>
-          </button>
-        </MenuTrigger>
-        <MenuPopover>
-          <MenuList>
-            {profiles.map((p) => (
-              <MenuItem
-                key={p.id}
-                icon={
-                  p.id === currentProfileId ? (
-                    <Checkmark16Regular />
-                  ) : p.incognito ? (
-                    <PersonProhibited16Regular />
-                  ) : (
-                    <Person20Regular style={{ width: 16, height: 16 }} />
-                  )
-                }
-                onClick={() => handleSwitch(p.id)}
-              >
-                {p.label}
-                {p.incognito ? ' (incognito)' : ''}
-                {p.builtin ? ' · default' : ''}
-              </MenuItem>
-            ))}
-            <MenuDivider />
-            <MenuItem icon={<PersonAdd16Regular />} onClick={() => void handleCreate(false)}>
-              New profile…
-            </MenuItem>
-            <MenuItem icon={<PersonProhibited16Regular />} onClick={() => void handleCreate(true)}>
-              New incognito profile…
-            </MenuItem>
-            {!current.builtin && (
-              <>
-                <MenuDivider />
-                <MenuItem icon={<Delete16Regular />} onClick={() => void handleDelete(current.id)}>
-                  Delete “{current.label}”
+      <>
+        <Menu positioning={{ position: 'below', align: 'end' }}>
+          <MenuTrigger>
+            <button
+              type="button"
+              className={`${styles.trigger}${current.incognito ? ` ${styles.triggerIncognito}` : ''}`}
+              aria-label={`Profile: ${current.label}`}
+              title={`Profile: ${current.label}${current.incognito ? ' (incognito)' : ''}`}
+            >
+              {current.incognito ? (
+                <PersonProhibited16Regular style={{ width: 14, height: 14 }} />
+              ) : (
+                <Person20Regular style={{ width: 14, height: 14 }} />
+              )}
+              <span className={styles.label}>{current.label}</span>
+            </button>
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              {profiles.map((p) => (
+                <MenuItem
+                  key={p.id}
+                  icon={
+                    p.id === currentProfileId ? (
+                      <Checkmark16Regular />
+                    ) : p.incognito ? (
+                      <PersonProhibited16Regular />
+                    ) : (
+                      <Person20Regular style={{ width: 16, height: 16 }} />
+                    )
+                  }
+                  onClick={() => handleSwitch(p.id)}
+                >
+                  {p.label}
+                  {p.incognito ? ' (incognito)' : ''}
+                  {p.builtin ? ' · default' : ''}
                 </MenuItem>
-              </>
-            )}
-          </MenuList>
-        </MenuPopover>
-      </Menu>
+              ))}
+              <MenuDivider />
+              <MenuItem icon={<PersonAdd16Regular />} onClick={() => openCreate(false)}>
+                New profile…
+              </MenuItem>
+              <MenuItem icon={<PersonProhibited16Regular />} onClick={() => openCreate(true)}>
+                New incognito profile…
+              </MenuItem>
+              {!current.builtin && (
+                <>
+                  <MenuDivider />
+                  <MenuItem
+                    icon={<Delete16Regular className={styles.destructive} />}
+                    onClick={() => setDeleteOpen(true)}
+                    className={styles.destructive}
+                  >
+                    Delete “{current.label}”
+                  </MenuItem>
+                </>
+              )}
+            </MenuList>
+          </MenuPopover>
+        </Menu>
+        <NewProfileDialog
+          open={createOpen}
+          defaultIncognito={createIncognito}
+          onClose={() => setCreateOpen(false)}
+          onCreate={handleCreate}
+        />
+        <ConfirmDialog
+          open={deleteOpen}
+          onClose={() => setDeleteOpen(false)}
+          onConfirm={confirmDelete}
+          title={`Delete profile “${current.label}”?`}
+          description="Any tabsets currently using this profile will switch back to the default. Persistent cookies and storage for this profile will be deleted the next time the app restarts."
+          confirmLabel="Delete profile"
+          destructive
+        />
+      </>
     );
   }
 );

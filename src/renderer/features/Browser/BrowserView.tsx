@@ -160,6 +160,11 @@ type PreviewState = {
   error: { code: number; description: string; url: string } | null;
 };
 
+/** Cmd (⌘) on macOS, Ctrl elsewhere. Used in button tooltips. */
+const IS_MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
+const MOD = IS_MAC ? '⌘' : 'Ctrl+';
+const SHIFT = IS_MAC ? '⇧' : 'Shift+';
+
 export const BrowserView = memo(
   ({
     tabsetId,
@@ -454,6 +459,15 @@ return;
         const isEditable =
           target?.isContentEditable || tag === 'input' || tag === 'textarea' || tag === 'select';
         const mod = event.metaKey || event.ctrlKey;
+
+        // F12 toggles our devtools panel — no modifier, but we still want
+        // it to work globally. Check it before the mod gate.
+        if (event.key === 'F12') {
+          event.preventDefault();
+          setDevtoolsOpen((v) => !v);
+          return;
+        }
+
         if (!mod && event.key !== 'Escape') {
 return;
 }
@@ -492,12 +506,11 @@ void browserApi.closeTab(tabsetId, activeTabId);
         } else if (event.shiftKey && key === 't') {
           event.preventDefault();
           void browserApi.reopenTab(tabsetId);
-        } else if (event.altKey && key === 'r') {
+        } else if (event.shiftKey && key === 'r') {
+          // Safari-style reader toggle. Shadows Chrome's "hard reload" but we
+          // don't bind hard reload elsewhere, so the overlap is harmless.
           event.preventDefault();
           void toggleReader();
-        } else if (event.altKey && key === 'i') {
-          event.preventDefault();
-          setDevtoolsOpen((v) => !v);
         } else if (event.key === '=' || event.key === '+') {
           event.preventDefault();
           applyZoom(zoom + 0.1);
@@ -507,10 +520,10 @@ void browserApi.closeTab(tabsetId, activeTabId);
         } else if (event.key === '0') {
           event.preventDefault();
           applyZoom(1);
-        } else if (event.key === '[') {
+        } else if (event.key === 'ArrowLeft' || event.key === '[') {
           event.preventDefault();
           webviewRef.current?.goBack();
-        } else if (event.key === ']') {
+        } else if (event.key === 'ArrowRight' || event.key === ']') {
           event.preventDefault();
           webviewRef.current?.goForward();
         } else if (event.key === 'Escape') {
@@ -559,7 +572,7 @@ return undefined;
             type="button"
             className={styles.navBtn}
             aria-label="Back"
-            title="Back (Ctrl+[)"
+            title={`Back (${MOD}←)`}
             onClick={() => webviewRef.current?.goBack()}
           >
             <ArrowLeft20Regular style={{ width: 14, height: 14 }} />
@@ -568,7 +581,7 @@ return undefined;
             type="button"
             className={styles.navBtn}
             aria-label="Forward"
-            title="Forward (Ctrl+])"
+            title={`Forward (${MOD}→)`}
             onClick={() => webviewRef.current?.goForward()}
           >
             <ArrowRight20Regular style={{ width: 14, height: 14 }} />
@@ -588,7 +601,7 @@ return undefined;
               type="button"
               className={styles.navBtn}
               aria-label="Reload"
-              title="Reload (Ctrl+R)"
+              title={`Reload (${MOD}R)`}
               onClick={() => webviewRef.current?.reload()}
             >
               <ArrowClockwise20Regular style={{ width: 14, height: 14 }} />
@@ -600,11 +613,11 @@ return undefined;
             className={styles.navBtn}
             aria-label={readerKey ? 'Exit reader mode' : 'Reader mode'}
             aria-pressed={!!readerKey}
-            title={readerKey ? 'Exit reader mode (Alt+R)' : 'Reader mode (Alt+R)'}
+            title={readerKey ? `Exit reader mode (${MOD}${SHIFT}R)` : `Reader mode (${MOD}${SHIFT}R)`}
             onClick={() => void toggleReader()}
           >
             {readerKey ? (
-              <BookOpen20Filled style={{ width: 14, height: 14 }} />
+              <BookOpen20Filled style={{ width: 14, height: 14, color: tokens.colorBrandForeground1 }} />
             ) : (
               <BookOpen20Regular style={{ width: 14, height: 14 }} />
             )}
@@ -614,7 +627,7 @@ return undefined;
             className={styles.navBtn}
             aria-label={bookmarked ? 'Remove bookmark' : 'Add bookmark'}
             aria-pressed={bookmarked}
-            title={bookmarked ? 'Remove bookmark (Ctrl+D)' : 'Add bookmark (Ctrl+D)'}
+            title={bookmarked ? `Remove bookmark (${MOD}D)` : `Add bookmark (${MOD}D)`}
             onClick={handleBookmarkToggle}
           >
             {bookmarked ? (
@@ -628,10 +641,16 @@ return undefined;
             className={styles.navBtn}
             aria-label={devtoolsOpen ? 'Close devtools' : 'Open devtools'}
             aria-pressed={devtoolsOpen}
-            title={devtoolsOpen ? 'Close devtools (Alt+I)' : 'Open devtools (Alt+I)'}
+            title={devtoolsOpen ? 'Close devtools (F12)' : 'Open devtools (F12)'}
             onClick={() => setDevtoolsOpen((v) => !v)}
           >
-            <WindowDevTools20Regular style={{ width: 14, height: 14 }} />
+            <WindowDevTools20Regular
+              style={{
+                width: 14,
+                height: 14,
+                ...(devtoolsOpen ? { color: tokens.colorBrandForeground1 } : {}),
+              }}
+            />
           </button>
           <DownloadsTray />
           <ProfileSwitcher tabsetId={tabsetId} profiles={state.profiles} currentProfileId={resolvedProfileId} />

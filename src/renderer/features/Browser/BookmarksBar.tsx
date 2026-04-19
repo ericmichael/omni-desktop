@@ -1,9 +1,9 @@
 import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { Star16Regular } from '@fluentui/react-icons';
+import { Delete16Regular, Star16Regular } from '@fluentui/react-icons';
 import { memo, useCallback } from 'react';
 
 import { fallbackTitle } from '@/lib/url';
-import { Menu, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@/renderer/ds';
+import { Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@/renderer/ds';
 import { browserApi } from '@/renderer/features/Browser/state';
 import type { BrowserBookmark } from '@/shared/types';
 
@@ -45,10 +45,7 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
     ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
   },
-  empty: {
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground4,
-  },
+  destructive: { color: tokens.colorPaletteRedForeground1 },
 });
 
 export const BookmarksBar = memo(
@@ -67,12 +64,11 @@ export const BookmarksBar = memo(
       void browserApi.removeBookmark(id);
     }, []);
 
+    // Hide the bar entirely when empty — don't clutter the chrome with a
+    // "how to bookmark" hint. The bar reappears the moment a bookmark is
+    // saved (Cmd+D / star button in the toolbar).
     if (bookmarks.length === 0) {
-      return (
-        <div className={`${styles.root}${isGlass ? ` ${  styles.rootGlass}` : ''}`}>
-          <span className={styles.empty}>No bookmarks yet — press Ctrl+D to bookmark this page.</span>
-        </div>
-      );
+      return null;
     }
 
     return (
@@ -95,7 +91,14 @@ export const BookmarksBar = memo(
               <MenuPopover>
                 <MenuList>
                   <MenuItem onClick={() => onOpen(b.url)}>Open</MenuItem>
-                  <MenuItem onClick={() => handleRemove(b.id)}>Remove bookmark</MenuItem>
+                  <MenuDivider />
+                  <MenuItem
+                    icon={<Delete16Regular className={styles.destructive} />}
+                    onClick={() => handleRemove(b.id)}
+                    className={styles.destructive}
+                  >
+                    Remove bookmark
+                  </MenuItem>
                 </MenuList>
               </MenuPopover>
             </Menu>
