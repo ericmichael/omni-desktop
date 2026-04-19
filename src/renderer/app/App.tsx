@@ -1,4 +1,5 @@
 import '@/renderer/styles/tailwind.css';
+import '@/renderer/omniagents-ui/styles/index.css';
 import '@fontsource-variable/inter';
 import '@xterm/xterm/css/xterm.css';
 import '@/renderer/features/Toast/ipc-toast-listener';

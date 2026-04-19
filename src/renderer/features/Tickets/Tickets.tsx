@@ -48,6 +48,7 @@ const useStyles = makeStyles({
     display: 'none',
     '@media (min-width: 640px)': {
       display: 'block',
+      ...shorthands.borderRight('1px', 'solid', tokens.colorNeutralStroke1),
     },
   },
   mainColumn: {

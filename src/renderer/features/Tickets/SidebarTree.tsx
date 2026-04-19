@@ -60,7 +60,6 @@ const useStyles = makeStyles({
   badge: {
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground3,
-    marginLeft: '4px',
   },
   icon: {
     flexShrink: 0,
@@ -105,11 +104,11 @@ const useStyles = makeStyles({
   titleRow: {
     display: 'flex',
     alignItems: 'baseline',
-    gap: '4px',
+    gap: tokens.spacingHorizontalS,
     minWidth: 0,
   },
   titleRowMain: {
-    flex: '1 1 auto',
+    flex: '0 1 auto',
     minWidth: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -786,9 +785,7 @@ return;
                         >
                           <span className={styles.titleRow}>
                             <span className={styles.titleRowMain}>{milestone.title}</span>
-                            <span className={`${styles.badge} ${styles.titleRowTrail}`}>
-                              ({milestoneTickets.length})
-                            </span>
+                            <span className={`${styles.badge} ${styles.titleRowTrail}`}>({milestoneTickets.length})</span>
                           </span>
                         </TreeItemLayout>
                         {milestoneTickets.length > 0 && (
@@ -806,8 +803,10 @@ return;
                   {looseTickets.length > 0 && (
                     <TreeItem itemType="branch" value={`backlog:${project.id}`}>
                       <TreeItemLayout iconBefore={<TaskListSquareLtr16Regular className={styles.icon} />}>
-                        Backlog
-                        <span className={styles.badge}>({looseTickets.length})</span>
+                        <span className={styles.titleRow}>
+                          <span className={styles.titleRowMain}>Backlog</span>
+                          <span className={`${styles.badge} ${styles.titleRowTrail}`}>({looseTickets.length})</span>
+                        </span>
                       </TreeItemLayout>
                       <Tree>
                         {looseTickets.map((ticket) => (

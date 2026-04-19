@@ -90,7 +90,7 @@ updateDrag(touch.clientX)
     <div
       className={[
         'w-1.5 flex-shrink-0 cursor-col-resize transition-colors group relative touch-none',
-        dragging ? 'bg-tweetBlue/50' : 'bg-bgCardAlt hover:bg-tweetBlue/30',
+        dragging ? 'bg-brand/50' : 'bg-bgCardAlt hover:bg-brand/30',
       ].join(' ')}
       onMouseDown={onMouseDown}
       onTouchStart={onTouchStart}

@@ -13,7 +13,7 @@ export function SessionList({ sessions, onSelect }: { sessions: SessionItem[]; o
             <div className="text-xs text-textSubtle">Messages: {s.message_count} · Created: {s.created_at}</div>
           </button>
         ))}
-        <button className="px-3 py-2 rounded-md bg-tweetBlue hover:brightness-110 text-white" onClick={() => onSelect(undefined)}>Start New Session</button>
+        <button className="px-3 py-2 rounded-md bg-brand hover:brightness-110 text-white" onClick={() => onSelect(undefined)}>Start New Session</button>
       </div>
     </div>
   )

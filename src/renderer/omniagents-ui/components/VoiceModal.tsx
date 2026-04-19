@@ -1056,7 +1056,7 @@ console.log('[VoiceModal] SPEAKING finished, transition to', effectiveState)
 } catch {}
                   }
                 }}
-                className="h-16 w-16 rounded-full bg-tweetBlue hover:brightness-110 flex items-center justify-center shadow-lg"
+                className="h-16 w-16 rounded-full bg-brand hover:brightness-110 flex items-center justify-center shadow-lg"
                 aria-label={isMuted ? 'Unmute' : 'Mute'}
               >
                 {isMuted ? (
@@ -1152,7 +1152,7 @@ console.log('[VoiceModal] SPEAKING finished, transition to', effectiveState)
               <button
                 type="submit"
                 disabled={!chatInput.trim()}
-                className="px-3 py-2 rounded-lg bg-tweetBlue text-white text-xs font-medium disabled:opacity-30 hover:brightness-110 transition-all flex-shrink-0"
+                className="px-3 py-2 rounded-lg bg-brand text-white text-xs font-medium disabled:opacity-30 hover:brightness-110 transition-all flex-shrink-0"
               >
                 Send
               </button>
@@ -1175,7 +1175,7 @@ function SidebarTranscriptBubble({ role, text, timestamp }: { role: 'user' | 'as
       <div
         className={`max-w-[85%] rounded-lg px-3 py-2 text-xs leading-relaxed ${
           isUser
-            ? 'bg-tweetBlue/20 text-white/90 rounded-br-sm'
+            ? 'bg-brand/20 text-white/90 rounded-br-sm'
             : 'bg-white/[0.06] text-white/80 rounded-bl-sm'
         }`}
       >

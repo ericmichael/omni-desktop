@@ -58,7 +58,7 @@ export const ChatShell = memo(
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ duration: 0.3, ease: 'easeOut' }}
                         >
-                          <div className="max-w-[80%] rounded-2xl bg-tweetBlue/10 px-4 py-2.5 text-sm text-textHeading">
+                          <div className="max-w-[80%] rounded-2xl bg-brand/10 px-4 py-2.5 text-sm text-textHeading">
                             {m.text}
                             {m.files && m.files.length > 0 && (
                               <div className="mt-1 text-xs text-textSubtle">
@@ -101,7 +101,7 @@ export const ChatShell = memo(
                                 <button
                                   type="button"
                                   onClick={onRetry}
-                                  className="h-8 rounded-md bg-tweetBlue px-4 text-sm font-medium text-white hover:brightness-110"
+                                  className="h-8 rounded-md bg-brand px-4 text-sm font-medium text-white hover:brightness-110"
                                 >
                                   Retry
                                 </button>
@@ -121,7 +121,7 @@ export const ChatShell = memo(
                                   type="button"
                                   onClick={onLaunch}
                                   disabled={launchDisabled}
-                                  className="h-9 rounded-full bg-tweetBlue px-5 text-sm font-medium text-white hover:brightness-110 disabled:opacity-50"
+                                  className="h-9 rounded-full bg-brand px-5 text-sm font-medium text-white hover:brightness-110 disabled:opacity-50"
                                 >
                                   Launch workspace
                                 </button>

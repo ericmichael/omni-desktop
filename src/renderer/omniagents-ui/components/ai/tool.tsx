@@ -12,7 +12,7 @@ import { CodeBlock } from './code-block'
 export type ToolProps = ComponentProps<typeof Collapsible>
 
 export const Tool = ({ className, ...props }: ToolProps) => (
-  <Collapsible className={cn('group not-prose mb-4 w-full rounded-md border', className)} {...props} />
+  <Collapsible className={cn('group not-prose mb-4 w-full rounded-md border bg-muted', className)} {...props} />
 )
 
 export type ToolPart = ToolUIPart | DynamicToolUIPart
@@ -57,15 +57,15 @@ export const ToolHeader = ({ className, title, preview, type, state, toolName, .
   const derivedName = type === 'dynamic-tool' ? toolName : type.split('-').slice(1).join('-')
 
   return (
-    <CollapsibleTrigger className={cn('flex w-full items-center justify-between gap-4 p-3', className)} {...props}>
-      <div className="flex items-center gap-2 min-w-0">
+    <CollapsibleTrigger className={cn('flex w-full items-center gap-4 p-3', className)} {...props}>
+      <div className="flex items-center gap-2 min-w-0 flex-1">
         <WrenchIcon className="size-4 text-muted-foreground flex-shrink-0" />
         <span className="inline-flex items-center gap-1 min-w-0 text-sm">
           <span className="font-medium text-foreground">{title ?? derivedName}</span>
           {preview ? <span className="text-muted-foreground truncate">({preview})</span> : null}
         </span>
-        {getStatusBadge(state)}
       </div>
+      {getStatusBadge(state)}
       <ChevronDownIcon className="size-4 text-muted-foreground transition-transform flex-shrink-0 group-data-[state=open]:rotate-180" />
     </CollapsibleTrigger>
   )

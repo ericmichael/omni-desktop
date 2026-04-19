@@ -1,5 +1,3 @@
-import './styles/index.css';
-
 import type { ReactNode } from 'react';
 import { useEffect, useMemo } from 'react';
 

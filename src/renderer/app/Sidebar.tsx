@@ -1,5 +1,6 @@
 import { makeStyles, mergeClasses, tokens,Tooltip } from '@fluentui/react-components';
 import {
+  Beaker24Regular,
   Chat24Filled,
   Code24Regular,
   DataBarVertical24Regular,
@@ -25,11 +26,13 @@ const ALL_TABS: {
   enterprise?: boolean;
   alwaysVisible?: boolean;
   pinBottom?: boolean;
+  devOnly?: boolean;
 }[] = [
   { value: 'chat', label: 'Chat', icon: <Chat24Filled />, alwaysVisible: true },
   { value: 'code', label: 'Code', icon: <Code24Regular />, alwaysVisible: true },
   { value: 'projects', label: 'Projects', icon: <Rocket24Filled />, alwaysVisible: true },
   { value: 'dashboards', label: 'Dashboards', icon: <DataBarVertical24Regular />, enterprise: true },
+  { value: 'gallery', label: 'Gallery', icon: <Beaker24Regular />, devOnly: true },
   { value: 'settings', label: 'Settings', icon: <Settings24Filled />, alwaysVisible: true, pinBottom: true },
 ];
 
@@ -40,7 +43,7 @@ const useStyles = makeStyles({
     flexDirection: 'row',
     width: '100%',
     flexShrink: 0,
-    backgroundColor: tokens.colorNeutralBackground1,
+    backgroundColor: tokens.colorNeutralBackground2,
     borderTopWidth: '1px',
     borderTopStyle: 'solid',
     borderTopColor: tokens.colorNeutralStroke1,
@@ -57,11 +60,35 @@ const useStyles = makeStyles({
     },
   },
   navGlass: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
+    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground2} 22%, transparent)`,
     backdropFilter: 'blur(36px) saturate(160%)',
     WebkitBackdropFilter: 'blur(36px) saturate(160%)',
     borderRightColor: 'rgba(255, 255, 255, 0.14)',
     borderTopColor: 'rgba(255, 255, 255, 0.14)',
+  },
+  /* Branded rail — used by themes that set `header.bg` in fluent-themes.ts
+     (currently just UTRGV). Reads the same `--color-header` CSS var the
+     branded header bar uses, and remaps icon/indicator colors to white
+     for contrast against the brand fill. */
+  navBranded: {
+    backgroundColor: 'var(--color-header)',
+    borderRightColor: 'rgba(255, 255, 255, 0.15)',
+    borderTopColor: 'rgba(255, 255, 255, 0.15)',
+    '& button[role="tab"]': {
+      color: 'rgba(255, 255, 255, 0.75)',
+      ':hover': {
+        color: '#ffffff',
+        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+      },
+    },
+    '& button[role="tab"][aria-selected="true"]': {
+      color: '#ffffff',
+      backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    },
+    /* Indicator: brand color is the bg fill, so use white so it's visible. */
+    '& button[role="tab"] > div:first-child': {
+      backgroundColor: '#ffffff',
+    },
   },
 
   /* ── Logo (desktop only) ── */
@@ -215,6 +242,7 @@ export const Sidebar = memo(() => {
   const store = useStore(persistedStoreApi.$atom);
   const openInboxCount = useStore($activeInboxCount);
   const isGlass = (store.layoutMode === 'code' || store.layoutMode === 'chat' || store.layoutMode === 'settings' || store.layoutMode === 'projects') && !!store.codeDeckBackground;
+  const isBrandedRail = store.theme === 'utrgv' && !isGlass;
 
   const setMode = useCallback(
     (mode: LayoutMode) => () => persistedStoreApi.setKey('layoutMode', mode),
@@ -228,6 +256,9 @@ export const Sidebar = memo(() => {
 
   const visibleTabs = useMemo(() => {
     return ALL_TABS.filter((t) => {
+      if (t.devOnly) {
+return import.meta.env.DEV;
+}
       if (t.alwaysVisible) {
 return true;
 }
@@ -301,7 +332,7 @@ return;
   return (
     <nav
       ref={navRef}
-      className={mergeClasses(styles.nav, isGlass && styles.navGlass)}
+      className={mergeClasses(styles.nav, isGlass && styles.navGlass, isBrandedRail && styles.navBranded)}
       role="tablist"
       aria-label="Main navigation"
       aria-orientation="vertical"

@@ -1,20 +1,23 @@
 :root {
-  --omni-tweetBlue: 29 161 242;
-  --omni-bgMain: 21 32 43;
-  --omni-bgColumn: 25 39 52;
-  --omni-bgCard: 30 39 50;
-  --omni-bgCardAlt: 37 51 65;
-  --omni-textSubtle: 136 153 166;
-  --omni-successGreen: 23 191 99;
-  --omni-warningOrange: 255 165 52;
-  --omni-errorRed: 224 36 94;
-  --omni-textPrimary: 243 244 246;
-  --omni-textHeading: 255 255 255;
-  --omni-textSecondary: 209 213 219;
+  /* Default dark theme — indigo brand on zinc neutrals. Matches the Fluent
+     `default` theme overrides in fluent-themes.ts so components using the
+     --omni-* tokens paint on the same palette as Fluent's colorNeutral*. */
+  --omni-brand: 99 102 241;         /* #6366f1  indigo (Fluent brand) */
+  --omni-bgMain: 9 9 11;            /* #09090b  zinc-950 (bg1) */
+  --omni-bgColumn: 24 24 27;        /* #18181b  zinc-900 (bg2) */
+  --omni-bgCard: 24 24 27;          /* #18181b  zinc-900 (bg2) */
+  --omni-bgCardAlt: 39 39 42;       /* #27272a  zinc-800 (bg3) */
+  --omni-textSubtle: 113 113 122;   /* #71717a  zinc-500 (fg3) */
+  --omni-successGreen: 74 222 128;  /* #4ade80  green-400 */
+  --omni-warningOrange: 251 191 36; /* #fbbf24  amber-400 */
+  --omni-errorRed: 248 113 113;     /* #f87171  red-400 */
+  --omni-textPrimary: 250 250 250;  /* #fafafa  zinc-50 (fg1) */
+  --omni-textHeading: 250 250 250;  /* #fafafa  zinc-50 */
+  --omni-textSecondary: 161 161 170;/* #a1a1aa  zinc-400 (fg2) */
 }
 
 [data-theme="teams-light"] {
-  --omni-tweetBlue: 0 120 212;          /* #0078D4  M365 brand blue */
+  --omni-brand: 0 120 212;          /* #0078D4  M365 brand blue */
   --omni-bgMain: 255 255 255;           /* #FFFFFF  page background */
   --omni-bgColumn: 250 250 250;         /* #FAFAFA  sidebar */
   --omni-bgCard: 245 245 245;           /* #F5F5F5  card surface */
@@ -29,7 +32,7 @@
 }
 
 [data-theme="teams-dark"] {
-  --omni-tweetBlue: 58 159 232;         /* #3A9FE8  M365 brand blue (dark) */
+  --omni-brand: 58 159 232;         /* #3A9FE8  M365 brand blue (dark) */
   --omni-bgMain: 31 31 31;              /* #1F1F1F  page background */
   --omni-bgColumn: 43 43 43;            /* #2B2B2B  sidebar */
   --omni-bgCard: 51 51 51;              /* #333333  card surface */
@@ -44,7 +47,7 @@
 }
 
 [data-theme="tokyo-night"] {
-  --omni-tweetBlue: 61 89 161;       /* #3d59a1  button.background */
+  --omni-brand: 61 89 161;       /* #3d59a1  button.background */
   --omni-bgMain: 26 27 38;           /* #1a1b26  editor.background */
   --omni-bgColumn: 22 22 30;         /* #16161e  sideBar.background */
   --omni-bgCard: 28 29 41;           /* #1c1d29  list.inactiveSelectionBackground */
@@ -59,7 +62,7 @@
 }
 
 [data-theme="vscode-dark"] {
-  --omni-tweetBlue: 0 120 212;       /* #0078D4  button.background */
+  --omni-brand: 0 120 212;       /* #0078D4  button.background */
   --omni-bgMain: 31 31 31;           /* #1F1F1F  editor.background */
   --omni-bgColumn: 24 24 24;         /* #181818  sideBar.background */
   --omni-bgCard: 43 43 43;           /* #2B2B2B  panel.border */
@@ -71,7 +74,7 @@
 }
 
 [data-theme="vscode-light"] {
-  --omni-tweetBlue: 0 95 184;        /* #005FB8  button.background */
+  --omni-brand: 0 95 184;        /* #005FB8  button.background */
   --omni-bgMain: 255 255 255;        /* #FFFFFF  editor.background */
   --omni-bgColumn: 248 248 248;      /* #F8F8F8  sideBar.background */
   --omni-bgCard: 243 243 243;        /* #F3F3F3  welcomePage.tileBackground */
@@ -86,7 +89,7 @@
 }
 
 [data-theme="utrgv"] {
-  --omni-tweetBlue: 240 80 35;         /* #F05023  UTRGV brand orange */
+  --omni-brand: 240 80 35;         /* #F05023  UTRGV brand orange */
   --omni-bgMain: 247 247 248;          /* #F7F7F8  soft off-white page */
   --omni-bgColumn: 241 241 243;        /* #F1F1F3  sidebar */
   --omni-bgCard: 255 255 255;          /* #FFFFFF  white cards */
@@ -109,7 +112,7 @@
 [data-theme="utrgv"] .bg-bgCardAlt .text-white {
   color: rgb(var(--omni-textSecondary)) !important;
 }
-[data-theme="utrgv"] .bg-bgCardAlt .bg-tweetBlue.text-white,
+[data-theme="utrgv"] .bg-bgCardAlt .bg-brand.text-white,
 [data-theme="utrgv"] .bg-bgCardAlt .bg-errorRed.text-white {
   color: #ffffff !important;
 }
@@ -122,7 +125,7 @@
   --tw-prose-body: rgb(var(--omni-textPrimary));
   --tw-prose-headings: rgb(var(--omni-textHeading));
   --tw-prose-bold: rgb(var(--omni-textHeading));
-  --tw-prose-links: rgb(var(--omni-tweetBlue));
+  --tw-prose-links: rgb(var(--omni-brand));
   --tw-prose-code: rgb(var(--omni-textPrimary));
   --tw-prose-pre-code: rgb(var(--omni-textPrimary));
   --tw-prose-counters: rgb(var(--omni-textSecondary));
@@ -139,7 +142,7 @@
   --tw-prose-body: rgb(var(--omni-textPrimary));
   --tw-prose-headings: rgb(var(--omni-textHeading));
   --tw-prose-bold: rgb(var(--omni-textHeading));
-  --tw-prose-links: rgb(var(--omni-tweetBlue));
+  --tw-prose-links: rgb(var(--omni-brand));
   --tw-prose-code: rgb(var(--omni-textPrimary));
   --tw-prose-pre-code: rgb(var(--omni-textPrimary));
   --tw-prose-counters: rgb(var(--omni-textSecondary));
@@ -156,7 +159,7 @@
   --tw-prose-body: rgb(var(--omni-textPrimary));
   --tw-prose-headings: rgb(var(--omni-textHeading));
   --tw-prose-bold: rgb(var(--omni-textHeading));
-  --tw-prose-links: rgb(var(--omni-tweetBlue));
+  --tw-prose-links: rgb(var(--omni-brand));
   --tw-prose-code: rgb(var(--omni-textPrimary));
   --tw-prose-pre-code: rgb(var(--omni-textPrimary));
   --tw-prose-counters: rgb(var(--omni-textSecondary));
@@ -169,58 +172,192 @@
   --tw-prose-td-borders: rgb(var(--omni-bgCardAlt));
 }
 
-/* ── shadcn/ai-elements CSS variable bridge ──────────────────────────
-   Maps --omni-* space-separated RGB vars to shadcn's expected semantic
-   color tokens. These are consumed by Tailwind's color utilities via
-   the shadcn convention (e.g. bg-background, text-foreground, etc.).
+/* ── shadcn semantic tokens (HSL triplets) ───────────────────────────
+   Standard shadcn convention: each theme defines `--primary`,
+   `--secondary`, etc. as **space-separated HSL triplets** so that
+   `hsl(var(--primary))` resolves correctly.
+
+   This is the format yoopta (@yoopta/themes-shadcn), radix, the
+   AI-elements library, and every shadcn-aware tool assume. The earlier
+   attempt to redefine these as `rgb(var(--omni-*))` broke every
+   `hsl(var(--X))` call-site (invalid CSS → transparent).
+
+   Tailwind utilities (`bg-primary`, etc.) are wired in tailwind.css
+   through `--color-primary: hsl(var(--primary))` so there is a single
+   source of truth for semantic color per theme. The `--omni-*` RGB
+   tokens above remain only for places that need a full `rgb()` form
+   (e.g. `color-mix(in srgb, rgb(var(--omni-bgMain)) 22%, transparent)`).
    ------------------------------------------------------------------ */
-:root,
-[data-theme] {
-  /* Core surfaces */
-  --background: rgb(var(--omni-bgMain));
-  --foreground: rgb(var(--omni-textPrimary));
-
-  /* Card / popover */
-  --card: rgb(var(--omni-bgCard));
-  --card-foreground: rgb(var(--omni-textPrimary));
-  --popover: rgb(var(--omni-bgCard));
-  --popover-foreground: rgb(var(--omni-textPrimary));
-
-  /* Primary = brand blue */
-  --primary: rgb(var(--omni-tweetBlue));
-  --primary-foreground: #ffffff;
-
-  /* Secondary = alt card */
-  --secondary: rgb(var(--omni-bgCardAlt));
-  --secondary-foreground: rgb(var(--omni-textHeading));
-
-  /* Muted = column bg */
-  --muted: rgb(var(--omni-bgColumn));
-  --muted-foreground: rgb(var(--omni-textSubtle));
-
-  /* Accent = card alt hover */
-  --accent: rgb(var(--omni-bgCardAlt));
-  --accent-foreground: rgb(var(--omni-textHeading));
-
-  /* Destructive = error red */
-  --destructive: rgb(var(--omni-errorRed));
-  --destructive-foreground: #ffffff;
-
-  /* Semantic status colors */
-  --warning: rgb(var(--omni-warningOrange));
-  --warning-foreground: rgb(var(--omni-textHeading));
-  --success: rgb(var(--omni-successGreen));
-  --success-foreground: #ffffff;
-  --info: rgb(var(--omni-tweetBlue));
-  --info-foreground: #ffffff;
-
-  /* Border / input / ring */
-  --border: rgb(var(--omni-bgCardAlt));
-  --input: rgb(var(--omni-bgCardAlt));
-  --ring: rgb(var(--omni-tweetBlue));
-
-  /* Radius */
+:root {
+  /* Default dark theme — shadcn "new-york" dark values on zinc neutrals
+     with indigo primary/ring. HSL triplets here mirror the --omni-* RGB
+     values above (zinc-950/900/800) so both color systems agree. */
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 98%;
+  --card: 240 5.9% 10%;
+  --card-foreground: 0 0% 98%;
+  --popover: 240 5.9% 10%;
+  --popover-foreground: 0 0% 98%;
+  --primary: 239 84% 67%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 240 3.7% 15.9%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 240 5.9% 10%;
+  --muted-foreground: 240 5% 64.9%;
+  --accent: 240 3.7% 15.9%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 84% 65%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 240 3.7% 15.9%;
+  --input: 240 3.7% 15.9%;
+  --ring: 239 84% 67%;
+  --sidebar: 240 5.9% 10%;
+  --sidebar-foreground: 0 0% 98%;
   --radius: 0.5rem;
+}
+
+[data-theme="teams-light"] {
+  --background: 0 0% 100%;
+  --foreground: 0 0% 25.9%;
+  --card: 0 0% 96.1%;
+  --card-foreground: 0 0% 25.9%;
+  --popover: 0 0% 96.1%;
+  --popover-foreground: 0 0% 25.9%;
+  --primary: 206 100% 41.6%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 92.2%;
+  --secondary-foreground: 0 0% 14.1%;
+  --muted: 0 0% 98%;
+  --muted-foreground: 0 0% 38%;
+  --accent: 0 0% 92.2%;
+  --accent-foreground: 0 0% 14.1%;
+  --destructive: 349 60% 48%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 92.2%;
+  --input: 0 0% 92.2%;
+  --ring: 206 100% 41.6%;
+  --sidebar: 0 0% 98%;
+  --sidebar-foreground: 0 0% 25.9%;
+}
+
+[data-theme="teams-dark"] {
+  --background: 0 0% 12.2%;
+  --foreground: 0 0% 78.4%;
+  --card: 0 0% 20%;
+  --card-foreground: 0 0% 78.4%;
+  --popover: 0 0% 20%;
+  --popover-foreground: 0 0% 78.4%;
+  --primary: 205 79.1% 56.9%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 25.1%;
+  --secondary-foreground: 0 0% 87.8%;
+  --muted: 0 0% 16.9%;
+  --muted-foreground: 0 0% 62%;
+  --accent: 0 0% 25.1%;
+  --accent-foreground: 0 0% 87.8%;
+  --destructive: 355 76.8% 59.4%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 25.1%;
+  --input: 0 0% 25.1%;
+  --ring: 205 79.1% 56.9%;
+  --sidebar: 0 0% 16.9%;
+  --sidebar-foreground: 0 0% 78.4%;
+}
+
+[data-theme="tokyo-night"] {
+  --background: 235 18.8% 12.5%;
+  --foreground: 229 35.4% 75.1%;
+  --card: 235 18.8% 13.5%;
+  --card-foreground: 229 35.4% 75.1%;
+  --popover: 235 18.8% 13.5%;
+  --popover-foreground: 229 35.4% 75.1%;
+  --primary: 223 45% 43.5%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 228 23.4% 21%;
+  --secondary-foreground: 229 72.6% 85.7%;
+  --muted: 240 15.4% 10.2%;
+  --muted-foreground: 229 20% 41.2%;
+  --accent: 228 23.4% 21%;
+  --accent-foreground: 229 72.6% 85.7%;
+  --destructive: 349 89% 71.6%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 228 23.4% 21%;
+  --input: 228 23.4% 21%;
+  --ring: 223 45% 43.5%;
+  --sidebar: 240 15.4% 10.2%;
+  --sidebar-foreground: 229 35.4% 75.1%;
+}
+
+[data-theme="vscode-dark"] {
+  --background: 0 0% 12.2%;
+  --foreground: 0 0% 80%;
+  --card: 0 0% 16.9%;
+  --card-foreground: 0 0% 80%;
+  --popover: 0 0% 16.9%;
+  --popover-foreground: 0 0% 80%;
+  --primary: 206 100% 41.6%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 19.2%;
+  --secondary-foreground: 0 0% 100%;
+  --muted: 0 0% 9.4%;
+  --muted-foreground: 0 0% 61.6%;
+  --accent: 0 0% 19.2%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 3 92.6% 62.9%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 19.2%;
+  --input: 0 0% 19.2%;
+  --ring: 206 100% 41.6%;
+  --sidebar: 0 0% 9.4%;
+  --sidebar-foreground: 0 0% 80%;
+}
+
+[data-theme="vscode-light"] {
+  --background: 0 0% 100%;
+  --foreground: 0 0% 23.1%;
+  --card: 0 0% 95.3%;
+  --card-foreground: 0 0% 23.1%;
+  --popover: 0 0% 95.3%;
+  --popover-foreground: 0 0% 23.1%;
+  --primary: 209 100% 36.1%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 89.8%;
+  --secondary-foreground: 0 0% 12.2%;
+  --muted: 0 0% 97.3%;
+  --muted-foreground: 0 0% 46.3%;
+  --accent: 0 0% 89.8%;
+  --accent-foreground: 0 0% 12.2%;
+  --destructive: 3 92.6% 62.9%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 89.8%;
+  --input: 0 0% 89.8%;
+  --ring: 209 100% 36.1%;
+  --sidebar: 0 0% 97.3%;
+  --sidebar-foreground: 0 0% 23.1%;
+}
+
+[data-theme="utrgv"] {
+  --background: 240 6.7% 97.1%;
+  --foreground: 240 7.1% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 240 7.1% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 7.1% 11%;
+  --primary: 13 87.2% 53.9%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 92%;
+  --secondary-foreground: 240 7.1% 11%;
+  --muted: 240 7.7% 94.9%;
+  --muted-foreground: 240 2.3% 56.7%;
+  --accent: 0 0% 92%;
+  --accent-foreground: 240 7.1% 11%;
+  --destructive: 0 72.2% 50.6%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 240 5% 86.7%;
+  --input: 240 5% 86.7%;
+  --ring: 13 87.2% 53.9%;
+  --sidebar: 240 7.7% 94.9%;
+  --sidebar-foreground: 240 7.1% 11%;
 }
 
 /* Default border color for bare `border` utilities (shadcn convention) */
@@ -242,6 +379,28 @@ body.resizing {
 }
 
 .prose pre code { background: transparent; }
+
+/* Streamdown wraps code blocks in a bordered card (data-streamdown="code-block")
+   whose inner <pre> (data-streamdown="code-block-body") also carries its own
+   border, producing a double outline. The outer card is the container; drop
+   the inner border so the content reads as one surface. */
+[data-streamdown="code-block-body"] {
+  border: none !important;
+}
+
+/* Align the language label and the copy/download pill with the code content's
+   inner edges. Without these, the label sits 12px left of the code start and
+   the pill hovers 16px past the code's right edge.
+   Code content starts at outer-p-2 (8px) + body-p-4 (16px) = 24px. The header
+   already has span.ml-1 (4px), so we need 12px of inline-start padding to reach
+   24px. The actions pill sits flush against outer-p-2, so 16px of inline-end
+   margin pushes it to 24px from the right. */
+[data-streamdown="code-block-header"] {
+  padding-inline-start: 12px;
+}
+[data-streamdown="code-block-actions"] {
+  margin-inline-end: 16px;
+}
 
 @keyframes shimmer-text {
   0% { background-position: 200% 50%; }

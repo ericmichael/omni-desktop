@@ -11,6 +11,7 @@ import { Chat } from '@/renderer/features/Chat/Chat';
 import { Code } from '@/renderer/features/Code/Code';
 import { $isConsoleOpen } from '@/renderer/features/Console/state';
 import { Dashboards } from '@/renderer/features/Dashboards/Dashboards';
+import { Gallery } from '@/renderer/features/Gallery/Gallery';
 import { OnboardingWizard } from '@/renderer/features/Onboarding/OnboardingWizard';
 import { SettingsPage } from '@/renderer/features/SettingsModal/SettingsPage';
 import { Tickets } from '@/renderer/features/Tickets/Tickets';
@@ -152,6 +153,7 @@ return prev;
     { key: 'dashboards', Component: Dashboards },
     { key: 'settings', Component: SettingsPage },
     { key: 'more', Component: MorePage },
+    ...(import.meta.env.DEV ? [{ key: 'gallery' as const, Component: Gallery }] : []),
   ];
 
   return (

@@ -52,7 +52,7 @@ export type WindowProps = {
 /**
  * Data stored in the electron store.
  */
-export type LayoutMode = 'chat' | 'code' | 'projects' | 'dashboards' | 'settings' | 'more';
+export type LayoutMode = 'chat' | 'code' | 'projects' | 'dashboards' | 'settings' | 'more' | 'gallery';
 export type OmniTheme =
   | 'teams-light'
   | 'teams-dark'
@@ -214,7 +214,7 @@ export const schema: Schema<StoreData> = {
 
   layoutMode: {
     type: 'string',
-    enum: ['chat', 'code', 'projects', 'dashboards', 'settings', 'more'],
+    enum: ['chat', 'code', 'projects', 'dashboards', 'settings', 'more', 'gallery'],
     default: 'chat',
   },
   theme: {

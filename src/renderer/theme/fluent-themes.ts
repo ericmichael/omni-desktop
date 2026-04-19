@@ -448,8 +448,10 @@ const themeDefs: Record<OmniTheme, ThemeDef> = {
     brand: utrgvBrand,
     mode: 'light',
     overrides: {
-      colorNeutralBackground1: '#ffffff',
-      colorNeutralBackground2: '#f7f7f8',
+      /* Shell bg aligned with --omni-bgMain so the chat body, nav rail (bg2),
+         and Gallery (bg-background) all sit on a single plane (#F7F7F8). */
+      colorNeutralBackground1: '#f7f7f8',
+      colorNeutralBackground2: '#f1f1f3',
       colorNeutralBackground3: '#efefef',
       colorNeutralBackground4: '#f0f0f1',
       colorNeutralBackground4Hover: '#e8e8e9',

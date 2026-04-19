@@ -24,14 +24,18 @@ const useStyles = makeStyles({
   drawer: {
     width: '260px',
     height: '100%',
+    /* Fluent's NavDrawer root defaults to colorNeutralBackground4 (#EBEBEB on
+       vscode-light — noticeably darker than the rest of the app). Force bg1
+       to match the Settings sidebar and the rest of the app's page plane. */
+    backgroundColor: tokens.colorNeutralBackground1,
   },
   header: {
     display: 'flex',
     alignItems: 'center',
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalXS,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalXS,
+    paddingTop: tokens.spacingVerticalXXL,
+    paddingBottom: tokens.spacingVerticalL,
   },
   headerTitle: {
     flex: '1 1 0',
