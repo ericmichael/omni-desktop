@@ -167,6 +167,22 @@ export class AppControlManager {
     return { entry, wc };
   }
 
+  /**
+   * Like {@link requireWebContents} but returns null instead of throwing
+   * when the webview isn't ready yet. Use for passive queries (live-polling
+   * devtools panels, UI state reads) where "not ready" is a legitimate
+   * empty state rather than an error worth spamming stderr.
+   */
+  private tryWebContents(handleId: AppHandleId) {
+    const entry = this.entries.get(handleId);
+    if (!entry || !entry.registration.controllable || entry.webContentsId === undefined) {
+      return null;
+    }
+    const wc = webContentsNS.fromId(entry.webContentsId);
+    if (!wc || wc.isDestroyed()) return null;
+    return { entry, wc };
+  }
+
   // -- popup handler ------------------------------------------------------
 
   /**
@@ -312,9 +328,13 @@ export class AppControlManager {
   }
 
   async snapshot(handleId: AppHandleId): Promise<AxNode> {
-    const { wc } = this.requireWebContents(handleId);
-    ensureAttached(wc);
-    return snapshot(wc);
+    // Soft-fail: the Elements devtools tab refreshes on mount / tab switch,
+    // which races the webview's own mount. Return an empty tree rather than
+    // log a "not ready" error to stderr every time.
+    const ref = this.tryWebContents(handleId);
+    if (!ref) return { ref: 'e1', role: 'empty' };
+    ensureAttached(ref.wc);
+    return snapshot(ref.wc);
   }
 
   /**
@@ -323,10 +343,11 @@ export class AppControlManager {
    * Massively cheaper context-wise than re-sending a full tree each turn.
    */
   async snapshotDiff(handleId: AppHandleId): Promise<SnapshotDiff> {
-    const { wc } = this.requireWebContents(handleId);
-    ensureAttached(wc);
-    const fresh = await snapshot(wc);
-    return diffSnapshots(wc, fresh);
+    const ref = this.tryWebContents(handleId);
+    if (!ref) return { added: [], removed: [], unchanged: 0 };
+    ensureAttached(ref.wc);
+    const fresh = await snapshot(ref.wc);
+    return diffSnapshots(ref.wc, fresh);
   }
 
   async click(
@@ -466,7 +487,13 @@ return;
     handleId: AppHandleId,
     options: { limit?: number; since?: number; urlIncludes?: string; statusMin?: number; clear?: boolean } = {}
   ): Promise<NetworkLogEntry[]> {
-    const { wc } = this.requireWebContents(handleId);
+    // NetworkTab polls this every second while the devtools panel is open,
+    // including during tab navigations and webview remounts. Treat "not
+    // ready" as an empty log rather than throwing — the error path would
+    // spam the main-process stderr with no user benefit.
+    const ref = this.tryWebContents(handleId);
+    if (!ref) return [];
+    const { wc } = ref;
     // Enable lazily so agents don't pay the CDP overhead when they don't
     // ask for network entries.
     await enableNetworkLog(wc);
@@ -555,10 +582,13 @@ return;
   }
 
   async setZoom(handleId: AppHandleId, factor: number): Promise<void> {
-    const { wc } = this.requireWebContents(handleId);
+    // Soft-fail: zoom is fire-and-forget from keyboard shortcuts and tab-
+    // switch races regularly send it at a webview that's still mounting.
+    const ref = this.tryWebContents(handleId);
+    if (!ref) return;
     // Clamp to Chromium's supported range.
     const clamped = Math.max(0.25, Math.min(5, factor));
-    wc.setZoomFactor(clamped);
+    ref.wc.setZoomFactor(clamped);
   }
 
   // -- cookies ------------------------------------------------------------
@@ -567,8 +597,10 @@ return;
     handleId: AppHandleId,
     filter: { url?: string; name?: string; domain?: string; path?: string } = {}
   ): Promise<unknown[]> {
-    const { wc } = this.requireWebContents(handleId);
-    return wc.session.cookies.get(filter);
+    // Soft-fail for StorageTab mount races — returning [] beats stderr spam.
+    const ref = this.tryWebContents(handleId);
+    if (!ref) return [];
+    return ref.wc.session.cookies.get(filter);
   }
 
   async cookiesSet(
@@ -617,7 +649,9 @@ return;
     handleId: AppHandleId,
     which: 'local' | 'session'
   ): Promise<Record<string, string>> {
-    const { wc } = this.requireWebContents(handleId);
+    // Soft-fail for StorageTab mount races.
+    const ref = this.tryWebContents(handleId);
+    if (!ref) return {};
     const expr = `(() => {
       const s = window.${which === 'local' ? 'localStorage' : 'sessionStorage'};
       const out = {};
@@ -627,7 +661,7 @@ return;
       }
       return out;
     })()`;
-    return (await wc.executeJavaScript(expr, true)) as Record<string, string>;
+    return (await ref.wc.executeJavaScript(expr, true)) as Record<string, string>;
   }
 
   async storageSet(
