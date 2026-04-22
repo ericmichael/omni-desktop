@@ -10,6 +10,7 @@ import { promisify } from 'util';
 import { getArtifactsDir } from '@/lib/artifacts';
 import { listArtifactEntries, readArtifactFile, resolveArtifactPath } from '@/lib/artifacts-fs';
 import { getGitFilesChanged, resolveWorkspaceMergeBase, resolveWorktreeMergeBase } from '@/lib/git-files-changed';
+import { checkMerge, mergeBranch } from '@/lib/pr-merge';
 import { INBOX_SWEEP_INTERVAL_MS } from '@/lib/inbox-expiry';
 import type { IMachineFactory, ISandboxFactory, IWorkflowLoader, ProjectManagerDeps } from '@/lib/project-manager-deps';
 import { runMigrations as runSchemaMigrations } from '@/lib/project-migrations';
@@ -40,6 +41,8 @@ import type {
   MilestoneId,
   Page,
   Pipeline,
+  PrMergeCheck,
+  PrMergeResult,
   Project,
   ProjectId,
   SessionMessage,
@@ -223,6 +226,7 @@ export class ProjectManager {
           this.store.set('tasks', tasks);
           this.sendToWindow('store:changed', this.store.store);
         },
+        getOmniConfigDir: () => getOmniConfigDir(),
       },
       host: {
         getTicketById: (ticketId) => this.getTicketById(ticketId),
@@ -726,6 +730,94 @@ export class ProjectManager {
 
   // #endregion
 
+  // #region Local PR flow (approve / merge)
+
+  /**
+   * Resolve the base + feature branch for a ticket's merge. The base is the
+   * milestone branch (falling back to `main` when the milestone has none);
+   * the feature branch is `ticket/<worktreeName>` created by `createWorktree`.
+   */
+  private resolvePrBranches = (ticket: Ticket): { base?: string; feature?: string; reason?: string } => {
+    const project = this.getProjects().find((p) => p.id === ticket.projectId);
+    if (!project) {
+      return { reason: 'Project not found' };
+    }
+    if (project.source?.kind !== 'local') {
+      return { reason: 'Merge is only supported for projects with a local git repo' };
+    }
+    if (!ticket.worktreeName) {
+      return { reason: 'Ticket has no worktree yet — nothing to merge' };
+    }
+    const feature = `ticket/${ticket.worktreeName}`;
+    const milestone = ticket.milestoneId ? this.milestones.getById(ticket.milestoneId) : undefined;
+    const base = milestone?.branch ?? 'main';
+    return { base, feature };
+  };
+
+  setPrReview = (ticketId: TicketId, review: 'approved' | 'changes_requested' | null): void => {
+    const ticket = this.getTicketById(ticketId);
+    if (!ticket) {
+      return;
+    }
+    this.updateTicket(ticketId, {
+      prReview: review === null ? undefined : { status: review, at: Date.now() },
+    });
+  };
+
+  checkPrMerge = async (ticketId: TicketId): Promise<PrMergeCheck> => {
+    const ticket = this.getTicketById(ticketId);
+    if (!ticket) {
+      return { ready: false, reason: 'Ticket not found' };
+    }
+    const project = this.getProjects().find((p) => p.id === ticket.projectId);
+    const { base, feature, reason } = this.resolvePrBranches(ticket);
+    if (!base || !feature || !project || project.source?.kind !== 'local') {
+      return { ready: false, reason: reason ?? 'Merge inputs unavailable' };
+    }
+    const res = await checkMerge(project.source.workspaceDir, base, feature);
+    return {
+      ready: true,
+      base,
+      feature,
+      hasConflicts: res.hasConflicts,
+      conflictingFiles: res.conflictingFiles,
+      ahead: res.ahead,
+    };
+  };
+
+  mergePrTicket = async (ticketId: TicketId): Promise<PrMergeResult> => {
+    const ticket = this.getTicketById(ticketId);
+    if (!ticket) {
+      return { ok: false, error: 'Ticket not found' };
+    }
+    if (ticket.prReview?.status !== 'approved') {
+      return { ok: false, error: 'Ticket must be approved before merging' };
+    }
+    if (ticket.prMergedAt !== undefined) {
+      return { ok: false, error: 'Ticket is already merged' };
+    }
+    const project = this.getProjects().find((p) => p.id === ticket.projectId);
+    const { base, feature, reason } = this.resolvePrBranches(ticket);
+    if (!base || !feature || !project || project.source?.kind !== 'local') {
+      return { ok: false, error: reason ?? 'Merge inputs unavailable' };
+    }
+    const title = ticket.title?.trim() || 'ticket';
+    const message = `Merge ${feature} into ${base}\n\n${title}`;
+    const res = await mergeBranch(project.source.workspaceDir, base, feature, message);
+    if (!res.ok) {
+      return { ok: false, error: res.error ?? 'Merge failed' };
+    }
+    // Stamp the merged timestamp only. Do NOT auto-move the ticket or trigger
+    // worktree cleanup — both stay under user control. The user moves the
+    // ticket to a terminal column when they're ready, and cleanup is
+    // initiated explicitly via the "Clean up worktree" button (dirty case)
+    // or naturally on column move (clean case).
+    this.updateTicket(ticketId, { prMergedAt: Date.now() });
+    return { ok: true, mergeCommitSha: res.mergeCommitSha! };
+  };
+
+  // #endregion
+
   // #region Column movement
 
   resolveTicket = (ticketId: TicketId, resolution: import('@/shared/types').TicketResolution): void => {
@@ -768,10 +860,17 @@ export class ProjectManager {
       this.updateTicket(ticketId, patch);
     }
 
-    // Clear resolution/archive when moving away from terminal column (reopen)
+    // Clear resolution/archive when moving away from terminal column (reopen).
+    // Also clear any deferred-cleanup flag + PR review since the ticket is active again.
     const ticket2 = this.getTicketById(ticketId);
     if (ticket2?.resolution && !this.isTerminalColumn(ticket.projectId, columnId)) {
-      this.updateTicket(ticketId, { resolution: undefined, resolvedAt: undefined, archivedAt: undefined });
+      this.updateTicket(ticketId, {
+        resolution: undefined,
+        resolvedAt: undefined,
+        archivedAt: undefined,
+        cleanupPending: undefined,
+        prReview: undefined,
+      });
     }
 
     // Reconciliation: stop supervisor and clean up workspace when ticket moves to a terminal column

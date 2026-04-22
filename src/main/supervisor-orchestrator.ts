@@ -42,6 +42,7 @@ import fs from 'fs/promises';
 import { nanoid } from 'nanoid';
 import path from 'path';
 
+import { getAgentArtifactsDir } from '@/lib/artifacts';
 import { buildAutopilotVariables, buildInteractiveVariables } from '@/lib/client-tools';
 import { buildContinuationPrompt } from '@/lib/continuation-prompt';
 import type { AppControlManager } from '@/main/app-control-manager';
@@ -64,7 +65,7 @@ import { createPlatformClient } from '@/main/platform-mode';
 import type { ProcessManager } from '@/main/process-manager';
 import { buildSupervisorPrompt, type SupervisorContext } from '@/main/supervisor-prompt';
 import { type ClientFunctionResponder, TicketMachine } from '@/main/ticket-machine';
-import { createWorktree, generateWorktreeName, removeWorktree } from '@/main/worktree-ops';
+import { createWorktree, generateWorktreeName, isWorktreeDirty,removeWorktree } from '@/main/worktree-ops';
 import { getLocalWorkspaceDir, requireLocalWorkspaceDir } from '@/shared/project-source';
 import { isActivePhase, type TicketPhase } from '@/shared/ticket-phase';
 import type {
@@ -158,6 +159,8 @@ export interface SupervisorOrchestratorStore {
   getCodeTabs(): Array<{ id: string; ticketId?: string }>;
   getPersistedTasks(): Task[];
   setPersistedTasks(tasks: Task[]): void;
+  /** Host-side omni-code config directory (e.g. ~/.config/omni_code on macOS/Linux). */
+  getOmniConfigDir(): string;
 }
 
 // ---------------------------------------------------------------------------
@@ -1312,6 +1315,11 @@ export class SupervisorOrchestrator {
    * Clean up a ticket's workspace: stop and remove its container, delete its
    * worktree, and run the before_remove hook. Called when a ticket reaches a
    * terminal column.
+   *
+   * If the worktree has uncommitted changes, cleanup is deferred — the ticket
+   * is marked `cleanupPending` and the worktree + sandbox stay alive so the
+   * user or agent can commit/discard. Call `finalizeTicketCleanup` once the
+   * worktree is clean to finish the teardown.
    */
   cleanupTicketWorkspace = async (ticketId: TicketId): Promise<void> => {
     const ticket = this.deps.host.getTicketById(ticketId);
@@ -1320,6 +1328,22 @@ export class SupervisorOrchestrator {
     }
 
     const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId);
+
+    // Defer cleanup when the worktree has unsaved work. The sandbox + supervisor
+    // stay alive so the user or agent can drive the worktree to a clean state.
+    if (ticket.worktreePath && project?.source?.kind === 'local') {
+      const dirty = await isWorktreeDirty(ticket.worktreePath);
+      if (dirty) {
+        console.log(
+          `[SupervisorOrchestrator] Worktree for ticket ${ticketId} has uncommitted changes — deferring cleanup.`
+        );
+        if (!ticket.cleanupPending) {
+          this.deps.host.updateTicket(ticketId, { cleanupPending: true });
+        }
+        return;
+      }
+    }
+
     const taskId = ticket.supervisorTaskId;
 
     // Run before_remove hook
@@ -1356,10 +1380,33 @@ export class SupervisorOrchestrator {
     // Remove worktree (source of truth is the ticket, not the task)
     if (ticket.worktreePath && ticket.worktreeName && project && project.source?.kind === 'local') {
       await removeWorktree(requireLocalWorkspaceDir(project.source), ticket.worktreePath, ticket.worktreeName);
-      this.deps.host.updateTicket(ticketId, { worktreePath: undefined, worktreeName: undefined });
+      this.deps.host.updateTicket(ticketId, {
+        worktreePath: undefined,
+        worktreeName: undefined,
+        cleanupPending: undefined,
+      });
+    } else if (ticket.cleanupPending) {
+      this.deps.host.updateTicket(ticketId, { cleanupPending: undefined });
     }
 
     console.log(`[SupervisorOrchestrator] Cleaned up workspace for ticket ${ticketId}.`);
+  };
+
+  /**
+   * Retry deferred cleanup for a ticket whose worktree was dirty when it was
+   * first resolved. Re-checks dirtiness; if still dirty, returns false and
+   * leaves `cleanupPending` set. Otherwise runs full teardown and returns true.
+   */
+  finalizeTicketCleanup = async (ticketId: TicketId): Promise<boolean> => {
+    return this.withTicketLock(ticketId, async () => {
+      const ticket = this.deps.host.getTicketById(ticketId);
+      if (!ticket) {
+        return false;
+      }
+      await this.cleanupTicketWorkspace(ticketId);
+      const after = this.deps.host.getTicketById(ticketId);
+      return !after?.cleanupPending;
+    });
   };
 
   resetSupervisorSession = (ticketId: TicketId): Promise<void> => {
@@ -2507,10 +2554,12 @@ export class SupervisorOrchestrator {
    */
   buildRunVariables(ticketId: TicketId, mode: 'autopilot' | 'interactive' = 'autopilot'): Record<string, unknown> {
     const ticket = this.deps.host.getTicketById(ticketId);
+    const backend = this.deps.store.getSandboxBackend() ?? 'none';
     const opts = {
       projectId: ticket?.projectId,
       projectLabel: ticket ? this.deps.store.getProjects().find((p) => p.id === ticket.projectId)?.label : undefined,
       ticketId,
+      artifactsDir: getAgentArtifactsDir(ticketId, backend, this.deps.store.getOmniConfigDir()),
     };
     const vars = mode === 'autopilot' ? buildAutopilotVariables(opts) : buildInteractiveVariables(opts);
     const supervisorPrompt = this.buildFullSupervisorPrompt(ticketId);

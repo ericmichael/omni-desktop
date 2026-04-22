@@ -297,6 +297,22 @@ export const ticketApi = {
   stopSupervisor: (ticketId: TicketId): Promise<void> => {
     return emitter.invoke('project:stop-supervisor', ticketId);
   },
+  finalizeTicketCleanup: async (ticketId: TicketId): Promise<boolean> => {
+    const ok = await emitter.invoke('project:finalize-ticket-cleanup', ticketId);
+    void ticketApi.fetchTasks();
+    return ok;
+  },
+  setPrReview: (ticketId: TicketId, review: 'approved' | 'changes_requested' | null): Promise<void> => {
+    return emitter.invoke('project:set-pr-review', ticketId, review);
+  },
+  checkMerge: (ticketId: TicketId): Promise<import('@/shared/types').PrMergeCheck> => {
+    return emitter.invoke('project:check-merge', ticketId);
+  },
+  mergeTicket: async (ticketId: TicketId): Promise<import('@/shared/types').PrMergeResult> => {
+    const result = await emitter.invoke('project:merge-ticket', ticketId);
+    void ticketApi.fetchTasks();
+    return result;
+  },
   sendSupervisorMessage: (ticketId: TicketId, message: string): Promise<void> => {
     // Optimistically add the user's message to the chat so it appears immediately
     const userMsg: SessionMessage = {

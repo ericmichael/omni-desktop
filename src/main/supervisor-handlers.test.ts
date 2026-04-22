@@ -1,5 +1,5 @@
 /**
- * Contract tests for supervisor IPC handlers — verifies all 10 channels are
+ * Contract tests for supervisor IPC handlers — verifies all channels are
  * registered and delegate to the correct SupervisorOrchestrator methods.
  */
 import { describe, expect, it, vi } from 'vitest';
@@ -18,6 +18,7 @@ const EXPECTED_CHANNELS = [
   'project:get-active-wip-tickets',
   'project:get-ticket-workspace',
   'project:get-tasks',
+  'project:finalize-ticket-cleanup',
 ];
 
 const makeOrchestrator = () => ({
@@ -31,6 +32,7 @@ const makeOrchestrator = () => ({
   getActiveWipTickets: vi.fn(() => []),
   getTicketWorkspaceLocked: vi.fn(() => '/tmp'),
   listTasks: vi.fn(() => []),
+  finalizeTicketCleanup: vi.fn(async () => true),
 });
 
 describe('registerSupervisorHandlers', () => {
@@ -97,5 +99,13 @@ describe('registerSupervisorHandlers', () => {
     registerSupervisorHandlers(ipc, orch as never);
     ipc.invoke('project:get-tasks');
     expect(orch.listTasks).toHaveBeenCalledOnce();
+  });
+
+  it('project:finalize-ticket-cleanup delegates with ticketId', () => {
+    const ipc = new StubIpc();
+    const orch = makeOrchestrator();
+    registerSupervisorHandlers(ipc, orch as never);
+    ipc.invoke('project:finalize-ticket-cleanup', 't1');
+    expect(orch.finalizeTicketCleanup).toHaveBeenCalledWith('t1');
   });
 });

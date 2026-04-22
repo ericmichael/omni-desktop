@@ -1,5 +1,5 @@
 import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
-import { Dismiss20Regular,Edit20Regular } from '@fluentui/react-icons';
+import { Dismiss20Regular,Edit20Regular, Warning20Filled } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
 
@@ -73,6 +73,35 @@ const useStyles = makeStyles({
   blockerRow: {
     display: 'flex',
     alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  cleanupBanner: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+    ...shorthands.border('1px', 'solid', tokens.colorPaletteYellowBorder2),
+    backgroundColor: tokens.colorPaletteYellowBackground1,
+    color: tokens.colorPaletteYellowForeground2,
+    borderRadius: tokens.borderRadiusMedium,
+    padding: tokens.spacingVerticalM,
+  },
+  cleanupBannerHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  cleanupBannerBody: {
+    fontSize: tokens.fontSizeBase300,
+  },
+  cleanupBannerPath: {
+    fontFamily: tokens.fontFamilyMonospace,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    wordBreak: 'break-all',
+  },
+  cleanupBannerActions: {
+    display: 'flex',
     gap: tokens.spacingHorizontalS,
   },
   blockerTitle: {
@@ -241,8 +270,47 @@ return;
     setEditingDescription(false);
   }, []);
 
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [cleanupError, setCleanupError] = useState<string | null>(null);
+  const handleFinalizeCleanup = useCallback(async () => {
+    setCleanupBusy(true);
+    setCleanupError(null);
+    try {
+      const ok = await ticketApi.finalizeTicketCleanup(ticket.id);
+      if (!ok) {
+        setCleanupError('Worktree still has uncommitted changes. Commit or discard them first.');
+      }
+    } finally {
+      setCleanupBusy(false);
+    }
+  }, [ticket.id]);
+
   return (
     <div className={styles.root}>
+      {ticket.cleanupPending && ticket.worktreePath && (
+        <div className={styles.cleanupBanner}>
+          <div className={styles.cleanupBannerHeader}>
+            <Warning20Filled />
+            Worktree has uncommitted changes — cleanup deferred
+          </div>
+          <div className={styles.cleanupBannerBody}>
+            This ticket is resolved, but its worktree still has unsaved work. Commit or discard the
+            changes, then click below to remove the worktree.
+          </div>
+          <div className={styles.cleanupBannerPath}>{ticket.worktreePath}</div>
+          {cleanupError && (
+            <div className={styles.cleanupBannerBody} role="alert">
+              {cleanupError}
+            </div>
+          )}
+          <div className={styles.cleanupBannerActions}>
+            <Button size="sm" onClick={handleFinalizeCleanup} isDisabled={cleanupBusy}>
+              {cleanupBusy ? 'Cleaning up…' : 'Clean up worktree'}
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Status metadata */}
       <div className={styles.section}>
         <SectionLabel>Status</SectionLabel>

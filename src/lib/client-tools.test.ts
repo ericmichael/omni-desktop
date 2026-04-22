@@ -848,6 +848,25 @@ describe('client_tools shape', () => {
     expect(autopilotVars.additional_instructions).toContain('tkt-1');
   });
 
+  it('PR writeup guidance uses the provided artifactsDir when passed (host mode)', () => {
+    const vars = buildAutopilotVariables({
+      ticketId: 'tkt-1',
+      artifactsDir: '/Users/alice/.config/omni_code/tickets/tkt-1/artifacts',
+    }) as { additional_instructions: string };
+    expect(vars.additional_instructions).toContain(
+      '/Users/alice/.config/omni_code/tickets/tkt-1/artifacts/pr/PR_TITLE.md'
+    );
+    expect(vars.additional_instructions).toContain(
+      '/Users/alice/.config/omni_code/tickets/tkt-1/artifacts/pr/PR_BODY.md'
+    );
+    expect(vars.additional_instructions).not.toContain('/home/user/');
+  });
+
+  it('PR writeup guidance falls back to the container path when artifactsDir is omitted', () => {
+    const vars = buildAutopilotVariables({ ticketId: 'tkt-1' }) as { additional_instructions: string };
+    expect(vars.additional_instructions).toContain('/home/user/.config/omni_code/tickets/tkt-1/artifacts/pr/PR_TITLE.md');
+  });
+
   it('extractSafeToolNames returns only tools with safe: true', () => {
     const tools = [
       { name: 'read_thing', safe: true, description: '', parameters: { type: 'object', properties: {} } },

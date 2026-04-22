@@ -1187,17 +1187,26 @@ const PROJECT_GUIDANCE = [
   'The dock hosts web apps the user can see — the built-in browser, VS Code, a VNC desktop, and any custom webview apps they installed. You can drive them with `list_apps`, `app_snapshot`, `app_click`, `app_fill`, `app_type`, `app_press`, `app_screenshot`, `app_eval`, and `app_navigate`. Always `list_apps` first to find valid ids, then `app_snapshot` before clicking — refs are per-snapshot and invalidate after any navigation. Prefer `app_fill` for text fields (handles clearing); use `app_type` only when the element is already focused.',
 ].join('\n');
 
+export type ContextIdentifierOpts = {
+  projectId?: string;
+  projectLabel?: string;
+  ticketId?: string;
+  /**
+   * Absolute path to the ticket's artifacts directory as the agent sees it.
+   * Pass the host path when the agent runs on the host (sandboxBackend
+   * 'none' / 'local'); pass the container path otherwise. Omit to default
+   * to the container path.
+   */
+  artifactsDir?: string;
+};
+
 /**
  * Build context identifiers for `additional_instructions`. Starts with the
  * behavioral guidance above, then appends the specific project/ticket the
  * agent is operating in (when known) and per-ticket artifact-channel
  * guidance.
  */
-const buildContextIdentifiers = (opts?: {
-  projectId?: string;
-  projectLabel?: string;
-  ticketId?: string;
-}): string => {
+const buildContextIdentifiers = (opts?: ContextIdentifierOpts): string => {
   const lines: string[] = [PROJECT_GUIDANCE];
   if (opts?.projectId) {
     lines.push('');
@@ -1205,16 +1214,27 @@ const buildContextIdentifiers = (opts?: {
   }
   if (opts?.ticketId) {
     lines.push(`Current ticket: ${opts.ticketId}`);
+    const artifactsDir = opts.artifactsDir ?? getContainerArtifactsDir(opts.ticketId);
     lines.push(
       [
         '',
         '## Where to put output for the user',
         'You have two distinct channels for surfacing information, and they serve different purposes:',
         '',
-        `- **Persistent artifacts directory (human-visible): \`${getContainerArtifactsDir(opts.ticketId)}\`**. Files you write here survive across runs and appear in this ticket's **Artifacts** tab in the launcher UI. Use for progress notes, research, generated deliverables, or any work product that should stick around for the user to review later and doesn't belong in the repo or project folder.`,
+        `- **Persistent artifacts directory (human-visible): \`${artifactsDir}\`**. Files you write here survive across runs and appear in this ticket's **Artifacts** tab in the launcher UI. Use for progress notes, research, generated deliverables, or any work product that should stick around for the user to review later and doesn't belong in the repo or project folder.`,
         '- **`display_artifact` tool** — renders content inline in the chat stream (markdown, HTML, etc.). Ephemeral, tied to the conversation. Use for "show this to the user now" — previews, summaries, diagrams responding to the current turn.',
         '',
         'Both are visible to the user. Choose by lifecycle: artifacts directory = "this should persist"; `display_artifact` = "show this now."',
+        '',
+        '## Keep the PR writeup current',
+        '',
+        "Maintain an accurate PR title and body reflecting the changes you've made so far. The launcher's **PR** tab reads these files (polled, so updates are picked up automatically):",
+        '',
+        `- \`${artifactsDir}/pr/PR_TITLE.md\` — one short line (≤70 chars) describing the ticket's change. No markdown, no trailing punctuation.`,
+        `- \`${artifactsDir}/pr/PR_BODY.md\` — markdown with a **Summary** section (what and why) and a **Test plan** section (how to verify). Keep it grounded in the diff.`,
+        `- \`${artifactsDir}/pr/CI_STATUS.md\` — optional. Latest CI/test status, if you've produced any.`,
+        '',
+        "Refresh these whenever the scope or nature of your work shifts — don't wait for a column change or for the work to be \"done.\" If nothing material has changed, leave them alone.",
       ].join('\n')
     );
   }
@@ -1222,11 +1242,7 @@ const buildContextIdentifiers = (opts?: {
 };
 
 /** Autopilot sessions: ticket tools + read-only context tools + column-scoped app control. */
-export const buildAutopilotVariables = (opts?: {
-  projectId?: string;
-  projectLabel?: string;
-  ticketId?: string;
-}): Record<string, unknown> => {
+export const buildAutopilotVariables = (opts?: ContextIdentifierOpts): Record<string, unknown> => {
   const allTools = [
     ...TICKET_CLIENT_TOOLS,
     ...READONLY_CONTEXT_TOOLS,
@@ -1241,11 +1257,7 @@ export const buildAutopilotVariables = (opts?: {
 };
 
 /** Interactive sessions (Chat tab): all tools except code-deck-only tools. */
-export const buildInteractiveVariables = (opts?: {
-  projectId?: string;
-  projectLabel?: string;
-  ticketId?: string;
-}): Record<string, unknown> => {
+export const buildInteractiveVariables = (opts?: ContextIdentifierOpts): Record<string, unknown> => {
   const allTools = [
     ...TICKET_CLIENT_TOOLS,
     ...READONLY_CONTEXT_TOOLS,
@@ -1266,11 +1278,7 @@ export const buildInteractiveVariables = (opts?: {
 };
 
 /** Code deck sessions: interactive tools + code-deck-only tools (open_preview, etc.). */
-export const buildCodeVariables = (opts?: {
-  projectId?: string;
-  projectLabel?: string;
-  ticketId?: string;
-}): Record<string, unknown> => {
+export const buildCodeVariables = (opts?: ContextIdentifierOpts): Record<string, unknown> => {
   const allTools = [
     ...TICKET_CLIENT_TOOLS,
     ...READONLY_CONTEXT_TOOLS,

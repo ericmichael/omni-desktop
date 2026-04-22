@@ -21,6 +21,7 @@ export function registerSupervisorHandlers(ipc: IIpcListener, supervisors: Super
   ipc.handle('project:get-active-wip-tickets', () => supervisors.getActiveWipTickets());
   ipc.handle('project:get-ticket-workspace', (_, ticketId) => supervisors.getTicketWorkspaceLocked(ticketId));
   ipc.handle('project:get-tasks', () => supervisors.listTasks());
+  ipc.handle('project:finalize-ticket-cleanup', (_, ticketId) => supervisors.finalizeTicketCleanup(ticketId));
 
   return [
     'project:ensure-supervisor-infra',
@@ -33,5 +34,6 @@ export function registerSupervisorHandlers(ipc: IIpcListener, supervisors: Super
     'project:get-active-wip-tickets',
     'project:get-ticket-workspace',
     'project:get-tasks',
+    'project:finalize-ticket-cleanup',
   ];
 }

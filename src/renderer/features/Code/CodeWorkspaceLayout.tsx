@@ -44,6 +44,12 @@ type CodeWorkspaceLayoutProps = {
    * webviews register under `tab-<tabId>:*`. Omit for the global dock.
    */
   tabId?: string;
+  /**
+   * cwd for terminals opened from this layout's dock. When the tab is bound to
+   * a ticket with a worktree, pass the worktree path so shells land there
+   * instead of the global project workspace.
+   */
+  terminalCwd?: string;
 };
 
 /** Build a `WebviewRegistryProps` entry from an AppDescriptor + layout scope. */
@@ -326,7 +332,7 @@ const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass, tabId }: { app: A
 });
 AppSurfaceView.displayName = 'AppSurfaceView';
 
-export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, variables, codeServerSrc, vncSrc, previewUrl, onPreviewUrlChange, activeApp = 'chat', onActiveAppChange, onReady, headerActionsTargetId, headerActionsCompact, sandboxLabel, onClientToolCall, pendingPlan, onPlanDecision, dockTargetId, isGlass, tabId }: CodeWorkspaceLayoutProps) => {
+export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, variables, codeServerSrc, vncSrc, previewUrl, onPreviewUrlChange, activeApp = 'chat', onActiveAppChange, onReady, headerActionsTargetId, headerActionsCompact, sandboxLabel, onClientToolCall, pendingPlan, onPlanDecision, dockTargetId, isGlass, tabId, terminalCwd }: CodeWorkspaceLayoutProps) => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const registry = useMemo(() => buildAppRegistry(store.customApps ?? []), [store.customApps]);
@@ -372,12 +378,12 @@ export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, va
   const handleDockSelect = useCallback(
     (id: AppId) => {
       if (id === 'terminal' && $terminals.get().length === 0) {
-        const cwd = persistedStoreApi.$atom.get().workspaceDir ?? undefined;
+        const cwd = terminalCwd ?? persistedStoreApi.$atom.get().workspaceDir ?? undefined;
         createTerminal(cwd);
       }
       onActiveAppChange?.(id);
     },
-    [onActiveAppChange]
+    [onActiveAppChange, terminalCwd]
   );
 
   return (

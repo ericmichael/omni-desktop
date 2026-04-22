@@ -3,7 +3,9 @@ import { useStore } from '@nanostores/react';
 import { motion } from 'framer-motion';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
+import { backendRunsOnHost,getArtifactsDir, getContainerArtifactsDir } from '@/lib/artifacts';
 import { buildCodeVariables } from '@/lib/client-tools';
+import { configApi } from '@/renderer/services/config';
 import { SessionStartupShell } from '@/renderer/common/SessionStartupShell';
 import { Button } from '@/renderer/ds';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
@@ -81,6 +83,7 @@ const CodeRunningView = memo(
     dockTargetId,
     isGlass,
     tabId,
+    terminalCwd,
   }: {
     sandboxUrls: { uiUrl: string; codeServerUrl?: string; noVncUrl?: string };
     sessionId?: string;
@@ -99,6 +102,7 @@ const CodeRunningView = memo(
     dockTargetId?: string;
     isGlass?: boolean;
     tabId?: string;
+    terminalCwd?: string;
   }) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
@@ -142,6 +146,7 @@ const CodeRunningView = memo(
             dockTargetId={dockTargetId}
             isGlass={isGlass}
             tabId={tabId}
+            terminalCwd={terminalCwd}
           />
         </div>
       </div>
@@ -230,14 +235,35 @@ export const CodeTabContent = memo(
       [tab.id, tab.ticketId, tab.projectId]
     );
 
-    const clientToolVariables = useMemo(
-      () =>
-        buildCodeVariables({
-          ...(project ? { projectId: project.id, projectLabel: project.label } : {}),
-          ...(tab.ticketId ? { ticketId: tab.ticketId } : {}),
-        }),
-      [tab.ticketId, project]
-    );
+    // Resolve the host omni config dir once — we need it to tell the agent
+    // where to write PR artifacts when it runs on the host (no sandbox).
+    const [hostConfigDir, setHostConfigDir] = useState<string | null>(null);
+    useEffect(() => {
+      let cancelled = false;
+      void configApi.getOmniConfigDir().then((dir) => {
+        if (!cancelled) {
+          setHostConfigDir(dir);
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, []);
+
+    const clientToolVariables = useMemo(() => {
+      const artifactsDir = tab.ticketId
+        ? backendRunsOnHost(sandboxBackend)
+          ? hostConfigDir
+            ? getArtifactsDir(hostConfigDir, tab.ticketId)
+            : undefined
+          : getContainerArtifactsDir(tab.ticketId)
+        : undefined;
+      return buildCodeVariables({
+        ...(project ? { projectId: project.id, projectLabel: project.label } : {}),
+        ...(tab.ticketId ? { ticketId: tab.ticketId } : {}),
+        ...(artifactsDir ? { artifactsDir } : {}),
+      });
+    }, [tab.ticketId, project, sandboxBackend, hostConfigDir]);
 
     // No project selected — show project picker
     if (!tab.projectId) {
@@ -275,6 +301,7 @@ export const CodeTabContent = memo(
             dockTargetId={dockTargetId}
             isGlass={isGlass}
             tabId={tab.id}
+            terminalCwd={workspaceDir ?? undefined}
           />
         ) : phase === 'error' ? (
           <CodeErrorView tabId={tab.id} retry={retry} />

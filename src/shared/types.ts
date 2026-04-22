@@ -387,6 +387,7 @@ export const schema: Schema<StoreData> = {
         createdAt: { type: 'number' },
         pipeline: { type: 'object' },
         sandbox: { type: ['object', 'null'] },
+        seedKey: { type: 'string' },
       },
       required: ['id', 'label', 'slug', 'createdAt'],
     },
@@ -408,6 +409,7 @@ export const schema: Schema<StoreData> = {
         completedAt: { type: 'number' },
         createdAt: { type: 'number' },
         updatedAt: { type: 'number' },
+        seedKey: { type: 'string' },
       },
       required: ['id', 'projectId', 'title', 'description', 'status', 'createdAt', 'updatedAt'],
     },
@@ -428,6 +430,7 @@ export const schema: Schema<StoreData> = {
         kind: { type: 'string', enum: ['doc', 'notebook'] },
         createdAt: { type: 'number' },
         updatedAt: { type: 'number' },
+        seedKey: { type: 'string' },
       },
       required: ['id', 'projectId', 'title', 'sortOrder', 'createdAt', 'updatedAt'],
     },
@@ -464,6 +467,7 @@ export const schema: Schema<StoreData> = {
         },
         createdAt: { type: 'number' },
         updatedAt: { type: 'number' },
+        seedKey: { type: 'string' },
       },
       required: ['id', 'title', 'status', 'createdAt', 'updatedAt'],
     },
@@ -518,6 +522,15 @@ export const schema: Schema<StoreData> = {
         columnChangedAt: { type: 'number' },
         resolvedAt: { type: 'number' },
         archivedAt: { type: 'number' },
+        cleanupPending: { type: 'boolean' },
+        prReview: {
+          type: 'object',
+          properties: {
+            status: { type: 'string', enum: ['approved', 'changes_requested'] },
+            at: { type: 'number' },
+          },
+        },
+        prMergedAt: { type: 'number' },
         // Kanban fields
         columnId: { type: 'string' },
         currentPhaseId: { type: ['string', 'null'] },
@@ -528,6 +541,7 @@ export const schema: Schema<StoreData> = {
         loopMaxIterations: { type: 'number' },
         loopIteration: { type: 'number' },
         loopStatus: { type: 'string', enum: ['running', 'completed', 'stopped', 'error'] },
+        seedKey: { type: 'string' },
       },
       required: [
         'id',
@@ -904,6 +918,8 @@ export type Project = {
   autoDispatch?: boolean;
   /** Per-project sandbox configuration. When absent/null, the default sandbox image is used. */
   sandbox?: SandboxConfig | null;
+  /** Populated by the seed script; tracked in seed-manifest for reset. */
+  seedKey?: string;
 };
 
 export type Milestone = {
@@ -922,6 +938,8 @@ export type Milestone = {
   completedAt?: number;
   createdAt: number;
   updatedAt: number;
+  /** Populated by the seed script; tracked in seed-manifest for reset. */
+  seedKey?: string;
 };
 
 /**
@@ -963,6 +981,8 @@ export type Page = {
   properties?: PageProperties;
   createdAt: number;
   updatedAt: number;
+  /** Populated by the seed script; tracked in seed-manifest for reset. */
+  seedKey?: string;
 };
 
 // --- Inbox ---
@@ -1014,6 +1034,8 @@ export type InboxItem = {
   promotedTo?: InboxPromotion;
   createdAt: number;
   updatedAt: number;
+  /** Populated by the seed script; tracked in seed-manifest for reset. */
+  seedKey?: string;
 };
 
 export type TicketComment = {
@@ -1060,6 +1082,18 @@ export type Ticket = {
   worktreePath?: string;
   /** Name of the git worktree (used for branch naming). */
   worktreeName?: string;
+  /**
+   * Set when the ticket was moved to the terminal column but the worktree
+   * had uncommitted changes, so cleanup was deferred. The worktree + sandbox
+   * stay alive until the user explicitly finalizes via `project:finalize-ticket-cleanup`.
+   */
+  cleanupPending?: boolean;
+
+  // --- Local PR flow ---
+  /** Reviewer decision on the ticket's PR. Gate for merging. */
+  prReview?: { status: 'approved' | 'changes_requested'; at: number };
+  /** Stamped when the ticket's feature branch is merged into its base. */
+  prMergedAt?: number;
 
   // Supervisor state
   /** Persistent supervisor session ID (survives across start_run calls). */
@@ -1084,6 +1118,8 @@ export type Ticket = {
   comments?: TicketComment[];
   /** History of supervisor runs on this ticket. */
   runs?: TicketRun[];
+  /** Populated by the seed script; tracked in seed-manifest for reset. */
+  seedKey?: string;
 };
 
 // --- Shaping ---
@@ -1133,10 +1169,21 @@ export type ArtifactFileContent = {
   size: number;
 };
 
+/**
+ * Which source the change came from:
+ *   - committed: between `base` and `HEAD` (what a PR would land)
+ *   - staged: between `HEAD` and the index (git add)
+ *   - unstaged: between the index and the working tree
+ *   - untracked: new file not tracked by git
+ * A single path can appear under multiple groups when its change spans several.
+ */
+export type DiffGroup = 'committed' | 'staged' | 'unstaged' | 'untracked';
+
 export type FileDiff = {
   path: string;
   oldPath?: string;
   status: 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'untracked';
+  group: DiffGroup;
   additions: number;
   deletions: number;
   isBinary: boolean;
@@ -1160,6 +1207,25 @@ export type SessionMessage = {
 };
 
 export type GitRepoInfo = { isGitRepo: true; branches: string[]; currentBranch: string } | { isGitRepo: false };
+
+/**
+ * Result of a dry-run merge check for a ticket's feature branch → base.
+ * `ready` is false when the ticket has no worktree / base / feature branch;
+ * conflict info is surfaced in `conflictingFiles` when `ready` is true.
+ */
+export type PrMergeCheck =
+  | { ready: false; reason: string }
+  | {
+      ready: true;
+      base: string;
+      feature: string;
+      hasConflicts: boolean;
+      conflictingFiles: string[];
+      /** Commits on the feature branch not present on base. Zero means nothing to merge. */
+      ahead: number;
+    };
+
+export type PrMergeResult = { ok: true; mergeCommitSha: string } | { ok: false; error: string };
 
 // #endregion
 
@@ -1395,6 +1461,18 @@ type ProjectIpcEvents = Namespaced<
     'send-supervisor-message': (ticketId: TicketId, message: string) => void;
     'reset-supervisor-session': (ticketId: TicketId) => void;
     'resolve-ticket': (ticketId: TicketId, resolution: TicketResolution) => void;
+    /**
+     * Retry the deferred cleanup for a completed ticket whose worktree was
+     * dirty. Returns true when cleanup succeeded, false when the worktree
+     * still has uncommitted changes (cleanupPending stays set).
+     */
+    'finalize-ticket-cleanup': (ticketId: TicketId) => boolean;
+    /** Set or clear the ticket's PR review decision. Pass null to clear. */
+    'set-pr-review': (ticketId: TicketId, review: 'approved' | 'changes_requested' | null) => void;
+    /** Dry-run merge the ticket's feature branch into its base; reports conflicts. */
+    'check-merge': (ticketId: TicketId) => PrMergeCheck;
+    /** Merge the ticket's feature branch into its base. On success, moves ticket to terminal column. */
+    'merge-ticket': (ticketId: TicketId) => PrMergeResult;
     'set-auto-dispatch': (projectId: ProjectId, enabled: boolean) => void;
     'get-supervisor-sandbox-status': (tabId: CodeTabId) => WithTimestamp<AgentProcessStatus> | null;
     'get-active-wip-tickets': () => Ticket[];
