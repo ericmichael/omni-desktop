@@ -5,13 +5,13 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { backendRunsOnHost,getArtifactsDir, getContainerArtifactsDir } from '@/lib/artifacts';
 import { buildCodeVariables } from '@/lib/client-tools';
-import { configApi } from '@/renderer/services/config';
 import { SessionStartupShell } from '@/renderer/common/SessionStartupShell';
 import { Button } from '@/renderer/ds';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { buildSandboxLabel, isCustomSandbox } from '@/renderer/omniagents-ui/sandbox-label';
+import { configApi } from '@/renderer/services/config';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { AppId } from '@/shared/app-registry';
@@ -84,6 +84,7 @@ const CodeRunningView = memo(
     isGlass,
     tabId,
     terminalCwd,
+    sidecarMode,
   }: {
     sandboxUrls: { uiUrl: string; codeServerUrl?: string; noVncUrl?: string };
     sessionId?: string;
@@ -103,6 +104,7 @@ const CodeRunningView = memo(
     isGlass?: boolean;
     tabId?: string;
     terminalCwd?: string;
+    sidecarMode?: boolean;
   }) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
@@ -147,6 +149,7 @@ const CodeRunningView = memo(
             isGlass={isGlass}
             tabId={tabId}
             terminalCwd={terminalCwd}
+            sidecarMode={sidecarMode}
           />
         </div>
       </div>
@@ -167,10 +170,11 @@ type CodeTabContentProps = {
   onPreviewUrlChange?: (url: string) => void;
   dockTargetId?: string;
   isGlass?: boolean;
+  sidecarMode?: boolean;
 };
 
 export const CodeTabContent = memo(
-  ({ tab, isVisible, activeApp = 'chat', onActiveAppChange, uiMinimal, headerActionsTargetId, headerActionsCompact, previewUrl, onPreviewUrlChange, dockTargetId, isGlass }: CodeTabContentProps) => {
+  ({ tab, isVisible, activeApp = 'chat', onActiveAppChange, uiMinimal, headerActionsTargetId, headerActionsCompact, previewUrl, onPreviewUrlChange, dockTargetId, isGlass, sidecarMode }: CodeTabContentProps) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
     const project = useMemo(
@@ -302,6 +306,7 @@ export const CodeTabContent = memo(
             isGlass={isGlass}
             tabId={tab.id}
             terminalCwd={workspaceDir ?? undefined}
+            sidecarMode={sidecarMode}
           />
         ) : phase === 'error' ? (
           <CodeErrorView tabId={tab.id} retry={retry} />

@@ -59,7 +59,7 @@ import type {
 } from '@/lib/project-manager-deps';
 import { decideRunEndAction, type FailureClass } from '@/lib/run-end';
 import { hasTemplateExpressions, renderTemplate, type TemplateVariables } from '@/lib/template';
-import { decideWorktreeAction } from '@/lib/worktree';
+import { claimsCollide, decideWorktreeAction, resolveWorkspaceClaim } from '@/lib/worktree';
 import type { AgentProcessMode } from '@/main/agent-process';
 import { createPlatformClient } from '@/main/platform-mode';
 import type { ProcessManager } from '@/main/process-manager';
@@ -583,6 +583,46 @@ export class SupervisorOrchestrator {
    */
   getActiveWipTickets(): Ticket[] {
     return this.deps.store.getTickets().filter((t) => t.phase !== undefined && isActivePhase(t.phase));
+  }
+
+  /**
+   * Detect a workspace collision with another actively-running supervisor.
+   *
+   * Two supervisors collide when they'd write to the same filesystem path:
+   *   - direct-mode ticket on the same local project (both mount workspaceDir)
+   *   - same persisted worktree path (defensive; reuse is keyed per-ticket)
+   *
+   * Worktree vs. worktree off the same base doesn't collide — each gets its
+   * own `~/Omni/Worktrees/<name>` checkout and `ticket/<name>` branch. Remote
+   * projects don't collide either; the container clones fresh.
+   */
+  findWorkspaceCollision(ticketId: TicketId): Ticket | null {
+    const ticket = this.deps.host.getTicketById(ticketId);
+    if (!ticket) {
+      return null;
+    }
+    const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId);
+    if (!project || project.source?.kind !== 'local') {
+      return null;
+    }
+    const claim = resolveWorkspaceClaim(ticket, project.source.workspaceDir);
+    if (!claim) {
+      return null;
+    }
+    for (const [otherId, entry] of this.machines) {
+      if (otherId === ticketId || !entry.machine.isActive()) {
+        continue;
+      }
+      const other = this.deps.host.getTicketById(otherId);
+      if (!other || other.projectId !== ticket.projectId) {
+        continue;
+      }
+      const otherClaim = resolveWorkspaceClaim(other, project.source.workspaceDir);
+      if (otherClaim && claimsCollide(claim, otherClaim)) {
+        return other;
+      }
+    }
+    return null;
   }
 
   // -------------------------------------------------------------------------
@@ -1454,6 +1494,11 @@ export class SupervisorOrchestrator {
         if (!this.canStartSupervisor(ticket.projectId, ticket.columnId)) {
           throw new Error('Concurrency limit reached');
         }
+        const collision = this.findWorkspaceCollision(ticketId);
+        if (collision) {
+          const hint = ticket.useWorktree === false ? ' Enable worktrees on this ticket to run them in parallel.' : '';
+          throw new Error(`"${collision.title}" is already running in this workspace — stop it first.${hint}`);
+        }
 
         await this.ensureSupervisorInfra(ticketId);
         await this.sendUserRunMessage(ticketId, message);
@@ -1713,6 +1758,12 @@ export class SupervisorOrchestrator {
         }
       }
       return `Concurrency limit reached (${MAX_CONCURRENT_SUPERVISORS} supervisors running). Stop another supervisor first.`;
+    }
+
+    const collision = this.findWorkspaceCollision(ticketId);
+    if (collision) {
+      const hint = ticket.useWorktree === false ? ' Enable worktrees on this ticket to run them in parallel.' : '';
+      return `"${collision.title}" is already running in this workspace — stop it first.${hint}`;
     }
 
     // WIP limit check (cognitive limit, cross-project)

@@ -1317,11 +1317,12 @@ type UtilIpcEvents = Namespaced<
 type TerminalIpcEvents = Namespaced<
   'terminal',
   {
-    create: (cwd?: string) => string;
-    list: () => string[];
+    create: (tabId: string, cwd?: string) => string;
+    list: (tabId: string) => string[];
     write: (id: string, data: string) => void;
     resize: (id: string, cols: number, rows: number) => void;
     dispose: (id: string) => void;
+    'dispose-all-for-tab': (tabId: string) => void;
   }
 >;
 
@@ -1955,8 +1956,8 @@ type StoreIpcRendererEvents = Namespaced<
 type TerminalIpcRendererEvents = Namespaced<
   'terminal',
   {
-    output: [string, string];
-    exited: [string, number];
+    output: [string, string, string];
+    exited: [string, string, number];
   }
 >;
 

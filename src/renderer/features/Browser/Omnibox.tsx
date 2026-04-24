@@ -110,7 +110,9 @@ export const Omnibox = forwardRef<
   const [draft, setDraft] = useState(value);
   const [open, setOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<BrowserSuggestion[]>([]);
-  const [highlight, setHighlight] = useState(0);
+  // -1 means "no suggestion selected" — Enter commits the typed draft. Arrow
+  // keys are the only way to move into the list, matching standard browsers.
+  const [highlight, setHighlight] = useState(-1);
   const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suggestSeqRef = useRef(0);
 
@@ -155,7 +157,7 @@ setSuggestions([]);
       setDraft(next);
       onValueChange?.(next);
       setOpen(true);
-      setHighlight(0);
+      setHighlight(-1);
       void fetchSuggestions(next);
     },
     [fetchSuggestions, onValueChange]
@@ -183,13 +185,13 @@ setSuggestions([]);
         setHighlight((h) => Math.min(h + 1, Math.max(0, suggestions.length - 1)));
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setHighlight((h) => Math.max(h - 1, 0));
+        setHighlight((h) => Math.max(h - 1, -1));
       } else if (e.key === 'Escape') {
         setOpen(false);
         setDraft(value);
       } else if (e.key === 'Enter') {
         e.preventDefault();
-        const pick = open && suggestions[highlight];
+        const pick = open && highlight >= 0 ? suggestions[highlight] : null;
         commit(pick ? pick.url : draft);
       }
     },

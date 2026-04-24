@@ -3,6 +3,7 @@ import { map } from 'nanostores';
 
 import { STATUS_POLL_INTERVAL_MS } from '@/renderer/constants';
 import type { AutoLaunchPhase } from '@/renderer/features/Code/use-code-auto-launch';
+import { destroyAllTerminalsForTab } from '@/renderer/features/Console/state';
 import {
   $agentStatuses,
   $agentXTerms,
@@ -53,6 +54,7 @@ export const codeApi = {
 
   removeTab: async (tabId: CodeTabId) => {
     await codeApi.stopSandbox(tabId);
+    await destroyAllTerminalsForTab(tabId);
 
     // Clean up per-tab state
     clearStatus(tabId);

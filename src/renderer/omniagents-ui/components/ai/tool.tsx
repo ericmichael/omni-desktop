@@ -57,7 +57,7 @@ export const ToolHeader = ({ className, title, preview, type, state, toolName, .
   const derivedName = type === 'dynamic-tool' ? toolName : type.split('-').slice(1).join('-')
 
   return (
-    <CollapsibleTrigger className={cn('flex w-full items-center gap-4 p-3', className)} {...props}>
+    <CollapsibleTrigger className={cn('flex w-full items-center gap-4 p-3 text-left', className)} {...props}>
       <div className="flex items-center gap-2 min-w-0 flex-1">
         <WrenchIcon className="size-4 text-muted-foreground flex-shrink-0" />
         <span className="inline-flex items-center gap-1 min-w-0 text-sm">

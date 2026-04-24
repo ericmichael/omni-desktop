@@ -8,7 +8,6 @@ import type { WebviewRegistryProps } from '@/renderer/common/Webview';
 import { Webview } from '@/renderer/common/Webview';
 import { BrowserView } from '@/renderer/features/Browser/BrowserView';
 import { ConsoleStarted } from '@/renderer/features/Console/ConsoleRunning';
-import { $terminals, createTerminal } from '@/renderer/features/Console/state';
 import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -50,6 +49,11 @@ type CodeWorkspaceLayoutProps = {
    * instead of the global project workspace.
    */
   terminalCwd?: string;
+  /**
+   * When true, the active dock app renders OUTSIDE this layout (as an adjacent
+   * deck column). Chat stays visible and no in-column overlay is drawn.
+   */
+  sidecarMode?: boolean;
 };
 
 /** Build a `WebviewRegistryProps` entry from an AppDescriptor + layout scope. */
@@ -282,7 +286,7 @@ const SurfaceFrame = memo(({ app, isGlass, children }: { app: AppDescriptor; isG
 });
 SurfaceFrame.displayName = 'SurfaceFrame';
 
-const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass, tabId }: { app: AppDescriptor; src?: string; onUrlChange?: (url: string) => void; isGlass?: boolean; tabId?: string }) => {
+const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass, tabId, terminalCwd }: { app: AppDescriptor; src?: string; onUrlChange?: (url: string) => void; isGlass?: boolean; tabId?: string; terminalCwd?: string }) => {
   const styles = useStyles();
   const registryProps = useMemo(() => makeRegistryProps(app, tabId), [app, tabId]);
 
@@ -302,10 +306,19 @@ const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass, tabId }: { app: A
   }
 
   if (app.kind === 'builtin-terminal') {
+    if (!tabId) {
+      return (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
+          <SurfaceFrame app={app} isGlass={isGlass}>
+            <div className={styles.unavailableState}>Terminal requires a workspace column.</div>
+          </SurfaceFrame>
+        </motion.div>
+      );
+    }
     return (
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
         <SurfaceFrame app={app} isGlass={isGlass}>
-          <ConsoleStarted />
+          <ConsoleStarted tabId={tabId} cwd={terminalCwd} />
         </SurfaceFrame>
       </motion.div>
     );
@@ -332,7 +345,7 @@ const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass, tabId }: { app: A
 });
 AppSurfaceView.displayName = 'AppSurfaceView';
 
-export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, variables, codeServerSrc, vncSrc, previewUrl, onPreviewUrlChange, activeApp = 'chat', onActiveAppChange, onReady, headerActionsTargetId, headerActionsCompact, sandboxLabel, onClientToolCall, pendingPlan, onPlanDecision, dockTargetId, isGlass, tabId, terminalCwd }: CodeWorkspaceLayoutProps) => {
+export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, variables, codeServerSrc, vncSrc, previewUrl, onPreviewUrlChange, activeApp = 'chat', onActiveAppChange, onReady, headerActionsTargetId, headerActionsCompact, sandboxLabel, onClientToolCall, pendingPlan, onPlanDecision, dockTargetId, isGlass, tabId, terminalCwd, sidecarMode }: CodeWorkspaceLayoutProps) => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const registry = useMemo(() => buildAppRegistry(store.customApps ?? []), [store.customApps]);
@@ -377,32 +390,31 @@ export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, va
 
   const handleDockSelect = useCallback(
     (id: AppId) => {
-      if (id === 'terminal' && $terminals.get().length === 0) {
-        const cwd = terminalCwd ?? persistedStoreApi.$atom.get().workspaceDir ?? undefined;
-        createTerminal(cwd);
-      }
       onActiveAppChange?.(id);
     },
-    [onActiveAppChange, terminalCwd]
+    [onActiveAppChange]
   );
 
   return (
     <div className={mergeClasses(styles.root, isGlass && styles.rootGlass, isGlass && styles.glassChatSurfaces)}>
       <div className={styles.mainArea}>
-        <div className={mergeClasses(styles.mainContent, activeApp !== 'chat' && styles.mainContentHidden)}>
+        <div className={mergeClasses(styles.mainContent, !sidecarMode && activeApp !== 'chat' && styles.mainContentHidden)}>
           <OmniAgentsApp uiUrl={uiSrc} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables} onReady={handleUiReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} sandboxLabel={sandboxLabel} onClientToolCall={onClientToolCall} pendingPlan={pendingPlan} onPlanDecision={onPlanDecision} />
         </div>
-        <AnimatePresence>
-          {activeApp !== 'chat' && activeDescriptor && (
-            <AppSurfaceView
-              app={activeDescriptor}
-              src={surfaceSrc}
-              onUrlChange={activeDescriptor.kind === 'builtin-browser' ? onPreviewUrlChange : undefined}
-              isGlass={isGlass}
-              tabId={tabId}
-            />
-          )}
-        </AnimatePresence>
+        {!sidecarMode && (
+          <AnimatePresence>
+            {activeApp !== 'chat' && activeDescriptor && (
+              <AppSurfaceView
+                app={activeDescriptor}
+                src={surfaceSrc}
+                onUrlChange={activeDescriptor.kind === 'builtin-browser' ? onPreviewUrlChange : undefined}
+                isGlass={isGlass}
+                tabId={tabId}
+                terminalCwd={terminalCwd}
+              />
+            )}
+          </AnimatePresence>
+        )}
       </div>
       {(() => {
         const dock = (

@@ -19,9 +19,10 @@ import {
   MoreHorizontal20Regular,
   Navigation20Regular,
   ReOrderDotsVertical20Regular,
+  Subtract20Regular,
 } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
-import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { uuidv4 } from '@/lib/uuid';
 import { Webview } from '@/renderer/common/Webview';
@@ -44,10 +45,12 @@ import {
   TicketResolutionBadge,
 } from '@/renderer/features/Tickets/TicketControls';
 import { type TicketPanel, TicketPanelOverlay } from '@/renderer/features/Tickets/TicketPanelOverlay';
+import { ConsoleStarted } from '@/renderer/features/Console/ConsoleRunning';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { AppHandleScope } from '@/shared/app-control-types';
 import { makeAppHandleId } from '@/shared/app-control-types';
-import type { AppId, CustomAppEntry } from '@/shared/app-registry';
+import type { AppDescriptor, AppId, CustomAppEntry } from '@/shared/app-registry';
+import { buildAppRegistry } from '@/shared/app-registry';
 import type { CodeLayoutMode, CodeTab, CodeTabId, TicketId, TicketResolution } from '@/shared/types';
 
 import { AppIcon } from './AppIcon';
@@ -207,6 +210,27 @@ const useStyles = makeStyles({
     ':focus-within .revealOnHover': { opacity: 1 },
   },
   deckDockSlot: { minHeight: 0 },
+  cardNoRightMargin: {
+    marginRight: 0,
+    borderTopRightRadius: 0,
+    borderBottomRightRadius: 0,
+  },
+  cardFlattenLeft: {
+    marginLeft: 0,
+    borderTopLeftRadius: 0,
+    borderBottomLeftRadius: 0,
+    borderLeftWidth: '2px',
+  },
+  sidecarBodyFill: { position: 'absolute', inset: 0 },
+  sidecarBodyHidden: { display: 'none' },
+  sidecarUnavailable: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
+    color: tokens.colorNeutralForeground4,
+    fontSize: tokens.fontSizeBase300,
+  },
   glassDeckHeader: {
     backgroundColor: 'transparent',
     backdropFilter: 'none',
@@ -869,6 +893,7 @@ const DeckColumn = memo(
     children,
     headerActionsSlot,
     isGlass,
+    hasSidecar,
   }: {
     tab: CodeTab;
     label: string;
@@ -883,6 +908,7 @@ const DeckColumn = memo(
     children: React.ReactNode;
     headerActionsSlot?: React.ReactNode;
     isGlass?: boolean;
+    hasSidecar?: boolean;
   }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
     const style = {
@@ -900,7 +926,7 @@ const DeckColumn = memo(
         style={style}
         className={mergeClasses(styles.deckColumn, isDragging && styles.deckColumnDragging)}
       >
-        <div className={mergeClasses(styles.deckColumnBordered, isGlass && styles.glassCard)}>
+        <div className={mergeClasses(styles.deckColumnBordered, isGlass && styles.glassCard, hasSidecar && styles.cardNoRightMargin)}>
           <CodeSessionHeader
             label={label}
             ticketTitle={ticketTitle}
@@ -1125,6 +1151,185 @@ const BrowserColumn = memo(
   }
 );
 BrowserColumn.displayName = 'BrowserColumn';
+
+type SidecarBodyProps = {
+  app: AppDescriptor;
+  originTabId: CodeTabId;
+  sandboxUrls: { codeServerUrl?: string; noVncUrl?: string } | undefined;
+  terminalCwd?: string;
+  previewUrl?: string;
+  onPreviewUrlChange?: (url: string) => void;
+  isGlass?: boolean;
+  hidden: boolean;
+};
+
+/**
+ * One sidecar app body. Rendered per mounted app with `hidden` toggling
+ * `display: none` so the underlying DOM (xterm container, Electron webview,
+ * iframe) survives app switches — preserves terminal scrollback, in-flight
+ * browser page, loaded code-server session, etc.
+ */
+const SidecarBody = memo(
+  ({ app, originTabId, sandboxUrls, terminalCwd, previewUrl, onPreviewUrlChange, isGlass, hidden }: SidecarBodyProps) => {
+    const styles = useStyles();
+    const registryProps = useMemo(
+      () => ({
+        handleId: makeAppHandleId('column', app.id, originTabId),
+        appId: app.id,
+        kind: app.kind,
+        scope: 'column' as AppHandleScope,
+        tabId: originTabId,
+        label: app.label,
+      }),
+      [app.id, app.label, app.kind, originTabId]
+    );
+
+    let body: React.ReactNode = null;
+    if (app.kind === 'builtin-browser') {
+      body = (
+        <BrowserView
+          tabsetId={`dock:${originTabId}`}
+          isGlass={isGlass}
+          registryScope="column"
+          registryTabId={originTabId}
+          src={previewUrl}
+          onUrlChange={onPreviewUrlChange}
+        />
+      );
+    } else if (app.kind === 'builtin-terminal') {
+      body = <ConsoleStarted tabId={originTabId} cwd={terminalCwd} />;
+    } else if (app.kind === 'builtin-code') {
+      body = sandboxUrls?.codeServerUrl ? (
+        <Webview src={sandboxUrls.codeServerUrl} showUnavailable={false} registry={registryProps} />
+      ) : (
+        <div className={styles.sidecarUnavailable}>{app.label} is unavailable for this workspace.</div>
+      );
+    } else if (app.kind === 'builtin-desktop') {
+      body = sandboxUrls?.noVncUrl ? (
+        <Webview src={sandboxUrls.noVncUrl} showUnavailable={false} registry={registryProps} />
+      ) : (
+        <div className={styles.sidecarUnavailable}>{app.label} is unavailable for this workspace.</div>
+      );
+    } else if (app.kind === 'webview') {
+      body = app.url ? (
+        <Webview src={app.url} showUnavailable={false} registry={registryProps} />
+      ) : (
+        <div className={styles.sidecarUnavailable}>No URL configured.</div>
+      );
+    }
+
+    return (
+      <div className={mergeClasses(styles.sidecarBodyFill, hidden && styles.sidecarBodyHidden)}>
+        {body}
+      </div>
+    );
+  }
+);
+SidecarBody.displayName = 'SidecarBody';
+
+/**
+ * Non-sortable adjacent column that hosts a dock app bound to an origin code
+ * tab. Handles register under `tab-<originTabId>:<appId>` so agents scoped to
+ * the origin tab see these apps exactly as they did when the dock opened them
+ * inline.
+ */
+const SidecarColumn = memo(
+  ({
+    originTab,
+    app,
+    sandboxUrls,
+    terminalCwd,
+    previewUrl,
+    onPreviewUrlChange,
+    onClose,
+    isGlass,
+    isExpanded,
+    onToggleExpand,
+  }: {
+    originTab: CodeTab;
+    app: AppDescriptor;
+    sandboxUrls: { codeServerUrl?: string; noVncUrl?: string } | undefined;
+    terminalCwd?: string;
+    previewUrl?: string;
+    onPreviewUrlChange?: (url: string) => void;
+    onClose: () => void;
+    isGlass?: boolean;
+    isExpanded: boolean;
+    onToggleExpand: () => void;
+  }) => {
+    const styles = useStyles();
+
+    // Keep every app we've ever activated mounted (hidden when inactive) so
+    // its DOM survives sidecar app switches. Without this, switching away
+    // from the browser tears down the <webview> and it reloads on return;
+    // switching away from the terminal drops the xterm's attached element.
+    const [mounted, setMounted] = useState<Map<AppId, AppDescriptor>>(
+      () => new Map([[app.id, app]])
+    );
+    useEffect(() => {
+      setMounted((prev) => {
+        if (prev.has(app.id)) {
+          return prev;
+        }
+        const next = new Map(prev);
+        next.set(app.id, app);
+        return next;
+      });
+    }, [app]);
+
+    return (
+      <div className={styles.deckColumn}>
+        <div className={mergeClasses(styles.deckColumnBordered, styles.cardFlattenLeft, isGlass && styles.glassCard)}>
+          <div className={mergeClasses(styles.sessionHeader, isGlass && styles.glassSessionHeader)}>
+            <div className={mergeClasses(styles.flexItemsCenter, styles.gap2, styles.minW0)}>
+              <AppIcon icon={app.icon} size={14} />
+              <span className={styles.sessionLabel} title={app.label}>
+                {app.label}
+              </span>
+            </div>
+            <div className={mergeClasses(styles.flexItemsCenter, styles.gap1)}>
+              <SessionActionButton
+                icon={
+                  isExpanded ? (
+                    <ArrowMinimize20Regular style={{ width: 15, height: 15 }} />
+                  ) : (
+                    <ArrowMaximize20Regular style={{ width: 15, height: 15 }} />
+                  )
+                }
+                label={isExpanded ? 'Collapse column' : 'Expand column'}
+                aria-pressed={isExpanded}
+                onClick={onToggleExpand}
+                className={mergeClasses(styles.revealOnHover, 'revealOnHover')}
+              />
+              <SessionActionButton
+                icon={<Subtract20Regular style={{ width: 14, height: 14 }} />}
+                label={`Hide ${app.label}`}
+                onClick={onClose}
+              />
+            </div>
+          </div>
+          <div className={styles.flex1MinH0Relative}>
+            {Array.from(mounted.values()).map((mountedApp) => (
+              <SidecarBody
+                key={mountedApp.id}
+                app={mountedApp}
+                originTabId={originTab.id}
+                sandboxUrls={sandboxUrls}
+                terminalCwd={terminalCwd}
+                previewUrl={previewUrl}
+                onPreviewUrlChange={onPreviewUrlChange}
+                isGlass={isGlass}
+                hidden={mountedApp.id !== app.id}
+              />
+            ))}
+          </div>
+        </div>
+        <div className={styles.deckDockSlot} />
+      </div>
+    );
+  }
+);
+SidecarColumn.displayName = 'SidecarColumn';
 
 const LAUNCHER_CELL_MIN_PX = 64;
 const LAUNCHER_CELL_MAX_PX = 96;
@@ -1515,8 +1720,12 @@ export const CodeDeck = memo(() => {
   const activeTabId = store.activeCodeTabId ?? tabs[0]?.id ?? null;
   const deckBackground = store.codeDeckBackground ?? null;
   const [activeApps, setActiveApps] = useState<Record<CodeTabId, AppId>>({});
+  // Remembers the last non-'chat' app a tab's sidecar displayed. Lets us keep
+  // `SidecarColumn` mounted (just hidden) when the user minimizes, so state
+  // like terminal scrollback or an open browser tab survives hide → re-show.
+  const [lastSidecarAppByTab, setLastSidecarAppByTab] = useState<Record<CodeTabId, AppId>>({});
   const [previewUrls, setPreviewUrls] = useState<Record<CodeTabId, string>>({});
-  const [expandedTabId, setExpandedTabId] = useState<CodeTabId | null>(null);
+  const [expandedTabIds, setExpandedTabIds] = useState<ReadonlySet<CodeTabId>>(() => new Set());
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
 
   useEffect(() => {
@@ -1579,10 +1788,22 @@ export const CodeDeck = memo(() => {
   }, [activeTabId, tabs]);
 
   useEffect(() => {
-    if (expandedTabId && !tabs.some((tab) => tab.id === expandedTabId)) {
-      setExpandedTabId(null);
-    }
-  }, [expandedTabId, tabs]);
+    setExpandedTabIds((current) => {
+      const validIds = new Set(tabs.map((t) => t.id));
+      let changed = false;
+      const next = new Set<CodeTabId>();
+      for (const id of current) {
+        // Sidecar-scoped keys (`sidecar:<tabId>`) are valid while their origin tab exists.
+        const originId = id.startsWith('sidecar:') ? id.slice('sidecar:'.length) : id;
+        if (validIds.has(originId)) {
+          next.add(id);
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [tabs]);
 
   // React to agent-triggered preview requests. We subscribe via `listen` rather
   // than `useStore` so every atom update fires — a rapid burst of requests all
@@ -1620,6 +1841,7 @@ export const CodeDeck = memo(() => {
   }, [store.projects]);
 
   const customApps = useMemo(() => [SYNTHETIC_BROWSER_APP, ...(store.customApps ?? [])], [store.customApps]);
+  const appRegistry = useMemo(() => buildAppRegistry(store.customApps ?? []), [store.customApps]);
 
   const resolveLabel = useCallback(
     (tab: CodeTab) => {
@@ -1669,7 +1891,7 @@ export const CodeDeck = memo(() => {
 
   const getColumnWidth = useCallback(
     (tabId: CodeTabId) => {
-      if (expandedTabId === tabId) {
+      if (expandedTabIds.has(tabId)) {
         return Math.min(EXPANDED_COLUMN_WIDTH, Math.round(viewportWidth * 0.92));
       }
       if (viewportWidth <= SNAP_SCROLL_WIDTH) {
@@ -1680,7 +1902,7 @@ export const CodeDeck = memo(() => {
       }
       return COLUMN_WIDTH;
     },
-    [expandedTabId, viewportWidth]
+    [expandedTabIds, viewportWidth]
   );
 
   const handleSelect = useCallback((id: CodeTabId) => {
@@ -1688,11 +1910,27 @@ export const CodeDeck = memo(() => {
   }, []);
 
   const handleToggleExpand = useCallback((id: CodeTabId) => {
-    setExpandedTabId((current) => (current === id ? null : id));
+    setExpandedTabIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
   }, []);
 
   const handleClose = useCallback((id: CodeTabId) => {
     setActiveApps((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    setLastSidecarAppByTab((current) => {
+      if (!(id in current)) {
+        return current;
+      }
       const next = { ...current };
       delete next[id];
       return next;
@@ -1702,12 +1940,27 @@ export const CodeDeck = memo(() => {
       delete next[id];
       return next;
     });
-    setExpandedTabId((current) => (current === id ? null : current));
+    setExpandedTabIds((current) => {
+      if (!current.has(id)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
     codeApi.removeTab(id);
   }, []);
 
   const handleActiveAppChange = useCallback((tabId: CodeTabId, app: AppId) => {
-    setActiveApps((prev) => ({ ...prev, [tabId]: app }));
+    setActiveApps((prev) => {
+      const current = prev[tabId] ?? 'chat';
+      // Clicking the already-active app closes the sidecar.
+      const next = current === app ? 'chat' : app;
+      return { ...prev, [tabId]: next };
+    });
+    if (app !== 'chat') {
+      setLastSidecarAppByTab((prev) => (prev[tabId] === app ? prev : { ...prev, [tabId]: app }));
+    }
   }, []);
 
   const handlePreviewUrlChange = useCallback((tabId: CodeTabId, url: string) => {
@@ -1747,7 +2000,15 @@ export const CodeDeck = memo(() => {
       }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'e') {
         event.preventDefault();
-        setExpandedTabId((current) => (current === activeTabId ? null : activeTabId));
+        setExpandedTabIds((current) => {
+          const next = new Set(current);
+          if (next.has(activeTabId)) {
+            next.delete(activeTabId);
+          } else {
+            next.add(activeTabId);
+          }
+          return next;
+        });
       }
     };
     window.addEventListener('keydown', handler);
@@ -1840,65 +2101,114 @@ export const CodeDeck = memo(() => {
                   const isLauncher = tab.customAppId === APP_LAUNCHER_ID;
                   const appEntry =
                     tab.customAppId && !isLauncher ? customApps.find((a) => a.id === tab.customAppId) : undefined;
+                  const activeAppId = activeApps[tab.id] ?? 'chat';
+                  // The currently-displayed sidecar app (if any).
+                  const sidecarApp =
+                    !isLauncher && !appEntry && activeAppId !== 'chat'
+                      ? appRegistry.find((a) => a.id === activeAppId)
+                      : undefined;
+                  // The sidecar app to keep MOUNTED (may be hidden). Preserves
+                  // state across minimize/restore — hidden when activeApp is
+                  // 'chat' but the tab has opened a sidecar before.
+                  const mountedSidecarApp =
+                    sidecarApp ??
+                    (!isLauncher && !appEntry && lastSidecarAppByTab[tab.id]
+                      ? appRegistry.find((a) => a.id === lastSidecarAppByTab[tab.id])
+                      : undefined);
+                  const sidecarHidden = !sidecarApp;
+                  const tabStatus = statuses[tab.id];
+                  const tabSandboxUrls =
+                    tabStatus && (tabStatus.type === 'running' || tabStatus.type === 'connecting')
+                      ? tabStatus.data
+                      : undefined;
+                  const tabTerminalCwd =
+                    tab.workspaceDir ??
+                    (tab.projectId ? projectMap.get(tab.projectId)?.workspaceDir : undefined);
                   return (
-                    <div key={tab.id} style={{ width: getColumnWidth(tab.id) }} className={styles.deckColumnWrap}>
-                      {isLauncher ? (
-                        <AppLauncherColumn
-                          tab={tab}
-                          customApps={customApps}
-                          onClose={handleClose}
-                          isExpanded={expandedTabId === tab.id}
-                          onToggleExpand={handleToggleExpand}
-                          isGlass={!!deckBackground}
-                        />
-                      ) : appEntry?.id === BROWSER_APP_ID ? (
-                        <BrowserColumn
-                          tab={tab}
-                          onClose={handleClose}
-                          isExpanded={expandedTabId === tab.id}
-                          onToggleExpand={handleToggleExpand}
-                          isGlass={!!deckBackground}
-                        />
-                      ) : appEntry ? (
-                        <AppColumn
-                          tab={tab}
-                          app={appEntry}
-                          onClose={handleClose}
-                          isExpanded={expandedTabId === tab.id}
-                          onToggleExpand={handleToggleExpand}
-                          isGlass={!!deckBackground}
-                        />
-                      ) : (
-                        <DeckColumn
-                          tab={tab}
-                          label={resolveLabel(tab)}
-                          ticketTitle={resolveTicketTitle(tab)}
-                          ticketColumnBadge={renderTicketColumnBadge(tab)}
-                          ticketMetaBadge={renderTicketMetaBadge(tab)}
-                          ticketActions={renderTicketBannerActions(tab)}
-                          actions={renderSessionActions(tab)}
-                          onClose={handleClose}
-                          isExpanded={expandedTabId === tab.id}
-                          onToggleExpand={handleToggleExpand}
-                          headerActionsSlot={<div id={`code-deck-header-actions-${tab.id}`} />}
-                          isGlass={!!deckBackground}
-                        >
-                          <CodeTabContent
+                    <Fragment key={tab.id}>
+                      <div style={{ width: getColumnWidth(tab.id) }} className={styles.deckColumnWrap}>
+                        {isLauncher ? (
+                          <AppLauncherColumn
                             tab={tab}
-                            isVisible
-                            activeApp={activeApps[tab.id] ?? 'chat'}
-                            onActiveAppChange={(app) => handleActiveAppChange(tab.id, app)}
-                            uiMinimal
-                            headerActionsTargetId={`code-deck-header-actions-${tab.id}`}
-                            headerActionsCompact
-                            previewUrl={previewUrls[tab.id]}
-                            onPreviewUrlChange={(url) => handlePreviewUrlChange(tab.id, url)}
-                            dockTargetId={`code-deck-dock-target-${tab.id}`}
+                            customApps={customApps}
+                            onClose={handleClose}
+                            isExpanded={expandedTabIds.has(tab.id)}
+                            onToggleExpand={handleToggleExpand}
                             isGlass={!!deckBackground}
                           />
-                        </DeckColumn>
+                        ) : appEntry?.id === BROWSER_APP_ID ? (
+                          <BrowserColumn
+                            tab={tab}
+                            onClose={handleClose}
+                            isExpanded={expandedTabIds.has(tab.id)}
+                            onToggleExpand={handleToggleExpand}
+                            isGlass={!!deckBackground}
+                          />
+                        ) : appEntry ? (
+                          <AppColumn
+                            tab={tab}
+                            app={appEntry}
+                            onClose={handleClose}
+                            isExpanded={expandedTabIds.has(tab.id)}
+                            onToggleExpand={handleToggleExpand}
+                            isGlass={!!deckBackground}
+                          />
+                        ) : (
+                          <DeckColumn
+                            tab={tab}
+                            label={resolveLabel(tab)}
+                            ticketTitle={resolveTicketTitle(tab)}
+                            ticketColumnBadge={renderTicketColumnBadge(tab)}
+                            ticketMetaBadge={renderTicketMetaBadge(tab)}
+                            ticketActions={renderTicketBannerActions(tab)}
+                            actions={renderSessionActions(tab)}
+                            onClose={handleClose}
+                            isExpanded={expandedTabIds.has(tab.id)}
+                            onToggleExpand={handleToggleExpand}
+                            headerActionsSlot={<div id={`code-deck-header-actions-${tab.id}`} />}
+                            isGlass={!!deckBackground}
+                            hasSidecar={!!sidecarApp}
+                          >
+                            <CodeTabContent
+                              tab={tab}
+                              isVisible
+                              activeApp={activeAppId}
+                              onActiveAppChange={(app) => handleActiveAppChange(tab.id, app)}
+                              uiMinimal
+                              headerActionsTargetId={`code-deck-header-actions-${tab.id}`}
+                              headerActionsCompact
+                              previewUrl={previewUrls[tab.id]}
+                              onPreviewUrlChange={(url) => handlePreviewUrlChange(tab.id, url)}
+                              dockTargetId={`code-deck-dock-target-${tab.id}`}
+                              isGlass={!!deckBackground}
+                              sidecarMode
+                            />
+                          </DeckColumn>
+                        )}
+                      </div>
+                      {mountedSidecarApp && (
+                        <div
+                          style={{
+                            width: getColumnWidth(`sidecar:${tab.id}`),
+                            ...(sidecarHidden ? { display: 'none' } : {}),
+                          }}
+                          className={styles.deckColumnWrap}
+                        >
+                          <SidecarColumn
+                            originTab={tab}
+                            app={mountedSidecarApp}
+                            sandboxUrls={tabSandboxUrls}
+                            terminalCwd={tabTerminalCwd}
+                            previewUrl={previewUrls[tab.id]}
+                            onPreviewUrlChange={(url) => handlePreviewUrlChange(tab.id, url)}
+                            onClose={() => handleActiveAppChange(tab.id, 'chat')}
+                            isGlass={!!deckBackground}
+                            isExpanded={expandedTabIds.has(`sidecar:${tab.id}`)}
+                            onToggleExpand={() => handleToggleExpand(`sidecar:${tab.id}`)}
+                          />
+                        </div>
                       )}
-                    </div>
+                    </Fragment>
                   );
                 })}
               </div>
