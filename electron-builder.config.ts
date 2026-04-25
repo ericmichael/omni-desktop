@@ -22,7 +22,16 @@ export default {
   directories: {
     output: 'dist',
   },
-  files: ['package.json', 'out/**/*', 'node_modules/node-pty/**/*'],
+  files: [
+    'package.json',
+    'out/**/*',
+    'node_modules/node-pty/**/*',
+    'packages/projects-db/dist/**/*',
+    'packages/projects-db/package.json',
+    'packages/projects-mcp/dist/**/*',
+    'packages/projects-mcp/package.json',
+    'packages/projects-mcp/index.d.ts',
+  ],
   extraResources: [
     {
       from: 'assets/bin',

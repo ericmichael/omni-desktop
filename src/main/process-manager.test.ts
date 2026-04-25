@@ -62,6 +62,7 @@ function makePm(opts?: { storeData?: Partial<ProcessManagerStoreData> }) {
     sandboxBackend: 'none',
     sandboxProfiles: null,
     selectedMachineId: null,
+    projects: [],
     ...opts?.storeData,
   };
   const pm = new ProcessManager({
@@ -208,6 +209,7 @@ describe('ProcessManager', () => {
         sandboxBackend: 'docker',
         sandboxProfiles: null,
         selectedMachineId: null,
+        projects: [],
       };
       const pm = new ProcessManager({
         sendToWindow: (() => {}) as never,

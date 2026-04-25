@@ -2,13 +2,19 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 import { createConsoleManager } from '@/main/console-manager';
+import { buildStoreSnapshot, PROJECT_KEYS, rowToProject } from '@/main/db-store-bridge';
 import { createExtensionManager } from '@/main/extension-manager';
+import { syncMcpConfig } from '@/main/mcp-config-manager';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
 import { PlatformClient } from '@/main/platform-client';
-import { createPlatformClient,isEnterpriseBuild, mapSandboxProfiles, PLATFORM_URL } from '@/main/platform-mode';
+import { createPlatformClient, isEnterpriseBuild, mapSandboxProfiles, PLATFORM_URL } from '@/main/platform-mode';
 import { createProcessManager } from '@/main/process-manager';
+import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
 import { createProjectManager } from '@/main/project-manager';
+import { ProjectMcpServer } from '@/main/project-mcp-server';
 import { getOmniConfigDir } from '@/main/util';
+import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
+import { getDefaultPagesDir, migrateFromJson } from 'omni-projects-db';
 import { ServerIpcAdapter } from '@/server/ipc-adapter';
 import type { ServerStore } from '@/server/store';
 import type { WsHandler } from '@/server/ws-handler';
@@ -17,7 +23,7 @@ import {
   registerSkillsHandlers,
   registerUtilHandlers,
 } from '@/shared/ipc-handlers';
-import type { IpcRendererEvents } from '@/shared/types';
+import type { IpcRendererEvents, Project } from '@/shared/types';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -39,6 +45,39 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
   // Project manager — shared across all clients so machines/sandboxes survive reconnections
   const sendToAll: typeof wsHandler.sendToAll = wsHandler.sendToAll.bind(wsHandler);
 
+  // Open shared SQLite DB for project data (mirrors Electron mode in src/main/index.ts).
+  // Both this server and the MCP server read/write the same projects.db via WAL.
+  const { repo } = openProjectDb();
+  try {
+    const migrated = migrateFromJson(repo, getDb(), {
+      projects: store.get('projects', []) as import('@/shared/types').Project[],
+      tickets: store.get('tickets', []) as import('@/shared/types').Ticket[],
+      milestones: store.get('milestones', []) as import('@/shared/types').Milestone[],
+      pages: store.get('pages', []) as import('@/shared/types').Page[],
+      inboxItems: store.get('inboxItems', []) as import('@/shared/types').InboxItem[],
+      tasks: store.get('tasks', []) as import('@/shared/types').Task[],
+    });
+    if (migrated > 0) {
+      console.log(`[ProjectDb] Migrated ${migrated} projects from server-store to SQLite`);
+    }
+  } catch (err) {
+    console.error('[ProjectDb] Failed to migrate from server-store:', err);
+  }
+
+  const projectMcp = new ProjectMcpServer(getDb(), repo, getDefaultPagesDir());
+  projectMcp.start().catch((err) => {
+    console.error('[ProjectMcp] failed to start:', err);
+  });
+
+  try {
+    syncMcpConfig();
+  } catch (err) {
+    console.error('[mcp-config] failed to sync:', err);
+  }
+
+  /** Merged snapshot — SQLite project data + server-store settings. */
+  const getStoreSnapshot = () => buildStoreSnapshot(repo, store);
+
   // --- Global managers (survive WS reconnections) ---
 
   const [omniInstall, cleanupOmniInstall] = createOmniInstallManager({
@@ -55,6 +94,7 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
       sandboxBackend: store.get('sandboxBackend') ?? 'none',
       sandboxProfiles: store.get('sandboxProfiles') ?? null,
       selectedMachineId: store.get('selectedMachineId') ?? null,
+      projects: repo.listProjects().map(rowToProject),
     }),
   });
 
@@ -63,6 +103,7 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
     sendToWindow: sendToAll,
     store: store as any,
     processManager,
+    repo,
   });
 
   const [, cleanupExtensions] = createExtensionManager({
@@ -71,32 +112,104 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
     sendToWindow: sendToAll,
   });
 
+  // Background workspace sync — keeps project workspaces synced to Azure Files
+  // so cloud sessions can mount the share instantly without tar upload.
+  const OMNI_CONFIG_DIR = getOmniConfigDir();
+  const syncManager = new WorkspaceSyncManager({
+    fetchFn: globalThis.fetch,
+    manifestDir: OMNI_CONFIG_DIR,
+    onStatusChange: (projectId, status) => {
+      wsHandler.sendToAll('workspace-sync:status-changed', projectId, status);
+    },
+  });
+  processManager.workspaceSyncManager = syncManager;
+
   // Wire platform client for enterprise mode
   const updatePlatformClients = () => {
     const platform = store.get('platform');
     const client = createPlatformClient(platform, globalThis.fetch);
     processManager.platformClient = client;
+    syncManager.setPlatformClient(client);
   };
   updatePlatformClients();
   const unsubPlatform = store.onDidAnyChange(() => updatePlatformClients());
 
+  /**
+   * Auto-start workspace sync for all projects that have a local workspace dir.
+   * Called after sign-in and on startup when already authenticated.
+   */
+  const autoStartSync = () => {
+    if (process.env['OMNI_ENABLE_WORKSPACE_UPLOAD'] !== '1') {
+      console.log('[WorkspaceSync] OMNI_ENABLE_WORKSPACE_UPLOAD!=1 — skipping auto-start');
+      return;
+    }
+    const projects = (store.get('projects') ?? []) as Project[];
+    const backend = store.get('sandboxBackend') ?? 'none';
+    // Only sync when platform (cloud) mode is active
+    if (backend !== 'platform') return;
+
+    for (const project of projects) {
+      if (project.source?.kind === 'local' && project.source.workspaceDir) {
+        syncManager.startSync(project.id, project.source.workspaceDir).catch((e) => {
+          console.warn(`[WorkspaceSync] Auto-start failed for ${project.id}:`, (e as Error).message);
+        });
+      }
+    }
+  };
+
+  // Workspace sync IPC handlers
+  ipc.handle('workspace-sync:start', (_, projectId: string, workspaceDir: string) => {
+    return syncManager.startSync(projectId, workspaceDir);
+  });
+  ipc.handle('workspace-sync:stop', (_, projectId: string) => {
+    return syncManager.stopSync(projectId);
+  });
+  ipc.handle('workspace-sync:get-status', (_, projectId: string) => {
+    return syncManager.getStatus(projectId);
+  });
+  ipc.handle('workspace-sync:get-share-name', (_, projectId: string) => {
+    return syncManager.getShareName(projectId);
+  });
+
   // Global status getters
   ipc.handle('omni-install-process:get-status', () => omniInstall.getStatus());
 
-  // Store change notifications — broadcast to all clients
-  store.onDidAnyChange((data) => {
-    wsHandler.sendToAll('store:changed', data);
-  });
+  // Store change notifications — broadcast to all clients.
+  // SQLite-backed project changes are broadcast by ProjectManager/DbChangeWatcher,
+  // so we suppress the raw onDidAnyChange path here and rely on the explicit
+  // snapshot broadcasts in the set/set-key handlers below.
+  // (No handler — explicit broadcasts only.)
 
-  // Store handlers
-  ipc.handle('store:get-key', (_, key) => store.get(key));
-  ipc.handle('store:set-key', (_, key, value) => store.set(key, value));
-  ipc.handle('store:get', () => store.store);
+  // Store handlers — snapshot-aware: project keys read from SQLite, writes rejected.
+  ipc.handle('store:get-key', (_, key) => {
+    const k = key as keyof import('@/shared/types').StoreData;
+    if (PROJECT_KEYS.has(k)) return getStoreSnapshot()[k];
+    return store.get(k);
+  });
+  ipc.handle('store:set-key', (_, key, value) => {
+    const k = key as keyof import('@/shared/types').StoreData;
+    if (PROJECT_KEYS.has(k)) {
+      throw new Error(
+        `store:set-key for project key "${String(k)}" is not allowed when SQLite is active. Use ProjectManager APIs.`
+      );
+    }
+    store.set(k, value as never);
+    wsHandler.sendToAll('store:changed', getStoreSnapshot());
+  });
+  ipc.handle('store:get', () => getStoreSnapshot());
   ipc.handle('store:set', (_, data) => {
+    const conflicts = [...PROJECT_KEYS].filter((k) => k in data);
+    if (conflicts.length > 0) {
+      throw new Error(
+        `store:set with project keys [${conflicts.join(', ')}] is not allowed when SQLite is active.`
+      );
+    }
     store.store = data;
+    wsHandler.sendToAll('store:changed', getStoreSnapshot());
   });
   ipc.handle('store:reset', () => {
     store.clear();
+    wsHandler.sendToAll('store:changed', getStoreSnapshot());
   });
 
   // Main process status (simplified for server)
@@ -114,7 +227,6 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
   }
 
   // Shared IPC handlers (config:*, util:*, skills:*) — identical across Electron and server.
-  const OMNI_CONFIG_DIR = getOmniConfigDir();
   registerConfigHandlers(ipc, OMNI_CONFIG_DIR);
   registerUtilHandlers(ipc, { fetchFn: globalThis.fetch, launcherVersion });
   registerSkillsHandlers(ipc, OMNI_CONFIG_DIR, store);
@@ -149,6 +261,8 @@ store.set('platform', { ...current, accessToken: newToken });
         store.set('selectedMachineId', selected.resource_id);
       }
       console.log(`[Platform] Policy applied: ${profiles.length} sandbox profile(s)`);
+      // Start background workspace sync now that platform mode is active
+      autoStartSync();
     } catch (e) {
       console.warn('[Platform] Failed to fetch policy:', (e as Error).message);
     }
@@ -243,11 +357,14 @@ return [];
   const cleanupGlobalManagers = async () => {
     unsubPlatform();
     const results = await Promise.allSettled([
+      syncManager.dispose(),
       cleanupProject(),
       cleanupOmniInstall(),
       cleanupProcessManager(),
       cleanupExtensions(),
+      projectMcp.stop(),
     ]);
+    closeProjectDb();
     const errors = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected').map((r) => r.reason);
     if (errors.length > 0) {
       console.error('Error cleaning up global managers:', errors);

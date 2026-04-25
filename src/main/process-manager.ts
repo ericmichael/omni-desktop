@@ -1,12 +1,15 @@
+import { execFileSync } from 'node:child_process';
 import { ipcMain } from 'electron';
 
 import { AgentProcess, type AgentProcessMode, type AgentProcessStartArg, type FetchFn } from '@/main/agent-process';
 import type { PlatformClient } from '@/main/platform-client';
+import type { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
 import type { IIpcListener } from '@/shared/ipc-listener';
 import type {
   AgentProcessStartOptions,
   AgentProcessStatus,
   IpcRendererEvents,
+  Project,
   SandboxBackend,
   SandboxProfile,
   WithTimestamp,
@@ -16,6 +19,7 @@ export type ProcessManagerStoreData = {
   sandboxBackend: SandboxBackend;
   sandboxProfiles: SandboxProfile[] | null;
   selectedMachineId: number | null;
+  projects: Project[];
 };
 
 /**
@@ -35,6 +39,9 @@ export class ProcessManager {
   /** Set by the platform integration when in enterprise mode. */
   platformClient: PlatformClient | null = null;
 
+  /** Set by platform integration for pre-synced workspace shares. */
+  workspaceSyncManager: WorkspaceSyncManager | null = null;
+
   /** Optional fallback for sandbox status — lets ProjectManager provide supervisor sandbox status. */
   statusFallback?: (processId: string) => WithTimestamp<AgentProcessStatus> | null;
 
@@ -49,6 +56,7 @@ export class ProcessManager {
       sandboxBackend: 'none' as const,
       sandboxProfiles: null,
       selectedMachineId: null,
+      projects: [],
     }));
   }
 
@@ -71,6 +79,78 @@ export class ProcessManager {
 return null;
 }
     return sandboxProfiles.find((p) => p.resource_id === selectedMachineId) ?? null;
+  }
+
+  /**
+   * For platform mode, resolve the best workspace delivery method:
+   * 1. git-remote source → container clones the repo (fastest, no upload)
+   * 2. Local project with git remote → container clones (avoids multi-GB upload)
+   * 3. WorkspaceSyncManager has a pre-synced share → mount it (instant)
+   * 4. Neither → falls through to one-shot tar upload in AgentProcess
+   */
+  private resolvePlatformWorkspace(workspaceDir: string): Partial<Pick<AgentProcessStartArg, 'gitRepo' | 'preSyncedShareName'>> {
+    if (this.resolveMode() !== 'platform') return {};
+
+    const { projects } = this.getStoreData();
+
+    // Find the project that owns this workspace directory
+    const project = projects.find((p) => {
+      if (p.source?.kind === 'local') return p.source.workspaceDir === workspaceDir;
+      return false;
+    });
+
+    // Explicit git-remote project
+    const gitProject = projects.find((p) => p.source?.kind === 'git-remote');
+    if (gitProject?.source?.kind === 'git-remote') {
+      return {
+        gitRepo: {
+          url: gitProject.source.repoUrl,
+          branch: gitProject.source.defaultBranch,
+        },
+      };
+    }
+
+    // Local project with git — resolve remote URL so container can clone
+    if (workspaceDir) {
+      const gitInfo = this.resolveGitRemote(workspaceDir);
+      if (gitInfo) return { gitRepo: gitInfo };
+    }
+
+    // Check if WorkspaceSyncManager has a pre-synced share for this project
+    if (project && this.workspaceSyncManager) {
+      const shareName = this.workspaceSyncManager.getShareName(project.id);
+      if (shareName && this.workspaceSyncManager.isSynced(project.id)) {
+        return { preSyncedShareName: shareName };
+      }
+    }
+
+    return {};
+  }
+
+  /** Try to resolve the git remote URL and current branch from a workspace directory. */
+  private resolveGitRemote(workspaceDir: string): { url: string; branch?: string } | null {
+    try {
+      const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
+        cwd: workspaceDir,
+        timeout: 3000,
+        encoding: 'utf-8',
+      }).trim();
+      if (!url) return null;
+
+      let branch: string | undefined;
+      try {
+        branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+          cwd: workspaceDir,
+          timeout: 3000,
+          encoding: 'utf-8',
+        }).trim();
+        if (branch === 'HEAD') branch = undefined; // detached HEAD
+      } catch { /* ignore */ }
+
+      return { url, branch };
+    } catch {
+      return null;
+    }
   }
 
   private getOrCreate(processId: string, mode: AgentProcessMode): AgentProcess {
@@ -108,6 +188,7 @@ return existing;
     const startArg: AgentProcessStartArg = {
       workspaceDir: opts.workspaceDir,
       sandboxVariant: (profile?.variant as 'standard' | 'work') ?? 'work',
+      ...this.resolvePlatformWorkspace(opts.workspaceDir),
     };
     proc.start(startArg);
   };
@@ -130,6 +211,7 @@ return;
     const fallbackArg: AgentProcessStartArg = {
       workspaceDir,
       sandboxVariant: (profile?.variant as 'standard' | 'work') ?? 'work',
+      ...this.resolvePlatformWorkspace(workspaceDir),
     };
     await proc.rebuild(fallbackArg);
   };

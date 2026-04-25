@@ -44,9 +44,6 @@ import path from 'path';
 
 import { buildAutopilotVariables, buildInteractiveVariables } from '@/lib/client-tools';
 import { buildContinuationPrompt } from '@/lib/continuation-prompt';
-import type { AppControlManager } from '@/main/app-control-manager';
-import type { AppClickButton, AppConsoleLevel } from '@/shared/app-control-types';
-import { makeAppHandleId } from '@/shared/app-control-types';
 import type {
   IMachineFactory,
   ISandbox,
@@ -60,12 +57,15 @@ import { decideRunEndAction, type FailureClass } from '@/lib/run-end';
 import { hasTemplateExpressions, renderTemplate, type TemplateVariables } from '@/lib/template';
 import { decideWorktreeAction } from '@/lib/worktree';
 import type { AgentProcessMode } from '@/main/agent-process';
+import type { AppControlManager } from '@/main/app-control-manager';
 import { createPlatformClient } from '@/main/platform-mode';
 import type { ProcessManager } from '@/main/process-manager';
 import { buildSupervisorPrompt, type SupervisorContext } from '@/main/supervisor-prompt';
 import { type ClientFunctionResponder, TicketMachine } from '@/main/ticket-machine';
 import { createWorktree, generateWorktreeName, removeWorktree } from '@/main/worktree-ops';
-import { getLocalWorkspaceDir, requireLocalWorkspaceDir } from '@/shared/project-source';
+import type { AppClickButton, AppConsoleLevel } from '@/shared/app-control-types';
+import { makeAppHandleId } from '@/shared/app-control-types';
+import { requireLocalWorkspaceDir } from '@/shared/project-source';
 import { isActivePhase, type TicketPhase } from '@/shared/ticket-phase';
 import type {
   AgentProcessStatus,
@@ -85,7 +85,6 @@ import type {
   TaskId,
   Ticket,
   TicketId,
-  TicketPriority,
   TokenUsage,
   WithTimestamp,
 } from '@/shared/types';
@@ -1803,63 +1802,7 @@ export class SupervisorOrchestrator {
       return;
     }
 
-    const pipeline = this.deps.host.getPipeline(ticket.projectId);
-
     switch (toolName) {
-      case 'get_ticket': {
-        const lookupId = (toolArgs.ticket_id as string) || ticketId;
-        const target = this.deps.host.getTicketById(lookupId);
-        if (!target) {
-          respond(false, { error: { message: `Ticket not found: ${lookupId}` } });
-          return;
-        }
-        const targetPipeline = this.deps.host.getPipeline(target.projectId);
-        const column = targetPipeline.columns.find((c) => c.id === target.columnId);
-        const comments = (target.comments ?? []).map((c) => ({
-          id: c.id,
-          author: c.author,
-          content: c.content,
-          created_at: new Date(c.createdAt).toISOString(),
-        }));
-        const runs = (target.runs ?? []).map((r) => ({
-          id: r.id,
-          started_at: new Date(r.startedAt).toISOString(),
-          ended_at: new Date(r.endedAt).toISOString(),
-          end_reason: r.endReason,
-          token_usage: r.tokenUsage ?? null,
-        }));
-        respond(true, {
-          id: target.id,
-          title: target.title,
-          description: target.description || '',
-          priority: target.priority,
-          column: column?.label ?? target.columnId,
-          pipeline: targetPipeline.columns.map((c) => c.label),
-          blocked_by: target.blockedBy ?? [],
-          branch: target.branch || null,
-          use_worktree: target.useWorktree ?? false,
-          worktree_path: target.worktreePath || null,
-          phase: target.phase ?? null,
-          run_count: runs.length,
-          created_at: new Date(target.createdAt).toISOString(),
-          updated_at: new Date(target.updatedAt).toISOString(),
-          comments,
-          runs,
-        });
-        break;
-      }
-      case 'move_ticket': {
-        const columnLabel = (toolArgs.column as string) ?? '';
-        const col = pipeline.columns.find((c) => c.label.toLowerCase() === columnLabel.toLowerCase());
-        if (!col) {
-          const valid = pipeline.columns.map((c) => c.label).join(', ');
-          respond(false, { error: { message: `Unknown column: "${columnLabel}". Valid columns: ${valid}` } });
-          return;
-        }
-        this.deps.host.moveTicketToColumn(ticketId, col.id);
-        respond(true, { ok: true, column: col.label });
-        break;
-      }
       case 'escalate': {
         const message = (toolArgs.message as string) ?? '';
         if (!message) {
@@ -1896,159 +1839,6 @@ export class SupervisorOrchestrator {
         respond(true, { ok: true, message: 'Notification sent' });
         break;
       }
-      case 'add_ticket_comment': {
-        const commentTicketId = (toolArgs.ticket_id as string) || ticketId;
-        const content = (toolArgs.content as string) ?? '';
-        if (!content) {
-          respond(false, { error: { message: 'Missing content' } });
-          return;
-        }
-        const commentTarget = this.deps.host.getTicketById(commentTicketId);
-        if (!commentTarget) {
-          respond(false, { error: { message: `Ticket not found: ${commentTicketId}` } });
-          return;
-        }
-        const comment = { id: nanoid(), author: 'agent' as const, content, createdAt: Date.now() };
-        const existingComments = commentTarget.comments ?? [];
-        this.deps.host.updateTicket(commentTicketId, { comments: [...existingComments, comment] });
-        respond(true, { ok: true, comment_id: comment.id });
-        break;
-      }
-      // --- Read-only context tools (available to all sessions including autopilot) ---
-      case 'get_ticket_comments': {
-        const commentsTicketId = (toolArgs.ticket_id as string) ?? '';
-        if (!commentsTicketId) {
-          respond(false, { error: { message: 'Missing ticket_id' } });
-          return;
-        }
-        const commentsTarget = this.deps.host.getTicketById(commentsTicketId);
-        if (!commentsTarget) {
-          respond(false, { error: { message: `Ticket not found: ${commentsTicketId}` } });
-          return;
-        }
-        respond(true, {
-          comments: (commentsTarget.comments ?? []).map((c) => ({
-            id: c.id,
-            author: c.author,
-            content: c.content,
-            created_at: new Date(c.createdAt).toISOString(),
-          })),
-        });
-        break;
-      }
-      // --- Project-scoped tools (available in interactive sessions) ---
-      case 'list_projects': {
-        const projects = this.deps.store.getProjects().map((p) => {
-          const pl = this.deps.host.getPipeline(p.id);
-          return {
-            id: p.id,
-            label: p.label,
-            workspaceDir: getLocalWorkspaceDir(p.source),
-            columns: pl.columns.map((c) => c.label),
-          };
-        });
-        respond(true, { projects });
-        break;
-      }
-      case 'list_tickets': {
-        const projectId = (toolArgs.project_id as string) ?? '';
-        if (!projectId) {
-          respond(false, { error: { message: 'Missing project_id' } });
-          return;
-        }
-        const pl = this.deps.host.getPipeline(projectId);
-        let tickets = this.deps.host.getTicketsByProject(projectId);
-        const columnFilter = toolArgs.column as string | undefined;
-        if (columnFilter) {
-          const col = pl.columns.find((c) => c.label.toLowerCase() === columnFilter.toLowerCase());
-          if (col) {
-            tickets = tickets.filter((t) => t.columnId === col.id);
-          }
-        }
-        const priorityFilter = toolArgs.priority as string | undefined;
-        if (priorityFilter) {
-          tickets = tickets.filter((t) => t.priority === priorityFilter);
-        }
-        const result = tickets.map((t) => ({
-          id: t.id,
-          title: t.title,
-          description: t.description || '',
-          priority: t.priority,
-          column: pl.columns.find((c) => c.id === t.columnId)?.label ?? t.columnId,
-          phase: t.phase,
-          blocked_by: t.blockedBy ?? [],
-          created_at: new Date(t.createdAt).toISOString(),
-          updated_at: new Date(t.updatedAt).toISOString(),
-        }));
-        respond(true, { tickets: result });
-        break;
-      }
-      case 'create_ticket': {
-        const projectId = (toolArgs.project_id as string) ?? '';
-        const title = (toolArgs.title as string) ?? '';
-        if (!projectId || !title) {
-          respond(false, { error: { message: 'Missing project_id or title' } });
-          return;
-        }
-        const proj = this.deps.store.getProjects().find((p) => p.id === projectId);
-        if (!proj) {
-          respond(false, { error: { message: `Project not found: ${projectId}` } });
-          return;
-        }
-        const newTicket = this.deps.host.addTicket({
-          projectId,
-          milestoneId: (toolArgs.milestone_id as string) || undefined,
-          title,
-          description: (toolArgs.description as string) ?? '',
-          priority: (toolArgs.priority as TicketPriority) ?? 'medium',
-          blockedBy: [],
-        });
-        respond(true, {
-          id: newTicket.id,
-          title: newTicket.title,
-          column: this.deps.host.getPipeline(projectId).columns[0]?.label,
-        });
-        break;
-      }
-      case 'update_ticket': {
-        const targetId = (toolArgs.ticket_id as string) ?? '';
-        if (!targetId) {
-          respond(false, { error: { message: 'Missing ticket_id' } });
-          return;
-        }
-        const target = this.deps.host.getTicketById(targetId);
-        if (!target) {
-          respond(false, { error: { message: `Ticket not found: ${targetId}` } });
-          return;
-        }
-        const patch: Record<string, unknown> = {};
-        if (toolArgs.title) {
-          patch.title = toolArgs.title;
-        }
-        if (toolArgs.description !== undefined) {
-          patch.description = toolArgs.description;
-        }
-        if (toolArgs.priority) {
-          patch.priority = toolArgs.priority;
-        }
-        if (toolArgs.branch !== undefined) {
-          patch.branch = toolArgs.branch;
-        }
-        // Dependency management
-        if (toolArgs.add_blocked_by || toolArgs.remove_blocked_by) {
-          const current = new Set(target.blockedBy ?? []);
-          for (const id of (toolArgs.add_blocked_by as string[]) ?? []) {
-            current.add(id);
-          }
-          for (const id of (toolArgs.remove_blocked_by as string[]) ?? []) {
-            current.delete(id);
-          }
-          patch.blockedBy = [...current];
-        }
-        this.deps.host.updateTicket(targetId, patch);
-        respond(true, { ok: true });
-        break;
-      }
       case 'start_ticket': {
         const targetId = (toolArgs.ticket_id as string) ?? '';
         if (!targetId) {
@@ -2071,166 +1861,6 @@ export class SupervisorOrchestrator {
           () => respond(true, { ok: true }),
           (err) => respond(false, { error: { message: String(err) } })
         );
-        break;
-      }
-      // --- Read-only context tools (available to all sessions including autopilot) ---
-      case 'list_milestones': {
-        const projectId = (toolArgs.project_id as string) ?? '';
-        if (!projectId) {
-          respond(false, { error: { message: 'Missing project_id' } });
-          return;
-        }
-        const items = this.deps.host.getMilestonesByProject(projectId);
-        respond(true, {
-          milestones: items.map((i) => ({
-            id: i.id,
-            title: i.title,
-            description: i.description || '',
-            branch: i.branch || null,
-            status: i.status,
-            created_at: new Date(i.createdAt).toISOString(),
-            updated_at: new Date(i.updatedAt).toISOString(),
-          })),
-        });
-        break;
-      }
-      case 'list_pages': {
-        const projectId = (toolArgs.project_id as string) ?? '';
-        if (!projectId) {
-          respond(false, { error: { message: 'Missing project_id' } });
-          return;
-        }
-        if (!this.deps.store.getProjects().find((p) => p.id === projectId)) {
-          respond(false, { error: { message: `Project not found: ${projectId}` } });
-          return;
-        }
-        const pages = this.deps.host.getPagesByProject(projectId);
-        respond(true, {
-          pages: pages.map((p) => ({
-            id: p.id,
-            title: p.title,
-            icon: p.icon ?? null,
-            parent_id: p.parentId,
-            sort_order: p.sortOrder,
-            is_root: p.isRoot ?? false,
-            created_at: new Date(p.createdAt).toISOString(),
-            updated_at: new Date(p.updatedAt).toISOString(),
-          })),
-        });
-        break;
-      }
-      case 'read_page': {
-        const pageId = (toolArgs.page_id as string) ?? '';
-        if (!pageId) {
-          respond(false, { error: { message: 'Missing page_id' } });
-          return;
-        }
-        const page = this.deps.host.getPageById(pageId);
-        if (!page) {
-          respond(false, { error: { message: `Page not found: ${pageId}` } });
-          return;
-        }
-        void this.deps.host.readPageContent(pageId).then(
-          (content) =>
-            respond(true, {
-              id: page.id,
-              title: page.title,
-              icon: page.icon ?? null,
-              parent_id: page.parentId,
-              is_root: page.isRoot ?? false,
-              content,
-            }),
-          () => respond(false, { error: { message: `Failed to read page content: ${pageId}` } })
-        );
-        break;
-      }
-      case 'read_milestone_brief': {
-        const milestoneId = (toolArgs.milestone_id as string) ?? '';
-        if (!milestoneId) {
-          respond(false, { error: { message: 'Missing milestone_id' } });
-          return;
-        }
-        const ms = this.deps.host.getMilestoneById(milestoneId);
-        if (!ms) {
-          respond(false, { error: { message: `Milestone not found: ${milestoneId}` } });
-          return;
-        }
-        respond(true, { brief: ms.brief ?? '' });
-        break;
-      }
-      case 'search_tickets': {
-        const query = (toolArgs.query as string) ?? '';
-        if (!query) {
-          respond(false, { error: { message: 'Missing query' } });
-          return;
-        }
-        const q = query.toLowerCase();
-        const projectFilter = toolArgs.project_id as string | undefined;
-        const allTickets = projectFilter
-          ? this.deps.host.getTicketsByProject(projectFilter)
-          : this.deps.store.getProjects().flatMap((p) => this.deps.host.getTicketsByProject(p.id));
-        const matches = allTickets.filter(
-          (t) => t.title.toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q)
-        );
-        const searchResult = matches.map((t) => {
-          const pl = this.deps.host.getPipeline(t.projectId);
-          return {
-            id: t.id,
-            project_id: t.projectId,
-            title: t.title,
-            description: t.description || '',
-            priority: t.priority,
-            column: pl.columns.find((c) => c.id === t.columnId)?.label ?? t.columnId,
-            phase: t.phase,
-            created_at: new Date(t.createdAt).toISOString(),
-            updated_at: new Date(t.updatedAt).toISOString(),
-          };
-        });
-        respond(true, { tickets: searchResult });
-        break;
-      }
-      case 'get_ticket_history': {
-        const historyTicketId = (toolArgs.ticket_id as string) ?? '';
-        if (!historyTicketId) {
-          respond(false, { error: { message: 'Missing ticket_id' } });
-          return;
-        }
-        const historyTarget = this.deps.host.getTicketById(historyTicketId);
-        if (!historyTarget) {
-          respond(false, { error: { message: `Ticket not found: ${historyTicketId}` } });
-          return;
-        }
-        const historyRuns = (historyTarget.runs ?? []).map((r) => ({
-          id: r.id,
-          started_at: new Date(r.startedAt).toISOString(),
-          ended_at: new Date(r.endedAt).toISOString(),
-          end_reason: r.endReason,
-          token_usage: r.tokenUsage ?? null,
-        }));
-        respond(true, {
-          ticket_id: historyTarget.id,
-          phase: historyTarget.phase ?? null,
-          run_count: historyRuns.length,
-          total_token_usage: historyTarget.tokenUsage ?? null,
-          runs: historyRuns,
-        });
-        break;
-      }
-      case 'get_pipeline': {
-        const pipelineProjectId = (toolArgs.project_id as string) ?? '';
-        if (!pipelineProjectId) {
-          respond(false, { error: { message: 'Missing project_id' } });
-          return;
-        }
-        const pl = this.deps.host.getPipeline(pipelineProjectId);
-        respond(true, {
-          columns: pl.columns.map((c) => ({
-            id: c.id,
-            label: c.label,
-            description: c.description || null,
-            gate: c.gate ?? false,
-          })),
-        });
         break;
       }
       default:

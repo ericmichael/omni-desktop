@@ -1,213 +1,155 @@
 /**
- * Project MCP Server
+ * In-process HTTP MCP server.
  *
- * Exposes project-management tools over the MCP Streamable HTTP transport.
- * The launcher starts one MCP server per sandbox so the agent inside Docker can
- * interact with tickets, pipelines, and UI via standard MCP tool calls.
+ * Runs alongside the launcher's main process and exposes project-management
+ * tools to any agent (or Claude Code session) over Streamable HTTP. Uses the
+ * launcher's existing `ProjectsRepo` so reads/writes go through a single
+ * SQLite handle — no cross-process write coordination needed.
  *
- * From inside the container the agent connects to:
- *   http://host.docker.internal:{port}/mcp
+ * Reachability:
+ *   - bwrap / none / server modes: `http://127.0.0.1:<port>/mcp`
+ *   - Docker mode:                 `http://host.docker.internal:<port>/mcp`
+ *
+ * Auth: a Bearer token persisted in `~/.config/omni_code/.mcp-token` so the
+ * URL stays stable across launcher restarts (Claude Code's MCP config can
+ * use a hard-coded URL + token without re-registration).
  */
+import { randomBytes, randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
+import { join } from 'node:path';
+import type { DatabaseSync } from 'node:sqlite';
 
-import { randomUUID } from 'node:crypto';
-import { createServer, type Server as HttpServer } from 'node:http';
-
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { z } from 'zod';
+import type { ProjectsRepo } from 'omni-projects-db';
+import { createServer as createMcpServer } from 'omni-projects-mcp';
 
-import type { Pipeline,TicketId } from '@/shared/types';
+import { getOmniConfigDir } from '@/main/util';
 
-// ---------------------------------------------------------------------------
-//  Context interface — the ProjectManager passes a narrow delegate so this
-//  module stays decoupled from the full manager.
-// ---------------------------------------------------------------------------
+/** Hard-pinned port. If something else is using it, the server fails to start. */
+export const MCP_PORT = 39071;
 
-export type ProjectMcpDelegate = {
-  /** Return ticket data (or null) for the bound ticket. */
-  getTicket: (ticketId: TicketId) => {
-    id: string;
-    title: string;
-    description: string;
-    priority: string;
-    columnId: string;
-    projectId: string;
-  } | null;
+const TOKEN_FILE = '.mcp-token';
 
-  /** Return the pipeline for a project. */
-  getPipeline: (projectId: string) => Pipeline;
+/**
+ * Read the launcher's MCP bearer token, creating it on first call. Persisted
+ * under `~/.config/omni_code/.mcp-token` so it survives launcher restarts and
+ * Claude Code can rely on it being stable.
+ */
+export function getMcpToken(): string {
+  const path = join(getOmniConfigDir(), TOKEN_FILE);
+  if (existsSync(path)) {
+    const token = readFileSync(path, 'utf-8').trim();
+    if (token.length >= 32) {
+return token;
+}
+  }
+  const token = randomBytes(32).toString('hex');
+  writeFileSync(path, `${token  }\n`, { mode: 0o600 });
+  return token;
+}
 
-  /** Move a ticket to a column (by column id). */
-  moveTicketToColumn: (ticketId: TicketId, columnId: string) => void;
-
-  /** Escalate — pause the run and notify the human. Returns a promise that resolves once the run is stopped. */
-  escalate: (ticketId: TicketId, message: string) => Promise<void>;
-};
-
-// ---------------------------------------------------------------------------
-//  ProjectMcpServer — one per ticket/sandbox
-// ---------------------------------------------------------------------------
+/**
+ * Build the MCP URL for the agent's perspective. Docker containers reach the
+ * host via `host.docker.internal`; everywhere else (bwrap, none, server mode)
+ * sees `127.0.0.1`.
+ */
+export function getMcpUrl(perspective: 'host' | 'docker'): string {
+  const host = perspective === 'docker' ? 'host.docker.internal' : '127.0.0.1';
+  return `http://${host}:${MCP_PORT}/mcp`;
+}
 
 export class ProjectMcpServer {
-  private mcp: McpServer;
   private httpServer: HttpServer | null = null;
   private transport: StreamableHTTPServerTransport | null = null;
-  private _port: number | null = null;
+  private _token: string;
 
   constructor(
-    private ticketId: TicketId,
-    private delegate: ProjectMcpDelegate
+    private db: DatabaseSync,
+    private repo: ProjectsRepo,
+    private pagesDir: string
   ) {
-    this.mcp = new McpServer(
-      { name: 'omni-launcher', version: '1.0.0' },
-      { capabilities: { tools: {} } }
-    );
-
-    this.registerTools();
+    this._token = getMcpToken();
   }
 
-  /** The port the HTTP server is listening on (null before start). */
-  get port(): number | null {
-    return this._port;
+  get port(): number {
+    return MCP_PORT;
   }
 
-  /**
-   * Build the MCP endpoint URL as seen from inside a Docker container.
-   * Uses host.docker.internal to reach the host-side MCP server through
-   * the Docker gateway.
-   */
-  containerUrl(): string {
-    return `http://host.docker.internal:${this._port}/mcp`;
+  get token(): string {
+    return this._token;
   }
 
-  // -----------------------------------------------------------------------
-  //  Tool registration
-  // -----------------------------------------------------------------------
+  async start(): Promise<void> {
+    if (this.httpServer) {
+return;
+}
 
-  private registerTools(): void {
-    // --- get_ticket ---
-    this.mcp.tool(
-      'get_ticket',
-      'Get the current ticket state including title, description, priority, current column, and pipeline columns.',
-      {},
-      async () => {
-        const ticket = this.delegate.getTicket(this.ticketId);
-        if (!ticket) {
-          return { content: [{ type: 'text', text: JSON.stringify({ error: 'Ticket not found' }) }], isError: true };
-        }
-        const pipeline = this.delegate.getPipeline(ticket.projectId);
-        const column = pipeline.columns.find((c) => c.id === ticket.columnId);
-        const result = {
-          id: ticket.id,
-          title: ticket.title,
-          description: ticket.description || '',
-          priority: ticket.priority,
-          column: column?.label ?? ticket.columnId,
-          pipeline: pipeline.columns.map((c) => c.label),
-        };
-        return { content: [{ type: 'text', text: JSON.stringify(result) }] };
-      }
-    );
-
-    // --- move_ticket ---
-    this.mcp.tool(
-      'move_ticket',
-      'Move this ticket to a different pipeline column. Use exact column labels from the pipeline.',
-      { column: z.string().describe('The target column label (e.g. "In Progress", "Done")') },
-      async ({ column: columnLabel }) => {
-        const ticket = this.delegate.getTicket(this.ticketId);
-        if (!ticket) {
-          return { content: [{ type: 'text', text: JSON.stringify({ error: 'Ticket not found' }) }], isError: true };
-        }
-        const pipeline = this.delegate.getPipeline(ticket.projectId);
-        const col = pipeline.columns.find((c) => c.label.toLowerCase() === columnLabel.toLowerCase());
-        if (!col) {
-          const valid = pipeline.columns.map((c) => c.label).join(', ');
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ error: `Unknown column: "${columnLabel}". Valid columns: ${valid}` }) }],
-            isError: true,
-          };
-        }
-        this.delegate.moveTicketToColumn(this.ticketId, col.id);
-        return { content: [{ type: 'text', text: JSON.stringify({ ok: true, column: col.label }) }] };
-      }
-    );
-
-    // --- escalate ---
-    this.mcp.tool(
-      'escalate',
-      'Pause the current run and notify the human operator. Only use when truly blocked by something outside your control.',
-      { message: z.string().describe('Brief description of what you need help with') },
-      async ({ message }) => {
-        const ticket = this.delegate.getTicket(this.ticketId);
-        if (!ticket || !message) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ error: 'Ticket not found or empty message' }) }],
-            isError: true,
-          };
-        }
-        await this.delegate.escalate(this.ticketId, message);
-        return { content: [{ type: 'text', text: JSON.stringify({ ok: true, message: 'Escalated to human operator' }) }] };
-      }
-    );
-  }
-
-  // -----------------------------------------------------------------------
-  //  Lifecycle
-  // -----------------------------------------------------------------------
-
-  /** Start the HTTP server on a random available port. */
-  async start(): Promise<number> {
+    const mcp = createMcpServer(this.db, this.repo, this.pagesDir);
     this.transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
     });
+    await mcp.connect(this.transport);
 
-    await this.mcp.connect(this.transport);
-
-    this.httpServer = createServer(async (req, res) => {
-      // Route /mcp to the MCP transport
+    this.httpServer = createHttpServer(async (req, res) => {
       const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
-      if (url.pathname === '/mcp') {
-        // Collect request body
-        const chunks: Buffer[] = [];
-        for await (const chunk of req) {
-          chunks.push(chunk as Buffer);
-        }
-        const body = Buffer.concat(chunks).toString('utf-8');
-        let parsed: unknown;
-        try {
-          parsed = body ? JSON.parse(body) : undefined;
-        } catch {
-          parsed = undefined;
-        }
-        await this.transport!.handleRequest(req, res, parsed);
-      } else {
+      if (url.pathname !== '/mcp') {
         res.writeHead(404);
         res.end('Not Found');
+        return;
       }
+
+      const auth = req.headers['authorization'];
+      const expected = `Bearer ${this._token}`;
+      if (auth !== expected) {
+        res.writeHead(401);
+        res.end('Unauthorized');
+        return;
+      }
+
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+chunks.push(chunk as Buffer);
+}
+      const body = Buffer.concat(chunks).toString('utf-8');
+      let parsed: unknown;
+      try {
+        parsed = body ? JSON.parse(body) : undefined;
+      } catch {
+        parsed = undefined;
+      }
+      await this.transport!.handleRequest(req, res, parsed);
     });
 
-    return new Promise<number>((resolve, reject) => {
-      this.httpServer!.listen(0, '0.0.0.0', () => {
-        const addr = this.httpServer!.address();
-        if (addr && typeof addr === 'object') {
-          this._port = addr.port;
-          console.log(`[ProjectMcpServer] Listening on port ${this._port} for ticket ${this.ticketId}`);
-          resolve(this._port);
+    await new Promise<void>((resolve, reject) => {
+      const onError = (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE') {
+          reject(
+            new Error(
+              `MCP port ${MCP_PORT} is already in use. Another launcher instance may be running.`
+            )
+          );
         } else {
-          reject(new Error('Failed to get server address'));
+          reject(err);
         }
+      };
+      this.httpServer!.once('error', onError);
+      this.httpServer!.listen(MCP_PORT, '0.0.0.0', () => {
+        this.httpServer!.off('error', onError);
+        console.log(`[ProjectMcp] Listening on 0.0.0.0:${MCP_PORT}`);
+        resolve();
       });
-      this.httpServer!.on('error', reject);
     });
   }
 
-  /** Stop the HTTP server and close the MCP transport. */
   async stop(): Promise<void> {
-    try {
-      await this.mcp.close();
-    } catch {
-      // ignore
+    if (this.transport) {
+      try {
+        await this.transport.close();
+      } catch {
+        // ignore
+      }
+      this.transport = null;
     }
     if (this.httpServer) {
       await new Promise<void>((resolve) => {
@@ -215,7 +157,5 @@ export class ProjectMcpServer {
       });
       this.httpServer = null;
     }
-    this._port = null;
-    console.log(`[ProjectMcpServer] Stopped for ticket ${this.ticketId}`);
   }
 }

@@ -502,6 +502,19 @@ export class OmniInstallManager {
     options: { cwd: string; env: Record<string, string> },
     repair?: boolean
   ): Promise<'success' | 'canceled' | 'error'> => {
+    // Dev mode: install omni-code editable from a local checkout so workspace
+    // edits are picked up live without reinstalling. Set OMNI_CODE_EDITABLE_PATH
+    // to the repo root in .env. Transitive deps (omniagents, etc.) still come
+    // from the index.
+    const editablePath = options.env.OMNI_CODE_EDITABLE_PATH || process.env.OMNI_CODE_EDITABLE_PATH;
+    const target: string[] = editablePath
+      ? ['--editable', editablePath]
+      : [`omni-code==${OMNI_CODE_VERSION}`];
+
+    if (editablePath) {
+      this.log.info(c.yellow(`Dev mode: installing omni-code editable from ${editablePath}\r\n`));
+    }
+
     const installArgs = [
       'pip',
       'install',
@@ -512,7 +525,7 @@ export class OmniInstallManager {
       '--extra-index-url',
       EXTRA_INDEX_URL,
       ...(repair ? ['--force-reinstall'] : []),
-      `omni-code==${OMNI_CODE_VERSION}`,
+      ...target,
     ];
 
     this.log.info(c.cyan('Installing omni-code...\r\n'));

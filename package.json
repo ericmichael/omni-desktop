@@ -7,13 +7,17 @@
   "engines": {
     "node": ">=22.0.0"
   },
+  "workspaces": [
+    "packages/*"
+  ],
   "repository": {
     "type": "git",
     "url": "git@github.com:ericmichael/omni-desktop.git"
   },
   "scripts": {
-    "dev": "electron-vite dev --watch",
-    "build": "electron-vite build",
+    "build:packages": "npm run build --workspaces --if-present",
+    "dev": "npm run build:packages && npm run rebuild && electron-vite dev --watch",
+    "build": "npm run build:packages && electron-vite build",
     "preview": "electron-vite preview",
     "download:sandbox": "node scripts/download-sandbox.mjs --force",
     "download:vcredist": "node scripts/download-vcredist.mjs",
@@ -34,13 +38,14 @@
     "test:ui": "npm rebuild node-pty && vitest --coverage --ui",
     "test:no-watch": "npm rebuild node-pty && vitest --no-watch",
     "rebuild": "electron-rebuild -f -w node-pty",
+    "rebuild:node": "node scripts/rebuild-if-needed.mjs",
     "postinstall": "npm run rebuild && node scripts/download-uv.mjs && node scripts/download-sandbox.mjs",
     "react-devtools": "react-devtools",
     "version": "npm version --message 'chore: bump version to v%s'",
     "build:browser": "vite build --config vite.browser.config.ts",
-    "build:server": "vite build --config vite.server.config.ts && npm run build:browser",
-    "dev:server": "concurrently -k -n server,browser -c blue,magenta \"vite build --config vite.server.config.ts --mode development --watch\" \"vite --config vite.browser.config.ts --mode development --host 0.0.0.0\"",
-    "start:server": "node out/server/index.mjs"
+    "build:server": "npm run build:packages && vite build --config vite.server.config.ts && npm run build:browser",
+    "dev:server": "npm run build:packages && npm run rebuild:node && concurrently -k -n server,browser -c blue,magenta \"vite build --config vite.server.config.ts --mode development --watch\" \"vite --config vite.browser.config.ts --mode development --host 0.0.0.0\"",
+    "start:server": "npm run rebuild:node && node out/server/index.mjs"
   },
   "devDependencies": {
     "@electron-toolkit/preload": "^3.0.2",
@@ -128,6 +133,8 @@
   "license": "Apache-2.0",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.88.0",
+    "omni-projects-db": "*",
+    "omni-projects-mcp": "*",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",

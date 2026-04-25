@@ -6,9 +6,9 @@
  */
 
 import { execFile } from 'node:child_process';
-import {readFile, stat, unlink, writeFile } from 'node:fs/promises';
+import { open, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import {join, posix } from 'node:path';
+import { join, posix } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -192,6 +192,154 @@ export async function uploadRemoteFile(
   }
 }
 
+/**
+ * Upload a large file from disk to Azure Files without loading it into memory.
+ * Reads 4 MiB chunks from the file handle and uploads them as PUT Range calls
+ * with up to `concurrency` ranges in flight at once.
+ */
+export async function uploadRemoteFileFromPath(
+  parsed: ParsedSasUrl,
+  relativePath: string,
+  filePath: string,
+  fileSize: number,
+  fetchFn: FetchFn,
+  onProgress?: (bytesUploaded: number) => void,
+  concurrency = 4
+): Promise<void> {
+  // Ensure parent directory exists
+  const parentDir = posix.dirname(relativePath);
+  if (parentDir && parentDir !== '.') {
+    await createRemoteDir(parsed, parentDir, fetchFn);
+  }
+
+  // Create file entry with the full size
+  const createUrl = fileUrl(parsed, relativePath);
+  const createRes = await fetchFn(createUrl, {
+    method: 'PUT',
+    headers: {
+      'x-ms-version': API_VERSION,
+      'x-ms-type': 'file',
+      'x-ms-content-length': String(fileSize),
+      'Content-Length': '0',
+    },
+  });
+  if (!createRes.ok) {
+    throw new Error(`Failed to create file "${relativePath}": ${createRes.status}`);
+  }
+
+  if (fileSize === 0) return;
+
+  const totalChunks = Math.ceil(fileSize / RANGE_CHUNK_SIZE);
+  let bytesUploaded = 0;
+  let chunkIdx = 0;
+
+  const fh = await open(filePath, 'r');
+  try {
+    const uploadChunk = async (): Promise<void> => {
+      while (chunkIdx < totalChunks) {
+        const i = chunkIdx++;
+        const start = i * RANGE_CHUNK_SIZE;
+        const end = Math.min(start + RANGE_CHUNK_SIZE, fileSize) - 1;
+        const length = end - start + 1;
+
+        // Each worker allocates its own buffer — no sharing across concurrent reads
+        const buf = Buffer.allocUnsafe(length);
+        const { bytesRead } = await fh.read(buf, 0, length, start);
+        const chunk = bytesRead === length ? buf : buf.subarray(0, bytesRead);
+
+        const rangeUrl = fileUrl(parsed, relativePath, 'comp=range');
+        const rangeRes = await fetchFn(rangeUrl, {
+          method: 'PUT',
+          headers: {
+            'x-ms-version': API_VERSION,
+            'x-ms-range': `bytes=${start}-${start + chunk.byteLength - 1}`,
+            'x-ms-write': 'update',
+            'Content-Length': String(chunk.byteLength),
+          },
+          body: chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength) as BodyInit,
+        });
+        if (!rangeRes.ok) {
+          throw new Error(`Failed to upload range ${start}-${end} for "${relativePath}": ${rangeRes.status}`);
+        }
+
+        bytesUploaded += chunk.byteLength;
+        onProgress?.(bytesUploaded);
+      }
+    };
+
+    const workers: Promise<void>[] = [];
+    for (let w = 0; w < Math.min(concurrency, totalChunks); w++) {
+      workers.push(uploadChunk());
+    }
+    await Promise.all(workers);
+  } finally {
+    await fh.close();
+  }
+}
+
+/**
+ * Download a large file from Azure Files directly to disk without buffering
+ * the entire file in memory. Uses GET Range requests in parallel.
+ */
+export async function downloadRemoteFileToPath(
+  parsed: ParsedSasUrl,
+  relativePath: string,
+  destPath: string,
+  fileSize: number,
+  fetchFn: FetchFn,
+  onProgress?: (bytesDownloaded: number) => void,
+  concurrency = 4
+): Promise<void> {
+  if (fileSize === 0) {
+    await writeFile(destPath, Buffer.alloc(0));
+    return;
+  }
+
+  const totalChunks = Math.ceil(fileSize / RANGE_CHUNK_SIZE);
+  let bytesDownloaded = 0;
+  let chunkIdx = 0;
+
+  const fh = await open(destPath, 'w');
+  try {
+    // Pre-allocate the file to the expected size
+    await fh.truncate(fileSize);
+
+    const downloadChunk = async (): Promise<void> => {
+      while (chunkIdx < totalChunks) {
+        const i = chunkIdx++;
+        const start = i * RANGE_CHUNK_SIZE;
+        const end = Math.min(start + RANGE_CHUNK_SIZE, fileSize) - 1;
+
+        const url = fileUrl(parsed, relativePath);
+        const res = await fetchFn(url, {
+          method: 'GET',
+          headers: {
+            'x-ms-version': API_VERSION,
+            'Range': `bytes=${start}-${end}`,
+          },
+        });
+        if (!res.ok && res.status !== 206) {
+          throw new Error(`Failed to download range ${start}-${end} for "${relativePath}": ${res.status}`);
+        }
+
+        const chunk = Buffer.from(await res.arrayBuffer());
+        await fh.write(chunk, 0, chunk.byteLength, start);
+
+        bytesDownloaded += chunk.byteLength;
+        onProgress?.(bytesDownloaded);
+      }
+    };
+
+    const workers: Promise<void>[] = [];
+    for (let w = 0; w < Math.min(concurrency, totalChunks); w++) {
+      workers.push(downloadChunk());
+    }
+    await Promise.all(workers);
+  } finally {
+    await fh.close();
+  }
+}
+
 /** Download a single file from the Azure Files share. */
 export async function downloadRemoteFile(
   parsed: ParsedSasUrl,
@@ -316,6 +464,44 @@ continue;
 // Bulk upload (tar-based) — for initial sync
 // ---------------------------------------------------------------------------
 
+/**
+ * Compress a directory to a tarball with live file-count progress via stderr.
+ * Uses --checkpoint to report every 500 files processed.
+ */
+async function compressWithProgress(
+  workspaceDir: string,
+  tarPath: string,
+  excludes: string[],
+  onProgress?: ProgressFn
+): Promise<void> {
+  const checkpoint = ['--checkpoint=500', '--checkpoint-action=dot'];
+
+  const run = (args: string[]): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      let fileCount = 0;
+      const proc = execFile('tar', args, { timeout: 300_000 }, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+      proc.stderr?.on('data', (data: Buffer | string) => {
+        // Each dot from --checkpoint-action=dot represents 500 files
+        const dots = String(data).replace(/[^.]/g, '').length;
+        if (dots > 0) {
+          fileCount += dots * 500;
+          onProgress?.(`Compressing: ~${fileCount.toLocaleString()} files processed...`);
+        }
+      });
+    });
+
+  try {
+    await run(['-I', 'zstd -3', '-cf', tarPath, ...checkpoint, ...excludes, '-C', workspaceDir, '.']);
+  } catch {
+    // Fallback to gzip if zstd not available
+    try { await unlink(tarPath); } catch { /* ignore */ }
+    await run(['czf', tarPath, ...checkpoint, ...excludes, '-C', workspaceDir, '.']);
+  }
+}
+
 export async function uploadWorkspace(
   workspaceDir: string,
   sasUrl: string,
@@ -327,26 +513,27 @@ export async function uploadWorkspace(
 
   try {
     onProgress?.('Compressing workspace...');
-    await execFileAsync('tar', ['-I', 'zstd -3', '-cf', tarPath, ...TAR_EXCLUDES, '-C', workspaceDir, '.'], {
-      timeout: 120_000,
-    }).catch(() =>
-      // Fallback to gzip if zstd not available
-      execFileAsync('tar', ['czf', tarPath, ...TAR_EXCLUDES, '-C', workspaceDir, '.'], {
-        timeout: 120_000,
-      })
-    );
+    await compressWithProgress(workspaceDir, tarPath, TAR_EXCLUDES, onProgress);
 
     const info = await stat(tarPath);
     const sizeMB = (info.size / (1024 * 1024)).toFixed(1);
-    onProgress?.(`Archive: ${sizeMB} MB`);
+    onProgress?.(`Archive: ${sizeMB} MB — uploading...`);
 
-    const contents = await readFile(tarPath);
-    await uploadRemoteFile(parsed, ARCHIVE_NAME, contents, fetchFn);
+    // Stream from disk in 4 MiB chunks with parallel range uploads.
+    // Never loads the full archive into memory — handles arbitrarily large files.
+    let lastPct = 0;
+    await uploadRemoteFileFromPath(parsed, ARCHIVE_NAME, tarPath, info.size, fetchFn, (bytesUploaded) => {
+      const pct = Math.floor((bytesUploaded / info.size) * 100);
+      if (pct > lastPct) {
+        lastPct = pct;
+        onProgress?.(`Uploading: ${pct}% (${(bytesUploaded / (1024 * 1024)).toFixed(0)}/${sizeMB} MB)`);
+      }
+    });
 
     onProgress?.(`Upload complete: ${sizeMB} MB`);
   } finally {
     try {
- await unlink(tarPath); 
+ await unlink(tarPath);
 } catch { /* ignore */ }
   }
 }
@@ -366,39 +553,50 @@ export async function downloadWorkspace(
 
   try {
     onProgress?.('Checking for workspace archive...');
-    let hasTar = false;
+    let archiveSize = 0;
     try {
       const headUrl = fileUrl(parsed, ARCHIVE_NAME);
       const headRes = await fetchFn(headUrl, {
         method: 'HEAD',
         headers: { 'x-ms-version': API_VERSION },
       });
-      hasTar = headRes.ok;
+      if (!headRes.ok) {
+        onProgress?.('No workspace archive found — skipping download');
+        return;
+      }
+      archiveSize = parseInt(headRes.headers.get('content-length') ?? '0', 10);
     } catch {
-      hasTar = false;
-    }
-
-    if (!hasTar) {
       onProgress?.('No workspace archive found — skipping download');
       return;
     }
 
-    onProgress?.('Downloading workspace archive...');
-    const contents = await downloadRemoteFile(parsed, ARCHIVE_NAME, fetchFn);
-    const sizeMB = (contents.byteLength / (1024 * 1024)).toFixed(1);
-    onProgress?.(`Downloaded: ${sizeMB} MB`);
+    const sizeMB = (archiveSize / (1024 * 1024)).toFixed(1);
+    onProgress?.(`Downloading workspace archive (${sizeMB} MB)...`);
 
-    await writeFile(tarPath, contents);
+    // Stream to disk in parallel 4 MiB range GETs — never buffers the whole file.
+    let lastPct = 0;
+    await downloadRemoteFileToPath(parsed, ARCHIVE_NAME, tarPath, archiveSize, fetchFn, (bytesDownloaded) => {
+      const pct = Math.floor((bytesDownloaded / archiveSize) * 100);
+      if (pct > lastPct) {
+        lastPct = pct;
+        onProgress?.(`Downloading: ${pct}% (${(bytesDownloaded / (1024 * 1024)).toFixed(0)}/${sizeMB} MB)`);
+      }
+    });
 
     onProgress?.('Extracting workspace...');
-    await execFileAsync('tar', ['xzf', tarPath, '-C', workspaceDir], {
-      timeout: 120_000,
-    });
+    // Try zstd first (matches upload), fall back to gzip
+    await execFileAsync('tar', ['-I', 'zstd', '-xf', tarPath, '-C', workspaceDir], {
+      timeout: 300_000,
+    }).catch(() =>
+      execFileAsync('tar', ['xzf', tarPath, '-C', workspaceDir], {
+        timeout: 300_000,
+      })
+    );
 
     onProgress?.(`Download complete: ${sizeMB} MB`);
   } finally {
     try {
- await unlink(tarPath); 
+ await unlink(tarPath);
 } catch { /* ignore */ }
   }
 }

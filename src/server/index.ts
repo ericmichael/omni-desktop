@@ -4,6 +4,7 @@ import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify from 'fastify';
 import { existsSync } from 'fs';
+import { BlockList, isIPv4, isIPv6 } from 'node:net';
 import { join, resolve } from 'path';
 
 // Server mode always runs as "development" so util.ts resolves paths from project root
@@ -28,25 +29,74 @@ process.on('uncaughtException', (err) => {
 const PORT = parseInt(process.env['PORT'] ?? '3001', 10);
 const HOST = process.env['HOST'] ?? '0.0.0.0';
 
+/**
+ * Build the allowlist for /api/ws-token. Loopback is always trusted; additional
+ * networks can be opted in via OMNI_TRUSTED_CIDRS (comma-separated).
+ *
+ * Example for Tailscale: OMNI_TRUSTED_CIDRS=100.64.0.0/10,fd7a:115c:a1e0::/48
+ *
+ * Anything outside this allowlist must supply the token explicitly via
+ * ?token= or OMNI_WS_TOKEN, since the token endpoint is what gates /ws auth.
+ */
+function buildTokenAllowList(): { check: (addr: string) => boolean; describe: () => string } {
+  const list = new BlockList();
+  list.addAddress('127.0.0.1', 'ipv4');
+  list.addAddress('::1', 'ipv6');
+
+  const cidrs = (process.env['OMNI_TRUSTED_CIDRS'] ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  for (const cidr of cidrs) {
+    const slash = cidr.indexOf('/');
+    if (slash < 0) {
+      console.warn(`[auth] OMNI_TRUSTED_CIDRS entry missing prefix length, skipping: "${cidr}"`);
+      continue;
+    }
+    const base = cidr.slice(0, slash);
+    const prefix = parseInt(cidr.slice(slash + 1), 10);
+    const family = isIPv6(base) ? 'ipv6' : isIPv4(base) ? 'ipv4' : null;
+    if (!family || !Number.isFinite(prefix)) {
+      console.warn(`[auth] OMNI_TRUSTED_CIDRS invalid entry, skipping: "${cidr}"`);
+      continue;
+    }
+    list.addSubnet(base, prefix, family);
+  }
+
+  const check = (addr: string): boolean => {
+    if (!addr) return false;
+    // Strip IPv4-mapped IPv6 prefix so 100.x addresses match the IPv4 rules
+    const normalized = addr.startsWith('::ffff:') ? addr.slice(7) : addr;
+    if (isIPv4(normalized)) return list.check(normalized, 'ipv4');
+    if (isIPv6(normalized)) return list.check(normalized, 'ipv6');
+    return false;
+  };
+
+  return { check, describe: () => (cidrs.length > 0 ? `loopback + ${cidrs.join(', ')}` : 'loopback only') };
+}
+
 const main = async () => {
   const fastify = Fastify({ logger: true });
 
   // Generate (or read) a WebSocket auth token. Clients must present this as
-  // a ?token= query param on the /ws connection. Loopback browser clients
-  // can fetch it via GET /api/ws-token; non-browser clients should use the
-  // OMNI_WS_TOKEN env var printed below.
+  // a ?token= query param on the /ws connection. Trusted-network browser
+  // clients can fetch it via GET /api/ws-token; non-browser clients should
+  // use the OMNI_WS_TOKEN env var printed below.
   const wsToken = process.env['OMNI_WS_TOKEN'] ?? crypto.randomUUID();
   console.log('[auth] WS token:', wsToken);
+
+  const tokenAllowList = buildTokenAllowList();
+  console.log(`[auth] /api/ws-token trusted networks: ${tokenAllowList.describe()}`);
 
   // WebSocket plugin
   await fastify.register(fastifyWebsocket);
 
-  // Loopback-only endpoint so the browser SPA can pick up the token before
-  // opening its WebSocket connection.
+  // Token endpoint — restricted to trusted networks (loopback by default;
+  // extend via OMNI_TRUSTED_CIDRS, e.g. "100.64.0.0/10" for Tailscale).
   fastify.get('/api/ws-token', (request, reply) => {
     const addr = request.socket.remoteAddress ?? '';
-    const isLoopback = addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
-    if (!isLoopback) {
+    if (!tokenAllowList.check(addr)) {
       reply.code(403).send({ error: 'Forbidden' });
       return;
     }

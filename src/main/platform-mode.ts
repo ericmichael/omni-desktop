@@ -36,10 +36,23 @@ export const isPlatformAuthenticated = (platform?: PlatformCredentials): boolean
 export const OPEN_SOURCE_BACKENDS: SandboxBackend[] = ['docker', 'podman', 'vm', 'local', 'none'];
 
 /**
- * Map platform backend vocabulary to launcher backend vocabulary.
- * The platform uses 'bwrap'/'qemu'; the launcher uses 'local'/'vm'.
+ * Map platform backend + compute_target to launcher backend vocabulary.
+ *
+ * The platform describes machines by backend (docker/podman/bwrap/qemu) and
+ * compute_target (local/cloud/either). The launcher uses a flat enum:
+ *   - "platform" = cloud compute (delegated to management plane compute API)
+ *   - "docker"   = local Docker/Podman container
+ *   - "local"    = bwrap process sandbox
+ *   - "vm"       = QEMU VM
+ *   - "none"     = no isolation
  */
-export function mapPlatformBackend(backend: string): SandboxBackend {
+export function mapPlatformBackend(backend: string, computeTarget?: string): SandboxBackend {
+  // Cloud compute targets are always "platform" — the management plane
+  // provisions the container via Azure Container Apps (or equivalent).
+  if (computeTarget === 'cloud') {
+    return 'platform';
+  }
+
   switch (backend) {
     case 'bwrap':
       return 'local';
@@ -54,12 +67,12 @@ export function mapPlatformBackend(backend: string): SandboxBackend {
  * Convert platform sandbox_profiles to launcher SandboxProfile format.
  */
 export function mapSandboxProfiles(
-  profiles: Array<{ resource_id: number; name: string; backend: string; variant?: string; image?: string; network_mode?: string; resource_limits?: Record<string, string | number> }>
+  profiles: Array<{ resource_id: number; name: string; backend: string; variant?: string; compute_target?: string; image?: string; network_mode?: string; resource_limits?: Record<string, string | number> }>
 ): SandboxProfile[] {
   return profiles.map((p) => ({
     resource_id: p.resource_id,
     name: p.name,
-    backend: mapPlatformBackend(p.backend),
+    backend: mapPlatformBackend(p.backend, p.compute_target),
     variant: p.variant,
     image: p.image,
     network_mode: p.network_mode,

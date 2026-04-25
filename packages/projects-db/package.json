@@ -1,0 +1,30 @@
+{
+  "name": "omni-projects-db",
+  "version": "0.1.0",
+  "description": "Shared SQLite schema, migrations, and repository for Omni project data. Used by both the MCP server and the launcher.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "node --test --import tsx dist/**/*.test.js"
+  },
+  "dependencies": {
+    "nanoid": "^5.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.7.0"
+  }
+}

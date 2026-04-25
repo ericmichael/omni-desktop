@@ -7,6 +7,8 @@ import { nanoid } from 'nanoid';
 import path from 'path';
 import { promisify } from 'util';
 
+import type { ProjectsRepo } from 'omni-projects-db';
+
 import { getArtifactsDir } from '@/lib/artifacts';
 import { listArtifactEntries, readArtifactFile, resolveArtifactPath } from '@/lib/artifacts-fs';
 import { getGitFilesChanged, resolveWorkspaceMergeBase, resolveWorktreeMergeBase } from '@/lib/git-files-changed';
@@ -15,6 +17,23 @@ import type { IMachineFactory, ISandboxFactory, IWorkflowLoader, ProjectManagerD
 import { runMigrations as runSchemaMigrations } from '@/lib/project-migrations';
 import { type HistoryRow, parseSessionHistoryRows } from '@/lib/session-history';
 import { AgentProcess } from '@/main/agent-process';
+import { DbChangeWatcher } from '@/main/db-change-watcher';
+import {
+  buildStoreSnapshot,
+  commentToRow,
+  inboxItemToRow,
+  milestoneToRow,
+  pageToRow,
+  projectToRow,
+  rowToInboxItem,
+  rowToMilestone,
+  rowToPage,
+  rowToProject,
+  rowToTask,
+  rowToTicket,
+  taskToRow,
+  ticketToRow,
+} from '@/main/db-store-bridge';
 import { registerInboxHandlers } from '@/main/inbox-handlers';
 import { InboxManager, type InboxManagerStore } from '@/main/inbox-manager';
 import { registerMilestoneHandlers } from '@/main/milestone-handlers';
@@ -86,6 +105,12 @@ export class ProjectManager {
   private store: Store<StoreData>;
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
 
+  /** When set, all project data is read/written via SQLite instead of electron-store. */
+  private repo: ProjectsRepo | undefined;
+
+  /** When set, detects MCP server writes and refreshes the UI. */
+  private changeWatcher: DbChangeWatcher | undefined;
+
   /** Workflow file loader (FLEET.md) per project. */
   private workflowLoader: IWorkflowLoader;
 
@@ -127,6 +152,8 @@ export class ProjectManager {
       sendToWindow: ProjectManager['sendToWindow'];
       processManager?: ProcessManager;
       appControlManager?: import('@/main/app-control-manager').AppControlManager;
+      /** Optional: shared SQLite repo. When provided, project data is stored in SQLite. */
+      repo?: ProjectsRepo;
     },
     deps?: Partial<ProjectManagerDeps>
   ) {
@@ -134,6 +161,15 @@ export class ProjectManager {
     this.sendToWindow = arg.sendToWindow;
     this.processManager = arg.processManager;
     this.appControlManager = arg.appControlManager;
+    this.repo = arg.repo;
+    // Set up cross-process change detection when using SQLite
+    if (this.repo) {
+      this.changeWatcher = new DbChangeWatcher(this.repo, () => {
+        this.broadcastStoreSnapshot();
+      });
+      this.changeWatcher.start();
+    }
+
     // Let ProcessManager fall back to supervisor sandbox status for ticket-linked tabs.
     // The orchestrator may not exist yet at this point in the constructor — defer
     // the lookup with an arrow function.
@@ -164,45 +200,76 @@ export class ProjectManager {
     };
     this.machineFactory = deps?.machineFactory;
 
-    const pageStore: PageManagerStore = {
-      getPages: () => (this.store.get('pages') ?? []) as Page[],
-      setPages: (items) => {
-        this.store.set('pages', items);
-        this.sendToWindow('store:changed', this.store.store);
-      },
-      getProjects: () => this.getProjects(),
-    };
+    const pageStore: PageManagerStore = this.repo
+      ? {
+          getPages: () => this.repo!.listAllPages().map(rowToPage),
+          setPages: (items) => {
+            this.repo!.replaceAllPages(items.map(pageToRow));
+            this.noteLocalWriteAndBroadcast();
+          },
+          getProjects: () => this.getProjects(),
+        }
+      : {
+          getPages: () => (this.store.get('pages') ?? []) as Page[],
+          setPages: (items) => {
+            this.store.set('pages', items);
+            this.sendToWindow('store:changed', this.store.store);
+          },
+          getProjects: () => this.getProjects(),
+        };
     this.pages = new PageManager({
       store: pageStore,
       sendToWindow: this.sendToWindow,
       resolveProjectDir: (project) => this.getProjectDirPath(project),
     });
-    const inboxStore: InboxManagerStore = {
-      getInboxItems: () => (this.store.get('inboxItems') ?? []) as InboxItem[],
-      setInboxItems: (items) => {
-        this.store.set('inboxItems', items);
-        this.sendToWindow('store:changed', this.store.store);
-      },
-      getTickets: () => this.getTickets(),
-      setTickets: (tickets) => this.setTickets(tickets),
-      getProjects: () => this.getProjects(),
-      setProjects: (projects) => this.setProjects(projects),
-    };
+    const inboxStore: InboxManagerStore = this.repo
+      ? {
+          getInboxItems: () => this.repo!.listAllInboxItems().map(rowToInboxItem),
+          setInboxItems: (items) => {
+            this.repo!.replaceAllInboxItems(items.map(inboxItemToRow));
+            this.noteLocalWriteAndBroadcast();
+          },
+          getTickets: () => this.getTickets(),
+          setTickets: (tickets) => this.setTickets(tickets),
+          getProjects: () => this.getProjects(),
+          setProjects: (projects) => this.setProjects(projects),
+        }
+      : {
+          getInboxItems: () => (this.store.get('inboxItems') ?? []) as InboxItem[],
+          setInboxItems: (items) => {
+            this.store.set('inboxItems', items);
+            this.sendToWindow('store:changed', this.store.store);
+          },
+          getTickets: () => this.getTickets(),
+          setTickets: (tickets) => this.setTickets(tickets),
+          getProjects: () => this.getProjects(),
+          setProjects: (projects) => this.setProjects(projects),
+        };
     this.inbox = new InboxManager({
       store: inboxStore,
       newId: () => nanoid(),
       now: () => Date.now(),
     });
 
-    const milestoneStore: MilestoneManagerStore = {
-      getMilestones: () => (this.store.get('milestones') ?? []) as Milestone[],
-      setMilestones: (items) => {
-        this.store.set('milestones', items);
-        this.sendToWindow('store:changed', this.store.store);
-      },
-      getTickets: () => this.getTickets(),
-      setTickets: (tickets) => this.setTickets(tickets),
-    };
+    const milestoneStore: MilestoneManagerStore = this.repo
+      ? {
+          getMilestones: () => this.repo!.listAllMilestones().map(rowToMilestone),
+          setMilestones: (items) => {
+            this.repo!.replaceAllMilestones(items.map(milestoneToRow));
+            this.noteLocalWriteAndBroadcast();
+          },
+          getTickets: () => this.getTickets(),
+          setTickets: (tickets) => this.setTickets(tickets),
+        }
+      : {
+          getMilestones: () => (this.store.get('milestones') ?? []) as Milestone[],
+          setMilestones: (items) => {
+            this.store.set('milestones', items);
+            this.sendToWindow('store:changed', this.store.store);
+          },
+          getTickets: () => this.getTickets(),
+          setTickets: (tickets) => this.setTickets(tickets),
+        };
     this.milestones = new MilestoneManager({
       store: milestoneStore,
       newId: () => nanoid(),
@@ -218,10 +285,18 @@ export class ProjectManager {
         getSandboxBackend: () => this.store.get('sandboxBackend'),
         getPlatformCredentials: () => this.store.get('platform'),
         getCodeTabs: () => (this.store.get('codeTabs', []) ?? []) as Array<{ id: string; ticketId?: string }>,
-        getPersistedTasks: () => this.store.get('tasks', []) as Task[],
+        getPersistedTasks: () =>
+          this.repo
+            ? this.repo.listAllTasks().map(rowToTask)
+            : (this.store.get('tasks', []) as Task[]),
         setPersistedTasks: (tasks) => {
-          this.store.set('tasks', tasks);
-          this.sendToWindow('store:changed', this.store.store);
+          if (this.repo) {
+            this.repo.replaceAllTasks(tasks.map(taskToRow));
+            this.noteLocalWriteAndBroadcast();
+          } else {
+            this.store.set('tasks', tasks);
+            this.sendToWindow('store:changed', this.store.store);
+          }
         },
       },
       host: {
@@ -262,15 +337,53 @@ export class ProjectManager {
     return project ? this.getProjectDirPath(project) : null;
   };
 
-  // #region Projects (persisted in electron-store)
+  // #region Broadcast helpers
+
+  /** Broadcast a full store snapshot to the renderer (SQLite + electron-store merged). */
+  private broadcastStoreSnapshot = (): void => {
+    if (this.repo) {
+      this.sendToWindow('store:changed', buildStoreSnapshot(this.repo, this.store));
+    } else {
+      this.sendToWindow('store:changed', this.store.store);
+    }
+  };
+
+  /** After a local SQLite write: suppress self-notification and broadcast. */
+  private noteLocalWriteAndBroadcast = (): void => {
+    this.changeWatcher?.noteLocalWrite();
+    this.broadcastStoreSnapshot();
+  };
+
+  /**
+   * Build a full StoreData snapshot. Used by MainProcessManager to serve
+   * `store:get` and `store:get-key` requests.
+   */
+  getStoreSnapshot = (): StoreData => {
+    if (this.repo) {
+      return buildStoreSnapshot(this.repo, this.store);
+    }
+    return this.store.store;
+  };
+
+  // #endregion
+
+  // #region Projects (persisted in SQLite when repo is set, else electron-store)
 
   private getProjects = (): Project[] => {
+    if (this.repo) {
+      return this.repo.listProjects().map(rowToProject);
+    }
     return this.store.get('projects', []);
   };
 
   private setProjects = (projects: Project[]): void => {
-    this.store.set('projects', projects);
-    this.sendToWindow('store:changed', this.store.store);
+    if (this.repo) {
+      this.repo.replaceAllProjects(projects.map(projectToRow));
+      this.noteLocalWriteAndBroadcast();
+    } else {
+      this.store.set('projects', projects);
+      this.sendToWindow('store:changed', this.store.store);
+    }
   };
 
   addProject = (input: Omit<Project, 'id' | 'createdAt'>): Project => {
@@ -530,15 +643,35 @@ export class ProjectManager {
 
   // #endregion
 
-  // #region Tickets (persisted in electron-store)
+  // #region Tickets (persisted in SQLite when repo is set, else electron-store)
 
   private getTickets = (): Ticket[] => {
+    if (this.repo) {
+      return this.repo.listAllTickets().map((row) => {
+        const comments = this.repo!.listCommentsByTicket(row.id);
+        return rowToTicket(row, comments);
+      });
+    }
     return this.store.get('tickets', []);
   };
 
   private setTickets = (tickets: Ticket[]): void => {
-    this.store.set('tickets', tickets);
-    this.sendToWindow('store:changed', this.store.store);
+    if (this.repo) {
+      this.repo.replaceAllTickets(tickets.map(ticketToRow));
+      // Also sync inline comments to the comments table
+      for (const ticket of tickets) {
+        if (ticket.comments && ticket.comments.length > 0) {
+          this.repo.replaceCommentsForTicket(
+            ticket.id,
+            ticket.comments.map((c) => commentToRow(c, ticket.id))
+          );
+        }
+      }
+      this.noteLocalWriteAndBroadcast();
+    } else {
+      this.store.set('tickets', tickets);
+      this.sendToWindow('store:changed', this.store.store);
+    }
   };
 
   private getTicketById = (ticketId: TicketId): Ticket | undefined => {
@@ -696,8 +829,10 @@ export class ProjectManager {
     }
     if (!task) {
       // Also check persisted tasks in the store
-      const storedTasks = this.store.get('tasks') ?? [];
-      task = storedTasks.find((t) => t.ticketId === ticketId);
+      const storedTasks = this.repo
+        ? this.repo.listAllTasks().map(rowToTask)
+        : (this.store.get('tasks') ?? []);
+      task = storedTasks.find((t: Task) => t.ticketId === ticketId);
     }
 
     // Determine the git directory and merge base reference.
@@ -949,6 +1084,7 @@ export class ProjectManager {
   // #endregion
 
   exit = async (): Promise<void> => {
+    this.changeWatcher?.stop();
     this.supervisors.stopStallDetection();
     this.supervisors.stopAutoDispatch();
     if (this.inboxSweepTimer) {
@@ -975,13 +1111,15 @@ export const createProjectManager = (arg: {
   store: Store<StoreData>;
   processManager?: ProcessManager;
   appControlManager?: import('@/main/app-control-manager').AppControlManager;
+  /** Optional: shared SQLite repo. When provided, project data is stored in SQLite. */
+  repo?: ProjectsRepo;
 }) => {
-  const { ipc, sendToWindow, store, processManager, appControlManager } = arg;
+  const { ipc, sendToWindow, store, processManager, appControlManager, repo } = arg;
 
   // Run migration
   ProjectManager.migrateToSupervisor(store);
 
-  const projectManager = new ProjectManager({ store, sendToWindow, processManager, appControlManager });
+  const projectManager = new ProjectManager({ store, sendToWindow, processManager, appControlManager, repo });
   const { supervisors, milestones, inbox, pages } = projectManager;
   supervisors.restorePersistedTasks();
 

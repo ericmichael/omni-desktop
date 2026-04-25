@@ -16,7 +16,7 @@ export default defineConfig(({ mode }) => {
     __PLATFORM_URL__: JSON.stringify(process.env.OMNI_PLATFORM_URL || ''),
   };
 
-  const cspScriptSrc = mode === 'development' ? "'self' 'unsafe-eval' 'wasm-unsafe-eval'" : "'self'";
+  const cspScriptSrc = mode === 'development' ? "'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'" : "'self'";
 
   return {
     server: {

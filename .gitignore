@@ -119,3 +119,13 @@ assets/bin/omni-sandbox
 assets/bin/omni-sandbox.exe
 assets/bin/bwrap
 assets/bin/vc_redist.x64.exe
+
+# Playwright artifacts
+.playwright-cli/
+.playwright-mcp/
+
+# Stray screenshots
+*.png
+
+# Workspace package build output (sources are tracked, dist is rebuilt)
+packages/*/dist/

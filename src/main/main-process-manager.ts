@@ -4,6 +4,7 @@ import contextMenu from 'electron-context-menu';
 import type Store from 'electron-store';
 import path from 'path';
 
+import { PROJECT_KEYS } from '@/main/db-store-bridge';
 import { isDevelopment, manageWindowSize } from '@/main/util';
 import type { IpcEvents, IpcRendererEvents, MainProcessStatus, StoreData, WithTimestamp } from '@/shared/types';
 
@@ -16,6 +17,13 @@ export class MainProcessManager {
   private status: WithTimestamp<MainProcessStatus>;
   private store: Store<StoreData>;
 
+  /**
+   * Optional snapshot provider. When set, `store:get` and `store:get-key` for
+   * project keys read from SQLite instead of electron-store. Set by `index.ts`
+   * after the ProjectManager is created.
+   */
+  getStoreSnapshot: (() => StoreData) | null = null;
+
   ipc: IpcListener<IpcEvents>;
   emitter: IpcEmitter<IpcRendererEvents>;
 
@@ -27,16 +35,55 @@ export class MainProcessManager {
     this.status = { type: 'initializing', timestamp: Date.now() };
     this.store = store;
     this.store.onDidAnyChange((data) => {
-      this.sendToWindow('store:changed', data);
+      // Only broadcast for non-project key changes when repo is active.
+      // Project data changes are broadcast by ProjectManager/DbChangeWatcher.
+      if (!this.getStoreSnapshot) {
+        this.sendToWindow('store:changed', data);
+      }
     });
-    this.ipc.handle('store:get-key', (_, key) => this.store.get(key));
-    this.ipc.handle('store:set-key', (_, key, value) => this.store.set(key, value));
-    this.ipc.handle('store:get', (_) => this.store.store);
+    this.ipc.handle('store:get-key', (_, key) => {
+      if (this.getStoreSnapshot && PROJECT_KEYS.has(key)) {
+        return this.getStoreSnapshot()[key];
+      }
+      return this.store.get(key);
+    });
+    this.ipc.handle('store:set-key', (_, key, value) => {
+      if (this.getStoreSnapshot && PROJECT_KEYS.has(key)) {
+        throw new Error(
+          `store:set-key for project key "${String(key)}" is not allowed when SQLite is active. Use ProjectManager APIs.`
+        );
+      }
+      this.store.set(key, value);
+      // When repo is active, broadcast the merged snapshot so project data is included
+      if (this.getStoreSnapshot) {
+        this.sendToWindow('store:changed', this.getStoreSnapshot());
+      }
+    });
+    this.ipc.handle('store:get', (_) => {
+      if (this.getStoreSnapshot) {
+        return this.getStoreSnapshot();
+      }
+      return this.store.store;
+    });
     this.ipc.handle('store:set', (_, data) => {
+      if (this.getStoreSnapshot) {
+        const conflicts = [...PROJECT_KEYS].filter((k) => k in data);
+        if (conflicts.length > 0) {
+          throw new Error(
+            `store:set with project keys [${conflicts.join(', ')}] is not allowed when SQLite is active.`
+          );
+        }
+      }
       this.store.store = data;
+      if (this.getStoreSnapshot) {
+        this.sendToWindow('store:changed', this.getStoreSnapshot());
+      }
     });
     this.ipc.handle('store:reset', (_) => {
       this.store.clear();
+      if (this.getStoreSnapshot) {
+        this.sendToWindow('store:changed', this.getStoreSnapshot());
+      }
     });
 
     contextMenu({

@@ -12,12 +12,17 @@ import { createAppControlManager } from '@/main/app-control-manager';
 import { createConsoleManager } from '@/main/console-manager';
 import { createExtensionManager } from '@/main/extension-manager';
 import { MainProcessManager } from '@/main/main-process-manager';
+import { rowToProject } from '@/main/db-store-bridge';
+import { syncMcpConfig } from '@/main/mcp-config-manager';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
+import { ProjectMcpServer } from '@/main/project-mcp-server';
 import { registerPlatformIpc } from '@/main/platform-ipc';
 import { createPlatformClient } from '@/main/platform-mode';
 import { createProcessManager } from '@/main/process-manager';
+import { openProjectDb, closeProjectDb, getDb } from '@/main/project-db';
 import { createProjectManager } from '@/main/project-manager';
 import { getStore } from '@/main/store';
+import { getDefaultPagesDir, migrateFromJson } from 'omni-projects-db';
 import {
   ensureDirectory,
   getDefaultWorkspaceDir,
@@ -76,6 +81,37 @@ app.commandLine.appendSwitch('disable-backing-store-limit');
 
 const OMNI_CONFIG_DIR = getOmniConfigDir();
 const store = getStore();
+const { repo } = openProjectDb();
+
+// One-time migration: move project data from electron-store JSON to SQLite.
+// This is idempotent — it skips if the DB already has projects.
+try {
+  const migrated = migrateFromJson(repo, getDb(), {
+    projects: store.get('projects', []) as import('@/shared/types').Project[],
+    tickets: store.get('tickets', []) as import('@/shared/types').Ticket[],
+    milestones: store.get('milestones', []) as import('@/shared/types').Milestone[],
+    pages: store.get('pages', []) as import('@/shared/types').Page[],
+    inboxItems: store.get('inboxItems', []) as import('@/shared/types').InboxItem[],
+    tasks: store.get('tasks', []) as import('@/shared/types').Task[],
+  });
+  if (migrated > 0) {
+    console.log(`[ProjectDb] Migrated ${migrated} projects from electron-store to SQLite`);
+  }
+} catch (err) {
+  console.error('[ProjectDb] Failed to migrate from electron-store:', err);
+}
+
+const projectMcp = new ProjectMcpServer(getDb(), repo, getDefaultPagesDir());
+projectMcp.start().catch((err) => {
+  console.error('[ProjectMcp] failed to start:', err);
+});
+
+try {
+  syncMcpConfig();
+} catch (err) {
+  console.error('[mcp-config] failed to sync:', err);
+}
+
 const main = new MainProcessManager({ store });
 let isShuttingDown = false;
 
@@ -99,15 +135,19 @@ const [processManager, cleanupProcessManager] = createProcessManager({
     sandboxBackend: store.get('sandboxBackend') ?? 'none',
     sandboxProfiles: store.get('sandboxProfiles') ?? null,
     selectedMachineId: store.get('selectedMachineId') ?? null,
+    projects: repo.listProjects().map(rowToProject),
   }),
 });
-const [, cleanupProject] = createProjectManager({
+const [projectManager, cleanupProject] = createProjectManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
   store,
   processManager,
   appControlManager,
+  repo,
 });
+// Wire up the store snapshot provider so MainProcessManager serves project data from SQLite
+main.getStoreSnapshot = () => projectManager.getStoreSnapshot();
 const [, cleanupExtensions] = createExtensionManager({
   ipc: main.ipc,
   store,
@@ -201,6 +241,7 @@ async function cleanup() {
     cleanupProcessManager(),
     cleanupProject(),
     cleanupExtensions(),
+    projectMcp.stop(),
   ]);
   const errors = results
     .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
@@ -211,6 +252,7 @@ async function cleanup() {
   } else {
     console.debug('Successfully cleaned up all processes');
   }
+  closeProjectDb();
   main.cleanup();
 }
 

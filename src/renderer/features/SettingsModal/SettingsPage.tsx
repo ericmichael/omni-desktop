@@ -34,9 +34,16 @@ type SettingsTab = (typeof TABS)[number]['value'];
 const useStyles = makeStyles({
   root: {
     display: 'flex',
+    flexDirection: 'column',
     width: '100%',
     height: '100%',
+    minHeight: 0,
+    overflowY: 'auto',
     backgroundColor: tokens.colorNeutralBackground1,
+    '@media (min-width: 640px)': {
+      flexDirection: 'row',
+      overflowY: 'visible',
+    },
   },
   rootGlass: {
     backgroundColor: 'transparent',
@@ -116,11 +123,13 @@ const useStyles = makeStyles({
   content: {
     flex: '1 1 0',
     minWidth: 0,
-    overflowY: 'auto',
     paddingTop: '24px',
     paddingBottom: '24px',
     paddingLeft: '32px',
     paddingRight: '32px',
+    '@media (min-width: 640px)': {
+      overflowY: 'auto',
+    },
     '@media (max-width: 639px)': {
       paddingLeft: '16px',
       paddingRight: '16px',
@@ -139,21 +148,31 @@ const useStyles = makeStyles({
     paddingLeft: '16px',
     paddingRight: '16px',
     paddingTop: '12px',
+    paddingBottom: '12px',
     overflowX: 'auto',
     flexShrink: 0,
+    position: 'sticky',
+    top: 0,
+    zIndex: 1,
+    backgroundColor: tokens.colorNeutralBackground1,
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
     '@media (min-width: 640px)': {
       display: 'none',
     },
   },
   mobileTab: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
     paddingLeft: '12px',
     paddingRight: '12px',
-    paddingTop: '6px',
-    paddingBottom: '6px',
+    paddingTop: '10px',
+    paddingBottom: '10px',
+    minHeight: '40px',
     borderRadius: tokens.borderRadiusMedium,
     border: 'none',
     backgroundColor: 'transparent',
-    color: tokens.colorNeutralForeground3,
+    color: tokens.colorNeutralForeground2,
     cursor: 'pointer',
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
@@ -229,6 +248,7 @@ export const SettingsPage = memo(() => {
               activeTab === tab.value && styles.mobileTabActive
             )}
           >
+            {tab.icon}
             {tab.label}
           </button>
         ))}
