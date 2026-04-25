@@ -1096,8 +1096,8 @@ export type Ticket = {
   prMergedAt?: number;
 
   // Supervisor state
-  /** Persistent supervisor session ID (survives across start_run calls). */
-  supervisorSessionId?: string;
+  /** True when autopilot is driving this ticket. Flipped by start/stopSupervisor. */
+  autopilot?: boolean;
   /** Current supervisor lifecycle phase. */
   phase?: import('@/shared/ticket-phase').TicketPhase;
   /** Stamped whenever `phase` transitions. Drives stalled-ticket risk. */
@@ -1475,7 +1475,6 @@ type ProjectIpcEvents = Namespaced<
     /** Merge the ticket's feature branch into its base. On success, moves ticket to terminal column. */
     'merge-ticket': (ticketId: TicketId) => PrMergeResult;
     'set-auto-dispatch': (projectId: ProjectId, enabled: boolean) => void;
-    'get-supervisor-sandbox-status': (tabId: CodeTabId) => WithTimestamp<AgentProcessStatus> | null;
     'get-active-wip-tickets': () => Ticket[];
     // Context file operations (replaces project.brief)
     'read-context': (projectId: ProjectId) => string;
@@ -1484,6 +1483,66 @@ type ProjectIpcEvents = Namespaced<
     'list-project-files': (projectId: ProjectId) => ArtifactFileEntry[];
     'get-context-preview': (projectId: ProjectId) => string;
     'open-project-file': (projectId: ProjectId, relativePath: string) => void;
+  }
+>;
+
+/**
+ * Supervisor bridge. The Code column owns the session, the WebSocket, and the
+ * run lifecycle. Main only orchestrates — decides *when* to submit a prompt
+ * and reacts to forwarded events. No main-process session id; no prepare step;
+ * no client-request round trip (tool calls are handled entirely in the
+ * renderer's `buildClientToolHandler`).
+ */
+export type SupervisorBridgeRequest =
+  | {
+      /**
+       * Make sure a Code tab exists for this ticket. Creates one if needed,
+       * switches the layout to code. Resolves after the actor registers.
+       */
+      kind: 'ensure-column';
+      ticketId: TicketId;
+      workspaceDir?: string;
+    }
+  | {
+      /**
+       * Start a run. Routes through the same handleSubmit path the user's
+       * keyboard uses. `supervisorPrompt` is prepended to additional_instructions
+       * when set (autopilot runs only — user submits leave it undefined).
+       */
+      kind: 'run';
+      ticketId: TicketId;
+      prompt: string;
+      supervisorPrompt?: string;
+    }
+  | { kind: 'send'; ticketId: TicketId; message: string }
+  | { kind: 'stop'; ticketId: TicketId }
+  | {
+      /** Stop current run and mint a fresh session id on the column. */
+      kind: 'reset';
+      ticketId: TicketId;
+    }
+  | { kind: 'dispose'; ticketId: TicketId };
+
+export type SupervisorBridgeEvent =
+  | { kind: 'run-started'; ticketId: TicketId; runId: string }
+  | { kind: 'run-end'; ticketId: TicketId; reason: string }
+  | {
+      kind: 'message';
+      ticketId: TicketId;
+      content: string;
+      role?: 'user' | 'assistant';
+      toolName?: string;
+    }
+  | { kind: 'token-usage'; ticketId: TicketId; usage: TokenUsage }
+  | { kind: 'disconnected'; ticketId: TicketId };
+
+type SupervisorIpcEvents = Namespaced<
+  'supervisor',
+  {
+    /** Renderer reports the result of a bridge request issued by main. */
+    'dispatch-result': (requestId: string, ok: boolean, result?: { runId?: string }, error?: string) => void;
+    /** Renderer forwards a sandbox run event so main's orchestrator can react. */
+    event: (event: SupervisorBridgeEvent) => void;
   }
 >;
 
@@ -1938,7 +1997,8 @@ export type IpcEvents = MainProcessIpcEvents &
   ExtensionIpcEvents &
   WorkspaceSyncIpcEvents &
   AppControlIpcEvents &
-  BrowserIpcEvents;
+  BrowserIpcEvents &
+  SupervisorIpcEvents;
 
 /**
  * Store events. Main process emits these events, renderer process listens to them.
@@ -2083,6 +2143,18 @@ type WorkspaceSyncIpcRendererEvents = Namespaced<
 >;
 
 /**
+ * Supervisor bridge — main → renderer. Main issues commands to the column
+ * actor. Tool calls / approvals never round-trip through main; the column's
+ * `buildClientToolHandler` handles them directly.
+ */
+type SupervisorIpcRendererEvents = Namespaced<
+  'supervisor',
+  {
+    dispatch: [string, SupervisorBridgeRequest];
+  }
+>;
+
+/**
  * Browser events. Main process emits a full-state snapshot whenever any
  * browser mutation lands — tabs, history, bookmarks, profiles. Renderers
  * simply replace their atom.
@@ -2117,7 +2189,8 @@ export type IpcRendererEvents = TerminalIpcRendererEvents &
   PlatformIpcRendererEvents &
   ExtensionIpcRendererEvents &
   WorkspaceSyncIpcRendererEvents &
-  BrowserIpcRendererEvents;
+  BrowserIpcRendererEvents &
+  SupervisorIpcRendererEvents;
 
 // #region Config file types
 

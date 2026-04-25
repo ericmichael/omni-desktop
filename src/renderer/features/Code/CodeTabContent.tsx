@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { backendRunsOnHost,getArtifactsDir, getContainerArtifactsDir } from '@/lib/artifacts';
-import { buildCodeVariables } from '@/lib/client-tools';
+import { buildSessionVariables } from '@/lib/client-tools';
 import { SessionStartupShell } from '@/renderer/common/SessionStartupShell';
 import { Button } from '@/renderer/ds';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
@@ -85,6 +85,7 @@ const CodeRunningView = memo(
     tabId,
     terminalCwd,
     sidecarMode,
+    ticketId,
   }: {
     sandboxUrls: { uiUrl: string; codeServerUrl?: string; noVncUrl?: string };
     sessionId?: string;
@@ -105,6 +106,7 @@ const CodeRunningView = memo(
     tabId?: string;
     terminalCwd?: string;
     sidecarMode?: boolean;
+    ticketId?: TicketId;
   }) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
@@ -150,6 +152,7 @@ const CodeRunningView = memo(
             tabId={tabId}
             terminalCwd={terminalCwd}
             sidecarMode={sidecarMode}
+            ticketId={ticketId}
           />
         </div>
       </div>
@@ -254,6 +257,15 @@ export const CodeTabContent = memo(
       };
     }, []);
 
+    // Look up the ticket's autopilot flag so the column builds its variables
+    // with catch-all safe_tool_overrides when autopilot is driving it.
+    const ticketAutopilot = useMemo(() => {
+      if (!tab.ticketId) {
+        return false;
+      }
+      return store.tickets.some((t) => t.id === tab.ticketId && t.autopilot === true);
+    }, [tab.ticketId, store.tickets]);
+
     const clientToolVariables = useMemo(() => {
       const artifactsDir = tab.ticketId
         ? backendRunsOnHost(sandboxBackend)
@@ -262,12 +274,16 @@ export const CodeTabContent = memo(
             : undefined
           : getContainerArtifactsDir(tab.ticketId)
         : undefined;
-      return buildCodeVariables({
-        ...(project ? { projectId: project.id, projectLabel: project.label } : {}),
-        ...(tab.ticketId ? { ticketId: tab.ticketId } : {}),
-        ...(artifactsDir ? { artifactsDir } : {}),
+      return buildSessionVariables({
+        surface: 'code',
+        autopilot: ticketAutopilot,
+        context: {
+          ...(project ? { projectId: project.id, projectLabel: project.label } : {}),
+          ...(tab.ticketId ? { ticketId: tab.ticketId } : {}),
+          ...(artifactsDir ? { artifactsDir } : {}),
+        },
       });
-    }, [tab.ticketId, project, sandboxBackend, hostConfigDir]);
+    }, [tab.ticketId, project, sandboxBackend, hostConfigDir, ticketAutopilot]);
 
     // No project selected — show project picker
     if (!tab.projectId) {
@@ -307,6 +323,7 @@ export const CodeTabContent = memo(
             tabId={tab.id}
             terminalCwd={workspaceDir ?? undefined}
             sidecarMode={sidecarMode}
+            ticketId={tab.ticketId as TicketId | undefined}
           />
         ) : phase === 'error' ? (
           <CodeErrorView tabId={tab.id} retry={retry} />

@@ -1241,60 +1241,57 @@ const buildContextIdentifiers = (opts?: ContextIdentifierOpts): string => {
   return lines.join('\n');
 };
 
-/** Autopilot sessions: ticket tools + read-only context tools + column-scoped app control. */
-export const buildAutopilotVariables = (opts?: ContextIdentifierOpts): Record<string, unknown> => {
-  const allTools = [
-    ...TICKET_CLIENT_TOOLS,
-    ...READONLY_CONTEXT_TOOLS,
-    ...APP_CONTROL_TOOLS,
-    ...BROWSER_CLIENT_TOOLS,
-  ];
-  return {
-    client_tools: allTools,
-    safe_tool_overrides: { safe_tool_names: extractSafeToolNames(allTools) },
-    additional_instructions: buildContextIdentifiers(opts),
-  };
+/**
+ * Build the variables bundle attached to a run / session.
+ *
+ * - `surface` picks the tool set. Chat surface gets project/inbox/page tools but
+ *   not code-deck-only tools. Code surface gets everything.
+ * - `autopilot` picks the approval policy. When true, we emit the catch-all
+ *   `safe_tool_patterns: ['.*']` so every tool runs without approval, and the
+ *   caller can supply a `supervisorPrompt` to prepend to additional_instructions.
+ *   When false, only tools marked `safe: true` on the client skip approval.
+ *
+ * One builder, two switches — this replaces the old `buildAutopilotVariables` /
+ * `buildInteractiveVariables` / `buildCodeVariables` trio whose divergent
+ * whitelists were the source of the "tool calls require approval" bug.
+ */
+export type SessionVariablesArgs = {
+  surface: 'chat' | 'code';
+  autopilot?: boolean;
+  context?: ContextIdentifierOpts;
+  /** Prepended to additional_instructions when autopilot is true. */
+  supervisorPrompt?: string;
 };
 
-/** Interactive sessions (Chat tab): all tools except code-deck-only tools. */
-export const buildInteractiveVariables = (opts?: ContextIdentifierOpts): Record<string, unknown> => {
-  const allTools = [
-    ...TICKET_CLIENT_TOOLS,
-    ...READONLY_CONTEXT_TOOLS,
-    ...PROJECT_CLIENT_TOOLS,
-    ...MILESTONE_CLIENT_TOOLS,
+const CHAT_CLIENT_TOOLS: readonly ClientToolDef[] = [
+  ...TICKET_CLIENT_TOOLS,
+  ...READONLY_CONTEXT_TOOLS,
+  ...PROJECT_CLIENT_TOOLS,
+  ...MILESTONE_CLIENT_TOOLS,
+  ...PAGE_CLIENT_TOOLS,
+  ...INBOX_CLIENT_TOOLS,
+  ...UI_CLIENT_TOOLS,
+  ...APP_CONTROL_TOOLS,
+  ...BROWSER_CLIENT_TOOLS,
+];
 
-    ...PAGE_CLIENT_TOOLS,
-    ...INBOX_CLIENT_TOOLS,
-    ...UI_CLIENT_TOOLS,
-    ...APP_CONTROL_TOOLS,
-    ...BROWSER_CLIENT_TOOLS,
-  ];
+const CODE_CLIENT_TOOLS: readonly ClientToolDef[] = [
+  ...CHAT_CLIENT_TOOLS,
+  ...CODE_UI_TOOLS,
+];
+
+export const buildSessionVariables = (args: SessionVariablesArgs): Record<string, unknown> => {
+  const { surface, autopilot = false, context, supervisorPrompt } = args;
+  const tools = surface === 'code' ? CODE_CLIENT_TOOLS : CHAT_CLIENT_TOOLS;
+  const baseInstructions = buildContextIdentifiers(context);
+  const instructions =
+    autopilot && supervisorPrompt ? `${supervisorPrompt}\n\n${baseInstructions}` : baseInstructions;
+
   return {
-    client_tools: allTools,
-    safe_tool_overrides: { safe_tool_names: extractSafeToolNames(allTools) },
-    additional_instructions: buildContextIdentifiers(opts),
-  };
-};
-
-/** Code deck sessions: interactive tools + code-deck-only tools (open_preview, etc.). */
-export const buildCodeVariables = (opts?: ContextIdentifierOpts): Record<string, unknown> => {
-  const allTools = [
-    ...TICKET_CLIENT_TOOLS,
-    ...READONLY_CONTEXT_TOOLS,
-    ...PROJECT_CLIENT_TOOLS,
-    ...MILESTONE_CLIENT_TOOLS,
-
-    ...PAGE_CLIENT_TOOLS,
-    ...INBOX_CLIENT_TOOLS,
-    ...UI_CLIENT_TOOLS,
-    ...CODE_UI_TOOLS,
-    ...APP_CONTROL_TOOLS,
-    ...BROWSER_CLIENT_TOOLS,
-  ];
-  return {
-    client_tools: allTools,
-    safe_tool_overrides: { safe_tool_names: extractSafeToolNames(allTools) },
-    additional_instructions: buildContextIdentifiers(opts),
+    client_tools: tools,
+    safe_tool_overrides: autopilot
+      ? { safe_tool_patterns: ['.*'] }
+      : { safe_tool_names: extractSafeToolNames(tools) },
+    additional_instructions: instructions,
   };
 };

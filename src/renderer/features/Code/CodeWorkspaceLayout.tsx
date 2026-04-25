@@ -14,6 +14,7 @@ import { persistedStoreApi } from '@/renderer/services/store';
 import { makeAppHandleId } from '@/shared/app-control-types';
 import type { AppDescriptor, AppId } from '@/shared/app-registry';
 import { buildAppRegistry } from '@/shared/app-registry';
+import type { TicketId } from '@/shared/types';
 
 import { AppIcon } from './AppIcon';
 import { EnvironmentDock } from './EnvironmentDock';
@@ -54,6 +55,8 @@ type CodeWorkspaceLayoutProps = {
    * deck column). Chat stays visible and no in-column overlay is drawn.
    */
   sidecarMode?: boolean;
+  /** Ticket bound to this column — enables the supervisor bridge actor. */
+  ticketId?: TicketId;
 };
 
 /** Build a `WebviewRegistryProps` entry from an AppDescriptor + layout scope. */
@@ -345,7 +348,7 @@ const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass, tabId, terminalCw
 });
 AppSurfaceView.displayName = 'AppSurfaceView';
 
-export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, variables, codeServerSrc, vncSrc, previewUrl, onPreviewUrlChange, activeApp = 'chat', onActiveAppChange, onReady, headerActionsTargetId, headerActionsCompact, sandboxLabel, onClientToolCall, pendingPlan, onPlanDecision, dockTargetId, isGlass, tabId, terminalCwd, sidecarMode }: CodeWorkspaceLayoutProps) => {
+export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, variables, codeServerSrc, vncSrc, previewUrl, onPreviewUrlChange, activeApp = 'chat', onActiveAppChange, onReady, headerActionsTargetId, headerActionsCompact, sandboxLabel, onClientToolCall, pendingPlan, onPlanDecision, dockTargetId, isGlass, tabId, terminalCwd, sidecarMode, ticketId }: CodeWorkspaceLayoutProps) => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const registry = useMemo(() => buildAppRegistry(store.customApps ?? []), [store.customApps]);
@@ -399,7 +402,7 @@ export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, va
     <div className={mergeClasses(styles.root, isGlass && styles.rootGlass, isGlass && styles.glassChatSurfaces)}>
       <div className={styles.mainArea}>
         <div className={mergeClasses(styles.mainContent, !sidecarMode && activeApp !== 'chat' && styles.mainContentHidden)}>
-          <OmniAgentsApp uiUrl={uiSrc} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables} onReady={handleUiReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} sandboxLabel={sandboxLabel} onClientToolCall={onClientToolCall} pendingPlan={pendingPlan} onPlanDecision={onPlanDecision} />
+          <OmniAgentsApp uiUrl={uiSrc} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables} onReady={handleUiReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} sandboxLabel={sandboxLabel} onClientToolCall={onClientToolCall} pendingPlan={pendingPlan} onPlanDecision={onPlanDecision} ticketId={ticketId} />
         </div>
         {!sidecarMode && (
           <AnimatePresence>

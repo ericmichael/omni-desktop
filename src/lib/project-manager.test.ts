@@ -725,12 +725,9 @@ describe('ProjectManager', () => {
   // processManager wiring
   // -------------------------------------------------------------------------
   describe('processManager integration', () => {
-    it('sets processManager.statusFallback when a processManager is provided', () => {
-      const processManager: { statusFallback?: unknown } = {};
-      makePm({ tickets: [{ id: 't1' }] }, { processManager });
-      expect(typeof processManager.statusFallback).toBe('function');
-    });
-
+    // `statusFallback` was removed along with the main-process WS client —
+    // the Code tab's ProcessManager entry is now authoritative for sandbox
+    // status, so the orchestrator has nothing to inject.
     it('does not fail when no processManager is provided', () => {
       expect(() => makePm({ tickets: [{ id: 't1' }] })).not.toThrow();
     });

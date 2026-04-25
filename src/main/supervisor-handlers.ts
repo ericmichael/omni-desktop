@@ -17,7 +17,6 @@ export function registerSupervisorHandlers(ipc: IIpcListener, supervisors: Super
   );
   ipc.handle('project:reset-supervisor-session', (_, ticketId) => supervisors.resetSupervisorSession(ticketId));
   ipc.handle('project:set-auto-dispatch', (_, projectId, enabled) => supervisors.setAutoDispatch(projectId, enabled));
-  ipc.handle('project:get-supervisor-sandbox-status', (_, tabId) => supervisors.getSupervisorStatusForCodeTab(tabId));
   ipc.handle('project:get-active-wip-tickets', () => supervisors.getActiveWipTickets());
   ipc.handle('project:get-ticket-workspace', (_, ticketId) => supervisors.getTicketWorkspaceLocked(ticketId));
   ipc.handle('project:get-tasks', () => supervisors.listTasks());
@@ -30,7 +29,6 @@ export function registerSupervisorHandlers(ipc: IIpcListener, supervisors: Super
     'project:send-supervisor-message',
     'project:reset-supervisor-session',
     'project:set-auto-dispatch',
-    'project:get-supervisor-sandbox-status',
     'project:get-active-wip-tickets',
     'project:get-ticket-workspace',
     'project:get-tasks',

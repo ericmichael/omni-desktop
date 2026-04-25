@@ -28,8 +28,7 @@ export const openTicketInCode = (ticketId: TicketId): Promise<void> => {
 
 const runOpenTicketInCode = async (ticketId: TicketId): Promise<void> => {
   // Fast path: if a tab for this ticket already exists, just focus it and
-  // switch layouts. Skips the workspace-resolution round-trip (which can
-  // create a worktree lock) and avoids spawning a duplicate column.
+  // switch layouts. The tab owns its session id, so we never pass one in.
   const tabs = persistedStoreApi.getKey('codeTabs') ?? [];
   const existing = tabs.find((t) => t.ticketId === ticketId);
   if (existing) {
@@ -54,39 +53,8 @@ const runOpenTicketInCode = async (ticketId: TicketId): Promise<void> => {
   const workspaceDir = await ticketApi.getTicketWorkspace(ticketId);
 
   await codeApi.addTabForTicket(ticketId, ticket.projectId, {
-    sessionId: ticket.supervisorSessionId,
     ticketTitle: ticket.title,
     workspaceDir,
   });
   await persistedStoreApi.setKey('layoutMode', 'code');
 };
-
-/**
- * Subscribe to ticket changes and sync supervisorSessionId to linked Code tabs.
- */
-const startSessionSync = (): void => {
-  // Track previous session IDs so we only sync on actual changes
-  const prevSessionIds = new Map<TicketId, string | undefined>();
-
-  $tickets.subscribe((tickets) => {
-    const codeTabs = persistedStoreApi.getKey('codeTabs') ?? [];
-    for (const tab of codeTabs) {
-      if (!tab.ticketId) {
-continue;
-}
-      const ticket = tickets[tab.ticketId];
-      if (!ticket) {
-continue;
-}
-      const prev = prevSessionIds.get(tab.ticketId);
-      if (ticket.supervisorSessionId !== prev) {
-        prevSessionIds.set(tab.ticketId, ticket.supervisorSessionId);
-        if (ticket.supervisorSessionId && ticket.supervisorSessionId !== tab.sessionId) {
-          codeApi.setTabSessionId(tab.id, ticket.supervisorSessionId);
-        }
-      }
-    }
-  });
-};
-
-startSessionSync();

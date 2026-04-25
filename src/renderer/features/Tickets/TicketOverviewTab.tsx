@@ -452,11 +452,11 @@ return;
       </div>
 
       {/* Supervisor info */}
-      {ticket.supervisorSessionId && (
+      {(ticket.autopilot || ticket.phase) && (
         <div className={styles.section}>
           <SectionLabel>Supervisor</SectionLabel>
           <div className={styles.infoText}>
-            <p>Session: {ticket.supervisorSessionId}</p>
+            {ticket.autopilot && <p>Autopilot: on</p>}
             {ticket.phase && <p>Phase: {ticket.phase}</p>}
           </div>
         </div>

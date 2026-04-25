@@ -96,7 +96,7 @@ export const codeApi = {
   addTabForTicket: async (
     ticketId: TicketId,
     projectId: ProjectId,
-    opts?: { sessionId?: string; ticketTitle?: string; workspaceDir?: string }
+    opts?: { ticketTitle?: string; workspaceDir?: string }
   ): Promise<CodeTab> => {
     const existingTabs = persistedStoreApi.getKey('codeTabs') ?? [];
     const existing = existingTabs.find((t) => t.ticketId === ticketId);
@@ -112,7 +112,6 @@ export const codeApi = {
       id: nanoid(),
       projectId,
       ticketId,
-      sessionId: opts?.sessionId,
       ticketTitle: opts?.ticketTitle,
       workspaceDir: opts?.workspaceDir,
       createdAt: Date.now(),

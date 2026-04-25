@@ -22,11 +22,6 @@ type UseAutoLaunchOptions = {
   processId: string;
   /** Workspace directory. When null the machine won't launch. */
   workspaceDir: string | null;
-  /**
-   * When true, check `project:get-supervisor-sandbox-status` before starting
-   * to avoid launching a duplicate sandbox when a supervisor already owns one.
-   */
-  supervisorAware?: boolean;
   /** Logger tag. */
   logLabel?: string;
 };
@@ -37,7 +32,7 @@ type UseAutoLaunchOptions = {
  * Side effects are driven by XState invoke actors — no phase-gated useEffects.
  */
 export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
-  const { processId, supervisorAware = false, logLabel } = opts;
+  const { processId, logLabel } = opts;
   const initialized = useStore($initialized);
   const store = useStore(persistedStoreApi.$atom);
   const sandboxEnabled = store.sandboxBackend !== 'none';
@@ -50,8 +45,6 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
   const previousWorkspaceDirRef = useRef(opts.workspaceDir);
   const storeRef = useRef(store);
   storeRef.current = store;
-  const supervisorAwareRef = useRef(supervisorAware);
-  supervisorAwareRef.current = supervisorAware;
 
   const actors = useMemo(() => ({
     checkRuntime: fromCallback<AutoLaunchEvent>(({ sendBack }) => {
@@ -126,24 +119,10 @@ return;
 return;
 }
 
-        // If supervisor-aware, check for an existing supervisor sandbox first
-        if (supervisorAwareRef.current) {
-          const existing = $agentStatuses.get()[processIdRef.current];
-          if (existing && (existing.type === 'running' || existing.type === 'connecting' || existing.type === 'starting')) {
-            sendBack({ type: 'CONFIG_OK' });
-            return;
-          }
-          try {
-            const supervisorStatus = await emitter.invoke('project:get-supervisor-sandbox-status', processIdRef.current);
-            if (!cancelled && supervisorStatus && (supervisorStatus.type === 'running' || supervisorStatus.type === 'connecting' || supervisorStatus.type === 'starting')) {
-              $agentStatuses.setKey(processIdRef.current, supervisorStatus);
-              sendBack({ type: 'CONFIG_OK' });
-              return;
-            }
-          } catch { /* no supervisor sandbox */ }
-          if (cancelled) {
-return;
-}
+        const existing = $agentStatuses.get()[processIdRef.current];
+        if (existing && (existing.type === 'running' || existing.type === 'connecting' || existing.type === 'starting')) {
+          sendBack({ type: 'CONFIG_OK' });
+          return;
         }
 
         agentProcessApi.start(processIdRef.current, { workspaceDir: wd });
@@ -165,19 +144,6 @@ return;
 }
         $agentStatuses.setKey(processIdRef.current, status);
       }).catch(() => {});
-
-      // Also check supervisor sandbox if applicable
-      if (supervisorAwareRef.current) {
-        emitter.invoke('project:get-supervisor-sandbox-status', processIdRef.current).then((status) => {
-          if (cancelled || !status || status.type === 'uninitialized') {
-return;
-}
-          const current = $agentStatuses.get()[processIdRef.current];
-          if (!current || current.type === 'uninitialized') {
-            $agentStatuses.setKey(processIdRef.current, status);
-          }
-        }).catch(() => {});
-      }
 
       const unsub = $agentStatuses.subscribe((allStatuses) => {
         const status = allStatuses[processIdRef.current];
@@ -245,15 +211,6 @@ return;
 
     let cancelled = false;
     void (async () => {
-      if (supervisorAwareRef.current) {
-        try {
-          const supervisorStatus = await emitter.invoke('project:get-supervisor-sandbox-status', processIdRef.current);
-          if (!cancelled && supervisorStatus && (supervisorStatus.type === 'running' || supervisorStatus.type === 'connecting' || supervisorStatus.type === 'starting')) {
-            return;
-          }
-        } catch {}
-      }
-
       if (cancelled) {
 return;
 }

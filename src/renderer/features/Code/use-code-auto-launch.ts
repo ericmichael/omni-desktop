@@ -8,15 +8,14 @@ import { $codeTabErrors, $codeTabPhases } from './state';
 export type { AutoLaunchPhase };
 
 /**
- * Per-tab auto-launch hook. Thin wrapper over useAutoLaunch with:
- * - supervisor awareness (avoids duplicating supervisor-owned sandboxes)
- * - phase/error sync to nanostore maps for non-React consumers
+ * Per-tab auto-launch hook. Thin wrapper over useAutoLaunch with phase/error
+ * sync to nanostore maps for non-React consumers. The Code tab owns the one
+ * sandbox per ticket now — there's no separate supervisor sandbox to avoid.
  */
 export const useCodeAutoLaunch = (tabId: CodeTabId, workspaceDir: string | null) => {
   const { phase, error, retry, launch, actor } = useAutoLaunch({
     processId: tabId,
     workspaceDir,
-    supervisorAware: true,
     logLabel: 'autoLaunch:code',
   });
 

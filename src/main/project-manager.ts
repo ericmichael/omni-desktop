@@ -10,12 +10,11 @@ import { promisify } from 'util';
 import { getArtifactsDir } from '@/lib/artifacts';
 import { listArtifactEntries, readArtifactFile, resolveArtifactPath } from '@/lib/artifacts-fs';
 import { getGitFilesChanged, resolveWorkspaceMergeBase, resolveWorktreeMergeBase } from '@/lib/git-files-changed';
-import { checkMerge, mergeBranch } from '@/lib/pr-merge';
 import { INBOX_SWEEP_INTERVAL_MS } from '@/lib/inbox-expiry';
-import type { IMachineFactory, ISandboxFactory, IWorkflowLoader, ProjectManagerDeps } from '@/lib/project-manager-deps';
+import { checkMerge, mergeBranch } from '@/lib/pr-merge';
+import type { IWorkflowLoader, ProjectManagerDeps } from '@/lib/project-manager-deps';
 import { runMigrations as runSchemaMigrations } from '@/lib/project-migrations';
 import { type HistoryRow, parseSessionHistoryRows } from '@/lib/session-history';
-import { AgentProcess } from '@/main/agent-process';
 import { registerInboxHandlers } from '@/main/inbox-handlers';
 import { InboxManager, type InboxManagerStore } from '@/main/inbox-manager';
 import { registerMilestoneHandlers } from '@/main/milestone-handlers';
@@ -24,6 +23,7 @@ import { registerPageHandlers } from '@/main/page-handlers';
 import { PageManager, type PageManagerStore } from '@/main/page-manager';
 import type { ProcessManager } from '@/main/process-manager';
 import { registerProjectHandlers } from '@/main/project-handlers';
+import { SupervisorBridge } from '@/main/supervisor-bridge';
 import { registerSupervisorHandlers } from '@/main/supervisor-handlers';
 import { SupervisorOrchestrator } from '@/main/supervisor-orchestrator';
 import { ensureDirectory, getDefaultWorkspaceDir, getOmniConfigDir, getProjectDir } from '@/main/util';
@@ -95,11 +95,10 @@ export class ProjectManager {
   /** Interval handle for inbox expiry sweep. */
   private inboxSweepTimer: ReturnType<typeof setInterval> | null = null;
 
-  /** Injectable factories for testing. Always set — defaults to a real-AgentProcess factory. */
-  private sandboxFactory: ISandboxFactory;
-  private machineFactory?: IMachineFactory;
+  /** Bridge to the renderer's column registry. Drives SUBMIT/stop/send. */
+  readonly bridge: SupervisorBridge;
 
-  /** Optional ProcessManager — when set, supervisor reuses Code tab sandboxes. */
+  /** Optional ProcessManager — used to stop Code tab sandboxes during cleanup. */
   private processManager?: ProcessManager;
 
   /** Optional AppControlManager — when set, autopilot agents get the `app_*` client tools. */
@@ -137,12 +136,7 @@ export class ProjectManager {
     this.sendToWindow = arg.sendToWindow;
     this.processManager = arg.processManager;
     this.appControlManager = arg.appControlManager;
-    // Let ProcessManager fall back to supervisor sandbox status for ticket-linked tabs.
-    // The orchestrator may not exist yet at this point in the constructor — defer
-    // the lookup with an arrow function.
-    if (this.processManager) {
-      this.processManager.statusFallback = (processId) => this.supervisors.getSupervisorStatusForCodeTab(processId);
-    }
+    this.bridge = deps?.bridge ?? new SupervisorBridge(arg.sendToWindow);
     this.workflowLoader =
       deps?.workflowLoader ??
       new WorkflowLoader({
@@ -162,11 +156,6 @@ export class ProjectManager {
           this.migrateOrphanedTickets(projectId, pipeline);
         },
       });
-    this.sandboxFactory = deps?.sandboxFactory ?? {
-      create: (opts) => new AgentProcess(opts),
-    };
-    this.machineFactory = deps?.machineFactory;
-
     const pageStore: PageManagerStore = {
       getPages: () => (this.store.get('pages') ?? []) as Page[],
       setPages: (items) => {
@@ -231,7 +220,6 @@ export class ProjectManager {
       host: {
         getTicketById: (ticketId) => this.getTicketById(ticketId),
         getTicketsByProject: (projectId) => this.getTicketsByProject(projectId),
-        addTicket: (input) => this.addTicket(input),
         updateTicket: (ticketId, patch) => this.updateTicket(ticketId, patch),
         isTerminalColumn: (projectId, columnId) => this.isTerminalColumn(projectId, columnId),
         getColumn: (projectId, columnId) => this.getColumn(projectId, columnId),
@@ -240,17 +228,12 @@ export class ProjectManager {
         getNextTicket: (projectId) => this.getNextTicket(projectId),
         moveTicketToColumn: (ticketId, columnId) => this.moveTicketToColumn(ticketId, columnId),
         updateProject: (projectId, patch) => this.updateProject(projectId, patch),
-        getMilestonesByProject: (projectId) => this.milestones.getByProject(projectId),
-        getMilestoneById: (milestoneId) => this.milestones.getById(milestoneId),
         getPagesByProject: (projectId) => this.pages.getByProject(projectId),
-        getPageById: (pageId) => this.pages.getById(pageId),
-        readPageContent: (pageId) => this.pages.readContent(pageId),
         getProjectDirPath: (project) => this.getProjectDirPath(project),
       },
       workflowLoader: this.workflowLoader,
       sendToWindow: this.sendToWindow,
-      sandboxFactory: this.sandboxFactory,
-      machineFactory: this.machineFactory,
+      bridge: this.bridge,
       processManager: this.processManager,
       appControlManager: this.appControlManager,
     });
@@ -577,11 +560,15 @@ export class ProjectManager {
   };
 
   removeTicket = (id: TicketId): void => {
-    // Stop machine if running
+    // Stop supervisor state if active, ask renderer to release its column binding,
+    // and stop the Code tab's sandbox if one is still running.
     const machineEntry = this.supervisors.machines.get(id);
     if (machineEntry) {
-      void machineEntry.machine.dispose();
-      void machineEntry.sandbox?.exit();
+      void this.bridge.dispose(id).catch(() => {});
+      if (machineEntry.tabId && this.processManager) {
+        void this.processManager.stop(machineEntry.tabId).catch(() => {});
+      }
+      machineEntry.state.dispose();
       this.supervisors.machines.delete(id);
     }
 
@@ -882,8 +869,20 @@ export class ProjectManager {
         console.log(
           `[ProjectManager] Ticket ${ticketId} moved to terminal column "${columnId}" — stopping supervisor and cleaning up workspace.`
         );
+        // Do the stop + cleanup inside a single ticket lock. We bypass
+        // `stopSupervisor` (which takes its own lock) to avoid a nested
+        // deadlock; the stop is inlined here.
         void this.supervisors.withTicketLock(ticketId, async () => {
-          await entry.machine.stop();
+          entry.state.cancelRetryTimer();
+          try {
+            await this.bridge.stop(ticketId);
+          } catch (err) {
+            console.warn(`[ProjectManager] bridge.stop failed for ${ticketId}:`, err);
+          }
+          entry.state.setRunId(null);
+          if (entry.state.getPhase() !== 'idle') {
+            entry.state.forcePhase('idle');
+          }
           await this.supervisors.cleanupTicketWorkspace(ticketId);
         });
       } else {
@@ -1058,13 +1057,20 @@ export class ProjectManager {
     this.workflowLoader.dispose();
     await this.pages.dispose();
 
-    // Dispose all machines
+    // Dispose all supervisor state records + release renderer column bindings.
     for (const [ticketId, entry] of this.supervisors.machines) {
-      await entry.machine.dispose();
+      try {
+        await this.bridge.dispose(ticketId);
+      } catch {
+        // Best-effort during shutdown
+      }
+      entry.state.dispose();
       this.supervisors.machines.delete(ticketId);
     }
 
     await this.supervisors.exitAllTasks();
+    this.supervisors.dispose();
+    this.bridge.disposeAll();
   };
 }
 
@@ -1081,7 +1087,7 @@ export const createProjectManager = (arg: {
   ProjectManager.migrateToSupervisor(store);
 
   const projectManager = new ProjectManager({ store, sendToWindow, processManager, appControlManager });
-  const { supervisors, milestones, inbox, pages } = projectManager;
+  const { supervisors, milestones, inbox, pages, bridge } = projectManager;
   supervisors.restorePersistedTasks();
 
   // Per-module IPC handler registration. Each helper returns the channel
@@ -1093,6 +1099,7 @@ export const createProjectManager = (arg: {
     ...registerMilestoneHandlers(ipc, milestones),
     ...registerPageHandlers(ipc, pages, (projectId) => projectManager.getProjectDir(projectId)),
     ...registerInboxHandlers(ipc, inbox),
+    ...bridge.registerIpc(ipc),
   ];
 
   const cleanup = async () => {

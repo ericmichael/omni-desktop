@@ -2,14 +2,15 @@ import { useStore } from '@nanostores/react'
 import { AnimatePresence, motion } from 'framer-motion'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { rehydrateHistory } from '@/lib/rehydrate-history'
 import { persistedStoreApi } from '@/renderer/services/store'
+import { forwardEvent, registerColumnActor } from '@/renderer/services/supervisor-bridge'
+import type { TicketId } from '@/shared/types'
 
 import type { PendingMessage } from './ChatShell'
 import { type ArtifactItem,ArtifactsPanel } from './components/ArtifactsPanel'
 import { Header } from './components/Header'
 import { Input } from './components/Input'
-import { type Attachment, type MessageItem,MessageList } from './components/MessageList'
+import { type Attachment,MessageList } from './components/MessageList'
 import { ResizableDivider } from './components/ResizableDivider'
 import { type SessionItem,SessionList } from './components/SessionList'
 import { Sidebar } from './components/Sidebar'
@@ -27,7 +28,7 @@ export type ClientToolCallHandler = (
   args: Record<string, unknown>,
 ) => Promise<{ ok: boolean; result?: Record<string, unknown>; error?: Record<string, unknown> }>;
 
-export function App({ sessionId: sessionIdProp, onSessionChange, variables: variablesProp, greeting, onReady, headerActionsTargetId, headerActionsCompact, pendingMessages, sandboxLabel: sandboxLabelProp, onClientToolCall, pendingPlan, onPlanDecision }: { sessionId?: string; onSessionChange?: (sessionId: string | undefined) => void; variables?: Record<string, unknown>; greeting?: string; onReady?: () => void; headerActionsTargetId?: string; headerActionsCompact?: boolean; pendingMessages?: PendingMessage[]; sandboxLabel?: string; onClientToolCall?: ClientToolCallHandler; pendingPlan?: import('@/shared/chat-types').PlanItem | null; onPlanDecision?: (approved: boolean) => void }) {
+export function App({ sessionId: sessionIdProp, onSessionChange, variables: variablesProp, greeting, onReady, headerActionsTargetId, headerActionsCompact, pendingMessages, sandboxLabel: sandboxLabelProp, onClientToolCall, pendingPlan, onPlanDecision, ticketId }: { sessionId?: string; onSessionChange?: (sessionId: string | undefined) => void; variables?: Record<string, unknown>; greeting?: string; onReady?: () => void; headerActionsTargetId?: string; headerActionsCompact?: boolean; pendingMessages?: PendingMessage[]; sandboxLabel?: string; onClientToolCall?: ClientToolCallHandler; pendingPlan?: import('@/shared/chat-types').PlanItem | null; onPlanDecision?: (approved: boolean) => void; ticketId?: TicketId }) {
   const uiConfig = useUiConfig()
   const launcherStore = useStore(persistedStoreApi.$atom)
   const [ui, setUI] = useState<UIState>('connecting')
@@ -182,6 +183,11 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
         setModelInfo({ model: p?.model, max_input_tokens: p?.max_input_tokens, max_output_tokens: p?.max_output_tokens })
       } catch {}
     })
+    // Single dispatcher for every `client_request` the server sends.
+    //   - ui.add_artifact → local artifact panel
+    //   - tool.call → local client-tool handler (works in every mode — autopilot
+    //     agents share the same path as user-initiated agents)
+    // `ui.request_tool_approval` / `ui.set_status` are handled by use-chat-session.ts.
     const offClientRequest = client.on('client_request', (p: any) => {
       const fn = String(p?.function ?? '')
       if (fn === 'ui.add_artifact') {
@@ -202,8 +208,8 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
       if (fn === 'tool.call') {
         const request_id = String(p?.request_id ?? '')
         if (!request_id) {
-return
-}
+          return
+        }
         const args = (p?.args || {}) as Record<string, unknown>
         const toolName = String(args.tool ?? '')
         const toolArgs = (args.arguments ?? {}) as Record<string, unknown>
@@ -258,7 +264,7 @@ return
 
   // moved below handleSubmit
 
-  const handleSubmit = useCallback(async (text: string, files?: File[]) => {
+  const handleSubmit = useCallback(async (text: string, files?: File[], supervisorPrompt?: string) => {
     // Slash commands
     if (text.startsWith('/')) {
       const parts = text.trim().split(/\s+/)
@@ -362,12 +368,24 @@ param.filename = f.name
       // Tell the machine we're submitting (appends user message, transitions to starting)
       submit(text, attachments.length ? attachments : undefined)
       // Merge parent-provided variables (e.g. client_tools) with workspace variables
-      const workspaceVars = (workspacePath && workspaceSupported)
+      const workspaceVars: Record<string, unknown> | undefined = (workspacePath && workspaceSupported)
         ? { workspace_root: workspacePath }
         : undefined
-      const variables = (variablesProp || workspaceVars)
+      const baseVariables: Record<string, unknown> | undefined = (variablesProp || workspaceVars)
         ? { ...variablesProp, ...workspaceVars }
         : undefined
+      // When main is driving autopilot, prepend the supervisor prompt to
+      // additional_instructions for this run only.
+      const existingInstructions = baseVariables?.additional_instructions
+      const variables: Record<string, unknown> | undefined = supervisorPrompt
+        ? {
+            ...(baseVariables ?? {}),
+            additional_instructions:
+              typeof existingInstructions === 'string'
+                ? `${supervisorPrompt}\n\n${existingInstructions}`
+                : supervisorPrompt,
+          }
+        : baseVariables
       await client.startRun(text, sessionId, variables, content)
       if (workspaceSupported) {
 setWorkspaceLocked(true)
@@ -384,6 +402,140 @@ return
     stop()
     client.stopRun(runId).catch(() => {})
   }, [client, stop, runId])
+
+  // Stable ref so the supervisor-bridge effect can call the latest handleSubmit
+  // without re-registering the actor on every deps change.
+  const handleSubmitRef = useRef(handleSubmit)
+  useEffect(() => {
+    handleSubmitRef.current = handleSubmit
+  }, [handleSubmit])
+
+  // ---------------------------------------------------------------------------
+  // Supervisor bridge — forward a narrow set of WS events to main's orchestrator
+  // and register this column's submit / send / stop / reset as the one path
+  // autopilot uses. No session id flows through here; the column is
+  // authoritative.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!ticketId) {
+      return
+    }
+    type RunEvent = {
+      run_id?: unknown
+      end_reason?: unknown
+      content?: unknown
+      role?: unknown
+      tool_name?: unknown
+      total_token_usage?: { input_tokens?: unknown; output_tokens?: unknown; total_tokens?: unknown }
+      input_tokens?: unknown
+      output_tokens?: unknown
+      total_tokens?: unknown
+    }
+    const num = (v: unknown): number => Number(v ?? 0)
+    const offs: Array<() => void> = []
+    const runStartedWaiters: Array<(runId: string) => void> = []
+
+    offs.push(
+      client.on('run_started', (raw: unknown) => {
+        const p = (raw ?? {}) as RunEvent
+        const runId = String(p.run_id ?? '')
+        forwardEvent({ kind: 'run-started', ticketId, runId })
+        // Wake anyone awaiting the next run_started (autopilot submits).
+        const pending = runStartedWaiters.splice(0, runStartedWaiters.length)
+        for (const w of pending) {
+          w(runId)
+        }
+      })
+    )
+    offs.push(
+      client.on('run_end', (raw: unknown) => {
+        const p = (raw ?? {}) as RunEvent
+        forwardEvent({ kind: 'run-end', ticketId, reason: String(p.end_reason ?? 'completed') })
+      })
+    )
+    offs.push(
+      client.on('message_output', (raw: unknown) => {
+        const p = (raw ?? {}) as RunEvent
+        forwardEvent({
+          kind: 'message',
+          ticketId,
+          content: String(p.content ?? ''),
+          role: p.role === 'user' ? 'user' : 'assistant',
+          toolName: typeof p.tool_name === 'string' ? p.tool_name : undefined,
+        })
+      })
+    )
+    offs.push(
+      client.on('token_usage', (raw: unknown) => {
+        const p = (raw ?? {}) as RunEvent
+        const u = p.total_token_usage ?? p
+        forwardEvent({
+          kind: 'token-usage',
+          ticketId,
+          usage: {
+            inputTokens: num(u.input_tokens),
+            outputTokens: num(u.output_tokens),
+            totalTokens: num(u.total_tokens),
+          },
+        })
+      })
+    )
+
+    const nextRunId = (timeoutMs = 60_000): Promise<string> =>
+      new Promise((resolve, reject) => {
+        const t = setTimeout(() => {
+          const i = runStartedWaiters.indexOf(wake)
+          if (i >= 0) {
+            runStartedWaiters.splice(i, 1)
+          }
+          reject(new Error('Timed out waiting for run_started'))
+        }, timeoutMs)
+        const wake = (runId: string): void => {
+          clearTimeout(t)
+          resolve(runId)
+        }
+        runStartedWaiters.push(wake)
+      })
+
+    const unregister = registerColumnActor({
+      ticketId,
+      submit: async (prompt, supervisorPrompt) => {
+        // Same path as user submit. When `supervisorPrompt` is set (autopilot
+        // drive), prepend it to additional_instructions for this run only.
+        const waiter = nextRunId()
+        await handleSubmitRef.current(prompt, undefined, supervisorPrompt)
+        const runId = await waiter
+        return { runId }
+      },
+      send: async (message) => {
+        const waiter = nextRunId()
+        await handleSubmitRef.current(message, undefined)
+        await waiter
+      },
+      stop: async () => {
+        const currentRunId = actor.getSnapshot().context.runId
+        if (currentRunId) {
+          await client.stopRun(currentRunId).catch(() => {})
+        }
+        machine.stop()
+      },
+      reset: async () => {
+        const currentRunId = actor.getSnapshot().context.runId
+        if (currentRunId) {
+          await client.stopRun(currentRunId).catch(() => {})
+        }
+        machine.stop()
+        await machine.loadSession(undefined)
+      },
+    })
+
+    return () => {
+      for (const off of offs) {
+        off()
+      }
+      unregister()
+    }
+  }, [ticketId, client, machine, actor])
 
   useEffect(() => {
     if (!connected) {

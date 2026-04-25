@@ -67,7 +67,7 @@ describe('runMigrations', () => {
         expect(t.phase).toBe('idle');
       }
       // Fall-through means schemaVersion ends up at the current version.
-      expect(store.get('schemaVersion')).toBe(17);
+      expect(store.get('schemaVersion')).toBe(18);
     });
   });
 
@@ -422,19 +422,19 @@ describe('runMigrations', () => {
   });
 
   describe('full ladder and idempotency', () => {
-    it('runs v0 → v17 end-to-end without throwing', () => {
+    it('runs v0 → v18 end-to-end without throwing', () => {
       const store = makeStore({
         // schemaVersion undefined → takes the initial boot path.
         tickets: [{ id: 't1', status: 'in_progress' }],
         projects: [{ id: 'p1', label: 'A', workspaceDir: '/tmp/w' }],
       });
       expect(() => runMigrations(store, makeDeps())).not.toThrow();
-      expect(store.get('schemaVersion')).toBe(17);
+      expect(store.get('schemaVersion')).toBe(18);
     });
 
-    it('is a no-op on an already-migrated v17 store', () => {
+    it('is a no-op on an already-migrated v18 store', () => {
       const store = makeStore({
-        schemaVersion: 17,
+        schemaVersion: 18,
         tickets: [{ id: 't1', phase: 'idle' }],
         projects: [],
         milestones: [],
@@ -444,13 +444,32 @@ describe('runMigrations', () => {
       const deps = makeDeps();
       runMigrations(store, deps);
 
-      expect(store.get('schemaVersion')).toBe(17);
+      expect(store.get('schemaVersion')).toBe(18);
       expect(deps.writeProjectContextBrief).not.toHaveBeenCalled();
+    });
+
+    it('v17 → v18 drops supervisorSessionId from tickets', () => {
+      const store = makeStore({
+        schemaVersion: 17,
+        tickets: [
+          { id: 't1', phase: 'idle', supervisorSessionId: 'sess-stale-1' },
+          { id: 't2', phase: 'completed', supervisorSessionId: 'sess-stale-2' },
+          { id: 't3', phase: 'idle' },
+        ],
+        projects: [],
+      });
+      runMigrations(store, makeDeps());
+      const tickets = store.get('tickets', []) as Array<Record<string, unknown>>;
+      expect(tickets).toHaveLength(3);
+      for (const t of tickets) {
+        expect(t).not.toHaveProperty('supervisorSessionId');
+      }
+      expect(store.get('schemaVersion')).toBe(18);
     });
 
     it('calls repairProjectRoots on idempotent v-current boot', () => {
       const store = makeStore({
-        schemaVersion: 17,
+        schemaVersion: 18,
         tickets: [],
         projects: [],
         milestones: [],
