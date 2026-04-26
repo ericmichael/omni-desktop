@@ -15,9 +15,9 @@
  * use a hard-coded URL + token without re-registration).
  */
 import { randomBytes, randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -41,11 +41,12 @@ export function getMcpToken(): string {
   if (existsSync(path)) {
     const token = readFileSync(path, 'utf-8').trim();
     if (token.length >= 32) {
-return token;
-}
+      return token;
+    }
   }
   const token = randomBytes(32).toString('hex');
-  writeFileSync(path, `${token  }\n`, { mode: 0o600 });
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${token}\n`, { mode: 0o600 });
   return token;
 }
 
@@ -121,25 +122,44 @@ chunks.push(chunk as Buffer);
       await this.transport!.handleRequest(req, res, parsed);
     });
 
-    await new Promise<void>((resolve, reject) => {
-      const onError = (err: NodeJS.ErrnoException) => {
-        if (err.code === 'EADDRINUSE') {
-          reject(
-            new Error(
-              `MCP port ${MCP_PORT} is already in use. Another launcher instance may be running.`
-            )
-          );
-        } else {
+    // Retry on EADDRINUSE — common during dev:server restarts where the
+    // previous process hasn't fully released the socket yet. Linux normally
+    // clears it within a few hundred ms once the holder exits.
+    const tryListen = (): Promise<void> =>
+      new Promise<void>((resolve, reject) => {
+        const onError = (err: NodeJS.ErrnoException) => {
+          this.httpServer!.off('listening', onListening);
           reject(err);
-        }
-      };
-      this.httpServer!.once('error', onError);
-      this.httpServer!.listen(MCP_PORT, '0.0.0.0', () => {
-        this.httpServer!.off('error', onError);
-        console.log(`[ProjectMcp] Listening on 0.0.0.0:${MCP_PORT}`);
-        resolve();
+        };
+        const onListening = () => {
+          this.httpServer!.off('error', onError);
+          console.log(`[ProjectMcp] Listening on 0.0.0.0:${MCP_PORT}`);
+          resolve();
+        };
+        this.httpServer!.once('error', onError);
+        this.httpServer!.once('listening', onListening);
+        this.httpServer!.listen(MCP_PORT, '0.0.0.0');
       });
-    });
+
+    const maxAttempts = 12; // ~6s total at 500ms intervals
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await tryListen();
+        return;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== 'EADDRINUSE' || attempt === maxAttempts) {
+          if (code === 'EADDRINUSE') {
+            throw new Error(
+              `MCP port ${MCP_PORT} still in use after ${maxAttempts} retries. Another launcher instance may be running.`
+            );
+          }
+          throw err;
+        }
+        console.log(`[ProjectMcp] Port ${MCP_PORT} busy (attempt ${attempt}/${maxAttempts}), retrying in 500ms...`);
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    }
   }
 
   async stop(): Promise<void> {

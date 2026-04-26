@@ -1,0 +1,12 @@
+[package]
+name = "cs-homework-dsa"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "bench"
+path = "src/bench.rs"
+
+[lib]
+name = "dsa"
+path = "src/lib.rs"

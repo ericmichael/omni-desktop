@@ -9,6 +9,7 @@ import {
   Checkmark16Regular,
   Delete20Regular,
   List20Regular,
+  LockClosed16Regular,
   MoreHorizontal20Regular,
   Open20Regular,
   Play20Filled,
@@ -32,6 +33,7 @@ type TicketRowProps = {
   ticket: Ticket;
   selected: boolean;
   hovered: boolean;
+  unresolvedBlockers: number;
   milestoneTitle?: string;
   projectMilestones: Milestone[];
   columnLabel: string;
@@ -180,6 +182,14 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
     textOverflow: 'ellipsis',
   },
+  blockedBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '3px',
+    flexShrink: 0,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorPaletteRedForeground1,
+  },
   dangerMenuItem: {
     color: tokens.colorPaletteRedForeground1,
   },
@@ -221,7 +231,7 @@ const useStyles = makeStyles({
   },
 });
 
-const TicketRow = memo(({ ticket, selected, hovered, milestoneTitle, projectMilestones, columnLabel, columnBadgeColor, onSelect, onHoverChange, onRequestDelete }: TicketRowProps) => {
+const TicketRow = memo(({ ticket, selected, hovered, unresolvedBlockers, milestoneTitle, projectMilestones, columnLabel, columnBadgeColor, onSelect, onHoverChange, onRequestDelete }: TicketRowProps) => {
   const styles = useStyles();
   const phase = ticket.phase;
   const isRunning = phase !== undefined && phase !== null && isActivePhase(phase);
@@ -286,6 +296,16 @@ const TicketRow = memo(({ ticket, selected, hovered, milestoneTitle, projectMile
         title={TICKET_PRIORITY_LABELS[ticket.priority]}
       />
       <span className={styles.title}>{ticket.title}</span>
+      {unresolvedBlockers > 0 && (
+        <span
+          className={styles.blockedBadge}
+          title={`Blocked by ${unresolvedBlockers} ticket${unresolvedBlockers === 1 ? '' : 's'}`}
+          aria-label={`Blocked by ${unresolvedBlockers}`}
+        >
+          <LockClosed16Regular />
+          {unresolvedBlockers}
+        </span>
+      )}
       {ticket.branch && (
         <span className={styles.branchBadge} title={ticket.branch}>
           <BranchFork16Regular />
@@ -528,6 +548,10 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
           {sortedTickets.map((ticket) => {
             const isHovered = hoveredId === ticket.id;
             const milestone = ticket.milestoneId ? milestones[ticket.milestoneId] : undefined;
+            const unresolvedBlockers = ticket.blockedBy.filter((id) => {
+              const b = ticketMap[id];
+              return b && !b.resolution;
+            }).length;
 
             return (
               <TicketRow
@@ -535,6 +559,7 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
                 ticket={ticket}
                 selected={selectedTicketId === ticket.id}
                 hovered={isHovered}
+                unresolvedBlockers={unresolvedBlockers}
                 milestoneTitle={milestone?.title}
                 projectMilestones={projectMilestones}
                 columnLabel={columnLabels[ticket.columnId] ?? 'Backlog'}

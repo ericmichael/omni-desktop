@@ -125,16 +125,8 @@ describe('ProcessManager', () => {
       expect(pm.getStatus('proc-1')).toBe(mockStatus);
     });
 
-    it('uses statusFallback when process does not exist', () => {
+    it('returns uninitialized when the process does not exist', () => {
       const { pm } = makePm();
-      const fallbackStatus: WithTimestamp<AgentProcessStatus> = {
-        type: 'running',
-        timestamp: 2000,
-        data: { wsUrl: 'ws://fallback:9000/ws', uiUrl: 'http://fallback:9000' },
-      };
-      pm.statusFallback = (id) => (id === 'supervisor-1' ? fallbackStatus : null);
-
-      expect(pm.getStatus('supervisor-1')).toBe(fallbackStatus);
       expect(pm.getStatus('other')).toEqual(expect.objectContaining({ type: 'uninitialized' }));
     });
   });

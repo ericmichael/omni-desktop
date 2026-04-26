@@ -1,21 +1,29 @@
 /**
  * Pure-ish git diff helper — given a git directory and a merge base, produces
- * a `DiffResponse` describing every changed file plus a unified patch.
+ * a `DiffResponse` describing every changed file plus a unified patch, split
+ * into four `group`s:
+ *
+ *   committed   — diffs between `mergeBase` and `HEAD` (what a PR would land)
+ *   staged      — diffs between `HEAD` and the index (`git add`-ed work)
+ *   unstaged    — diffs between the index and the working tree
+ *   untracked   — files not tracked by git at all
+ *
+ * A single path can appear in multiple groups when changes span them
+ * (e.g. a committed modification with unstaged edits on top).
  *
  * Extracted from ProjectManager (Sprint C2a of the 6.3 decomposition). The
  * ticket/task/worktree lookup and merge-base resolution stay in
  * ProjectManager (they depend on store state); this module handles the
  * git CLI dance and file I/O for untracked content.
  *
- * Covered by the T8 wave tests in project-manager.test.ts which exercise
- * every code path against a real tmpdir git repo.
+ * Covered by the test suite in project-manager.test.ts + git-files-changed.test.ts.
  */
 import { execFile } from 'child_process';
 import fs from 'fs/promises';
 import path from 'path';
 import { promisify } from 'util';
 
-import type { DiffResponse, FileDiff } from '@/shared/types';
+import type { DiffGroup, DiffResponse, FileDiff } from '@/shared/types';
 
 const execFileAsync = promisify(execFile);
 
@@ -32,16 +40,217 @@ const EMPTY: DiffResponse = { totalFiles: 0, totalAdditions: 0, totalDeletions: 
 export interface GitFilesChangedInput {
   gitDir: string;
   /**
-   * The base reference to diff against:
-   * - A commit SHA / branch name → diff that..HEAD
-   * - The literal string 'HEAD' → show uncommitted work (staged + unstaged + untracked)
+   * The base reference to diff against for the `committed` group:
+   * - A commit SHA / branch name → committed group = `<base>..HEAD`
+   * - The literal string 'HEAD' → omit the committed group
+   * (staged/unstaged/untracked groups are always computed)
    */
   mergeBase: string;
 }
 
+const charToStatus = (ch: string): FileDiff['status'] => {
+  switch (ch) {
+    case 'A':
+      return 'added';
+    case 'M':
+      return 'modified';
+    case 'D':
+      return 'deleted';
+    case 'R':
+      return 'renamed';
+    case 'C':
+      return 'copied';
+    default:
+      return 'modified';
+  }
+};
+
 /**
- * Run git against `gitDir` and return the changed-files summary.
- * Any error (missing repo, git failure, etc.) produces an empty response.
+ * Parse NUL-delimited `git diff --name-status -z` output into FileDiff rows.
+ * Rename/copy entries span three fields: `<status>\0<old>\0<new>`.
+ */
+const parseNameStatus = (output: string, group: DiffGroup): FileDiff[] => {
+  const files: FileDiff[] = [];
+  const parts = output.split('\0');
+  for (let i = 0; i < parts.length; i++) {
+    const statusField = parts[i];
+    if (!statusField) {
+      continue;
+    }
+    const statusChar = statusField.charAt(0);
+    if (statusChar === 'R' || statusChar === 'C') {
+      const oldPath = parts[++i] ?? '';
+      const newPath = parts[++i] ?? '';
+      files.push({
+        path: newPath,
+        oldPath,
+        status: statusChar === 'R' ? 'renamed' : 'copied',
+        group,
+        additions: 0,
+        deletions: 0,
+        isBinary: false,
+      });
+      continue;
+    }
+    const filePath = parts[++i] ?? '';
+    if (!filePath) {
+      continue;
+    }
+    files.push({
+      path: filePath,
+      status: charToStatus(statusChar),
+      group,
+      additions: 0,
+      deletions: 0,
+      isBinary: false,
+    });
+  }
+  return files;
+};
+
+const listCommittedFiles = async (gitDir: string, base: string): Promise<FileDiff[]> => {
+  const { stdout } = await execFileAsync(
+    'git',
+    ['-C', gitDir, 'diff', '--name-status', '-M', '-C', '-z', base, 'HEAD'],
+    { timeout: 10_000 }
+  );
+  return parseNameStatus(stdout, 'committed');
+};
+
+const listStagedFiles = async (gitDir: string, hasHead: boolean): Promise<FileDiff[]> => {
+  if (hasHead) {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', gitDir, 'diff', '--name-status', '-M', '-C', '-z', '--cached'],
+      { timeout: 10_000 }
+    );
+    return parseNameStatus(stdout, 'staged');
+  }
+  // No HEAD: every tracked path in the index is "added" for the first commit.
+  // `git ls-files --stage -z` lists index entries, which is what we need.
+  const { stdout } = await execFileAsync(
+    'git',
+    ['-C', gitDir, 'ls-files', '--stage', '-z'],
+    { timeout: 10_000 }
+  );
+  const files: FileDiff[] = [];
+  for (const entry of stdout.split('\0')) {
+    if (!entry) {
+      continue;
+    }
+    // Format: `<mode> <oid> <stage>\t<path>`
+    const tabIdx = entry.indexOf('\t');
+    if (tabIdx < 0) {
+      continue;
+    }
+    const filePath = entry.slice(tabIdx + 1);
+    if (!filePath) {
+      continue;
+    }
+    files.push({
+      path: filePath,
+      status: 'added',
+      group: 'staged',
+      additions: 0,
+      deletions: 0,
+      isBinary: false,
+    });
+  }
+  return files;
+};
+
+const listUnstagedFiles = async (gitDir: string): Promise<FileDiff[]> => {
+  const { stdout } = await execFileAsync(
+    'git',
+    ['-C', gitDir, 'diff', '--name-status', '-M', '-C', '-z'],
+    { timeout: 10_000 }
+  );
+  return parseNameStatus(stdout, 'unstaged');
+};
+
+const listUntrackedFiles = async (gitDir: string): Promise<FileDiff[]> => {
+  const { stdout } = await execFileAsync(
+    'git',
+    ['-C', gitDir, 'ls-files', '--others', '--exclude-standard', '-z'],
+    { timeout: 10_000 }
+  );
+  const files: FileDiff[] = [];
+  for (const filePath of stdout.split('\0')) {
+    if (!filePath) {
+      continue;
+    }
+    files.push({
+      path: filePath,
+      status: 'untracked',
+      group: 'untracked',
+      additions: 0,
+      deletions: 0,
+      isBinary: false,
+    });
+  }
+  return files;
+};
+
+const buildUntrackedPatch = async (file: FileDiff, gitDir: string): Promise<void> => {
+  const absPath = path.join(gitDir, file.path);
+  // Prevent path traversal: the resolved file must still live inside gitDir.
+  const realGitDir = await fs.realpath(gitDir);
+  const realFile = await fs.realpath(absPath).catch(() => absPath);
+  if (!realFile.startsWith(realGitDir + path.sep) && realFile !== realGitDir) {
+    return;
+  }
+  const stat = await fs.stat(absPath).catch(() => null);
+  if (!stat || !stat.isFile()) {
+    return;
+  }
+  if (stat.size > MAX_UNTRACKED_BYTES) {
+    file.isBinary = true;
+    return;
+  }
+  try {
+    const buf = await fs.readFile(absPath);
+    // Detect binary via NUL bytes in the first 8KB (matches git's heuristic).
+    const probe = buf.subarray(0, 8192);
+    if (probe.includes(0)) {
+      file.isBinary = true;
+      return;
+    }
+    const fileContent = buf.toString('utf-8');
+    const lines = fileContent.split('\n');
+    // A trailing newline produces an empty last element; don't count it.
+    if (lines.length > 0 && lines[lines.length - 1] === '') {
+      lines.pop();
+    }
+    file.additions = lines.length;
+    const patchLines = lines.map((l) => `+${l}`);
+    file.patch = `--- /dev/null\n+++ b/${file.path}\n@@ -0,0 +1,${lines.length} @@\n${patchLines.join('\n')}`;
+  } catch {
+    file.isBinary = true;
+  }
+};
+
+const patchArgsFor = (gitDir: string, file: FileDiff, mergeBase: string, hasHead: boolean): string[] => {
+  const common = ['-C', gitDir, 'diff', '--unified=8', '--inter-hunk-context=4'];
+  switch (file.group) {
+    case 'committed':
+      return [...common, mergeBase, 'HEAD', '--', file.path];
+    case 'staged':
+      // `--cached` without HEAD can error; pass the empty tree explicitly.
+      return hasHead
+        ? [...common, '--cached', '--', file.path]
+        : [...common, '--cached', EMPTY_TREE, '--', file.path];
+    case 'unstaged':
+      return [...common, '--', file.path];
+    case 'untracked':
+      // Unreachable — untracked patches are synthesized separately.
+      return [...common];
+  }
+};
+
+/**
+ * Run git against `gitDir` and return the changed-files summary across all
+ * four groups. Any error (missing repo, git failure, etc.) produces an empty
+ * response.
  */
 export async function getGitFilesChanged(input: GitFilesChangedInput): Promise<DiffResponse> {
   const { gitDir, mergeBase } = input;
@@ -53,7 +262,6 @@ export async function getGitFilesChanged(input: GitFilesChangedInput): Promise<D
   }
 
   try {
-    // Check whether HEAD exists (repo may have zero commits).
     let hasHead = true;
     try {
       await execFileAsync('git', ['-C', gitDir, 'rev-parse', '--verify', 'HEAD'], { timeout: 5_000 });
@@ -61,129 +269,17 @@ export async function getGitFilesChanged(input: GitFilesChangedInput): Promise<D
       hasHead = false;
     }
 
-    const files: FileDiff[] = [];
+    // Gather all groups. Committed is skipped when mergeBase is 'HEAD' (no
+    // upstream) or when the repo has no commits yet.
+    const includeCommitted = hasHead && mergeBase !== 'HEAD';
+    const [committed, staged, unstaged, untracked] = await Promise.all([
+      includeCommitted ? listCommittedFiles(gitDir, mergeBase).catch(() => []) : Promise.resolve([]),
+      listStagedFiles(gitDir, hasHead).catch(() => []),
+      hasHead ? listUnstagedFiles(gitDir).catch(() => []) : Promise.resolve([]),
+      listUntrackedFiles(gitDir).catch(() => []),
+    ]);
 
-    if (!hasHead) {
-      // ── No commits yet ──────────────────────────────────────────────
-      // Use `git status --porcelain -z` for NUL-delimited output (handles
-      // filenames with spaces, quotes, and unicode correctly).
-      const { stdout: lsOutput } = await execFileAsync('git', ['-C', gitDir, 'status', '--porcelain', '-z', '-uall'], {
-        timeout: 10_000,
-      });
-      // -z output: entries are NUL-separated. Rename entries produce two
-      // fields (old\0new) but renames are impossible with no commits.
-      for (const entry of lsOutput.split('\0')) {
-        if (!entry || entry.length < 4) {
-          continue;
-        }
-        const xy = entry.slice(0, 2);
-        const filePath = entry.slice(3);
-        if (!filePath) {
-          continue;
-        }
-        const status: FileDiff['status'] = xy.includes('?') ? 'untracked' : 'added';
-        files.push({ path: filePath, status, additions: 0, deletions: 0, isBinary: false });
-      }
-    } else {
-      // ── Commits exist ───────────────────────────────────────────────
-      // When mergeBase === 'HEAD' (no upstream), `git diff HEAD HEAD` is
-      // empty — useless. Fall back to showing uncommitted work instead.
-      const showUncommitted = mergeBase === 'HEAD';
-
-      if (showUncommitted) {
-        // Show staged + unstaged + untracked changes relative to HEAD.
-        const { stdout: statusOutput } = await execFileAsync(
-          'git',
-          ['-C', gitDir, 'status', '--porcelain', '-z', '-uall'],
-          { timeout: 10_000 }
-        );
-        const entries = statusOutput.split('\0');
-        for (let i = 0; i < entries.length; i++) {
-          const entry = entries[i]!;
-          if (!entry || entry.length < 4) {
-            continue;
-          }
-          const xy = entry.slice(0, 2);
-          const filePath = entry.slice(3);
-          if (!filePath) {
-            continue;
-          }
-
-          let status: FileDiff['status'];
-          if (xy.includes('?')) {
-            status = 'untracked';
-          } else if (xy.startsWith('R') || xy.endsWith('R')) {
-            status = 'renamed';
-            i++; // skip the next entry (old path in -z format)
-          } else if (xy.startsWith('A') || xy.endsWith('A')) {
-            status = 'added';
-          } else if (xy.startsWith('D') || xy.endsWith('D')) {
-            status = 'deleted';
-          } else {
-            status = 'modified';
-          }
-
-          files.push({ path: filePath, status, additions: 0, deletions: 0, isBinary: false });
-        }
-      } else {
-        // Normal path: diff committed changes between mergeBase and HEAD.
-        const { stdout: diffOutput } = await execFileAsync(
-          'git',
-          ['-C', gitDir, 'diff', '--name-status', '-M', '-C', '-z', mergeBase, 'HEAD'],
-          { timeout: 10_000 }
-        );
-
-        // -z with --name-status: NUL-delimited as STATUS\0path[\0oldpath]
-        const parts = diffOutput.split('\0');
-        for (let i = 0; i < parts.length; i++) {
-          const statusField = parts[i];
-          if (!statusField) {
-            continue;
-          }
-          const statusChar = statusField.charAt(0);
-          const filePath = parts[++i] ?? '';
-          let oldPath: string | undefined;
-          if (statusChar === 'R' || statusChar === 'C') {
-            oldPath = filePath;
-            i++;
-            const newPath = parts[i] ?? '';
-            files.push({
-              path: newPath,
-              oldPath,
-              status: statusChar === 'R' ? 'renamed' : 'copied',
-              additions: 0,
-              deletions: 0,
-              isBinary: false,
-            });
-            continue;
-          }
-
-          let status: FileDiff['status'];
-          switch (statusChar) {
-            case 'A':
-              status = 'added';
-              break;
-            case 'M':
-              status = 'modified';
-              break;
-            case 'D':
-              status = 'deleted';
-              break;
-            default:
-              status = 'modified';
-          }
-
-          files.push({ path: filePath, oldPath, status, additions: 0, deletions: 0, isBinary: false });
-        }
-      }
-    }
-
-    // Determine the base ref for producing patches.
-    // - No commits → empty tree
-    // - No upstream (mergeBase was 'HEAD') → diff working tree against HEAD
-    // - Normal → diff mergeBase..HEAD
-    const effectiveBase = !hasHead ? EMPTY_TREE : mergeBase;
-    const diffWorktree = hasHead && mergeBase === 'HEAD';
+    const files: FileDiff[] = [...committed, ...staged, ...unstaged, ...untracked];
 
     let totalAdditions = 0;
     let totalDeletions = 0;
@@ -195,54 +291,13 @@ export async function getGitFilesChanged(input: GitFilesChangedInput): Promise<D
       }
 
       try {
-        if (file.status === 'untracked') {
-          // Untracked files have no git object — synthesize a patch from file content.
-          const absPath = path.join(gitDir, file.path);
-          // Verify the resolved path is still inside gitDir (prevent traversal).
-          const realGitDir = await fs.realpath(gitDir);
-          const realFile = await fs.realpath(absPath).catch(() => absPath);
-          if (!realFile.startsWith(realGitDir + path.sep) && realFile !== realGitDir) {
-            continue;
-          }
-          const stat = await fs.stat(absPath).catch(() => null);
-          if (!stat || !stat.isFile()) {
-            continue;
-          }
-          if (stat.size > MAX_UNTRACKED_BYTES) {
-            file.isBinary = true;
-            continue;
-          }
-          try {
-            const buf = await fs.readFile(absPath);
-            // Detect binary: check for NUL bytes in the first 8KB (same heuristic as git).
-            const probe = buf.subarray(0, 8192);
-            if (probe.includes(0)) {
-              file.isBinary = true;
-              continue;
-            }
-            const fileContent = buf.toString('utf-8');
-            const lines = fileContent.split('\n');
-            // A trailing newline produces an empty last element — don't count it as an added line.
-            if (lines.length > 0 && lines[lines.length - 1] === '') {
-              lines.pop();
-            }
-            file.additions = lines.length;
-            totalAdditions += file.additions;
-            const patchLines = lines.map((l) => `+${l}`);
-            file.patch = `--- /dev/null\n+++ b/${file.path}\n@@ -0,0 +1,${lines.length} @@\n${patchLines.join('\n')}`;
-          } catch {
-            file.isBinary = true;
-          }
+        if (file.group === 'untracked') {
+          await buildUntrackedPatch(file, gitDir);
+          totalAdditions += file.additions;
           continue;
         }
 
-        // For committed or staged diffs, use git diff directly.
-        // When diffWorktree is true we diff the working tree against HEAD (no second ref).
-        const diffArgs = diffWorktree
-          ? ['-C', gitDir, 'diff', '--unified=8', '--inter-hunk-context=4', 'HEAD', '--', file.path]
-          : ['-C', gitDir, 'diff', '--unified=8', '--inter-hunk-context=4', effectiveBase, 'HEAD', '--', file.path];
-
-        const { stdout: patch } = await execFileAsync('git', diffArgs, { timeout: 5_000 });
+        const { stdout: patch } = await execFileAsync('git', patchArgsFor(gitDir, file, mergeBase, hasHead), { timeout: 5_000 });
         file.patch = patch;
 
         if (file.patch) {
@@ -255,7 +310,6 @@ export async function getGitFilesChanged(input: GitFilesChangedInput): Promise<D
           }
         }
 
-        // Detect binary
         if (file.patch?.includes('Binary files')) {
           file.isBinary = true;
           file.patch = undefined;
@@ -264,7 +318,7 @@ export async function getGitFilesChanged(input: GitFilesChangedInput): Promise<D
         totalAdditions += file.additions;
         totalDeletions += file.deletions;
       } catch {
-        // If we can't get the patch for a file, just skip it
+        // Skip files whose patch we couldn't load.
       }
     }
 
@@ -283,7 +337,7 @@ export async function getGitFilesChanged(input: GitFilesChangedInput): Promise<D
 /**
  * Resolve the appropriate mergeBase for a git directory when no worktree-base
  * is known. Prefers the upstream tracking branch → merge-base(upstream, HEAD);
- * falls back to 'HEAD' which signals "show uncommitted work".
+ * falls back to 'HEAD' which signals "no committed group".
  */
 export async function resolveWorkspaceMergeBase(gitDir: string): Promise<string> {
   try {
@@ -312,11 +366,25 @@ export async function resolveWorkspaceMergeBase(gitDir: string): Promise<string>
 /**
  * Resolve the mergeBase for a worktree against its branch. Falls back to the
  * branch name if `git merge-base` fails.
+ *
+ * When the merge-base equals HEAD (worktree is checked out on the base branch
+ * itself, or HEAD hasn't diverged), there's no committed diff to show —
+ * return the literal 'HEAD' so getGitFilesChanged omits the committed group
+ * and focuses on staged/unstaged/untracked instead.
  */
 export async function resolveWorktreeMergeBase(gitDir: string, branch: string): Promise<string> {
   try {
     const { stdout } = await execFileAsync('git', ['-C', gitDir, 'merge-base', branch, 'HEAD'], { timeout: 10_000 });
-    return stdout.trim();
+    const mergeBase = stdout.trim();
+    try {
+      const { stdout: headSha } = await execFileAsync('git', ['-C', gitDir, 'rev-parse', 'HEAD'], { timeout: 5_000 });
+      if (headSha.trim() === mergeBase) {
+        return 'HEAD';
+      }
+    } catch {
+      // If HEAD can't be resolved, fall through to the merge-base.
+    }
+    return mergeBase;
   } catch {
     return branch;
   }

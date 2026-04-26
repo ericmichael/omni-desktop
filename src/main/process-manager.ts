@@ -42,9 +42,6 @@ export class ProcessManager {
   /** Set by platform integration for pre-synced workspace shares. */
   workspaceSyncManager: WorkspaceSyncManager | null = null;
 
-  /** Optional fallback for sandbox status — lets ProjectManager provide supervisor sandbox status. */
-  statusFallback?: (processId: string) => WithTimestamp<AgentProcessStatus> | null;
-
   constructor(arg: {
     sendToWindow: ProcessManager['sendToWindow'];
     fetchFn?: FetchFn;
@@ -220,10 +217,6 @@ return;
     const proc = this.processes.get(processId);
     if (proc) {
 return proc.getStatus();
-}
-    const fallback = this.statusFallback?.(processId);
-    if (fallback) {
-return fallback;
 }
     return { type: 'uninitialized', timestamp: Date.now() };
   };

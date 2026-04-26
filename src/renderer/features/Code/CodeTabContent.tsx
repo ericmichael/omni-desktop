@@ -3,13 +3,15 @@ import { useStore } from '@nanostores/react';
 import { motion } from 'framer-motion';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { buildCodeVariables } from '@/lib/client-tools';
+import { backendRunsOnHost,getArtifactsDir, getContainerArtifactsDir } from '@/lib/artifacts';
+import { buildSessionVariables } from '@/lib/client-tools';
 import { SessionStartupShell } from '@/renderer/common/SessionStartupShell';
 import { Button } from '@/renderer/ds';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { buildSandboxLabel, isCustomSandbox } from '@/renderer/omniagents-ui/sandbox-label';
+import { configApi } from '@/renderer/services/config';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { AppId } from '@/shared/app-registry';
@@ -81,6 +83,9 @@ const CodeRunningView = memo(
     dockTargetId,
     isGlass,
     tabId,
+    terminalCwd,
+    sidecarMode,
+    ticketId,
   }: {
     sandboxUrls: { uiUrl: string; codeServerUrl?: string; noVncUrl?: string };
     sessionId?: string;
@@ -99,6 +104,9 @@ const CodeRunningView = memo(
     dockTargetId?: string;
     isGlass?: boolean;
     tabId?: string;
+    terminalCwd?: string;
+    sidecarMode?: boolean;
+    ticketId?: TicketId;
   }) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
@@ -142,6 +150,9 @@ const CodeRunningView = memo(
             dockTargetId={dockTargetId}
             isGlass={isGlass}
             tabId={tabId}
+            terminalCwd={terminalCwd}
+            sidecarMode={sidecarMode}
+            ticketId={ticketId}
           />
         </div>
       </div>
@@ -162,10 +173,11 @@ type CodeTabContentProps = {
   onPreviewUrlChange?: (url: string) => void;
   dockTargetId?: string;
   isGlass?: boolean;
+  sidecarMode?: boolean;
 };
 
 export const CodeTabContent = memo(
-  ({ tab, isVisible, activeApp = 'chat', onActiveAppChange, uiMinimal, headerActionsTargetId, headerActionsCompact, previewUrl, onPreviewUrlChange, dockTargetId, isGlass }: CodeTabContentProps) => {
+  ({ tab, isVisible, activeApp = 'chat', onActiveAppChange, uiMinimal, headerActionsTargetId, headerActionsCompact, previewUrl, onPreviewUrlChange, dockTargetId, isGlass, sidecarMode }: CodeTabContentProps) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
     const project = useMemo(
@@ -230,14 +242,48 @@ export const CodeTabContent = memo(
       [tab.id, tab.ticketId, tab.projectId]
     );
 
-    const clientToolVariables = useMemo(
-      () =>
-        buildCodeVariables({
+    // Resolve the host omni config dir once — we need it to tell the agent
+    // where to write PR artifacts when it runs on the host (no sandbox).
+    const [hostConfigDir, setHostConfigDir] = useState<string | null>(null);
+    useEffect(() => {
+      let cancelled = false;
+      void configApi.getOmniConfigDir().then((dir) => {
+        if (!cancelled) {
+          setHostConfigDir(dir);
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, []);
+
+    // Look up the ticket's autopilot flag so the column builds its variables
+    // with catch-all safe_tool_overrides when autopilot is driving it.
+    const ticketAutopilot = useMemo(() => {
+      if (!tab.ticketId) {
+        return false;
+      }
+      return store.tickets.some((t) => t.id === tab.ticketId && t.autopilot === true);
+    }, [tab.ticketId, store.tickets]);
+
+    const clientToolVariables = useMemo(() => {
+      const artifactsDir = tab.ticketId
+        ? backendRunsOnHost(sandboxBackend)
+          ? hostConfigDir
+            ? getArtifactsDir(hostConfigDir, tab.ticketId)
+            : undefined
+          : getContainerArtifactsDir(tab.ticketId)
+        : undefined;
+      return buildSessionVariables({
+        surface: 'code',
+        autopilot: ticketAutopilot,
+        context: {
           ...(project ? { projectId: project.id, projectLabel: project.label } : {}),
           ...(tab.ticketId ? { ticketId: tab.ticketId } : {}),
-        }),
-      [tab.ticketId, project]
-    );
+          ...(artifactsDir ? { artifactsDir } : {}),
+        },
+      });
+    }, [tab.ticketId, project, sandboxBackend, hostConfigDir, ticketAutopilot]);
 
     // No project selected — show project picker
     if (!tab.projectId) {
@@ -275,6 +321,9 @@ export const CodeTabContent = memo(
             dockTargetId={dockTargetId}
             isGlass={isGlass}
             tabId={tab.id}
+            terminalCwd={workspaceDir ?? undefined}
+            sidecarMode={sidecarMode}
+            ticketId={tab.ticketId as TicketId | undefined}
           />
         ) : phase === 'error' ? (
           <CodeErrorView tabId={tab.id} retry={retry} />

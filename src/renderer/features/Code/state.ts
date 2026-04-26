@@ -3,6 +3,7 @@ import { map } from 'nanostores';
 
 import { STATUS_POLL_INTERVAL_MS } from '@/renderer/constants';
 import type { AutoLaunchPhase } from '@/renderer/features/Code/use-code-auto-launch';
+import { destroyAllTerminalsForTab } from '@/renderer/features/Console/state';
 import {
   $agentStatuses,
   $agentXTerms,
@@ -53,6 +54,7 @@ export const codeApi = {
 
   removeTab: async (tabId: CodeTabId) => {
     await codeApi.stopSandbox(tabId);
+    await destroyAllTerminalsForTab(tabId);
 
     // Clean up per-tab state
     clearStatus(tabId);
@@ -94,7 +96,7 @@ export const codeApi = {
   addTabForTicket: async (
     ticketId: TicketId,
     projectId: ProjectId,
-    opts?: { sessionId?: string; ticketTitle?: string; workspaceDir?: string }
+    opts?: { ticketTitle?: string; workspaceDir?: string }
   ): Promise<CodeTab> => {
     const existingTabs = persistedStoreApi.getKey('codeTabs') ?? [];
     const existing = existingTabs.find((t) => t.ticketId === ticketId);
@@ -110,7 +112,6 @@ export const codeApi = {
       id: nanoid(),
       projectId,
       ticketId,
-      sessionId: opts?.sessionId,
       ticketTitle: opts?.ticketTitle,
       workspaceDir: opts?.workspaceDir,
       createdAt: Date.now(),

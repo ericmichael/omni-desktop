@@ -157,7 +157,7 @@ describe('ticket file roundtrip', () => {
       worktreeName: 'login-fix',
       phase: 'running',
       resolution: 'completed',
-      supervisorSessionId: 'sess-xyz',
+      autopilot: true,
       tokenUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
       shaping: { doneLooksLike: 'redirect works', appetite: 'medium', outOfScope: 'password reset' },
     });

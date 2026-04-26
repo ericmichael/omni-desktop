@@ -71,6 +71,15 @@ vi.mock('@/main/workspace-sync', () => ({
   downloadWorkspace: vi.fn(async () => {}),
 }));
 
+vi.mock('@/main/project-mcp-server', () => ({
+  getMcpToken: vi.fn(() => 'test-mcp-token'),
+  getMcpUrl: vi.fn((perspective: 'host' | 'docker') =>
+    perspective === 'docker' ? 'http://host.docker.internal:39071/mcp' : 'http://127.0.0.1:39071/mcp'
+  ),
+  ProjectMcpServer: class {},
+  MCP_PORT: 39071,
+}));
+
 // Silence SimpleLogger so the test output isn't cluttered with startup banners.
 vi.mock('@/lib/simple-logger', () => ({
   SimpleLogger: class {

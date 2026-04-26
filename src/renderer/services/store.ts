@@ -34,6 +34,11 @@ const getDefaults = (): StoreData => ({
   lastWeeklyReviewAt: null,
   enabledExtensions: {},
   skillSources: {},
+  customApps: [],
+  browserProfiles: [],
+  browserTabsets: {},
+  browserHistory: [],
+  browserBookmarks: [],
 });
 
 /**

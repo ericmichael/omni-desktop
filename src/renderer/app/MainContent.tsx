@@ -1,5 +1,5 @@
 import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { Info20Regular, Settings20Filled, WindowConsole20Regular } from '@fluentui/react-icons';
+import { Info20Regular, Settings20Filled } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import type { CSSProperties } from 'react';
 import { memo, useCallback, useEffect, useState } from 'react';
@@ -9,8 +9,8 @@ import { Caption1, ListItem, Subtitle2 } from '@/renderer/ds';
 import { $launcherVersion } from '@/renderer/features/Banner/state';
 import { Chat } from '@/renderer/features/Chat/Chat';
 import { Code } from '@/renderer/features/Code/Code';
-import { $isConsoleOpen } from '@/renderer/features/Console/state';
 import { Dashboards } from '@/renderer/features/Dashboards/Dashboards';
+import { Gallery } from '@/renderer/features/Gallery/Gallery';
 import { OnboardingWizard } from '@/renderer/features/Onboarding/OnboardingWizard';
 import { SettingsPage } from '@/renderer/features/SettingsModal/SettingsPage';
 import { Tickets } from '@/renderer/features/Tickets/Tickets';
@@ -88,10 +88,6 @@ const MorePage = memo(() => {
     persistedStoreApi.setKey('layoutMode', 'settings');
   }, []);
 
-  const openConsole = useCallback(() => {
-    $isConsoleOpen.set(true);
-  }, []);
-
   return (
     <div className={styles.morePage}>
       <div className={styles.moreHeader}>
@@ -99,7 +95,6 @@ const MorePage = memo(() => {
       </div>
       <div>
         <ListItem icon={<Settings20Filled />} label="Settings" detail="Theme, models, network, MCP" onClick={openSettings} />
-        <ListItem icon={<WindowConsole20Regular />} label="Dev Console" detail="Terminal session" onClick={openConsole} />
       </div>
       {version && (
         <div className={styles.moreFooter}>
@@ -152,6 +147,7 @@ return prev;
     { key: 'dashboards', Component: Dashboards },
     { key: 'settings', Component: SettingsPage },
     { key: 'more', Component: MorePage },
+    ...(import.meta.env.DEV ? [{ key: 'gallery' as const, Component: Gallery }] : []),
   ];
 
   return (

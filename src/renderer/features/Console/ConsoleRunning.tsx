@@ -1,19 +1,18 @@
 import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
-import { Add20Regular, Dismiss12Regular, Dismiss20Regular } from '@fluentui/react-icons';
+import { Add20Regular, Dismiss12Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useEffect, useMemo } from 'react';
 
-import { IconButton } from '@/renderer/ds';
 import { ConsoleXterm } from '@/renderer/features/Console/ConsoleXterm';
+import type { TerminalState } from '@/renderer/features/Console/state';
 import {
-  $activeTerminalId,
-  $isConsoleOpen,
-  $terminals,
+  $activeTerminalIdByTab,
+  $terminalsByTab,
   createTerminal,
   destroyTerminal,
+  ensureTerminalForTab,
   setActiveTerminal,
 } from '@/renderer/features/Console/state';
-import { persistedStoreApi } from '@/renderer/services/store';
 
 const useStyles = makeStyles({
   root: { display: 'flex', width: '100%', height: '100%', position: 'relative', flexDirection: 'column', minHeight: 0 },
@@ -115,79 +114,117 @@ const useStyles = makeStyles({
       color: tokens.colorNeutralForeground1,
     },
   },
-  closeBtn: {
-    flexShrink: 0,
-    width: '30px',
-    height: '30px',
-  },
   xtermWrap: { position: 'relative', width: '100%', height: '100%', minHeight: 0 },
   xtermPane: { position: 'absolute', inset: 0 },
   xtermPaneHidden: { display: 'none' },
 });
 
-const closeConsole = () => {
-  $isConsoleOpen.set(false);
+type TerminalTabButtonProps = {
+  tabId: string;
+  terminalId: string;
+  label: string;
+  className: string;
+  closeClassName: string;
 };
 
-export const ConsoleStarted = memo(() => {
+const TerminalTabButton = memo(
+  ({ tabId, terminalId, label, className, closeClassName }: TerminalTabButtonProps) => {
+    const handleActivate = useCallback(() => {
+      setActiveTerminal(tabId, terminalId);
+    }, [tabId, terminalId]);
+
+    const handleClose = useCallback(
+      (e: React.MouseEvent) => {
+        e.stopPropagation();
+        void destroyTerminal(tabId, terminalId);
+      },
+      [tabId, terminalId]
+    );
+
+    return (
+      <button type="button" className={className} onClick={handleActivate}>
+        <span>{label}</span>
+        <button
+          type="button"
+          className={closeClassName}
+          onClick={handleClose}
+          aria-label={`Close ${label}`}
+        >
+          <Dismiss12Regular />
+        </button>
+      </button>
+    );
+  }
+);
+TerminalTabButton.displayName = 'TerminalTabButton';
+
+type XtermPaneProps = {
+  terminal: TerminalState;
+  hidden: boolean;
+  className: string;
+  hiddenClassName: string;
+};
+
+const XtermPane = memo(({ terminal, hidden, className, hiddenClassName }: XtermPaneProps) => (
+  <div className={mergeClasses(className, hidden && hiddenClassName)}>
+    <ConsoleXterm terminal={terminal} />
+  </div>
+));
+XtermPane.displayName = 'XtermPane';
+
+type ConsoleStartedProps = {
+  tabId: string;
+  /** cwd used when the user hits the + button to open a new terminal in this column. */
+  cwd?: string;
+};
+
+export const ConsoleStarted = memo(({ tabId, cwd }: ConsoleStartedProps) => {
   const styles = useStyles();
-  const terminals = useStore($terminals);
-  const activeId = useStore($activeTerminalId);
-  const store = useStore(persistedStoreApi.$atom);
+  const terminalsByTab = useStore($terminalsByTab);
+  const activeByTab = useStore($activeTerminalIdByTab);
+  const terminals = useMemo(() => terminalsByTab[tabId] ?? [], [terminalsByTab, tabId]);
+  const activeId = activeByTab[tabId] ?? null;
+
+  useEffect(() => {
+    void ensureTerminalForTab(tabId, cwd);
+  }, [tabId, cwd]);
 
   const handleNewTab = useCallback(() => {
-    const cwd = store.workspaceDir ?? undefined;
-    createTerminal(cwd);
-  }, [store.workspaceDir]);
-
-  const handleCloseTab = useCallback((e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    destroyTerminal(id);
-  }, []);
+    void createTerminal(tabId, cwd);
+  }, [tabId, cwd]);
 
   return (
     <div className={styles.root}>
       <div className={styles.toolbar}>
         <div className={styles.tabs}>
           {terminals.map((t, i) => (
-            <button
+            <TerminalTabButton
               key={t.id}
-              type="button"
+              tabId={tabId}
+              terminalId={t.id}
+              label={`Terminal ${i + 1}`}
               className={mergeClasses(
                 styles.tab,
                 t.id === activeId && styles.tabActive,
                 !t.isRunning && styles.tabDead,
               )}
-              onClick={() => setActiveTerminal(t.id)}
-            >
-              <span>Terminal {i + 1}</span>
-              <button
-                type="button"
-                className={styles.tabClose}
-                onClick={(e) => handleCloseTab(e, t.id)}
-                aria-label={`Close Terminal ${i + 1}`}
-              >
-                <Dismiss12Regular />
-              </button>
-            </button>
+              closeClassName={styles.tabClose}
+            />
           ))}
           <button type="button" className={styles.addBtn} onClick={handleNewTab} aria-label="New terminal" title="New terminal">
             <Add20Regular style={{ width: 14, height: 14 }} />
           </button>
         </div>
-        <IconButton
-          aria-label="Close"
-          onClick={closeConsole}
-          size="md"
-          icon={<Dismiss20Regular />}
-          className={styles.closeBtn}
-        />
       </div>
       <div className={styles.xtermWrap}>
         {terminals.map((t) => (
-          <div key={t.id} className={mergeClasses(styles.xtermPane, t.id !== activeId && styles.xtermPaneHidden)}>
-            <ConsoleXterm terminal={t} />
-          </div>
+          <XtermPane
+            key={t.id}
+            terminal={t}
+            hidden={t.id !== activeId}
+            className={styles.xtermPane}
+            hiddenClassName={styles.xtermPaneHidden}
+          />
         ))}
       </div>
     </div>

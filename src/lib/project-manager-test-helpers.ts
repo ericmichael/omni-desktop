@@ -3,32 +3,31 @@
  *
  * Both `project-manager.test.ts` and `supervisor-orchestrator.test.ts` import
  * from this module so they can construct a real `ProjectManager` (with a
- * mock machine factory + stub sandbox factory + stub workflow loader) without
- * touching Docker, WebSockets, or the filesystem.
- *
- * No tests live here — only the DI stubs, seed builders, and the `orch()`
- * accessor. The split is so each test file can stay focused on its own
- * coverage area while sharing the boilerplate that has accreted across the
- * T1–T11 testing wave.
+ * mock SupervisorBridge + stub workflow loader) without touching WebSockets
+ * or the filesystem.
  */
 
 import { vi } from 'vitest';
 
-import type {
-  IMachineFactory,
-  ISandbox,
-  ISandboxFactory,
-  IStore,
-  ITicketMachine,
-  IWorkflowLoader,
-  MachineCallbacks,
-  ProjectManagerDeps,
-} from '@/lib/project-manager-deps';
+import type { IStore, IWorkflowLoader, ProjectManagerDeps } from '@/lib/project-manager-deps';
 import type { WorkflowConfig } from '@/lib/workflow';
 import { ProjectManager } from '@/main/project-manager';
-import type { SupervisorOrchestrator } from '@/main/supervisor-orchestrator';
+import type { SupervisorBridge } from '@/main/supervisor-bridge';
+import type {
+  SupervisorEntry,
+  SupervisorOrchestrator,
+} from '@/main/supervisor-orchestrator';
+import { SupervisorState } from '@/main/supervisor-state';
 import type { TicketPhase } from '@/shared/ticket-phase';
-import type { AgentProcessStatus, Pipeline, Project, StoreData, Ticket, TicketId, WithTimestamp } from '@/shared/types';
+import type {
+  CodeTabId,
+  Pipeline,
+  Project,
+  StoreData,
+  SupervisorBridgeEvent,
+  Ticket,
+  TicketId,
+} from '@/shared/types';
 
 // ---------------------------------------------------------------------------
 // Phase classifier mirrors (must stay in sync with shared/ticket-phase)
@@ -100,124 +99,179 @@ export const makeStore = (overrides: Partial<StoreData> = {}): IStore => {
 };
 
 // ---------------------------------------------------------------------------
-// Mock machine + factory
+// Mock SupervisorBridge — records every dispatch, lets tests simulate events
 // ---------------------------------------------------------------------------
 
-export type MockMachine = ITicketMachine & {
-  ticketId: TicketId;
-  phase: TicketPhase;
-  callbacks: MachineCallbacks;
-  // Test helpers
-  simulateRunEnd: (reason: string) => void;
-  simulateTokenUsage: (usage: { inputTokens: number; outputTokens: number; totalTokens: number }) => void;
-  simulateClientRequest: (
-    fnName: string,
-    args: Record<string, unknown>,
-    respond: (ok: boolean, result?: Record<string, unknown>) => void
-  ) => void;
-  // Inspection
-  getLastActivity: () => number;
-  // Spies
+export type MockBridge = {
+  /** Underlying bridge passed to ProjectManager. */
+  bridge: SupervisorBridge;
+  /** All events emitted from the bridge to the orchestrator, in order. */
+  eventsReceived: SupervisorBridgeEvent[];
+  /** Fire a bridge event into every registered handler (simulates renderer → main). */
+  emit: (event: SupervisorBridgeEvent) => void;
+  /** Spies. */
+  ensureColumn: ReturnType<typeof vi.fn>;
+  run: ReturnType<typeof vi.fn>;
+  send: ReturnType<typeof vi.fn>;
   stop: ReturnType<typeof vi.fn>;
-  forcePhase: ReturnType<typeof vi.fn>;
-  setWsUrl: ReturnType<typeof vi.fn>;
-  createSession: ReturnType<typeof vi.fn>;
+  reset: ReturnType<typeof vi.fn>;
+  dispose: ReturnType<typeof vi.fn>;
+};
+
+export const makeMockBridge = (): MockBridge => {
+  const handlers = new Set<(event: SupervisorBridgeEvent) => void>();
+  const eventsReceived: SupervisorBridgeEvent[] = [];
+  const ensureColumn = vi.fn(() => Promise.resolve());
+  const run = vi.fn((arg: { ticketId: TicketId }): Promise<{ runId: string }> =>
+    Promise.resolve({ runId: `run-${arg.ticketId}` })
+  );
+  const send = vi.fn(() => Promise.resolve());
+  const stop = vi.fn(() => Promise.resolve());
+  const reset = vi.fn(() => Promise.resolve());
+  const dispose = vi.fn(() => Promise.resolve());
+
+  const bridge: SupervisorBridge = {
+    ensureColumn,
+    run,
+    send,
+    stop,
+    reset,
+    dispose,
+    registerIpc: vi.fn(() => []),
+    onEvent: (handler: (event: SupervisorBridgeEvent) => void) => {
+      handlers.add(handler);
+      return () => handlers.delete(handler);
+    },
+    disposeAll: vi.fn(),
+  } as unknown as SupervisorBridge;
+
+  return {
+    bridge,
+    eventsReceived,
+    emit: (event) => {
+      eventsReceived.push(event);
+      for (const h of handlers) {
+        h(event);
+      }
+    },
+    ensureColumn,
+    run,
+    send,
+    stop,
+    reset,
+    dispose,
+  };
+};
+
+// ---------------------------------------------------------------------------
+// Test-only view of a supervisor entry — real SupervisorState + simulate helpers
+// ---------------------------------------------------------------------------
+
+export type MockEntry = {
+  ticketId: TicketId;
+  state: SupervisorState;
+  /**
+   * Mutable phase handle. Setting `phase` forces the state's phase — convenient
+   * for tests that want to jump to e.g. `running` before simulating events.
+   */
+  get phase(): TicketPhase;
+  set phase(p: TicketPhase);
+  /** Mutable retry-attempt counter (state.retryAttempt). */
+  get retryAttempt(): number;
+  set retryAttempt(n: number);
+  /** Mutable continuation-turn counter. */
+  get continuationTurn(): number;
+  set continuationTurn(n: number);
+  /** Read-only view of `state.lastActivity`. */
+  get lastActivityAt(): number;
+  set lastActivityAt(t: number);
+  getLastActivity: () => number;
+
+  // --- Spies mapped to the bridge/state surface ------------------------------
+  scheduleRetryTimer: ReturnType<typeof vi.spyOn>;
+  cancelRetryTimer: ReturnType<typeof vi.spyOn>;
+  recordActivity: ReturnType<typeof vi.spyOn>;
+  stop: ReturnType<typeof vi.fn>;
+  /** Bridge `run` spy — the startRun path. */
   startRun: ReturnType<typeof vi.fn>;
   sendMessage: ReturnType<typeof vi.fn>;
   dispose: ReturnType<typeof vi.fn>;
-  recordActivity: ReturnType<typeof vi.fn>;
-  cancelRetryTimer: ReturnType<typeof vi.fn>;
-  scheduleRetryTimer: ReturnType<typeof vi.fn>;
+  forcePhase: ReturnType<typeof vi.spyOn>;
+
+  // --- Event simulators ------------------------------------------------------
+  simulateRunEnd: (reason: string) => void;
+  simulateTokenUsage: (usage: { inputTokens: number; outputTokens: number; totalTokens: number }) => void;
 };
 
-export type MakeFactoryReturn = {
-  factory: IMachineFactory;
-  machines: Map<TicketId, MockMachine>;
-  createdOrder: TicketId[];
-};
+/**
+ * Install a new `SupervisorEntry` into the orchestrator for a ticket.
+ * Returns a MockEntry with simulate helpers for driving bridge events.
+ */
+export const seedMachine = (ctx: { pm: ProjectManager; bridge: MockBridge }, ticketId: TicketId): MockEntry => {
+  const orchestrator = orch(ctx.pm);
+  const state = new SupervisorState(ticketId, {
+    onPhaseChange: (tid, phase) => {
+      // Mirror the orchestrator's real callback so phase updates reach the store
+      // and IPC just like production. Safe because we installed the state under
+      // `machines.set` below; the orchestrator's own createState hook isn't used.
+      (orchestrator as unknown as { deps: { host: { updateTicket: (id: TicketId, patch: Partial<Ticket>) => void } } }).deps.host.updateTicket(tid, {
+        phase,
+        phaseChangedAt: Date.now(),
+      });
+    },
+  });
+  const entry: SupervisorEntry = { state, tabId: `tab-${ticketId}` as CodeTabId };
+  orchestrator.machines.set(ticketId, entry);
 
-export const makeMachineFactory = (): MakeFactoryReturn => {
-  const machines = new Map<TicketId, MockMachine>();
-  const createdOrder: TicketId[] = [];
+  const scheduleRetryTimerSpy = vi.spyOn(state, 'scheduleRetryTimer');
+  const cancelRetryTimerSpy = vi.spyOn(state, 'cancelRetryTimer');
+  const recordActivitySpy = vi.spyOn(state, 'recordActivity');
+  const forcePhaseSpy = vi.spyOn(state, 'forcePhase');
 
-  const factory: IMachineFactory = {
-    create: (ticketId: TicketId, callbacks: MachineCallbacks): ITicketMachine => {
-      const mock: MockMachine = {
-        ticketId,
-        phase: 'idle' as TicketPhase,
-        callbacks,
-        lastActivityAt: Date.now(),
-        continuationTurn: 0,
-        retryAttempt: 0,
-        getPhase: () => mock.phase,
-        isActive: () => ACTIVE_PHASES.includes(mock.phase),
-        isStreaming: () => STREAMING_PHASES.includes(mock.phase),
-        getSessionId: () => 'stub-session',
-        getLastActivity: () => mock.lastActivityAt,
-        transition: (to: TicketPhase) => {
-          mock.phase = to;
-          callbacks.onPhaseChange(ticketId, to);
-        },
-        forcePhase: vi.fn((to: TicketPhase) => {
-          mock.phase = to;
-        }) as unknown as MockMachine['forcePhase'],
-        setWsUrl: vi.fn() as unknown as MockMachine['setWsUrl'],
-        // eslint-disable-next-line @typescript-eslint/require-await
-        createSession: vi.fn(async () => 'stub-session') as unknown as MockMachine['createSession'],
-        // eslint-disable-next-line @typescript-eslint/require-await
-        startRun: vi.fn(async () => ({ sessionId: 'stub-session' })) as unknown as MockMachine['startRun'],
-        // eslint-disable-next-line @typescript-eslint/require-await
-        sendMessage: vi.fn(async () => {}) as unknown as MockMachine['sendMessage'],
-        // eslint-disable-next-line @typescript-eslint/require-await
-        stop: vi.fn(async () => {
-          mock.phase = 'idle';
-        }) as unknown as MockMachine['stop'],
-        dispose: vi.fn() as unknown as MockMachine['dispose'],
-        recordActivity: vi.fn(() => {
-          mock.lastActivityAt = Date.now();
-        }) as unknown as MockMachine['recordActivity'],
-        cancelRetryTimer: vi.fn() as unknown as MockMachine['cancelRetryTimer'],
-        scheduleRetryTimer: vi.fn() as unknown as MockMachine['scheduleRetryTimer'],
-        simulateRunEnd: (reason: string) => callbacks.onRunEnd(ticketId, reason),
-        simulateTokenUsage: (usage) => callbacks.onTokenUsage(ticketId, usage),
-        simulateClientRequest: (fnName, args, respond) => {
-          callbacks.onClientRequest?.(ticketId, fnName, args, respond);
-        },
-      };
-      machines.set(ticketId, mock);
-      createdOrder.push(ticketId);
-      return mock as unknown as ITicketMachine;
+  const mock: MockEntry = {
+    ticketId,
+    state,
+    get phase() {
+      return state.getPhase();
+    },
+    set phase(p: TicketPhase) {
+      state.forcePhase(p);
+    },
+    get retryAttempt() {
+      return state.retryAttempt;
+    },
+    set retryAttempt(n: number) {
+      state.retryAttempt = n;
+    },
+    get continuationTurn() {
+      return state.continuationTurn;
+    },
+    set continuationTurn(n: number) {
+      state.continuationTurn = n;
+    },
+    get lastActivityAt() {
+      return state.lastActivity;
+    },
+    set lastActivityAt(t: number) {
+      state.lastActivity = t;
+    },
+    getLastActivity: () => state.getLastActivity(),
+    scheduleRetryTimer: scheduleRetryTimerSpy,
+    cancelRetryTimer: cancelRetryTimerSpy,
+    recordActivity: recordActivitySpy,
+    forcePhase: forcePhaseSpy,
+    stop: ctx.bridge.stop,
+    startRun: ctx.bridge.run,
+    sendMessage: ctx.bridge.send,
+    dispose: ctx.bridge.dispose,
+    simulateRunEnd: (reason: string) => {
+      ctx.bridge.emit({ kind: 'run-end', ticketId, reason });
+    },
+    simulateTokenUsage: (usage) => {
+      ctx.bridge.emit({ kind: 'token-usage', ticketId, usage });
     },
   };
-
-  return { factory, machines, createdOrder };
-};
-
-// ---------------------------------------------------------------------------
-// Mock sandbox factory (unused in most tests, but required by DI)
-// ---------------------------------------------------------------------------
-
-export type MockSandbox = ISandbox & {
-  start: ReturnType<typeof vi.fn>;
-  stop: ReturnType<typeof vi.fn>;
-  getStatus: ReturnType<typeof vi.fn>;
-};
-
-export const makeSandboxFactory = (): { factory: ISandboxFactory; sandboxes: MockSandbox[] } => {
-  const sandboxes: MockSandbox[] = [];
-  const factory: ISandboxFactory = {
-    create: (): ISandbox => {
-      const sb: MockSandbox = {
-        start: vi.fn(),
-        // eslint-disable-next-line @typescript-eslint/require-await
-        stop: vi.fn(async () => {}),
-        getStatus: vi.fn(() => null as WithTimestamp<AgentProcessStatus> | null),
-      } as MockSandbox;
-      sandboxes.push(sb);
-      return sb;
-    },
-  };
-  return { factory, sandboxes };
+  return mock;
 };
 
 // ---------------------------------------------------------------------------
@@ -227,15 +281,12 @@ export const makeSandboxFactory = (): { factory: ISandboxFactory; sandboxes: Moc
 export const makeWorkflowLoader = (configOverride: Partial<WorkflowConfig> = {}): IWorkflowLoader => {
   const config: WorkflowConfig = { ...configOverride };
   return {
-    // eslint-disable-next-line @typescript-eslint/require-await
-    load: vi.fn(async () => ({})),
-    // eslint-disable-next-line @typescript-eslint/require-await
-    loadFromRemote: vi.fn(async () => ({})),
+    load: vi.fn(() => Promise.resolve({})),
+    loadFromRemote: vi.fn(() => Promise.resolve({})),
     get: vi.fn(() => null),
     getConfig: vi.fn(() => config),
     getPromptTemplate: vi.fn(() => 'stub prompt template'),
-    // eslint-disable-next-line @typescript-eslint/require-await
-    runHook: vi.fn(async () => true),
+    runHook: vi.fn(() => Promise.resolve(true)),
     dispose: vi.fn(),
   };
 };
@@ -324,10 +375,11 @@ export const seedStore = (args: SeedArgs = {}): IStore => {
 export type PmCtx = {
   pm: ProjectManager;
   store: IStore;
-  machines: Map<TicketId, MockMachine>;
+  /** Seeded MockEntry records by ticket id (populated by `seedMachine`). */
+  machines: Map<TicketId, MockEntry>;
   send: ReturnType<typeof makeSendToWindow>;
   workflow: IWorkflowLoader;
-  machineFactory: IMachineFactory;
+  bridge: MockBridge;
 };
 
 export const makePm = (
@@ -343,8 +395,8 @@ export const makePm = (
       : seedStore((storeOrSeed as SeedArgs) ?? {});
   const send = makeSendToWindow();
   const workflow = makeWorkflowLoader(opts.workflowConfig ?? {});
-  const { factory: machineFactory, machines } = makeMachineFactory();
-  const { factory: sandboxFactory } = makeSandboxFactory();
+  const bridge = makeMockBridge();
+  const machines = new Map<TicketId, MockEntry>();
 
   const pm = new ProjectManager(
     {
@@ -354,12 +406,11 @@ export const makePm = (
     },
     {
       workflowLoader: workflow,
-      machineFactory,
-      sandboxFactory,
+      bridge: bridge.bridge,
     }
   );
 
-  return { pm, store, machines, send, workflow, machineFactory };
+  return { pm, store, machines, send, workflow, bridge };
 };
 
 /**
@@ -369,3 +420,8 @@ export const makePm = (
  */
 export const orch = (pm: ProjectManager): SupervisorOrchestrator =>
   (pm as unknown as { supervisors: SupervisorOrchestrator }).supervisors;
+
+// ---------------------------------------------------------------------------
+// Back-compat re-exports — old tests reference `MockMachine`
+// ---------------------------------------------------------------------------
+export type MockMachine = MockEntry;

@@ -22,7 +22,7 @@ export const ConsoleXterm = memo(({ terminal }: { terminal: TerminalState }) => 
     assert(parent);
 
     terminal.xterm.options.theme = theme;
-    terminal.xterm.onResize(({ rows, cols }) => {
+    const resizeSub = terminal.xterm.onResize(({ rows, cols }) => {
       emitter.invoke('terminal:resize', terminal.id, cols, rows);
     });
 
@@ -34,12 +34,28 @@ export const ConsoleXterm = memo(({ terminal }: { terminal: TerminalState }) => 
     const resizeObserver = new ResizeObserver(debouncedFit);
     resizeObserver.observe(parent);
 
-    terminal.xterm.open(el);
-    terminal.xterm.focus();
+    // xterm's `open()` is documented as one-shot. On remount (e.g. toggling
+    // sidecar apps) the xterm instance lives on in the atom — reparent its
+    // existing root element instead of calling `open()` a second time, which
+    // leaves the renderer stuck pointing at the old (detached) DOM.
+    const existingRoot = terminal.xterm.element;
+    if (existingRoot) {
+      el.appendChild(existingRoot);
+    } else {
+      terminal.xterm.open(el);
+    }
 
-    debouncedFit();
+    // Defer to rAF so the new parent has layout, then fit + refresh so the
+    // viewport paints the scrollback on the fresh DOM.
+    const raf = requestAnimationFrame(() => {
+      fit();
+      terminal.xterm.refresh(0, terminal.xterm.rows - 1);
+      terminal.xterm.focus();
+    });
 
     return () => {
+      cancelAnimationFrame(raf);
+      resizeSub.dispose();
       resizeObserver.disconnect();
     };
   }, [terminal.fitAddon, terminal.id, terminal.xterm, theme]);

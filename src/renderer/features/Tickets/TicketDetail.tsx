@@ -18,7 +18,7 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { SelectTabData } from '@/renderer/ds';
-import { Badge, Body1, Button, Caption1, IconButton, Input, Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger, Select, Tab, TabList } from '@/renderer/ds';
+import { Badge, Body1, Button, Caption1, IconButton, Input, Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger, Select, Switch, Tab, TabList } from '@/renderer/ds';
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -170,6 +170,7 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, closeBehavior = 
   const [gitInfo, setGitInfo] = useState<GitRepoInfo | null>(null);
   const [editingBranch, setEditingBranch] = useState(false);
   const [editBranch, setEditBranch] = useState('');
+  const [editUseWorktree, setEditUseWorktree] = useState(true);
 
   useEffect(() => {
     if (project?.source?.kind !== 'local') {
@@ -205,6 +206,7 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, closeBehavior = 
       return;
     }
     setEditBranch(ticket.branch ?? '');
+    setEditUseWorktree(ticket.useWorktree ?? false);
     setEditingBranch(true);
   }, [ticket]);
 
@@ -216,11 +218,15 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, closeBehavior = 
     if (!ticket) {
       return;
     }
+    // Direct mode: clear the branch too — a ticket running against the
+    // project's working tree doesn't own one, and leaving a stale value
+    // would make the UI claim a branch the supervisor isn't using.
     void ticketApi.updateTicket(ticketId, {
-      branch: editBranch || undefined,
+      useWorktree: editUseWorktree,
+      branch: editUseWorktree ? editBranch || undefined : undefined,
     });
     setEditingBranch(false);
-  }, [editBranch, ticket, ticketId]);
+  }, [editBranch, editUseWorktree, ticket, ticketId]);
 
   const handleTitleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -480,22 +486,36 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, closeBehavior = 
       {editingBranch && gitInfo?.isGitRepo && (
         <div className={styles.branchEditBar}>
           <div className={styles.branchGroup}>
-            <Caption1 style={{ color: tokens.colorNeutralForeground3, fontWeight: tokens.fontWeightMedium }}>Branch</Caption1>
-            <Select
-              value={editBranch}
-              onChange={(e) => setEditBranch(e.target.value)}
-              size="sm"
-            >
-              <option value="">None</option>
-              {gitInfo.branches.map((branch) => (
-                <option key={branch} value={branch}>
-                  {branch}
-                </option>
-              ))}
-            </Select>
+            <Caption1 style={{ color: tokens.colorNeutralForeground3, fontWeight: tokens.fontWeightMedium }}>Isolated worktree</Caption1>
+            <Switch
+              checked={editUseWorktree}
+              onCheckedChange={setEditUseWorktree}
+              disabled={Boolean(ticket.worktreePath)}
+            />
           </div>
+          {editUseWorktree && (
+            <div className={styles.branchGroup}>
+              <Caption1 style={{ color: tokens.colorNeutralForeground3, fontWeight: tokens.fontWeightMedium }}>Branch</Caption1>
+              <Select
+                value={editBranch}
+                onChange={(e) => setEditBranch(e.target.value)}
+                size="sm"
+              >
+                <option value="">None</option>
+                {gitInfo.branches.map((branch) => (
+                  <option key={branch} value={branch}>
+                    {branch}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
           <Caption1 style={{ color: tokens.colorNeutralForeground2 }}>
-            Tickets with a branch open in an isolated workspace.
+            {ticket.worktreePath
+              ? 'Clean up the active worktree before switching modes.'
+              : editUseWorktree
+                ? 'Supervisor runs in its own branch + worktree, isolated from the main checkout.'
+                : 'Supervisor runs directly in the project checkout. Only one direct-mode ticket can run at a time.'}
           </Caption1>
           <div className={styles.branchGroup}>
             <Button size="sm" onClick={handleSaveBranch}>

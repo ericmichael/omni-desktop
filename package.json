@@ -44,8 +44,10 @@
     "version": "npm version --message 'chore: bump version to v%s'",
     "build:browser": "vite build --config vite.browser.config.ts",
     "build:server": "npm run build:packages && vite build --config vite.server.config.ts && npm run build:browser",
-    "dev:server": "npm run build:packages && npm run rebuild:node && concurrently -k -n server,browser -c blue,magenta \"vite build --config vite.server.config.ts --mode development --watch\" \"vite --config vite.browser.config.ts --mode development --host 0.0.0.0\"",
-    "start:server": "npm run rebuild:node && node out/server/index.mjs"
+    "dev:server": "npm run build:packages && npm run rebuild:node && vite build --config vite.server.config.ts --mode development && concurrently -k -n server-build,server,browser-build,browser-dev -c blue,cyan,green,magenta \"vite build --config vite.server.config.ts --mode development --watch\" \"node --watch out/server/index.mjs\" \"vite build --config vite.browser.config.ts --mode development --watch\" \"vite --config vite.browser.config.ts --mode development --host 0.0.0.0 --port 5173 --strictPort\"",
+    "start:server": "npm run rebuild:node && node out/server/index.mjs",
+    "seed": "node scripts/seed.mjs",
+    "seed:reset": "node scripts/seed.mjs --reset"
   },
   "devDependencies": {
     "@electron-toolkit/preload": "^3.0.2",

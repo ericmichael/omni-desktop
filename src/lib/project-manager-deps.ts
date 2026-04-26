@@ -2,82 +2,12 @@
  * Interfaces for ProjectManager's external dependencies.
  *
  * These allow ProjectManager's orchestration logic to be tested with stubs
- * instead of requiring real Docker containers, WebSocket servers, and file systems.
+ * instead of requiring real WebSocket servers or file systems.
  */
 
 import type { WorkflowConfig } from '@/lib/workflow';
-import type { AgentProcessMode, AgentProcessStartArg } from '@/main/agent-process';
-import type { PlatformClient } from '@/main/platform-client';
-import type { TicketPhase } from '@/shared/ticket-phase';
-import type {
-  AgentProcessStatus,
-  IpcRendererEvents,
-  SessionMessage,
-  StoreData,
-  TicketId,
-  TokenUsage,
-  WithTimestamp,
-} from '@/shared/types';
-
-// ---------------------------------------------------------------------------
-// ITicketMachine — the state machine for a single ticket's supervisor
-// ---------------------------------------------------------------------------
-
-export interface ITicketMachine {
-  getPhase(): TicketPhase;
-  isActive(): boolean;
-  isStreaming(): boolean;
-  getSessionId(): string | null;
-
-  transition(to: TicketPhase): void;
-  forcePhase(phase: TicketPhase): void;
-
-  setWsUrl(url: string): void;
-  createSession(variables?: Record<string, unknown>, sessionId?: string): Promise<string>;
-  startRun(
-    prompt: string,
-    opts?: { sessionId?: string; variables?: Record<string, unknown> }
-  ): Promise<{ sessionId: string }>;
-  /** Send a user message into a running session (streaming phases only). */
-  sendMessage(message: string): Promise<void>;
-  stop(): Promise<void>;
-  dispose(): void;
-
-  recordActivity(): void;
-  getLastActivity(): number;
-  cancelRetryTimer(): void;
-  scheduleRetryTimer(delayMs: number, callback: () => void): void;
-
-  continuationTurn: number;
-  retryAttempt: number;
-  lastActivityAt: number;
-}
-
-// ---------------------------------------------------------------------------
-// ISandbox — a sandbox container
-// ---------------------------------------------------------------------------
-
-export interface ISandbox {
-  readonly mode: AgentProcessMode;
-  start(arg: AgentProcessStartArg, options?: { rebuild?: boolean }): Promise<void> | void;
-  stop(): Promise<void>;
-  exit(): Promise<void>;
-  execInContainer(command: string, cwd?: string, timeoutMs?: number): Promise<boolean>;
-  getStatus(): WithTimestamp<AgentProcessStatus>;
-}
-
-// ---------------------------------------------------------------------------
-// ISandboxFactory — creates sandboxes (allows test stubs)
-// ---------------------------------------------------------------------------
-
-export interface ISandboxFactory {
-  create(opts: {
-    mode: AgentProcessMode;
-    platformClient?: PlatformClient;
-    ipcRawOutput: (data: string) => void;
-    onStatusChange: (status: WithTimestamp<AgentProcessStatus>) => void;
-  }): ISandbox;
-}
+import type { SupervisorBridge } from '@/main/supervisor-bridge';
+import type { IpcRendererEvents, StoreData } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
 // IWorkflowLoader — FLEET.md configuration
@@ -93,27 +23,6 @@ export interface IWorkflowLoader {
   getPromptTemplate(projectId: string): string;
   runHook(projectId: string, hookName: string, workspaceDir: string): Promise<boolean>;
   dispose(): void;
-}
-
-// ---------------------------------------------------------------------------
-// IMachineFactory — creates ticket machines (allows test stubs)
-// ---------------------------------------------------------------------------
-
-export type MachineCallbacks = {
-  onPhaseChange: (ticketId: TicketId, phase: TicketPhase) => void;
-  onMessage: (ticketId: TicketId, msg: SessionMessage) => void;
-  onRunEnd: (ticketId: TicketId, reason: string) => void;
-  onTokenUsage: (ticketId: TicketId, usage: TokenUsage) => void;
-  onClientRequest?: (
-    ticketId: TicketId,
-    functionName: string,
-    args: Record<string, unknown>,
-    respond: (ok: boolean, result?: Record<string, unknown>) => void
-  ) => void;
-};
-
-export interface IMachineFactory {
-  create(ticketId: TicketId, callbacks: MachineCallbacks): ITicketMachine;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +52,5 @@ export type ProjectManagerDeps = {
   store: IStore;
   sendToWindow: IWindowSender;
   workflowLoader: IWorkflowLoader;
-  sandboxFactory: ISandboxFactory;
-  machineFactory: IMachineFactory;
+  bridge: SupervisorBridge;
 };

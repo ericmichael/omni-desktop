@@ -297,6 +297,22 @@ export const ticketApi = {
   stopSupervisor: (ticketId: TicketId): Promise<void> => {
     return emitter.invoke('project:stop-supervisor', ticketId);
   },
+  finalizeTicketCleanup: async (ticketId: TicketId): Promise<boolean> => {
+    const ok = await emitter.invoke('project:finalize-ticket-cleanup', ticketId);
+    void ticketApi.fetchTasks();
+    return ok;
+  },
+  setPrReview: (ticketId: TicketId, review: 'approved' | 'changes_requested' | null): Promise<void> => {
+    return emitter.invoke('project:set-pr-review', ticketId, review);
+  },
+  checkMerge: (ticketId: TicketId): Promise<import('@/shared/types').PrMergeCheck> => {
+    return emitter.invoke('project:check-merge', ticketId);
+  },
+  mergeTicket: async (ticketId: TicketId): Promise<import('@/shared/types').PrMergeResult> => {
+    const result = await emitter.invoke('project:merge-ticket', ticketId);
+    void ticketApi.fetchTasks();
+    return result;
+  },
   sendSupervisorMessage: (ticketId: TicketId, message: string): Promise<void> => {
     // Optimistically add the user's message to the chat so it appears immediately
     const userMsg: SessionMessage = {
@@ -402,6 +418,21 @@ export const ticketApi = {
     $previousTicketsView.set($ticketsView.get());
     $ticketsView.set({ type: 'ticket', ticketId });
     persistedStoreApi.setKey('activeTicketId', ticketId);
+    // Hydrate `$tickets` so TicketDetail can find the ticket even when entering
+    // from a path that didn't run fetchTickets (e.g. dashboard click). Use the
+    // broadcast snapshot for the synchronous initial render, then refresh
+    // from the source of truth.
+    const inMemory = $tickets.get()[ticketId];
+    if (!inMemory) {
+      const persisted = persistedStoreApi.$atom.get().tickets.find((t) => t.id === ticketId);
+      if (persisted) {
+        $tickets.setKey(ticketId, persisted);
+      }
+    }
+    const projectId = ($tickets.get()[ticketId] ?? persistedStoreApi.$atom.get().tickets.find((t) => t.id === ticketId))?.projectId;
+    if (projectId) {
+      void ticketApi.fetchTickets(projectId);
+    }
   },
   setActiveTicket: (ticketId: TicketId): void => {
     persistedStoreApi.setKey('activeTicketId', ticketId);

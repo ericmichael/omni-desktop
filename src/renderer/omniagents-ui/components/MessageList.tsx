@@ -445,7 +445,7 @@ return undefined
   return (
     <div className="flex justify-start">
       <div className="w-full min-w-0">
-        <Tool className="bg-secondary">
+        <Tool>
           <ToolHeader
             type={`tool-${item.tool}`}
             state={toolState}

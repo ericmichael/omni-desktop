@@ -26,7 +26,16 @@ export default defineConfig({
         // and errors out if they're not installed. Marking them external
         // lets the runtime `require` fail gracefully into the JS fallback,
         // which is exactly what `ws` is designed for.
-        external: ['node-pty', 'bufferutil', 'utf-8-validate'],
+        //
+        // `fsevents` is chokidar's macOS-only native watcher. Its JS wrapper
+        // does `require("./fsevents.node")` relative to its own folder — if
+        // rollup bundles the JS in, the relative path resolves against the
+        // output bundle instead, which silently half-loads the native module
+        // (constants work, `flags.SinceNow` is undefined). External keeps
+        // the require intact. Symptom if this regresses: fatal
+        // "Cannot read properties of undefined (reading 'SinceNow')" whenever
+        // PageWatcher subscribes to a file.
+        external: ['node-pty', 'bufferutil', 'utf-8-validate', 'fsevents'],
       },
     },
   },

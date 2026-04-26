@@ -1,9 +1,13 @@
 /**
- * Launcher-only client tool definitions. Project / ticket / milestone / page /
- * inbox CRUD lives in the in-process MCP server (`packages/projects-mcp` via
- * `src/main/project-mcp-server.ts`); this file only carries tools that
- * coordinate with the launcher's runtime state — supervisor lifecycle, the
- * UI escalate/notify channels, app-control, and the renderer-side overlays.
+ * Launcher-only client tool definitions.
+ *
+ * Project / ticket / milestone / page / inbox CRUD has moved into the
+ * in-process MCP server (`packages/projects-mcp` via
+ * `src/main/project-mcp-server.ts`); the agent reaches those tools over
+ * Streamable HTTP. This file only carries tools that coordinate with the
+ * launcher's runtime state — escalation/notification channels, supervisor
+ * lifecycle (start/stop), the deck UI overlays, and the renderer-driven
+ * app-control + browser-control suites.
  */
 
 import { getContainerArtifactsDir } from '@/lib/artifacts';
@@ -36,9 +40,9 @@ export const TICKET_CLIENT_TOOLS = [
 ] as const;
 
 /**
- * Project-tier supervisor lifecycle tools — these dispatch / halt the
- * launcher's per-ticket supervisor and aren't covered by MCP (which only
- * sees DB rows, not the running supervisor process tree).
+ * Supervisor lifecycle tools — drive the launcher's autopilot orchestrator.
+ * Project / ticket CRUD lives in the MCP server; only run-control sits here
+ * because it touches launcher-side process state, not just the database.
  */
 export const PROJECT_CLIENT_TOOLS = [
   {
@@ -111,6 +115,17 @@ export const APP_CONTROL_TOOLS = [
       properties: {
         app_id: { type: 'string', description: 'App id from `list_apps` (e.g. "browser").' },
       },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'app_snapshot_diff',
+    safe: true,
+    description:
+      "Capture a fresh snapshot and return only what changed since the previous `app_snapshot_diff` call (first call returns everything as `added`). Use between steps of a long automation to save context — no need to re-send an entire tree when only a toast appeared or a row was removed.",
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' } },
       required: ['app_id'],
     },
   },
@@ -265,6 +280,364 @@ export const APP_CONTROL_TOOLS = [
   },
 ] as const;
 
+/**
+ * Browser-specific tools. Split out from APP_CONTROL_TOOLS because they
+ * operate on browser concepts (tabs, tabsets, stylesheets, find-in-page)
+ * rather than generic webviews. They still use the same `app_id` scheme for
+ * the active-tab operations so scoping stays consistent.
+ *
+ * `tabset_id` is an internal identifier:
+ *   - `col:<codeTabId>` — a standalone browser column in the code deck
+ *   - `dock:<codeTabId>` — the per-session dock browser inside a code tab
+ *   - `dock:global` — the shell's global dock browser (if present)
+ *
+ * Callers can fetch the full list with `browser_list_tabsets`.
+ */
+export const BROWSER_CLIENT_TOOLS = [
+  {
+    name: 'browser_list_tabsets',
+    safe: true,
+    description:
+      'List every browser tabset (each code-deck column and per-session dock) with its tabs, active tab, and profile. Use before `browser_tab_*` tools to learn valid `tabset_id` and `tab_id` values.',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'browser_tab_create',
+    safe: true,
+    description:
+      'Open a new tab in the given tabset. Optionally navigate it to `url` and/or leave the active tab unchanged with `activate: false`.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tabset_id: { type: 'string' },
+        url: { type: 'string' },
+        activate: { type: 'boolean' },
+      },
+      required: ['tabset_id'],
+    },
+  },
+  {
+    name: 'browser_tab_close',
+    safe: true,
+    description: 'Close a specific tab. If it was the only tab, the tabset retains one fresh blank tab.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tabset_id: { type: 'string' },
+        tab_id: { type: 'string' },
+      },
+      required: ['tabset_id', 'tab_id'],
+    },
+  },
+  {
+    name: 'browser_tab_activate',
+    safe: true,
+    description: 'Make the given tab the active one in its tabset.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tabset_id: { type: 'string' },
+        tab_id: { type: 'string' },
+      },
+      required: ['tabset_id', 'tab_id'],
+    },
+  },
+  {
+    name: 'browser_tab_navigate',
+    safe: true,
+    description:
+      'Navigate a specific tab (not just the active one) to a URL. Accepts anything `browser_tab_create.url` does — URLs, `localhost:PORT`, etc. Records a history entry.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tabset_id: { type: 'string' },
+        tab_id: { type: 'string' },
+        url: { type: 'string' },
+      },
+      required: ['tabset_id', 'tab_id', 'url'],
+    },
+  },
+  {
+    name: 'browser_scroll',
+    safe: true,
+    description:
+      "Scroll the active tab of a browser app. Pass one of: `to_top`, `to_bottom`, or `dx`/`dy` pixel offsets. `app_id` refers to a browser-kind app from `list_apps` (usually `\"browser\"`).",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        dx: { type: 'number' },
+        dy: { type: 'number' },
+        to_top: { type: 'boolean' },
+        to_bottom: { type: 'boolean' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'browser_inject_css',
+    safe: true,
+    description:
+      "Inject a stylesheet into the active tab's document. Returns a `key` you can pass to `browser_remove_inserted_css` to undo. The stylesheet persists until the page navigates.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        css: { type: 'string', description: 'CSS source to inject.' },
+      },
+      required: ['app_id', 'css'],
+    },
+  },
+  {
+    name: 'browser_remove_inserted_css',
+    safe: true,
+    description: 'Remove previously injected CSS by its key.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        key: { type: 'string' },
+      },
+      required: ['app_id', 'key'],
+    },
+  },
+  {
+    name: 'browser_find_in_page',
+    safe: true,
+    description:
+      "Search the active tab for `query`. Returns `{ matches, active_ordinal }`. Set `find_next: true` to advance to the next match after a prior call.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        query: { type: 'string' },
+        case_sensitive: { type: 'boolean' },
+        forward: { type: 'boolean' },
+        find_next: { type: 'boolean' },
+      },
+      required: ['app_id', 'query'],
+    },
+  },
+  {
+    name: 'browser_wait_for',
+    safe: true,
+    description:
+      "Block until a condition on the active tab is met. Supply one of: `selector` (CSS selector must match something), `url_includes` (substring of current URL), or `network_idle: true` (page finished loading). Times out after `timeout_ms` (default 10000).",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        selector: { type: 'string' },
+        url_includes: { type: 'string' },
+        network_idle: { type: 'boolean' },
+        timeout_ms: { type: 'number' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'browser_scroll_to_ref',
+    safe: true,
+    description:
+      'Scroll an element identified by a `ref` from `app_snapshot` into view. Use before clicks on far-down elements to avoid off-screen misses.',
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' }, ref: { type: 'string' } },
+      required: ['app_id', 'ref'],
+    },
+  },
+  {
+    name: 'browser_pdf',
+    safe: true,
+    description:
+      "Print the active tab to PDF and write it into the ticket's artifacts directory. Returns the absolute file path.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        landscape: { type: 'boolean' },
+        print_background: { type: 'boolean' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'browser_full_screenshot',
+    safe: true,
+    description:
+      'Capture a full-page PNG of the active tab (not just the viewport) using CDP. Returns the absolute file path in the ticket artifacts directory.',
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' } },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'browser_screenshot_element',
+    safe: true,
+    description:
+      'Capture a PNG clipped to a specific element identified by `ref` (from `app_snapshot`). Great for visual confirmation of a button, card, or error message without a full-page screenshot.',
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' }, ref: { type: 'string' } },
+      required: ['app_id', 'ref'],
+    },
+  },
+  {
+    name: 'browser_set_viewport',
+    safe: true,
+    description:
+      'Emulate a specific viewport size and/or device-scale/mobile flag on the active tab. Pass `clear: true` to restore the real viewport. Useful for responsive testing.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        width: { type: 'number' },
+        height: { type: 'number' },
+        device_scale_factor: { type: 'number' },
+        mobile: { type: 'boolean' },
+        clear: { type: 'boolean' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'browser_set_user_agent',
+    safe: true,
+    description:
+      'Override the User-Agent header the active tab sends. Pass an empty string to restore the default.',
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' }, user_agent: { type: 'string' } },
+      required: ['app_id', 'user_agent'],
+    },
+  },
+  {
+    name: 'browser_set_zoom',
+    safe: true,
+    description: 'Set the active tab\'s zoom factor (1.0 = 100%, range 0.25–5).',
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' }, factor: { type: 'number' } },
+      required: ['app_id', 'factor'],
+    },
+  },
+  {
+    name: 'browser_cookies_get',
+    safe: true,
+    description:
+      "Read cookies from the active tab's partition. Optional filter narrows by URL, name, domain, or path. Returns Electron Cookie objects.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        url: { type: 'string' },
+        name: { type: 'string' },
+        domain: { type: 'string' },
+        path: { type: 'string' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'browser_cookies_set',
+    safe: true,
+    description:
+      "Write or update a cookie in the active tab's partition. `url` is required by Electron to locate the cookie's host/scheme.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        url: { type: 'string' },
+        name: { type: 'string' },
+        value: { type: 'string' },
+        domain: { type: 'string' },
+        path: { type: 'string' },
+        secure: { type: 'boolean' },
+        http_only: { type: 'boolean' },
+        expiration_date: { type: 'number', description: 'Unix seconds.' },
+        same_site: { type: 'string', enum: ['unspecified', 'no_restriction', 'lax', 'strict'] },
+      },
+      required: ['app_id', 'url', 'name', 'value'],
+    },
+  },
+  {
+    name: 'browser_cookies_clear',
+    safe: true,
+    description: 'Remove cookies matching a filter. Returns the number removed.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        url: { type: 'string' },
+        name: { type: 'string' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'browser_storage_get',
+    safe: true,
+    description: 'Read all key/value pairs from localStorage or sessionStorage on the active tab.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        which: { type: 'string', enum: ['local', 'session'] },
+      },
+      required: ['app_id', 'which'],
+    },
+  },
+  {
+    name: 'browser_storage_set',
+    safe: true,
+    description: 'Write key/value pairs into localStorage or sessionStorage on the active tab.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        which: { type: 'string', enum: ['local', 'session'] },
+        entries: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+        },
+      },
+      required: ['app_id', 'which', 'entries'],
+    },
+  },
+  {
+    name: 'browser_storage_clear',
+    safe: true,
+    description: 'Clear all keys from localStorage or sessionStorage on the active tab.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        which: { type: 'string', enum: ['local', 'session'] },
+      },
+      required: ['app_id', 'which'],
+    },
+  },
+  {
+    name: 'browser_network_log',
+    safe: true,
+    description:
+      "Read the last N network requests the active tab made — method, URL, status, mimeType, timing. Useful for diagnosing failing fetches, authentication errors, or slow requests. Pass `clear: true` to reset the buffer after reading.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        limit: { type: 'number', description: 'Max entries to return (default 100, up to 500 buffered).' },
+        since: { type: 'number', description: 'CDP timestamp to filter from.' },
+        url_includes: { type: 'string' },
+        status_min: { type: 'number', description: 'Only entries with status >= this value (e.g. 400 to find failures).' },
+        clear: { type: 'boolean' },
+      },
+      required: ['app_id'],
+    },
+  },
+] as const;
+
 export const UI_CLIENT_TOOLS = [
   {
     name: 'display_plan',
@@ -324,7 +697,7 @@ const PROJECT_GUIDANCE = [
   '- `notify` — heads-up, run continues. Use for time-sensitive but non-blocking info.',
   '- `escalate` — **stops the run**. Use only when truly blocked (missing credentials, ambiguous requirements, external action).',
   '',
-  'Before starting a ticket, read `get_ticket_comments` to see what prior runs learned and decided. Before ending work, write a comment summarizing decisions, blockers, and next steps — this is the cross-session memory for the next run.',
+  'Before starting a ticket: read `get_ticket_comments` to see what prior runs learned. Before ending work, write a comment summarizing decisions, blockers, and next steps — this is the cross-session memory for the next run.',
   '',
   '## Pipeline gates',
   '',
@@ -345,17 +718,26 @@ const PROJECT_GUIDANCE = [
   'The dock hosts web apps the user can see — the built-in browser, VS Code, a VNC desktop, and any custom webview apps they installed. You can drive them with `list_apps`, `app_snapshot`, `app_click`, `app_fill`, `app_type`, `app_press`, `app_screenshot`, `app_eval`, and `app_navigate`. Always `list_apps` first to find valid ids, then `app_snapshot` before clicking — refs are per-snapshot and invalidate after any navigation. Prefer `app_fill` for text fields (handles clearing); use `app_type` only when the element is already focused.',
 ].join('\n');
 
+export type ContextIdentifierOpts = {
+  projectId?: string;
+  projectLabel?: string;
+  ticketId?: string;
+  /**
+   * Absolute path to the ticket's artifacts directory as the agent sees it.
+   * Pass the host path when the agent runs on the host (sandboxBackend
+   * 'none' / 'local'); pass the container path otherwise. Omit to default
+   * to the container path.
+   */
+  artifactsDir?: string;
+};
+
 /**
  * Build context identifiers for `additional_instructions`. Starts with the
  * behavioral guidance above, then appends the specific project/ticket the
  * agent is operating in (when known) and per-ticket artifact-channel
  * guidance.
  */
-const buildContextIdentifiers = (opts?: {
-  projectId?: string;
-  projectLabel?: string;
-  ticketId?: string;
-}): string => {
+const buildContextIdentifiers = (opts?: ContextIdentifierOpts): string => {
   const lines: string[] = [PROJECT_GUIDANCE];
   if (opts?.projectId) {
     lines.push('');
@@ -363,71 +745,80 @@ const buildContextIdentifiers = (opts?: {
   }
   if (opts?.ticketId) {
     lines.push(`Current ticket: ${opts.ticketId}`);
+    const artifactsDir = opts.artifactsDir ?? getContainerArtifactsDir(opts.ticketId);
     lines.push(
       [
         '',
         '## Where to put output for the user',
         'You have two distinct channels for surfacing information, and they serve different purposes:',
         '',
-        `- **Persistent artifacts directory (human-visible): \`${getContainerArtifactsDir(opts.ticketId)}\`**. Files you write here survive across runs and appear in this ticket's **Artifacts** tab in the launcher UI. Use for progress notes, research, generated deliverables, or any work product that should stick around for the user to review later and doesn't belong in the repo or project folder.`,
+        `- **Persistent artifacts directory (human-visible): \`${artifactsDir}\`**. Files you write here survive across runs and appear in this ticket's **Artifacts** tab in the launcher UI. Use for progress notes, research, generated deliverables, or any work product that should stick around for the user to review later and doesn't belong in the repo or project folder.`,
         '- **`display_artifact` tool** — renders content inline in the chat stream (markdown, HTML, etc.). Ephemeral, tied to the conversation. Use for "show this to the user now" — previews, summaries, diagrams responding to the current turn.',
         '',
         'Both are visible to the user. Choose by lifecycle: artifacts directory = "this should persist"; `display_artifact` = "show this now."',
+        '',
+        '## Keep the PR writeup current',
+        '',
+        "Maintain an accurate PR title and body reflecting the changes you've made so far. The launcher's **PR** tab reads these files (polled, so updates are picked up automatically):",
+        '',
+        `- \`${artifactsDir}/pr/PR_TITLE.md\` — one short line (≤70 chars) describing the ticket's change. No markdown, no trailing punctuation.`,
+        `- \`${artifactsDir}/pr/PR_BODY.md\` — markdown with a **Summary** section (what and why) and a **Test plan** section (how to verify). Keep it grounded in the diff.`,
+        `- \`${artifactsDir}/pr/CI_STATUS.md\` — optional. Latest CI/test status, if you've produced any.`,
+        '',
+        "Refresh these whenever the scope or nature of your work shifts — don't wait for a column change or for the work to be \"done.\" If nothing material has changed, leave them alone.",
       ].join('\n')
     );
   }
   return lines.join('\n');
 };
 
-/** Autopilot sessions: ticket tools + read-only context tools + column-scoped app control. */
-export const buildAutopilotVariables = (opts?: {
-  projectId?: string;
-  projectLabel?: string;
-  ticketId?: string;
-}): Record<string, unknown> => {
-  const allTools = [...TICKET_CLIENT_TOOLS, ...APP_CONTROL_TOOLS];
-  return {
-    client_tools: allTools,
-    safe_tool_overrides: { safe_tool_names: extractSafeToolNames(allTools) },
-    additional_instructions: buildContextIdentifiers(opts),
-  };
+/**
+ * Build the variables bundle attached to a run / session.
+ *
+ * - `surface` picks the tool set. Chat surface gets project/inbox/page tools but
+ *   not code-deck-only tools. Code surface gets everything.
+ * - `autopilot` picks the approval policy. When true, we emit the catch-all
+ *   `safe_tool_patterns: ['.*']` so every tool runs without approval, and the
+ *   caller can supply a `supervisorPrompt` to prepend to additional_instructions.
+ *   When false, only tools marked `safe: true` on the client skip approval.
+ *
+ * One builder, two switches — this replaces the old `buildAutopilotVariables` /
+ * `buildInteractiveVariables` / `buildCodeVariables` trio whose divergent
+ * whitelists were the source of the "tool calls require approval" bug.
+ */
+export type SessionVariablesArgs = {
+  surface: 'chat' | 'code';
+  autopilot?: boolean;
+  context?: ContextIdentifierOpts;
+  /** Prepended to additional_instructions when autopilot is true. */
+  supervisorPrompt?: string;
 };
 
-/** Interactive sessions (Chat tab): all tools except code-deck-only tools. */
-export const buildInteractiveVariables = (opts?: {
-  projectId?: string;
-  projectLabel?: string;
-  ticketId?: string;
-}): Record<string, unknown> => {
-  const allTools = [
-    ...TICKET_CLIENT_TOOLS,
-    ...PROJECT_CLIENT_TOOLS,
-    ...UI_CLIENT_TOOLS,
-    ...APP_CONTROL_TOOLS,
-  ];
-  return {
-    client_tools: allTools,
-    safe_tool_overrides: { safe_tool_names: extractSafeToolNames(allTools) },
-    additional_instructions: buildContextIdentifiers(opts),
-  };
-};
+const CHAT_CLIENT_TOOLS: readonly ClientToolDef[] = [
+  ...TICKET_CLIENT_TOOLS,
+  ...PROJECT_CLIENT_TOOLS,
+  ...UI_CLIENT_TOOLS,
+  ...APP_CONTROL_TOOLS,
+  ...BROWSER_CLIENT_TOOLS,
+];
 
-/** Code deck sessions: interactive tools + code-deck-only tools (open_preview, etc.). */
-export const buildCodeVariables = (opts?: {
-  projectId?: string;
-  projectLabel?: string;
-  ticketId?: string;
-}): Record<string, unknown> => {
-  const allTools = [
-    ...TICKET_CLIENT_TOOLS,
-    ...PROJECT_CLIENT_TOOLS,
-    ...UI_CLIENT_TOOLS,
-    ...CODE_UI_TOOLS,
-    ...APP_CONTROL_TOOLS,
-  ];
+const CODE_CLIENT_TOOLS: readonly ClientToolDef[] = [
+  ...CHAT_CLIENT_TOOLS,
+  ...CODE_UI_TOOLS,
+];
+
+export const buildSessionVariables = (args: SessionVariablesArgs): Record<string, unknown> => {
+  const { surface, autopilot = false, context, supervisorPrompt } = args;
+  const tools = surface === 'code' ? CODE_CLIENT_TOOLS : CHAT_CLIENT_TOOLS;
+  const baseInstructions = buildContextIdentifiers(context);
+  const instructions =
+    autopilot && supervisorPrompt ? `${supervisorPrompt}\n\n${baseInstructions}` : baseInstructions;
+
   return {
-    client_tools: allTools,
-    safe_tool_overrides: { safe_tool_names: extractSafeToolNames(allTools) },
-    additional_instructions: buildContextIdentifiers(opts),
+    client_tools: tools,
+    safe_tool_overrides: autopilot
+      ? { safe_tool_patterns: ['.*'] }
+      : { safe_tool_names: extractSafeToolNames(tools) },
+    additional_instructions: instructions,
   };
 };

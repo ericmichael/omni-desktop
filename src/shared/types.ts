@@ -52,7 +52,7 @@ export type WindowProps = {
 /**
  * Data stored in the electron store.
  */
-export type LayoutMode = 'chat' | 'code' | 'projects' | 'dashboards' | 'settings' | 'more';
+export type LayoutMode = 'chat' | 'code' | 'projects' | 'dashboards' | 'settings' | 'more' | 'gallery';
 export type OmniTheme =
   | 'teams-light'
   | 'teams-dark'
@@ -157,7 +157,96 @@ export type StoreData = {
 
   /** User-added custom apps for the workspace dock. */
   customApps: CustomAppEntry[];
+
+  /** Browser profiles (default + user-created). Always contains at least the built-in default. */
+  browserProfiles: BrowserProfile[];
+  /**
+   * Browser tabsets keyed by id. Conventional ids:
+   * - `col:<codeTabId>` — standalone browser column in the code deck.
+   * - `dock:<codeTabId>` — per-session browser surface inside the env dock.
+   */
+  browserTabsets: Record<BrowserTabsetId, BrowserTabset>;
+  /** Capped-length visit history, newest first. */
+  browserHistory: BrowserHistoryEntry[];
+  /** User-curated bookmarks. */
+  browserBookmarks: BrowserBookmark[];
 };
+
+// #region Browser types
+
+export type BrowserProfileId = string;
+export type BrowserTabsetId = string;
+export type BrowserTabId = string;
+
+/**
+ * A browser identity. Each profile maps to an Electron `partition` name so its
+ * cookies, localStorage, and cache are isolated from other profiles and from
+ * non-browser webviews in the app.
+ */
+export type BrowserProfile = {
+  id: BrowserProfileId;
+  label: string;
+  /** Electron webview `partition=` attribute, e.g. `persist:browser-default`. */
+  partition: string;
+  /** True for the built-in default profile. Cannot be deleted. */
+  builtin?: boolean;
+  /** Non-persistent partition (`partition` starts without `persist:`). */
+  incognito?: boolean;
+  createdAt: number;
+};
+
+/** One open tab within a tabset. */
+export type BrowserTab = {
+  id: BrowserTabId;
+  url: string;
+  title?: string;
+  favicon?: string;
+  /** Per-tab profile override. Falls back to the tabset's profile. */
+  profileId?: BrowserProfileId;
+  pinned?: boolean;
+  createdAt: number;
+  lastActiveAt: number;
+};
+
+/**
+ * A collection of tabs owned by one surface (e.g. one browser column in the
+ * code deck, or one per-session dock browser).
+ */
+export type BrowserTabset = {
+  id: BrowserTabsetId;
+  profileId: BrowserProfileId;
+  tabs: BrowserTab[];
+  activeTabId: BrowserTabId | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type BrowserHistoryEntry = {
+  id: string;
+  url: string;
+  title?: string;
+  profileId: BrowserProfileId;
+  visitedAt: number;
+};
+
+export type BrowserBookmark = {
+  id: string;
+  url: string;
+  title: string;
+  folder?: string;
+  createdAt: number;
+};
+
+/** Item returned by the omnibox suggestion service. */
+export type BrowserSuggestion = {
+  kind: 'history' | 'bookmark' | 'search';
+  url: string;
+  title?: string;
+  /** Higher = more relevant. Used only for sort. */
+  score: number;
+};
+
+// #endregion
 
 // The electron store uses JSON schema to validate its data.
 
@@ -214,7 +303,7 @@ export const schema: Schema<StoreData> = {
 
   layoutMode: {
     type: 'string',
-    enum: ['chat', 'code', 'projects', 'dashboards', 'settings', 'more'],
+    enum: ['chat', 'code', 'projects', 'dashboards', 'settings', 'more', 'gallery'],
     default: 'chat',
   },
   theme: {
@@ -298,6 +387,7 @@ export const schema: Schema<StoreData> = {
         createdAt: { type: 'number' },
         pipeline: { type: 'object' },
         sandbox: { type: ['object', 'null'] },
+        seedKey: { type: 'string' },
       },
       required: ['id', 'label', 'slug', 'createdAt'],
     },
@@ -319,6 +409,7 @@ export const schema: Schema<StoreData> = {
         completedAt: { type: 'number' },
         createdAt: { type: 'number' },
         updatedAt: { type: 'number' },
+        seedKey: { type: 'string' },
       },
       required: ['id', 'projectId', 'title', 'description', 'status', 'createdAt', 'updatedAt'],
     },
@@ -339,6 +430,7 @@ export const schema: Schema<StoreData> = {
         kind: { type: 'string', enum: ['doc', 'notebook'] },
         createdAt: { type: 'number' },
         updatedAt: { type: 'number' },
+        seedKey: { type: 'string' },
       },
       required: ['id', 'projectId', 'title', 'sortOrder', 'createdAt', 'updatedAt'],
     },
@@ -375,6 +467,7 @@ export const schema: Schema<StoreData> = {
         },
         createdAt: { type: 'number' },
         updatedAt: { type: 'number' },
+        seedKey: { type: 'string' },
       },
       required: ['id', 'title', 'status', 'createdAt', 'updatedAt'],
     },
@@ -429,6 +522,15 @@ export const schema: Schema<StoreData> = {
         columnChangedAt: { type: 'number' },
         resolvedAt: { type: 'number' },
         archivedAt: { type: 'number' },
+        cleanupPending: { type: 'boolean' },
+        prReview: {
+          type: 'object',
+          properties: {
+            status: { type: 'string', enum: ['approved', 'changes_requested'] },
+            at: { type: 'number' },
+          },
+        },
+        prMergedAt: { type: 'number' },
         // Kanban fields
         columnId: { type: 'string' },
         currentPhaseId: { type: ['string', 'null'] },
@@ -439,6 +541,7 @@ export const schema: Schema<StoreData> = {
         loopMaxIterations: { type: 'number' },
         loopIteration: { type: 'number' },
         loopStatus: { type: 'string', enum: ['running', 'completed', 'stopped', 'error'] },
+        seedKey: { type: 'string' },
       },
       required: [
         'id',
@@ -487,6 +590,84 @@ export const schema: Schema<StoreData> = {
         columnScoped: { type: 'boolean' },
       },
       required: ['id', 'label', 'icon', 'url', 'order'],
+    },
+  },
+  browserProfiles: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        label: { type: 'string' },
+        partition: { type: 'string' },
+        builtin: { type: 'boolean' },
+        incognito: { type: 'boolean' },
+        createdAt: { type: 'number' },
+      },
+      required: ['id', 'label', 'partition', 'createdAt'],
+    },
+  },
+  browserTabsets: {
+    type: 'object',
+    default: {},
+    additionalProperties: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        profileId: { type: 'string' },
+        tabs: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              url: { type: 'string' },
+              title: { type: 'string' },
+              favicon: { type: 'string' },
+              profileId: { type: 'string' },
+              pinned: { type: 'boolean' },
+              createdAt: { type: 'number' },
+              lastActiveAt: { type: 'number' },
+            },
+            required: ['id', 'url', 'createdAt', 'lastActiveAt'],
+          },
+        },
+        activeTabId: { type: ['string', 'null'] },
+        createdAt: { type: 'number' },
+        updatedAt: { type: 'number' },
+      },
+      required: ['id', 'profileId', 'tabs', 'activeTabId', 'createdAt', 'updatedAt'],
+    },
+  },
+  browserHistory: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        url: { type: 'string' },
+        title: { type: 'string' },
+        profileId: { type: 'string' },
+        visitedAt: { type: 'number' },
+      },
+      required: ['id', 'url', 'profileId', 'visitedAt'],
+    },
+  },
+  browserBookmarks: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        url: { type: 'string' },
+        title: { type: 'string' },
+        folder: { type: 'string' },
+        createdAt: { type: 'number' },
+      },
+      required: ['id', 'url', 'title', 'createdAt'],
     },
   },
 };
@@ -737,6 +918,8 @@ export type Project = {
   autoDispatch?: boolean;
   /** Per-project sandbox configuration. When absent/null, the default sandbox image is used. */
   sandbox?: SandboxConfig | null;
+  /** Populated by the seed script; tracked in seed-manifest for reset. */
+  seedKey?: string;
 };
 
 export type Milestone = {
@@ -755,6 +938,8 @@ export type Milestone = {
   completedAt?: number;
   createdAt: number;
   updatedAt: number;
+  /** Populated by the seed script; tracked in seed-manifest for reset. */
+  seedKey?: string;
 };
 
 /**
@@ -796,6 +981,8 @@ export type Page = {
   properties?: PageProperties;
   createdAt: number;
   updatedAt: number;
+  /** Populated by the seed script; tracked in seed-manifest for reset. */
+  seedKey?: string;
 };
 
 // --- Inbox ---
@@ -847,6 +1034,8 @@ export type InboxItem = {
   promotedTo?: InboxPromotion;
   createdAt: number;
   updatedAt: number;
+  /** Populated by the seed script; tracked in seed-manifest for reset. */
+  seedKey?: string;
 };
 
 export type TicketComment = {
@@ -893,10 +1082,22 @@ export type Ticket = {
   worktreePath?: string;
   /** Name of the git worktree (used for branch naming). */
   worktreeName?: string;
+  /**
+   * Set when the ticket was moved to the terminal column but the worktree
+   * had uncommitted changes, so cleanup was deferred. The worktree + sandbox
+   * stay alive until the user explicitly finalizes via `project:finalize-ticket-cleanup`.
+   */
+  cleanupPending?: boolean;
+
+  // --- Local PR flow ---
+  /** Reviewer decision on the ticket's PR. Gate for merging. */
+  prReview?: { status: 'approved' | 'changes_requested'; at: number };
+  /** Stamped when the ticket's feature branch is merged into its base. */
+  prMergedAt?: number;
 
   // Supervisor state
-  /** Persistent supervisor session ID (survives across start_run calls). */
-  supervisorSessionId?: string;
+  /** True when autopilot is driving this ticket. Flipped by start/stopSupervisor. */
+  autopilot?: boolean;
   /** Current supervisor lifecycle phase. */
   phase?: import('@/shared/ticket-phase').TicketPhase;
   /** Stamped whenever `phase` transitions. Drives stalled-ticket risk. */
@@ -917,6 +1118,8 @@ export type Ticket = {
   comments?: TicketComment[];
   /** History of supervisor runs on this ticket. */
   runs?: TicketRun[];
+  /** Populated by the seed script; tracked in seed-manifest for reset. */
+  seedKey?: string;
 };
 
 // --- Shaping ---
@@ -966,10 +1169,21 @@ export type ArtifactFileContent = {
   size: number;
 };
 
+/**
+ * Which source the change came from:
+ *   - committed: between `base` and `HEAD` (what a PR would land)
+ *   - staged: between `HEAD` and the index (git add)
+ *   - unstaged: between the index and the working tree
+ *   - untracked: new file not tracked by git
+ * A single path can appear under multiple groups when its change spans several.
+ */
+export type DiffGroup = 'committed' | 'staged' | 'unstaged' | 'untracked';
+
 export type FileDiff = {
   path: string;
   oldPath?: string;
   status: 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'untracked';
+  group: DiffGroup;
   additions: number;
   deletions: number;
   isBinary: boolean;
@@ -993,6 +1207,25 @@ export type SessionMessage = {
 };
 
 export type GitRepoInfo = { isGitRepo: true; branches: string[]; currentBranch: string } | { isGitRepo: false };
+
+/**
+ * Result of a dry-run merge check for a ticket's feature branch → base.
+ * `ready` is false when the ticket has no worktree / base / feature branch;
+ * conflict info is surfaced in `conflictingFiles` when `ready` is true.
+ */
+export type PrMergeCheck =
+  | { ready: false; reason: string }
+  | {
+      ready: true;
+      base: string;
+      feature: string;
+      hasConflicts: boolean;
+      conflictingFiles: string[];
+      /** Commits on the feature branch not present on base. Zero means nothing to merge. */
+      ahead: number;
+    };
+
+export type PrMergeResult = { ok: true; mergeCommitSha: string } | { ok: false; error: string };
 
 // #endregion
 
@@ -1063,6 +1296,8 @@ type UtilIpcEvents = Namespaced<
     'get-default-workspace-dir': () => string;
     'ensure-directory': (path: string) => boolean;
     'open-directory': (path: string) => string;
+    /** Open a URL in the user's default browser via Electron `shell.openExternal`. */
+    'open-external': (url: string) => void;
     'get-launcher-version': () => string;
     'get-omni-runtime-info': () => OmniRuntimeInfo;
     'check-url': (url: string) => boolean;
@@ -1082,11 +1317,12 @@ type UtilIpcEvents = Namespaced<
 type TerminalIpcEvents = Namespaced<
   'terminal',
   {
-    create: (cwd?: string) => string;
-    list: () => string[];
+    create: (tabId: string, cwd?: string) => string;
+    list: (tabId: string) => string[];
     write: (id: string, data: string) => void;
     resize: (id: string, cols: number, rows: number) => void;
     dispose: (id: string) => void;
+    'dispose-all-for-tab': (tabId: string) => void;
   }
 >;
 
@@ -1226,8 +1462,19 @@ type ProjectIpcEvents = Namespaced<
     'send-supervisor-message': (ticketId: TicketId, message: string) => void;
     'reset-supervisor-session': (ticketId: TicketId) => void;
     'resolve-ticket': (ticketId: TicketId, resolution: TicketResolution) => void;
+    /**
+     * Retry the deferred cleanup for a completed ticket whose worktree was
+     * dirty. Returns true when cleanup succeeded, false when the worktree
+     * still has uncommitted changes (cleanupPending stays set).
+     */
+    'finalize-ticket-cleanup': (ticketId: TicketId) => boolean;
+    /** Set or clear the ticket's PR review decision. Pass null to clear. */
+    'set-pr-review': (ticketId: TicketId, review: 'approved' | 'changes_requested' | null) => void;
+    /** Dry-run merge the ticket's feature branch into its base; reports conflicts. */
+    'check-merge': (ticketId: TicketId) => PrMergeCheck;
+    /** Merge the ticket's feature branch into its base. On success, moves ticket to terminal column. */
+    'merge-ticket': (ticketId: TicketId) => PrMergeResult;
     'set-auto-dispatch': (projectId: ProjectId, enabled: boolean) => void;
-    'get-supervisor-sandbox-status': (tabId: CodeTabId) => WithTimestamp<AgentProcessStatus> | null;
     'get-active-wip-tickets': () => Ticket[];
     // Context file operations (replaces project.brief)
     'read-context': (projectId: ProjectId) => string;
@@ -1236,6 +1483,66 @@ type ProjectIpcEvents = Namespaced<
     'list-project-files': (projectId: ProjectId) => ArtifactFileEntry[];
     'get-context-preview': (projectId: ProjectId) => string;
     'open-project-file': (projectId: ProjectId, relativePath: string) => void;
+  }
+>;
+
+/**
+ * Supervisor bridge. The Code column owns the session, the WebSocket, and the
+ * run lifecycle. Main only orchestrates — decides *when* to submit a prompt
+ * and reacts to forwarded events. No main-process session id; no prepare step;
+ * no client-request round trip (tool calls are handled entirely in the
+ * renderer's `buildClientToolHandler`).
+ */
+export type SupervisorBridgeRequest =
+  | {
+      /**
+       * Make sure a Code tab exists for this ticket. Creates one if needed,
+       * switches the layout to code. Resolves after the actor registers.
+       */
+      kind: 'ensure-column';
+      ticketId: TicketId;
+      workspaceDir?: string;
+    }
+  | {
+      /**
+       * Start a run. Routes through the same handleSubmit path the user's
+       * keyboard uses. `supervisorPrompt` is prepended to additional_instructions
+       * when set (autopilot runs only — user submits leave it undefined).
+       */
+      kind: 'run';
+      ticketId: TicketId;
+      prompt: string;
+      supervisorPrompt?: string;
+    }
+  | { kind: 'send'; ticketId: TicketId; message: string }
+  | { kind: 'stop'; ticketId: TicketId }
+  | {
+      /** Stop current run and mint a fresh session id on the column. */
+      kind: 'reset';
+      ticketId: TicketId;
+    }
+  | { kind: 'dispose'; ticketId: TicketId };
+
+export type SupervisorBridgeEvent =
+  | { kind: 'run-started'; ticketId: TicketId; runId: string }
+  | { kind: 'run-end'; ticketId: TicketId; reason: string }
+  | {
+      kind: 'message';
+      ticketId: TicketId;
+      content: string;
+      role?: 'user' | 'assistant';
+      toolName?: string;
+    }
+  | { kind: 'token-usage'; ticketId: TicketId; usage: TokenUsage }
+  | { kind: 'disconnected'; ticketId: TicketId };
+
+type SupervisorIpcEvents = Namespaced<
+  'supervisor',
+  {
+    /** Renderer reports the result of a bridge request issued by main. */
+    'dispatch-result': (requestId: string, ok: boolean, result?: { runId?: string }, error?: string) => void;
+    /** Renderer forwards a sandbox run event so main's orchestrator can react. */
+    event: (event: SupervisorBridgeEvent) => void;
   }
 >;
 
@@ -1482,6 +1789,9 @@ type AppControlIpcEvents = Namespaced<
     snapshot: (
       handleId: import('@/shared/app-control-types').AppHandleId
     ) => import('@/shared/app-control-types').AxNode;
+    'snapshot-diff': (
+      handleId: import('@/shared/app-control-types').AppHandleId
+    ) => import('@/main/app-control-cdp').SnapshotDiff;
     click: (
       handleId: import('@/shared/app-control-types').AppHandleId,
       ref: string,
@@ -1494,8 +1804,179 @@ type AppControlIpcEvents = Namespaced<
     ) => void;
     type: (handleId: import('@/shared/app-control-types').AppHandleId, text: string) => void;
     press: (handleId: import('@/shared/app-control-types').AppHandleId, key: string) => void;
+    scroll: (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      options: { dx?: number; dy?: number; toTop?: boolean; toBottom?: boolean }
+    ) => void;
+    'inject-css': (handleId: import('@/shared/app-control-types').AppHandleId, css: string) => string;
+    'remove-inserted-css': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      key: string
+    ) => void;
+    find: (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      query: string,
+      options?: { caseSensitive?: boolean; forward?: boolean; findNext?: boolean }
+    ) => { matches: number; activeOrdinal: number };
+    'stop-find': (handleId: import('@/shared/app-control-types').AppHandleId) => void;
+    'wait-for': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      options: { selector?: string; urlIncludes?: string; networkIdle?: boolean; timeoutMs?: number }
+    ) => { ok: true; matched: 'selector' | 'url' | 'networkIdle' };
+    'scroll-to-ref': (handleId: import('@/shared/app-control-types').AppHandleId, ref: string) => void;
+    'network-log': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      options?: { limit?: number; since?: number; urlIncludes?: string; statusMin?: number; clear?: boolean }
+    ) => import('@/main/app-control-cdp').NetworkLogEntry[];
+    pdf: (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      options?: { artifactsSubdir?: string; landscape?: boolean; printBackground?: boolean }
+    ) => string;
+    'full-screenshot': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      options?: import('@/shared/app-control-types').AppScreenshotOptions
+    ) => string;
+    'element-screenshot': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      ref: string,
+      options?: import('@/shared/app-control-types').AppScreenshotOptions
+    ) => string;
+    'set-viewport': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      options:
+        | { width: number; height: number; deviceScaleFactor?: number; mobile?: boolean }
+        | { clear: true }
+    ) => void;
+    'set-user-agent': (handleId: import('@/shared/app-control-types').AppHandleId, ua: string) => void;
+    'set-zoom': (handleId: import('@/shared/app-control-types').AppHandleId, factor: number) => void;
+    'cookies-get': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      filter?: { url?: string; name?: string; domain?: string; path?: string }
+    ) => unknown[];
+    'cookies-set': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      cookie: {
+        url: string;
+        name: string;
+        value: string;
+        domain?: string;
+        path?: string;
+        secure?: boolean;
+        httpOnly?: boolean;
+        expirationDate?: number;
+        sameSite?: 'unspecified' | 'no_restriction' | 'lax' | 'strict';
+      }
+    ) => void;
+    'cookies-clear': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      filter?: { url?: string; name?: string }
+    ) => number;
+    'storage-get': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      which: 'local' | 'session'
+    ) => Record<string, string>;
+    'storage-set': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      which: 'local' | 'session',
+      entries: Record<string, string>
+    ) => void;
+    'storage-clear': (
+      handleId: import('@/shared/app-control-types').AppHandleId,
+      which: 'local' | 'session'
+    ) => void;
   }
 >;
+
+/**
+ * Browser API. Owns tabs, history, bookmarks, and profiles. Renderer invokes,
+ * main handles. State mutations broadcast `browser:state-changed` events so
+ * every open surface re-renders from the same source of truth.
+ */
+type BrowserIpcEvents = Namespaced<
+  'browser',
+  {
+    /** Full snapshot of the persisted browser state. Cheap — entire state lives in electron-store. */
+    'get-state': () => {
+      profiles: BrowserProfile[];
+      tabsets: Record<BrowserTabsetId, BrowserTabset>;
+      bookmarks: BrowserBookmark[];
+    };
+    /** Create a new profile. Partition is derived from id. */
+    'profile-add': (input: { label: string; incognito?: boolean }) => BrowserProfile;
+    'profile-remove': (id: BrowserProfileId) => void;
+    /** Idempotent. Ensures a tabset exists and returns it; creates a blank tab on first call. */
+    'tabset-ensure': (id: BrowserTabsetId, opts?: { profileId?: BrowserProfileId; initialUrl?: string }) => BrowserTabset;
+    'tabset-remove': (id: BrowserTabsetId) => void;
+    /** Switch a tabset to a different profile; swaps its partition on remount. */
+    'tabset-set-profile': (id: BrowserTabsetId, profileId: BrowserProfileId) => void;
+    /** Create a new tab. If `activate` is true (default), also activates it. */
+    'tab-create': (
+      tabsetId: BrowserTabsetId,
+      opts?: { url?: string; activate?: boolean; profileId?: BrowserProfileId }
+    ) => BrowserTab;
+    'tab-close': (tabsetId: BrowserTabsetId, tabId: BrowserTabId) => void;
+    'tab-activate': (tabsetId: BrowserTabsetId, tabId: BrowserTabId) => void;
+    'tab-navigate': (tabsetId: BrowserTabsetId, tabId: BrowserTabId, url: string) => void;
+    'tab-update-meta': (
+      tabsetId: BrowserTabsetId,
+      tabId: BrowserTabId,
+      patch: { title?: string; favicon?: string; url?: string }
+    ) => void;
+    'tab-reorder': (tabsetId: BrowserTabsetId, tabIds: BrowserTabId[]) => void;
+    'tab-pin': (tabsetId: BrowserTabsetId, tabId: BrowserTabId, pinned: boolean) => void;
+    'tab-duplicate': (tabsetId: BrowserTabsetId, tabId: BrowserTabId) => BrowserTab;
+    /** Restore the most recently closed tab in this tabset (LIFO). */
+    'tab-reopen': (tabsetId: BrowserTabsetId) => BrowserTab | null;
+    /** Record a visit. Dedupes against the most recent entry for the same URL. */
+    'history-record': (entry: { url: string; title?: string; profileId: BrowserProfileId }) => void;
+    'history-list': (opts?: { query?: string; limit?: number; profileId?: BrowserProfileId }) => BrowserHistoryEntry[];
+    'history-clear': (opts?: { profileId?: BrowserProfileId }) => void;
+    'bookmark-add': (input: { url: string; title: string; folder?: string }) => BrowserBookmark;
+    'bookmark-remove': (id: string) => void;
+    /** Returns a ranked mix of history + bookmarks + a synthetic search entry. */
+    suggest: (query: string, opts?: { limit?: number; profileId?: BrowserProfileId }) => BrowserSuggestion[];
+    /** List in-memory downloads across every watched partition. Newest first. */
+    'downloads-list': () => BrowserDownloadEntry[];
+    'downloads-clear': () => number;
+    'downloads-remove': (id: string) => void;
+    /** Open a completed download with the OS default handler. */
+    'downloads-open-file': (id: string) => string;
+    /** Reveal a completed download in Finder / Explorer. */
+    'downloads-show-in-folder': (id: string) => void;
+    /**
+     * Signal that a new webview with this partition is about to render, so
+     * the main process attaches its `will-download` listener. Safe to call
+     * repeatedly — idempotent per-session.
+     */
+    'downloads-watch-partition': (partition: string) => void;
+    /** List all outstanding permission requests awaiting a decision. */
+    'permissions-list': () => import('@/shared/permissions-types').PermissionRequest[];
+    /** Allow or deny a pending permission request by id. */
+    'permissions-decide': (id: string, allow: boolean) => void;
+    /** Attach the permission handler to a new partition on first mount. */
+    'permissions-watch-partition': (partition: string) => void;
+  }
+>;
+
+/**
+ * Download tracking — one entry per `DownloadItem` observed via
+ * `session.will-download`. Lives in memory (not persisted), newest first.
+ */
+export type BrowserDownloadState = 'progressing' | 'interrupted' | 'paused' | 'completed' | 'cancelled';
+
+export type BrowserDownloadEntry = {
+  id: string;
+  url: string;
+  filename: string;
+  savePath?: string;
+  mimeType?: string;
+  totalBytes: number;
+  receivedBytes: number;
+  state: BrowserDownloadState;
+  startedAt: number;
+  endedAt?: number;
+  partition?: string;
+};
 
 /**
  * Intersection of all the events that the renderer can invoke and main process can handle.
@@ -1515,7 +1996,9 @@ export type IpcEvents = MainProcessIpcEvents &
   PlatformIpcEvents &
   ExtensionIpcEvents &
   WorkspaceSyncIpcEvents &
-  AppControlIpcEvents;
+  AppControlIpcEvents &
+  BrowserIpcEvents &
+  SupervisorIpcEvents;
 
 /**
  * Store events. Main process emits these events, renderer process listens to them.
@@ -1533,8 +2016,8 @@ type StoreIpcRendererEvents = Namespaced<
 type TerminalIpcRendererEvents = Namespaced<
   'terminal',
   {
-    output: [string, string];
-    exited: [string, number];
+    output: [string, string, string];
+    exited: [string, string, number];
   }
 >;
 
@@ -1660,6 +2143,38 @@ type WorkspaceSyncIpcRendererEvents = Namespaced<
 >;
 
 /**
+ * Supervisor bridge — main → renderer. Main issues commands to the column
+ * actor. Tool calls / approvals never round-trip through main; the column's
+ * `buildClientToolHandler` handles them directly.
+ */
+type SupervisorIpcRendererEvents = Namespaced<
+  'supervisor',
+  {
+    dispatch: [string, SupervisorBridgeRequest];
+  }
+>;
+
+/**
+ * Browser events. Main process emits a full-state snapshot whenever any
+ * browser mutation lands — tabs, history, bookmarks, profiles. Renderers
+ * simply replace their atom.
+ */
+type BrowserIpcRendererEvents = Namespaced<
+  'browser',
+  {
+    'state-changed': [
+      {
+        profiles: BrowserProfile[];
+        tabsets: Record<BrowserTabsetId, BrowserTabset>;
+        bookmarks: BrowserBookmark[];
+      },
+    ];
+    'downloads-changed': [BrowserDownloadEntry[]];
+    'permissions-changed': [import('@/shared/permissions-types').PermissionRequest[]];
+  }
+>;
+
+/**
  * Intersection of all the events emitted by main process that the renderer can listen to.
  */
 export type IpcRendererEvents = TerminalIpcRendererEvents &
@@ -1673,7 +2188,9 @@ export type IpcRendererEvents = TerminalIpcRendererEvents &
   ToastIpcRendererEvents &
   PlatformIpcRendererEvents &
   ExtensionIpcRendererEvents &
-  WorkspaceSyncIpcRendererEvents;
+  WorkspaceSyncIpcRendererEvents &
+  BrowserIpcRendererEvents &
+  SupervisorIpcRendererEvents;
 
 // #region Config file types
 

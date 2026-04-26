@@ -1,7 +1,8 @@
-import './styles/index.css';
-
 import type { ReactNode } from 'react';
 import { useEffect, useMemo } from 'react';
+
+import type { PlanItem } from '@/shared/chat-types';
+import type { TicketId } from '@/shared/types';
 
 import type { ClientToolCallHandler } from './App';
 import { App as OmniAgentsCore } from './App';
@@ -21,8 +22,10 @@ type OmniAgentsAppProps = {
   pendingMessages?: PendingMessage[];
   sandboxLabel?: string;
   onClientToolCall?: ClientToolCallHandler;
-  pendingPlan?: import('@/shared/chat-types').PlanItem | null;
+  pendingPlan?: PlanItem | null;
   onPlanDecision?: (approved: boolean) => void;
+  /** Ticket bound to this column. When set, the app registers a supervisor bridge actor. */
+  ticketId?: TicketId;
 };
 
 const ThemeSync = ({ children }: { children: ReactNode }) => {
@@ -39,14 +42,14 @@ const ThemeSync = ({ children }: { children: ReactNode }) => {
   return <>{children}</>;
 };
 
-export const OmniAgentsApp = ({ uiUrl, sessionId, onSessionChange, variables, greeting, onReady, headerActionsTargetId, headerActionsCompact, pendingMessages, sandboxLabel, onClientToolCall, pendingPlan, onPlanDecision }: OmniAgentsAppProps) => {
+export const OmniAgentsApp = ({ uiUrl, sessionId, onSessionChange, variables, greeting, onReady, headerActionsTargetId, headerActionsCompact, pendingMessages, sandboxLabel, onClientToolCall, pendingPlan, onPlanDecision, ticketId }: OmniAgentsAppProps) => {
   const normalizedUrl = useMemo(() => new URL(uiUrl, window.location.origin).toString(), [uiUrl]);
 
   return (
     <UiConfigProvider uiUrl={normalizedUrl}>
       <RPCClientProvider>
         <ThemeSync>
-          <OmniAgentsCore sessionId={sessionId} onSessionChange={onSessionChange} variables={variables} greeting={greeting} onReady={onReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} pendingMessages={pendingMessages} sandboxLabel={sandboxLabel} onClientToolCall={onClientToolCall} pendingPlan={pendingPlan} onPlanDecision={onPlanDecision} />
+          <OmniAgentsCore sessionId={sessionId} onSessionChange={onSessionChange} variables={variables} greeting={greeting} onReady={onReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} pendingMessages={pendingMessages} sandboxLabel={sandboxLabel} onClientToolCall={onClientToolCall} pendingPlan={pendingPlan} onPlanDecision={onPlanDecision} ticketId={ticketId} />
         </ThemeSync>
       </RPCClientProvider>
     </UiConfigProvider>

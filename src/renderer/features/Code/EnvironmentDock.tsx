@@ -21,13 +21,13 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: '2px',
-    marginLeft: '10px',
-    marginRight: '10px',
-    marginBottom: '8px',
-    marginTop: '6px',
-    paddingLeft: '6px',
-    paddingRight: '6px',
+    gap: tokens.spacingHorizontalXXS,
+    marginLeft: tokens.spacingHorizontalMNudge,
+    marginRight: tokens.spacingHorizontalMNudge,
+    marginBottom: tokens.spacingVerticalS,
+    marginTop: tokens.spacingVerticalSNudge,
+    paddingLeft: tokens.spacingHorizontalSNudge,
+    paddingRight: tokens.spacingHorizontalSNudge,
     paddingTop: '5px',
     paddingBottom: '5px',
     borderRadius: '14px',
@@ -46,11 +46,11 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    gap: '2px',
-    paddingLeft: '12px',
-    paddingRight: '12px',
+    gap: tokens.spacingVerticalXXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
     paddingTop: '5px',
-    paddingBottom: '6px',
+    paddingBottom: tokens.spacingVerticalSNudge,
     borderRadius: '10px',
     border: 'none',
     backgroundColor: 'transparent',
@@ -67,6 +67,7 @@ const useStyles = makeStyles({
     ':active': {
       transform: 'translateY(0) scale(0.97)',
     },
+    ':focus-visible': { outline: `2px solid ${tokens.colorStrokeFocus2}`, outlineOffset: '1px' },
   },
   itemActive: {
     color: tokens.colorBrandForeground1,
@@ -118,8 +119,7 @@ export const EnvironmentDock = memo(({ apps, activeAppId, onSelect, sandboxUrls,
     <div className={mergeClasses(styles.dock, isGlass && styles.dockGlass)}>
       {apps.map((app) => {
         const isActive = activeAppId === app.id;
-        const isAvailable =
-          app.scope === 'sandbox' ? !!sandboxUrls?.[app.sandboxUrlKey!] : true;
+        const isAvailable = app.scope === 'sandbox' ? !!sandboxUrls?.[app.sandboxUrlKey!] : true;
 
         if (app.scope === 'sandbox' && !isAvailable) {
           return null;

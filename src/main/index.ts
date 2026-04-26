@@ -9,7 +9,10 @@ import { pathToFileURL } from 'url';
 
 import { getArtifactsDir } from '@/lib/artifacts';
 import { createAppControlManager } from '@/main/app-control-manager';
+import { createBrowserManager } from '@/main/browser-manager';
 import { createConsoleManager } from '@/main/console-manager';
+import { createDownloadsManager } from '@/main/downloads-manager';
+import { createPermissionsManager } from '@/main/permissions-manager';
 import { createExtensionManager } from '@/main/extension-manager';
 import { MainProcessManager } from '@/main/main-process-manager';
 import { rowToProject } from '@/main/db-store-bridge';
@@ -79,6 +82,17 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding');
 // windows open at a time so this should have no effect. But just in case, we disable the limit.
 app.commandLine.appendSwitch('disable-backing-store-limit');
 
+// Expose a Chrome DevTools Protocol endpoint in development so external tools
+// (chrome://inspect, puppeteer, `curl http://localhost:9222/json`) can attach
+// to the running renderer without restarting. Opt-in via OMNI_DEBUG_PORT.
+if (process.env.NODE_ENV === 'development' || process.env.OMNI_DEBUG_PORT) {
+  const port = process.env.OMNI_DEBUG_PORT ?? '9222';
+  app.commandLine.appendSwitch('remote-debugging-port', port);
+  // Chromium 111+ requires this to allow non-browser clients to connect.
+  app.commandLine.appendSwitch('remote-allow-origins', '*');
+  console.log(`[debug] Chrome DevTools Protocol listening on http://localhost:${port}`);
+}
+
 const OMNI_CONFIG_DIR = getOmniConfigDir();
 const store = getStore();
 const { repo } = openProjectDb();
@@ -120,8 +134,23 @@ const [, cleanupConsole] = createConsoleManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
 });
+// Forward-reference for the BrowserManager — created further down, but
+// AppControlManager needs its popup callback at construction time so
+// `setWindowOpenHandler` can route `window.open` into `BrowserManager.createTab`.
+let browserManagerRef: ReturnType<typeof createBrowserManager>[0] | null = null;
 const [appControlManager, cleanupAppControl] = createAppControlManager({
   ipc: main.ipc,
+  onBrowserPopup: (tabsetId, url, disposition) => {
+    if (!browserManagerRef) return;
+    // `background-tab` maps to Cmd/Ctrl+click: open without stealing focus.
+    // Everything else (`foreground-tab`, `new-window`, `default`) activates.
+    const activate = disposition !== 'background-tab';
+    try {
+      browserManagerRef.createTab(tabsetId, { url, activate });
+    } catch {
+      // Tabset may not exist yet (race on first mount) — ignore.
+    }
+  },
 });
 const [omniInstall, cleanupOmniInstall] = createOmniInstallManager({
   ipc: main.ipc,
@@ -151,6 +180,20 @@ main.getStoreSnapshot = () => projectManager.getStoreSnapshot();
 const [, cleanupExtensions] = createExtensionManager({
   ipc: main.ipc,
   store,
+  sendToWindow: main.sendToWindow,
+});
+const [browserManager, cleanupBrowser] = createBrowserManager({
+  ipc: main.ipc,
+  sendToWindow: main.sendToWindow,
+  store,
+});
+browserManagerRef = browserManager;
+const [, cleanupDownloads] = createDownloadsManager({
+  ipc: main.ipc,
+  sendToWindow: main.sendToWindow,
+});
+const [, cleanupPermissions] = createPermissionsManager({
+  ipc: main.ipc,
   sendToWindow: main.sendToWindow,
 });
 const { cleanup: cleanupPlatform, refreshPolicy: refreshPlatformPolicy } = registerPlatformIpc({
@@ -242,6 +285,9 @@ async function cleanup() {
     cleanupProject(),
     cleanupExtensions(),
     projectMcp.stop(),
+    cleanupBrowser(),
+    cleanupDownloads(),
+    cleanupPermissions(),
   ]);
   const errors = results
     .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
@@ -424,5 +470,6 @@ main.ipc.handle('util:select-file', async (_, path, filters) => {
   return result.filePaths[0] ?? null;
 });
 main.ipc.handle('util:open-directory', (_, path) => shell.openPath(path));
+main.ipc.handle('util:open-external', (_, url) => shell.openExternal(url));
 
 //#endregion

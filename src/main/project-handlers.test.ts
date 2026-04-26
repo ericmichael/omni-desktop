@@ -1,5 +1,5 @@
 /**
- * Contract tests for project IPC handlers — verifies all 22 channels are
+ * Contract tests for project IPC handlers — verifies all channels are
  * registered and delegate to the correct ProjectManager methods.
  */
 import { describe, expect, it, vi } from 'vitest';
@@ -31,6 +31,9 @@ const EXPECTED_CHANNELS = [
   'project:read-artifact',
   'project:open-artifact-external',
   'project:get-files-changed',
+  'project:set-pr-review',
+  'project:check-merge',
+  'project:merge-ticket',
   'project:read-context',
   'project:write-context',
   'project:list-project-files',
@@ -62,6 +65,9 @@ const makeManager = () => ({
   listProjectFiles: vi.fn(() => []),
   getContextPreview: vi.fn(() => ''),
   openProjectFile: vi.fn(),
+  setPrReview: vi.fn(),
+  checkPrMerge: vi.fn(async () => ({ ready: false, reason: 'stub' })),
+  mergePrTicket: vi.fn(async () => ({ ok: true, mergeCommitSha: 'deadbeef' })),
 });
 
 describe('registerProjectHandlers', () => {
@@ -169,5 +175,29 @@ describe('registerProjectHandlers', () => {
     registerProjectHandlers(ipc, mgr as never);
     ipc.invoke('project:get-files-changed', 't1');
     expect(mgr.getFilesChanged).toHaveBeenCalledWith('t1');
+  });
+
+  it('project:set-pr-review delegates with ticketId and review status', () => {
+    const ipc = new StubIpc();
+    const mgr = makeManager();
+    registerProjectHandlers(ipc, mgr as never);
+    ipc.invoke('project:set-pr-review', 't1', 'approved');
+    expect(mgr.setPrReview).toHaveBeenCalledWith('t1', 'approved');
+  });
+
+  it('project:check-merge delegates with ticketId', () => {
+    const ipc = new StubIpc();
+    const mgr = makeManager();
+    registerProjectHandlers(ipc, mgr as never);
+    ipc.invoke('project:check-merge', 't1');
+    expect(mgr.checkPrMerge).toHaveBeenCalledWith('t1');
+  });
+
+  it('project:merge-ticket delegates with ticketId', () => {
+    const ipc = new StubIpc();
+    const mgr = makeManager();
+    registerProjectHandlers(ipc, mgr as never);
+    ipc.invoke('project:merge-ticket', 't1');
+    expect(mgr.mergePrTicket).toHaveBeenCalledWith('t1');
   });
 });

@@ -3,6 +3,8 @@ import { nanoid } from 'nanoid';
 
 import type { PtyCallbacks, PtyEntry } from '@/lib/pty-utils';
 import { createPtyBuffer, createPtyProcess, killPtyProcessAsync, setupPtyCallbacks } from '@/lib/pty-utils';
+
+type TabScopedEntry = PtyEntry & { tabId: string };
 import { getActivateVenvCommand, getBundledBinPath, getHomeDirectory, getShell, isDirectory } from '@/main/util';
 import type { IIpcListener } from '@/shared/ipc-listener';
 import type { IpcRendererEvents } from '@/shared/types';
@@ -39,9 +41,10 @@ const defaultDeps = (): ConsoleManagerDeps => ({
 
 /**
  * ConsoleManager manages multiple interactive shell PTYs for the terminal/console.
+ * Each PTY is owned by a workspace tab (column); terminals are scoped by tabId.
  */
 export class ConsoleManager {
-  private entries = new Map<string, PtyEntry>();
+  private entries = new Map<string, TabScopedEntry>();
   private deps: ConsoleManagerDeps;
 
   constructor(deps?: Partial<ConsoleManagerDeps>) {
@@ -49,13 +52,14 @@ export class ConsoleManager {
   }
 
   /**
-   * Create a new console PTY.
+   * Create a new console PTY owned by `tabId`.
    * Returns the console ID.
    */
   async createConsole(
+    tabId: string,
     callbacks: {
-      onData: (id: string, data: string) => void;
-      onExit: (id: string, exitCode: number, signal?: number) => void;
+      onData: (tabId: string, id: string, data: string) => void;
+      onExit: (tabId: string, id: string, exitCode: number, signal?: number) => void;
     },
     initialCwd?: string
   ): Promise<string> {
@@ -71,18 +75,18 @@ export class ConsoleManager {
 
     const ptyCallbacks: PtyCallbacks = {
       onData: (data) => {
-        callbacks.onData(id, data);
+        callbacks.onData(tabId, id, data);
       },
       onExit: (exitCode, signal) => {
         this.entries.delete(id);
-        callbacks.onData(id, `Process exited with code ${exitCode}${signal ? `, signal: ${signal}` : ''}`);
-        callbacks.onExit(id, exitCode, signal);
+        callbacks.onData(tabId, id, `Process exited with code ${exitCode}${signal ? `, signal: ${signal}` : ''}`);
+        callbacks.onExit(tabId, id, exitCode, signal);
       },
     };
 
     this.deps.setupCallbacks(process, ptyCallbacks, ansiBuffer);
 
-    this.entries.set(id, { id, process, ansiSequenceBuffer: ansiBuffer });
+    this.entries.set(id, { id, tabId, process, ansiSequenceBuffer: ansiBuffer });
 
     // Initialize the console environment
     await this.initializeConsole(id, initialCwd);
@@ -155,10 +159,18 @@ return;
   }
 
   /**
-   * List all active console IDs
+   * Dispose all PTYs owned by a tab (called when a workspace column closes).
    */
-  listIds(): string[] {
-    return [...this.entries.keys()];
+  async disposeAllForTab(tabId: string): Promise<void> {
+    const ids = [...this.entries.values()].filter((e) => e.tabId === tabId).map((e) => e.id);
+    await Promise.allSettled(ids.map((id) => this.disposeOne(id)));
+  }
+
+  /**
+   * List active console IDs owned by a tab.
+   */
+  listIdsForTab(tabId: string): string[] {
+    return [...this.entries.values()].filter((e) => e.tabId === tabId).map((e) => e.id);
   }
 
   /**
@@ -181,21 +193,25 @@ export const createConsoleManager = (arg: {
 
   const consoleManager = new ConsoleManager();
 
-  const onData = (id: string, data: string) => {
-    sendToWindow('terminal:output', id, data);
+  const onData = (tabId: string, id: string, data: string) => {
+    sendToWindow('terminal:output', tabId, id, data);
   };
 
-  const onExit = (id: string, exitCode: number) => {
-    sendToWindow('terminal:exited', id, exitCode);
+  const onExit = (tabId: string, id: string, exitCode: number) => {
+    sendToWindow('terminal:exited', tabId, id, exitCode);
   };
 
   // IPC handlers
-  ipc.handle('terminal:create', (_, cwd) => {
-    return consoleManager.createConsole({ onData, onExit }, cwd);
+  ipc.handle('terminal:create', (_, tabId, cwd) => {
+    return consoleManager.createConsole(tabId, { onData, onExit }, cwd);
   });
 
   ipc.handle('terminal:dispose', async (_, id) => {
     await consoleManager.disposeOne(id);
+  });
+
+  ipc.handle('terminal:dispose-all-for-tab', async (_, tabId) => {
+    await consoleManager.disposeAllForTab(tabId);
   });
 
   ipc.handle('terminal:resize', (_, id, cols, rows) => {
@@ -206,14 +222,15 @@ export const createConsoleManager = (arg: {
     consoleManager.write(id, data);
   });
 
-  ipc.handle('terminal:list', (_) => {
-    return consoleManager.listIds();
+  ipc.handle('terminal:list', (_, tabId) => {
+    return consoleManager.listIdsForTab(tabId);
   });
 
   const cleanup = async () => {
     await consoleManager.disposeAll();
     ipcMain.removeHandler('terminal:create');
     ipcMain.removeHandler('terminal:dispose');
+    ipcMain.removeHandler('terminal:dispose-all-for-tab');
     ipcMain.removeHandler('terminal:resize');
     ipcMain.removeHandler('terminal:write');
     ipcMain.removeHandler('terminal:list');

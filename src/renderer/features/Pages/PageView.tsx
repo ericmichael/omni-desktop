@@ -43,6 +43,9 @@ const useStyles = makeStyles({
   },
   header: {
     flexShrink: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalL,
     paddingLeft: tokens.spacingHorizontalXXL,
     paddingRight: tokens.spacingHorizontalXXL,
     paddingTop: tokens.spacingVerticalXXL,

@@ -2,7 +2,7 @@ import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Button, Input, Select, Textarea } from '@/renderer/ds';
+import { Button, Input, Select, Switch, Textarea } from '@/renderer/ds';
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { GitRepoInfo, MilestoneId, ProjectId, TicketPriority } from '@/shared/types';
@@ -51,6 +51,7 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [gitInfo, setGitInfo] = useState<GitRepoInfo | null>(null);
   const [branch, setBranch] = useState('');
+  const [useWorktree, setUseWorktree] = useState(false);
 
   const store = useStore(persistedStoreApi.$atom);
   const project = useMemo(() => store.projects.find((p) => p.id === projectId), [store.projects, projectId]);
@@ -120,7 +121,7 @@ return;
         description: description.trim(),
         priority,
         blockedBy,
-        ...(gitInfo?.isGitRepo && { branch }),
+        ...(gitInfo?.isGitRepo && { useWorktree, ...(useWorktree && { branch }) }),
       });
       setTitle('');
       setDescription('');
@@ -130,7 +131,7 @@ return;
     } finally {
       setIsSubmitting(false);
     }
-  }, [title, description, priority, blockedBy, branch, gitInfo, isSubmitting, projectId, milestoneId, onClose]);
+  }, [title, description, priority, blockedBy, branch, useWorktree, gitInfo, isSubmitting, projectId, milestoneId, onClose]);
 
   return (
     <div className={styles.root}>
@@ -198,19 +199,25 @@ return;
       {projectHasRepo && gitInfo?.isGitRepo && (
         <div className={styles.fieldRow}>
           <div className={styles.fieldGroup}>
-            <label className={styles.fieldLabel}>Branch</label>
-            <Select
-              value={branch}
-              onChange={(e) => setBranch(e.target.value)}
-              size="sm"
-            >
-              {gitInfo.branches.map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </Select>
+            <label className={styles.fieldLabel}>Isolated worktree</label>
+            <Switch checked={useWorktree} onCheckedChange={setUseWorktree} />
           </div>
+          {useWorktree && (
+            <div className={styles.fieldGroup}>
+              <label className={styles.fieldLabel}>Branch</label>
+              <Select
+                value={branch}
+                onChange={(e) => setBranch(e.target.value)}
+                size="sm"
+              >
+                {gitInfo.branches.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
         </div>
       )}
       <div className={styles.actions}>

@@ -1,14 +1,15 @@
 import { useDraggable } from '@dnd-kit/core';
 import { makeStyles, mergeClasses, shorthands,tokens, Tooltip } from '@fluentui/react-components';
-import { ArrowSync20Regular, BranchFork16Regular, Open20Regular, Play20Filled,ReOrderDotsVertical20Regular } from '@fluentui/react-icons';
-import { memo, useCallback } from 'react';
+import { ArrowSync20Regular, BranchFork16Regular, LockClosed16Regular,Open20Regular, Play20Filled,ReOrderDotsVertical20Regular } from '@fluentui/react-icons';
+import { useStore } from '@nanostores/react';
+import { memo, useCallback, useMemo } from 'react';
 
 import { Badge, Body1, IconButton } from '@/renderer/ds';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { isActivePhase } from '@/shared/ticket-phase';
 import type { Ticket, TicketPhase } from '@/shared/types';
 
-import { ticketApi } from './state';
+import { $tickets, ticketApi } from './state';
 import { APPETITE_COLORS, APPETITE_LABELS, PHASE_COLORS, PHASE_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './ticket-constants';
 
 const canStart = (phase: TicketPhase | undefined) => !phase || !isActivePhase(phase);
@@ -88,6 +89,13 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
     minWidth: 0,
   },
+  blockedBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '3px',
+    color: tokens.colorPaletteRedForeground1,
+    fontSize: tokens.fontSizeBase200,
+  },
 });
 
 export const KanbanCard = memo(
@@ -98,8 +106,14 @@ export const KanbanCard = memo(
       disabled: isOverlay,
     });
 
+    const allTickets = useStore($tickets);
+    const unresolvedBlockers = useMemo(
+      () => ticket.blockedBy.filter((id) => allTickets[id] && !allTickets[id]!.resolution).length,
+      [ticket.blockedBy, allTickets]
+    );
+
     const handleClick = useCallback(() => {
-      openTicketInCode(ticket.id);
+      ticketApi.goToTicket(ticket.id);
     }, [ticket.id]);
 
     const handleStart = useCallback(
@@ -175,6 +189,14 @@ export const KanbanCard = memo(
                 <span className={styles.branchBadge}>
                   <BranchFork16Regular />
                   <span className={styles.branchLabel}>{branch}</span>
+                </span>
+              </Tooltip>
+            )}
+            {unresolvedBlockers > 0 && (
+              <Tooltip content={`Blocked by ${unresolvedBlockers} ticket${unresolvedBlockers === 1 ? '' : 's'}`} relationship="label" withArrow>
+                <span className={styles.blockedBadge} aria-label={`Blocked by ${unresolvedBlockers}`}>
+                  <LockClosed16Regular />
+                  {unresolvedBlockers}
                 </span>
               </Tooltip>
             )}

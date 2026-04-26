@@ -1,4 +1,5 @@
 import '@/renderer/styles/tailwind.css';
+import '@/renderer/omniagents-ui/styles/index.css';
 import '@fontsource-variable/inter';
 import '@xterm/xterm/css/xterm.css';
 import '@/renderer/features/Toast/ipc-toast-listener';
@@ -15,7 +16,6 @@ import { MainContent } from '@/renderer/app/MainContent';
 import { syncTheme } from '@/renderer/constants';
 import { SystemInfoLoadingGate, SystemInfoProvider } from '@/renderer/contexts/SystemInfoContext';
 import { AuthGate } from '@/renderer/features/Auth/AuthGate';
-import { Console } from '@/renderer/features/Console/Console';
 import { QuickCapture } from '@/renderer/features/Inbox/QuickCapture';
 import { ToastContainer } from '@/renderer/features/Toast/ToastContainer';
 import { SyncBar } from '@/renderer/features/WorkspaceSync/SyncBar';
@@ -75,7 +75,6 @@ export const App = () => {
                 <div className={styles.layout}>
                   <MainContent />
                 </div>
-                <Console />
                 <QuickCapture />
                 <SyncBar />
               </AuthGate>

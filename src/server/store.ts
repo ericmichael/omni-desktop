@@ -34,6 +34,11 @@ const DEFAULTS: StoreData = {
   lastWeeklyReviewAt: null,
   enabledExtensions: {},
   skillSources: {},
+  customApps: [],
+  browserProfiles: [],
+  browserTabsets: {},
+  browserHistory: [],
+  browserBookmarks: [],
 };
 
 type ChangeCallback = (data: StoreData | undefined) => void;

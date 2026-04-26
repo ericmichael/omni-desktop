@@ -62,7 +62,7 @@ export function PromptInput({ className, isLoading = false, maxHeight = 240, val
       }}
     >
       <div
-        className={clsx('relative rounded-[24px] border border-bgCardAlt bg-bgCardAlt p-2 shadow-sm', className)}
+        className={clsx('relative rounded-[24px] border border-bgCardAlt bg-bgColumn p-2 shadow-sm', className)}
         onClick={() => textareaRef.current?.focus()}
       >
         {children}
@@ -135,15 +135,5 @@ export function PromptInputActions({ children, className, ...props }: PromptInpu
     <div className={clsx('flex items-center gap-2', className)} {...props}>
       {children}
     </div>
-  )
-}
-
-type PromptInputActionProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  tooltip?: React.ReactNode
-}
-
-export function PromptInputAction({ className, tooltip, ...props }: PromptInputActionProps) {
-  return (
-    <button className={clsx(className)} {...props} />
   )
 }

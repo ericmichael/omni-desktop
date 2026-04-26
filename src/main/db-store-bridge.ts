@@ -122,7 +122,9 @@ export function rowToTicket(row: TicketRow, comments?: CommentRow[]): Ticket {
   if (row.use_worktree) ticket.useWorktree = true;
   if (row.worktree_path) ticket.worktreePath = row.worktree_path;
   if (row.worktree_name) ticket.worktreeName = row.worktree_name;
-  if (row.supervisor_session_id) ticket.supervisorSessionId = row.supervisor_session_id;
+  // supervisor_session_id column is retained in SQLite for old rows but is
+  // no longer surfaced on the Ticket model — the renderer Code column owns
+  // the session id now, not the ticket record.
   if (row.phase) ticket.phase = row.phase as TicketPhase;
   if (row.phase_changed_at) ticket.phaseChangedAt = fromIso(row.phase_changed_at);
   if (row.supervisor_task_id) ticket.supervisorTaskId = row.supervisor_task_id as TaskId;
@@ -261,7 +263,8 @@ export function ticketToRow(t: Ticket): TicketRow {
     use_worktree: t.useWorktree ? 1 : 0,
     worktree_path: t.worktreePath ?? null,
     worktree_name: t.worktreeName ?? null,
-    supervisor_session_id: t.supervisorSessionId ?? null,
+    // Column kept for backwards compatibility with older rows; not written.
+    supervisor_session_id: null,
     phase: (t.phase as string) ?? null,
     phase_changed_at: isoOrNull(t.phaseChangedAt),
     supervisor_task_id: (t.supervisorTaskId as string) ?? null,

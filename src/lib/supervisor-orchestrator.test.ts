@@ -21,8 +21,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { makePm, orch, TEST_PIPELINE, type MockMachine, type PmCtx } from '@/lib/project-manager-test-helpers';
-import type { ISandbox } from '@/lib/project-manager-deps';
+import { makePm, orch, seedMachine, TEST_PIPELINE, type MockMachine, type PmCtx } from '@/lib/project-manager-test-helpers';
 import type { WorkflowConfig } from '@/lib/workflow';
 import type { ProjectManager } from '@/main/project-manager';
 import type { TicketPhase } from '@/shared/ticket-phase';
@@ -47,16 +46,12 @@ describe('SupervisorOrchestrator integration', () => {
   // -------------------------------------------------------------------------
   describe('token usage', () => {
     it('accumulates tokens across onTokenUsage callbacks (Wave 1 fix)', () => {
-      const { pm, store, machines } = makePm({
+      const ctx = makePm({
         tickets: [{ id: 't1' }],
       });
+      const { pm, store } = ctx;
 
-      // Create machine via internal path (uses our factory)
-      const mach = orch(pm).createMachine('t1');
-      // Register in machines map so nothing assumes external registration
-      orch(pm).machines.set('t1', { machine: mach, sandbox: null });
-
-      const mock = machines.get('t1')!;
+      const mock = seedMachine(ctx, 't1' as TicketId);
       mock.simulateTokenUsage({ inputTokens: 100, outputTokens: 50, totalTokens: 150 });
       mock.simulateTokenUsage({ inputTokens: 200, outputTokens: 100, totalTokens: 300 });
 
@@ -69,10 +64,9 @@ describe('SupervisorOrchestrator integration', () => {
     });
 
     it('is a no-op when delta is zero', () => {
-      const { pm, store, machines } = makePm({ tickets: [{ id: 't1' }] });
-      const mach = orch(pm).createMachine('t1');
-      orch(pm).machines.set('t1', { machine: mach, sandbox: null });
-      const mock = machines.get('t1')!;
+      const ctx = makePm({ tickets: [{ id: 't1' }] });
+      const { pm, store, machines } = ctx;
+      const mock = seedMachine(ctx, 't1');
 
       mock.simulateTokenUsage({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
       const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
@@ -90,9 +84,7 @@ describe('SupervisorOrchestrator integration', () => {
       mock: MockMachine;
     } => {
       const ctx = makePm({ tickets: [{ id: 't1' }] });
-      const mach = orch(ctx.pm).createMachine('t1');
-      orch(ctx.pm).machines.set('t1', { machine: mach, sandbox: null });
-      const mock = ctx.machines.get('t1')!;
+      const mock = seedMachine(ctx, 't1');
       mock.phase = 'running';
       return { ctx, mock };
     };
@@ -153,13 +145,12 @@ describe('SupervisorOrchestrator integration', () => {
 
       it('clamps the delay at MAX_RETRY_BACKOFF_MS (5 minutes) for very large attempts', () => {
         // Use a workflow config that raises maxRetries so attempt=10 doesn't hit the error branch.
-        const { pm, machines } = makePm(
+        const ctx = makePm(
           { tickets: [{ id: 't1' }] },
           { workflowConfig: { supervisor: { max_retry_attempts: 100 } } }
         );
-        const mach = orch(pm).createMachine('t1');
-        orch(pm).machines.set('t1', { machine: mach, sandbox: null });
-        const mock = machines.get('t1')!;
+        const { pm, machines } = ctx;
+        const mock = seedMachine(ctx, 't1');
         mock.phase = 'running';
 
         orch(pm).scheduleRetry('t1', 'error', { attempt: 10 });
@@ -205,17 +196,15 @@ describe('SupervisorOrchestrator integration', () => {
       });
 
       it('requeues with attempt+1 when no concurrency slots are available', async () => {
-        const { ctx, mock, machines } = (() => {
+        const { ctx, mock } = (() => {
           const base = setupRunningMachine();
           // Saturate global concurrency by creating 4 more running machines
           for (let i = 0; i < 4; i++) {
-            const m = orch(base.ctx.pm).createMachine(`other-${i}` as TicketId);
-            orch(base.ctx.pm).machines.set(`other-${i}` as TicketId, { machine: m, sandbox: null });
-            base.ctx.machines.get(`other-${i}` as TicketId)!.phase = 'running';
+            const otherMock = seedMachine(base.ctx, `other-${i}` as TicketId);
+            otherMock.phase = 'running';
           }
-          return { ctx: base.ctx, mock: base.mock, machines: base.ctx.machines };
+          return { ctx: base.ctx, mock: base.mock };
         })();
-        void machines;
 
         await orch(ctx.pm).handleRetryFired('t1', 'error', 2, 0);
 
@@ -244,10 +233,9 @@ describe('SupervisorOrchestrator integration', () => {
     const STALL_CHECK_INTERVAL_MS = 30_000;
 
     it('transitions a stalled non-streaming active machine by stopping it', async () => {
-      const { pm, machines } = makePm({ tickets: [{ id: 't1' }] });
-      const mach = orch(pm).createMachine('t1');
-      orch(pm).machines.set('t1', { machine: mach, sandbox: null });
-      const mock = machines.get('t1')!;
+      const ctx = makePm({ tickets: [{ id: 't1' }] });
+      const { pm, machines } = ctx;
+      const mock = seedMachine(ctx, 't1');
 
       // Active but non-streaming → eligible for stall detection
       mock.phase = 'provisioning';
@@ -260,10 +248,9 @@ describe('SupervisorOrchestrator integration', () => {
     });
 
     it('does not stall a machine with recent activity', async () => {
-      const { pm, machines } = makePm({ tickets: [{ id: 't1' }] });
-      const mach = orch(pm).createMachine('t1');
-      orch(pm).machines.set('t1', { machine: mach, sandbox: null });
-      const mock = machines.get('t1')!;
+      const ctx = makePm({ tickets: [{ id: 't1' }] });
+      const { pm, machines } = ctx;
+      const mock = seedMachine(ctx, 't1');
 
       mock.phase = 'provisioning';
       mock.lastActivityAt = Date.now(); // fresh
@@ -274,10 +261,9 @@ describe('SupervisorOrchestrator integration', () => {
     });
 
     it('does not stall idle/terminal machines', async () => {
-      const { pm, machines } = makePm({ tickets: [{ id: 't1' }] });
-      const mach = orch(pm).createMachine('t1');
-      orch(pm).machines.set('t1', { machine: mach, sandbox: null });
-      const mock = machines.get('t1')!;
+      const ctx = makePm({ tickets: [{ id: 't1' }] });
+      const { pm, machines } = ctx;
+      const mock = seedMachine(ctx, 't1');
 
       mock.phase = 'idle';
       mock.lastActivityAt = Date.now() - (STALL_TIMEOUT_MS + 10_000);
@@ -288,10 +274,9 @@ describe('SupervisorOrchestrator integration', () => {
     });
 
     it('uses extended timeout for streaming phases (short silence is not a stall)', async () => {
-      const { pm, machines } = makePm({ tickets: [{ id: 't1' }] });
-      const mach = orch(pm).createMachine('t1');
-      orch(pm).machines.set('t1', { machine: mach, sandbox: null });
-      const mock = machines.get('t1')!;
+      const ctx = makePm({ tickets: [{ id: 't1' }] });
+      const { pm, machines } = ctx;
+      const mock = seedMachine(ctx, 't1');
 
       // Silent for 10 minutes — well past the 5-minute non-streaming timeout,
       // but far below the 30-minute streaming safety-net.
@@ -305,10 +290,9 @@ describe('SupervisorOrchestrator integration', () => {
 
     it('fires safety-net for streaming phases that exceed STREAMING_STALL_TIMEOUT_MS', async () => {
       const STREAMING_STALL_TIMEOUT_MS = 30 * 60 * 1000;
-      const { pm, machines } = makePm({ tickets: [{ id: 't1' }] });
-      const mach = orch(pm).createMachine('t1');
-      orch(pm).machines.set('t1', { machine: mach, sandbox: null });
-      const mock = machines.get('t1')!;
+      const ctx = makePm({ tickets: [{ id: 't1' }] });
+      const { pm, machines } = ctx;
+      const mock = seedMachine(ctx, 't1');
 
       // Silent for 31 minutes — past the streaming safety-net.
       mock.phase = 'running';
@@ -325,22 +309,23 @@ describe('SupervisorOrchestrator integration', () => {
   // -------------------------------------------------------------------------
   describe('auto-dispatch concurrency', () => {
     it('canStartSupervisor returns false when global limit is reached', () => {
-      const { pm, machines } = makePm({
+      const ctx = makePm({
         tickets: Array.from({ length: 5 }, (_, i) => ({ id: `t${i}`, columnId: 'in_progress' })),
       });
+      const { pm, machines } = ctx;
 
       // Pre-populate 5 running machines (= MAX_CONCURRENT_SUPERVISORS)
       for (let i = 0; i < 5; i++) {
-        const mach = orch(pm).createMachine(`t${i}` as TicketId);
-        orch(pm).machines.set(`t${i}` as TicketId, { machine: mach, sandbox: null });
-        machines.get(`t${i}` as TicketId)!.phase = 'running';
+        const mock = seedMachine(ctx, `t${i}` as TicketId);
+
+        mock.phase = 'running';
       }
 
       expect(orch(pm).canStartSupervisor('proj-1', 'in_progress')).toBe(false);
     });
 
     it('canStartSupervisor returns false when per-column limit is reached (Wave 1 fix 4.5)', () => {
-      const { pm, machines } = makePm(
+      const ctx = makePm(
         { tickets: [{ id: 't1', columnId: 'in_progress' }] },
         {
           workflowConfig: {
@@ -348,10 +333,12 @@ describe('SupervisorOrchestrator integration', () => {
           },
         }
       );
+      const { pm, machines } = ctx;
 
-      const mach = orch(pm).createMachine('t1');
-      orch(pm).machines.set('t1', { machine: mach, sandbox: null });
-      machines.get('t1')!.phase = 'running';
+      const mock = seedMachine(ctx, 't1');
+
+
+      mock.phase = 'running';
 
       // Second ticket in same column — should be blocked by per-column limit
       expect(orch(pm).canStartSupervisor('proj-1', 'in_progress')).toBe(false);
@@ -360,35 +347,38 @@ describe('SupervisorOrchestrator integration', () => {
     });
 
     it('canStartSupervisor returns true when slots are available', () => {
-      const { pm } = makePm({ tickets: [{ id: 't1' }] });
+      const ctx = makePm({ tickets: [{ id: 't1' }] });
+      const { pm } = ctx;
       expect(orch(pm).canStartSupervisor('proj-1', 'in_progress')).toBe(true);
     });
 
     it('getEffectiveMaxConcurrent clamps FLEET.md override to global limit', () => {
-      const { pm } = makePm({ tickets: [] }, { workflowConfig: { supervisor: { max_concurrent: 99 } } });
+      const ctx = makePm({ tickets: [] }, { workflowConfig: { supervisor: { max_concurrent: 99 } } });
+      const { pm } = ctx;
       // Global MAX_CONCURRENT_SUPERVISORS is 5; override clamped down.
       expect(orch(pm).getEffectiveMaxConcurrent('proj-1')).toBe(5);
     });
 
     it('isAutoDispatchEnabled reads project flag before FLEET.md override', () => {
-      const { pm: pmOn } = makePm({ autoDispatch: true });
-      expect(orch(pmOn).isAutoDispatchEnabled('proj-1')).toBe(true);
+      const ctxOn = makePm({ autoDispatch: true });
+      expect(orch(ctxOn.pm).isAutoDispatchEnabled('proj-1')).toBe(true);
 
-      const { pm: pmWorkflow } = makePm(
+      const ctxWorkflow = makePm(
         { autoDispatch: false },
         { workflowConfig: { supervisor: { auto_dispatch: true } } }
       );
-      expect(orch(pmWorkflow).isAutoDispatchEnabled('proj-1')).toBe(true);
+      expect(orch(ctxWorkflow.pm).isAutoDispatchEnabled('proj-1')).toBe(true);
 
-      const { pm: pmOff } = makePm({ autoDispatch: false });
-      expect(orch(pmOff).isAutoDispatchEnabled('proj-1')).toBe(false);
+      const ctxOff = makePm({ autoDispatch: false });
+      expect(orch(ctxOff.pm).isAutoDispatchEnabled('proj-1')).toBe(false);
     });
 
     it('autoDispatchTick skips projects with auto-dispatch disabled', async () => {
-      const { pm } = makePm({
+      const ctx = makePm({
         autoDispatch: false,
         tickets: [{ id: 't-ready', columnId: 'backlog' }],
       });
+      const { pm } = ctx;
       // Stub startSupervisor to avoid real sandbox construction
       const startSpy = vi.fn(async () => {});
       (orch(pm) as unknown as { startSupervisor: typeof startSpy }).startSupervisor = startSpy;
@@ -399,10 +389,11 @@ describe('SupervisorOrchestrator integration', () => {
     });
 
     it('autoDispatchTick invokes startSupervisor for a ready ticket when enabled', async () => {
-      const { pm } = makePm({
+      const ctx = makePm({
         autoDispatch: true,
         tickets: [{ id: 't-ready', columnId: 'backlog' }],
       });
+      const { pm } = ctx;
       const startSpy = vi.fn(async () => {});
       (orch(pm) as unknown as { startSupervisor: typeof startSpy }).startSupervisor = startSpy;
 
@@ -412,10 +403,11 @@ describe('SupervisorOrchestrator integration', () => {
     });
 
     it('autoDispatchTick reverts the column move when startSupervisor rejects (bug #2)', async () => {
-      const { pm, store } = makePm({
+      const ctx = makePm({
         autoDispatch: true,
         tickets: [{ id: 't-ready', columnId: 'backlog' }],
       });
+      const { pm, store } = ctx;
       // startSupervisor throws — e.g., preflight failed, hook failed, etc.
       const startSpy = vi.fn(async () => {
         throw new Error('preflight failed');
@@ -431,14 +423,15 @@ describe('SupervisorOrchestrator integration', () => {
     });
 
     it('autoDispatchTick skips tickets whose supervisor is already active', async () => {
-      const { pm, machines } = makePm({
+      const ctx = makePm({
         autoDispatch: true,
         // A ticket in backlog that is ALSO active (e.g., leftover from a half-failed cycle).
         tickets: [{ id: 't-ready', columnId: 'backlog' }],
       });
-      const mach = orch(pm).createMachine('t-ready');
-      orch(pm).machines.set('t-ready', { machine: mach, sandbox: null });
-      machines.get('t-ready')!.phase = 'running';
+      const { pm, machines } = ctx;
+      const mock = seedMachine(ctx, 't-ready');
+
+      mock.phase = 'running';
 
       const startSpy = vi.fn(async () => {});
       (orch(pm) as unknown as { startSupervisor: typeof startSpy }).startSupervisor = startSpy;
@@ -449,17 +442,18 @@ describe('SupervisorOrchestrator integration', () => {
     });
 
     it('autoDispatchTick does not dispatch when global MAX_CONCURRENT_SUPERVISORS is reached', async () => {
-      const { pm, machines } = makePm({
+      const ctx = makePm({
         autoDispatch: true,
         tickets: [
           ...Array.from({ length: 5 }, (_, i) => ({ id: `busy-${i}`, columnId: 'in_progress' })),
           { id: 't-ready', columnId: 'backlog' },
         ],
       });
+      const { pm, machines } = ctx;
       for (let i = 0; i < 5; i++) {
-        const mach = orch(pm).createMachine(`busy-${i}` as TicketId);
-        orch(pm).machines.set(`busy-${i}` as TicketId, { machine: mach, sandbox: null });
-        machines.get(`busy-${i}` as TicketId)!.phase = 'running';
+        const mock = seedMachine(ctx, `busy-${i}` as TicketId);
+
+        mock.phase = 'running';
       }
       const startSpy = vi.fn(async () => {});
       (orch(pm) as unknown as { startSupervisor: typeof startSpy }).startSupervisor = startSpy;
@@ -470,64 +464,9 @@ describe('SupervisorOrchestrator integration', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // handleClientToolCall error responses
-  // -------------------------------------------------------------------------
-  describe('handleClientToolCall error responses', () => {
-    const invoke = (
-      pm: ProjectManager,
-      ticketId: TicketId,
-      toolName: string,
-      toolArgs: Record<string, unknown>
-    ): { ok: boolean; result?: Record<string, unknown> } => {
-      let captured: { ok: boolean; result?: Record<string, unknown> } = { ok: false };
-      orch(pm).handleClientToolCall(ticketId, 'tool.call', { tool: toolName, arguments: toolArgs }, (ok, result) => {
-        captured = { ok, result };
-      });
-      return captured;
-    };
-
-    it('responds with ok=false when ticket_id is missing for get_ticket_comments (Wave 1 fix 4.2)', () => {
-      const { pm } = makePm({ tickets: [{ id: 't1' }] });
-      const result = invoke(pm, 't1', 'get_ticket_comments', {});
-      expect(result.ok).toBe(false);
-      expect((result.result?.error as { message?: string } | undefined)?.message).toMatch(/ticket_id/i);
-    });
-
-    it('responds with ok=false on unknown column for move_ticket', () => {
-      const { pm } = makePm({ tickets: [{ id: 't1' }] });
-      const result = invoke(pm, 't1', 'move_ticket', { column: 'no-such-column' });
-      expect(result.ok).toBe(false);
-      expect((result.result?.error as { message?: string } | undefined)?.message).toMatch(/unknown column/i);
-    });
-
-    it('responds with ok=true on successful move_ticket', () => {
-      const { pm, store } = makePm({ tickets: [{ id: 't1' }] });
-      const result = invoke(pm, 't1', 'move_ticket', { column: 'Review' });
-      expect(result.ok).toBe(true);
-      expect(result.result?.error).toBeUndefined();
-      expect(result.result?.ok).toBe(true);
-      // Verify actual side effect
-      const updated = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
-      expect(updated.columnId).toBe('review');
-    });
-
-    it('responds with ok=false when tool name is missing', () => {
-      const { pm } = makePm({ tickets: [{ id: 't1' }] });
-      let captured: { ok: boolean; result?: Record<string, unknown> } = { ok: true };
-      orch(pm).handleClientToolCall('t1', 'tool.call', {}, (ok, result) => {
-        captured = { ok, result };
-      });
-      expect(captured.ok).toBe(false);
-      expect((captured.result?.error as { message?: string } | undefined)?.message).toMatch(/tool name/i);
-    });
-
-    it('responds with ok=false for unknown ticketId', () => {
-      const { pm } = makePm({ tickets: [{ id: 't1' }] });
-      const result = invoke(pm, 'nonexistent' as TicketId, 'move_ticket', { column: 'Review' });
-      expect(result.ok).toBe(false);
-    });
-  });
+  // handleClientToolCall moved out of main — tool dispatch now lives entirely
+  // in the renderer's `buildClientToolHandler`. See
+  // `src/renderer/features/Tickets/*.test.ts` for the equivalent coverage.
 
   // -------------------------------------------------------------------------
   // T1 — handleMachineRunEnd (run record, continue/complete/stopped/retry)
@@ -538,9 +477,7 @@ describe('SupervisorOrchestrator integration', () => {
       opts: { reason?: string; continuationTurn?: number; workflowConfig?: Partial<WorkflowConfig> } = {}
     ): { ctx: PmCtx; mock: MockMachine } => {
       const ctx = makePm({ tickets: [{ id: 't1' }] }, { workflowConfig: opts.workflowConfig });
-      const mach = orch(ctx.pm).createMachine('t1');
-      orch(ctx.pm).machines.set('t1', { machine: mach, sandbox: null });
-      const mock = ctx.machines.get('t1')!;
+      const mock = seedMachine(ctx, 't1');
       mock.phase = 'running';
       mock.continuationTurn = opts.continuationTurn ?? 0;
       return { ctx, mock };
@@ -639,9 +576,11 @@ describe('SupervisorOrchestrator integration', () => {
         expect(mock.continuationTurn).toBe(1);
         expect(mock.phase).toBe('continuing');
         expect(mock.startRun).toHaveBeenCalled();
-        // Verify the prompt is a continuation prompt
+        // Verify the prompt is a continuation prompt. `bridge.run` receives
+        // an options object with `{ ticketId, prompt, ... }`.
         const lastCall = (mock.startRun as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
-        expect(String(lastCall[0])).toMatch(/continuation/i);
+        const prompt = (lastCall[0] as { prompt?: string }).prompt ?? '';
+        expect(prompt).toMatch(/continuation/i);
         void ctx;
       });
 
@@ -720,9 +659,7 @@ describe('SupervisorOrchestrator integration', () => {
         pipeline,
         tickets: [{ id: 't1', columnId: 'in_progress' }],
       });
-      const mach = orch(ctx.pm).createMachine('t1');
-      orch(ctx.pm).machines.set('t1', { machine: mach, sandbox: null });
-      const mock = ctx.machines.get('t1')!;
+      const mock = seedMachine(ctx, 't1');
       mock.phase = 'running';
       return { ctx, mock };
     };
@@ -778,11 +715,11 @@ describe('SupervisorOrchestrator integration', () => {
 
     it('reopen (terminal → non-terminal) clears resolution and resolvedAt', async () => {
       const { ctx } = setupWithRetryArmed();
-      ctx.pm.resolveTicket('t1', 'done');
+      ctx.pm.resolveTicket('t1', 'completed');
       await vi.runOnlyPendingTimersAsync();
 
       let ticket = ctx.store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
-      expect(ticket.resolution).toBe('done');
+      expect(ticket.resolution).toBe('completed');
       expect(ticket.resolvedAt).toBeGreaterThan(0);
 
       // Reopen into an active column.
@@ -813,81 +750,87 @@ describe('SupervisorOrchestrator integration', () => {
     const LOCAL_SOURCE = { kind: 'local' as const, workspaceDir: '/tmp/fake-workspace' };
 
     it('rejects an unknown ticket', () => {
-      const { pm } = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
+      const ctx = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
+      const { pm } = ctx;
       const err = orch(pm).validateDispatchPreflight('nope' as TicketId);
       expect(err).toMatch(/not found/i);
     });
 
     it('rejects a project with no source', () => {
-      const { pm } = makePm({ tickets: [{ id: 't1' }] });
+      const ctx = makePm({ tickets: [{ id: 't1' }] });
+      const { pm } = ctx;
       const err = orch(pm).validateDispatchPreflight('t1');
       expect(err).toMatch(/no repository/i);
     });
 
     it('rejects a local project with empty workspaceDir', () => {
-      const { pm } = makePm({
+      const ctx = makePm({
         source: { kind: 'local', workspaceDir: '' },
         tickets: [{ id: 't1' }],
       });
+      const { pm } = ctx;
       const err = orch(pm).validateDispatchPreflight('t1');
       expect(err).toMatch(/workspace directory/i);
     });
 
     it('rejects a git-remote project with empty repoUrl', () => {
-      const { pm } = makePm({
+      const ctx = makePm({
         source: { kind: 'git-remote', repoUrl: '' },
         tickets: [{ id: 't1' }],
       });
+      const { pm } = ctx;
       const err = orch(pm).validateDispatchPreflight('t1');
       expect(err).toMatch(/repository url/i);
     });
 
     it('rejects a ticket in the terminal column', () => {
-      const { pm } = makePm({
+      const ctx = makePm({
         source: LOCAL_SOURCE,
         tickets: [{ id: 't1', columnId: 'done' }],
       });
+      const { pm } = ctx;
       const err = orch(pm).validateDispatchPreflight('t1');
       expect(err).toMatch(/terminal column/i);
     });
 
     it('rejects when a machine is already active (not idle/ready/error/completed)', () => {
-      const { pm, machines } = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
-      const mach = orch(pm).createMachine('t1');
-      orch(pm).machines.set('t1', { machine: mach, sandbox: null });
-      machines.get('t1')!.phase = 'running';
+      const ctx = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
+      const { pm, machines } = ctx;
+      const mock = seedMachine(ctx, 't1');
+
+      mock.phase = 'running';
 
       const err = orch(pm).validateDispatchPreflight('t1');
       expect(err).toMatch(/already active/i);
     });
 
     it('allows dispatch when machine is in idle/ready/error/completed', () => {
-      const { pm, machines } = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
-      const mach = orch(pm).createMachine('t1');
-      orch(pm).machines.set('t1', { machine: mach, sandbox: null });
+      const ctx = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
+      const { pm } = ctx;
+      const mock = seedMachine(ctx, 't1' as TicketId);
 
       for (const phase of ['idle', 'ready', 'error', 'completed'] as TicketPhase[]) {
-        machines.get('t1')!.phase = phase;
+        mock.phase = phase;
         expect(orch(pm).validateDispatchPreflight('t1')).toBeNull();
       }
     });
 
     it('rejects when global MAX_CONCURRENT_SUPERVISORS is reached', () => {
-      const { pm, machines } = makePm({
+      const ctx = makePm({
         source: LOCAL_SOURCE,
         tickets: Array.from({ length: 6 }, (_, i) => ({ id: `t${i}` })),
       });
+      const { pm } = ctx;
       for (let i = 0; i < 5; i++) {
-        const m = orch(pm).createMachine(`t${i}` as TicketId);
-        orch(pm).machines.set(`t${i}` as TicketId, { machine: m, sandbox: null });
-        machines.get(`t${i}` as TicketId)!.phase = 'running';
+        const m = seedMachine(ctx, `t${i}` as TicketId);
+        m.phase = 'running';
       }
       const err = orch(pm).validateDispatchPreflight('t5');
       expect(err).toMatch(/concurrency limit/i);
     });
 
     it('rejects when WIP limit is reached', () => {
-      const { pm } = makePm({
+      const ctx = makePm({
         source: LOCAL_SOURCE,
         wipLimit: 1,
         tickets: [
@@ -895,117 +838,39 @@ describe('SupervisorOrchestrator integration', () => {
           { id: 't-active', phase: 'running' }, // isActivePhase → counts toward WIP
         ],
       });
+      const { pm } = ctx;
       const err = orch(pm).validateDispatchPreflight('t1');
       expect(err).toBe('WIP_LIMIT:1');
     });
 
     it('does not count the ticket itself toward WIP (retry case)', () => {
-      const { pm } = makePm({
+      const ctx = makePm({
         source: LOCAL_SOURCE,
         wipLimit: 1,
         tickets: [{ id: 't1', phase: 'running' }],
       });
+      const { pm } = ctx;
       // t1 retrying its own dispatch: WIP count excludes self, so it's allowed.
       expect(orch(pm).validateDispatchPreflight('t1')).toBeNull();
     });
 
     it('returns null on the happy path', () => {
-      const { pm } = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
+      const ctx = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
+      const { pm } = ctx;
       expect(orch(pm).validateDispatchPreflight('t1')).toBeNull();
     });
   });
 
-  describe('ensureSupervisorInfra idempotency', () => {
-    it('returns the existing entry unchanged when the machine is already streaming', async () => {
-      const { pm, machines } = makePm({
+  describe('ensureColumn', () => {
+    it('calls bridge.ensureColumn with the resolved workspace dir', async () => {
+      const ctx = makePm({
         source: { kind: 'local', workspaceDir: '/tmp/fake' },
         tickets: [{ id: 't1' }],
       });
-      const mach = orch(pm).createMachine('t1');
-      // Fake a "running sandbox" via a stub ISandbox.
-      const fakeSandbox: ISandbox = {
-        mode: 'none',
-        start: () => {},
-        stop: async () => {},
-        exit: async () => {},
-        execInContainer: async () => true,
-        getStatus: () =>
-          ({
-            type: 'running',
-            timestamp: Date.now(),
-            data: { wsUrl: 'ws://fake' },
-          }) as unknown as WithTimestamp<AgentProcessStatus>,
-      };
-      orch(pm).machines.set('t1', { machine: mach, sandbox: fakeSandbox });
-      const mock = machines.get('t1')!;
-      mock.phase = 'running';
-
-      const result = (await orch(pm).ensureSupervisorInfra('t1')) as {
-        machine: unknown;
-        sandbox: unknown;
-      };
-      expect(result.sandbox).toBe(fakeSandbox);
-      // Streaming machine must not get re-provisioned.
-      expect(mock.forcePhase).not.toHaveBeenCalled();
-      expect(mock.setWsUrl).not.toHaveBeenCalled();
-    });
-
-    it('reuses a ready machine with a session', async () => {
-      const { pm, machines } = makePm({
-        source: { kind: 'local', workspaceDir: '/tmp/fake' },
-        tickets: [{ id: 't1' }],
-      });
-      const mach = orch(pm).createMachine('t1');
-      const fakeSandbox: ISandbox = {
-        mode: 'none',
-        start: () => {},
-        stop: async () => {},
-        exit: async () => {},
-        execInContainer: async () => true,
-        getStatus: () =>
-          ({
-            type: 'running',
-            timestamp: Date.now(),
-            data: { wsUrl: 'ws://fake' },
-          }) as unknown as WithTimestamp<AgentProcessStatus>,
-      };
-      orch(pm).machines.set('t1', { machine: mach, sandbox: fakeSandbox });
-      const mock = machines.get('t1')!;
-      mock.phase = 'ready';
-
-      await orch(pm).ensureSupervisorInfra('t1');
-      expect(mock.createSession).not.toHaveBeenCalled();
-    });
-
-    it('disposes a stale machine whose sandbox is not running', async () => {
-      const { pm, machines } = makePm({
-        source: { kind: 'local', workspaceDir: '/tmp/fake' },
-        tickets: [{ id: 't1' }],
-      });
-      const mach = orch(pm).createMachine('t1');
-      const deadSandbox: ISandbox = {
-        mode: 'none',
-        start: () => {},
-        stop: async () => {},
-        exit: async () => {},
-        execInContainer: async () => true,
-        getStatus: () => ({ type: 'exited', timestamp: Date.now() }) as unknown as WithTimestamp<AgentProcessStatus>,
-      };
-      orch(pm).machines.set('t1', { machine: mach, sandbox: deadSandbox });
-      const mock = machines.get('t1')!;
-      mock.phase = 'idle';
-
-      // After disposing the stale entry, ensureSupervisorInfra proceeds to
-      // build a fresh sandbox. Our mock factory never fires onStatusChange,
-      // so sandboxReady hangs until the 120s safety timeout rejects it.
-      // Run the call + timer advance concurrently so the rejection flows.
-      const ensurePromise = orch(pm)
-        .ensureSupervisorInfra('t1')
-        .catch(() => 'rejected');
-      await vi.advanceTimersByTimeAsync(121_000);
-      await expect(ensurePromise).resolves.toBe('rejected');
-
-      expect(mock.dispose).toHaveBeenCalled();
+      await orch(ctx.pm).ensureColumn('t1' as TicketId);
+      expect(ctx.bridge.ensureColumn).toHaveBeenCalledWith(
+        expect.objectContaining({ ticketId: 't1' })
+      );
     });
   });
 
@@ -1017,9 +882,7 @@ describe('SupervisorOrchestrator integration', () => {
 
     const setupWithMachine = (phase: TicketPhase): { ctx: PmCtx; mock: MockMachine } => {
       const ctx = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
-      const mach = orch(ctx.pm).createMachine('t1');
-      orch(ctx.pm).machines.set('t1', { machine: mach, sandbox: null });
-      const mock = ctx.machines.get('t1')!;
+      const mock = seedMachine(ctx, 't1');
       mock.phase = phase;
       return { ctx, mock };
     };
@@ -1033,10 +896,10 @@ describe('SupervisorOrchestrator integration', () => {
       });
     }
 
-    it('forwards via machine.sendMessage when the machine is streaming', async () => {
+    it('forwards via bridge.send when the machine is streaming', async () => {
       const { ctx, mock } = setupWithMachine('running');
       await orch(ctx.pm).sendSupervisorMessage('t1', 'hello mid-run');
-      expect(mock.sendMessage).toHaveBeenCalledWith('hello mid-run');
+      expect(mock.sendMessage).toHaveBeenCalledWith('t1', 'hello mid-run');
       expect(mock.startRun).not.toHaveBeenCalled();
     });
 
@@ -1047,34 +910,33 @@ describe('SupervisorOrchestrator integration', () => {
     });
 
     it('throws when no machine exists and the ticket is unknown', async () => {
-      const { pm } = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
+      const ctx = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
+      const { pm } = ctx;
       await expect(orch(pm).sendSupervisorMessage('nope' as TicketId, 'hi')).rejects.toThrow(/not found/i);
     });
 
     it('throws when no machine exists and concurrency is saturated', async () => {
-      const { pm, machines } = makePm({
+      const ctx = makePm({
         source: LOCAL_SOURCE,
         tickets: [{ id: 't1' }, ...Array.from({ length: 5 }, (_, i) => ({ id: `busy-${i}` }))],
       });
+      const { pm } = ctx;
       for (let i = 0; i < 5; i++) {
-        const m = orch(pm).createMachine(`busy-${i}` as TicketId);
-        orch(pm).machines.set(`busy-${i}` as TicketId, { machine: m, sandbox: null });
-        machines.get(`busy-${i}` as TicketId)!.phase = 'running';
+        const m = seedMachine(ctx, `busy-${i}` as TicketId);
+        m.phase = 'running';
       }
 
       await expect(orch(pm).sendSupervisorMessage('t1', 'hi')).rejects.toThrow(/concurrency/i);
     });
 
-    it('routes through ensureSupervisorInfra when no machine exists and slots are available', async () => {
-      const { pm } = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
-      // Stub ensureSupervisorInfra on the orchestrator so we don't touch fs/sandbox.
+    it('routes through ensureColumn when no machine exists and slots are available', async () => {
+      const ctx = makePm({ source: LOCAL_SOURCE, tickets: [{ id: 't1' }] });
+      const { pm } = ctx;
       const ensureSpy = vi.fn(async () => {
-        // Simulate ensureSupervisorInfra registering a fresh machine.
-        const mach = orch(pm).createMachine('t1');
-        orch(pm).machines.set('t1', { machine: mach, sandbox: null });
-        return { machine: mach, sandbox: null };
+        const seeded = seedMachine(ctx, 't1' as TicketId);
+        return { state: seeded.state, tabId: 'tab-t1' as unknown as import('@/shared/types').CodeTabId };
       });
-      (orch(pm) as unknown as { ensureSupervisorInfra: typeof ensureSpy }).ensureSupervisorInfra = ensureSpy;
+      (orch(pm) as unknown as { ensureColumn: typeof ensureSpy }).ensureColumn = ensureSpy;
 
       await orch(pm).sendSupervisorMessage('t1', 'hi');
 
@@ -1083,33 +945,26 @@ describe('SupervisorOrchestrator integration', () => {
   });
 
   describe('resetSupervisorSession', () => {
-    it('stops the machine, creates a new session, and persists its id on the ticket', async () => {
+    it('stops the in-flight run and asks the column to mint a fresh session', async () => {
       const ctx = makePm({
         source: { kind: 'local', workspaceDir: '/tmp/fake' },
         tickets: [{ id: 't1' }],
       });
-      const mach = orch(ctx.pm).createMachine('t1');
-      orch(ctx.pm).machines.set('t1', { machine: mach, sandbox: null });
-      const mock = ctx.machines.get('t1')!;
+      const mock = seedMachine(ctx, 't1');
       mock.phase = 'running';
-
-      (mock.createSession as ReturnType<typeof vi.fn>).mockImplementation(async () => 'new-session-id');
 
       await orch(ctx.pm).resetSupervisorSession('t1');
 
-      expect(mock.stop).toHaveBeenCalled();
-      expect(mock.createSession).toHaveBeenCalled();
-      const ticket = ctx.store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
-      // The new session id is generated inside PM via crypto.randomUUID, so we
-      // just verify *something* got persisted and it isn't undefined.
-      expect(ticket.supervisorSessionId).toBeTruthy();
+      expect(ctx.bridge.stop).toHaveBeenCalledWith('t1');
+      expect(ctx.bridge.reset).toHaveBeenCalledWith('t1');
     });
 
     it('is a no-op when no machine exists', async () => {
-      const { pm } = makePm({
+      const ctx = makePm({
         source: { kind: 'local', workspaceDir: '/tmp/fake' },
         tickets: [{ id: 't1' }],
       });
+      const { pm } = ctx;
       await expect(orch(pm).resetSupervisorSession('t1')).resolves.toBeUndefined();
     });
   });
@@ -1133,7 +988,8 @@ describe('SupervisorOrchestrator integration', () => {
       }) as unknown as import('@/shared/types').Task;
 
     it('marks running tasks as exited', () => {
-      const { pm, store } = makePm({ tickets: [{ id: 't1' }] });
+      const ctx = makePm({ tickets: [{ id: 't1' }] });
+      const { pm, store } = ctx;
       store.set('tasks', [makeTask('task-1', 'running')]);
 
       orch(pm).restorePersistedTasks();
@@ -1143,7 +999,8 @@ describe('SupervisorOrchestrator integration', () => {
     });
 
     it('preserves already-exited and errored tasks', () => {
-      const { pm, store } = makePm({ tickets: [{ id: 't1' }] });
+      const ctx = makePm({ tickets: [{ id: 't1' }] });
+      const { pm, store } = ctx;
       store.set('tasks', [makeTask('task-exited', 'exited'), makeTask('task-error', 'error')]);
 
       orch(pm).restorePersistedTasks();
@@ -1153,13 +1010,14 @@ describe('SupervisorOrchestrator integration', () => {
     });
 
     it('resets active ticket phases to idle', () => {
-      const { pm, store } = makePm({
+      const ctx = makePm({
         tickets: [
           { id: 't-running', phase: 'running' },
           { id: 't-provisioning', phase: 'provisioning' },
           { id: 't-awaiting', phase: 'awaiting_input' },
         ],
       });
+      const { pm, store } = ctx;
 
       orch(pm).restorePersistedTasks();
 
@@ -1170,7 +1028,8 @@ describe('SupervisorOrchestrator integration', () => {
     });
 
     it('preserves completed phase across restart', () => {
-      const { pm, store } = makePm({ tickets: [{ id: 't1', phase: 'completed' }] });
+      const ctx = makePm({ tickets: [{ id: 't1', phase: 'completed' }] });
+      const { pm, store } = ctx;
 
       orch(pm).restorePersistedTasks();
 
@@ -1183,7 +1042,8 @@ describe('SupervisorOrchestrator integration', () => {
       // error states from prior sessions are considered stale because the in-memory
       // retry counters are gone. If this behavior changes in the future, update
       // both the comment and this test together.
-      const { pm, store } = makePm({ tickets: [{ id: 't1', phase: 'error' }] });
+      const ctx = makePm({ tickets: [{ id: 't1', phase: 'error' }] });
+      const { pm, store } = ctx;
 
       orch(pm).restorePersistedTasks();
 
@@ -1192,7 +1052,8 @@ describe('SupervisorOrchestrator integration', () => {
     });
 
     it('preserves idle phase', () => {
-      const { pm, store } = makePm({ tickets: [{ id: 't1', phase: 'idle' }] });
+      const ctx = makePm({ tickets: [{ id: 't1', phase: 'idle' }] });
+      const { pm, store } = ctx;
 
       orch(pm).restorePersistedTasks();
 
@@ -1201,7 +1062,8 @@ describe('SupervisorOrchestrator integration', () => {
     });
 
     it('removes orphaned persisted tasks that reference a deleted ticket', async () => {
-      const { pm, store } = makePm({ tickets: [{ id: 't1' }] });
+      const ctx = makePm({ tickets: [{ id: 't1' }] });
+      const { pm, store } = ctx;
       store.set('tasks', [makeTask('orphan-task', 'exited', { ticketId: 'deleted-ticket' as TicketId })]);
 
       orch(pm).restorePersistedTasks();
@@ -1213,9 +1075,10 @@ describe('SupervisorOrchestrator integration', () => {
     });
 
     it('removes persisted tasks whose ticket is in a terminal column', async () => {
-      const { pm, store } = makePm({
+      const ctx = makePm({
         tickets: [{ id: 't1', columnId: 'done' }],
       });
+      const { pm, store } = ctx;
       // Ticket references a task; both should be cleaned up.
       const tickets = store.get('tickets', []);
       tickets[0]!.supervisorTaskId = 'task-1' as never;

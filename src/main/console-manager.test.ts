@@ -85,35 +85,36 @@ describe('ConsoleManager', () => {
 
   it('starts with no active consoles', () => {
     const mgr = new ConsoleManager(makeDeps());
-    expect(mgr.listIds()).toEqual([]);
+    expect(mgr.listIdsForTab('tab-1')).toEqual([]);
     expect(mgr.isActive()).toBe(false);
   });
 
-  it('createConsole returns an id and tracks the entry', async () => {
+  it('createConsole returns an id and tracks the entry for its tab', async () => {
     const mgr = new ConsoleManager(makeDeps());
-    const id = await mgr.createConsole({ onData: vi.fn(), onExit: vi.fn() });
+    const id = await mgr.createConsole('tab-1', { onData: vi.fn(), onExit: vi.fn() });
 
     expect(id).toBe('console-1');
-    expect(mgr.listIds()).toEqual(['console-1']);
+    expect(mgr.listIdsForTab('tab-1')).toEqual(['console-1']);
+    expect(mgr.listIdsForTab('tab-2')).toEqual([]);
     expect(mgr.isActive()).toBe(true);
     expect(ptyInstances).toHaveLength(1);
   });
 
-  it('creates multiple independent consoles', async () => {
+  it('keeps terminals from different tabs isolated', async () => {
     const mgr = new ConsoleManager(makeDeps());
     const callbacks = { onData: vi.fn(), onExit: vi.fn() };
 
-    const id1 = await mgr.createConsole(callbacks);
-    const id2 = await mgr.createConsole(callbacks);
+    const id1 = await mgr.createConsole('tab-a', callbacks);
+    const id2 = await mgr.createConsole('tab-b', callbacks);
 
     expect(id1).not.toBe(id2);
-    expect(mgr.listIds()).toHaveLength(2);
-    expect(ptyInstances).toHaveLength(2);
+    expect(mgr.listIdsForTab('tab-a')).toEqual([id1]);
+    expect(mgr.listIdsForTab('tab-b')).toEqual([id2]);
   });
 
   it('write delegates to the PTY process', async () => {
     const mgr = new ConsoleManager(makeDeps());
-    const id = await mgr.createConsole({ onData: vi.fn(), onExit: vi.fn() });
+    const id = await mgr.createConsole('tab-1', { onData: vi.fn(), onExit: vi.fn() });
 
     mgr.write(id, 'hello\r');
 
@@ -127,7 +128,7 @@ describe('ConsoleManager', () => {
 
   it('resize delegates to the PTY process', async () => {
     const mgr = new ConsoleManager(makeDeps());
-    const id = await mgr.createConsole({ onData: vi.fn(), onExit: vi.fn() });
+    const id = await mgr.createConsole('tab-1', { onData: vi.fn(), onExit: vi.fn() });
 
     mgr.resize(id, 120, 40);
 
@@ -142,11 +143,11 @@ describe('ConsoleManager', () => {
   it('disposeOne removes entry and kills PTY', async () => {
     const deps = makeDeps();
     const mgr = new ConsoleManager(deps);
-    const id = await mgr.createConsole({ onData: vi.fn(), onExit: vi.fn() });
+    const id = await mgr.createConsole('tab-1', { onData: vi.fn(), onExit: vi.fn() });
 
     await mgr.disposeOne(id);
 
-    expect(mgr.listIds()).toEqual([]);
+    expect(mgr.listIdsForTab('tab-1')).toEqual([]);
     expect(mgr.isActive()).toBe(false);
     expect(deps.killPty).toHaveBeenCalledOnce();
   });
@@ -156,52 +157,67 @@ describe('ConsoleManager', () => {
     await mgr.disposeOne('nonexistent');
   });
 
+  it('disposeAllForTab removes only that tab\'s entries', async () => {
+    const mgr = new ConsoleManager(makeDeps());
+    const callbacks = { onData: vi.fn(), onExit: vi.fn() };
+    await mgr.createConsole('tab-a', callbacks);
+    await mgr.createConsole('tab-a', callbacks);
+    const keepId = await mgr.createConsole('tab-b', callbacks);
+
+    await mgr.disposeAllForTab('tab-a');
+
+    expect(mgr.listIdsForTab('tab-a')).toEqual([]);
+    expect(mgr.listIdsForTab('tab-b')).toEqual([keepId]);
+    expect(mgr.isActive()).toBe(true);
+  });
+
   it('disposeAll removes all entries', async () => {
     const mgr = new ConsoleManager(makeDeps());
     const callbacks = { onData: vi.fn(), onExit: vi.fn() };
-    await mgr.createConsole(callbacks);
-    await mgr.createConsole(callbacks);
+    await mgr.createConsole('tab-a', callbacks);
+    await mgr.createConsole('tab-b', callbacks);
 
-    expect(mgr.listIds()).toHaveLength(2);
+    expect(mgr.isActive()).toBe(true);
 
     await mgr.disposeAll();
 
-    expect(mgr.listIds()).toEqual([]);
+    expect(mgr.listIdsForTab('tab-a')).toEqual([]);
+    expect(mgr.listIdsForTab('tab-b')).toEqual([]);
     expect(mgr.isActive()).toBe(false);
   });
 
-  it('PTY exit callback removes entry from map and notifies', async () => {
+  it('PTY exit callback removes entry from map and notifies with tabId', async () => {
     const mgr = new ConsoleManager(makeDeps());
     const onData = vi.fn();
     const onExit = vi.fn();
-    const id = await mgr.createConsole({ onData, onExit });
+    const id = await mgr.createConsole('tab-1', { onData, onExit });
 
     expect(mgr.isActive()).toBe(true);
 
     // Simulate the PTY exiting
     ptyInstances[0]!.onExitCb!({ exitCode: 0 });
 
-    expect(mgr.listIds()).toEqual([]);
+    expect(mgr.listIdsForTab('tab-1')).toEqual([]);
     expect(mgr.isActive()).toBe(false);
-    expect(onExit).toHaveBeenCalledWith(id, 0, undefined);
-    expect(onData).toHaveBeenCalledWith(id, expect.stringContaining('exited with code 0'));
+    expect(onExit).toHaveBeenCalledWith('tab-1', id, 0, undefined);
+    expect(onData).toHaveBeenCalledWith('tab-1', id, expect.stringContaining('exited with code 0'));
   });
 
   it('PTY exit with signal includes signal in message', async () => {
     const mgr = new ConsoleManager(makeDeps());
     const onData = vi.fn();
     const onExit = vi.fn();
-    await mgr.createConsole({ onData, onExit });
+    await mgr.createConsole('tab-1', { onData, onExit });
 
     ptyInstances[0]!.onExitCb!({ exitCode: 137, signal: 9 });
 
-    expect(onData).toHaveBeenCalledWith(expect.any(String), expect.stringContaining('signal: 9'));
-    expect(onExit).toHaveBeenCalledWith(expect.any(String), 137, 9);
+    expect(onData).toHaveBeenCalledWith('tab-1', expect.any(String), expect.stringContaining('signal: 9'));
+    expect(onExit).toHaveBeenCalledWith('tab-1', expect.any(String), 137, 9);
   });
 
   it('initializes console with PATH export on creation', async () => {
     const mgr = new ConsoleManager(makeDeps());
-    await mgr.createConsole({ onData: vi.fn(), onExit: vi.fn() });
+    await mgr.createConsole('tab-1', { onData: vi.fn(), onExit: vi.fn() });
 
     const pathWrite = ptyInstances[0]!.writeCalls.find((w) => w.includes('PATH'));
     expect(pathWrite).toBeDefined();

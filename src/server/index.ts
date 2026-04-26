@@ -103,17 +103,6 @@ const main = async () => {
     reply.send({ token: wsToken });
   });
 
-  // Serve the built browser renderer as static files
-  const staticDir = resolve(__dirname, '../browser');
-  if (existsSync(staticDir)) {
-    await fastify.register(fastifyStatic, {
-      root: staticDir,
-      prefix: '/',
-    });
-  } else {
-    fastify.log.warn(`Static dir not found: ${staticDir}. Renderer will not be served.`);
-  }
-
   // WebSocket handler
   const wsHandler = new WsHandler();
   const store = new ServerStore();
@@ -151,6 +140,22 @@ const main = async () => {
       );
     });
   });
+
+  // Serve the built browser renderer as static files. In dev:server mode the
+  // browser bundle is rebuilt on save (`vite build --watch`), so saves
+  // propagate without a manual rebuild — but the page still has to be
+  // reloaded (no HMR via this path). For full HMR, hit Vite directly on its
+  // dev port (`http://<host>:5173`); Vite is configured to proxy /api, /ws,
+  // and /proxy back to this server.
+  const staticDir = resolve(__dirname, '../browser');
+  if (existsSync(staticDir)) {
+    await fastify.register(fastifyStatic, {
+      root: staticDir,
+      prefix: '/',
+    });
+  } else {
+    fastify.log.warn(`Static dir not found: ${staticDir}. Renderer will not be served.`);
+  }
 
   // SPA fallback: serve index.html for non-API, non-WS routes
   fastify.setNotFoundHandler((_request, reply) => {

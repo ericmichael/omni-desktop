@@ -3,7 +3,7 @@ import { Desktop20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { buildInteractiveVariables } from '@/lib/client-tools';
+import { buildSessionVariables } from '@/lib/client-tools';
 import { FloatingWidget } from '@/renderer/features/Omni/FloatingWidget';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
@@ -136,9 +136,10 @@ function useChatProjectContext() {
 
   const variables = useMemo(
     () =>
-      buildInteractiveVariables(
-        project ? { projectId: project.id, projectLabel: project.label } : undefined
-      ),
+      buildSessionVariables({
+        surface: 'chat',
+        context: project ? { projectId: project.id, projectLabel: project.label } : undefined,
+      }),
     [project]
   );
 
@@ -197,7 +198,7 @@ const SandboxRunningView = memo(
       <div className={styles.flexColFullRelative}>
         <div className={styles.flex1Relative}>
           <div className={styles.fullSizeRelative}>
-            <OmniAgentsApp uiUrl={uiSrc} greeting={greeting} sandboxLabel={sandboxLabel} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables ?? buildInteractiveVariables()} onClientToolCall={onClientToolCall ?? buildClientToolHandler()} pendingPlan={pendingPlan} onPlanDecision={resolvePlanApproval} />
+            <OmniAgentsApp uiUrl={uiSrc} greeting={greeting} sandboxLabel={sandboxLabel} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables ?? buildSessionVariables({ surface: 'chat' })} onClientToolCall={onClientToolCall ?? buildClientToolHandler()} pendingPlan={pendingPlan} onPlanDecision={resolvePlanApproval} />
             {vncSrc && (
               <FloatingWidget
                 src={vncSrc}

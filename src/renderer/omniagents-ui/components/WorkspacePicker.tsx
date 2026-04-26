@@ -153,7 +153,7 @@ setEditingPath(false)
 } 
 }}
                 autoFocus
-                className="flex-1 bg-bgCard text-textHeading text-xs rounded px-2 py-1 border border-bgCardAlt outline-none focus:border-tweetBlue"
+                className="flex-1 bg-bgCard text-textHeading text-xs rounded px-2 py-1 border border-bgCardAlt outline-none focus:border-brand"
               />
             </form>
           ) : (
@@ -171,7 +171,7 @@ setEditingPath(false)
         <div className="flex-1 overflow-y-auto min-h-0" style={{ maxHeight: '50vh' }}>
           {loading ? (
             <div className="flex items-center justify-center py-8">
-              <div className="animate-spin rounded-full h-5 w-5 border-2 border-tweetBlue border-t-transparent" />
+              <div className="animate-spin rounded-full h-5 w-5 border-2 border-brand border-t-transparent" />
             </div>
           ) : error ? (
             <div className="px-4 py-6 text-sm text-errorRed text-center">{error}</div>
@@ -185,7 +185,7 @@ setEditingPath(false)
                   onClick={() => load(entry.path)}
                   className="w-full flex items-center gap-3 px-4 py-2 text-left hover:bg-bgCard/50 transition-colors"
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" className="flex-shrink-0 text-tweetBlue" fill="currentColor">
+                  <svg width="16" height="16" viewBox="0 0 24 24" className="flex-shrink-0 text-brand" fill="currentColor">
                     <path d="M2 6a2 2 0 012-2h5l2 2h9a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
                   </svg>
                   <span className="text-sm text-textHeading truncate">{entry.name}</span>
@@ -206,7 +206,7 @@ setEditingPath(false)
           <button
             onClick={() => currentPath && onSelect(currentPath)}
             disabled={!currentPath}
-            className="px-4 py-1.5 text-sm font-medium bg-tweetBlue text-white rounded-lg hover:brightness-110 disabled:opacity-50 transition-all"
+            className="px-4 py-1.5 text-sm font-medium bg-brand text-white rounded-lg hover:brightness-110 disabled:opacity-50 transition-all"
           >
             Use This Folder
           </button>

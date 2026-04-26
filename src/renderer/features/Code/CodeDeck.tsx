@@ -1,23 +1,56 @@
 import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
-import { arrayMove, horizontalListSortingStrategy, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import {
+  arrayMove,
+  horizontalListSortingStrategy,
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
-import { Add20Regular, Apps20Regular, ArrowClockwise20Regular, ArrowLeft20Regular, ArrowMaximize20Regular, ArrowMinimize20Regular, ArrowRight20Regular, BranchFork20Regular, Chat20Regular, Globe20Regular, MoreHorizontal20Regular, Navigation20Regular,ReOrderDotsVertical20Regular } from '@fluentui/react-icons';
+import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
+import {
+  Add20Regular,
+  Apps20Regular,
+  ArrowMaximize20Regular,
+  ArrowMinimize20Regular,
+  BranchFork20Regular,
+  Chat20Regular,
+  Globe20Regular,
+  MoreHorizontal20Regular,
+  Navigation20Regular,
+  ReOrderDotsVertical20Regular,
+  Subtract20Regular,
+} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
-import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { uuidv4 } from '@/lib/uuid';
-import type { WebviewHandle } from '@/renderer/common/Webview';
 import { Webview } from '@/renderer/common/Webview';
-import { Button, Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger, SegmentedControl } from '@/renderer/ds';
+import { BrowserView } from '@/renderer/features/Browser/BrowserView';
+import {
+  Button,
+  Menu,
+  MenuDivider,
+  MenuItem,
+  MenuList,
+  MenuPopover,
+  MenuTrigger,
+  SegmentedControl,
+} from '@/renderer/ds';
 import { $previewRequest, clearPreviewRequest } from '@/renderer/features/Tickets/preview-bridge';
 import { ticketApi } from '@/renderer/features/Tickets/state';
-import { TicketBannerActions, TicketColumnBadge, TicketResolutionBadge } from '@/renderer/features/Tickets/TicketControls';
+import {
+  TicketBannerActions,
+  TicketColumnBadge,
+  TicketResolutionBadge,
+} from '@/renderer/features/Tickets/TicketControls';
 import { type TicketPanel, TicketPanelOverlay } from '@/renderer/features/Tickets/TicketPanelOverlay';
+import { ConsoleStarted } from '@/renderer/features/Console/ConsoleRunning';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { AppHandleScope } from '@/shared/app-control-types';
 import { makeAppHandleId } from '@/shared/app-control-types';
-import type { AppId, CustomAppEntry } from '@/shared/app-registry';
+import type { AppDescriptor, AppId, CustomAppEntry } from '@/shared/app-registry';
+import { buildAppRegistry } from '@/shared/app-registry';
 import type { CodeLayoutMode, CodeTab, CodeTabId, TicketId, TicketResolution } from '@/shared/types';
 
 import { AppIcon } from './AppIcon';
@@ -44,20 +77,8 @@ const SYNTHETIC_BROWSER_APP: CustomAppEntry = {
   columnScoped: false,
 };
 
-/** Coerce a typed address into a loadable URL. Treats bare terms as DDG searches. */
-function normalizeAddress(input: string): string {
-  const trimmed = input.trim();
-  if (!trimmed) {
-    return BROWSER_START_URL;
-  }
-  if (/^https?:\/\//i.test(trimmed) || /^file:\/\//i.test(trimmed) || /^about:/i.test(trimmed)) {
-    return trimmed;
-  }
-  if (/^[\w-]+(\.[\w-]+)+(\/.*)?$/.test(trimmed)) {
-    return `https://${trimmed}`;
-  }
-  return `https://duckduckgo.com/?q=${encodeURIComponent(trimmed)}`;
-}
+// URL normalization lives in `@/lib/url` so it's shared with the
+// main-process BrowserManager and testable without the DOM.
 
 const COLUMN_WIDTH = 480;
 const COLUMN_WIDTH_SMALL = 360;
@@ -86,24 +107,30 @@ const useStyles = makeStyles({
   },
   deckHeaderActions: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
   flexItemsCenter: { display: 'flex', alignItems: 'center' },
-  gap1: { gap: '4px' },
+  gap1: { gap: tokens.spacingHorizontalXS },
   gap2: { gap: tokens.spacingHorizontalS },
   gap3: { gap: tokens.spacingHorizontalM },
   minW0: { minWidth: 0 },
   sessionActionBtn: {
     display: 'inline-flex',
-    width: '32px',
-    height: '32px',
+    width: '24px',
+    height: '24px',
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: tokens.borderRadiusMedium,
-    color: tokens.colorNeutralForeground2,
-    transitionProperty: 'color, background-color',
-    transitionDuration: '150ms',
+    color: tokens.colorNeutralForeground3,
+    transitionProperty: 'color, background-color, opacity',
+    transitionDuration: tokens.durationFaster,
     ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
+    ':focus-visible': { outline: `2px solid ${tokens.colorStrokeFocus2}`, outlineOffset: '1px' },
     border: 'none',
     backgroundColor: 'transparent',
     cursor: 'pointer',
+  },
+  revealOnHover: {
+    opacity: 0,
+    transitionProperty: 'opacity',
+    transitionDuration: tokens.durationFaster,
   },
   sessionActionBtnDisabled: {
     cursor: 'not-allowed',
@@ -116,16 +143,17 @@ const useStyles = makeStyles({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground1,
+    paddingRight: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    minHeight: '32px',
+    backgroundColor: 'transparent',
   },
   sessionLabel: {
-    fontSize: tokens.fontSizeBase300,
+    fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightMedium,
-    color: tokens.colorNeutralForeground1,
+    color: tokens.colorNeutralForeground2,
+    letterSpacing: '0.01em',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
@@ -136,14 +164,9 @@ const useStyles = makeStyles({
     justifyContent: 'space-between',
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    paddingTop: '6px',
-    paddingBottom: '6px',
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground2,
-    '@media (min-width: 640px)': {
-      paddingLeft: tokens.spacingHorizontalXL,
-      paddingRight: tokens.spacingHorizontalXL,
-    },
+    paddingTop: '2px',
+    paddingBottom: tokens.spacingVerticalXS,
+    backgroundColor: 'transparent',
   },
   ticketTitle: {
     fontSize: tokens.fontSizeBase200,
@@ -183,8 +206,31 @@ const useStyles = makeStyles({
     overflow: 'hidden',
     margin: tokens.spacingHorizontalS,
     backgroundColor: 'transparent',
+    ':hover .revealOnHover': { opacity: 1 },
+    ':focus-within .revealOnHover': { opacity: 1 },
   },
   deckDockSlot: { minHeight: 0 },
+  cardNoRightMargin: {
+    marginRight: 0,
+    borderTopRightRadius: 0,
+    borderBottomRightRadius: 0,
+  },
+  cardFlattenLeft: {
+    marginLeft: 0,
+    borderTopLeftRadius: 0,
+    borderBottomLeftRadius: 0,
+    borderLeftWidth: '2px',
+  },
+  sidecarBodyFill: { position: 'absolute', inset: 0 },
+  sidecarBodyHidden: { display: 'none' },
+  sidecarUnavailable: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
+    color: tokens.colorNeutralForeground4,
+    fontSize: tokens.fontSizeBase300,
+  },
   glassDeckHeader: {
     backgroundColor: 'transparent',
     backdropFilter: 'none',
@@ -192,16 +238,10 @@ const useStyles = makeStyles({
     borderBottomColor: 'transparent',
   },
   glassSessionHeader: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 10%, transparent)`,
-    backdropFilter: 'blur(36px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
-    borderBottomColor: 'transparent',
+    backgroundColor: 'transparent',
   },
   glassTicketBanner: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 8%, transparent)`,
-    backdropFilter: 'blur(36px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
-    borderBottomColor: 'transparent',
+    backgroundColor: 'transparent',
   },
   glassFocusSidebar: {
     backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
@@ -285,17 +325,58 @@ const useStyles = makeStyles({
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    width: '32px',
-    height: '32px',
+    width: '20px',
+    height: '20px',
+    marginLeft: '-4px',
     borderRadius: tokens.borderRadiusMedium,
-    color: tokens.colorNeutralForeground2,
+    color: tokens.colorNeutralForeground3,
     border: 'none',
     backgroundColor: 'transparent',
     cursor: 'grab',
+    transitionProperty: 'color, background-color, opacity',
+    transitionDuration: tokens.durationFaster,
     ':hover': { color: tokens.colorNeutralForeground1, backgroundColor: tokens.colorSubtleBackgroundHover },
+    ':focus-visible': { outline: `2px solid ${tokens.colorStrokeFocus2}`, outlineOffset: '1px' },
+  },
+  dragHandleA11y: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: 0,
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    border: 'none',
+    backgroundColor: 'transparent',
+    color: tokens.colorNeutralForeground3,
+    cursor: 'grab',
+    ':focus-visible': {
+      position: 'relative',
+      width: '20px',
+      height: '20px',
+      clipPath: 'none',
+      overflow: 'visible',
+      whiteSpace: 'normal',
+      borderRadius: tokens.borderRadiusMedium,
+      outline: `2px solid ${tokens.colorStrokeFocus2}`,
+      outlineOffset: '1px',
+    },
+  },
+  dragSurface: {
+    cursor: 'grab',
+    userSelect: 'none',
+    WebkitUserSelect: 'none',
+    ':active': { cursor: 'grabbing' },
   },
   flex1MinH0Relative: { flex: '1 1 0', minHeight: 0, position: 'relative' },
-  sessionPane: { width: '100%', height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: tokens.colorNeutralBackground2 },
+  sessionPane: {
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
   sessionPaneHidden: { display: 'none' },
   focusListItem: { position: 'relative' },
   focusListItemDragging: { opacity: 0.7 },
@@ -314,13 +395,36 @@ const useStyles = makeStyles({
     cursor: 'pointer',
     border: 'none',
     backgroundColor: 'transparent',
+    ':hover .revealOnHover': { opacity: 1 },
+    ':focus-within .revealOnHover': { opacity: 1 },
   },
   focusListItemActive: { backgroundColor: tokens.colorBrandBackground2, color: tokens.colorNeutralForeground1 },
-  focusListItemInactive: { color: tokens.colorNeutralForeground2, ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 } },
-  focusListItemContent: { flex: '1 1 0', minWidth: 0, textAlign: 'left', border: 'none', backgroundColor: 'transparent', cursor: 'pointer' },
+  focusListItemInactive: {
+    color: tokens.colorNeutralForeground2,
+    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
+  },
+  focusListItemContent: {
+    flex: '1 1 0',
+    minWidth: 0,
+    textAlign: 'left',
+    border: 'none',
+    backgroundColor: 'transparent',
+    cursor: 'pointer',
+  },
   focusListItemInner: { display: 'flex', flexDirection: 'column', minWidth: 0 },
-  focusListItemLabel: { fontSize: tokens.fontSizeBase300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  focusListItemSub: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  focusListItemLabel: {
+    fontSize: tokens.fontSizeBase300,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  focusListItemSub: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
   deckScroll: {
     flex: '1 1 0',
     minHeight: 0,
@@ -350,7 +454,13 @@ const useStyles = makeStyles({
       scrollSnapAlign: 'start',
     },
   },
-  focusLayout: { flex: '1 1 0', minHeight: 0, display: 'flex', flexDirection: 'column', [`@media (min-width: ${SNAP_SCROLL_WIDTH + 1}px)`]: { flexDirection: 'row' } },
+  focusLayout: {
+    flex: '1 1 0',
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    [`@media (min-width: ${SNAP_SCROLL_WIDTH + 1}px)`]: { flexDirection: 'row' },
+  },
   focusSidebar: {
     display: 'none',
     flexDirection: 'column',
@@ -389,7 +499,14 @@ const useStyles = makeStyles({
     overflowX: 'auto',
     [`@media (min-width: ${SNAP_SCROLL_WIDTH + 1}px)`]: { display: 'none' },
   },
-  mobileTabBarInner: { display: 'flex', alignItems: 'center', gap: '4px', paddingLeft: tokens.spacingHorizontalS, paddingTop: '6px', paddingBottom: '6px' },
+  mobileTabBarInner: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingTop: '6px',
+    paddingBottom: '6px',
+  },
   mobileTabChip: {
     flexShrink: 0,
     paddingLeft: '14px',
@@ -544,7 +661,19 @@ const useStyles = makeStyles({
 });
 
 const CodeDeckHeader = memo(
-  ({ layoutMode, onLayoutMode, onNewSession, onOpenApps, isGlass }: { layoutMode: CodeLayoutMode; onLayoutMode: (mode: CodeLayoutMode) => void; onNewSession: () => void; onOpenApps: () => void; isGlass?: boolean }) => {
+  ({
+    layoutMode,
+    onLayoutMode,
+    onNewSession,
+    onOpenApps,
+    isGlass,
+  }: {
+    layoutMode: CodeLayoutMode;
+    onLayoutMode: (mode: CodeLayoutMode) => void;
+    onNewSession: () => void;
+    onOpenApps: () => void;
+    isGlass?: boolean;
+  }) => {
     const styles = useStyles();
     return (
       <div className={mergeClasses(styles.deckHeader, isGlass && styles.glassDeckHeader)}>
@@ -572,7 +701,10 @@ const CodeDeckHeader = memo(
         <div className={styles.deckHeaderActions}>
           <SegmentedControl
             value={layoutMode}
-            options={[{ value: 'deck', label: 'Deck' }, { value: 'focus', label: 'Focus' }]}
+            options={[
+              { value: 'deck', label: 'Deck' },
+              { value: 'focus', label: 'Focus' },
+            ]}
             onChange={onLayoutMode}
             layoutId="code-layout-toggle"
           />
@@ -602,25 +734,34 @@ const CodeDeckHeader = memo(
 );
 CodeDeckHeader.displayName = 'CodeDeckHeader';
 
-const SessionActionButton = forwardRef<HTMLButtonElement, { icon: React.ReactNode; label: string; isDisabled?: boolean; onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void }>(
-  ({ icon, label, isDisabled, onClick, ...rest }, ref) => {
-    const styles = useStyles();
-    return (
-      <button
-        ref={ref}
-        type="button"
-        aria-label={label}
-        title={label}
-        disabled={isDisabled}
-        onClick={onClick}
-        className={mergeClasses(styles.sessionActionBtn, isDisabled && styles.sessionActionBtnDisabled)}
-        {...rest}
-      >
-        {icon}
-      </button>
-    );
+const SessionActionButton = forwardRef<
+  HTMLButtonElement,
+  {
+    icon: React.ReactNode;
+    label: string;
+    isDisabled?: boolean;
+    onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
+    className?: string;
+    'aria-pressed'?: boolean;
+    'aria-expanded'?: boolean;
   }
-);
+>(({ icon, label, isDisabled, onClick, className, ...rest }, ref) => {
+  const styles = useStyles();
+  return (
+    <button
+      ref={ref}
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={isDisabled}
+      onClick={onClick}
+      className={mergeClasses(styles.sessionActionBtn, isDisabled && styles.sessionActionBtnDisabled, className)}
+      {...rest}
+    >
+      {icon}
+    </button>
+  );
+});
 SessionActionButton.displayName = 'SessionActionButton';
 
 const RESOLUTIONS: { value: TicketResolution; label: string }[] = [
@@ -629,7 +770,6 @@ const RESOLUTIONS: { value: TicketResolution; label: string }[] = [
   { value: 'duplicate', label: 'Close as Duplicate' },
   { value: 'cancelled', label: 'Close as Cancelled' },
 ];
-
 
 const CodeSessionHeader = memo(
   ({
@@ -641,6 +781,7 @@ const CodeSessionHeader = memo(
     actions,
     onClose,
     dragHandle,
+    dragSurfaceProps,
     ticketId,
     onOpenPanel,
     isGlass,
@@ -653,6 +794,7 @@ const CodeSessionHeader = memo(
     actions?: React.ReactNode;
     onClose?: () => void;
     dragHandle?: React.ReactNode;
+    dragSurfaceProps?: React.HTMLAttributes<HTMLDivElement>;
     ticketId?: TicketId;
     onOpenPanel?: (panel: TicketPanel) => void;
     isGlass?: boolean;
@@ -669,10 +811,15 @@ const CodeSessionHeader = memo(
     const styles = useStyles();
     return (
       <>
-        <div className={mergeClasses(styles.sessionHeader, isGlass && styles.glassSessionHeader)}>
+        <div
+          className={mergeClasses(styles.sessionHeader, styles.dragSurface, isGlass && styles.glassSessionHeader)}
+          {...dragSurfaceProps}
+        >
           <div className={mergeClasses(styles.flexItemsCenter, styles.gap2, styles.minW0)}>
             {dragHandle}
-            <span className={styles.sessionLabel}>{label}</span>
+            <span className={styles.sessionLabel} title={label}>
+              {label}
+            </span>
           </div>
           <div className={mergeClasses(styles.flexItemsCenter, styles.gap1)}>
             {actions}
@@ -714,7 +861,9 @@ const CodeSessionHeader = memo(
         {ticketTitle && (
           <div className={mergeClasses(styles.ticketBanner, isGlass && styles.glassTicketBanner)}>
             <div className={mergeClasses(styles.flexItemsCenter, styles.gap2, styles.minW0)}>
-              <span className={styles.ticketTitle}>{ticketTitle}</span>
+              <span className={styles.ticketTitle} title={ticketTitle}>
+                {ticketTitle}
+              </span>
               <span className={styles.ticketBadges}>
                 {ticketColumnBadge}
                 {ticketMetaBadge}
@@ -744,6 +893,7 @@ const DeckColumn = memo(
     children,
     headerActionsSlot,
     isGlass,
+    hasSidecar,
   }: {
     tab: CodeTab;
     label: string;
@@ -758,6 +908,7 @@ const DeckColumn = memo(
     children: React.ReactNode;
     headerActionsSlot?: React.ReactNode;
     isGlass?: boolean;
+    hasSidecar?: boolean;
   }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
     const style = {
@@ -775,7 +926,7 @@ const DeckColumn = memo(
         style={style}
         className={mergeClasses(styles.deckColumn, isDragging && styles.deckColumnDragging)}
       >
-        <div className={mergeClasses(styles.deckColumnBordered, isGlass && styles.glassCard)}>
+        <div className={mergeClasses(styles.deckColumnBordered, isGlass && styles.glassCard, hasSidecar && styles.cardNoRightMargin)}>
           <CodeSessionHeader
             label={label}
             ticketTitle={ticketTitle}
@@ -788,22 +939,31 @@ const DeckColumn = memo(
                 {headerActionsSlot}
                 {actions}
                 <SessionActionButton
-                  icon={isExpanded ? <ArrowMinimize20Regular style={{ width: 15, height: 15 }} /> : <ArrowMaximize20Regular style={{ width: 15, height: 15 }} />}
+                  icon={
+                    isExpanded ? (
+                      <ArrowMinimize20Regular style={{ width: 15, height: 15 }} />
+                    ) : (
+                      <ArrowMaximize20Regular style={{ width: 15, height: 15 }} />
+                    )
+                  }
                   label={isExpanded ? 'Collapse column' : 'Expand column'}
+                  aria-pressed={isExpanded}
                   onClick={() => onToggleExpand(tab.id)}
+                  className={mergeClasses(styles.revealOnHover, 'revealOnHover')}
                 />
               </div>
             }
             onClose={() => onClose(tab.id)}
             ticketId={tab.ticketId as TicketId | undefined}
             onOpenPanel={tab.ticketId ? setActivePanel : undefined}
+            dragSurfaceProps={listeners}
             dragHandle={
               <button
                 type="button"
-                className={styles.dragHandle}
+                className={styles.dragHandleA11y}
                 {...attributes}
                 {...listeners}
-                aria-label="Reorder"
+                aria-label={`Reorder ${label}`}
               >
                 <ReOrderDotsVertical20Regular style={{ width: 16, height: 16 }} />
               </button>
@@ -824,7 +984,21 @@ const DeckColumn = memo(
 DeckColumn.displayName = 'DeckColumn';
 
 const AppColumn = memo(
-  ({ tab, app, onClose, isExpanded, onToggleExpand, isGlass }: { tab: CodeTab; app: CustomAppEntry; onClose: (id: CodeTabId) => void; isExpanded: boolean; onToggleExpand: (id: CodeTabId) => void; isGlass?: boolean }) => {
+  ({
+    tab,
+    app,
+    onClose,
+    isExpanded,
+    onToggleExpand,
+    isGlass,
+  }: {
+    tab: CodeTab;
+    app: CustomAppEntry;
+    onClose: (id: CodeTabId) => void;
+    isExpanded: boolean;
+    onToggleExpand: (id: CodeTabId) => void;
+    isGlass?: boolean;
+  }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
     const style = { transform: CSS.Transform.toString(transform), transition };
     const styles = useStyles();
@@ -841,28 +1015,49 @@ const AppColumn = memo(
     }, [app.id, app.label, app.columnScoped, tab.id]);
 
     return (
-      <div ref={setNodeRef} style={style} className={mergeClasses(styles.deckColumn, isDragging && styles.deckColumnDragging)}>
+      <div
+        ref={setNodeRef}
+        style={style}
+        className={mergeClasses(styles.deckColumn, isDragging && styles.deckColumnDragging)}
+      >
         <div className={mergeClasses(styles.deckColumnBordered, isGlass && styles.glassCard)}>
-          <div className={mergeClasses(styles.sessionHeader, isGlass && styles.glassSessionHeader)}>
+          <div
+            className={mergeClasses(styles.sessionHeader, styles.dragSurface, isGlass && styles.glassSessionHeader)}
+            {...listeners}
+          >
             <div className={mergeClasses(styles.flexItemsCenter, styles.gap2, styles.minW0)}>
               <button
                 type="button"
-                className={styles.dragHandle}
+                className={styles.dragHandleA11y}
                 {...attributes}
                 {...listeners}
-                aria-label="Reorder"
+                aria-label={`Reorder ${app.label}`}
               >
                 <ReOrderDotsVertical20Regular style={{ width: 16, height: 16 }} />
               </button>
-              <span className={styles.sessionLabel}>{app.label}</span>
+              <span className={styles.sessionLabel} title={app.label}>
+                {app.label}
+              </span>
             </div>
             <div className={mergeClasses(styles.flexItemsCenter, styles.gap1)}>
               <SessionActionButton
-                icon={isExpanded ? <ArrowMinimize20Regular style={{ width: 15, height: 15 }} /> : <ArrowMaximize20Regular style={{ width: 15, height: 15 }} />}
+                icon={
+                  isExpanded ? (
+                    <ArrowMinimize20Regular style={{ width: 15, height: 15 }} />
+                  ) : (
+                    <ArrowMaximize20Regular style={{ width: 15, height: 15 }} />
+                  )
+                }
                 label={isExpanded ? 'Collapse column' : 'Expand column'}
+                aria-pressed={isExpanded}
                 onClick={() => onToggleExpand(tab.id)}
+                className={mergeClasses(styles.revealOnHover, 'revealOnHover')}
               />
-              <SessionActionButton icon={<Add20Regular style={{ width: 14, height: 14, transform: 'rotate(45deg)' }} />} label="Close" onClick={() => onClose(tab.id)} />
+              <SessionActionButton
+                icon={<Add20Regular style={{ width: 14, height: 14, transform: 'rotate(45deg)' }} />}
+                label={`Close ${app.label}`}
+                onClick={() => onClose(tab.id)}
+              />
             </div>
           </div>
           <div className={styles.flex1MinH0Relative}>
@@ -877,119 +1072,78 @@ const AppColumn = memo(
 AppColumn.displayName = 'AppColumn';
 
 /**
- * URL-bar + back/forward/reload toolbar + <Webview>. Used both inside a full
- * deck column chrome (`BrowserColumn`) and inlined into the focus layout.
+ * Standalone browser deck column. Chrome (drag handle, expand/collapse, close)
+ * lives here; the browser itself is the shared `BrowserView` component so the
+ * standalone column and the per-session dock stay behaviorally identical.
  */
-const BrowserBody = memo(({ tabId }: { tabId: CodeTabId }) => {
-  const styles = useStyles();
-  const [src, setSrc] = useState(BROWSER_START_URL);
-  const [addressInput, setAddressInput] = useState(BROWSER_START_URL);
-  const webviewRef = useRef<WebviewHandle>(null);
-
-  const handleNavigate = useCallback((url: string) => {
-    setAddressInput(url);
-  }, []);
-
-  const handleSubmit = useCallback((event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const next = normalizeAddress(addressInput);
-    setAddressInput(next);
-    setSrc(next);
-  }, [addressInput]);
-
-  const registryProps = useMemo(
-    () => ({
-      handleId: makeAppHandleId('global', BROWSER_APP_ID),
-      appId: BROWSER_APP_ID,
-      kind: 'webview' as const,
-      scope: 'global' as AppHandleScope,
-      label: 'Browser',
-    }),
-    []
-  );
-
-  return (
-    <div className={styles.flex1MinH0Relative} style={{ display: 'flex', flexDirection: 'column' }}>
-      <form className={styles.browserToolbar} onSubmit={handleSubmit}>
-        <button
-          type="button"
-          className={styles.browserNavBtn}
-          aria-label="Back"
-          title="Back"
-          onClick={() => webviewRef.current?.goBack()}
-        >
-          <ArrowLeft20Regular style={{ width: 14, height: 14 }} />
-        </button>
-        <button
-          type="button"
-          className={styles.browserNavBtn}
-          aria-label="Forward"
-          title="Forward"
-          onClick={() => webviewRef.current?.goForward()}
-        >
-          <ArrowRight20Regular style={{ width: 14, height: 14 }} />
-        </button>
-        <button
-          type="button"
-          className={styles.browserNavBtn}
-          aria-label="Reload"
-          title="Reload"
-          onClick={() => webviewRef.current?.reload()}
-        >
-          <ArrowClockwise20Regular style={{ width: 14, height: 14 }} />
-        </button>
-        <input
-          type="text"
-          className={styles.browserUrlInput}
-          value={addressInput}
-          onChange={(e) => setAddressInput(e.target.value)}
-          onFocus={(e) => e.currentTarget.select()}
-          placeholder="Search or enter URL"
-          spellCheck={false}
-          data-tab-id={tabId}
-        />
-      </form>
-      <div style={{ flex: '1 1 0', minHeight: 0 }}>
-        <Webview
-          ref={webviewRef}
-          src={src}
-          showUnavailable={false}
-          onNavigate={handleNavigate}
-          registry={registryProps}
-        />
-      </div>
-    </div>
-  );
-});
-BrowserBody.displayName = 'BrowserBody';
-
 const BrowserColumn = memo(
-  ({ tab, onClose, isExpanded, onToggleExpand, isGlass }: { tab: CodeTab; onClose: (id: CodeTabId) => void; isExpanded: boolean; onToggleExpand: (id: CodeTabId) => void; isGlass?: boolean }) => {
+  ({
+    tab,
+    onClose,
+    isExpanded,
+    onToggleExpand,
+    isGlass,
+  }: {
+    tab: CodeTab;
+    onClose: (id: CodeTabId) => void;
+    isExpanded: boolean;
+    onToggleExpand: (id: CodeTabId) => void;
+    isGlass?: boolean;
+  }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
     const style = { transform: CSS.Transform.toString(transform), transition };
     const styles = useStyles();
 
     return (
-      <div ref={setNodeRef} style={style} className={mergeClasses(styles.deckColumn, isDragging && styles.deckColumnDragging)}>
+      <div
+        ref={setNodeRef}
+        style={style}
+        className={mergeClasses(styles.deckColumn, isDragging && styles.deckColumnDragging)}
+      >
         <div className={mergeClasses(styles.deckColumnBordered, isGlass && styles.glassCard)}>
-          <div className={mergeClasses(styles.sessionHeader, isGlass && styles.glassSessionHeader)}>
+          <div
+            className={mergeClasses(styles.sessionHeader, styles.dragSurface, isGlass && styles.glassSessionHeader)}
+            {...listeners}
+          >
             <div className={mergeClasses(styles.flexItemsCenter, styles.gap2, styles.minW0)}>
-              <button type="button" className={styles.dragHandle} {...attributes} {...listeners} aria-label="Reorder">
+              <button
+                type="button"
+                className={styles.dragHandleA11y}
+                {...attributes}
+                {...listeners}
+                aria-label="Reorder Browser"
+              >
                 <ReOrderDotsVertical20Regular style={{ width: 16, height: 16 }} />
               </button>
               <Globe20Regular style={{ width: 14, height: 14, color: tokens.colorNeutralForeground2 }} />
-              <span className={styles.sessionLabel}>Browser</span>
+              <span className={styles.sessionLabel} title="Browser">
+                Browser
+              </span>
             </div>
             <div className={mergeClasses(styles.flexItemsCenter, styles.gap1)}>
               <SessionActionButton
-                icon={isExpanded ? <ArrowMinimize20Regular style={{ width: 15, height: 15 }} /> : <ArrowMaximize20Regular style={{ width: 15, height: 15 }} />}
+                icon={
+                  isExpanded ? (
+                    <ArrowMinimize20Regular style={{ width: 15, height: 15 }} />
+                  ) : (
+                    <ArrowMaximize20Regular style={{ width: 15, height: 15 }} />
+                  )
+                }
                 label={isExpanded ? 'Collapse column' : 'Expand column'}
+                aria-pressed={isExpanded}
                 onClick={() => onToggleExpand(tab.id)}
+                className={mergeClasses(styles.revealOnHover, 'revealOnHover')}
               />
-              <SessionActionButton icon={<Add20Regular style={{ width: 14, height: 14, transform: 'rotate(45deg)' }} />} label="Close" onClick={() => onClose(tab.id)} />
+              <SessionActionButton
+                icon={<Add20Regular style={{ width: 14, height: 14, transform: 'rotate(45deg)' }} />}
+                label="Close Browser"
+                onClick={() => onClose(tab.id)}
+              />
             </div>
           </div>
-          <BrowserBody tabId={tab.id} />
+          <div className={styles.flex1MinH0Relative}>
+            <BrowserView tabsetId={`col:${tab.id}`} isGlass={isGlass} />
+          </div>
         </div>
         <div className={styles.deckDockSlot} />
       </div>
@@ -997,6 +1151,185 @@ const BrowserColumn = memo(
   }
 );
 BrowserColumn.displayName = 'BrowserColumn';
+
+type SidecarBodyProps = {
+  app: AppDescriptor;
+  originTabId: CodeTabId;
+  sandboxUrls: { codeServerUrl?: string; noVncUrl?: string } | undefined;
+  terminalCwd?: string;
+  previewUrl?: string;
+  onPreviewUrlChange?: (url: string) => void;
+  isGlass?: boolean;
+  hidden: boolean;
+};
+
+/**
+ * One sidecar app body. Rendered per mounted app with `hidden` toggling
+ * `display: none` so the underlying DOM (xterm container, Electron webview,
+ * iframe) survives app switches — preserves terminal scrollback, in-flight
+ * browser page, loaded code-server session, etc.
+ */
+const SidecarBody = memo(
+  ({ app, originTabId, sandboxUrls, terminalCwd, previewUrl, onPreviewUrlChange, isGlass, hidden }: SidecarBodyProps) => {
+    const styles = useStyles();
+    const registryProps = useMemo(
+      () => ({
+        handleId: makeAppHandleId('column', app.id, originTabId),
+        appId: app.id,
+        kind: app.kind,
+        scope: 'column' as AppHandleScope,
+        tabId: originTabId,
+        label: app.label,
+      }),
+      [app.id, app.label, app.kind, originTabId]
+    );
+
+    let body: React.ReactNode = null;
+    if (app.kind === 'builtin-browser') {
+      body = (
+        <BrowserView
+          tabsetId={`dock:${originTabId}`}
+          isGlass={isGlass}
+          registryScope="column"
+          registryTabId={originTabId}
+          src={previewUrl}
+          onUrlChange={onPreviewUrlChange}
+        />
+      );
+    } else if (app.kind === 'builtin-terminal') {
+      body = <ConsoleStarted tabId={originTabId} cwd={terminalCwd} />;
+    } else if (app.kind === 'builtin-code') {
+      body = sandboxUrls?.codeServerUrl ? (
+        <Webview src={sandboxUrls.codeServerUrl} showUnavailable={false} registry={registryProps} />
+      ) : (
+        <div className={styles.sidecarUnavailable}>{app.label} is unavailable for this workspace.</div>
+      );
+    } else if (app.kind === 'builtin-desktop') {
+      body = sandboxUrls?.noVncUrl ? (
+        <Webview src={sandboxUrls.noVncUrl} showUnavailable={false} registry={registryProps} />
+      ) : (
+        <div className={styles.sidecarUnavailable}>{app.label} is unavailable for this workspace.</div>
+      );
+    } else if (app.kind === 'webview') {
+      body = app.url ? (
+        <Webview src={app.url} showUnavailable={false} registry={registryProps} />
+      ) : (
+        <div className={styles.sidecarUnavailable}>No URL configured.</div>
+      );
+    }
+
+    return (
+      <div className={mergeClasses(styles.sidecarBodyFill, hidden && styles.sidecarBodyHidden)}>
+        {body}
+      </div>
+    );
+  }
+);
+SidecarBody.displayName = 'SidecarBody';
+
+/**
+ * Non-sortable adjacent column that hosts a dock app bound to an origin code
+ * tab. Handles register under `tab-<originTabId>:<appId>` so agents scoped to
+ * the origin tab see these apps exactly as they did when the dock opened them
+ * inline.
+ */
+const SidecarColumn = memo(
+  ({
+    originTab,
+    app,
+    sandboxUrls,
+    terminalCwd,
+    previewUrl,
+    onPreviewUrlChange,
+    onClose,
+    isGlass,
+    isExpanded,
+    onToggleExpand,
+  }: {
+    originTab: CodeTab;
+    app: AppDescriptor;
+    sandboxUrls: { codeServerUrl?: string; noVncUrl?: string } | undefined;
+    terminalCwd?: string;
+    previewUrl?: string;
+    onPreviewUrlChange?: (url: string) => void;
+    onClose: () => void;
+    isGlass?: boolean;
+    isExpanded: boolean;
+    onToggleExpand: () => void;
+  }) => {
+    const styles = useStyles();
+
+    // Keep every app we've ever activated mounted (hidden when inactive) so
+    // its DOM survives sidecar app switches. Without this, switching away
+    // from the browser tears down the <webview> and it reloads on return;
+    // switching away from the terminal drops the xterm's attached element.
+    const [mounted, setMounted] = useState<Map<AppId, AppDescriptor>>(
+      () => new Map([[app.id, app]])
+    );
+    useEffect(() => {
+      setMounted((prev) => {
+        if (prev.has(app.id)) {
+          return prev;
+        }
+        const next = new Map(prev);
+        next.set(app.id, app);
+        return next;
+      });
+    }, [app]);
+
+    return (
+      <div className={styles.deckColumn}>
+        <div className={mergeClasses(styles.deckColumnBordered, styles.cardFlattenLeft, isGlass && styles.glassCard)}>
+          <div className={mergeClasses(styles.sessionHeader, isGlass && styles.glassSessionHeader)}>
+            <div className={mergeClasses(styles.flexItemsCenter, styles.gap2, styles.minW0)}>
+              <AppIcon icon={app.icon} size={14} />
+              <span className={styles.sessionLabel} title={app.label}>
+                {app.label}
+              </span>
+            </div>
+            <div className={mergeClasses(styles.flexItemsCenter, styles.gap1)}>
+              <SessionActionButton
+                icon={
+                  isExpanded ? (
+                    <ArrowMinimize20Regular style={{ width: 15, height: 15 }} />
+                  ) : (
+                    <ArrowMaximize20Regular style={{ width: 15, height: 15 }} />
+                  )
+                }
+                label={isExpanded ? 'Collapse column' : 'Expand column'}
+                aria-pressed={isExpanded}
+                onClick={onToggleExpand}
+                className={mergeClasses(styles.revealOnHover, 'revealOnHover')}
+              />
+              <SessionActionButton
+                icon={<Subtract20Regular style={{ width: 14, height: 14 }} />}
+                label={`Hide ${app.label}`}
+                onClick={onClose}
+              />
+            </div>
+          </div>
+          <div className={styles.flex1MinH0Relative}>
+            {Array.from(mounted.values()).map((mountedApp) => (
+              <SidecarBody
+                key={mountedApp.id}
+                app={mountedApp}
+                originTabId={originTab.id}
+                sandboxUrls={sandboxUrls}
+                terminalCwd={terminalCwd}
+                previewUrl={previewUrl}
+                onPreviewUrlChange={onPreviewUrlChange}
+                isGlass={isGlass}
+                hidden={mountedApp.id !== app.id}
+              />
+            ))}
+          </div>
+        </div>
+        <div className={styles.deckDockSlot} />
+      </div>
+    );
+  }
+);
+SidecarColumn.displayName = 'SidecarColumn';
 
 const LAUNCHER_CELL_MIN_PX = 64;
 const LAUNCHER_CELL_MAX_PX = 96;
@@ -1038,7 +1371,7 @@ function computeLauncherLayout(n: number, containerWidth: number): LauncherLayou
 
   if (candidates.length > 0) {
     // Prefer smallest capacity (fewest empty slots), tiebreak by fewest rows.
-    candidates.sort((a, b) => (a.capacity - b.capacity) || (a.h - b.h));
+    candidates.sort((a, b) => a.capacity - b.capacity || a.h - b.h);
     const { h, k, cellWidth } = candidates[0]!;
     const m = (h - 1) / 2;
     const rows: number[] = [];
@@ -1101,21 +1434,20 @@ const AppLauncherGrid = memo(
     }, [apps, containerWidth]);
 
     return (
-      <div
-        ref={ref}
-        className={styles.launcherGrid}
-        style={{ ['--launcher-cell-width' as string]: `${cellWidth}px` }}
-      >
+      <div ref={ref} className={styles.launcherGrid} style={{ ['--launcher-cell-width' as string]: `${cellWidth}px` }}>
         {rows.map((row, rowIndex) => (
           <div
             key={rowIndex}
-            className={mergeClasses(
-              styles.launcherRow,
-              uniform && rowIndex % 2 === 1 && styles.launcherRowOffset
-            )}
+            className={mergeClasses(styles.launcherRow, uniform && rowIndex % 2 === 1 && styles.launcherRowOffset)}
           >
             {row.map((app) => (
-              <button key={app.id} type="button" className={styles.launcherItem} onClick={() => onPick(app.id)}>
+              <button
+                key={app.id}
+                type="button"
+                className={styles.launcherItem}
+                onClick={() => onPick(app.id)}
+                title={app.label}
+              >
                 <span className={mergeClasses(styles.launcherIconDisk, isGlass && styles.launcherIconDiskGlass)}>
                   <AppIcon icon={app.icon} size={34} />
                 </span>
@@ -1131,7 +1463,21 @@ const AppLauncherGrid = memo(
 AppLauncherGrid.displayName = 'AppLauncherGrid';
 
 const AppLauncherColumn = memo(
-  ({ tab, customApps, onClose, isExpanded, onToggleExpand, isGlass }: { tab: CodeTab; customApps: CustomAppEntry[]; onClose: (id: CodeTabId) => void; isExpanded: boolean; onToggleExpand: (id: CodeTabId) => void; isGlass?: boolean }) => {
+  ({
+    tab,
+    customApps,
+    onClose,
+    isExpanded,
+    onToggleExpand,
+    isGlass,
+  }: {
+    tab: CodeTab;
+    customApps: CustomAppEntry[];
+    onClose: (id: CodeTabId) => void;
+    isExpanded: boolean;
+    onToggleExpand: (id: CodeTabId) => void;
+    isGlass?: boolean;
+  }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
     const style = { transform: CSS.Transform.toString(transform), transition };
     const styles = useStyles();
@@ -1144,22 +1490,49 @@ const AppLauncherColumn = memo(
     );
 
     return (
-      <div ref={setNodeRef} style={style} className={mergeClasses(styles.deckColumn, isDragging && styles.deckColumnDragging)}>
+      <div
+        ref={setNodeRef}
+        style={style}
+        className={mergeClasses(styles.deckColumn, isDragging && styles.deckColumnDragging)}
+      >
         <div className={mergeClasses(styles.deckColumnBordered, isGlass && styles.glassCard)}>
-          <div className={mergeClasses(styles.sessionHeader, isGlass && styles.glassSessionHeader)}>
+          <div
+            className={mergeClasses(styles.sessionHeader, styles.dragSurface, isGlass && styles.glassSessionHeader)}
+            {...listeners}
+          >
             <div className={mergeClasses(styles.flexItemsCenter, styles.gap2, styles.minW0)}>
-              <button type="button" className={styles.dragHandle} {...attributes} {...listeners} aria-label="Reorder">
+              <button
+                type="button"
+                className={styles.dragHandleA11y}
+                {...attributes}
+                {...listeners}
+                aria-label="Reorder Apps"
+              >
                 <ReOrderDotsVertical20Regular style={{ width: 16, height: 16 }} />
               </button>
-              <span className={styles.sessionLabel}>Apps</span>
+              <span className={styles.sessionLabel} title="Apps">
+                Apps
+              </span>
             </div>
             <div className={mergeClasses(styles.flexItemsCenter, styles.gap1)}>
               <SessionActionButton
-                icon={isExpanded ? <ArrowMinimize20Regular style={{ width: 15, height: 15 }} /> : <ArrowMaximize20Regular style={{ width: 15, height: 15 }} />}
+                icon={
+                  isExpanded ? (
+                    <ArrowMinimize20Regular style={{ width: 15, height: 15 }} />
+                  ) : (
+                    <ArrowMaximize20Regular style={{ width: 15, height: 15 }} />
+                  )
+                }
                 label={isExpanded ? 'Collapse column' : 'Expand column'}
+                aria-pressed={isExpanded}
                 onClick={() => onToggleExpand(tab.id)}
+                className={mergeClasses(styles.revealOnHover, 'revealOnHover')}
               />
-              <SessionActionButton icon={<Add20Regular style={{ width: 14, height: 14, transform: 'rotate(45deg)' }} />} label="Close" onClick={() => onClose(tab.id)} />
+              <SessionActionButton
+                icon={<Add20Regular style={{ width: 14, height: 14, transform: 'rotate(45deg)' }} />}
+                label="Close Apps"
+                onClick={() => onClose(tab.id)}
+              />
             </div>
           </div>
           <div className={mergeClasses(styles.launcherBody, isGlass && styles.launcherBodyGlass)}>
@@ -1220,7 +1593,13 @@ const CodeSessionPane = memo(
     const handleClosePanel = useCallback(() => setActivePanel(null), []);
 
     return (
-      <div className={mergeClasses(styles.sessionPane, isGlass && styles.glassSessionPane, !isVisible && styles.sessionPaneHidden)}>
+      <div
+        className={mergeClasses(
+          styles.sessionPane,
+          isGlass && styles.glassSessionPane,
+          !isVisible && styles.sessionPaneHidden
+        )}
+      >
         <CodeSessionHeader
           label={label}
           ticketTitle={ticketTitle}
@@ -1257,7 +1636,21 @@ const CodeSessionPane = memo(
 CodeSessionPane.displayName = 'CodeSessionPane';
 
 const FocusListItem = memo(
-  ({ tab, label, subLabel, isActive, onSelect, onClose }: { tab: CodeTab; label: string; subLabel?: string | null; isActive: boolean; onSelect: (id: CodeTabId) => void; onClose: (id: CodeTabId) => void }) => {
+  ({
+    tab,
+    label,
+    subLabel,
+    isActive,
+    onSelect,
+    onClose,
+  }: {
+    tab: CodeTab;
+    label: string;
+    subLabel?: string | null;
+    isActive: boolean;
+    onSelect: (id: CodeTabId) => void;
+    onClose: (id: CodeTabId) => void;
+  }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
     const style = {
       transform: CSS.Transform.toString(transform),
@@ -1265,49 +1658,55 @@ const FocusListItem = memo(
     };
 
     const styles = useStyles();
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={mergeClasses(styles.focusListItem, isDragging && styles.focusListItemDragging)}
-    >
+    return (
       <div
-        className={mergeClasses(
-          styles.focusListItemRow,
-          isActive ? styles.focusListItemActive : styles.focusListItemInactive
-        )}
+        ref={setNodeRef}
+        style={style}
+        className={mergeClasses(styles.focusListItem, isDragging && styles.focusListItemDragging)}
       >
-        <button
-          type="button"
-          className={styles.dragHandle}
-          {...attributes}
-          {...listeners}
-          aria-label="Reorder"
+        <div
+          className={mergeClasses(
+            styles.focusListItemRow,
+            isActive ? styles.focusListItemActive : styles.focusListItemInactive
+          )}
         >
-          <ReOrderDotsVertical20Regular style={{ width: 14, height: 14 }} />
-        </button>
-        <button type="button" onClick={() => onSelect(tab.id)} className={styles.focusListItemContent}>
-          <div className={styles.focusListItemInner}>
-            <span className={styles.focusListItemLabel}>{label}</span>
-            {subLabel && <span className={styles.focusListItemSub}>{subLabel}</span>}
-          </div>
-        </button>
-        <Menu positioning={{ position: 'below', align: 'end', fallbackPositions: ['above-end'] }}>
-          <MenuTrigger>
-            <SessionActionButton
-              icon={<MoreHorizontal20Regular style={{ width: 16, height: 16 }} />}
-              label="Session menu"
-            />
-          </MenuTrigger>
-          <MenuPopover>
-            <MenuList>
-              <MenuItem onClick={() => onClose(tab.id)}>Delete session</MenuItem>
-            </MenuList>
-          </MenuPopover>
-        </Menu>
+          <button
+            type="button"
+            className={mergeClasses(styles.dragHandle, styles.revealOnHover, 'revealOnHover')}
+            {...attributes}
+            {...listeners}
+            aria-label={`Reorder ${label}`}
+          >
+            <ReOrderDotsVertical20Regular style={{ width: 14, height: 14 }} />
+          </button>
+          <button type="button" onClick={() => onSelect(tab.id)} className={styles.focusListItemContent}>
+            <div className={styles.focusListItemInner}>
+              <span className={styles.focusListItemLabel} title={label}>
+                {label}
+              </span>
+              {subLabel && (
+                <span className={styles.focusListItemSub} title={subLabel}>
+                  {subLabel}
+                </span>
+              )}
+            </div>
+          </button>
+          <Menu positioning={{ position: 'below', align: 'end', fallbackPositions: ['above-end'] }}>
+            <MenuTrigger>
+              <SessionActionButton
+                icon={<MoreHorizontal20Regular style={{ width: 16, height: 16 }} />}
+                label="Session menu"
+              />
+            </MenuTrigger>
+            <MenuPopover>
+              <MenuList>
+                <MenuItem onClick={() => onClose(tab.id)}>Delete session</MenuItem>
+              </MenuList>
+            </MenuPopover>
+          </Menu>
+        </div>
       </div>
-    </div>
-  );
+    );
   }
 );
 FocusListItem.displayName = 'FocusListItem';
@@ -1321,8 +1720,12 @@ export const CodeDeck = memo(() => {
   const activeTabId = store.activeCodeTabId ?? tabs[0]?.id ?? null;
   const deckBackground = store.codeDeckBackground ?? null;
   const [activeApps, setActiveApps] = useState<Record<CodeTabId, AppId>>({});
+  // Remembers the last non-'chat' app a tab's sidecar displayed. Lets us keep
+  // `SidecarColumn` mounted (just hidden) when the user minimizes, so state
+  // like terminal scrollback or an open browser tab survives hide → re-show.
+  const [lastSidecarAppByTab, setLastSidecarAppByTab] = useState<Record<CodeTabId, AppId>>({});
   const [previewUrls, setPreviewUrls] = useState<Record<CodeTabId, string>>({});
-  const [expandedTabId, setExpandedTabId] = useState<CodeTabId | null>(null);
+  const [expandedTabIds, setExpandedTabIds] = useState<ReadonlySet<CodeTabId>>(() => new Set());
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
 
   useEffect(() => {
@@ -1372,8 +1775,8 @@ export const CodeDeck = memo(() => {
     if (tabs.length === 0 && !addingFirstTab.current) {
       addingFirstTab.current = true;
       codeApi.addTab().finally(() => {
- addingFirstTab.current = false; 
-});
+        addingFirstTab.current = false;
+      });
     }
   }, [tabs.length]);
 
@@ -1385,25 +1788,47 @@ export const CodeDeck = memo(() => {
   }, [activeTabId, tabs]);
 
   useEffect(() => {
-    if (expandedTabId && !tabs.some((tab) => tab.id === expandedTabId)) {
-      setExpandedTabId(null);
-    }
-  }, [expandedTabId, tabs]);
+    setExpandedTabIds((current) => {
+      const validIds = new Set(tabs.map((t) => t.id));
+      let changed = false;
+      const next = new Set<CodeTabId>();
+      for (const id of current) {
+        // Sidecar-scoped keys (`sidecar:<tabId>`) are valid while their origin tab exists.
+        const originId = id.startsWith('sidecar:') ? id.slice('sidecar:'.length) : id;
+        if (validIds.has(originId)) {
+          next.add(id);
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [tabs]);
 
-  // React to agent-triggered preview requests
-  const previewRequest = useStore($previewRequest);
+  // React to agent-triggered preview requests. We subscribe via `listen` rather
+  // than `useStore` so every atom update fires — a rapid burst of requests all
+  // get applied instead of being coalesced to the last-rendered value.
+  const activeTabIdRef = useRef(activeTabId);
+  const firstTabIdRef = useRef(tabs[0]?.id);
+  activeTabIdRef.current = activeTabId;
+  firstTabIdRef.current = tabs[0]?.id;
   useEffect(() => {
-    if (!previewRequest) {
-return;
-}
-    const targetTabId = (previewRequest.tabId as CodeTabId | undefined) ?? activeTabId ?? tabs[0]?.id;
-    if (!targetTabId) {
-return;
-}
-    setPreviewUrls((prev) => ({ ...prev, [targetTabId]: previewRequest.url }));
-    setActiveApps((prev) => ({ ...prev, [targetTabId]: 'browser' }));
-    clearPreviewRequest();
-  }, [previewRequest, activeTabId, tabs]);
+    const seen = new Set<string>();
+    const unsubscribe = $previewRequest.listen((req) => {
+      if (!req || seen.has(req.id)) {
+        return;
+      }
+      seen.add(req.id);
+      const targetTabId = (req.tabId as CodeTabId | undefined) ?? activeTabIdRef.current ?? firstTabIdRef.current;
+      if (!targetTabId) {
+        return;
+      }
+      setPreviewUrls((prev) => ({ ...prev, [targetTabId]: req.url }));
+      setActiveApps((prev) => ({ ...prev, [targetTabId]: 'browser' }));
+      clearPreviewRequest();
+    });
+    return unsubscribe;
+  }, []);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -1415,10 +1840,8 @@ return;
     return map;
   }, [store.projects]);
 
-  const customApps = useMemo(
-    () => [SYNTHETIC_BROWSER_APP, ...(store.customApps ?? [])],
-    [store.customApps]
-  );
+  const customApps = useMemo(() => [SYNTHETIC_BROWSER_APP, ...(store.customApps ?? [])], [store.customApps]);
+  const appRegistry = useMemo(() => buildAppRegistry(store.customApps ?? []), [store.customApps]);
 
   const resolveLabel = useCallback(
     (tab: CodeTab) => {
@@ -1430,39 +1853,33 @@ return;
         return app?.label ?? 'App';
       }
       if (!tab.projectId) {
-return 'New Session';
-}
+        return 'New Session';
+      }
       return projectMap.get(tab.projectId)?.label ?? 'Unknown';
     },
     [projectMap, customApps]
   );
 
-  const resolveTicketTitle = useCallback(
-    (tab: CodeTab) => tab.ticketTitle ?? null,
-    []
-  );
+  const resolveTicketTitle = useCallback((tab: CodeTab) => tab.ticketTitle ?? null, []);
 
   const resolveSubLabel = useCallback(
     (tab: CodeTab) => {
       if (!tab.projectId) {
-return null;
-}
+        return null;
+      }
       const workspaceDir = projectMap.get(tab.projectId)?.workspaceDir;
       if (!workspaceDir) {
-return null;
-}
+        return null;
+      }
       const segments = workspaceDir.split('/').filter(Boolean);
       return segments.slice(-2).join('/');
     },
     [projectMap]
   );
 
-  const handleLayoutMode = useCallback(
-    (mode: CodeLayoutMode) => {
-      codeApi.setLayoutMode(mode);
-    },
-    []
-  );
+  const handleLayoutMode = useCallback((mode: CodeLayoutMode) => {
+    codeApi.setLayoutMode(mode);
+  }, []);
 
   const handleNewSession = useCallback(() => {
     codeApi.addTab();
@@ -1474,18 +1891,18 @@ return null;
 
   const getColumnWidth = useCallback(
     (tabId: CodeTabId) => {
-      if (expandedTabId === tabId) {
-return EXPANDED_COLUMN_WIDTH;
-}
+      if (expandedTabIds.has(tabId)) {
+        return Math.min(EXPANDED_COLUMN_WIDTH, Math.round(viewportWidth * 0.92));
+      }
       if (viewportWidth <= SNAP_SCROLL_WIDTH) {
-return Math.round(viewportWidth * 0.92);
-}
+        return Math.round(viewportWidth * 0.92);
+      }
       if (viewportWidth <= NARROW_DECK_WIDTH) {
-return COLUMN_WIDTH_SMALL;
-}
+        return COLUMN_WIDTH_SMALL;
+      }
       return COLUMN_WIDTH;
     },
-    [expandedTabId, viewportWidth]
+    [expandedTabIds, viewportWidth]
   );
 
   const handleSelect = useCallback((id: CodeTabId) => {
@@ -1493,7 +1910,15 @@ return COLUMN_WIDTH_SMALL;
   }, []);
 
   const handleToggleExpand = useCallback((id: CodeTabId) => {
-    setExpandedTabId((current) => (current === id ? null : id));
+    setExpandedTabIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
   }, []);
 
   const handleClose = useCallback((id: CodeTabId) => {
@@ -1502,12 +1927,40 @@ return COLUMN_WIDTH_SMALL;
       delete next[id];
       return next;
     });
-    setExpandedTabId((current) => (current === id ? null : current));
+    setLastSidecarAppByTab((current) => {
+      if (!(id in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    setPreviewUrls((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    setExpandedTabIds((current) => {
+      if (!current.has(id)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
     codeApi.removeTab(id);
   }, []);
 
   const handleActiveAppChange = useCallback((tabId: CodeTabId, app: AppId) => {
-    setActiveApps((prev) => ({ ...prev, [tabId]: app }));
+    setActiveApps((prev) => {
+      const current = prev[tabId] ?? 'chat';
+      // Clicking the already-active app closes the sidecar.
+      const next = current === app ? 'chat' : app;
+      return { ...prev, [tabId]: next };
+    });
+    if (app !== 'chat') {
+      setLastSidecarAppByTab((prev) => (prev[tabId] === app ? prev : { ...prev, [tabId]: app }));
+    }
   }, []);
 
   const handlePreviewUrlChange = useCallback((tabId: CodeTabId, url: string) => {
@@ -1537,28 +1990,34 @@ return COLUMN_WIDTH_SMALL;
     const handler = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const tagName = target?.tagName?.toLowerCase();
-      const isEditable = target?.isContentEditable || tagName === 'input' || tagName === 'textarea' || tagName === 'select';
+      const isEditable =
+        target?.isContentEditable || tagName === 'input' || tagName === 'textarea' || tagName === 'select';
       if (isEditable) {
-return;
-}
+        return;
+      }
       if (!activeTabId) {
-return;
-}
+        return;
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'e') {
         event.preventDefault();
-        setExpandedTabId((current) => (current === activeTabId ? null : activeTabId));
+        setExpandedTabIds((current) => {
+          const next = new Set(current);
+          if (next.has(activeTabId)) {
+            next.delete(activeTabId);
+          } else {
+            next.add(activeTabId);
+          }
+          return next;
+        });
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [activeTabId]);
 
-  const handleNewTabSession = useCallback(
-    (tab: CodeTab) => {
-      codeApi.setTabSessionId(tab.id, uuidv4());
-    },
-    []
-  );
+  const handleNewTabSession = useCallback((tab: CodeTab) => {
+    codeApi.setTabSessionId(tab.id, uuidv4());
+  }, []);
 
   const renderSessionActions = useCallback(
     (tab: CodeTab) => (
@@ -1566,35 +2025,30 @@ return;
         icon={<Add20Regular style={{ width: 13, height: 13 }} />}
         label="New session"
         onClick={() => handleNewTabSession(tab)}
+        className={mergeClasses(styles.revealOnHover, 'revealOnHover')}
       />
     ),
-    [handleNewTabSession]
+    [handleNewTabSession, styles.revealOnHover]
   );
 
-  const renderTicketColumnBadge = useCallback(
-    (tab: CodeTab) => {
-      if (!tab.ticketId) {
-return undefined;
-}
-      return <TicketColumnBadge ticketId={tab.ticketId} />;
-    },
-    []
-  );
+  const renderTicketColumnBadge = useCallback((tab: CodeTab) => {
+    if (!tab.ticketId) {
+      return undefined;
+    }
+    return <TicketColumnBadge ticketId={tab.ticketId} />;
+  }, []);
 
-  const renderTicketBannerActions = useCallback(
-    (tab: CodeTab) => {
-      if (!tab.ticketId) {
-return undefined;
-}
-      return (
-        <>
-          <TicketBannerActions ticketId={tab.ticketId} />
-          <TicketResolutionBadge ticketId={tab.ticketId} />
-        </>
-      );
-    },
-    []
-  );
+  const renderTicketBannerActions = useCallback((tab: CodeTab) => {
+    if (!tab.ticketId) {
+      return undefined;
+    }
+    return (
+      <>
+        <TicketBannerActions ticketId={tab.ticketId} />
+        <TicketResolutionBadge ticketId={tab.ticketId} />
+      </>
+    );
+  }, []);
 
   const renderTicketMetaBadge = useCallback(
     (tab: CodeTab) => {
@@ -1610,7 +2064,8 @@ return undefined;
       const milestone = store.milestones.find((item) => item.id === ticket.milestoneId);
       const effectiveBranch = ticket.branch ?? milestone?.branch;
       const projectWorkspaceDir = tab.projectId ? projectMap.get(tab.projectId)?.workspaceDir : undefined;
-      const isIsolatedWorkspace = !!tab.workspaceDir && !!projectWorkspaceDir && tab.workspaceDir !== projectWorkspaceDir;
+      const isIsolatedWorkspace =
+        !!tab.workspaceDir && !!projectWorkspaceDir && tab.workspaceDir !== projectWorkspaceDir;
 
       if (!effectiveBranch && !isIsolatedWorkspace) {
         return undefined;
@@ -1630,7 +2085,13 @@ return undefined;
 
   return (
     <div className={styles.root}>
-      <CodeDeckHeader layoutMode={layoutMode} onLayoutMode={handleLayoutMode} onNewSession={handleNewSession} onOpenApps={handleOpenApps} isGlass={!!deckBackground} />
+      <CodeDeckHeader
+        layoutMode={layoutMode}
+        onLayoutMode={handleLayoutMode}
+        onNewSession={handleNewSession}
+        onOpenApps={handleOpenApps}
+        isGlass={!!deckBackground}
+      />
       {layoutMode === 'deck' && (
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
           <SortableContext items={tabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
@@ -1638,50 +2099,116 @@ return undefined;
               <div className={styles.deckInner}>
                 {tabs.map((tab) => {
                   const isLauncher = tab.customAppId === APP_LAUNCHER_ID;
-                  const appEntry = tab.customAppId && !isLauncher ? customApps.find((a) => a.id === tab.customAppId) : undefined;
+                  const appEntry =
+                    tab.customAppId && !isLauncher ? customApps.find((a) => a.id === tab.customAppId) : undefined;
+                  const activeAppId = activeApps[tab.id] ?? 'chat';
+                  // The currently-displayed sidecar app (if any).
+                  const sidecarApp =
+                    !isLauncher && !appEntry && activeAppId !== 'chat'
+                      ? appRegistry.find((a) => a.id === activeAppId)
+                      : undefined;
+                  // The sidecar app to keep MOUNTED (may be hidden). Preserves
+                  // state across minimize/restore — hidden when activeApp is
+                  // 'chat' but the tab has opened a sidecar before.
+                  const mountedSidecarApp =
+                    sidecarApp ??
+                    (!isLauncher && !appEntry && lastSidecarAppByTab[tab.id]
+                      ? appRegistry.find((a) => a.id === lastSidecarAppByTab[tab.id])
+                      : undefined);
+                  const sidecarHidden = !sidecarApp;
+                  const tabStatus = statuses[tab.id];
+                  const tabSandboxUrls =
+                    tabStatus && (tabStatus.type === 'running' || tabStatus.type === 'connecting')
+                      ? tabStatus.data
+                      : undefined;
+                  const tabTerminalCwd =
+                    tab.workspaceDir ??
+                    (tab.projectId ? projectMap.get(tab.projectId)?.workspaceDir : undefined);
                   return (
-                    <div
-                      key={tab.id}
-                      style={{ width: getColumnWidth(tab.id) }}
-                      className={styles.deckColumnWrap}
-                    >
-                      {isLauncher ? (
-                        <AppLauncherColumn tab={tab} customApps={customApps} onClose={handleClose} isExpanded={expandedTabId === tab.id} onToggleExpand={handleToggleExpand} isGlass={!!deckBackground} />
-                      ) : appEntry?.id === BROWSER_APP_ID ? (
-                        <BrowserColumn tab={tab} onClose={handleClose} isExpanded={expandedTabId === tab.id} onToggleExpand={handleToggleExpand} isGlass={!!deckBackground} />
-                      ) : appEntry ? (
-                        <AppColumn tab={tab} app={appEntry} onClose={handleClose} isExpanded={expandedTabId === tab.id} onToggleExpand={handleToggleExpand} isGlass={!!deckBackground} />
-                      ) : (
-                        <DeckColumn
-                          tab={tab}
-                          label={resolveLabel(tab)}
-                          ticketTitle={resolveTicketTitle(tab)}
-                          ticketColumnBadge={renderTicketColumnBadge(tab)}
-                          ticketMetaBadge={renderTicketMetaBadge(tab)}
-                          ticketActions={renderTicketBannerActions(tab)}
-                          actions={renderSessionActions(tab)}
-                          onClose={handleClose}
-                          isExpanded={expandedTabId === tab.id}
-                          onToggleExpand={handleToggleExpand}
-                          headerActionsSlot={<div id={`code-deck-header-actions-${tab.id}`} />}
-                          isGlass={!!deckBackground}
-                        >
-                          <CodeTabContent
+                    <Fragment key={tab.id}>
+                      <div style={{ width: getColumnWidth(tab.id) }} className={styles.deckColumnWrap}>
+                        {isLauncher ? (
+                          <AppLauncherColumn
                             tab={tab}
-                            isVisible
-                            activeApp={activeApps[tab.id] ?? 'chat'}
-                            onActiveAppChange={(app) => handleActiveAppChange(tab.id, app)}
-                            uiMinimal
-                            headerActionsTargetId={`code-deck-header-actions-${tab.id}`}
-                            headerActionsCompact
-                            previewUrl={previewUrls[tab.id]}
-                            onPreviewUrlChange={(url) => handlePreviewUrlChange(tab.id, url)}
-                            dockTargetId={`code-deck-dock-target-${tab.id}`}
+                            customApps={customApps}
+                            onClose={handleClose}
+                            isExpanded={expandedTabIds.has(tab.id)}
+                            onToggleExpand={handleToggleExpand}
                             isGlass={!!deckBackground}
                           />
-                        </DeckColumn>
+                        ) : appEntry?.id === BROWSER_APP_ID ? (
+                          <BrowserColumn
+                            tab={tab}
+                            onClose={handleClose}
+                            isExpanded={expandedTabIds.has(tab.id)}
+                            onToggleExpand={handleToggleExpand}
+                            isGlass={!!deckBackground}
+                          />
+                        ) : appEntry ? (
+                          <AppColumn
+                            tab={tab}
+                            app={appEntry}
+                            onClose={handleClose}
+                            isExpanded={expandedTabIds.has(tab.id)}
+                            onToggleExpand={handleToggleExpand}
+                            isGlass={!!deckBackground}
+                          />
+                        ) : (
+                          <DeckColumn
+                            tab={tab}
+                            label={resolveLabel(tab)}
+                            ticketTitle={resolveTicketTitle(tab)}
+                            ticketColumnBadge={renderTicketColumnBadge(tab)}
+                            ticketMetaBadge={renderTicketMetaBadge(tab)}
+                            ticketActions={renderTicketBannerActions(tab)}
+                            actions={renderSessionActions(tab)}
+                            onClose={handleClose}
+                            isExpanded={expandedTabIds.has(tab.id)}
+                            onToggleExpand={handleToggleExpand}
+                            headerActionsSlot={<div id={`code-deck-header-actions-${tab.id}`} />}
+                            isGlass={!!deckBackground}
+                            hasSidecar={!!sidecarApp}
+                          >
+                            <CodeTabContent
+                              tab={tab}
+                              isVisible
+                              activeApp={activeAppId}
+                              onActiveAppChange={(app) => handleActiveAppChange(tab.id, app)}
+                              uiMinimal
+                              headerActionsTargetId={`code-deck-header-actions-${tab.id}`}
+                              headerActionsCompact
+                              previewUrl={previewUrls[tab.id]}
+                              onPreviewUrlChange={(url) => handlePreviewUrlChange(tab.id, url)}
+                              dockTargetId={`code-deck-dock-target-${tab.id}`}
+                              isGlass={!!deckBackground}
+                              sidecarMode
+                            />
+                          </DeckColumn>
+                        )}
+                      </div>
+                      {mountedSidecarApp && (
+                        <div
+                          style={{
+                            width: getColumnWidth(`sidecar:${tab.id}`),
+                            ...(sidecarHidden ? { display: 'none' } : {}),
+                          }}
+                          className={styles.deckColumnWrap}
+                        >
+                          <SidecarColumn
+                            originTab={tab}
+                            app={mountedSidecarApp}
+                            sandboxUrls={tabSandboxUrls}
+                            terminalCwd={tabTerminalCwd}
+                            previewUrl={previewUrls[tab.id]}
+                            onPreviewUrlChange={(url) => handlePreviewUrlChange(tab.id, url)}
+                            onClose={() => handleActiveAppChange(tab.id, 'chat')}
+                            isGlass={!!deckBackground}
+                            isExpanded={expandedTabIds.has(`sidecar:${tab.id}`)}
+                            onToggleExpand={() => handleToggleExpand(`sidecar:${tab.id}`)}
+                          />
+                        </div>
                       )}
-                    </div>
+                    </Fragment>
                   );
                 })}
               </div>
@@ -1720,12 +2247,11 @@ return undefined;
                       onClick={() => handleSelect(tab.id)}
                       className={mergeClasses(
                         styles.mobileTabChip,
-                        tab.id === activeTab?.id
-                          ? styles.mobileTabChipActive
-                          : styles.mobileTabChipInactive,
-                        !!deckBackground && (tab.id === activeTab?.id
-                          ? styles.glassMobileTabChipActive
-                          : styles.glassMobileTabChipInactive)
+                        tab.id === activeTab?.id ? styles.mobileTabChipActive : styles.mobileTabChipInactive,
+                        !!deckBackground &&
+                          (tab.id === activeTab?.id
+                            ? styles.glassMobileTabChipActive
+                            : styles.glassMobileTabChipInactive)
                       )}
                     >
                       {resolveLabel(tab)}
@@ -1742,7 +2268,12 @@ return undefined;
                 </div>
               </div>
               <div className={mergeClasses(styles.focusSidebar, !!deckBackground && styles.glassFocusSidebar)}>
-                <div className={mergeClasses(styles.focusSidebarHeader, !!deckBackground && styles.glassFocusSidebarHeader)}>
+                <div
+                  className={mergeClasses(
+                    styles.focusSidebarHeader,
+                    !!deckBackground && styles.glassFocusSidebarHeader
+                  )}
+                >
                   <span className={styles.focusSidebarTitle}>Sessions</span>
                   {tabs.length > 0 && <span className={styles.focusSidebarCount}>{tabs.length}</span>}
                 </div>
@@ -1763,11 +2294,22 @@ return undefined;
               <div className={styles.focusContent}>
                 {tabs.map((tab) => {
                   const isLauncher = tab.customAppId === APP_LAUNCHER_ID;
-                  const appEntry = tab.customAppId && !isLauncher ? customApps.find((a) => a.id === tab.customAppId) : undefined;
+                  const appEntry =
+                    tab.customAppId && !isLauncher ? customApps.find((a) => a.id === tab.customAppId) : undefined;
                   if (isLauncher) {
                     return (
-                      <div key={tab.id} style={{ width: '100%', height: '100%', display: tab.id === activeTab?.id ? 'flex' : 'none', flexDirection: 'column' }}>
-                        <div className={mergeClasses(styles.launcherBody, !!deckBackground && styles.launcherBodyGlass)}>
+                      <div
+                        key={tab.id}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          display: tab.id === activeTab?.id ? 'flex' : 'none',
+                          flexDirection: 'column',
+                        }}
+                      >
+                        <div
+                          className={mergeClasses(styles.launcherBody, !!deckBackground && styles.launcherBodyGlass)}
+                        >
                           {customApps.length === 0 ? (
                             <div className={styles.launcherEmpty}>No apps installed. Add apps in Settings.</div>
                           ) : (
@@ -1783,15 +2325,26 @@ return undefined;
                   }
                   if (appEntry?.id === BROWSER_APP_ID) {
                     return (
-                      <div key={tab.id} style={{ width: '100%', height: '100%', display: tab.id === activeTab?.id ? 'flex' : 'none', flexDirection: 'column' }}>
-                        <BrowserBody tabId={tab.id} />
+                      <div
+                        key={tab.id}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          display: tab.id === activeTab?.id ? 'flex' : 'none',
+                          flexDirection: 'column',
+                        }}
+                      >
+                        <BrowserView tabsetId={`col:${tab.id}`} isGlass={!!deckBackground} />
                       </div>
                     );
                   }
                   if (appEntry) {
                     const scope: AppHandleScope = appEntry.columnScoped ? 'column' : 'global';
                     return (
-                      <div key={tab.id} style={{ width: '100%', height: '100%', display: tab.id === activeTab?.id ? 'block' : 'none' }}>
+                      <div
+                        key={tab.id}
+                        style={{ width: '100%', height: '100%', display: tab.id === activeTab?.id ? 'block' : 'none' }}
+                      >
                         <Webview
                           src={appEntry.url}
                           showUnavailable={false}

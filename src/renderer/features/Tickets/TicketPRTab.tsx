@@ -4,7 +4,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
 import type { SelectTabData } from '@/renderer/ds';
 import { IconButton, ListSkeleton, Tab, TabList } from '@/renderer/ds';
-import type { DiffResponse, FileDiff, TicketId } from '@/shared/types';
+import type { DiffGroup,DiffResponse, FileDiff, TicketId } from '@/shared/types';
 
 import { ticketApi } from './state';
 import { TicketPROverview } from './TicketPROverview';
@@ -40,6 +40,17 @@ const STATUS_LABELS: Record<FileDiff['status'], string> = {
   copied: 'C',
   untracked: 'U',
 };
+
+const GROUP_ORDER: DiffGroup[] = ['committed', 'staged', 'unstaged', 'untracked'];
+
+const GROUP_LABELS: Record<DiffGroup, string> = {
+  committed: 'Committed',
+  staged: 'Staged',
+  unstaged: 'Unstaged',
+  untracked: 'Untracked',
+};
+
+const fileKey = (file: FileDiff): string => `${file.group}:${file.path}`;
 
 type PatchRow =
   | { type: 'hunk'; text: string }
@@ -270,6 +281,40 @@ const useStyles = makeStyles({
     overflowY: 'auto',
     ...shorthands.borderRight('1px', 'solid', tokens.colorNeutralStroke1),
   },
+  groupHeader: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: '6px',
+    padding: '6px 10px 4px',
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    color: tokens.colorNeutralForeground2,
+    backgroundColor: tokens.colorNeutralBackground2,
+    position: 'sticky',
+    top: 0,
+    zIndex: 1,
+    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke1),
+  },
+  groupHeaderFirst: {
+    borderTopWidth: 0,
+  },
+  groupHeaderCount: {
+    fontWeight: tokens.fontWeightRegular,
+    color: tokens.colorNeutralForeground3,
+    textTransform: 'none',
+    letterSpacing: 'normal',
+  },
+  groupHeaderStats: {
+    marginLeft: 'auto',
+    fontWeight: tokens.fontWeightRegular,
+    textTransform: 'none',
+    letterSpacing: 'normal',
+    fontSize: tokens.fontSizeBase200,
+    display: 'flex',
+    gap: '6px',
+  },
   divider: {
     width: '4px',
     flexShrink: 0,
@@ -361,14 +406,14 @@ const DiffViewer = memo(({ file }: { file: FileDiff }) => {
 DiffViewer.displayName = 'DiffViewer';
 
 const FileListItem = memo(
-  ({ file, isSelected, onSelect }: { file: FileDiff; isSelected: boolean; onSelect: (path: string) => void }) => {
+  ({ file, isSelected, onSelect }: { file: FileDiff; isSelected: boolean; onSelect: (key: string) => void }) => {
     const styles = useStyles();
     const fileName = file.path.split('/').pop() ?? file.path;
     const dirPath = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : '';
 
     const handleClick = useCallback(() => {
-      onSelect(file.path);
-    }, [onSelect, file.path]);
+      onSelect(fileKey(file));
+    }, [onSelect, file]);
 
     return (
       <button
@@ -408,7 +453,9 @@ const FilesChangedContent = memo(({ ticketId }: { ticketId: TicketId }) => {
   const styles = useStyles();
   const [data, setData] = useState<DiffResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  // Selection is keyed by `<group>:<path>` so the same path can be selected
+  // independently across groups (staged vs. unstaged vs. committed).
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [listWidthPercent, setListWidthPercent] = useState(DEFAULT_LIST_PERCENT);
   const [isDragging, setIsDragging] = useState(false);
   const splitRef = useRef<HTMLDivElement>(null);
@@ -417,16 +464,15 @@ const FilesChangedContent = memo(({ ticketId }: { ticketId: TicketId }) => {
     try {
       const resp = await ticketApi.getFilesChanged(ticketId);
       setData(resp);
-      // Auto-select first file if none selected
-      if (resp.files.length > 0 && !selectedPath) {
-        setSelectedPath(resp.files[0]!.path);
+      if (resp.files.length > 0 && !selectedKey) {
+        setSelectedKey(fileKey(resp.files[0]!));
       }
     } catch {
       // Silently fail on poll errors
     } finally {
       setLoading(false);
     }
-  }, [ticketId, selectedPath]);
+  }, [ticketId, selectedKey]);
 
   // Fetch on mount + poll
   useEffect(() => {
@@ -439,8 +485,8 @@ const FilesChangedContent = memo(({ ticketId }: { ticketId: TicketId }) => {
     void fetchData();
   }, [fetchData]);
 
-  const handleSelectFile = useCallback((filePath: string) => {
-    setSelectedPath(filePath);
+  const handleSelectFile = useCallback((key: string) => {
+    setSelectedKey(key);
   }, []);
 
   const handleDividerMouseDown = useCallback((e: React.MouseEvent) => {
@@ -466,7 +512,7 @@ const FilesChangedContent = memo(({ ticketId }: { ticketId: TicketId }) => {
     document.addEventListener('mouseup', handleMouseUp);
   }, []);
 
-  const selectedFile = data?.files.find((f) => f.path === selectedPath) ?? null;
+  const selectedFile = data?.files.find((f) => fileKey(f) === selectedKey) ?? null;
 
   if (loading && !data) {
     return (
@@ -502,19 +548,46 @@ const FilesChangedContent = memo(({ ticketId }: { ticketId: TicketId }) => {
       <div ref={splitRef} className={mergeClasses(styles.splitPane, isDragging && styles.selectNonePane)}>
         {isDragging && <div className={styles.dragOverlay} />}
 
-        {/* File list */}
+        {/* File list, grouped by source */}
         <div
           className={styles.fileListPane}
           style={{ width: `${listWidthPercent}%` }}
         >
-          {data.files.map((file) => (
-            <FileListItem
-              key={file.path}
-              file={file}
-              isSelected={file.path === selectedPath}
-              onSelect={handleSelectFile}
-            />
-          ))}
+          {GROUP_ORDER.map((group, groupIdx) => {
+            const groupFiles = data.files.filter((f) => f.group === group);
+            if (groupFiles.length === 0) {
+              return null;
+            }
+            const adds = groupFiles.reduce((n, f) => n + f.additions, 0);
+            const dels = groupFiles.reduce((n, f) => n + f.deletions, 0);
+            return (
+              <div key={group}>
+                <div
+                  className={mergeClasses(styles.groupHeader, groupIdx === 0 && styles.groupHeaderFirst)}
+                >
+                  <span>{GROUP_LABELS[group]}</span>
+                  <span className={styles.groupHeaderCount}>{groupFiles.length}</span>
+                  {(adds > 0 || dels > 0) && (
+                    <span className={styles.groupHeaderStats}>
+                      {adds > 0 && <span className={styles.greenText}>+{adds}</span>}
+                      {dels > 0 && <span className={styles.redText}>-{dels}</span>}
+                    </span>
+                  )}
+                </div>
+                {groupFiles.map((file) => {
+                  const key = fileKey(file);
+                  return (
+                    <FileListItem
+                      key={key}
+                      file={file}
+                      isSelected={key === selectedKey}
+                      onSelect={handleSelectFile}
+                    />
+                  );
+                })}
+              </div>
+            );
+          })}
         </div>
 
         {/* Draggable divider */}

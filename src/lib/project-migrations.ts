@@ -437,10 +437,29 @@ export function runMigrations(store: IMigrationStore, deps: MigrationDeps): void
   if (version === 16 || (store.get('schemaVersion', 0) as number) === 16) {
     store.set('schemaVersion', 17);
     deps.repairProjectRoots?.();
+    // Fall through to v17→v18.
+  }
+
+  // v17 → v18: drop ticket.supervisorSessionId. The Code column owns the
+  // session id now; any persisted value is stale and must not feed back into
+  // newly mounted columns.
+  if (version === 17 || (store.get('schemaVersion', 0) as number) === 17) {
+    const tickets = (store.get('tickets', []) as Record<string, unknown>[]) ?? [];
+    const migrated = tickets.map((raw) => {
+      if (!('supervisorSessionId' in raw)) {
+        return raw;
+      }
+      const { supervisorSessionId: _s, ...rest } = raw;
+      void _s;
+      return rest;
+    });
+    store.set('tickets', migrated);
+    store.set('schemaVersion', 18);
+    deps.repairProjectRoots?.();
     return;
   }
 
-  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 17) {
+  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 18) {
     deps.repairProjectRoots?.();
     return;
   }

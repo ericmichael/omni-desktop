@@ -1,9 +1,11 @@
 @import 'tailwindcss';
 @plugin '@tailwindcss/typography';
 
-/* Scan yoopta theme/UI packages so Tailwind generates their utility classes */
+/* Scan third-party packages that ship with Tailwind class strings, so the
+ * JIT generates their utilities. */
 @source "../../../node_modules/@yoopta/themes-shadcn/dist";
 @source "../../../node_modules/@yoopta/ui/dist";
+@source "../../../node_modules/streamdown/dist";
 
 /* dark: variant uses .dark class on <html> (toggled in App.tsx based on theme mode) */
 @custom-variant dark (&:is(.dark *));
@@ -31,7 +33,7 @@
   --color-fg-warning: #fbbf24;
 
   /* Omniagents web UI palette (legacy names) */
-  --color-tweetBlue: rgb(var(--omni-tweetBlue));
+  --color-brand: rgb(var(--omni-brand));
   --color-bgMain: rgb(var(--omni-bgMain));
   --color-bgColumn: rgb(var(--omni-bgColumn));
   --color-bgCard: rgb(var(--omni-bgCard));
@@ -44,33 +46,39 @@
   --color-textHeading: rgb(var(--omni-textHeading));
   --color-textSecondary: rgb(var(--omni-textSecondary));
 
-  /* shadcn / ai-elements semantic tokens
-     These reference the --omni-* vars (source of truth) so they
-     automatically adapt when [data-theme] changes. */
-  --color-background: rgb(var(--omni-bgMain));
-  --color-foreground: rgb(var(--omni-textPrimary));
-  --color-card: rgb(var(--omni-bgCard));
-  --color-card-foreground: rgb(var(--omni-textPrimary));
-  --color-popover: rgb(var(--omni-bgCard));
-  --color-popover-foreground: rgb(var(--omni-textPrimary));
-  --color-primary: rgb(var(--omni-tweetBlue));
-  --color-primary-foreground: #ffffff;
-  --color-secondary: rgb(var(--omni-bgCardAlt));
-  --color-secondary-foreground: rgb(var(--omni-textHeading));
-  --color-muted: rgb(var(--omni-bgColumn));
-  --color-muted-foreground: rgb(var(--omni-textSubtle));
-  --color-accent: rgb(var(--omni-bgCardAlt));
-  --color-accent-foreground: rgb(var(--omni-textHeading));
-  --color-destructive: rgb(var(--omni-errorRed));
-  --color-destructive-foreground: #ffffff;
-  --color-border: rgb(var(--omni-bgCardAlt));
-  --color-input: rgb(var(--omni-bgCardAlt));
-  --color-ring: rgb(var(--omni-tweetBlue));
+  /* shadcn / ai-elements semantic tokens.
+     Wired through `hsl(var(--X))` so both our Tailwind utilities AND
+     yoopta's injected `.bg-primary { background-color: hsl(var(--primary)) }`
+     style block read from the same HSL triplet definitions in
+     omniagents-ui/styles/index.css. This is the standard shadcn contract. */
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  /* Status tokens not in the shadcn spec — kept on the --omni-* ramp. */
   --color-warning: rgb(var(--omni-warningOrange));
   --color-warning-foreground: rgb(var(--omni-textHeading));
   --color-success: rgb(var(--omni-successGreen));
   --color-success-foreground: #ffffff;
-  --color-info: rgb(var(--omni-tweetBlue));
+  --color-info: rgb(var(--omni-brand));
   --color-info-foreground: #ffffff;
 
   /* Accent (indigo) palette */
@@ -146,53 +154,9 @@
   }
 }
 
-/* Bare shadcn CSS vars required by @yoopta/themes-shadcn.
-   Yoopta references these as hsl(var(--foreground)) etc.
-   Light defaults, overridden by .dark below. */
-:root {
-  --background: 0 0% 100%;
-  --foreground: 0 0% 3.9%;
-  --card: 0 0% 100%;
-  --card-foreground: 0 0% 3.9%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 0 0% 3.9%;
-  --primary: 0 0% 9%;
-  --primary-foreground: 0 0% 98%;
-  --secondary: 0 0% 96.1%;
-  --secondary-foreground: 0 0% 9%;
-  --muted: 0 0% 96.1%;
-  --muted-foreground: 0 0% 45.1%;
-  --accent: 0 0% 96.1%;
-  --accent-foreground: 0 0% 9%;
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 0 0% 89.8%;
-  --input: 0 0% 89.8%;
-  --ring: 0 0% 3.9%;
-  --radius: 0.5rem;
-}
-
-.dark {
-  --background: 0 0% 3.9%;
-  --foreground: 0 0% 98%;
-  --card: 0 0% 3.9%;
-  --card-foreground: 0 0% 98%;
-  --popover: 0 0% 3.9%;
-  --popover-foreground: 0 0% 98%;
-  --primary: 0 0% 98%;
-  --primary-foreground: 0 0% 9%;
-  --secondary: 0 0% 14.9%;
-  --secondary-foreground: 0 0% 98%;
-  --muted: 0 0% 14.9%;
-  --muted-foreground: 0 0% 63.9%;
-  --accent: 0 0% 14.9%;
-  --accent-foreground: 0 0% 98%;
-  --destructive: 0 62.8% 30.6%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 0 0% 14.9%;
-  --input: 0 0% 14.9%;
-  --ring: 0 0% 83.1%;
-}
+/* Shadcn semantic HSL-triplet vars (--primary, --secondary, …) are defined
+   per-theme in `omniagents-ui/styles/index.css`, keyed on [data-theme="…"].
+   That's the single source of truth; no generic fallback block here. */
 
 /* XTerm CSS vars for terminal theming */
 :root {

@@ -17,7 +17,7 @@ vi.mock('@/main/util', () => ({
   getWorktreesDir: () => worktreesTmpDir,
 }));
 
-import { checkGitRepo, createWorktree, generateWorktreeName, removeWorktree } from '@/main/worktree-ops';
+import { checkGitRepo, createWorktree, generateWorktreeName, isWorktreeDirty,removeWorktree } from '@/main/worktree-ops';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -171,5 +171,42 @@ describe('removeWorktree', () => {
     initRepo();
     // Should not throw — removeWorktree catches errors internally
     await removeWorktree(repoDir, '/tmp/nonexistent-wt', 'nonexistent');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isWorktreeDirty
+// ---------------------------------------------------------------------------
+
+describe('isWorktreeDirty', () => {
+  it('returns false for a clean worktree', async () => {
+    initRepo();
+    const clean = await isWorktreeDirty(repoDir);
+    expect(clean).toBe(false);
+  });
+
+  it('returns true when there are untracked files', async () => {
+    initRepo();
+    execSync('touch new-file.txt', { cwd: repoDir });
+    const dirty = await isWorktreeDirty(repoDir);
+    expect(dirty).toBe(true);
+  });
+
+  it('returns true when there are unstaged modifications', async () => {
+    initRepo();
+    execSync('touch tracked.txt && git add tracked.txt && git commit -m "add"', { cwd: repoDir, stdio: 'ignore' });
+    execSync('echo change > tracked.txt', { cwd: repoDir });
+    const dirty = await isWorktreeDirty(repoDir);
+    expect(dirty).toBe(true);
+  });
+
+  it('returns true (fail-safe) when the path is not a git repo', async () => {
+    const notGit = mkdtempSync(join(tmpdir(), 'not-git-dirty-'));
+    try {
+      const dirty = await isWorktreeDirty(notGit);
+      expect(dirty).toBe(true);
+    } finally {
+      rmSync(notGit, { recursive: true, force: true });
+    }
   });
 });
