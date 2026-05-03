@@ -68,7 +68,6 @@ const useStyles = makeStyles({
   },
   toolbarGlass: {
     backgroundColor: 'transparent',
-    borderBottomColor: 'rgba(255, 255, 255, 0.14)',
   },
   navBtn: {
     display: 'inline-flex',

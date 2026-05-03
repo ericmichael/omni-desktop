@@ -420,6 +420,35 @@ describe('ProjectManager', () => {
       const result = await pm.getFilesChanged('t1');
       expect(result.hasChanges).toBe(false);
     });
+
+    it('shows committed diff for a ticket on a feature branch with no worktree', async () => {
+      // Reproduces the bug: ticket has a branch but no worktree, workspace
+      // is checked out on that branch. Old code resolved against @{upstream}
+      // and showed nothing; new code diffs against trunk (main) and surfaces
+      // the actual ticket diff.
+      writeFileSync(join(repoDir, 'a.txt'), 'a\n');
+      git('add', 'a.txt');
+      git('commit', '-q', '-m', 'init on main');
+      git('checkout', '-q', '-b', 'feat/foo');
+      writeFileSync(join(repoDir, 'b.txt'), 'b\n');
+      git('add', 'b.txt');
+      git('commit', '-q', '-m', 'add b on feat/foo');
+
+      const { pm, store } = makePm({
+        source: { kind: 'local', workspaceDir: repoDir },
+        tickets: [{ id: 't1' }],
+      });
+      // Record the ticket's branch — mirrors how the supervisor sets it.
+      const tickets = store.get('tickets', []);
+      tickets[0]!.branch = 'feat/foo';
+      store.set('tickets', tickets);
+
+      const result = await pm.getFilesChanged('t1');
+
+      expect(result.hasChanges).toBe(true);
+      const committed = result.files.filter((f) => f.group === 'committed');
+      expect(committed.map((f) => f.path)).toEqual(['b.txt']);
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -657,50 +686,8 @@ describe('ProjectManager', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // T-new — migrateOrphanedTickets (via ensureWorkflowLoaded)
-  // -------------------------------------------------------------------------
-  describe('migrateOrphanedTickets', () => {
-    it('moves tickets with stale columnIds to the first column', () => {
-      const { pm, store } = makePm({
-        tickets: [
-          { id: 't1', columnId: 'stale-column' },
-          { id: 't2', columnId: 'backlog' },
-        ],
-      });
-
-      // Trigger migration by calling ensureWorkflowLoaded, which calls migrateOrphanedTickets
-      // Since migrateOrphanedTickets is private, we trigger it through the public interface
-      // Directly manipulate: set a ticket's columnId to something not in the pipeline
-      const tickets = store.get('tickets', []);
-      tickets[0]!.columnId = 'deleted-column' as never;
-      store.set('tickets', tickets);
-
-      // Force pipeline re-evaluation — calling getPipeline + manually invoking the method
-      // through a column move that triggers the pipeline check won't work directly.
-      // Instead, call ensureWorkflowLoaded which calls migrateOrphanedTickets.
-      void pm.ensureWorkflowLoaded('proj-1');
-
-      const updatedTickets = store.get('tickets', []);
-      expect(updatedTickets.find((t: Ticket) => t.id === 't1')!.columnId).toBe('backlog');
-      expect(updatedTickets.find((t: Ticket) => t.id === 't2')!.columnId).toBe('backlog');
-    });
-
-    it('does not touch tickets whose columnId is still valid', () => {
-      const { pm, store } = makePm({
-        tickets: [
-          { id: 't1', columnId: 'in_progress' },
-          { id: 't2', columnId: 'review' },
-        ],
-      });
-
-      void pm.ensureWorkflowLoaded('proj-1');
-
-      const updatedTickets = store.get('tickets', []);
-      expect(updatedTickets.find((t: Ticket) => t.id === 't1')!.columnId).toBe('in_progress');
-      expect(updatedTickets.find((t: Ticket) => t.id === 't2')!.columnId).toBe('review');
-    });
-  });
+  // migrateOrphanedTickets was removed — its replacement (repo.syncColumnsForProject)
+  // is exercised by packages/projects-db/src/repo.test.ts.
 
   // -------------------------------------------------------------------------
   // T-new — removeTicket

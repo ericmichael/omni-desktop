@@ -1,6 +1,5 @@
 import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
-import type { CSSProperties } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 
 import { CounterBadge, Tab, TabList, TopAppBar } from '@/renderer/ds';
@@ -28,21 +27,23 @@ const useStyles = makeStyles({
   rootGlass: {
     backgroundColor: 'transparent',
   },
+  // Glass surfaces inherit translucent neutral colors via Fluent token overrides
+  // pushed at the deck-bg root in MainContent. These classes only opt in to the
+  // blur layer — bg/border colors come from --colorNeutralBackground* / --colorNeutralStroke1.
   mobileTabBarGlass: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
-    backdropFilter: 'blur(36px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+    backgroundColor: tokens.colorNeutralBackground1,
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
   },
   desktopSidebarGlass: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
-    backdropFilter: 'blur(36px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
-    borderRight: '1px solid rgba(255, 255, 255, 0.14)',
+    backgroundColor: tokens.colorNeutralBackground2,
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
   },
   contentAreaGlass: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
-    backdropFilter: 'blur(36px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+    backgroundColor: tokens.colorNeutralBackground1,
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
   },
   desktopSidebar: {
     display: 'none',
@@ -216,20 +217,7 @@ export const Tickets = memo(() => {
   }, [view]);
 
   return (
-    <div
-      className={mergeClasses(styles.root, isGlass && styles.rootGlass)}
-      style={
-        isGlass
-          ? ({
-              '--colorNeutralBackground2': 'rgba(255, 255, 255, 0.06)',
-              '--colorNeutralBackground3': 'rgba(255, 255, 255, 0.04)',
-              '--colorNeutralBackground4': 'rgba(255, 255, 255, 0.04)',
-              '--colorNeutralBackground5': 'rgba(255, 255, 255, 0.04)',
-              '--colorNeutralBackground6': 'rgba(255, 255, 255, 0.04)',
-            } as CSSProperties)
-          : undefined
-      }
-    >
+    <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
       {/* Desktop: sidebar always visible */}
       <div className={mergeClasses(styles.desktopSidebar, isGlass && styles.desktopSidebarGlass)}>
         <TicketsSidebar />

@@ -1,8 +1,8 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { DatabaseSync } from 'node:sqlite';
-import type { ProjectsRepo } from 'omni-projects-db';
-import { DEFAULT_COLUMNS, columnId, inboxId, pageId, projectId, ticketId, tx, writePageContent } from 'omni-projects-db';
-import type { InboxRow } from 'omni-projects-db';
+
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { InboxRow,ProjectsRepo  } from 'omni-projects-db';
+import { DEFAULT_COLUMNS, defaultColumnId, inboxId, pageId, projectId, ticketId, tx, writePageContent } from 'omni-projects-db';
 import { z } from 'zod';
 
 const json = (data: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data) }] });
@@ -86,14 +86,22 @@ export function registerInboxTools(server: McpServer, db: DatabaseSync, repo: Pr
     },
     async ({ item_id, title, description, status, project_id, outcome, appetite, not_doing }) => {
       const item = repo.getInboxItem(item_id);
-      if (!item) return err(`Inbox item not found: ${item_id}`);
+      if (!item) {
+return err(`Inbox item not found: ${item_id}`);
+}
 
       const sets: string[] = [];
       const params: unknown[] = [];
 
-      if (title !== undefined) { sets.push('title = ?'); params.push(title); }
-      if (description !== undefined) { sets.push('note = ?'); params.push(description); }
-      if (project_id !== undefined) { sets.push('project_id = ?'); params.push(project_id || null); }
+      if (title !== undefined) {
+ sets.push('title = ?'); params.push(title); 
+}
+      if (description !== undefined) {
+ sets.push('note = ?'); params.push(description); 
+}
+      if (project_id !== undefined) {
+ sets.push('project_id = ?'); params.push(project_id || null); 
+}
 
       // Shape the item if shaping fields provided
       if (outcome !== undefined || appetite !== undefined || not_doing !== undefined) {
@@ -120,7 +128,9 @@ export function registerInboxTools(server: McpServer, db: DatabaseSync, repo: Pr
         }
       }
 
-      if (sets.length === 0) return json({ ok: true });
+      if (sets.length === 0) {
+return json({ ok: true });
+}
 
       sets.push("updated_at = datetime('now')");
       params.push(item_id);
@@ -137,7 +147,9 @@ export function registerInboxTools(server: McpServer, db: DatabaseSync, repo: Pr
     { item_id: z.string().describe('The inbox item ID to delete') },
     async ({ item_id }) => {
       const result = db.prepare('DELETE FROM inbox_items WHERE id = ?').run(item_id);
-      if (result.changes === 0) return err(`Inbox item not found: ${item_id}`);
+      if (result.changes === 0) {
+return err(`Inbox item not found: ${item_id}`);
+}
       repo.bumpChangeSeq();
       return json({ ok: true });
     }
@@ -153,11 +165,15 @@ export function registerInboxTools(server: McpServer, db: DatabaseSync, repo: Pr
     },
     async ({ item_id, project_id, milestone_id }) => {
       const item = repo.getInboxItem(item_id);
-      if (!item) return err(`Inbox item not found: ${item_id}`);
+      if (!item) {
+return err(`Inbox item not found: ${item_id}`);
+}
 
       const cols = repo.listColumns(project_id);
       const firstCol = cols[0];
-      if (!firstCol) return err(`Project not found or has no pipeline: ${project_id}`);
+      if (!firstCol) {
+return err(`Project not found or has no pipeline: ${project_id}`);
+}
 
       const tktId = ticketId();
 
@@ -188,13 +204,17 @@ export function registerInboxTools(server: McpServer, db: DatabaseSync, repo: Pr
     },
     async ({ item_id, label }) => {
       const item = repo.getInboxItem(item_id);
-      if (!item) return err(`Inbox item not found: ${item_id}`);
+      if (!item) {
+return err(`Inbox item not found: ${item_id}`);
+}
 
       const projLabel = label || item.title;
       const slug = slugify(projLabel);
 
       const existing = repo.getProjectBySlug(slug);
-      if (existing) return err(`A project with slug "${slug}" already exists.`);
+      if (existing) {
+return err(`A project with slug "${slug}" already exists.`);
+}
 
       const projId = projectId();
 
@@ -207,7 +227,7 @@ export function registerInboxTools(server: McpServer, db: DatabaseSync, repo: Pr
           const col = DEFAULT_COLUMNS[i]!;
           db.prepare(
             'INSERT INTO pipeline_columns (id, project_id, label, description, sort_order, gate) VALUES (?, ?, ?, ?, ?, ?)'
-          ).run(columnId(), projId, col.label, col.description, i, col.gate ? 1 : 0);
+          ).run(defaultColumnId(projId, col.logicalId), projId, col.label, null, i, col.gate ? 1 : 0);
         }
 
         const rootId = pageId();

@@ -36,6 +36,10 @@ class FakeStore implements InboxManagerStore {
   setProjects(projects: Project[]) {
     this.projects = projects;
   }
+  // Tests don't exercise SQLite — fall back to project.pipeline / defaults.
+  getPipeline() {
+    return null;
+  }
 }
 
 const NOW = 1_700_000_000_000;

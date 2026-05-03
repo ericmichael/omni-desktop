@@ -134,6 +134,13 @@ export type StoreData = {
   codeLayoutMode: CodeLayoutMode;
   /** Optional background image (data URL) rendered behind the Code Deck. */
   codeDeckBackground: string | null;
+  /**
+   * Wallpaper-derived glass tone. Sampled from `codeDeckBackground` luminance
+   * on upload — drives whether glass surfaces use a dark scrim with light
+   * text (`'dark'`) or a light scrim with dark text (`'light'`). Independent
+   * of the active theme so glass material stays readable on any wallpaper.
+   */
+  glassTone: 'dark' | 'light';
   activeTicketId: TicketId | null;
 
   // Enterprise platform (optional — when set, enables enterprise mode)
@@ -1493,6 +1500,20 @@ type ProjectIpcEvents = Namespaced<
  * no client-request round trip (tool calls are handled entirely in the
  * renderer's `buildClientToolHandler`).
  */
+/**
+ * Per-dispatch run intent. The orchestrator composes this from its own state
+ * (autopilot mode, supervisor framing, retry context, etc.) and ships it with
+ * the `bridge.run` dispatch. The column merges it onto its locally owned
+ * variables. Fields here are the subset that need to differ between
+ * orchestrator-driven and user-driven submits.
+ */
+export type RunOverrides = {
+  /** Prepended to the column's existing additional_instructions. */
+  additionalInstructions?: string;
+  /** Approval policy override; replaces the column's default. */
+  safeToolOverrides?: { safe_tool_names?: string[]; safe_tool_patterns?: string[] };
+};
+
 export type SupervisorBridgeRequest =
   | {
       /**
@@ -1506,13 +1527,19 @@ export type SupervisorBridgeRequest =
   | {
       /**
        * Start a run. Routes through the same handleSubmit path the user's
-       * keyboard uses. `supervisorPrompt` is prepended to additional_instructions
-       * when set (autopilot runs only — user submits leave it undefined).
+       * keyboard uses. `runOverrides` carries the orchestrator's intent for
+       * THIS run (supervisor prompt to inject, approval policy) atomically
+       * with the dispatch — the column merges these on top of its locally
+       * owned variables (`client_tools`, `workspace_root`) without having to
+       * read steady-state autopilot mode (which would race with the dispatch).
+       *
+       * For user-initiated submits, `runOverrides` is undefined and the
+       * column derives variables from steady-state `ticket.autopilot`.
        */
       kind: 'run';
       ticketId: TicketId;
       prompt: string;
-      supervisorPrompt?: string;
+      runOverrides?: RunOverrides;
     }
   | { kind: 'send'; ticketId: TicketId; message: string }
   | { kind: 'stop'; ticketId: TicketId }
@@ -2093,7 +2120,6 @@ type ProjectIpcRendererEvents = Namespaced<
     phase: [TicketId, import('@/shared/ticket-phase').TicketPhase];
     'supervisor-message': [TicketId, SessionMessage];
     'token-usage': [TicketId, TokenUsage];
-    pipeline: [ProjectId, Pipeline];
   }
 >;
 

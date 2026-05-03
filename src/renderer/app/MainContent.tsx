@@ -1,10 +1,10 @@
 import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { Info20Regular, Settings20Filled } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
-import type { CSSProperties } from 'react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
 import { Sidebar } from '@/renderer/app/Sidebar';
+import { getGlassVars } from '@/renderer/theme/glass-vars';
 import { Caption1, ListItem, Subtitle2 } from '@/renderer/ds';
 import { $launcherVersion } from '@/renderer/features/Banner/state';
 import { Chat } from '@/renderer/features/Chat/Chat';
@@ -59,6 +59,10 @@ const useStyles = makeStyles({
     height: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
   },
+  morePageGlass: {
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
+  },
   moreHeader: {
     paddingLeft: '20px',
     paddingRight: '20px',
@@ -83,13 +87,14 @@ const useStyles = makeStyles({
 const MorePage = memo(() => {
   const styles = useStyles();
   const version = useStore($launcherVersion);
+  const isGlass = useStore(persistedStoreApi.$atom).codeDeckBackground != null;
 
   const openSettings = useCallback(() => {
     persistedStoreApi.setKey('layoutMode', 'settings');
   }, []);
 
   return (
-    <div className={styles.morePage}>
+    <div className={mergeClasses(styles.morePage, isGlass && styles.morePageGlass)}>
       <div className={styles.moreHeader}>
         <Subtitle2>More</Subtitle2>
       </div>
@@ -121,7 +126,7 @@ export const MainContent = memo(() => {
   const store = useStore(persistedStoreApi.$atom);
   const active: LayoutMode = store.layoutMode;
   const deckBackground = store.codeDeckBackground ?? null;
-  const showDeckBg = (active === 'code' || active === 'chat' || active === 'settings' || active === 'projects') && !!deckBackground;
+  const showDeckBg = !!deckBackground;
 
   const [mounted, setMounted] = useState<Set<LayoutMode>>(() => new Set([active]));
 
@@ -155,21 +160,10 @@ return prev;
       className={mergeClasses(styles.root, showDeckBg && styles.rootWithDeckBg)}
       style={
         showDeckBg
-          ? ({
+          ? {
               backgroundImage: `url(${deckBackground})`,
-              '--colorSubtleBackgroundHover': 'rgba(255, 255, 255, 0.10)',
-              '--colorSubtleBackgroundPressed': 'rgba(255, 255, 255, 0.16)',
-              '--colorSubtleBackgroundSelected': 'rgba(255, 255, 255, 0.14)',
-              '--colorNeutralBackground1Hover': 'rgba(255, 255, 255, 0.10)',
-              '--colorNeutralBackground1Pressed': 'rgba(255, 255, 255, 0.16)',
-              '--colorNeutralBackground1Selected': 'rgba(255, 255, 255, 0.14)',
-              '--colorNeutralBackground2Hover': 'rgba(255, 255, 255, 0.10)',
-              '--colorNeutralBackground2Pressed': 'rgba(255, 255, 255, 0.16)',
-              '--colorNeutralBackground2Selected': 'rgba(255, 255, 255, 0.14)',
-              '--colorNeutralBackground3Hover': 'rgba(255, 255, 255, 0.10)',
-              '--colorNeutralBackground3Pressed': 'rgba(255, 255, 255, 0.16)',
-              '--colorNeutralBackground3Selected': 'rgba(255, 255, 255, 0.14)',
-            } as CSSProperties)
+              ...getGlassVars(store.glassTone ?? 'dark'),
+            }
           : undefined
       }
     >

@@ -60,11 +60,9 @@ const useStyles = makeStyles({
     },
   },
   navGlass: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground2} 22%, transparent)`,
-    backdropFilter: 'blur(36px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
-    borderRightColor: 'rgba(255, 255, 255, 0.14)',
-    borderTopColor: 'rgba(255, 255, 255, 0.14)',
+    backgroundColor: tokens.colorNeutralBackground2,
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
   },
   /* Branded rail — used by themes that set `header.bg` in fluent-themes.ts
      (currently just UTRGV). Reads the same `--color-header` CSS var the
@@ -241,7 +239,7 @@ export const Sidebar = memo(() => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const openInboxCount = useStore($activeInboxCount);
-  const isGlass = (store.layoutMode === 'code' || store.layoutMode === 'chat' || store.layoutMode === 'settings' || store.layoutMode === 'projects') && !!store.codeDeckBackground;
+  const isGlass = !!store.codeDeckBackground;
   const isBrandedRail = store.theme === 'utrgv' && !isGlass;
 
   const setMode = useCallback(

@@ -1,8 +1,8 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { DatabaseSync } from 'node:sqlite';
-import type { ProjectsRepo } from 'omni-projects-db';
-import { DEFAULT_COLUMNS, columnId, deleteProjectPages, pageId, projectId, tx, writePageContent } from 'omni-projects-db';
-import type { ProjectRow, ColumnRow } from 'omni-projects-db';
+
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type {ProjectsRepo  } from 'omni-projects-db';
+import { DEFAULT_COLUMNS, defaultColumnId, deleteProjectPages, pageId, projectId, tx, writePageContent } from 'omni-projects-db';
 import { z } from 'zod';
 
 const json = (data: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data) }] });
@@ -48,19 +48,21 @@ export function registerProjectTools(server: McpServer, db: DatabaseSync, repo: 
 
       // Check slug uniqueness
       const existing = repo.getProjectBySlug(slug);
-      if (existing) return err(`A project with slug "${slug}" already exists.`);
+      if (existing) {
+return err(`A project with slug "${slug}" already exists.`);
+}
 
       tx(db, () => {
         db.prepare(
           'INSERT INTO projects (id, label, slug, workspace_dir) VALUES (?, ?, ?, ?)'
         ).run(id, label, slug, workspace_dir ?? null);
 
-        // Seed default pipeline columns
+        // Seed default pipeline columns with deterministic prefixed IDs
         for (let i = 0; i < DEFAULT_COLUMNS.length; i++) {
           const col = DEFAULT_COLUMNS[i]!;
           db.prepare(
             'INSERT INTO pipeline_columns (id, project_id, label, description, sort_order, gate) VALUES (?, ?, ?, ?, ?, ?)'
-          ).run(columnId(), id, col.label, col.description, i, col.gate ? 1 : 0);
+          ).run(defaultColumnId(id, col.logicalId), id, col.label, null, i, col.gate ? 1 : 0);
         }
 
         // Seed root page
@@ -99,7 +101,9 @@ export function registerProjectTools(server: McpServer, db: DatabaseSync, repo: 
     },
     async ({ project_id, label, workspace_dir }) => {
       const project = repo.getProject(project_id);
-      if (!project) return err(`Project not found: ${project_id}`);
+      if (!project) {
+return err(`Project not found: ${project_id}`);
+}
 
       const sets: string[] = [];
       const params: unknown[] = [];
@@ -114,7 +118,9 @@ export function registerProjectTools(server: McpServer, db: DatabaseSync, repo: 
         params.push(workspace_dir || null);
       }
 
-      if (sets.length === 0) return json({ ok: true });
+      if (sets.length === 0) {
+return json({ ok: true });
+}
 
       sets.push("updated_at = datetime('now')");
       params.push(project_id);
@@ -131,8 +137,12 @@ export function registerProjectTools(server: McpServer, db: DatabaseSync, repo: 
     { project_id: z.string().describe('The project ID to delete') },
     async ({ project_id }) => {
       const project = repo.getProject(project_id);
-      if (!project) return err(`Project not found: ${project_id}`);
-      if (project.is_personal) return err('Cannot delete the Personal project');
+      if (!project) {
+return err(`Project not found: ${project_id}`);
+}
+      if (project.is_personal) {
+return err('Cannot delete the Personal project');
+}
 
       repo.deleteProject(project_id);
       deleteProjectPages(pagesDir, project.slug);

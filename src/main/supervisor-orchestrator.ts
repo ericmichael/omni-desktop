@@ -29,6 +29,7 @@
 import { existsSync, readFileSync } from 'fs';
 import fs from 'fs/promises';
 import { nanoid } from 'nanoid';
+import { logicalColumnId } from 'omni-projects-db';
 import path from 'path';
 
 import { buildContinuationPrompt } from '@/lib/continuation-prompt';
@@ -532,9 +533,14 @@ export class SupervisorOrchestrator {
     return this.deps.workflowLoader.getConfig(projectId).supervisor?.max_continuation_turns ?? MAX_CONTINUATION_TURNS;
   }
 
-  /** Per-column concurrency limit from FLEET.md, or undefined if not set. */
+  /**
+   * Per-column concurrency limit from FLEET.md, or undefined if not set.
+   * FLEET.md keys are logical ids (`spec`, `implementation`); SQLite column
+   * ids are prefixed (`${projectId}__spec`). Strip the prefix before lookup.
+   */
   getColumnMaxConcurrent(projectId: ProjectId, columnId: ColumnId): number | undefined {
-    return this.deps.workflowLoader.getConfig(projectId).supervisor?.max_concurrent_by_column?.[columnId];
+    const logicalId = logicalColumnId(projectId, columnId);
+    return this.deps.workflowLoader.getConfig(projectId).supervisor?.max_concurrent_by_column?.[logicalId];
   }
 
   /** Whether a project opts into auto-dispatch (project flag OR FLEET.md override). */
@@ -1017,10 +1023,12 @@ export class SupervisorOrchestrator {
   // -------------------------------------------------------------------------
 
   /**
-   * Dispatch an autopilot run through the column. The phase flip to `running`
-   * is driven by the `run-started` bridge event — keeping the current phase
-   * (`continuing`, `retrying`, `ready`, etc.) until the server confirms lets
-   * UI and tests observe the transitional state.
+   * Dispatch an autopilot run through the column. Phase flips to `running`
+   * synchronously here — the `running` phase per ticket-phase.ts means
+   * "start_run sent" and that's exactly what's happening as we hand off to
+   * the bridge. The later `run-started` bridge event re-asserts the same
+   * phase as a no-op. Transitioning eagerly is what lets the autopilot pill
+   * reflect state immediately instead of looking idle for a round-trip.
    */
   startMachineRun = (ticketId: TicketId, prompt: string): void => {
     const entry = this.machines.get(ticketId);
@@ -1034,8 +1042,18 @@ export class SupervisorOrchestrator {
     state.recordActivity();
 
     const supervisorPrompt = this.buildFullSupervisorPrompt(ticketId);
+    // Run intent for THIS dispatch — composed from orchestrator state and
+    // shipped atomically with the bridge call. The column does not need to
+    // (and must not) re-derive these from steady-state stores. Autopilot
+    // runs always bypass per-tool approvals; the framing prompt is prepended
+    // to whatever additional_instructions the column already has.
+    const runOverrides = {
+      additionalInstructions: supervisorPrompt,
+      safeToolOverrides: { safe_tool_patterns: ['.*'] },
+    };
     console.log(`[SupervisorOrchestrator] startMachineRun: bridge.run for ${ticketId}`);
-    void this.deps.bridge.run({ ticketId, prompt, supervisorPrompt }).then(
+    state.transition('running' as TicketPhase);
+    void this.deps.bridge.run({ ticketId, prompt, runOverrides }).then(
       (result) => {
         state.setRunId(result.runId);
       },
@@ -1749,7 +1767,7 @@ export class SupervisorOrchestrator {
             title: ticket.title,
             description: ticket.description || '(no description)',
             priority: ticket.priority,
-            columnId: ticket.columnId,
+            columnId: logicalColumnId(ticket.projectId, ticket.columnId),
             branch: this.deps.host.resolveTicketBranch(ticket),
           },
           pipeline: {

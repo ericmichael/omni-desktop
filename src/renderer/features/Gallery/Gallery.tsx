@@ -1,5 +1,9 @@
+import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { useStore } from '@nanostores/react';
 import { BookmarkIcon, CodeIcon, FileTextIcon, GlobeIcon, SendHorizontalIcon } from 'lucide-react';
 import { memo, useState } from 'react';
+
+import { persistedStoreApi } from '@/renderer/services/store';
 
 import {
   Artifact,
@@ -63,6 +67,22 @@ import {
 } from '@/renderer/omniagents-ui/components/promptkit/PromptInput';
 import { Markdown } from '@/renderer/omniagents-ui/components/promptkit/markdown';
 
+const useStyles = makeStyles({
+  // Inner shadcn surface colors (--color-card, --color-muted, --color-secondary, etc.)
+  // are overridden to glass scrim values at the deck-bg root in MainContent. This
+  // class only adds the blur layer to the page shell and tints the primary CTA.
+  glassRoot: {
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
+    '& .bg-primary': {
+      backgroundColor: `color-mix(in srgb, ${tokens.colorBrandBackground} 70%, transparent)`,
+      backdropFilter: 'var(--glass-blur-light)',
+      WebkitBackdropFilter: 'var(--glass-blur-light)',
+      boxShadow: `0 1px 0 0 rgba(255,255,255,0.14) inset, 0 2px 8px -2px rgba(0,0,0,0.15)`,
+    },
+  },
+});
+
 const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
   <section className="mb-12">
     <h2 className="mb-4 border-b border-border pb-2 text-lg font-semibold text-foreground">{title}</h2>
@@ -99,10 +119,12 @@ const TOOL_STATES: { state: ToolState; label: string }[] = [
 
 export const Gallery = memo(() => {
   const [promptValue, setPromptValue] = useState('');
+  const styles = useStyles();
+  const isGlass = useStore(persistedStoreApi.$atom).codeDeckBackground != null;
 
   return (
     <TooltipProvider>
-      <div className="h-full w-full overflow-auto bg-background p-8 text-foreground">
+      <div className={mergeClasses('h-full w-full overflow-auto p-8 text-foreground', !isGlass && 'bg-background', isGlass && styles.glassRoot)}>
         <div className="mx-auto max-w-3xl">
         <header className="mb-8">
           <h1 className="text-2xl font-bold">Component Gallery</h1>

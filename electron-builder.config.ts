@@ -32,6 +32,12 @@ export default {
     'packages/projects-mcp/package.json',
     'packages/projects-mcp/index.d.ts',
   ],
+  // The omni-projects-mcp cli.js is spawned by `node` at runtime (both by
+  // launcher-managed agents and by omni-code standalone reading the same
+  // mcp.json). Files inside app.asar aren't readable by raw fs/node, so the
+  // mcp packages must be extracted to app.asar.unpacked/. omni-projects-db
+  // is a CommonJS dep of cli.js — unpack it too so require() resolves.
+  asarUnpack: ['packages/projects-mcp/**/*', 'packages/projects-db/**/*'],
   extraResources: [
     {
       from: 'assets/bin',

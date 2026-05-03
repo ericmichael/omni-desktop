@@ -574,7 +574,9 @@ describe('SupervisorOrchestrator integration', () => {
         await vi.advanceTimersByTimeAsync(600);
 
         expect(mock.continuationTurn).toBe(1);
-        expect(mock.phase).toBe('continuing');
+        // Phase transitions: continuing (action accepted) → running (start_run dispatched).
+        // startMachineRun flips to `running` synchronously when bridge.run is sent.
+        expect(mock.phase).toBe('running');
         expect(mock.startRun).toHaveBeenCalled();
         // Verify the prompt is a continuation prompt. `bridge.run` receives
         // an options object with `{ ticketId, prompt, ... }`.

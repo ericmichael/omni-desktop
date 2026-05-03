@@ -1,7 +1,6 @@
 import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
 import { Apps20Regular, Cube20Regular, Globe20Regular, Lightbulb20Regular, Person20Regular, PlugConnected20Regular, PuzzlePiece20Regular,Settings20Regular, WindowConsole20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
-import type { CSSProperties } from 'react';
 import { memo, useCallback, useState } from 'react';
 
 import { Subtitle2 } from '@/renderer/ds';
@@ -49,20 +48,19 @@ const useStyles = makeStyles({
     backgroundColor: 'transparent',
   },
   navGlass: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
-    backdropFilter: 'blur(36px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
-    borderRightColor: 'rgba(255, 255, 255, 0.14)',
+    backgroundColor: tokens.colorNeutralBackground1,
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
   },
   contentGlass: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
-    backdropFilter: 'blur(36px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+    backgroundColor: tokens.colorNeutralBackground1,
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
   },
   mobileTabsGlass: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
-    backdropFilter: 'blur(36px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+    backgroundColor: tokens.colorNeutralBackground1,
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
   },
   /* ── Left nav ── */
   nav: {
@@ -201,20 +199,7 @@ export const SettingsPage = memo(() => {
   );
 
   return (
-    <div
-      className={mergeClasses(styles.root, isGlass && styles.rootGlass)}
-      style={
-        isGlass
-          ? ({
-              '--colorNeutralBackground2': 'rgba(255, 255, 255, 0.06)',
-              '--colorNeutralBackground3': 'rgba(255, 255, 255, 0.04)',
-              '--colorNeutralBackground4': 'rgba(255, 255, 255, 0.04)',
-              '--colorNeutralBackground5': 'rgba(255, 255, 255, 0.04)',
-              '--colorNeutralBackground6': 'rgba(255, 255, 255, 0.04)',
-            } as CSSProperties)
-          : undefined
-      }
-    >
+    <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
       {/* Desktop: left nav */}
       <nav className={mergeClasses(styles.nav, isGlass && styles.navGlass)}>
         <div className={styles.navHeader}>

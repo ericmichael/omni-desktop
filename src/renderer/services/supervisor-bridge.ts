@@ -14,17 +14,19 @@
 import { codeApi } from '@/renderer/features/Code/state';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { SupervisorBridgeEvent, SupervisorBridgeRequest, TicketId } from '@/shared/types';
+import type { RunOverrides, SupervisorBridgeEvent, SupervisorBridgeRequest, TicketId } from '@/shared/types';
 
 export type ColumnActor = {
   ticketId: TicketId;
   /**
-   * Submit a prompt through the column's own handleSubmit path. When main is
-   * driving autopilot, `supervisorPrompt` is prepended to the variables'
-   * `additional_instructions` so the agent sees the supervisor framing. Resolves
-   * with the runId once `run_started` lands.
+   * Submit a prompt through the column's own handleSubmit path. `runOverrides`
+   * carries the orchestrator's intent for THIS specific run (autopilot framing,
+   * approval policy) and is merged onto the column's locally owned variables.
+   * For user-initiated submits, `runOverrides` is undefined and the column
+   * uses steady-state mode (`ticket.autopilot`). Resolves with the runId once
+   * `run_started` lands.
    */
-  submit: (prompt: string, supervisorPrompt?: string) => Promise<{ runId: string }>;
+  submit: (prompt: string, runOverrides?: RunOverrides) => Promise<{ runId: string }>;
   send: (message: string) => Promise<void>;
   stop: () => Promise<void>;
   /** Stop any in-flight run and mint a fresh session id on the column. */
@@ -125,7 +127,7 @@ async function handleDispatch(requestId: string, request: SupervisorBridgeReques
     let result: { runId?: string } = {};
     switch (request.kind) {
       case 'run': {
-        const res = await actor.submit(request.prompt, request.supervisorPrompt);
+        const res = await actor.submit(request.prompt, request.runOverrides);
         result = { runId: res.runId };
         break;
       }

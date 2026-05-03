@@ -75,6 +75,7 @@ const defaultStoreData = (): StoreData =>
     activeCodeTabId: null,
     codeLayoutMode: 'deck',
     codeDeckBackground: null,
+    glassTone: 'dark',
     activeTicketId: null,
     enabledExtensions: {},
   }) as unknown as StoreData;

@@ -13,6 +13,7 @@ import {
 } from '@/renderer/features/Omni/state';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi, selectWorkspaceDir } from '@/renderer/services/store';
+import { detectGlassTone } from '@/renderer/theme/glass-vars';
 import type { OmniTheme, SandboxBackend } from '@/shared/types';
 
 const BACKEND_LABELS: Record<SandboxBackend, string> = {
@@ -150,11 +151,17 @@ return;
       return;
     }
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const result = reader.result;
-      if (typeof result === 'string') {
-        persistedStoreApi.setKey('codeDeckBackground', result);
+      if (typeof result !== 'string') {
+        return;
       }
+      // Pick a glass tone from wallpaper luminance so the frosted material stays
+      // readable: dark photo → black scrim + light text; bright photo → white
+      // scrim + dark text. Independent of the active theme.
+      const tone = await detectGlassTone(result);
+      persistedStoreApi.setKey('codeDeckBackground', result);
+      persistedStoreApi.setKey('glassTone', tone);
     };
     reader.readAsDataURL(file);
   }, []);

@@ -99,7 +99,7 @@ workspacePath = String(res.path);
     /* ignore */
   }
 
-  // 4. Realtime probe for voice enablement. Best-effort; failure disables voice.
+  // Probe via capabilities() not startSession(): the latter creates an empty trace per boot.
   let voiceEnabled = false;
   if (wsRealtimeUrl) {
     try {
@@ -107,16 +107,8 @@ workspacePath = String(res.path);
       const rtc = new RealtimeRPCClient(wsRealtimeUrl, token);
       await rtc.connect();
       try {
-        const res = (await rtc.startSession()) as any;
-        const sid = String(res?.session_id || '');
-        if (sid) {
-          voiceEnabled = true;
-          try {
-            await rtc.stopSession(sid);
-          } catch {
-            /* ignore */
-          }
-        }
+        const caps = await rtc.capabilities();
+        voiceEnabled = !!caps?.enabled;
       } finally {
         rtc.disconnect();
       }

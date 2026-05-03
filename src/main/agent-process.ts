@@ -16,7 +16,6 @@ import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
 import type { PlatformClient } from '@/main/platform-client';
 import { getStore } from '@/main/store';
-import { getMcpToken, getMcpUrl } from '@/main/project-mcp-server';
 import {
   ensureDirectory,
   getBundledBinPath,
@@ -165,13 +164,6 @@ export class AgentProcess {
     }
 
     const env = { ...process.env, ...DEFAULT_ENV, ...shellEnvSync() } as Record<string, string>;
-
-    // Resolve `${OMNI_MCP_URL}` / `${OMNI_MCP_TOKEN}` in the agent's mcp.json
-    // for non-Docker modes. Docker mode passes these via `--env` flags below
-    // since Docker doesn't inherit the parent process environment.
-    const mcpPerspective = this.mode === 'sandbox' || this.mode === 'podman' ? 'docker' : 'host';
-    env.OMNI_MCP_URL = getMcpUrl(mcpPerspective);
-    env.OMNI_MCP_TOKEN = getMcpToken();
 
     // Pre-flight checks
     if (this.mode === 'sandbox') {
@@ -716,12 +708,6 @@ return null;
     // Dev mode: omni sandbox resolves its own Dockerfile from omni_code/sandbox/
 
     args.push('--persist-volume', 'omni-gh:/home/user/.config/gh');
-
-    // Resolve `${OMNI_MCP_URL}` / `${OMNI_MCP_TOKEN}` in the container's
-    // mcp.json against the launcher's in-process HTTP MCP server. Container
-    // reaches the host via host.docker.internal.
-    args.push('--env', `OMNI_MCP_URL=${getMcpUrl('docker')}`);
-    args.push('--env', `OMNI_MCP_TOKEN=${getMcpToken()}`);
 
     if (variant === 'work') {
       args.push('--persist-volume', 'omni-azure:/home/user/.azure');

@@ -15,7 +15,12 @@ import { join, sep } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { getGitFilesChanged, resolveWorkspaceMergeBase, resolveWorktreeMergeBase } from '@/lib/git-files-changed';
+import {
+  getGitFilesChanged,
+  resolveTicketDiffBase,
+  resolveWorkspaceMergeBase,
+  resolveWorktreeMergeBase,
+} from '@/lib/git-files-changed';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -528,6 +533,86 @@ describe('resolveWorktreeMergeBase', () => {
     // sentinel to fall back to the working-tree diff path.
     commitFile('file.txt', 'v1');
     const result = await resolveWorktreeMergeBase(repoDir, 'main');
+    expect(result).toBe('HEAD');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveTicketDiffBase
+// ---------------------------------------------------------------------------
+
+describe('resolveTicketDiffBase', () => {
+  beforeEach(() => initRepo());
+  afterEach(() => rmSync(repoDir, { recursive: true, force: true }));
+
+  it('uses the preferred branch when it exists', async () => {
+    commitFile('file.txt', 'v1');
+    const baseCommit = git('rev-parse', 'HEAD');
+    git('checkout', '-b', 'milestone-x');
+    commitFile('milestone.txt', 'milestone work');
+    const milestoneCommit = git('rev-parse', 'HEAD');
+    git('checkout', '-b', 'feature');
+    commitFile('feature.txt', 'feature work');
+
+    const result = await resolveTicketDiffBase(repoDir, 'milestone-x');
+    expect(result).toBe(milestoneCommit);
+    expect(result).not.toBe(baseCommit);
+  });
+
+  it('falls back to main when the preferred branch does not exist', async () => {
+    commitFile('file.txt', 'v1');
+    const mainCommit = git('rev-parse', 'HEAD');
+    git('checkout', '-b', 'feature');
+    commitFile('feature.txt', 'feature work');
+
+    const result = await resolveTicketDiffBase(repoDir, 'nonexistent');
+    expect(result).toBe(mainCommit);
+  });
+
+  it('falls back to main when no preferred branch is given (the no-worktree case)', async () => {
+    // This is the bug fix: a ticket with a branch but no worktree should
+    // still get a real merge-base against trunk, not @{upstream} (which is
+    // typically the same branch and produces an empty committed group).
+    commitFile('file.txt', 'v1');
+    const mainCommit = git('rev-parse', 'HEAD');
+    git('checkout', '-b', 'feat/foo');
+    commitFile('foo.txt', 'foo work');
+
+    const result = await resolveTicketDiffBase(repoDir);
+    expect(result).toBe(mainCommit);
+  });
+
+  it('falls back to master when main is absent', async () => {
+    rmSync(repoDir, { recursive: true, force: true });
+    repoDir = mkdtempSync(join(tmpdir(), 'git-test-'));
+    git('init', '-b', 'master');
+    git('config', 'user.email', 'test@test.com');
+    git('config', 'user.name', 'Test');
+
+    commitFile('file.txt', 'v1');
+    const masterCommit = git('rev-parse', 'HEAD');
+    git('checkout', '-b', 'feature');
+    commitFile('feature.txt', 'feature work');
+
+    const result = await resolveTicketDiffBase(repoDir);
+    expect(result).toBe(masterCommit);
+  });
+
+  it("returns 'HEAD' when the trunk equals HEAD (no committed diff to show)", async () => {
+    commitFile('file.txt', 'v1');
+    const result = await resolveTicketDiffBase(repoDir);
+    expect(result).toBe('HEAD');
+  });
+
+  it("returns 'HEAD' when no candidate exists and there is no upstream", async () => {
+    rmSync(repoDir, { recursive: true, force: true });
+    repoDir = mkdtempSync(join(tmpdir(), 'git-test-'));
+    git('init', '-b', 'develop');
+    git('config', 'user.email', 'test@test.com');
+    git('config', 'user.name', 'Test');
+    commitFile('file.txt', 'v1');
+
+    const result = await resolveTicketDiffBase(repoDir);
     expect(result).toBe('HEAD');
   });
 });

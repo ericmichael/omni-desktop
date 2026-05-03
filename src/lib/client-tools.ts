@@ -1,13 +1,12 @@
 /**
  * Launcher-only client tool definitions.
  *
- * Project / ticket / milestone / page / inbox CRUD has moved into the
- * in-process MCP server (`packages/projects-mcp` via
- * `src/main/project-mcp-server.ts`); the agent reaches those tools over
- * Streamable HTTP. This file only carries tools that coordinate with the
- * launcher's runtime state — escalation/notification channels, supervisor
- * lifecycle (start/stop), the deck UI overlays, and the renderer-driven
- * app-control + browser-control suites.
+ * Project / ticket / milestone / page / inbox CRUD lives in the bundled
+ * `omni-projects-mcp` stdio server (`packages/projects-mcp`), which the
+ * agent spawns per `~/.config/omni_code/mcp.json`. This file only carries
+ * tools that coordinate with the launcher's runtime state — escalation /
+ * notification channels, supervisor lifecycle (start/stop), the deck UI
+ * overlays, and the renderer-driven app-control + browser-control suites.
  */
 
 import { getContainerArtifactsDir } from '@/lib/artifacts';

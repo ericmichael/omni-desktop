@@ -7,6 +7,7 @@ export { tx } from './tx.js';
 
 // Repository
 export { ProjectsRepo } from './repo.js';
+export type { ColumnSyncInput, ColumnSyncResult, TicketRemap } from './repo.js';
 
 // Types
 export type {
@@ -36,7 +37,13 @@ export {
 export { toIso, fromIso } from './timestamps.js';
 
 // Defaults
-export { DEFAULT_COLUMNS, SIMPLE_COLUMNS } from './defaults.js';
+export {
+  DEFAULT_COLUMNS,
+  SIMPLE_COLUMNS,
+  defaultColumnId,
+  logicalColumnId,
+} from './defaults.js';
+export type { ColumnDef } from './defaults.js';
 
 // Page filesystem
 export {

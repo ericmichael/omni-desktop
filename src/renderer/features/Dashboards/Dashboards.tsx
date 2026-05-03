@@ -1,12 +1,29 @@
-import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
 import { ArrowLeft20Regular, DataBarVertical20Regular, Open20Regular } from '@fluentui/react-icons';
+import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
 import { emitter } from '@/renderer/services/ipc';
+import { persistedStoreApi } from '@/renderer/services/store';
 import type { PlatformDashboard } from '@/shared/types';
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', width: '100%', height: '100%', backgroundColor: tokens.colorNeutralBackground1 },
+  rootGlass: {
+    backgroundColor: tokens.colorNeutralBackground1,
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
+  },
+  dashCardGlass: {
+    backgroundColor: tokens.colorNeutralBackground3,
+    backdropFilter: 'var(--glass-blur-light)',
+    WebkitBackdropFilter: 'var(--glass-blur-light)',
+  },
+  embedHeaderGlass: {
+    backgroundColor: tokens.colorNeutralBackground2,
+    backdropFilter: 'var(--glass-blur-light)',
+    WebkitBackdropFilter: 'var(--glass-blur-light)',
+  },
   listHeader: {
     paddingLeft: tokens.spacingHorizontalXL,
     paddingRight: tokens.spacingHorizontalXL,
@@ -99,6 +116,7 @@ export const Dashboards = memo(() => {
   const [dashboards, setDashboards] = useState<PlatformDashboard[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeDashboard, setActiveDashboard] = useState<PlatformDashboard | null>(null);
+  const isGlass = useStore(persistedStoreApi.$atom).codeDeckBackground != null;
 
   useEffect(() => {
     emitter
@@ -117,10 +135,10 @@ export const Dashboards = memo(() => {
   }, []);
 
   if (activeDashboard) {
-    return <DashboardEmbed dashboard={activeDashboard} onBack={closeDashboard} />;
+    return <DashboardEmbed dashboard={activeDashboard} onBack={closeDashboard} isGlass={isGlass} />;
   }
 
-  return <DashboardList dashboards={dashboards} loading={loading} onOpen={openDashboard} />;
+  return <DashboardList dashboards={dashboards} loading={loading} onOpen={openDashboard} isGlass={isGlass} />;
 });
 Dashboards.displayName = 'Dashboards';
 
@@ -133,14 +151,16 @@ const DashboardList = memo(
     dashboards,
     loading,
     onOpen,
+    isGlass,
   }: {
     dashboards: PlatformDashboard[];
     loading: boolean;
     onOpen: (d: PlatformDashboard) => void;
+    isGlass: boolean;
   }) => {
     const styles = useStyles();
     return (
-    <div className={styles.root}>
+    <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
       <div className={styles.listHeader}>
         <h1 className={styles.listTitle}>Dashboards</h1>
         <p className={styles.listSubtitle}>Your entitled Databricks dashboards</p>
@@ -165,7 +185,7 @@ const DashboardList = memo(
               <button
                 key={d.resource_id}
                 onClick={() => onOpen(d)}
-                className={styles.dashCard}
+                className={mergeClasses(styles.dashCard, isGlass && styles.dashCardGlass)}
               >
                 <div className={styles.dashCardTop}>
                   <DataBarVertical20Regular className={styles.dashCardIcon} />
@@ -194,15 +214,17 @@ const DashboardEmbed = memo(
   ({
     dashboard,
     onBack,
+    isGlass,
   }: {
     dashboard: PlatformDashboard;
     onBack: () => void;
+    isGlass: boolean;
   }) => {
     const styles = useStyles();
     return (
-    <div className={styles.root}>
+    <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
       {/* Header bar */}
-      <div className={styles.embedHeader}>
+      <div className={mergeClasses(styles.embedHeader, isGlass && styles.embedHeaderGlass)}>
         <button
           onClick={onBack}
           className={styles.backBtn}

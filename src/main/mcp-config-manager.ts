@@ -1,28 +1,28 @@
 /**
  * Maintains the `omni-projects` entry in `~/.config/omni_code/mcp.json` so
- * the agent (running inside any sandbox mode that mounts the omni config
- * dir) connects to the launcher's in-process HTTP MCP server.
+ * the agent connects to the bundled `omni-projects-mcp` stdio server. The
+ * same entry works for omni-code running standalone (the launcher bundles
+ * the MCP cli, so the absolute path stays valid as long as the launcher is
+ * installed).
  *
- * URL is templated on `${OMNI_MCP_URL}` and the auth header on
- * `${OMNI_MCP_TOKEN}`. The launcher injects both env vars into the agent
- * process at start time, choosing the correct host (`127.0.0.1` for
- * bwrap/none/server, `host.docker.internal` for Docker) per sandbox mode.
- *
- * Marked with `_managed: "omni-launcher"` so reruns are idempotent and the
- * user can manually clear the marker to "freeze" the entry.
+ * The entry is marked with `_managed: "omni-launcher"` so reruns are
+ * idempotent and the user can manually clear the marker to "freeze" the
+ * entry.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
-import { getOmniConfigDir } from '@/main/util';
+import { app } from 'electron';
+
+import { getOmniConfigDir, isDevelopment } from '@/main/util';
 
 const MARKER = 'omni-launcher';
 const ENTRY_NAME = 'omni-projects';
 
 interface ManagedServerEntry {
-  type: 'streamable_http';
-  url: string;
-  headers: Record<string, string>;
+  type: 'stdio';
+  command: string;
+  args: string[];
   _managed?: string;
 }
 
@@ -30,20 +30,33 @@ interface McpJson {
   mcpServers?: Record<string, ManagedServerEntry | Record<string, unknown>>;
 }
 
-// `${...}` placeholders are read literally — omniagents/user_mcp.py expands
-// them at agent startup against the launcher-injected env vars. Suppressing
-// the lint rule that flags template-curlies in plain strings.
-// eslint-disable-next-line no-template-curly-in-string
-const URL_TEMPLATE = '${OMNI_MCP_URL}';
-// eslint-disable-next-line no-template-curly-in-string
-const TOKEN_HEADER = 'Bearer ${OMNI_MCP_TOKEN}';
+/**
+ * Resolve the absolute path to the bundled `omni-projects-mcp` cli.js.
+ *
+ * Dev:  <repo>/packages/projects-mcp/dist/cli.js (workspace path)
+ * Prod: <app-resources>/app.asar.unpacked/packages/projects-mcp/dist/cli.js
+ *
+ * The `packages/projects-mcp/dist/**` glob is added to electron-builder's
+ * `asarUnpack` so the file is reachable by `node` (asar contents aren't
+ * readable by raw fs).
+ */
+function getMcpBinPath(): string {
+  if (isDevelopment() || !app.isPackaged) {
+    return resolve(__dirname, '..', '..', 'packages', 'projects-mcp', 'dist', 'cli.js');
+  }
+  const appPath = app.getAppPath();
+  const unpacked = appPath.endsWith('.asar') ? `${appPath}.unpacked` : appPath;
+  return join(unpacked, 'packages', 'projects-mcp', 'dist', 'cli.js');
+}
 
-const DESIRED: ManagedServerEntry = {
-  type: 'streamable_http',
-  url: URL_TEMPLATE,
-  headers: { Authorization: TOKEN_HEADER },
-  _managed: MARKER,
-};
+function buildDesired(): ManagedServerEntry {
+  return {
+    type: 'stdio',
+    command: 'node',
+    args: [getMcpBinPath()],
+    _managed: MARKER,
+  };
+}
 
 /** Insert or refresh the `omni-projects` entry in mcp.json. */
 export function syncMcpConfig(): void {
@@ -64,17 +77,18 @@ export function syncMcpConfig(): void {
 
   // User claimed the entry — don't overwrite.
   if (existing && existing._managed !== MARKER) {
-return;
-}
+    return;
+  }
 
-  if (existing && JSON.stringify(existing) === JSON.stringify(DESIRED)) {
-return;
-}
+  const desired = buildDesired();
+  if (existing && JSON.stringify(existing) === JSON.stringify(desired)) {
+    return;
+  }
 
-  servers[ENTRY_NAME] = DESIRED;
+  servers[ENTRY_NAME] = desired;
   parsed.mcpServers = servers;
 
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(parsed, null, 2)  }\n`, 'utf-8');
+  writeFileSync(path, `${JSON.stringify(parsed, null, 2)}\n`, 'utf-8');
   console.log(`[mcp-config] wrote ${ENTRY_NAME} entry to ${path}`);
 }

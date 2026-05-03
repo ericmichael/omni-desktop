@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-import { commentId, columnId } from './ids.js';
+import { DEFAULT_COLUMNS as SHARED_DEFAULT_COLUMNS, defaultColumnId } from './defaults.js';
+import { commentId } from './ids.js';
 import type { ProjectsRepo } from './repo.js';
 import { toIso } from './timestamps.js';
 import { tx } from './tx.js';
@@ -122,14 +123,11 @@ interface JsonTask {
   lastUrls?: unknown;
 }
 
-const DEFAULT_COLUMNS: JsonColumn[] = [
-  { id: 'backlog', label: 'Backlog' },
-  { id: 'spec', label: 'Spec' },
-  { id: 'implementation', label: 'Implementation' },
-  { id: 'review', label: 'Review', gate: true },
-  { id: 'pr', label: 'PR' },
-  { id: 'completed', label: 'Completed' },
-];
+const DEFAULT_COLUMNS: JsonColumn[] = SHARED_DEFAULT_COLUMNS.map((c) => ({
+  id: c.logicalId,
+  label: c.label,
+  ...(c.gate ? { gate: true } : {}),
+}));
 
 function jsonStr(v: unknown): string | null {
   return v != null ? JSON.stringify(v) : null;
@@ -148,7 +146,9 @@ function isoOpt(epochMs: number | undefined): string | null {
 export function migrateFromJson(repo: ProjectsRepo, db: DatabaseSync, data: JsonStoreData): number {
   // Idempotency: skip if DB already has projects
   const existing = repo.listProjects();
-  if (existing.length > 0) return 0;
+  if (existing.length > 0) {
+return 0;
+}
 
   const projects = data.projects ?? [];
   const tickets = data.tickets ?? [];
@@ -157,12 +157,11 @@ export function migrateFromJson(repo: ProjectsRepo, db: DatabaseSync, data: Json
   const inboxItems = data.inboxItems ?? [];
   const tasks = data.tasks ?? [];
 
-  // Track column ID remaps: oldId → newId. Column IDs in the launcher's
-  // electron-store may collide across projects (e.g. every project has a
-  // column called "backlog" with id "backlog"). Since pipeline_columns.id
-  // is a global PRIMARY KEY, we generate fresh IDs for duplicates and remap
-  // ticket.column_id references accordingly.
-  const seenColumnIds = new Set<string>();
+  // Column IDs in the launcher's electron-store collide across projects
+  // (e.g. every project has a column called `backlog` with id `backlog`).
+  // SQLite's `pipeline_columns.id` is a global PRIMARY KEY, so we rewrite
+  // every column id as `${projectId}__${logicalId}` and remap the
+  // referenced ticket.column_id accordingly.
   const columnIdRemap = new Map<string, string>();
 
   tx(db, () => {
@@ -184,17 +183,10 @@ export function migrateFromJson(repo: ProjectsRepo, db: DatabaseSync, data: Json
       const columns = p.pipeline?.columns ?? DEFAULT_COLUMNS;
       for (let i = 0; i < columns.length; i++) {
         const col = columns[i]!;
-        let id = col.id;
-        if (seenColumnIds.has(id)) {
-          // Collision: generate a fresh ID and record the remap
-          // Key is scoped to (projectId, oldColumnId) so tickets can be remapped
-          const newId = columnId();
-          columnIdRemap.set(`${p.id}:${id}`, newId);
-          id = newId;
-        }
-        seenColumnIds.add(id);
+        const newId = defaultColumnId(p.id, col.id);
+        columnIdRemap.set(`${p.id}:${col.id}`, newId);
         repo.upsertColumn({
-          id,
+          id: newId,
           project_id: p.id,
           label: col.label,
           description: col.description ?? null,

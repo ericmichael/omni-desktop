@@ -44,6 +44,12 @@ export interface InboxManagerStore {
   setTickets(tickets: Ticket[]): void;
   getProjects(): Project[];
   setProjects(projects: Project[]): void;
+  /**
+   * Resolve the pipeline for a project. SQLite is the source of truth in
+   * production, but tests may pass a fake that reads from the project
+   * record directly.
+   */
+  getPipeline(projectId: ProjectId): Pipeline | null;
 }
 
 export interface InboxManagerDeps {
@@ -223,10 +229,12 @@ throw new InboxPromotionError(`Cannot reactivate promoted item ${id}`);
     }
 
     const pipeline: Pipeline =
-      project.pipeline ?? (project.source ? DEFAULT_PIPELINE : SIMPLE_PIPELINE);
+      this.deps.store.getPipeline(opts.projectId) ??
+      project.pipeline ??
+      (project.source ? DEFAULT_PIPELINE : SIMPLE_PIPELINE);
     const columnId =
       opts.columnId ??
-      pipeline.columns.find((c) => c.id === 'backlog')?.id ??
+      pipeline.columns.find((c) => c.id.endsWith('__backlog') || c.id === 'backlog')?.id ??
       pipeline.columns[0]?.id ??
       'backlog';
 

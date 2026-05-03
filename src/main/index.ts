@@ -3,6 +3,7 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 import { app, dialog, net, protocol, shell } from 'electron';
+import { migrateFromJson } from 'omni-projects-db';
 import { resolve } from 'path';
 import { assert } from 'tsafe';
 import { pathToFileURL } from 'url';
@@ -11,21 +12,19 @@ import { getArtifactsDir } from '@/lib/artifacts';
 import { createAppControlManager } from '@/main/app-control-manager';
 import { createBrowserManager } from '@/main/browser-manager';
 import { createConsoleManager } from '@/main/console-manager';
+import { rowToProject } from '@/main/db-store-bridge';
 import { createDownloadsManager } from '@/main/downloads-manager';
-import { createPermissionsManager } from '@/main/permissions-manager';
 import { createExtensionManager } from '@/main/extension-manager';
 import { MainProcessManager } from '@/main/main-process-manager';
-import { rowToProject } from '@/main/db-store-bridge';
 import { syncMcpConfig } from '@/main/mcp-config-manager';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
-import { ProjectMcpServer } from '@/main/project-mcp-server';
+import { createPermissionsManager } from '@/main/permissions-manager';
 import { registerPlatformIpc } from '@/main/platform-ipc';
 import { createPlatformClient } from '@/main/platform-mode';
 import { createProcessManager } from '@/main/process-manager';
-import { openProjectDb, closeProjectDb, getDb } from '@/main/project-db';
+import { closeProjectDb, getDb,openProjectDb } from '@/main/project-db';
 import { createProjectManager } from '@/main/project-manager';
 import { getStore } from '@/main/store';
-import { getDefaultPagesDir, migrateFromJson } from 'omni-projects-db';
 import {
   ensureDirectory,
   getDefaultWorkspaceDir,
@@ -115,11 +114,6 @@ try {
   console.error('[ProjectDb] Failed to migrate from electron-store:', err);
 }
 
-const projectMcp = new ProjectMcpServer(getDb(), repo, getDefaultPagesDir());
-projectMcp.start().catch((err) => {
-  console.error('[ProjectMcp] failed to start:', err);
-});
-
 try {
   syncMcpConfig();
 } catch (err) {
@@ -141,7 +135,9 @@ let browserManagerRef: ReturnType<typeof createBrowserManager>[0] | null = null;
 const [appControlManager, cleanupAppControl] = createAppControlManager({
   ipc: main.ipc,
   onBrowserPopup: (tabsetId, url, disposition) => {
-    if (!browserManagerRef) return;
+    if (!browserManagerRef) {
+return;
+}
     // `background-tab` maps to Cmd/Ctrl+click: open without stealing focus.
     // Everything else (`foreground-tab`, `new-window`, `default`) activates.
     const activate = disposition !== 'background-tab';
@@ -284,7 +280,6 @@ async function cleanup() {
     cleanupProcessManager(),
     cleanupProject(),
     cleanupExtensions(),
-    projectMcp.stop(),
     cleanupBrowser(),
     cleanupDownloads(),
     cleanupPermissions(),

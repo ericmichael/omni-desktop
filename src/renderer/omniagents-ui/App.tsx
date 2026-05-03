@@ -1,6 +1,7 @@
 import { useStore } from '@nanostores/react'
 import { AnimatePresence, motion } from 'framer-motion'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { waitFor } from 'xstate'
 
 import { persistedStoreApi } from '@/renderer/services/store'
 import { forwardEvent, registerColumnActor } from '@/renderer/services/supervisor-bridge'
@@ -264,7 +265,7 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
 
   // moved below handleSubmit
 
-  const handleSubmit = useCallback(async (text: string, files?: File[], supervisorPrompt?: string) => {
+  const handleSubmit = useCallback(async (text: string, files?: File[], runOverrides?: import('@/shared/types').RunOverrides) => {
     // Slash commands
     if (text.startsWith('/')) {
       const parts = text.trim().split(/\s+/)
@@ -374,16 +375,26 @@ param.filename = f.name
       const baseVariables: Record<string, unknown> | undefined = (variablesProp || workspaceVars)
         ? { ...variablesProp, ...workspaceVars }
         : undefined
-      // When main is driving autopilot, prepend the supervisor prompt to
-      // additional_instructions for this run only.
-      const existingInstructions = baseVariables?.additional_instructions
-      const variables: Record<string, unknown> | undefined = supervisorPrompt
+      // Merge per-dispatch overrides (from the orchestrator's bridge.run call)
+      // on top of the column's locally owned variables. The orchestrator owns
+      // autopilot mode and ships its run intent atomically with the dispatch,
+      // so we never derive that state by reading a separate store.
+      // additional_instructions is prepended (orchestrator framing first);
+      // safe_tool_overrides is replaced wholesale.
+      const variables: Record<string, unknown> | undefined = runOverrides
         ? {
             ...(baseVariables ?? {}),
-            additional_instructions:
-              typeof existingInstructions === 'string'
-                ? `${supervisorPrompt}\n\n${existingInstructions}`
-                : supervisorPrompt,
+            ...(runOverrides.additionalInstructions
+              ? {
+                  additional_instructions:
+                    typeof baseVariables?.additional_instructions === 'string'
+                      ? `${runOverrides.additionalInstructions}\n\n${baseVariables.additional_instructions}`
+                      : runOverrides.additionalInstructions,
+                }
+              : {}),
+            ...(runOverrides.safeToolOverrides
+              ? { safe_tool_overrides: runOverrides.safeToolOverrides }
+              : {}),
           }
         : baseVariables
       await client.startRun(text, sessionId, variables, content)
@@ -497,18 +508,32 @@ return
         runStartedWaiters.push(wake)
       })
 
+    // Gate any bridge-driven submit on the chat-session machine being in
+    // ready.idle — xstate silently drops SUBMIT in any other state, which
+    // would let `client.startRun` fire while the local UI never transitions
+    // to `thinking` (Stop button never shown). The machine reports its
+    // value as `{ ready: 'idle' }` once boot completes.
+    const awaitChatReady = (): Promise<void> =>
+      waitFor(actor, (s) => {
+        const v = s.value
+        return typeof v === 'object' && v !== null && 'ready' in v && (v as { ready?: unknown }).ready === 'idle'
+      }, { timeout: 30_000 }).then(() => undefined)
+
     const unregister = registerColumnActor({
       ticketId,
-      submit: async (prompt, supervisorPrompt) => {
-        // Same path as user submit. When `supervisorPrompt` is set (autopilot
-        // drive), prepend it to additional_instructions for this run only.
+      submit: async (prompt, runOverrides) => {
+        // Same handleSubmit path as user submits. The orchestrator's per-
+        // dispatch intent (autopilot framing, approval policy) rides on the
+        // `runOverrides` payload — no implicit signals, no store reads.
         const waiter = nextRunId()
-        await handleSubmitRef.current(prompt, undefined, supervisorPrompt)
+        await awaitChatReady()
+        await handleSubmitRef.current(prompt, undefined, runOverrides)
         const runId = await waiter
         return { runId }
       },
       send: async (message) => {
         const waiter = nextRunId()
+        await awaitChatReady()
         await handleSubmitRef.current(message, undefined)
         await waiter
       },

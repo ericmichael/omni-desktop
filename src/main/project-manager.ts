@@ -4,18 +4,19 @@ import type Store from 'electron-store';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import fs from 'fs/promises';
 import { nanoid } from 'nanoid';
+import type { ProjectsRepo, TicketRemap } from 'omni-projects-db';
+import { commentId } from 'omni-projects-db';
 import path from 'path';
 import { promisify } from 'util';
 
-import type { ProjectsRepo } from 'omni-projects-db';
-
 import { getArtifactsDir } from '@/lib/artifacts';
 import { listArtifactEntries, readArtifactFile, resolveArtifactPath } from '@/lib/artifacts-fs';
-import { getGitFilesChanged, resolveWorkspaceMergeBase, resolveWorktreeMergeBase } from '@/lib/git-files-changed';
+import { getGitFilesChanged, resolveTicketDiffBase } from '@/lib/git-files-changed';
 import { INBOX_SWEEP_INTERVAL_MS } from '@/lib/inbox-expiry';
 import { checkMerge, mergeBranch } from '@/lib/pr-merge';
 import type { IWorkflowLoader, ProjectManagerDeps } from '@/lib/project-manager-deps';
 import { runMigrations as runSchemaMigrations } from '@/lib/project-migrations';
+import { resolvePipelineDefs } from '@/lib/resolve-pipeline-defs';
 import { type HistoryRow, parseSessionHistoryRows } from '@/lib/session-history';
 import { DbChangeWatcher } from '@/main/db-change-watcher';
 import {
@@ -183,12 +184,10 @@ export class ProjectManager {
               workflow.config.supervisor ? ' (has supervisor config)' : ''
             }${workflow.config.hooks ? ' (has hooks)' : ''}`
           );
-          // Push updated pipeline to the renderer so the UI reflects FLEET.md changes
-          const pipeline = this.getPipeline(projectId);
-          this.sendToWindow('project:pipeline', projectId, pipeline);
-
-          // Migrate tickets whose columnId no longer exists in the new pipeline
-          this.migrateOrphanedTickets(projectId, pipeline);
+          // SQLite is the source of truth — re-sync pipeline_columns from
+          // the new FLEET.md and remap any orphaned tickets. The store
+          // snapshot broadcast carries the new pipeline to the renderer.
+          this.syncPipelineForProject(projectId);
         },
       });
     const pageStore: PageManagerStore = this.repo
@@ -224,6 +223,7 @@ export class ProjectManager {
           setTickets: (tickets) => this.setTickets(tickets),
           getProjects: () => this.getProjects(),
           setProjects: (projects) => this.setProjects(projects),
+          getPipeline: (projectId) => this.getPipeline(projectId),
         }
       : {
           getInboxItems: () => (this.store.get('inboxItems') ?? []) as InboxItem[],
@@ -235,6 +235,7 @@ export class ProjectManager {
           setTickets: (tickets) => this.setTickets(tickets),
           getProjects: () => this.getProjects(),
           setProjects: (projects) => this.setProjects(projects),
+          getPipeline: (projectId) => this.getPipeline(projectId),
         };
     this.inbox = new InboxManager({
       store: inboxStore,
@@ -385,13 +386,20 @@ export class ProjectManager {
     this.pages.seedRootPage(project);
     // Create project directory and context.md
     void this.ensureProjectDir(project);
+    // Seed pipeline_columns immediately with the source-appropriate defaults
+    // so tickets created before FLEET.md loads have a valid FK target.
+    this.syncPipelineForProject(project.id);
     // Eagerly load FLEET.md so the pipeline is ready when the UI fetches it.
     // Personal / context-only projects (no source) have no FLEET.md and no
-    // workflow to load — they use SIMPLE_PIPELINE and run no hooks. See getPipeline().
+    // workflow to load — they use SIMPLE_COLUMNS and run no hooks.
     if (project.source?.kind === 'local') {
-      void this.workflowLoader.load(project.id, project.source.workspaceDir);
+      void this.workflowLoader
+        .load(project.id, project.source.workspaceDir)
+        .then(() => this.syncPipelineForProject(project.id));
     } else if (project.source?.kind === 'git-remote') {
-      void this.workflowLoader.loadFromRemote(project.id, project.source.repoUrl, project.source.defaultBranch);
+      void this.workflowLoader
+        .loadFromRemote(project.id, project.source.repoUrl, project.source.defaultBranch)
+        .then(() => this.syncPipelineForProject(project.id));
     }
     return project;
   };
@@ -552,19 +560,105 @@ export class ProjectManager {
     } else if (project.source?.kind === 'git-remote') {
       await this.workflowLoader.loadFromRemote(projectId, project.source?.repoUrl, project.source?.defaultBranch);
     }
-    // Migrate any tickets with stale columnIds after first load
-    const pipeline = this.getPipeline(projectId);
-    this.migrateOrphanedTickets(projectId, pipeline);
+    this.syncPipelineForProject(projectId);
+  };
+
+  /**
+   * Resolve the pipeline column defs for a project (FLEET.md → source-based
+   * defaults) and write them to SQLite via `repo.syncColumnsForProject`. Adds
+   * a system-style ticket comment when a gate column is removed and a ticket
+   * is remapped to a non-gate column. No-op when running without a SQLite
+   * repo (legacy electron-store mode used only by some tests).
+   */
+  private syncPipelineForProject = (projectId: ProjectId): void => {
+    if (!this.repo) {
+      return;
+    }
+
+    const project = this.getProjects().find((p) => p.id === projectId);
+    if (!project) {
+      return;
+    }
+
+    const hasExisting = this.repo.listColumns(projectId).length > 0;
+    const defs = resolvePipelineDefs({
+      hasSource: !!project.source,
+      hasExisting,
+      workflow: this.workflowLoader.getConfig(projectId),
+    });
+    if (!defs) {
+      return;
+    }
+
+    let result;
+    try {
+      result = this.repo.syncColumnsForProject(projectId, defs);
+    } catch (err) {
+      console.warn(`[ProjectManager] syncColumnsForProject failed for ${projectId}:`, err);
+      return;
+    }
+
+    for (const remap of result.remappedTickets) {
+      if (remap.gateLost) {
+        this.appendGateLostComment(projectId, remap);
+      }
+    }
+
+    if (result.inserted.length || result.removed.length || result.remappedTickets.length) {
+      this.noteLocalWriteAndBroadcast();
+    }
+  };
+
+  /**
+   * Append a `[Pipeline change]` comment to a ticket whose gate column was
+   * removed. The comment is authored as `agent` because the ticket_comments
+   * CHECK constraint only permits `agent`/`human`; the prefix makes the
+   * provenance obvious in the discussion view and in `get_ticket_comments`
+   * output.
+   */
+  private appendGateLostComment = (projectId: ProjectId, remap: TicketRemap): void => {
+    if (!this.repo) {
+return;
+}
+    const content = `[Pipeline change] This ticket was in the gate column "${remap.fromLabel}", which was removed from FLEET.md. It has been remapped to "${remap.toLabel}". Please re-evaluate whether human review is still needed.`;
+    try {
+      this.repo.upsertComment({
+        id: commentId(),
+        ticket_id: remap.ticketId,
+        author: 'agent',
+        content,
+        created_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.warn(`[ProjectManager] failed to append gate-lost comment to ${remap.ticketId} in ${projectId}:`, err);
+    }
   };
 
   getPipeline = (projectId: ProjectId): Pipeline => {
-    // Priority: FLEET.md pipeline → project.pipeline → DEFAULT_PIPELINE
+    // SQLite pipeline_columns is the source of truth — `syncPipelineForProject`
+    // keeps it in sync with FLEET.md or the source-based defaults.
+    if (this.repo) {
+      const rows = this.repo.listColumns(projectId);
+      if (rows.length > 0) {
+        return {
+          columns: rows.map((r) => ({
+            id: r.id as ColumnId,
+            label: r.label,
+            ...(r.description ? { description: r.description } : {}),
+            ...(r.gate ? { gate: true } : {}),
+          })),
+        };
+      }
+    }
+
+    // Legacy electron-store path / fallback before SQLite sync runs.
     const workflowPipeline = this.workflowLoader.getConfig(projectId).pipeline;
     if (workflowPipeline && workflowPipeline.columns.length > 0) {
       return {
         columns: workflowPipeline.columns.map((col) => ({
           id: col.id,
           label: col.label,
+          ...(col.gate ? { gate: true } : {}),
         })),
       };
     }
@@ -572,7 +666,6 @@ export class ProjectManager {
     if (project?.pipeline) {
       return project.pipeline;
     }
-    // Projects with a linked repo get the full dev pipeline; others get the simple one
     return project?.source ? DEFAULT_PIPELINE : SIMPLE_PIPELINE;
   };
 
@@ -601,30 +694,6 @@ export class ProjectManager {
   /** Check if a column is the first (backlog) column for a project. */
   private isFirstColumn = (projectId: ProjectId, columnId: ColumnId): boolean => {
     return columnId === this.getFirstColumnId(projectId);
-  };
-
-  /** Move tickets whose columnId no longer exists in the pipeline to the first column. */
-  private migrateOrphanedTickets = (projectId: ProjectId, pipeline: Pipeline): void => {
-    const columnIds = new Set(pipeline.columns.map((c) => c.id));
-    const firstColumnId = pipeline.columns[0]?.id;
-    if (!firstColumnId) {
-      return;
-    }
-
-    const tickets = this.getTickets();
-    let changed = false;
-    for (const ticket of tickets) {
-      if (ticket.projectId === projectId && ticket.columnId && !columnIds.has(ticket.columnId)) {
-        console.log(
-          `[ProjectManager] Migrating ticket ${ticket.id} from orphaned column "${ticket.columnId}" to "${firstColumnId}"`
-        );
-        ticket.columnId = firstColumnId;
-        changed = true;
-      }
-    }
-    if (changed) {
-      this.setTickets(tickets);
-    }
   };
 
   // #endregion
@@ -825,27 +894,39 @@ export class ProjectManager {
       task = storedTasks.find((t: Task) => t.ticketId === ticketId);
     }
 
-    // Determine the git directory and merge base reference.
-    // Case 1: task has a worktree → diff worktree against its base branch
-    // Case 2: no worktree (supervisor mode) → diff project workspaceDir against upstream tracking branch
+    // Determine the gitDir: the ticket's worktree if it has one, else the
+    // project workspace (which is bind-mounted into the supervisor container
+    // in direct mode, so the agent's commits land here).
     const worktreePath = ticket.worktreePath ?? task?.worktreePath;
-    const worktreeBranch = this.milestones.resolveTicketBranch(ticket) ?? task?.branch;
-
     let gitDir: string;
-    let mergeBase: string;
-    if (worktreePath && worktreeBranch) {
+    if (worktreePath) {
       gitDir = worktreePath;
-      mergeBase = await resolveWorktreeMergeBase(gitDir, worktreeBranch);
     } else {
-      // Supervisor mode: no worktree, diff the project workspace against its upstream
       const project = this.getProjects().find((p) => p.id === ticket.projectId);
       if (!project || project.source?.kind !== 'local') {
         return empty; // git-remote diffs happen inside the container, not locally
       }
-      gitDir = project.source?.workspaceDir;
-      mergeBase = await resolveWorkspaceMergeBase(gitDir);
+      gitDir = project.source.workspaceDir;
     }
 
+    // Resolve the base branch the ticket's work would land in:
+    //  - Worktree mode: the worktree was branched from `effectiveBranch`, so
+    //    that's the base — `<effectiveBranch>..HEAD` is the ticket's PR diff.
+    //  - Direct mode: when the ticket has its own branch off a milestone
+    //    branch, the milestone branch is the base (mirrors `resolvePrBranches`).
+    //    Otherwise the work goes on the milestone branch (or trunk) directly,
+    //    so we leave preferredBase undefined and let the helper pick trunk.
+    const milestoneBranch = ticket.milestoneId
+      ? this.milestones.getById(ticket.milestoneId)?.branch
+      : undefined;
+    let preferredBase: string | undefined;
+    if (worktreePath) {
+      preferredBase = this.milestones.resolveTicketBranch(ticket) ?? task?.branch;
+    } else if (ticket.branch && milestoneBranch && ticket.branch !== milestoneBranch) {
+      preferredBase = milestoneBranch;
+    }
+
+    const mergeBase = await resolveTicketDiffBase(gitDir, preferredBase);
     return getGitFilesChanged({ gitDir, mergeBase });
   };
 

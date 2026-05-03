@@ -82,9 +82,9 @@ const useStyles = makeStyles({
     boxShadow: `0 1px 0 rgba(255,255,255,0.04) inset`,
   },
   surfaceCardGlass: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 18%, transparent)`,
-    backdropFilter: 'blur(36px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+    backgroundColor: tokens.colorNeutralBackground1,
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
     boxShadow: `0 1px 0 rgba(255,255,255,0.10) inset, 0 -1px 0 rgba(255,255,255,0.04) inset`,
   },
   surfaceInner: { display: 'flex', height: '100%', flexDirection: 'column', backgroundColor: 'inherit' },
@@ -102,10 +102,9 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalM,
   },
   surfaceHeaderGlass: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground2} 14%, transparent)`,
-    backdropFilter: 'blur(24px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(24px) saturate(160%)',
-    borderBottomColor: 'rgba(255, 255, 255, 0.14)',
+    backgroundColor: tokens.colorNeutralBackground2,
+    backdropFilter: 'var(--glass-blur-light)',
+    WebkitBackdropFilter: 'var(--glass-blur-light)',
   },
   surfaceHeaderLeft: {
     display: 'flex',
@@ -183,7 +182,7 @@ const useStyles = makeStyles({
   },
   surfaceBody: { minHeight: 0, flex: '1 1 0', position: 'relative', display: 'flex', flexDirection: 'column', backgroundColor: tokens.colorNeutralBackground1 },
   surfaceBodyGlass: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 10%, transparent)`,
+    backgroundColor: tokens.colorNeutralBackground1,
   },
   surfaceContentFill: { flex: '1 1 0', minHeight: 0, minWidth: 0 },
   browserUrlWrap: { minWidth: '240px', flex: '1 1 360px' },
@@ -209,22 +208,14 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground4,
     fontSize: tokens.fontSizeBase300,
   },
+  // Inner Tailwind/shadcn surface colors come from --color-bgCard, --color-background,
+  // --color-secondary, etc. set as glass scrim on the deck-bg root in MainContent.
+  // This class only adds the brand-tinted treatment for primary CTAs.
   glassChatSurfaces: {
-    '& .bg-surface, & .bg-card, & .bg-background, & .bg-bgColumn, & .bg-bgCard, & .bg-bgCardAlt, & .bg-bgMain': {
-      backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
-      backdropFilter: 'blur(28px) saturate(160%)',
-      WebkitBackdropFilter: 'blur(28px) saturate(160%)',
-    },
-    '& .bg-secondary': {
-      backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
-      backdropFilter: 'blur(20px) saturate(160%)',
-      WebkitBackdropFilter: 'blur(20px) saturate(160%)',
-      boxShadow: `0 1px 0 0 rgba(255,255,255,0.12) inset, 0 2px 8px -2px rgba(0,0,0,0.15)`,
-    },
     '& .bg-primary': {
       backgroundColor: `color-mix(in srgb, ${tokens.colorBrandBackground} 70%, transparent)`,
-      backdropFilter: 'blur(20px) saturate(160%)',
-      WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+      backdropFilter: 'var(--glass-blur-light)',
+      WebkitBackdropFilter: 'var(--glass-blur-light)',
       boxShadow: `0 1px 0 0 rgba(255,255,255,0.14) inset, 0 2px 8px -2px rgba(0,0,0,0.15)`,
     },
     '& .chat-input-footer': {

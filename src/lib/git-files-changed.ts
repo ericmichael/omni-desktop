@@ -389,3 +389,29 @@ export async function resolveWorktreeMergeBase(gitDir: string, branch: string): 
     return branch;
   }
 }
+
+async function refExists(gitDir: string, ref: string): Promise<boolean> {
+  try {
+    await execFileAsync('git', ['-C', gitDir, 'rev-parse', '--verify', '--quiet', ref], { timeout: 5_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve the merge base for a ticket's "Files Changed" diff. Tries the
+ * caller's preferred branch first (typically the milestone branch the ticket
+ * branched from, or the worktree's base), then conventional trunk names,
+ * then the workspace's upstream tracking branch as a final fallback. The
+ * first candidate that actually exists in the repo is used.
+ */
+export async function resolveTicketDiffBase(gitDir: string, preferredBranch?: string): Promise<string> {
+  const candidates = [preferredBranch, 'main', 'master'].filter((c): c is string => Boolean(c));
+  for (const ref of candidates) {
+    if (await refExists(gitDir, ref)) {
+      return resolveWorktreeMergeBase(gitDir, ref);
+    }
+  }
+  return resolveWorkspaceMergeBase(gitDir);
+}

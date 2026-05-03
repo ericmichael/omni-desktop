@@ -23,7 +23,6 @@ const useStyles = makeStyles({
   },
   rootGlass: {
     backgroundColor: 'transparent',
-    borderBottomColor: 'rgba(255, 255, 255, 0.14)',
   },
   chip: {
     display: 'inline-flex',

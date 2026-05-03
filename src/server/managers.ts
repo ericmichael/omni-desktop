@@ -1,4 +1,5 @@
 import { readFileSync } from 'fs';
+import { migrateFromJson } from 'omni-projects-db';
 import { join } from 'path';
 
 import { createBrowserManager } from '@/main/browser-manager';
@@ -12,10 +13,8 @@ import { createPlatformClient, isEnterpriseBuild, mapSandboxProfiles, PLATFORM_U
 import { createProcessManager } from '@/main/process-manager';
 import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
 import { createProjectManager } from '@/main/project-manager';
-import { ProjectMcpServer } from '@/main/project-mcp-server';
 import { getOmniConfigDir } from '@/main/util';
 import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
-import { getDefaultPagesDir, migrateFromJson } from 'omni-projects-db';
 import { ServerIpcAdapter } from '@/server/ipc-adapter';
 import type { ServerStore } from '@/server/store';
 import type { WsHandler } from '@/server/ws-handler';
@@ -47,7 +46,8 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
   const sendToAll: typeof wsHandler.sendToAll = wsHandler.sendToAll.bind(wsHandler);
 
   // Open shared SQLite DB for project data (mirrors Electron mode in src/main/index.ts).
-  // Both this server and the MCP server read/write the same projects.db via WAL.
+  // Both this server and any agent-spawned MCP stdio subprocesses read/write the same
+  // projects.db via WAL.
   const { repo } = openProjectDb();
   try {
     const migrated = migrateFromJson(repo, getDb(), {
@@ -64,11 +64,6 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
   } catch (err) {
     console.error('[ProjectDb] Failed to migrate from server-store:', err);
   }
-
-  const projectMcp = new ProjectMcpServer(getDb(), repo, getDefaultPagesDir());
-  projectMcp.start().catch((err) => {
-    console.error('[ProjectMcp] failed to start:', err);
-  });
 
   try {
     syncMcpConfig();
@@ -166,7 +161,9 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
     const projects = (store.get('projects') ?? []) as Project[];
     const backend = store.get('sandboxBackend') ?? 'none';
     // Only sync when platform (cloud) mode is active
-    if (backend !== 'platform') return;
+    if (backend !== 'platform') {
+return;
+}
 
     for (const project of projects) {
       if (project.source?.kind === 'local' && project.source.workspaceDir) {
@@ -203,7 +200,9 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
   // Store handlers — snapshot-aware: project keys read from SQLite, writes rejected.
   ipc.handle('store:get-key', (_, key) => {
     const k = key as keyof import('@/shared/types').StoreData;
-    if (PROJECT_KEYS.has(k)) return getStoreSnapshot()[k];
+    if (PROJECT_KEYS.has(k)) {
+return getStoreSnapshot()[k];
+}
     return store.get(k);
   });
   ipc.handle('store:set-key', (_, key, value) => {
@@ -383,7 +382,6 @@ return [];
       cleanupOmniInstall(),
       cleanupProcessManager(),
       cleanupExtensions(),
-      projectMcp.stop(),
       cleanupBrowser(),
     ]);
     closeProjectDb();

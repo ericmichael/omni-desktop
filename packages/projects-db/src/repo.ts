@@ -1,16 +1,49 @@
 import type { DatabaseSync } from 'node:sqlite';
 
+import { defaultColumnId } from './defaults.js';
 import { tx } from './tx.js';
 import type {
-  ProjectRow,
   ColumnRow,
-  TicketRow,
   CommentRow,
+  InboxRow,
   MilestoneRow,
   PageRow,
-  InboxRow,
+  ProjectRow,
   TaskRow,
+  TicketRow,
 } from './types.js';
+
+/**
+ * Pipeline column definition (FLEET.md or shared defaults). The `logicalId`
+ * is the user-facing id; the SQLite primary key is derived from
+ * `${projectId}__${logicalId}`.
+ */
+export interface ColumnSyncInput {
+  logicalId: string;
+  label: string;
+  description?: string | null;
+  gate?: boolean;
+}
+
+/**
+ * Per-ticket remap record returned by `syncColumnsForProject`. The launcher
+ * uses `gateLost` to decide whether to attach a "needs human review" comment
+ * — a ticket sitting in a gate column got remapped to a non-gate column.
+ */
+export interface TicketRemap {
+  ticketId: string;
+  fromColumnId: string;
+  toColumnId: string;
+  fromLabel: string;
+  toLabel: string;
+  gateLost: boolean;
+}
+
+export interface ColumnSyncResult {
+  inserted: string[];
+  removed: string[];
+  remappedTickets: TicketRemap[];
+}
 
 /**
  * Repository wrapping pre-compiled prepared statements for all project data CRUD.
@@ -104,6 +137,133 @@ export class ProjectsRepo {
       }
       this.bumpChangeSeq();
     });
+  }
+
+  /**
+   * Sync the pipeline columns for a project. Idempotent.
+   *
+   * Remap policy for tickets whose current column is being removed:
+   *   1. Same SQLite id in the new set → no-op (label/sort/gate may change).
+   *   2. Same label (case-insensitive) → rebind to the new id.
+   *   3. Bucket fallback:
+   *        - was first column → new first column
+   *        - was last column  → new last column
+   *        - was a gate       → new first gate, else new first middle column
+   *        - was middle       → new first middle column
+   *
+   * `gateLost = true` when the old column was a gate and the new target is
+   * not — caller should surface the change (e.g. ticket comment).
+   *
+   * Order under FK enforcement: upsert new columns → UPDATE tickets →
+   * DELETE removed columns. All within a single transaction.
+   */
+  syncColumnsForProject(projectId: string, defs: ColumnSyncInput[]): ColumnSyncResult {
+    if (defs.length === 0) {
+      throw new Error('syncColumnsForProject: defs must not be empty');
+    }
+
+    const newRows: ColumnRow[] = defs.map((d, i) => ({
+      id: defaultColumnId(projectId, d.logicalId),
+      project_id: projectId,
+      label: d.label,
+      description: d.description ?? null,
+      sort_order: i,
+      gate: d.gate ? 1 : 0,
+    }));
+
+    const result: ColumnSyncResult = { inserted: [], removed: [], remappedTickets: [] };
+
+    tx(this.db, () => {
+      const oldRows = this.listColumns(projectId);
+      const oldById = new Map(oldRows.map((r) => [r.id, r]));
+      const newById = new Map(newRows.map((r) => [r.id, r]));
+      const newByLabelLower = new Map(newRows.map((r) => [r.label.toLowerCase(), r]));
+
+      // Bucket targets in the new pipeline
+      const firstNew = newRows[0]!;
+      const lastNew = newRows[newRows.length - 1]!;
+      const firstGateNew = newRows.find((r) => r.gate === 1);
+      const middleNew = newRows.find((r, i) => i > 0 && i < newRows.length - 1) ?? firstNew;
+
+      // 1a. Free up labels held by columns about to be removed. The
+      // schema enforces UNIQUE(project_id, label) so a new column reusing
+      // an old label would otherwise trip on upsert before the old row is
+      // deleted. Rename to a guaranteed-unique placeholder; the row gets
+      // dropped later in this same tx.
+      for (const oldRow of oldRows) {
+        if (!newById.has(oldRow.id)) {
+          this.stmts.updateColumnLabel.run(`__obsolete__${oldRow.id}`, oldRow.id);
+        }
+      }
+
+      // 1b. Upsert new columns (FK targets need to exist before remap)
+      for (const row of newRows) {
+        if (!oldById.has(row.id)) {
+          result.inserted.push(row.id);
+        }
+        this.stmts.upsertColumn.run(
+          row.id, row.project_id, row.label, row.description, row.sort_order, row.gate,
+        );
+      }
+
+      // 2. Remap tickets whose column was removed
+      const tickets = this.listTicketsByProject(projectId);
+      const oldFirst = oldRows[0];
+      const oldLast = oldRows[oldRows.length - 1];
+
+      for (const t of tickets) {
+        if (newById.has(t.column_id)) {
+          continue; // already valid
+        }
+
+        const oldCol = oldById.get(t.column_id);
+        let target: ColumnRow;
+
+        if (oldCol) {
+          // Try label match first
+          const byLabel = newByLabelLower.get(oldCol.label.toLowerCase());
+          if (byLabel) {
+            target = byLabel;
+          } else if (oldCol.id === oldFirst?.id) {
+            target = firstNew;
+          } else if (oldCol.id === oldLast?.id) {
+            target = lastNew;
+          } else if (oldCol.gate === 1) {
+            target = firstGateNew ?? middleNew;
+          } else {
+            target = middleNew;
+          }
+        } else {
+          // Old column wasn't even in pipeline_columns — orphan from earlier
+          // launcher versions. Drop it in the first column.
+          target = firstNew;
+        }
+
+        const gateLost = oldCol?.gate === 1 && target.gate !== 1;
+
+        this.stmts.updateTicketColumn.run(target.id, t.id);
+        result.remappedTickets.push({
+          ticketId: t.id,
+          fromColumnId: t.column_id,
+          toColumnId: target.id,
+          fromLabel: oldCol?.label ?? t.column_id,
+          toLabel: target.label,
+          gateLost,
+        });
+      }
+
+      // 3. Delete columns no longer in the new set (FK now safe)
+      for (const oldRow of oldRows) {
+        if (!newById.has(oldRow.id)) {
+          this.stmts.deleteColumnById.run(oldRow.id);
+          result.removed.push(oldRow.id);
+        }
+      }
+
+      this.bumpChangeSeq();
+    });
+
+    return result;
   }
 
   // ---- Tickets ----
@@ -388,6 +548,12 @@ function prepareStatements(db: DatabaseSync) {
         sort_order = excluded.sort_order, gate = excluded.gate
     `),
     deleteColumnsForProject: db.prepare('DELETE FROM pipeline_columns WHERE project_id = ?'),
+    deleteColumnById: db.prepare('DELETE FROM pipeline_columns WHERE id = ?'),
+    updateColumnLabel: db.prepare('UPDATE pipeline_columns SET label = ? WHERE id = ?'),
+    updateTicketColumn: db.prepare(`
+      UPDATE tickets SET column_id = ?, column_changed_at = datetime('now'), updated_at = datetime('now')
+      WHERE id = ?
+    `),
 
     // Tickets
     listAllTickets: db.prepare('SELECT * FROM tickets ORDER BY created_at'),

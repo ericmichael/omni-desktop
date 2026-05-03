@@ -131,6 +131,7 @@ const useStyles = makeStyles({
     opacity: 0,
     transitionProperty: 'opacity',
     transitionDuration: tokens.durationFaster,
+    '@media (hover: none)': { opacity: 1 },
   },
   sessionActionBtnDisabled: {
     cursor: 'not-allowed',
@@ -160,8 +161,10 @@ const useStyles = makeStyles({
   },
   ticketBanner: {
     display: 'flex',
+    flexWrap: 'wrap',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    columnGap: tokens.spacingHorizontalS,
+    rowGap: '2px',
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
     paddingTop: '2px',
@@ -169,26 +172,27 @@ const useStyles = makeStyles({
     backgroundColor: 'transparent',
   },
   ticketTitle: {
+    flex: '1 1 100%',
+    minWidth: 0,
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+    '@media (min-width: 640px)': { flex: '1 1 0' },
   },
   ticketBadges: {
-    display: 'none',
+    display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     flexShrink: 0,
-    '@media (min-width: 640px)': { display: 'flex' },
   },
   ticketActions: {
-    display: 'none',
+    display: 'flex',
     alignItems: 'center',
     gap: '6px',
     flexShrink: 0,
-    marginLeft: tokens.spacingHorizontalS,
-    '@media (min-width: 640px)': { display: 'flex' },
+    marginLeft: 'auto',
   },
   deckColumn: {
     display: 'grid',
@@ -243,42 +247,40 @@ const useStyles = makeStyles({
   glassTicketBanner: {
     backgroundColor: 'transparent',
   },
+  // Glass surface colors come from --colorNeutralBackground* / --colorNeutralStroke1
+  // pushed at the deck-bg root in MainContent. These classes only opt in to the
+  // blur layer and any unique embellishments (insets / shadows / shapes).
   glassFocusSidebar: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
-    backdropFilter: 'blur(36px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
-    borderRightColor: 'rgba(255, 255, 255, 0.14)',
+    backgroundColor: tokens.colorNeutralBackground1,
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
   },
-  glassFocusSidebarHeader: {
-    borderBottomColor: 'rgba(255, 255, 255, 0.14)',
-  },
+  glassFocusSidebarHeader: {},
   glassMobileTabBar: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
-    backdropFilter: 'blur(36px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
-    borderBottomColor: 'rgba(255, 255, 255, 0.14)',
+    backgroundColor: tokens.colorNeutralBackground1,
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
   },
   glassSessionPane: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
-    backdropFilter: 'blur(36px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+    backgroundColor: tokens.colorNeutralBackground1,
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
   },
   glassMobileTabChipInactive: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 18%, transparent)`,
-    backdropFilter: 'blur(20px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+    backgroundColor: tokens.colorNeutralBackground3,
+    backdropFilter: 'var(--glass-blur-light)',
+    WebkitBackdropFilter: 'var(--glass-blur-light)',
   },
   glassMobileTabChipActive: {
     backgroundColor: `color-mix(in srgb, ${tokens.colorBrandBackground} 60%, transparent)`,
-    backdropFilter: 'blur(20px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+    backdropFilter: 'var(--glass-blur-light)',
+    WebkitBackdropFilter: 'var(--glass-blur-light)',
   },
   glassCard: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 12%, transparent)`,
-    backdropFilter: 'blur(36px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+    backgroundColor: tokens.colorNeutralBackground3,
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
     borderRadius: '28px',
-    ...shorthands.borderColor(`color-mix(in srgb, white 12%, transparent)`),
     boxShadow: `0 1px 0 0 rgba(255, 255, 255, 0.22) inset, 0 0 0 1px rgba(255, 255, 255, 0.06) inset, 0 30px 80px -24px rgba(0, 0, 0, 0.45), 0 12px 32px -12px rgba(0, 0, 0, 0.3)`,
   },
   deckColumnDragging: { opacity: 0.7 },
@@ -637,9 +639,9 @@ const useStyles = makeStyles({
   },
   launcherIconDiskGlass: {
     backgroundImage: 'none',
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
-    backdropFilter: 'blur(24px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(24px) saturate(160%)',
+    backgroundColor: tokens.colorNeutralBackground3,
+    backdropFilter: 'var(--glass-blur-light)',
+    WebkitBackdropFilter: 'var(--glass-blur-light)',
     boxShadow: `inset 0 1px 0 0 rgba(255, 255, 255, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.10), 0 10px 24px -10px rgba(0, 0, 0, 0.45)`,
   },
   launcherItemLabel: {
@@ -860,15 +862,15 @@ const CodeSessionHeader = memo(
         </div>
         {ticketTitle && (
           <div className={mergeClasses(styles.ticketBanner, isGlass && styles.glassTicketBanner)}>
-            <div className={mergeClasses(styles.flexItemsCenter, styles.gap2, styles.minW0)}>
-              <span className={styles.ticketTitle} title={ticketTitle}>
-                {ticketTitle}
-              </span>
+            <span className={styles.ticketTitle} title={ticketTitle}>
+              {ticketTitle}
+            </span>
+            {(ticketColumnBadge || ticketMetaBadge) && (
               <span className={styles.ticketBadges}>
                 {ticketColumnBadge}
                 {ticketMetaBadge}
               </span>
-            </div>
+            )}
             {ticketActions && <div className={styles.ticketActions}>{ticketActions}</div>}
           </div>
         )}
@@ -1892,6 +1894,9 @@ export const CodeDeck = memo(() => {
   const getColumnWidth = useCallback(
     (tabId: CodeTabId) => {
       if (expandedTabIds.has(tabId)) {
+        if (viewportWidth <= SNAP_SCROLL_WIDTH) {
+          return viewportWidth;
+        }
         return Math.min(EXPANDED_COLUMN_WIDTH, Math.round(viewportWidth * 0.92));
       }
       if (viewportWidth <= SNAP_SCROLL_WIDTH) {

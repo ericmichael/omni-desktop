@@ -16,8 +16,8 @@ function getProjectSlug(repo: ProjectsRepo, projectId: string): string | null {
 export function registerPageTools(server: McpServer, db: DatabaseSync, repo: ProjectsRepo, pagesDir: string): void {
   server.tool(
     'list_pages',
-    'List all pages in a project as a flat list with parent/child relationships.',
-    { project_id: z.string().describe('The project ID to list pages for.') },
+    'List omni-projects documentation pages (markdown notes/specs/plans tied to a project) as a flat list with parent/child relationships. NOT for filesystem files — use list_directory / glob_files / grep_files for those.',
+    { project_id: z.string().describe('The omni-projects project ID (proj_*). NOT a filesystem path.') },
     async ({ project_id }) => {
       const exists = repo.getProject(project_id);
       if (!exists) return err(`Project not found: ${project_id}`);
@@ -43,9 +43,19 @@ export function registerPageTools(server: McpServer, db: DatabaseSync, repo: Pro
 
   server.tool(
     'read_page',
-    "Read a page's markdown content and metadata.",
-    { page_id: z.string().describe('The page ID to read.') },
+    "Read an omni-projects documentation page (markdown note/spec/plan tied to a project) by its page_id (pg_*). NOT for filesystem files — use read_file with a path like AGENTS.md or src/foo.py for workspace source.",
+    { page_id: z.string().describe('The omni-projects page ID (pg_*), as returned by list_pages or create_page. NOT a filesystem path.') },
     async ({ page_id }) => {
+      // Path-shaped inputs (start with / or contain a /) are almost
+      // always agents reaching for the wrong tool — surface the right
+      // one in the error rather than a bare "not found".
+      if (page_id.startsWith('/') || page_id.includes('/')) {
+        return err(
+          `Page not found: ${page_id}. This looks like a filesystem path. ` +
+            `read_page reads omni-projects documentation pages by ID (pg_*), ` +
+            `not workspace files. Use read_file for source files.`
+        );
+      }
       const page = repo.getPage(page_id);
       if (!page) return err(`Page not found: ${page_id}`);
 
@@ -67,7 +77,7 @@ export function registerPageTools(server: McpServer, db: DatabaseSync, repo: Pro
 
   server.tool(
     'create_page',
-    'Create a new page in a project. Pages are markdown documents organized in a tree.',
+    'Create a new omni-projects documentation page in a project (markdown note/spec/plan, organized in a tree alongside the project root). NOT for filesystem files — use write_file to create source files in the workspace.',
     {
       project_id: z.string().describe('The project to create the page in.'),
       title: z.string().describe('Page title.'),
@@ -96,7 +106,7 @@ export function registerPageTools(server: McpServer, db: DatabaseSync, repo: Pro
 
   server.tool(
     'update_page',
-    "Update a page's title, content, icon, or structured properties.",
+    "Update an omni-projects documentation page's title, content, icon, or structured properties. NOT for filesystem files — use write_file or apply_patch on workspace source.",
     {
       page_id: z.string().describe('The page ID to update.'),
       title: z.string().optional().describe('New title.'),

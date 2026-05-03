@@ -499,10 +499,6 @@ const listen = () => {
     }
   });
 
-  ipc.on('project:pipeline', (_projectId, pipeline: Pipeline) => {
-    $pipeline.set(pipeline);
-  });
-
   // Hydrate tasks on init so the renderer has current task state immediately
   void ticketApi.fetchTasks();
 

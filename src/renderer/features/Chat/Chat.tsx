@@ -24,25 +24,18 @@ const useStyles = makeStyles({
   flex1Relative: { flex: '1 1 0', minHeight: 0, position: 'relative' },
   absoluteInsetZ0: { position: 'absolute', inset: 0, zIndex: 0 },
   absoluteInsetZ10: { position: 'absolute', inset: 0, zIndex: 10 },
+  // Inner surface bg/border colors for chat content come from the Tailwind
+  // var overrides pushed at the deck-bg root in MainContent (--color-bgCard,
+  // --color-background, etc. resolve to the glass scrim). This class only
+  // adds the blur layer to the chat shell, keeps the primary CTA semi-
+  // translucent, and rebuilds the chat composer footer as a glass capsule.
   glassRoot: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
-    backdropFilter: 'blur(36px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
-    '& .bg-surface, & .bg-card, & .bg-background, & .bg-bgColumn, & .bg-bgCard, & .bg-bgCardAlt, & .bg-bgMain': {
-      backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
-      backdropFilter: 'blur(28px) saturate(160%)',
-      WebkitBackdropFilter: 'blur(28px) saturate(160%)',
-    },
-    '& .bg-secondary': {
-      backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
-      backdropFilter: 'blur(20px) saturate(160%)',
-      WebkitBackdropFilter: 'blur(20px) saturate(160%)',
-      boxShadow: `0 1px 0 0 rgba(255,255,255,0.12) inset, 0 2px 8px -2px rgba(0,0,0,0.15)`,
-    },
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
     '& .bg-primary': {
       backgroundColor: `color-mix(in srgb, ${tokens.colorBrandBackground} 70%, transparent)`,
-      backdropFilter: 'blur(20px) saturate(160%)',
-      WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+      backdropFilter: 'var(--glass-blur-light)',
+      WebkitBackdropFilter: 'var(--glass-blur-light)',
       boxShadow: `0 1px 0 0 rgba(255,255,255,0.14) inset, 0 2px 8px -2px rgba(0,0,0,0.15)`,
     },
     '& .chat-input-footer': {
@@ -51,7 +44,7 @@ const useStyles = makeStyles({
       backgroundColor: 'transparent',
       backdropFilter: 'none',
       WebkitBackdropFilter: 'none',
-      borderTop: `1px solid rgba(255, 255, 255, 0.14)`,
+      borderTop: `1px solid var(--colorNeutralStroke1)`,
     },
     '& .chat-input-footer::before': {
       content: '""',
