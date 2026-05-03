@@ -6,7 +6,7 @@
  * `omni-projects-mcp` directly to the agent. This file handles only:
  * - escalation / notification channels (`escalate`, `notify`)
  * - supervisor lifecycle (`start_ticket`, `stop_ticket`)
- * - deck UI overlays (`open_preview`, `display_plan`)
+ * - deck UI overlays (`browser_open`, `display_plan`)
  * - app-control + browser-control suites that drive the renderer's webviews
  */
 
@@ -85,7 +85,7 @@ async function handleUITools(
   tabId?: string,
 ): Promise<ClientToolResult | null> {
   switch (toolName) {
-    case 'open_preview': {
+    case 'browser_open': {
       const url = (toolArgs.url as string) ?? '';
       if (!url) {
 return err('Missing url');
@@ -110,8 +110,9 @@ return err('Missing url');
 }
 
 /**
- * App-control tools. Dispatches list/navigate/snapshot/click/fill/type/press
- * /screenshot/eval/console/reload/back/forward against the live webview
+ * App-control tools. Dispatches the full `app_*` family — discovery, history,
+ * input, snapshot, capture, page primitives (scroll/find/wait/inject_css/etc.),
+ * and per-webview state (cookies/storage/network) — against the live webview
  * registry. Enforces scope: column-only for autopilot, column+global otherwise.
  */
 async function handleAppControlTools(
@@ -133,30 +134,7 @@ async function handleAppControlTools(
     return ok({ apps });
   }
 
-  // Browser-active-tab tools share the `app_id` scheme even though they don't
-  // live under the `app_` prefix, so accept both families here.
-  const BROWSER_APP_TOOLS = new Set([
-    'browser_scroll',
-    'browser_scroll_to_ref',
-    'browser_inject_css',
-    'browser_remove_inserted_css',
-    'browser_find_in_page',
-    'browser_wait_for',
-    'browser_pdf',
-    'browser_full_screenshot',
-    'browser_screenshot_element',
-    'browser_set_viewport',
-    'browser_set_user_agent',
-    'browser_set_zoom',
-    'browser_cookies_get',
-    'browser_cookies_set',
-    'browser_cookies_clear',
-    'browser_storage_get',
-    'browser_storage_set',
-    'browser_storage_clear',
-    'browser_network_log',
-  ]);
-  if (!toolName.startsWith('app_') && !BROWSER_APP_TOOLS.has(toolName)) {
+  if (!toolName.startsWith('app_')) {
     return null;
   }
 
@@ -203,11 +181,16 @@ async function handleAppControlTools(
         return ok({ value: value ?? null });
       }
       case 'app_screenshot': {
-        const path = await emitter.invoke(
-          'app:screenshot',
-          handleId,
-          currentTicketId ? { artifactsSubdir: currentTicketId } : {}
-        );
+        const subdir = currentTicketId ? { artifactsSubdir: currentTicketId } : {};
+        if (typeof toolArgs.ref === 'string' && toolArgs.ref) {
+          const path = await emitter.invoke('app:element-screenshot', handleId, toolArgs.ref, subdir);
+          return ok({ path });
+        }
+        if (toolArgs.full_page === true) {
+          const path = await emitter.invoke('app:full-screenshot', handleId, subdir);
+          return ok({ path });
+        }
+        const path = await emitter.invoke('app:screenshot', handleId, subdir);
         return ok({ path });
       }
       case 'app_console': {
@@ -261,7 +244,7 @@ async function handleAppControlTools(
         await emitter.invoke('app:press', handleId, key);
         return ok({ ok: true });
       }
-      case 'browser_scroll': {
+      case 'app_scroll': {
         const opts = {
           dx: typeof toolArgs.dx === 'number' ? (toolArgs.dx as number) : undefined,
           dy: typeof toolArgs.dy === 'number' ? (toolArgs.dy as number) : undefined,
@@ -271,7 +254,7 @@ async function handleAppControlTools(
         await emitter.invoke('app:scroll', handleId, opts);
         return ok({ ok: true });
       }
-      case 'browser_inject_css': {
+      case 'app_inject_css': {
         const css = (toolArgs.css as string) ?? '';
         if (!css) {
 return err('Missing css');
@@ -279,7 +262,7 @@ return err('Missing css');
         const key = await emitter.invoke('app:inject-css', handleId, css);
         return ok({ key });
       }
-      case 'browser_remove_inserted_css': {
+      case 'app_remove_inserted_css': {
         const key = (toolArgs.key as string) ?? '';
         if (!key) {
 return err('Missing key');
@@ -287,7 +270,7 @@ return err('Missing key');
         await emitter.invoke('app:remove-inserted-css', handleId, key);
         return ok({ ok: true });
       }
-      case 'browser_find_in_page': {
+      case 'app_find_in_page': {
         const query = (toolArgs.query as string) ?? '';
         if (!query) {
 return err('Missing query');
@@ -299,7 +282,7 @@ return err('Missing query');
         });
         return ok({ matches: result.matches, active_ordinal: result.activeOrdinal });
       }
-      case 'browser_wait_for': {
+      case 'app_wait_for': {
         try {
           const res = await emitter.invoke('app:wait-for', handleId, {
             selector: typeof toolArgs.selector === 'string' ? (toolArgs.selector as string) : undefined,
@@ -313,7 +296,7 @@ return err('Missing query');
           return err(e instanceof Error ? e.message : String(e));
         }
       }
-      case 'browser_scroll_to_ref': {
+      case 'app_scroll_to_ref': {
         const ref = (toolArgs.ref as string) ?? '';
         if (!ref) {
 return err('Missing ref');
@@ -321,7 +304,7 @@ return err('Missing ref');
         await emitter.invoke('app:scroll-to-ref', handleId, ref);
         return ok({ ok: true });
       }
-      case 'browser_pdf': {
+      case 'app_pdf': {
         const path = await emitter.invoke(
           'app:pdf',
           handleId,
@@ -335,26 +318,7 @@ return err('Missing ref');
         );
         return ok({ path });
       }
-      case 'browser_full_screenshot': {
-        const path = await emitter.invoke(
-          'app:full-screenshot',
-          handleId,
-          currentTicketId ? { artifactsSubdir: currentTicketId } : {}
-        );
-        return ok({ path });
-      }
-      case 'browser_screenshot_element': {
-        const ref = (toolArgs.ref as string) ?? '';
-        if (!ref) return err('Missing ref');
-        const path = await emitter.invoke(
-          'app:element-screenshot',
-          handleId,
-          ref,
-          currentTicketId ? { artifactsSubdir: currentTicketId } : {}
-        );
-        return ok({ path });
-      }
-      case 'browser_set_viewport': {
+      case 'app_set_viewport': {
         if (toolArgs.clear === true) {
           await emitter.invoke('app:set-viewport', handleId, { clear: true });
           return ok({ ok: true });
@@ -362,7 +326,7 @@ return err('Missing ref');
         const width = Number(toolArgs.width);
         const height = Number(toolArgs.height);
         if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
-          return err('browser_set_viewport needs positive `width` + `height`, or `clear: true`.');
+          return err('app_set_viewport needs positive `width` + `height`, or `clear: true`.');
         }
         await emitter.invoke('app:set-viewport', handleId, {
           width,
@@ -374,12 +338,12 @@ return err('Missing ref');
         });
         return ok({ ok: true });
       }
-      case 'browser_set_user_agent': {
+      case 'app_set_user_agent': {
         const ua = (toolArgs.user_agent as string) ?? '';
         await emitter.invoke('app:set-user-agent', handleId, ua);
         return ok({ ok: true });
       }
-      case 'browser_set_zoom': {
+      case 'app_set_zoom': {
         const factor = Number(toolArgs.factor);
         if (!Number.isFinite(factor)) {
 return err('Missing numeric factor');
@@ -387,7 +351,7 @@ return err('Missing numeric factor');
         await emitter.invoke('app:set-zoom', handleId, factor);
         return ok({ ok: true });
       }
-      case 'browser_cookies_get': {
+      case 'app_cookies_get': {
         const cookies = await emitter.invoke('app:cookies-get', handleId, {
           ...(typeof toolArgs.url === 'string' ? { url: toolArgs.url as string } : {}),
           ...(typeof toolArgs.name === 'string' ? { name: toolArgs.name as string } : {}),
@@ -396,7 +360,7 @@ return err('Missing numeric factor');
         });
         return ok({ cookies });
       }
-      case 'browser_cookies_set': {
+      case 'app_cookies_set': {
         const url = (toolArgs.url as string) ?? '';
         const name = (toolArgs.name as string) ?? '';
         const value = (toolArgs.value as string) ?? '';
@@ -420,14 +384,14 @@ return err('Missing url or name');
         });
         return ok({ ok: true });
       }
-      case 'browser_cookies_clear': {
+      case 'app_cookies_clear': {
         const removed = await emitter.invoke('app:cookies-clear', handleId, {
           ...(typeof toolArgs.url === 'string' ? { url: toolArgs.url as string } : {}),
           ...(typeof toolArgs.name === 'string' ? { name: toolArgs.name as string } : {}),
         });
         return ok({ removed });
       }
-      case 'browser_storage_get': {
+      case 'app_storage_get': {
         const which = toolArgs.which as 'local' | 'session';
         if (which !== 'local' && which !== 'session') {
 return err('which must be "local" or "session"');
@@ -435,7 +399,7 @@ return err('which must be "local" or "session"');
         const entries = await emitter.invoke('app:storage-get', handleId, which);
         return ok({ entries });
       }
-      case 'browser_storage_set': {
+      case 'app_storage_set': {
         const which = toolArgs.which as 'local' | 'session';
         const entries = toolArgs.entries as Record<string, string> | undefined;
         if (which !== 'local' && which !== 'session') {
@@ -447,7 +411,7 @@ return err('Missing entries object');
         await emitter.invoke('app:storage-set', handleId, which, entries);
         return ok({ ok: true });
       }
-      case 'browser_storage_clear': {
+      case 'app_storage_clear': {
         const which = toolArgs.which as 'local' | 'session';
         if (which !== 'local' && which !== 'session') {
 return err('which must be "local" or "session"');
@@ -455,7 +419,7 @@ return err('which must be "local" or "session"');
         await emitter.invoke('app:storage-clear', handleId, which);
         return ok({ ok: true });
       }
-      case 'browser_network_log': {
+      case 'app_network_log': {
         const entries = await emitter.invoke('app:network-log', handleId, {
           ...(typeof toolArgs.limit === 'number' ? { limit: toolArgs.limit as number } : {}),
           ...(typeof toolArgs.since === 'number' ? { since: toolArgs.since as number } : {}),

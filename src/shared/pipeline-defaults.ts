@@ -1,4 +1,4 @@
-import { DEFAULT_COLUMNS, SIMPLE_COLUMNS } from 'omni-projects-db';
+import { DEFAULT_COLUMNS, SIMPLE_COLUMNS } from 'omni-projects-db/defaults';
 
 import type { Pipeline } from '@/shared/types';
 

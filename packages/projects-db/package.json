@@ -3,12 +3,17 @@
   "version": "0.1.0",
   "description": "Shared SQLite schema, migrations, and repository for Omni project data. Used by both the MCP server and the launcher.",
   "type": "module",
+  "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./defaults": {
+      "import": "./dist/defaults.js",
+      "types": "./dist/defaults.d.ts"
     }
   },
   "files": [

@@ -71,14 +71,14 @@ export const PROJECT_CLIENT_TOOLS = [
 /** Code-deck-only UI tools — require the overlay panel infrastructure. */
 export const CODE_UI_TOOLS = [
   {
-    name: 'open_preview',
+    name: 'browser_open',
     safe: true,
     description:
-      'Open a web preview panel showing the given URL. Use this to show the user a running web app, dev server, or any web page. The preview opens as an overlay panel with a URL bar.',
+      'Mount this session\'s browser sidecar and point it at `url`. Opens the sidecar if it is not already showing. Use to surface a running web app, dev server, or page to the user; for subsequent navigation use `app_navigate` against the `browser` app id.',
     parameters: {
       type: 'object',
       properties: {
-        url: { type: 'string', description: 'The URL to preview (e.g. "http://localhost:3000")' },
+        url: { type: 'string', description: 'The URL to load (e.g. "http://localhost:3000")' },
       },
       required: ['url'],
     },
@@ -89,6 +89,16 @@ export const CODE_UI_TOOLS = [
  * App-control tools — drive webviews (built-in browser, code-server, VNC
  * desktop, and user-installed webview apps) via Playwright-flavoured
  * commands. Every action takes an `app_id` from `list_apps`.
+ *
+ * Covers three layers of capability, all keyed by `app_id`:
+ * - Generic (any controllable app): navigate, snapshot, click, fill, type,
+ *   press, screenshot, eval, console, history.
+ * - Page primitives (browser/webview kinds): scroll, find, wait, inject_css,
+ *   pdf, set_viewport / user_agent / zoom.
+ * - WebContents state (browser/webview kinds): cookies, storage, network log.
+ *
+ * For multi-tab management of a browser app (creating/switching tabs in its
+ * tabset) see {@link BROWSER_CLIENT_TOOLS}.
  *
  * Scoping rules (enforced by the handler, not the schema):
  * - Autopilot agents can only reach column-scoped apps in their own tab.
@@ -206,11 +216,13 @@ export const APP_CONTROL_TOOLS = [
     name: 'app_screenshot',
     safe: true,
     description:
-      'Capture a PNG screenshot of the app\'s visible viewport and write it to the ticket\'s artifacts directory (or a default location). Returns the absolute file path — show the path to the user and/or attach it via `display_artifact`.',
+      "Capture a PNG screenshot of an app and write it to the ticket's artifacts directory. By default captures the visible viewport. Pass `full_page: true` for the entire scrollable page (browser/webview only) or `ref` (from `app_snapshot`) to clip to a specific element. Returns the absolute file path.",
     parameters: {
       type: 'object',
       properties: {
         app_id: { type: 'string' },
+        full_page: { type: 'boolean', description: 'Capture the full scrollable page instead of just the viewport.' },
+        ref: { type: 'string', description: 'Element ref from `app_snapshot` — clip the screenshot to this element.' },
       },
       required: ['app_id'],
     },
@@ -277,13 +289,270 @@ export const APP_CONTROL_TOOLS = [
       required: ['app_id'],
     },
   },
+  {
+    name: 'app_scroll',
+    safe: true,
+    description:
+      "Scroll the app's active page. Pass one of: `to_top`, `to_bottom`, or `dx`/`dy` pixel offsets. Works on any browser- or webview-kind app from `list_apps`.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        dx: { type: 'number' },
+        dy: { type: 'number' },
+        to_top: { type: 'boolean' },
+        to_bottom: { type: 'boolean' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'app_scroll_to_ref',
+    safe: true,
+    description:
+      'Scroll an element identified by a `ref` from `app_snapshot` into view. Use before clicks on far-down elements to avoid off-screen misses.',
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' }, ref: { type: 'string' } },
+      required: ['app_id', 'ref'],
+    },
+  },
+  {
+    name: 'app_inject_css',
+    safe: true,
+    description:
+      "Inject a stylesheet into the app's document. Returns a `key` you can pass to `app_remove_inserted_css` to undo. The stylesheet persists until the page navigates.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        css: { type: 'string', description: 'CSS source to inject.' },
+      },
+      required: ['app_id', 'css'],
+    },
+  },
+  {
+    name: 'app_remove_inserted_css',
+    safe: true,
+    description: 'Remove previously injected CSS by its key.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        key: { type: 'string' },
+      },
+      required: ['app_id', 'key'],
+    },
+  },
+  {
+    name: 'app_find_in_page',
+    safe: true,
+    description:
+      "Search the app's page for `query`. Returns `{ matches, active_ordinal }`. Set `find_next: true` to advance to the next match after a prior call.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        query: { type: 'string' },
+        case_sensitive: { type: 'boolean' },
+        forward: { type: 'boolean' },
+        find_next: { type: 'boolean' },
+      },
+      required: ['app_id', 'query'],
+    },
+  },
+  {
+    name: 'app_wait_for',
+    safe: true,
+    description:
+      "Block until a condition on the app's page is met. Supply one of: `selector` (CSS selector must match something), `url_includes` (substring of current URL), or `network_idle: true` (page finished loading). Times out after `timeout_ms` (default 10000).",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        selector: { type: 'string' },
+        url_includes: { type: 'string' },
+        network_idle: { type: 'boolean' },
+        timeout_ms: { type: 'number' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'app_pdf',
+    safe: true,
+    description:
+      "Print the app's page to PDF and write it into the ticket's artifacts directory. Returns the absolute file path.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        landscape: { type: 'boolean' },
+        print_background: { type: 'boolean' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'app_set_viewport',
+    safe: true,
+    description:
+      "Emulate a specific viewport size and/or device-scale/mobile flag on the app's page. Pass `clear: true` to restore the real viewport. Useful for responsive testing.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        width: { type: 'number' },
+        height: { type: 'number' },
+        device_scale_factor: { type: 'number' },
+        mobile: { type: 'boolean' },
+        clear: { type: 'boolean' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'app_set_user_agent',
+    safe: true,
+    description:
+      "Override the User-Agent header the app sends. Pass an empty string to restore the default.",
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' }, user_agent: { type: 'string' } },
+      required: ['app_id', 'user_agent'],
+    },
+  },
+  {
+    name: 'app_set_zoom',
+    safe: true,
+    description: "Set the app's zoom factor (1.0 = 100%, range 0.25–5).",
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' }, factor: { type: 'number' } },
+      required: ['app_id', 'factor'],
+    },
+  },
+  {
+    name: 'app_cookies_get',
+    safe: true,
+    description:
+      "Read cookies from the app's partition. Optional filter narrows by URL, name, domain, or path. Returns Electron Cookie objects.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        url: { type: 'string' },
+        name: { type: 'string' },
+        domain: { type: 'string' },
+        path: { type: 'string' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'app_cookies_set',
+    safe: true,
+    description:
+      "Write or update a cookie in the app's partition. `url` is required by Electron to locate the cookie's host/scheme.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        url: { type: 'string' },
+        name: { type: 'string' },
+        value: { type: 'string' },
+        domain: { type: 'string' },
+        path: { type: 'string' },
+        secure: { type: 'boolean' },
+        http_only: { type: 'boolean' },
+        expiration_date: { type: 'number', description: 'Unix seconds.' },
+        same_site: { type: 'string', enum: ['unspecified', 'no_restriction', 'lax', 'strict'] },
+      },
+      required: ['app_id', 'url', 'name', 'value'],
+    },
+  },
+  {
+    name: 'app_cookies_clear',
+    safe: true,
+    description: 'Remove cookies matching a filter. Returns the number removed.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        url: { type: 'string' },
+        name: { type: 'string' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'app_storage_get',
+    safe: true,
+    description: "Read all key/value pairs from localStorage or sessionStorage on the app's page.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        which: { type: 'string', enum: ['local', 'session'] },
+      },
+      required: ['app_id', 'which'],
+    },
+  },
+  {
+    name: 'app_storage_set',
+    safe: true,
+    description: "Write key/value pairs into localStorage or sessionStorage on the app's page.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        which: { type: 'string', enum: ['local', 'session'] },
+        entries: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+        },
+      },
+      required: ['app_id', 'which', 'entries'],
+    },
+  },
+  {
+    name: 'app_storage_clear',
+    safe: true,
+    description: "Clear all keys from localStorage or sessionStorage on the app's page.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        which: { type: 'string', enum: ['local', 'session'] },
+      },
+      required: ['app_id', 'which'],
+    },
+  },
+  {
+    name: 'app_network_log',
+    safe: true,
+    description:
+      "Read the last N network requests the app made — method, URL, status, mimeType, timing. Useful for diagnosing failing fetches, authentication errors, or slow requests. Pass `clear: true` to reset the buffer after reading.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        limit: { type: 'number', description: 'Max entries to return (default 100, up to 500 buffered).' },
+        since: { type: 'number', description: 'CDP timestamp to filter from.' },
+        url_includes: { type: 'string' },
+        status_min: { type: 'number', description: 'Only entries with status >= this value (e.g. 400 to find failures).' },
+        clear: { type: 'boolean' },
+      },
+      required: ['app_id'],
+    },
+  },
 ] as const;
 
 /**
- * Browser-specific tools. Split out from APP_CONTROL_TOOLS because they
- * operate on browser concepts (tabs, tabsets, stylesheets, find-in-page)
- * rather than generic webviews. They still use the same `app_id` scheme for
- * the active-tab operations so scoping stays consistent.
+ * Browser tabset-management tools. Distinct from `app_*` because they operate
+ * on a browser app's *multi-tab structure* rather than a single drivable
+ * surface — each browser app has its own tabset with multiple tabs, and these
+ * tools create/close/activate/navigate individual tabs in it.
  *
  * `tabset_id` is an internal identifier:
  *   - `col:<codeTabId>` — a standalone browser column in the code deck
@@ -354,285 +623,6 @@ export const BROWSER_CLIENT_TOOLS = [
         url: { type: 'string' },
       },
       required: ['tabset_id', 'tab_id', 'url'],
-    },
-  },
-  {
-    name: 'browser_scroll',
-    safe: true,
-    description:
-      "Scroll the active tab of a browser app. Pass one of: `to_top`, `to_bottom`, or `dx`/`dy` pixel offsets. `app_id` refers to a browser-kind app from `list_apps` (usually `\"browser\"`).",
-    parameters: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string' },
-        dx: { type: 'number' },
-        dy: { type: 'number' },
-        to_top: { type: 'boolean' },
-        to_bottom: { type: 'boolean' },
-      },
-      required: ['app_id'],
-    },
-  },
-  {
-    name: 'browser_inject_css',
-    safe: true,
-    description:
-      "Inject a stylesheet into the active tab's document. Returns a `key` you can pass to `browser_remove_inserted_css` to undo. The stylesheet persists until the page navigates.",
-    parameters: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string' },
-        css: { type: 'string', description: 'CSS source to inject.' },
-      },
-      required: ['app_id', 'css'],
-    },
-  },
-  {
-    name: 'browser_remove_inserted_css',
-    safe: true,
-    description: 'Remove previously injected CSS by its key.',
-    parameters: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string' },
-        key: { type: 'string' },
-      },
-      required: ['app_id', 'key'],
-    },
-  },
-  {
-    name: 'browser_find_in_page',
-    safe: true,
-    description:
-      "Search the active tab for `query`. Returns `{ matches, active_ordinal }`. Set `find_next: true` to advance to the next match after a prior call.",
-    parameters: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string' },
-        query: { type: 'string' },
-        case_sensitive: { type: 'boolean' },
-        forward: { type: 'boolean' },
-        find_next: { type: 'boolean' },
-      },
-      required: ['app_id', 'query'],
-    },
-  },
-  {
-    name: 'browser_wait_for',
-    safe: true,
-    description:
-      "Block until a condition on the active tab is met. Supply one of: `selector` (CSS selector must match something), `url_includes` (substring of current URL), or `network_idle: true` (page finished loading). Times out after `timeout_ms` (default 10000).",
-    parameters: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string' },
-        selector: { type: 'string' },
-        url_includes: { type: 'string' },
-        network_idle: { type: 'boolean' },
-        timeout_ms: { type: 'number' },
-      },
-      required: ['app_id'],
-    },
-  },
-  {
-    name: 'browser_scroll_to_ref',
-    safe: true,
-    description:
-      'Scroll an element identified by a `ref` from `app_snapshot` into view. Use before clicks on far-down elements to avoid off-screen misses.',
-    parameters: {
-      type: 'object',
-      properties: { app_id: { type: 'string' }, ref: { type: 'string' } },
-      required: ['app_id', 'ref'],
-    },
-  },
-  {
-    name: 'browser_pdf',
-    safe: true,
-    description:
-      "Print the active tab to PDF and write it into the ticket's artifacts directory. Returns the absolute file path.",
-    parameters: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string' },
-        landscape: { type: 'boolean' },
-        print_background: { type: 'boolean' },
-      },
-      required: ['app_id'],
-    },
-  },
-  {
-    name: 'browser_full_screenshot',
-    safe: true,
-    description:
-      'Capture a full-page PNG of the active tab (not just the viewport) using CDP. Returns the absolute file path in the ticket artifacts directory.',
-    parameters: {
-      type: 'object',
-      properties: { app_id: { type: 'string' } },
-      required: ['app_id'],
-    },
-  },
-  {
-    name: 'browser_screenshot_element',
-    safe: true,
-    description:
-      'Capture a PNG clipped to a specific element identified by `ref` (from `app_snapshot`). Great for visual confirmation of a button, card, or error message without a full-page screenshot.',
-    parameters: {
-      type: 'object',
-      properties: { app_id: { type: 'string' }, ref: { type: 'string' } },
-      required: ['app_id', 'ref'],
-    },
-  },
-  {
-    name: 'browser_set_viewport',
-    safe: true,
-    description:
-      'Emulate a specific viewport size and/or device-scale/mobile flag on the active tab. Pass `clear: true` to restore the real viewport. Useful for responsive testing.',
-    parameters: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string' },
-        width: { type: 'number' },
-        height: { type: 'number' },
-        device_scale_factor: { type: 'number' },
-        mobile: { type: 'boolean' },
-        clear: { type: 'boolean' },
-      },
-      required: ['app_id'],
-    },
-  },
-  {
-    name: 'browser_set_user_agent',
-    safe: true,
-    description:
-      'Override the User-Agent header the active tab sends. Pass an empty string to restore the default.',
-    parameters: {
-      type: 'object',
-      properties: { app_id: { type: 'string' }, user_agent: { type: 'string' } },
-      required: ['app_id', 'user_agent'],
-    },
-  },
-  {
-    name: 'browser_set_zoom',
-    safe: true,
-    description: 'Set the active tab\'s zoom factor (1.0 = 100%, range 0.25–5).',
-    parameters: {
-      type: 'object',
-      properties: { app_id: { type: 'string' }, factor: { type: 'number' } },
-      required: ['app_id', 'factor'],
-    },
-  },
-  {
-    name: 'browser_cookies_get',
-    safe: true,
-    description:
-      "Read cookies from the active tab's partition. Optional filter narrows by URL, name, domain, or path. Returns Electron Cookie objects.",
-    parameters: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string' },
-        url: { type: 'string' },
-        name: { type: 'string' },
-        domain: { type: 'string' },
-        path: { type: 'string' },
-      },
-      required: ['app_id'],
-    },
-  },
-  {
-    name: 'browser_cookies_set',
-    safe: true,
-    description:
-      "Write or update a cookie in the active tab's partition. `url` is required by Electron to locate the cookie's host/scheme.",
-    parameters: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string' },
-        url: { type: 'string' },
-        name: { type: 'string' },
-        value: { type: 'string' },
-        domain: { type: 'string' },
-        path: { type: 'string' },
-        secure: { type: 'boolean' },
-        http_only: { type: 'boolean' },
-        expiration_date: { type: 'number', description: 'Unix seconds.' },
-        same_site: { type: 'string', enum: ['unspecified', 'no_restriction', 'lax', 'strict'] },
-      },
-      required: ['app_id', 'url', 'name', 'value'],
-    },
-  },
-  {
-    name: 'browser_cookies_clear',
-    safe: true,
-    description: 'Remove cookies matching a filter. Returns the number removed.',
-    parameters: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string' },
-        url: { type: 'string' },
-        name: { type: 'string' },
-      },
-      required: ['app_id'],
-    },
-  },
-  {
-    name: 'browser_storage_get',
-    safe: true,
-    description: 'Read all key/value pairs from localStorage or sessionStorage on the active tab.',
-    parameters: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string' },
-        which: { type: 'string', enum: ['local', 'session'] },
-      },
-      required: ['app_id', 'which'],
-    },
-  },
-  {
-    name: 'browser_storage_set',
-    safe: true,
-    description: 'Write key/value pairs into localStorage or sessionStorage on the active tab.',
-    parameters: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string' },
-        which: { type: 'string', enum: ['local', 'session'] },
-        entries: {
-          type: 'object',
-          additionalProperties: { type: 'string' },
-        },
-      },
-      required: ['app_id', 'which', 'entries'],
-    },
-  },
-  {
-    name: 'browser_storage_clear',
-    safe: true,
-    description: 'Clear all keys from localStorage or sessionStorage on the active tab.',
-    parameters: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string' },
-        which: { type: 'string', enum: ['local', 'session'] },
-      },
-      required: ['app_id', 'which'],
-    },
-  },
-  {
-    name: 'browser_network_log',
-    safe: true,
-    description:
-      "Read the last N network requests the active tab made — method, URL, status, mimeType, timing. Useful for diagnosing failing fetches, authentication errors, or slow requests. Pass `clear: true` to reset the buffer after reading.",
-    parameters: {
-      type: 'object',
-      properties: {
-        app_id: { type: 'string' },
-        limit: { type: 'number', description: 'Max entries to return (default 100, up to 500 buffered).' },
-        since: { type: 'number', description: 'CDP timestamp to filter from.' },
-        url_includes: { type: 'string' },
-        status_min: { type: 'number', description: 'Only entries with status >= this value (e.g. 400 to find failures).' },
-        clear: { type: 'boolean' },
-      },
-      required: ['app_id'],
     },
   },
 ] as const;
@@ -714,7 +704,7 @@ const PROJECT_GUIDANCE = [
   '',
   '## Driving apps (browser, webviews)',
   '',
-  'The dock hosts web apps the user can see — the built-in browser, VS Code, a VNC desktop, and any custom webview apps they installed. You can drive them with `list_apps`, `app_snapshot`, `app_click`, `app_fill`, `app_type`, `app_press`, `app_screenshot`, `app_eval`, and `app_navigate`. Always `list_apps` first to find valid ids, then `app_snapshot` before clicking — refs are per-snapshot and invalidate after any navigation. Prefer `app_fill` for text fields (handles clearing); use `app_type` only when the element is already focused.',
+  'The dock hosts web apps the user can see — the built-in browser, VS Code, a VNC desktop, and any custom webview apps they installed. Drive them through the `app_*` family: `list_apps` (discovery), `app_snapshot` / `app_click` / `app_fill` / `app_type` / `app_press` (interaction), `app_navigate` / `app_reload` / `app_back` / `app_forward` (history), `app_screenshot` / `app_pdf` (capture), `app_eval` / `app_console` / `app_network_log` (diagnostics), `app_scroll` / `app_scroll_to_ref` / `app_find_in_page` / `app_wait_for` (page), `app_inject_css` / `app_remove_inserted_css` / `app_set_viewport` / `app_set_user_agent` / `app_set_zoom` (presentation), `app_cookies_*` / `app_storage_*` (state). Always `list_apps` first to find valid ids, then `app_snapshot` before clicking — refs are per-snapshot and invalidate after any navigation. Prefer `app_fill` for text fields (handles clearing); use `app_type` only when the element is already focused. Browser apps additionally have `browser_*` tools for managing their tabsets (multiple tabs in one app).',
 ].join('\n');
 
 export type ContextIdentifierOpts = {

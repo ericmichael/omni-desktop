@@ -46,7 +46,7 @@ describe('client_tools shape', () => {
     expect(names).not.toContain('list_inbox');
     expect(names).not.toContain('create_milestone');
     // Code-only tools should NOT be in chat surface
-    expect(names).not.toContain('open_preview');
+    expect(names).not.toContain('browser_open');
     expect(vars.additional_instructions).toContain('Working with projects and tickets');
   });
 
@@ -55,7 +55,7 @@ describe('client_tools shape', () => {
       client_tools: { name: string }[];
     };
     const names = vars.client_tools.map((t) => t.name);
-    expect(names).toContain('open_preview');
+    expect(names).toContain('browser_open');
     expect(names).toContain('display_plan');
     expect(names).toContain('browser_list_tabsets');
   });

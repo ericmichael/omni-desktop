@@ -1281,7 +1281,7 @@ const SidecarColumn = memo(
 
     return (
       <div className={styles.deckColumn}>
-        <div className={mergeClasses(styles.deckColumnBordered, styles.cardFlattenLeft, isGlass && styles.glassCard)}>
+        <div className={mergeClasses(styles.deckColumnBordered, isGlass && styles.glassCard, styles.cardFlattenLeft)}>
           <div className={mergeClasses(styles.sessionHeader, isGlass && styles.glassSessionHeader)}>
             <div className={mergeClasses(styles.flexItemsCenter, styles.gap2, styles.minW0)}>
               <AppIcon icon={app.icon} size={14} />

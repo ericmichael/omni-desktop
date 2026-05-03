@@ -186,7 +186,7 @@ export const BrowserView = memo(
     registryTabId?: string;
     /**
      * External URL to navigate the active tab to. Used by the dock browser
-     * when an agent `open_preview` tool fires — the agent's URL flows through
+     * when an agent `browser_open` tool fires — the agent's URL flows through
      * here and overrides whatever the user last typed.
      */
     src?: string;
