@@ -162,6 +162,13 @@ export type StoreData = {
    */
   skillSources: Record<string, SkillSource>;
 
+  /**
+   * Marketplace bundles the user has installed, keyed by `${repo}:${plugin}`.
+   * Records the ref + manifest version + skill names that were on disk at
+   * install time, so update checks can diff against the live manifest.
+   */
+  installedBundles: Record<string, InstalledBundle>;
+
   /** User-added custom apps for the workspace dock. */
   customApps: CustomAppEntry[];
 
@@ -579,6 +586,11 @@ export const schema: Schema<StoreData> = {
     default: {},
   },
   skillSources: {
+    type: 'object',
+    additionalProperties: { type: 'object' },
+    default: {},
+  },
+  installedBundles: {
     type: 'object',
     additionalProperties: { type: 'object' },
     default: {},
@@ -1393,6 +1405,45 @@ export type MarketplaceManifest = {
 };
 
 /**
+ * Persisted record of a marketplace bundle install. Keyed by `${repo}:${plugin}`
+ * in `StoreData.installedBundles`. Used to diff against live manifests when
+ * checking for updates and to reap skills that the upstream removed.
+ */
+export type InstalledBundle = {
+  repo: string;
+  plugin: string;
+  /** Git ref the bundle was installed from (defaults to `main`). */
+  ref: string;
+  /** `metadata.version` from the manifest at install time, if any. */
+  version?: string;
+  /** SKILL.md `name` of every skill that was installed as part of this bundle. */
+  skillNames: string[];
+  installedAt: number;
+};
+
+export type BundleUpdateStatus = 'up-to-date' | 'update-available' | 'unreachable';
+
+/**
+ * Per-bundle update report returned by `skills:check-bundle-updates`. The UI
+ * uses this to decide whether to show an "Update" button and what changed.
+ */
+export type BundleUpdateInfo = {
+  bundleKey: string;
+  repo: string;
+  plugin: string;
+  status: BundleUpdateStatus;
+  installedVersion?: string;
+  /** Manifest version live in the upstream repo. */
+  liveVersion?: string;
+  /** Skill names present upstream but not in the installed record. */
+  addedSkills: string[];
+  /** Skill names installed locally but no longer in the upstream manifest. */
+  removedSkills: string[];
+  /** Reason the manifest could not be fetched (when `status === 'unreachable'`). */
+  error?: string;
+};
+
+/**
  * A discovered skill entry returned by the skills:list IPC handler.
  */
 export type SkillEntry = {
@@ -1430,6 +1481,14 @@ type SkillsIpcEvents = Namespaced<
     'fetch-marketplace': (repo: string) => MarketplaceManifest;
     /** Install every skill in the named plugin from the given repo. */
     'install-marketplace-plugin': (repo: string, pluginName: string) => SkillEntry[];
+    /**
+     * Re-fetch a previously installed bundle, install added/changed skills,
+     * and remove skills that the upstream no longer ships. Bumps the stored
+     * bundle record's version + skillNames + installedAt on success.
+     */
+    'update-marketplace-plugin': (repo: string, pluginName: string) => SkillEntry[];
+    /** Probe upstream manifests for every installed bundle and report diffs. */
+    'check-bundle-updates': () => BundleUpdateInfo[];
   }
 >;
 

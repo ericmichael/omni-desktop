@@ -9,9 +9,14 @@ import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';
 import { WebSocket as WsWebSocket } from 'ws';
 
-import { installSkillFromFile, listSkills, setSkillEnabled, uninstallSkill } from '@/main/skills';
 import type { SkillStore } from '@/main/skills';
-import { fetchMarketplace, installMarketplacePlugin } from '@/main/skills-marketplace';
+import { installSkillFromFile, listSkills, setSkillEnabled, uninstallSkill } from '@/main/skills';
+import {
+  checkBundleUpdates,
+  fetchMarketplace,
+  installMarketplacePlugin,
+  updateMarketplacePlugin,
+} from '@/main/skills-marketplace';
 import {
   checkModelsConfigured,
   ensureDirectory,
@@ -215,4 +220,8 @@ export function registerSkillsHandlers(ipc: IIpcListener, configDir: string, sto
   ipc.handle('skills:install-marketplace-plugin', (_: unknown, repo: string, name: string) =>
     installMarketplacePlugin(configDir, repo, name, store)
   );
+  ipc.handle('skills:update-marketplace-plugin', (_: unknown, repo: string, name: string) =>
+    updateMarketplacePlugin(configDir, repo, name, store)
+  );
+  ipc.handle('skills:check-bundle-updates', () => checkBundleUpdates(store));
 }

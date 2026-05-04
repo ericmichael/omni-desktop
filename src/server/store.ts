@@ -35,6 +35,7 @@ const DEFAULTS: StoreData = {
   lastWeeklyReviewAt: null,
   enabledExtensions: {},
   skillSources: {},
+  installedBundles: {},
   customApps: [],
   browserProfiles: [],
   browserTabsets: {},

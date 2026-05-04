@@ -456,10 +456,43 @@ export function runMigrations(store: IMigrationStore, deps: MigrationDeps): void
     store.set('tickets', migrated);
     store.set('schemaVersion', 18);
     deps.repairProjectRoots?.();
+    // Fall through to v18→v19.
+  }
+
+  // v18 → v19: backfill installedBundles from existing skillSources so
+  // marketplace bundles installed before bundle tracking existed are still
+  // updatable. One bundle record per (repo, plugin) pair seen in skillSources.
+  if (version === 18 || (store.get('schemaVersion', 0) as number) === 18) {
+    const sources = (store.get('skillSources', {}) as Record<string, Record<string, unknown>>) ?? {};
+    const bundles: Record<string, Record<string, unknown>> = {};
+    const now = deps.now();
+    for (const [skillName, source] of Object.entries(sources)) {
+      if (source && source.kind === 'marketplace') {
+        const repo = source.repo as string;
+        const plugin = source.plugin as string;
+        const ref = (source.ref as string) ?? 'main';
+        const key = `${repo}:${plugin}`;
+        const existing = bundles[key];
+        if (existing) {
+          (existing.skillNames as string[]).push(skillName);
+        } else {
+          bundles[key] = {
+            repo,
+            plugin,
+            ref,
+            skillNames: [skillName],
+            installedAt: now,
+          };
+        }
+      }
+    }
+    store.set('installedBundles', bundles);
+    store.set('schemaVersion', 19);
+    deps.repairProjectRoots?.();
     return;
   }
 
-  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 18) {
+  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 19) {
     deps.repairProjectRoots?.();
     return;
   }

@@ -67,7 +67,7 @@ describe('runMigrations', () => {
         expect(t.phase).toBe('idle');
       }
       // Fall-through means schemaVersion ends up at the current version.
-      expect(store.get('schemaVersion')).toBe(18);
+      expect(store.get('schemaVersion')).toBe(19);
     });
   });
 
@@ -422,19 +422,19 @@ describe('runMigrations', () => {
   });
 
   describe('full ladder and idempotency', () => {
-    it('runs v0 → v18 end-to-end without throwing', () => {
+    it('runs v0 → v19 end-to-end without throwing', () => {
       const store = makeStore({
         // schemaVersion undefined → takes the initial boot path.
         tickets: [{ id: 't1', status: 'in_progress' }],
         projects: [{ id: 'p1', label: 'A', workspaceDir: '/tmp/w' }],
       });
       expect(() => runMigrations(store, makeDeps())).not.toThrow();
-      expect(store.get('schemaVersion')).toBe(18);
+      expect(store.get('schemaVersion')).toBe(19);
     });
 
-    it('is a no-op on an already-migrated v18 store', () => {
+    it('is a no-op on an already-migrated v19 store', () => {
       const store = makeStore({
-        schemaVersion: 18,
+        schemaVersion: 19,
         tickets: [{ id: 't1', phase: 'idle' }],
         projects: [],
         milestones: [],
@@ -444,7 +444,7 @@ describe('runMigrations', () => {
       const deps = makeDeps();
       runMigrations(store, deps);
 
-      expect(store.get('schemaVersion')).toBe(18);
+      expect(store.get('schemaVersion')).toBe(19);
       expect(deps.writeProjectContextBrief).not.toHaveBeenCalled();
     });
 
@@ -464,12 +464,43 @@ describe('runMigrations', () => {
       for (const t of tickets) {
         expect(t).not.toHaveProperty('supervisorSessionId');
       }
-      expect(store.get('schemaVersion')).toBe(18);
+      // Falls through to v19, which is the current head.
+      expect(store.get('schemaVersion')).toBe(19);
+    });
+
+    it('v18 → v19 backfills installedBundles from existing skillSources', () => {
+      const store = makeStore({
+        schemaVersion: 18,
+        tickets: [],
+        projects: [],
+        skillSources: {
+          pdf: { kind: 'marketplace', repo: 'anthropics/skills', plugin: 'document-skills', ref: 'main' },
+          docx: { kind: 'marketplace', repo: 'anthropics/skills', plugin: 'document-skills', ref: 'main' },
+          'canvas-design': {
+            kind: 'marketplace',
+            repo: 'anthropics/skills',
+            plugin: 'creative-skills',
+            ref: 'main',
+          },
+          local: { kind: 'local' },
+          'from-file': { kind: 'file', filename: 'foo.skill' },
+        },
+      });
+      runMigrations(store, makeDeps());
+
+      expect(store.get('schemaVersion')).toBe(19);
+      const bundles = store.get('installedBundles') as Record<string, { skillNames: string[] }>;
+      expect(Object.keys(bundles).sort()).toEqual([
+        'anthropics/skills:creative-skills',
+        'anthropics/skills:document-skills',
+      ]);
+      expect(bundles['anthropics/skills:document-skills']!.skillNames.sort()).toEqual(['docx', 'pdf']);
+      expect(bundles['anthropics/skills:creative-skills']!.skillNames).toEqual(['canvas-design']);
     });
 
     it('calls repairProjectRoots on idempotent v-current boot', () => {
       const store = makeStore({
-        schemaVersion: 18,
+        schemaVersion: 19,
         tickets: [],
         projects: [],
         milestones: [],

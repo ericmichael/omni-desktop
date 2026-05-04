@@ -35,6 +35,7 @@ const getDefaults = (): StoreData => ({
   lastWeeklyReviewAt: null,
   enabledExtensions: {},
   skillSources: {},
+  installedBundles: {},
   customApps: [],
   browserProfiles: [],
   browserTabsets: {},
