@@ -1,5 +1,13 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 
+import {
+  DEFAULT_WEBVIEW_MAX_INITIAL_RETRIES,
+  DEFAULT_WEBVIEW_RETRY_BASE_DELAY_MS,
+  DEFAULT_WEBVIEW_RETRY_MAX_DELAY_MS,
+  getRetryDelayMs,
+  isAbortErrorCode,
+  shouldRetryInitialLoad,
+} from '@/lib/webview-navigation';
 import { registerApp, unregisterApp, updateApp } from '@/renderer/features/AppControl/live-registry';
 import type { AppHandleId, AppRegistrationPayload } from '@/shared/app-control-types';
 import { isControllableKind } from '@/shared/app-control-types';
@@ -93,6 +101,9 @@ export const Webview = forwardRef<WebviewHandle, {
   onFoundInPage?: (result: FoundInPageResult) => void;
   onContextMenu?: (params: ContextMenuParams) => void;
   onError?: (error: { code: number; description: string; url: string }) => void;
+  maxInitialRetries?: number;
+  retryBaseDelayMs?: number;
+  retryMaxDelayMs?: number;
   showUnavailable?: boolean;
   /** If provided, this webview registers itself with the app-control registry. */
   registry?: WebviewRegistryProps;
@@ -113,6 +124,9 @@ export const Webview = forwardRef<WebviewHandle, {
   onFoundInPage,
   onContextMenu,
   onError,
+  maxInitialRetries = DEFAULT_WEBVIEW_MAX_INITIAL_RETRIES,
+  retryBaseDelayMs = DEFAULT_WEBVIEW_RETRY_BASE_DELAY_MS,
+  retryMaxDelayMs = DEFAULT_WEBVIEW_RETRY_MAX_DELAY_MS,
   showUnavailable = true,
   registry,
   partition,
@@ -128,9 +142,17 @@ export const Webview = forwardRef<WebviewHandle, {
   const onFoundInPageRef = useRef(onFoundInPage);
   const onContextMenuRef = useRef(onContextMenu);
   const onErrorRef = useRef(onError);
+  const srcRef = useRef(src);
+  const registryRef = useRef(registry);
   const readyEmittedRef = useRef(false);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const retryDelayRef = useRef(750);
+  const retryAttemptRef = useRef(0);
+  const maxInitialRetriesRef = useRef(maxInitialRetries);
+  const retryBaseDelayMsRef = useRef(retryBaseDelayMs);
+  const retryMaxDelayMsRef = useRef(retryMaxDelayMs);
+  const registeredHandleRef = useRef<AppHandleId | null>(null);
+  const [internalError, setInternalError] = useState<{ code: number; description: string; url: string } | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   useEffect(() => {
  onReadyRef.current = onReady; 
@@ -159,6 +181,61 @@ export const Webview = forwardRef<WebviewHandle, {
   useEffect(() => {
  onErrorRef.current = onError;
 }, [onError]);
+  useEffect(() => {
+    srcRef.current = src;
+    retryAttemptRef.current = 0;
+    setInternalError(null);
+  }, [src]);
+  useEffect(() => {
+    registryRef.current = registry;
+  }, [registry]);
+  useEffect(() => {
+    maxInitialRetriesRef.current = maxInitialRetries;
+  }, [maxInitialRetries]);
+  useEffect(() => {
+    retryBaseDelayMsRef.current = retryBaseDelayMs;
+  }, [retryBaseDelayMs]);
+  useEffect(() => {
+    retryMaxDelayMsRef.current = retryMaxDelayMs;
+  }, [retryMaxDelayMs]);
+  useEffect(() => {
+    const currentRegistry = registry;
+    const currentSrc = src;
+    if (!currentRegistry || !currentSrc || !elementRef.current) {
+      return;
+    }
+    const webContentsId = (() => {
+      if (!isElectron) {
+        return undefined;
+      }
+      try {
+        return (elementRef.current as unknown as Electron.WebviewTag).getWebContentsId?.();
+      } catch {
+        return undefined;
+      }
+    })();
+    if (registeredHandleRef.current && registeredHandleRef.current !== currentRegistry.handleId) {
+      unregisterApp(registeredHandleRef.current);
+      registeredHandleRef.current = null;
+    }
+    if (registeredHandleRef.current === currentRegistry.handleId) {
+      updateApp(currentRegistry.handleId, { url: currentSrc, ...(webContentsId !== undefined ? { webContentsId } : {}) });
+      return;
+    }
+    registerApp({
+      handleId: currentRegistry.handleId,
+      appId: currentRegistry.appId,
+      kind: currentRegistry.kind,
+      scope: currentRegistry.scope,
+      tabId: currentRegistry.tabId,
+      label: currentRegistry.label,
+      url: currentSrc,
+      controllable: isControllableKind(currentRegistry.kind),
+      ...(webContentsId !== undefined ? { webContentsId } : {}),
+      ...(currentRegistry.browserTabsetId ? { browserTabsetId: currentRegistry.browserTabsetId } : {}),
+    });
+    registeredHandleRef.current = currentRegistry.handleId;
+  }, [registry, src]);
 
   useImperativeHandle(handleRef, () => ({
     reload: () => {
@@ -292,6 +369,14 @@ return;
     retryTimerRef.current = null;
   }, []);
 
+  const emitError = useCallback((error: { code: number; description: string; url: string }) => {
+    if (onErrorRef.current) {
+      onErrorRef.current(error);
+    } else {
+      setInternalError(error);
+    }
+  }, []);
+
   const scheduleRetry = useCallback(() => {
     const el = elementRef.current;
     if (!el) {
@@ -299,8 +384,12 @@ return;
     }
     clearRetryTimer();
 
-    const delay = retryDelayRef.current;
-    retryDelayRef.current = Math.min(15_000, Math.round(retryDelayRef.current * 1.4));
+    const attempt = retryAttemptRef.current++;
+    const delay = getRetryDelayMs({
+      attempt,
+      baseDelayMs: retryBaseDelayMsRef.current,
+      maxDelayMs: retryMaxDelayMsRef.current,
+    });
     retryTimerRef.current = setTimeout(() => {
       if (isElectron) {
         (el as unknown as Electron.WebviewTag).reload();
@@ -317,10 +406,11 @@ return;
       cleanupRef.current = null;
       elementRef.current = null;
       clearRetryTimer();
-      retryDelayRef.current = 750;
+      retryAttemptRef.current = 0;
       readyEmittedRef.current = false;
 
-      if (!node || !src) {
+      const currentSrc = srcRef.current;
+      if (!node || !currentSrc) {
         return;
       }
 
@@ -328,22 +418,24 @@ return;
 
       if (isElectron) {
         const el = node as unknown as Electron.WebviewTag;
+        const currentRegistry = registryRef.current;
 
         // Register with the app-control registry as early as possible so
         // list_apps sees the handle even before first load. webContentsId
         // fills in on the first did-finish-load below.
-        if (registry) {
+        if (currentRegistry) {
           registerApp({
-            handleId: registry.handleId,
-            appId: registry.appId,
-            kind: registry.kind,
-            scope: registry.scope,
-            tabId: registry.tabId,
-            label: registry.label,
-            url: src,
-            controllable: isControllableKind(registry.kind),
-            ...(registry.browserTabsetId ? { browserTabsetId: registry.browserTabsetId } : {}),
+            handleId: currentRegistry.handleId,
+            appId: currentRegistry.appId,
+            kind: currentRegistry.kind,
+            scope: currentRegistry.scope,
+            tabId: currentRegistry.tabId,
+            label: currentRegistry.label,
+            url: currentSrc,
+            controllable: isControllableKind(currentRegistry.kind),
+            ...(currentRegistry.browserTabsetId ? { browserTabsetId: currentRegistry.browserTabsetId } : {}),
           });
+          registeredHandleRef.current = currentRegistry.handleId;
         }
 
         const onStartLoad = () => {
@@ -352,7 +444,7 @@ return;
 
         const onLoad = () => {
           clearRetryTimer();
-          retryDelayRef.current = 750;
+          retryAttemptRef.current = 0;
           onLoadingRef.current?.(false);
 
           if (!readyEmittedRef.current) {
@@ -360,7 +452,8 @@ return;
             onReadyRef.current?.();
           }
 
-          if (registry) {
+          const currentRegistry = registryRef.current;
+          if (currentRegistry) {
             const webContentsId = (() => {
               try {
                 return el.getWebContentsId?.();
@@ -368,7 +461,7 @@ return;
                 return undefined;
               }
             })();
-            updateApp(registry.handleId, {
+            updateApp(currentRegistry.handleId, {
               webContentsId,
               url: (() => {
                 try {
@@ -394,13 +487,22 @@ return;
           if (!isMainFrame) {
 return;
 }
-          if (errorCode === -3) {
+          if (isAbortErrorCode(errorCode)) {
 return;
 } // ERR_ABORTED
           onLoadingRef.current?.(false);
 
           if (readyEmittedRef.current) {
-            onErrorRef.current?.({ code: errorCode ?? -1, description: e.errorDescription ?? 'Load failed', url: e.validatedURL ?? '' });
+            emitError({ code: errorCode ?? -1, description: e.errorDescription ?? 'Load failed', url: e.validatedURL ?? '' });
+            return;
+          }
+          if (!shouldRetryInitialLoad({
+            errorCode,
+            ready: readyEmittedRef.current,
+            attempt: retryAttemptRef.current,
+            maxAttempts: maxInitialRetriesRef.current,
+          })) {
+            emitError({ code: errorCode ?? -1, description: e.errorDescription ?? 'Load failed', url: e.validatedURL ?? srcRef.current ?? '' });
             return;
           }
           scheduleRetry();
@@ -419,8 +521,9 @@ return;
 }
           if (e.url) {
 onNavigateRef.current?.(e.url);
-            if (registry) {
-              updateApp(registry.handleId, { url: e.url });
+            const currentRegistry = registryRef.current;
+            if (currentRegistry) {
+              updateApp(currentRegistry.handleId, { url: e.url });
             }
           }
         };
@@ -429,8 +532,9 @@ onNavigateRef.current?.(e.url);
           const e = event as { title?: string };
           if (e.title) {
 onTitleRef.current?.(e.title);
-            if (registry) {
-              updateApp(registry.handleId, { title: e.title });
+            const currentRegistry = registryRef.current;
+            if (currentRegistry) {
+              updateApp(currentRegistry.handleId, { title: e.title });
             }
           }
         };
@@ -479,8 +583,9 @@ onTitleRef.current?.(e.title);
           el.removeEventListener('page-favicon-updated', onFavicon);
           el.removeEventListener('found-in-page', onFoundInPage);
           el.removeEventListener('context-menu', onContextMenuEvent);
-          if (registry) {
-            unregisterApp(registry.handleId);
+          if (registeredHandleRef.current) {
+            unregisterApp(registeredHandleRef.current);
+            registeredHandleRef.current = null;
           }
         };
       } else {
@@ -491,7 +596,7 @@ onTitleRef.current?.(e.title);
 
         const onLoad = () => {
           clearRetryTimer();
-          retryDelayRef.current = 750;
+          retryAttemptRef.current = 0;
           onLoadingRef.current?.(false);
 
           if (!readyEmittedRef.current) {
@@ -515,7 +620,16 @@ onTitleRef.current?.(title);
         const onIframeError = () => {
           onLoadingRef.current?.(false);
           if (readyEmittedRef.current) {
-            onErrorRef.current?.({ code: -1, description: 'Failed to load page', url: iframe.src });
+            emitError({ code: -1, description: 'Failed to load page', url: iframe.src });
+            return;
+          }
+          if (!shouldRetryInitialLoad({
+            errorCode: -1,
+            ready: readyEmittedRef.current,
+            attempt: retryAttemptRef.current,
+            maxAttempts: maxInitialRetriesRef.current,
+          })) {
+            emitError({ code: -1, description: 'Failed to load page', url: iframe.src });
             return;
           }
           scheduleRetry();
@@ -547,7 +661,7 @@ return;
         };
       }
     },
-    [clearRetryTimer, scheduleRetry, src, registry]
+    [clearRetryTimer, emitError, scheduleRetry]
   );
 
   if (!src) {
@@ -561,13 +675,40 @@ return;
     );
   }
 
+  if (internalError) {
+    return (
+      <div style={{ display: 'flex', height: '100%', width: '100%', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <div style={{ display: 'flex', maxWidth: 520, flexDirection: 'column', gap: 12, textAlign: 'center' }}>
+          <div style={{ fontSize: 16, fontWeight: 600 }}>This app did not load</div>
+          <div style={{ opacity: 0.75 }}>{internalError.description || 'The embedded page failed to load.'}</div>
+          <div style={{ wordBreak: 'break-all', opacity: 0.6, fontSize: 12 }}>{internalError.url || src}</div>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => {
+                retryAttemptRef.current = 0;
+                setInternalError(null);
+                setReloadNonce((n) => n + 1);
+              }}
+            >
+              Retry
+            </button>
+            <button type="button" onClick={() => void navigator.clipboard.writeText(internalError.url || src).catch(() => {})}>
+              Copy URL
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (isElectron) {
     // `partition` must be set BEFORE the <webview> is inserted into the DOM;
     // Electron ignores later changes. Keying on partition forces a remount so
     // switching profiles actually takes effect.
     return (
       <webview
-        key={partition ?? 'default'}
+        key={`${partition ?? 'default'}:${reloadNonce}`}
         ref={callbackRef}
         src={src}
         {...(partition ? { partition } : {})}
@@ -578,6 +719,7 @@ return;
 
   return (
     <iframe
+      key={reloadNonce}
       ref={callbackRef as React.RefCallback<HTMLIFrameElement>}
       src={src}
       style={{ width: '100%', height: '100%', border: 'none' }}

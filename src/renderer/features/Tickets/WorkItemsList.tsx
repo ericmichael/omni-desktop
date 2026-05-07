@@ -253,7 +253,6 @@ const TicketRow = memo(({ ticket, selected, hovered, unresolvedBlockers, milesto
   }, [ticket.id]);
 
   const handleAutopilot = useCallback(() => {
-    void openTicketInCode(ticket.id);
     void ticketApi.startSupervisor(ticket.id);
   }, [ticket.id]);
 

@@ -244,7 +244,6 @@ export const TicketDetail = memo(({ ticketId, compact, onClose, closeBehavior = 
   }, [ticketId]);
 
   const handleStartAutopilot = useCallback(() => {
-    void openTicketInCode(ticketId);
     void ticketApi.startSupervisor(ticketId);
   }, [ticketId]);
 

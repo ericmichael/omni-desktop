@@ -47,10 +47,12 @@ export function registerColumnActor(actor: ColumnActor): () => void {
     waiters.delete(actor.ticketId);
   }
   return () => {
-    if (actors.get(actor.ticketId) === actor) {
-      actors.delete(actor.ticketId);
-      void forwardEvent({ kind: 'disconnected', ticketId: actor.ticketId });
-    }
+    queueMicrotask(() => {
+      if (actors.get(actor.ticketId) === actor) {
+        actors.delete(actor.ticketId);
+        void forwardEvent({ kind: 'disconnected', ticketId: actor.ticketId });
+      }
+    });
   };
 }
 

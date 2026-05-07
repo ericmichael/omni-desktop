@@ -49,6 +49,7 @@ export type PreviewRequest = {
 };
 
 let nextId = 0;
+const latestRequestByTab = new Map<string, string>();
 
 /** Reactive atom — the most recent preview request, or null. */
 export const $previewRequest = atom<PreviewRequest | null>(null);
@@ -89,8 +90,13 @@ return url;
 /** Called by the client tool handler. Returns immediately (proxy registration is async but non-blocking). */
 export function requestPreviewOpen(url: string, tabId?: string): void {
   const id = `preview-${++nextId}`;
+  const key = tabId ?? 'default';
+  latestRequestByTab.set(key, id);
   // Fire and forget — resolve the proxy URL, then set the atom
   void resolvePreviewUrl(url, tabId).then((resolvedUrl) => {
+    if (latestRequestByTab.get(key) !== id) {
+      return;
+    }
     $previewRequest.set({ id, url: resolvedUrl, tabId });
   });
 }

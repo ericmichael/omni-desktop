@@ -23,7 +23,7 @@ import {
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { fallbackTitle, parseOrigin } from '@/lib/url';
+import { fallbackTitle, normalizeAddress, parseOrigin } from '@/lib/url';
 import type { ConsoleMessage, ContextMenuParams, FoundInPageResult, WebviewHandle } from '@/renderer/common/Webview';
 import { Webview } from '@/renderer/common/Webview';
 import { BookmarksBar } from '@/renderer/features/Browser/BookmarksBar';
@@ -286,9 +286,10 @@ return;
       if (src === lastExternalSrcRef.current) {
 return;
 }
+      const normalizedSrc = normalizeAddress(src);
       lastExternalSrcRef.current = src;
-      if (activeTab.url !== src) {
-        void browserApi.navigateTab(tabsetId, activeTab.id, src);
+      if (activeTab.url !== normalizedSrc) {
+        void browserApi.navigateTab(tabsetId, activeTab.id, normalizedSrc);
       }
     }, [src, activeTab, tabsetId]);
 

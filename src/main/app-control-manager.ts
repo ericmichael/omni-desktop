@@ -15,6 +15,8 @@ import fs from 'fs/promises';
 import path from 'path';
 
 import { getArtifactsDir } from '@/lib/artifacts';
+import { normalizeAddress } from '@/lib/url';
+import { isAbortError } from '@/lib/webview-navigation';
 import {
   clearNetworkLog,
   clearViewportOverride,
@@ -221,15 +223,10 @@ export class AppControlManager {
     if (!wc || wc.isDestroyed()) {
       return;
     }
-    const handler = (
-      _event: unknown,
-      level: number,
-      message: string,
-      _line: number,
-      _sourceId: string
-    ) => {
-      // Electron emits level 0=log/info, 1=warning, 2=error. Treat warnings
-      // and errors accordingly; everything else is `log`.
+    const handler = (event: unknown) => {
+      const payload = event as { level?: number; message?: string };
+      const level = payload.level ?? 0;
+      const message = payload.message ?? '';
       const mapped: AppConsoleLevel = level === 2 ? 'error' : level === 1 ? 'warn' : 'log';
       entry.console.push({ level: mapped, message, timestamp: Date.now() });
       if (entry.console.length > MAX_CONSOLE_ENTRIES) {
@@ -250,7 +247,18 @@ export class AppControlManager {
 
   async navigate(handleId: AppHandleId, url: string): Promise<void> {
     const { wc } = this.requireWebContents(handleId);
-    await wc.loadURL(url);
+    const normalized = normalizeAddress(url);
+    if (wc.getURL() === normalized) {
+      return;
+    }
+    try {
+      await wc.loadURL(normalized);
+    } catch (error) {
+      if (isAbortError(error)) {
+        return;
+      }
+      throw error;
+    }
   }
 
   async reload(handleId: AppHandleId): Promise<void> {

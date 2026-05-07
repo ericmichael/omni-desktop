@@ -119,7 +119,6 @@ export const KanbanCard = memo(
     const handleStart = useCallback(
       (e: React.MouseEvent) => {
         e.stopPropagation();
-        openTicketInCode(ticket.id);
         ticketApi.startSupervisor(ticket.id);
       },
       [ticket.id]

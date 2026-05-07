@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { customAppPartition } from '@/lib/app-partition';
 import type { WebviewRegistryProps } from '@/renderer/common/Webview';
 import { Webview } from '@/renderer/common/Webview';
 import { BrowserView } from '@/renderer/features/Browser/BrowserView';
@@ -322,7 +323,7 @@ const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass, tabId, terminalCw
     return (
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
         <SurfaceFrame app={app} isGlass={isGlass}>
-          {app.url ? <Webview src={app.url} showUnavailable={false} registry={registryProps} /> : <div className={styles.unavailableState}>No URL configured.</div>}
+          {app.url ? <Webview src={app.url} partition={customAppPartition(app.id)} showUnavailable={false} registry={registryProps} /> : <div className={styles.unavailableState}>No URL configured.</div>}
         </SurfaceFrame>
       </motion.div>
     );

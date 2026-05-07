@@ -415,7 +415,6 @@ const TicketTreeItem = memo(({ ticket, onSelect, onItemClick }: { ticket: Ticket
               <MenuItem
                 icon={<Play20Filled />}
                 onClick={() => {
-                  void openTicketInCode(ticket.id);
                   void ticketApi.startSupervisor(ticket.id);
                 }}
               >

@@ -414,18 +414,11 @@ return
     client.stopRun(runId).catch(() => {})
   }, [client, stop, runId])
 
-  // Stable ref so the supervisor-bridge effect can call the latest handleSubmit
-  // without re-registering the actor on every deps change.
-  const handleSubmitRef = useRef(handleSubmit)
-  useEffect(() => {
-    handleSubmitRef.current = handleSubmit
-  }, [handleSubmit])
+  const runStartedWaitersRef = useRef<Array<(runId: string) => void>>([])
 
   // ---------------------------------------------------------------------------
-  // Supervisor bridge — forward a narrow set of WS events to main's orchestrator
-  // and register this column's submit / send / stop / reset as the one path
-  // autopilot uses. No session id flows through here; the column is
-  // authoritative.
+  // Supervisor bridge event forwarding. The Code column owns the session id;
+  // main observes this narrow event stream to drive phase / retry / stall state.
   // ---------------------------------------------------------------------------
   useEffect(() => {
     if (!ticketId) {
@@ -444,15 +437,13 @@ return
     }
     const num = (v: unknown): number => Number(v ?? 0)
     const offs: Array<() => void> = []
-    const runStartedWaiters: Array<(runId: string) => void> = []
 
     offs.push(
       client.on('run_started', (raw: unknown) => {
         const p = (raw ?? {}) as RunEvent
         const runId = String(p.run_id ?? '')
         forwardEvent({ kind: 'run-started', ticketId, runId })
-        // Wake anyone awaiting the next run_started (autopilot submits).
-        const pending = runStartedWaiters.splice(0, runStartedWaiters.length)
+        const pending = runStartedWaitersRef.current.splice(0, runStartedWaitersRef.current.length)
         for (const w of pending) {
           w(runId)
         }
@@ -492,12 +483,28 @@ return
       })
     )
 
+    return () => {
+      for (const off of offs) {
+        off()
+      }
+    }
+  }, [ticketId, client])
+
+  // ---------------------------------------------------------------------------
+  // Supervisor bridge actor registration. This is the one path autopilot uses
+  // to submit, send, stop, and reset runs through the live Code column.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!ticketId) {
+      return
+    }
+
     const nextRunId = (timeoutMs = 60_000): Promise<string> =>
       new Promise((resolve, reject) => {
         const t = setTimeout(() => {
-          const i = runStartedWaiters.indexOf(wake)
+          const i = runStartedWaitersRef.current.indexOf(wake)
           if (i >= 0) {
-            runStartedWaiters.splice(i, 1)
+            runStartedWaitersRef.current.splice(i, 1)
           }
           reject(new Error('Timed out waiting for run_started'))
         }, timeoutMs)
@@ -505,14 +512,9 @@ return
           clearTimeout(t)
           resolve(runId)
         }
-        runStartedWaiters.push(wake)
+        runStartedWaitersRef.current.push(wake)
       })
 
-    // Gate any bridge-driven submit on the chat-session machine being in
-    // ready.idle — xstate silently drops SUBMIT in any other state, which
-    // would let `client.startRun` fire while the local UI never transitions
-    // to `thinking` (Stop button never shown). The machine reports its
-    // value as `{ ready: 'idle' }` once boot completes.
     const awaitChatReady = (): Promise<void> =>
       waitFor(actor, (s) => {
         const v = s.value
@@ -522,19 +524,16 @@ return
     const unregister = registerColumnActor({
       ticketId,
       submit: async (prompt, runOverrides) => {
-        // Same handleSubmit path as user submits. The orchestrator's per-
-        // dispatch intent (autopilot framing, approval policy) rides on the
-        // `runOverrides` payload — no implicit signals, no store reads.
         const waiter = nextRunId()
         await awaitChatReady()
-        await handleSubmitRef.current(prompt, undefined, runOverrides)
+        await handleSubmit(prompt, undefined, runOverrides)
         const runId = await waiter
         return { runId }
       },
       send: async (message) => {
         const waiter = nextRunId()
         await awaitChatReady()
-        await handleSubmitRef.current(message, undefined)
+        await handleSubmit(message, undefined)
         await waiter
       },
       stop: async () => {
@@ -555,12 +554,9 @@ return
     })
 
     return () => {
-      for (const off of offs) {
-        off()
-      }
       unregister()
     }
-  }, [ticketId, client, machine, actor])
+  }, [ticketId, client, machine, actor, handleSubmit])
 
   useEffect(() => {
     if (!connected) {

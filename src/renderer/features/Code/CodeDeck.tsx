@@ -24,6 +24,7 @@ import {
 import { useStore } from '@nanostores/react';
 import { forwardRef, Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { customAppPartition } from '@/lib/app-partition';
 import { uuidv4 } from '@/lib/uuid';
 import { Webview } from '@/renderer/common/Webview';
 import { BrowserView } from '@/renderer/features/Browser/BrowserView';
@@ -1063,7 +1064,7 @@ const AppColumn = memo(
             </div>
           </div>
           <div className={styles.flex1MinH0Relative}>
-            <Webview src={app.url} showUnavailable={false} registry={registryProps} />
+            <Webview src={app.url} partition={customAppPartition(app.id)} showUnavailable={false} registry={registryProps} />
           </div>
         </div>
         <div className={styles.deckDockSlot} />
@@ -1214,7 +1215,7 @@ const SidecarBody = memo(
       );
     } else if (app.kind === 'webview') {
       body = app.url ? (
-        <Webview src={app.url} showUnavailable={false} registry={registryProps} />
+        <Webview src={app.url} partition={customAppPartition(app.id)} showUnavailable={false} registry={registryProps} />
       ) : (
         <div className={styles.sidecarUnavailable}>No URL configured.</div>
       );

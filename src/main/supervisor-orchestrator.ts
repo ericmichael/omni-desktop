@@ -1126,6 +1126,11 @@ export class SupervisorOrchestrator {
       console.log(`[SupervisorOrchestrator] startSupervisor: ensureColumn for ${ticketId}...`);
       const entry = await this.ensureColumn(ticketId);
 
+      const phase = entry.state.getPhase();
+      if (phase === 'idle' || phase === 'error' || phase === 'completed') {
+        entry.state.forcePhase('ready' as TicketPhase);
+      }
+
       if (project.source?.kind === 'git-remote') {
         const hookScript = this.deps.workflowLoader.getConfig(ticket.projectId).hooks?.before_run;
         if (hookScript && entry.tabId && this.deps.processManager) {

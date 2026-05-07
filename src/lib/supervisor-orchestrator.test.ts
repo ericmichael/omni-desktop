@@ -876,6 +876,30 @@ describe('SupervisorOrchestrator integration', () => {
     });
   });
 
+  describe('startSupervisor', () => {
+    it('re-arms an idle existing machine before dispatching an autopilot run', async () => {
+      const ctx = makePm({
+        source: { kind: 'local', workspaceDir: '/tmp/fake' },
+        tickets: [{ id: 't1' }],
+      });
+      const mock = seedMachine(ctx, 't1' as TicketId);
+      mock.phase = 'idle';
+
+      await orch(ctx.pm).startSupervisor('t1' as TicketId);
+
+      expect(mock.phase).toBe('running');
+      expect(ctx.bridge.run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ticketId: 't1',
+          prompt: 'Begin working on this ticket.',
+          runOverrides: expect.objectContaining({
+            safeToolOverrides: { safe_tool_patterns: ['.*'] },
+          }),
+        })
+      );
+    });
+  });
+
   // -------------------------------------------------------------------------
   // T6 — sendSupervisorMessage + resetSupervisorSession
   // -------------------------------------------------------------------------
