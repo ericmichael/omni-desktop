@@ -28,7 +28,6 @@ function defaultStoreData() {
     lastWeeklyReviewAt: null,
     schemaVersion: CURRENT_SCHEMA_VERSION,
     chatSessionId: null,
-    chatProjectId: null,
     codeTabs: [],
     activeCodeTabId: null,
     codeLayoutMode: 'deck',

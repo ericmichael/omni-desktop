@@ -23,7 +23,6 @@ const getDefaults = (): StoreData => ({
   tickets: [],
   schemaVersion: 0,
   chatSessionId: null,
-  chatProjectId: null,
   codeTabs: [],
   activeCodeTabId: null,
   codeLayoutMode: 'deck',

@@ -7,10 +7,13 @@ import { createConsoleManager } from '@/main/console-manager';
 import { buildStoreSnapshot, PROJECT_KEYS, rowToProject } from '@/main/db-store-bridge';
 import { createExtensionManager } from '@/main/extension-manager';
 import { syncMcpConfig } from '@/main/mcp-config-manager';
+import { registerMigrationHandlers } from '@/main/migration-handlers';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
+import { migrateLegacyPagesToConfigDir } from '@/main/pages-relocation-migration';
 import { PlatformClient } from '@/main/platform-client';
 import { createPlatformClient, isEnterpriseBuild, mapSandboxProfiles, PLATFORM_URL } from '@/main/platform-mode';
 import { createProcessManager } from '@/main/process-manager';
+import { backfillProjectConfigs } from '@/main/project-config-backfill';
 import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
 import { createProjectManager } from '@/main/project-manager';
 import { getOmniConfigDir } from '@/main/util';
@@ -63,6 +66,44 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
     }
   } catch (err) {
     console.error('[ProjectDb] Failed to migrate from server-store:', err);
+  }
+
+  try {
+    const backfilled = backfillProjectConfigs(repo);
+    if (backfilled > 0) {
+      console.log(`[ProjectDb] Backfilled config for ${backfilled} projects`);
+    }
+  } catch (err) {
+    console.error('[ProjectDb] Failed to backfill project configs:', err);
+  }
+
+  try {
+    const summary = migrateLegacyPagesToConfigDir(repo);
+    const total = summary.perProjectPagesCopied + summary.rootPagesFromContextMd + summary.mcpPagesCopied;
+    if (total > 0) {
+      console.log(
+        `[ProjectDb] Pages migration copied ${total} files ` +
+          `(per-project: ${summary.perProjectPagesCopied}, ` +
+          `context.md → root: ${summary.rootPagesFromContextMd}, ` +
+          `MCP: ${summary.mcpPagesCopied}, ` +
+          `skipped existing: ${summary.skippedAlreadyMigrated})`
+      );
+    }
+    const existing = store.get('pagesMigration');
+    if (!existing && summary.legacyPaths.length > 0) {
+      store.set('pagesMigration', {
+        summary: {
+          perProjectPagesCopied: summary.perProjectPagesCopied,
+          rootPagesFromContextMd: summary.rootPagesFromContextMd,
+          mcpPagesCopied: summary.mcpPagesCopied,
+          skippedAlreadyMigrated: summary.skippedAlreadyMigrated,
+        },
+        legacyPaths: summary.legacyPaths,
+        acknowledged: false,
+      });
+    }
+  } catch (err) {
+    console.error('[ProjectDb] Failed to migrate legacy pages:', err);
   }
 
   try {
@@ -249,6 +290,17 @@ return getStoreSnapshot()[k];
   registerConfigHandlers(ipc, OMNI_CONFIG_DIR);
   registerUtilHandlers(ipc, { fetchFn: globalThis.fetch, launcherVersion });
   registerSkillsHandlers(ipc, OMNI_CONFIG_DIR, store);
+  registerMigrationHandlers(ipc, {
+    get: () => store.get('pagesMigration') ?? null,
+    set: (value) => {
+      if (value === null) {
+        store.delete('pagesMigration');
+      } else {
+        store.set('pagesMigration', value);
+      }
+      sendToAll('store:changed', store.store);
+    },
+  });
 
   // Desktop-only handlers — stubbed for browser mode
   ipc.handle('util:select-directory', () => null);

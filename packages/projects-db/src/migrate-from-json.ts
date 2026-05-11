@@ -176,6 +176,7 @@ return 0;
         auto_dispatch: p.autoDispatch ? 1 : 0,
         source: jsonStr(p.source),
         sandbox: jsonStr(p.sandbox),
+        config: null,
         created_at: toIso(p.createdAt),
         updated_at: toIso(p.createdAt),
       });

@@ -17,6 +17,7 @@ import { syncTheme } from '@/renderer/constants';
 import { SystemInfoLoadingGate, SystemInfoProvider } from '@/renderer/contexts/SystemInfoContext';
 import { AuthGate } from '@/renderer/features/Auth/AuthGate';
 import { QuickCapture } from '@/renderer/features/Inbox/QuickCapture';
+import { MigrationNotice } from '@/renderer/features/MigrationNotice/MigrationNotice';
 import { ToastContainer } from '@/renderer/features/Toast/ToastContainer';
 import { SyncBar } from '@/renderer/features/WorkspaceSync/SyncBar';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -30,6 +31,11 @@ const useStyles = makeStyles({
     height: '100dvh',
     position: 'relative',
     overflow: 'hidden',
+    // Flex column so the post-migration notice (rendered above the main
+    // layout when present) doesn't fight the layout for vertical space —
+    // it shrinks to its content and `.layout` consumes the rest.
+    display: 'flex',
+    flexDirection: 'column',
     backgroundColor: tokens.colorNeutralBackground1,
     fontFamily: tokens.fontFamilyBase,
     color: tokens.colorNeutralForeground1,
@@ -38,7 +44,7 @@ const useStyles = makeStyles({
   layout: {
     display: 'flex',
     width: '100%',
-    height: '100%',
+    flex: '1 1 0',
     minHeight: 0,
   },
 });
@@ -72,6 +78,7 @@ export const App = () => {
           <ErrorBoundary FallbackComponent={ErrorBoundaryFallback}>
             <SystemInfoLoadingGate>
               <AuthGate>
+                <MigrationNotice />
                 <div className={styles.layout}>
                   <MainContent />
                 </div>

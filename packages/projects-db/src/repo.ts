@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 
 import { defaultColumnId } from './defaults.js';
-import { tx } from './tx.js';
+import { tx, txDeferred } from './tx.js';
 import type {
   ColumnRow,
   CommentRow,
@@ -95,9 +95,48 @@ export class ProjectsRepo {
     this.bumpChangeSeq();
   }
 
+  /**
+   * Read the `config` column for a project. Returns the raw JSON string —
+   * caller is responsible for `JSON.parse` and shape validation. Returns
+   * `null` for rows that haven't been backfilled yet (v3 migration adds the
+   * column; rows from before that have NULL).
+   */
+  getProjectConfig(id: string): string | null {
+    const row = this.stmts.getProjectConfig.get(id) as { config: string | null } | undefined;
+    return row?.config ?? null;
+  }
+
+  /**
+   * Write the `config` column for a project. Pass a JSON-stringified
+   * `ProjectConfig`. Bumps `_change_seq` so the watcher fires.
+   */
+  setProjectConfig(id: string, configJson: string | null): void {
+    this.stmts.setProjectConfig.run(configJson, id);
+    this.bumpChangeSeq();
+  }
+
+  /**
+   * Sync the projects table to `rows` without destroying child data.
+   *
+   * Earlier versions did `DELETE FROM projects` + reinsert inside the tx —
+   * which wiped every ticket, milestone, page, pipeline column, task and
+   * comment via ON DELETE CASCADE before re-creating the project rows. Any
+   * routine update (renaming a project, assigning a workspace, toggling
+   * auto-dispatch) destroyed all related data.
+   *
+   * Diff-and-upsert preserves children: a project row that exists in both
+   * old and new is upserted (no cascade fires); a project missing from the
+   * new set is explicitly deleted (cascade fires only for the removed row).
+   */
   replaceAllProjects(rows: ProjectRow[]): void {
-    tx(this.db, () => {
-      this.stmts.deleteAllProjects.run();
+    txDeferred(this.db, () => {
+      const incoming = new Set(rows.map((r) => r.id));
+      const existing = this.stmts.listAllProjectIds.all() as Array<{ id: string }>;
+      for (const { id } of existing) {
+        if (!incoming.has(id)) {
+          this.stmts.deleteProject.run(id);
+        }
+      }
       for (const row of rows) {
         this.stmts.upsertProject.run(
           row.id, row.label, row.slug, row.workspace_dir,
@@ -299,9 +338,21 @@ export class ProjectsRepo {
     this.bumpChangeSeq();
   }
 
+  /**
+   * Sync the tickets table to `rows` without destroying child data
+   * (comments, supervisor tasks). See `replaceAllProjects` for the
+   * rationale — the legacy delete-all+reinsert pattern wiped
+   * `ticket_comments` via CASCADE on every ticket write.
+   */
   replaceAllTickets(rows: TicketRow[]): void {
-    tx(this.db, () => {
-      this.stmts.deleteAllTickets.run();
+    txDeferred(this.db, () => {
+      const incoming = new Set(rows.map((r) => r.id));
+      const existing = this.stmts.listAllTicketIds.all() as Array<{ id: string }>;
+      for (const { id } of existing) {
+        if (!incoming.has(id)) {
+          this.stmts.deleteTicket.run(id);
+        }
+      }
       for (const row of rows) {
         this.stmts.upsertTicket.run(
           row.id, row.project_id, row.milestone_id, row.column_id,
@@ -377,9 +428,22 @@ export class ProjectsRepo {
     this.bumpChangeSeq();
   }
 
+  /**
+   * Sync the milestones table to `rows` without breaking ticket links.
+   * Milestone deletes use SET NULL on `tickets.milestone_id`, but the
+   * legacy delete-all+reinsert pattern severed every ticket's milestone
+   * link on every milestone write. Diff-and-upsert only fires SET NULL
+   * for milestones actually being removed.
+   */
   replaceAllMilestones(rows: MilestoneRow[]): void {
-    tx(this.db, () => {
-      this.stmts.deleteAllMilestones.run();
+    txDeferred(this.db, () => {
+      const incoming = new Set(rows.map((r) => r.id));
+      const existing = this.stmts.listAllMilestoneIds.all() as Array<{ id: string }>;
+      for (const { id } of existing) {
+        if (!incoming.has(id)) {
+          this.stmts.deleteMilestone.run(id);
+        }
+      }
       for (const row of rows) {
         this.stmts.upsertMilestone.run(
           row.id, row.project_id, row.title, row.description,
@@ -419,9 +483,21 @@ export class ProjectsRepo {
     this.bumpChangeSeq();
   }
 
+  /**
+   * Sync the pages table to `rows`. Deferred FKs let us upsert parent/
+   * child pages in any order — `pages.parent_id` self-references the same
+   * table and the legacy pattern of delete-all + reinsert could fail or
+   * silently null parent pointers depending on row order.
+   */
   replaceAllPages(rows: PageRow[]): void {
-    tx(this.db, () => {
-      this.stmts.deleteAllPages.run();
+    txDeferred(this.db, () => {
+      const incoming = new Set(rows.map((r) => r.id));
+      const existing = this.stmts.listAllPageIds.all() as Array<{ id: string }>;
+      for (const { id } of existing) {
+        if (!incoming.has(id)) {
+          this.stmts.deletePage.run(id);
+        }
+      }
       for (const row of rows) {
         this.stmts.upsertPage.run(
           row.id, row.project_id, row.parent_id, row.title,
@@ -457,9 +533,20 @@ export class ProjectsRepo {
     this.bumpChangeSeq();
   }
 
+  /**
+   * Sync the inbox table to `rows`. No child tables reference inbox_items,
+   * so diff-and-upsert is purely for consistency with the other replaceAll
+   * methods and to avoid unnecessary row churn on every write.
+   */
   replaceAllInboxItems(rows: InboxRow[]): void {
-    tx(this.db, () => {
-      this.stmts.deleteAllInboxItems.run();
+    txDeferred(this.db, () => {
+      const incoming = new Set(rows.map((r) => r.id));
+      const existing = this.stmts.listAllInboxItemIds.all() as Array<{ id: string }>;
+      for (const { id } of existing) {
+        if (!incoming.has(id)) {
+          this.stmts.deleteInboxItem.run(id);
+        }
+      }
       for (const row of rows) {
         this.stmts.upsertInboxItem.run(
           row.id, row.title, row.note, row.project_id,
@@ -499,9 +586,20 @@ export class ProjectsRepo {
     this.bumpChangeSeq();
   }
 
+  /**
+   * Sync the tasks table to `rows`. No child tables reference tasks, but
+   * we still use diff-and-upsert so a routine "save supervisor state"
+   * doesn't churn every task row's identity.
+   */
   replaceAllTasks(rows: TaskRow[]): void {
-    tx(this.db, () => {
-      this.stmts.deleteAllTasks.run();
+    txDeferred(this.db, () => {
+      const incoming = new Set(rows.map((r) => r.id));
+      const existing = this.stmts.listAllTaskIds.all() as Array<{ id: string }>;
+      for (const { id } of existing) {
+        if (!incoming.has(id)) {
+          this.stmts.deleteTask.run(id);
+        }
+      }
       for (const row of rows) {
         this.stmts.upsertTask.run(
           row.id, row.project_id, row.task_description, row.status,
@@ -537,6 +635,9 @@ function prepareStatements(db: DatabaseSync) {
     `),
     deleteProject: db.prepare('DELETE FROM projects WHERE id = ?'),
     deleteAllProjects: db.prepare('DELETE FROM projects'),
+    listAllProjectIds: db.prepare('SELECT id FROM projects'),
+    getProjectConfig: db.prepare('SELECT config FROM projects WHERE id = ?'),
+    setProjectConfig: db.prepare('UPDATE projects SET config = ?, updated_at = datetime(\'now\') WHERE id = ?'),
 
     // Pipeline columns
     listColumns: db.prepare('SELECT * FROM pipeline_columns WHERE project_id = ? ORDER BY sort_order'),
@@ -581,6 +682,7 @@ function prepareStatements(db: DatabaseSync) {
     `),
     deleteTicket: db.prepare('DELETE FROM tickets WHERE id = ?'),
     deleteAllTickets: db.prepare('DELETE FROM tickets'),
+    listAllTicketIds: db.prepare('SELECT id FROM tickets'),
 
     // Comments
     listCommentsByTicket: db.prepare('SELECT * FROM ticket_comments WHERE ticket_id = ? ORDER BY created_at'),
@@ -607,6 +709,7 @@ function prepareStatements(db: DatabaseSync) {
     `),
     deleteMilestone: db.prepare('DELETE FROM milestones WHERE id = ?'),
     deleteAllMilestones: db.prepare('DELETE FROM milestones'),
+    listAllMilestoneIds: db.prepare('SELECT id FROM milestones'),
 
     // Pages
     listAllPages: db.prepare('SELECT * FROM pages ORDER BY sort_order'),
@@ -623,6 +726,7 @@ function prepareStatements(db: DatabaseSync) {
     `),
     deletePage: db.prepare('DELETE FROM pages WHERE id = ?'),
     deleteAllPages: db.prepare('DELETE FROM pages'),
+    listAllPageIds: db.prepare('SELECT id FROM pages'),
 
     // Inbox items
     listAllInboxItems: db.prepare('SELECT * FROM inbox_items ORDER BY created_at DESC'),
@@ -637,6 +741,7 @@ function prepareStatements(db: DatabaseSync) {
     `),
     deleteInboxItem: db.prepare('DELETE FROM inbox_items WHERE id = ?'),
     deleteAllInboxItems: db.prepare('DELETE FROM inbox_items'),
+    listAllInboxItemIds: db.prepare('SELECT id FROM inbox_items'),
 
     // Tasks
     listAllTasks: db.prepare('SELECT * FROM tasks ORDER BY created_at'),
@@ -653,5 +758,6 @@ function prepareStatements(db: DatabaseSync) {
     `),
     deleteTask: db.prepare('DELETE FROM tasks WHERE id = ?'),
     deleteAllTasks: db.prepare('DELETE FROM tasks'),
+    listAllTaskIds: db.prepare('SELECT id FROM tasks'),
   };
 }

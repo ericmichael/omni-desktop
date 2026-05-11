@@ -46,6 +46,17 @@ export const getUVExecutablePath = (): string => {
   return path.join(getBundledBinPath(), uvName);
 };
 
+/**
+ * Get the path to the vendored MCP-UI sandbox proxy HTML. Served by the
+ * ``mcp-sandbox:`` protocol handler in main/index.ts.
+ */
+export const getMcpSandboxHtmlPath = (): string => {
+  if (isDevelopment() || !app.isPackaged || !process.resourcesPath) {
+    return path.resolve(path.join(__dirname, '..', '..', 'assets', 'mcp-sandbox', 'index.html'));
+  }
+  return path.resolve(path.join(process.resourcesPath, 'mcp-sandbox', 'index.html'));
+};
+
 export const getOmniRuntimeDir = (): string => {
   // On Windows, use %USERPROFILE%\.omni — the shortest stable non-admin path.
   // Deep site-packages paths inside the venv easily exceed 260 chars when
@@ -205,6 +216,19 @@ export const getProjectsDir = (): string => {
 
 export const getProjectDir = (slug: string): string => {
   return path.join(getProjectsDir(), slug);
+};
+
+/**
+ * Absolute filesystem directory holding a project's pages and notebooks.
+ *
+ * Pages now live under `<config>/pages/<projectId>/<pageId>.{md,py}` rather
+ * than `<workspaceDir>/Projects/<slug>/pages/`. Keyed by stable id, not slug,
+ * so rename doesn't break the filesystem. Shared 1:1 with the MCP layout
+ * (`getDefaultPagesDir` in omni-projects-db), so both writers land on the
+ * same files.
+ */
+export const getProjectPagesDir = (projectId: string): string => {
+  return path.join(getOmniConfigDir(), 'pages', projectId);
 };
 
 /** Generate a filesystem-safe slug from a project label. */

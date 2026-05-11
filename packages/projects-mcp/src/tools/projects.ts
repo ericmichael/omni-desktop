@@ -70,7 +70,7 @@ return err(`A project with slug "${slug}" already exists.`);
         db.prepare(
           'INSERT INTO pages (id, project_id, parent_id, title, sort_order, is_root) VALUES (?, ?, NULL, ?, 0, 1)'
         ).run(rootId, id, label);
-        writePageContent(pagesDir, slug, rootId, `# ${label}\n`);
+        writePageContent(pagesDir, id, rootId, `# ${label}\n`);
 
         repo.bumpChangeSeq();
       });
@@ -110,6 +110,14 @@ return err(`Project not found: ${project_id}`);
 
       if (label !== undefined) {
         const slug = slugify(label);
+        // Reject the rename if another project already owns this slug. Matches
+        // the create_project uniqueness check above — surfaces a clean error
+        // to the agent instead of letting the schema's UNIQUE constraint throw
+        // a raw SQLITE_CONSTRAINT mid-update.
+        const collision = repo.getProjectBySlug(slug);
+        if (collision && collision.id !== project_id) {
+          return err(`A project with slug "${slug}" already exists.`);
+        }
         sets.push('label = ?', 'slug = ?');
         params.push(label, slug);
       }
@@ -145,7 +153,7 @@ return err('Cannot delete the Personal project');
 }
 
       repo.deleteProject(project_id);
-      deleteProjectPages(pagesDir, project.slug);
+      deleteProjectPages(pagesDir, project_id);
 
       return json({ ok: true });
     }

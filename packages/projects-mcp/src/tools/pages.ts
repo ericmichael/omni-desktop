@@ -8,11 +8,6 @@ import { z } from 'zod';
 const json = (data: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data) }] });
 const err = (message: string) => ({ content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }], isError: true as const });
 
-function getProjectSlug(repo: ProjectsRepo, projectId: string): string | null {
-  const row = repo.getProject(projectId);
-  return row?.slug ?? null;
-}
-
 export function registerPageTools(server: McpServer, db: DatabaseSync, repo: ProjectsRepo, pagesDir: string): void {
   server.tool(
     'list_pages',
@@ -59,8 +54,7 @@ export function registerPageTools(server: McpServer, db: DatabaseSync, repo: Pro
       const page = repo.getPage(page_id);
       if (!page) return err(`Page not found: ${page_id}`);
 
-      const slug = getProjectSlug(repo, page.project_id);
-      const content = slug ? readPageContent(pagesDir, slug, page.id) : null;
+      const content = readPageContent(pagesDir, page.project_id, page.id);
 
       return json({
         id: page.id,
@@ -86,8 +80,8 @@ export function registerPageTools(server: McpServer, db: DatabaseSync, repo: Pro
       icon: z.string().optional().describe('Optional emoji icon for sidebar display.'),
     },
     async ({ project_id, title, parent_id, content, icon }) => {
-      const slug = getProjectSlug(repo, project_id);
-      if (!slug) return err(`Project not found: ${project_id}`);
+      const project = repo.getProject(project_id);
+      if (!project) return err(`Project not found: ${project_id}`);
 
       const id = pageId();
       const sortOrder = Date.now();
@@ -98,7 +92,7 @@ export function registerPageTools(server: McpServer, db: DatabaseSync, repo: Pro
       `).run(id, project_id, parent_id ?? null, title, icon ?? null, sortOrder);
       repo.bumpChangeSeq();
 
-      writePageContent(pagesDir, slug, id, content?.trim() ? content : `# ${title}\n`);
+      writePageContent(pagesDir, project_id, id, content?.trim() ? content : `# ${title}\n`);
 
       return json({ id, title, parent_id: parent_id ?? null });
     }
@@ -131,8 +125,7 @@ export function registerPageTools(server: McpServer, db: DatabaseSync, repo: Pro
       }
 
       if (content !== undefined) {
-        const slug = getProjectSlug(repo, page.project_id);
-        if (slug) writePageContent(pagesDir, slug, page.id, content);
+        writePageContent(pagesDir, page.project_id, page.id, content);
       }
 
       return json({ ok: true });

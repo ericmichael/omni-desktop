@@ -1,8 +1,12 @@
+import { AppRenderer } from '@mcp-ui/client'
+import type { CallToolResult, ReadResourceResult } from '@modelcontextprotocol/sdk/types.js'
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js'
 import { motion } from 'framer-motion'
 import { CheckCircleIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, PaperclipIcon,ThumbsDownIcon, ThumbsUpIcon } from 'lucide-react'
 import React, { useCallback,useEffect, useMemo, useState } from 'react'
 
 import { getGreeting } from '@/renderer/omniagents-ui/greeting'
+import { useRPCClient } from '@/renderer/omniagents-ui/rpc-context'
 
 import { ActivityGroup as ActivityGroupComponent } from './ActivityGroup'
 import type { ActivityGroupData } from './activity-group'
@@ -36,11 +40,11 @@ import {
 import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } from './ChatContainer'
 import { Markdown } from './promptkit/markdown'
 
-export type { ApprovalItem, ArtifactItem, Attachment, ChatMessage, MessageItem, PlanItem, ToolItem } from '@/shared/chat-types'
-import type { ApprovalItem, ArtifactItem, Attachment, ChatMessage, MessageItem, PlanItem, ToolItem } from '@/shared/chat-types'
+export type { ApprovalItem, ArtifactItem, ArtifactMcpUi, Attachment, ChatMessage, MessageItem, PlanItem, ToolItem } from '@/shared/chat-types'
+import type { ApprovalItem, ArtifactItem, ArtifactMcpUi, Attachment, ChatMessage, MessageItem, PlanItem, ToolItem } from '@/shared/chat-types'
 
-export function MessageList({ items, greeting: greetingProp, statusText, thinking, statusSpinner, preambleText, welcomeText, onApprovalDecision, pendingPlan, onPlanDecision, statusItalic, onReaction, currentRunId, toolStatusText }:
-  { items: MessageItem[]; greeting?: string; statusText?: string; thinking?: boolean; statusSpinner?: boolean; preambleText?: string; welcomeText?: string; onApprovalDecision?: (request_id: string, value: 'yes' | 'always' | 'no') => void; pendingPlan?: PlanItem | null; onPlanDecision?: (approved: boolean) => void; statusItalic?: boolean; onReaction?: (type: 'like' | 'dislike', text?: string) => void; currentRunId?: string; toolStatusText?: string }) {
+export function MessageList({ items, greeting: greetingProp, statusText, thinking, statusSpinner, preambleText, welcomeText, onApprovalDecision, pendingPlan, onPlanDecision, statusItalic, onReaction, currentRunId, toolStatusText, onSubmitMessage, onStageContext }:
+  { items: MessageItem[]; greeting?: string; statusText?: string; thinking?: boolean; statusSpinner?: boolean; preambleText?: string; welcomeText?: string; onApprovalDecision?: (request_id: string, value: 'yes' | 'always' | 'no', kind?: 'function' | 'mcp') => void; pendingPlan?: PlanItem | null; onPlanDecision?: (approved: boolean) => void; statusItalic?: boolean; onReaction?: (type: 'like' | 'dislike', text?: string) => void; currentRunId?: string; toolStatusText?: string; onSubmitMessage?: (text: string) => void | Promise<void>; onStageContext?: (source: string, text: string) => void }) {
   const [fallbackGreeting] = useState(getGreeting)
   const greeting = greetingProp ?? fallbackGreeting
   const [reactions, setReactions] = useState<Record<number, 'like' | 'dislike' | undefined>>({})
@@ -73,7 +77,17 @@ onReaction?.(type)
     }
     setFeedbackIndex(undefined)
   }, [feedbackIndex, reactions, onReaction])
-  const displayItems = useMemo(() => groupItems(items, currentRunId, !!thinking), [items, currentRunId, thinking])
+  // Tools may opt out of the conversation log by attaching
+  // ``ui_metadata.hidden = true`` on their RichToolOutput (e.g.
+  // ``bash_status`` polls, no-op ``bash_kill`` results). The omniagents
+  // web/Ink backends drop them before grouping so they don't render as
+  // chat cards and don't inflate activity-group counts — match that
+  // here so the docked panels stay the only surface for those signals.
+  const visibleItems = useMemo(
+    () => items.filter((it) => !(it.type === 'tool' && (it as ToolItem).metadata?.hidden === true)),
+    [items],
+  )
+  const displayItems = useMemo(() => groupItems(visibleItems, currentRunId, !!thinking), [visibleItems, currentRunId, thinking])
   const lastDisplay = displayItems[displayItems.length - 1]
   const hasRunningGroup = lastDisplay?.type === 'activity_group' && (lastDisplay as ActivityGroupData).isRunning
   const tickerStatus = hasRunningGroup ? toolStatusText : undefined
@@ -117,13 +131,13 @@ onReaction?.(type)
 return <ActivityGroupComponent key={`${(m as any).runId  }-${  i}`} group={m as any} statusText={tickerStatus} />
 }
             if (m.type === 'chat') {
-return <MessageBubble key={i} index={i} role={(m as ChatMessage).role} content={(m as ChatMessage).content} attachments={(m as ChatMessage).attachments} reactions={reactions} onReact={handleReaction} feedbackIndex={feedbackIndex} onFeedbackSubmit={handleFeedbackSubmit} onFeedbackDismiss={handleFeedbackDismiss} />
+return <MessageBubble key={i} index={i} role={(m as ChatMessage).role} content={(m as ChatMessage).content} attachments={(m as ChatMessage).attachments} stagedContext={(m as ChatMessage).staged_context} reactions={reactions} onReact={handleReaction} feedbackIndex={feedbackIndex} onFeedbackSubmit={handleFeedbackSubmit} onFeedbackDismiss={handleFeedbackDismiss} />
 }
             if (m.type === 'tool') {
 return <ToolCard key={(m as ToolItem).call_id || i} item={m as ToolItem} />
 }
             if (m.type === 'artifact') {
-return <InlineArtifact key={(m as ArtifactItem).artifact_id || i} item={m as ArtifactItem} />
+return <InlineArtifact key={(m as ArtifactItem).artifact_id || i} item={m as ArtifactItem} onSubmitMessage={onSubmitMessage} onStageContext={onStageContext} />
 }
             if (m.type === 'approval') {
               const reqId = (m as ApprovalItem).request_id
@@ -145,19 +159,57 @@ return <InlineArtifact key={(m as ArtifactItem).artifact_id || i} item={m as Art
   )
 }
 
-function MessageBubble({ index, role, content, attachments, reactions, onReact, feedbackIndex, onFeedbackSubmit, onFeedbackDismiss }: { index: number; role: ChatMessage['role']; content: string; attachments?: Attachment[]; reactions?: Record<number, 'like' | 'dislike' | undefined>; onReact?: (index: number, type: 'like' | 'dislike') => void; feedbackIndex?: number; onFeedbackSubmit?: (index: number, text: string) => void; onFeedbackDismiss?: () => void }) {
+/**
+ * Compact "📎 context attached" affordance shown next to a user message
+ * that carried MCP-Apps staged context. Clicking it expands to show the
+ * full text of each entry so the user can see exactly what extra context
+ * the model received on this turn.
+ */
+function StagedContextRibbon({ entries }: { entries: NonNullable<ChatMessage['staged_context']> }) {
+  const [expanded, setExpanded] = useState(false)
+  const toggle = useCallback(() => setExpanded((v) => !v), [])
+  const summary = entries.length === 1
+    ? entries[0]?.text.split(/\r?\n/)[0]?.slice(0, 60) ?? ''
+    : `${entries.length} context blocks attached`
+  return (
+    <div className="w-full flex flex-col items-end gap-1">
+      <button
+        type="button"
+        onClick={toggle}
+        className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+        aria-expanded={expanded}
+      >
+        📎 {expanded ? 'Hide' : entries.length === 1 ? summary : summary}
+      </button>
+      {expanded ? (
+        <div className="w-full rounded-md border border-border bg-secondary/40 px-3 py-2 text-[12px] text-muted-foreground space-y-2">
+          {entries.map((c) => (
+            <pre key={c.source} className="whitespace-pre-wrap break-words font-sans">
+              {c.text}
+            </pre>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function MessageBubble({ index, role, content, attachments, stagedContext, reactions, onReact, feedbackIndex, onFeedbackSubmit, onFeedbackDismiss }: { index: number; role: ChatMessage['role']; content: string; attachments?: Attachment[]; stagedContext?: ChatMessage['staged_context']; reactions?: Record<number, 'like' | 'dislike' | undefined>; onReact?: (index: number, type: 'like' | 'dislike') => void; feedbackIndex?: number; onFeedbackSubmit?: (index: number, text: string) => void; onFeedbackDismiss?: () => void }) {
   const [feedbackText, setFeedbackText] = useState('')
   const showFeedback = feedbackIndex === index
   if (role === 'user') {
     return (
       <div className="flex justify-end">
-        <div className="flex flex-col items-end max-w-[85%] sm:max-w-[70%] space-y-3">
+        <div className="flex flex-col items-end max-w-[85%] sm:max-w-[70%] space-y-2">
           {attachments && attachments.length > 0 ? (
             <div className="flex flex-wrap gap-2 w-full justify-end">
               {attachments.map((att, i) => (
                 <AttachmentChip key={i} attachment={att} />
               ))}
             </div>
+          ) : null}
+          {stagedContext && stagedContext.length > 0 ? (
+            <StagedContextRibbon entries={stagedContext} />
           ) : null}
           <div className="rounded-[18px] bg-primary text-primary-foreground px-4 py-3 text-sm">
             <MessageResponse>{content}</MessageResponse>
@@ -269,7 +321,7 @@ function MessageBubble({ index, role, content, attachments, reactions, onReact, 
   )
 }
 
-function InlineArtifact({ item }: { item: ArtifactItem }) {
+function InlineArtifact({ item, onSubmitMessage, onStageContext }: { item: ArtifactItem; onSubmitMessage?: (text: string) => void | Promise<void>; onStageContext?: (source: string, text: string) => void }) {
   const [copied, setCopied] = useState(false)
   const handleCopy = useCallback(() => {
     try {
@@ -294,7 +346,7 @@ function InlineArtifact({ item }: { item: ArtifactItem }) {
             </ArtifactActions>
           </ArtifactHeader>
           <ArtifactContent>
-            <InlineArtifactBody item={item} />
+            <InlineArtifactBody item={item} onSubmitMessage={onSubmitMessage} onStageContext={onStageContext} />
           </ArtifactContent>
         </Artifact>
       </div>
@@ -302,8 +354,12 @@ function InlineArtifact({ item }: { item: ArtifactItem }) {
   )
 }
 
-function InlineArtifactBody({ item }: { item: ArtifactItem }) {
+function InlineArtifactBody({ item, onSubmitMessage, onStageContext }: { item: ArtifactItem; onSubmitMessage?: (text: string) => void | Promise<void>; onStageContext?: (source: string, text: string) => void }) {
   const mode = String(item.mode || 'markdown')
+
+  if (mode === 'mcp_ui' && item.mcp_ui) {
+    return <McpUiSurface payload={item.mcp_ui} sessionId={item.session_id} artifactId={item.artifact_id} onSubmitMessage={onSubmitMessage} onStageContext={onStageContext} />
+  }
 
   if (mode === 'markdown') {
     return (
@@ -408,6 +464,346 @@ return null
   )
 }
 
+/**
+ * Host identity advertised to MCP-Apps guests so apps can branch on host
+ * (e.g. style differently for ChatGPT vs. Claude Desktop vs. us).
+ */
+const MCP_UI_HOST_INFO = { name: 'Omni Code Launcher', version: '1.0.0' } as const
+
+/**
+ * Host capability declaration. Each present key signals support; empty
+ * objects ``{}`` are the spec's "yes, present" shape for boolean-style
+ * capabilities. Anything not listed here, the guest must assume we don't
+ * support — Prefab's renderer keys feature visibility off this.
+ *
+ *   • ``openLinks``      — we forward ``ui/open-link`` via ``handleOpenLink``
+ *   • ``serverTools``    — we forward ``tools/call`` to omniagents
+ *   • ``serverResources``— we forward ``resources/read`` to omniagents
+ *   • ``message``        — we accept ``ui/message`` when ``onSubmitMessage``
+ *                          is wired (driven by the chat's submit path)
+ */
+const MCP_UI_HOST_CAPABILITIES = {
+  openLinks: {},
+  serverTools: {},
+  serverResources: {},
+  // ``message`` declares which content-block modalities we accept from
+  // ``ui/message`` requests. We only forward ``text`` blocks into the
+  // chat's submit path today.
+  message: { text: {} },
+  // ``updateModelContext`` — same modality set as ``message``. The host
+  // stashes the content in a session-local staged-context buffer that
+  // gets prepended to the next user prompt (see ``App.tsx#handleSubmit``).
+  updateModelContext: { text: {} },
+} as const
+
+/**
+ * Build the MCP-Apps sandbox proxy URL. Returns a separate-origin URL
+ * under Electron (``mcp-sandbox://``) and a same-origin route in browser
+ * mode. See ``src/main/index.ts`` and ``src/server/index.ts``.
+ */
+function getMcpSandboxUrl(): URL {
+  const isElectron = typeof window !== 'undefined' && 'electron' in window
+  if (isElectron) {
+    return new URL('mcp-sandbox://app/index.html')
+  }
+  return new URL(`${window.location.origin}/mcp-sandbox/index.html`)
+}
+
+/**
+ * Build the HTML payload to hand to AppRenderer. MCP-Apps UI resources come
+ * in two flavors: ``text/html;profile=mcp-app`` (HTML directly) and
+ * ``text/uri-list`` (URL to embed). For uri-list we synthesize a minimal
+ * HTML wrapper that iframes the target URL — the sandbox CSP allows
+ * ``frame-src https: http:`` so the embed loads cross-origin.
+ */
+function resolveMcpUiHtml(inner: NonNullable<ArtifactMcpUi['resource']>['resource']): string {
+  if (!inner) {
+return ''
+}
+  const mime = String(inner.mimeType || '').toLowerCase()
+  const raw = typeof inner.text === 'string' ? inner.text : inner.blob ? safeAtob(inner.blob) : ''
+  if (!raw) {
+return ''
+}
+  if (mime.includes('uri-list') || /^https?:\/\//i.test(raw.trim())) {
+    const url = raw.split(/\r?\n/).find((l) => l.trim() && !l.trim().startsWith('#'))?.trim() ?? ''
+    if (!url) {
+return ''
+}
+    // Wrapper HTML for ``externalUrl`` content. The wrapper sits between
+    // our proxy iframe and the actual external page (three iframes deep
+    // total). Without the bridging script below the external page's
+    // ``window.parent.postMessage`` calls die at the wrapper — that's
+    // what breaks ``SendMessage`` / ``UpdateContext`` / ``CallTool``
+    // from inside a Prefab page served via ``text/uri-list``. We forward
+    // everything bidirectionally so MCP-Apps actions reach the host.
+    return `<!doctype html><html><body style="margin:0;height:100vh"><iframe id="inner" src="${escapeHtml(url)}" style="border:0;width:100%;height:100%" sandbox="allow-scripts allow-forms allow-popups allow-same-origin"></iframe><script>(function(){var i=document.getElementById('inner');window.addEventListener('message',function(e){if(e.source===window.parent&&i.contentWindow){i.contentWindow.postMessage(e.data,'*');}else if(i&&e.source===i.contentWindow){window.parent.postMessage(e.data,'*');}});})();</script></body></html>`
+  }
+  return raw
+}
+
+function safeAtob(b: string): string {
+  try {
+ return atob(b)
+} catch {
+ return ''
+}
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
+}
+
+/**
+ * Render an MCP-Apps UI resource as an artifact-body surface. The payload
+ * is stashed by omniagents (``omniagents/core/agents/mcp_ui.py``) when an
+ * MCP server returns a ``text/html;profile=mcp-app`` / ``text/uri-list``
+ * content block; ``use-chat-session`` then turns the ``tool_result``
+ * metadata into a standalone ``ArtifactItem`` so it gets full-width
+ * framing rather than being collapsed into an activity group with other
+ * tool cards. The mcp-ui ``<AppRenderer>`` runs inside our sandboxed
+ * proxy iframe and routes ``tools/call`` / ``resources/read`` postMessage
+ * requests back to omniagents' ``mcp.*`` server functions out-of-band, per
+ * the MCP Apps spec.
+ */
+function McpUiSurface({ payload, sessionId, artifactId, onSubmitMessage, onStageContext }: { payload: ArtifactMcpUi; sessionId?: string; artifactId?: string; onSubmitMessage?: (text: string) => void | Promise<void>; onStageContext?: (source: string, text: string) => void }) {
+  const rpc = useRPCClient()
+  const serverName = payload.server_name
+  // Stable source key per artifact: re-stages from the same MCP UI replace
+  // the prior entry, per the spec's "overwrite previous context" rule.
+  const stageSource = artifactId ? `mcp_ui:${artifactId}` : `mcp_ui:${payload.tool_name}`
+
+  // Resolve HTML for ``<AppRenderer>``. The inline case extracts from
+  // ``payload.resource.resource.text``; the resource-URI case
+  // (FastMCP/Prefab) fetches a shared renderer over RPC. Either way
+  // the result is a string of HTML.
+  const inlineHtml = useMemo(
+    () => resolveMcpUiHtml(payload.resource?.resource),
+    [payload.resource?.resource],
+  )
+  const [fetchedHtml, setFetchedHtml] = useState<string | null>(null)
+  const [fetchError, setFetchError] = useState<string | null>(null)
+  useEffect(() => {
+    if (!payload.resource_uri || !serverName) {
+return
+}
+    let cancelled = false
+    setFetchError(null)
+    setFetchedHtml(null)
+    rpc
+      .mcpReadResource(serverName, payload.resource_uri, sessionId)
+      .then((res) => {
+        if (cancelled) {
+return
+}
+        const contents = Array.isArray(res.contents) ? res.contents : []
+        // Find the first text/html entry. ``contents[]`` items are
+        // serialized MCP ``TextResourceContents`` / ``BlobResourceContents``;
+        // the renderer is text.
+        let html: string | null = null
+        for (const c of contents as Array<Record<string, unknown>>) {
+          const text = typeof c.text === 'string' ? (c.text as string) : null
+          if (text) {
+            html = text
+            break
+          }
+          const blob = typeof c.blob === 'string' ? (c.blob as string) : null
+          if (blob) {
+            try {
+              html = atob(blob)
+              break
+            } catch {
+              // continue
+            }
+          }
+        }
+        if (html) {
+          setFetchedHtml(html)
+        } else {
+          setFetchError('UI resource returned no HTML content')
+        }
+      })
+      .catch((err: Error) => {
+        if (cancelled) {
+return
+}
+        setFetchError(err.message || 'Failed to load UI resource')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [rpc, serverName, payload.resource_uri, sessionId])
+
+  const html = fetchedHtml ?? inlineHtml
+
+  const toolInput = useMemo(() => {
+    const inp = payload.tool_input
+    if (inp && typeof inp === 'object') {
+return inp as Record<string, unknown>
+}
+    return undefined
+  }, [payload.tool_input])
+
+  const toolResult = useMemo<CallToolResult | undefined>(() => {
+    // FastMCP/Prefab path: synthesize a CallToolResult from the structured
+    // content so the shared renderer (e.g. Prefab's React bundle) gets the
+    // per-call payload it needs. ``content`` is empty because Prefab tools
+    // put everything in structuredContent.
+    if (payload.structured_content !== undefined && payload.structured_content !== null) {
+      return {
+        content: [],
+        structuredContent: payload.structured_content as Record<string, unknown>,
+      } as CallToolResult
+    }
+    if (!payload.tool_output) {
+return undefined
+}
+    try {
+      const parsed = JSON.parse(payload.tool_output)
+      if (parsed && typeof parsed === 'object' && 'content' in parsed) {
+        return parsed as CallToolResult
+      }
+    } catch {
+      // ignore — not all tool outputs are JSON CallToolResult
+    }
+    return undefined
+  }, [payload.structured_content, payload.tool_output])
+
+  const sandboxUrl = useMemo(() => getMcpSandboxUrl(), [])
+
+  const handleCallTool = useCallback(
+    async (params: { name: string; arguments?: Record<string, unknown> }) => {
+      const res = await rpc.mcpCallTool(serverName, params.name, params.arguments ?? {}, sessionId)
+      return (res.result ?? { content: [] }) as CallToolResult
+    },
+    [rpc, serverName, sessionId],
+  )
+
+  const handleReadResource = useCallback(
+    async (params: { uri: string }): Promise<ReadResourceResult> => {
+      const res = await rpc.mcpReadResource(serverName, params.uri, sessionId)
+      return { contents: res.contents } as ReadResourceResult
+    },
+    [rpc, serverName, sessionId],
+  )
+
+  const handleOpenLink = useCallback(async (params: { url: string }) => {
+    const url = params.url || ''
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      window.open(url, '_blank', 'noopener,noreferrer')
+    }
+    return {}
+  }, [])
+
+  // ``ui/update-model-context`` — guest stages content to be included in
+  // the next user turn without triggering a response. AppRenderer doesn't
+  // expose a dedicated prop for this; it routes via ``onFallbackRequest``.
+  // We extract text content and stash via ``onStageContext``; ``App.tsx``'s
+  // ``handleSubmit`` prepends staged context to the next prompt.
+  const handleFallbackRequest = useCallback(
+    async (
+      request: { method?: string; params?: { content?: Array<{ type?: string; text?: string }> } },
+    ): Promise<Record<string, unknown>> => {
+      if (request?.method === 'ui/update-model-context' && onStageContext) {
+        const text = (request.params?.content ?? [])
+          .filter((c) => c && c.type === 'text' && typeof c.text === 'string')
+          .map((c) => c.text as string)
+          .join('\n\n')
+          .trim()
+        onStageContext(stageSource, text)
+        return {}
+      }
+      // Unknown method — surface as a host-side McpError so the guest can
+      // distinguish "not supported" from a transport failure.
+      throw new McpError(ErrorCode.MethodNotFound, `Unsupported MCP-UI method: ${request?.method ?? '<missing>'}`)
+    },
+    [onStageContext, stageSource],
+  )
+
+  // ``ui/message`` — guest asks the host to send a chat message on behalf
+  // of the user. Prefab's ``SendMessage`` action ("Ask AI" button in the
+  // hitchhikers-guide demo) maps to this. We extract the text parts and
+  // route them through the chat's normal submit path so the agent sees
+  // a regular user turn.
+  const handleMessage = useCallback(
+    async (params: { content?: Array<{ type?: string; text?: string }> }): Promise<{ isError?: boolean }> => {
+      if (!onSubmitMessage) {
+        return { isError: true }
+      }
+      const text = (params.content ?? [])
+        .filter((c) => c && c.type === 'text' && typeof c.text === 'string')
+        .map((c) => c.text as string)
+        .join('\n\n')
+        .trim()
+      if (!text) {
+        return { isError: true }
+      }
+      try {
+        await onSubmitMessage(text)
+        return {}
+      } catch {
+        return { isError: true }
+      }
+    },
+    [onSubmitMessage],
+  )
+
+  if (fetchError) {
+    return (
+      <pre className="whitespace-pre-wrap break-words text-sm text-destructive">
+        Failed to load MCP UI resource: {fetchError}
+      </pre>
+    )
+  }
+  if (!serverName) {
+    return (
+      <pre className="whitespace-pre-wrap break-words text-sm text-muted-foreground">
+        MCP UI payload missing server reference.
+      </pre>
+    )
+  }
+  if (!html) {
+    // Resource-URI path still fetching, or no HTML at all.
+    if (payload.resource_uri) {
+      return <div className="px-3 py-2 text-xs text-muted-foreground">Loading MCP UI resource…</div>
+    }
+    return (
+      <pre className="whitespace-pre-wrap break-words text-sm text-muted-foreground">
+        MCP UI payload missing HTML content.
+      </pre>
+    )
+  }
+
+  return (
+    // The iframe is forced to ``!w-full !h-full`` so it ignores the
+    // pixel width/height AppFrame keeps writing in response to the
+    // guest's ``size-changed`` notifications. The wrapper owns the
+    // sizing (full width × 70vh cap) and the *single* scrollbar lives
+    // inside the iframe, on the guest's own scrolling root — same as
+    // every other webview-style host. Avoid stacking outer + inner
+    // scrollbars by keeping the wrapper ``overflow-hidden``.
+    <div
+      className="relative w-full overflow-hidden [&_iframe]:!w-full [&_iframe]:!h-full [&_iframe]:!max-w-full [&_iframe]:!max-h-full [&_iframe]:!block"
+      style={{ height: '70vh', minHeight: 320 }}
+    >
+      <AppRenderer
+        toolName={payload.tool_name}
+        sandbox={{ url: sandboxUrl }}
+        html={html}
+        toolInput={toolInput}
+        toolResult={toolResult}
+        hostInfo={MCP_UI_HOST_INFO}
+        hostCapabilities={MCP_UI_HOST_CAPABILITIES}
+        onCallTool={handleCallTool}
+        onReadResource={handleReadResource as never}
+        onOpenLink={handleOpenLink}
+        onMessage={onSubmitMessage ? handleMessage : undefined}
+        onFallbackRequest={handleFallbackRequest as never}
+      />
+    </div>
+  )
+}
+
 export function ToolCard({ item }: { item: ToolItem }) {
   const hasResult = item.status === 'result'
   const toolState = hasResult ? 'output-available' as const : 'input-available' as const
@@ -430,15 +826,18 @@ return undefined
     return formatArgsPreview(item.input || '', 80) || undefined
   }, [item.input, item.metadata])
 
-  const richBody = useMemo(() => renderMetadata(item.metadata, item.output || ''), [item.metadata, item.output])
+  const richBody = useMemo(
+    () => renderMetadata(item.metadata, item.output || ''),
+    [item.metadata, item.output],
+  )
   const parsedInput = useMemo(() => {
     if (!item.input) {
 return undefined
 }
     try {
- return JSON.parse(item.input) 
+ return JSON.parse(item.input)
 } catch {
- return undefined 
+ return undefined
 }
   }, [item.input])
 
@@ -474,18 +873,23 @@ return undefined
 
 const COLLAPSIBLE_DISPLAY_TYPES = new Set(['diff', 'file_write', 'file_content', 'search_results', 'command'])
 
-function ApprovalCard({ item, onDecision, queuePosition, queueTotal }: { item: ApprovalItem; onDecision?: (request_id: string, value: 'yes' | 'always' | 'no') => void; queuePosition?: number; queueTotal?: number }) {
+function ApprovalCard({ item, onDecision, queuePosition, queueTotal }: { item: ApprovalItem; onDecision?: (request_id: string, value: 'yes' | 'always' | 'no', kind?: 'function' | 'mcp') => void; queuePosition?: number; queueTotal?: number }) {
   const meta = item.metadata
   const summary = meta && typeof meta === 'object' && typeof meta.summary === 'string' ? meta.summary : ''
   const richBody = renderMetadata(meta, item.argumentsText || '')
   const [expanded, setExpanded] = useState(false)
   const toggleExpanded = useCallback(() => setExpanded((v) => !v), [])
+  const isMcp = item.kind === 'mcp'
 
-  // Header
+  // Header. MCP approvals identify the hosted server via ``server_label``
+  // and have no ``always_approve`` affordance (omniagents 0.16 intentionally
+  // omits it for MCP).
   const displayType = meta && typeof meta === 'object' ? meta.display_type : undefined
   const metaInner = meta && typeof meta === 'object' ? meta.metadata : undefined
   let headerSuffix: React.ReactNode = null
-  if ((displayType === 'file_write' || displayType === 'diff') && metaInner && typeof metaInner.file_path === 'string' && metaInner.file_path) {
+  if (isMcp && item.server_label) {
+    headerSuffix = <span className="font-mono text-xs text-warning/90"> — {item.server_label}/{item.tool}</span>
+  } else if ((displayType === 'file_write' || displayType === 'diff') && metaInner && typeof metaInner.file_path === 'string' && metaInner.file_path) {
     headerSuffix = <span className="font-mono text-xs text-warning/90"> — {metaInner.file_path}</span>
   } else if (displayType === 'command' && metaInner && typeof metaInner.command === 'string' && metaInner.command) {
     const cmd = metaInner.command
@@ -504,7 +908,7 @@ function ApprovalCard({ item, onDecision, queuePosition, queueTotal }: { item: A
         </div>
       ) : null}
       <div className="text-sm font-semibold text-warning pr-24">
-        Approve {item.tool}
+        {isMcp ? 'Approve MCP call' : `Approve ${item.tool}`}
         {headerSuffix}
       </div>
       {summary ? <div className="text-xs text-muted-foreground mt-0.5">{summary}</div> : null}
@@ -534,9 +938,14 @@ function ApprovalCard({ item, onDecision, queuePosition, queueTotal }: { item: A
         )}
       </div>
       <div className="mt-3 flex gap-2 justify-end">
-        <button className="px-3 py-1.5 text-xs rounded-md border border-destructive text-destructive bg-transparent hover:bg-destructive/20" onClick={() => onDecision && onDecision(item.request_id, 'no')}>Reject</button>
-        <button className="px-3 py-1.5 text-xs rounded-md border border-primary text-primary bg-transparent hover:bg-muted" onClick={() => onDecision && onDecision(item.request_id, 'always')}>Always</button>
-        <button className="px-3 py-1.5 text-xs rounded-md bg-primary hover:brightness-110 text-primary-foreground" onClick={() => onDecision && onDecision(item.request_id, 'yes')}>Approve Once</button>
+        <button className="px-3 py-1.5 text-xs rounded-md border border-destructive text-destructive bg-transparent hover:bg-destructive/20" onClick={() => onDecision && onDecision(item.request_id, 'no', item.kind)}>Reject</button>
+        {/* The MCP approval path has no ``always_approve`` flag —
+            omniagents 0.16 intentionally omits it. Hide the button so
+            we don't expose a no-op affordance. */}
+        {!isMcp && (
+          <button className="px-3 py-1.5 text-xs rounded-md border border-primary text-primary bg-transparent hover:bg-muted" onClick={() => onDecision && onDecision(item.request_id, 'always', item.kind)}>Always</button>
+        )}
+        <button className="px-3 py-1.5 text-xs rounded-md bg-primary hover:brightness-110 text-primary-foreground" onClick={() => onDecision && onDecision(item.request_id, 'yes', item.kind)}>{isMcp ? 'Approve' : 'Approve Once'}</button>
       </div>
     </div>
   )

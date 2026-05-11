@@ -3,7 +3,7 @@ import 'dotenv/config';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify from 'fastify';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { BlockList, isIPv4, isIPv6 } from 'node:net';
 import { join, resolve } from 'path';
 
@@ -139,6 +139,34 @@ const main = async () => {
         sessionId
       );
     });
+  });
+
+  // MCP-Apps sandbox proxy. Mirrors the ``mcp-sandbox://`` Electron
+  // protocol (see src/main/index.ts) but with a same-origin caveat:
+  // in browser mode the proxy URL shares an origin with the renderer,
+  // so guest UIs get less isolation than under Electron. The mcp-ui
+  // double-iframe + document.write pattern still buys some separation
+  // for the rawhtml flow. Use Electron for full cross-origin sandboxing.
+  const sandboxHtmlPath = resolve(__dirname, '../..', 'assets', 'mcp-sandbox', 'index.html');
+  fastify.get('/mcp-sandbox/index.html', (_request, reply) => {
+    if (!existsSync(sandboxHtmlPath)) {
+      return reply.code(404).send('Not found');
+    }
+    return reply
+      .header('Content-Type', 'text/html; charset=utf-8')
+      .header(
+        'Content-Security-Policy',
+        [
+          "default-src 'none'",
+          "script-src 'unsafe-inline' https:",
+          "style-src 'unsafe-inline' https:",
+          "font-src https: data:",
+          "img-src https: data: blob:",
+          "connect-src https: wss: ws: data: blob:",
+          "frame-src about: data: blob: https: http:",
+        ].join('; '),
+      )
+      .send(readFileSync(sandboxHtmlPath));
   });
 
   // Serve the built browser renderer as static files. In dev:server mode the

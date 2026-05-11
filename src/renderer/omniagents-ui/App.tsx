@@ -9,12 +9,14 @@ import type { TicketId } from '@/shared/types'
 
 import type { PendingMessage } from './ChatShell'
 import { type ArtifactItem,ArtifactsPanel } from './components/ArtifactsPanel'
+import { BashJobs, type BashJobsKillResult, type BashJobsTailResult,type BashJobSummary } from './components/BashJobs'
 import { Header } from './components/Header'
 import { Input } from './components/Input'
 import { type Attachment,MessageList } from './components/MessageList'
 import { ResizableDivider } from './components/ResizableDivider'
 import { type SessionItem,SessionList } from './components/SessionList'
 import { Sidebar } from './components/Sidebar'
+import { Tasks, type TaskSummary } from './components/Tasks'
 import { WorkspacePicker } from './components/WorkspacePicker'
 import { OmniAgentsHeaderActionsPortal, OmniAgentsHeaderActionsProvider } from './header-actions'
 import { useChatBoot } from './hooks/use-chat-boot'
@@ -68,6 +70,12 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   const [workspacePath, setWorkspacePath] = useState<string | null>(null)
   const [workspaceLocked, setWorkspaceLocked] = useState(false)
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false)
+  // Background-bash live override: `ui.bash_jobs.update` broadcasts (and the
+  // kill/tail/list server calls below) push a fresh snapshot here. When non-
+  // null this takes precedence over the snapshot derived from tool_result
+  // metadata in `items`. Reset to null on session change so the new session
+  // starts from its own history-derived state.
+  const [liveBashJobs, setLiveBashJobs] = useState<BashJobSummary[] | null>(null)
   const [initialSessionParam] = useState<string | undefined>(() => uiConfig.session)
   const readyRef = useRef(false)
   const onClientToolCallRef = useRef(onClientToolCall)
@@ -87,8 +95,8 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   const machine = useChatSession(client)
   const {
     actor,
-    items, thinking, status, statusSpinner, statusItalic, preamble, toolStatus, runId, sessionId,
-    submit, submitError, stop, loadSession, selectSession, historyLoaded, historyError, newSession, approvalDecided, appendResponse, addArtifact, setSessionId,
+    items, thinking, status, statusSpinner, statusItalic, preamble, toolStatus, runId, sessionId, stagedContext,
+    submit, submitError, stop, loadSession, selectSession, historyLoaded, historyError, newSession, approvalDecided, appendResponse, addArtifact, setSessionId, stageContext, clearStagedContext,
   } = machine
 
   // Boot orchestrator — composes server → RPC → bootstrap → session load into
@@ -188,7 +196,9 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
     //   - ui.add_artifact → local artifact panel
     //   - tool.call → local client-tool handler (works in every mode — autopilot
     //     agents share the same path as user-initiated agents)
-    // `ui.request_tool_approval` / `ui.set_status` are handled by use-chat-session.ts.
+    // `ui.set_status` is handled by use-chat-session.ts. Tool approvals
+    // are now on the dedicated `tool_approval_requested` event (omniagents
+    // 0.16+), also wired in use-chat-session.ts — not on client_request.
     const offClientRequest = client.on('client_request', (p: any) => {
       const fn = String(p?.function ?? '')
       if (fn === 'ui.add_artifact') {
@@ -201,6 +211,26 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
           artifact_id: typeof args?.artifact_id === 'string' ? args.artifact_id : undefined,
           session_id: typeof p?.session_id === 'string' ? p.session_id : undefined,
         })
+        if (request_id) {
+          client.clientResponse(request_id, true, { ack: true }).catch(() => {})
+        }
+        return
+      }
+      if (fn === 'ui.bash_jobs.update') {
+        const request_id = String(p?.request_id ?? '')
+        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
+        const currentSessionId = actor.getSnapshot().context.sessionId
+        if (eventSessionId && currentSessionId && currentSessionId !== eventSessionId) {
+          if (request_id) {
+            client.clientResponse(request_id, true, { ack: true }).catch(() => {})
+          }
+          return
+        }
+        const args = p?.args || {}
+        const snap = args?.snapshot
+        if (Array.isArray(snap)) {
+          setLiveBashJobs(snap as BashJobSummary[])
+        }
         if (request_id) {
           client.clientResponse(request_id, true, { ack: true }).catch(() => {})
         }
@@ -239,6 +269,66 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   const visibleArtifacts = useMemo(() => {
     return items.filter((it): it is ArtifactItem => it.type === 'artifact')
   }, [items])
+
+  // Derive Tasks + BashJobs from the items stream — every tool_result whose
+  // metadata carries a `tasks_snapshot` / `bash_jobs_snapshot` overwrites the
+  // running snapshot, so the latest one wins. This makes the panels self-
+  // populating on session load (history replay) without a separate listener.
+  const { tasks, derivedBashJobs } = useMemo(() => {
+    let lastTasks: TaskSummary[] = []
+    let lastJobs: BashJobSummary[] = []
+    for (const it of items) {
+      if (it.type !== 'tool') {
+        continue
+      }
+      const md = (it as { metadata?: { tasks_snapshot?: unknown; bash_jobs_snapshot?: unknown } }).metadata
+      if (Array.isArray(md?.tasks_snapshot)) {
+        lastTasks = md.tasks_snapshot as TaskSummary[]
+      }
+      if (Array.isArray(md?.bash_jobs_snapshot)) {
+        lastJobs = md.bash_jobs_snapshot as BashJobSummary[]
+      }
+    }
+    return { tasks: lastTasks, derivedBashJobs: lastJobs }
+  }, [items])
+
+  // Live override (from ui.bash_jobs.update broadcasts and bash_jobs.* server
+  // calls) takes precedence over history-derived state when present.
+  const bashJobs = liveBashJobs ?? derivedBashJobs
+
+  // Clear the live override on session change so the next session starts
+  // from its own history-derived snapshot instead of the previous session's
+  // last broadcast.
+  useEffect(() => {
+    setLiveBashJobs(null)
+  }, [sessionId])
+
+  const handleBashKill = useCallback(async (job_id: string): Promise<BashJobsKillResult> => {
+    const res = (await client.serverCall('bash_jobs.kill', { job_id }, sessionId)) as unknown as BashJobsKillResult
+    if (Array.isArray(res?.snapshot)) {
+      setLiveBashJobs(res.snapshot)
+    }
+    return res
+  }, [client, sessionId])
+
+  const handleBashTail = useCallback(async (job_id: string, lines?: number): Promise<BashJobsTailResult> => {
+    const args: Record<string, unknown> = { job_id }
+    if (typeof lines === 'number') {
+      args.lines = lines
+    }
+    const res = (await client.serverCall('bash_jobs.tail', args, sessionId)) as unknown as BashJobsTailResult & { snapshot?: BashJobSummary[] }
+    if (Array.isArray(res?.snapshot)) {
+      setLiveBashJobs(res.snapshot)
+    }
+    return res
+  }, [client, sessionId])
+
+  const handleBashWarmup = useCallback(async () => {
+    const res = (await client.serverCall('bash_jobs.list', {}, sessionId)) as unknown as { snapshot?: BashJobSummary[] }
+    if (Array.isArray(res?.snapshot)) {
+      setLiveBashJobs(res.snapshot)
+    }
+  }, [client, sessionId])
 
   useEffect(() => {
     const handler = () => setIsLargeScreen(window.innerWidth >= 1024)
@@ -366,8 +456,23 @@ param.filename = f.name
         attachments = processed.map(p => p.attachment)
         content = parts
       }
-      // Tell the machine we're submitting (appends user message, transitions to starting)
-      submit(text, attachments.length ? attachments : undefined)
+      // MCP-Apps ``ui/update-model-context``: prepend any staged context
+      // blocks to the prompt the agent sees. Snapshot the staged entries
+      // before clearing so we can attach them to the user-turn message
+      // for visibility in the chat log.
+      const stagedSnapshot = stagedContext.length > 0 ? stagedContext.slice() : undefined
+      const agentPrompt =
+        stagedSnapshot
+          ? `${stagedSnapshot.map((c) => c.text).join('\n\n')}\n\n${text}`
+          : text
+
+      // Tell the machine we're submitting (appends user message, transitions
+      // to starting). Carry the staged context onto the user message so the
+      // chat history shows that extra context was attached.
+      submit(text, attachments.length ? attachments : undefined, stagedSnapshot)
+      if (stagedSnapshot) {
+        clearStagedContext()
+      }
       // Merge parent-provided variables (e.g. client_tools) with workspace variables
       const workspaceVars: Record<string, unknown> | undefined = (workspacePath && workspaceSupported)
         ? { workspace_root: workspacePath }
@@ -397,14 +502,14 @@ param.filename = f.name
               : {}),
           }
         : baseVariables
-      await client.startRun(text, sessionId, variables, content)
+      await client.startRun(agentPrompt, sessionId, variables, content)
       if (workspaceSupported) {
 setWorkspaceLocked(true)
 }
     } catch (e) {
       submitError(String((e as Error)?.message || 'Failed to start run'))
     }
-  }, [client, sessionId, variablesProp, submit, submitError, workspacePath, workspaceSupported])
+  }, [client, sessionId, variablesProp, submit, submitError, workspacePath, workspaceSupported, stagedContext, clearStagedContext])
 
   const handleStop = useCallback(() => {
     if (!runId) {
@@ -598,13 +703,30 @@ return
     }
   }, [connected, ui, pendingMessages, handleSubmit])
 
-  const handleApprovalDecision = useCallback(async (request_id: string, value: 'yes' | 'always' | 'no') => {
+  const handleApprovalDecision = useCallback(async (request_id: string, value: 'yes' | 'always' | 'no', kind: 'function' | 'mcp' = 'function') => {
+    // ``request_id`` is the model-minted identifier we stored on the
+    // ApprovalItem when the approval event arrived (see
+    // use-chat-session.ts):
+    //   - kind 'function' → tool call_id  → tool_approval_response RPC
+    //   - kind 'mcp'      → McpApprovalRequest id → mcp_approval_response RPC
+    // Both take ``decision: "approve" | "reject"``; only the function
+    // path honors ``always_approve``.
+    const decision = value === 'no' ? 'reject' : 'approve'
+    const alwaysApprove = value === 'always'
+    const failureMessage = (e: unknown) => String((e as Error)?.message || 'failed')
     try {
-      const approved = value !== 'no'
-      const always_approve = value === 'always'
-      await client.clientResponse(request_id, true, { approved, always_approve })
+      if (kind === 'mcp') {
+        await client.mcpApprovalResponse(request_id, decision)
+      } else {
+        await client.toolApprovalResponse(request_id, decision, alwaysApprove)
+      }
     } catch (e) {
-      await client.clientResponse(request_id, false, undefined, { message: String((e as Error)?.message || 'failed') }).catch(() => {})
+      // Best-effort fallback: reject with the underlying error so the
+      // run unblocks instead of hanging on the approval future.
+      const reject = kind === 'mcp'
+        ? client.mcpApprovalResponse(request_id, 'reject', failureMessage(e))
+        : client.toolApprovalResponse(request_id, 'reject', false, failureMessage(e))
+      await reject.catch(() => {})
     }
     approvalDecided(request_id, value)
   }, [client, approvalDecided])
@@ -798,6 +920,8 @@ args.text = text
                   onReaction={handleReaction}
                   currentRunId={runId}
                   toolStatusText={toolStatus}
+                  onSubmitMessage={handleSubmit}
+                  onStageContext={stageContext}
                 />
                 <AnimatePresence>
                   {!connected && (
@@ -819,6 +943,38 @@ args.text = text
                   )}
                 </AnimatePresence>
               </div>
+              <Tasks tasks={tasks} />
+              <BashJobs
+                jobs={bashJobs}
+                onKill={handleBashKill}
+                onTail={handleBashTail}
+                onWarmup={handleBashWarmup}
+              />
+              {stagedContext.length > 0 && (
+                // MCP-Apps staged context chips. Each ``ui/update-model-context``
+                // entry shows up here so the user knows what'll be sent on the
+                // next turn; clicking × removes that entry (passing empty text
+                // to ``stageContext`` clears the source).
+                <div className="flex flex-wrap gap-1 px-3 py-1 text-[11px]">
+                  {stagedContext.map((c) => (
+                    <span
+                      key={c.source}
+                      className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary px-2 py-0.5 text-muted-foreground"
+                      title={c.text}
+                    >
+                      <span className="truncate max-w-[240px]">📎 {c.text.slice(0, 60)}{c.text.length > 60 ? '…' : ''}</span>
+                      <button
+                        type="button"
+                        className="text-muted-foreground hover:text-foreground"
+                        onClick={() => stageContext(c.source, '')}
+                        aria-label="Remove staged context"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
               <Input
                 disabled={!connected || !bootState.ready}
                 thinking={thinking}

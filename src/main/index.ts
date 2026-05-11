@@ -22,12 +22,16 @@ import { createPermissionsManager } from '@/main/permissions-manager';
 import { registerPlatformIpc } from '@/main/platform-ipc';
 import { createPlatformClient } from '@/main/platform-mode';
 import { createProcessManager } from '@/main/process-manager';
+import { registerMigrationHandlers } from '@/main/migration-handlers';
+import { migrateLegacyPagesToConfigDir } from '@/main/pages-relocation-migration';
+import { backfillProjectConfigs } from '@/main/project-config-backfill';
 import { closeProjectDb, getDb,openProjectDb } from '@/main/project-db';
 import { createProjectManager } from '@/main/project-manager';
 import { getStore } from '@/main/store';
 import {
   ensureDirectory,
   getDefaultWorkspaceDir,
+  getMcpSandboxHtmlPath,
   getOmniConfigDir,
   getProjectsDir,
   isDirectory,
@@ -58,6 +62,19 @@ process.on('uncaughtException', (err) => {
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'artifact',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+    },
+  },
+  // MCP Apps sandbox proxy origin. Registered as a separate, opaque
+  // origin so the AppFrame iframe (mcp-ui) is cross-origin isolated from
+  // the renderer. ``bypassCSP`` is intentionally not set — the handler
+  // sets a strict CSP that lets the proxy script run but blocks anything
+  // it loads (apart from the inner iframe written via document.write).
+  {
+    scheme: 'mcp-sandbox',
     privileges: {
       standard: true,
       secure: true,
@@ -112,6 +129,57 @@ try {
   }
 } catch (err) {
   console.error('[ProjectDb] Failed to migrate from electron-store:', err);
+}
+
+// Backfill any project rows whose `config` column is NULL — added in
+// schema v3. Idempotent; only touches rows without an existing config.
+try {
+  const backfilled = backfillProjectConfigs(repo);
+  if (backfilled > 0) {
+    console.log(`[ProjectDb] Backfilled config for ${backfilled} projects`);
+  }
+} catch (err) {
+  console.error('[ProjectDb] Failed to backfill project configs:', err);
+}
+
+// Task #18: copy legacy on-disk pages (`<workspaceDir>/Projects/<slug>/pages`,
+// per-project `context.md`, and MCP's `<config>/projects/<slug>/pages`) into
+// the new `<config>/pages/<projectId>/` layout. Idempotent; never deletes
+// originals so a bad migration can be recovered by hand.
+//
+// Records a one-shot notice in the store when legacy paths still exist so
+// the renderer can show a dismissible cleanup banner. The notice is left
+// in place across reboots until the user acknowledges or runs cleanup.
+try {
+  const summary = migrateLegacyPagesToConfigDir(repo);
+  const total = summary.perProjectPagesCopied + summary.rootPagesFromContextMd + summary.mcpPagesCopied;
+  if (total > 0) {
+    console.log(
+      `[ProjectDb] Pages migration copied ${total} files ` +
+        `(per-project: ${summary.perProjectPagesCopied}, ` +
+        `context.md → root: ${summary.rootPagesFromContextMd}, ` +
+        `MCP: ${summary.mcpPagesCopied}, ` +
+        `skipped existing: ${summary.skippedAlreadyMigrated})`
+    );
+  }
+  // Only seed the notice on the first boot where we found something
+  // worth telling the user about. Subsequent boots leave the existing
+  // state alone (so a user mid-decision doesn't get re-prompted).
+  const existing = store.get('pagesMigration');
+  if (!existing && summary.legacyPaths.length > 0) {
+    store.set('pagesMigration', {
+      summary: {
+        perProjectPagesCopied: summary.perProjectPagesCopied,
+        rootPagesFromContextMd: summary.rootPagesFromContextMd,
+        mcpPagesCopied: summary.mcpPagesCopied,
+        skippedAlreadyMigrated: summary.skippedAlreadyMigrated,
+      },
+      legacyPaths: summary.legacyPaths,
+      acknowledged: false,
+    });
+  }
+} catch (err) {
+  console.error('[ProjectDb] Failed to migrate legacy pages:', err);
 }
 
 try {
@@ -306,6 +374,55 @@ app.on('ready', () => {
   // URL format: artifact://file/{ticketId}/{relativePath}
   // We use a dummy hostname ("file") because URL spec lowercases hostnames,
   // which corrupts case-sensitive ticket IDs like nanoid.
+  // MCP Apps sandbox proxy. Serves the vendored mcp-ui ``index.html``
+  // (assets/mcp-sandbox/) at ``mcp-sandbox://app/index.html``. The
+  // AppFrame iframe loads this URL to host a cross-origin sandbox for
+  // MCP-Apps tool UIs. CSP allows inline script (the proxy itself is a
+  // small inline script) but blocks network loads — guest HTML is
+  // delivered to the proxy via postMessage and written into a nested
+  // iframe via document.write, where it runs without script privileges
+  // unless the inner iframe's sandbox attribute permits it.
+  protocol.handle('mcp-sandbox', async (request) => {
+    try {
+      const url = new URL(request.url);
+      // Only one resource is served — any path returns the same HTML.
+      // The query string is preserved by the browser and read by the
+      // proxy script (contentType=rawhtml or ?url=...).
+      void url;
+      const htmlPath = getMcpSandboxHtmlPath();
+      const upstream = await net.fetch(pathToFileURL(htmlPath).toString());
+      const headers = new Headers(upstream.headers);
+      headers.set('Content-Type', 'text/html; charset=utf-8');
+      headers.set(
+        'Content-Security-Policy',
+        // ``script-src 'unsafe-inline' https:`` lets renderer-HTML import
+        // its component runtime from a CDN (Prefab's renderer loads from
+        // ``cdn.jsdelivr.net``, generative-ui-style apps may pull from
+        // other origins). ``style-src`` mirrors so stylesheets load.
+        // ``font-src`` + ``img-src`` permit referenced assets;
+        // ``connect-src`` permits any fetch/XHR/WebSocket the renderer
+        // makes back to its own backend. ``frame-src https: http:`` keeps
+        // MCP-Apps ``externalUrl`` (text/uri-list) embedding working.
+        [
+          "default-src 'none'",
+          "script-src 'unsafe-inline' https:",
+          "style-src 'unsafe-inline' https:",
+          "font-src https: data:",
+          "img-src https: data: blob:",
+          "connect-src https: wss: ws: data: blob:",
+          "frame-src about: data: blob: https: http:",
+        ].join('; '),
+      );
+      return new Response(upstream.body, {
+        status: upstream.status,
+        statusText: upstream.statusText,
+        headers,
+      });
+    } catch {
+      return new Response('Not found', { status: 404 });
+    }
+  });
+
   protocol.handle('artifact', async (request) => {
     try {
       const url = new URL(request.url);
@@ -432,6 +549,20 @@ registerUtilHandlers(main.ipc, {
   launcherVersion: app.getVersion(),
 });
 registerSkillsHandlers(main.ipc, OMNI_CONFIG_DIR, store);
+registerMigrationHandlers(main.ipc, {
+  get: () => store.get('pagesMigration') ?? null,
+  set: (value) => {
+    if (value === null) {
+      store.delete('pagesMigration');
+    } else {
+      store.set('pagesMigration', value);
+    }
+    // Renderer mirrors electron-store via `store:changed`; pushing the
+    // full snapshot keeps the migration banner reactive without a
+    // dedicated event channel.
+    main.getWindow()?.webContents.send('store:changed', store.store);
+  },
+});
 
 //#endregion
 

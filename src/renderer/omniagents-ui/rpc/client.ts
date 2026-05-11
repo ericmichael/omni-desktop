@@ -470,6 +470,47 @@ params.error = error
     await this.call('client_response', params)
   }
 
+  /**
+   * Respond to a ``tool_approval_requested`` event (omniagents 0.16+
+   * function-tool interruption flow). The wire format moved off the
+   * generic ``client_request``/``client_response`` pair onto a dedicated
+   * RPC method so the server can distinguish approvals from other
+   * server-initiated requests without sniffing the ``function`` field.
+   */
+  async toolApprovalResponse(
+    callId: string,
+    decision: 'approve' | 'reject',
+    alwaysApprove: boolean = false,
+    rejectionMessage?: string,
+  ): Promise<boolean> {
+    const params: Record<string, unknown> = { call_id: callId, decision }
+    if (alwaysApprove) {
+params.always_approve = true
+}
+    if (rejectionMessage) {
+params.rejection_message = rejectionMessage
+}
+    return this.call<boolean>('tool_approval_response', params)
+  }
+
+  /**
+   * Respond to an ``mcp_approval_requested`` event (omniagents 0.16+
+   * hosted-MCP interruption flow). Parallel to ``toolApprovalResponse``
+   * but keyed by ``request_id`` (the model's ``McpApprovalRequest.id``)
+   * — intentionally no ``always_approve`` flag on this path.
+   */
+  async mcpApprovalResponse(
+    requestId: string,
+    decision: 'approve' | 'reject',
+    rejectionMessage?: string,
+  ): Promise<boolean> {
+    const params: Record<string, unknown> = { request_id: requestId, decision }
+    if (rejectionMessage) {
+params.rejection_message = rejectionMessage
+}
+    return this.call<boolean>('mcp_approval_response', params)
+  }
+
   async listServerFunctions(): Promise<Array<{ name: string; description?: string; params_schema?: Record<string, unknown>; result_schema?: Record<string, unknown> }>> {
     return this.call('list_server_functions', {})
   }
@@ -483,6 +524,48 @@ params.args = args
 params.session_id = sessionId
 }
     return this.call('server_call', params)
+  }
+
+  // MCP Apps host helpers. These hit omniagents' ``mcp.*`` server
+  // functions and are used by the MCP-UI ``AppRenderer`` integration
+  // (see MessageList.tsx) to fetch tool metadata, read UI resources,
+  // and route postMessage actions back to the originating server.
+
+  async mcpListTools(serverName: string, sessionId?: string): Promise<{
+    server_name: string;
+    tools: Array<Record<string, unknown>>;
+    next_cursor?: string;
+  }> {
+    const res = await this.serverCall('mcp.list_tools', { server_name: serverName }, sessionId);
+    return res as { server_name: string; tools: Array<Record<string, unknown>>; next_cursor?: string };
+  }
+
+  async mcpReadResource(serverName: string, uri: string, sessionId?: string): Promise<{
+    server_name: string;
+    uri: string;
+    contents: Array<Record<string, unknown>>;
+  }> {
+    const res = await this.serverCall('mcp.read_resource', { server_name: serverName, uri }, sessionId);
+    return res as { server_name: string; uri: string; contents: Array<Record<string, unknown>> };
+  }
+
+  /**
+   * Invoke a tool on an MCP server out-of-band — the agent does not see
+   * this call. Used to route postMessage ``tools/call`` requests from a
+   * rendered MCP-Apps UI back to the originating server.
+   */
+  async mcpCallTool(
+    serverName: string,
+    toolName: string,
+    args?: Record<string, unknown>,
+    sessionId?: string,
+  ): Promise<{ server_name: string; tool_name: string; result: Record<string, unknown> }> {
+    const res = await this.serverCall(
+      'mcp.call_tool',
+      { server_name: serverName, tool_name: toolName, arguments: args ?? {} },
+      sessionId,
+    );
+    return res as { server_name: string; tool_name: string; result: Record<string, unknown> };
   }
 
   async clientFunctions(version: number, functions: Array<{ name: string; description?: string }>): Promise<void> {

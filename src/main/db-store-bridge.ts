@@ -83,6 +83,16 @@ export function rowToProject(row: ProjectRow): Project {
   if (row.auto_dispatch) project.autoDispatch = true;
   if (row.source) project.source = JSON.parse(row.source);
   if (row.sandbox) project.sandbox = JSON.parse(row.sandbox);
+
+  // The `workspace_dir` column is the authoritative store of the linked
+  // local directory — MCP `update_project workspace_dir` writes there
+  // directly. When set, it overrides any stale value in the `source` JSON.
+  // We keep `source.kind` from the JSON (local vs git-remote vs absent)
+  // and only override the workspaceDir field within local sources.
+  if (row.workspace_dir && project.source?.kind === 'local') {
+    project.source = { ...project.source, workspaceDir: row.workspace_dir };
+  }
+
   return project;
 }
 
@@ -219,15 +229,25 @@ export function rowToTask(row: TaskRow): Task {
 
 export function projectToRow(p: Project): ProjectRow {
   const now = toIso(Date.now());
+  // Mirror `source.workspaceDir` into the dedicated column so the launcher
+  // and the MCP server (which reads/writes the column directly) agree on
+  // the project's linked directory. Earlier versions hard-coded `null` here,
+  // which silently clobbered every MCP-side `update_project workspace_dir`
+  // write on the next launcher save.
+  const workspaceDir =
+    p.source?.kind === 'local' ? p.source.workspaceDir : null;
   return {
     id: p.id,
     label: p.label,
     slug: p.slug,
-    workspace_dir: null,
+    workspace_dir: workspaceDir,
     is_personal: p.isPersonal ? 1 : 0,
     auto_dispatch: p.autoDispatch ? 1 : 0,
     source: jsonStrOrNull(p.source),
     sandbox: jsonStrOrNull(p.sandbox),
+    // `config` is managed via dedicated repo.setProjectConfig() — the
+    // upsert path leaves it untouched on existing rows and NULL on inserts.
+    config: null,
     created_at: toIso(p.createdAt),
     updated_at: now,
   };

@@ -2,9 +2,10 @@
  * PageManager — owns the lifecycle of user-authored pages (markdown + marimo
  * notebooks) for each project.
  *
- * Extracted from `ProjectManager` (Sprint A of the project-manager decomposition).
- * Mirrors the narrow-store-adapter pattern already established by `InboxManager`
- * so tests can drop in an in-memory fake without bringing up electron-store.
+ * Pages live under `<config>/pages/<projectId>/<pageId>.{md,py}`. Keyed by
+ * stable id, not slug, so project renames are pure DB ops. Shared 1:1 with
+ * the MCP server (omni-projects-db `getDefaultPagesDir`), so both writers
+ * converge on the same files.
  *
  * Owns:
  *   - The `pages` store slice (get/set/getByProject/add/update/remove/reorder)
@@ -16,9 +17,9 @@
  *
  * Does NOT own:
  *   - Project CRUD (ProjectManager)
- *   - The authoritative `getProjectDirPath` resolver — injected via
- *     `resolveProjectDir` so this module doesn't duplicate the
- *     personal-vs-slug directory layout.
+ *   - The project's working directory (agents' workspace) — that's still
+ *     resolved separately via `ProjectManager.getProjectDir`. Pages
+ *     deliberately no longer live in the working dir.
  */
 import fs from 'fs/promises';
 import { nanoid } from 'nanoid';
@@ -29,7 +30,7 @@ import { getTemplate, type TemplateKey } from '@/lib/page-templates';
 import { PageWatcherManager } from '@/lib/page-watcher';
 import { MARIMO_NOTEBOOK_TEMPLATE } from '@/main/extensions/marimo';
 import { writeGlassCss } from '@/main/extensions/marimo-glass';
-import { ensureDirectory } from '@/main/util';
+import { ensureDirectory, getProjectPagesDir } from '@/main/util';
 import type { IpcRendererEvents, Page, PageId, Project, ProjectId } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
@@ -39,11 +40,13 @@ import type { IpcRendererEvents, Page, PageId, Project, ProjectId } from '@/shar
 /**
  * Minimal store surface PageManager needs. Kept narrow so tests can fake it
  * with a plain object (same pattern as InboxManagerStore).
+ *
+ * Pages are now resolved purely by `page.projectId` — PageManager no longer
+ * needs to read the projects slice to know where files live.
  */
 export interface PageManagerStore {
   getPages(): Page[];
   setPages(pages: Page[]): void;
-  getProjects(): Project[];
 }
 
 export type PageManagerWindowSender = <T extends keyof IpcRendererEvents>(
@@ -56,10 +59,10 @@ export interface PageManagerDeps {
   /** Emits `page:content-changed` / `page:content-deleted` to the renderer. */
   sendToWindow: PageManagerWindowSender;
   /**
-   * Authoritative project-directory resolver. Injected because
-   * ProjectManager owns the personal-vs-slug layout decision.
+   * Resolve the absolute pages dir for a project id. Injected so tests can
+   * point at a tmp dir without monkey-patching the global util.
    */
-  resolveProjectDir: (project: Project) => string;
+  resolvePagesDir?: (projectId: ProjectId) => string;
   /** Mint a page id. Injected for deterministic tests. */
   newId?: () => string;
   /** Current wall-clock time. Injected for deterministic tests. */
@@ -73,7 +76,7 @@ export interface PageManagerDeps {
 export class PageManager {
   private store: PageManagerStore;
   private sendToWindow: PageManagerWindowSender;
-  private resolveProjectDir: (project: Project) => string;
+  private resolvePagesDir: (projectId: ProjectId) => string;
   private newId: () => string;
   private now: () => number;
   private watcher: PageWatcherManager;
@@ -81,7 +84,7 @@ export class PageManager {
   constructor(deps: PageManagerDeps) {
     this.store = deps.store;
     this.sendToWindow = deps.sendToWindow;
-    this.resolveProjectDir = deps.resolveProjectDir;
+    this.resolvePagesDir = deps.resolvePagesDir ?? getProjectPagesDir;
     this.newId = deps.newId ?? (() => nanoid());
     this.now = deps.now ?? (() => Date.now());
     this.watcher = new PageWatcherManager(
@@ -132,20 +135,17 @@ export class PageManager {
 
     // Seed the .md / .py file on disk. Pending-write markers keep the watcher's
     // echo-suppression from firing a spurious page:content-changed on this first write.
-    const project = this.store.getProjects().find((p) => p.id === page.projectId);
-    if (project) {
-      const filePath = this.getPageFilePath(project, page);
-      const initialContent = page.kind === 'notebook' ? MARIMO_NOTEBOOK_TEMPLATE : getTemplate(template);
-      this.watcher.notePendingWrite(filePath, initialContent);
-      void ensureDirectory(path.dirname(filePath)).then(() =>
-        fs.writeFile(filePath, initialContent, 'utf-8').catch(() => {})
-      );
-      // Notebook pages need the glass CSS sidecar so marimo's css_file= reference
-      // resolves on first open. Default to glass-off; the renderer rewrites it
-      // immediately before launching the marimo webview.
-      if (page.kind === 'notebook') {
-        void writeGlassCss(path.dirname(filePath), false).catch(() => {});
-      }
+    const filePath = this.getPageFilePath(page);
+    const initialContent = page.kind === 'notebook' ? MARIMO_NOTEBOOK_TEMPLATE : getTemplate(template);
+    this.watcher.notePendingWrite(filePath, initialContent);
+    void ensureDirectory(path.dirname(filePath)).then(() =>
+      fs.writeFile(filePath, initialContent, 'utf-8').catch(() => {})
+    );
+    // Notebook pages need the glass CSS sidecar so marimo's css_file= reference
+    // resolves on first open. Default to glass-off; the renderer rewrites it
+    // immediately before launching the marimo webview.
+    if (page.kind === 'notebook') {
+      void writeGlassCss(path.dirname(filePath), false).catch(() => {});
     }
     return page;
   };
@@ -173,15 +173,12 @@ export class PageManager {
 
     // Unsubscribe BEFORE deleting the file so chokidar's unlink event doesn't
     // reach the watcher and emit a phantom page:content-deleted to any subscriber.
-    const project = this.store.getProjects().find((p) => p.id === target.projectId);
-    if (project) {
-      for (const pageId of toDelete) {
-        const page = pages.find((p) => p.id === pageId);
-        if (page) {
-          const filePath = this.getPageFilePath(project, page);
-          this.watcher.unsubscribe(filePath);
-          void fs.rm(filePath, { force: true }).catch(() => {});
-        }
+    for (const pageId of toDelete) {
+      const page = pages.find((p) => p.id === pageId);
+      if (page) {
+        const filePath = this.getPageFilePath(page);
+        this.watcher.unsubscribe(filePath);
+        void fs.rm(filePath, { force: true }).catch(() => {});
       }
     }
 
@@ -210,11 +207,7 @@ export class PageManager {
     if (!page) {
       return '';
     }
-    const project = this.store.getProjects().find((p) => p.id === page.projectId);
-    if (!project) {
-      return '';
-    }
-    const filePath = this.getPageFilePath(project, page);
+    const filePath = this.getPageFilePath(page);
     try {
       return await fs.readFile(filePath, 'utf-8');
     } catch {
@@ -227,11 +220,7 @@ export class PageManager {
     if (!page) {
       return;
     }
-    const project = this.store.getProjects().find((p) => p.id === page.projectId);
-    if (!project) {
-      return;
-    }
-    const filePath = this.getPageFilePath(project, page);
+    const filePath = this.getPageFilePath(page);
     await ensureDirectory(path.dirname(filePath));
     // Record the pending write BEFORE touching disk so the resulting chokidar
     // event is recognized as our own echo and suppressed.
@@ -245,11 +234,7 @@ export class PageManager {
     if (!page) {
       return null;
     }
-    const project = this.store.getProjects().find((p) => p.id === page.projectId);
-    if (!project) {
-      return null;
-    }
-    const filePath = this.getPageFilePath(project, page);
+    const filePath = this.getPageFilePath(page);
     await this.watcher.subscribe(filePath);
     let content = '';
     try {
@@ -265,11 +250,7 @@ export class PageManager {
     if (!page) {
       return;
     }
-    const project = this.store.getProjects().find((p) => p.id === page.projectId);
-    if (!project) {
-      return;
-    }
-    const filePath = this.getPageFilePath(project, page);
+    const filePath = this.getPageFilePath(page);
     this.watcher.unsubscribe(filePath);
   };
 
@@ -279,11 +260,7 @@ export class PageManager {
     if (!page || page.kind !== 'notebook') {
       return null;
     }
-    const project = this.store.getProjects().find((p) => p.id === page.projectId);
-    if (!project) {
-      return null;
-    }
-    return this.getPageFilePath(project, page);
+    return this.getPageFilePath(page);
   };
 
   // ---------- Project-lifecycle helpers (called by ProjectManager) ----------
@@ -307,35 +284,48 @@ export class PageManager {
     return rootPage;
   };
 
-  /** Called from ProjectManager.removeProject to cascade-delete the project's pages. */
+  /**
+   * Called from ProjectManager.removeProject to cascade-delete the project's
+   * pages — both the DB rows and the on-disk `.md` / `.py` files. Without
+   * the filesystem cleanup, deleting a project leaves orphaned page files
+   * under `<projectDir>/pages/` forever.
+   */
   removeAllForProject = (projectId: ProjectId): void => {
-    const remaining = this.getAll().filter((p) => p.projectId !== projectId);
-    this.writeAll(remaining);
+    const pages = this.getAll();
+    const projectPages = pages.filter((p) => p.projectId === projectId);
+
+    // Unsubscribe watchers + remove files BEFORE dropping DB rows.
+    for (const page of projectPages) {
+      const filePath = this.getPageFilePath(page);
+      this.watcher.unsubscribe(filePath);
+      void fs.rm(filePath, { force: true }).catch(() => {});
+    }
+
+    // Also drop the project's pages dir wholesale so the parent dir is
+    // cleaned up alongside the individual files.
+    void fs.rm(this.resolvePagesDir(projectId), { recursive: true, force: true }).catch(() => {});
+
+    this.writeAll(pages.filter((p) => p.projectId !== projectId));
   };
 
   // ---------- Internal ----------
 
-  /** Page file path resolver — root pages use <projectDir>/context.md,
-   *  doc pages use <projectDir>/pages/<id>.md, notebooks use .py. */
-  private getPageFilePath = (project: Project, page: Page): string => {
-    const dir = this.resolveProjectDir(project);
-    if (page.isRoot) {
-      return path.join(dir, 'context.md');
-    }
+  /**
+   * Page file path resolver. All pages — root and non-root, markdown and
+   * notebook — live at `<pagesDir>/<projectId>/<pageId>.{md,py}`. There is
+   * no `context.md` special case; root pages are just rows with `is_root=1`.
+   */
+  private getPageFilePath = (page: Page): string => {
+    const dir = this.resolvePagesDir(page.projectId);
     const ext = page.kind === 'notebook' ? '.py' : '.md';
-    return path.join(dir, 'pages', `${page.id}${ext}`);
+    return path.join(dir, `${page.id}${ext}`);
   };
 
   /** Reverse-lookup a pageId from its on-disk file path (for watcher events). */
   private pageIdForFilePath = (filePath: string): PageId | null => {
     const pages = this.getAll();
-    const projects = this.store.getProjects();
     for (const page of pages) {
-      const project = projects.find((p) => p.id === page.projectId);
-      if (!project) {
-        continue;
-      }
-      if (this.getPageFilePath(project, page) === filePath) {
+      if (this.getPageFilePath(page) === filePath) {
         return page.id;
       }
     }

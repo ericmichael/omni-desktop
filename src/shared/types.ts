@@ -127,8 +127,6 @@ export type StoreData = {
   lastWeeklyReviewAt: number | null;
   schemaVersion: number;
   chatSessionId: string | null;
-  /** Which project is selected in the Chat tab. Null = no project context. */
-  chatProjectId: ProjectId | null;
   codeTabs: CodeTab[];
   activeCodeTabId: CodeTabId | null;
   codeLayoutMode: CodeLayoutMode;
@@ -184,6 +182,36 @@ export type StoreData = {
   browserHistory: BrowserHistoryEntry[];
   /** User-curated bookmarks. */
   browserBookmarks: BrowserBookmark[];
+
+  /**
+   * One-shot notice surfaced after the v18 pages-relocation migration
+   * (Task #18). Present only when (a) the migration found legacy files
+   * that still exist on disk and (b) the user hasn't dismissed the
+   * notice yet. Cleared when the user clicks dismiss or runs cleanup.
+   */
+  pagesMigration?: PagesMigrationState;
+};
+
+/**
+ * Persisted state for the post-migration notice. The summary is captured
+ * once on the boot the migration ran and replayed to the renderer until
+ * the user acknowledges it.
+ */
+export type PagesMigrationState = {
+  /** Counts of files copied per source bucket. */
+  summary: {
+    perProjectPagesCopied: number;
+    rootPagesFromContextMd: number;
+    mcpPagesCopied: number;
+    skippedAlreadyMigrated: number;
+  };
+  /**
+   * Legacy directories/files still on disk that the user can safely delete
+   * to reclaim space. Absolute paths, sorted.
+   */
+  legacyPaths: string[];
+  /** True once the user dismissed the notice or ran cleanup. */
+  acknowledged: boolean;
 };
 
 // #region Browser types
@@ -346,10 +374,6 @@ export const schema: Schema<StoreData> = {
     default: 0,
   },
   chatSessionId: {
-    type: ['string', 'null'],
-    default: null,
-  },
-  chatProjectId: {
     type: ['string', 'null'],
     default: null,
   },
@@ -1719,6 +1743,28 @@ type PageIpcEvents = Namespaced<
 >;
 
 /**
+ * One-shot migration notice IPC. The Task #18 pages-relocation migration
+ * records its summary into the store on boot; the renderer reads it to
+ * show a dismissible notice, then either acknowledges or runs cleanup
+ * (which `rm -rf`s the legacy paths and clears the notice in one step).
+ */
+type MigrationIpcEvents = Namespaced<
+  'migration',
+  {
+    /** Read the current notice state. Null = nothing to show. */
+    'get-pages-state': () => PagesMigrationState | null;
+    /** Mark the notice dismissed without touching legacy files. */
+    'acknowledge-pages': () => void;
+    /**
+     * Delete the recorded legacy directories/files and clear the notice.
+     * Returns the count actually removed (paths that no longer exist are
+     * skipped silently). Idempotent.
+     */
+    'cleanup-legacy-pages': () => { removed: number };
+  }
+>;
+
+/**
  * Inbox API. Renderer invokes, main handles. The inbox is a global capture
  * surface (items can be projectless) backed by electron-store. Its lifecycle
  * is GTD: new → shaped → promoted (to ticket/project) or deferred.
@@ -2079,6 +2125,7 @@ export type IpcEvents = MainProcessIpcEvents &
   MilestoneIpcEvents &
   PageIpcEvents &
   InboxIpcEvents &
+  MigrationIpcEvents &
   PlatformIpcEvents &
   ExtensionIpcEvents &
   WorkspaceSyncIpcEvents &
@@ -2187,7 +2234,8 @@ type ProjectIpcRendererEvents = Namespaced<
  */
 /**
  * Page content events. Main process emits when a watched page file changes on
- * disk due to an external edit (e.g. the user edited context.md in their IDE).
+ * disk due to an external edit (e.g. the user edited a page in their IDE, or
+ * an MCP client like Claude Desktop wrote into `<config>/pages/<projectId>/`).
  */
 type PageIpcRendererEvents = Namespaced<
   'page',

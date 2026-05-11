@@ -34,8 +34,27 @@ export const $tasks = map<Record<TaskId, Task>>({});
 /**
  * Tickets keyed by ID. Accumulates across projects — the sidebar tree and
  * the dashboard both need to render multiple projects' tickets at once.
+ *
+ * Hydrated from `store.tickets` on every `store:changed` broadcast so the
+ * kanban view doesn't need a per-project `fetchTickets` round-trip to
+ * render on initial boot. `fetchTickets` and per-row optimistic updates
+ * still work — the main process re-broadcasts after every write, so any
+ * optimistic state converges with the snapshot on the next tick.
  */
 export const $tickets = map<Record<TicketId, Ticket>>({});
+
+persistedStoreApi.$atom.subscribe((store) => {
+  const next: Record<TicketId, Ticket> = {};
+  for (const ticket of store.tickets) {
+    next[ticket.id] = ticket;
+  }
+  // Only set when the shape actually changed — `subscribe` fires on every
+  // store snapshot (theme toggles, sandbox state, etc.) but most won't
+  // touch tickets. Skipping the write avoids spurious re-renders.
+  if (!objectEquals($tickets.get(), next)) {
+    $tickets.set(next);
+  }
+});
 
 /**
  * Cached pipeline for the current project.

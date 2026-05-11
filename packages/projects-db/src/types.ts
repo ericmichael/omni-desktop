@@ -9,6 +9,8 @@ export type ProjectRow = {
   auto_dispatch: number;
   source: string | null;       // JSON
   sandbox: string | null;      // JSON
+  /** JSON-stringified ProjectConfig — see src/lib/project-to-config.ts (launcher). */
+  config: string | null;
   created_at: string;
   updated_at: string;
 };

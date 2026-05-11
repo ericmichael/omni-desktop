@@ -70,7 +70,6 @@ const defaultStoreData = (): StoreData =>
     lastWeeklyReviewAt: null,
     schemaVersion: 4,
     chatSessionId: null,
-    chatProjectId: null,
     codeTabs: [],
     activeCodeTabId: null,
     codeLayoutMode: 'deck',

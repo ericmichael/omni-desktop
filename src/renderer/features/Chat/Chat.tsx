@@ -12,7 +12,6 @@ import { ChatShell } from '@/renderer/omniagents-ui/ChatShell';
 import { getGreeting } from '@/renderer/omniagents-ui/greeting';
 import { buildSandboxLabel } from '@/renderer/omniagents-ui/sandbox-label';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
-import type { ProjectId } from '@/shared/types';
 
 import { $chatProcessStatus } from './state';
 import { useChatAutoLaunch } from './use-chat-auto-launch';
@@ -68,84 +67,7 @@ const useStyles = makeStyles({
       WebkitBackdropFilter: 'none',
     },
   },
-  projectSelect: {
-    position: 'absolute',
-    top: tokens.spacingVerticalS,
-    right: tokens.spacingHorizontalM,
-    zIndex: 20,
-    fontSize: tokens.fontSizeBase200,
-    backgroundColor: tokens.colorNeutralBackground1,
-    color: tokens.colorNeutralForeground2,
-    border: `1px solid ${tokens.colorNeutralStroke1}`,
-    borderRadius: tokens.borderRadiusMedium,
-    paddingTop: '2px',
-    paddingBottom: '2px',
-    paddingLeft: tokens.spacingHorizontalS,
-    paddingRight: tokens.spacingHorizontalS,
-    cursor: 'pointer',
-    outline: 'none',
-  },
 });
-
-/** Small project picker in the chat header area. */
-const ChatProjectPicker = memo(() => {
-  const styles = useStyles();
-  const store = useStore(persistedStoreApi.$atom);
-  const projects = store.projects;
-  const chatProjectId = store.chatProjectId ?? '';
-
-  const handleChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-    const value = e.target.value;
-    persistedStoreApi.setKey('chatProjectId', value || null);
-  }, []);
-
-  if (projects.length === 0) {
-return null;
-}
-
-  return (
-    <select
-      className={styles.projectSelect}
-      value={chatProjectId}
-      onChange={handleChange}
-      aria-label="Chat project context"
-    >
-      <option value="">No project</option>
-      {projects.map((p) => (
-        <option key={p.id} value={p.id}>
-          {p.label}
-        </option>
-      ))}
-    </select>
-  );
-});
-ChatProjectPicker.displayName = 'ChatProjectPicker';
-
-/** Hook to get project context variables and tool handler for the selected chat project. */
-function useChatProjectContext() {
-  const store = useStore(persistedStoreApi.$atom);
-  const chatProjectId = store.chatProjectId ?? null;
-  const project = chatProjectId ? store.projects.find((p) => p.id === chatProjectId) : null;
-
-  const variables = useMemo(
-    () =>
-      buildSessionVariables({
-        surface: 'chat',
-        context: project ? { projectId: project.id, projectLabel: project.label } : undefined,
-      }),
-    [project]
-  );
-
-  const toolHandler = useMemo(
-    () =>
-      buildClientToolHandler(
-        project ? { projectId: project.id as ProjectId } : undefined
-      ),
-    [project]
-  );
-
-  return { variables, toolHandler };
-}
 
 /** Running view when sandbox is enabled — shows OmniAgentsApp with VNC floating widget. */
 const SandboxRunningView = memo(
@@ -221,7 +143,8 @@ export const Chat = memo(() => {
   const [greeting] = useState(getGreeting);
   const [runningMounted, setRunningMounted] = useState(false);
   const pendingPlan = useStore($pendingPlan);
-  const { variables, toolHandler } = useChatProjectContext();
+  const variables = useMemo(() => buildSessionVariables({ surface: 'chat' }), []);
+  const toolHandler = useMemo(() => buildClientToolHandler(), []);
 
   const isGlass = !!store.codeDeckBackground;
   const theme = store.theme ?? 'teams-light';
@@ -277,7 +200,6 @@ setRunningMounted(false);
 
     return (
       <div className={mergeClasses(styles.fullSizeRelative, isGlass && styles.glassRoot)}>
-        <ChatProjectPicker />
         {showShell && (
           <div className={styles.absoluteInsetZ0}>
             <ChatShell
@@ -309,7 +231,6 @@ handleRunningReady();
   // When sandbox is disabled, use OmniAgentsHostApp (like old Chat.tsx)
   return (
     <div className={mergeClasses(styles.fullSize, isGlass && styles.glassRoot)}>
-      <ChatProjectPicker />
       <OmniAgentsHostApp
         variables={variables}
         onClientToolCall={toolHandler}

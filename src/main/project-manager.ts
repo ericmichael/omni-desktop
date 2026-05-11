@@ -16,8 +16,11 @@ import { INBOX_SWEEP_INTERVAL_MS } from '@/lib/inbox-expiry';
 import { checkMerge, mergeBranch } from '@/lib/pr-merge';
 import type { IWorkflowLoader, ProjectManagerDeps } from '@/lib/project-manager-deps';
 import { runMigrations as runSchemaMigrations } from '@/lib/project-migrations';
+import type { ProjectConfigDefaults } from '@/lib/project-to-config';
+import { projectToConfig } from '@/lib/project-to-config';
 import { resolvePipelineDefs } from '@/lib/resolve-pipeline-defs';
 import { type HistoryRow, parseSessionHistoryRows } from '@/lib/session-history';
+import { slugifyUnique } from '@/lib/slugify-unique';
 import { DbChangeWatcher } from '@/main/db-change-watcher';
 import {
   buildStoreSnapshot,
@@ -37,6 +40,7 @@ import {
 } from '@/main/db-store-bridge';
 import { registerInboxHandlers } from '@/main/inbox-handlers';
 import { InboxManager, type InboxManagerStore } from '@/main/inbox-manager';
+import { getMcpBinPath } from '@/main/mcp-config-manager';
 import { registerMilestoneHandlers } from '@/main/milestone-handlers';
 import { MilestoneManager, type MilestoneManagerStore } from '@/main/milestone-manager';
 import { registerPageHandlers } from '@/main/page-handlers';
@@ -46,9 +50,15 @@ import { registerProjectHandlers } from '@/main/project-handlers';
 import { SupervisorBridge } from '@/main/supervisor-bridge';
 import { registerSupervisorHandlers } from '@/main/supervisor-handlers';
 import { SupervisorOrchestrator } from '@/main/supervisor-orchestrator';
-import { ensureDirectory, getDefaultWorkspaceDir, getOmniConfigDir, getProjectDir } from '@/main/util';
+import {
+  getDefaultWorkspaceDir,
+  getOmniConfigDir,
+  getProjectDir,
+  getProjectPagesDir,
+} from '@/main/util';
 import { WorkflowLoader } from '@/main/workflow-loader';
 import type { IIpcListener } from '@/shared/ipc-listener';
+import type { ProjectConfig } from '@/shared/manifest';
 import { DEFAULT_PIPELINE, SIMPLE_PIPELINE } from '@/shared/pipeline-defaults';
 import type {
   ArtifactFileContent,
@@ -197,7 +207,6 @@ export class ProjectManager {
             this.repo!.replaceAllPages(items.map(pageToRow));
             this.noteLocalWriteAndBroadcast();
           },
-          getProjects: () => this.getProjects(),
         }
       : {
           getPages: () => (this.store.get('pages') ?? []) as Page[],
@@ -205,12 +214,10 @@ export class ProjectManager {
             this.store.set('pages', items);
             this.sendToWindow('store:changed', this.store.store);
           },
-          getProjects: () => this.getProjects(),
         };
     this.pages = new PageManager({
       store: pageStore,
       sendToWindow: this.sendToWindow,
-      resolveProjectDir: (project) => this.getProjectDirPath(project),
     });
     const inboxStore: InboxManagerStore = this.repo
       ? {
@@ -241,6 +248,11 @@ export class ProjectManager {
       store: inboxStore,
       newId: () => nanoid(),
       now: () => Date.now(),
+      // Route inbox.promoteToProject through the full project-creation path
+      // so the new project gets slug disambiguation, pipeline seeding, root
+      // page, and project dir. Without this, the bare-insert fallback in
+      // InboxManager creates a project that breaks on the next addTicket call.
+      createProject: (input) => this.addProject(input),
     });
 
     const milestoneStore: MilestoneManagerStore = this.repo
@@ -290,6 +302,21 @@ export class ProjectManager {
             this.sendToWindow('store:changed', this.store.store);
           }
         },
+        // Per-row task writes — supervisor uses these for the high-frequency
+        // transition path. Falls back to setPersistedTasks (above) when the
+        // repo is absent (legacy electron-store mode in tests).
+        upsertPersistedTask: this.repo
+          ? (task: Task) => {
+              this.repo!.upsertTask(taskToRow(task));
+              this.noteLocalWriteAndBroadcast();
+            }
+          : undefined,
+        deletePersistedTask: this.repo
+          ? (taskId) => {
+              this.repo!.deleteTask(taskId);
+              this.noteLocalWriteAndBroadcast();
+            }
+          : undefined,
         getOmniConfigDir: () => getOmniConfigDir(),
       },
       host: {
@@ -304,7 +331,6 @@ export class ProjectManager {
         moveTicketToColumn: (ticketId, columnId) => this.moveTicketToColumn(ticketId, columnId),
         updateProject: (projectId, patch) => this.updateProject(projectId, patch),
         getPagesByProject: (projectId) => this.pages.getByProject(projectId),
-        getProjectDirPath: (project) => this.getProjectDirPath(project),
       },
       workflowLoader: this.workflowLoader,
       sendToWindow: this.sendToWindow,
@@ -318,10 +344,55 @@ export class ProjectManager {
     this.startInboxSweep();
   }
 
-  /** Public accessor used by IPC wiring to resolve a project's working directory. */
+  /**
+   * Read the `ProjectConfig` for a project. Reads the persisted JSON column
+   * via `repo.getProjectConfig` when available; falls back to deriving via
+   * `projectToConfig` for resilience. Returns `null` for unknown projects
+   * or when running without a SQLite repo (legacy electron-store mode).
+   */
+  getProjectConfig = (projectId: ProjectId): ProjectConfig | null => {
+    const project = this.getProjects().find((p) => p.id === projectId);
+    if (!project) {
+      return null;
+    }
+    if (this.repo) {
+      const stored = this.repo.getProjectConfig(projectId);
+      if (stored) {
+        try {
+          return JSON.parse(stored) as ProjectConfig;
+        } catch {
+          // Fall through to derive — corrupt JSON in the column shouldn't break reads.
+        }
+      }
+    }
+    return projectToConfig(project, this.getProjectConfigDefaults());
+  };
+
+  /** Resolve the defaults `projectToConfig` needs from the launcher's environment. */
+  private getProjectConfigDefaults = (): ProjectConfigDefaults => ({
+    skillsDir: path.join(getOmniConfigDir(), 'skills'),
+    projectsMcpCliPath: getMcpBinPath(),
+    defaultDockerImage: 'omni-sandbox:latest',
+  });
+
+  /**
+   * Public accessor used by IPC wiring to resolve a project's working
+   * directory. Derives the path from `ProjectConfig.manifest.entries['.']`
+   * when the project has a local-dir workspace entry; otherwise falls back
+   * to the legacy slug-based resolver (Personal / context-only / git-remote
+   * projects don't have a host-side workspace dir to return).
+   */
   getProjectDir = (projectId: ProjectId): string | null => {
     const project = this.getProjects().find((p) => p.id === projectId);
-    return project ? this.getProjectDirPath(project) : null;
+    if (!project) {
+      return null;
+    }
+    const config = this.getProjectConfig(projectId);
+    const root = config?.manifest.entries?.['.'];
+    if (root && root.type === 'local_dir') {
+      return root.src;
+    }
+    return this.getProjectDirPath(project);
   };
 
   // #region Broadcast helpers
@@ -366,6 +437,15 @@ export class ProjectManager {
   private setProjects = (projects: Project[]): void => {
     if (this.repo) {
       this.repo.replaceAllProjects(projects.map(projectToRow));
+      // Recompute `config` for every project so the manifest stays in sync
+      // with the source fields. `replaceAllProjects` leaves the column
+      // untouched on upsert (it's not in the SET clause), so we rewrite it
+      // explicitly here.
+      const defaults = this.getProjectConfigDefaults();
+      for (const project of projects) {
+        const config = projectToConfig(project, defaults);
+        this.repo.setProjectConfig(project.id, JSON.stringify(config));
+      }
       this.noteLocalWriteAndBroadcast();
     } else {
       this.store.set('projects', projects);
@@ -374,18 +454,26 @@ export class ProjectManager {
   };
 
   addProject = (input: Omit<Project, 'id' | 'createdAt'>): Project => {
+    // Disambiguate slug against existing rows to prevent SQLITE_CONSTRAINT
+    // crashes when two labels slugify to the same value. The caller-supplied
+    // slug is the candidate; the launcher appends `-2`, `-3`, … as needed.
+    const existing = this.getProjects();
+    const takenSlugs = new Set(existing.map((p) => p.slug));
+    const slug = slugifyUnique(input.slug, (s) => takenSlugs.has(s));
     const project: Project = {
       ...input,
+      slug,
       id: nanoid(),
       createdAt: Date.now(),
     };
-    const projects = this.getProjects();
-    projects.push(project);
+    const projects = [...existing, project];
     this.setProjects(projects);
-    // Seed the project's root page through PageManager.
-    this.pages.seedRootPage(project);
-    // Create project directory and context.md
-    void this.ensureProjectDir(project);
+    // Seed the project's root page through PageManager. The root page's body
+    // is the project brief that used to live in `<projectDir>/context.md`;
+    // PageManager seeds it with the brief template under
+    // `<config>/pages/<projectId>/<rootId>.md`.
+    const rootPage = this.pages.seedRootPage(project);
+    void this.pages.writeContent(rootPage.id, DEFAULT_BRIEF_TEMPLATE).catch(() => {});
     // Seed pipeline_columns immediately with the source-appropriate defaults
     // so tickets created before FLEET.md loads have a valid FK target.
     this.syncPipelineForProject(project.id);
@@ -393,8 +481,11 @@ export class ProjectManager {
     // Personal / context-only projects (no source) have no FLEET.md and no
     // workflow to load — they use SIMPLE_COLUMNS and run no hooks.
     if (project.source?.kind === 'local') {
+      // `getProjectDir` reads `local_dir.src` from the persisted ProjectConfig,
+      // with `project.source.workspaceDir` as a fallback for resilience.
+      const workspaceDir = this.getProjectDir(project.id) ?? project.source.workspaceDir;
       void this.workflowLoader
-        .load(project.id, project.source.workspaceDir)
+        .load(project.id, workspaceDir)
         .then(() => this.syncPipelineForProject(project.id));
     } else if (project.source?.kind === 'git-remote') {
       void this.workflowLoader
@@ -428,7 +519,12 @@ export class ProjectManager {
 
   // #region Project directories & context files
 
-  /** Get the project directory path. Personal projects use workspace root; others use Projects/<slug>/. */
+  /**
+   * Get the project's working-directory path — i.e. where agents and the
+   * sandbox run, NOT where pages live. Personal projects use the workspace
+   * root; named projects use `Projects/<slug>/`. Pages are resolved
+   * separately via `PageManager`'s projectId-keyed layout.
+   */
   private getProjectDirPath = (project: Project): string => {
     if (project.isPersonal) {
       return getDefaultWorkspaceDir();
@@ -436,45 +532,37 @@ export class ProjectManager {
     return getProjectDir(project.slug);
   };
 
-  /** Ensure the project directory and context.md exist on disk. */
-  private ensureProjectDir = async (project: Project): Promise<void> => {
-    const dir = this.getProjectDirPath(project);
-    await ensureDirectory(dir);
-    const contextPath = path.join(dir, 'context.md');
-    try {
-      await fs.access(contextPath);
-    } catch {
-      // Write default context template
-      await fs.writeFile(contextPath, DEFAULT_BRIEF_TEMPLATE, 'utf-8');
+  /**
+   * Read the project's brief — i.e. the body of the root page. Returns ''
+   * when the project has no root page or the file is missing.
+   *
+   * Historically this read `<projectDir>/context.md` directly. The brief
+   * now lives at `<config>/pages/<projectId>/<rootId>.md` (the root page's
+   * regular file), so we route through PageManager.
+   */
+  readContext = (projectId: ProjectId): Promise<string> => {
+    const rootPage = this.pages.getByProject(projectId).find((p) => p.isRoot);
+    if (!rootPage) {
+      return Promise.resolve('');
     }
+    return this.pages.readContent(rootPage.id);
   };
 
-  /** Read context.md for a project. Returns empty string if file doesn't exist. */
-  readContext = async (projectId: ProjectId): Promise<string> => {
-    const project = this.getProjects().find((p) => p.id === projectId);
-    if (!project) {
-      return '';
-    }
-    const contextPath = path.join(this.getProjectDirPath(project), 'context.md');
-    try {
-      return await fs.readFile(contextPath, 'utf-8');
-    } catch {
-      return '';
-    }
-  };
-
-  /** Write context.md for a project. Creates the directory if needed. */
+  /** Write the project's brief — the body of the root page. */
   writeContext = async (projectId: ProjectId, content: string): Promise<void> => {
-    const project = this.getProjects().find((p) => p.id === projectId);
-    if (!project) {
+    const rootPage = this.pages.getByProject(projectId).find((p) => p.isRoot);
+    if (!rootPage) {
       return;
     }
-    const dir = this.getProjectDirPath(project);
-    await ensureDirectory(dir);
-    await fs.writeFile(path.join(dir, 'context.md'), content, 'utf-8');
+    await this.pages.writeContent(rootPage.id, content);
   };
 
-  /** List files in the project folder (excluding context.md). */
+  /**
+   * List files in the project's working directory. Skips `context.md`
+   * since legacy projects may still have one left over from when the
+   * brief lived in the working dir; the brief now lives in
+   * `<config>/pages/<projectId>/<rootId>.md`.
+   */
   listProjectFiles = async (projectId: ProjectId): Promise<ArtifactFileEntry[]> => {
     const project = this.getProjects().find((p) => p.id === projectId);
     if (!project) {
@@ -488,6 +576,7 @@ export class ProjectManager {
 
       for (const entry of entries) {
         if (entry.name === 'context.md') {
+          // Legacy artifact — hide from the UI.
           continue;
         }
         const fullPath = path.join(dir, entry.name);
@@ -518,7 +607,7 @@ export class ProjectManager {
     }
   };
 
-  /** Get first 200 chars of context.md for preview. */
+  /** Get first 200 chars of the project brief (root page body) for preview. */
   getContextPreview = async (projectId: ProjectId): Promise<string> => {
     const content = await this.readContext(projectId);
     return content.slice(0, 200);
@@ -556,7 +645,8 @@ export class ProjectManager {
     }
 
     if (project.source?.kind === 'local') {
-      await this.workflowLoader.load(projectId, project.source?.workspaceDir);
+      const workspaceDir = this.getProjectDir(projectId) ?? project.source.workspaceDir;
+      await this.workflowLoader.load(projectId, workspaceDir);
     } else if (project.source?.kind === 'git-remote') {
       await this.workflowLoader.loadFromRemote(projectId, project.source?.repoUrl, project.source?.defaultBranch);
     }
@@ -744,13 +834,49 @@ return;
       createdAt: now,
       updatedAt: now,
     };
-    const tickets = this.getTickets();
-    tickets.push(ticket);
-    this.setTickets(tickets);
+    if (this.repo) {
+      // Per-row write: avoids the read-all → mutate → write-all pattern that
+      // races with MCP and re-churns every other ticket in the table on each
+      // edit. `upsertTicket` is a single INSERT ON CONFLICT touching exactly
+      // this row.
+      this.repo.upsertTicket(ticketToRow(ticket));
+      if (ticket.comments && ticket.comments.length > 0) {
+        this.repo.replaceCommentsForTicket(
+          ticket.id,
+          ticket.comments.map((c) => commentToRow(c, ticket.id))
+        );
+      }
+      this.noteLocalWriteAndBroadcast();
+    } else {
+      const tickets = this.getTickets();
+      tickets.push(ticket);
+      this.setTickets(tickets);
+    }
     return ticket;
   };
 
   updateTicket = (id: TicketId, patch: Partial<Omit<Ticket, 'id' | 'projectId' | 'createdAt'>>): void => {
+    if (this.repo) {
+      const row = this.repo.getTicket(id);
+      if (!row) {
+        return;
+      }
+      const comments = this.repo.listCommentsByTicket(id);
+      const current = rowToTicket(row, comments);
+      const next: Ticket = { ...current, ...patch, updatedAt: Date.now() };
+      this.repo.upsertTicket(ticketToRow(next));
+      if (patch.comments) {
+        // Only re-sync comments when the patch actually includes them. The
+        // old `setTickets` path replayed every ticket's comments on every
+        // edit — that's where the write amplification came from.
+        this.repo.replaceCommentsForTicket(
+          id,
+          patch.comments.map((c) => commentToRow(c, id))
+        );
+      }
+      this.noteLocalWriteAndBroadcast();
+      return;
+    }
     const tickets = this.getTickets();
     const index = tickets.findIndex((t) => t.id === id);
     if (index === -1) {
@@ -773,6 +899,13 @@ return;
       this.supervisors.machines.delete(id);
     }
 
+    if (this.repo) {
+      // Per-row delete. `ticket_comments` cascades automatically via the
+      // FK; supervisor `tasks.ticket_id` is SET NULL so tasks survive.
+      this.repo.deleteTicket(id);
+      this.noteLocalWriteAndBroadcast();
+      return;
+    }
     const tickets = this.getTickets().filter((t) => t.id !== id);
     this.setTickets(tickets);
   };
@@ -1142,47 +1275,54 @@ return;
   /**
    * Migrate the store through every schema version up to the current one.
    * Pure logic lives in `@/lib/project-migrations` — this wrapper injects
-   * the fs side-effects (v10 brief → context.md, v12 Personal dir) that
-   * can't run in the pure module.
+   * the fs side-effects (v10 brief → root-page file) that can't run in
+   * the pure module.
+   *
+   * The v10 brief used to write `<projectDir>/context.md`; it now writes
+   * `<config>/pages/<projectId>/<rootId>.md` so the brief stays attached
+   * to the root page row, decoupled from any working directory.
    */
   static migrateToSupervisor(store: Store<StoreData>): void {
     runSchemaMigrations(store as unknown as Parameters<typeof runSchemaMigrations>[0], {
       newId: () => nanoid(),
       now: () => Date.now(),
       writeProjectContextBrief: (project) => {
-        const dir = project.isPersonal ? getDefaultWorkspaceDir() : getProjectDir(project.slug ?? 'project');
-        const contextPath = path.join(dir, 'context.md');
         try {
-          if (existsSync(contextPath)) {
+          const pages = (store.get('pages', []) as Page[]).filter(
+            (p) => p.projectId === project.id && p.isRoot
+          );
+          const rootPage = pages[0];
+          if (!rootPage) {
+            return;
+          }
+          const dir = getProjectPagesDir(project.id);
+          const filePath = path.join(dir, `${rootPage.id}.md`);
+          if (existsSync(filePath)) {
             return;
           }
           mkdirSync(dir, { recursive: true });
-          writeFileSync(contextPath, project.brief ?? DEFAULT_BRIEF_TEMPLATE, 'utf-8');
+          writeFileSync(filePath, project.brief ?? DEFAULT_BRIEF_TEMPLATE, 'utf-8');
         } catch (err) {
-          console.warn(`[ProjectManager] v10: failed to write context.md for ${project.id}:`, err);
+          console.warn(`[ProjectManager] v10: failed to write brief for ${project.id}:`, err);
         }
       },
       ensurePersonalProjectDir: () => {
-        try {
-          mkdirSync(getDefaultWorkspaceDir(), { recursive: true });
-          const contextPath = path.join(getDefaultWorkspaceDir(), 'context.md');
-          if (!existsSync(contextPath)) {
-            writeFileSync(contextPath, DEFAULT_BRIEF_TEMPLATE, 'utf-8');
-          }
-        } catch (err) {
-          console.warn('[ProjectManager] v12: failed to ensure Personal project dir:', err);
-        }
+        // Historical v12: previously seeded a `context.md` in the workspace
+        // root for the Personal project. The brief now lives with the root
+        // page under `<config>/pages/<projectId>/`, so the Personal-special-
+        // case directory write is no longer needed. Keeping the hook
+        // present (no-op) so the migration runner's signature is stable.
       },
       repairProjectRoots: () => {
-        ProjectManager.repairProjectRootsAndContextFiles(store);
+        ProjectManager.repairProjectRoots(store);
       },
     });
     // Run the repair pass once more after migrations return so idempotent
     // boots (schemaVersion already at head) still fix any drift.
-    ProjectManager.repairProjectRootsAndContextFiles(store);
+    ProjectManager.repairProjectRoots(store);
   }
 
-  private static repairProjectRootsAndContextFiles(store: Store<StoreData>): void {
+  private static repairProjectRoots(store: Store<StoreData>): void {
     const projects = store.get('projects', []) as Project[];
     const pages = store.get('pages', []) as Page[];
     const now = Date.now();
@@ -1202,17 +1342,6 @@ return;
           createdAt: now,
           updatedAt: now,
         });
-      }
-
-      const dir = project.isPersonal ? getDefaultWorkspaceDir() : getProjectDir(project.slug);
-      const contextPath = path.join(dir, 'context.md');
-      try {
-        if (!existsSync(contextPath)) {
-          mkdirSync(dir, { recursive: true });
-          writeFileSync(contextPath, DEFAULT_BRIEF_TEMPLATE, 'utf-8');
-        }
-      } catch (err) {
-        console.warn(`[ProjectManager] failed to repair context.md for ${project.id}:`, err);
       }
     }
 

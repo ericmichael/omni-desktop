@@ -104,38 +104,59 @@ return;
       }),
 
       client.on('tool_result', (p: any) => {
+        const callId = String(p?.call_id ?? '');
+        const tool = String(p?.tool ?? '');
+        const output = typeof p?.output === 'string' ? p.output : JSON.stringify(p?.output);
+        const metadata = p?.metadata;
         actor.send({
           type: 'TOOL_RESULT',
-          call_id: String(p?.call_id ?? ''),
-          tool: String(p?.tool ?? ''),
-          output: typeof p?.output === 'string' ? p.output : JSON.stringify(p?.output),
-          metadata: p?.metadata,
+          call_id: callId,
+          tool,
+          output,
+          metadata,
           run_id: typeof p?.run_id === 'string' ? p.run_id : undefined,
           session_id: typeof p?.session_id === 'string' ? p.session_id : undefined,
         });
+        // MCP-Apps: if omniagents attached an ``mcp_ui`` payload, surface
+        // it as a standalone artifact in the stream. Tool-card grouping
+        // collapses interactive UIs into the activity group; artifacts
+        // render full-width with their own framing.
+        //
+        // Two flavors:
+        //   • ``ui.resource`` — inline HTML (mcp-ui demo)
+        //   • ``ui.resource_uri`` + ``ui.structured_content`` — shared
+        //     renderer fetched via ``mcp.read_resource`` (FastMCP /
+        //     Prefab). The McpUiSurface renderer handles both.
+        const ui = metadata?.mcp_ui;
+        const hasInline = ui?.resource != null;
+        const hasResourceUri = typeof ui?.resource_uri === 'string' && ui.resource_uri.length > 0;
+        if (ui && (hasInline || hasResourceUri)) {
+          actor.send({
+            type: 'ADD_ARTIFACT',
+            artifact_id: `mcp_ui:${callId || tool}`,
+            title: ui.tool_name || tool || 'MCP App',
+            content: '',
+            mode: 'mcp_ui',
+            session_id: typeof p?.session_id === 'string' ? p.session_id : undefined,
+            mcp_ui: {
+              server_name: String(ui.server_name ?? ''),
+              tool_name: String(ui.tool_name ?? tool),
+              tool_input: undefined,
+              tool_output: output,
+              resource: ui.resource,
+              resource_uri: hasResourceUri ? ui.resource_uri : undefined,
+              structured_content: ui.structured_content,
+            },
+          });
+        }
       }),
 
-      // client_request: only route approval + set_status to the machine.
-      // Artifacts and tool.call stay outside (separate concerns).
+      // client_request: route ``ui.set_status`` to the machine. Tool
+      // approvals migrated off this channel in omniagents 0.16 — they
+      // now ride on the dedicated ``tool_approval_requested`` event
+      // (wired below). Artifacts and tool.call stay outside.
       client.on('client_request', (p: any) => {
         const fn = String(p?.function ?? '');
-
-        if (fn === 'ui.request_tool_approval') {
-          const args = p?.args || {};
-          const request_id = String(p?.request_id ?? '');
-          if (!request_id) {
-return;
-}
-          actor.send({
-            type: 'REQUEST_APPROVAL',
-            request_id,
-            tool: String(args?.tool ?? ''),
-            argumentsText: String(args?.arguments ?? ''),
-            metadata: args?.metadata,
-            session_id: typeof p?.session_id === 'string' ? p.session_id : undefined,
-          });
-          return;
-        }
 
         if (fn === 'ui.set_status') {
           const request_id = String(p?.request_id ?? '');
@@ -154,7 +175,60 @@ return;
         }
       }),
 
-      client.on('client_request_resolved', (p: any) => {
+      // Tool-approval interruption events (omniagents 0.16+). The server
+      // pauses the run on a ``ToolApprovalItem`` and emits
+      // ``tool_approval_requested``; we surface it to the state machine
+      // and answer back via ``client.toolApprovalResponse``. When
+      // another channel responds first, the server broadcasts
+      // ``tool_approval_resolved`` so we dismiss the pending card.
+      // ``call_id`` is the model-minted tool-call id; the state machine
+      // historically uses ``request_id`` for the same role, so we map
+      // at the wire boundary rather than touching every machine consumer.
+      client.on('tool_approval_requested', (p: any) => {
+        const call_id = String(p?.call_id ?? '');
+        if (!call_id) {
+return;
+}
+        actor.send({
+          type: 'REQUEST_APPROVAL',
+          request_id: call_id,
+          tool: String(p?.tool_name ?? ''),
+          argumentsText: String(p?.arguments ?? ''),
+          metadata: p?.metadata,
+          session_id: typeof p?.session_id === 'string' ? p.session_id : undefined,
+        });
+      }),
+
+      client.on('tool_approval_resolved', (p: any) => {
+        const call_id = String(p?.call_id ?? '');
+        if (call_id) {
+          actor.send({ type: 'APPROVAL_RESOLVED', request_id: call_id });
+        }
+      }),
+
+      // Hosted-MCP approval flow (omniagents 0.16+). Parallel to the
+      // function-tool path but keyed by ``request_id`` (the model's
+      // ``McpApprovalRequest.id``) and identifies the MCP server via
+      // ``server_label``. There is no ``always_approve`` affordance on
+      // this path — the server intentionally omits it for MCP.
+      client.on('mcp_approval_requested', (p: any) => {
+        const request_id = String(p?.request_id ?? '');
+        if (!request_id) {
+return;
+}
+        actor.send({
+          type: 'REQUEST_APPROVAL',
+          request_id,
+          tool: String(p?.tool_name ?? ''),
+          argumentsText: String(p?.arguments ?? ''),
+          metadata: p?.metadata,
+          session_id: typeof p?.session_id === 'string' ? p.session_id : undefined,
+          kind: 'mcp',
+          server_label: typeof p?.server_label === 'string' ? p.server_label : undefined,
+        });
+      }),
+
+      client.on('mcp_approval_resolved', (p: any) => {
         const request_id = String(p?.request_id ?? '');
         if (request_id) {
           actor.send({ type: 'APPROVAL_RESOLVED', request_id });
@@ -174,6 +248,7 @@ return;
   const statusSpinner = useSelector(actor, (s) => s.context.statusSpinner);
   const statusItalic = useSelector(actor, (s) => s.context.statusItalic);
   const toolStatus = useSelector(actor, (s) => s.context.toolStatus);
+  const stagedContext = useSelector(actor, (s) => s.context.stagedContext);
   // Hierarchical snapshot value: either a string (initializing, initError)
   // or { ready: 'idle' | 'starting' | ... }. Flatten to a single union.
   const phase = useSelector(actor, (s) => flattenPhase(s.value));
@@ -188,8 +263,12 @@ return;
    * to the session via the prior loadSession() call.
    */
   const submit = useCallback(
-    (text: string, attachments?: Attachment[]) => {
-      actor.send({ type: 'SUBMIT', text, attachments });
+    (
+      text: string,
+      attachments?: Attachment[],
+      stagedContext?: ReadonlyArray<{ source: string; text: string }>,
+    ) => {
+      actor.send({ type: 'SUBMIT', text, attachments, stagedContext });
     },
     [actor],
   );
@@ -273,6 +352,24 @@ return;
   );
 
   /**
+   * Stage content for inclusion in the next user turn (MCP-Apps
+   * ``ui/update-model-context``). ``source`` keys per-view so re-stages
+   * from the same source replace the prior entry. Pass empty text to
+   * clear a specific source.
+   */
+  const stageContext = useCallback(
+    (source: string, text: string) => {
+      actor.send({ type: 'STAGE_CONTEXT', source, text });
+    },
+    [actor],
+  );
+
+  /** Drop all staged context entries. Called automatically on submit. */
+  const clearStagedContext = useCallback(() => {
+    actor.send({ type: 'CLEAR_STAGED_CONTEXT' });
+  }, [actor]);
+
+  /**
    * High-level: load a session end-to-end. This is the ONE call every
    * consumer should use. It owns the choreography that used to be
    * repeated imperatively at every call site:
@@ -334,6 +431,7 @@ return;
     statusSpinner,
     statusItalic,
     toolStatus,
+    stagedContext,
     phase,
     thinking,
     // High-level action
@@ -350,6 +448,8 @@ return;
     appendResponse,
     addArtifact,
     setSessionId,
+    stageContext,
+    clearStagedContext,
   };
 }
 

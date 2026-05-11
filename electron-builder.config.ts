@@ -54,6 +54,13 @@ export default {
       to: './bin',
       filter: 'bwrap',
     },
+    {
+      // Vendored MCP-UI sandbox proxy HTML. Served by the
+      // ``mcp-sandbox:`` custom protocol (see src/main/index.ts).
+      from: 'assets/mcp-sandbox',
+      to: './mcp-sandbox',
+      filter: '*.html',
+    },
   ],
   mac: {
     target: ['dmg'],

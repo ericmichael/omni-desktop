@@ -40,7 +40,7 @@ interface McpJson {
  * `asarUnpack` so the file is reachable by `node` (asar contents aren't
  * readable by raw fs).
  */
-function getMcpBinPath(): string {
+export function getMcpBinPath(): string {
   if (isDevelopment() || !app.isPackaged) {
     return resolve(__dirname, '..', '..', 'packages', 'projects-mcp', 'dist', 'cli.js');
   }

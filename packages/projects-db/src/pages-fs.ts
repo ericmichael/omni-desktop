@@ -1,39 +1,47 @@
 import { mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 
-export function getPageDir(basePath: string, projectSlug: string): string {
-  return join(basePath, projectSlug, 'pages');
+/**
+ * Pages are stored at `<basePath>/<projectId>/<pageId>.md`.
+ *
+ * Keyed by stable id (not slug) so project renames are pure DB ops with no
+ * filesystem churn. The launcher and MCP server share this layout — both
+ * write into the same `<config>/pages` tree so neither overwrites the other.
+ */
+
+export function getPageDir(basePath: string, projectId: string): string {
+  return join(basePath, projectId);
 }
 
-export function getPagePath(basePath: string, projectSlug: string, pageId: string): string {
-  return join(getPageDir(basePath, projectSlug), `${pageId}.md`);
+export function getPagePath(basePath: string, projectId: string, pageId: string): string {
+  return join(getPageDir(basePath, projectId), `${pageId}.md`);
 }
 
-export function readPageContent(basePath: string, projectSlug: string, pageId: string): string | null {
+export function readPageContent(basePath: string, projectId: string, pageId: string): string | null {
   try {
-    return readFileSync(getPagePath(basePath, projectSlug, pageId), 'utf-8');
+    return readFileSync(getPagePath(basePath, projectId, pageId), 'utf-8');
   } catch {
     return null;
   }
 }
 
-export function writePageContent(basePath: string, projectSlug: string, pageId: string, content: string): void {
-  const filePath = getPagePath(basePath, projectSlug, pageId);
+export function writePageContent(basePath: string, projectId: string, pageId: string, content: string): void {
+  const filePath = getPagePath(basePath, projectId, pageId);
   mkdirSync(dirname(filePath), { recursive: true });
   writeFileSync(filePath, content, 'utf-8');
 }
 
-export function deletePageContent(basePath: string, projectSlug: string, pageId: string): void {
+export function deletePageContent(basePath: string, projectId: string, pageId: string): void {
   try {
-    unlinkSync(getPagePath(basePath, projectSlug, pageId));
+    unlinkSync(getPagePath(basePath, projectId, pageId));
   } catch {
     // ignore if file doesn't exist
   }
 }
 
-export function deleteProjectPages(basePath: string, projectSlug: string): void {
+export function deleteProjectPages(basePath: string, projectId: string): void {
   try {
-    rmSync(join(basePath, projectSlug), { recursive: true, force: true });
+    rmSync(getPageDir(basePath, projectId), { recursive: true, force: true });
   } catch {
     // ignore
   }

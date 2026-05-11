@@ -1,0 +1,133 @@
+<!doctype html>
+<!--
+  MCP-Apps sandbox proxy for @mcp-ui/client / @modelcontextprotocol/ext-apps
+  (protocol revision shipped with mcp-ui v7.1.x). Loaded by the launcher at
+  ``mcp-sandbox://app/index.html`` (Electron) or ``/mcp-sandbox/index.html``
+  (server mode).
+
+  Responsibilities:
+    1. On load, post the JSON-RPC ``ui/notifications/sandbox-proxy-ready``
+       notification to ``window.parent`` so the host's ``AppFrame`` knows
+       the proxy is alive.
+    2. When the host (via ``AppBridge.sendSandboxResourceReady``) delivers
+       ``ui/notifications/sandbox-resource-ready`` carrying ``params.html``,
+       render that HTML inside a nested iframe.
+    3. Bridge every other JSON-RPC message bidirectionally between the
+       host (``window.parent``) and the guest app (the nested iframe). The
+       guest's ``App`` class connects its own ``PostMessageTransport`` to
+       ``window.parent`` (which is the proxy), so the proxy must be a
+       transparent JSON-RPC relay.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>MCP-Apps Proxy</title>
+    <style>
+      html, body { margin: 0; height: 100%; width: 100%; max-width: 100%; }
+      body { display: flex; flex-direction: column; overflow-x: hidden; }
+      * { box-sizing: border-box; }
+      iframe { background: transparent; border: 0; padding: 0; overflow: hidden; flex-grow: 1; width: 100%; max-width: 100%; }
+    </style>
+  </head>
+  <body>
+    <script>
+      (function () {
+        var inner = null;
+        var pendingFromHost = [];
+
+        function postToParent(msg) {
+          window.parent.postMessage(msg, '*');
+        }
+
+        function postToInner(msg) {
+          if (inner && inner.contentWindow) {
+            inner.contentWindow.postMessage(msg, '*');
+          } else {
+            pendingFromHost.push(msg);
+          }
+        }
+
+        function renderHtml(html, csp) {
+          if (inner) {
+            try {
+              inner.parentNode && inner.parentNode.removeChild(inner);
+            } catch (e) {}
+            inner = null;
+          }
+          inner = document.createElement('iframe');
+          inner.style.width = '100%';
+          inner.style.height = '100%';
+          inner.style.border = '0';
+          // ``allow-forms`` is required for Prefab's ``Form``/``Input``
+          // submissions; ``allow-popups`` lets onOpenLink hand off to
+          // ``window.open``. ``allow-modals`` permits ``confirm()`` from
+          // guest code.
+          inner.setAttribute(
+            'sandbox',
+            'allow-scripts allow-same-origin allow-forms allow-popups allow-modals'
+          );
+          inner.src = 'about:blank';
+          document.body.appendChild(inner);
+
+          function writeOnce() {
+            try {
+              var doc = inner.contentDocument || (inner.contentWindow && inner.contentWindow.document);
+              if (!doc) return false;
+              doc.open();
+              doc.write(html || '');
+              doc.close();
+              // Replay any host messages that arrived before the inner existed.
+              var queued = pendingFromHost;
+              pendingFromHost = [];
+              for (var i = 0; i < queued.length; i++) {
+                try { inner.contentWindow.postMessage(queued[i], '*'); } catch (e) {}
+              }
+              return true;
+            } catch (e) {
+              console.error('[mcp-sandbox] writeHtml failed', e);
+              return false;
+            }
+          }
+
+          if (inner.contentDocument && inner.contentDocument.readyState !== 'loading') {
+            writeOnce();
+          } else {
+            inner.addEventListener('load', writeOnce, { once: true });
+          }
+        }
+
+        window.addEventListener('message', function (event) {
+          var data = event.data;
+          if (!data || typeof data !== 'object') return;
+
+          // Host → proxy (and → inner). ``event.source === window.parent``.
+          if (event.source === window.parent) {
+            // Intercept sandbox-resource-ready: this is the host telling us
+            // which HTML to render. The guest app inside the inner iframe
+            // is what actually responds to the rest of the protocol.
+            if (data.method === 'ui/notifications/sandbox-resource-ready' &&
+                data.params && typeof data.params.html === 'string') {
+              renderHtml(data.params.html, data.params.csp);
+              return;
+            }
+            postToInner(data);
+            return;
+          }
+
+          // Inner → proxy → host.
+          if (inner && event.source === inner.contentWindow) {
+            postToParent(data);
+          }
+        });
+
+        // Tell the host we're ready. Must be a JSON-RPC notification —
+        // ``AppFrame`` (mcp-ui v7.1) keys on ``data.method``.
+        postToParent({
+          jsonrpc: '2.0',
+          method: 'ui/notifications/sandbox-proxy-ready',
+          params: {}
+        });
+      })();
+    </script>
+  </body>
+</html>

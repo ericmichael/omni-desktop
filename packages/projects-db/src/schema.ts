@@ -154,4 +154,15 @@ CREATE TABLE _change_seq (
 INSERT INTO _change_seq (id, seq) VALUES (1, 0);
 `,
   },
+  {
+    version: 3,
+    sql: `
+-- Per-project agent runtime configuration (manifest, capabilities, runtime,
+-- mcp_servers, snapshot, run_as). Stored as JSON-stringified ProjectConfig.
+-- Nullable: rows from before v3 get backfilled on next boot. See
+-- src/lib/project-to-config.ts for the canonical shape and src/main/index.ts
+-- for the backfill routine.
+ALTER TABLE projects ADD COLUMN config TEXT;
+`,
+  },
 ];

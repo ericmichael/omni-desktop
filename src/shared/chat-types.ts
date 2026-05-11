@@ -27,6 +27,14 @@ export type ChatMessage = {
   content: string;
   timestamp?: string;
   attachments?: Attachment[];
+  /**
+   * MCP-Apps staged context entries that were flushed and prepended to
+   * the agent's prompt on this user turn. The visible ``content`` shows
+   * just the user's typed text; this field records what extra context
+   * the model actually saw, so the chat log makes it obvious that
+   * something was attached.
+   */
+  staged_context?: ReadonlyArray<{ source: string; text: string }>;
 };
 
 export type ToolItem = {
@@ -42,11 +50,20 @@ export type ToolItem = {
 
 export type ApprovalItem = {
   type: 'approval';
+  // ``request_id`` is the model-minted identifier we echo back on the
+  // decision RPC. For ``kind: 'function'`` it's the tool ``call_id``
+  // (omniagents 0.16 ``tool_approval_requested``). For ``kind: 'mcp'``
+  // it's the McpApprovalRequest id (omniagents 0.16 ``mcp_approval_requested``).
   request_id: string;
   tool: string;
   argumentsText?: string;
   metadata?: any;
   session_id?: string;
+  // Discriminator. Defaults to 'function' for back-compat with existing
+  // approval items already in items[] when this field was introduced.
+  kind?: 'function' | 'mcp';
+  // Set for ``kind: 'mcp'`` to identify the hosted MCP server.
+  server_label?: string;
 };
 
 export type PlanStep = {
@@ -62,6 +79,47 @@ export type PlanItem = {
   steps: PlanStep[];
 };
 
+/**
+ * Optional MCP-Apps UI payload attached to an artifact. When present the
+ * renderer mounts the mcp-ui ``<AppRenderer>`` in place of the generic
+ * artifact body. ``server_name`` is used to route ``tools/call`` and
+ * ``resources/read`` postMessage actions back to the originating MCP
+ * server via omniagents' ``mcp.*`` server functions.
+ */
+export type ArtifactMcpUi = {
+  server_name: string;
+  tool_name: string;
+  tool_input?: unknown;
+  tool_output?: string;
+  /**
+   * Inline UI payload (mcp-ui demo flavor) — the renderer extracts the
+   * HTML from ``resource.resource.text`` directly. Mutually exclusive
+   * with ``resource_uri``.
+   */
+  resource?: {
+    type?: string;
+    resource?: {
+      uri?: string;
+      mimeType?: string;
+      text?: string;
+      blob?: string;
+    };
+  };
+  /**
+   * MCP Apps ``_meta.ui.resourceUri`` (FastMCP / Prefab flavor) — the
+   * host fetches the renderer HTML from this URI via ``mcp.read_resource``
+   * and forwards ``structured_content`` to it as the tool result.
+   */
+  resource_uri?: string;
+  /**
+   * ``CallToolResult.structuredContent`` produced by the MCP server.
+   * Passed to ``AppRenderer`` as ``toolResult.structuredContent`` so the
+   * resource-shared renderer (e.g. Prefab's React bundle) knows what to
+   * render for this specific call.
+   */
+  structured_content?: unknown;
+};
+
 export type ArtifactItem = {
   type: 'artifact';
   artifact_id?: string;
@@ -70,6 +128,8 @@ export type ArtifactItem = {
   mode?: string;
   session_id?: string;
   updated_at?: number;
+  /** Set for MCP-Apps UI resources surfaced via tool_result metadata. */
+  mcp_ui?: ArtifactMcpUi;
 };
 
 export type MessageItem = ChatMessage | ToolItem | ApprovalItem | ArtifactItem;

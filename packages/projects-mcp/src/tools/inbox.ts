@@ -234,7 +234,7 @@ return err(`A project with slug "${slug}" already exists.`);
         db.prepare(
           'INSERT INTO pages (id, project_id, parent_id, title, sort_order, is_root) VALUES (?, ?, NULL, ?, 0, 1)'
         ).run(rootId, projId, projLabel);
-        writePageContent(pagesDir, slug, rootId, `# ${projLabel}\n`);
+        writePageContent(pagesDir, projId, rootId, `# ${projLabel}\n`);
 
         const promotion = JSON.stringify({ kind: 'project', id: projId, at: new Date().toISOString() });
         db.prepare(`

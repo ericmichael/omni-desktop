@@ -45,6 +45,7 @@ import type { ProcessManager } from '@/main/process-manager';
 import type { SupervisorBridge } from '@/main/supervisor-bridge';
 import { buildSupervisorPrompt, type SupervisorContext } from '@/main/supervisor-prompt';
 import { SupervisorState } from '@/main/supervisor-state';
+import { getProjectPagesDir } from '@/main/util';
 import { createWorktree, generateWorktreeName, isWorktreeDirty,removeWorktree } from '@/main/worktree-ops';
 import { requireLocalWorkspaceDir } from '@/shared/project-source';
 import { isActivePhase, type TicketPhase } from '@/shared/ticket-phase';
@@ -138,6 +139,14 @@ export interface SupervisorOrchestratorStore {
   getCodeTabs(): Array<{ id: string; ticketId?: string }>;
   getPersistedTasks(): Task[];
   setPersistedTasks(tasks: Task[]): void;
+  /**
+   * Per-row task write. Used by the high-frequency `persistTask` and
+   * `removePersistedTask` paths to avoid the read-all/mutate/write-all
+   * cycle. Optional for backward compatibility with stores that only
+   * implement the bulk `setPersistedTasks` path (e.g. older test fakes).
+   */
+  upsertPersistedTask?(task: Task): void;
+  deletePersistedTask?(taskId: TaskId): void;
   /** Host-side omni-code config directory (e.g. ~/.config/omni_code on macOS/Linux). */
   getOmniConfigDir(): string;
 }
@@ -169,10 +178,10 @@ export interface SupervisorOrchestratorHost {
   updateProject(projectId: ProjectId, patch: { autoDispatch?: boolean }): void;
 
   // Used by buildFullSupervisorPrompt to read the project's root page
-  // (context.md brief) before issuing a run.
+  // (the brief) before issuing a run. The file path itself is resolved
+  // off `ticket.projectId` via `getProjectPagesDir` — the host no longer
+  // needs to expose a directory resolver for this.
   getPagesByProject(projectId: ProjectId): Page[];
-  /** Resolves the on-disk project directory (Personal vs slug). */
-  getProjectDirPath(project: Project): string;
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +256,12 @@ export class SupervisorOrchestrator {
 
   /** Insert or update a persisted task record. */
   private persistTask(task: Task): void {
+    // Prefer per-row write when the store provides it — one SQL upsert
+    // instead of read-all → mutate → write-all on every task transition.
+    if (this.deps.store.upsertPersistedTask) {
+      this.deps.store.upsertPersistedTask(task);
+      return;
+    }
     const tasks = this.deps.store.getPersistedTasks();
     const index = tasks.findIndex((t) => t.id === task.id);
     if (index === -1) {
@@ -259,6 +274,10 @@ export class SupervisorOrchestrator {
 
   /** Drop a persisted task by id. No-op if absent. */
   private removePersistedTask(taskId: TaskId): void {
+    if (this.deps.store.deletePersistedTask) {
+      this.deps.store.deletePersistedTask(taskId);
+      return;
+    }
     const tasks = this.deps.store.getPersistedTasks().filter((t) => t.id !== taskId);
     this.deps.store.setPersistedTasks(tasks);
   }
@@ -1713,14 +1732,17 @@ export class SupervisorOrchestrator {
     // Gather context for the supervisor prompt
     const context: SupervisorContext = {};
 
-    // Project brief: read the root page's context.md (sync-safe since we pre-load it)
+    // Project brief: read the root page's body. Routed through PageManager
+    // so the lookup follows the same projectId-keyed layout the rest of the
+    // app uses; the host promise is awaited synchronously via .then because
+    // buildFullSupervisorPrompt itself is sync — we set the field on the
+    // context object that hasn't been frozen yet.
     const rootPage = this.deps.host.getPagesByProject(ticket.projectId).find((p) => p.isRoot);
     if (rootPage) {
+      const filePath = path.join(getProjectPagesDir(ticket.projectId), `${rootPage.id}.md`);
       try {
-        const dir = this.deps.host.getProjectDirPath(project);
-        const contextPath = path.join(dir, 'context.md');
-        if (existsSync(contextPath)) {
-          const brief = readFileSync(contextPath, 'utf-8');
+        if (existsSync(filePath)) {
+          const brief = readFileSync(filePath, 'utf-8');
           if (brief.trim()) {
             context.projectBrief = brief.length > 500 ? `${brief.slice(0, 500)}\n…(truncated)` : brief;
           }

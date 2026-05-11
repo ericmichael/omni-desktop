@@ -238,4 +238,44 @@ params.commit = true
   async clientResponse(requestId: string, ok: boolean, result?: Record<string, unknown>): Promise<boolean> {
     return this.call('client_response', { request_id: requestId, ok, result })
   }
+
+  /**
+   * Respond to a ``tool_approval_requested`` event forwarded via
+   * ``realtime_event`` → ``agent_event``. Same wire as the chat client:
+   * dedicated ``tool_approval_response`` RPC keyed by ``call_id`` (the
+   * model-minted tool-call id), with optional ``always_approve`` and
+   * ``rejection_message`` fields.
+   */
+  async toolApprovalResponse(
+    callId: string,
+    decision: 'approve' | 'reject',
+    alwaysApprove: boolean = false,
+    rejectionMessage?: string,
+  ): Promise<boolean> {
+    const params: Record<string, unknown> = { call_id: callId, decision }
+    if (alwaysApprove) {
+params.always_approve = true
+}
+    if (rejectionMessage) {
+params.rejection_message = rejectionMessage
+}
+    return this.call('tool_approval_response', params)
+  }
+
+  /**
+   * Respond to an ``mcp_approval_requested`` event forwarded via the
+   * realtime channel. Same wire as the chat client: keyed by request_id,
+   * no ``always_approve``.
+   */
+  async mcpApprovalResponse(
+    requestId: string,
+    decision: 'approve' | 'reject',
+    rejectionMessage?: string,
+  ): Promise<boolean> {
+    const params: Record<string, unknown> = { request_id: requestId, decision }
+    if (rejectionMessage) {
+params.rejection_message = rejectionMessage
+}
+    return this.call('mcp_approval_response', params)
+  }
 }

@@ -548,6 +548,57 @@ export class OmniInstallManager {
     return 'error';
   };
 
+  // Optional override step: install `omniagents` editable from a local checkout
+  // so launcher dev work that depends on unreleased omniagents fixes can pick
+  // them up without waiting for a PyPI release. Runs AFTER `installOmniCode`
+  // because omni-code's dep resolution pulls in the pinned PyPI omniagents;
+  // the editable install replaces that. No-op when `OMNIAGENTS_EDITABLE_PATH`
+  // isn't set. Failures here are surfaced as errors — if the user opted in to
+  // an editable install we shouldn't silently fall back to a stale PyPI copy.
+  private installOmniAgentsEditable = async (
+    uvPath: string,
+    options: { cwd: string; env: Record<string, string> }
+  ): Promise<'success' | 'canceled' | 'error' | 'skipped'> => {
+    const editablePath =
+      options.env.OMNIAGENTS_EDITABLE_PATH || process.env.OMNIAGENTS_EDITABLE_PATH;
+    if (!editablePath) {
+      return 'skipped';
+    }
+
+    this.log.info(c.yellow(`Dev mode: installing omniagents editable from ${editablePath}\r\n`));
+
+    const installArgs = [
+      'pip',
+      'install',
+      '--python',
+      PYTHON_VERSION,
+      '--python-preference',
+      'only-managed',
+      '--extra-index-url',
+      EXTRA_INDEX_URL,
+      '--editable',
+      editablePath,
+    ];
+
+    this.log.info(`> ${uvPath} ${installArgs.join(' ')}\r\n`);
+
+    const result = await withResultAsync(() => this.runCommand(uvPath, installArgs, options));
+
+    if (result.isOk()) {
+      return result.value;
+    }
+
+    this.log.error(c.red(`Failed to install omniagents editable: ${result.error.message}\r\n`));
+    this.updateStatus({
+      type: 'error',
+      error: {
+        message: `Failed to install omniagents editable from ${editablePath} (uv pip install: ${result.error.message})`,
+        context: serializeError(result.error),
+      },
+    });
+    return 'error';
+  };
+
   startInstall = async (repair?: boolean) => {
     if (this.installInProgress) {
       this.log.info(c.gray('Install already in progress — skipping duplicate request\r\n'));
@@ -732,6 +783,20 @@ export class OmniInstallManager {
       }
 
       if (installResult === 'canceled') {
+        this.log.warn(c.yellow('Installation canceled\r\n'));
+        this.updateStatus({ type: 'canceled' });
+        return;
+      }
+
+      // Optional: install omniagents editable on top of whatever omni-code
+      // pulled in. No-op when OMNIAGENTS_EDITABLE_PATH isn't set.
+      const omniagentsResult = await this.installOmniAgentsEditable(uvPath, runProcessOptions);
+
+      if (omniagentsResult === 'error') {
+        return;
+      }
+
+      if (omniagentsResult === 'canceled') {
         this.log.warn(c.yellow('Installation canceled\r\n'));
         this.updateStatus({ type: 'canceled' });
         return;

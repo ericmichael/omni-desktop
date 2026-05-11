@@ -58,6 +58,17 @@ export interface InboxManagerDeps {
   newId: () => string;
   /** Current wall-clock time. Injected for deterministic tests. */
   now: () => number;
+  /**
+   * Optional host callback to create a project with the launcher's full
+   * lifecycle: slug uniqueness, pipeline seeding, root page, project dir,
+   * workflow loader. When provided, `promoteToProject` delegates to this
+   * instead of inserting a minimal project row directly (which would skip
+   * pipeline seeding and break subsequent `addTicket` calls).
+   *
+   * Tests that don't need the full lifecycle can omit this — `promoteToProject`
+   * falls back to direct `setProjects` insertion as before.
+   */
+  createProject?: (input: Omit<Project, 'id' | 'createdAt'>) => Project;
 }
 
 export class InboxItemNotFoundError extends Error {
@@ -270,17 +281,28 @@ throw new InboxPromotionError(`Cannot reactivate promoted item ${id}`);
       throw new InboxPromotionError(`Inbox item ${id} is already promoted`);
     }
 
-    const now = this.deps.now();
     const label = opts.label.trim() || item.title;
-    const project: Project = {
-      id: this.deps.newId(),
-      label,
-      slug: slugify(label),
-      createdAt: now,
-    };
 
-    this.deps.store.setProjects([...this.deps.store.getProjects(), project]);
-    this.stampPromotion(id, { kind: 'project', id: project.id, at: now });
+    // Prefer the host's full project-creation path when wired — it seeds
+    // pipeline columns, the root page, the project dir, and runs the
+    // workflow loader. Falling back to a direct store insert would create
+    // a project with no `pipeline_columns` rows, which then breaks the
+    // next `addTicket` call with a foreign-key violation.
+    let project: Project;
+    if (this.deps.createProject) {
+      project = this.deps.createProject({ label, slug: slugify(label) });
+    } else {
+      const now = this.deps.now();
+      project = {
+        id: this.deps.newId(),
+        label,
+        slug: slugify(label),
+        createdAt: now,
+      };
+      this.deps.store.setProjects([...this.deps.store.getProjects(), project]);
+    }
+
+    this.stampPromotion(id, { kind: 'project', id: project.id, at: this.deps.now() });
     return project;
   }
 

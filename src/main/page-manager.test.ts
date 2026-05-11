@@ -38,18 +38,14 @@ let projectDir: string;
 let idCounter: number;
 let clock: number;
 
-function makeStore(initial?: { pages?: Page[]; projects?: Project[] }): PageManagerStore & { pages: Page[] } {
+function makeStore(initial?: { pages?: Page[] }): PageManagerStore & { pages: Page[] } {
   const store = {
     pages: initial?.pages ?? [],
-    projects: initial?.projects ?? [],
     getPages() {
       return store.pages;
     },
     setPages(items: Page[]) {
       store.pages = items;
-    },
-    getProjects() {
-      return store.projects as Project[];
     },
   };
   return store;
@@ -70,19 +66,19 @@ const noopSend: PageManagerWindowSender = () => {};
 function makeMgr(opts?: { pages?: Page[]; projects?: Project[] }) {
   idCounter = 0;
   clock = 1000;
-  const project = opts?.projects?.[0] ?? makeProject();
   const store = makeStore({
     pages: opts?.pages ?? [],
-    projects: opts?.projects ?? [project],
   });
   const sendCalls: Array<{ channel: string; args: unknown[] }> = [];
   const send: PageManagerWindowSender = ((channel: string, ...args: unknown[]) => {
     sendCalls.push({ channel, args });
   }) as PageManagerWindowSender;
+  // Pages now live under <pagesDir>/<projectId>/<pageId>.{md,py}. Stub the
+  // resolver so test files land in a tmp dir keyed by project id.
   const mgr = new PageManager({
     store,
     sendToWindow: send,
-    resolveProjectDir: () => projectDir,
+    resolvePagesDir: (projectId: string) => join(projectDir, projectId),
     newId: () => `page-${++idCounter}`,
     now: () => clock,
   });
@@ -270,26 +266,26 @@ describe('PageManager', () => {
       expect(content).toBe('');
     });
 
-    it('root page content is stored as context.md', async () => {
+    it('root page content lives at <pagesDir>/<rootId>.md (no context.md special case)', async () => {
       const { mgr } = makeMgr();
       const root = mgr.seedRootPage(makeProject());
 
       await mgr.writeContent(root.id, '# Context');
-      const onDisk = readFileSync(join(projectDir, 'context.md'), 'utf-8');
+      const onDisk = readFileSync(join(projectDir, 'proj-1', `${root.id}.md`), 'utf-8');
       expect(onDisk).toBe('# Context');
     });
 
-    it('non-root doc pages are stored under pages/<id>.md', async () => {
+    it('non-root doc pages live at <pagesDir>/<id>.md', async () => {
       const { mgr } = makeMgr();
       const root = mgr.seedRootPage(makeProject());
       const child = mgr.add({ projectId: 'proj-1', parentId: root.id, title: 'Child', sortOrder: 0 });
 
       await mgr.writeContent(child.id, 'child content');
-      const onDisk = readFileSync(join(projectDir, 'pages', `${child.id}.md`), 'utf-8');
+      const onDisk = readFileSync(join(projectDir, 'proj-1', `${child.id}.md`), 'utf-8');
       expect(onDisk).toBe('child content');
     });
 
-    it('notebook pages are stored as .py files', async () => {
+    it('notebook pages are stored as .py files at <pagesDir>/<id>.py', async () => {
       const { mgr } = makeMgr();
       const root = mgr.seedRootPage(makeProject());
       const nb = mgr.add({
@@ -305,7 +301,7 @@ describe('PageManager', () => {
       await new Promise((r) => setTimeout(r, 50));
 
       await mgr.writeContent(nb.id, '# marimo code');
-      const onDisk = readFileSync(join(projectDir, 'pages', `${nb.id}.py`), 'utf-8');
+      const onDisk = readFileSync(join(projectDir, 'proj-1', `${nb.id}.py`), 'utf-8');
       expect(onDisk).toBe('# marimo code');
     });
   });
@@ -323,7 +319,7 @@ describe('PageManager', () => {
       });
 
       const p = mgr.getNotebookFilePath(nb.id);
-      expect(p).toBe(join(projectDir, 'pages', `${nb.id}.py`));
+      expect(p).toBe(join(projectDir, 'proj-1', `${nb.id}.py`));
     });
 
     it('returns null for doc pages', () => {

@@ -44,6 +44,18 @@ export type ChatSessionPhase =
   | 'awaitingApproval'
   | 'stopping';
 
+/**
+ * One snapshot of model context staged via MCP-Apps ``ui/update-model-context``.
+ * Per spec, "each request overwrites the previous context stored by the view"
+ * — so the buffer is keyed by ``source`` (e.g. ``mcp_ui:<call_id>``) and a new
+ * stage from the same source replaces the prior one. On submit we flatten
+ * all staged entries into the prompt, then clear.
+ */
+export type StagedContextEntry = {
+  source: string;
+  text: string;
+};
+
 export type ChatSessionContext = {
   sessionId: string | undefined;
   runId: string | undefined;
@@ -56,11 +68,22 @@ export type ChatSessionContext = {
   statusItalic: boolean;
   toolStatus: string | undefined;
   error: string | undefined;
+  stagedContext: StagedContextEntry[];
 };
 
 export type ChatSessionEvent =
   // User actions
-  | { type: 'SUBMIT'; text: string; attachments?: Attachment[] }
+  | {
+      type: 'SUBMIT';
+      text: string;
+      attachments?: Attachment[];
+      /**
+       * MCP-Apps staged context entries flushed on this submit. Stored
+       * on the resulting user-turn ChatMessage so the chat log shows
+       * that extra context was attached.
+       */
+      stagedContext?: ReadonlyArray<StagedContextEntry>;
+    }
   | { type: 'SELECT_SESSION'; id: string }
   | { type: 'NEW_SESSION'; sessionId: string }
   | { type: 'STOP' }
@@ -95,6 +118,12 @@ export type ChatSessionEvent =
       argumentsText?: string;
       metadata?: unknown;
       session_id?: string;
+      // Discriminator for the two interruption flows in omniagents
+      // 0.16+: function-tool approvals (default) vs hosted-MCP
+      // approvals. MCP approvals carry a server_label and are answered
+      // via a different RPC (no ``always_approve`` flag).
+      kind?: 'function' | 'mcp';
+      server_label?: string;
     }
   | { type: 'APPROVAL_RESOLVED'; request_id: string }
   | { type: 'SET_STATUS'; text?: string; showSpinner?: boolean; session_id?: string }
@@ -111,10 +140,17 @@ export type ChatSessionEvent =
       content: string;
       mode?: string;
       session_id?: string;
+      mcp_ui?: ArtifactItem['mcp_ui'];
     }
   // Direct item manipulation (slash commands, external updates)
   | { type: 'APPEND_RESPONSE'; content: string }
-  | { type: 'SET_SESSION_ID'; sessionId: string };
+  | { type: 'SET_SESSION_ID'; sessionId: string }
+  // MCP-Apps ``ui/update-model-context`` — stage content for the next
+  // user turn. ``source`` keys per-view (e.g. ``mcp_ui:<call_id>``) so
+  // re-stages from the same source replace the prior entry, matching
+  // the spec's "overwrite previous context" semantics.
+  | { type: 'STAGE_CONTEXT'; source: string; text: string }
+  | { type: 'CLEAR_STAGED_CONTEXT' };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -140,6 +176,7 @@ const INITIAL_CONTEXT: ChatSessionContext = {
   statusItalic: false,
   toolStatus: undefined,
   error: undefined,
+  stagedContext: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -192,6 +229,9 @@ export const chatSessionMachine = setup({
         const msg: ChatMessage = { type: 'chat', role: 'user', content: e.text };
         if (e.attachments?.length) {
           msg.attachments = e.attachments;
+        }
+        if (e.stagedContext && e.stagedContext.length > 0) {
+          msg.staged_context = e.stagedContext;
         }
         return [...context.items, msg];
       },
@@ -320,6 +360,8 @@ export const chatSessionMachine = setup({
         argumentsText: e.argumentsText,
         metadata: e.metadata,
         session_id: e.session_id,
+        kind: e.kind ?? 'function',
+        server_label: e.server_label,
       };
       const newPending = new Map(context.pendingApprovals);
       newPending.set(e.request_id, item);
@@ -424,6 +466,7 @@ return e.items;
         content: e.content,
         mode: e.mode,
         session_id: e.session_id,
+        mcp_ui: e.mcp_ui,
         updated_at: Date.now(),
       };
       const next = context.items.slice();
@@ -446,6 +489,23 @@ return e.items;
     setSessionIdOnly: assign({
       sessionId: ({ event }) =>
         (event as Extract<ChatSessionEvent, { type: 'SET_SESSION_ID' }>).sessionId,
+    }),
+
+    stageContext: assign(({ context, event }) => {
+      const e = event as Extract<ChatSessionEvent, { type: 'STAGE_CONTEXT' }>;
+      const text = (e.text || '').trim();
+      // Replace any existing entry with the same source; per MCP-Apps spec
+      // each ``ui/update-model-context`` request overwrites the previous
+      // context stored by that view.
+      const next = context.stagedContext.filter((c) => c.source !== e.source);
+      if (text) {
+        next.push({ source: e.source, text });
+      }
+      return { stagedContext: next };
+    }),
+
+    clearStagedContext: assign({
+      stagedContext: () => [],
     }),
   },
 }).createMachine({
@@ -475,6 +535,8 @@ return e.items;
     HISTORY_LOADED: { actions: 'setHistoryItems' },
     APPEND_RESPONSE: { actions: 'appendResponse' },
     ADD_ARTIFACT: { guard: 'acceptLoose', actions: 'addArtifact' },
+    STAGE_CONTEXT: { actions: 'stageContext' },
+    CLEAR_STAGED_CONTEXT: { actions: 'clearStagedContext' },
     APPROVAL_RESOLVED: { actions: 'removeApproval' },
     SELECT_SESSION: {
       target: '.initializing',

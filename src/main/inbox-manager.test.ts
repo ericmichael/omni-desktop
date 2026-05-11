@@ -337,6 +337,40 @@ describe('InboxManager: promoteToProject', () => {
     expect(project.label).toBe('Build X');
     expect(project.slug).toBe('build-x');
   });
+
+  it('delegates to createProject when wired (so caller gets pipeline + root page)', () => {
+    const { store } = makeManager();
+    const createCalls: Array<{ label: string; slug: string }> = [];
+    const sentinel: Project = {
+      id: 'sentinel-id',
+      label: 'Sentinel',
+      slug: 'sentinel',
+      createdAt: NOW,
+    };
+    const manager = new InboxManager({
+      store: store as unknown as InboxManagerStore,
+      newId: () => 'unused-id',
+      now: () => NOW,
+      createProject: (input) => {
+        createCalls.push({ label: input.label, slug: input.slug });
+        return sentinel;
+      },
+    });
+    const item = manager.add({ title: 'Promote me' });
+    const project = manager.promoteToProject(item.id, { label: 'Promote me!' });
+
+    // Direct setProjects-insert path should NOT have run. Only the host's
+    // createProject callback decides what gets persisted.
+    expect(store.projects).toHaveLength(0);
+    expect(createCalls).toEqual([{ label: 'Promote me!', slug: 'promote-me' }]);
+    expect(project).toBe(sentinel);
+    // Promotion tombstone still gets stamped using whatever id the host returned.
+    expect(store.inboxItems[0].promotedTo).toEqual({
+      kind: 'project',
+      id: 'sentinel-id',
+      at: NOW,
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

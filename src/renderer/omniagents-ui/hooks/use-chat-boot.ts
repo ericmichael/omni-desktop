@@ -53,9 +53,11 @@ async function runBootstrap(opts: UseChatBootOptions): Promise<ChatBootCapabilit
   const { client, wsRealtimeUrl, token } = opts;
 
   // 1. Register client-callable functions the server can invoke.
+  // ``ui.request_tool_approval`` is gone: omniagents 0.16 moved
+  // approvals onto the dedicated ``tool_approval_requested`` event +
+  // ``tool_approval_response`` RPC, no client_request hop.
   try {
     await client.clientFunctions(1, [
-      { name: 'ui.request_tool_approval' },
       { name: 'ui.set_status' },
       { name: 'ui.add_artifact' },
     ]);

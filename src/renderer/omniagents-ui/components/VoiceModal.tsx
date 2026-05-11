@@ -551,26 +551,59 @@ console.log('[ui] event', t, p)
           })
         }
 
-        if (eventType === 'client_request') {
-          const fn = String(data?.function || '')
-          if (fn === 'ui.request_tool_approval') {
-            const args = data?.args || {}
+        // omniagents 0.16+ moved tool approvals off ``client_request``
+        // onto a dedicated ``tool_approval_requested`` event keyed by
+        // ``call_id`` (the model-minted tool-call id). Cross-tab
+        // dismissal rides on ``tool_approval_resolved``. The
+        // VoiceNotification's ``request_id`` field is retained for
+        // backwards compatibility with the notification card UI —
+        // populated from ``call_id`` at the wire boundary.
+        if (eventType === 'tool_approval_requested') {
+          const call_id = String(data?.call_id || '')
+          if (call_id) {
             setNotifications(prev => [{
-              id: `ap_${data.request_id || Date.now()}`,
+              id: `ap_${call_id}`,
               type: 'tool_approval' as const,
-              tool: args.tool || 'tool',
-              input: typeof args.arguments === 'string' ? args.arguments : JSON.stringify(args.arguments),
-              request_id: data.request_id,
-              metadata: args.metadata,
+              tool: String(data?.tool_name || 'tool'),
+              input: typeof data?.arguments === 'string' ? data.arguments : JSON.stringify(data?.arguments ?? ''),
+              request_id: call_id,
+              metadata: data?.metadata,
               timestamp: Date.now(),
             }, ...prev].slice(0, 10))
           }
         }
 
-        if (eventType === 'client_request_resolved') {
-          const reqId = String(data?.request_id || '')
-          if (reqId) {
-            setNotifications(prev => prev.filter(n => n.request_id !== reqId))
+        if (eventType === 'tool_approval_resolved') {
+          const call_id = String(data?.call_id || '')
+          if (call_id) {
+            setNotifications(prev => prev.filter(n => n.request_id !== call_id))
+          }
+        }
+
+        // Hosted-MCP approval flow — keyed by ``request_id`` (the model's
+        // ``McpApprovalRequest.id``) rather than call_id, and identifies
+        // the MCP server via ``server_label``. The notification's
+        // request_id is the MCP request_id; the kind discriminator on the
+        // notification lets handleApprove/handleReject pick the right RPC.
+        if (eventType === 'mcp_approval_requested') {
+          const request_id = String(data?.request_id || '')
+          if (request_id) {
+            setNotifications(prev => [{
+              id: `mcp_ap_${request_id}`,
+              type: 'tool_approval' as const,
+              tool: String(data?.tool_name || 'tool'),
+              input: typeof data?.arguments === 'string' ? data.arguments : JSON.stringify(data?.arguments ?? ''),
+              request_id,
+              metadata: { ...(data?.metadata && typeof data.metadata === 'object' ? data.metadata : {}), kind: 'mcp', server_label: String(data?.server_label || '') },
+              timestamp: Date.now(),
+            }, ...prev].slice(0, 10))
+          }
+        }
+
+        if (eventType === 'mcp_approval_resolved') {
+          const request_id = String(data?.request_id || '')
+          if (request_id) {
+            setNotifications(prev => prev.filter(n => n.request_id !== request_id))
           }
         }
       }
@@ -717,15 +750,35 @@ clientRef.current.stopSession(sid).catch(() => {})
     }
   }, [isOpen])
 
+  // Look up the kind of an in-flight approval so handleApprove/Reject
+  // can pick the right RPC. MCP-side notifications stash the
+  // discriminator on ``metadata.kind`` (see the mcp_approval_requested
+  // branch above); anything else is a function-tool approval.
+  const isMcpApproval = useCallback((requestId: string) => {
+    const n = notifications.find((x) => x.request_id === requestId)
+    const meta = (n as any)?.metadata
+    return meta && typeof meta === 'object' && meta.kind === 'mcp'
+  }, [notifications])
+
   const handleApprove = useCallback((requestId: string) => {
-    clientRef.current?.clientResponse(requestId, true, { approved: true })
+    if (isMcpApproval(requestId)) {
+      clientRef.current?.mcpApprovalResponse(requestId, 'approve').catch(() => {})
+    } else {
+      // ``requestId`` for function-tool approvals is the call_id we
+      // stored when ``tool_approval_requested`` arrived.
+      clientRef.current?.toolApprovalResponse(requestId, 'approve').catch(() => {})
+    }
     setNotifications(prev => prev.filter(n => n.request_id !== requestId))
-  }, [])
+  }, [isMcpApproval])
 
   const handleReject = useCallback((requestId: string) => {
-    clientRef.current?.clientResponse(requestId, true, { approved: false })
+    if (isMcpApproval(requestId)) {
+      clientRef.current?.mcpApprovalResponse(requestId, 'reject').catch(() => {})
+    } else {
+      clientRef.current?.toolApprovalResponse(requestId, 'reject').catch(() => {})
+    }
     setNotifications(prev => prev.filter(n => n.request_id !== requestId))
-  }, [])
+  }, [isMcpApproval])
 
   const handleDismissNotification = useCallback((id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id))

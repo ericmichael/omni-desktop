@@ -25,7 +25,14 @@ export function getDefaultDbPath(): string {
   return join(getOmniConfigDir(), 'projects.db');
 }
 
-/** Default pages directory: <config dir>/projects */
+/**
+ * Default pages directory: `<config dir>/pages`.
+ *
+ * Pages live at `<config dir>/pages/<projectId>/<pageId>.md`. Keyed by
+ * stable id so renames don't churn the filesystem. The launcher resolves
+ * the same path via `getProjectPagesDir(projectId)` so both writers
+ * converge on a single tree.
+ */
 export function getDefaultPagesDir(): string {
-  return join(getOmniConfigDir(), 'projects');
+  return join(getOmniConfigDir(), 'pages');
 }
