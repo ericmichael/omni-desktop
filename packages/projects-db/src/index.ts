@@ -55,6 +55,9 @@ export {
   deleteProjectPages,
 } from './pages-fs.js';
 
+// Markdown normalization
+export { normalizeMarkdown } from './normalize-markdown.js';
+
 // JSON migration
 export { migrateFromJson } from './migrate-from-json.js';
 export type { JsonStoreData } from './migrate-from-json.js';

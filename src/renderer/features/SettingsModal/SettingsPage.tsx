@@ -1,11 +1,12 @@
 import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
-import { Apps20Regular, Cube20Regular, Globe20Regular, Lightbulb20Regular, Person20Regular, PlugConnected20Regular, PuzzlePiece20Regular,Settings20Regular, WindowConsole20Regular } from '@fluentui/react-icons';
+import { Apps20Regular, Cube20Regular, Globe20Regular, Lightbulb20Regular, MicSettings20Regular, Person20Regular, PlugConnected20Regular, PuzzlePiece20Regular,Settings20Regular, WindowConsole20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useState } from 'react';
 
 import { Subtitle2 } from '@/renderer/ds';
 import { SettingsModalAccountTab } from '@/renderer/features/SettingsModal/SettingsModalAccountTab';
 import { SettingsModalAppsTab } from '@/renderer/features/SettingsModal/SettingsModalAppsTab';
+import { SettingsModalAudioTab } from '@/renderer/features/SettingsModal/SettingsModalAudioTab';
 import { SettingsModalEnvironmentTab } from '@/renderer/features/SettingsModal/SettingsModalEnvironmentTab';
 import { SettingsModalExtensionsTab } from '@/renderer/features/SettingsModal/SettingsModalExtensionsTab';
 import { SettingsModalGeneralTab } from '@/renderer/features/SettingsModal/SettingsModalGeneralTab';
@@ -23,6 +24,7 @@ const TABS = [
   { value: 'MCP', label: 'MCP Servers', icon: <PlugConnected20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Apps', label: 'Apps', icon: <Apps20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Skills', label: 'Skills', icon: <Lightbulb20Regular style={{ width: 18, height: 18 }} /> },
+  { value: 'Audio', label: 'Audio', icon: <MicSettings20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Network', label: 'Network', icon: <Globe20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Extensions', label: 'Extensions', icon: <PuzzlePiece20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Account', label: 'Account', icon: <Person20Regular style={{ width: 18, height: 18 }} /> },
@@ -248,6 +250,7 @@ export const SettingsPage = memo(() => {
           {activeTab === 'MCP' && <SettingsModalMcpTab />}
           {activeTab === 'Apps' && <SettingsModalAppsTab />}
           {activeTab === 'Skills' && <SettingsModalSkillsTab />}
+          {activeTab === 'Audio' && <SettingsModalAudioTab />}
           {activeTab === 'Network' && <SettingsModalNetworkTab />}
           {activeTab === 'Extensions' && <SettingsModalExtensionsTab />}
           {activeTab === 'Account' && <SettingsModalAccountTab />}

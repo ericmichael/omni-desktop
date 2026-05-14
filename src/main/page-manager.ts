@@ -23,6 +23,7 @@
  */
 import fs from 'fs/promises';
 import { nanoid } from 'nanoid';
+import { normalizeMarkdown } from 'omni-projects-db';
 import path from 'path';
 
 import { computePagesToDelete } from '@/lib/page-cascade';
@@ -136,7 +137,11 @@ export class PageManager {
     // Seed the .md / .py file on disk. Pending-write markers keep the watcher's
     // echo-suppression from firing a spurious page:content-changed on this first write.
     const filePath = this.getPageFilePath(page);
-    const initialContent = page.kind === 'notebook' ? MARIMO_NOTEBOOK_TEMPLATE : getTemplate(template);
+    const rawInitial = page.kind === 'notebook' ? MARIMO_NOTEBOOK_TEMPLATE : getTemplate(template);
+    // Normalize markdown so disk content is canonical CommonMark and
+    // downstream readers (Yoopta, agents, grep) get a parseable file. Skip
+    // notebooks — those are .py source, not markdown.
+    const initialContent = page.kind === 'notebook' ? rawInitial : normalizeMarkdown(rawInitial);
     this.watcher.notePendingWrite(filePath, initialContent);
     void ensureDirectory(path.dirname(filePath)).then(() =>
       fs.writeFile(filePath, initialContent, 'utf-8').catch(() => {})
@@ -222,10 +227,13 @@ export class PageManager {
     }
     const filePath = this.getPageFilePath(page);
     await ensureDirectory(path.dirname(filePath));
-    // Record the pending write BEFORE touching disk so the resulting chokidar
-    // event is recognized as our own echo and suppressed.
-    this.watcher.notePendingWrite(filePath, content);
-    await fs.writeFile(filePath, content, 'utf-8');
+    // Canonicalize markdown so what lands on disk parses cleanly under
+    // marked / Yoopta / remark / grep. Notebook pages stay raw — they're
+    // .py, not markdown. The pending-write echo suppression must see the
+    // exact bytes that hit disk, so normalize first, then note, then write.
+    const normalized = page.kind === 'notebook' ? content : normalizeMarkdown(content);
+    this.watcher.notePendingWrite(filePath, normalized);
+    await fs.writeFile(filePath, normalized, 'utf-8');
   };
 
   /** Renderer-facing: start watching a page's file for external edits. */

@@ -147,7 +147,7 @@ return prev;
 
   const panels: { key: LayoutMode; Component: React.ComponentType }[] = [
     { key: 'chat', Component: Chat },
-    { key: 'code', Component: Code },
+    { key: 'spaces', Component: Code },
     { key: 'projects', Component: Tickets },
     { key: 'dashboards', Component: Dashboards },
     { key: 'settings', Component: SettingsPage },
@@ -167,7 +167,7 @@ return prev;
           : undefined
       }
     >
-      <div className={mergeClasses(active === 'code' && styles.sidebarHiddenMobile)}>
+      <div className={mergeClasses(active === 'spaces' && styles.sidebarHiddenMobile)}>
         <Sidebar />
       </div>
       <div className={styles.content}>

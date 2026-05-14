@@ -1,33 +1,54 @@
-import { makeStyles, mergeClasses,tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import {
+  ArchiveRegular,
   CalendarCheckmark20Regular,
   CheckmarkCircle20Regular,
   ChevronDown16Regular,
   ChevronRight16Regular,
-  Flash20Filled,
-  Warning20Regular,
+  ErrorCircle16Regular,
+  MailInbox20Regular,
+  Open16Regular,
+  Pin20Filled,
+  Play20Filled,
+  Warning16Regular,
 } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
 
-import { focusHeader, type FocusItem,rankFocus } from '@/lib/focus-ranker';
-import { detectRisks, type RiskSeverity, type RiskSignal } from '@/lib/risk-signals';
+import {
+  groupRiskSignalsForHome,
+  isMilestonePinned,
+  isProjectPinned,
+  milestoneProgress,
+  projectOpenTicketCount,
+  rankFocusForMilestone,
+  rankFocusForProject,
+} from '@/lib/home-rollup';
+import { detectRisks, type RiskSignal } from '@/lib/risk-signals';
 import { computeShippedDigest, localBoundaries, type ShippedItem } from '@/lib/shipped-digest';
 import { dayName, isReviewDue } from '@/lib/weekly-review';
-import { Badge, Body1, Button, Caption1, Caption1Strong, Subtitle2, Title3 } from '@/renderer/ds';
+import {
+  Badge,
+  Body1,
+  Button,
+  Caption1,
+  Caption1Strong,
+  IconButton,
+  ProgressBar,
+  Subtitle2,
+  Title3,
+} from '@/renderer/ds';
 import { $activeInbox } from '@/renderer/features/Inbox/state';
-import { $milestones } from '@/renderer/features/Initiatives/state';
-import { openTicketInCode } from '@/renderer/services/navigation';
+import { $milestones, milestoneApi } from '@/renderer/features/Initiatives/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { DEFAULT_PIPELINE } from '@/shared/pipeline-defaults';
 import { isActivePhase } from '@/shared/ticket-phase';
-import type { ColumnId } from '@/shared/types';
+import type { ColumnId, Milestone, Project, ProjectId, Ticket } from '@/shared/types';
 
-import { $wipDialogPendingTicket, ticketApi } from './state';
-import { PHASE_COLORS, PHASE_LABELS } from './ticket-constants';
-import { WeeklyReviewDialog } from './WeeklyReviewDialog';
+import { ticketApi } from './state';
+import { WeekPlanDialog } from './WeekPlanDialog';
 
-/* ---------- Styles ---------- */
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const useStyles = makeStyles({
   root: {
@@ -48,7 +69,18 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: '28px',
   },
-  header: { display: 'flex', flexDirection: 'column', gap: '4px' },
+  header: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '12px',
+  },
+  headerTitle: {
+    display: 'flex',
+    flexDirection: 'column',
+    flex: '1 1 0',
+    minWidth: 0,
+    gap: '4px',
+  },
 
   /* WIP gauge */
   wipRow: { display: 'flex', alignItems: 'baseline', gap: '8px' },
@@ -87,7 +119,7 @@ const useStyles = makeStyles({
   reviewText: { display: 'flex', flexDirection: 'column', flex: '1 1 0', minWidth: 0, gap: '2px' },
   reviewIcon: { flexShrink: 0, color: tokens.colorBrandForeground1 },
 
-  /* Section */
+  /* Section shell */
   section: { display: 'flex', flexDirection: 'column', gap: '6px' },
   sectionHeader: {
     display: 'flex',
@@ -104,12 +136,6 @@ const useStyles = makeStyles({
     letterSpacing: '0.05em',
     color: tokens.colorNeutralForeground2,
   },
-  sectionLead: {
-    paddingLeft: '16px',
-    paddingRight: '16px',
-    color: tokens.colorNeutralForeground2,
-    fontSize: tokens.fontSizeBase300,
-  },
   sectionEmpty: {
     paddingLeft: '16px',
     paddingRight: '16px',
@@ -120,31 +146,50 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
   },
 
-  /* Row */
-  row: {
+  /* Pinned card */
+  card: {
     display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    width: '100%',
+    flexDirection: 'column',
+    gap: '8px',
     paddingLeft: '16px',
     paddingRight: '16px',
-    paddingTop: '10px',
-    paddingBottom: '10px',
-    textAlign: 'left',
-    border: 'none',
-    backgroundColor: 'transparent',
+    paddingTop: '12px',
+    paddingBottom: '12px',
     borderRadius: tokens.borderRadiusMedium,
-    cursor: 'pointer',
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
-    ':active': { backgroundColor: tokens.colorSubtleBackgroundPressed },
+    backgroundColor: tokens.colorNeutralBackground2,
   },
-  rowContent: { display: 'flex', flexDirection: 'column', flex: '1 1 0', minWidth: 0, gap: '2px' },
-  rowTitle: {
+  cardHeader: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '8px',
+  },
+  cardTitleBlock: {
+    flex: '1 1 0',
+    minWidth: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+  },
+  cardTitleRow: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: '8px',
+    minWidth: 0,
+  },
+  cardTitle: {
+    flex: '0 1 auto',
+    minWidth: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+    fontWeight: tokens.fontWeightSemibold,
   },
-  rowMeta: {
+  cardPercent: {
+    flexShrink: 0,
+    fontVariantNumeric: 'tabular-nums',
+    color: tokens.colorNeutralForeground3,
+  },
+  cardMeta: {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
@@ -154,29 +199,102 @@ const useStyles = makeStyles({
   projectTag: {
     color: tokens.colorNeutralForeground2,
     fontWeight: tokens.fontWeightSemibold,
-    ':after': {
-      content: '"·"',
-      marginLeft: '8px',
-      color: tokens.colorNeutralForeground4,
-      fontWeight: tokens.fontWeightRegular,
-    },
   },
-  rowRank: {
-    flexShrink: 0,
-    width: '20px',
-    textAlign: 'right',
-    fontVariantNumeric: 'tabular-nums',
+  ownerKind: {
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase100,
+  },
+  progress: { width: '100%' },
+
+  /* Next-up row inside card */
+  nextUp: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '6px 8px',
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  nextUpLabel: {
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
+    flexShrink: 0,
   },
-  dot: { width: '10px', height: '10px', borderRadius: '9999px', flexShrink: 0 },
-  dotActive: { backgroundColor: tokens.colorPaletteGreenForeground1 },
-  dotIdle: { backgroundColor: tokens.colorNeutralForeground3, opacity: 0.3 },
+  nextUpBtn: {
+    flex: '1 1 0',
+    minWidth: 0,
+    display: 'flex',
+    alignItems: 'center',
+    border: 'none',
+    backgroundColor: 'transparent',
+    cursor: 'pointer',
+    padding: 0,
+    textAlign: 'left',
+    color: tokens.colorNeutralForeground1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    ':hover': { color: tokens.colorBrandForeground1 },
+  },
 
-  /* Risk severity dots */
-  sevHigh: { backgroundColor: tokens.colorPaletteRedForeground1 },
-  sevMedium: { backgroundColor: tokens.colorPaletteYellowForeground1 },
-  sevLow: { backgroundColor: tokens.colorNeutralForeground3 },
+  /* Risk strip */
+  riskStrip: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexWrap: 'wrap',
+  },
+
+  /* Card footer affordances */
+  cardFooter: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: '4px',
+    marginTop: '2px',
+  },
+
+  /* Inbox strip */
+  inboxRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    paddingLeft: '16px',
+    paddingRight: '16px',
+    paddingTop: '8px',
+    paddingBottom: '8px',
+    border: 'none',
+    backgroundColor: 'transparent',
+    cursor: 'pointer',
+    textAlign: 'left',
+    width: '100%',
+    borderRadius: tokens.borderRadiusMedium,
+    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
+  },
+  inboxText: {
+    flex: '1 1 0',
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  showAllToggle: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    paddingLeft: '16px',
+    paddingRight: '16px',
+    paddingTop: '8px',
+    paddingBottom: '8px',
+    border: 'none',
+    backgroundColor: 'transparent',
+    cursor: 'pointer',
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase300,
+    ':hover': { color: tokens.colorNeutralForeground1 },
+  },
 
   /* Shipped */
   shippedCounts: {
@@ -200,6 +318,22 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
     fontSize: tokens.fontSizeBase300,
     ':hover': { color: tokens.colorNeutralForeground1 },
+  },
+  shippedRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    width: '100%',
+    paddingLeft: '16px',
+    paddingRight: '16px',
+    paddingTop: '8px',
+    paddingBottom: '8px',
+    textAlign: 'left',
+    border: 'none',
+    backgroundColor: 'transparent',
+    borderRadius: tokens.borderRadiusMedium,
+    cursor: 'pointer',
+    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
   },
 
   /* Empty */
@@ -236,7 +370,11 @@ const WipGauge = memo(({ used, limit }: { used: number; limit: number }) => {
             key={i}
             className={mergeClasses(
               styles.wipSlot,
-              filled ? (used >= limit ? styles.wipSlotFull : styles.wipSlotFilled) : styles.wipSlotEmpty
+              filled
+                ? used >= limit
+                  ? styles.wipSlotFull
+                  : styles.wipSlotFilled
+                : styles.wipSlotEmpty
             )}
           />
         ))}
@@ -253,13 +391,11 @@ const Section = memo(
     icon,
     title,
     count,
-    lead,
     children,
   }: {
     icon: React.ReactNode;
     title: string;
     count?: number;
-    lead?: string;
     children: React.ReactNode;
   }) => {
     const styles = useStyles();
@@ -268,9 +404,8 @@ const Section = memo(
         <div className={styles.sectionHeader}>
           <span className={styles.sectionIcon}>{icon}</span>
           <Caption1Strong className={styles.sectionTitle}>{title}</Caption1Strong>
-          {count != null && count > 0 && <Caption1>({count})</Caption1>}
+          {count !== undefined && count > 0 && <Caption1>({count})</Caption1>}
         </div>
-        {lead && <Caption1 className={styles.sectionLead}>{lead}</Caption1>}
         {children}
       </div>
     );
@@ -278,102 +413,292 @@ const Section = memo(
 );
 Section.displayName = 'Section';
 
-/* ---------- Focus row ---------- */
+/* ---------- Risk strip ---------- */
 
-const FocusRow = memo(
-  ({ item, index, projectLabel }: { item: FocusItem; index: number; projectLabel?: string }) => {
+const RiskStrip = memo(
+  ({ signals, hasInFlight }: { signals: RiskSignal[]; hasInFlight: boolean }) => {
     const styles = useStyles();
-    const ticket = item.ticket;
-    const phase = ticket.phase;
-    const running = phase != null && isActivePhase(phase);
 
-    const handleClick = useCallback(() => {
-      if (running) {
-        void openTicketInCode(ticket.id);
-      } else {
-        ticketApi.goToTicket(ticket.id);
+    let selfBlocked = 0;
+    let stalled = 0;
+    for (const s of signals) {
+      if (s.kind === 'self_blocked') {
+        selfBlocked++;
+      } else if (s.kind === 'stalled_ticket') {
+        stalled++;
       }
-    }, [running, ticket.id]);
+    }
+
+    if (!hasInFlight && selfBlocked === 0 && stalled === 0) {
+      return null;
+    }
 
     return (
-      <button type="button" className={styles.row} onClick={handleClick}>
-        <span className={styles.rowRank}>{index + 1}</span>
-        <div className={mergeClasses(styles.dot, running ? styles.dotActive : styles.dotIdle)} />
-        <div className={styles.rowContent}>
-          <Body1 className={styles.rowTitle}>{ticket.title}</Body1>
-          <div className={styles.rowMeta}>
-            {projectLabel && <span className={styles.projectTag}>{projectLabel}</span>}
-            <span>{item.reason}</span>
-            {phase && PHASE_LABELS[phase] && phase !== 'idle' && (
-              <Badge color={PHASE_COLORS[phase] ?? 'default'}>{PHASE_LABELS[phase]}</Badge>
-            )}
-          </div>
-        </div>
-      </button>
+      <div className={styles.riskStrip}>
+        {hasInFlight && (
+          <Badge color="green">
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  backgroundColor: tokens.colorPaletteGreenForeground1,
+                }}
+              />
+              in flight
+            </span>
+          </Badge>
+        )}
+        {selfBlocked > 0 && (
+          <Badge color="blue">
+            <Warning16Regular style={{ width: 12, height: 12, marginRight: 4 }} />
+            {selfBlocked} needs input
+          </Badge>
+        )}
+        {stalled > 0 && (
+          <Badge color="yellow">
+            <ErrorCircle16Regular style={{ width: 12, height: 12, marginRight: 4 }} />
+            {stalled} stalled
+          </Badge>
+        )}
+      </div>
     );
   }
 );
-FocusRow.displayName = 'FocusRow';
+RiskStrip.displayName = 'RiskStrip';
 
-/* ---------- Risk row ---------- */
+/* ---------- Pinned milestone card ---------- */
 
-const severityClass = (sev: RiskSeverity, styles: ReturnType<typeof useStyles>) => {
-  if (sev === 'high') {
-return styles.sevHigh;
-}
-  if (sev === 'medium') {
-return styles.sevMedium;
-}
-  return styles.sevLow;
-};
+const MilestoneCard = memo(
+  ({
+    milestone,
+    projectLabel,
+    tickets,
+    nextUp,
+    risks,
+    hasInFlight,
+  }: {
+    milestone: Milestone;
+    projectLabel: string;
+    tickets: Ticket[];
+    nextUp: Ticket | null;
+    risks: RiskSignal[];
+    hasInFlight: boolean;
+  }) => {
+    const styles = useStyles();
+    const progress = useMemo(() => milestoneProgress(milestone, tickets), [milestone, tickets]);
+    const pct = Math.round(progress.pct * 100);
+    const now = Date.now();
+    const dueDays =
+      milestone.dueDate !== undefined ? Math.ceil((milestone.dueDate - now) / DAY_MS) : null;
+    const deadlineLabel =
+      dueDays === null
+        ? null
+        : dueDays < 0
+          ? `${Math.abs(dueDays)}d overdue`
+          : dueDays === 0
+            ? 'due today'
+            : `due in ${dueDays}d`;
 
-const RiskRow = memo(
-  ({ signal, projectLabel }: { signal: RiskSignal; projectLabel?: string }) => {
+    const handleNextUpClick = useCallback(() => {
+      if (nextUp) {
+        ticketApi.goToTicket(nextUp.id);
+      }
+    }, [nextUp]);
+
+    const handleStart = useCallback(() => {
+      if (nextUp) {
+        void ticketApi.startSupervisor(nextUp.id);
+      }
+    }, [nextUp]);
+
+    const handleOpen = useCallback(() => {
+      ticketApi.goToMilestone(milestone.id, milestone.projectId);
+    }, [milestone.id, milestone.projectId]);
+
+    const handleUnpin = useCallback(() => {
+      void milestoneApi.updateMilestone(milestone.id, { pinnedAt: undefined });
+    }, [milestone.id]);
+
+    return (
+      <div className={styles.card}>
+        <div className={styles.cardHeader}>
+          <div className={styles.cardTitleBlock}>
+            <div className={styles.cardTitleRow}>
+              <Body1 className={styles.cardTitle}>{milestone.title}</Body1>
+              <Caption1 className={styles.cardPercent}>{pct}%</Caption1>
+            </div>
+            <div className={styles.cardMeta}>
+              <span className={styles.ownerKind}>Milestone</span>
+              {projectLabel && <span className={styles.projectTag}>{projectLabel}</span>}
+              <span>
+                {progress.resolved}/{progress.total}
+              </span>
+              {deadlineLabel && <span>· {deadlineLabel}</span>}
+            </div>
+          </div>
+          <IconButton aria-label="Unpin milestone" icon={<Pin20Filled />} size="sm" onClick={handleUnpin} />
+        </div>
+
+        <ProgressBar
+          value={progress.pct}
+          color={pct === 100 ? 'success' : 'brand'}
+          className={styles.progress}
+        />
+
+        {nextUp ? (
+          <div className={styles.nextUp}>
+            <span className={styles.nextUpLabel}>Next:</span>
+            <button type="button" className={styles.nextUpBtn} onClick={handleNextUpClick}>
+              {nextUp.title}
+            </button>
+            <Button size="sm" leftIcon={<Play20Filled />} onClick={handleStart}>
+              Start
+            </Button>
+          </div>
+        ) : (
+          <Caption1 className={styles.nextUpLabel}>No open tickets.</Caption1>
+        )}
+
+        <RiskStrip signals={risks} hasInFlight={hasInFlight} />
+
+        <div className={styles.cardFooter}>
+          <Button size="sm" variant="ghost" leftIcon={<Open16Regular />} onClick={handleOpen}>
+            Open milestone
+          </Button>
+        </div>
+      </div>
+    );
+  }
+);
+MilestoneCard.displayName = 'MilestoneCard';
+
+/* ---------- Pinned project card ---------- */
+
+const ProjectCard = memo(
+  ({
+    project,
+    openCount,
+    nextUp,
+    risks,
+    hasInFlight,
+  }: {
+    project: Project;
+    openCount: number;
+    nextUp: Ticket | null;
+    risks: RiskSignal[];
+    hasInFlight: boolean;
+  }) => {
+    const styles = useStyles();
+    const now = Date.now();
+    const dueDays =
+      project.dueDate !== undefined ? Math.ceil((project.dueDate - now) / DAY_MS) : null;
+    const deadlineLabel =
+      dueDays === null
+        ? null
+        : dueDays < 0
+          ? `${Math.abs(dueDays)}d overdue`
+          : dueDays === 0
+            ? 'due today'
+            : `due in ${dueDays}d`;
+
+    const handleNextUpClick = useCallback(() => {
+      if (nextUp) {
+        ticketApi.goToTicket(nextUp.id);
+      }
+    }, [nextUp]);
+
+    const handleStart = useCallback(() => {
+      if (nextUp) {
+        void ticketApi.startSupervisor(nextUp.id);
+      }
+    }, [nextUp]);
+
+    const handleOpen = useCallback(() => {
+      ticketApi.goToProject(project.id);
+    }, [project.id]);
+
+    const handleUnpin = useCallback(() => {
+      void ticketApi.updateProject(project.id, { pinnedAt: undefined });
+    }, [project.id]);
+
+    return (
+      <div className={styles.card}>
+        <div className={styles.cardHeader}>
+          <div className={styles.cardTitleBlock}>
+            <div className={styles.cardTitleRow}>
+              <Body1 className={styles.cardTitle}>{project.label}</Body1>
+            </div>
+            <div className={styles.cardMeta}>
+              <span className={styles.ownerKind}>Project</span>
+              <span>
+                {openCount} open ticket{openCount === 1 ? '' : 's'}
+              </span>
+              {deadlineLabel && <span>· {deadlineLabel}</span>}
+            </div>
+          </div>
+          <IconButton aria-label="Unpin project" icon={<Pin20Filled />} size="sm" onClick={handleUnpin} />
+        </div>
+
+        {nextUp ? (
+          <div className={styles.nextUp}>
+            <span className={styles.nextUpLabel}>Next:</span>
+            <button type="button" className={styles.nextUpBtn} onClick={handleNextUpClick}>
+              {nextUp.title}
+            </button>
+            <Button size="sm" leftIcon={<Play20Filled />} onClick={handleStart}>
+              Start
+            </Button>
+          </div>
+        ) : (
+          <Caption1 className={styles.nextUpLabel}>No open tickets in this project.</Caption1>
+        )}
+
+        <RiskStrip signals={risks} hasInFlight={hasInFlight} />
+
+        <div className={styles.cardFooter}>
+          <Button size="sm" variant="ghost" leftIcon={<Open16Regular />} onClick={handleOpen}>
+            Open project
+          </Button>
+        </div>
+      </div>
+    );
+  }
+);
+ProjectCard.displayName = 'ProjectCard';
+
+/* ---------- Inbox strip ---------- */
+
+const InboxStripRow = memo(({ signal }: { signal: RiskSignal }) => {
   const styles = useStyles();
 
   const handleClick = useCallback(() => {
-    const action = signal.action;
-    switch (action.kind) {
-      case 'open_ticket':
-        ticketApi.goToTicket(action.ticketId);
-        break;
-      case 'open_milestone':
-        ticketApi.goToMilestone(action.milestoneId, action.projectId);
-        break;
-      case 'open_inbox_item':
-        ticketApi.goToInbox(action.inboxItemId);
-        break;
-      case 'open_project':
-        ticketApi.goToProject(action.projectId);
-        break;
-      case 'open_wip_dialog': {
-        // Surface the WIP dialog by nudging the pending-ticket atom.
-        const firstActive = persistedStoreApi.$atom
-          .get()
-          .tickets.find((t) => t.phase != null && isActivePhase(t.phase));
-        if (firstActive) {
-          $wipDialogPendingTicket.set(firstActive);
-        }
-        break;
-      }
+    if (signal.action.kind === 'open_inbox_item') {
+      ticketApi.goToInbox(signal.action.inboxItemId);
     }
   }, [signal]);
 
   return (
-    <button type="button" className={styles.row} onClick={handleClick}>
-      <div className={mergeClasses(styles.dot, severityClass(signal.severity, styles))} />
-      <div className={styles.rowContent}>
-        <Body1 className={styles.rowTitle}>{signal.title}</Body1>
-        <div className={styles.rowMeta}>
-          {projectLabel && <span className={styles.projectTag}>{projectLabel}</span>}
-          {signal.detail && <span>{signal.detail}</span>}
-        </div>
-      </div>
+    <button type="button" className={styles.inboxRow} onClick={handleClick}>
+      <MailInbox20Regular />
+      <span className={styles.inboxText}>{signal.title}</span>
+      {signal.detail && (
+        <Caption1
+          style={{
+            color:
+              signal.severity === 'high'
+                ? tokens.colorPaletteYellowForeground1
+                : tokens.colorNeutralForeground3,
+          }}
+        >
+          {signal.detail}
+        </Caption1>
+      )}
     </button>
   );
-  }
-);
-RiskRow.displayName = 'RiskRow';
+});
+InboxStripRow.displayName = 'InboxStripRow';
 
 /* ---------- Shipped row ---------- */
 
@@ -393,13 +718,26 @@ const ShippedRow = memo(
     const subtitle = item.kind === 'ticket' ? 'Ticket shipped' : 'Milestone completed';
 
     return (
-      <button type="button" className={styles.row} onClick={handleClick}>
-        <div className={styles.rowContent}>
-          <Body1 className={styles.rowTitle}>{title}</Body1>
-          <div className={styles.rowMeta}>
-            {projectLabel && <span className={styles.projectTag}>{projectLabel}</span>}
-            <span>{subtitle}</span>
-          </div>
+      <button type="button" className={styles.shippedRow} onClick={handleClick}>
+        <CheckmarkCircle20Regular style={{ width: 16, height: 16 }} />
+        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: '1 1 0' }}>
+          <Body1
+            style={{
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {title}
+          </Body1>
+          <Caption1>
+            {projectLabel && (
+              <span style={{ color: tokens.colorNeutralForeground2, marginRight: 6 }}>
+                {projectLabel} ·
+              </span>
+            )}
+            {subtitle}
+          </Caption1>
         </div>
       </button>
     );
@@ -407,64 +745,39 @@ const ShippedRow = memo(
 );
 ShippedRow.displayName = 'ShippedRow';
 
-/* ---------- Focus section ---------- */
-
-function focusLead(
-  header: ReturnType<typeof focusHeader>
-): string {
-  switch (header.kind) {
-    case 'in_flight':
-      return `${header.activeCount} in flight — finish these first`;
-    case 'start':
-      return `${header.openSlots} ${header.openSlots === 1 ? 'slot' : 'slots'} open — start with these`;
-    case 'shape_inbox':
-      return `Nothing ready. ${header.shapedCount} inbox ${
-        header.shapedCount === 1 ? 'item is' : 'items are'
-      } shaped — commit one to a project.`;
-    case 'empty':
-      return 'No work queued.';
-  }
-}
-
 /* ---------- Main dashboard ---------- */
 
 export const ProjectsDashboard = memo(() => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
-  const milestones = useStore($milestones);
+  const milestonesMap = useStore($milestones);
   const activeInbox = useStore($activeInbox);
 
   const [reviewOpen, setReviewOpen] = useState(false);
   const [shippedExpanded, setShippedExpanded] = useState(false);
 
+  const openReview = useCallback(() => setReviewOpen(true), []);
+  const closeReview = useCallback(() => setReviewOpen(false), []);
+  const toggleShipped = useCallback(() => setShippedExpanded((v) => !v), []);
+  const goToInbox = useCallback(() => ticketApi.goToInbox(), []);
+
   const wipLimit = store.wipLimit ?? 3;
 
-  const projectLabels = useMemo(() => {
-    const map: Record<string, string> = {};
-    for (const p of store.projects) {
-map[p.id] = p.label;
-}
-    return map;
-  }, [store.projects]);
+  const tickets = useMemo(
+    () => store.tickets.filter((ticket) => !ticket.archivedAt),
+    [store.tickets]
+  );
 
-  // Read tickets from the persisted store — the canonical global list that
-  // stays in sync via `store:changed`. The $tickets atom is project-scoped
-  // scratch space that fetchTickets(projectId) wholesale replaces, so reading
-  // from it would make the dashboard flicker to a single project as soon as
-  // the user expands a node in the sidebar.
-  const tickets = useMemo(() => store.tickets.filter((ticket) => !ticket.archivedAt), [store.tickets]);
+  const milestones = useMemo(() => Object.values(milestonesMap), [milestonesMap]);
 
-  // Collect terminal (last) column IDs across every project. The rest of the
-  // system treats "in the last kanban column" as done — the ranker and risk
-  // detector must match that, otherwise cards dragged to Done still rank.
   const terminalColumnIds = useMemo<ReadonlySet<ColumnId>>(() => {
     const set = new Set<ColumnId>();
     for (const project of store.projects) {
       const columns = project.pipeline?.columns ?? DEFAULT_PIPELINE.columns;
       const last = columns[columns.length - 1];
       if (last) {
-set.add(last.id);
-}
+        set.add(last.id);
+      }
     }
     return set;
   }, [store.projects]);
@@ -475,39 +788,24 @@ set.add(last.id);
         (t) =>
           t.resolution === undefined &&
           !terminalColumnIds.has(t.columnId) &&
-          t.phase != null &&
+          t.phase !== undefined &&
           isActivePhase(t.phase)
       ).length,
     [tickets, terminalColumnIds]
   );
 
   const reviewDue = useMemo(
-    () => isReviewDue(store.weeklyReviewDay ?? 5, store.lastWeeklyReviewAt ?? null),
+    () => isReviewDue(store.weeklyReviewDay ?? 1, store.lastWeeklyReviewAt ?? null),
     [store.weeklyReviewDay, store.lastWeeklyReviewAt]
   );
 
   const now = Date.now();
 
-  const ranked = useMemo(
-    () => rankFocus({ tickets, milestones, terminalColumnIds, now, limit: 5 }),
-    [tickets, milestones, terminalColumnIds, now]
-  );
-
-  const shapedInboxCount = useMemo(
-    () => activeInbox.filter((i) => i.status === 'shaped').length,
-    [activeInbox]
-  );
-
-  const header = useMemo(
-    () => focusHeader({ ranked, wipUsed, wipLimit, shapedInboxCount }),
-    [ranked, wipUsed, wipLimit, shapedInboxCount]
-  );
-
   const risks = useMemo(
     () =>
       detectRisks({
         tickets,
-        milestones: Object.values(milestones),
+        milestones,
         inboxItems: activeInbox,
         projects: store.projects,
         terminalColumnIds,
@@ -517,11 +815,98 @@ set.add(last.id);
     [tickets, milestones, activeInbox, store.projects, terminalColumnIds, wipLimit, now]
   );
 
+  const grouped = useMemo(
+    () => groupRiskSignalsForHome({ signals: risks, tickets }),
+    [risks, tickets]
+  );
+
+  const milestoneMapById = useMemo(() => {
+    const m: Record<string, Milestone> = {};
+    for (const milestone of milestones) {
+      m[milestone.id] = milestone;
+    }
+    return m;
+  }, [milestones]);
+
+  const projectLabels = useMemo(() => {
+    const map: Record<ProjectId, string> = {};
+    for (const p of store.projects) {
+      map[p.id] = p.label;
+    }
+    return map;
+  }, [store.projects]);
+
+  const pinnedProjects = useMemo(
+    () => store.projects.filter((p) => isProjectPinned(p)),
+    [store.projects]
+  );
+
+  const pinnedMilestones = useMemo(
+    () => milestones.filter((m) => isMilestonePinned(m) && m.status === 'active'),
+    [milestones]
+  );
+
+  const totalPinned = pinnedProjects.length + pinnedMilestones.length;
+
+  const projectCardContext = useCallback(
+    (project: Project) => {
+      const focus = rankFocusForProject({
+        project,
+        tickets,
+        milestones: milestoneMapById,
+        terminalColumnIds,
+        now,
+      });
+      const projectTickets = tickets.filter((t) => t.projectId === project.id);
+      const hasInFlight = projectTickets.some(
+        (t) =>
+          t.resolution === undefined &&
+          !terminalColumnIds.has(t.columnId) &&
+          t.phase !== undefined &&
+          isActivePhase(t.phase)
+      );
+      const openCount = projectOpenTicketCount({ project, tickets, terminalColumnIds });
+      return {
+        nextUp: focus?.ticket ?? null,
+        risks: grouped.byProject.get(project.id) ?? [],
+        hasInFlight,
+        openCount,
+      };
+    },
+    [tickets, milestoneMapById, terminalColumnIds, now, grouped.byProject]
+  );
+
+  const milestoneCardContext = useCallback(
+    (milestone: Milestone) => {
+      const focus = rankFocusForMilestone({
+        milestone,
+        tickets,
+        milestones: milestoneMapById,
+        terminalColumnIds,
+        now,
+      });
+      const milestoneTickets = tickets.filter((t) => t.milestoneId === milestone.id);
+      const hasInFlight = milestoneTickets.some(
+        (t) =>
+          t.resolution === undefined &&
+          !terminalColumnIds.has(t.columnId) &&
+          t.phase !== undefined &&
+          isActivePhase(t.phase)
+      );
+      return {
+        nextUp: focus?.ticket ?? null,
+        risks: grouped.byMilestone.get(milestone.id) ?? [],
+        hasInFlight,
+      };
+    },
+    [tickets, milestoneMapById, terminalColumnIds, now, grouped.byMilestone]
+  );
+
   const shipped = useMemo(() => {
     const { startOfToday, startOfWeek } = localBoundaries(new Date(now));
     return computeShippedDigest({
       tickets,
-      milestones: Object.values(milestones),
+      milestones,
       startOfToday,
       startOfWeek,
     });
@@ -530,7 +915,6 @@ set.add(last.id);
   const hasAnyContent =
     tickets.length > 0 || activeInbox.length > 0 || store.projects.length > 0;
 
-  // Completely empty state — new user, nothing captured yet.
   if (!hasAnyContent) {
     return (
       <div className={styles.root}>
@@ -539,9 +923,9 @@ set.add(last.id);
             <div className={styles.empty}>
               <span className={styles.emptyTilde}>~</span>
               <Body1>Nothing here yet.</Body1>
-              <Caption1>Capture a thought or create your first project to get started.</Caption1>
+              <Caption1>Create a project or capture a thought to get started.</Caption1>
               <div className={styles.emptyActions}>
-                <Button size="sm" onClick={() => ticketApi.goToInbox()}>
+                <Button size="sm" onClick={goToInbox}>
                   Open inbox
                 </Button>
               </div>
@@ -558,71 +942,110 @@ set.add(last.id);
         <div className={styles.container}>
           {/* Header */}
           <div className={styles.header}>
-            <Title3>Home</Title3>
-            <Caption1>What needs your attention.</Caption1>
+            <div className={styles.headerTitle}>
+              <Title3>Home</Title3>
+              <Caption1>What you&apos;re focused on this week.</Caption1>
+            </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              leftIcon={<CalendarCheckmark20Regular />}
+              onClick={openReview}
+            >
+              Plan week
+            </Button>
           </div>
 
           {/* WIP gauge */}
           <WipGauge used={wipUsed} limit={wipLimit} />
 
-          {/* Review banner */}
+          {/* Review banner (Monday) */}
           {reviewDue && (
-            <button type="button" onClick={() => setReviewOpen(true)} className={styles.reviewBanner}>
+            <button type="button" onClick={openReview} className={styles.reviewBanner}>
               <CalendarCheckmark20Regular className={styles.reviewIcon} />
               <div className={styles.reviewText}>
                 <Subtitle2>
-                  It is {dayName(store.weeklyReviewDay ?? 5)} — time for your weekly review
+                  It&apos;s {dayName(store.weeklyReviewDay ?? 1)} — plan your week
                 </Subtitle2>
-                <Caption1>Reflect on what shipped, triage your inbox, and clear the decks.</Caption1>
+                <Caption1>
+                  Recap what you shipped and pin the projects or milestones you&apos;re committing to.
+                </Caption1>
               </div>
-              <Button size="sm" onClick={() => setReviewOpen(true)}>
+              <Button size="sm" onClick={openReview}>
                 Start
               </Button>
             </button>
           )}
 
-          {/* Focus */}
+          {/* THIS WEEK */}
           <Section
-            icon={<Flash20Filled style={{ width: 16, height: 16 }} />}
-            title="Focus"
-            lead={focusLead(header)}
+            icon={<Pin20Filled style={{ width: 16, height: 16 }} />}
+            title="This week"
+            count={totalPinned}
           >
-            {ranked.length === 0 ? null : (
+            {totalPinned === 0 ? (
+              <div className={styles.sectionEmpty}>
+                Nothing pinned. Pin a project or milestone in the sidebar to focus on it here.
+              </div>
+            ) : (
               <>
-                {ranked.map((item, i) => (
-                  <FocusRow
-                    key={item.ticket.id}
-                    item={item}
-                    index={i}
-                    projectLabel={projectLabels[item.ticket.projectId]}
-                  />
-                ))}
+                {pinnedProjects.map((project) => {
+                  const ctx = projectCardContext(project);
+                  return (
+                    <ProjectCard
+                      key={project.id}
+                      project={project}
+                      openCount={ctx.openCount}
+                      nextUp={ctx.nextUp}
+                      risks={ctx.risks}
+                      hasInFlight={ctx.hasInFlight}
+                    />
+                  );
+                })}
+                {pinnedMilestones.map((milestone) => {
+                  const ctx = milestoneCardContext(milestone);
+                  return (
+                    <MilestoneCard
+                      key={milestone.id}
+                      milestone={milestone}
+                      projectLabel={projectLabels[milestone.projectId] ?? ''}
+                      tickets={tickets}
+                      nextUp={ctx.nextUp}
+                      risks={ctx.risks}
+                      hasInFlight={ctx.hasInFlight}
+                    />
+                  );
+                })}
               </>
             )}
           </Section>
 
-          {/* At risk */}
-          <Section
-            icon={<Warning20Regular style={{ width: 16, height: 16 }} />}
-            title="At risk"
-            count={risks.length}
-          >
-            {risks.length === 0 ? (
-              <div className={styles.sectionEmpty}>Nothing is drifting. Keep shipping.</div>
-            ) : (
-              risks.map((r) => (
-                <RiskRow
-                  key={r.id}
-                  signal={r}
-                  projectLabel={riskProjectLabel(r, tickets, projectLabels)}
-                />
-              ))
-            )}
-          </Section>
+          {/* Inbox strip */}
+          {grouped.inbox.length > 0 && (
+            <Section
+              icon={<MailInbox20Regular style={{ width: 16, height: 16 }} />}
+              title="Inbox"
+              count={grouped.inbox.length}
+            >
+              {grouped.inbox.slice(0, 3).map((signal) => (
+                <InboxStripRow key={signal.id} signal={signal} />
+              ))}
+              {grouped.inbox.length > 3 && (
+                <button
+                  type="button"
+                  className={styles.showAllToggle}
+                  onClick={goToInbox}
+                >
+                  <ChevronRight16Regular />
+                  Show all in Inbox
+                </button>
+              )}
+            </Section>
+          )}
 
           {/* Shipped */}
           <Section
-            icon={<CheckmarkCircle20Regular style={{ width: 16, height: 16 }} />}
+            icon={<ArchiveRegular style={{ width: 16, height: 16 }} />}
             title="Shipped"
           >
             <div className={styles.shippedCounts}>
@@ -642,52 +1065,29 @@ set.add(last.id);
                 <button
                   type="button"
                   className={styles.shippedToggle}
-                  onClick={() => setShippedExpanded((v) => !v)}
+                  onClick={toggleShipped}
                 >
                   {shippedExpanded ? <ChevronDown16Regular /> : <ChevronRight16Regular />}
                   <span>{shippedExpanded ? 'Hide details' : 'Show details'}</span>
                 </button>
-                {shippedExpanded && shipped.week.items.map((item) => {
-                  const key = item.kind === 'ticket' ? `t:${item.ticket.id}` : `m:${item.milestone.id}`;
-                  const projectId =
-                    item.kind === 'ticket' ? item.ticket.projectId : item.milestone.projectId;
-                  return (
-                    <ShippedRow key={key} item={item} projectLabel={projectLabels[projectId]} />
-                  );
-                })}
+                {shippedExpanded &&
+                  shipped.week.items.map((item) => {
+                    const key = item.kind === 'ticket' ? `t:${item.ticket.id}` : `m:${item.milestone.id}`;
+                    const projectId =
+                      item.kind === 'ticket' ? item.ticket.projectId : item.milestone.projectId;
+                    return (
+                      <ShippedRow key={key} item={item} projectLabel={projectLabels[projectId]} />
+                    );
+                  })}
               </>
             )}
           </Section>
+
         </div>
       </div>
-      <WeeklyReviewDialog open={reviewOpen} onClose={() => setReviewOpen(false)} />
+      <WeekPlanDialog open={reviewOpen} onClose={closeReview} />
     </div>
   );
 });
 ProjectsDashboard.displayName = 'ProjectsDashboard';
 
-/**
- * Resolve the project label for a risk signal. Signals keyed directly on a
- * project (quiet_project, milestone_*) carry the id; ticket-scoped signals
- * need a lookup through the ticket list. Inbox and WIP signals aren't
- * project-scoped and return undefined.
- */
-function riskProjectLabel(
-  signal: RiskSignal,
-  tickets: readonly import('@/shared/types').Ticket[],
-  labels: Record<string, string>
-): string | undefined {
-  const action = signal.action;
-  switch (action.kind) {
-    case 'open_ticket': {
-      const ticket = tickets.find((t) => t.id === action.ticketId);
-      return ticket ? labels[ticket.projectId] : undefined;
-    }
-    case 'open_milestone':
-      return labels[action.projectId];
-    case 'open_project':
-      return labels[action.projectId];
-    default:
-      return undefined;
-  }
-}

@@ -182,6 +182,9 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
   const [sandboxMode, setSandboxMode] = useState<SandboxMode>(initialSandboxMode);
   const [sandboxValue, setSandboxValue] = useState(deriveSandboxValue(editProject?.sandbox, initialSandboxMode));
   const [autoDispatch, setAutoDispatch] = useState(editProject?.autoDispatch ?? false);
+  const [dueDate, setDueDate] = useState(
+    editProject?.dueDate !== undefined ? toInputDate(editProject.dueDate) : ''
+  );
 
   const isValid =
     label.trim().length > 0 &&
@@ -239,6 +242,8 @@ setSandboxValue('');
           }
       : undefined;
 
+    const dueDateMs = fromInputDate(dueDate);
+
     try {
       if (isEdit && editProject) {
         await ticketApi.updateProject(editProject.id, {
@@ -246,6 +251,7 @@ setSandboxValue('');
           ...(source !== undefined ? { source } : {}),
           ...(isEdit ? { sandbox: sandbox ?? null } : {}),
           autoDispatch,
+          dueDate: dueDateMs,
         });
       } else {
         await ticketApi.addProject({
@@ -253,13 +259,18 @@ setSandboxValue('');
           slug: label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'project',
           ...(source ? { source } : {}),
           sandbox: sandbox ?? null,
+          ...(dueDateMs !== undefined ? { dueDate: dueDateMs } : {}),
         });
       }
       onClose();
     } finally {
       setIsSubmitting(false);
     }
-  }, [isValid, isSubmitting, isEdit, editProject, label, linkRepo, sourceKind, workspaceDir, repoUrl, defaultBranch, sandboxMode, sandboxValue, autoDispatch, onClose]);
+  }, [isValid, isSubmitting, isEdit, editProject, label, linkRepo, sourceKind, workspaceDir, repoUrl, defaultBranch, sandboxMode, sandboxValue, autoDispatch, dueDate, onClose]);
+
+  const handleDueDateChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setDueDate(e.target.value);
+  }, []);
 
   return (
     <>
@@ -368,13 +379,21 @@ setSandboxValue('');
                 </div>
               </div>
             )}
+
+            {/* Due date — optional */}
+            <div className={styles.section}>
+              <div className={styles.fieldGroup}>
+                <label className={styles.label}>Due date</label>
+                <Input type="date" value={dueDate} onChange={handleDueDateChange} />
+              </div>
+            </div>
           </DialogBody>
-          <DialogFooter className="flex-col sm:flex-row gap-2 sm:justify-end">
-            <Button onClick={handleSubmit} isDisabled={!isValid || isSubmitting} className="w-full sm:w-auto justify-center">
-              {isEdit ? 'Save' : 'Create Project'}
-            </Button>
-            <Button variant="ghost" onClick={onClose} className="w-full sm:w-auto justify-center">
+          <DialogFooter>
+            <Button variant="ghost" onClick={onClose}>
               Cancel
+            </Button>
+            <Button onClick={handleSubmit} isDisabled={!isValid || isSubmitting}>
+              {isEdit ? 'Save' : 'Create Project'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -389,3 +408,24 @@ setSandboxValue('');
   );
 });
 ProjectForm.displayName = 'ProjectForm';
+
+/** Format an epoch-ms timestamp as a local YYYY-MM-DD string for <input type="date">. */
+function toInputDate(ms: number): string {
+  const d = new Date(ms);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Parse a YYYY-MM-DD input value into an epoch-ms at local midnight, or undefined. */
+function fromInputDate(value: string): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const [y, m, d] = value.split('-').map(Number);
+  if (!y || !m || !d) {
+    return undefined;
+  }
+  return new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
+}

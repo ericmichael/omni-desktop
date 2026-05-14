@@ -2,8 +2,9 @@ import { AppRenderer } from '@mcp-ui/client'
 import type { CallToolResult, ReadResourceResult } from '@modelcontextprotocol/sdk/types.js'
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js'
 import { motion } from 'framer-motion'
-import { CheckCircleIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, PaperclipIcon,ThumbsDownIcon, ThumbsUpIcon } from 'lucide-react'
-import React, { useCallback,useEffect, useMemo, useState } from 'react'
+import { CheckCircleIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, Maximize2Icon, Minimize2Icon, PaperclipIcon,ThumbsDownIcon, ThumbsUpIcon } from 'lucide-react'
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import { getGreeting } from '@/renderer/omniagents-ui/greeting'
 import { useRPCClient } from '@/renderer/omniagents-ui/rpc-context'
@@ -42,6 +43,16 @@ import { Markdown } from './promptkit/markdown'
 
 export type { ApprovalItem, ArtifactItem, ArtifactMcpUi, Attachment, ChatMessage, MessageItem, PlanItem, ToolItem } from '@/shared/chat-types'
 import type { ApprovalItem, ArtifactItem, ArtifactMcpUi, Attachment, ChatMessage, MessageItem, PlanItem, ToolItem } from '@/shared/chat-types'
+
+// Portal target for maximized artifacts. App.tsx provides the chat-column
+// element so a maximized artifact can absolute-position-fill the pane between
+// the header and the input bar (i.e. cover the message list, but not the
+// sidebar/header). Null falls back to inline rendering.
+const ArtifactPortalContext = createContext<HTMLElement | null>(null)
+
+export function ArtifactPortalProvider({ target, children }: { target: HTMLElement | null; children: React.ReactNode }) {
+  return <ArtifactPortalContext.Provider value={target}>{children}</ArtifactPortalContext.Provider>
+}
 
 export function MessageList({ items, greeting: greetingProp, statusText, thinking, statusSpinner, preambleText, welcomeText, onApprovalDecision, pendingPlan, onPlanDecision, statusItalic, onReaction, currentRunId, toolStatusText, onSubmitMessage, onStageContext }:
   { items: MessageItem[]; greeting?: string; statusText?: string; thinking?: boolean; statusSpinner?: boolean; preambleText?: string; welcomeText?: string; onApprovalDecision?: (request_id: string, value: 'yes' | 'always' | 'no', kind?: 'function' | 'mcp') => void; pendingPlan?: PlanItem | null; onPlanDecision?: (approved: boolean) => void; statusItalic?: boolean; onReaction?: (type: 'like' | 'dislike', text?: string) => void; currentRunId?: string; toolStatusText?: string; onSubmitMessage?: (text: string) => void | Promise<void>; onStageContext?: (source: string, text: string) => void }) {
@@ -323,42 +334,89 @@ function MessageBubble({ index, role, content, attachments, stagedContext, react
 
 function InlineArtifact({ item, onSubmitMessage, onStageContext }: { item: ArtifactItem; onSubmitMessage?: (text: string) => void | Promise<void>; onStageContext?: (source: string, text: string) => void }) {
   const [copied, setCopied] = useState(false)
+  const [maximized, setMaximized] = useState(false)
+  const portalTarget = useContext(ArtifactPortalContext)
+  const mode = String(item.mode || 'markdown')
+  // Copy makes sense only for textual artifacts. `mcp_ui` has empty content;
+  // `html` and `image` would copy raw markup / URL, which isn't useful here.
+  const copyable = mode !== 'mcp_ui' && mode !== 'html' && mode !== 'image'
+
   const handleCopy = useCallback(() => {
     try {
- navigator.clipboard.writeText(item.content) 
+ navigator.clipboard.writeText(item.content)
 } catch {}
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }, [item.content])
 
+  const toggleMaximized = useCallback(() => setMaximized((v) => !v), [])
+
+  useEffect(() => {
+    if (!maximized) {
+return
+}
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMaximized(false)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [maximized])
+
+  const canPortal = maximized && portalTarget !== null
+
+  const artifact = (
+    <Artifact className={canPortal ? 'h-full w-full shadow-lg' : undefined}>
+      <ArtifactHeader>
+        <ArtifactTitle>{item.title || 'Artifact'}</ArtifactTitle>
+        <ArtifactActions>
+          {copyable ? (
+            <ArtifactAction
+              tooltip={copied ? 'Copied!' : 'Copy'}
+              icon={CopyIcon}
+              onClick={handleCopy}
+            />
+          ) : null}
+          <ArtifactAction
+            tooltip={maximized ? 'Restore' : 'Maximize'}
+            icon={maximized ? Minimize2Icon : Maximize2Icon}
+            onClick={toggleMaximized}
+          />
+        </ArtifactActions>
+      </ArtifactHeader>
+      <ArtifactContent className={canPortal ? 'flex' : undefined}>
+        <InlineArtifactBody item={item} maximized={canPortal} onSubmitMessage={onSubmitMessage} onStageContext={onStageContext} />
+      </ArtifactContent>
+    </Artifact>
+  )
+
+  if (canPortal) {
+    // Toggling maximize unmounts/remounts the artifact body — iframe-backed
+    // modes (mcp_ui, html) reload on each toggle. Acceptable since users
+    // typically maximize before interacting, not mid-flow.
+    return createPortal(
+      <div className="absolute inset-0 z-20 flex bg-background/95 p-3">
+        {artifact}
+      </div>,
+      portalTarget,
+    )
+  }
+
   return (
     <div className="flex justify-start" data-artifact-id={item.artifact_id || undefined}>
       <div className="w-full min-w-0">
-        <Artifact>
-          <ArtifactHeader>
-            <ArtifactTitle>{item.title || 'Artifact'}</ArtifactTitle>
-            <ArtifactActions>
-              <ArtifactAction
-                tooltip={copied ? 'Copied!' : 'Copy'}
-                icon={CopyIcon}
-                onClick={handleCopy}
-              />
-            </ArtifactActions>
-          </ArtifactHeader>
-          <ArtifactContent>
-            <InlineArtifactBody item={item} onSubmitMessage={onSubmitMessage} onStageContext={onStageContext} />
-          </ArtifactContent>
-        </Artifact>
+        {artifact}
       </div>
     </div>
   )
 }
 
-function InlineArtifactBody({ item, onSubmitMessage, onStageContext }: { item: ArtifactItem; onSubmitMessage?: (text: string) => void | Promise<void>; onStageContext?: (source: string, text: string) => void }) {
+function InlineArtifactBody({ item, maximized, onSubmitMessage, onStageContext }: { item: ArtifactItem; maximized?: boolean; onSubmitMessage?: (text: string) => void | Promise<void>; onStageContext?: (source: string, text: string) => void }) {
   const mode = String(item.mode || 'markdown')
 
   if (mode === 'mcp_ui' && item.mcp_ui) {
-    return <McpUiSurface payload={item.mcp_ui} sessionId={item.session_id} artifactId={item.artifact_id} onSubmitMessage={onSubmitMessage} onStageContext={onStageContext} />
+    return <McpUiSurface payload={item.mcp_ui} sessionId={item.session_id} artifactId={item.artifact_id} maximized={maximized} onSubmitMessage={onSubmitMessage} onStageContext={onStageContext} />
   }
 
   if (mode === 'markdown') {
@@ -370,18 +428,18 @@ function InlineArtifactBody({ item, onSubmitMessage, onStageContext }: { item: A
   }
 
   if (mode === 'html') {
-    return <InlineHtmlPreview content={item.content} />
+    return <InlineHtmlPreview content={item.content} maximized={maximized} />
   }
 
   if (mode === 'image') {
-    return <img src={item.content} alt={item.title || 'artifact'} className="max-w-full rounded" />
+    return <img src={item.content} alt={item.title || 'artifact'} className={maximized ? 'mx-auto max-h-full max-w-full rounded' : 'max-w-full rounded'} />
   }
 
   // plain text / unknown
   return <pre className="whitespace-pre-wrap break-words text-sm">{item.content}</pre>
 }
 
-function InlineHtmlPreview({ content }: { content: string }) {
+function InlineHtmlPreview({ content, maximized }: { content: string; maximized?: boolean }) {
   const [height, setHeight] = useState(200)
 
   const script = `<script>
@@ -405,7 +463,7 @@ function InlineHtmlPreview({ content }: { content: string }) {
     <iframe
       srcDoc={srcDoc}
       sandbox="allow-scripts"
-      style={{ width: '100%', height, border: 'none', borderRadius: 6, background: '#fff' }}
+      style={{ width: '100%', height: maximized ? '100%' : height, border: 'none', borderRadius: 6, background: '#fff' }}
     />
   )
 }
@@ -566,7 +624,7 @@ function escapeHtml(s: string): string {
  * requests back to omniagents' ``mcp.*`` server functions out-of-band, per
  * the MCP Apps spec.
  */
-function McpUiSurface({ payload, sessionId, artifactId, onSubmitMessage, onStageContext }: { payload: ArtifactMcpUi; sessionId?: string; artifactId?: string; onSubmitMessage?: (text: string) => void | Promise<void>; onStageContext?: (source: string, text: string) => void }) {
+function McpUiSurface({ payload, sessionId, artifactId, maximized, onSubmitMessage, onStageContext }: { payload: ArtifactMcpUi; sessionId?: string; artifactId?: string; maximized?: boolean; onSubmitMessage?: (text: string) => void | Promise<void>; onStageContext?: (source: string, text: string) => void }) {
   const rpc = useRPCClient()
   const serverName = payload.server_name
   // Stable source key per artifact: re-stages from the same MCP UI replace
@@ -784,7 +842,7 @@ return undefined
     // scrollbars by keeping the wrapper ``overflow-hidden``.
     <div
       className="relative w-full overflow-hidden [&_iframe]:!w-full [&_iframe]:!h-full [&_iframe]:!max-w-full [&_iframe]:!max-h-full [&_iframe]:!block"
-      style={{ height: '70vh', minHeight: 320 }}
+      style={maximized ? { width: '100%', height: '100%' } : { height: '70vh', minHeight: 320 }}
     >
       <AppRenderer
         toolName={payload.tool_name}

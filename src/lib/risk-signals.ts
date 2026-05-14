@@ -30,6 +30,8 @@ export type RiskSignalKind =
   | 'milestone_quiet'
   | 'aging_inbox'
   | 'inbox_expiring'
+  | 'project_overdue'
+  | 'project_due_soon'
   | 'quiet_project';
 
 export type RiskAction =
@@ -52,7 +54,7 @@ export type RiskInput = {
   tickets: Ticket[];
   milestones: Milestone[];
   inboxItems: InboxItem[];
-  projects: Array<{ id: string; label: string }>;
+  projects: Array<{ id: string; label: string; dueDate?: number }>;
   /** Column IDs treated as "done". Tickets in these columns are excluded from
    *  per-ticket signals (stalled, self-blocked, WIP count). */
   terminalColumnIds?: ReadonlySet<ColumnId>;
@@ -244,16 +246,55 @@ continue;
     }
   }
 
-  // --- Quiet project ---
+  // --- Per-project signals ---
   // Last activity = max(ticket.updatedAt, inbox.updatedAt) across the project.
-  // Skip the Personal project quiet warning — it's meant to stay around even when idle.
   for (const project of projects) {
     const projectTickets = tickets.filter((t) => t.projectId === project.id);
     const projectInbox = inboxItems.filter((i) => i.projectId === project.id);
-    if (projectTickets.length === 0 && projectInbox.length === 0) {
-continue;
-}
 
+    // Deadline pressure. Requires at least one unresolved, non-terminal ticket
+    // — a deadline on an empty or fully-done project isn't actionable.
+    if (project.dueDate !== undefined) {
+      const hasUnresolved = projectTickets.some(
+        (t) => t.resolution === undefined && !(terminalColumnIds?.has(t.columnId) ?? false)
+      );
+      if (hasUnresolved) {
+        const daysLeft = Math.ceil((project.dueDate - now) / DAY_MS);
+        if (daysLeft <= 0) {
+          out.push({
+            id: `project_overdue:${project.id}`,
+            kind: 'project_overdue',
+            severity: 'high',
+            title: project.label,
+            detail: `Overdue by ${Math.abs(daysLeft)}d`,
+            action: { kind: 'open_project', projectId: project.id },
+          });
+        } else if (daysLeft <= 3) {
+          out.push({
+            id: `project_due_soon:${project.id}`,
+            kind: 'project_due_soon',
+            severity: 'high',
+            title: project.label,
+            detail: `Due in ${daysLeft}d`,
+            action: { kind: 'open_project', projectId: project.id },
+          });
+        } else if (daysLeft <= 7) {
+          out.push({
+            id: `project_due_soon:${project.id}`,
+            kind: 'project_due_soon',
+            severity: 'medium',
+            title: project.label,
+            detail: `Due in ${daysLeft}d`,
+            action: { kind: 'open_project', projectId: project.id },
+          });
+        }
+      }
+    }
+
+    // Quiet project — last activity older than threshold.
+    if (projectTickets.length === 0 && projectInbox.length === 0) {
+      continue;
+    }
     const lastActivity = Math.max(
       ...projectTickets.map((t) => t.updatedAt),
       ...projectInbox.map((i) => i.updatedAt),

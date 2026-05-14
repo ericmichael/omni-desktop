@@ -28,6 +28,7 @@ export function registerMilestoneTools(server: McpServer, db: DatabaseSync, repo
           status: m.status,
           due_date: m.due_date,
           completed_at: m.completed_at,
+          pinned_at: m.pinned_at,
           created_at: m.created_at,
           updated_at: m.updated_at,
         })),
@@ -44,8 +45,9 @@ export function registerMilestoneTools(server: McpServer, db: DatabaseSync, repo
       description: z.string().optional().describe('What this milestone delivers'),
       branch: z.string().optional().describe('Optional git branch for this milestone.'),
       due_date: z.string().optional().describe('Optional due date in ISO format (e.g. 2026-04-30).'),
+      pinned: z.boolean().optional().describe('Pin the milestone to Home on creation.'),
     },
-    async ({ project_id, title, description, branch, due_date }) => {
+    async ({ project_id, title, description, branch, due_date, pinned }) => {
       const exists = repo.getProject(project_id);
       if (!exists) return err(`Project not found: ${project_id}`);
 
@@ -56,9 +58,17 @@ export function registerMilestoneTools(server: McpServer, db: DatabaseSync, repo
 
       const id = milestoneId();
       db.prepare(`
-        INSERT INTO milestones (id, project_id, title, description, branch, due_date)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(id, project_id, title, description ?? '', branch ?? null, due_date ?? null);
+        INSERT INTO milestones (id, project_id, title, description, branch, due_date, pinned_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id,
+        project_id,
+        title,
+        description ?? '',
+        branch ?? null,
+        due_date ?? null,
+        pinned ? new Date().toISOString() : null
+      );
       repo.bumpChangeSeq();
 
       return json({ id, title });
@@ -67,7 +77,7 @@ export function registerMilestoneTools(server: McpServer, db: DatabaseSync, repo
 
   server.tool(
     'update_milestone',
-    'Update a milestone — title, description, branch, status, brief, or due date.',
+    'Update a milestone — title, description, branch, status, brief, due date, or pin state.',
     {
       milestone_id: z.string().describe('The milestone ID to update'),
       title: z.string().optional().describe('New title'),
@@ -76,8 +86,9 @@ export function registerMilestoneTools(server: McpServer, db: DatabaseSync, repo
       status: z.enum(['active', 'completed', 'archived']).optional().describe('New status'),
       brief: z.string().optional().describe('Full markdown content of the milestone brief'),
       due_date: z.string().optional().describe('Due date in ISO format. Pass empty string to clear.'),
+      pinned: z.boolean().optional().describe('true pins the milestone to Home, false unpins it.'),
     },
-    async ({ milestone_id, title, description, branch, status, brief, due_date }) => {
+    async ({ milestone_id, title, description, branch, status, brief, due_date, pinned }) => {
       const existing = repo.getMilestone(milestone_id);
       if (!existing) return err(`Milestone not found: ${milestone_id}`);
 
@@ -108,6 +119,14 @@ export function registerMilestoneTools(server: McpServer, db: DatabaseSync, repo
           if (Number.isNaN(parsed)) return err('Invalid due_date. Use an ISO date like 2026-04-30.');
           sets.push('due_date = ?');
           params.push(due_date);
+        }
+      }
+
+      if (pinned !== undefined) {
+        if (pinned) {
+          sets.push("pinned_at = datetime('now')");
+        } else {
+          sets.push('pinned_at = NULL');
         }
       }
 

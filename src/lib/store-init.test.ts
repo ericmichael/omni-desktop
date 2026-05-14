@@ -86,8 +86,16 @@ describe('migrateLayoutMode', () => {
     expect(migrateLayoutMode('chat')).toBeNull();
   });
 
-  it('returns null for valid "code" mode', () => {
-    expect(migrateLayoutMode('code')).toBeNull();
+  it('migrates legacy "code" mode to "spaces"', () => {
+    expect(migrateLayoutMode('code')).toBe('spaces');
+  });
+
+  it('migrates intermediate "os" mode to "spaces"', () => {
+    expect(migrateLayoutMode('os')).toBe('spaces');
+  });
+
+  it('returns null for valid "spaces" mode', () => {
+    expect(migrateLayoutMode('spaces')).toBeNull();
   });
 
   it('returns null for valid "projects" mode', () => {

@@ -29,6 +29,8 @@ interface JsonProject {
   pipeline?: { columns: JsonColumn[] };
   autoDispatch?: boolean;
   sandbox?: unknown;
+  dueDate?: number;
+  pinnedAt?: number;
 }
 
 interface JsonColumn {
@@ -78,6 +80,7 @@ interface JsonMilestone {
   status: string;
   dueDate?: number;
   completedAt?: number;
+  pinnedAt?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -177,6 +180,8 @@ return 0;
         source: jsonStr(p.source),
         sandbox: jsonStr(p.sandbox),
         config: null,
+        due_date: isoOpt(p.dueDate),
+        pinned_at: isoOpt(p.pinnedAt),
         created_at: toIso(p.createdAt),
         updated_at: toIso(p.createdAt),
       });
@@ -209,6 +214,7 @@ return 0;
         status: m.status,
         due_date: isoOpt(m.dueDate),
         completed_at: isoOpt(m.completedAt),
+        pinned_at: isoOpt(m.pinnedAt),
         created_at: toIso(m.createdAt),
         updated_at: toIso(m.updatedAt),
       });

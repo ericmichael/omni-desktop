@@ -401,7 +401,7 @@ const useStyles = makeStyles({
     ':hover .revealOnHover': { opacity: 1 },
     ':focus-within .revealOnHover': { opacity: 1 },
   },
-  focusListItemActive: { backgroundColor: tokens.colorBrandBackground2, color: tokens.colorNeutralForeground1 },
+  focusListItemActive: { backgroundColor: tokens.colorSubtleBackgroundSelected, color: tokens.colorNeutralForeground1 },
   focusListItemInactive: {
     color: tokens.colorNeutralForeground2,
     ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
@@ -689,8 +689,8 @@ const CodeDeckHeader = memo(
             </MenuTrigger>
             <MenuPopover>
               <MenuList>
-                <MenuItem onClick={() => onLayoutMode(layoutMode === 'deck' ? 'focus' : 'deck')}>
-                  Switch to {layoutMode === 'deck' ? 'Focus' : 'Deck'}
+                <MenuItem onClick={() => onLayoutMode(layoutMode === 'tile' ? 'focus' : 'tile')}>
+                  Switch to {layoutMode === 'tile' ? 'Focus' : 'Tile'}
                 </MenuItem>
                 <MenuDivider />
                 <MenuItem onClick={() => persistedStoreApi.setKey('layoutMode', 'chat')}>Chat</MenuItem>
@@ -705,7 +705,7 @@ const CodeDeckHeader = memo(
           <SegmentedControl
             value={layoutMode}
             options={[
-              { value: 'deck', label: 'Deck' },
+              { value: 'tile', label: 'Tile' },
               { value: 'focus', label: 'Focus' },
             ]}
             onChange={onLayoutMode}
@@ -1719,7 +1719,7 @@ export const CodeDeck = memo(() => {
   const store = useStore(persistedStoreApi.$atom);
   const statuses = useStore($codeTabStatuses);
   const tabs = store.codeTabs ?? [];
-  const layoutMode = store.codeLayoutMode ?? 'deck';
+  const layoutMode = store.codeLayoutMode ?? 'tile';
   const activeTabId = store.activeCodeTabId ?? tabs[0]?.id ?? null;
   const deckBackground = store.codeDeckBackground ?? null;
   const [activeApps, setActiveApps] = useState<Record<CodeTabId, AppId>>({});
@@ -2098,7 +2098,7 @@ export const CodeDeck = memo(() => {
         onOpenApps={handleOpenApps}
         isGlass={!!deckBackground}
       />
-      {layoutMode === 'deck' && (
+      {layoutMode === 'tile' && (
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
           <SortableContext items={tabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
             <div ref={deckScrollRef} className={styles.deckScroll}>
@@ -2237,7 +2237,7 @@ export const CodeDeck = memo(() => {
                     </MenuTrigger>
                     <MenuPopover>
                       <MenuList>
-                        <MenuItem onClick={() => handleLayoutMode('deck')}>Switch to Deck</MenuItem>
+                        <MenuItem onClick={() => handleLayoutMode('tile')}>Switch to Tile</MenuItem>
                         <MenuDivider />
                         <MenuItem onClick={() => persistedStoreApi.setKey('layoutMode', 'chat')}>Chat</MenuItem>
                         <MenuItem onClick={() => persistedStoreApi.setKey('layoutMode', 'projects')}>Projects</MenuItem>

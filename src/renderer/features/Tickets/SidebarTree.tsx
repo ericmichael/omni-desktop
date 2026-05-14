@@ -1,13 +1,15 @@
 // Board20/Flag20 are kept because they render inside MenuPopover action menus,
 // which want the larger 20px icon size. The tree's iconBefore slot uses 16px.
-import { makeStyles, tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import {
   Add16Regular,
   Board16Regular,
   Board20Regular,
   Checkmark12Regular,
+  ChevronRight16Regular,
   Delete20Regular,
   Document16Regular,
+  DocumentMultiple16Regular,
   DocumentText16Regular,
   Edit20Regular,
   Flag16Regular,
@@ -18,6 +20,8 @@ import {
   MoreHorizontal16Regular,
   Notebook20Regular,
   Open20Regular,
+  Pin16Filled,
+  Pin16Regular,
   Play20Filled,
   Settings20Regular,
   TaskListSquareLtr16Regular,
@@ -49,6 +53,24 @@ const useStyles = makeStyles({
   tree: {
     paddingTop: '2px',
     paddingBottom: '2px',
+    /**
+     * Tighten Fluent's per-level indent. Fluent's TreeItemLayout computes
+     * left-padding as `level × var(--spacingHorizontalXXL)` (default 20px).
+     * Overriding the variable locally on the tree root scales every nesting
+     * level down at once and preserves Fluent's leaf-vs-branch alignment
+     * logic, since both calcs use this same variable.
+     */
+    '--spacingHorizontalXXL': '12px',
+    /**
+     * Fluent's expandIcon column has a hard-coded min-width of 24px. With
+     * the variable above at 12px, a level-N leaf gets N×12px padding while
+     * a level-N branch gets (N-1)×12 + 24 = N×12 + 12 — branches end up
+     * 12px further right than their sibling leaves. Shrinking the chevron
+     * column to one indent step (12px) makes the math balance.
+     */
+    '& .fui-TreeItemLayout__expandIcon': {
+      minWidth: '12px',
+    },
   },
   liveDot: {
     width: '8px',
@@ -130,6 +152,7 @@ const useStyles = makeStyles({
   hoverableItem: {
     '&:hover .action-buttons': {
       opacity: 1,
+      width: 'auto',
     },
     /**
      * Fluent's TreeItemLayout main slot only sets padding — it doesn't claim
@@ -147,6 +170,14 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     gap: '0px',
+    /**
+     * Collapsed to zero width by default so the label can use the full
+     * remaining row width. On row hover (handled in `hoverableItem`) the
+     * width expands to `auto`, the buttons fade in, and the label
+     * truncates if it would now overflow.
+     */
+    width: 0,
+    overflow: 'hidden',
     opacity: 0,
     transition: 'opacity 0.1s',
   },
@@ -180,7 +211,118 @@ const useStyles = makeStyles({
       color: tokens.colorNeutralForeground1,
     },
   },
+  /**
+   * Pin slot. When the entity is pinned it sits outside the hover-revealed
+   * action group and stays visible at all times in brand color, so the user
+   * can see what's pinned at a glance. When unpinned it sits inside the
+   * hover group via `actionButtons` and follows that opacity transition.
+   */
+  pinSlotVisible: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    color: tokens.colorBrandForeground1,
+  },
+  /**
+   * Applied alongside `hoverableItem` on branch rows. Hides Fluent's native
+   * expand chevron's glyph (visibility:hidden, not display:none) so its
+   * column stays reserved and branch rows align with leaf rows. The custom
+   * chevron stacked inside `iconBefore` (via `BranchIcon`) is the actual
+   * toggle target — it sits on top of the row's icon, visible on hover, and
+   * rotates 90° when the row is expanded (driven by aria-expanded).
+   *
+   * Every rule scopes to `> .fui-TreeItemLayout` so it only affects this
+   * row's own chevron, never a descendant branch's. The hover rules also
+   * use `:not(:has(.hoverableBranch:hover))` so only the innermost hovered
+   * branch shows its chevron — otherwise hovering a child would light up
+   * every ancestor chevron in the chain.
+   */
+  hoverableBranch: {
+    '& > .fui-TreeItemLayout .fui-TreeItemLayout__expandIcon': {
+      visibility: 'hidden',
+    },
+    '&:hover:not(:has(.hoverableBranch:hover)) > .fui-TreeItemLayout .branch-icon-default': {
+      opacity: 0,
+    },
+    '&:hover:not(:has(.hoverableBranch:hover)) > .fui-TreeItemLayout .branch-icon-chevron': {
+      opacity: 1,
+    },
+    '&[aria-expanded="true"] > .fui-TreeItemLayout .branch-icon-chevron': {
+      transform: 'translate(-50%, -50%) rotate(90deg)',
+    },
+  },
+  /**
+   * Stack wrapper for the swap-icon used as iconBefore on branch rows. The
+   * row's actual icon and the chevron share this 16px square — only one is
+   * visible at a time, toggled via the parent `.hoverableBranch:hover` rule.
+   */
+  branchIconStack: {
+    position: 'relative',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '16px',
+    height: '16px',
+    flexShrink: 0,
+  },
+  branchIconDefault: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transitionProperty: 'opacity',
+    transitionDuration: tokens.durationFaster,
+  },
+  branchIconChevron: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    opacity: 0,
+    transitionProperty: 'opacity, transform',
+    transitionDuration: tokens.durationFaster,
+    pointerEvents: 'none',
+  },
 });
+
+const stopPropagation = (e: React.SyntheticEvent) => e.stopPropagation();
+
+/**
+ * Stacked icon used as `iconBefore` on branch rows. The supplied icon shows
+ * by default; on row hover the chevron fades in on top of it (via the
+ * `hoverableBranch` parent class). Clicking the stack toggles expand state —
+ * Fluent's native chevron is visually hidden, so this is the real toggle.
+ */
+const BranchIcon = memo(
+  ({
+    icon,
+    value,
+    onToggle,
+  }: {
+    icon: React.ReactNode;
+    value: string;
+    onToggle: (value: string) => void;
+  }) => {
+    const styles = useStyles();
+    const handleClick = useCallback(
+      (e: React.MouseEvent) => {
+        e.stopPropagation();
+        onToggle(value);
+      },
+      [value, onToggle]
+    );
+    return (
+      <span
+        role="presentation"
+        className={styles.branchIconStack}
+        onMouseDown={stopPropagation}
+        onClick={handleClick}
+      >
+        <span className={`branch-icon-default ${styles.branchIconDefault}`}>{icon}</span>
+        <ChevronRight16Regular className={`branch-icon-chevron ${styles.branchIconChevron}`} />
+      </span>
+    );
+  }
+);
+BranchIcon.displayName = 'BranchIcon';
 
 /** Shorten a local path to the last 2 segments (e.g. ~/projects/my-app → projects/my-app). */
 function shortenPath(fullPath: string): string {
@@ -218,6 +360,8 @@ type SidebarTreeProps = {
   onExpandProject?: (projectId: ProjectId) => void;
   /** Called when user requests a new milestone for a project. */
   onCreateMilestone?: (projectId: ProjectId) => void;
+  /** Called when user requests to edit an existing milestone. */
+  onEditMilestone?: (milestone: Milestone) => void;
 };
 
 /** Build child pages for a given parentId, sorted by sortOrder. */
@@ -260,6 +404,7 @@ const PageTreeItem = memo(
     onFinishRename,
     onCancelRename,
     onItemClick,
+    onToggle,
   }: {
     page: Page;
     pages: Record<string, Page>;
@@ -272,6 +417,8 @@ const PageTreeItem = memo(
     onCancelRename: () => void;
     /** Click handler that guards against double-fire with onOpenChange */
     onItemClick: (value: string) => void;
+    /** Toggle a branch open/closed without navigating. */
+    onToggle: (value: string) => void;
   }) => {
     const styles = useStyles();
     const children = getChildPages(pages, page.id);
@@ -333,16 +480,21 @@ const PageTreeItem = memo(
       </span>
     );
 
+    const pageIconNode = page.icon ? (
+      <span className={styles.emojiIcon}>{page.icon}</span>
+    ) : (
+      <DocumentText16Regular className={styles.icon} />
+    );
+
     return (
-      <TreeItem itemType={hasChildren ? 'branch' : 'leaf'} value={value} className={styles.hoverableItem} onClick={() => onItemClick(value)}>
+      <TreeItem
+        itemType={hasChildren ? 'branch' : 'leaf'}
+        value={value}
+        className={mergeClasses(styles.hoverableItem, hasChildren && styles.hoverableBranch)}
+        onClick={() => onItemClick(value)}
+      >
         <TreeItemLayout
-          iconBefore={
-            page.icon ? (
-              <span className={styles.emojiIcon}>{page.icon}</span>
-            ) : (
-              <DocumentText16Regular className={styles.icon} />
-            )
-          }
+          iconBefore={hasChildren ? <BranchIcon icon={pageIconNode} value={value} onToggle={onToggle} /> : pageIconNode}
           aside={actionButtons}
           onDoubleClick={() => onStartRename(page.id, page.title)}
         >
@@ -378,6 +530,7 @@ const PageTreeItem = memo(
                 onFinishRename={onFinishRename}
                 onCancelRename={onCancelRename}
                 onItemClick={onItemClick}
+                onToggle={onToggle}
               />
             ))}
           </Tree>
@@ -443,7 +596,7 @@ TicketTreeItem.displayName = 'TicketTreeItem';
 // ─── Main tree ───────────────────────────────────────────────────────────────
 
 export const SidebarTree = memo(
-  ({ projects, pages, milestones, tickets, onSelect, onExpandProject, onCreateMilestone }: SidebarTreeProps) => {
+  ({ projects, pages, milestones, tickets, onSelect, onExpandProject, onCreateMilestone, onEditMilestone }: SidebarTreeProps) => {
     const styles = useStyles();
     const [openItems, setOpenItems] = useState<Set<string>>(new Set());
     const rename = useInlineRename();
@@ -489,6 +642,26 @@ return prev;
         }
       },
       [onSelect, onExpandProject]
+    );
+
+    /** Toggle a branch's open state without navigating. Used by `BranchIcon`
+     *  in place of Fluent's native chevron (which is visually hidden). */
+    const handleToggle = useCallback(
+      (value: string) => {
+        setOpenItems((prev) => {
+          const next = new Set(prev);
+          if (next.has(value)) {
+            next.delete(value);
+          } else {
+            next.add(value);
+            if (value.startsWith('project:')) {
+              onExpandProject?.(value.slice(8));
+            }
+          }
+          return next;
+        });
+      },
+      [onExpandProject]
     );
 
     /** For leaf items that don't fire onOpenChange */
@@ -577,9 +750,43 @@ return null;
 
           const projectValue = `project:${project.id}`;
 
+          const projectPinned = project.pinnedAt !== undefined;
+          const handleProjectPin = (e: React.MouseEvent) => {
+            e.stopPropagation();
+            void ticketApi.updateProject(project.id, {
+              pinnedAt: projectPinned ? undefined : Date.now(),
+            });
+          };
+          const projectPinSlot = projectPinned ? (
+            <span
+              role="presentation"
+              className={styles.pinSlotVisible}
+              onMouseDown={stopPropagation}
+              onClick={stopPropagation}
+            >
+              <button
+                type="button"
+                aria-label="Unpin project"
+                className={styles.nativeBtn}
+                onClick={handleProjectPin}
+              >
+                <Pin16Filled />
+              </button>
+            </span>
+          ) : null;
           const projectActions = (
             // eslint-disable-next-line jsx-a11y/no-static-element-interactions
             <span className={`action-buttons ${styles.actionButtons}`} onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+              {!projectPinned && (
+                <button
+                  type="button"
+                  aria-label="Pin project to this week"
+                  className={styles.nativeBtn}
+                  onClick={handleProjectPin}
+                >
+                  <Pin16Regular />
+                </button>
+              )}
               <button
                 type="button"
                 aria-label="New page"
@@ -652,17 +859,24 @@ return;
             </span>
           );
 
+          const projectAside = (
+            <>
+              {projectPinSlot}
+              {projectActions}
+            </>
+          );
+
           return (
             <TreeItem
               key={project.id}
               itemType="branch"
               value={projectValue}
-              className={styles.hoverableItem}
+              className={mergeClasses(styles.hoverableItem, styles.hoverableBranch)}
               onClick={() => handleItemClick(projectValue)}
             >
                 <TreeItemLayout
-                  iconBefore={<Folder16Regular className={styles.icon} />}
-                  aside={projectActions}
+                  iconBefore={<BranchIcon icon={<Folder16Regular className={styles.icon} />} value={projectValue} onToggle={handleToggle} />}
+                  aside={projectAside}
                 >
                   <span className={styles.titleRow}>
                     <span className={styles.titleRowMain}>{project.label}</span>
@@ -671,39 +885,53 @@ return;
                 </TreeItemLayout>
 
               <Tree>
-                  {/* Board */}
-                  <TreeItem
-                    itemType="leaf"
-                    value={`board:${project.id}`}
-                    className={styles.hoverableItem}
-                    onClick={() => handleItemClick(`board:${project.id}`)}
-                  >
-                      <TreeItemLayout iconBefore={<Board16Regular className={styles.icon} />}>
+                  {/* Pages */}
+                  {rootPages.length > 0 && (
+                    <TreeItem itemType="branch" value={`pages:${project.id}`} className={styles.hoverableBranch}>
+                      <TreeItemLayout iconBefore={<BranchIcon icon={<DocumentMultiple16Regular className={styles.icon} />} value={`pages:${project.id}`} onToggle={handleToggle} />}>
                         <span className={styles.titleRow}>
-                          <span className={styles.titleRowMain}>Board</span>
-                          <span className={`${styles.badge} ${styles.titleRowTrail}`}>({activeTicketCount})</span>
+                          <span className={styles.titleRowMain}>Pages</span>
+                          <span className={`${styles.badge} ${styles.titleRowTrail}`}>({rootPages.length})</span>
                         </span>
                       </TreeItemLayout>
+                      <Tree>
+                        {rootPages.map((page) => (
+                          <PageTreeItem
+                            key={page.id}
+                            page={page}
+                            pages={pages}
+                            onSelect={onSelect}
+                            renamingId={rename.renamingId}
+                            renameValue={rename.renameValue}
+                            setRenameValue={rename.setRenameValue}
+                            onStartRename={rename.startRename}
+                            onFinishRename={handleFinishRename}
+                            onCancelRename={rename.cancelRename}
+                            onItemClick={handleItemClick}
+                            onToggle={handleToggle}
+                          />
+                        ))}
+                      </Tree>
                     </TreeItem>
+                  )}
 
-                  {/* Pages */}
-                  {rootPages.map((page) => (
-                    <PageTreeItem
-                      key={page.id}
-                      page={page}
-                      pages={pages}
-                      onSelect={onSelect}
-                      renamingId={rename.renamingId}
-                      renameValue={rename.renameValue}
-                      setRenameValue={rename.setRenameValue}
-                      onStartRename={rename.startRename}
-                      onFinishRename={handleFinishRename}
-                      onCancelRename={rename.cancelRename}
-                      onItemClick={handleItemClick}
-                    />
-                  ))}
-
-                  {/* Milestones */}
+                  {/* Board — branch grouping milestones + loose-ticket backlog.
+                      Clicking the label navigates to the unified board view
+                      (matches project rows); the chevron just expands. */}
+                  <TreeItem
+                    itemType="branch"
+                    value={`board:${project.id}`}
+                    className={mergeClasses(styles.hoverableItem, styles.hoverableBranch)}
+                    onClick={() => handleItemClick(`board:${project.id}`)}
+                  >
+                    <TreeItemLayout iconBefore={<BranchIcon icon={<Board16Regular className={styles.icon} />} value={`board:${project.id}`} onToggle={handleToggle} />}>
+                      <span className={styles.titleRow}>
+                        <span className={styles.titleRowMain}>Board</span>
+                        <span className={`${styles.badge} ${styles.titleRowTrail}`}>({activeTicketCount})</span>
+                      </span>
+                    </TreeItemLayout>
+                    <Tree>
+                      {/* Milestones */}
                   {projectMilestones.map((milestone) => {
                     const milestoneTickets = ticketsByMilestone[milestone.id] ?? [];
                     const milestoneValue = `milestone:${milestone.id}:${project.id}`;
@@ -721,15 +949,50 @@ return;
                         .then((ticket) => ticketApi.goToTicket(ticket.id));
                     };
 
+                    const milestonePinned = milestone.pinnedAt !== undefined;
+                    const handleMilestonePin = (e: React.MouseEvent) => {
+                      e.stopPropagation();
+                      void milestoneApi.updateMilestone(milestone.id, {
+                        pinnedAt: milestonePinned ? undefined : Date.now(),
+                      });
+                    };
+                    const milestonePinSlot = milestonePinned ? (
+                      <span
+                        role="presentation"
+                        className={styles.pinSlotVisible}
+                        onMouseDown={stopPropagation}
+                        onClick={stopPropagation}
+                      >
+                        <button
+                          type="button"
+                          aria-label="Unpin milestone"
+                          className={styles.nativeBtn}
+                          onClick={handleMilestonePin}
+                        >
+                          <Pin16Filled />
+                        </button>
+                      </span>
+                    ) : null;
+
                     const milestoneActions = (
                       // eslint-disable-next-line jsx-a11y/no-static-element-interactions
                       <span className={`action-buttons ${styles.actionButtons}`} onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+                        {!milestonePinned && (
+                          <button
+                            type="button"
+                            aria-label="Pin milestone to this week"
+                            className={styles.nativeBtn}
+                            onClick={handleMilestonePin}
+                          >
+                            <Pin16Regular />
+                          </button>
+                        )}
                         <button
                           type="button"
                           aria-label="New ticket"
                           className={styles.nativeBtn}
                           onClick={(e) => {
- e.stopPropagation(); handleNewMilestoneTicket(); 
+ e.stopPropagation(); handleNewMilestoneTicket();
 }}
                         >
                           <Add16Regular />
@@ -744,6 +1007,9 @@ return;
                             <MenuList>
                               <MenuItem icon={<Add16Regular />} onClick={handleNewMilestoneTicket}>
                                 New ticket
+                              </MenuItem>
+                              <MenuItem icon={<Edit20Regular />} onClick={() => onEditMilestone?.(milestone)}>
+                                Edit milestone
                               </MenuItem>
                               <MenuDivider />
                               <MenuItem
@@ -770,17 +1036,29 @@ return;
                       </span>
                     );
 
+                    const milestoneAside = (
+                      <>
+                        {milestonePinSlot}
+                        {milestoneActions}
+                      </>
+                    );
+
+                    const milestoneIsBranch = milestoneTickets.length > 0;
                     return (
                       <TreeItem
                         key={milestone.id}
-                        itemType={milestoneTickets.length > 0 ? 'branch' : 'leaf'}
+                        itemType={milestoneIsBranch ? 'branch' : 'leaf'}
                         value={milestoneValue}
-                        className={styles.hoverableItem}
+                        className={mergeClasses(styles.hoverableItem, milestoneIsBranch && styles.hoverableBranch)}
                         onClick={() => handleItemClick(milestoneValue)}
                       >
                         <TreeItemLayout
-                          iconBefore={<Flag16Regular className={styles.icon} />}
-                          aside={milestoneActions}
+                          iconBefore={
+                            milestoneIsBranch
+                              ? <BranchIcon icon={<Flag16Regular className={styles.icon} />} value={milestoneValue} onToggle={handleToggle} />
+                              : <Flag16Regular className={styles.icon} />
+                          }
+                          aside={milestoneAside}
                         >
                           <span className={styles.titleRow}>
                             <span className={styles.titleRowMain}>{milestone.title}</span>
@@ -798,22 +1076,24 @@ return;
                     );
                   })}
 
-                  {/* Loose tickets (no milestone) */}
-                  {looseTickets.length > 0 && (
-                    <TreeItem itemType="branch" value={`backlog:${project.id}`}>
-                      <TreeItemLayout iconBefore={<TaskListSquareLtr16Regular className={styles.icon} />}>
-                        <span className={styles.titleRow}>
-                          <span className={styles.titleRowMain}>Backlog</span>
-                          <span className={`${styles.badge} ${styles.titleRowTrail}`}>({looseTickets.length})</span>
-                        </span>
-                      </TreeItemLayout>
-                      <Tree>
-                        {looseTickets.map((ticket) => (
-                          <TicketTreeItem key={ticket.id} ticket={ticket} onSelect={onSelect} onItemClick={handleItemClick} />
-                        ))}
-                      </Tree>
-                    </TreeItem>
-                  )}
+                      {/* Loose tickets (no milestone) */}
+                      {looseTickets.length > 0 && (
+                        <TreeItem itemType="branch" value={`backlog:${project.id}`} className={styles.hoverableBranch}>
+                          <TreeItemLayout iconBefore={<BranchIcon icon={<TaskListSquareLtr16Regular className={styles.icon} />} value={`backlog:${project.id}`} onToggle={handleToggle} />}>
+                            <span className={styles.titleRow}>
+                              <span className={styles.titleRowMain}>Backlog</span>
+                              <span className={`${styles.badge} ${styles.titleRowTrail}`}>({looseTickets.length})</span>
+                            </span>
+                          </TreeItemLayout>
+                          <Tree>
+                            {looseTickets.map((ticket) => (
+                              <TicketTreeItem key={ticket.id} ticket={ticket} onSelect={onSelect} onItemClick={handleItemClick} />
+                            ))}
+                          </Tree>
+                        </TreeItem>
+                      )}
+                    </Tree>
+                  </TreeItem>
 
                   {/* Source / Workspace link */}
                   {project.source?.kind === 'local' && (

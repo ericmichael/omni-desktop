@@ -250,3 +250,19 @@ button,
 [role='button'] {
   user-select: none;
 }
+
+/*
+ * Native HTML5 date inputs draw their calendar-picker icon via the user
+ * agent's default color scheme. On dark Fluent themes the icon defaults to
+ * black-on-dark and is nearly invisible. `color-scheme: dark` tells the
+ * browser to render native form controls (including the picker indicator)
+ * with light foregrounds suited to a dark background. The launcher toggles
+ * `.dark` on <html> based on the active theme (see fluent-themes.ts).
+ */
+.dark input[type='date'],
+.dark input[type='time'],
+.dark input[type='datetime-local'],
+.dark input[type='month'],
+.dark input[type='week'] {
+  color-scheme: dark;
+}

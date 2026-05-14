@@ -29,7 +29,7 @@ export type BashJobsKillResult = {
   error?: string
 }
 
-const MAX_VISIBLE = 6
+const MAX_VISIBLE = 5
 const COMMAND_TRUNCATE = 80
 const TAIL_DEFAULT_LINES = 200
 

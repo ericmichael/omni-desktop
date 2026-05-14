@@ -12,7 +12,7 @@ import { type ArtifactItem,ArtifactsPanel } from './components/ArtifactsPanel'
 import { BashJobs, type BashJobsKillResult, type BashJobsTailResult,type BashJobSummary } from './components/BashJobs'
 import { Header } from './components/Header'
 import { Input } from './components/Input'
-import { type Attachment,MessageList } from './components/MessageList'
+import { ArtifactPortalProvider, type Attachment,MessageList } from './components/MessageList'
 import { ResizableDivider } from './components/ResizableDivider'
 import { type SessionItem,SessionList } from './components/SessionList'
 import { Sidebar } from './components/Sidebar'
@@ -76,6 +76,10 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   // metadata in `items`. Reset to null on session change so the new session
   // starts from its own history-derived state.
   const [liveBashJobs, setLiveBashJobs] = useState<BashJobSummary[] | null>(null)
+  // Element backing the maximized-artifact portal. Callback ref triggers a
+  // re-render when the chat-column wrapper attaches/detaches.
+  const [chatColumnEl, setChatColumnEl] = useState<HTMLDivElement | null>(null)
+  const [runActive, setRunActive] = useState(false)
   const [initialSessionParam] = useState<string | undefined>(() => uiConfig.session)
   const readyRef = useRef(false)
   const onClientToolCallRef = useRef(onClientToolCall)
@@ -169,10 +173,12 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   // so that any early events aren't lost.
   useEffect(() => {
     const offRunStarted = client.on('run_started', () => {
+      setRunActive(true)
       onSessionChangeRef.current?.(actor.getSnapshot().context.sessionId)
       refreshSessions()
     })
     const offRunEnd = client.on('run_end', (p: any) => {
+      setRunActive(false)
       try {
         const usage = p?.usage || {}
         const info = {
@@ -289,12 +295,18 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
         lastJobs = md.bash_jobs_snapshot as BashJobSummary[]
       }
     }
-    return { tasks: lastTasks, derivedBashJobs: lastJobs }
-  }, [items])
+    const filteredTasks = runActive ? lastTasks : lastTasks.filter(t => t.status !== 'completed')
+    return { tasks: filteredTasks, derivedBashJobs: lastJobs }
+  }, [items, runActive])
 
   // Live override (from ui.bash_jobs.update broadcasts and bash_jobs.* server
-  // calls) takes precedence over history-derived state when present.
-  const bashJobs = liveBashJobs ?? derivedBashJobs
+  // calls) takes precedence over history-derived state when present. Mirror
+  // the Tasks behavior: while a run is active keep everything visible, but
+  // once it ends drop exited jobs so the panel hides itself when idle.
+  const bashJobs = useMemo(() => {
+    const source = liveBashJobs ?? derivedBashJobs
+    return runActive ? source : source.filter(j => j.running)
+  }, [liveBashJobs, derivedBashJobs, runActive])
 
   // Clear the live override on session change so the next session starts
   // from its own history-derived snapshot instead of the previous session's
@@ -355,7 +367,7 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
 
   // moved below handleSubmit
 
-  const handleSubmit = useCallback(async (text: string, files?: File[], runOverrides?: import('@/shared/types').RunOverrides) => {
+  const handleSubmit = useCallback(async (text: string, files?: File[], runOverrides?: import('@/shared/types').RunOverrides): Promise<{ runId: string } | undefined> => {
     // Slash commands
     if (text.startsWith('/')) {
       const parts = text.trim().split(/\s+/)
@@ -396,11 +408,13 @@ args = { value: parsed }
       }
     }
     try {
-      // sessionId is guaranteed defined here — the machine only allows
-      // SUBMIT from ready.idle, which is only reachable after loadSession
-      // has populated context.sessionId. We rely on that invariant instead
-      // of the old defensive uuidv4() fallback.
-      if (!sessionId) {
+      // Read sessionId from the actor snapshot rather than the destructured
+      // React state — the chat-session machine sets context.sessionId
+      // synchronously when entering ready.idle, but the React render that
+      // would update the destructured value may not have flushed yet when
+      // the supervisor bridge calls us right after awaitChatReady() resolves.
+      const liveSessionId = actor.getSnapshot().context.sessionId ?? sessionId
+      if (!liveSessionId) {
         submitError('No active session — loadSession must run first')
         return
       }
@@ -473,9 +487,17 @@ param.filename = f.name
       if (stagedSnapshot) {
         clearStagedContext()
       }
-      // Merge parent-provided variables (e.g. client_tools) with workspace variables
-      const workspaceVars: Record<string, unknown> | undefined = (workspacePath && workspaceSupported)
-        ? { workspace_root: workspacePath }
+      // Merge parent-provided variables (e.g. client_tools) with workspace
+      // variables. Prefer the boot actor's capabilities snapshot over the
+      // destructured React state — boot finishes synchronously inside xstate
+      // (waitFor unblocks awaitChatReady), but the React state that mirrors
+      // its capabilities into setWorkspacePath / setWorkspaceSupported may
+      // not have flushed by the time the supervisor bridge submits the run.
+      const caps = bootState.actor.getSnapshot().context.capabilities
+      const liveWorkspacePath = caps?.workspacePath ?? workspacePath
+      const liveWorkspaceSupported = caps?.workspaceSupported ?? workspaceSupported
+      const workspaceVars: Record<string, unknown> | undefined = (liveWorkspacePath && liveWorkspaceSupported)
+        ? { workspace_root: liveWorkspacePath }
         : undefined
       const baseVariables: Record<string, unknown> | undefined = (variablesProp || workspaceVars)
         ? { ...variablesProp, ...workspaceVars }
@@ -502,14 +524,16 @@ param.filename = f.name
               : {}),
           }
         : baseVariables
-      await client.startRun(agentPrompt, sessionId, variables, content)
+      const startResult = await client.startRun(agentPrompt, liveSessionId, variables, content)
       if (workspaceSupported) {
 setWorkspaceLocked(true)
 }
+      return { runId: String(startResult?.run_id ?? '') }
     } catch (e) {
       submitError(String((e as Error)?.message || 'Failed to start run'))
+      return undefined
     }
-  }, [client, sessionId, variablesProp, submit, submitError, workspacePath, workspaceSupported, stagedContext, clearStagedContext])
+  }, [client, sessionId, actor, bootState.actor, variablesProp, submit, submitError, workspacePath, workspaceSupported, stagedContext, clearStagedContext])
 
   const handleStop = useCallback(() => {
     if (!runId) {
@@ -518,8 +542,6 @@ return
     stop()
     client.stopRun(runId).catch(() => {})
   }, [client, stop, runId])
-
-  const runStartedWaitersRef = useRef<Array<(runId: string) => void>>([])
 
   // ---------------------------------------------------------------------------
   // Supervisor bridge event forwarding. The Code column owns the session id;
@@ -548,10 +570,6 @@ return
         const p = (raw ?? {}) as RunEvent
         const runId = String(p.run_id ?? '')
         forwardEvent({ kind: 'run-started', ticketId, runId })
-        const pending = runStartedWaitersRef.current.splice(0, runStartedWaitersRef.current.length)
-        for (const w of pending) {
-          w(runId)
-        }
       })
     )
     offs.push(
@@ -604,22 +622,6 @@ return
       return
     }
 
-    const nextRunId = (timeoutMs = 60_000): Promise<string> =>
-      new Promise((resolve, reject) => {
-        const t = setTimeout(() => {
-          const i = runStartedWaitersRef.current.indexOf(wake)
-          if (i >= 0) {
-            runStartedWaitersRef.current.splice(i, 1)
-          }
-          reject(new Error('Timed out waiting for run_started'))
-        }, timeoutMs)
-        const wake = (runId: string): void => {
-          clearTimeout(t)
-          resolve(runId)
-        }
-        runStartedWaitersRef.current.push(wake)
-      })
-
     const awaitChatReady = (): Promise<void> =>
       waitFor(actor, (s) => {
         const v = s.value
@@ -628,18 +630,22 @@ return
 
     const unregister = registerColumnActor({
       ticketId,
+      // The bridge resolves the runId from `start_run`'s RPC response rather
+      // than waiting for a `run_started` event. Event-based waits used to
+      // live in a component-local ref, which lost waiters across React
+      // StrictMode's mount → unmount → mount dance and stranded the bridge
+      // dispatch in a 60s timeout. The RPC ack carries the same run_id.
       submit: async (prompt, runOverrides) => {
-        const waiter = nextRunId()
         await awaitChatReady()
-        await handleSubmit(prompt, undefined, runOverrides)
-        const runId = await waiter
-        return { runId }
+        const result = await handleSubmit(prompt, undefined, runOverrides)
+        if (!result?.runId) {
+          throw new Error('start_run did not return a run_id')
+        }
+        return { runId: result.runId }
       },
       send: async (message) => {
-        const waiter = nextRunId()
         await awaitChatReady()
         await handleSubmit(message, undefined)
-        await waiter
       },
       stop: async () => {
         const currentRunId = actor.getSnapshot().context.runId
@@ -904,25 +910,27 @@ args.text = text
           )}
           <div className="flex-1 flex flex-row min-h-0 min-w-0">
             <div className="flex-1 flex flex-col min-h-0 min-w-0">
-              <div className="flex-1 min-h-0 relative flex flex-col">
-                <MessageList
-                  items={items}
-                  greeting={greeting}
-                  statusText={status}
-                  thinking={thinking}
-                  statusSpinner={statusSpinner}
-                  preambleText={preamble}
-                  welcomeText={welcomeText}
-                  onApprovalDecision={handleApprovalDecision}
-                  pendingPlan={pendingPlan}
-                  onPlanDecision={onPlanDecision}
-                  statusItalic={statusItalic}
-                  onReaction={handleReaction}
-                  currentRunId={runId}
-                  toolStatusText={toolStatus}
-                  onSubmitMessage={handleSubmit}
-                  onStageContext={stageContext}
-                />
+              <div ref={setChatColumnEl} className="flex-1 min-h-0 relative flex flex-col">
+                <ArtifactPortalProvider target={chatColumnEl}>
+                  <MessageList
+                    items={items}
+                    greeting={greeting}
+                    statusText={status}
+                    thinking={thinking}
+                    statusSpinner={statusSpinner}
+                    preambleText={preamble}
+                    welcomeText={welcomeText}
+                    onApprovalDecision={handleApprovalDecision}
+                    pendingPlan={pendingPlan}
+                    onPlanDecision={onPlanDecision}
+                    statusItalic={statusItalic}
+                    onReaction={handleReaction}
+                    currentRunId={runId}
+                    toolStatusText={toolStatus}
+                    onSubmitMessage={(text) => { void handleSubmit(text); }}
+                    onStageContext={stageContext}
+                  />
+                </ArtifactPortalProvider>
                 <AnimatePresence>
                   {!connected && (
                     <motion.div
@@ -979,7 +987,7 @@ args.text = text
                 disabled={!connected || !bootState.ready}
                 thinking={thinking}
                 onStop={handleStop}
-                onSubmit={handleSubmit}
+                onSubmit={(text, files) => { void handleSubmit(text, files); }}
                 voiceEnabled={voiceEnabled}
                 workspacePath={workspaceSupported ? workspacePath : undefined}
                 workspaceLocked={workspaceLocked}

@@ -2,7 +2,7 @@ import { makeStyles, mergeClasses, tokens,Tooltip } from '@fluentui/react-compon
 import {
   Beaker24Regular,
   Chat24Filled,
-  Code24Regular,
+  ColumnTriple24Regular,
   DataBarVertical24Regular,
   MoreHorizontal24Filled,
   Rocket24Filled,
@@ -29,7 +29,7 @@ const ALL_TABS: {
   devOnly?: boolean;
 }[] = [
   { value: 'chat', label: 'Chat', icon: <Chat24Filled />, alwaysVisible: true },
-  { value: 'code', label: 'Code', icon: <Code24Regular />, alwaysVisible: true },
+  { value: 'spaces', label: 'Spaces', icon: <ColumnTriple24Regular />, alwaysVisible: true },
   { value: 'projects', label: 'Projects', icon: <Rocket24Filled />, alwaysVisible: true },
   { value: 'dashboards', label: 'Dashboards', icon: <DataBarVertical24Regular />, enterprise: true },
   { value: 'gallery', label: 'Gallery', icon: <Beaker24Regular />, devOnly: true },

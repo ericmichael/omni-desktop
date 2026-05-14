@@ -11,6 +11,8 @@ export type ProjectRow = {
   sandbox: string | null;      // JSON
   /** JSON-stringified ProjectConfig — see src/lib/project-to-config.ts (launcher). */
   config: string | null;
+  due_date: string | null;     // epoch ms, stringified
+  pinned_at: string | null;    // epoch ms, stringified
   created_at: string;
   updated_at: string;
 };
@@ -71,6 +73,7 @@ export type MilestoneRow = {
   status: string;
   due_date: string | null;
   completed_at: string | null;
+  pinned_at: string | null;    // epoch ms, stringified
   created_at: string;
   updated_at: string;
 };

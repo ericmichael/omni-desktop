@@ -14,6 +14,7 @@ import { $activeInbox } from '@/renderer/features/Inbox/state';
 import { $milestones, milestoneApi } from '@/renderer/features/Initiatives/state';
 import { $pages, pageApi } from '@/renderer/features/Pages/state';
 import { persistedStoreApi } from '@/renderer/services/store';
+import type { Milestone } from '@/shared/types';
 
 import { MilestoneForm } from './MilestoneForm';
 import { ProjectForm } from './ProjectForm';
@@ -70,11 +71,14 @@ const useStyles = makeStyles({
   /**
    * Wrapper for the Home/Inbox mini-tree. Keeps it visually identical to
    * the projects tree below so Fluent's TreeItem geometry — icon column,
-   * row height, hover/selection — lines up pixel-for-pixel.
+   * row height, hover/selection — lines up pixel-for-pixel. Override
+   * `--spacingHorizontalXXL` to match SidebarTree's tightened per-level
+   * indent (Fluent's TreeItemLayout multiplies it by aria-level).
    */
   pinnedTree: {
     paddingTop: '2px',
     paddingBottom: '2px',
+    '--spacingHorizontalXXL': '12px',
   },
   pinnedLabelRow: {
     display: 'flex',
@@ -147,6 +151,7 @@ export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void })
   const tickets = useStore($tickets);
   const [formOpen, setFormOpen] = useState(false);
   const [milestoneFormProjectId, setMilestoneFormProjectId] = useState<string | null>(null);
+  const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null);
   const [projectsOpen, setProjectsOpen] = useState(true);
 
   const projects = store.projects;
@@ -155,7 +160,11 @@ export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void })
   const handleOpenForm = useCallback(() => setFormOpen(true), []);
   const handleCloseForm = useCallback(() => setFormOpen(false), []);
   const handleCreateMilestone = useCallback((projectId: string) => setMilestoneFormProjectId(projectId), []);
-  const handleCloseMilestoneForm = useCallback(() => setMilestoneFormProjectId(null), []);
+  const handleEditMilestone = useCallback((milestone: Milestone) => setEditingMilestone(milestone), []);
+  const handleCloseMilestoneForm = useCallback(() => {
+    setMilestoneFormProjectId(null);
+    setEditingMilestone(null);
+  }, []);
   const toggleProjects = useCallback(() => setProjectsOpen((v) => !v), []);
 
   // Fetch project data when expanding in the tree (without navigating)
@@ -252,19 +261,29 @@ export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void })
               onSelect={handleTreeSelect}
               onExpandProject={handleExpandProject}
               onCreateMilestone={handleCreateMilestone}
+              onEditMilestone={handleEditMilestone}
             />
           )
         )}
       </NavDrawerBody>
 
       <ProjectForm open={formOpen} onClose={handleCloseForm} />
-      <AnimatedDialog open={milestoneFormProjectId != null} onClose={handleCloseMilestoneForm}>
+      <AnimatedDialog
+        open={milestoneFormProjectId != null || editingMilestone != null}
+        onClose={handleCloseMilestoneForm}
+      >
         <DialogContent>
-          <DialogHeader>New Milestone</DialogHeader>
+          <DialogHeader>{editingMilestone ? 'Edit Milestone' : 'New Milestone'}</DialogHeader>
           <DialogBody>
-            {milestoneFormProjectId && (
+            {editingMilestone ? (
+              <MilestoneForm
+                projectId={editingMilestone.projectId}
+                editMilestone={editingMilestone}
+                onClose={handleCloseMilestoneForm}
+              />
+            ) : milestoneFormProjectId ? (
               <MilestoneForm projectId={milestoneFormProjectId} onClose={handleCloseMilestoneForm} />
-            )}
+            ) : null}
           </DialogBody>
         </DialogContent>
       </AnimatedDialog>

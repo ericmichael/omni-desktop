@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 
 import { RealtimeRPCClient } from '@/renderer/omniagents-ui/rpc/realtime'
 import { useUiConfig } from '@/renderer/omniagents-ui/ui-config'
+import type { AudioSettings } from '@/shared/types'
 
 import Orb from './Orb'
 import type { VoiceNotification } from './VoiceNotificationCenter'
@@ -51,6 +52,8 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
   const [chatInput, setChatInput] = useState('')
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
   const activeAudioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set())
+  const playbackDestRef = useRef<MediaStreamAudioDestinationNode | null>(null)
+  const audioOutElRef = useRef<HTMLAudioElement | null>(null)
   const playbackCheckIntervalRef = useRef<number | null>(null)
   const toolUseEndTimeRef = useRef<number>(0)  // When the last tool finished
   const toolUseLingerMs = 1800  // How long the effect lingers after tool completes (1.8s)
@@ -175,12 +178,27 @@ return
       return
     }
 
+    // Snapshot persisted audio prefs for this session. Dynamic import keeps
+    // services/store out of VoiceModal's eager graph — the static import
+    // chains through services/ipc → WS transport, which breaks tests that
+    // load this module under jsdom without a full localStorage polyfill.
+    void import('@/renderer/services/store').then(({ persistedStoreApi }) => {
+      if (!mounted) {
+return
+}
+      const audioPrefs: AudioSettings = persistedStoreApi.$atom.get().audioSettings
+      startVoiceSession(audioPrefs)
+    })
+
+    function startVoiceSession(audioPrefs: AudioSettings) {
+
     // Request microphone access
     navigator.mediaDevices.getUserMedia({
       audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
+        deviceId: audioPrefs.inputDeviceId ? { exact: audioPrefs.inputDeviceId } : undefined,
+        echoCancellation: audioPrefs.echoCancellation,
+        noiseSuppression: audioPrefs.noiseSuppression,
+        autoGainControl: audioPrefs.autoGainControl,
         channelCount: 1,
       } as any,
     })
@@ -193,6 +211,33 @@ return
         streamRef.current = stream
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
         audioContextRef.current = audioContext
+
+        // Route TTS playback through a hidden <audio> element so we can pick the
+        // output device via setSinkId(). The capture-pipeline silent sinks
+        // continue to use ctx.destination — they're at gain=0 just to keep the
+        // worklet alive, so it doesn't matter where they go.
+        try {
+          const dest = audioContext.createMediaStreamDestination()
+          playbackDestRef.current = dest
+          const el = audioOutElRef.current
+          if (el) {
+            el.srcObject = dest.stream
+            el.play().catch(() => {})
+            const sinkId = audioPrefs.outputDeviceId
+            const setSink = (el as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }).setSinkId
+            if (sinkId && typeof setSink === 'function') {
+              setSink.call(el, sinkId).catch((err) => {
+                if (debugEnabled) {
+console.warn('[ui] setSinkId failed', err)
+}
+              })
+            }
+          }
+        } catch (e) {
+          if (debugEnabled) {
+console.warn('[ui] playback dest setup failed', e)
+}
+        }
         if (debugEnabled) {
 console.log('[ui] audio ctx', { sampleRate: audioContext.sampleRate })
 }
@@ -426,6 +471,7 @@ return
       .catch(err => {
         console.error('Audio setup error:', err)
       })
+    } // end startVoiceSession
 
     return () => {
       mounted = false
@@ -440,6 +486,13 @@ return
  processorRef.current.disconnect() 
 } catch {}
       }
+      if (audioOutElRef.current) {
+        try {
+ audioOutElRef.current.pause()
+} catch {}
+        audioOutElRef.current.srcObject = null
+      }
+      playbackDestRef.current = null
       if (audioContextRef.current) {
         audioContextRef.current.close()
       }
@@ -658,9 +711,9 @@ return
             activeAudioSourcesRef.current.delete(src)
           }
 
-          src.connect(ctx.destination)
+          src.connect(playbackDestRef.current ?? ctx.destination)
           try {
- src.start(startAt) 
+ src.start(startAt)
 } catch {}
           scheduledTimeRef.current = startAt + buffer.duration
           if (debugEnabled) {
@@ -978,6 +1031,10 @@ console.log('[VoiceModal] SPEAKING finished, transition to', effectiveState)
   // inside the composer's flow, clipping the overlay to the chat input area.
   const modal = (
     <div className="fixed inset-0 z-[9999] bg-black flex flex-col">
+      {/* Hidden audio sink for TTS playback. Lets us route output to a chosen
+          device via setSinkId(); fed by a MediaStreamAudioDestinationNode. */}
+      <audio ref={audioOutElRef} autoPlay style={{ display: 'none' }} />
+
       {/* ── Top bar ── */}
       <div
         className="flex items-center justify-between px-5 py-3 border-b border-white/[0.06]"

@@ -415,11 +415,11 @@ return prev;
               />
             </div>
           </DialogBody>
-          <DialogFooter className="gap-2 justify-end flex-col sm:flex-row">
-            <Button variant="ghost" onClick={onClose} className="justify-center h-12 text-base sm:h-9 sm:text-sm order-2 sm:order-1">
+          <DialogFooter>
+            <Button variant="ghost" onClick={onClose}>
               Cancel
             </Button>
-            <Button onClick={handleSave} isDisabled={!isDirty} className="justify-center h-12 text-base sm:h-9 sm:text-sm order-1 sm:order-2">
+            <Button onClick={handleSave} isDisabled={!isDirty}>
               Save
             </Button>
           </DialogFooter>

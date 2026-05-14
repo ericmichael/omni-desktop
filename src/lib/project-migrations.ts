@@ -489,10 +489,33 @@ export function runMigrations(store: IMigrationStore, deps: MigrationDeps): void
     store.set('installedBundles', bundles);
     store.set('schemaVersion', 19);
     deps.repairProjectRoots?.();
+    // Fall through to v19→v20.
+  }
+
+  // v19 → v20: rename Code tab to Spaces, and its Deck layout mode to Tile.
+  // 'os' and 'spaces' (codeLayoutMode) are intermediate names from in-flight
+  // dev builds — convert them as well so no one is stranded.
+  if (version === 19 || (store.get('schemaVersion', 0) as number) === 19) {
+    const layoutMode = store.get('layoutMode') as string | undefined;
+    if (layoutMode === 'code' || layoutMode === 'os') {
+      store.set('layoutMode', 'spaces');
+    }
+    const codeLayoutMode = store.get('codeLayoutMode') as string | undefined;
+    if (codeLayoutMode === 'deck' || codeLayoutMode === 'spaces') {
+      store.set('codeLayoutMode', 'tile');
+    }
+    store.set('schemaVersion', 20);
+    // Fall through to v20→v21.
+  }
+
+  // v20 → v21: add audioSettings (trivial — JSON schema default fills it).
+  if (version === 20 || (store.get('schemaVersion', 0) as number) === 20) {
+    store.set('schemaVersion', 21);
+    deps.repairProjectRoots?.();
     return;
   }
 
-  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 19) {
+  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 21) {
     deps.repairProjectRoots?.();
     return;
   }

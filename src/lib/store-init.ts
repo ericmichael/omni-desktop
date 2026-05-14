@@ -7,7 +7,7 @@
 
 import type { LayoutMode, SandboxBackend } from '@/shared/types';
 
-const VALID_LAYOUT_MODES: LayoutMode[] = ['chat', 'code', 'projects', 'dashboards', 'settings', 'more'];
+const VALID_LAYOUT_MODES: LayoutMode[] = ['chat', 'spaces', 'projects', 'dashboards', 'settings', 'more'];
 
 /**
  * GA users (no preview features, no enterprise policy) must not run with any
@@ -31,6 +31,9 @@ export function enforceSandboxPolicy(store: {
 export function migrateLayoutMode(mode: string): LayoutMode | null {
   if (mode === 'work' || mode === 'desktop' || mode === 'home') {
     return 'chat';
+  }
+  if (mode === 'code' || mode === 'os') {
+    return 'spaces';
   }
   if (!VALID_LAYOUT_MODES.includes(mode as LayoutMode)) {
     return 'chat';

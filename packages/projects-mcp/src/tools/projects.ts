@@ -27,6 +27,8 @@ export function registerProjectTools(server: McpServer, db: DatabaseSync, repo: 
           slug: p.slug,
           workspace_dir: p.workspace_dir,
           is_personal: !!p.is_personal,
+          due_date: p.due_date,
+          pinned_at: p.pinned_at,
           columns: cols.map(c => c.label),
           created_at: p.created_at,
         };
@@ -41,10 +43,17 @@ export function registerProjectTools(server: McpServer, db: DatabaseSync, repo: 
     {
       label: z.string().describe('Human-readable project name'),
       workspace_dir: z.string().optional().describe('Local directory to link as the project workspace.'),
+      due_date: z.string().optional().describe('Optional due date in ISO format (e.g. 2026-04-30).'),
+      pinned: z.boolean().optional().describe('Pin the project to Home on creation.'),
     },
-    async ({ label, workspace_dir }) => {
+    async ({ label, workspace_dir, due_date, pinned }) => {
       const id = projectId();
       const slug = slugify(label);
+
+      if (due_date) {
+        const parsed = Date.parse(due_date);
+        if (Number.isNaN(parsed)) return err('Invalid due_date. Use an ISO date like 2026-04-30.');
+      }
 
       // Check slug uniqueness
       const existing = repo.getProjectBySlug(slug);
@@ -54,8 +63,16 @@ return err(`A project with slug "${slug}" already exists.`);
 
       tx(db, () => {
         db.prepare(
-          'INSERT INTO projects (id, label, slug, workspace_dir) VALUES (?, ?, ?, ?)'
-        ).run(id, label, slug, workspace_dir ?? null);
+          `INSERT INTO projects (id, label, slug, workspace_dir, due_date, pinned_at)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        ).run(
+          id,
+          label,
+          slug,
+          workspace_dir ?? null,
+          due_date ?? null,
+          pinned ? new Date().toISOString() : null
+        );
 
         // Seed default pipeline columns with deterministic prefixed IDs
         for (let i = 0; i < DEFAULT_COLUMNS.length; i++) {
@@ -93,13 +110,15 @@ return err(`A project with slug "${slug}" already exists.`);
 
   server.tool(
     'update_project',
-    "Update a project's label or linked workspace directory.",
+    "Update a project's label, linked workspace, deadline, or pin state.",
     {
       project_id: z.string().describe('The project ID to update'),
       label: z.string().optional().describe('New project name'),
       workspace_dir: z.string().optional().describe('Set the linked local directory. Pass empty string to unlink.'),
+      due_date: z.string().optional().describe('Due date in ISO format. Pass empty string to clear.'),
+      pinned: z.boolean().optional().describe('true pins the project to Home, false unpins it.'),
     },
-    async ({ project_id, label, workspace_dir }) => {
+    async ({ project_id, label, workspace_dir, due_date, pinned }) => {
       const project = repo.getProject(project_id);
       if (!project) {
 return err(`Project not found: ${project_id}`);
@@ -124,6 +143,23 @@ return err(`Project not found: ${project_id}`);
       if (workspace_dir !== undefined) {
         sets.push('workspace_dir = ?');
         params.push(workspace_dir || null);
+      }
+      if (due_date !== undefined) {
+        if (due_date === '') {
+          sets.push('due_date = NULL');
+        } else {
+          const parsed = Date.parse(due_date);
+          if (Number.isNaN(parsed)) return err('Invalid due_date. Use an ISO date like 2026-04-30.');
+          sets.push('due_date = ?');
+          params.push(due_date);
+        }
+      }
+      if (pinned !== undefined) {
+        if (pinned) {
+          sets.push("pinned_at = datetime('now')");
+        } else {
+          sets.push('pinned_at = NULL');
+        }
       }
 
       if (sets.length === 0) {

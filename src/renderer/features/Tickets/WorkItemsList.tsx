@@ -28,7 +28,7 @@ import { $activeMilestoneId, $pipeline, $tickets, ticketApi } from './state';
 import { PHASE_COLORS, PHASE_LABELS, TICKET_PRIORITY_LABELS } from './ticket-constants';
 
 type ViewMode = 'list' | 'board';
-type VisibilityFilter = 'active' | 'resolved' | 'archived' | 'all';
+type VisibilityFilter = 'active' | 'archived' | 'all';
 type TicketRowProps = {
   ticket: Ticket;
   selected: boolean;
@@ -392,11 +392,14 @@ type WorkItemsListProps = {
   selectedTicketId?: TicketId | null;
   onSelectTicket?: (ticketId: TicketId) => void;
   title?: string;
-  contextLabel?: string;
+  contextLabel?: React.ReactNode;
   onBack?: () => void;
+  /** Optional actions rendered at the right edge of the header (before the
+   *  view-mode toggle / filter), e.g. a milestone overflow menu. */
+  rightActions?: React.ReactNode;
 };
 
-export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket, title = 'Items', contextLabel, onBack }: WorkItemsListProps) => {
+export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket, title = 'Items', contextLabel, onBack, rightActions }: WorkItemsListProps) => {
   const styles = useStyles();
   const ticketMap = useStore($tickets);
   const pipeline = useStore($pipeline);
@@ -450,10 +453,7 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
         return false;
       }
       if (visibilityFilter === 'active') {
-        return !t.resolution && !t.archivedAt;
-      }
-      if (visibilityFilter === 'resolved') {
-        return !!t.resolution && !t.archivedAt;
+        return !t.archivedAt;
       }
       if (visibilityFilter === 'archived') {
         return !!t.archivedAt;
@@ -524,7 +524,6 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
             value={visibilityFilter}
             options={[
               { value: 'active', label: 'Active' },
-              { value: 'resolved', label: 'Resolved' },
               { value: 'archived', label: 'Archived' },
               { value: 'all', label: 'All' },
             ]}
@@ -536,6 +535,7 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
             size="sm"
             onClick={toggleView}
           />
+          {rightActions}
         </div>
       </div>
 

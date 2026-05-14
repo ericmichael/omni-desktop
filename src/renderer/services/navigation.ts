@@ -33,7 +33,7 @@ const runOpenTicketInCode = async (ticketId: TicketId): Promise<void> => {
   const existing = tabs.find((t) => t.ticketId === ticketId);
   if (existing) {
     await persistedStoreApi.setKey('activeCodeTabId', existing.id);
-    await persistedStoreApi.setKey('layoutMode', 'code');
+    await persistedStoreApi.setKey('layoutMode', 'spaces');
     return;
   }
 
@@ -56,5 +56,5 @@ const runOpenTicketInCode = async (ticketId: TicketId): Promise<void> => {
     ticketTitle: ticket.title,
     workspaceDir,
   });
-  await persistedStoreApi.setKey('layoutMode', 'code');
+  await persistedStoreApi.setKey('layoutMode', 'spaces');
 };

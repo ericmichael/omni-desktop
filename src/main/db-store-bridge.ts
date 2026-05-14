@@ -93,6 +93,9 @@ export function rowToProject(row: ProjectRow): Project {
     project.source = { ...project.source, workspaceDir: row.workspace_dir };
   }
 
+  if (row.due_date) project.dueDate = fromIso(row.due_date);
+  if (row.pinned_at) project.pinnedAt = fromIso(row.pinned_at);
+
   return project;
 }
 
@@ -172,6 +175,7 @@ export function rowToMilestone(row: MilestoneRow): Milestone {
   if (row.brief) milestone.brief = row.brief;
   if (row.due_date) milestone.dueDate = fromIso(row.due_date);
   if (row.completed_at) milestone.completedAt = fromIso(row.completed_at);
+  if (row.pinned_at) milestone.pinnedAt = fromIso(row.pinned_at);
   return milestone;
 }
 
@@ -248,6 +252,8 @@ export function projectToRow(p: Project): ProjectRow {
     // `config` is managed via dedicated repo.setProjectConfig() — the
     // upsert path leaves it untouched on existing rows and NULL on inserts.
     config: null,
+    due_date: isoOrNull(p.dueDate),
+    pinned_at: isoOrNull(p.pinnedAt),
     created_at: toIso(p.createdAt),
     updated_at: now,
   };
@@ -316,6 +322,7 @@ export function milestoneToRow(m: Milestone): MilestoneRow {
     status: m.status,
     due_date: isoOrNull(m.dueDate),
     completed_at: isoOrNull(m.completedAt),
+    pinned_at: isoOrNull(m.pinnedAt),
     created_at: toIso(m.createdAt),
     updated_at: toIso(m.updatedAt),
   };

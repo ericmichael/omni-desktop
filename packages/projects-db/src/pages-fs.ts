@@ -1,6 +1,8 @@
 import { mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 
+import { normalizeMarkdown } from './normalize-markdown.js';
+
 /**
  * Pages are stored at `<basePath>/<projectId>/<pageId>.md`.
  *
@@ -28,7 +30,7 @@ export function readPageContent(basePath: string, projectId: string, pageId: str
 export function writePageContent(basePath: string, projectId: string, pageId: string, content: string): void {
   const filePath = getPagePath(basePath, projectId, pageId);
   mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, content, 'utf-8');
+  writeFileSync(filePath, normalizeMarkdown(content), 'utf-8');
 }
 
 export function deletePageContent(basePath: string, projectId: string, pageId: string): void {

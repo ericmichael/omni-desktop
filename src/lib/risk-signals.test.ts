@@ -301,6 +301,87 @@ describe('detectRisks', () => {
     });
   });
 
+  describe('project deadline pressure', () => {
+    it('flags overdue projects with unresolved tickets as high severity', () => {
+      const projects = [{ id: 'p1', label: 'Project 1', dueDate: NOW - DAY_MS }];
+      const tickets = [makeTicket({ id: 't1' })];
+      const risks = detectRisks({
+        tickets,
+        milestones: [],
+        inboxItems: [],
+        ...baseInput,
+        projects,
+      });
+      const overdue = risks.find((r) => r.kind === 'project_overdue');
+      expect(overdue).toBeDefined();
+      expect(overdue?.severity).toBe('high');
+    });
+
+    it('does not flag overdue projects whose tickets are all resolved', () => {
+      const projects = [{ id: 'p1', label: 'Project 1', dueDate: NOW - DAY_MS }];
+      const tickets = [
+        makeTicket({ id: 't1', resolution: 'completed', resolvedAt: NOW - 2 * DAY_MS }),
+      ];
+      const risks = detectRisks({
+        tickets,
+        milestones: [],
+        inboxItems: [],
+        ...baseInput,
+        projects,
+      });
+      expect(risks.some((r) => r.kind === 'project_overdue')).toBe(false);
+    });
+
+    it('does not flag overdue projects whose only open tickets are in terminal columns', () => {
+      const projects = [{ id: 'p1', label: 'Project 1', dueDate: NOW - DAY_MS }];
+      const tickets = [makeTicket({ id: 't1', columnId: 'done' })];
+      const risks = detectRisks({
+        tickets,
+        milestones: [],
+        inboxItems: [],
+        ...baseInput,
+        projects,
+        terminalColumnIds: new Set(['done']),
+      });
+      expect(risks.some((r) => r.kind === 'project_overdue')).toBe(false);
+    });
+
+    it('flags due-in-3-days as high severity', () => {
+      const projects = [{ id: 'p1', label: 'Project 1', dueDate: NOW + 2 * DAY_MS }];
+      const tickets = [makeTicket({ id: 't1' })];
+      const risks = detectRisks({
+        tickets,
+        milestones: [],
+        inboxItems: [],
+        ...baseInput,
+        projects,
+      });
+      const soon = risks.find((r) => r.kind === 'project_due_soon');
+      expect(soon?.severity).toBe('high');
+    });
+
+    it('flags due-in-7-days as medium severity', () => {
+      const projects = [{ id: 'p1', label: 'Project 1', dueDate: NOW + 5 * DAY_MS }];
+      const tickets = [makeTicket({ id: 't1' })];
+      const risks = detectRisks({
+        tickets,
+        milestones: [],
+        inboxItems: [],
+        ...baseInput,
+        projects,
+      });
+      const soon = risks.find((r) => r.kind === 'project_due_soon');
+      expect(soon?.severity).toBe('medium');
+    });
+
+    it('does not flag projects without a dueDate', () => {
+      const tickets = [makeTicket({ id: 't1' })];
+      const risks = detectRisks({ tickets, milestones: [], inboxItems: [], ...baseInput });
+      expect(risks.some((r) => r.kind === 'project_overdue')).toBe(false);
+      expect(risks.some((r) => r.kind === 'project_due_soon')).toBe(false);
+    });
+  });
+
   it('sorts high-severity signals ahead of low', () => {
     const quiet = NOW - (RISK_THRESHOLDS.projectQuietDays + 1) * DAY_MS;
     const old = NOW - 6.5 * DAY_MS;

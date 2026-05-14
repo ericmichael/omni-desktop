@@ -268,6 +268,8 @@ describe('replaceAll* preserves child data', () => {
         source: null,
         sandbox: null,
         config: null,
+        due_date: null,
+        pinned_at: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       },

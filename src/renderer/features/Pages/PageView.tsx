@@ -172,39 +172,6 @@ const useStyles = makeStyles({
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
   },
-  childPages: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-    paddingLeft: tokens.spacingHorizontalXXL,
-    paddingRight: tokens.spacingHorizontalXXL,
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalM,
-    maxWidth: '900px',
-    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke1),
-  },
-  childPageLink: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    padding: '6px 8px',
-    borderRadius: '6px',
-    border: 'none',
-    backgroundColor: 'transparent',
-    cursor: 'pointer',
-    color: tokens.colorNeutralForeground1,
-    fontSize: tokens.fontSizeBase300,
-    textAlign: 'left',
-    width: '100%',
-    ':hover': {
-      backgroundColor: tokens.colorSubtleBackgroundHover,
-    },
-  },
-  childPageIcon: {
-    fontSize: '16px',
-    flexShrink: 0,
-  },
-
   // Skeleton shown while the editor chunk downloads (cold start) or while the
   // initial page content is being read from disk. The horizontal padding here
   // (spacingHorizontalM) combines with the bodyInner wrapper's same padding
@@ -371,22 +338,6 @@ setTitle(page.title);
     actor.send({ type: 'RESOLVE_KEEP_LOCAL' });
   }, [actor]);
 
-  // -------------------------------------------------------------------------
-  // Child pages
-  // -------------------------------------------------------------------------
-  const childPages = useMemo(() => {
-    return Object.values(pages)
-      .filter((p) => p.parentId === pageId)
-      .sort((a, b) => a.sortOrder - b.sortOrder);
-  }, [pages, pageId]);
-
-  const handleChildClick = useCallback(
-    (childId: PageId) => {
-      ticketApi.goToPage(childId, projectId);
-    },
-    [projectId]
-  );
-
   if (!page) {
 return null;
 }
@@ -474,22 +425,6 @@ return null;
           )}
         </div>
 
-        {/* Child pages list */}
-        {childPages.length > 0 && (
-          <div className={styles.childPages}>
-            {childPages.map((child) => (
-              <button
-                key={child.id}
-                type="button"
-                className={styles.childPageLink}
-                onClick={() => handleChildClick(child.id)}
-              >
-                <span className={styles.childPageIcon}>{child.icon ?? '📄'}</span>
-                {child.title}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );

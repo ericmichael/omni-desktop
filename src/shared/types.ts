@@ -52,7 +52,7 @@ export type WindowProps = {
 /**
  * Data stored in the electron store.
  */
-export type LayoutMode = 'chat' | 'code' | 'projects' | 'dashboards' | 'settings' | 'more' | 'gallery';
+export type LayoutMode = 'chat' | 'spaces' | 'projects' | 'dashboards' | 'settings' | 'more' | 'gallery';
 export type OmniTheme =
   | 'teams-light'
   | 'teams-dark'
@@ -98,6 +98,16 @@ export type PlatformCredentials = {
   domains?: Array<{ id: number; name: string; slug: string }>;
 };
 
+export type AudioSettings = {
+  /** mediaDevices deviceId for the input mic. Null = OS default. */
+  inputDeviceId: string | null;
+  /** mediaDevices deviceId for output (applied via setSinkId on a routed <audio> element). Null = OS default. */
+  outputDeviceId: string | null;
+  echoCancellation: boolean;
+  noiseSuppression: boolean;
+  autoGainControl: boolean;
+};
+
 export type StoreData = {
   workspaceDir?: string;
   sandboxBackend: SandboxBackend;
@@ -121,7 +131,7 @@ export type StoreData = {
   tickets: Ticket[];
   /** Maximum active tickets across all projects (cognitive WIP limit). Default: 3. */
   wipLimit: number;
-  /** Day of week for the weekly review prompt (0=Sun, 1=Mon, ..., 6=Sat). Default: 5 (Friday). */
+  /** Day of week for the weekly review prompt (0=Sun, 1=Mon, ..., 6=Sat). Default: 1 (Monday). */
   weeklyReviewDay: number;
   /** Timestamp (ms) of last completed weekly review. Null if never done. */
   lastWeeklyReviewAt: number | null;
@@ -169,6 +179,9 @@ export type StoreData = {
 
   /** User-added custom apps for the workspace dock. */
   customApps: CustomAppEntry[];
+
+  /** Voice mode audio device + processing preferences. */
+  audioSettings: AudioSettings;
 
   /** Browser profiles (default + user-created). Always contains at least the built-in default. */
   browserProfiles: BrowserProfile[];
@@ -345,7 +358,9 @@ export const schema: Schema<StoreData> = {
 
   layoutMode: {
     type: 'string',
-    enum: ['chat', 'code', 'projects', 'dashboards', 'settings', 'more', 'gallery'],
+    // 'code' and 'os' are pre-v20 names for 'spaces'; kept so existing stores
+    // load before the v19→v20 migration runs. Migration converts them.
+    enum: ['chat', 'spaces', 'os', 'code', 'projects', 'dashboards', 'settings', 'more', 'gallery'],
     default: 'chat',
   },
   theme: {
@@ -363,7 +378,7 @@ export const schema: Schema<StoreData> = {
   },
   weeklyReviewDay: {
     type: 'number',
-    default: 5,
+    default: 1,
   },
   lastWeeklyReviewAt: {
     type: ['number', 'null'],
@@ -400,8 +415,10 @@ export const schema: Schema<StoreData> = {
   },
   codeLayoutMode: {
     type: 'string',
-    enum: ['deck', 'focus'],
-    default: 'deck',
+    // 'deck' and 'spaces' are pre-v20 names for 'tile'; kept so existing
+    // stores load before the v19→v20 migration runs. Migration converts them.
+    enum: ['tile', 'spaces', 'deck', 'focus'],
+    default: 'tile',
   },
   codeDeckBackground: {
     type: ['string', 'null'],
@@ -425,6 +442,8 @@ export const schema: Schema<StoreData> = {
         createdAt: { type: 'number' },
         pipeline: { type: 'object' },
         sandbox: { type: ['object', 'null'] },
+        dueDate: { type: 'number' },
+        pinnedAt: { type: 'number' },
         seedKey: { type: 'string' },
       },
       required: ['id', 'label', 'slug', 'createdAt'],
@@ -445,6 +464,7 @@ export const schema: Schema<StoreData> = {
         status: { type: 'string', enum: ['active', 'completed', 'archived'] },
         dueDate: { type: 'number' },
         completedAt: { type: 'number' },
+        pinnedAt: { type: 'number' },
         createdAt: { type: 'number' },
         updatedAt: { type: 'number' },
         seedKey: { type: 'string' },
@@ -634,6 +654,24 @@ export const schema: Schema<StoreData> = {
       },
       required: ['id', 'label', 'icon', 'url', 'order'],
     },
+  },
+  audioSettings: {
+    type: 'object',
+    default: {
+      inputDeviceId: null,
+      outputDeviceId: null,
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+    properties: {
+      inputDeviceId: { type: ['string', 'null'] },
+      outputDeviceId: { type: ['string', 'null'] },
+      echoCancellation: { type: 'boolean' },
+      noiseSuppression: { type: 'boolean' },
+      autoGainControl: { type: 'boolean' },
+    },
+    required: ['inputDeviceId', 'outputDeviceId', 'echoCancellation', 'noiseSuppression', 'autoGainControl'],
   },
   browserProfiles: {
     type: 'array',
@@ -840,7 +878,7 @@ export type OmniRuntimeInfo =
 
 export type CodeTabId = string;
 
-export type CodeLayoutMode = 'deck' | 'focus';
+export type CodeLayoutMode = 'tile' | 'focus';
 
 
 export type CodeTab = {
@@ -961,6 +999,10 @@ export type Project = {
   autoDispatch?: boolean;
   /** Per-project sandbox configuration. When absent/null, the default sandbox image is used. */
   sandbox?: SandboxConfig | null;
+  /** Optional target date (epoch ms). Drives deadline-pressure risk signals. */
+  dueDate?: number;
+  /** Timestamp of the most recent pin action. Set = pinned to Home; undefined = not pinned. */
+  pinnedAt?: number;
   /** Populated by the seed script; tracked in seed-manifest for reset. */
   seedKey?: string;
 };
@@ -979,6 +1021,8 @@ export type Milestone = {
   dueDate?: number;
   /** Stamped when status transitions to 'completed'. */
   completedAt?: number;
+  /** Timestamp of the most recent pin action. Set = pinned to Home; undefined = not pinned. */
+  pinnedAt?: number;
   createdAt: number;
   updatedAt: number;
   /** Populated by the seed script; tracked in seed-manifest for reset. */

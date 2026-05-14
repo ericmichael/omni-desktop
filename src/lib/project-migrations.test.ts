@@ -67,7 +67,7 @@ describe('runMigrations', () => {
         expect(t.phase).toBe('idle');
       }
       // Fall-through means schemaVersion ends up at the current version.
-      expect(store.get('schemaVersion')).toBe(19);
+      expect(store.get('schemaVersion')).toBe(21);
     });
   });
 
@@ -422,19 +422,19 @@ describe('runMigrations', () => {
   });
 
   describe('full ladder and idempotency', () => {
-    it('runs v0 → v19 end-to-end without throwing', () => {
+    it('runs v0 → v21 end-to-end without throwing', () => {
       const store = makeStore({
         // schemaVersion undefined → takes the initial boot path.
         tickets: [{ id: 't1', status: 'in_progress' }],
         projects: [{ id: 'p1', label: 'A', workspaceDir: '/tmp/w' }],
       });
       expect(() => runMigrations(store, makeDeps())).not.toThrow();
-      expect(store.get('schemaVersion')).toBe(19);
+      expect(store.get('schemaVersion')).toBe(21);
     });
 
-    it('is a no-op on an already-migrated v19 store', () => {
+    it('is a no-op on an already-migrated v21 store', () => {
       const store = makeStore({
-        schemaVersion: 19,
+        schemaVersion: 21,
         tickets: [{ id: 't1', phase: 'idle' }],
         projects: [],
         milestones: [],
@@ -444,7 +444,7 @@ describe('runMigrations', () => {
       const deps = makeDeps();
       runMigrations(store, deps);
 
-      expect(store.get('schemaVersion')).toBe(19);
+      expect(store.get('schemaVersion')).toBe(21);
       expect(deps.writeProjectContextBrief).not.toHaveBeenCalled();
     });
 
@@ -464,8 +464,8 @@ describe('runMigrations', () => {
       for (const t of tickets) {
         expect(t).not.toHaveProperty('supervisorSessionId');
       }
-      // Falls through to v19, which is the current head.
-      expect(store.get('schemaVersion')).toBe(19);
+      // Falls through to v20, which is the current head.
+      expect(store.get('schemaVersion')).toBe(21);
     });
 
     it('v18 → v19 backfills installedBundles from existing skillSources', () => {
@@ -488,7 +488,7 @@ describe('runMigrations', () => {
       });
       runMigrations(store, makeDeps());
 
-      expect(store.get('schemaVersion')).toBe(19);
+      expect(store.get('schemaVersion')).toBe(21);
       const bundles = store.get('installedBundles') as Record<string, { skillNames: string[] }>;
       expect(Object.keys(bundles).sort()).toEqual([
         'anthropics/skills:creative-skills',
@@ -500,7 +500,7 @@ describe('runMigrations', () => {
 
     it('calls repairProjectRoots on idempotent v-current boot', () => {
       const store = makeStore({
-        schemaVersion: 19,
+        schemaVersion: 21,
         tickets: [],
         projects: [],
         milestones: [],
@@ -509,6 +509,48 @@ describe('runMigrations', () => {
       const repair = vi.fn();
       runMigrations(store, makeDeps({ repairProjectRoots: repair }));
       expect(repair).toHaveBeenCalled();
+    });
+
+    it('v19 → v20 renames legacy "code" to "spaces" and "deck" to "tile"', () => {
+      const store = makeStore({
+        schemaVersion: 19,
+        tickets: [],
+        projects: [],
+        layoutMode: 'code',
+        codeLayoutMode: 'deck',
+      });
+      runMigrations(store, makeDeps());
+      expect(store.get('schemaVersion')).toBe(21);
+      expect(store.get('layoutMode')).toBe('spaces');
+      expect(store.get('codeLayoutMode')).toBe('tile');
+    });
+
+    it('v19 → v20 also converts intermediate "os" and "spaces" values', () => {
+      const store = makeStore({
+        schemaVersion: 19,
+        tickets: [],
+        projects: [],
+        layoutMode: 'os',
+        codeLayoutMode: 'spaces',
+      });
+      runMigrations(store, makeDeps());
+      expect(store.get('schemaVersion')).toBe(21);
+      expect(store.get('layoutMode')).toBe('spaces');
+      expect(store.get('codeLayoutMode')).toBe('tile');
+    });
+
+    it('v19 → v20 leaves other layoutMode and codeLayoutMode values alone', () => {
+      const store = makeStore({
+        schemaVersion: 19,
+        tickets: [],
+        projects: [],
+        layoutMode: 'projects',
+        codeLayoutMode: 'focus',
+      });
+      runMigrations(store, makeDeps());
+      expect(store.get('schemaVersion')).toBe(21);
+      expect(store.get('layoutMode')).toBe('projects');
+      expect(store.get('codeLayoutMode')).toBe('focus');
     });
   });
 

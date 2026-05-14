@@ -95,7 +95,7 @@ async function ensureColumn(request: Extract<SupervisorBridgeRequest, { kind: 'e
   const existing = tabs.find((t) => t.ticketId === request.ticketId);
   if (existing) {
     await persistedStoreApi.setKey('activeCodeTabId', existing.id);
-    await persistedStoreApi.setKey('layoutMode', 'code');
+    await persistedStoreApi.setKey('layoutMode', 'spaces');
     return;
   }
   const ticket = (persistedStoreApi.$atom.get().tickets ?? []).find((t) => t.id === request.ticketId);
@@ -106,7 +106,7 @@ async function ensureColumn(request: Extract<SupervisorBridgeRequest, { kind: 'e
     ticketTitle: ticket.title,
     workspaceDir: request.workspaceDir,
   });
-  await persistedStoreApi.setKey('layoutMode', 'code');
+  await persistedStoreApi.setKey('layoutMode', 'spaces');
 }
 
 const DISPATCH_TIMEOUT_MS = 90_000;

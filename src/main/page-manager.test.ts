@@ -254,7 +254,9 @@ describe('PageManager', () => {
 
       await mgr.writeContent(root.id, '# Hello World');
       const content = await mgr.readContent(root.id);
-      expect(content).toBe('# Hello World');
+      // writeContent canonicalizes via remark-stringify, which always emits
+      // a trailing newline (POSIX-canonical form).
+      expect(content).toBe('# Hello World\n');
     });
 
     it('readContent returns empty string when file does not exist', async () => {
@@ -272,7 +274,7 @@ describe('PageManager', () => {
 
       await mgr.writeContent(root.id, '# Context');
       const onDisk = readFileSync(join(projectDir, 'proj-1', `${root.id}.md`), 'utf-8');
-      expect(onDisk).toBe('# Context');
+      expect(onDisk).toBe('# Context\n');
     });
 
     it('non-root doc pages live at <pagesDir>/<id>.md', async () => {
@@ -282,7 +284,7 @@ describe('PageManager', () => {
 
       await mgr.writeContent(child.id, 'child content');
       const onDisk = readFileSync(join(projectDir, 'proj-1', `${child.id}.md`), 'utf-8');
-      expect(onDisk).toBe('child content');
+      expect(onDisk).toBe('child content\n');
     });
 
     it('notebook pages are stored as .py files at <pagesDir>/<id>.py', async () => {

@@ -31,7 +31,7 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    flex: '1 1 0',
+    width: '100%',
     minWidth: 0,
   },
   headerContent: { flex: '1 1 0', minWidth: 0 },

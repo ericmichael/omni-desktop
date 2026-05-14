@@ -17,7 +17,7 @@ import { KanbanCard } from './KanbanCard';
 import { KanbanColumn } from './KanbanColumn';
 import { $activeMilestoneId, $pipeline, $tickets, ticketApi } from './state';
 
-type VisibilityFilter = 'active' | 'resolved' | 'archived' | 'all';
+type VisibilityFilter = 'active' | 'archived' | 'all';
 
 const useStyles = makeStyles({
   loading: {
@@ -70,10 +70,7 @@ export const KanbanBoard = memo(({ projectId, visibilityFilter = 'active' }: { p
             return false;
           }
           if (visibilityFilter === 'active') {
-            return !t.resolution && !t.archivedAt;
-          }
-          if (visibilityFilter === 'resolved') {
-            return !!t.resolution && !t.archivedAt;
+            return !t.archivedAt;
           }
           if (visibilityFilter === 'archived') {
             return !!t.archivedAt;

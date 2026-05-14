@@ -25,7 +25,7 @@ const DEFAULTS: StoreData = {
   chatSessionId: null,
   codeTabs: [],
   activeCodeTabId: null,
-  codeLayoutMode: 'deck',
+  codeLayoutMode: 'tile',
   codeDeckBackground: null,
   glassTone: 'dark',
   activeTicketId: null,

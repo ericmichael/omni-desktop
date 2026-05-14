@@ -9,7 +9,7 @@ export type TaskSummary = {
   blockedBy?: string[]
 }
 
-const MAX_VISIBLE = 8
+const MAX_VISIBLE = 5
 
 const DOT_CLASS: Record<TaskSummary['status'], string> = {
   pending: 'bg-textSubtle/50',

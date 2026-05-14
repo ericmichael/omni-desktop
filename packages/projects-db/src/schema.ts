@@ -165,4 +165,15 @@ INSERT INTO _change_seq (id, seq) VALUES (1, 0);
 ALTER TABLE projects ADD COLUMN config TEXT;
 `,
   },
+  {
+    version: 4,
+    sql: `
+-- Pin state + project deadline. Both pin columns are timestamps (epoch ms,
+-- stringified) — set = pinned to Home, NULL = not pinned. due_date on
+-- projects mirrors the existing milestones.due_date column.
+ALTER TABLE projects ADD COLUMN due_date TEXT;
+ALTER TABLE projects ADD COLUMN pinned_at TEXT;
+ALTER TABLE milestones ADD COLUMN pinned_at TEXT;
+`,
+  },
 ];

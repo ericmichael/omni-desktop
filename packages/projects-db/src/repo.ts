@@ -85,6 +85,7 @@ export class ProjectsRepo {
     this.stmts.upsertProject.run(
       row.id, row.label, row.slug, row.workspace_dir,
       row.is_personal, row.auto_dispatch, row.source, row.sandbox,
+      row.due_date, row.pinned_at,
       row.created_at, row.updated_at,
     );
     this.bumpChangeSeq();
@@ -141,6 +142,7 @@ export class ProjectsRepo {
         this.stmts.upsertProject.run(
           row.id, row.label, row.slug, row.workspace_dir,
           row.is_personal, row.auto_dispatch, row.source, row.sandbox,
+          row.due_date, row.pinned_at,
           row.created_at, row.updated_at,
         );
       }
@@ -418,7 +420,8 @@ export class ProjectsRepo {
     this.stmts.upsertMilestone.run(
       row.id, row.project_id, row.title, row.description,
       row.branch, row.brief, row.status, row.due_date,
-      row.completed_at, row.created_at, row.updated_at,
+      row.completed_at, row.pinned_at,
+      row.created_at, row.updated_at,
     );
     this.bumpChangeSeq();
   }
@@ -448,7 +451,8 @@ export class ProjectsRepo {
         this.stmts.upsertMilestone.run(
           row.id, row.project_id, row.title, row.description,
           row.branch, row.brief, row.status, row.due_date,
-          row.completed_at, row.created_at, row.updated_at,
+          row.completed_at, row.pinned_at,
+          row.created_at, row.updated_at,
         );
       }
       this.bumpChangeSeq();
@@ -625,12 +629,13 @@ function prepareStatements(db: DatabaseSync) {
     getProject: db.prepare('SELECT * FROM projects WHERE id = ?'),
     getProjectBySlug: db.prepare('SELECT * FROM projects WHERE slug = ?'),
     upsertProject: db.prepare(`
-      INSERT INTO projects (id, label, slug, workspace_dir, is_personal, auto_dispatch, source, sandbox, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO projects (id, label, slug, workspace_dir, is_personal, auto_dispatch, source, sandbox, due_date, pinned_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         label = excluded.label, slug = excluded.slug, workspace_dir = excluded.workspace_dir,
         is_personal = excluded.is_personal, auto_dispatch = excluded.auto_dispatch,
         source = excluded.source, sandbox = excluded.sandbox,
+        due_date = excluded.due_date, pinned_at = excluded.pinned_at,
         updated_at = excluded.updated_at
     `),
     deleteProject: db.prepare('DELETE FROM projects WHERE id = ?'),
@@ -700,12 +705,13 @@ function prepareStatements(db: DatabaseSync) {
     listMilestonesByProject: db.prepare('SELECT * FROM milestones WHERE project_id = ? ORDER BY created_at'),
     getMilestone: db.prepare('SELECT * FROM milestones WHERE id = ?'),
     upsertMilestone: db.prepare(`
-      INSERT INTO milestones (id, project_id, title, description, branch, brief, status, due_date, completed_at, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO milestones (id, project_id, title, description, branch, brief, status, due_date, completed_at, pinned_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         project_id = excluded.project_id, title = excluded.title, description = excluded.description,
         branch = excluded.branch, brief = excluded.brief, status = excluded.status,
-        due_date = excluded.due_date, completed_at = excluded.completed_at, updated_at = excluded.updated_at
+        due_date = excluded.due_date, completed_at = excluded.completed_at,
+        pinned_at = excluded.pinned_at, updated_at = excluded.updated_at
     `),
     deleteMilestone: db.prepare('DELETE FROM milestones WHERE id = ?'),
     deleteAllMilestones: db.prepare('DELETE FROM milestones'),
