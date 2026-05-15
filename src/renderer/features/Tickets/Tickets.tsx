@@ -1,16 +1,18 @@
 import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
+import { Add20Regular, Chat20Regular, Navigation20Regular, Play20Filled } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 
-import { CounterBadge, Tab, TabList, TopAppBar } from '@/renderer/ds';
+import { Button, IconButton, TopAppBar } from '@/renderer/ds';
 import { InboxView } from '@/renderer/features/Inbox/InboxView';
-import { $activeInboxCount } from '@/renderer/features/Inbox/state';
+import { $quickCaptureOpen } from '@/renderer/features/Inbox/QuickCapture';
 import { PageView } from '@/renderer/features/Pages/PageView';
 import { $pages, pageApi } from '@/renderer/features/Pages/state';
+import { openTicketInCode } from '@/renderer/services/navigation';
 import { persistedStoreApi } from '@/renderer/services/store';
 
 import { MilestoneDetail } from './MilestoneDetail';
-import { ProjectPage } from './ProjectPage';
+import { ProjectActions, ProjectPage } from './ProjectPage';
 import { ProjectsDashboard } from './ProjectsDashboard';
 import { TicketsSidebar } from './Sidebar';
 import { $activeWipTickets, $ticketsView, $wipDialogPendingTicket, ticketApi } from './state';
@@ -30,11 +32,6 @@ const useStyles = makeStyles({
   // Glass surfaces inherit translucent neutral colors via Fluent token overrides
   // pushed at the deck-bg root in MainContent. These classes only opt in to the
   // blur layer — bg/border colors come from --colorNeutralBackground* / --colorNeutralStroke1.
-  mobileTabBarGlass: {
-    backgroundColor: tokens.colorNeutralBackground1,
-    backdropFilter: 'var(--glass-blur)',
-    WebkitBackdropFilter: 'var(--glass-blur)',
-  },
   desktopSidebarGlass: {
     backgroundColor: tokens.colorNeutralBackground2,
     backdropFilter: 'var(--glass-blur)',
@@ -64,13 +61,6 @@ const useStyles = makeStyles({
       display: 'none',
     },
   },
-  mobileTabBar: {
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
-  inboxBadge: {
-    marginLeft: tokens.spacingHorizontalXS,
-  },
   contentArea: {
     flex: '1 1 0',
     minHeight: 0,
@@ -99,10 +89,6 @@ function useIsDesktop() {
   return useSyncExternalStore(subscribeMQ, getIsDesktop, getIsDesktopServer);
 }
 
-/* ---------- Mobile tab type ---------- */
-
-type MobileTab = 'inbox' | 'projects';
-
 /* ---------- Main export ---------- */
 
 export const Tickets = memo(() => {
@@ -111,14 +97,13 @@ export const Tickets = memo(() => {
   const isGlass = !!persistedStore.codeDeckBackground;
   const view = useStore($ticketsView);
   const isDesktop = useIsDesktop();
-  const [mobileTab, setMobileTab] = useState<MobileTab>(view.type === 'inbox' ? 'inbox' : 'projects');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const pages = useStore($pages);
   const tickets = persistedStore.tickets;
 
-  const openInboxCount = useStore($activeInboxCount);
   const activeTicket = useMemo(
-    () => (view.type === 'ticket' ? tickets.find((ticket) => ticket.id === view.ticketId) ?? null : null),
+    () => (view.type === 'ticket' ? (tickets.find((ticket) => ticket.id === view.ticketId) ?? null) : null),
     [view, tickets]
   );
   const activeProject = useMemo(() => {
@@ -126,13 +111,26 @@ export const Tickets = memo(() => {
       view.type === 'project' || view.type === 'page' || view.type === 'milestone' || view.type === 'board'
         ? view.projectId
         : activeTicket?.projectId;
-    return projectId ? persistedStore.projects.find((project) => project.id === projectId) ?? null : null;
+    return projectId ? (persistedStore.projects.find((project) => project.id === projectId) ?? null) : null;
   }, [view, activeTicket?.projectId, persistedStore.projects]);
 
-  const isViewingProject = view.type === 'project' || view.type === 'page' || view.type === 'milestone' || view.type === 'board';
+  useEffect(() => {
+    if (isDesktop) {
+      setMobileNavOpen(false);
+    }
+  }, [isDesktop]);
 
   // Context-aware back navigation for mobile
-  const mobileBackTitle = useMemo(() => {
+  const mobileHeaderTitle = useMemo(() => {
+    if (view.type === 'dashboard') {
+      return 'Home';
+    }
+    if (view.type === 'inbox') {
+      return view.selectedItemId ? 'Inbox Item' : 'Inbox';
+    }
+    if (view.type === 'ticket') {
+      return activeTicket?.title ?? 'Ticket';
+    }
     if (view.type === 'page') {
       const page = pages[view.pageId];
       if (page?.parentId) {
@@ -148,7 +146,7 @@ export const Tickets = memo(() => {
       return 'Project';
     }
     return 'Projects';
-  }, [view, pages]);
+  }, [view, pages, activeTicket?.title]);
 
   const handleBack = useCallback(() => {
     if (view.type === 'page') {
@@ -181,16 +179,70 @@ export const Tickets = memo(() => {
     ticketApi.goBackToPrevious(activeTicket?.projectId);
   }, [activeTicket?.projectId]);
 
+  const handleInboxBack = useCallback(() => {
+    ticketApi.goToInbox();
+  }, []);
+
+  const handleInboxHomeBack = useCallback(() => {
+    ticketApi.goToDashboard();
+  }, []);
+
+  const handleOpenMobileNav = useCallback(() => setMobileNavOpen(true), []);
+  const handleCloseMobileNav = useCallback(() => setMobileNavOpen(false), []);
+  const handleAddInboxItem = useCallback(() => {
+    $quickCaptureOpen.set(true);
+  }, []);
+  const handleOpenTicketChat = useCallback(() => {
+    if (view.type === 'ticket') {
+      void openTicketInCode(view.ticketId);
+    }
+  }, [view]);
+  const handleRetryTicketAutopilot = useCallback(() => {
+    if (view.type === 'ticket') {
+      void ticketApi.startSupervisor(view.ticketId);
+    }
+  }, [view]);
+  const mobileBackHandler =
+    view.type === 'dashboard'
+      ? undefined
+      : view.type === 'inbox'
+        ? view.selectedItemId
+          ? handleInboxBack
+          : handleInboxHomeBack
+        : view.type === 'ticket'
+          ? handleTicketBack
+          : handleBack;
+  const mobileNavButton = (
+    <IconButton aria-label="Open navigation" icon={<Navigation20Regular />} size="sm" onClick={handleOpenMobileNav} />
+  );
+  const mobileAddInboxButton = (
+    <IconButton aria-label="Add inbox item" icon={<Add20Regular />} size="sm" onClick={handleAddInboxItem} />
+  );
+  const mobileTicketErrorActions = activeTicket?.phase === 'error' && (
+    <>
+      <Button size="sm" variant="ghost" leftIcon={<Chat20Regular />} onClick={handleOpenTicketChat}>
+        Chat
+      </Button>
+      <Button size="sm" leftIcon={<Play20Filled />} onClick={handleRetryTicketAutopilot}>
+        Retry
+      </Button>
+    </>
+  );
+
   // Keyboard shortcut: Cmd/Ctrl+N → new page in current project
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
         const projectId =
-          view.type === 'project' ? view.projectId
-          : view.type === 'page' ? view.projectId
-          : view.type === 'milestone' ? view.projectId
-          : view.type === 'board' ? view.projectId
-          : null;
+          view.type === 'project'
+            ? view.projectId
+            : view.type === 'page'
+              ? view.projectId
+              : view.type === 'milestone'
+                ? view.projectId
+                : view.type === 'board'
+                  ? view.projectId
+                  : null;
         if (!projectId) {
           return;
         }
@@ -202,14 +254,16 @@ export const Tickets = memo(() => {
         }
         const siblings = Object.values(allPages).filter((p) => p.parentId === rootPage.id);
         const maxSort = siblings.reduce((max, p) => Math.max(max, p.sortOrder), 0);
-        void pageApi.addPage({
-          projectId,
-          parentId: rootPage.id,
-          title: 'Untitled',
-          sortOrder: maxSort + 1,
-        }).then((newPage) => {
-          ticketApi.goToPage(newPage.id, projectId);
-        });
+        void pageApi
+          .addPage({
+            projectId,
+            parentId: rootPage.id,
+            title: 'Untitled',
+            sortOrder: maxSort + 1,
+          })
+          .then((newPage) => {
+            ticketApi.goToPage(newPage.id, projectId);
+          });
       }
     };
     window.addEventListener('keydown', handler);
@@ -224,40 +278,23 @@ export const Tickets = memo(() => {
       </div>
 
       <div className={styles.mainColumn}>
-        {/* Mobile: tab bar or back header */}
+        {/* Mobile: header with sidebar access */}
         <div className={styles.mobileHeader}>
-          {mobileTab === 'projects' && isViewingProject ? (
-            /* Back header when viewing a project/page/milestone detail */
-            <TopAppBar title={mobileBackTitle} onBack={handleBack} className="bg-surface-raised" />
-          ) : (
-            /* Tab bar: Inbox / Projects */
-            <div className={mergeClasses(styles.mobileTabBar, isGlass && styles.mobileTabBarGlass)}>
-              <TabList
-                selectedValue={mobileTab}
-                onTabSelect={(_e, data) => {
-                  const tab = data.value as MobileTab;
-                  setMobileTab(tab);
-                  if (tab === 'inbox') {
-                    ticketApi.goToInbox();
-                  } else {
-                    ticketApi.goToDashboard();
-                  }
-                }}
-                appearance="subtle"
-                style={{ width: '100%' }}
-              >
-                <Tab value="inbox" style={{ flex: '1 1 0', justifyContent: 'center' }}>
-                  Inbox
-                  {openInboxCount > 0 && (
-                    <CounterBadge count={openInboxCount} size="small" color="brand" className={styles.inboxBadge} />
-                  )}
-                </Tab>
-                <Tab value="projects" style={{ flex: '1 1 0', justifyContent: 'center' }}>
-                  Projects
-                </Tab>
-              </TabList>
-            </div>
-          )}
+          <TopAppBar
+            title={mobileHeaderTitle}
+            onBack={mobileBackHandler}
+            leading={mobileNavButton}
+            actions={
+              view.type === 'inbox' && !view.selectedItemId ? (
+                mobileAddInboxButton
+              ) : view.type === 'project' ? (
+                <ProjectActions projectId={view.projectId} />
+              ) : view.type === 'ticket' ? (
+                mobileTicketErrorActions
+              ) : undefined
+            }
+            className="bg-surface-raised"
+          />
         </div>
 
         {/* Content — only mount one layout to avoid duplicate stateful editors */}
@@ -267,33 +304,59 @@ export const Tickets = memo(() => {
               {view.type === 'inbox' && <InboxView selectedItemId={view.selectedItemId} />}
               {view.type === 'project' && <ProjectPage projectId={view.projectId} />}
               {view.type === 'page' && <PageView key={view.pageId} pageId={view.pageId} projectId={view.projectId} />}
-              {view.type === 'milestone' && <MilestoneDetail milestoneId={view.milestoneId} projectId={view.projectId} />}
-              {view.type === 'board' && (
-                <WorkItemsList projectId={view.projectId} title="Board" contextLabel={activeProject?.label} onBack={handleBack} />
+              {view.type === 'milestone' && (
+                <MilestoneDetail milestoneId={view.milestoneId} projectId={view.projectId} />
               )}
-              {view.type === 'ticket' && <TicketDetail key={view.ticketId} ticketId={view.ticketId} onClose={handleTicketBack} closeBehavior="back" />}
+              {view.type === 'board' && (
+                <WorkItemsList
+                  projectId={view.projectId}
+                  title="Board"
+                  contextLabel={activeProject?.label}
+                  onBack={handleBack}
+                />
+              )}
+              {view.type === 'ticket' && (
+                <TicketDetail
+                  key={view.ticketId}
+                  ticketId={view.ticketId}
+                  onClose={handleTicketBack}
+                  closeBehavior="back"
+                />
+              )}
               {view.type === 'dashboard' && <ProjectsDashboard />}
             </div>
           ) : (
             <div className={styles.mobileContent}>
-              {mobileTab === 'inbox' && <InboxView selectedItemId={view.type === 'inbox' ? view.selectedItemId : undefined} />}
-              {mobileTab === 'projects' && (
-                view.type === 'ticket'
-                  ? <TicketDetail key={view.ticketId} ticketId={view.ticketId} onClose={handleTicketBack} closeBehavior="back" />
-                  : view.type === 'page'
-                    ? <PageView key={view.pageId} pageId={view.pageId} projectId={view.projectId} />
-                    : view.type === 'milestone'
-                      ? <MilestoneDetail milestoneId={view.milestoneId} projectId={view.projectId} />
-                      : view.type === 'board'
-                        ? <WorkItemsList projectId={view.projectId} />
-                        : view.type === 'project'
-                        ? <ProjectPage projectId={view.projectId} />
-                        : <ProjectsDashboard />
+              {view.type === 'inbox' && <InboxView selectedItemId={view.selectedItemId} hideChrome />}
+              {view.type === 'ticket' && (
+                <TicketDetail
+                  key={view.ticketId}
+                  ticketId={view.ticketId}
+                  onClose={handleTicketBack}
+                  closeBehavior="back"
+                  hideTitleBar
+                />
               )}
+              {view.type === 'page' && <PageView key={view.pageId} pageId={view.pageId} projectId={view.projectId} />}
+              {view.type === 'milestone' && (
+                <MilestoneDetail milestoneId={view.milestoneId} projectId={view.projectId} />
+              )}
+              {view.type === 'board' && <WorkItemsList projectId={view.projectId} />}
+              {view.type === 'project' && <ProjectPage projectId={view.projectId} />}
+              {view.type === 'dashboard' && <ProjectsDashboard />}
             </div>
           )}
         </div>
       </div>
+
+      {!isDesktop && (
+        <TicketsSidebar
+          type="overlay"
+          open={mobileNavOpen}
+          onClose={handleCloseMobileNav}
+          onNavigate={handleCloseMobileNav}
+        />
+      )}
 
       <WipLimitOverlay />
     </div>
@@ -306,7 +369,7 @@ const WipLimitOverlay = memo(() => {
   const pendingTicket = useStore($wipDialogPendingTicket);
   const activeTickets = useStore($activeWipTickets);
 
-  const handleDrop = useCallback((droppedTicketId: string) => {
+  const handleDrop = useCallback((_droppedTicketId: string) => {
     const pending = $wipDialogPendingTicket.get();
     $wipDialogPendingTicket.set(null);
     // After stopping the dropped ticket, start the pending one

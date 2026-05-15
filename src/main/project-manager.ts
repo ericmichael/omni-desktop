@@ -468,6 +468,14 @@ export class ProjectManager {
     };
     const projects = [...existing, project];
     this.setProjects(projects);
+    // Ensure the host-side workspace dir exists so the first agent launch
+    // doesn't fail the `isDirectory(workspaceDir)` check in AgentProcess.
+    // Personal projects use the (already-ensured) workspace root; local-source
+    // projects use a user-supplied existing dir; git-remote projects clone
+    // inside the container — so only context-only named projects need this.
+    if (!project.isPersonal && !project.source) {
+      mkdirSync(this.getProjectDirPath(project), { recursive: true });
+    }
     // Seed the project's root page through PageManager. The root page's body
     // is the project brief that used to live in `<projectDir>/context.md`;
     // PageManager seeds it with the brief template under

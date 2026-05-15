@@ -12,8 +12,6 @@ import {
   ArrowClockwise20Regular,
   ArrowLeft20Regular,
   ArrowRight20Regular,
-  BookOpen20Filled,
-  BookOpen20Regular,
   Dismiss20Regular,
   Globe20Regular,
   Star20Filled,
@@ -34,8 +32,6 @@ import { HistoryPanel } from '@/renderer/features/Browser/HistoryPanel';
 import { Omnibox, type OmniboxHandle } from '@/renderer/features/Browser/Omnibox';
 import { PageContextMenu } from '@/renderer/features/Browser/PageContextMenu';
 import { PermissionsBar } from '@/renderer/features/Browser/PermissionsBar';
-import { ProfileSwitcher } from '@/renderer/features/Browser/ProfileSwitcher';
-import { READER_MODE_CSS } from '@/renderer/features/Browser/reader-mode';
 import { $browserState, browserApi, getActiveTab } from '@/renderer/features/Browser/state';
 import { TabStrip } from '@/renderer/features/Browser/TabStrip';
 import { emitter } from '@/renderer/services/ipc';
@@ -162,7 +158,6 @@ type PreviewState = {
 /** Cmd (⌘) on macOS, Ctrl elsewhere. Used in button tooltips. */
 const IS_MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
 const MOD = IS_MAC ? '⌘' : 'Ctrl+';
-const SHIFT = IS_MAC ? '⇧' : 'Shift+';
 
 export const BrowserView = memo(
   ({
@@ -196,6 +191,10 @@ export const BrowserView = memo(
     const styles = useStyles();
     const state = useStore($browserState);
     const tabset = state.tabsets[tabsetId];
+    // Per-session dock browsers are transient and scoped to a workspace column,
+    // so general-purpose-browser affordances (bookmarks, history) are only
+    // surfaced in the global standalone column.
+    const isGlobal = registryScope === 'global';
     const webviewRef = useRef<WebviewHandle>(null);
     const omniRef = useRef<OmniboxHandle>(null);
     const [previewState, setPreviewState] = useState<PreviewState>({ loading: false, error: null });
@@ -203,7 +202,6 @@ export const BrowserView = memo(
     const [findResult, setFindResult] = useState<{ ordinal: number; matches: number } | null>(null);
     const [historyOpen, setHistoryOpen] = useState(false);
     const [ctxMenu, setCtxMenu] = useState<ContextMenuParams | null>(null);
-    const [readerKey, setReaderKey] = useState<string | null>(null);
     const [devtoolsOpen, setDevtoolsOpen] = useState(false);
     const [consoleLog, setConsoleLog] = useState<Array<ConsoleMessage & { timestamp: number }>>([]);
 
@@ -215,20 +213,6 @@ export const BrowserView = memo(
     }, []);
 
     const handleClearConsole = useCallback(() => setConsoleLog([]), []);
-
-    const toggleReader = useCallback(async () => {
-      const handle = webviewRef.current;
-      if (!handle) {
-return;
-}
-      if (readerKey) {
-        await handle.removeInsertedCSS(readerKey);
-        setReaderKey(null);
-      } else {
-        const key = await handle.insertCSS(READER_MODE_CSS);
-        setReaderKey(key);
-      }
-    }, [readerKey]);
 
     // Resolve the active profile & partition.
     const resolvedProfileId = profileId ?? tabset?.profileId ?? 'default';
@@ -255,10 +239,9 @@ return;
     const activeTab = useMemo(() => getActiveTab(tabset), [tabset]);
     const activeTabId = activeTab?.id;
 
-    // Reset reader state when the active tab changes — the injected CSS is
-    // tied to the specific webContents, which is remounted on tab switch.
+    // Clear the captured console log when the active tab changes — entries
+    // are tied to the specific webContents, which is remounted on tab switch.
     useEffect(() => {
-      setReaderKey(null);
       setConsoleLog([]);
     }, [activeTabId]);
 
@@ -494,23 +477,18 @@ void browserApi.closeTab(tabsetId, activeTabId);
         } else if (key === 'r') {
           event.preventDefault();
           webviewRef.current?.reload();
-        } else if (key === 'd') {
+        } else if (key === 'd' && isGlobal) {
           event.preventDefault();
           handleBookmarkToggle();
         } else if (key === 'f') {
           event.preventDefault();
           setFindOpen(true);
-        } else if (event.shiftKey && key === 'h') {
+        } else if (event.shiftKey && key === 'h' && isGlobal) {
           event.preventDefault();
           setHistoryOpen(true);
         } else if (event.shiftKey && key === 't') {
           event.preventDefault();
           void browserApi.reopenTab(tabsetId);
-        } else if (event.shiftKey && key === 'r') {
-          // Safari-style reader toggle. Shadows Chrome's "hard reload" but we
-          // don't bind hard reload elsewhere, so the overlap is harmless.
-          event.preventDefault();
-          void toggleReader();
         } else if (event.key === '=' || event.key === '+') {
           event.preventDefault();
           applyZoom(zoom + 0.1);
@@ -534,7 +512,7 @@ webviewRef.current?.stop();
       };
       window.addEventListener('keydown', handler);
       return () => window.removeEventListener('keydown', handler);
-    }, [activeTabId, applyZoom, handleBookmarkToggle, handleNewTab, previewState.loading, tabsetId, toggleReader, zoom]);
+    }, [activeTabId, applyZoom, handleBookmarkToggle, handleNewTab, isGlobal, previewState.loading, tabsetId, zoom]);
 
     // --- Registry --------------------------------------------------------------
 
@@ -608,34 +586,22 @@ return undefined;
             </button>
           )}
           <Omnibox ref={omniRef} value={activeTab.url} onSubmit={handleOmniboxSubmit} />
-          <button
-            type="button"
-            className={styles.navBtn}
-            aria-label={readerKey ? 'Exit reader mode' : 'Reader mode'}
-            aria-pressed={!!readerKey}
-            title={readerKey ? `Exit reader mode (${MOD}${SHIFT}R)` : `Reader mode (${MOD}${SHIFT}R)`}
-            onClick={() => void toggleReader()}
-          >
-            {readerKey ? (
-              <BookOpen20Filled style={{ width: 14, height: 14, color: tokens.colorBrandForeground1 }} />
-            ) : (
-              <BookOpen20Regular style={{ width: 14, height: 14 }} />
-            )}
-          </button>
-          <button
-            type="button"
-            className={styles.navBtn}
-            aria-label={bookmarked ? 'Remove bookmark' : 'Add bookmark'}
-            aria-pressed={bookmarked}
-            title={bookmarked ? `Remove bookmark (${MOD}D)` : `Add bookmark (${MOD}D)`}
-            onClick={handleBookmarkToggle}
-          >
-            {bookmarked ? (
-              <Star20Filled style={{ width: 14, height: 14, color: 'goldenrod' }} />
-            ) : (
-              <Star20Regular style={{ width: 14, height: 14 }} />
-            )}
-          </button>
+          {isGlobal && (
+            <button
+              type="button"
+              className={styles.navBtn}
+              aria-label={bookmarked ? 'Remove bookmark' : 'Add bookmark'}
+              aria-pressed={bookmarked}
+              title={bookmarked ? `Remove bookmark (${MOD}D)` : `Add bookmark (${MOD}D)`}
+              onClick={handleBookmarkToggle}
+            >
+              {bookmarked ? (
+                <Star20Filled style={{ width: 14, height: 14, color: 'goldenrod' }} />
+              ) : (
+                <Star20Regular style={{ width: 14, height: 14 }} />
+              )}
+            </button>
+          )}
           <button
             type="button"
             className={styles.navBtn}
@@ -653,9 +619,8 @@ return undefined;
             />
           </button>
           <DownloadsTray />
-          <ProfileSwitcher tabsetId={tabsetId} profiles={state.profiles} currentProfileId={resolvedProfileId} />
         </div>
-        <BookmarksBar bookmarks={state.bookmarks} isGlass={isGlass} onOpen={navigateActive} />
+        {isGlobal && <BookmarksBar bookmarks={state.bookmarks} isGlass={isGlass} onOpen={navigateActive} />}
         <PermissionsBar partition={partition} />
         <div className={styles.body}>
           {previewState.loading && <div className={styles.loadingBar} />}
@@ -718,7 +683,7 @@ return undefined;
               onClose={() => setDevtoolsOpen(false)}
             />
           )}
-          {historyOpen && (
+          {isGlobal && historyOpen && (
             <HistoryPanel
               profileId={resolvedProfileId}
               onOpen={navigateActive}

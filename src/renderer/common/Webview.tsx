@@ -9,6 +9,7 @@ import {
   shouldRetryInitialLoad,
 } from '@/lib/webview-navigation';
 import { registerApp, unregisterApp, updateApp } from '@/renderer/features/AppControl/live-registry';
+import { resolveProxiedSrc, unproxyUrl } from '@/renderer/services/proxy-resolver';
 import type { AppHandleId, AppRegistrationPayload } from '@/shared/app-control-types';
 import { isControllableKind } from '@/shared/app-control-types';
 
@@ -153,6 +154,10 @@ export const Webview = forwardRef<WebviewHandle, {
   const registeredHandleRef = useRef<AppHandleId | null>(null);
   const [internalError, setInternalError] = useState<{ code: number; description: string; url: string } | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
+  // Resolved src for the <iframe> in browser/server mode. External http(s)
+  // URLs are routed through `/proxy/<name>/…` so `frame-ancestors` /
+  // `X-Frame-Options` don't block embedding. No-op in Electron `<webview>`.
+  const [iframeSrc, setIframeSrc] = useState<string | undefined>(isElectron ? src : undefined);
 
   useEffect(() => {
  onReadyRef.current = onReady; 
@@ -185,6 +190,27 @@ export const Webview = forwardRef<WebviewHandle, {
     srcRef.current = src;
     retryAttemptRef.current = 0;
     setInternalError(null);
+  }, [src]);
+  // Resolve external URLs through the server's /proxy reverse-proxy so the
+  // iframe doesn't get killed by X-Frame-Options / frame-ancestors.
+  useEffect(() => {
+    if (isElectron) {
+      setIframeSrc(src);
+      return;
+    }
+    if (!src) {
+      setIframeSrc(undefined);
+      return;
+    }
+    let cancelled = false;
+    void resolveProxiedSrc(src).then((resolved) => {
+      if (!cancelled) {
+        setIframeSrc(resolved);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [src]);
   useEffect(() => {
     registryRef.current = registry;
@@ -608,7 +634,7 @@ onTitleRef.current?.(e.title);
           try {
             const href = iframe.contentWindow?.location.href;
             if (href && href !== 'about:blank') {
-              onNavigateRef.current?.(href);
+              onNavigateRef.current?.(unproxyUrl(href));
             }
             const title = iframe.contentDocument?.title;
             if (title) {
@@ -644,7 +670,7 @@ return;
             const level = data.level === 'error' ? 'error' : data.level === 'warn' ? 'warn' : 'log';
             onConsoleRef.current?.({ level, message: data.message ?? '' });
           } else if (data?.type === '__preview_navigate__' && data.url) {
-            onNavigateRef.current?.(data.url);
+            onNavigateRef.current?.(unproxyUrl(data.url));
           } else if (data?.type === '__preview_title__' && data.title) {
             onTitleRef.current?.(data.title);
           }
@@ -721,7 +747,7 @@ return;
     <iframe
       key={reloadNonce}
       ref={callbackRef as React.RefCallback<HTMLIFrameElement>}
-      src={src}
+      src={iframeSrc}
       style={{ width: '100%', height: '100%', border: 'none' }}
       sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
     />

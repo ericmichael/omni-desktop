@@ -6,6 +6,13 @@ import type { WsHandler } from '@/server/ws-handler';
 /** Map from proxy prefix (e.g. "chat-uiUrl") to upstream origin (e.g. "http://localhost:8082") */
 const upstreamMap = new Map<string, string>();
 
+/** Default allowlist when none is supplied: loopback only. */
+const defaultIsTrusted = (addr: string): boolean => {
+  if (!addr) return false;
+  const normalized = addr.startsWith('::ffff:') ? addr.slice(7) : addr;
+  return normalized === '127.0.0.1' || normalized === '::1';
+};
+
 /**
  * Register a proxy upstream and return the proxy path prefix.
  * Used by the preview system to dynamically route arbitrary URLs through the proxy.
@@ -18,8 +25,16 @@ export const registerProxyUpstream = (proxyName: string, upstreamOrigin: string)
 /**
  * Register the wildcard proxy route, WebSocket proxy routes, and URL rewriting interceptors.
  * Must be called BEFORE fastify.listen() so routes are registered at boot time.
+ *
+ * `isTrusted` decides whether a remote address may call `/proxy/_register`.
+ * Pass the same allowlist used by `/api/ws-token` so `OMNI_TRUSTED_CIDRS`
+ * controls both endpoints uniformly (Tailscale, WireGuard, etc.).
  */
-export const setupProxyRewriter = (fastify: FastifyInstance, wsHandler: WsHandler): void => {
+export const setupProxyRewriter = (
+  fastify: FastifyInstance,
+  wsHandler: WsHandler,
+  isTrusted: (remoteAddress: string) => boolean = defaultIsTrusted,
+): void => {
   // --- Combined HTTP + WebSocket proxy ---
   // Register inside a plugin so GET can handle both HTTP and WS upgrades on the same path.
   void fastify.register(async function proxyRoutes(f) {
@@ -50,13 +65,14 @@ export const setupProxyRewriter = (fastify: FastifyInstance, wsHandler: WsHandle
   });
 
   // --- Dynamic proxy registration endpoint ---
-  // Set OMNI_ALLOW_EXTERNAL_REGISTER=1 only if callers are trusted (e.g. internal k8s cluster).
+  // Gated by the same allowlist as /api/ws-token (loopback + OMNI_TRUSTED_CIDRS).
+  // OMNI_ALLOW_EXTERNAL_REGISTER=1 is a backstop escape hatch for environments
+  // where the CIDR list can't be expressed cleanly (e.g. dynamic peer ranges).
   fastify.post('/proxy/_register', {
     onRequest: async (request, reply) => {
       const addr = request.socket.remoteAddress ?? '';
-      const isLoopback = addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
-      if (!isLoopback && !process.env['OMNI_ALLOW_EXTERNAL_REGISTER']) {
-        reply.code(403).send({ error: 'Forbidden: only loopback clients may register proxy upstreams' });
+      if (!isTrusted(addr) && !process.env['OMNI_ALLOW_EXTERNAL_REGISTER']) {
+        reply.code(403).send({ error: 'Forbidden: caller not in trusted network' });
         return;
       }
     },

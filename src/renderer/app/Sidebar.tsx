@@ -1,4 +1,4 @@
-import { makeStyles, mergeClasses, tokens,Tooltip } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, tokens, Tooltip } from '@fluentui/react-components';
 import {
   Beaker24Regular,
   Chat24Filled,
@@ -15,6 +15,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { OmniLogo } from '@/renderer/common/AsciiLogo';
 import { CounterBadge } from '@/renderer/ds';
 import { $activeInboxCount } from '@/renderer/features/Inbox/state';
+import { ticketApi } from '@/renderer/features/Tickets/state';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { LayoutMode } from '@/shared/types';
@@ -243,7 +244,12 @@ export const Sidebar = memo(() => {
   const isBrandedRail = store.theme === 'utrgv' && !isGlass;
 
   const setMode = useCallback(
-    (mode: LayoutMode) => () => persistedStoreApi.setKey('layoutMode', mode),
+    (mode: LayoutMode) => () => {
+      persistedStoreApi.setKey('layoutMode', mode);
+      if (mode === 'projects') {
+        ticketApi.goToDashboard();
+      }
+    },
     []
   );
 
@@ -255,14 +261,14 @@ export const Sidebar = memo(() => {
   const visibleTabs = useMemo(() => {
     return ALL_TABS.filter((t) => {
       if (t.devOnly) {
-return import.meta.env.DEV;
-}
+        return import.meta.env.DEV;
+      }
       if (t.alwaysVisible) {
-return true;
-}
+        return true;
+      }
       if (t.enterprise) {
-return isEnterprise;
-}
+        return isEnterprise;
+      }
       return true;
     });
   }, [isEnterprise]);
@@ -277,13 +283,13 @@ return isEnterprise;
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLElement>) => {
     const nav = navRef.current;
     if (!nav) {
-return;
-}
+      return;
+    }
     const buttons = Array.from(nav.querySelectorAll<HTMLButtonElement>('button[role="tab"]'));
     const current = buttons.indexOf(e.target as HTMLButtonElement);
     if (current === -1) {
-return;
-}
+      return;
+    }
 
     let next = -1;
     if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
@@ -353,9 +359,7 @@ return;
       <div className={styles.spacer} />
 
       {/* Bottom-pinned tabs (Settings) — desktop only */}
-      <div className={styles.settingsWrap}>
-        {bottomTabs.map((tab) => renderTab(tab))}
-      </div>
+      <div className={styles.settingsWrap}>{bottomTabs.map((tab) => renderTab(tab))}</div>
     </nav>
   );
 });

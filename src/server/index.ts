@@ -107,8 +107,9 @@ const main = async () => {
   const wsHandler = new WsHandler();
   const store = new ServerStore();
 
-  // Set up reverse proxy URL rewriting for internal services (chat, sandbox, etc.)
-  setupProxyRewriter(fastify, wsHandler);
+  // Set up reverse proxy URL rewriting for internal services (chat, sandbox, etc.).
+  // Share the ws-token allowlist so /proxy/_register honors OMNI_TRUSTED_CIDRS too.
+  setupProxyRewriter(fastify, wsHandler, tokenAllowList.check);
 
   // Wire global (shared) IPC handlers — store, util, config, project, code, chat, sandbox, install
   const { cleanupGlobalManagers } = wireGlobalHandlers({ wsHandler, store });

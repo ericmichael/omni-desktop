@@ -2,14 +2,33 @@ import {
   makeStyles,
   NavDrawer,
   NavDrawerBody,
+  type NavDrawerProps,
   Subtitle2,
   tokens,
 } from '@fluentui/react-components';
-import { Add20Regular, ChevronDown12Regular, ChevronRight12Regular, Home16Regular, MailInbox16Regular } from '@fluentui/react-icons';
+import {
+  Add20Regular,
+  ChevronDown12Regular,
+  ChevronRight12Regular,
+  Dismiss20Regular,
+  Home16Regular,
+  MailInbox16Regular,
+} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import type { KeyboardEvent } from 'react';
 import { memo, useCallback, useMemo, useState } from 'react';
 
-import { AnimatedDialog, Caption1, DialogBody, DialogContent, DialogHeader, IconButton, Tree, TreeItem, TreeItemLayout } from '@/renderer/ds';
+import {
+  AnimatedDialog,
+  Caption1,
+  DialogBody,
+  DialogContent,
+  DialogHeader,
+  IconButton,
+  Tree,
+  TreeItem,
+  TreeItemLayout,
+} from '@/renderer/ds';
 import { $activeInbox } from '@/renderer/features/Inbox/state';
 import { $milestones, milestoneApi } from '@/renderer/features/Initiatives/state';
 import { $pages, pageApi } from '@/renderer/features/Pages/state';
@@ -103,46 +122,60 @@ const useStyles = makeStyles({
 /** Build a unique selectedValue from the current view state. */
 function viewToNavValue(view: ReturnType<typeof $ticketsView.get>): string | undefined {
   if (view.type === 'dashboard') {
-return 'home';
-}
+    return 'home';
+  }
   if (view.type === 'inbox') {
-return view.selectedItemId ? `inbox:${view.selectedItemId}` : 'inbox';
-}
+    return view.selectedItemId ? `inbox:${view.selectedItemId}` : 'inbox';
+  }
   if (view.type === 'project') {
-return `project:${view.projectId}`;
-}
+    return `project:${view.projectId}`;
+  }
   if (view.type === 'ticket') {
-return `ticket:${view.ticketId}`;
-}
+    return `ticket:${view.ticketId}`;
+  }
   if (view.type === 'page') {
-return `page:${view.pageId}:${view.projectId}`;
-}
+    return `page:${view.pageId}:${view.projectId}`;
+  }
   if (view.type === 'milestone') {
-return `milestone:${view.milestoneId}:${view.projectId}`;
-}
+    return `milestone:${view.milestoneId}:${view.projectId}`;
+  }
   if (view.type === 'board') {
-return `board:${view.projectId}`;
-}
+    return `board:${view.projectId}`;
+  }
   return undefined;
 }
 
 /** Lightweight collapsible section header — small gray text + chevron, like Teams. */
 const SectionHeader = memo(({ label, open, onToggle }: { label: string; open: boolean; onToggle: () => void }) => {
   const styles = useStyles();
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (event.key === 'Enter') {
+        onToggle();
+      }
+    },
+    [onToggle]
+  );
+
   return (
-    <div className={styles.sectionHeader} onClick={onToggle} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onToggle()}>
-      <span className={styles.chevron}>
-        {open ? <ChevronDown12Regular /> : <ChevronRight12Regular />}
-      </span>
+    <div className={styles.sectionHeader} onClick={onToggle} role="button" tabIndex={0} onKeyDown={handleKeyDown}>
+      <span className={styles.chevron}>{open ? <ChevronDown12Regular /> : <ChevronRight12Regular />}</span>
       <span className={styles.sectionLabel}>{label}</span>
     </div>
   );
 });
 SectionHeader.displayName = 'SectionHeader';
 
+type TicketsSidebarProps = {
+  onNavigate?: () => void;
+  type?: NavDrawerProps['type'];
+  open?: boolean;
+  onClose?: () => void;
+};
+
 /* ── Main sidebar ── */
 
-export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void }) => {
+export const TicketsSidebar = memo(({ onNavigate, type = 'inline', open = true, onClose }: TicketsSidebarProps) => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const view = useStore($ticketsView);
@@ -166,6 +199,14 @@ export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void })
     setEditingMilestone(null);
   }, []);
   const toggleProjects = useCallback(() => setProjectsOpen((v) => !v), []);
+  const handleOpenChange = useCallback(
+    (_event: unknown, data: { open: boolean }) => {
+      if (!data.open) {
+        onClose?.();
+      }
+    },
+    [onClose]
+  );
 
   // Fetch project data when expanding in the tree (without navigating)
   const handleExpandProject = useCallback((projectId: string) => {
@@ -210,15 +251,13 @@ export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void })
   );
 
   const activeInbox = useStore($activeInbox);
-  const openInboxItems = useMemo(
-    () => [...activeInbox].sort((a, b) => b.createdAt - a.createdAt),
-    [activeInbox]
-  );
+  const openInboxItems = useMemo(() => [...activeInbox].sort((a, b) => b.createdAt - a.createdAt), [activeInbox]);
 
   return (
     <NavDrawer
-      type="inline"
-      open
+      type={type}
+      open={open}
+      onOpenChange={handleOpenChange}
       selectedValue={selectedValue}
       className={styles.drawer}
       size="small"
@@ -227,6 +266,9 @@ export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void })
       <div className={styles.header}>
         <Subtitle2 className={styles.headerTitle}>Projects</Subtitle2>
         <IconButton aria-label="New project" icon={<Add20Regular />} size="sm" onClick={handleOpenForm} />
+        {type === 'overlay' && (
+          <IconButton aria-label="Close navigation" icon={<Dismiss20Regular />} size="sm" onClick={onClose} />
+        )}
       </div>
 
       <NavDrawerBody className={styles.body}>
@@ -248,8 +290,8 @@ export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void })
 
         {/* ── Projects Tree ── */}
         <SectionHeader label="Projects" open={projectsOpen} onToggle={toggleProjects} />
-        {projectsOpen && (
-          projects.length === 0 ? (
+        {projectsOpen &&
+          (projects.length === 0 ? (
             <Caption1 className={styles.emptyHint}>No projects yet</Caption1>
           ) : (
             <SidebarTree
@@ -263,13 +305,12 @@ export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void })
               onCreateMilestone={handleCreateMilestone}
               onEditMilestone={handleEditMilestone}
             />
-          )
-        )}
+          ))}
       </NavDrawerBody>
 
       <ProjectForm open={formOpen} onClose={handleCloseForm} />
       <AnimatedDialog
-        open={milestoneFormProjectId != null || editingMilestone != null}
+        open={milestoneFormProjectId !== null || editingMilestone !== null}
         onClose={handleCloseMilestoneForm}
       >
         <DialogContent>

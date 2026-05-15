@@ -11,6 +11,7 @@ import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-co
 import {
   Add20Regular,
   Apps20Regular,
+  ArrowLeft20Regular,
   ArrowMaximize20Regular,
   ArrowMinimize20Regular,
   BranchFork20Regular,
@@ -27,7 +28,6 @@ import { forwardRef, Fragment, memo, useCallback, useEffect, useMemo, useRef, us
 import { customAppPartition } from '@/lib/app-partition';
 import { uuidv4 } from '@/lib/uuid';
 import { Webview } from '@/renderer/common/Webview';
-import { BrowserView } from '@/renderer/features/Browser/BrowserView';
 import {
   Button,
   Menu,
@@ -38,6 +38,8 @@ import {
   MenuTrigger,
   SegmentedControl,
 } from '@/renderer/ds';
+import { BrowserView } from '@/renderer/features/Browser/BrowserView';
+import { ConsoleStarted } from '@/renderer/features/Console/ConsoleRunning';
 import { $previewRequest, clearPreviewRequest } from '@/renderer/features/Tickets/preview-bridge';
 import { ticketApi } from '@/renderer/features/Tickets/state';
 import {
@@ -46,7 +48,6 @@ import {
   TicketResolutionBadge,
 } from '@/renderer/features/Tickets/TicketControls';
 import { type TicketPanel, TicketPanelOverlay } from '@/renderer/features/Tickets/TicketPanelOverlay';
-import { ConsoleStarted } from '@/renderer/features/Console/ConsoleRunning';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { AppHandleScope } from '@/shared/app-control-types';
 import { makeAppHandleId } from '@/shared/app-control-types';
@@ -678,28 +679,14 @@ const CodeDeckHeader = memo(
     isGlass?: boolean;
   }) => {
     const styles = useStyles();
+    const handleBack = useCallback(() => persistedStoreApi.setKey('layoutMode', 'chat'), []);
+
     return (
       <div className={mergeClasses(styles.deckHeader, isGlass && styles.glassDeckHeader)}>
         <div className={styles.deckHeaderNav}>
-          <Menu positioning={{ position: 'below', align: 'start' }}>
-            <MenuTrigger>
-              <button type="button" className={styles.mobileNavBtn} aria-label="Navigate">
-                <Navigation20Regular style={{ width: 18, height: 18 }} />
-              </button>
-            </MenuTrigger>
-            <MenuPopover>
-              <MenuList>
-                <MenuItem onClick={() => onLayoutMode(layoutMode === 'tile' ? 'focus' : 'tile')}>
-                  Switch to {layoutMode === 'tile' ? 'Focus' : 'Tile'}
-                </MenuItem>
-                <MenuDivider />
-                <MenuItem onClick={() => persistedStoreApi.setKey('layoutMode', 'chat')}>Chat</MenuItem>
-                <MenuItem onClick={() => persistedStoreApi.setKey('layoutMode', 'projects')}>Projects</MenuItem>
-                <MenuDivider />
-                <MenuItem onClick={() => persistedStoreApi.setKey('layoutMode', 'settings')}>Settings</MenuItem>
-              </MenuList>
-            </MenuPopover>
-          </Menu>
+          <button type="button" className={styles.mobileNavBtn} aria-label="Back to Chat" onClick={handleBack}>
+            <ArrowLeft20Regular style={{ width: 18, height: 18 }} />
+          </button>
         </div>
         <div className={styles.deckHeaderActions}>
           <SegmentedControl
@@ -929,7 +916,13 @@ const DeckColumn = memo(
         style={style}
         className={mergeClasses(styles.deckColumn, isDragging && styles.deckColumnDragging)}
       >
-        <div className={mergeClasses(styles.deckColumnBordered, isGlass && styles.glassCard, hasSidecar && styles.cardNoRightMargin)}>
+        <div
+          className={mergeClasses(
+            styles.deckColumnBordered,
+            isGlass && styles.glassCard,
+            hasSidecar && styles.cardNoRightMargin
+          )}
+        >
           <CodeSessionHeader
             label={label}
             ticketTitle={ticketTitle}
@@ -1064,7 +1057,12 @@ const AppColumn = memo(
             </div>
           </div>
           <div className={styles.flex1MinH0Relative}>
-            <Webview src={app.url} partition={customAppPartition(app.id)} showUnavailable={false} registry={registryProps} />
+            <Webview
+              src={app.url}
+              partition={customAppPartition(app.id)}
+              showUnavailable={false}
+              registry={registryProps}
+            />
           </div>
         </div>
         <div className={styles.deckDockSlot} />
@@ -1173,7 +1171,16 @@ type SidecarBodyProps = {
  * browser page, loaded code-server session, etc.
  */
 const SidecarBody = memo(
-  ({ app, originTabId, sandboxUrls, terminalCwd, previewUrl, onPreviewUrlChange, isGlass, hidden }: SidecarBodyProps) => {
+  ({
+    app,
+    originTabId,
+    sandboxUrls,
+    terminalCwd,
+    previewUrl,
+    onPreviewUrlChange,
+    isGlass,
+    hidden,
+  }: SidecarBodyProps) => {
     const styles = useStyles();
     const registryProps = useMemo(
       () => ({
@@ -1215,17 +1222,18 @@ const SidecarBody = memo(
       );
     } else if (app.kind === 'webview') {
       body = app.url ? (
-        <Webview src={app.url} partition={customAppPartition(app.id)} showUnavailable={false} registry={registryProps} />
+        <Webview
+          src={app.url}
+          partition={customAppPartition(app.id)}
+          showUnavailable={false}
+          registry={registryProps}
+        />
       ) : (
         <div className={styles.sidecarUnavailable}>No URL configured.</div>
       );
     }
 
-    return (
-      <div className={mergeClasses(styles.sidecarBodyFill, hidden && styles.sidecarBodyHidden)}>
-        {body}
-      </div>
-    );
+    return <div className={mergeClasses(styles.sidecarBodyFill, hidden && styles.sidecarBodyHidden)}>{body}</div>;
   }
 );
 SidecarBody.displayName = 'SidecarBody';
@@ -1266,9 +1274,7 @@ const SidecarColumn = memo(
     // its DOM survives sidecar app switches. Without this, switching away
     // from the browser tears down the <webview> and it reloads on return;
     // switching away from the terminal drops the xterm's attached element.
-    const [mounted, setMounted] = useState<Map<AppId, AppDescriptor>>(
-      () => new Map([[app.id, app]])
-    );
+    const [mounted, setMounted] = useState<Map<AppId, AppDescriptor>>(() => new Map([[app.id, app]]));
     useEffect(() => {
       setMounted((prev) => {
         if (prev.has(app.id)) {
@@ -2128,8 +2134,7 @@ export const CodeDeck = memo(() => {
                       ? tabStatus.data
                       : undefined;
                   const tabTerminalCwd =
-                    tab.workspaceDir ??
-                    (tab.projectId ? projectMap.get(tab.projectId)?.workspaceDir : undefined);
+                    tab.workspaceDir ?? (tab.projectId ? projectMap.get(tab.projectId)?.workspaceDir : undefined);
                   return (
                     <Fragment key={tab.id}>
                       <div style={{ width: getColumnWidth(tab.id) }} className={styles.deckColumnWrap}>

@@ -139,6 +139,14 @@ const TabItem = memo(({ tab, active, onSelect, onClose, onPinToggle, onDuplicate
     [onClose, tab.id]
   );
 
+  // Stop pointer events from the close button (and other interactive
+  // children) from reaching dnd-kit's sortable listeners on the parent
+  // tab div. Without this, mouse jitter on click can activate the drag
+  // sensor and swallow the synthetic click event.
+  const stopPointer = useCallback((e: React.PointerEvent | React.MouseEvent) => {
+    e.stopPropagation();
+  }, []);
+
   return (
     <div
       ref={setNodeRef}
@@ -186,7 +194,14 @@ const TabItem = memo(({ tab, active, onSelect, onClose, onPinToggle, onDuplicate
         </MenuPopover>
       </Menu>
       {!tab.pinned && (
-        <button type="button" className={styles.close} onClick={handleClose} aria-label={`Close ${title}`}>
+        <button
+          type="button"
+          className={styles.close}
+          onClick={handleClose}
+          onPointerDown={stopPointer}
+          onMouseDown={stopPointer}
+          aria-label={`Close ${title}`}
+        >
           <Dismiss16Regular />
         </button>
       )}
