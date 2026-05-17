@@ -5,6 +5,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Input, Select, Switch, Textarea } from '@/renderer/ds';
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import { persistedStoreApi } from '@/renderer/services/store';
+import { firstSource } from '@/shared/types';
 import type { GitRepoInfo, MilestoneId, ProjectId, TicketPriority } from '@/shared/types';
 
 import { $activeMilestoneId, $tickets, ticketApi } from './state';
@@ -55,7 +56,7 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
 
   const store = useStore(persistedStoreApi.$atom);
   const project = useMemo(() => store.projects.find((p) => p.id === projectId), [store.projects, projectId]);
-  const projectHasRepo = project?.source != null;
+  const projectHasRepo = firstSource(project) != null;
 
   const milestones = useStore($milestones);
   const activeMilestoneId = useStore($activeMilestoneId);
@@ -80,10 +81,11 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
     if (!project) {
 return;
 }
-    if (project.source?.kind !== 'local') {
+    const projectSource = firstSource(project);
+    if (projectSource?.kind !== 'local') {
 return;
 }
-    ticketApi.checkGitRepo(project.source.workspaceDir).then((info) => {
+    ticketApi.checkGitRepo(projectSource.workspaceDir).then((info) => {
       setGitInfo(info);
       if (info.isGitRepo) {
         setBranch(info.currentBranch);

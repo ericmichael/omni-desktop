@@ -5,6 +5,7 @@ import { Button, Input, Select, Textarea } from '@/renderer/ds';
 import { milestoneApi } from '@/renderer/features/Initiatives/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { GitRepoInfo, Milestone, ProjectId } from '@/shared/types';
+import { firstSource } from '@/shared/types';
 
 import { ticketApi } from './state';
 
@@ -61,10 +62,12 @@ export const MilestoneForm = memo(({
     if (!project) {
 return;
 }
-    if (project.source?.kind !== 'local') {
+    if (firstSource(project)?.kind !== 'local') {
 return;
 }
-    ticketApi.checkGitRepo(project.source.workspaceDir).then((info) => {
+    const s = firstSource(project);
+    if (s?.kind !== 'local') return;
+    ticketApi.checkGitRepo(s.workspaceDir).then((info) => {
       setGitInfo(info);
     });
   }, [project]);

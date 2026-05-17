@@ -12,6 +12,7 @@ import {
   pollProcessStatus,
   teardownTerminal,
 } from '@/renderer/services/agent-process';
+import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type {
   CodeLayoutMode,
@@ -45,7 +46,12 @@ export const codeApi = {
   },
 
   addTab: async (): Promise<CodeTab> => {
-    const tab: CodeTab = { id: nanoid(), projectId: null, createdAt: Date.now() };
+    const tab: CodeTab = {
+      id: nanoid(),
+      projectId: null,
+      sessionId: nanoid(),
+      createdAt: Date.now(),
+    };
     const tabs = [...(persistedStoreApi.getKey('codeTabs') ?? []), tab];
     await persistedStoreApi.setKey('codeTabs', tabs);
     await persistedStoreApi.setKey('activeCodeTabId', tab.id);
@@ -53,6 +59,7 @@ export const codeApi = {
   },
 
   removeTab: async (tabId: CodeTabId) => {
+    const tab = (persistedStoreApi.getKey('codeTabs') ?? []).find((t) => t.id === tabId);
     await codeApi.stopSandbox(tabId);
     await destroyAllTerminalsForTab(tabId);
 
@@ -73,6 +80,12 @@ export const codeApi = {
     await persistedStoreApi.setKey('codeTabs', tabs);
     if (activeId === tabId) {
       await persistedStoreApi.setKey('activeCodeTabId', tabs[tabs.length - 1]?.id ?? null);
+    }
+
+    // Cascade: delete the tab's workspace snapshot. Tab is gone for
+    // good (no resume UI for deleted tabs), so the tar is dead weight.
+    if (tab?.sessionId) {
+      void emitter.invoke('snapshot:delete', tab.sessionId);
     }
   },
 
@@ -112,6 +125,7 @@ export const codeApi = {
       id: nanoid(),
       projectId,
       ticketId,
+      sessionId: nanoid(),
       ticketTitle: opts?.ticketTitle,
       workspaceDir: opts?.workspaceDir,
       createdAt: Date.now(),
@@ -123,7 +137,13 @@ export const codeApi = {
   },
 
   addAppTab: async (customAppId: string): Promise<CodeTab> => {
-    const tab: CodeTab = { id: nanoid(), projectId: null, customAppId, createdAt: Date.now() };
+    const tab: CodeTab = {
+      id: nanoid(),
+      projectId: null,
+      sessionId: nanoid(),
+      customAppId,
+      createdAt: Date.now(),
+    };
     const tabs = [...(persistedStoreApi.getKey('codeTabs') ?? []), tab];
     await persistedStoreApi.setKey('codeTabs', tabs);
     return tab;

@@ -5,12 +5,15 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { buildSessionVariables } from '@/lib/client-tools';
 import { FloatingWidget } from '@/renderer/features/Omni/FloatingWidget';
+import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
+import { SandboxPicker } from '@/renderer/features/SandboxProfile/SandboxPicker';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
-import { OmniAgentsApp, OmniAgentsHostApp } from '@/renderer/omniagents-ui';
+import { emitter } from '@/renderer/services/ipc';
+import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import { ChatShell } from '@/renderer/omniagents-ui/ChatShell';
 import { getGreeting } from '@/renderer/omniagents-ui/greeting';
-import { buildSandboxLabel } from '@/renderer/omniagents-ui/sandbox-label';
+import { buildProfileLabel } from '@/renderer/omniagents-ui/sandbox-label';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
 
 import { $chatProcessStatus } from './state';
@@ -76,6 +79,9 @@ const SandboxRunningView = memo(
     theme,
     greeting,
     sandboxLabel,
+    sandboxOptions,
+    currentSandboxProfile,
+    onSandboxChange,
     sessionId,
     onSessionChange,
     variables,
@@ -83,12 +89,14 @@ const SandboxRunningView = memo(
   }: {
     sandboxUrls: {
       uiUrl: string;
-      codeServerUrl?: string;
-      noVncUrl?: string;
+      services?: Record<string, string>;
     };
     theme: string;
     greeting?: string;
     sandboxLabel?: string;
+    sandboxOptions?: { value: string; label: string }[];
+    currentSandboxProfile?: string;
+    onSandboxChange?: (value: string) => void;
     sessionId?: string;
     onSessionChange?: (sessionId: string | undefined) => void;
     variables?: Record<string, unknown>;
@@ -101,7 +109,7 @@ const SandboxRunningView = memo(
       }
       return url.toString();
     }, [sandboxUrls.uiUrl, theme]);
-    const vncSrc = sandboxUrls.noVncUrl;
+    const vncSrc = sandboxUrls.services?.['vnc'];
 
     const [vncOverlayOpen, setVncOverlayOpen] = useState(false);
     const handleOpenVncOverlay = useCallback(() => setVncOverlayOpen(true), []);
@@ -113,7 +121,7 @@ const SandboxRunningView = memo(
       <div className={styles.flexColFullRelative}>
         <div className={styles.flex1Relative}>
           <div className={styles.fullSizeRelative}>
-            <OmniAgentsApp uiUrl={uiSrc} greeting={greeting} sandboxLabel={sandboxLabel} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables ?? buildSessionVariables({ surface: 'chat' })} onClientToolCall={onClientToolCall ?? buildClientToolHandler()} pendingPlan={pendingPlan} onPlanDecision={resolvePlanApproval} />
+            <OmniAgentsApp uiUrl={uiSrc} greeting={greeting} sandboxLabel={sandboxLabel} sandboxOptions={sandboxOptions} currentSandboxProfile={currentSandboxProfile} onSandboxChange={onSandboxChange} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables ?? buildSessionVariables({ surface: 'chat' })} onClientToolCall={onClientToolCall ?? buildClientToolHandler()} pendingPlan={pendingPlan} onPlanDecision={resolvePlanApproval} />
             {vncSrc && (
               <FloatingWidget
                 src={vncSrc}
@@ -139,47 +147,59 @@ export const Chat = memo(() => {
   const initialized = useStore($initialized);
   const chatStatus = useStore($chatProcessStatus);
   const store = useStore(persistedStoreApi.$atom);
-  const { phase, error, retry, launch, sandboxEnabled } = useChatAutoLaunch();
+  // Per-launch profile override. ``undefined`` = use defaults (user
+  // default → store). Reset when the chat exits so the next idle picks
+  // up store changes again.
+  const [profileOverride, setProfileOverride] = useState<string | undefined>(undefined);
+  const { phase, error, retry, launch, profileName } = useChatAutoLaunch({
+    ...(profileOverride ? { profileNameOverride: profileOverride } : {}),
+  });
   const [greeting] = useState(getGreeting);
   const [runningMounted, setRunningMounted] = useState(false);
-  const pendingPlan = useStore($pendingPlan);
+  const [isEnterprise, setIsEnterprise] = useState(false);
   const variables = useMemo(() => buildSessionVariables({ surface: 'chat' }), []);
   const toolHandler = useMemo(() => buildClientToolHandler(), []);
 
+  useEffect(() => {
+    emitter.invoke('platform:is-enterprise').then(setIsEnterprise);
+  }, []);
+
   const isGlass = !!store.codeDeckBackground;
   const theme = store.theme ?? 'teams-light';
-  const sandboxBackend = store.sandboxBackend ?? 'none';
-  const sandboxLabel = useMemo(() => (sandboxBackend !== 'none' ? buildSandboxLabel(sandboxBackend) : undefined), [sandboxBackend]);
+  const sandboxLabel = useMemo(() => buildProfileLabel(profileName), [profileName]);
+  const sandboxOptions = useMemo(
+    () => getAvailableProfileNames({ isEnterprise }).map((name) => ({
+      value: name,
+      label: getProfileMenuLabel(name),
+    })),
+    [isEnterprise]
+  );
 
   const chatSessionId = store.chatSessionId ?? undefined;
   const handleSessionChange = useCallback((sessionId: string | undefined) => {
     persistedStoreApi.setKey('chatSessionId', sessionId ?? null);
   }, []);
 
-  // Derive URLs from chatStatus (unified — handles both local and sandbox modes)
+  // Every chat goes through `omni serve` after the v22 cut — the JSON-RPC
+  // WebSocket URL lives in chatData.uiUrl regardless of profile.
+  //
+  // Only mount the iframe on ``running``. ``connecting`` arrives the moment
+  // omni-serve emits its JSON readiness line, which is *before* uvicorn has
+  // actually bound the port — pointing the iframe there causes a brief
+  // ERR_CONNECTION_REFUSED / uvicorn error flash before the real UI loads.
+  // ``agent-process.ts`` already gates the ``running`` flip on an HTTP+WS
+  // health probe, so by the time we see it the port is truly serving.
   const chatData = useMemo(() => {
-    if (chatStatus.type !== 'running' && chatStatus.type !== 'connecting') {
+    if (chatStatus.type !== 'running') {
       return null;
     }
     return chatStatus.data;
   }, [chatStatus]);
 
-  const localUiUrl = useMemo(() => {
-    if (!chatData) {
-return null;
-}
-    const url = new URL(chatData.uiUrl, window.location.origin);
-    if (theme !== 'default') {
-      url.searchParams.set('theme', theme);
-    }
-    return url.toString();
-  }, [chatData, theme]);
-
-  // Reset when URLs go away
   useEffect(() => {
     if (!chatData) {
-setRunningMounted(false);
-}
+      setRunningMounted(false);
+    }
   }, [chatData]);
 
   const handleRunningReady = useCallback(() => {
@@ -190,64 +210,58 @@ setRunningMounted(false);
     return null;
   }
 
-  // When sandbox is enabled, use ChatShell + SandboxRunningView (like old Omni.tsx)
-  if (sandboxEnabled) {
-    const hasUrls = !!chatData;
-    const showShell = !hasUrls || !runningMounted;
+  const hasUrls = !!chatData;
+  const showShell = !hasUrls || !runningMounted;
+  const shellPhase =
+    phase === 'error' ? ('error' as const) : phase === 'idle' ? ('idle' as const) : ('loading' as const);
 
-    const shellPhase =
-      phase === 'error' ? ('error' as const) : phase === 'idle' ? ('idle' as const) : ('loading' as const);
-
-    return (
-      <div className={mergeClasses(styles.fullSizeRelative, isGlass && styles.glassRoot)}>
-        {showShell && (
-          <div className={styles.absoluteInsetZ0}>
-            <ChatShell
-              greeting={greeting}
-              phase={shellPhase}
-              error={phase === 'error' ? error : undefined}
-              onRetry={phase === 'error' ? retry : undefined}
-              onLaunch={phase === 'idle' ? launch : undefined}
-              launchDisabled={phase === 'idle' ? !store.workspaceDir : undefined}
-            />
-          </div>
-        )}
-        {hasUrls && (
-          <div
-            className={styles.absoluteInsetZ10}
-            ref={(el) => {
-              if (el) {
-handleRunningReady();
-}
-            }}
-          >
-            <SandboxRunningView sandboxUrls={chatData} theme={theme} greeting={greeting} sandboxLabel={sandboxLabel} sessionId={chatSessionId} onSessionChange={handleSessionChange} variables={variables} onClientToolCall={toolHandler} />
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // When sandbox is disabled, use OmniAgentsHostApp (like old Chat.tsx)
   return (
-    <div className={mergeClasses(styles.fullSize, isGlass && styles.glassRoot)}>
-      <OmniAgentsHostApp
-        variables={variables}
-        onClientToolCall={toolHandler}
-        pendingPlan={pendingPlan}
-        onPlanDecision={resolvePlanApproval}
-        sessionId={chatSessionId}
-        onSessionChange={handleSessionChange}
-        state={
-          localUiUrl
-            ? { type: 'ready', uiUrl: localUiUrl }
-            : phase === 'idle'
-              ? { type: 'idle', onLaunch: launch, disabled: !store.workspaceDir }
-              : phase === 'error'
-                ? { type: 'error', error: error ?? 'An unexpected error occurred.', onRetry: retry }
-                : { type: 'loading' }
-        }
-      />
+    <div className={mergeClasses(styles.fullSizeRelative, isGlass && styles.glassRoot)}>
+      {showShell && (
+        <div className={styles.absoluteInsetZ0}>
+          <ChatShell
+            greeting={greeting}
+            phase={shellPhase}
+            error={phase === 'error' ? error : undefined}
+            onRetry={phase === 'error' ? retry : undefined}
+            onLaunch={phase === 'idle' ? launch : undefined}
+            launchDisabled={phase === 'idle' ? !store.workspaceDir : undefined}
+            prelaunchExtras={
+              phase === 'idle' ? (
+                <SandboxPicker
+                  value={profileName}
+                  onChange={setProfileOverride}
+                  context={{ isEnterprise }}
+                />
+              ) : undefined
+            }
+          />
+        </div>
+      )}
+      {hasUrls && (
+        <div
+          className={styles.absoluteInsetZ10}
+          ref={(el) => {
+            if (el) {
+              handleRunningReady();
+            }
+          }}
+        >
+          <SandboxRunningView
+            sandboxUrls={chatData}
+            theme={theme}
+            greeting={greeting}
+            sandboxLabel={sandboxLabel}
+            sandboxOptions={sandboxOptions}
+            currentSandboxProfile={profileName}
+            onSandboxChange={setProfileOverride}
+            sessionId={chatSessionId}
+            onSessionChange={handleSessionChange}
+            variables={variables}
+            onClientToolCall={toolHandler}
+          />
+        </div>
+      )}
     </div>
   );
 });

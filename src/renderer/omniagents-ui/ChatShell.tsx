@@ -1,4 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
+import type { ReactNode } from 'react';
 import { memo, useCallback, useState } from 'react';
 
 import { Input } from './components/Input';
@@ -16,6 +17,12 @@ type ChatShellProps = {
   onRetry?: () => void;
   onLaunch?: () => void;
   launchDisabled?: boolean;
+  /**
+   * Optional slot rendered alongside the Launch button while idle. Used
+   * by Chat.tsx to mount the pre-launch SandboxPicker so the user can
+   * pick which sandbox profile this session boots against.
+   */
+  prelaunchExtras?: ReactNode;
   onSubmit?: (msg: PendingMessage) => void;
   pendingMessages?: PendingMessage[];
 };
@@ -26,7 +33,7 @@ const headerActions = {
 };
 
 export const ChatShell = memo(
-  ({ greeting: greetingProp, phase, error, onRetry, onLaunch, launchDisabled, onSubmit, pendingMessages }: ChatShellProps) => {
+  ({ greeting: greetingProp, phase, error, onRetry, onLaunch, launchDisabled, prelaunchExtras, onSubmit, pendingMessages }: ChatShellProps) => {
     const handleSubmit = useCallback(
       (text: string, files?: File[]) => {
         onSubmit?.({ text, files });
@@ -111,7 +118,7 @@ export const ChatShell = memo(
                           <AnimatePresence>
                             {phase === 'idle' && onLaunch && (
                               <motion.div
-                                className="mt-5"
+                                className="mt-5 flex items-center gap-2"
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
                                 exit={{ opacity: 0 }}
@@ -125,6 +132,7 @@ export const ChatShell = memo(
                                 >
                                   Launch workspace
                                 </button>
+                                {prelaunchExtras}
                               </motion.div>
                             )}
                           </AnimatePresence>

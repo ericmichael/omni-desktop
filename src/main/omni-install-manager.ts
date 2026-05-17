@@ -567,6 +567,14 @@ export class OmniInstallManager {
 
     this.log.info(c.yellow(`Dev mode: installing omniagents editable from ${editablePath}\r\n`));
 
+    // ``--editable <path>`` alone installs the bare package with no
+    // optional-dependency groups. Because this step runs AFTER
+    // installOmniCode (which pulled ``omniagents[all]`` transitively),
+    // a bare editable install would *replace* the all-extras install
+    // with one missing every sandbox-*, session-*, etc. extra —
+    // breaking ``omni serve`` for docker / e2b / cloud profiles.
+    // Request ``[all]`` explicitly so the editable install keeps the
+    // same extras the non-editable install would have given us.
     const installArgs = [
       'pip',
       'install',
@@ -577,7 +585,7 @@ export class OmniInstallManager {
       '--extra-index-url',
       EXTRA_INDEX_URL,
       '--editable',
-      editablePath,
+      `${editablePath}[all]`,
     ];
 
     this.log.info(`> ${uvPath} ${installArgs.join(' ')}\r\n`);

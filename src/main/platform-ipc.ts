@@ -12,7 +12,7 @@ import type Store from 'electron-store';
 
 import type { FetchFn } from '@/main/agent-process';
 import { PlatformClient } from '@/main/platform-client';
-import { isEnterpriseBuild, mapSandboxProfiles, PLATFORM_URL } from '@/main/platform-mode';
+import { isEnterpriseBuild, PLATFORM_URL } from '@/main/platform-mode';
 import type { IpcEvents, IpcRendererEvents, PlatformCredentials, StoreData } from '@/shared/types';
 
 export function registerPlatformIpc(arg: {
@@ -55,9 +55,11 @@ return null;
 
   ipc.handle('platform:sign-out', () => {
     store.delete('platform');
-    store.set('sandboxProfiles', null);
-    store.set('selectedMachineId', null);
-    store.set('sandboxBackend', 'none');
+    // Reset to no-isolation default. Step 6 introduces an
+    // OmniPlatformSandboxClient so the `platform` profile becomes a real
+    // SandboxClient that fails cleanly when unauthenticated; until then,
+    // bouncing to `host` keeps the user productive after sign-out.
+    store.set('defaultProfileName', 'host');
     sendToWindow('platform:auth-changed', null);
   });
 
@@ -92,8 +94,12 @@ return [];
   // --- Internal ---
 
   /**
-   * Fetch the effective policy from the platform and apply sandbox profiles
-   * to the store. Auto-selects 'platform' backend if available.
+   * Fetch the effective policy from the platform. After v22 the platform's
+   * sandbox_profiles are no longer materialized into the store — step 6
+   * turns the platform path into a SandboxClient and the profiles flow
+   * through the same profile-resolution chain as everything else. For now
+   * we just touch the network so token refresh runs and the credentials
+   * stay valid.
    */
   async function fetchAndApplyPolicy(credentials: PlatformCredentials): Promise<void> {
     try {
@@ -107,20 +113,7 @@ return [];
           store.set('platform', { ...current, accessToken: newToken });
         }
       };
-
-      const policy = await client.getPolicy('omni_code');
-      const profiles = mapSandboxProfiles(policy.sandbox_profiles ?? []);
-      store.set('sandboxProfiles', profiles.length > 0 ? profiles : null);
-
-      if (profiles.length > 0) {
-        // Auto-select: prefer 'platform' backend, otherwise first available
-        const platformProfile = profiles.find((p) => p.backend === 'platform');
-        const selected = platformProfile ?? profiles[0]!;
-        store.set('sandboxBackend', selected.backend);
-        store.set('selectedMachineId', selected.resource_id);
-      }
-
-      console.log(`[Platform] Policy applied: ${profiles.length} sandbox profile(s)`);
+      await client.getPolicy('omni_code');
     } catch (e) {
       console.warn('[Platform] Failed to fetch policy:', (e as Error).message);
     }

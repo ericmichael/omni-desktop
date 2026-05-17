@@ -61,7 +61,9 @@ export function WorkspacePicker({
       let start = initialPath
       if (!start) {
         try {
-          const res = await client.serverCall('fs_get_cwd', {}, sessionId) as any
+          // Start picker at the agent's workspace root (manifest root for
+          // sandboxed clients), not omni serve's host cwd.
+          const res = await client.serverCall('fs_get_workspace_root', {}, sessionId) as any
           start = res?.path
         } catch {}
       }

@@ -1,12 +1,14 @@
 import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
 import { ArrowSync20Regular, BranchCompare20Regular } from '@fluentui/react-icons';
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { useStore } from '@nanostores/react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { SelectTabData } from '@/renderer/ds';
 import { IconButton, ListSkeleton, Tab, TabList } from '@/renderer/ds';
+import { persistedStoreApi } from '@/renderer/services/store';
 import type { DiffGroup,DiffResponse, FileDiff, TicketId } from '@/shared/types';
 
-import { ticketApi } from './state';
+import { $tickets, ticketApi } from './state';
 import { TicketPROverview } from './TicketPROverview';
 
 const POLL_INTERVAL_MS = 5_000;
@@ -449,7 +451,13 @@ const FileListItem = memo(
 );
 FileListItem.displayName = 'FileListItem';
 
-const FilesChangedContent = memo(({ ticketId }: { ticketId: TicketId }) => {
+/**
+ * Per-source files-changed view. Diffs one ProjectSource's container
+ * subdir against its ``omni/seed`` baseline. The parent component
+ * (FilesChangedPane) picks which source is active.
+ */
+const FilesChangedContent = memo(
+  ({ ticketId, sourceId }: { ticketId: TicketId; sourceId: string }) => {
   const styles = useStyles();
   const [data, setData] = useState<DiffResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -460,9 +468,16 @@ const FilesChangedContent = memo(({ ticketId }: { ticketId: TicketId }) => {
   const [isDragging, setIsDragging] = useState(false);
   const splitRef = useRef<HTMLDivElement>(null);
 
+  // Reset file selection when the active source switches.
+  useEffect(() => {
+    setSelectedKey(null);
+    setData(null);
+    setLoading(true);
+  }, [sourceId]);
+
   const fetchData = useCallback(async () => {
     try {
-      const resp = await ticketApi.getFilesChanged(ticketId);
+      const resp = await ticketApi.getFilesChanged(ticketId, sourceId);
       setData(resp);
       if (resp.files.length > 0 && !selectedKey) {
         setSelectedKey(fileKey(resp.files[0]!));
@@ -472,7 +487,7 @@ const FilesChangedContent = memo(({ ticketId }: { ticketId: TicketId }) => {
     } finally {
       setLoading(false);
     }
-  }, [ticketId, selectedKey]);
+  }, [ticketId, sourceId, selectedKey]);
 
   // Fetch on mount + poll
   useEffect(() => {
@@ -612,6 +627,70 @@ const FilesChangedContent = memo(({ ticketId }: { ticketId: TicketId }) => {
 });
 FilesChangedContent.displayName = 'FilesChangedContent';
 
+/**
+ * Source-picker shell for the Files Changed sub-tab. Renders one
+ * TabList row across project.sources and shows the active source's
+ * file-diff pane below. Single-source projects skip the picker.
+ */
+const FilesChangedPane = memo(({ ticketId }: { ticketId: TicketId }) => {
+  const styles = useStyles();
+  const tickets = useStore($tickets);
+  const store = useStore(persistedStoreApi.$atom);
+  const sources = useMemo(() => {
+    const ticket = tickets[ticketId];
+    if (!ticket) return [];
+    const project = store.projects.find((p) => p.id === ticket.projectId);
+    return project?.sources ?? [];
+  }, [tickets, store.projects, ticketId]);
+
+  const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
+  // Track the previous sources signature so we can reset the active id
+  // when sources are added/removed but keep it stable otherwise.
+  const sig = sources.map((s) => s.id).join('|');
+  useEffect(() => {
+    if (sources.length === 0) {
+      setActiveSourceId(null);
+      return;
+    }
+    if (!activeSourceId || !sources.some((s) => s.id === activeSourceId)) {
+      setActiveSourceId(sources[0]!.id);
+    }
+  // activeSourceId intentionally omitted: we only want to flip it when
+  // the sources set itself changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig]);
+
+  const handleSourceTabSelect = useCallback((_e: unknown, data: SelectTabData) => {
+    setActiveSourceId(data.value as string);
+  }, []);
+
+  if (sources.length === 0 || !activeSourceId) {
+    return (
+      <div className={styles.centerMessage}>
+        This project has no sources attached.
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.columnLayout}>
+      {sources.length > 1 && (
+        <div className={styles.tabBar}>
+          <TabList size="small" selectedValue={activeSourceId} onTabSelect={handleSourceTabSelect}>
+            {sources.map((s) => (
+              <Tab key={s.id} value={s.id}>{s.mountName}</Tab>
+            ))}
+          </TabList>
+        </div>
+      )}
+      <div className={styles.tabContent}>
+        <FilesChangedContent ticketId={ticketId} sourceId={activeSourceId} />
+      </div>
+    </div>
+  );
+});
+FilesChangedPane.displayName = 'FilesChangedPane';
+
 type PRSubTab = 'Overview' | 'Files Changed';
 const PR_SUB_TABS: PRSubTab[] = ['Overview', 'Files Changed'];
 
@@ -637,7 +716,7 @@ export const TicketPRTab = memo(({ ticketId }: { ticketId: TicketId }) => {
       {/* Sub-tab content */}
       <div className={styles.tabContent}>
         {activeSubTab === 'Overview' && <TicketPROverview ticketId={ticketId} />}
-        {activeSubTab === 'Files Changed' && <FilesChangedContent ticketId={ticketId} />}
+        {activeSubTab === 'Files Changed' && <FilesChangedPane ticketId={ticketId} />}
       </div>
     </div>
   );

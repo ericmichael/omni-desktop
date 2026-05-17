@@ -7,8 +7,13 @@ export type ProjectRow = {
   workspace_dir: string | null;
   is_personal: number;
   auto_dispatch: number;
-  source: string | null;       // JSON
-  sandbox: string | null;      // JSON
+  sources: string;             // JSON array of ProjectSource; defaults to '[]'
+  /**
+   * Per-project sandbox profile name. ``null`` = inherit the user-default
+   * profile selected in launcher Settings. Profile names resolve to YAML
+   * files under ``<config>/sandbox/<name>.yml``.
+   */
+  sandbox_profile: string | null;
   /** JSON-stringified ProjectConfig — see src/lib/project-to-config.ts (launcher). */
   config: string | null;
   due_date: string | null;     // epoch ms, stringified
@@ -51,6 +56,9 @@ export type TicketRow = {
   supervisor_task_id: string | null;
   token_usage: string | null;           // JSON
   runs: string;                          // JSON array
+  // Launcher-specific (v6) — PR review state
+  pr_review: string | null;             // JSON { status, at } or null
+  pr_merged_at: string | null;          // epoch ms, stringified
   created_at: string;
   updated_at: string;
 };

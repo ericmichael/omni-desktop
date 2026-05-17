@@ -89,7 +89,11 @@ welcomeText = String(info.welcome_text);
     if (names.has('fs_list_dir') && names.has('fs_get_workspace_root')) {
       workspaceSupported = true;
       try {
-        const res = (await client.serverCall('fs_get_cwd')) as any;
+        // Use fs_get_workspace_root, not fs_get_cwd: for sandboxed agents
+        // the manifest root (what the agent's tools actually see) may
+        // differ from omni serve's host cwd, and the prompt must match
+        // tool reality.
+        const res = (await client.serverCall('fs_get_workspace_root')) as any;
         if (res?.path) {
 workspacePath = String(res.path);
 }

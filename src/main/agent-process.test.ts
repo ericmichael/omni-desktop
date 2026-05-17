@@ -5,48 +5,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Mocks
 // ---------------------------------------------------------------------------
 
-// Hoisted shared state for the `node:child_process` mock. Vitest hoists vi.mock
-// factories above imports, so the factory cannot reference test-level variables
-// directly. vi.hoisted() gives us a place to park state that the factory can
-// safely close over.
 const hoisted = vi.hoisted(() => ({
   nextChild: null as unknown,
   spawnCalls: [] as unknown[][],
 }));
 
 vi.mock('node:child_process', async () => {
-  const { promisify } = await import('node:util');
   const actual = (await vi.importActual('node:child_process')) as typeof import('node:child_process');
-
-  // execFile mock: provide a promisify.custom that short-circuits to success so
-  // `promisify(execFile)(...)` resolves immediately. checkDocker/checkPodman
-  // thus succeed without any real subprocess.
-  const execFileMock = ((_cmd: string, _args: string[], _opts: unknown, cb: unknown) => {
-    if (typeof cb === 'function') {
-      (cb as (err: Error | null, res: { stdout: string; stderr: string }) => void)(null, {
-        stdout: '',
-        stderr: '',
-      });
-    }
-    return { on: () => {} };
-  }) as unknown as typeof import('node:child_process').execFile;
-  (execFileMock as unknown as { [k: symbol]: unknown })[promisify.custom] = async () => ({
-    stdout: '',
-    stderr: '',
-  });
-
-  // Spawn mock: return whatever `hoisted.nextChild` currently points at and
-  // record the call arguments for assertions.
   const spawnMock = ((...args: unknown[]) => {
     hoisted.spawnCalls.push(args);
     return hoisted.nextChild as ReturnType<typeof import('node:child_process').spawn>;
   }) as unknown as typeof import('node:child_process').spawn;
-
-  return {
-    ...actual,
-    spawn: spawnMock,
-    execFile: execFileMock,
-  };
+  return { ...actual, spawn: spawnMock };
 });
 
 vi.mock('@/main/util', () => ({
@@ -60,18 +30,21 @@ vi.mock('@/main/util', () => ({
   pathExists: vi.fn(async () => true),
 }));
 
-vi.mock('shell-env', () => ({ shellEnvSync: () => ({}) }));
-
-vi.mock('@/lib/pty-utils', () => ({
-  DEFAULT_ENV: {},
+vi.mock('@/main/profile-resolver', () => ({
+  HOST_PROFILE_NAME: 'host',
+  resolveProfile: vi.fn((name: string) => {
+    if (name === 'host') return { kind: 'builtin-default' };
+    if (name === 'missing') return { kind: 'missing', expected: '/fake/config/sandbox/missing.yml' };
+    return { kind: 'file', path: `/fake/config/sandbox/${name}.yml` };
+  }),
 }));
 
+vi.mock('shell-env', () => ({ shellEnvSync: () => ({}) }));
+vi.mock('@/lib/pty-utils', () => ({ DEFAULT_ENV: {} }));
 vi.mock('@/main/workspace-sync', () => ({
   uploadWorkspace: vi.fn(async () => {}),
   downloadWorkspace: vi.fn(async () => {}),
 }));
-
-// Silence SimpleLogger so the test output isn't cluttered with startup banners.
 vi.mock('@/lib/simple-logger', () => ({
   SimpleLogger: class {
     constructor(_handler: unknown) {}
@@ -80,17 +53,6 @@ vi.mock('@/lib/simple-logger', () => ({
     warn(): void {}
     error(): void {}
   },
-}));
-
-vi.mock('@/main/store', () => ({
-  store: {
-    get: vi.fn((_key: string) => undefined),
-    set: vi.fn(),
-  },
-  getStore: vi.fn(() => ({
-    get: vi.fn((_key: string) => undefined),
-    set: vi.fn(),
-  })),
 }));
 
 vi.mock('ws', async () => {
@@ -133,8 +95,6 @@ const makeMockChild = (): MockChild => {
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
   child.exitCode = null;
-  // When killProcess() calls kill('SIGTERM'), immediately emit a 'close' event
-  // so stop()/exit() don't hang waiting on the teardown handshake.
   child.kill = vi.fn((_signal?: string) => {
     if (child.exitCode === null) {
       child.exitCode = 0;
@@ -158,7 +118,7 @@ type Harness = {
   fetchFn: ReturnType<typeof vi.fn>;
 };
 
-const makeHarness = (mode: 'none' | 'local' | 'sandbox' | 'podman'): Harness => {
+const makeHarness = (): Harness => {
   const child = makeMockChild();
   hoisted.nextChild = child;
   hoisted.spawnCalls.length = 0;
@@ -169,7 +129,7 @@ const makeHarness = (mode: 'none' | 'local' | 'sandbox' | 'podman'): Harness => 
   });
 
   const proc = new AgentProcess({
-    mode,
+    mode: 'serve',
     ipcRawOutput: () => {},
     onStatusChange: (s) => statuses.push(s),
     fetchFn: fetchFn as unknown as typeof globalThis.fetch,
@@ -181,221 +141,259 @@ const makeHarness = (mode: 'none' | 'local' | 'sandbox' | 'podman'): Harness => 
 const spawnCallCount = () => hoisted.spawnCalls.length;
 const spawnCall = (i: number) => hoisted.spawnCalls[i] as [string, string[], { env: Record<string, string> }];
 
-const START_ARG: AgentProcessStartArg = { workspaceDir: '/test/workspace' };
-
-const SANDBOX_PAYLOAD = JSON.stringify({
-  sandbox_url: 'http://sandbox:8000',
-  ws_url: 'ws://sandbox:9000/ws',
-  ui_url: 'http://sandbox:9000',
-  code_server_url: null,
-  novnc_url: null,
-  container_id: 'abc123',
-  container_name: 'omni-test',
-  ports: { sandbox: 8000, ui: 9000, code_server: null, vnc: null },
+const SERVE_PAYLOAD = JSON.stringify({
+  sandbox_url: 'http://127.0.0.1:9000',
+  ws_url: 'ws://127.0.0.1:9000/ws',
+  ui_url: 'http://127.0.0.1:9000',
+  services: { code_server: 'http://127.0.0.1:8080', vnc: 'http://127.0.0.1:6080' },
+  ports: { ui: 9000 },
+  container_id: null,
+  container_name: 'omni-serve-unix_local',
 });
-
-const lastStatus = (statuses: WithTimestamp<AgentProcessStatus>[]) => statuses[statuses.length - 1]!;
-const hasStatusType = (statuses: WithTimestamp<AgentProcessStatus>[], type: AgentProcessStatus['type']) =>
-  statuses.some((s) => s.type === type);
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('AgentProcess', () => {
+describe('AgentProcess (serve mode)', () => {
   beforeEach(() => {
-    hoisted.spawnCalls.length = 0;
     hoisted.nextChild = null;
+    hoisted.spawnCalls.length = 0;
   });
 
   afterEach(() => {
-    vi.useRealTimers();
+    vi.clearAllMocks();
   });
 
-  describe('start() idempotency', () => {
-    it('is a no-op when already in starting state', async () => {
-      const h = makeHarness('sandbox');
-      await h.proc.start(START_ARG);
-      expect(spawnCallCount()).toBe(1);
-      expect(hasStatusType(h.statuses, 'starting')).toBe(true);
+  type Source = AgentProcessStartArg['sources'][number];
+  const localSource = (workspaceDir = '/test/workspace', mountName = 'ws'): Source => ({
+    mountName,
+    kind: 'local',
+    workspaceDir,
+  });
+  const localGitSource = (workspaceDir = '/test/workspace', mountName = 'ws'): Source => ({
+    mountName,
+    kind: 'local-git',
+    workspaceDir,
+  });
+  const remoteSource = (
+    repoUrl = 'https://github.com/foo/bar.git',
+    mountName = 'bar',
+    ref?: string
+  ): Source => {
+    const s: Source = { mountName, kind: 'git-remote', repoUrl };
+    if (ref) s.ref = ref;
+    return s;
+  };
 
-      await h.proc.start(START_ARG);
-      expect(spawnCallCount()).toBe(1);
+  // Pull the JSON descriptor strings out of an args array so tests can
+  // assert on their parsed shape rather than substring-matching.
+  const sourceDescriptors = (args: string[]): unknown[] => {
+    const out: unknown[] = [];
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === '--source' && typeof args[i + 1] === 'string') {
+        out.push(JSON.parse(args[i + 1]!));
+      }
+    }
+    return out;
+  };
 
-      await h.proc.exit();
+  it('spawns `omni serve` with a --source JSON descriptor for a local git source', async () => {
+    const h = makeHarness();
+    await h.proc.start({
+      profileName: 'devbox',
+      sources: [localGitSource('/test/workspace', 'launcher')],
     });
 
-    it('is a no-op when already in connecting state', async () => {
-      const h = makeHarness('sandbox');
-      await h.proc.start(START_ARG);
-      h.child.emitStdout(`${SANDBOX_PAYLOAD  }\n`);
-      expect(lastStatus(h.statuses).type).toBe('connecting');
-
-      await h.proc.start(START_ARG);
-      expect(spawnCallCount()).toBe(1);
-      await h.proc.exit();
-    });
+    expect(spawnCallCount()).toBe(1);
+    const [binary, args] = spawnCall(0);
+    expect(binary).toBe('/fake/bin/omni');
+    expect(args).toContain('serve');
+    expect(args).toContain('--profile');
+    expect(args).toContain('/fake/config/sandbox/devbox.yml');
+    expect(args).toContain('--output');
+    expect(args).toContain('json');
+    expect(args).toContain('--workspace');
+    expect(args[args.indexOf('--workspace') + 1]).toBe('/test/workspace');
+    expect(sourceDescriptors(args)).toEqual([
+      { kind: 'local-git', mountName: 'launcher', path: '/test/workspace' },
+    ]);
   });
 
-  describe('stdout JSON parsing', () => {
-    it('transitions to connecting on a valid sandbox JSON payload', async () => {
-      const h = makeHarness('sandbox');
-      await h.proc.start(START_ARG);
-      h.child.emitStdout(`${SANDBOX_PAYLOAD  }\n`);
-
-      const last = lastStatus(h.statuses);
-      expect(last.type).toBe('connecting');
-      if (last.type === 'connecting') {
-        expect(last.data.uiUrl).toBe('http://sandbox:9000');
-        expect(last.data.wsUrl).toBe('ws://sandbox:9000/ws');
-        expect(last.data.containerName).toBe('omni-test');
-        expect(last.data.containerId).toBe('abc123');
-        expect(last.data.port).toBe(9000);
-      }
-      await h.proc.exit();
+  it('emits multiple --source descriptors for a multi-source project', async () => {
+    const h = makeHarness();
+    await h.proc.start({
+      profileName: 'host',
+      sources: [
+        localGitSource('/repos/launcher', 'launcher'),
+        localGitSource('/repos/omni-code', 'omni-code'),
+        remoteSource('https://github.com/me/omniagents.git', 'omniagents', 'main'),
+      ],
     });
-
-    it('ignores malformed JSON lines', async () => {
-      const h = makeHarness('sandbox');
-      await h.proc.start(START_ARG);
-      const before = h.statuses.length;
-      h.child.emitStdout('not-json\n');
-      h.child.emitStdout('{ this is { broken }\n');
-      expect(h.statuses.length).toBe(before);
-      expect(lastStatus(h.statuses).type).toBe('starting');
-      await h.proc.exit();
-    });
-
-    it('buffers partial lines until a newline arrives', async () => {
-      const h = makeHarness('sandbox');
-      await h.proc.start(START_ARG);
-      const before = h.statuses.length;
-      const mid = Math.floor(SANDBOX_PAYLOAD.length / 2);
-      h.child.emitStdout(SANDBOX_PAYLOAD.slice(0, mid));
-      expect(h.statuses.length).toBe(before);
-      h.child.emitStdout(`${SANDBOX_PAYLOAD.slice(mid)  }\n`);
-
-      const connectingCount = h.statuses.filter((s) => s.type === 'connecting').length;
-      expect(connectingCount).toBe(1);
-      await h.proc.exit();
-    });
-
-    it('only parses the first valid JSON payload (jsonEmitted guard)', async () => {
-      const h = makeHarness('sandbox');
-      await h.proc.start(START_ARG);
-      h.child.emitStdout(`${SANDBOX_PAYLOAD  }\n`);
-      h.child.emitStdout(`${SANDBOX_PAYLOAD  }\n`);
-      const connectingCount = h.statuses.filter((s) => s.type === 'connecting').length;
-      expect(connectingCount).toBe(1);
-      await h.proc.exit();
-    });
+    const [, args] = spawnCall(0);
+    expect(sourceDescriptors(args)).toEqual([
+      { kind: 'local-git', mountName: 'launcher', path: '/repos/launcher' },
+      { kind: 'local-git', mountName: 'omni-code', path: '/repos/omni-code' },
+      { kind: 'git-remote', mountName: 'omniagents', repoUrl: 'https://github.com/me/omniagents.git', ref: 'main' },
+    ]);
   });
 
-  describe('exit handling', () => {
-    it('exit code 0 transitions to exited', async () => {
-      const h = makeHarness('sandbox');
-      await h.proc.start(START_ARG);
-      h.child.emitClose(0);
-      expect(lastStatus(h.statuses).type).toBe('exited');
+  it('includes ref in the git-remote descriptor when set', async () => {
+    const h = makeHarness();
+    await h.proc.start({
+      profileName: 'host',
+      sources: [remoteSource('https://github.com/foo/bar.git', 'bar', 'main')],
     });
-
-    it('SIGTERM while stopping transitions to exited (not error)', async () => {
-      const h = makeHarness('sandbox');
-      await h.proc.start(START_ARG);
-      const stopPromise = h.proc.stop();
-      expect(h.statuses.some((s) => s.type === 'stopping')).toBe(true);
-      h.child.emitClose(null, 'SIGTERM');
-      await stopPromise;
-      expect(lastStatus(h.statuses).type).toBe('exited');
-    });
-
-    it('non-zero exit transitions to error', async () => {
-      const h = makeHarness('sandbox');
-      await h.proc.start(START_ARG);
-      h.child.emitClose(1);
-      const last = lastStatus(h.statuses);
-      expect(last.type).toBe('error');
-      if (last.type === 'error') {
-        expect(last.error.message).toMatch(/code 1/);
-      }
-    });
-
-    it('produces a port-conflict error message when stderr matches', async () => {
-      const h = makeHarness('sandbox');
-      await h.proc.start(START_ARG);
-      h.child.emitStderr('Error: bind: address already in use\n');
-      h.child.emitClose(1);
-      const last = lastStatus(h.statuses);
-      expect(last.type).toBe('error');
-      if (last.type === 'error') {
-        expect(last.error.message.toLowerCase()).toContain('port');
-      }
-    });
-
-    it('spawn error event transitions to error status', async () => {
-      const h = makeHarness('none');
-      await h.proc.start(START_ARG);
-      h.child.emit('error', new Error('boom'));
-      const errStatus = h.statuses.find((s) => s.type === 'error');
-      expect(errStatus).toBeDefined();
-      if (errStatus?.type === 'error') {
-        expect(errStatus.error.message).toBe('boom');
-      }
+    expect(sourceDescriptors(spawnCall(0)[1])[0]).toEqual({
+      kind: 'git-remote',
+      mountName: 'bar',
+      repoUrl: 'https://github.com/foo/bar.git',
+      ref: 'main',
     });
   });
 
-  describe('arg building via spawn invocation', () => {
-    it('sandbox mode includes --mode server, --workspace, --output json', async () => {
-      const h = makeHarness('sandbox');
-      await h.proc.start({ workspaceDir: '/test/ws' });
-      expect(spawnCallCount()).toBe(1);
-      const [binary, args] = spawnCall(0);
-      expect(binary).toBe('/fake/bin/omni');
-      expect(args).toContain('sandbox');
-      expect(args).toContain('--mode');
-      expect(args).toContain('server');
-      expect(args).toContain('--workspace');
-      expect(args).toContain('/test/ws');
-      expect(args).toContain('--output');
-      expect(args).toContain('json');
-      await h.proc.exit();
+  it('omits --profile for the host profile (uses omni serve bundled default)', async () => {
+    const h = makeHarness();
+    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
+
+    const [, args] = spawnCall(0);
+    expect(args).not.toContain('--profile');
+  });
+
+  it('forwards --project and --snapshot-dir when projectId is set', async () => {
+    const h = makeHarness();
+    await h.proc.start({
+      profileName: 'host',
+      sources: [localSource('/ws')],
+      projectId: 'proj_abc',
     });
 
-    it('podman mode sets OMNI_CONTAINER_RUNTIME=podman in spawn env', async () => {
-      const h = makeHarness('podman');
-      await h.proc.start({ workspaceDir: '/test/ws' });
-      expect(spawnCallCount()).toBe(1);
-      const [, , opts] = spawnCall(0);
-      expect(opts.env['OMNI_CONTAINER_RUNTIME']).toBe('podman');
-      await h.proc.exit();
-    });
+    const [, args] = spawnCall(0);
+    expect(args).toContain('--project');
+    expect(args).toContain('proj_abc');
+    expect(args).toContain('--snapshot-dir');
+    expect(args).toContain('/fake/config/snapshots');
+  });
 
-    it('none mode uses omni CLI directly with --mode server', async () => {
-      const h = makeHarness('none');
-      await h.proc.start({ workspaceDir: '/test/ws' });
-      expect(spawnCallCount()).toBe(1);
-      const [binary, args] = spawnCall(0);
-      expect(binary).toBe('/fake/bin/omni');
-      expect(args).toContain('--mode');
-      expect(args).toContain('server');
-      expect(args).toContain('--host');
-      expect(args).toContain('127.0.0.1');
-      // None mode transitions to connecting immediately (local port known upfront).
-      expect(hasStatusType(h.statuses, 'connecting')).toBe(true);
-      await h.proc.exit();
-    });
+  it('always passes --snapshot-dir; --session-id only when caller supplies one', async () => {
+    const h = makeHarness();
+    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
+    const [, args1] = spawnCall(0);
+    // --snapshot-dir is always present — omni serve auto-generates a
+    // session_id and the launcher captures it from the readiness payload.
+    expect(args1).toContain('--snapshot-dir');
+    // No sessionId on this start, so --session-id is omitted (fresh start).
+    expect(args1).not.toContain('--session-id');
 
-    it('sandbox mode passes gitRepo url as env var', async () => {
-      const h = makeHarness('sandbox');
-      await h.proc.start({
-        workspaceDir: '/test/ws',
-        gitRepo: { url: 'https://github.com/x/y.git', branch: 'main' },
+    // Subsequent start with a captured session id forwards it for resume.
+    await h.proc.stop();
+    hoisted.spawnCalls.length = 0;
+    await h.proc.start({
+      profileName: 'host',
+      sources: [localSource('/ws')],
+      sessionId: 'sess_xyz',
+    });
+    const [, args2] = spawnCall(0);
+    expect(args2).toContain('--session-id');
+    expect(args2).toContain('sess_xyz');
+  });
+
+  it('reports an error and does not spawn when the profile cannot be resolved', async () => {
+    const h = makeHarness();
+    await h.proc.start({ profileName: 'missing', sources: [localSource('/ws')] });
+
+    expect(spawnCallCount()).toBe(0);
+    const last = h.statuses.at(-1);
+    expect(last?.type).toBe('error');
+    if (last?.type === 'error') {
+      expect(last.error.message).toMatch(/Profile "missing" not found/);
+    }
+  });
+
+  it('parses the JSON readiness payload into AgentProcessData (services map preserved)', async () => {
+    const h = makeHarness();
+    await h.proc.start({ profileName: 'devbox', sources: [localSource('/ws')] });
+    h.child.emitStdout(`${SERVE_PAYLOAD}\n`);
+
+    const connecting = h.statuses.find((s) => s.type === 'connecting');
+    expect(connecting?.type).toBe('connecting');
+    if (connecting?.type === 'connecting') {
+      expect(connecting.data.uiUrl).toBe('http://127.0.0.1:9000');
+      expect(connecting.data.wsUrl).toBe('ws://127.0.0.1:9000/ws');
+      expect(connecting.data.services).toEqual({
+        code_server: 'http://127.0.0.1:8080',
+        vnc: 'http://127.0.0.1:6080',
       });
-      const [, args] = spawnCall(0);
-      expect(args).toContain('--env');
-      expect(args.some((a) => a === 'OMNI_GIT_REPO_URL=https://github.com/x/y.git')).toBe(true);
-      expect(args.some((a) => a === 'OMNI_GIT_BRANCH=main')).toBe(true);
-      await h.proc.exit();
+      expect(connecting.data.port).toBe(9000);
+    }
+  });
+
+  it('handles split-buffer payloads (line not complete in first write)', async () => {
+    const h = makeHarness();
+    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
+
+    const mid = Math.floor(SERVE_PAYLOAD.length / 2);
+    h.child.emitStdout(SERVE_PAYLOAD.slice(0, mid));
+    expect(h.statuses.find((s) => s.type === 'connecting')).toBeUndefined();
+    h.child.emitStdout(`${SERVE_PAYLOAD.slice(mid)}\n`);
+    expect(h.statuses.find((s) => s.type === 'connecting')).toBeDefined();
+  });
+
+  it('ignores duplicate JSON payloads after the first', async () => {
+    const h = makeHarness();
+    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
+
+    h.child.emitStdout(`${SERVE_PAYLOAD}\n`);
+    h.child.emitStdout(`${SERVE_PAYLOAD}\n`);
+
+    const connecting = h.statuses.filter((s) => s.type === 'connecting');
+    expect(connecting.length).toBe(1);
+  });
+
+  it('transitions to error on non-zero exit when not stopping', async () => {
+    const h = makeHarness();
+    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
+    h.child.emitStderr('boom\n');
+    h.child.emitClose(2);
+
+    const last = h.statuses.at(-1);
+    expect(last?.type).toBe('error');
+    if (last?.type === 'error') {
+      expect(last.error.message).toContain('omni serve exited');
+    }
+  });
+
+  it('transitions to exited on close after stop()', async () => {
+    const h = makeHarness();
+    await h.proc.start({ profileName: 'host', sources: [localSource('/ws')] });
+    await h.proc.stop();
+
+    const last = h.statuses.at(-1);
+    expect(last?.type).toBe('exited');
+  });
+
+  it('errors when workspace dir does not exist (local sources only)', async () => {
+    const utilMock = await import('@/main/util');
+    (utilMock.isDirectory as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false);
+
+    const h = makeHarness();
+    await h.proc.start({ profileName: 'host', sources: [localSource('/missing')] });
+    expect(spawnCallCount()).toBe(0);
+    const last = h.statuses.at(-1);
+    expect(last?.type).toBe('error');
+  });
+
+  it('does not check workspaceDir for git-remote sources', async () => {
+    const utilMock = await import('@/main/util');
+    const isDirSpy = utilMock.isDirectory as ReturnType<typeof vi.fn>;
+    isDirSpy.mockClear();
+
+    const h = makeHarness();
+    await h.proc.start({
+      profileName: 'host',
+      sources: [remoteSource('https://github.com/foo/bar.git')],
     });
+    expect(isDirSpy).not.toHaveBeenCalled();
+    expect(spawnCallCount()).toBe(1);
   });
 });

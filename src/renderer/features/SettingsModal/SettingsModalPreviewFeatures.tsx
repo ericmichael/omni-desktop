@@ -27,9 +27,11 @@ export const SettingsModalPreviewFeatures = memo(() => {
   }, []);
   const onChange = useCallback((checked: boolean) => {
     persistedStoreApi.setKey('previewFeatures', checked);
-    // GA users should not run with any sandbox backend. Enterprise policy drives its own backend.
+    // GA users (no preview features, no enterprise) fall back to the
+    // no-isolation `host` profile. Enterprise stays on whatever profile
+    // the user selected since the platform path is its own surface.
     if (!checked && !isEnterprise) {
-      persistedStoreApi.setKey('sandboxBackend', 'none');
+      persistedStoreApi.setKey('defaultProfileName', 'host');
     }
   }, [isEnterprise]);
 

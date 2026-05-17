@@ -169,35 +169,35 @@ describe('registerProjectHandlers', () => {
     expect(mgr.listArtifacts).toHaveBeenCalledWith('t1', 'sub/dir');
   });
 
-  it('project:get-files-changed delegates with ticketId', () => {
+  it('project:get-files-changed delegates with ticketId + sourceId', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
     registerProjectHandlers(ipc, mgr as never);
-    ipc.invoke('project:get-files-changed', 't1');
-    expect(mgr.getFilesChanged).toHaveBeenCalledWith('t1');
+    ipc.invoke('project:get-files-changed', 't1', 'src1');
+    expect(mgr.getFilesChanged).toHaveBeenCalledWith('t1', 'src1');
   });
 
-  it('project:set-pr-review delegates with ticketId and review status', () => {
+  it('project:set-pr-review delegates with ticketId + sourceId + review status', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
     registerProjectHandlers(ipc, mgr as never);
-    ipc.invoke('project:set-pr-review', 't1', 'approved');
-    expect(mgr.setPrReview).toHaveBeenCalledWith('t1', 'approved');
+    ipc.invoke('project:set-pr-review', 't1', 'src1', 'approved');
+    expect(mgr.setPrReview).toHaveBeenCalledWith('t1', 'src1', 'approved');
   });
 
-  it('project:check-merge delegates with ticketId', () => {
+  it('project:check-merge delegates with ticketId + sourceId', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
     registerProjectHandlers(ipc, mgr as never);
-    ipc.invoke('project:check-merge', 't1');
-    expect(mgr.checkPrMerge).toHaveBeenCalledWith('t1');
+    ipc.invoke('project:check-merge', 't1', 'src1');
+    expect(mgr.checkPrMerge).toHaveBeenCalledWith('t1', 'src1');
   });
 
-  it('project:merge-ticket delegates with ticketId', () => {
+  it('project:merge-ticket delegates with ticketId + sourceId', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
     registerProjectHandlers(ipc, mgr as never);
-    ipc.invoke('project:merge-ticket', 't1');
-    expect(mgr.mergePrTicket).toHaveBeenCalledWith('t1');
+    ipc.invoke('project:merge-ticket', 't1', 'src1');
+    expect(mgr.mergePrTicket).toHaveBeenCalledWith('t1', 'src1');
   });
 });

@@ -1,5 +1,5 @@
 /**
- * Tests for ProcessManager — mode resolution, status fallback,
+ * Tests for ProcessManager — profile-name resolution, status fallback,
  * getRunningWsUrlForTicket, and lifecycle operations.
  *
  * Mocks AgentProcess to avoid real process spawning.
@@ -44,12 +44,23 @@ vi.mock('@/main/store', () => ({
   getStore: vi.fn(() => ({ get: vi.fn(() => undefined), set: vi.fn() })),
 }));
 
+// node:child_process is touched by resolveGitRemote — stub to no remote.
+vi.mock('node:child_process', async () => {
+  const actual = (await vi.importActual('node:child_process')) as typeof import('node:child_process');
+  return {
+    ...actual,
+    execFileSync: vi.fn(() => {
+      throw new Error('no git remote in test');
+    }),
+  };
+});
+
 // ---------------------------------------------------------------------------
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
 
 import { ProcessManager, type ProcessManagerStoreData } from '@/main/process-manager';
-import type { AgentProcessStatus, WithTimestamp } from '@/shared/types';
+import type { AgentProcessStatus, Project, WithTimestamp } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -59,16 +70,14 @@ function makePm(opts?: { storeData?: Partial<ProcessManagerStoreData> }) {
   hoisted.agentProcessInstances = [];
   const sendCalls: Array<{ channel: string; args: unknown[] }> = [];
   const storeData: ProcessManagerStoreData = {
-    sandboxBackend: 'none',
-    sandboxProfiles: null,
-    selectedMachineId: null,
+    defaultProfileName: 'host',
     projects: [],
     ...opts?.storeData,
   };
   const pm = new ProcessManager({
     sendToWindow: ((channel: string, ...args: unknown[]) => {
       sendCalls.push({ channel, args });
-    }) as ProcessManager['start'] extends (...args: infer _A) => unknown ? never : never as never,
+    }) as never,
     getStoreData: () => storeData,
   });
   return { pm, sendCalls };
@@ -89,18 +98,46 @@ describe('ProcessManager', () => {
 
   describe('mode resolution', () => {
     it.each([
-      ['docker', 'sandbox'],
-      ['podman', 'podman'],
-      ['vm', 'vm'],
-      ['local', 'local'],
+      ['host', 'serve'],
+      ['devbox', 'serve'],
+      ['custom-profile', 'serve'],
       ['platform', 'platform'],
-      ['none', 'none'],
-    ] as const)('sandboxBackend=%s resolves to mode=%s', (backend, expectedMode) => {
-      const { pm } = makePm({ storeData: { sandboxBackend: backend } });
+    ] as const)('defaultProfileName=%s resolves to mode=%s', (profileName, expectedMode) => {
+      const { pm } = makePm({ storeData: { defaultProfileName: profileName } });
       pm.start('test-1', { workspaceDir: '/tmp/ws' });
 
       expect(hoisted.agentProcessInstances).toHaveLength(1);
       expect(hoisted.agentProcessInstances[0]!.mode).toBe(expectedMode);
+    });
+
+    it('per-project sandboxProfile overrides defaultProfileName', () => {
+      const project: Project = {
+        id: 'proj_1',
+        label: 'Proj',
+        slug: 'proj',
+        sources: [],
+        createdAt: 0,
+        sandboxProfile: 'platform',
+      };
+      const { pm } = makePm({
+        storeData: { defaultProfileName: 'host', projects: [project] },
+      });
+      pm.start('tab-1', { workspaceDir: '/tmp/ws', projectId: 'proj_1' });
+
+      expect(hoisted.agentProcessInstances[0]!.mode).toBe('platform');
+    });
+
+    it('forwards profileName + projectId in the start arg', () => {
+      const { pm } = makePm({ storeData: { defaultProfileName: 'devbox' } });
+      pm.start('tab-1', { workspaceDir: '/tmp', projectId: 'proj_x' });
+
+      expect(hoisted.agentProcessInstances[0]!.start).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspaceDir: '/tmp',
+          profileName: 'devbox',
+          projectId: 'proj_x',
+        })
+      );
     });
   });
 
@@ -123,11 +160,6 @@ describe('ProcessManager', () => {
       hoisted.agentProcessInstances[0]!.getStatus.mockReturnValue(mockStatus);
 
       expect(pm.getStatus('proc-1')).toBe(mockStatus);
-    });
-
-    it('returns uninitialized when the process does not exist', () => {
-      const { pm } = makePm();
-      expect(pm.getStatus('other')).toEqual(expect.objectContaining({ type: 'uninitialized' }));
     });
   });
 
@@ -191,16 +223,13 @@ describe('ProcessManager', () => {
       pm.start('proc-1', { workspaceDir: '/tmp/ws' });
       pm.start('proc-1', { workspaceDir: '/tmp/ws2' });
 
-      // Should reuse — only 1 instance created
       expect(hoisted.agentProcessInstances).toHaveLength(1);
       expect(hoisted.agentProcessInstances[0]!.start).toHaveBeenCalledTimes(2);
     });
 
     it('start creates new process when mode changes', () => {
       const storeData: ProcessManagerStoreData = {
-        sandboxBackend: 'docker',
-        sandboxProfiles: null,
-        selectedMachineId: null,
+        defaultProfileName: 'host',
         projects: [],
       };
       const pm = new ProcessManager({
@@ -210,15 +239,14 @@ describe('ProcessManager', () => {
 
       pm.start('proc-1', { workspaceDir: '/tmp' });
       expect(hoisted.agentProcessInstances).toHaveLength(1);
-      expect(hoisted.agentProcessInstances[0]!.mode).toBe('sandbox');
+      expect(hoisted.agentProcessInstances[0]!.mode).toBe('serve');
 
-      // Change mode
-      storeData.sandboxBackend = 'podman';
+      // Flip to platform — different mode → new instance
+      storeData.defaultProfileName = 'platform';
       pm.start('proc-1', { workspaceDir: '/tmp' });
 
       expect(hoisted.agentProcessInstances).toHaveLength(2);
-      expect(hoisted.agentProcessInstances[1]!.mode).toBe('podman');
-      // Old process should have been exited
+      expect(hoisted.agentProcessInstances[1]!.mode).toBe('platform');
       expect(hoisted.agentProcessInstances[0]!.exit).toHaveBeenCalled();
     });
 
@@ -229,13 +257,7 @@ describe('ProcessManager', () => {
       await pm.stop('proc-1');
 
       expect(hoisted.agentProcessInstances[0]!.stop).toHaveBeenCalled();
-      // Subsequent getStatus should return uninitialized
       expect(pm.getStatus('proc-1').type).toBe('uninitialized');
-    });
-
-    it('stop is a no-op for unknown processId', async () => {
-      const { pm } = makePm();
-      await pm.stop('unknown'); // should not throw
     });
 
     it('cleanup exits all processes', async () => {
@@ -249,35 +271,6 @@ describe('ProcessManager', () => {
       expect(hoisted.agentProcessInstances[1]!.exit).toHaveBeenCalled();
       expect(pm.getStatus('a').type).toBe('uninitialized');
       expect(pm.getStatus('b').type).toBe('uninitialized');
-    });
-  });
-
-  describe('sandbox profile', () => {
-    it('uses variant from selected profile', () => {
-      const { pm } = makePm({
-        storeData: {
-          sandboxBackend: 'platform',
-          sandboxProfiles: [
-            { resource_id: 42, name: 'GPU', backend: 'platform', variant: 'standard' },
-          ],
-          selectedMachineId: 42,
-        },
-      });
-
-      pm.start('proc-1', { workspaceDir: '/tmp' });
-
-      expect(hoisted.agentProcessInstances[0]!.start).toHaveBeenCalledWith(
-        expect.objectContaining({ sandboxVariant: 'standard' })
-      );
-    });
-
-    it('defaults to work variant when no profile selected', () => {
-      const { pm } = makePm({ storeData: { sandboxBackend: 'docker' } });
-      pm.start('proc-1', { workspaceDir: '/tmp' });
-
-      expect(hoisted.agentProcessInstances[0]!.start).toHaveBeenCalledWith(
-        expect.objectContaining({ sandboxVariant: 'work' })
-      );
     });
   });
 });

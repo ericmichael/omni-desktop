@@ -7,9 +7,7 @@ import type { StoreData } from '@/shared/types';
 const STORE_PATH = join(homedir(), '.config', 'Omni Code', 'config.json');
 
 const DEFAULTS: StoreData = {
-  sandboxBackend: 'none',
-  sandboxProfiles: null,
-  selectedMachineId: null,
+  defaultProfileName: 'host',
   optInToLauncherPrereleases: false,
   previewFeatures: false,
   layoutMode: 'chat',

@@ -38,6 +38,7 @@ import type {
   Pipeline,
   Project,
   ProjectId,
+  ProjectSource,
   ShapingData,
   StoreData,
   Task,
@@ -73,26 +74,38 @@ function isoOrNull(epochMs: number | undefined): string | null {
 // ---- Row → Model conversions ----
 
 export function rowToProject(row: ProjectRow): Project {
+  let sources: ProjectSource[] = [];
+  try {
+    const parsed = JSON.parse(row.sources) as unknown;
+    if (Array.isArray(parsed)) sources = parsed as ProjectSource[];
+  } catch {
+    // Malformed JSON — treat as no sources rather than crash.
+  }
+
+  // ``workspace_dir`` column is the authoritative single-source store for
+  // MCP ``update_project workspace_dir`` writes (callers don't know about
+  // the multi-source model yet). When set + the project has at least one
+  // local source, override the first local source's workspaceDir.
+  if (row.workspace_dir) {
+    const idx = sources.findIndex((s) => s.kind === 'local');
+    if (idx >= 0) {
+      const existing = sources[idx]!;
+      if (existing.kind === 'local') {
+        sources[idx] = { ...existing, workspaceDir: row.workspace_dir };
+      }
+    }
+  }
+
   const project: Project = {
     id: row.id as ProjectId,
     label: row.label,
     slug: row.slug,
+    sources,
     createdAt: fromIso(row.created_at),
   };
   if (row.is_personal) project.isPersonal = true;
   if (row.auto_dispatch) project.autoDispatch = true;
-  if (row.source) project.source = JSON.parse(row.source);
-  if (row.sandbox) project.sandbox = JSON.parse(row.sandbox);
-
-  // The `workspace_dir` column is the authoritative store of the linked
-  // local directory — MCP `update_project workspace_dir` writes there
-  // directly. When set, it overrides any stale value in the `source` JSON.
-  // We keep `source.kind` from the JSON (local vs git-remote vs absent)
-  // and only override the workspaceDir field within local sources.
-  if (row.workspace_dir && project.source?.kind === 'local') {
-    project.source = { ...project.source, workspaceDir: row.workspace_dir };
-  }
-
+  if (row.sandbox_profile) project.sandboxProfile = row.sandbox_profile;
   if (row.due_date) project.dueDate = fromIso(row.due_date);
   if (row.pinned_at) project.pinnedAt = fromIso(row.pinned_at);
 
@@ -145,6 +158,40 @@ export function rowToTicket(row: TicketRow, comments?: CommentRow[]): Ticket {
 
   const runs = parseJsonOr<unknown[]>(row.runs, []);
   if (runs.length > 0) ticket.runs = runs as Ticket['runs'];
+
+  if (row.pr_review) {
+    try {
+      const parsed = JSON.parse(row.pr_review) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        // Validate each map entry's shape; drop malformed ones rather than
+        // crash. Stored value is Record<sourceId, { status, at }>.
+        const out: Record<string, { status: 'approved' | 'changes_requested'; at: number }> = {};
+        for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+          const entry = v as { status?: string; at?: number };
+          if (entry?.status === 'approved' || entry?.status === 'changes_requested') {
+            out[k] = { status: entry.status, at: entry.at ?? Date.now() };
+          }
+        }
+        if (Object.keys(out).length > 0) ticket.prReview = out;
+      }
+    } catch {
+      // Malformed JSON in the column — treat as no review.
+    }
+  }
+  if (row.pr_merged_at) {
+    try {
+      const parsed = JSON.parse(row.pr_merged_at) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const out: Record<string, number> = {};
+        for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+          if (typeof v === 'number') out[k] = v;
+        }
+        if (Object.keys(out).length > 0) ticket.prMergedAt = out;
+      }
+    } catch {
+      // Malformed — treat as not merged.
+    }
+  }
 
   if (comments && comments.length > 0) {
     ticket.comments = comments.map(rowToComment);
@@ -233,13 +280,14 @@ export function rowToTask(row: TaskRow): Task {
 
 export function projectToRow(p: Project): ProjectRow {
   const now = toIso(Date.now());
-  // Mirror `source.workspaceDir` into the dedicated column so the launcher
-  // and the MCP server (which reads/writes the column directly) agree on
-  // the project's linked directory. Earlier versions hard-coded `null` here,
-  // which silently clobbered every MCP-side `update_project workspace_dir`
-  // write on the next launcher save.
-  const workspaceDir =
-    p.source?.kind === 'local' ? p.source.workspaceDir : null;
+  // ``workspace_dir`` column mirrors the first local source's path so the
+  // launcher and the MCP server (which reads/writes the column directly)
+  // agree on the project's linked directory for the single-source
+  // ergonomic case. Multi-source projects: still mirror the first local
+  // source, since MCP's update_project workspace_dir API doesn't know
+  // about the array model.
+  const firstLocal = p.sources.find((s) => s.kind === 'local');
+  const workspaceDir = firstLocal?.kind === 'local' ? firstLocal.workspaceDir : null;
   return {
     id: p.id,
     label: p.label,
@@ -247,8 +295,8 @@ export function projectToRow(p: Project): ProjectRow {
     workspace_dir: workspaceDir,
     is_personal: p.isPersonal ? 1 : 0,
     auto_dispatch: p.autoDispatch ? 1 : 0,
-    source: jsonStrOrNull(p.source),
-    sandbox: jsonStrOrNull(p.sandbox),
+    sources: JSON.stringify(p.sources),
+    sandbox_profile: p.sandboxProfile ?? null,
     // `config` is managed via dedicated repo.setProjectConfig() — the
     // upsert path leaves it untouched on existing rows and NULL on inserts.
     config: null,
@@ -296,6 +344,8 @@ export function ticketToRow(t: Ticket): TicketRow {
     supervisor_task_id: (t.supervisorTaskId as string) ?? null,
     token_usage: jsonStrOrNull(t.tokenUsage),
     runs: JSON.stringify(t.runs ?? []),
+    pr_review: t.prReview && Object.keys(t.prReview).length > 0 ? JSON.stringify(t.prReview) : null,
+    pr_merged_at: t.prMergedAt && Object.keys(t.prMergedAt).length > 0 ? JSON.stringify(t.prMergedAt) : null,
     created_at: toIso(t.createdAt),
     updated_at: toIso(t.updatedAt),
   };

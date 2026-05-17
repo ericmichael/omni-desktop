@@ -139,7 +139,7 @@ export const ProjectCardsGrid = memo(() => {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '');
-    const project = await ticketApi.addProject({ label: name, slug });
+    const project = await ticketApi.addProject({ label: name, slug, sources: [] });
     setCreating(false);
     setNewName('');
     ticketApi.goToProject(project.id);

@@ -321,14 +321,24 @@ export const ticketApi = {
     void ticketApi.fetchTasks();
     return ok;
   },
-  setPrReview: (ticketId: TicketId, review: 'approved' | 'changes_requested' | null): Promise<void> => {
-    return emitter.invoke('project:set-pr-review', ticketId, review);
+  setPrReview: (
+    ticketId: TicketId,
+    sourceId: string,
+    review: 'approved' | 'changes_requested' | null
+  ): Promise<void> => {
+    return emitter.invoke('project:set-pr-review', ticketId, sourceId, review);
   },
-  checkMerge: (ticketId: TicketId): Promise<import('@/shared/types').PrMergeCheck> => {
-    return emitter.invoke('project:check-merge', ticketId);
+  checkMerge: (
+    ticketId: TicketId,
+    sourceId: string
+  ): Promise<import('@/shared/types').PrMergeCheck> => {
+    return emitter.invoke('project:check-merge', ticketId, sourceId);
   },
-  mergeTicket: async (ticketId: TicketId): Promise<import('@/shared/types').PrMergeResult> => {
-    const result = await emitter.invoke('project:merge-ticket', ticketId);
+  mergeTicket: async (
+    ticketId: TicketId,
+    sourceId: string
+  ): Promise<import('@/shared/types').PrMergeResult> => {
+    const result = await emitter.invoke('project:merge-ticket', ticketId, sourceId);
     void ticketApi.fetchTasks();
     return result;
   },
@@ -373,8 +383,8 @@ export const ticketApi = {
   openArtifactExternal: (ticketId: TicketId, relativePath: string): Promise<void> => {
     return emitter.invoke('project:open-artifact-external', ticketId, relativePath);
   },
-  getFilesChanged: (ticketId: TicketId): Promise<DiffResponse> => {
-    return emitter.invoke('project:get-files-changed', ticketId);
+  getFilesChanged: (ticketId: TicketId, sourceId: string): Promise<DiffResponse> => {
+    return emitter.invoke('project:get-files-changed', ticketId, sourceId);
   },
 
   // Context files (replaces project.brief)

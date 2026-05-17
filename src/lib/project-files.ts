@@ -28,7 +28,6 @@ import type {
   Project,
   ProjectId,
   ProjectSource,
-  SandboxConfig,
   ShapingData,
   Ticket,
   TicketComment,
@@ -36,6 +35,7 @@ import type {
   TicketRun,
   TokenUsage,
 } from '@/shared/types';
+import { firstSource } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
 // Constants shared by parsers and tests
@@ -194,24 +194,23 @@ const PipelineSchema: z.ZodType<Pipeline> = z.object({
   columns: z.array(ColumnSchema),
 });
 
-const SandboxConfigSchema: z.ZodType<SandboxConfig> = z.object({
-  image: z.string().optional(),
-  dockerfile: z.string().optional(),
-});
-
 const ProjectSourceSchema: z.ZodType<ProjectSource> = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('local'),
+    id: z.string(),
+    mountName: z.string(),
     workspaceDir: z.string(),
     gitDetected: z.boolean().optional(),
   }),
   z.object({
     kind: z.literal('git-remote'),
+    id: z.string(),
+    mountName: z.string(),
     repoUrl: z.string(),
     defaultBranch: z.string().optional(),
     credentials: z.object({ kind: z.literal('platform-managed'), credentialId: z.string() }).optional(),
   }),
-]);
+]) as unknown as z.ZodType<ProjectSource>;
 
 /** Frontmatter schema for a ticket file. Body holds the description. */
 const TicketMetaSchema = z.object({
@@ -273,9 +272,9 @@ const ProjectConfigSchema = z.object({
   label: z.string(),
   slug: z.string(),
   isPersonal: z.boolean().optional(),
-  source: ProjectSourceSchema.optional(),
+  sources: z.array(ProjectSourceSchema).default([]),
   pipeline: PipelineSchema.optional(),
-  sandbox: SandboxConfigSchema.nullable().optional(),
+  sandboxProfile: z.string().nullable().optional(),
   autoDispatch: z.boolean().optional(),
   createdAt: Timestamp,
 });
@@ -453,11 +452,13 @@ return parsed;
     id: c.id as ProjectId,
     label: c.label,
     slug: c.slug,
-    isPersonal: c.isPersonal,
-    source: c.source,
-    pipeline: c.pipeline,
-    sandbox: c.sandbox,
-    autoDispatch: c.autoDispatch,
+    ...(c.isPersonal !== undefined ? { isPersonal: c.isPersonal } : {}),
+    sources: c.sources,
+    ...(c.pipeline !== undefined ? { pipeline: c.pipeline } : {}),
+    ...(c.sandboxProfile !== undefined && c.sandboxProfile !== null
+      ? { sandboxProfile: c.sandboxProfile }
+      : {}),
+    ...(c.autoDispatch !== undefined ? { autoDispatch: c.autoDispatch } : {}),
     createdAt: c.createdAt,
   });
 }
@@ -577,9 +578,9 @@ export function serializeProjectConfig(project: Project): string {
     label: project.label,
     slug: project.slug,
     isPersonal: project.isPersonal,
-    source: project.source,
+    sources: project.sources,
     pipeline: project.pipeline,
-    sandbox: project.sandbox,
+    sandboxProfile: project.sandboxProfile,
     autoDispatch: project.autoDispatch,
     createdAt: msToIso(project.createdAt),
   });

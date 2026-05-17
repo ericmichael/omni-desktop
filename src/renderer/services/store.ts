@@ -1,14 +1,12 @@
 import type { ReadableAtom } from 'nanostores';
 import { atom } from 'nanostores';
 
-import { enforceSandboxPolicy, migrateLayoutMode } from '@/lib/store-init';
+import { migrateLayoutMode } from '@/lib/store-init';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import type { ModelsConfig, OperatingSystem, StoreData } from '@/shared/types';
 
 const getDefaults = (): StoreData => ({
-  sandboxBackend: 'none',
-  sandboxProfiles: null,
-  selectedMachineId: null,
+  defaultProfileName: 'host',
   optInToLauncherPrereleases: false,
   previewFeatures: false,
 
@@ -129,12 +127,6 @@ emitter.invoke('util:get-os').then($operatingSystem.set);
 const init = async () => {
   await persistedStoreApi.sync();
   const store = persistedStoreApi.get();
-
-  // GA users (no preview features, no enterprise policy) must not run with any sandbox backend.
-  const sandboxReset = enforceSandboxPolicy(store);
-  if (sandboxReset) {
-    await persistedStoreApi.setKey('sandboxBackend', sandboxReset);
-  }
 
   // Migrate legacy layoutMode values to current valid modes
   const layoutReset = migrateLayoutMode(store.layoutMode as string);

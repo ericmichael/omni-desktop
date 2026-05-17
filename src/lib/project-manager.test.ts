@@ -221,7 +221,7 @@ describe('ProjectManager', () => {
       const project = pm.addProject({
         label: 'New Project',
         slug: 'new-project',
-        source: { kind: 'local', workspaceDir: join(homeDir, 'work') },
+        sources: [{ id: 's1', mountName: 'work', kind: 'local', workspaceDir: join(homeDir, 'work') }],
       } as unknown as Parameters<typeof pm.addProject>[0]);
 
       const pages = store.get('pages', []);
@@ -319,13 +319,13 @@ describe('ProjectManager', () => {
 
     const makePmForRepo = (): PmCtx =>
       makePm({
-        source: { kind: 'local', workspaceDir: repoDir },
+        sources: [{ id: 's1', mountName: 'work', kind: 'local', workspaceDir: repoDir }],
         tickets: [{ id: 't1' }],
       });
 
     it('returns empty result for a fresh repo with no files', async () => {
       const { pm } = makePmForRepo();
-      const result = await pm.getFilesChanged('t1');
+      const result = await pm.getFilesChanged('t1', 's1');
       expect(result.hasChanges).toBe(false);
       expect(result.files).toEqual([]);
     });
@@ -334,7 +334,7 @@ describe('ProjectManager', () => {
       const { pm } = makePmForRepo();
       writeFileSync(join(repoDir, 'new.txt'), 'hello\nworld\n');
 
-      const result = await pm.getFilesChanged('t1');
+      const result = await pm.getFilesChanged('t1', 's1');
 
       expect(result.hasChanges).toBe(true);
       expect(result.files).toHaveLength(1);
@@ -356,7 +356,7 @@ describe('ProjectManager', () => {
       writeFileSync(join(repoDir, 'a.txt'), 'modified\n');
 
       const { pm } = makePmForRepo();
-      const result = await pm.getFilesChanged('t1');
+      const result = await pm.getFilesChanged('t1', 's1');
 
       expect(result.hasChanges).toBe(true);
       const file = result.files.find((f) => f.path === 'a.txt')!;
@@ -374,7 +374,7 @@ describe('ProjectManager', () => {
       git('add', 'b.txt');
 
       const { pm } = makePmForRepo();
-      const result = await pm.getFilesChanged('t1');
+      const result = await pm.getFilesChanged('t1', 's1');
 
       const b = result.files.find((f) => f.path === 'b.txt')!;
       expect(b.status).toBe('added');
@@ -387,7 +387,7 @@ describe('ProjectManager', () => {
       git('rm', '-q', 'a.txt');
 
       const { pm } = makePmForRepo();
-      const result = await pm.getFilesChanged('t1');
+      const result = await pm.getFilesChanged('t1', 's1');
 
       const a = result.files.find((f) => f.path === 'a.txt')!;
       expect(a.status).toBe('deleted');
@@ -401,7 +401,7 @@ describe('ProjectManager', () => {
       writeFileSync(join(repoDir, 'bin.dat'), buf);
 
       const { pm } = makePmForRepo();
-      const result = await pm.getFilesChanged('t1');
+      const result = await pm.getFilesChanged('t1', 's1');
 
       const bin = result.files.find((f) => f.path === 'bin.dat')!;
       expect(bin.isBinary).toBe(true);
@@ -410,14 +410,14 @@ describe('ProjectManager', () => {
 
     it('returns empty when the ticket does not exist', async () => {
       const { pm } = makePmForRepo();
-      const result = await pm.getFilesChanged('nope' as TicketId);
+      const result = await pm.getFilesChanged('nope' as TicketId, 's1');
       expect(result.hasChanges).toBe(false);
     });
 
     it('returns empty when the project workspaceDir no longer exists on disk', async () => {
       const { pm } = makePmForRepo();
       rmSync(repoDir, { recursive: true, force: true });
-      const result = await pm.getFilesChanged('t1');
+      const result = await pm.getFilesChanged('t1', 's1');
       expect(result.hasChanges).toBe(false);
     });
 
@@ -435,7 +435,7 @@ describe('ProjectManager', () => {
       git('commit', '-q', '-m', 'add b on feat/foo');
 
       const { pm, store } = makePm({
-        source: { kind: 'local', workspaceDir: repoDir },
+        sources: [{ id: 's1', mountName: 'work', kind: 'local', workspaceDir: repoDir }],
         tickets: [{ id: 't1' }],
       });
       // Record the ticket's branch — mirrors how the supervisor sets it.
@@ -443,7 +443,7 @@ describe('ProjectManager', () => {
       tickets[0]!.branch = 'feat/foo';
       store.set('tickets', tickets);
 
-      const result = await pm.getFilesChanged('t1');
+      const result = await pm.getFilesChanged('t1', 's1');
 
       expect(result.hasChanges).toBe(true);
       const committed = result.files.filter((f) => f.group === 'committed');
@@ -549,7 +549,7 @@ describe('ProjectManager', () => {
     it('falls back to DEFAULT_PIPELINE for projects with a source but no pipeline', () => {
       const { pm, store } = makePm({
         tickets: [],
-        source: { kind: 'local', workspaceDir: '/tmp/work' },
+        sources: [{ id: 's1', mountName: 'work', kind: 'local', workspaceDir: '/tmp/work' }],
       });
       // Remove pipeline from the project
       const projects = store.get('projects', []);

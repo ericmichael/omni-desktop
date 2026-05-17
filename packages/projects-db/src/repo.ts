@@ -84,7 +84,7 @@ export class ProjectsRepo {
   upsertProject(row: ProjectRow): void {
     this.stmts.upsertProject.run(
       row.id, row.label, row.slug, row.workspace_dir,
-      row.is_personal, row.auto_dispatch, row.source, row.sandbox,
+      row.is_personal, row.auto_dispatch, row.sources, row.sandbox_profile,
       row.due_date, row.pinned_at,
       row.created_at, row.updated_at,
     );
@@ -141,7 +141,7 @@ export class ProjectsRepo {
       for (const row of rows) {
         this.stmts.upsertProject.run(
           row.id, row.label, row.slug, row.workspace_dir,
-          row.is_personal, row.auto_dispatch, row.source, row.sandbox,
+          row.is_personal, row.auto_dispatch, row.sources, row.sandbox_profile,
           row.due_date, row.pinned_at,
           row.created_at, row.updated_at,
         );
@@ -330,6 +330,7 @@ export class ProjectsRepo {
       row.use_worktree, row.worktree_path, row.worktree_name,
       row.supervisor_session_id, row.phase, row.phase_changed_at,
       row.supervisor_task_id, row.token_usage, row.runs,
+      row.pr_review, row.pr_merged_at,
       row.created_at, row.updated_at,
     );
     this.bumpChangeSeq();
@@ -364,6 +365,7 @@ export class ProjectsRepo {
           row.use_worktree, row.worktree_path, row.worktree_name,
           row.supervisor_session_id, row.phase, row.phase_changed_at,
           row.supervisor_task_id, row.token_usage, row.runs,
+          row.pr_review, row.pr_merged_at,
           row.created_at, row.updated_at,
         );
       }
@@ -629,12 +631,12 @@ function prepareStatements(db: DatabaseSync) {
     getProject: db.prepare('SELECT * FROM projects WHERE id = ?'),
     getProjectBySlug: db.prepare('SELECT * FROM projects WHERE slug = ?'),
     upsertProject: db.prepare(`
-      INSERT INTO projects (id, label, slug, workspace_dir, is_personal, auto_dispatch, source, sandbox, due_date, pinned_at, created_at, updated_at)
+      INSERT INTO projects (id, label, slug, workspace_dir, is_personal, auto_dispatch, sources, sandbox_profile, due_date, pinned_at, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         label = excluded.label, slug = excluded.slug, workspace_dir = excluded.workspace_dir,
         is_personal = excluded.is_personal, auto_dispatch = excluded.auto_dispatch,
-        source = excluded.source, sandbox = excluded.sandbox,
+        sources = excluded.sources, sandbox_profile = excluded.sandbox_profile,
         due_date = excluded.due_date, pinned_at = excluded.pinned_at,
         updated_at = excluded.updated_at
     `),
@@ -671,8 +673,9 @@ function prepareStatements(db: DatabaseSync) {
         blocked_by, shaping, resolution, resolved_at, archived_at, column_changed_at,
         use_worktree, worktree_path, worktree_name, supervisor_session_id,
         phase, phase_changed_at, supervisor_task_id, token_usage, runs,
+        pr_review, pr_merged_at,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         project_id = excluded.project_id, milestone_id = excluded.milestone_id,
         column_id = excluded.column_id, title = excluded.title, description = excluded.description,
@@ -683,7 +686,9 @@ function prepareStatements(db: DatabaseSync) {
         worktree_name = excluded.worktree_name, supervisor_session_id = excluded.supervisor_session_id,
         phase = excluded.phase, phase_changed_at = excluded.phase_changed_at,
         supervisor_task_id = excluded.supervisor_task_id, token_usage = excluded.token_usage,
-        runs = excluded.runs, updated_at = excluded.updated_at
+        runs = excluded.runs,
+        pr_review = excluded.pr_review, pr_merged_at = excluded.pr_merged_at,
+        updated_at = excluded.updated_at
     `),
     deleteTicket: db.prepare('DELETE FROM tickets WHERE id = ?'),
     deleteAllTickets: db.prepare('DELETE FROM tickets'),

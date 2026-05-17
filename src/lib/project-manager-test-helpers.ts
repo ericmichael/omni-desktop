@@ -333,13 +333,17 @@ export type SeedArgs = {
 export const seedStore = (args: SeedArgs = {}): IStore => {
   const projectId = args.projectId ?? 'proj-1';
   const pipeline = args.pipeline ?? TEST_PIPELINE;
+  const sourcesArg = (args as { sources?: unknown[]; source?: unknown }).sources
+    ?? ((args as { source?: unknown }).source != null
+      ? [{ id: 's1', mountName: 'work', ...((args as { source: object }).source) }]
+      : []);
   const project: Project = {
     id: projectId,
     label: 'Test Project',
     createdAt: Date.now(),
     pipeline,
     autoDispatch: args.autoDispatch ?? false,
-    source: args.source,
+    sources: sourcesArg,
   } as unknown as Project;
 
   const tickets: Ticket[] = (args.tickets ?? []).map(

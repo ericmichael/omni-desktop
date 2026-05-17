@@ -67,7 +67,7 @@ describe('runMigrations', () => {
         expect(t.phase).toBe('idle');
       }
       // Fall-through means schemaVersion ends up at the current version.
-      expect(store.get('schemaVersion')).toBe(21);
+      expect(store.get('schemaVersion')).toBe(22);
     });
   });
 
@@ -422,19 +422,66 @@ describe('runMigrations', () => {
   });
 
   describe('full ladder and idempotency', () => {
-    it('runs v0 → v21 end-to-end without throwing', () => {
+    it('runs v0 → v22 end-to-end without throwing', () => {
       const store = makeStore({
         // schemaVersion undefined → takes the initial boot path.
         tickets: [{ id: 't1', status: 'in_progress' }],
         projects: [{ id: 'p1', label: 'A', workspaceDir: '/tmp/w' }],
       });
       expect(() => runMigrations(store, makeDeps())).not.toThrow();
-      expect(store.get('schemaVersion')).toBe(21);
+      expect(store.get('schemaVersion')).toBe(22);
     });
 
-    it('is a no-op on an already-migrated v21 store', () => {
+    it('v21 → v22 maps docker→devbox, drops legacy sandbox keys, strips Project.sandbox', () => {
       const store = makeStore({
         schemaVersion: 21,
+        sandboxBackend: 'docker',
+        sandboxProfiles: [{ resource_id: 1 }],
+        selectedMachineId: 1,
+        tickets: [],
+        projects: [
+          { id: 'p1', label: 'A', sandbox: { image: 'ubuntu:24.04' } },
+          { id: 'p2', label: 'B' },
+        ],
+      });
+      runMigrations(store, makeDeps());
+      expect(store.get('schemaVersion')).toBe(22);
+      expect(store.get('defaultProfileName')).toBe('devbox');
+      expect(store.get('sandboxBackend')).toBeUndefined();
+      expect(store.get('sandboxProfiles')).toBeUndefined();
+      expect(store.get('selectedMachineId')).toBeUndefined();
+      const projects = store.get('projects', []) as Array<Record<string, unknown>>;
+      expect(projects[0]).not.toHaveProperty('sandbox');
+      expect(projects[1]).not.toHaveProperty('sandbox');
+    });
+
+    it('v21 → v22 maps platform→platform', () => {
+      const store = makeStore({
+        schemaVersion: 21,
+        sandboxBackend: 'platform',
+        tickets: [],
+        projects: [],
+      });
+      runMigrations(store, makeDeps());
+      expect(store.get('defaultProfileName')).toBe('platform');
+    });
+
+    it('v21 → v22 maps dropped backends (podman/vm/local/none) to host', () => {
+      for (const legacy of ['podman', 'vm', 'local', 'none']) {
+        const store = makeStore({
+          schemaVersion: 21,
+          sandboxBackend: legacy,
+          tickets: [],
+          projects: [],
+        });
+        runMigrations(store, makeDeps());
+        expect(store.get('defaultProfileName')).toBe('host');
+      }
+    });
+
+    it('is a no-op on an already-migrated v22 store', () => {
+      const store = makeStore({
+        schemaVersion: 22,
         tickets: [{ id: 't1', phase: 'idle' }],
         projects: [],
         milestones: [],
@@ -444,7 +491,7 @@ describe('runMigrations', () => {
       const deps = makeDeps();
       runMigrations(store, deps);
 
-      expect(store.get('schemaVersion')).toBe(21);
+      expect(store.get('schemaVersion')).toBe(22);
       expect(deps.writeProjectContextBrief).not.toHaveBeenCalled();
     });
 
@@ -465,7 +512,7 @@ describe('runMigrations', () => {
         expect(t).not.toHaveProperty('supervisorSessionId');
       }
       // Falls through to v20, which is the current head.
-      expect(store.get('schemaVersion')).toBe(21);
+      expect(store.get('schemaVersion')).toBe(22);
     });
 
     it('v18 → v19 backfills installedBundles from existing skillSources', () => {
@@ -488,7 +535,7 @@ describe('runMigrations', () => {
       });
       runMigrations(store, makeDeps());
 
-      expect(store.get('schemaVersion')).toBe(21);
+      expect(store.get('schemaVersion')).toBe(22);
       const bundles = store.get('installedBundles') as Record<string, { skillNames: string[] }>;
       expect(Object.keys(bundles).sort()).toEqual([
         'anthropics/skills:creative-skills',
@@ -500,7 +547,7 @@ describe('runMigrations', () => {
 
     it('calls repairProjectRoots on idempotent v-current boot', () => {
       const store = makeStore({
-        schemaVersion: 21,
+        schemaVersion: 22,
         tickets: [],
         projects: [],
         milestones: [],
@@ -520,7 +567,7 @@ describe('runMigrations', () => {
         codeLayoutMode: 'deck',
       });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(21);
+      expect(store.get('schemaVersion')).toBe(22);
       expect(store.get('layoutMode')).toBe('spaces');
       expect(store.get('codeLayoutMode')).toBe('tile');
     });
@@ -534,7 +581,7 @@ describe('runMigrations', () => {
         codeLayoutMode: 'spaces',
       });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(21);
+      expect(store.get('schemaVersion')).toBe(22);
       expect(store.get('layoutMode')).toBe('spaces');
       expect(store.get('codeLayoutMode')).toBe('tile');
     });
@@ -548,7 +595,7 @@ describe('runMigrations', () => {
         codeLayoutMode: 'focus',
       });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(21);
+      expect(store.get('schemaVersion')).toBe(22);
       expect(store.get('layoutMode')).toBe('projects');
       expect(store.get('codeLayoutMode')).toBe('focus');
     });

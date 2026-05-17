@@ -7,6 +7,7 @@ import { Button, Heading } from '@/renderer/ds';
 import { ProjectForm } from '@/renderer/features/Projects/ProjectForm';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { CodeTabId, Project } from '@/shared/types';
+import { firstSource } from '@/shared/types';
 
 import { codeApi } from './state';
 
@@ -101,7 +102,7 @@ const ProjectCard = memo(
         <FolderOpen20Regular className={styles.projectIcon} />
         <div className={styles.projectContent}>
           <div className={styles.projectLabel}>{project.label}</div>
-          <div className={styles.projectDir}>{project.source?.kind === 'local' ? project.source.workspaceDir : project.source?.kind === 'git-remote' ? project.source.repoUrl : ''}</div>
+          <div className={styles.projectDir}>{(() => { const s = firstSource(project); if (s?.kind === 'local') return s.workspaceDir; if (s?.kind === 'git-remote') return s.repoUrl; return ''; })()}</div>
         </div>
       </button>
     );

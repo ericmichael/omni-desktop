@@ -24,11 +24,14 @@ interface JsonProject {
   label: string;
   slug: string;
   isPersonal?: boolean;
+  // Legacy electron-store rows had `source: ProjectSource | undefined`. The
+  // current model is `sources: ProjectSource[]`. We accept either here and
+  // normalize to an array in the migrator.
   source?: unknown;
+  sources?: unknown[];
   createdAt: number;
   pipeline?: { columns: JsonColumn[] };
   autoDispatch?: boolean;
-  sandbox?: unknown;
   dueDate?: number;
   pinnedAt?: number;
 }
@@ -66,6 +69,11 @@ interface JsonTicket {
   tokenUsage?: unknown;
   comments?: { id: string; author: string; content: string; createdAt: number }[];
   runs?: unknown[];
+  // Multi-source migration: prReview/prMergedAt are now Record<sourceId, ...>.
+  // The JSON migrator accepts both the legacy scalar shape and the new map
+  // shape so we don't have to special-case the unmigrated electron-store dump.
+  prReview?: { status: 'approved' | 'changes_requested'; at: number } | Record<string, { status: 'approved' | 'changes_requested'; at: number }>;
+  prMergedAt?: number | Record<string, number>;
   createdAt: number;
   updatedAt: number;
 }
@@ -132,6 +140,26 @@ const DEFAULT_COLUMNS: JsonColumn[] = SHARED_DEFAULT_COLUMNS.map((c) => ({
   ...(c.gate ? { gate: true } : {}),
 }));
 
+/**
+ * Normalize a legacy JsonProject's source/sources fields into the current
+ * ``ProjectSource[]`` shape.
+ *
+ * - If ``sources`` is already an array, use it as-is (each entry assumed
+ *   to already have ``id`` + ``mountName`` from a later launcher run).
+ * - Else if ``source`` is a populated object, wrap it as a single-element
+ *   array, injecting a random ``id`` and using the project's slug as the
+ *   default ``mountName``.
+ * - Else (both absent), produce an empty array.
+ */
+function _legacyToSources(p: JsonProject): unknown[] {
+  if (Array.isArray(p.sources)) return p.sources;
+  if (p.source && typeof p.source === 'object') {
+    const id = Math.random().toString(36).slice(2, 18);
+    return [{ ...(p.source as object), id, mountName: p.slug }];
+  }
+  return [];
+}
+
 function jsonStr(v: unknown): string | null {
   return v != null ? JSON.stringify(v) : null;
 }
@@ -177,8 +205,12 @@ return 0;
         workspace_dir: null,
         is_personal: p.isPersonal ? 1 : 0,
         auto_dispatch: p.autoDispatch ? 1 : 0,
-        source: jsonStr(p.source),
-        sandbox: jsonStr(p.sandbox),
+        sources: JSON.stringify(_legacyToSources(p)),
+        // v22 launcher cut: the legacy `sandbox: { image?, dockerfile? }`
+        // shape is dead. Per-project sandbox profile selection lives in
+        // ``sandboxProfile`` (string), which post-dates the JSON store —
+        // electron-store rows never had it, so we always seed null.
+        sandbox_profile: null,
         config: null,
         due_date: isoOpt(p.dueDate),
         pinned_at: isoOpt(p.pinnedAt),
@@ -248,6 +280,13 @@ return 0;
         supervisor_task_id: t.supervisorTaskId ?? null,
         token_usage: jsonStr(t.tokenUsage),
         runs: JSON.stringify(t.runs ?? []),
+        // pr_review and pr_merged_at are JSON columns in the v7+ schema
+        // (Record<sourceId, ...>). Pass straight through — if the JSON
+        // source has the legacy scalar shape it'll persist as malformed
+        // and be ignored by the bridge converter, which is acceptable
+        // since pre-multi-source rows have no source ids to key on.
+        pr_review: t.prReview ? JSON.stringify(t.prReview) : null,
+        pr_merged_at: t.prMergedAt !== undefined && t.prMergedAt !== null ? JSON.stringify(t.prMergedAt) : null,
         created_at: toIso(t.createdAt),
         updated_at: toIso(t.updatedAt),
       });

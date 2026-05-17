@@ -1,4 +1,4 @@
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { ipcMain, shell } from 'electron';
 import type Store from 'electron-store';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
@@ -11,6 +11,7 @@ import { promisify } from 'util';
 
 import { getArtifactsDir } from '@/lib/artifacts';
 import { listArtifactEntries, readArtifactFile, resolveArtifactPath } from '@/lib/artifacts-fs';
+import { buildContainerSeedPatch, getContainerFilesChanged } from '@/lib/container-files-changed';
 import { getGitFilesChanged, resolveTicketDiffBase } from '@/lib/git-files-changed';
 import { INBOX_SWEEP_INTERVAL_MS } from '@/lib/inbox-expiry';
 import { checkMerge, mergeBranch } from '@/lib/pr-merge';
@@ -82,8 +83,43 @@ import type {
   TicketId,
   TicketPriority,
 } from '@/shared/types';
+import { firstSource } from '@/shared/types';
+import type { ProjectSource } from '@/shared/types';
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Run ``git apply`` with the patch piped via stdin. ``execFile`` doesn't
+ * support stdin, so this small helper uses ``spawn`` and waits for
+ * close. Resolves with stderr on non-zero exit so callers can surface
+ * the apply failure verbatim.
+ */
+const gitApplyStdin = (
+  cwd: string,
+  extraArgs: string[],
+  patch: string
+): Promise<{ ok: true } | { ok: false; stderr: string }> =>
+  new Promise((resolve) => {
+    const child = spawn('git', ['-C', cwd, 'apply', ...extraArgs, '-'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', (err) => {
+      resolve({ ok: false, stderr: err.message });
+    });
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve({ ok: true });
+      } else {
+        resolve({ ok: false, stderr: stderr || `git apply exited ${code}` });
+      }
+    });
+    child.stdin.write(patch);
+    child.stdin.end();
+  });
 
 const DEFAULT_BRIEF_TEMPLATE = `## Problem
 
@@ -286,7 +322,6 @@ export class ProjectManager {
         setTickets: (tickets) => this.setTickets(tickets),
         getProjects: () => this.getProjects(),
         getWipLimit: () => this.store.get('wipLimit') ?? 3,
-        getSandboxBackend: () => this.store.get('sandboxBackend'),
         getPlatformCredentials: () => this.store.get('platform'),
         getCodeTabs: () => (this.store.get('codeTabs', []) ?? []) as Array<{ id: string; ticketId?: string }>,
         getPersistedTasks: () =>
@@ -473,7 +508,7 @@ export class ProjectManager {
     // Personal projects use the (already-ensured) workspace root; local-source
     // projects use a user-supplied existing dir; git-remote projects clone
     // inside the container — so only context-only named projects need this.
-    if (!project.isPersonal && !project.source) {
+    if (!project.isPersonal && project.sources.length === 0) {
       mkdirSync(this.getProjectDirPath(project), { recursive: true });
     }
     // Seed the project's root page through PageManager. The root page's body
@@ -485,19 +520,21 @@ export class ProjectManager {
     // Seed pipeline_columns immediately with the source-appropriate defaults
     // so tickets created before FLEET.md loads have a valid FK target.
     this.syncPipelineForProject(project.id);
-    // Eagerly load FLEET.md so the pipeline is ready when the UI fetches it.
-    // Personal / context-only projects (no source) have no FLEET.md and no
-    // workflow to load — they use SIMPLE_COLUMNS and run no hooks.
-    if (project.source?.kind === 'local') {
-      // `getProjectDir` reads `local_dir.src` from the persisted ProjectConfig,
-      // with `project.source.workspaceDir` as a fallback for resilience.
-      const workspaceDir = this.getProjectDir(project.id) ?? project.source.workspaceDir;
+    // Eagerly load FLEET.md from the first source so the pipeline is ready
+    // when the UI fetches it. Personal / context-only projects (no source)
+    // have no FLEET.md and no workflow to load — they use SIMPLE_COLUMNS.
+    // Multi-source projects load FLEET.md from the first source only; mixing
+    // workflows across sources would need explicit precedence rules we
+    // haven't defined yet.
+    const primarySource = project.sources[0];
+    if (primarySource?.kind === 'local') {
+      const workspaceDir = this.getProjectDir(project.id) ?? primarySource.workspaceDir;
       void this.workflowLoader
         .load(project.id, workspaceDir)
         .then(() => this.syncPipelineForProject(project.id));
-    } else if (project.source?.kind === 'git-remote') {
+    } else if (primarySource?.kind === 'git-remote') {
       void this.workflowLoader
-        .loadFromRemote(project.id, project.source.repoUrl, project.source.defaultBranch)
+        .loadFromRemote(project.id, primarySource.repoUrl, primarySource.defaultBranch)
         .then(() => this.syncPipelineForProject(project.id));
     }
     return project;
@@ -652,11 +689,12 @@ export class ProjectManager {
       return;
     }
 
-    if (project.source?.kind === 'local') {
-      const workspaceDir = this.getProjectDir(projectId) ?? project.source.workspaceDir;
+    const source = firstSource(project);
+    if (source?.kind === 'local') {
+      const workspaceDir = this.getProjectDir(projectId) ?? source.workspaceDir;
       await this.workflowLoader.load(projectId, workspaceDir);
-    } else if (project.source?.kind === 'git-remote') {
-      await this.workflowLoader.loadFromRemote(projectId, project.source?.repoUrl, project.source?.defaultBranch);
+    } else if (source?.kind === 'git-remote') {
+      await this.workflowLoader.loadFromRemote(projectId, source.repoUrl, source.defaultBranch);
     }
     this.syncPipelineForProject(projectId);
   };
@@ -680,7 +718,7 @@ export class ProjectManager {
 
     const hasExisting = this.repo.listColumns(projectId).length > 0;
     const defs = resolvePipelineDefs({
-      hasSource: !!project.source,
+      hasSource: project.sources.length > 0,
       hasExisting,
       workflow: this.workflowLoader.getConfig(projectId),
     });
@@ -764,7 +802,7 @@ return;
     if (project?.pipeline) {
       return project.pipeline;
     }
-    return project?.source ? DEFAULT_PIPELINE : SIMPLE_PIPELINE;
+    return project && project.sources.length > 0 ? DEFAULT_PIPELINE : SIMPLE_PIPELINE;
   };
 
   private getColumn = (projectId: ProjectId, columnId: ColumnId) => {
@@ -1005,7 +1043,7 @@ return;
 
   // #region Files changed (git diff)
 
-  getFilesChanged = async (ticketId: TicketId): Promise<DiffResponse> => {
+  getFilesChanged = async (ticketId: TicketId, sourceId: string): Promise<DiffResponse> => {
     const empty: DiffResponse = { totalFiles: 0, totalAdditions: 0, totalDeletions: 0, hasChanges: false, files: [] };
 
     const ticket = this.getTicketById(ticketId);
@@ -1013,13 +1051,32 @@ return;
       return empty;
     }
 
-    // Find the task associated with this ticket (via supervisorTaskId or ticketId on task)
+    const project = this.getProjects().find((p) => p.id === ticket.projectId);
+    if (!project) {
+      return empty;
+    }
+
+    // Find the named source by id on the project.
+    const source = project.sources.find((s) => s.id === sourceId);
+
+    // Container-backed model: for local sources with a running session,
+    // the agent's work lives in /workspace/<mountName>. Diff against
+    // the ``omni/seed`` tag set up by devbox.yml's init step.
+    if (source?.kind === 'local') {
+      const containerId = this.processManager?.getProjectContainerId(project.id) ?? null;
+      if (containerId) {
+        return getContainerFilesChanged({ containerId, mountName: source.mountName });
+      }
+    }
+
+    // Host-side fallback (legacy worktree flow, currently unused by
+    // entry-based seeding but kept until the supervisor's per-ticket
+    // worktree machinery is rebuilt in container-land).
     let task: Task | undefined;
     if (ticket.supervisorTaskId) {
       task = this.supervisors.tasks.get(ticket.supervisorTaskId)?.task;
     }
     if (!task) {
-      // Fallback: search all tasks for one matching this ticketId
       for (const [, entry] of this.supervisors.tasks) {
         if (entry.task.ticketId === ticketId) {
           task = entry.task;
@@ -1028,35 +1085,23 @@ return;
       }
     }
     if (!task) {
-      // Also check persisted tasks in the store
       const storedTasks = this.repo
         ? this.repo.listAllTasks().map(rowToTask)
         : (this.store.get('tasks') ?? []);
       task = storedTasks.find((t: Task) => t.ticketId === ticketId);
     }
 
-    // Determine the gitDir: the ticket's worktree if it has one, else the
-    // project workspace (which is bind-mounted into the supervisor container
-    // in direct mode, so the agent's commits land here).
     const worktreePath = ticket.worktreePath ?? task?.worktreePath;
     let gitDir: string;
     if (worktreePath) {
       gitDir = worktreePath;
     } else {
-      const project = this.getProjects().find((p) => p.id === ticket.projectId);
-      if (!project || project.source?.kind !== 'local') {
+      if (source?.kind !== 'local') {
         return empty; // git-remote diffs happen inside the container, not locally
       }
-      gitDir = project.source.workspaceDir;
+      gitDir = source.workspaceDir;
     }
 
-    // Resolve the base branch the ticket's work would land in:
-    //  - Worktree mode: the worktree was branched from `effectiveBranch`, so
-    //    that's the base — `<effectiveBranch>..HEAD` is the ticket's PR diff.
-    //  - Direct mode: when the ticket has its own branch off a milestone
-    //    branch, the milestone branch is the base (mirrors `resolvePrBranches`).
-    //    Otherwise the work goes on the milestone branch (or trunk) directly,
-    //    so we leave preferredBase undefined and let the helper pick trunk.
     const milestoneBranch = ticket.milestoneId
       ? this.milestones.getById(ticket.milestoneId)?.branch
       : undefined;
@@ -1085,7 +1130,7 @@ return;
     if (!project) {
       return { reason: 'Project not found' };
     }
-    if (project.source?.kind !== 'local') {
+    if (firstSource(project)?.kind !== 'local') {
       return { reason: 'Merge is only supported for projects with a local git repo' };
     }
     if (!ticket.worktreeName) {
@@ -1097,27 +1142,76 @@ return;
     return { base, feature };
   };
 
-  setPrReview = (ticketId: TicketId, review: 'approved' | 'changes_requested' | null): void => {
+  /**
+   * Set or clear one source's PR review on a ticket. ``prReview`` is a
+   * map keyed by ``ProjectSource.id``; passing ``null`` removes the
+   * entry for *this* source only (other sources' reviews are
+   * unaffected).
+   */
+  setPrReview = (
+    ticketId: TicketId,
+    sourceId: string,
+    review: 'approved' | 'changes_requested' | null
+  ): void => {
     const ticket = this.getTicketById(ticketId);
-    if (!ticket) {
-      return;
+    if (!ticket) return;
+    const existing = ticket.prReview ?? {};
+    let next: Ticket['prReview'];
+    if (review === null) {
+      const copy = { ...existing };
+      delete copy[sourceId];
+      next = Object.keys(copy).length === 0 ? undefined : copy;
+    } else {
+      next = { ...existing, [sourceId]: { status: review, at: Date.now() } };
     }
-    this.updateTicket(ticketId, {
-      prReview: review === null ? undefined : { status: review, at: Date.now() },
-    });
+    this.updateTicket(ticketId, { prReview: next });
   };
 
-  checkPrMerge = async (ticketId: TicketId): Promise<PrMergeCheck> => {
+  /**
+   * Dry-run ``git apply --check`` of one source's container patch onto
+   * its host workspace. Reports conflicts independently per source.
+   */
+  checkPrMerge = async (ticketId: TicketId, sourceId: string): Promise<PrMergeCheck> => {
     const ticket = this.getTicketById(ticketId);
     if (!ticket) {
       return { ready: false, reason: 'Ticket not found' };
     }
     const project = this.getProjects().find((p) => p.id === ticket.projectId);
-    const { base, feature, reason } = this.resolvePrBranches(ticket);
-    if (!base || !feature || !project || project.source?.kind !== 'local') {
-      return { ready: false, reason: reason ?? 'Merge inputs unavailable' };
+    if (!project) {
+      return { ready: false, reason: 'Project not found' };
     }
-    const res = await checkMerge(project.source.workspaceDir, base, feature);
+    const source = project.sources.find((s) => s.id === sourceId);
+    if (!source) {
+      return { ready: false, reason: `Source not found: ${sourceId}` };
+    }
+    if (source.kind !== 'local') {
+      return { ready: false, reason: 'Merge is only supported for local sources' };
+    }
+
+    // Container-backed: dry-run git apply --check of this source's seed patch.
+    const containerId = this.processManager?.getProjectContainerId(project.id) ?? null;
+    if (containerId) {
+      const patch = await buildContainerSeedPatch(containerId, source.mountName);
+      if (!patch.trim()) {
+        return { ready: false, reason: 'No changes to merge' };
+      }
+      const check = await gitApplyStdin(source.workspaceDir, ['--check'], patch);
+      return {
+        ready: true,
+        base: 'host workspace',
+        feature: `container/${source.mountName}`,
+        hasConflicts: !check.ok,
+        conflictingFiles: [],
+        ahead: 1,
+      };
+    }
+
+    // No running container — legacy worktree fallback.
+    const { base, feature, reason } = this.resolvePrBranches(ticket);
+    if (!base || !feature) {
+      return { ready: false, reason: reason ?? 'No running session for this project' };
+    }
+    const res = await checkMerge(source.workspaceDir, base, feature);
     return {
       ready: true,
       base,
@@ -1128,34 +1222,65 @@ return;
     };
   };
 
-  mergePrTicket = async (ticketId: TicketId): Promise<PrMergeResult> => {
+  /**
+   * Apply one source's container patch onto its host workspace. Stamps
+   * ``prMergedAt[sourceId]`` on success — a ticket is fully merged when
+   * every touched source has a timestamp here.
+   */
+  mergePrTicket = async (ticketId: TicketId, sourceId: string): Promise<PrMergeResult> => {
     const ticket = this.getTicketById(ticketId);
     if (!ticket) {
       return { ok: false, error: 'Ticket not found' };
     }
-    if (ticket.prReview?.status !== 'approved') {
-      return { ok: false, error: 'Ticket must be approved before merging' };
-    }
-    if (ticket.prMergedAt !== undefined) {
-      return { ok: false, error: 'Ticket is already merged' };
-    }
     const project = this.getProjects().find((p) => p.id === ticket.projectId);
+    if (!project) {
+      return { ok: false, error: 'Project not found' };
+    }
+    const source = project.sources.find((s) => s.id === sourceId);
+    if (!source) {
+      return { ok: false, error: `Source not found: ${sourceId}` };
+    }
+    if (source.kind !== 'local') {
+      return { ok: false, error: 'Merge is only supported for local sources' };
+    }
+    // Per-source approval gate.
+    if (ticket.prReview?.[sourceId]?.status !== 'approved') {
+      return { ok: false, error: 'This source must be approved before merging' };
+    }
+    if (ticket.prMergedAt?.[sourceId] !== undefined) {
+      return { ok: false, error: 'This source is already merged' };
+    }
+
+    const containerId = this.processManager?.getProjectContainerId(project.id) ?? null;
+    if (containerId) {
+      const patch = await buildContainerSeedPatch(containerId, source.mountName);
+      if (!patch.trim()) {
+        return { ok: false, error: 'No changes to merge' };
+      }
+      const applied = await gitApplyStdin(source.workspaceDir, ['--whitespace=nowarn'], patch);
+      if (!applied.ok) {
+        return { ok: false, error: `git apply failed: ${applied.stderr}` };
+      }
+      this.updateTicket(ticketId, {
+        prMergedAt: { ...(ticket.prMergedAt ?? {}), [sourceId]: Date.now() },
+      });
+      return { ok: true, mergeCommitSha: 'apply' };
+    }
+
+    // No running container — fall back to legacy worktree merge.
     const { base, feature, reason } = this.resolvePrBranches(ticket);
-    if (!base || !feature || !project || project.source?.kind !== 'local') {
-      return { ok: false, error: reason ?? 'Merge inputs unavailable' };
+    if (!base || !feature) {
+      return { ok: false, error: reason ?? 'No running session for this project' };
     }
     const title = ticket.title?.trim() || 'ticket';
     const message = `Merge ${feature} into ${base}\n\n${title}`;
-    const res = await mergeBranch(project.source.workspaceDir, base, feature, message);
+    const res = await mergeBranch(source.workspaceDir, base, feature, message);
     if (!res.ok) {
       return { ok: false, error: res.error ?? 'Merge failed' };
     }
-    // Stamp the merged timestamp only. Do NOT auto-move the ticket or trigger
-    // worktree cleanup — both stay under user control. The user moves the
-    // ticket to a terminal column when they're ready, and cleanup is
-    // initiated explicitly via the "Clean up worktree" button (dirty case)
-    // or naturally on column move (clean case).
-    this.updateTicket(ticketId, { prMergedAt: Date.now() });
+    this.updateTicket(ticketId, {
+      prMergedAt: { ...(ticket.prMergedAt ?? {}), [sourceId]: Date.now() },
+    });
     return { ok: true, mergeCommitSha: res.mergeCommitSha! };
   };
 

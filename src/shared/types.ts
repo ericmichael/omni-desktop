@@ -62,25 +62,20 @@ export type OmniTheme =
   | 'vscode-light'
   | 'utrgv';
 
-export type SandboxVariant = 'standard' | 'work';
-export type SandboxBackend = 'platform' | 'docker' | 'podman' | 'vm' | 'local' | 'none';
-
 /**
- * A sandbox execution profile from platform policy.
- * Each Machine governed resource produces one of these.
+ * Summary of a sandbox profile available to the launcher. Discovered at
+ * runtime by the main process from disk (`<config>/sandbox/*.yml`) plus
+ * bundled built-ins. Not persisted to the store — re-derived each boot.
  */
-export type SandboxProfile = {
-  resource_id: number;
+export type ProfileSummary = {
+  /** Profile name; matches the YAML filename without extension. */
   name: string;
-  backend: SandboxBackend;
-  variant?: string;
-  image?: string;
-  network_mode?: string;
-  resource_limits?: {
-    cpu?: string;
-    memory?: string;
-    max_duration_minutes?: number;
-  };
+  /** Human-readable label for UI. */
+  label: string;
+  /** Sandbox client type from the profile (`unix_local`, `docker`, ...). */
+  clientType: string;
+  /** True for profiles shipped with the launcher (not user-created). */
+  builtin: boolean;
 };
 
 /**
@@ -110,11 +105,13 @@ export type AudioSettings = {
 
 export type StoreData = {
   workspaceDir?: string;
-  sandboxBackend: SandboxBackend;
-  /** Platform-provided sandbox profiles. Null = open-source mode (all local backends available). */
-  sandboxProfiles: SandboxProfile[] | null;
-  /** ID of the selected Machine governed resource (from sandboxProfiles). */
-  selectedMachineId: number | null;
+  /**
+   * Name of the default sandbox profile. Resolved at launch time against
+   * the launcher's profile chain (built-in → user-default → per-project).
+   * Built-in profiles always present: `host` (no isolation, unix_local) and
+   * `devbox` (docker with code-server + VNC). Enterprise adds `platform`.
+   */
+  defaultProfileName: string;
   launcherWindowProps?: WindowProps;
   appWindowProps?: WindowProps;
   optInToLauncherPrereleases: boolean;
@@ -332,18 +329,9 @@ export const schema: Schema<StoreData> = {
   workspaceDir: {
     type: 'string',
   },
-  sandboxBackend: {
+  defaultProfileName: {
     type: 'string',
-    enum: ['platform', 'docker', 'podman', 'vm', 'local', 'none'],
-    default: 'none',
-  },
-  sandboxProfiles: {
-    type: ['array', 'null'],
-    default: null,
-  },
-  selectedMachineId: {
-    type: ['number', 'null'],
-    default: null,
+    default: 'host',
   },
   launcherWindowProps: winSizePropsSchema,
   appWindowProps: winSizePropsSchema,
@@ -438,10 +426,10 @@ export const schema: Schema<StoreData> = {
         label: { type: 'string' },
         slug: { type: 'string' },
         isPersonal: { type: 'boolean' },
-        source: { type: ['object', 'null'] },
+        sources: { type: 'array', default: [] },
         createdAt: { type: 'number' },
         pipeline: { type: 'object' },
-        sandbox: { type: ['object', 'null'] },
+        sandboxProfile: { type: ['string', 'null'] },
         dueDate: { type: 'number' },
         pinnedAt: { type: 'number' },
         seedKey: { type: 'string' },
@@ -581,14 +569,9 @@ export const schema: Schema<StoreData> = {
         resolvedAt: { type: 'number' },
         archivedAt: { type: 'number' },
         cleanupPending: { type: 'boolean' },
-        prReview: {
-          type: 'object',
-          properties: {
-            status: { type: 'string', enum: ['approved', 'changes_requested'] },
-            at: { type: 'number' },
-          },
-        },
-        prMergedAt: { type: 'number' },
+        // Per-source maps keyed by ProjectSource.id.
+        prReview: { type: 'object' },
+        prMergedAt: { type: 'object' },
         // Kanban fields
         columnId: { type: 'string' },
         currentPhaseId: { type: ['string', 'null'] },
@@ -819,15 +802,25 @@ export type OmniInstallProcessStatus = Status<
   'uninitialized' | 'starting' | 'installing' | 'canceling' | 'exiting' | 'completed' | 'canceled'
 >;
 
-// Unified agent process data — superset of sandbox and local process data
+// Unified agent process data — emitted by `omni serve` and the platform path.
 export type AgentProcessData = {
+  /** Base URL the renderer parses for WS + HTTP endpoints. */
   uiUrl: string;
+  /** Direct WS URL for JSON-RPC; renderer derives from uiUrl if unset. */
   wsUrl?: string;
+  /** Same shape as uiUrl today — kept for status/debug surfaces. */
   sandboxUrl?: string;
-  codeServerUrl?: string;
-  noVncUrl?: string;
+  /**
+   * Named services running inside the sandbox session, keyed by profile
+   * service name (`code_server`, `vnc`, ...). Each value is a host URL the
+   * renderer can iframe directly. Empty when the profile defines no services.
+   */
+  services?: Record<string, string>;
+  /** Container id when the backend is docker; absent for unix_local/platform. */
   containerId?: string;
+  /** Container name when the backend is docker. */
   containerName?: string;
+  /** Host port the agent's WS/HTTP server is bound to. */
   port?: number;
 };
 
@@ -841,6 +834,31 @@ export type AgentProcessStatus =
  */
 export type AgentProcessStartOptions = {
   workspaceDir: string;
+  /**
+   * Project id, when this agent process belongs to a project. Forwarded to
+   * `omni serve --project <id>` so the per-project profile layer
+   * (`<config>/projects/<id>/sandbox.yml`) is resolved.
+   */
+  projectId?: string;
+  /**
+   * Per-launch profile override. Wins over per-project ``sandboxProfile``
+   * and the user's ``defaultProfileName``. Set by the pre-launch sandbox
+   * picker; not persisted — a follow-up launch without this set falls
+   * back through the normal resolution chain.
+   */
+  profileNameOverride?: string;
+  /**
+   * Conversation session id — the SAME id used to scope chat history and
+   * WebSocket ``serverCall`` traffic in the omniagents server. Used as
+   * the snapshot key, so each conversation gets its own workspace state.
+   *
+   * Caller eagerly generates this when starting a fresh conversation
+   * (uuid) and persists on the owning record (``StoreData.chatSessionId``
+   * or ``CodeTab.sessionId``), then passes it both here AND as the
+   * ``sessionId`` prop to OmniAgentsApp so the agent server uses the
+   * same id for its session.
+   */
+  sessionId?: string;
 };
 
 /**
@@ -955,33 +973,46 @@ export type Pipeline = {
   columns: Column[];
 };
 
-// --- Sandbox config ---
-
-/**
- * Per-project sandbox configuration. When set, supervisors run inside a Docker container
- * using the specified image or Dockerfile. When absent/null, the default sandbox is used.
- */
-export type SandboxConfig = {
-  /** Pre-built Docker image (e.g. "ubuntu:24.04"). */
-  image?: string;
-  /** Path to a Dockerfile (relative to workspace). */
-  dockerfile?: string;
-};
-
 // --- Core entities ---
 
 /** Credential reference for git-remote sources. Resolved at clone time by the platform. */
 export type GitCredentialRef = { kind: 'platform-managed'; credentialId: string };
 
 /**
- * Discriminated union describing where a project's code repo lives.
- * Optional — projects don't require a linked repo.
- * - `local`: directory on the user's machine (may or may not be a git repo — `gitDetected` is auto-set).
- * - `git-remote`: sandbox clones the repo; git is the persistence layer.
+ * One repo/directory attached to a project. Projects can have any number
+ * of sources (zero, one, or many) — a cross-cutting ticket like "ship a
+ * change across launcher + omni-code + omniagents" attaches three sources
+ * to one project so the agent sees all three at once in /workspace.
+ *
+ * - `id`: stable identifier (nanoid). Reviews + merge state on tickets key
+ *   off this so renaming the user-facing ``mountName`` doesn't orphan
+ *   per-source PR state.
+ * - `mountName`: subdirectory under ``/workspace/`` inside the container
+ *   (e.g. ``launcher``). Defaults to a slug derived from path or repo
+ *   name; must be unique within a project.
+ * - `kind`: `local` (host directory) or `git-remote` (URL the container
+ *   clones).
  */
-export type ProjectSource =
+export type ProjectSource = (
   | { kind: 'local'; workspaceDir: string; gitDetected?: boolean }
-  | { kind: 'git-remote'; repoUrl: string; defaultBranch?: string; credentials?: GitCredentialRef };
+  | { kind: 'git-remote'; repoUrl: string; defaultBranch?: string; credentials?: GitCredentialRef }
+) & {
+  id: string;
+  mountName: string;
+};
+
+/**
+ * Single-source ergonomic accessor: the first source attached to a project,
+ * or undefined if none. Use this for callers that conceptually want "the
+ * project's repo" — the launcher's legacy code paths and the MCP API
+ * (which doesn't model multi-source).
+ *
+ * Multi-source-aware callers (PR UI, container seeding, per-source merge)
+ * iterate ``project.sources`` directly.
+ */
+export const firstSource = (
+  project: { sources: ProjectSource[] } | undefined | null
+): ProjectSource | undefined => project?.sources[0];
 
 export type Project = {
   id: ProjectId;
@@ -990,15 +1021,21 @@ export type Project = {
   slug: string;
   /** True for the auto-created Personal project. Cannot be deleted. */
   isPersonal?: boolean;
-  /** Optional repo link. Projects without a repo use their project folder as workspace. */
-  source?: ProjectSource;
+  /**
+   * Repos/directories attached to this project. Empty array = no source.
+   * The container exposes each source under ``/workspace/<mountName>``.
+   */
+  sources: ProjectSource[];
   createdAt: number;
   /** Pipeline configuration. If undefined, DEFAULT_PIPELINE is used. */
   pipeline?: Pipeline;
   /** When true, automatically dispatch tickets from backlog in priority order. */
   autoDispatch?: boolean;
-  /** Per-project sandbox configuration. When absent/null, the default sandbox image is used. */
-  sandbox?: SandboxConfig | null;
+  /**
+   * Per-project sandbox profile name. Overrides ``defaultProfileName`` for
+   * this project. ``null``/missing inherits the user-default.
+   */
+  sandboxProfile?: string | null;
   /** Optional target date (epoch ms). Drives deadline-pressure risk signals. */
   dueDate?: number;
   /** Timestamp of the most recent pin action. Set = pinned to Home; undefined = not pinned. */
@@ -1176,11 +1213,19 @@ export type Ticket = {
    */
   cleanupPending?: boolean;
 
-  // --- Local PR flow ---
-  /** Reviewer decision on the ticket's PR. Gate for merging. */
-  prReview?: { status: 'approved' | 'changes_requested'; at: number };
-  /** Stamped when the ticket's feature branch is merged into its base. */
-  prMergedAt?: number;
+  // --- Local PR flow (per source) ---
+  /**
+   * Reviewer decision per source. Keyed by ``ProjectSource.id``.
+   * A ticket touching three sources may have three review states.
+   * Approve gate for merging is evaluated per source.
+   */
+  prReview?: Record<string, { status: 'approved' | 'changes_requested'; at: number }>;
+  /**
+   * Stamped per source when that source's container changes have been
+   * applied to its host. Keyed by ``ProjectSource.id``. A ticket is
+   * fully merged when every touched source has a timestamp here.
+   */
+  prMergedAt?: Record<string, number>;
 
   // Supervisor state
   /** True when autopilot is driving this ticket. Flipped by start/stopSupervisor. */
@@ -1363,6 +1408,19 @@ type AgentProcessIpcEvents = Namespaced<
     rebuild: (processId: string, arg: AgentProcessStartOptions) => void;
     resize: (processId: string, cols: number, rows: number) => void;
     'get-status': (processId: string) => WithTimestamp<AgentProcessStatus>;
+  }
+>;
+
+type SnapshotIpcEvents = Namespaced<
+  'snapshot',
+  {
+    /**
+     * Cascade-delete the snapshot tar for *sessionId*. Called by the
+     * renderer when a code tab is removed — the tab is gone for good,
+     * its workspace pickle is dead weight. Idempotent (missing file is
+     * not an error).
+     */
+    delete: (sessionId: string) => void;
   }
 >;
 
@@ -1588,7 +1646,13 @@ type ProjectIpcEvents = Namespaced<
     'list-artifacts': (ticketId: TicketId, dirPath?: string) => ArtifactFileEntry[];
     'read-artifact': (ticketId: TicketId, relativePath: string) => ArtifactFileContent;
     'open-artifact-external': (ticketId: TicketId, relativePath: string) => void;
-    'get-files-changed': (ticketId: TicketId) => DiffResponse;
+    /**
+     * Diff one source's container subdir vs its ``omni/seed`` baseline.
+     * ``sourceId`` is required: cross-source diffs aren't a thing — each
+     * source has its own git repo inside the container. The renderer
+     * iterates ``project.sources`` and calls this per source.
+     */
+    'get-files-changed': (ticketId: TicketId, sourceId: string) => DiffResponse;
     // Supervisor operations
     'ensure-supervisor-infra': (ticketId: TicketId) => void;
     'start-supervisor': (ticketId: TicketId) => void;
@@ -1602,12 +1666,16 @@ type ProjectIpcEvents = Namespaced<
      * still has uncommitted changes (cleanupPending stays set).
      */
     'finalize-ticket-cleanup': (ticketId: TicketId) => boolean;
-    /** Set or clear the ticket's PR review decision. Pass null to clear. */
-    'set-pr-review': (ticketId: TicketId, review: 'approved' | 'changes_requested' | null) => void;
-    /** Dry-run merge the ticket's feature branch into its base; reports conflicts. */
-    'check-merge': (ticketId: TicketId) => PrMergeCheck;
-    /** Merge the ticket's feature branch into its base. On success, moves ticket to terminal column. */
-    'merge-ticket': (ticketId: TicketId) => PrMergeResult;
+    /** Set or clear one source's PR review decision on a ticket. Pass null to clear. */
+    'set-pr-review': (
+      ticketId: TicketId,
+      sourceId: string,
+      review: 'approved' | 'changes_requested' | null
+    ) => void;
+    /** Dry-run apply one source's container patch onto its host repo; reports conflicts. */
+    'check-merge': (ticketId: TicketId, sourceId: string) => PrMergeCheck;
+    /** Apply one source's container patch onto its host repo. */
+    'merge-ticket': (ticketId: TicketId, sourceId: string) => PrMergeResult;
     'set-auto-dispatch': (projectId: ProjectId, enabled: boolean) => void;
     'get-active-wip-tickets': () => Ticket[];
     // Context file operations (replaces project.brief)
@@ -2160,6 +2228,7 @@ export type BrowserDownloadEntry = {
 export type IpcEvents = MainProcessIpcEvents &
   OmniInstallProcessIpcEvents &
   AgentProcessIpcEvents &
+  SnapshotIpcEvents &
   UtilIpcEvents &
   TerminalIpcEvents &
   StoreIpcEvents &

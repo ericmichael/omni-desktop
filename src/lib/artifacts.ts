@@ -1,5 +1,3 @@
-import type { SandboxBackend } from '@/shared/types';
-
 const TICKETS_DIR = 'tickets';
 const ARTIFACTS_DIR = 'artifacts';
 const CONTAINER_CONFIG_ROOT = '/home/user/.config/omni_code';
@@ -21,24 +19,25 @@ export const getContainerArtifactsDir = (ticketId: string): string => {
 };
 
 /**
- * True when the given sandbox backend keeps the agent on the host (no Linux
- * container). These backends need host paths in agent-facing instructions.
+ * True when the resolved profile keeps the workspace on the host filesystem
+ * (currently just ``host`` → unix_local with the workspace dir as root).
+ * Anything else (``devbox``, ``platform``, future custom profiles) puts the
+ * workspace inside a container, so artifact paths must use the container layout.
  */
-export const backendRunsOnHost = (backend: SandboxBackend): boolean =>
-  backend === 'none' || backend === 'local';
+export const profileRunsOnHost = (profileName: string): boolean => profileName === 'host';
 
 /**
  * Resolve the artifacts directory *as the agent will see it* — host path when
- * the agent runs on the user's machine, container path when it runs inside a
- * Linux sandbox. Use this when handing paths to the agent via prompts or
+ * the profile keeps the workspace on the host, container path otherwise. Use
+ * this when handing paths to the agent via prompts or
  * `additional_instructions`.
  */
 export const getAgentArtifactsDir = (
   ticketId: string,
-  backend: SandboxBackend,
+  profileName: string,
   hostConfigDir: string
 ): string => {
-  return backendRunsOnHost(backend)
+  return profileRunsOnHost(profileName)
     ? getArtifactsDir(hostConfigDir, ticketId)
     : getContainerArtifactsDir(ticketId);
 };

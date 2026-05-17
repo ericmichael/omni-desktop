@@ -57,7 +57,6 @@ import type {
   PlatformCredentials,
   Project,
   ProjectId,
-  SandboxBackend,
   SessionMessage,
   SupervisorBridgeEvent,
   Task,
@@ -65,6 +64,8 @@ import type {
   Ticket,
   TicketId,
 } from '@/shared/types';
+import { firstSource } from '@/shared/types';
+import type { ProjectSource } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
 // Operational constants — referenced by SupervisorOrchestrator and eventually
@@ -134,7 +135,6 @@ export interface SupervisorOrchestratorStore {
   setTickets(tickets: Ticket[]): void;
   getProjects(): Project[];
   getWipLimit(): number;
-  getSandboxBackend(): SandboxBackend | undefined;
   getPlatformCredentials(): PlatformCredentials | undefined;
   getCodeTabs(): Array<{ id: string; ticketId?: string }>;
   getPersistedTasks(): Task[];
@@ -424,9 +424,10 @@ export class SupervisorOrchestrator {
       const ticket = this.deps.host.getTicketById(ticketId);
       if (ticket) {
         const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId);
-        if (project?.source?.kind === 'local') {
-          void this.deps.workflowLoader.runHook(ticket.projectId, 'after_run', project.source.workspaceDir);
-        } else if (project?.source?.kind === 'git-remote') {
+        const afterSource = firstSource(project);
+        if (afterSource?.kind === 'local') {
+          void this.deps.workflowLoader.runHook(ticket.projectId, 'after_run', afterSource.workspaceDir);
+        } else if (afterSource?.kind === 'git-remote') {
           const hookScript = this.deps.workflowLoader.getConfig(ticket.projectId).hooks?.after_run;
           if (hookScript) {
             const currentEntry = this.machines.get(ticketId);
@@ -632,10 +633,10 @@ export class SupervisorOrchestrator {
       return null;
     }
     const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId);
-    if (!project || project.source?.kind !== 'local') {
+    if (!project || firstSource(project)?.kind !== 'local') {
       return null;
     }
-    const claim = resolveWorkspaceClaim(ticket, project.source.workspaceDir);
+    const claim = resolveWorkspaceClaim(ticket, (firstSource(project) as Extract<ProjectSource, { kind: 'local' }> | undefined)?.workspaceDir);
     if (!claim) {
       return null;
     }
@@ -647,7 +648,7 @@ export class SupervisorOrchestrator {
       if (!other || other.projectId !== ticket.projectId) {
         continue;
       }
-      const otherClaim = resolveWorkspaceClaim(other, project.source.workspaceDir);
+      const otherClaim = resolveWorkspaceClaim(other, (firstSource(project) as Extract<ProjectSource, { kind: 'local' }> | undefined)?.workspaceDir);
       if (otherClaim && claimsCollide(claim, otherClaim)) {
         return other;
       }
@@ -756,8 +757,9 @@ export class SupervisorOrchestrator {
         }
 
         let hookOk = true;
-        if (project.source?.kind === 'local') {
-          hookOk = await this.deps.workflowLoader.runHook(ticket.projectId, 'before_run', project.source?.workspaceDir);
+        const projectSource = firstSource(project);
+        if (projectSource?.kind === 'local') {
+          hookOk = await this.deps.workflowLoader.runHook(ticket.projectId, 'before_run', projectSource.workspaceDir);
         } else {
           const hookScript = this.deps.workflowLoader.getConfig(ticket.projectId).hooks?.before_run;
           if (hookScript) {
@@ -928,19 +930,20 @@ export class SupervisorOrchestrator {
     }
 
     // Git-remote projects: container clones the repo — no local workspace or worktrees
-    if (project.source?.kind === 'git-remote') {
-      const effectiveBranch = this.deps.host.resolveTicketBranch(ticket) ?? project.source?.defaultBranch;
+    const projectSource = firstSource(project);
+    if (projectSource?.kind === 'git-remote') {
+      const effectiveBranch = this.deps.host.resolveTicketBranch(ticket) ?? projectSource.defaultBranch;
       return {
         workspaceDir: '/home/user/workspace', // container-side path (not local)
         action: 'none',
         gitRepo: {
-          url: project.source?.repoUrl,
+          url: projectSource.repoUrl,
           branch: effectiveBranch,
         },
       };
     }
 
-    let workspaceDir = requireLocalWorkspaceDir(project.source);
+    let workspaceDir = requireLocalWorkspaceDir(firstSource(project));
     let worktreePath: string | undefined;
     let worktreeName: string | undefined;
     const effectiveBranch = this.deps.host.resolveTicketBranch(ticket);
@@ -963,7 +966,7 @@ export class SupervisorOrchestrator {
       console.log(`[SupervisorOrchestrator] Reusing existing worktree "${worktreeName}" for ticket ${ticketId}`);
     } else if (wtAction.action === 'create') {
       worktreeName = generateWorktreeName();
-      worktreePath = await createWorktree(requireLocalWorkspaceDir(project.source), effectiveBranch!, worktreeName);
+      worktreePath = await createWorktree(requireLocalWorkspaceDir(firstSource(project)), effectiveBranch!, worktreeName);
       workspaceDir = worktreePath;
       this.deps.host.updateTicket(ticketId, { worktreePath, worktreeName });
     }
@@ -1006,8 +1009,8 @@ export class SupervisorOrchestrator {
     if (action === 'create') {
       const afterCreateOk = await this.deps.workflowLoader.runHook(ticket.projectId, 'after_create', workspaceDir);
       if (!afterCreateOk) {
-        if (worktreePath && worktreeName && project.source?.kind === 'local') {
-          await removeWorktree(requireLocalWorkspaceDir(project.source), worktreePath, worktreeName);
+        if (worktreePath && worktreeName && firstSource(project)?.kind === 'local') {
+          await removeWorktree(requireLocalWorkspaceDir(firstSource(project)), worktreePath, worktreeName);
         }
         throw new Error('after_create hook failed');
       }
@@ -1125,21 +1128,21 @@ export class SupervisorOrchestrator {
       const ticket = this.deps.host.getTicketById(ticketId)!;
       const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId)!;
 
-      if (project.source?.kind === 'local') {
-        await this.deps.workflowLoader.load(ticket.projectId, project.source.workspaceDir);
-
+      const projectSource = firstSource(project);
+      if (projectSource?.kind === 'local') {
+        await this.deps.workflowLoader.load(ticket.projectId, projectSource.workspaceDir);
         const hookOk = await this.deps.workflowLoader.runHook(
           ticket.projectId,
           'before_run',
-          project.source.workspaceDir
+          projectSource.workspaceDir
         );
         if (!hookOk) {
           console.warn(`[SupervisorOrchestrator] before_run hook failed for ${ticketId}. Aborting start.`);
           throw new Error('before_run hook failed');
         }
-      } else if (project.source?.kind === 'git-remote') {
-        const effectiveBranch = this.deps.host.resolveTicketBranch(ticket) ?? project.source.defaultBranch;
-        await this.deps.workflowLoader.loadFromRemote(ticket.projectId, project.source.repoUrl, effectiveBranch);
+      } else if (projectSource?.kind === 'git-remote') {
+        const effectiveBranch = this.deps.host.resolveTicketBranch(ticket) ?? projectSource.defaultBranch;
+        await this.deps.workflowLoader.loadFromRemote(ticket.projectId, projectSource.repoUrl, effectiveBranch);
       }
 
       console.log(`[SupervisorOrchestrator] startSupervisor: ensureColumn for ${ticketId}...`);
@@ -1150,7 +1153,7 @@ export class SupervisorOrchestrator {
         entry.state.forcePhase('ready' as TicketPhase);
       }
 
-      if (project.source?.kind === 'git-remote') {
+      if (firstSource(project)?.kind === 'git-remote') {
         const hookScript = this.deps.workflowLoader.getConfig(ticket.projectId).hooks?.before_run;
         if (hookScript && entry.tabId && this.deps.processManager) {
           const hookOk = await this.execHookInContainer(entry.tabId, hookScript);
@@ -1230,7 +1233,7 @@ export class SupervisorOrchestrator {
 
     // Defer cleanup when the worktree has unsaved work. The sandbox + supervisor
     // stay alive so the user or agent can drive the worktree to a clean state.
-    if (ticket.worktreePath && project?.source?.kind === 'local') {
+    if (ticket.worktreePath && firstSource(project)?.kind === 'local') {
       const dirty = await isWorktreeDirty(ticket.worktreePath);
       if (dirty) {
         console.log(
@@ -1246,10 +1249,11 @@ export class SupervisorOrchestrator {
     const taskId = ticket.supervisorTaskId;
 
     // Run before_remove hook
-    if (project?.source?.kind === 'local') {
-      const workspaceDir = ticket.worktreePath ?? project.source.workspaceDir;
+    const removeSource = firstSource(project);
+    if (removeSource?.kind === 'local') {
+      const workspaceDir = ticket.worktreePath ?? removeSource.workspaceDir;
       await this.deps.workflowLoader.runHook(ticket.projectId, 'before_remove', workspaceDir);
-    } else if (project?.source?.kind === 'git-remote') {
+    } else if (removeSource?.kind === 'git-remote') {
       const hookScript = this.deps.workflowLoader.getConfig(ticket.projectId).hooks?.before_remove;
       if (hookScript) {
         const machineEntry = this.machines.get(ticketId);
@@ -1287,8 +1291,8 @@ export class SupervisorOrchestrator {
     }
 
     // Remove worktree (source of truth is the ticket, not the task)
-    if (ticket.worktreePath && ticket.worktreeName && project && project.source?.kind === 'local') {
-      await removeWorktree(requireLocalWorkspaceDir(project.source), ticket.worktreePath, ticket.worktreeName);
+    if (ticket.worktreePath && ticket.worktreeName && project && firstSource(project)?.kind === 'local') {
+      await removeWorktree(requireLocalWorkspaceDir(firstSource(project)), ticket.worktreePath, ticket.worktreeName);
       this.deps.host.updateTicket(ticketId, {
         worktreePath: undefined,
         worktreeName: undefined,
@@ -1440,8 +1444,8 @@ export class SupervisorOrchestrator {
       // Clean up worktree from the ticket
       if (ticket.worktreePath && ticket.worktreeName) {
         const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId);
-        if (project?.source?.kind === 'local') {
-          await removeWorktree(requireLocalWorkspaceDir(project.source), ticket.worktreePath, ticket.worktreeName);
+        if (firstSource(project)?.kind === 'local') {
+          await removeWorktree(requireLocalWorkspaceDir(firstSource(project)), ticket.worktreePath, ticket.worktreeName);
         }
         this.deps.host.updateTicket(ticket.id, { worktreePath: undefined, worktreeName: undefined });
         cleaned++;
@@ -1460,8 +1464,8 @@ export class SupervisorOrchestrator {
       if (task.ticketId && !ticketIds.has(task.ticketId)) {
         if (task.worktreePath && task.worktreeName) {
           const project = this.deps.store.getProjects().find((p) => p.id === task.projectId);
-          if (project?.source?.kind === 'local') {
-            await removeWorktree(requireLocalWorkspaceDir(project.source), task.worktreePath, task.worktreeName);
+          if (firstSource(project)?.kind === 'local') {
+            await removeWorktree(requireLocalWorkspaceDir(firstSource(project)), task.worktreePath, task.worktreeName);
           }
         }
         this.removePersistedTask(task.id);
@@ -1583,13 +1587,13 @@ export class SupervisorOrchestrator {
     // Personal / context-only projects have no source and cannot run supervisors:
     // there's no workspace to mount and no workflow to execute. Reject explicitly
     // so the user sees a clear message instead of a downstream mount failure.
-    if (!project.source) {
+    if (project.sources.length === 0) {
       return `Project "${project.label}" has no repository — supervisors require a workspace or git remote`;
     }
-    if (project.source.kind === 'local' && !project.source.workspaceDir) {
+    if (firstSource(project)?.kind === 'local' && !(firstSource(project) as Extract<ProjectSource, { kind: 'local' }> | undefined)?.workspaceDir) {
       return `Project "${project.label}" has no workspace directory configured`;
     }
-    if (project.source.kind === 'git-remote' && !project.source.repoUrl) {
+    if (firstSource(project)?.kind === 'git-remote' && !(firstSource(project) as Extract<ProjectSource, { kind: 'git-remote' }> | undefined)?.repoUrl) {
       return `Project "${project.label}" has no repository URL configured`;
     }
 
@@ -1800,11 +1804,11 @@ export class SupervisorOrchestrator {
           pipeline: {
             columns: pipeline.columns.map((c) => c.label).join(' → '),
           },
-          project: {
-            label: project.label,
-            workspaceDir:
-              (project.source?.kind === 'local' ? project.source?.workspaceDir : project.source?.repoUrl) ?? '',
-          },
+          project: (() => {
+            const s = firstSource(project);
+            const dir = s?.kind === 'local' ? s.workspaceDir : s?.kind === 'git-remote' ? s.repoUrl : '';
+            return { label: project.label, workspaceDir: dir };
+          })(),
           attempt,
         };
 

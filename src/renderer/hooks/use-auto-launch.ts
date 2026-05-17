@@ -22,6 +22,20 @@ type UseAutoLaunchOptions = {
   processId: string;
   /** Workspace directory. When null the machine won't launch. */
   workspaceDir: string | null;
+  /** Project id, forwarded to ProcessManager for per-project profile lookup. */
+  projectId?: string;
+  /**
+   * Per-launch sandbox profile override. Wins over project + default
+   * resolution in ProcessManager. Set by the pre-launch SandboxPicker.
+   */
+  profileNameOverride?: string;
+  /**
+   * Conversation session id — used both as the snapshot key (per-session
+   * workspace persistence) and the agent server's session id (chat history,
+   * WS ``serverCall`` scoping). Caller is responsible for ensuring this is
+   * non-null when launching (pre-mint upstream).
+   */
+  sessionId?: string;
   /** Logger tag. */
   logLabel?: string;
 };
@@ -35,7 +49,6 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
   const { processId, logLabel } = opts;
   const initialized = useStore($initialized);
   const store = useStore(persistedStoreApi.$atom);
-  const sandboxEnabled = store.sandboxBackend !== 'none';
 
   // Refs so actor callbacks always see current values without recreating the actors object
   const processIdRef = useRef(processId);
@@ -43,6 +56,12 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
   const workspaceDirRef = useRef(opts.workspaceDir);
   workspaceDirRef.current = opts.workspaceDir;
   const previousWorkspaceDirRef = useRef(opts.workspaceDir);
+  const projectIdRef = useRef(opts.projectId);
+  projectIdRef.current = opts.projectId;
+  const profileNameOverrideRef = useRef(opts.profileNameOverride);
+  profileNameOverrideRef.current = opts.profileNameOverride;
+  const sessionIdRef = useRef(opts.sessionId);
+  sessionIdRef.current = opts.sessionId;
   const storeRef = useRef(store);
   storeRef.current = store;
 
@@ -125,7 +144,14 @@ return;
           return;
         }
 
-        agentProcessApi.start(processIdRef.current, { workspaceDir: wd });
+        agentProcessApi.start(processIdRef.current, {
+          workspaceDir: wd,
+          ...(projectIdRef.current ? { projectId: projectIdRef.current } : {}),
+          ...(profileNameOverrideRef.current
+            ? { profileNameOverride: profileNameOverrideRef.current }
+            : {}),
+          ...(sessionIdRef.current ? { sessionId: sessionIdRef.current } : {}),
+        });
         sendBack({ type: 'CONFIG_OK' });
       })();
       return () => {
@@ -169,8 +195,8 @@ sendBack({ type: 'SANDBOX_EXITED' });
   }), []);  
 
   const inspect = useMemo(() => createMachineLogger(logLabel ?? `autoLaunch:${processId}`, {
-    tags: { sandbox: store.sandboxBackend ?? 'none' },
-  }), [processId, logLabel, store.sandboxBackend]);
+    tags: { sandbox: store.defaultProfileName ?? 'none' },
+  }), [processId, logLabel, store.defaultProfileName]);
 
   const machine = useMemo(() => autoLaunchMachine.provide({ actors }), [actors]);
   const actor = useActorRef(machine, { inspect });
@@ -178,16 +204,16 @@ sendBack({ type: 'SANDBOX_EXITED' });
   const error = useSelector(actor, (snap) => snap.context.error);
 
   // Reset when sandbox backend changes
-  const lastSandboxBackend = useRef(store.sandboxBackend);
+  const lastSandboxBackend = useRef(store.defaultProfileName);
   useEffect(() => {
-    if (lastSandboxBackend.current !== store.sandboxBackend) {
-      lastSandboxBackend.current = store.sandboxBackend;
+    if (lastSandboxBackend.current !== store.defaultProfileName) {
+      lastSandboxBackend.current = store.defaultProfileName;
       actor.send({ type: 'RESET' });
       if (initialized) {
         actor.send({ type: 'LAUNCH' });
       }
     }
-  }, [store.sandboxBackend, initialized, actor]);
+  }, [store.defaultProfileName, initialized, actor]);
 
   // Trigger: send LAUNCH when initialized + workspace available
   useEffect(() => {
@@ -222,9 +248,38 @@ return;
     })();
 
     return () => {
- cancelled = true; 
+ cancelled = true;
 };
   }, [initialized, opts.workspaceDir, actor]);
+
+  // Restart when the per-launch sandbox profile override changes. The in-
+  // composer SandboxPicker writes this; the running omni-serve was bound to
+  // the *previous* profile, so the container has to be torn down, the
+  // machine reset, and LAUNCH re-fired explicitly. The general auto-launch
+  // effect above won't re-trigger on its own — none of its deps change on
+  // RESET — so we must drive the next launch from here.
+  const previousProfileOverrideRef = useRef(opts.profileNameOverride);
+  useEffect(() => {
+    const previous = previousProfileOverrideRef.current;
+    previousProfileOverrideRef.current = opts.profileNameOverride;
+    if (!initialized || previous === opts.profileNameOverride) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      await agentProcessApi.stop(processIdRef.current);
+      if (cancelled) {
+return;
+}
+      actor.send({ type: 'RESET' });
+      if (workspaceDirRef.current) {
+        actor.send({ type: 'LAUNCH' });
+      }
+    })();
+    return () => {
+ cancelled = true;
+};
+  }, [initialized, opts.profileNameOverride, actor]);
 
   const retry = useCallback(() => {
     actor.send({ type: 'RETRY' });

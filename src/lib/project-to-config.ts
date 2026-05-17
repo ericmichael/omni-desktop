@@ -19,7 +19,7 @@ import type {
   ProjectConfig,
   RuntimeConfig,
 } from '@/shared/manifest';
-import type { Project } from '@/shared/types';
+import { firstSource, type Project } from '@/shared/types';
 
 /**
  * Defaults the launcher provides at config-build time. The current launcher
@@ -78,18 +78,23 @@ export function parseGitRepoUrl(url: string): { host: string; repo: string } | n
  * Returns `null` for chat-only / Personal / context-only projects.
  */
 function buildWorkspaceEntry(project: Project): LocalDirEntry | GitRepoEntry | null {
-  if (!project.source) {
+  // Legacy single-source view: this helper feeds the MCP-facing project
+  // config which still models one workspace per project. Multi-source
+  // projects surface only the first source here; the agent's container
+  // gets all sources via the omni serve CLI path.
+  const source = firstSource(project);
+  if (!source) {
     return null;
   }
-  if (project.source.kind === 'local') {
+  if (source.kind === 'local') {
     return {
       type: 'local_dir',
-      src: project.source.workspaceDir,
+      src: source.workspaceDir,
       writable: true,
     };
   }
-  if (project.source.kind === 'git-remote') {
-    const parsed = parseGitRepoUrl(project.source.repoUrl);
+  if (source.kind === 'git-remote') {
+    const parsed = parseGitRepoUrl(source.repoUrl);
     if (!parsed) {
       // Unparseable URL — surface as a context-only manifest. The caller
       // can validate separately if it wants to refuse the rename.
@@ -100,8 +105,8 @@ function buildWorkspaceEntry(project: Project): LocalDirEntry | GitRepoEntry | n
       host: parsed.host,
       repo: parsed.repo,
     };
-    if (project.source.defaultBranch) {
-      entry.ref = project.source.defaultBranch;
+    if (source.defaultBranch) {
+      entry.ref = source.defaultBranch;
     }
     return entry;
   }
@@ -150,17 +155,17 @@ function buildCapabilities(defaults: ProjectConfigDefaults): Capability[] {
 }
 
 /**
- * Resolve the runtime sandbox configuration. The current launcher stores
- * an optional image override on the project; if absent, the launcher's
- * default sandbox image is used. The `omni-sandbox` Rust binary backend
- * isn't surfaced here yet — it would become a third `client:` variant
- * with its own options shape.
+ * Resolve the runtime sandbox configuration. After the v22 cut, image
+ * overrides live in sandbox profiles (not on projects), so this always
+ * returns the launcher default. ``buildRuntime`` survives as a stub for
+ * downstream consumers of ``projectToConfig`` that still expect a
+ * RuntimeConfig in the legacy shape; new code should pull image config
+ * out of the resolved sandbox profile instead.
  */
-function buildRuntime(project: Project, defaults: ProjectConfigDefaults): RuntimeConfig {
-  const image = project.sandbox?.image ?? defaults.defaultDockerImage;
+function buildRuntime(_project: Project, defaults: ProjectConfigDefaults): RuntimeConfig {
   return {
     client: 'docker',
-    options: { image },
+    options: { image: defaults.defaultDockerImage },
   };
 }
 

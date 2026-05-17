@@ -511,11 +511,48 @@ export function runMigrations(store: IMigrationStore, deps: MigrationDeps): void
   // v20 → v21: add audioSettings (trivial — JSON schema default fills it).
   if (version === 20 || (store.get('schemaVersion', 0) as number) === 20) {
     store.set('schemaVersion', 21);
+    // Fall through to v21→v22.
+  }
+
+  // v21 → v22: collapse the 6-mode sandbox backend into a single
+  // `defaultProfileName` string + drop platform-pushed machine profiles +
+  // strip per-project `sandbox: { image, dockerfile }` (custom images now
+  // become first-class profiles, not inline project fields).
+  //
+  // Backend mapping:
+  //   docker          → "devbox"   (the launcher-published image with code-server + VNC)
+  //   platform        → "platform" (deferred to step 6; old PlatformClient path still wired)
+  //   podman/vm/local/none → "host" (no isolation, unix_local)
+  if (version === 21 || (store.get('schemaVersion', 0) as number) === 21) {
+    const legacyBackend = store.get('sandboxBackend') as string | undefined;
+    let profileName = 'host';
+    if (legacyBackend === 'docker') profileName = 'devbox';
+    else if (legacyBackend === 'platform') profileName = 'platform';
+    store.set('defaultProfileName', profileName);
+
+    store.delete('sandboxBackend');
+    store.delete('sandboxProfiles');
+    store.delete('selectedMachineId');
+
+    // Strip the legacy per-project sandbox field. Custom images become
+    // user-created profiles (a follow-up surface) — for now, drop the inline
+    // shape so the migration is clean.
+    const projects = (store.get('projects', []) as Record<string, unknown>[]) ?? [];
+    if (projects.length > 0) {
+      const stripped = projects.map((p) => {
+        const { sandbox: _drop, ...rest } = p;
+        void _drop;
+        return rest;
+      });
+      store.set('projects', stripped);
+    }
+
+    store.set('schemaVersion', 22);
     deps.repairProjectRoots?.();
     return;
   }
 
-  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 21) {
+  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 22) {
     deps.repairProjectRoots?.();
     return;
   }

@@ -3,19 +3,21 @@ import { useStore } from '@nanostores/react';
 import { motion } from 'framer-motion';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { backendRunsOnHost,getArtifactsDir, getContainerArtifactsDir } from '@/lib/artifacts';
+import { getArtifactsDir, getContainerArtifactsDir, profileRunsOnHost } from '@/lib/artifacts';
 import { buildSessionVariables } from '@/lib/client-tools';
 import { SessionStartupShell } from '@/renderer/common/SessionStartupShell';
 import { Button } from '@/renderer/ds';
+import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
-import { buildSandboxLabel, isCustomSandbox } from '@/renderer/omniagents-ui/sandbox-label';
+import { buildProfileLabel } from '@/renderer/omniagents-ui/sandbox-label';
 import { configApi } from '@/renderer/services/config';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { AppId } from '@/shared/app-registry';
 import type { CodeTab, CodeTabId, TicketId } from '@/shared/types';
+import { firstSource } from '@/shared/types';
 
 import { CodeEmptyState } from './CodeEmptyState';
 import { CodeWorkspaceLayout } from './CodeWorkspaceLayout';
@@ -77,6 +79,9 @@ const CodeRunningView = memo(
     headerActionsTargetId,
     headerActionsCompact,
     sandboxLabel,
+    sandboxOptions,
+    currentSandboxProfile,
+    onSandboxChange,
     onClientToolCall,
     previewUrl,
     onPreviewUrlChange,
@@ -87,7 +92,7 @@ const CodeRunningView = memo(
     sidecarMode,
     ticketId,
   }: {
-    sandboxUrls: { uiUrl: string; codeServerUrl?: string; noVncUrl?: string };
+    sandboxUrls: { uiUrl: string; services?: Record<string, string> };
     sessionId?: string;
     onSessionChange?: (sessionId: string | undefined) => void;
     variables?: Record<string, unknown>;
@@ -98,6 +103,9 @@ const CodeRunningView = memo(
     headerActionsTargetId?: string;
     headerActionsCompact?: boolean;
     sandboxLabel?: string;
+    sandboxOptions?: { value: string; label: string }[];
+    currentSandboxProfile?: string;
+    onSandboxChange?: (value: string) => void;
     onClientToolCall?: ClientToolCallHandler;
     previewUrl?: string;
     onPreviewUrlChange?: (url: string) => void;
@@ -123,8 +131,8 @@ const CodeRunningView = memo(
       }
       return url.toString();
     }, [sandboxUrls.uiUrl, theme, uiMinimal]);
-    const codeServerSrc = sandboxUrls.codeServerUrl;
-    const vncSrc = sandboxUrls.noVncUrl;
+    const codeServerSrc = sandboxUrls.services?.['code_server'];
+    const vncSrc = sandboxUrls.services?.['vnc'];
 
     return (
       <div className={styles.flexColFullRelative}>
@@ -144,6 +152,9 @@ const CodeRunningView = memo(
             headerActionsTargetId={headerActionsTargetId}
             headerActionsCompact={headerActionsCompact}
             sandboxLabel={sandboxLabel}
+            sandboxOptions={sandboxOptions}
+            currentSandboxProfile={currentSandboxProfile}
+            onSandboxChange={onSandboxChange}
             onClientToolCall={onClientToolCall}
             pendingPlan={pendingPlan}
             onPlanDecision={resolvePlanApproval}
@@ -188,7 +199,8 @@ export const CodeTabContent = memo(
     // disk (`Projects/<slug>/` or `~/Omni/Workspace/` for Personal). Resolve it
     // lazily so the sandbox can start even when the user hasn't picked a
     // workspace.
-    const linkedWorkspaceDir = tab.workspaceDir ?? (project?.source?.kind === 'local' ? project.source.workspaceDir : null) ?? null;
+    const projectSource = firstSource(project);
+    const linkedWorkspaceDir = tab.workspaceDir ?? (projectSource?.kind === 'local' ? projectSource.workspaceDir : null) ?? null;
     const [resolvedProjectDir, setResolvedProjectDir] = useState<string | null>(null);
     useEffect(() => {
       if (linkedWorkspaceDir || !tab.projectId) {
@@ -206,19 +218,44 @@ export const CodeTabContent = memo(
       };
     }, [tab.projectId, linkedWorkspaceDir]);
     const workspaceDir = linkedWorkspaceDir ?? resolvedProjectDir;
-    const sandboxBackend = store.sandboxBackend ?? 'none';
-    const sandboxLabel = useMemo(
-      () => (sandboxBackend !== 'none' ? buildSandboxLabel(sandboxBackend, { custom: isCustomSandbox(project?.sandbox) }) : undefined),
-      [sandboxBackend, project?.sandbox]
+
+    // Per-launch profile override held in tab-local state (not persisted).
+    // Resolution chain: override → per-project ``sandboxProfile`` → user
+    // default. Drives the label and the host-vs-container artifact path.
+    const [profileOverride, setProfileOverride] = useState<string | undefined>(undefined);
+    const profileName =
+      profileOverride ?? project?.sandboxProfile ?? store.defaultProfileName ?? 'host';
+    const sandboxLabel = useMemo(() => buildProfileLabel(profileName), [profileName]);
+
+    const [isEnterprise, setIsEnterprise] = useState(false);
+    useEffect(() => {
+      emitter.invoke('platform:is-enterprise').then(setIsEnterprise);
+    }, []);
+    const sandboxOptions = useMemo(
+      () => getAvailableProfileNames({ isEnterprise }).map((name) => ({
+        value: name,
+        label: getProfileMenuLabel(name),
+      })),
+      [isEnterprise]
     );
 
-    const { phase, retry } = useCodeAutoLaunch(tab.id, workspaceDir);
+    const { phase, retry } = useCodeAutoLaunch(tab.id, workspaceDir, {
+      ...(tab.projectId ? { projectId: tab.projectId } : {}),
+      ...(profileOverride ? { profileNameOverride: profileOverride } : {}),
+      ...(tab.sessionId ? { sessionId: tab.sessionId } : {}),
+    });
 
     const allStatuses = useStore($codeTabStatuses);
     const sandboxStatus = allStatuses[tab.id];
 
+    // Only mount the iframe on ``running``. ``connecting`` arrives the
+    // moment omni-serve emits its JSON readiness line — that's before
+    // uvicorn has actually bound the port, so loading the iframe there
+    // briefly shows ERR_CONNECTION_REFUSED / a uvicorn error before the
+    // real UI loads. ``agent-process.ts`` already gates ``running`` on
+    // an HTTP+WS health probe, so by then the port is truly serving.
     const sandboxUrls = useMemo(() => {
-      if (!sandboxStatus || (sandboxStatus.type !== 'running' && sandboxStatus.type !== 'connecting')) {
+      if (!sandboxStatus || sandboxStatus.type !== 'running') {
         return null;
       }
       return sandboxStatus.data;
@@ -268,7 +305,7 @@ export const CodeTabContent = memo(
 
     const clientToolVariables = useMemo(() => {
       const artifactsDir = tab.ticketId
-        ? backendRunsOnHost(sandboxBackend)
+        ? profileRunsOnHost(profileName)
           ? hostConfigDir
             ? getArtifactsDir(hostConfigDir, tab.ticketId)
             : undefined
@@ -283,7 +320,7 @@ export const CodeTabContent = memo(
           ...(artifactsDir ? { artifactsDir } : {}),
         },
       });
-    }, [tab.ticketId, project, sandboxBackend, hostConfigDir, ticketAutopilot]);
+    }, [tab.ticketId, project, profileName, hostConfigDir, ticketAutopilot]);
 
     // No project selected — show project picker
     if (!tab.projectId) {
@@ -315,6 +352,9 @@ export const CodeTabContent = memo(
             headerActionsTargetId={headerActionsTargetId}
             headerActionsCompact={headerActionsCompact}
             sandboxLabel={sandboxLabel}
+            sandboxOptions={sandboxOptions}
+            currentSandboxProfile={profileName}
+            onSandboxChange={setProfileOverride}
             onClientToolCall={handleClientToolCall}
             previewUrl={previewUrl}
             onPreviewUrlChange={onPreviewUrlChange}
@@ -327,16 +367,12 @@ export const CodeTabContent = memo(
           />
         ) : phase === 'error' ? (
           <CodeErrorView tabId={tab.id} retry={retry} />
-        ) : phase === 'idle' ? (
-          <SessionStartupShell
-            eyebrow="Workspace Setup"
-            title="Choose a project"
-            description="Open an existing project in this session or create a new one to start working."
-          >
-            <CodeEmptyState tabId={tab.id} embedded />
-          </SessionStartupShell>
         ) : (
-          /* Connecting — show a subtle centered indicator */
+          /* idle / checking / installing / ready / starting / connecting —
+             at this point we already have tab.projectId (we passed the
+             early return above), so auto-launch will drive the machine to
+             ``running`` shortly. The in-composer sandbox picker handles
+             profile changes; no pre-launch picker needed here. */
           <div className={styles.flexCenter}>
             <motion.div
               className={styles.spinnerPill}
@@ -357,7 +393,9 @@ export const CodeTabContent = memo(
                   d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                 />
               </svg>
-              <span className={styles.spinnerText}>Connecting…</span>
+              <span className={styles.spinnerText}>
+                {phase === 'idle' ? 'Restarting sandbox…' : 'Connecting…'}
+              </span>
             </motion.div>
           </div>
         )}

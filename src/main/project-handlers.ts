@@ -47,12 +47,20 @@ export function registerProjectHandlers(ipc: IIpcListener, projectManager: Proje
   ipc.handle('project:open-artifact-external', (_, ticketId, relativePath) =>
     projectManager.openArtifactExternal(ticketId, relativePath)
   );
-  ipc.handle('project:get-files-changed', (_, ticketId) => projectManager.getFilesChanged(ticketId));
+  ipc.handle('project:get-files-changed', (_, ticketId, sourceId) =>
+    projectManager.getFilesChanged(ticketId, sourceId)
+  );
 
-  // Local PR flow
-  ipc.handle('project:set-pr-review', (_, ticketId, review) => projectManager.setPrReview(ticketId, review));
-  ipc.handle('project:check-merge', (_, ticketId) => projectManager.checkPrMerge(ticketId));
-  ipc.handle('project:merge-ticket', (_, ticketId) => projectManager.mergePrTicket(ticketId));
+  // Local PR flow (per-source — sourceId is one of the project's ProjectSource ids)
+  ipc.handle('project:set-pr-review', (_, ticketId, sourceId, review) =>
+    projectManager.setPrReview(ticketId, sourceId, review)
+  );
+  ipc.handle('project:check-merge', (_, ticketId, sourceId) =>
+    projectManager.checkPrMerge(ticketId, sourceId)
+  );
+  ipc.handle('project:merge-ticket', (_, ticketId, sourceId) =>
+    projectManager.mergePrTicket(ticketId, sourceId)
+  );
 
   // Context + project files
   ipc.handle('project:read-context', (_, projectId) => projectManager.readContext(projectId));

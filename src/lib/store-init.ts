@@ -5,24 +5,9 @@
  * without performing any I/O — the caller applies the patches.
  */
 
-import type { LayoutMode, SandboxBackend } from '@/shared/types';
+import type { LayoutMode } from '@/shared/types';
 
 const VALID_LAYOUT_MODES: LayoutMode[] = ['chat', 'spaces', 'projects', 'dashboards', 'settings', 'more'];
-
-/**
- * GA users (no preview features, no enterprise policy) must not run with any
- * sandbox backend. Returns 'none' if the backend should be reset, null if ok.
- */
-export function enforceSandboxPolicy(store: {
-  previewFeatures: boolean;
-  sandboxProfiles: unknown[] | null;
-  sandboxBackend: SandboxBackend;
-}): 'none' | null {
-  if (!store.previewFeatures && !store.sandboxProfiles && store.sandboxBackend && store.sandboxBackend !== 'none') {
-    return 'none';
-  }
-  return null;
-}
 
 /**
  * Migrate legacy layout modes to current valid modes.

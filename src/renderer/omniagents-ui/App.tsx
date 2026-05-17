@@ -31,7 +31,7 @@ export type ClientToolCallHandler = (
   args: Record<string, unknown>,
 ) => Promise<{ ok: boolean; result?: Record<string, unknown>; error?: Record<string, unknown> }>;
 
-export function App({ sessionId: sessionIdProp, onSessionChange, variables: variablesProp, greeting, onReady, headerActionsTargetId, headerActionsCompact, pendingMessages, sandboxLabel: sandboxLabelProp, onClientToolCall, pendingPlan, onPlanDecision, ticketId }: { sessionId?: string; onSessionChange?: (sessionId: string | undefined) => void; variables?: Record<string, unknown>; greeting?: string; onReady?: () => void; headerActionsTargetId?: string; headerActionsCompact?: boolean; pendingMessages?: PendingMessage[]; sandboxLabel?: string; onClientToolCall?: ClientToolCallHandler; pendingPlan?: import('@/shared/chat-types').PlanItem | null; onPlanDecision?: (approved: boolean) => void; ticketId?: TicketId }) {
+export function App({ sessionId: sessionIdProp, onSessionChange, variables: variablesProp, greeting, onReady, headerActionsTargetId, headerActionsCompact, pendingMessages, sandboxLabel: sandboxLabelProp, sandboxOptions, currentSandboxProfile, onSandboxChange, onClientToolCall, pendingPlan, onPlanDecision, ticketId, workspaceDir }: { sessionId?: string; onSessionChange?: (sessionId: string | undefined) => void; variables?: Record<string, unknown>; greeting?: string; onReady?: () => void; headerActionsTargetId?: string; headerActionsCompact?: boolean; pendingMessages?: PendingMessage[]; sandboxLabel?: string; sandboxOptions?: { value: string; label: string }[]; currentSandboxProfile?: string; onSandboxChange?: (value: string) => void; onClientToolCall?: ClientToolCallHandler; pendingPlan?: import('@/shared/chat-types').PlanItem | null; onPlanDecision?: (approved: boolean) => void; ticketId?: TicketId; workspaceDir?: string }) {
   const uiConfig = useUiConfig()
   const launcherStore = useStore(persistedStoreApi.$atom)
   const [ui, setUI] = useState<UIState>('connecting')
@@ -67,7 +67,20 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   const [isLargeScreen, setIsLargeScreen] = useState(() => window.innerWidth >= 1024)
   const [minimalMode] = useState(() => uiConfig.minimal)
   const [workspaceSupported, setWorkspaceSupported] = useState(false)
-  const [workspacePath, setWorkspacePath] = useState<string | null>(null)
+  // Seed from the workspaceDir prop the launcher passes down for project-scoped
+  // surfaces (Code tab). The chat-boot RPC still runs after connect to confirm
+  // and refresh — but the chip avoids flashing "Select workspace" while the
+  // round-trip is in flight.
+  const [workspacePath, setWorkspacePath] = useState<string | null>(workspaceDir ?? null)
+  // Keep workspacePath aligned with the prop when the launcher swaps the
+  // project under us (e.g. moving a tab to a different project). The chat-boot
+  // / session-restore RPCs will overwrite it again once they resolve; this
+  // just keeps the visual in sync until then.
+  useEffect(() => {
+    if (workspaceDir) {
+      setWorkspacePath(workspaceDir)
+    }
+  }, [workspaceDir])
   const [workspaceLocked, setWorkspaceLocked] = useState(false)
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false)
   // Background-bash live override: `ui.bash_jobs.update` broadcasts (and the
@@ -760,7 +773,10 @@ setWorkspacePath(res.path)
       setWorkspaceLocked(false)
       if (workspaceSupported) {
         try {
-          const res = await client.serverCall('fs_get_cwd') as any
+          // Match the chat-boot path: prefer the sandbox manifest root
+          // over omni serve's host cwd so docker / remote sandboxes show
+          // the path the agent's tools actually operate on.
+          const res = await client.serverCall('fs_get_workspace_root') as any
           if (res?.path) {
 setWorkspacePath(res.path)
 }
@@ -869,7 +885,24 @@ args.text = text
   }, [client, sessionId])
 
   const hasArtifacts = visibleArtifacts.length > 0
-  const sandboxLabel = sandboxLabelProp ?? ((launcherStore.sandboxBackend ?? 'none') !== 'none' ? ({ platform: 'Cloud', docker: 'Docker', podman: 'Podman', vm: 'VM', local: 'Local', none: undefined } as Record<string, string | undefined>)[launcherStore.sandboxBackend] : undefined)
+  const sandboxLabel = sandboxLabelProp ?? (({ host: undefined, devbox: 'Devbox', platform: 'Cloud' } as Record<string, string | undefined>)[launcherStore.defaultProfileName ?? 'host'])
+
+  // Confirm before switching INTO ``host`` post-first-message: the SDK's
+  // unix_local.hydrate_workspace writes the snapshot back into the user's
+  // host workspace, overwriting whatever was there. Pre-first-message
+  // there's nothing in the container yet, so no warning is needed. Other
+  // transitions (devbox→devbox, host→devbox) hydrate into a managed
+  // container fs and don't touch the user's working tree.
+  const handleSandboxChange = useCallback((value: string) => {
+    if (workspaceLocked && currentSandboxProfile !== 'host' && value === 'host') {
+      const ok = window.confirm(
+        "Switching to Host will apply the agent's container workspace back to your host files. " +
+        "Any uncommitted local changes in your host workspace may be overwritten. Continue?"
+      )
+      if (!ok) return
+    }
+    onSandboxChange?.(value)
+  }, [workspaceLocked, currentSandboxProfile, onSandboxChange])
   const headerActions = {
     showArtifactsButton: hasArtifacts,
     onArtifactsToggle: hasArtifacts ? () => setArtifactsPanelOpen((v) => !v) : undefined,
@@ -993,6 +1026,9 @@ args.text = text
                 workspaceLocked={workspaceLocked}
                 onWorkspaceClick={() => setWorkspacePickerOpen(true)}
                 sandboxLabel={sandboxLabel}
+                sandboxOptions={sandboxOptions}
+                currentSandboxProfile={currentSandboxProfile}
+                onSandboxChange={handleSandboxChange}
                 sandboxLoading={!connected}
                 sessionId={sessionId}
                 onVoiceSessionCreated={(id: string) => setSessionId(id)}

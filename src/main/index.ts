@@ -37,6 +37,11 @@ import {
   isDirectory,
   isFile,
 } from '@/main/util';
+import {
+  DEFAULT_CHAT_SNAPSHOT_TTL_MS,
+  gcStaleSnapshots,
+  registerSnapshotHandlers,
+} from '@/main/snapshot-manager';
 import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
 import { registerConfigHandlers, registerSkillsHandlers, registerUtilHandlers } from '@/shared/ipc-handlers';
 
@@ -225,12 +230,32 @@ const [processManager, cleanupProcessManager] = createProcessManager({
   sendToWindow: main.sendToWindow,
   fetchFn: (input, init) => net.fetch(input as string, init),
   getStoreData: () => ({
-    sandboxBackend: store.get('sandboxBackend') ?? 'none',
-    sandboxProfiles: store.get('sandboxProfiles') ?? null,
-    selectedMachineId: store.get('selectedMachineId') ?? null,
+    defaultProfileName: store.get('defaultProfileName') ?? 'host',
     projects: repo.listProjects().map(rowToProject),
   }),
 });
+registerSnapshotHandlers(main.ipc);
+
+// Startup snapshot GC. Code tabs cascade-delete on remove; this sweep
+// catches chat snapshots older than 14 days (and any code-tab tar
+// orphaned by a crashed cascade). Protected set = active chatSessionId
+// + every code tab's sessionId. Best-effort; failures don't block boot.
+void (async () => {
+  try {
+    const keep = new Set<string>();
+    const chatSessionId = store.get('chatSessionId');
+    if (chatSessionId) keep.add(chatSessionId);
+    for (const tab of store.get('codeTabs') ?? []) {
+      if (tab.sessionId) keep.add(tab.sessionId);
+    }
+    const deleted = await gcStaleSnapshots({ keep, ttlMs: DEFAULT_CHAT_SNAPSHOT_TTL_MS });
+    if (deleted.length > 0) {
+      console.log(`[snapshot-gc] deleted ${deleted.length} stale snapshot(s)`);
+    }
+  } catch (err) {
+    console.error('[snapshot-gc] failed:', err);
+  }
+})();
 const [projectManager, cleanupProject] = createProjectManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,

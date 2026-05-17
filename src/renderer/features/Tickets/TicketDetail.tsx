@@ -46,6 +46,7 @@ import {
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { persistedStoreApi } from '@/renderer/services/store';
+import { firstSource } from '@/shared/types';
 import type { GitRepoInfo, MilestoneId, TicketId, TicketPhase, TicketResolution } from '@/shared/types';
 
 import { $pipeline, $tickets, ticketApi } from './state';
@@ -208,14 +209,15 @@ export const TicketDetail = memo(
     const [editUseWorktree, setEditUseWorktree] = useState(true);
 
     useEffect(() => {
-      if (project?.source?.kind !== 'local') {
+      const s = firstSource(project);
+      if (s?.kind !== 'local') {
         setGitInfo(null);
         return;
       }
-      ticketApi.checkGitRepo(project.source.workspaceDir).then((info) => {
+      ticketApi.checkGitRepo(s.workspaceDir).then((info) => {
         setGitInfo(info);
       });
-    }, [project?.source]);
+    }, [project]);
 
     const handleStartEditTitle = useCallback(() => {
       if (ticket) {

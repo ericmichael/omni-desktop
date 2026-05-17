@@ -53,6 +53,7 @@ import type { AppHandleScope } from '@/shared/app-control-types';
 import { makeAppHandleId } from '@/shared/app-control-types';
 import type { AppDescriptor, AppId, CustomAppEntry } from '@/shared/app-registry';
 import { buildAppRegistry } from '@/shared/app-registry';
+import { firstSource } from '@/shared/types';
 import type { CodeLayoutMode, CodeTab, CodeTabId, TicketId, TicketResolution } from '@/shared/types';
 
 import { AppIcon } from './AppIcon';
@@ -1156,7 +1157,7 @@ BrowserColumn.displayName = 'BrowserColumn';
 type SidecarBodyProps = {
   app: AppDescriptor;
   originTabId: CodeTabId;
-  sandboxUrls: { codeServerUrl?: string; noVncUrl?: string } | undefined;
+  sandboxUrls: { services?: Record<string, string> } | undefined;
   terminalCwd?: string;
   previewUrl?: string;
   onPreviewUrlChange?: (url: string) => void;
@@ -1209,14 +1210,14 @@ const SidecarBody = memo(
     } else if (app.kind === 'builtin-terminal') {
       body = <ConsoleStarted tabId={originTabId} cwd={terminalCwd} />;
     } else if (app.kind === 'builtin-code') {
-      body = sandboxUrls?.codeServerUrl ? (
-        <Webview src={sandboxUrls.codeServerUrl} showUnavailable={false} registry={registryProps} />
+      body = sandboxUrls?.services?.['code_server'] ? (
+        <Webview src={sandboxUrls.services['code_server']} showUnavailable={false} registry={registryProps} />
       ) : (
         <div className={styles.sidecarUnavailable}>{app.label} is unavailable for this workspace.</div>
       );
     } else if (app.kind === 'builtin-desktop') {
-      body = sandboxUrls?.noVncUrl ? (
-        <Webview src={sandboxUrls.noVncUrl} showUnavailable={false} registry={registryProps} />
+      body = sandboxUrls?.services?.['vnc'] ? (
+        <Webview src={sandboxUrls.services['vnc']} showUnavailable={false} registry={registryProps} />
       ) : (
         <div className={styles.sidecarUnavailable}>{app.label} is unavailable for this workspace.</div>
       );
@@ -1259,7 +1260,7 @@ const SidecarColumn = memo(
   }: {
     originTab: CodeTab;
     app: AppDescriptor;
-    sandboxUrls: { codeServerUrl?: string; noVncUrl?: string } | undefined;
+    sandboxUrls: { services?: Record<string, string> } | undefined;
     terminalCwd?: string;
     previewUrl?: string;
     onPreviewUrlChange?: (url: string) => void;
@@ -1844,7 +1845,8 @@ export const CodeDeck = memo(() => {
   const projectMap = useMemo(() => {
     const map = new Map<string, { label: string; workspaceDir: string | undefined }>();
     for (const p of store.projects) {
-      map.set(p.id, { label: p.label, workspaceDir: p.source?.kind === 'local' ? p.source.workspaceDir : undefined });
+      const s = firstSource(p);
+      map.set(p.id, { label: p.label, workspaceDir: s?.kind === 'local' ? s.workspaceDir : undefined });
     }
     return map;
   }, [store.projects]);

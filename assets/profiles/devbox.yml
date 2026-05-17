@@ -1,0 +1,111 @@
+version: 1
+
+# Default user identity for tool exec/spawn/read/write inside the
+# container. WITHOUT this, the SDK's docker session runs everything as
+# root, which lets the agent's bash tool tamper with in-container
+# security state (e.g. ``iptables -F`` to undo the network allowlist).
+# Running as the non-privileged uid 1000 makes those capability-
+# restricted operations fail at the kernel level, regardless of what
+# NET_ADMIN is granted to the container. We use the numeric form so
+# this works whether the image names the user ``ubuntu`` (current
+# published image at uid 1000) or ``user`` (newer entrypoint that
+# renames the existing user).
+run_as: "1000:1000"
+
+# Launcher-bundled "devbox" profile. Loaded by `omni serve --profile` when
+# the user's defaultProfileName is "devbox" and no override exists at
+# <config>/sandbox/devbox.yml.
+#
+# Describes a full development environment in a container: code-server,
+# a desktop reachable via noVNC, postgres + redis, plus the toolchains
+# needed for typical web/data workloads. The image is built from
+# `sandbox-image/Dockerfile` in this repo.
+#
+# Workspace seeding is NOT in this profile — it's injected per-project by
+# ``omni serve`` based on the project's source kind (local-git via
+# ``git archive``, local non-git via SDK ``LocalDir``, git-remote via SDK
+# ``GitRepo``). The profile only describes the *container shape*.
+
+client:
+  type: docker
+  # NET_ADMIN + seccomp=unconfined are both required for iptables to work
+  # inside the container. NET_ADMIN alone isn't enough — Docker's default
+  # seccomp profile blocks the netfilter syscalls iptables-nft needs, so
+  # rules silently fail to install (apply-network-isolation.sh has no
+  # `set -e` and reports success regardless). The non-privileged user
+  # the agent runs as still can't manipulate iptables, since per-task
+  # capability checks block it independent of seccomp.
+  cap_add: ["NET_ADMIN"]
+  security_opt: ["seccomp=unconfined"]
+  # Override the image's default USER. The SDK's own bookkeeping (PTY
+  # pid-path chown, archive writes, manifest materialization) runs as
+  # the container's default user and needs root. The agent's *tools*
+  # still execute as the non-privileged uid 1000 — that's controlled by
+  # ``run_as`` above.
+  user: "root"
+
+options:
+  image: ghcr.io/ericmichael/omni-code-sandbox-work:latest
+  exposed_ports: [8080, 6080]
+
+manifest:
+  # Manifest root is the workspace path inside the container. Entries
+  # are injected per-project by ``omni serve --source-kind ...``.
+  root: /workspace
+
+init:
+  # /workspace was created by the SDK during manifest materialization
+  # and is owned by root (the container's default user we overrode
+  # above). The agent's tools run as run_as (uid 1000), so chown the
+  # workspace tree to that uid before services or the agent start.
+  - "chown -R 1000:1000 /workspace"
+  # PR baseline: after seeding, snapshot each per-source subdirectory's
+  # state as a tagged commit ``refs/tags/omni/seed`` inside that
+  # source's git repo. The launcher diffs against that tag per source
+  # to compute the agent's PR.
+  #
+  # Layout assumption (multi-source projects): /workspace/<mountName>/
+  # is one source per subdir. Single-source projects have one subdir;
+  # multi-source projects have several. We loop over all top-level
+  # subdirs of /workspace and run the dance in each.
+  #
+  # Per subdir: if .git is already there (e.g. GitRepo entry shipped
+  # one), tag the current HEAD; otherwise git-init and create a
+  # baseline commit. ``safe.directory '*'`` blanket lets git operate
+  # on any of the workspace subdirs regardless of host-uid mismatch.
+  - |
+    sudo -u '#1000' bash -lc '
+      set -e
+      git config --global --add safe.directory "*"
+      git config --global user.email omni@local
+      git config --global user.name "Omni Seed"
+      for d in /workspace/*/; do
+        cd "$d" || continue
+        if [ -d .git ]; then
+          git tag -f omni/seed HEAD 2>/dev/null || true
+        else
+          git init -q -b main
+          # Flatten any nested .git dirs inside this source. Without
+          # this, ``git add -A`` reaches an embedded repo (e.g. when
+          # the source is a folder-of-folders containing other git
+          # checkouts) and tries to record it as a submodule pointer
+          # — which fails when the nested repo has no HEAD. The host
+          # filesystem is untouched; only this ephemeral copy is
+          # flattened.
+          find . -mindepth 2 -name .git -prune -exec rm -rf {} + 2>/dev/null || true
+          git add -A
+          git commit -q --allow-empty -m "omni-seed (workspace baseline)"
+          git tag -f omni/seed HEAD
+        fi
+      done
+    '
+
+services:
+  code_server:
+    command: "code-server --bind-addr 0.0.0.0:8080 --auth none /workspace"
+    port: 8080
+    user: "1000:1000"
+  vnc:
+    command: "bash /usr/local/bin/start-vnc.sh"
+    port: 6080
+    user: "1000:1000"

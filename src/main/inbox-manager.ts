@@ -25,6 +25,7 @@ import type {
   Ticket,
   TicketId,
 } from '@/shared/types';
+import { firstSource } from '@/shared/types';
 
 /**
  * 30 days — how long a promoted tombstone sticks around before GC. Long
@@ -242,7 +243,7 @@ throw new InboxPromotionError(`Cannot reactivate promoted item ${id}`);
     const pipeline: Pipeline =
       this.deps.store.getPipeline(opts.projectId) ??
       project.pipeline ??
-      (project.source ? DEFAULT_PIPELINE : SIMPLE_PIPELINE);
+      (firstSource(project) ? DEFAULT_PIPELINE : SIMPLE_PIPELINE);
     const columnId =
       opts.columnId ??
       pipeline.columns.find((c) => c.id.endsWith('__backlog') || c.id === 'backlog')?.id ??
@@ -290,13 +291,14 @@ throw new InboxPromotionError(`Cannot reactivate promoted item ${id}`);
     // next `addTicket` call with a foreign-key violation.
     let project: Project;
     if (this.deps.createProject) {
-      project = this.deps.createProject({ label, slug: slugify(label) });
+      project = this.deps.createProject({ label, slug: slugify(label), sources: [] });
     } else {
       const now = this.deps.now();
       project = {
         id: this.deps.newId(),
         label,
         slug: slugify(label),
+        sources: [],
         createdAt: now,
       };
       this.deps.store.setProjects([...this.deps.store.getProjects(), project]);

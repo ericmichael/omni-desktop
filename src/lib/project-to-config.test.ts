@@ -134,17 +134,7 @@ describe('projectToConfig', () => {
     expect(config.manifest.entries).toEqual({});
   });
 
-  it('sandbox.image overrides defaultDockerImage', () => {
-    const project = baseProject({ sandbox: { image: 'custom/image:v2' } });
-    const config = projectToConfig(project, DEFAULTS);
-
-    expect(config.runtime).toEqual({
-      client: 'docker',
-      options: { image: 'custom/image:v2' },
-    });
-  });
-
-  it('sandbox absent — falls back to defaultDockerImage', () => {
+  it('runtime always uses defaultDockerImage — project-level image overrides moved to sandbox profiles in v22', () => {
     const project = baseProject();
     const config = projectToConfig(project, DEFAULTS);
 
@@ -232,12 +222,11 @@ describe('projectToConfig', () => {
       },
       autoDispatch: true,
       pipeline: { columns: [{ id: 'backlog', label: 'Backlog' }] },
-      sandbox: { image: 'omni-sandbox:dev' },
     });
     const config = projectToConfig(project, DEFAULTS);
 
     expect(config.manifest.entries?.['.']).toMatchObject({ type: 'local_dir' });
-    expect(config.runtime).toMatchObject({ options: { image: 'omni-sandbox:dev' } });
+    expect(config.runtime).toMatchObject({ options: { image: 'omni-sandbox:latest' } });
     const omni = config.mcp_servers?.[0];
     expect(omni?.type).toBe('stdio');
     if (omni?.type === 'stdio') {

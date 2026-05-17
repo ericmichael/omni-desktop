@@ -176,4 +176,64 @@ ALTER TABLE projects ADD COLUMN pinned_at TEXT;
 ALTER TABLE milestones ADD COLUMN pinned_at TEXT;
 `,
   },
+  {
+    version: 5,
+    sql: `
+-- v22 launcher cut: per-project sandbox config is no longer an inline
+-- image/dockerfile JSON blob; it's a profile name that points at a YAML
+-- profile under <config>/sandbox/<name>.yml. Drop the legacy column
+-- (always NULL after the launcher's electron-store migration to v22)
+-- and add the new "sandbox_profile" column.
+ALTER TABLE projects DROP COLUMN sandbox;
+ALTER TABLE projects ADD COLUMN sandbox_profile TEXT;
+`,
+  },
+  {
+    version: 6,
+    sql: `
+-- PR review state on tickets. Used by the local-PR UI flow:
+--   pr_review:    JSON {"status":"approved|changes_requested","at":<epoch ms>}
+--                 NULL = no review yet (Approve/Request changes buttons enabled).
+--   pr_merged_at: epoch ms (stringified). Set when the user merges the agent's
+--                 container changes into the host repo. NULL = not merged.
+-- Pre-existing rows get NULL; the Ticket model already treats both fields as
+-- optional so no backfill is needed.
+ALTER TABLE tickets ADD COLUMN pr_review TEXT;
+ALTER TABLE tickets ADD COLUMN pr_merged_at TEXT;
+`,
+  },
+  {
+    version: 7,
+    sql: `
+-- Multi-source projects. A project now owns 0..N sources (repos/dirs)
+-- instead of exactly 0..1. The container exposes each under
+-- /workspace/<mountName>. Ticket PR state becomes a JSON map keyed by
+-- ProjectSource.id so reviews/merges are tracked per source.
+--
+-- Migration of existing rows (pure SQL via SQLite's json1):
+--   projects.sources: wrap the old single source as a 1-element array
+--     after injecting auto-generated id + mountName (slug-derived).
+--     Rows with source IS NULL get an empty array.
+--   tickets.pr_review / pr_merged_at: the old scalar shape and the new
+--     map shape are incompatible. Clear the columns rather than try to
+--     migrate (no production state has these populated yet).
+ALTER TABLE projects ADD COLUMN sources TEXT NOT NULL DEFAULT '[]';
+
+UPDATE projects
+SET sources = json_array(
+  json_patch(
+    source,
+    json_object(
+      'id', lower(hex(randomblob(8))),
+      'mountName', slug
+    )
+  )
+)
+WHERE source IS NOT NULL;
+
+ALTER TABLE projects DROP COLUMN source;
+
+UPDATE tickets SET pr_review = NULL, pr_merged_at = NULL;
+`,
+  },
 ];

@@ -17,11 +17,11 @@ return source.workspaceDir;
 }
 
 /** Type guard for local sources. */
-export function isLocalSource(source: ProjectSource | undefined): source is { kind: 'local'; workspaceDir: string; gitDetected?: boolean } {
+export function isLocalSource(source: ProjectSource | undefined): source is Extract<ProjectSource, { kind: 'local' }> {
   return source?.kind === 'local';
 }
 
-/** Check if a project has a linked repo. */
+/** Check if a project has at least one linked source. */
 export function hasRepo(project: Project): boolean {
-  return project.source != null;
+  return project.sources.length > 0;
 }

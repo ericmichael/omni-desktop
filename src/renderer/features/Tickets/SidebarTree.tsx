@@ -1095,32 +1095,35 @@ return;
                     </Tree>
                   </TreeItem>
 
-                  {/* Source / Workspace link */}
-                  {project.source?.kind === 'local' && (
-                    <TreeItem
-                      itemType="leaf"
-                      value={`source:${project.id}`}
-                      className={styles.hoverableItem}
-                    >
-                      <TreeItemLayout iconBefore={<Link16Regular className={styles.icon} />}>
-                        <span className={styles.sourceLabel} title={project.source.workspaceDir}>
-                          {shortenPath(project.source.workspaceDir)}
-                        </span>
-                      </TreeItemLayout>
-                    </TreeItem>
-                  )}
-                  {project.source?.kind === 'git-remote' && (
-                    <TreeItem
-                      itemType="leaf"
-                      value={`source:${project.id}`}
-                      className={styles.hoverableItem}
-                    >
-                      <TreeItemLayout iconBefore={<Globe16Regular className={styles.icon} />}>
-                        <span className={styles.sourceLabel} title={project.source.repoUrl}>
-                          {shortenRepoUrl(project.source.repoUrl)}
-                        </span>
-                      </TreeItemLayout>
-                    </TreeItem>
+                  {/* One leaf per source. Folder icon for local, globe for git-remote. */}
+                  {project.sources.map((s) =>
+                    s.kind === 'local' ? (
+                      <TreeItem
+                        key={s.id}
+                        itemType="leaf"
+                        value={`source:${project.id}:${s.id}`}
+                        className={styles.hoverableItem}
+                      >
+                        <TreeItemLayout iconBefore={<Link16Regular className={styles.icon} />}>
+                          <span className={styles.sourceLabel} title={s.workspaceDir}>
+                            {shortenPath(s.workspaceDir)}
+                          </span>
+                        </TreeItemLayout>
+                      </TreeItem>
+                    ) : (
+                      <TreeItem
+                        key={s.id}
+                        itemType="leaf"
+                        value={`source:${project.id}:${s.id}`}
+                        className={styles.hoverableItem}
+                      >
+                        <TreeItemLayout iconBefore={<Globe16Regular className={styles.icon} />}>
+                          <span className={styles.sourceLabel} title={s.repoUrl}>
+                            {shortenRepoUrl(s.repoUrl)}
+                          </span>
+                        </TreeItemLayout>
+                      </TreeItem>
+                    )
                   )}
                 </Tree>
             </TreeItem>

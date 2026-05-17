@@ -1,11 +1,21 @@
-import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
-import { memo, useCallback, useState } from 'react';
+import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { AnimatedDialog, Button, DialogBody, DialogContent, DialogFooter, DialogHeader, Input, Switch } from '@/renderer/ds';
-import type { Project, SandboxConfig } from '@/shared/types';
+import { AnimatedDialog, Button, DialogBody, DialogContent, DialogFooter, DialogHeader, Input, Select, Switch } from '@/renderer/ds';
+import {
+  draftsToSources,
+  type SourceDraft,
+  SourcesEditor,
+  sourcesToDrafts,
+} from '@/renderer/features/Projects/SourcesEditor';
+import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
+import { emitter } from '@/renderer/services/ipc';
+import type { Project } from '@/shared/types';
 
-import { DirectoryBrowserDialog } from './DirectoryBrowserDialog';
 import { ticketApi } from './state';
+
+/** Sentinel value for the "Inherit default" option in the profile <Select>. */
+const INHERIT_PROFILE = '__inherit__';
 
 const useStyles = makeStyles({
   body: {
@@ -73,32 +83,6 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightMedium,
     flexShrink: 0,
   },
-  sandboxOptions: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-  },
-  sandboxBtn: {
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    paddingTop: '6px',
-    paddingBottom: '6px',
-    borderRadius: '9999px',
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightMedium,
-    transitionProperty: 'background-color, color',
-    transitionDuration: '150ms',
-    border: 'none',
-    cursor: 'pointer',
-  },
-  sandboxBtnActive: {
-    backgroundColor: tokens.colorBrandBackground2,
-    color: tokens.colorBrandForeground1,
-  },
-  sandboxBtnInactive: {
-    backgroundColor: tokens.colorNeutralBackground3,
-    color: tokens.colorNeutralForeground2,
-  },
   linkToggle: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorBrandForeground1,
@@ -125,140 +109,81 @@ const useStyles = makeStyles({
   },
 });
 
-type SandboxMode = 'default' | 'image' | 'dockerfile';
-
-function deriveSandboxMode(sandbox?: SandboxConfig | null): SandboxMode {
-  if (sandbox?.image) {
-return 'image';
-}
-  if (sandbox?.dockerfile) {
-return 'dockerfile';
-}
-  return 'default';
-}
-
-function deriveSandboxValue(sandbox?: SandboxConfig | null, mode?: SandboxMode): string {
-  if (mode === 'image') {
-return sandbox?.image ?? '';
-}
-  if (mode === 'dockerfile') {
-return sandbox?.dockerfile ?? '';
-}
-  return '';
-}
-
-const SANDBOX_OPTIONS: { value: SandboxMode; label: string }[] = [
-  { value: 'default', label: 'Default' },
-  { value: 'image', label: 'Docker Image' },
-  { value: 'dockerfile', label: 'Dockerfile' },
-];
-
 type ProjectFormProps = {
   open: boolean;
   onClose: () => void;
   editProject?: Project;
 };
 
-type SourceKind = 'local' | 'git-remote';
-
 export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProps) => {
   const styles = useStyles();
   const isEdit = Boolean(editProject);
 
   const [label, setLabel] = useState(editProject?.label ?? '');
-  const [linkRepo, setLinkRepo] = useState(editProject?.source != null);
-  const [workspaceDir, setWorkspaceDir] = useState(editProject?.source?.kind === 'local' ? editProject.source.workspaceDir : '');
-  // Git-remote source is preserved through edit but not mutable via this UI
-  // (feature is hidden). Existing git-remote projects submit with their
-  // original repoUrl/defaultBranch intact.
-  const sourceKind: SourceKind = editProject?.source?.kind === 'git-remote' ? 'git-remote' : 'local';
-  const repoUrl = editProject?.source?.kind === 'git-remote' ? editProject.source.repoUrl : '';
-  const defaultBranch = editProject?.source?.kind === 'git-remote' ? (editProject.source.defaultBranch ?? '') : '';
+  const [drafts, setDrafts] = useState<SourceDraft[]>(() => sourcesToDrafts(editProject?.sources ?? []));
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [browseOpen, setBrowseOpen] = useState(false);
 
-  // Sandbox only shown in edit mode
-  const initialSandboxMode = deriveSandboxMode(editProject?.sandbox);
-  const [sandboxMode, setSandboxMode] = useState<SandboxMode>(initialSandboxMode);
-  const [sandboxValue, setSandboxValue] = useState(deriveSandboxValue(editProject?.sandbox, initialSandboxMode));
   const [autoDispatch, setAutoDispatch] = useState(editProject?.autoDispatch ?? false);
   const [dueDate, setDueDate] = useState(
     editProject?.dueDate !== undefined ? toInputDate(editProject.dueDate) : ''
   );
 
-  const isValid =
-    label.trim().length > 0 &&
-    (!linkRepo || (sourceKind === 'local' ? workspaceDir.trim().length > 0 : repoUrl.trim().length > 0));
+  // Per-project sandbox profile (null = inherit user-default).
+  const [sandboxProfile, setSandboxProfile] = useState<string | null>(
+    editProject?.sandboxProfile ?? null
+  );
+  const [isEnterprise, setIsEnterprise] = useState(false);
+  useEffect(() => {
+    emitter.invoke('platform:is-enterprise').then(setIsEnterprise);
+  }, []);
+  const availableProfiles = useMemo(
+    () => getAvailableProfileNames({ isEnterprise }),
+    [isEnterprise]
+  );
+  const handleSandboxProfileChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      setSandboxProfile(e.target.value === INHERIT_PROFILE ? null : e.target.value);
+    },
+    []
+  );
+
+  const isValid = label.trim().length > 0;
 
   const handleLabelChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setLabel(e.target.value);
-  }, []);
-
-  const handleBrowseOpen = useCallback(() => setBrowseOpen(true), []);
-  const handleBrowseClose = useCallback(() => setBrowseOpen(false), []);
-
-  const handleDirSelected = useCallback(
-    (dir: string) => {
-      setWorkspaceDir(dir);
-      if (!label.trim()) {
-        const parts = dir.split('/');
-        setLabel(parts[parts.length - 1] ?? '');
-      }
-    },
-    [label]
-  );
-
-  const handleSandboxModeChange = useCallback((mode: SandboxMode) => {
-    setSandboxMode(mode);
-    if (mode === 'default') {
-setSandboxValue('');
-}
-  }, []);
-
-  const handleSandboxValueChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setSandboxValue(e.target.value);
   }, []);
 
   const handleSubmit = useCallback(async () => {
     if (!isValid || isSubmitting) {
       return;
     }
+    const conv = draftsToSources(drafts);
+    if (!conv.ok) {
+      setSubmitError(conv.error);
+      return;
+    }
+    setSubmitError(null);
     setIsSubmitting(true);
 
-    const sandbox: SandboxConfig | undefined =
-      sandboxMode === 'image' && sandboxValue.trim()
-        ? { image: sandboxValue.trim() }
-        : sandboxMode === 'dockerfile' && sandboxValue.trim()
-          ? { dockerfile: sandboxValue.trim() }
-          : undefined;
-
-    const source = linkRepo
-      ? sourceKind === 'local'
-        ? { kind: 'local' as const, workspaceDir: workspaceDir.trim() }
-        : {
-            kind: 'git-remote' as const,
-            repoUrl: repoUrl.trim(),
-            ...(defaultBranch.trim() ? { defaultBranch: defaultBranch.trim() } : {}),
-          }
-      : undefined;
-
+    const slug = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'project';
     const dueDateMs = fromInputDate(dueDate);
 
     try {
       if (isEdit && editProject) {
         await ticketApi.updateProject(editProject.id, {
           label: label.trim(),
-          ...(source !== undefined ? { source } : {}),
-          ...(isEdit ? { sandbox: sandbox ?? null } : {}),
+          sources: conv.sources,
           autoDispatch,
+          sandboxProfile,
           dueDate: dueDateMs,
         });
       } else {
         await ticketApi.addProject({
           label: label.trim(),
-          slug: label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'project',
-          ...(source ? { source } : {}),
-          sandbox: sandbox ?? null,
+          slug,
+          sources: conv.sources,
+          ...(sandboxProfile ? { sandboxProfile } : {}),
           ...(dueDateMs !== undefined ? { dueDate: dueDateMs } : {}),
         });
       }
@@ -266,145 +191,96 @@ setSandboxValue('');
     } finally {
       setIsSubmitting(false);
     }
-  }, [isValid, isSubmitting, isEdit, editProject, label, linkRepo, sourceKind, workspaceDir, repoUrl, defaultBranch, sandboxMode, sandboxValue, autoDispatch, dueDate, onClose]);
+  }, [isValid, isSubmitting, isEdit, editProject, label, drafts, autoDispatch, sandboxProfile, dueDate, onClose]);
 
   const handleDueDateChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setDueDate(e.target.value);
   }, []);
 
+  const hasAtLeastOneSource = drafts.length > 0;
   return (
-    <>
-      <AnimatedDialog open={open} onClose={onClose}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>{isEdit ? 'Edit Project' : 'New Project'}</DialogHeader>
-          <DialogBody className={styles.body}>
-            {/* Name */}
+    <AnimatedDialog open={open} onClose={onClose}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>{isEdit ? 'Edit Project' : 'New Project'}</DialogHeader>
+        <DialogBody className={styles.body}>
+          {/* Name */}
+          <div className={styles.section}>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label}>Name</label>
+              <Input
+                type="text"
+                value={label}
+                onChange={handleLabelChange}
+                placeholder="my-project"
+              />
+            </div>
+          </div>
+
+          {/* Sources */}
+          <div className={styles.section}>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label}>Sources</label>
+              <SourcesEditor value={drafts} onChange={setDrafts} />
+            </div>
+          </div>
+
+          {/* Sandbox — only in edit mode. New projects inherit the default. */}
+          {isEdit && (
             <div className={styles.section}>
               <div className={styles.fieldGroup}>
-                <label className={styles.label}>Name</label>
-                <Input
-                  type="text"
-                  value={label}
-                  onChange={handleLabelChange}
-                  placeholder="my-project"
-                />
-              </div>
-
-              {/* Link a directory toggle. For existing git-remote projects we
-                  still render their repo details read-only via the submit
-                  payload — the UI here is local-only. */}
-              {!linkRepo && (
-                <button
-                  type="button"
-                  className={styles.linkToggle}
-                  onClick={() => setLinkRepo(true)}
+                <label className={styles.label}>Sandbox profile</label>
+                <Select
+                  value={sandboxProfile ?? INHERIT_PROFILE}
+                  onChange={handleSandboxProfileChange}
                 >
-                  + Link a local directory
-                </button>
-              )}
-
-              {linkRepo && sourceKind === 'local' && (
-                <>
-                  <div className={styles.fieldGroup}>
-                    <label className={styles.label}>Directory</label>
-                    <button
-                      type="button"
-                      onClick={handleBrowseOpen}
-                      className={styles.browseBtn}
-                    >
-                      <span className={mergeClasses(styles.browseText, workspaceDir ? styles.browseTextFilled : styles.browseTextEmpty)}>
-                        {workspaceDir || 'Tap to select directory'}
-                      </span>
-                      <span className={styles.browseLabel}>Browse</span>
-                    </button>
-                  </div>
-
-                  <button
-                    type="button"
-                    className={styles.linkToggle}
-                    onClick={() => setLinkRepo(false)}
-                  >
-                    Remove linked directory
-                  </button>
-                </>
-              )}
-            </div>
-
-            {/* Sandbox — only in edit mode */}
-            {isEdit && (
-              <div className={styles.section}>
-                <label className={styles.label}>Sandbox</label>
-                <div className={styles.sandboxOptions}>
-                  {SANDBOX_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => handleSandboxModeChange(opt.value)}
-                      className={mergeClasses(
-                        styles.sandboxBtn,
-                        sandboxMode === opt.value ? styles.sandboxBtnActive : styles.sandboxBtnInactive
-                      )}
-                    >
-                      {opt.label}
-                    </button>
+                  <option value={INHERIT_PROFILE}>Inherit default</option>
+                  {availableProfiles.map((name) => (
+                    <option key={name} value={name}>
+                      {getProfileMenuLabel(name)}
+                    </option>
                   ))}
-                </div>
-                {sandboxMode === 'image' && (
-                  <Input
-                    type="text"
-                    value={sandboxValue}
-                    onChange={handleSandboxValueChange}
-                    placeholder="ubuntu:24.04"
-                  />
-                )}
-                {sandboxMode === 'dockerfile' && (
-                  <Input
-                    type="text"
-                    value={sandboxValue}
-                    onChange={handleSandboxValueChange}
-                    placeholder="Dockerfile"
-                  />
-                )}
-              </div>
-            )}
-            {/* Auto-dispatch — only in edit mode with a linked repo */}
-            {isEdit && linkRepo && (
-              <div className={styles.section}>
-                <div className={styles.switchRow}>
-                  <div className={styles.switchLabel}>
-                    <label className={styles.label}>Auto-dispatch</label>
-                    <span className={styles.switchDescription}>Automatically assign and start tickets</span>
-                  </div>
-                  <Switch checked={autoDispatch} onCheckedChange={setAutoDispatch} />
-                </div>
-              </div>
-            )}
-
-            {/* Due date — optional */}
-            <div className={styles.section}>
-              <div className={styles.fieldGroup}>
-                <label className={styles.label}>Due date</label>
-                <Input type="date" value={dueDate} onChange={handleDueDateChange} />
+                </Select>
               </div>
             </div>
-          </DialogBody>
-          <DialogFooter>
-            <Button variant="ghost" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button onClick={handleSubmit} isDisabled={!isValid || isSubmitting}>
-              {isEdit ? 'Save' : 'Create Project'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </AnimatedDialog>
-      <DirectoryBrowserDialog
-        open={browseOpen}
-        onClose={handleBrowseClose}
-        onSelect={handleDirSelected}
-        initialPath={workspaceDir || undefined}
-      />
-    </>
+          )}
+
+          {/* Auto-dispatch — only in edit mode with at least one source */}
+          {isEdit && hasAtLeastOneSource && (
+            <div className={styles.section}>
+              <div className={styles.switchRow}>
+                <div className={styles.switchLabel}>
+                  <label className={styles.label}>Auto-dispatch</label>
+                  <span className={styles.switchDescription}>Automatically assign and start tickets</span>
+                </div>
+                <Switch checked={autoDispatch} onCheckedChange={setAutoDispatch} />
+              </div>
+            </div>
+          )}
+
+          {/* Due date — optional */}
+          <div className={styles.section}>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label}>Due date</label>
+              <Input type="date" value={dueDate} onChange={handleDueDateChange} />
+            </div>
+          </div>
+
+          {submitError && (
+            <div role="alert" style={{ color: 'var(--colorPaletteRedForeground1)' }}>
+              {submitError}
+            </div>
+          )}
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit} isDisabled={!isValid || isSubmitting}>
+            {isEdit ? 'Save' : 'Create Project'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </AnimatedDialog>
   );
 });
 ProjectForm.displayName = 'ProjectForm';

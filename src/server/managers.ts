@@ -11,7 +11,7 @@ import { registerMigrationHandlers } from '@/main/migration-handlers';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
 import { migrateLegacyPagesToConfigDir } from '@/main/pages-relocation-migration';
 import { PlatformClient } from '@/main/platform-client';
-import { createPlatformClient, isEnterpriseBuild, mapSandboxProfiles, PLATFORM_URL } from '@/main/platform-mode';
+import { createPlatformClient, isEnterpriseBuild, PLATFORM_URL } from '@/main/platform-mode';
 import { createProcessManager } from '@/main/process-manager';
 import { backfillProjectConfigs } from '@/main/project-config-backfill';
 import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
@@ -26,6 +26,7 @@ import {
   registerSkillsHandlers,
   registerUtilHandlers,
 } from '@/shared/ipc-handlers';
+import { firstSource } from '@/shared/types';
 import type { IpcRendererEvents, Project } from '@/shared/types';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -128,9 +129,7 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
     sendToWindow: sendToAll,
     fetchFn: globalThis.fetch,
     getStoreData: () => ({
-      sandboxBackend: store.get('sandboxBackend') ?? 'none',
-      sandboxProfiles: store.get('sandboxProfiles') ?? null,
-      selectedMachineId: store.get('selectedMachineId') ?? null,
+      defaultProfileName: store.get('defaultProfileName') ?? 'host',
       projects: repo.listProjects().map(rowToProject),
     }),
   });
@@ -149,8 +148,12 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
     sendToWindow: sendToAll,
   });
 
-  // Background workspace sync — keeps project workspaces synced to Azure Files
-  // so cloud sessions can mount the share instantly without tar upload.
+  // Background workspace sync — keeps project workspaces synced to Azure
+  // Files so cloud sessions could mount the share instantly without tar
+  // upload. After the v22 cut the sync manager is no longer wired through
+  // ProcessManager (Shape B handles workspace materialization via
+  // SandboxClient/Manifest); the IPC channels survive so the SyncBar UI
+  // can still report status for any projects that opted in.
   const OMNI_CONFIG_DIR = getOmniConfigDir();
   const syncManager = new WorkspaceSyncManager({
     fetchFn: globalThis.fetch,
@@ -159,7 +162,6 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
       wsHandler.sendToAll('workspace-sync:status-changed', projectId, status);
     },
   });
-  processManager.workspaceSyncManager = syncManager;
 
   const [, cleanupBrowser] = createBrowserManager({
     ipc,
@@ -200,15 +202,16 @@ export const wireGlobalHandlers = (arg: { wsHandler: WsHandler; store: ServerSto
       return;
     }
     const projects = (store.get('projects') ?? []) as Project[];
-    const backend = store.get('sandboxBackend') ?? 'none';
-    // Only sync when platform (cloud) mode is active
-    if (backend !== 'platform') {
+    const profileName = store.get('defaultProfileName') ?? 'host';
+    // Only sync when the platform profile is active
+    if (profileName !== 'platform') {
 return;
 }
 
     for (const project of projects) {
-      if (project.source?.kind === 'local' && project.source.workspaceDir) {
-        syncManager.startSync(project.id, project.source.workspaceDir).catch((e) => {
+      const s = firstSource(project);
+      if (s?.kind === 'local' && s.workspaceDir) {
+        syncManager.startSync(project.id, s.workspaceDir).catch((e) => {
           console.warn(`[WorkspaceSync] Auto-start failed for ${project.id}:`, (e as Error).message);
         });
       }
@@ -323,17 +326,12 @@ return getStoreSnapshot()[k];
 store.set('platform', { ...current, accessToken: newToken });
 }
       };
-      const policy = await client.getPolicy('omni_code');
-      const profiles = mapSandboxProfiles(policy.sandbox_profiles ?? []);
-      store.set('sandboxProfiles', profiles.length > 0 ? profiles : null);
-      if (profiles.length > 0) {
-        const platformProfile = profiles.find((p) => p.backend === 'platform');
-        const selected = platformProfile ?? profiles[0]!;
-        store.set('sandboxBackend', selected.backend);
-        store.set('selectedMachineId', selected.resource_id);
-      }
-      console.log(`[Platform] Policy applied: ${profiles.length} sandbox profile(s)`);
-      // Start background workspace sync now that platform mode is active
+      // v22: platform-pushed sandbox profiles are no longer materialized into
+      // the launcher store (step 6 turns the platform path into a
+      // SandboxClient; until then the `platform` profile name is selected
+      // through the same defaultProfileName setting as every other profile).
+      // We still touch the policy endpoint so token refresh stays current.
+      await client.getPolicy('omni_code');
       autoStartSync();
     } catch (e) {
       console.warn('[Platform] Failed to fetch policy:', (e as Error).message);
@@ -386,9 +384,7 @@ return;
   });
   ipc.handle('platform:sign-out', () => {
     store.delete('platform');
-    store.set('sandboxProfiles', null);
-    store.set('selectedMachineId', null);
-    store.set('sandboxBackend', 'none');
+    store.set('defaultProfileName', 'host');
     wsHandler.sendToAll('platform:auth-changed', null);
   });
 

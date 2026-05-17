@@ -141,7 +141,7 @@ export const ProjectActions = memo(({ projectId }: { projectId: ProjectId }) => 
             <MenuItem icon={<Settings20Regular />} onClick={handleOpenEdit}>
               Project settings
             </MenuItem>
-            {project.source !== null && project.source !== undefined && (
+            {project.sources.length > 0 && (
               <MenuItem icon={<Settings20Regular />} onClick={handleOpenPipelineSettings}>
                 Pipeline settings
               </MenuItem>

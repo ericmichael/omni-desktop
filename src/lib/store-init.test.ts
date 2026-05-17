@@ -1,65 +1,9 @@
 /**
- * Tests for store init pure logic — sandbox enforcement and layout migration.
- *
- * These guard production-critical invariants:
- * - GA users must never run with a sandbox backend
- * - Legacy layout modes must be migrated to valid current modes
+ * Tests for store init pure logic — layout migration.
  */
 import { describe, expect, it } from 'vitest';
 
-import { enforceSandboxPolicy, migrateLayoutMode } from '@/lib/store-init';
-
-// ---------------------------------------------------------------------------
-// enforceSandboxPolicy
-// ---------------------------------------------------------------------------
-
-describe('enforceSandboxPolicy', () => {
-  it('resets backend to none for GA user with docker backend', () => {
-    expect(
-      enforceSandboxPolicy({ previewFeatures: false, sandboxProfiles: null, sandboxBackend: 'docker' })
-    ).toBe('none');
-  });
-
-  it('resets backend to none for GA user with podman backend', () => {
-    expect(
-      enforceSandboxPolicy({ previewFeatures: false, sandboxProfiles: null, sandboxBackend: 'podman' })
-    ).toBe('none');
-  });
-
-  it('resets backend to none for GA user with local backend', () => {
-    expect(
-      enforceSandboxPolicy({ previewFeatures: false, sandboxProfiles: null, sandboxBackend: 'local' })
-    ).toBe('none');
-  });
-
-  it('allows none backend for GA user', () => {
-    expect(
-      enforceSandboxPolicy({ previewFeatures: false, sandboxProfiles: null, sandboxBackend: 'none' })
-    ).toBeNull();
-  });
-
-  it('allows any backend when preview features are enabled', () => {
-    expect(
-      enforceSandboxPolicy({ previewFeatures: true, sandboxProfiles: null, sandboxBackend: 'docker' })
-    ).toBeNull();
-  });
-
-  it('allows any backend when enterprise sandbox profiles are present', () => {
-    expect(
-      enforceSandboxPolicy({
-        previewFeatures: false,
-        sandboxProfiles: [{ resource_id: 1, name: 'Standard', backend: 'docker' }] as never[],
-        sandboxBackend: 'docker',
-      })
-    ).toBeNull();
-  });
-
-  it('allows none backend when both preview and enterprise are absent', () => {
-    expect(
-      enforceSandboxPolicy({ previewFeatures: false, sandboxProfiles: null, sandboxBackend: 'none' })
-    ).toBeNull();
-  });
-});
+import { migrateLayoutMode } from '@/lib/store-init';
 
 // ---------------------------------------------------------------------------
 // migrateLayoutMode
