@@ -194,6 +194,67 @@ describe('chatSessionMachine', () => {
       });
       expect(phase(snap)).toBe('running');
     });
+
+    // Queue-drainer path: a queued message fires server-side, server
+    // broadcasts run_started with the prompt, the machine is sitting in
+    // idle (no local SUBMIT ran for this run).
+    describe('from idle with prompt (queued / background runs)', () => {
+      it('transitions idle → running', () => {
+        const snap = next(idleSnap('sess-1'), {
+          type: 'RUN_STARTED',
+          run_id: 'queued-1',
+          session_id: 'sess-1',
+          prompt: 'do the thing',
+        });
+        expect(phase(snap)).toBe('running');
+        expect(ctx(snap).runId).toBe('queued-1');
+      });
+
+      it('appends user message from event.prompt', () => {
+        const snap = next(idleSnap('sess-1'), {
+          type: 'RUN_STARTED',
+          run_id: 'queued-1',
+          session_id: 'sess-1',
+          prompt: 'do the thing',
+        });
+        const items = ctx(snap).items as MessageItem[];
+        expect(items.length).toBe(1);
+        const userMsg = items[0];
+        expect(userMsg).toMatchObject({
+          type: 'chat',
+          role: 'user',
+          content: 'do the thing',
+        });
+      });
+
+      it('does not duplicate when last user item already matches', () => {
+        // Local submit ran first (optimistic append); RUN_STARTED arrives
+        // afterward with the same prompt. Should be a no-op for items.
+        const after = next(startingSnap('sess-1'), {
+          type: 'RUN_STARTED',
+          run_id: 'run-1',
+          session_id: 'sess-1',
+          prompt: 'hello',
+        });
+        const items = ctx(after).items as MessageItem[];
+        const userMsgs = items.filter(
+          (it) => it.type === 'chat' && it.role === 'user',
+        );
+        expect(userMsgs.length).toBe(1);
+      });
+
+      it('skips append when prompt is missing', () => {
+        // Legacy server (or background event without a prompt): still
+        // transition, but don't conjure a blank user message.
+        const snap = next(idleSnap('sess-1'), {
+          type: 'RUN_STARTED',
+          run_id: 'queued-1',
+          session_id: 'sess-1',
+        });
+        expect(phase(snap)).toBe('running');
+        expect(ctx(snap).items).toEqual([]);
+      });
+    });
   });
 
   // -----------------------------------------------------------------------

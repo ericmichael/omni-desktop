@@ -66,6 +66,12 @@ return;
           type: 'RUN_STARTED',
           run_id: String(p?.run_id ?? ''),
           session_id: typeof p?.session_id === 'string' ? p.session_id : undefined,
+          // prompt: forwarded so the machine can append the user message
+          // when RUN_STARTED arrives from idle (queued / background-triggered
+          // runs). For runs originated by local submit(), the optimistic
+          // append already happened and the machine's idempotency check
+          // skips the duplicate.
+          prompt: typeof p?.prompt === 'string' ? p.prompt : undefined,
         });
       }),
 

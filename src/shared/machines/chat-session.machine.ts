@@ -89,7 +89,7 @@ export type ChatSessionEvent =
   | { type: 'STOP' }
   | { type: 'APPROVAL_DECIDED'; request_id: string; value: 'yes' | 'always' | 'no' }
   // Server events
-  | { type: 'RUN_STARTED'; run_id: string; session_id?: string }
+  | { type: 'RUN_STARTED'; run_id: string; session_id?: string; prompt?: string }
   | { type: 'RUN_END'; session_id?: string }
   | { type: 'MESSAGE_OUTPUT'; content: string; session_id?: string }
   | {
@@ -255,6 +255,30 @@ export const chatSessionMachine = setup({
         statusItalic: false,
         toolStatus: undefined,
       };
+    }),
+
+    // RUN_STARTED can fire from ``idle`` when a run was initiated outside
+    // the local actor — e.g. a queued message that the server drainer
+    // turned into a start_run, or a background-automation enqueue. In
+    // that case the user-side SUBMIT never ran, so the user message is
+    // missing from items. Append it from the prompt carried on the event
+    // so the transcript stays coherent.
+    appendUserMessageFromRunStarted: assign(({ context, event }) => {
+      const e = event as Extract<ChatSessionEvent, { type: 'RUN_STARTED' }>;
+      const text = typeof e.prompt === 'string' ? e.prompt : '';
+      if (!text) {
+        return { items: context.items };
+      }
+      const lastUser = [...context.items].reverse().find(
+        (it): it is ChatMessage => it.type === 'chat' && it.role === 'user',
+      );
+      // Idempotency: if the last user item already matches, this RUN_STARTED
+      // is a re-arrival (reconnect replay, session-history replay). Skip.
+      if (lastUser && lastUser.content === text) {
+        return { items: context.items };
+      }
+      const msg: ChatMessage = { type: 'chat', role: 'user', content: text };
+      return { items: [...context.items, msg] };
     }),
 
     bufferPreamble: assign(({ context, event }) => {
@@ -578,6 +602,17 @@ return e.items;
         idle: {
           on: {
             SUBMIT: { target: 'starting', actions: 'appendUserMessage' },
+            // A queued message draining server-side, or any background-
+            // initiated run, surfaces here as a RUN_STARTED while the
+            // machine sits in idle. Treat it the same as the user's own
+            // SUBMIT path: append the user message (from event.prompt) and
+            // advance to running so subsequent message_output / tool
+            // events aren't dropped.
+            RUN_STARTED: {
+              guard: 'acceptLoose',
+              target: 'running',
+              actions: ['appendUserMessageFromRunStarted', 'setRunStarted'],
+            },
             // Late-arriving events from a previous run (session-filtered)
             MESSAGE_OUTPUT: { guard: 'acceptStrict', actions: 'bufferPreamble' },
           },

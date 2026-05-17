@@ -13,6 +13,7 @@ import { BashJobs, type BashJobsKillResult, type BashJobsTailResult,type BashJob
 import { Header } from './components/Header'
 import { Input } from './components/Input'
 import { ArtifactPortalProvider, type Attachment,MessageList } from './components/MessageList'
+import { QueuedMessages } from './components/QueuedMessages'
 import { ResizableDivider } from './components/ResizableDivider'
 import { type SessionItem,SessionList } from './components/SessionList'
 import { Sidebar } from './components/Sidebar'
@@ -94,6 +95,7 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   const [chatColumnEl, setChatColumnEl] = useState<HTMLDivElement | null>(null)
   const [runActive, setRunActive] = useState(false)
   const [initialSessionParam] = useState<string | undefined>(() => uiConfig.session)
+  const [queuedMessages, setQueuedMessages] = useState<import('./rpc/client').QueuedMessage[]>([])
   const readyRef = useRef(false)
   const onClientToolCallRef = useRef(onClientToolCall)
   useEffect(() => {
@@ -185,6 +187,17 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   // the boot machine — they need to be live even before boot completes
   // so that any early events aren't lost.
   useEffect(() => {
+    const offQueueChanged = client.on('queue_changed', (p: any) => {
+      // Server broadcasts a full snapshot (small queue, simple to apply).
+      // Only accept events targeted at the currently-loaded session so a
+      // stale ``queue_changed`` from a session we just switched away from
+      // doesn't poison the panel.
+      const liveSessionId = actor.getSnapshot().context.sessionId
+      if (typeof p?.session_id === 'string' && p.session_id !== liveSessionId) {
+        return
+      }
+      setQueuedMessages(Array.isArray(p?.items) ? p.items : [])
+    })
     const offRunStarted = client.on('run_started', () => {
       setRunActive(true)
       onSessionChangeRef.current?.(actor.getSnapshot().context.sessionId)
@@ -279,7 +292,7 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
     })
 
     return () => {
-      offRunStarted(); offRunEnd(); offClientRequest(); offToken()
+      offQueueChanged(); offRunStarted(); offRunEnd(); offClientRequest(); offToken()
       client.disconnect()
     }
   }, [client, actor, addArtifact, refreshSessions])
@@ -390,8 +403,17 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
         const funcs = await client.listServerFunctions()
         const found = funcs.find(f => String(f.name).toLowerCase() === name.toLowerCase())
         if (!found) {
-          // Not a known server function; send to LLM
-          await client.startRun(text, sessionId)
+          // Not a known server function; send to LLM. Queue instead of
+          // starting directly when a run is already active or the queue
+          // is non-empty — same guard as the main path below.
+          if (runActive || queuedMessages.length > 0) {
+            const sid = actor.getSnapshot().context.sessionId ?? sessionId
+            if (sid) {
+              await client.enqueueMessage(sid, text, { triggerRun: true, role: 'user', source: 'ui' })
+            }
+          } else {
+            await client.startRun(text, sessionId)
+          }
           return
         }
         let args: Record<string, unknown> = {}
@@ -493,13 +515,6 @@ param.filename = f.name
           ? `${stagedSnapshot.map((c) => c.text).join('\n\n')}\n\n${text}`
           : text
 
-      // Tell the machine we're submitting (appends user message, transitions
-      // to starting). Carry the staged context onto the user message so the
-      // chat history shows that extra context was attached.
-      submit(text, attachments.length ? attachments : undefined, stagedSnapshot)
-      if (stagedSnapshot) {
-        clearStagedContext()
-      }
       // Merge parent-provided variables (e.g. client_tools) with workspace
       // variables. Prefer the boot actor's capabilities snapshot over the
       // destructured React state — boot finishes synchronously inside xstate
@@ -537,6 +552,41 @@ param.filename = f.name
               : {}),
           }
         : baseVariables
+
+      // Queue the message instead of starting a run directly when a run is
+      // currently active or the queue is non-empty. The drainer on the
+      // server side calls start_run for us once the current run finishes,
+      // and the chat-session machine handles the resulting RUN_STARTED
+      // from idle state (appending the user message via event.prompt).
+      // Critical: skip the local ``submit()`` machine call on this path —
+      // the machine is in ``running`` and would drop SUBMIT, while
+      // appending an optimistic user item that would later be duplicated
+      // when RUN_STARTED fires with the same prompt.
+      const queueAhead = runActive || queuedMessages.length > 0
+      if (queueAhead) {
+        await client.enqueueMessage(liveSessionId, agentPrompt, {
+          triggerRun: true,
+          role: 'user',
+          variables,
+          source: 'ui',
+        })
+        if (stagedSnapshot) {
+          clearStagedContext()
+        }
+        if (workspaceSupported) {
+          setWorkspaceLocked(true)
+        }
+        // No run_id yet — the drainer mints one when start_run fires.
+        return { runId: '' }
+      }
+
+      // Direct-start path: machine submit() owns the optimistic user-item
+      // append and the idle → starting transition.
+      submit(text, attachments.length ? attachments : undefined, stagedSnapshot)
+      if (stagedSnapshot) {
+        clearStagedContext()
+      }
+
       const startResult = await client.startRun(agentPrompt, liveSessionId, variables, content)
       if (workspaceSupported) {
 setWorkspaceLocked(true)
@@ -546,7 +596,7 @@ setWorkspaceLocked(true)
       submitError(String((e as Error)?.message || 'Failed to start run'))
       return undefined
     }
-  }, [client, sessionId, actor, bootState.actor, variablesProp, submit, submitError, workspacePath, workspaceSupported, stagedContext, clearStagedContext])
+  }, [client, sessionId, actor, bootState.actor, variablesProp, submit, submitError, workspacePath, workspaceSupported, stagedContext, clearStagedContext, runActive, queuedMessages.length])
 
   const handleStop = useCallback(() => {
     if (!runId) {
@@ -756,6 +806,18 @@ return
     const resolvedId = await loadSession(id)
     if (!opts?.fromProp) {
       onSessionChange?.(resolvedId)
+    }
+    // Seed the Up-next panel from server state. ``queue_changed``
+    // notifications will keep it in sync from here on.
+    if (resolvedId) {
+      try {
+        const snap = await client.listQueue(resolvedId)
+        setQueuedMessages(snap.items)
+      } catch {
+        setQueuedMessages([])
+      }
+    } else {
+      setQueuedMessages([])
     }
     // Workspace restore is a side-effect of session selection, not part
     // of machine state — it stays here.
@@ -990,6 +1052,19 @@ args.text = text
                 onKill={handleBashKill}
                 onTail={handleBashTail}
                 onWarmup={handleBashWarmup}
+              />
+              <QueuedMessages
+                items={queuedMessages}
+                onCancel={(id) => {
+                  if (!sessionId) {
+                    return
+                  }
+                  // Optimistic remove — the server's queue_changed broadcast
+                  // is the source of truth and will overwrite this if the
+                  // cancel raced with a drainer pop (cancel returns not_found).
+                  setQueuedMessages((prev) => prev.filter((it) => it.id !== id))
+                  client.cancelQueuedMessage(sessionId, id).catch(() => {})
+                }}
               />
               {stagedContext.length > 0 && (
                 // MCP-Apps staged context chips. Each ``ui/update-model-context``
