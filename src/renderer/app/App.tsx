@@ -29,6 +29,9 @@ const useStyles = makeStyles({
   shell: {
     width: '100dvw',
     height: '100dvh',
+    paddingTop: 'env(safe-area-inset-top, 0px)',
+    paddingLeft: 'env(safe-area-inset-left, 0px)',
+    paddingRight: 'env(safe-area-inset-right, 0px)',
     position: 'relative',
     overflow: 'hidden',
     // Flex column so the post-migration notice (rendered above the main

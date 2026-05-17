@@ -86,6 +86,7 @@ const SandboxRunningView = memo(
     onSessionChange,
     variables,
     onClientToolCall,
+    workspaceDir,
   }: {
     sandboxUrls: {
       uiUrl: string;
@@ -101,6 +102,7 @@ const SandboxRunningView = memo(
     onSessionChange?: (sessionId: string | undefined) => void;
     variables?: Record<string, unknown>;
     onClientToolCall?: Parameters<typeof OmniAgentsApp>[0]['onClientToolCall'];
+    workspaceDir?: string;
   }) => {
     const uiSrc = useMemo(() => {
       const url = new URL(sandboxUrls.uiUrl, window.location.origin);
@@ -121,7 +123,7 @@ const SandboxRunningView = memo(
       <div className={styles.flexColFullRelative}>
         <div className={styles.flex1Relative}>
           <div className={styles.fullSizeRelative}>
-            <OmniAgentsApp uiUrl={uiSrc} greeting={greeting} sandboxLabel={sandboxLabel} sandboxOptions={sandboxOptions} currentSandboxProfile={currentSandboxProfile} onSandboxChange={onSandboxChange} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables ?? buildSessionVariables({ surface: 'chat' })} onClientToolCall={onClientToolCall ?? buildClientToolHandler()} pendingPlan={pendingPlan} onPlanDecision={resolvePlanApproval} />
+            <OmniAgentsApp uiUrl={uiSrc} greeting={greeting} sandboxLabel={sandboxLabel} sandboxOptions={sandboxOptions} currentSandboxProfile={currentSandboxProfile} onSandboxChange={onSandboxChange} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables ?? buildSessionVariables({ surface: 'chat' })} onClientToolCall={onClientToolCall ?? buildClientToolHandler()} pendingPlan={pendingPlan} onPlanDecision={resolvePlanApproval} workspaceDir={workspaceDir} />
             {vncSrc && (
               <FloatingWidget
                 src={vncSrc}
@@ -259,6 +261,7 @@ export const Chat = memo(() => {
             onSessionChange={handleSessionChange}
             variables={variables}
             onClientToolCall={toolHandler}
+            workspaceDir={store.workspaceDir ?? undefined}
           />
         </div>
       )}
