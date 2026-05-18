@@ -10,6 +10,7 @@
  */
 
 import { getContainerArtifactsDir } from '@/lib/artifacts';
+import type { ProjectSource } from '@/shared/types';
 
 // Ticket-scoped client tools used to live here as launcher stubs
 // (``notify`` / ``escalate``). They're now omniagents builtins (see the
@@ -704,6 +705,22 @@ export type ContextIdentifierOpts = {
    * ``session_variables(ctx)`` without parsing additional_instructions.
    */
   workspaceDir?: string;
+  /**
+   * Project sources, when known. Renders a workspace-layout section so the
+   * agent knows which subdirectories of ``/workspace/`` are populated and
+   * what each one represents. Multi-source projects co-mount each here.
+   */
+  sources?: readonly ProjectSource[];
+};
+
+/** One-line label for a source — what to call out so the agent recognizes it. */
+const describeSourceForContext = (s: ProjectSource): string => {
+  if (s.kind === 'git-remote') {
+    const ref = s.defaultBranch ? `@${s.defaultBranch}` : '';
+    return `${s.repoUrl}${ref}`;
+  }
+  const basename = s.workspaceDir.split('/').filter(Boolean).pop() ?? s.workspaceDir;
+  return basename;
 };
 
 /**
@@ -717,6 +734,19 @@ const buildContextIdentifiers = (opts?: ContextIdentifierOpts): string => {
   if (opts?.projectId) {
     lines.push('');
     lines.push(`Current project: ${opts.projectLabel ?? opts.projectId} (ID: ${opts.projectId})`);
+  }
+  if (opts?.sources && opts.sources.length > 0) {
+    const intro =
+      opts.sources.length === 1
+        ? 'This project has one source mounted in your workspace:'
+        : `This project has ${opts.sources.length} sources co-mounted in your workspace. Each lives at a separate subdirectory and may need to be investigated when making changes:`;
+    const sourceLines = opts.sources.map(
+      (s) => `- \`/workspace/${s.mountName}/\` — ${describeSourceForContext(s)} (${s.kind})`
+    );
+    lines.push('');
+    lines.push('## Workspace Layout');
+    lines.push(intro);
+    lines.push(...sourceLines);
   }
   if (opts?.ticketId) {
     lines.push(`Current ticket: ${opts.ticketId}`);

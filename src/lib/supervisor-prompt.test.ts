@@ -31,7 +31,7 @@ const makeProject = (overrides: Partial<Project> = {}): Project => ({
   id: 'proj-1',
   label: 'My Project',
   slug: 'my-project',
-  source: { kind: 'local', workspaceDir: '/home/user/project' },
+  sources: [{ id: 'src-1', mountName: 'project', kind: 'local', workspaceDir: '/home/user/project' }],
   createdAt: Date.now(),
   ...overrides,
 });
@@ -123,5 +123,10 @@ describe('buildSupervisorPrompt', () => {
     expect(prompt).not.toContain('## Project Brief');
     expect(prompt).not.toContain('## Blockers');
     expect(prompt).not.toContain('## Recent Comments');
+  });
+
+  it('does not render the workspace layout — that lives in buildContextIdentifiers', () => {
+    const prompt = buildSupervisorPrompt(makeTicket(), makeProject(), PIPELINE);
+    expect(prompt).not.toContain('## Workspace Layout');
   });
 });

@@ -89,6 +89,7 @@ const CodeRunningView = memo(
     isGlass,
     tabId,
     terminalCwd,
+    agentWorkspaceDir,
     sidecarMode,
     ticketId,
   }: {
@@ -113,6 +114,7 @@ const CodeRunningView = memo(
     isGlass?: boolean;
     tabId?: string;
     terminalCwd?: string;
+    agentWorkspaceDir?: string;
     sidecarMode?: boolean;
     ticketId?: TicketId;
   }) => {
@@ -162,6 +164,7 @@ const CodeRunningView = memo(
             isGlass={isGlass}
             tabId={tabId}
             terminalCwd={terminalCwd}
+            agentWorkspaceDir={agentWorkspaceDir}
             sidecarMode={sidecarMode}
             ticketId={ticketId}
           />
@@ -239,6 +242,21 @@ export const CodeTabContent = memo(
       [isEnterprise]
     );
 
+    // What the agent should treat as its workspace root. For host profiles
+    // the agent runs on the host, so the host path is correct. For
+    // containerized profiles (docker, e2b, …) the agent's filesystem root is
+    // ``/workspace/<mountName>`` (or just ``/workspace`` when no source has
+    // been attached) — passing a host path here would land in
+    // ``session.variables.workspace_root`` and make every ``execute_bash``
+    // try to ``cd`` to a path that doesn't exist inside the container.
+    const agentWorkspaceDir = useMemo(() => {
+      if (profileRunsOnHost(profileName)) {
+        return workspaceDir ?? undefined;
+      }
+      const mountName = projectSource?.mountName;
+      return mountName ? `/workspace/${mountName}` : '/workspace';
+    }, [profileName, workspaceDir, projectSource]);
+
     const { phase, retry } = useCodeAutoLaunch(tab.id, workspaceDir, {
       ...(tab.projectId ? { projectId: tab.projectId } : {}),
       ...(profileOverride ? { profileNameOverride: profileOverride } : {}),
@@ -315,7 +333,7 @@ export const CodeTabContent = memo(
         surface: 'code',
         autopilot: ticketAutopilot,
         context: {
-          ...(project ? { projectId: project.id, projectLabel: project.label } : {}),
+          ...(project ? { projectId: project.id, projectLabel: project.label, sources: project.sources } : {}),
           ...(tab.ticketId ? { ticketId: tab.ticketId } : {}),
           ...(artifactsDir ? { artifactsDir } : {}),
           ...(tab.workspaceDir ? { workspaceDir: tab.workspaceDir } : {}),
@@ -363,6 +381,7 @@ export const CodeTabContent = memo(
             isGlass={isGlass}
             tabId={tab.id}
             terminalCwd={workspaceDir ?? undefined}
+            agentWorkspaceDir={agentWorkspaceDir}
             sidecarMode={sidecarMode}
             ticketId={tab.ticketId as TicketId | undefined}
           />

@@ -137,6 +137,32 @@ describe('client_tools shape', () => {
     );
   });
 
+  it('renders the workspace layout when sources are present', () => {
+    const vars = buildSessionVariables({
+      surface: 'code',
+      context: {
+        projectId: 'proj-1',
+        sources: [
+          { id: 's1', mountName: 'launcher', kind: 'local', workspaceDir: '/home/emm/Omni/Workspace/launcher' },
+          { id: 's2', mountName: 'omni-code', kind: 'local', workspaceDir: '/home/emm/Omni/Workspace/omni-code' },
+          { id: 's3', mountName: 'omniagents', kind: 'git-remote', repoUrl: 'https://github.com/anthropic/omniagents', defaultBranch: 'main' },
+        ],
+      },
+    }) as { additional_instructions: string };
+    expect(vars.additional_instructions).toContain('## Workspace Layout');
+    expect(vars.additional_instructions).toContain('3 sources co-mounted');
+    expect(vars.additional_instructions).toContain('`/workspace/launcher/`');
+    expect(vars.additional_instructions).toContain('`/workspace/omniagents/` — https://github.com/anthropic/omniagents@main (git-remote)');
+  });
+
+  it('omits the workspace layout when sources is empty', () => {
+    const vars = buildSessionVariables({
+      surface: 'code',
+      context: { projectId: 'proj-1', sources: [] },
+    }) as { additional_instructions: string };
+    expect(vars.additional_instructions).not.toContain('## Workspace Layout');
+  });
+
   it('extractSafeToolNames returns only tools with safe: true', () => {
     const tools = [
       { name: 'read_thing', safe: true, description: '', parameters: { type: 'object', properties: {} } },
