@@ -145,11 +145,11 @@ const DEFAULT_BRIEF_TEMPLATE = `## Problem
 // `checkGitRepo` moved too — it is imported from the new module and re-exported
 // via the IPC handler.
 
-// Operational constants (MAX_CONCURRENT_SUPERVISORS, STALL_TIMEOUT_MS, etc.)
-// now live in `@/main/supervisor-orchestrator` and are re-imported at the top
-// of this file while the retry / stall / auto-dispatch methods still reside
-// in ProjectManager. classifyRunEndReason / decideRunEndAction imported from
-// @/lib/run-end.
+// Operational constants (MAX_CONCURRENT_SUPERVISORS, MAX_CONTINUATION_TURNS,
+// AUTO_DISPATCH_INTERVAL_MS) live in `@/main/supervisor-orchestrator`.
+// Continuation, retries, and stall detection are owned by omni-code's
+// ``/goal`` server function — there is no launcher-side retry queue or
+// stall timer to manage here.
 
 export class ProjectManager {
   private store: Store<StoreData>;
@@ -374,7 +374,6 @@ export class ProjectManager {
       appControlManager: this.appControlManager,
     });
 
-    this.supervisors.startStallDetection();
     this.supervisors.startAutoDispatch();
     this.startInboxSweep();
   }
@@ -1343,8 +1342,6 @@ return;
 
     // Reconciliation: stop supervisor and clean up workspace when ticket moves to a terminal column
     if (this.isTerminalColumn(ticket.projectId, columnId)) {
-      // Cancel any pending retry timer first to prevent re-dispatch races
-      this.supervisors.cancelRetry(ticketId);
       const entry = this.supervisors.machines.get(ticketId);
       if (entry) {
         console.log(
@@ -1354,7 +1351,6 @@ return;
         // `stopSupervisor` (which takes its own lock) to avoid a nested
         // deadlock; the stop is inlined here.
         void this.supervisors.withTicketLock(ticketId, async () => {
-          entry.state.cancelRetryTimer();
           try {
             await this.bridge.stop(ticketId);
           } catch (err) {
@@ -1372,23 +1368,19 @@ return;
     }
 
     // Also stop if moving back to the first column (user is shelving the ticket).
-    // Cancel any pending retry so an armed timer doesn't revive a shelved ticket.
     if (this.isFirstColumn(ticket.projectId, columnId)) {
       const entry = this.supervisors.machines.get(ticketId);
       if (entry) {
         console.log(`[ProjectManager] Ticket ${ticketId} moved to backlog — stopping supervisor.`);
-        this.supervisors.cancelRetry(ticketId);
         void this.supervisors.stopSupervisor(ticketId);
       }
     }
 
     // Stop supervisor (preserve workspace) when entering a gated column.
-    // Same retry-timer concern as the backlog path above.
     if (column.gate) {
       const entry = this.supervisors.machines.get(ticketId);
       if (entry) {
         console.log(`[ProjectManager] Ticket ${ticketId} entered gated column "${columnId}" — stopping supervisor.`);
-        this.supervisors.cancelRetry(ticketId);
         void this.supervisors.stopSupervisor(ticketId);
       }
     }
@@ -1525,13 +1517,11 @@ return;
 
   exit = async (): Promise<void> => {
     this.changeWatcher?.stop();
-    this.supervisors.stopStallDetection();
     this.supervisors.stopAutoDispatch();
     if (this.inboxSweepTimer) {
       clearInterval(this.inboxSweepTimer);
       this.inboxSweepTimer = null;
     }
-    this.supervisors.cancelAllRetries();
     this.workflowLoader.dispose();
     await this.pages.dispose();
 

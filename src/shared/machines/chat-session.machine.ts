@@ -89,7 +89,7 @@ export type ChatSessionEvent =
   | { type: 'STOP' }
   | { type: 'APPROVAL_DECIDED'; request_id: string; value: 'yes' | 'always' | 'no' }
   // Server events
-  | { type: 'RUN_STARTED'; run_id: string; session_id?: string; prompt?: string }
+  | { type: 'RUN_STARTED'; run_id: string; session_id?: string; prompt?: string; prompt_role?: string }
   | { type: 'RUN_END'; session_id?: string }
   | { type: 'MESSAGE_OUTPUT'; content: string; session_id?: string }
   | {
@@ -260,24 +260,34 @@ export const chatSessionMachine = setup({
     // RUN_STARTED can fire from ``idle`` when a run was initiated outside
     // the local actor — e.g. a queued message that the server drainer
     // turned into a start_run, or a background-automation enqueue. In
-    // that case the user-side SUBMIT never ran, so the user message is
-    // missing from items. Append it from the prompt carried on the event
-    // so the transcript stays coherent.
+    // that case the user-side SUBMIT never ran, so the originating turn
+    // is missing from items. Append it from the prompt carried on the
+    // event so the transcript stays coherent. The server tags the turn
+    // with ``prompt_role`` so notification-batch wakeups (worker /
+    // bash-job completions) land as assistant messages rather than fake
+    // user input; default to user for back-compat with servers that
+    // don't ship the field.
     appendUserMessageFromRunStarted: assign(({ context, event }) => {
       const e = event as Extract<ChatSessionEvent, { type: 'RUN_STARTED' }>;
       const text = typeof e.prompt === 'string' ? e.prompt : '';
       if (!text) {
         return { items: context.items };
       }
-      const lastUser = [...context.items].reverse().find(
-        (it): it is ChatMessage => it.type === 'chat' && it.role === 'user',
+      const role: ChatMessage['role'] =
+        e.prompt_role === 'assistant' || e.prompt_role === 'system'
+          ? e.prompt_role
+          : 'user';
+      // Idempotency: scan items for a matching same-role chat message
+      // already present. Reconnect / history-replay can deliver the same
+      // RUN_STARTED twice; the rehydrate path may also have written the
+      // turn to items already if reload races the live event.
+      const dup = context.items.some(
+        (it) => it.type === 'chat' && it.role === role && it.content === text,
       );
-      // Idempotency: if the last user item already matches, this RUN_STARTED
-      // is a re-arrival (reconnect replay, session-history replay). Skip.
-      if (lastUser && lastUser.content === text) {
+      if (dup) {
         return { items: context.items };
       }
-      const msg: ChatMessage = { type: 'chat', role: 'user', content: text };
+      const msg: ChatMessage = { type: 'chat', role, content: text };
       return { items: [...context.items, msg] };
     }),
 

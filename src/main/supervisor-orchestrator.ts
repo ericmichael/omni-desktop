@@ -3,27 +3,28 @@
  *
  * The Code column owns the session id, the sandbox WebSocket, and every tool /
  * approval call. This orchestrator issues a narrow set of commands to the
- * column via `SupervisorBridge` (ensure column, run prompt, stop, reset,
- * dispose) and reacts to forwarded events (run_started, run_end, token_usage,
- * disconnected) — nothing more.
+ * column via `SupervisorBridge` (ensure column, start a ``/goal`` loop,
+ * stop the loop, reset, dispose) and reacts to forwarded events
+ * (run_started, run_end, token_usage, goal-update, disconnected).
  *
  * What lives here:
- *   - Phase records + retry / continuation / stall logic (no session id, no
- *     WebSocket)
- *   - Workspace / worktree provisioning + FLEET.md hooks
+ *   - Phase records mirrored from ``ui.goal.update`` snapshots
+ *   - Workspace / worktree provisioning + project hooks
  *   - Concurrency + WIP / dispatch-preflight validation
  *   - Auto-dispatch poll
- *   - Supervisor prompt assembly (`buildFullSupervisorPrompt`,
- *     `buildContinuationPromptForTicket`) — passed to the column via
- *     `bridge.run({ supervisorPrompt })`
+ *   - Initial supervisor prompt assembly (`buildFullSupervisorPrompt`) —
+ *     passed once at startGoal time as the loop's goal text. Continuation
+ *     prompts are owned by the agent-side ``/goal`` server function (see
+ *     omni-code's ``server_functions/goal.py``).
  *   - Task persistence for the UI task list
  *
- * What does NOT live here anymore (was here pre-refactor):
+ * What does NOT live here anymore:
  *   - Session id minting / tracking
- *   - `session.ensure` round-trip (`bridge.prepare` is gone)
- *   - Tool-call dispatch (`handleClientToolCall` / `dispatchAppControlCall`) —
- *     the renderer's `buildClientToolHandler` handles everything
+ *   - Tool-call dispatch — the renderer's `buildClientToolHandler` handles
+ *     everything
  *   - Variable building — the column builds its own via `buildSessionVariables`
+ *   - Continuation, retry-on-error, and stall detection — all owned by
+ *     omni-code's ``/goal`` loop
  */
 
 import { existsSync, readFileSync } from 'fs';
@@ -32,12 +33,10 @@ import { nanoid } from 'nanoid';
 import { logicalColumnId } from 'omni-projects-db';
 import path from 'path';
 
-import { buildContinuationPrompt } from '@/lib/continuation-prompt';
 import type {
   IWindowSender,
   IWorkflowLoader,
 } from '@/lib/project-manager-deps';
-import { decideRunEndAction, type FailureClass } from '@/lib/run-end';
 import { hasTemplateExpressions, renderTemplate, type TemplateVariables } from '@/lib/template';
 import { claimsCollide, decideWorktreeAction, resolveWorkspaceClaim } from '@/lib/worktree';
 import type { AppControlManager } from '@/main/app-control-manager';
@@ -75,31 +74,13 @@ import type { ProjectSource } from '@/shared/types';
 /** Maximum number of supervisors that can run concurrently across all projects. */
 export const MAX_CONCURRENT_SUPERVISORS = 5;
 
-/** If no supervisor message is received within this window, the run is considered stalled. */
-export const STALL_TIMEOUT_MS = 5 * 60 * 1000;
-
 /**
- * Safety-net timeout for streaming phases (running/continuing). Normally the
- * primary stall check skips streaming phases because legitimate long tool
- * calls can silence the message stream for minutes. But if the supervisor
- * crashes silently — no exit event, no run_end, no error — a streaming machine
- * would hang forever. This backstop fires only after a very long silence.
+ * Maximum continuation turns. Used as the default ``max_turns`` arg
+ * passed to omni-code's ``/goal`` server function when neither the
+ * project's workflow config nor an explicit override sets one. The
+ * agent-side loop is what enforces this budget — the launcher just
+ * forwards the value at startGoal time.
  */
-export const STREAMING_STALL_TIMEOUT_MS = 30 * 60 * 1000;
-
-/** How often to check for stalled supervisors. */
-export const STALL_CHECK_INTERVAL_MS = 30_000;
-
-/** Base delay for exponential backoff on failure-driven retries. */
-export const RETRY_BASE_DELAY_MS = 10_000;
-
-/** Maximum backoff delay for failure retries. */
-export const MAX_RETRY_BACKOFF_MS = 5 * 60 * 1000;
-
-/** Maximum retry attempts before giving up. */
-export const MAX_RETRY_ATTEMPTS = 5;
-
-/** Maximum continuation turns (successful run → re-check → continue). */
 export const MAX_CONTINUATION_TURNS = 10;
 
 /** Auto-dispatch poll interval — check every 30s for eligible tickets. */
@@ -110,20 +91,12 @@ export const AUTO_DISPATCH_INTERVAL_MS = 30_000;
 // ---------------------------------------------------------------------------
 
 export interface SupervisorEntry {
-  /** Phase + retry record. Holds no session id — the Code column is authoritative. */
+  /** Phase record. Holds no session id — the Code column is authoritative. */
   state: SupervisorState;
   /** The Code tab driving this supervisor. Resolved from `store.getCodeTabs()`. */
   tabId: CodeTabId;
 }
 
-/** @deprecated retained as a type alias for callers; use SupervisorEntry. */
-export type MachineEntry = SupervisorEntry;
-
-export interface RetryOpts {
-  attempt?: number;
-  continuationTurn?: number;
-  error?: string;
-}
 
 // ---------------------------------------------------------------------------
 // Narrow store surface — just the slices the orchestrator reads and writes.
@@ -215,7 +188,6 @@ export interface SupervisorOrchestratorDeps {
 // ---------------------------------------------------------------------------
 
 export class SupervisorOrchestrator {
-  private stallCheckTimer: ReturnType<typeof setInterval> | null = null;
   private autoDispatchTimer: ReturnType<typeof setInterval> | null = null;
 
   /**
@@ -370,6 +342,10 @@ export class SupervisorOrchestrator {
         }
         return;
       }
+      case 'goal-update': {
+        this.handleGoalUpdate(event.ticketId, event.snapshot);
+        return;
+      }
     }
   }
 
@@ -399,8 +375,16 @@ export class SupervisorOrchestrator {
   // -------------------------------------------------------------------------
 
   /**
-   * Handle a run_end notification from a machine. Decides whether to continue,
-   * retry, or stop based on the run end reason and ticket state.
+   * Handle a ``run_end`` notification from a column. Continue / retry /
+   * completion decisioning lives in omni-code's ``/goal`` server function;
+   * the orchestrator's job here is narrow:
+   *
+   *   - Persist the run record for the ticket's run history.
+   *   - Fire the after_run project hook (best-effort).
+   *
+   * Phase transitions come from ``handleGoalUpdate`` (the agent-side loop's
+   * ``ui.goal.update`` broadcast), NOT from here — a single run ending
+   * mid-loop doesn't mean the work is done.
    */
   handleMachineRunEnd = (ticketId: TicketId, reason: string): Promise<void> => {
     return this.withTicketLock(ticketId, async () => {
@@ -410,46 +394,27 @@ export class SupervisorOrchestrator {
       if (!entry) {
         return;
       }
-      const { state } = entry;
 
-      // Guard: ignore if machine was already stopped/transitioned (e.g., user clicked Stop)
-      if (!state.isStreaming()) {
-        console.log(
-          `[SupervisorOrchestrator] Ignoring run_end for ${ticketId} — machine in phase ${state.getPhase()}`
-        );
-        return;
-      }
-
-      // Run after_run hook (best-effort)
       const ticket = this.deps.host.getTicketById(ticketId);
       if (ticket) {
+        // after_run hook (best-effort). Fires once per run regardless of
+        // whether the /goal loop continues — semantics match the
+        // pre-migration behavior.
         const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId);
         const afterSource = firstSource(project);
         if (afterSource?.kind === 'local') {
           void this.deps.workflowLoader.runHook(ticket.projectId, 'after_run', afterSource.workspaceDir);
         } else if (afterSource?.kind === 'git-remote') {
           const hookScript = this.deps.workflowLoader.getConfig(ticket.projectId).hooks?.after_run;
-          if (hookScript) {
-            const currentEntry = this.machines.get(ticketId);
-            if (currentEntry?.tabId) {
-              void this.execHookInContainer(currentEntry.tabId, hookScript);
-            }
+          if (hookScript && entry.tabId) {
+            void this.execHookInContainer(entry.tabId, hookScript);
           }
         }
-      }
 
-      const maxTurns = ticket ? this.getEffectiveMaxContinuationTurns(ticket.projectId) : MAX_CONTINUATION_TURNS;
-
-      const action = decideRunEndAction({
-        reason,
-        continuationTurn: state.continuationTurn,
-        maxContinuationTurns: maxTurns,
-      });
-
-      // Persist run record. startedAt comes from runStartedAt — falling back
-      // to updatedAt is a last-resort approximation, since token-usage updates
-      // bump updatedAt and would otherwise collapse startedAt onto endedAt.
-      if (ticket) {
+        // Persist run record. startedAt comes from runStartedAt — falling
+        // back to updatedAt is a last-resort approximation, since
+        // token-usage updates bump updatedAt and would otherwise collapse
+        // startedAt onto endedAt.
         const endedAt = Date.now();
         const runStartedAt = this.runStartedAt.get(ticketId) ?? ticket.updatedAt;
         const run = {
@@ -463,71 +428,61 @@ export class SupervisorOrchestrator {
         this.deps.host.updateTicket(ticketId, { runs: [...existingRuns, run] });
         this.runStartedAt.delete(ticketId);
       }
-
-      switch (action.type) {
-        case 'stopped':
-          state.transition('idle' as TicketPhase);
-          return;
-
-        case 'complete':
-          console.log(`[SupervisorOrchestrator] Ticket ${ticketId} work complete.`);
-          state.transition('completed' as TicketPhase);
-          return;
-
-        case 'continue': {
-          // Re-read ticket — the agent may have moved it during the run
-          const freshTicket = this.deps.host.getTicketById(ticketId);
-          if (freshTicket) {
-            if (this.deps.host.isTerminalColumn(freshTicket.projectId, freshTicket.columnId)) {
-              console.log(`[SupervisorOrchestrator] Ticket ${ticketId} is in terminal column — not continuing.`);
-              state.transition('completed' as TicketPhase);
-              return;
-            }
-            const col = this.deps.host.getColumn(freshTicket.projectId, freshTicket.columnId);
-            if (col?.gate) {
-              console.log(
-                `[SupervisorOrchestrator] Ticket ${ticketId} is in gated column "${freshTicket.columnId}" — not continuing.`
-              );
-              state.transition('idle' as TicketPhase);
-              return;
-            }
-          }
-
-          state.continuationTurn = action.nextTurn;
-          state.transition('continuing' as TicketPhase);
-          state.recordActivity();
-
-          console.log(`[SupervisorOrchestrator] Continuing ticket ${ticketId} (turn ${action.nextTurn}/${maxTurns}).`);
-
-          const continuationPrompt = this.buildContinuationPromptForTicket(ticketId, action.nextTurn + 1, maxTurns);
-          // Brief delay to let the server's worker task finish cleanup (clear current_task)
-          // before we send the next start_run, avoiding "Run already active" race.
-          await new Promise<void>((r) => {
-            setTimeout(r, 500);
-          });
-          this.startMachineRun(ticketId, continuationPrompt);
-          return;
-        }
-
-        case 'retry':
-          this.scheduleRetry(ticketId, action.failureClass, {
-            attempt: state.retryAttempt + 1,
-            continuationTurn: state.continuationTurn,
-            error: reason,
-          });
-          return;
-      }
     });
   };
 
-  // -------------------------------------------------------------------------
-  // Effective-config accessors — resolve workflow (FLEET.md) overrides against
-  // the hard-coded defaults above.
-  // -------------------------------------------------------------------------
+  /**
+   * Map a ``ui.goal.update`` snapshot from the agent-side ``/goal`` loop
+   * onto the ticket's phase. Snapshot is null when the loop has fully
+   * torn down (no goal set on the session); status ``active`` means a
+   * turn is in flight or the tick is waiting; ``completed`` / ``cancelled``
+   * are terminal.
+   */
+  handleGoalUpdate = (ticketId: TicketId, snapshot: import('@/shared/types').GoalSnapshotPayload | null): void => {
+    const entry = this.machines.get(ticketId);
+    if (!entry) {
+      return;
+    }
+    const { state } = entry;
 
-  getEffectiveStallTimeout(projectId: ProjectId): number {
-    return this.deps.workflowLoader.getConfig(projectId).supervisor?.stall_timeout_ms ?? STALL_TIMEOUT_MS;
-  }
+    if (!snapshot) {
+      // Loop torn down — drop to idle unless the user explicitly stopped
+      // us (state already idle in that path).
+      if (state.getPhase() !== 'idle' && state.getPhase() !== 'completed') {
+        state.forcePhase('idle' as TicketPhase);
+      }
+      return;
+    }
+
+    if (snapshot.status === 'completed') {
+      console.log(
+        `[SupervisorOrchestrator] /goal completed for ${ticketId}: ${snapshot.completion_reason ?? 'achieved'}`
+      );
+      if (state.getPhase() !== 'completed') {
+        state.transition('completed' as TicketPhase);
+      }
+      return;
+    }
+
+    if (snapshot.status === 'cancelled') {
+      console.log(`[SupervisorOrchestrator] /goal cancelled for ${ticketId}`);
+      if (state.getPhase() !== 'idle' && state.getPhase() !== 'error') {
+        state.forcePhase('idle' as TicketPhase);
+      }
+      return;
+    }
+
+    // status === 'active'
+    state.recordActivity();
+    if (!state.isStreaming() && state.isActive()) {
+      state.transition('running' as TicketPhase);
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // Effective-config accessors — resolve workflow overrides against the
+  // hard-coded defaults above.
+  // -------------------------------------------------------------------------
 
   /**
    * Effective max concurrent supervisors. Uses the minimum of the global limit
@@ -543,10 +498,6 @@ export class SupervisorOrchestrator {
       return Math.min(projectLimit, MAX_CONCURRENT_SUPERVISORS);
     }
     return MAX_CONCURRENT_SUPERVISORS;
-  }
-
-  getEffectiveMaxRetries(projectId: ProjectId): number {
-    return this.deps.workflowLoader.getConfig(projectId).supervisor?.max_retry_attempts ?? MAX_RETRY_ATTEMPTS;
   }
 
   getEffectiveMaxContinuationTurns(projectId: ProjectId): number {
@@ -654,250 +605,6 @@ export class SupervisorOrchestrator {
       }
     }
     return null;
-  }
-
-  // -------------------------------------------------------------------------
-  // Retry queue (Symphony-inspired exponential backoff)
-  // -------------------------------------------------------------------------
-
-  /**
-   * Schedule a retry for a ticket's supervisor after a failed run.
-   *
-   * Uses exponential backoff. `decideRunEndAction` only emits the retry action
-   * for `error` and `stalled` reasons — `completed` / `max_turns` are handled
-   * by the `continue` branch in `handleMachineRunEnd`, which dispatches the
-   * next run directly without going through this queue.
-   */
-  scheduleRetry(ticketId: TicketId, failureClass: FailureClass, opts: RetryOpts): void {
-    const entry = this.machines.get(ticketId);
-    if (!entry) {
-      return;
-    }
-    const { state } = entry;
-
-    const attempt = opts.attempt ?? 0;
-    const continuationTurn = opts.continuationTurn ?? 0;
-
-    state.retryAttempt = attempt;
-    state.continuationTurn = continuationTurn;
-
-    const ticket = this.deps.host.getTicketById(ticketId);
-    const maxRetryAttempts = ticket ? this.getEffectiveMaxRetries(ticket.projectId) : MAX_RETRY_ATTEMPTS;
-
-    if (attempt >= maxRetryAttempts) {
-      console.log(
-        `[SupervisorOrchestrator] Ticket ${ticketId} reached max retry attempts (${maxRetryAttempts}). Giving up.`
-      );
-      state.transition('error');
-      return;
-    }
-
-    const delayMs = Math.min(RETRY_BASE_DELAY_MS * Math.pow(2, attempt), MAX_RETRY_BACKOFF_MS);
-
-    console.log(
-      `[SupervisorOrchestrator] Scheduling retry for ${ticketId} (attempt=${attempt}, turn=${continuationTurn}) ` +
-        `in ${Math.round(delayMs / 1000)}s${opts.error ? ` (reason: ${opts.error})` : ''}`
-    );
-
-    state.scheduleRetryTimer(delayMs, () => {
-      void this.handleRetryFired(ticketId, failureClass, attempt, continuationTurn);
-    });
-  }
-
-  /**
-   * Handle a retry timer firing. Re-check ticket state and re-dispatch if
-   * still eligible.
-   */
-  handleRetryFired(
-    ticketId: TicketId,
-    failureClass: FailureClass,
-    attempt: number,
-    continuationTurn: number
-  ): Promise<void> {
-    return this.withTicketLock(ticketId, async () => {
-      const ticket = this.deps.host.getTicketById(ticketId);
-      const entry = this.machines.get(ticketId);
-      if (!ticket || !entry) {
-        console.log(
-          `[SupervisorOrchestrator] Retry fired for ${ticketId} but ticket/machine no longer exists. Releasing.`
-        );
-        return;
-      }
-      const { state } = entry;
-
-      // Don't retry if ticket is now in a terminal column
-      if (this.deps.host.isTerminalColumn(ticket.projectId, ticket.columnId)) {
-        console.log(
-          `[SupervisorOrchestrator] Retry fired for ${ticketId} but ticket is in terminal column. Releasing.`
-        );
-        state.transition('idle');
-        return;
-      }
-
-      // Check concurrency (including per-column limits)
-      if (!this.canStartSupervisor(ticket.projectId, ticket.columnId)) {
-        console.log(`[SupervisorOrchestrator] No slots available for retry of ${ticketId}. Requeuing.`);
-        this.scheduleRetry(ticketId, failureClass, {
-          attempt: attempt + 1,
-          continuationTurn,
-          error: 'no available supervisor slots',
-        });
-        return;
-      }
-
-      // Re-dispatch
-      console.log(
-        `[SupervisorOrchestrator] Retry firing for ${ticketId} (${failureClass}, attempt=${attempt}, turn=${continuationTurn}). Re-dispatching.`
-      );
-
-      try {
-        const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId);
-        if (!project) {
-          return;
-        }
-
-        let hookOk = true;
-        const projectSource = firstSource(project);
-        if (projectSource?.kind === 'local') {
-          hookOk = await this.deps.workflowLoader.runHook(ticket.projectId, 'before_run', projectSource.workspaceDir);
-        } else {
-          const hookScript = this.deps.workflowLoader.getConfig(ticket.projectId).hooks?.before_run;
-          if (hookScript) {
-            const currentEntry = this.machines.get(ticketId);
-            if (currentEntry?.tabId) {
-              hookOk = await this.execHookInContainer(currentEntry.tabId, hookScript);
-            }
-          }
-        }
-        if (!hookOk) {
-          console.warn(
-            `[SupervisorOrchestrator] before_run hook failed during retry for ${ticketId}. Scheduling another retry.`
-          );
-          this.scheduleRetry(ticketId, 'error', {
-            attempt: attempt + 1,
-            continuationTurn,
-            error: 'before_run hook failed',
-          });
-          return;
-        }
-
-        const prompt = 'The previous run failed. Please review the current state and continue working on this ticket.';
-
-        state.recordActivity();
-        await this.ensureColumn(ticketId);
-        this.startMachineRun(ticketId, prompt);
-      } catch (error) {
-        console.error(`[SupervisorOrchestrator] Retry dispatch failed for ${ticketId}:`, error);
-        this.scheduleRetry(ticketId, 'error', {
-          attempt: attempt + 1,
-          continuationTurn,
-          error: (error as Error).message,
-        });
-      }
-    });
-  }
-
-  /** Cancel any pending retry timer for a single ticket. */
-  cancelRetry(ticketId: TicketId): void {
-    const entry = this.machines.get(ticketId);
-    if (entry) {
-      entry.state.cancelRetryTimer();
-    }
-  }
-
-  /** Cancel all pending retry timers — called from PM.exit(). */
-  cancelAllRetries(): void {
-    for (const [, entry] of this.machines) {
-      entry.state.cancelRetryTimer();
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  // Stall detection
-  // -------------------------------------------------------------------------
-
-  /** Start the periodic stall-check timer. Idempotent. */
-  startStallDetection(): void {
-    if (this.stallCheckTimer) {
-      return;
-    }
-    this.stallCheckTimer = setInterval(() => this.checkForStalledSupervisors(), STALL_CHECK_INTERVAL_MS);
-  }
-
-  /** Stop the stall-check timer. Idempotent. */
-  stopStallDetection(): void {
-    if (this.stallCheckTimer) {
-      clearInterval(this.stallCheckTimer);
-      this.stallCheckTimer = null;
-    }
-  }
-
-  /**
-   * One stall-check tick. Any active machine that hasn't recorded activity
-   * within its effective timeout is stopped and handed to the retry queue.
-   * Streaming phases get a much longer safety-net timeout because legitimate
-   * long tool calls can silence the message stream for many minutes.
-   */
-  checkForStalledSupervisors(): void {
-    const now = Date.now();
-
-    for (const [ticketId, entry] of this.machines) {
-      const { state } = entry;
-      const phase = state.getPhase();
-
-      if (!state.isActive()) {
-        continue;
-      }
-      // Skip phases that have their own timeouts or are waiting intentionally.
-      // 'ready' means the session exists but no autonomous run was started — the user
-      // may be using the workspace manually, so don't treat it as stalled.
-      if (phase === 'retrying' || phase === 'awaiting_input' || phase === 'ready') {
-        continue;
-      }
-
-      const ticket = this.deps.host.getTicketById(ticketId);
-      const stallTimeout = state.isStreaming()
-        ? STREAMING_STALL_TIMEOUT_MS
-        : ticket
-          ? this.getEffectiveStallTimeout(ticket.projectId)
-          : STALL_TIMEOUT_MS;
-
-      const elapsed = now - state.getLastActivity();
-      if (elapsed > stallTimeout) {
-        void this.withTicketLock(ticketId, async () => {
-          // Re-check under lock
-          if (!state.isActive()) {
-            return;
-          }
-          if (state.getPhase() === 'retrying' || state.getPhase() === 'awaiting_input') {
-            return;
-          }
-          const elapsedNow = Date.now() - state.getLastActivity();
-          if (elapsedNow <= stallTimeout) {
-            return;
-          }
-
-          console.warn(
-            `[SupervisorOrchestrator] Supervisor stalled for ticket ${ticketId} in phase "${state.getPhase()}" (${Math.round(elapsedNow / 1000)}s since last activity). Stopping and scheduling retry.`
-          );
-          try {
-            await this.deps.bridge.stop(ticketId);
-          } catch (err) {
-            console.warn(`[SupervisorOrchestrator] bridge.stop failed during stall for ${ticketId}:`, err);
-          }
-          state.setRunId(null);
-          if (state.getPhase() !== 'idle') {
-            state.forcePhase('idle' as TicketPhase);
-          }
-
-          this.scheduleRetry(ticketId, 'stalled', {
-            attempt: state.retryAttempt + 1,
-            continuationTurn: state.continuationTurn,
-            error: `stalled in phase ${state.getPhase()} for ${Math.round(elapsedNow / 1000)}s`,
-          });
-        });
-      }
-    }
   }
 
   // -------------------------------------------------------------------------
@@ -1045,14 +752,16 @@ export class SupervisorOrchestrator {
   // -------------------------------------------------------------------------
 
   /**
-   * Dispatch an autopilot run through the column. Phase flips to `running`
-   * synchronously here — the `running` phase per ticket-phase.ts means
-   * "start_run sent" and that's exactly what's happening as we hand off to
-   * the bridge. The later `run-started` bridge event re-asserts the same
-   * phase as a no-op. Transitioning eagerly is what lets the autopilot pill
-   * reflect state immediately instead of looking idle for a round-trip.
+   * Dispatch the autopilot loop through the column. Phase flips to
+   * ``running`` synchronously — the agent-side ``/goal`` server function
+   * (omni-code) owns the loop from here: it installs the periodic tick,
+   * enqueues the initial framing prompt, classifies run-ends, and
+   * broadcasts ``ui.goal.update`` snapshots which the orchestrator
+   * mirrors back onto the ticket via ``handleGoalUpdate``. The launcher
+   * no longer drives continuation, retry, or stall detection — those
+   * concerns live in ``/goal``.
    */
-  startMachineRun = (ticketId: TicketId, prompt: string): void => {
+  startMachineRun = (ticketId: TicketId): void => {
     const entry = this.machines.get(ticketId);
     if (!entry) {
       console.warn(`[SupervisorOrchestrator] startMachineRun: no entry for ${ticketId}`);
@@ -1063,29 +772,36 @@ export class SupervisorOrchestrator {
     this.runStartedAt.set(ticketId, Date.now());
     state.recordActivity();
 
+    const ticket = this.deps.host.getTicketById(ticketId);
+    const maxTurns = ticket
+      ? this.getEffectiveMaxContinuationTurns(ticket.projectId)
+      : MAX_CONTINUATION_TURNS;
+
+    // Compose the supervisor framing as the goal text. The column's
+    // session.ensure path also sees ticket_id / project_id / workspace_dir
+    // in session.variables (set via buildSessionVariables), so omni-code
+    // tools can read structured ticket context without parsing this
+    // prompt.
     const supervisorPrompt = this.buildFullSupervisorPrompt(ticketId);
-    // Run intent for THIS dispatch — composed from orchestrator state and
-    // shipped atomically with the bridge call. The column does not need to
-    // (and must not) re-derive these from steady-state stores. Autopilot
-    // runs always bypass per-tool approvals; the framing prompt is prepended
-    // to whatever additional_instructions the column already has.
-    const runOverrides = {
-      additionalInstructions: supervisorPrompt,
-      safeToolOverrides: { safe_tool_patterns: ['.*'] },
-    };
-    console.log(`[SupervisorOrchestrator] startMachineRun: bridge.run for ${ticketId}`);
+
+    console.log(`[SupervisorOrchestrator] startMachineRun: bridge.startGoal for ${ticketId}`);
     state.transition('running' as TicketPhase);
-    void this.deps.bridge.run({ ticketId, prompt, runOverrides }).then(
-      (result) => {
-        state.setRunId(result.runId);
-      },
-      (error) => {
-        console.error(`[SupervisorOrchestrator] bridge.run failed for ${ticketId}:`, error);
+    void this.deps.bridge
+      .startGoal({
+        ticketId,
+        prompt: supervisorPrompt,
+        maxTurns,
+        runOverrides: {
+          additionalInstructions: supervisorPrompt,
+          safeToolOverrides: { safe_tool_patterns: ['.*'] },
+        },
+      })
+      .catch((error) => {
+        console.error(`[SupervisorOrchestrator] bridge.startGoal failed for ${ticketId}:`, error);
         if (state.isActive() && state.getPhase() !== 'error') {
           state.forcePhase('error' as TicketPhase);
         }
-      }
-    );
+      });
   };
 
   /**
@@ -1173,7 +889,7 @@ export class SupervisorOrchestrator {
       this.deps.host.updateTicket(ticketId, { autopilot: true });
 
       console.log(`[SupervisorOrchestrator] startSupervisor: startMachineRun for ${ticketId}`);
-      this.startMachineRun(ticketId, 'Begin working on this ticket.');
+      this.startMachineRun(ticketId);
     });
   };
 
@@ -1200,11 +916,10 @@ export class SupervisorOrchestrator {
       if (!entry) {
         return;
       }
-      entry.state.cancelRetryTimer();
       try {
-        await this.deps.bridge.stop(ticketId);
+        await this.deps.bridge.stopGoal(ticketId);
       } catch (err) {
-        console.warn(`[SupervisorOrchestrator] bridge.stop failed for ${ticketId}:`, err);
+        console.warn(`[SupervisorOrchestrator] bridge.stopGoal failed for ${ticketId}:`, err);
       }
       entry.state.setRunId(null);
       if (entry.state.getPhase() !== 'idle') {
@@ -1826,20 +1541,6 @@ export class SupervisorOrchestrator {
     }
 
     return basePrompt;
-  }
-
-  /**
-   * Wrapper around the pure `buildContinuationPrompt` helper that resolves the
-   * ticket, pipeline, and FLEET.md continuation override from this instance's
-   * state.
-   */
-  buildContinuationPromptForTicket(ticketId: TicketId, turn: number, maxTurns: number): string {
-    const ticket = this.deps.host.getTicketById(ticketId);
-    const customContinuation = ticket
-      ? this.deps.workflowLoader.getConfig(ticket.projectId).supervisor?.continuation_prompt
-      : undefined;
-    const pipeline = ticket ? this.deps.host.getPipeline(ticket.projectId) : null;
-    return buildContinuationPrompt({ ticket, pipeline, customContinuation, turn, maxTurns });
   }
 
   /** Release bridge subscription on shutdown. */

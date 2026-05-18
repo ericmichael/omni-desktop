@@ -11,32 +11,11 @@
 
 import { getContainerArtifactsDir } from '@/lib/artifacts';
 
-export const TICKET_CLIENT_TOOLS = [
-  {
-    name: 'escalate',
-    description:
-      'Pause the current run and notify the human operator. Only use when truly blocked by something outside your control.',
-    parameters: {
-      type: 'object',
-      properties: {
-        message: { type: 'string', description: 'Brief description of what you need help with' },
-      },
-      required: ['message'],
-    },
-  },
-  {
-    name: 'notify',
-    description:
-      'Send a notification to the human operator without stopping the run. Use for heads-up messages like "changed the DB schema" or "found something unexpected". The run continues.',
-    parameters: {
-      type: 'object',
-      properties: {
-        message: { type: 'string', description: 'Brief notification message for the human.' },
-      },
-      required: ['message'],
-    },
-  },
-] as const;
+// Ticket-scoped client tools used to live here as launcher stubs
+// (``notify`` / ``escalate``). They're now omniagents builtins (see the
+// ``human`` capability in omni-code's ``agent.yml``) flowing through the
+// ``client_request`` dispatch path with real UI (Notifications panel +
+// EscalationBanner). The launcher no longer declares them.
 
 /**
  * Supervisor lifecycle tools — drive the launcher's autopilot orchestrator.
@@ -718,6 +697,13 @@ export type ContextIdentifierOpts = {
    * to the container path.
    */
   artifactsDir?: string;
+  /**
+   * Absolute path to the ticket's workspace directory (worktree root). Set
+   * by the orchestrator before the session is opened; surfaced into
+   * ``session.variables`` so omni-code tools/skills can read it via
+   * ``session_variables(ctx)`` without parsing additional_instructions.
+   */
+  workspaceDir?: string;
 };
 
 /**
@@ -784,7 +770,6 @@ export type SessionVariablesArgs = {
 };
 
 const CHAT_CLIENT_TOOLS: readonly ClientToolDef[] = [
-  ...TICKET_CLIENT_TOOLS,
   ...PROJECT_CLIENT_TOOLS,
   ...UI_CLIENT_TOOLS,
   ...APP_CONTROL_TOOLS,
@@ -809,5 +794,12 @@ export const buildSessionVariables = (args: SessionVariablesArgs): Record<string
       ? { safe_tool_patterns: ['.*'] }
       : { safe_tool_names: extractSafeToolNames(tools) },
     additional_instructions: instructions,
+    // Structured ticket context — omniagents persists these into
+    // ``session.variables`` so omni-code tools / server functions /
+    // prompts can read them via ``session_variables(ctx)`` without
+    // grepping additional_instructions.
+    ...(context?.ticketId ? { ticket_id: context.ticketId } : {}),
+    ...(context?.projectId ? { project_id: context.projectId } : {}),
+    ...(context?.workspaceDir ? { workspace_dir: context.workspaceDir } : {}),
   };
 };

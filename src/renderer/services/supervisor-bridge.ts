@@ -27,6 +27,20 @@ export type ColumnActor = {
    * `run_started` lands.
    */
   submit: (prompt: string, runOverrides?: RunOverrides) => Promise<{ runId: string }>;
+  /**
+   * Start an autopilot ``/goal`` loop on the column's session. Calls the
+   * ``goal`` server function (omni-code) which installs the periodic tick
+   * and drives continuation. The column does NOT need to react to
+   * ``run_end`` between turns — the agent-side loop handles that.
+   */
+  goalStart: (arg: {
+    prompt: string;
+    maxTurns?: number;
+    tickInterval?: number;
+    runOverrides?: RunOverrides;
+  }) => Promise<void>;
+  /** Cancel the running ``/goal`` loop on the column's session. */
+  goalStop: () => Promise<void>;
   send: (message: string) => Promise<void>;
   stop: () => Promise<void>;
   /** Stop any in-flight run and mint a fresh session id on the column. */
@@ -133,6 +147,17 @@ async function handleDispatch(requestId: string, request: SupervisorBridgeReques
         result = { runId: res.runId };
         break;
       }
+      case 'goal-start':
+        await actor.goalStart({
+          prompt: request.prompt,
+          maxTurns: request.maxTurns,
+          tickInterval: request.tickInterval,
+          runOverrides: request.runOverrides,
+        });
+        break;
+      case 'goal-stop':
+        await actor.goalStop();
+        break;
       case 'send':
         await actor.send(request.message);
         break;

@@ -318,9 +318,10 @@ export const CodeTabContent = memo(
           ...(project ? { projectId: project.id, projectLabel: project.label } : {}),
           ...(tab.ticketId ? { ticketId: tab.ticketId } : {}),
           ...(artifactsDir ? { artifactsDir } : {}),
+          ...(tab.workspaceDir ? { workspaceDir: tab.workspaceDir } : {}),
         },
       });
-    }, [tab.ticketId, project, profileName, hostConfigDir, ticketAutopilot]);
+    }, [tab.ticketId, tab.workspaceDir, project, profileName, hostConfigDir, ticketAutopilot]);
 
     // No project selected — show project picker
     if (!tab.projectId) {

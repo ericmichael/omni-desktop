@@ -2,8 +2,10 @@
  * Tests for the launcher-only client-tool definitions and `buildSessionVariables`.
  *
  * Project / ticket / milestone / page / inbox CRUD has moved to the in-process
- * MCP server (`packages/projects-mcp`); only escalation, supervisor lifecycle,
- * UI overlays, and app/browser control remain as client tools.
+ * MCP server (`packages/projects-mcp`). ``escalate`` / ``notify`` used to live
+ * here as stubs but are now omniagents builtins (see the ``human`` capability
+ * and the ``client_request`` dispatch path in ``omniagents-ui/App.tsx``).
+ * Only supervisor lifecycle, UI overlays, and app/browser control remain.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -12,12 +14,11 @@ import {
   buildSessionVariables,
   extractSafeToolNames,
   PROJECT_CLIENT_TOOLS,
-  TICKET_CLIENT_TOOLS,
 } from '@/lib/client-tools';
 
 describe('client_tools shape', () => {
   it('every tool has name, description, and parameters', () => {
-    for (const tool of [...TICKET_CLIENT_TOOLS, ...PROJECT_CLIENT_TOOLS]) {
+    for (const tool of PROJECT_CLIENT_TOOLS) {
       expect(tool.name).toBeTypeOf('string');
       expect(tool.description).toBeTypeOf('string');
       expect(tool.parameters).toBeDefined();
@@ -32,8 +33,6 @@ describe('client_tools shape', () => {
       additional_instructions: string;
     };
     const names = vars.client_tools.map((t) => t.name);
-    expect(names).toContain('escalate');
-    expect(names).toContain('notify');
     expect(names).toContain('start_ticket');
     expect(names).toContain('stop_ticket');
     expect(names).toContain('display_plan');
@@ -145,12 +144,6 @@ describe('client_tools shape', () => {
       { name: 'list_thing', safe: true, description: '', parameters: { type: 'object', properties: {} } },
     ] as const;
     expect(extractSafeToolNames(tools)).toEqual(['read_thing', 'list_thing']);
-  });
-
-  it('escalate requires message parameter', () => {
-    const tool = TICKET_CLIENT_TOOLS.find((t) => t.name === 'escalate')!;
-    expect(tool.parameters.properties).toHaveProperty('message');
-    expect(tool.parameters.required).toEqual(['message']);
   });
 
   it('start_ticket and stop_ticket each require ticket_id', () => {

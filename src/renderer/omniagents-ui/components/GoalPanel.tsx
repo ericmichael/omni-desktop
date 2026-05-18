@@ -1,0 +1,59 @@
+import React from 'react'
+
+// Server payload from omni-code's /goal autopilot loop (server_functions/goal.py).
+// snapshot=null means no goal is set on this session (panel renders nothing).
+export type GoalSnapshot = {
+  goal: string
+  turn: number
+  max_turns: number
+  tick_interval?: number
+  last_reason: string | null
+  status: 'active' | 'completed' | 'cancelled'
+  started_at: number
+  completion_reason: string | null
+}
+
+const GOAL_TRUNCATE = 100
+
+function shortGoal(goal: string, max: number): string {
+  const oneLine = goal.replace(/\s+/g, ' ').trim()
+  if (oneLine.length <= max) return oneLine
+  return oneLine.slice(0, max - 1) + '…'
+}
+
+function dotClass(status: GoalSnapshot['status']): string {
+  if (status === 'active') return 'bg-brand animate-pulse'
+  if (status === 'completed') return 'bg-successGreen'
+  return 'bg-errorRed'
+}
+
+// Compact single-line docked panel for the /goal autopilot loop. Mirrors
+// the ink TUI's Goal.tsx contract:
+//   Active:    ● goal · <text>
+//   Completed: ● goal · <text> · completed
+//   Cancelled: ● goal · <text> · cancelled
+export function GoalPanel({ snapshot }: { snapshot: GoalSnapshot | null }) {
+  if (!snapshot) return null
+  return (
+    <div className="px-3 pt-2">
+      <div className="rounded-md border border-bgCardAlt bg-bgCardAlt/60 px-2.5 py-1.5">
+        <div className="flex items-center gap-2 text-xs text-textSubtle">
+          <span
+            className={['inline-block w-1.5 h-1.5 rounded-full flex-shrink-0', dotClass(snapshot.status)].join(' ')}
+            aria-hidden
+          />
+          <span className="font-medium text-textPrimary">goal</span>
+          <span aria-hidden>·</span>
+          <span className="truncate min-w-0 text-textPrimary" title={snapshot.goal}>
+            {shortGoal(snapshot.goal, GOAL_TRUNCATE)}
+          </span>
+          {snapshot.status !== 'active' && (
+            <span className={['ml-auto whitespace-nowrap', snapshot.status === 'completed' ? 'text-successGreen' : 'text-errorRed'].join(' ')}>
+              {snapshot.status}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}

@@ -19,8 +19,6 @@ describe('parseWorkflow', () => {
     const content = `---
 supervisor:
   max_concurrent: 3
-  stall_timeout_ms: 600000
-  max_retry_attempts: 2
   max_continuation_turns: 5
 ---
 
@@ -29,8 +27,6 @@ Custom prompt here.`;
     const result = parseWorkflow(content);
     expect(result.config.supervisor).toEqual({
       max_concurrent: 3,
-      stall_timeout_ms: 600000,
-      max_retry_attempts: 2,
       max_continuation_turns: 5,
     });
     expect(result.promptTemplate).toBe('Custom prompt here.');
@@ -73,8 +69,7 @@ Prompt body.`;
     const content = `---
 supervisor:
   max_concurrent: not_a_number
-  stall_timeout_ms: -100
-  max_retry_attempts: 0
+  max_continuation_turns: 0
 ---`;
 
     const result = parseWorkflow(content);

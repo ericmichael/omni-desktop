@@ -114,25 +114,6 @@ describe('detectRisks', () => {
     });
   });
 
-  describe('self-blocked', () => {
-    it('flags awaiting_input tickets older than the threshold', () => {
-      const old = NOW - 2 * DAY_MS;
-      const tickets = [
-        makeTicket({ id: 't1', phase: 'awaiting_input', phaseChangedAt: old }),
-      ];
-      const risks = detectRisks({ tickets, milestones: [], inboxItems: [], ...baseInput });
-      expect(risks.some((r) => r.kind === 'self_blocked')).toBe(true);
-    });
-
-    it('does not flag freshly-blocked tickets', () => {
-      const tickets = [
-        makeTicket({ id: 't1', phase: 'awaiting_input', phaseChangedAt: NOW - 60 * 1000 }),
-      ];
-      const risks = detectRisks({ tickets, milestones: [], inboxItems: [], ...baseInput });
-      expect(risks.some((r) => r.kind === 'self_blocked')).toBe(false);
-    });
-  });
-
   describe('WIP overflow', () => {
     it('flags when active count reaches wipLimit', () => {
       const tickets = [

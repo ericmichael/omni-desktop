@@ -254,6 +254,39 @@ describe('chatSessionMachine', () => {
         expect(phase(snap)).toBe('running');
         expect(ctx(snap).items).toEqual([]);
       });
+
+      it('appends as assistant when prompt_role="assistant"', () => {
+        // Background-notification wakeup path: worker / bash-job
+        // completions arrive as run_started with prompt_role="assistant"
+        // so the wakeup reads as the agent observing its own background
+        // activity, not as fake user input.
+        const snap = next(idleSnap('sess-1'), {
+          type: 'RUN_STARTED',
+          run_id: 'wake-1',
+          session_id: 'sess-1',
+          prompt: '[worker] otto status=completed',
+          prompt_role: 'assistant',
+        });
+        const items = ctx(snap).items as MessageItem[];
+        expect(items.length).toBe(1);
+        expect(items[0]).toMatchObject({
+          type: 'chat',
+          role: 'assistant',
+          content: '[worker] otto status=completed',
+        });
+      });
+
+      it('defaults to user when prompt_role is unknown', () => {
+        const snap = next(idleSnap('sess-1'), {
+          type: 'RUN_STARTED',
+          run_id: 'queued-1',
+          session_id: 'sess-1',
+          prompt: 'do the thing',
+          prompt_role: 'wat',
+        });
+        const items = ctx(snap).items as MessageItem[];
+        expect(items[0]).toMatchObject({ role: 'user', content: 'do the thing' });
+      });
     });
   });
 

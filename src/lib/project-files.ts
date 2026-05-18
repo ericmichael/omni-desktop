@@ -54,9 +54,6 @@ const TICKET_PHASES = [
   'session_creating',
   'ready',
   'running',
-  'continuing',
-  'awaiting_input',
-  'retrying',
   'error',
   'completed',
 ] as const satisfies readonly TicketPhase[];

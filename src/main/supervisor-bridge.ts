@@ -95,6 +95,27 @@ export class SupervisorBridge {
     });
   }
 
+  /**
+   * Start an autopilot ``/goal`` loop on the ticket's session. The
+   * agent-side server function takes over from there — see
+   * ``server_functions/goal.py`` in omni-code. Returns when the
+   * ``/goal`` call has been acked (not when the loop completes).
+   */
+  startGoal(arg: {
+    ticketId: TicketId;
+    prompt: string;
+    maxTurns?: number;
+    tickInterval?: number;
+    runOverrides?: RunOverrides;
+  }): Promise<void> {
+    return this.dispatch({ kind: 'goal-start', ...arg }).then(() => {});
+  }
+
+  /** Cancel the running ``/goal`` loop on the ticket's session. */
+  stopGoal(ticketId: TicketId): Promise<void> {
+    return this.dispatch({ kind: 'goal-stop', ticketId }).then(() => {});
+  }
+
   send(ticketId: TicketId, message: string): Promise<void> {
     return this.dispatch({ kind: 'send', ticketId, message }).then(() => {});
   }

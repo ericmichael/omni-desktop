@@ -81,9 +81,6 @@ export const PHASE_LABELS: Partial<Record<TicketPhase, string>> = {
   session_creating: 'Initializing session…',
   ready: 'Ready',
   running: 'Working…',
-  continuing: 'Continuing…',
-  awaiting_input: 'Awaiting input',
-  retrying: 'Retrying…',
   error: 'Error',
   completed: 'Completed',
 };
@@ -95,9 +92,6 @@ export const PHASE_COLORS: Partial<Record<TicketPhase, BadgeColor>> = {
   session_creating: 'yellow',
   ready: 'default',
   running: 'green',
-  continuing: 'green',
-  awaiting_input: 'blue',
-  retrying: 'yellow',
   error: 'red',
   completed: 'default',
 };

@@ -23,6 +23,8 @@ vi.mock('@/renderer/features/Code/state', () => ({
 const makeActor = (ticketId: string) => ({
   ticketId,
   submit: vi.fn(() => Promise.resolve({ runId: 'run-1' })),
+  goalStart: vi.fn(() => Promise.resolve()),
+  goalStop: vi.fn(() => Promise.resolve()),
   send: vi.fn(() => Promise.resolve()),
   stop: vi.fn(() => Promise.resolve()),
   reset: vi.fn(() => Promise.resolve()),

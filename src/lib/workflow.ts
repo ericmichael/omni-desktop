@@ -11,8 +11,6 @@
  * ---
  * supervisor:
  *   max_concurrent: 3
- *   stall_timeout_ms: 600000
- *   max_retry_attempts: 3
  *   max_continuation_turns: 8
  * hooks:
  *   before_run: |
@@ -40,14 +38,14 @@ export type WorkflowColumnDef = {
 export type WorkflowConfig = {
   supervisor?: {
     max_concurrent?: number;
-    stall_timeout_ms?: number;
-    max_retry_attempts?: number;
+    /**
+     * Forwarded to omni-code's ``/goal`` server function as the ``max_turns``
+     * cap for the autopilot loop. The loop itself enforces it.
+     */
     max_continuation_turns?: number;
     auto_dispatch?: boolean;
     /** Per-column concurrency limits. Keys are column IDs, values are positive integers. */
     max_concurrent_by_column?: Record<string, number>;
-    /** Custom continuation prompt template. Supports {{turn}}, {{maxTurns}} placeholders. */
-    continuation_prompt?: string;
   };
   /** Custom pipeline columns. Overrides the project's stored pipeline when present. */
   pipeline?: {
@@ -306,16 +304,6 @@ const applyValue = (config: WorkflowConfig, section: string, key: string, value:
 config.supervisor.max_concurrent = numValue;
 }
         break;
-      case 'stall_timeout_ms':
-        if (!isNaN(numValue) && numValue > 0) {
-config.supervisor.stall_timeout_ms = numValue;
-}
-        break;
-      case 'max_retry_attempts':
-        if (!isNaN(numValue) && numValue > 0) {
-config.supervisor.max_retry_attempts = numValue;
-}
-        break;
       case 'max_continuation_turns':
         if (!isNaN(numValue) && numValue > 0) {
 config.supervisor.max_continuation_turns = numValue;
@@ -323,11 +311,6 @@ config.supervisor.max_continuation_turns = numValue;
         break;
       case 'auto_dispatch':
         config.supervisor.auto_dispatch = value === 'true';
-        break;
-      case 'continuation_prompt':
-        if (value) {
-config.supervisor.continuation_prompt = value;
-}
         break;
     }
   } else if (section === 'max_concurrent_by_column') {

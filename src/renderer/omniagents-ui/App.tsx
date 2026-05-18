@@ -14,10 +14,14 @@ import { Header } from './components/Header'
 import { Input } from './components/Input'
 import { ArtifactPortalProvider, type Attachment,MessageList } from './components/MessageList'
 import { QueuedMessages } from './components/QueuedMessages'
+import { GoalPanel, type GoalSnapshot } from './components/GoalPanel'
+import { WorkersPanel, type WorkerSummary, type WorkersKillResult } from './components/WorkersPanel'
 import { ResizableDivider } from './components/ResizableDivider'
 import { type SessionItem,SessionList } from './components/SessionList'
 import { Sidebar } from './components/Sidebar'
 import { Tasks, type TaskSummary } from './components/Tasks'
+import { Notifications, type NotificationInfo } from './components/Notifications'
+import { EscalationBanner, type EscalationInfo } from './components/EscalationBanner'
 import { WorkspacePicker } from './components/WorkspacePicker'
 import { OmniAgentsHeaderActionsPortal, OmniAgentsHeaderActionsProvider } from './header-actions'
 import { useChatBoot } from './hooks/use-chat-boot'
@@ -90,6 +94,22 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   // metadata in `items`. Reset to null on session change so the new session
   // starts from its own history-derived state.
   const [liveBashJobs, setLiveBashJobs] = useState<BashJobSummary[] | null>(null)
+  const [goalSnapshot, setGoalSnapshot] = useState<GoalSnapshot | null>(null)
+  const [workers, setWorkers] = useState<WorkerSummary[]>([])
+  // Dismissed IDs for each docked panel. Snapshotted on user submit:
+  // every item currently in a terminal state gets added so it disappears
+  // from the panel when the next run begins. Items spawned during the
+  // new run aren't in the set yet, so they show normally; when THEY
+  // exit they remain visible until the user's next submit. Reset on
+  // session change so a fresh session starts clean.
+  const [dismissedWorkerIds, setDismissedWorkerIds] = useState<Set<string>>(new Set())
+  const [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(new Set())
+  const [dismissedTaskIds, setDismissedTaskIds] = useState<Set<string>>(new Set())
+  // Notifications accumulate from the agent's `notify` builtin calls;
+  // dismissed manually via the docked panel buttons.
+  const [notifications, setNotifications] = useState<NotificationInfo[]>([])
+  // Pending agent escalation — the next user submit becomes the reply.
+  const [escalation, setEscalation] = useState<EscalationInfo | null>(null)
   // Element backing the maximized-artifact portal. Callback ref triggers a
   // re-render when the chat-column wrapper attaches/detaches.
   const [chatColumnEl, setChatColumnEl] = useState<HTMLDivElement | null>(null)
@@ -268,6 +288,29 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
         }
         return
       }
+      if (fn === 'ui.workers.update') {
+        // Broadcast from omni-code's worker spawn / completion hooks.
+        // Snapshot is the full per-session workers list; replace state
+        // wholesale.
+        const request_id = String(p?.request_id ?? '')
+        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
+        const currentSessionId = actor.getSnapshot().context.sessionId
+        if (eventSessionId && currentSessionId && currentSessionId !== eventSessionId) {
+          if (request_id) {
+            client.clientResponse(request_id, true, { ack: true }).catch(() => {})
+          }
+          return
+        }
+        const args = p?.args || {}
+        const snap = args?.snapshot
+        if (Array.isArray(snap)) {
+          setWorkers(snap as WorkerSummary[])
+        }
+        if (request_id) {
+          client.clientResponse(request_id, true, { ack: true }).catch(() => {})
+        }
+        return
+      }
       if (fn === 'tool.call') {
         const request_id = String(p?.request_id ?? '')
         if (!request_id) {
@@ -287,6 +330,100 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
           .catch((err: Error) => {
             client.clientResponse(request_id, false, undefined, { message: err.message }).catch(() => {})
           })
+        return
+      }
+      if (fn === 'notify') {
+        // Agent ``notify`` builtin — fire-and-forget heads-up. Push to
+        // the docked notifications panel and ack immediately; the user
+        // dismisses manually via the panel buttons.
+        const request_id = String(p?.request_id ?? '')
+        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
+        const currentSessionId = actor.getSnapshot().context.sessionId
+        if (eventSessionId && currentSessionId && currentSessionId !== eventSessionId) {
+          if (request_id) {
+            client.clientResponse(request_id, true, { ack: true }).catch(() => {})
+          }
+          return
+        }
+        const args = p?.args || {}
+        const message = typeof args?.message === 'string' ? args.message : ''
+        if (message) {
+          setNotifications((prev) => [
+            ...prev,
+            {
+              id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              message,
+              timestamp: Date.now(),
+            },
+          ])
+        }
+        if (request_id) {
+          client.clientResponse(request_id, true, { ack: true }).catch(() => {})
+        }
+        return
+      }
+      if (fn === 'ui.goal.update') {
+        // Two consumers for the /goal autopilot snapshot:
+        //   1. The local GoalPanel chip rendered above the input — every
+        //      chat surface (Chat tab, Spaces Agent Session) gets the
+        //      visible status indicator.
+        //   2. main's SupervisorOrchestrator — Tickets-only path that
+        //      maps active/completed/cancelled onto the ticket's phase.
+        // Always ack so the omniagents server doesn't hang.
+        const request_id = String(p?.request_id ?? '')
+        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
+        const currentSessionId = actor.getSnapshot().context.sessionId
+        if (eventSessionId && currentSessionId && currentSessionId !== eventSessionId) {
+          if (request_id) {
+            client.clientResponse(request_id, true, { ack: true }).catch(() => {})
+          }
+          return
+        }
+        const args = p?.args || {}
+        const snap = args?.snapshot
+        if (snap === null || snap === undefined) {
+          setGoalSnapshot(null)
+        } else if (typeof snap === 'object') {
+          setGoalSnapshot(snap as GoalSnapshot)
+        }
+        if (ticketId) {
+          void forwardEvent({
+            kind: 'goal-update',
+            ticketId,
+            snapshot: (snap === null || snap === undefined) ? null : snap as any,
+          })
+        }
+        if (request_id) {
+          client.clientResponse(request_id, true, { ack: true }).catch(() => {})
+        }
+        return
+      }
+      if (fn === 'escalate') {
+        // Agent ``escalate`` builtin — blocking. Surface the banner and
+        // intentionally do NOT call clientResponse here; the next user
+        // submit reads the pending escalation, sends the reply via
+        // clientResponse, and clears the banner.
+        const request_id = String(p?.request_id ?? '')
+        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
+        const currentSessionId = actor.getSnapshot().context.sessionId
+        if (eventSessionId && currentSessionId && currentSessionId !== eventSessionId) {
+          if (request_id) {
+            client.clientResponse(request_id, true, { ack: true }).catch(() => {})
+          }
+          return
+        }
+        const args = p?.args || {}
+        const message = typeof args?.message === 'string' ? args.message : ''
+        const runIdArg = typeof p?.run_id === 'string' ? p.run_id : undefined
+        if (!request_id) {
+          return
+        }
+        setEscalation({
+          request_id,
+          message,
+          session_id: eventSessionId,
+          run_id: runIdArg,
+        })
         return
       }
     })
@@ -321,25 +458,55 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
         lastJobs = md.bash_jobs_snapshot as BashJobSummary[]
       }
     }
-    const filteredTasks = runActive ? lastTasks : lastTasks.filter(t => t.status !== 'completed')
+    // Filter out completed tasks that were dismissed at the last user
+    // submit, then apply the idle-mode "hide completed" rule on top so
+    // the panel quiets down between runs.
+    const liveTasks = lastTasks.filter(t => !(t.status === 'completed' && dismissedTaskIds.has(t.id)))
+    const filteredTasks = runActive ? liveTasks : liveTasks.filter(t => t.status !== 'completed')
     return { tasks: filteredTasks, derivedBashJobs: lastJobs }
-  }, [items, runActive])
+  }, [items, runActive, dismissedTaskIds])
 
   // Live override (from ui.bash_jobs.update broadcasts and bash_jobs.* server
   // calls) takes precedence over history-derived state when present. Mirror
-  // the Tasks behavior: while a run is active keep everything visible, but
-  // once it ends drop exited jobs so the panel hides itself when idle.
+  // the Tasks behavior: while a run is active keep everything visible (minus
+  // dismissed exits), but once idle drop exited jobs so the panel hides
+  // itself.
   const bashJobs = useMemo(() => {
     const source = liveBashJobs ?? derivedBashJobs
-    return runActive ? source : source.filter(j => j.running)
-  }, [liveBashJobs, derivedBashJobs, runActive])
+    const live = source.filter(j => !(!j.running && dismissedJobIds.has(j.job_id)))
+    return runActive ? live : live.filter(j => j.running)
+  }, [liveBashJobs, derivedBashJobs, runActive, dismissedJobIds])
+
+  // Same shape for workers: drop dismissed exits, then hide all exits
+  // when idle so the dock disappears between runs.
+  const visibleWorkers = useMemo(() => {
+    const live = workers.filter(w => !(w.status !== 'running' && dismissedWorkerIds.has(w.worker_id)))
+    return runActive ? live : live.filter(w => w.status === 'running')
+  }, [workers, runActive, dismissedWorkerIds])
 
   // Clear the live override on session change so the next session starts
   // from its own history-derived snapshot instead of the previous session's
   // last broadcast.
   useEffect(() => {
     setLiveBashJobs(null)
+    // Workers panel has no history-derived seed (workers are runtime
+    // only); clear so the prior session's list doesn't leak into the new
+    // one until ``workers.list`` resolves below.
+    setWorkers([])
+    // Reset dismissal sets on session change so a fresh session starts
+    // with the panels showing their full server-side snapshot.
+    setDismissedWorkerIds(new Set())
+    setDismissedJobIds(new Set())
+    setDismissedTaskIds(new Set())
   }, [sessionId])
+
+  const handleWorkerKill = useCallback(async (worker_id: string): Promise<WorkersKillResult> => {
+    const res = (await client.serverCall('workers.kill', { worker_id }, sessionId)) as unknown as WorkersKillResult
+    if (Array.isArray(res?.snapshot)) {
+      setWorkers(res.snapshot as WorkerSummary[])
+    }
+    return res
+  }, [client, sessionId])
 
   const handleBashKill = useCallback(async (job_id: string): Promise<BashJobsKillResult> => {
     const res = (await client.serverCall('bash_jobs.kill', { job_id }, sessionId)) as unknown as BashJobsKillResult
@@ -394,12 +561,87 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   // moved below handleSubmit
 
   const handleSubmit = useCallback(async (text: string, files?: File[], runOverrides?: import('@/shared/types').RunOverrides): Promise<{ runId: string } | undefined> => {
+    // Dismiss currently-terminal items from each docked panel so the
+    // next run starts with a clean dock. Items spawned during the new
+    // run aren't in the set yet and will stay visible until the user's
+    // next submit. Fires for slash commands too — a slash is still a
+    // user-initiated step boundary.
+    setDismissedWorkerIds(prev => {
+      const next = new Set(prev)
+      for (const w of workers) {
+        if (w.status !== 'running') next.add(w.worker_id)
+      }
+      return next
+    })
+    setDismissedJobIds(prev => {
+      const next = new Set(prev)
+      const source = liveBashJobs ?? derivedBashJobs
+      for (const j of source) {
+        if (!j.running) next.add(j.job_id)
+      }
+      return next
+    })
+    setDismissedTaskIds(prev => {
+      const next = new Set(prev)
+      for (const t of tasks) {
+        if (t.status === 'completed') next.add(t.id)
+      }
+      return next
+    })
+
+    // Escalation reply: when the agent is paused on an ``escalate``
+    // tool call, route the user's next message back as the reply via
+    // client_response (and clear the banner) instead of starting a
+    // new run. Slash commands pass through so the user can still
+    // issue /goal.stop, /help, etc. mid-escalation.
+    if (escalation && !text.startsWith('/')) {
+      const pending = escalation
+      setEscalation(null)
+      try {
+        await client.clientResponse(pending.request_id, true, { reply: text })
+      } catch {}
+      return undefined
+    }
+
     // Slash commands
     if (text.startsWith('/')) {
       const parts = text.trim().split(/\s+/)
       const name = parts[0].slice(1)
       const argText = text.slice(parts[0].length).trim()
       try {
+        // Anchor the session's workspace_root before dispatching the
+        // server function. Slash commands like ``/goal`` trigger
+        // ``start_run`` server-side via ``enqueue_message`` + drainer
+        // (the autopilot path bypasses our regular ``startRun(variables)``
+        // call), so the session has to already carry ``workspace_root``
+        // by the time the run kicks off — otherwise the framework raises
+        // ``WorkspaceRootRequiredError``. The unknown-slash fallback
+        // below also routes through ``startRun`` / ``enqueueMessage``
+        // without variables, so we set it once for every slash path.
+        //
+        // Source priority: local ``workspacePath`` state first. It's
+        // seeded synchronously from the ``workspaceDir`` prop (line 77),
+        // refreshed by the boot caps effect (line 161), AND updated by
+        // ``WorkspacePicker.onSelect`` (line 1338) — so a user changing
+        // the workspace via the pill *before* hitting submit is
+        // respected here. Boot capabilities only win when local state
+        // hasn't been seeded (no prop + boot raced React's flush).
+        const sid = actor.getSnapshot().context.sessionId ?? sessionId
+        const caps = bootState.actor.getSnapshot().context.capabilities as
+          | { workspacePath?: string | null; workspaceSupported?: boolean }
+          | undefined
+        const liveWorkspacePath = workspacePath || caps?.workspacePath || null
+        const liveWorkspaceSupported = workspaceSupported || !!caps?.workspaceSupported
+        if (sid && liveWorkspacePath && liveWorkspaceSupported) {
+          try {
+            await client.serverCall('session.ensure', {
+              session_id: sid,
+              workspace_root: liveWorkspacePath,
+            })
+          } catch {
+            /* best-effort — let the server function attempt the run anyway */
+          }
+        }
         const funcs = await client.listServerFunctions()
         const found = funcs.find(f => String(f.name).toLowerCase() === name.toLowerCase())
         if (!found) {
@@ -596,7 +838,7 @@ setWorkspaceLocked(true)
       submitError(String((e as Error)?.message || 'Failed to start run'))
       return undefined
     }
-  }, [client, sessionId, actor, bootState.actor, variablesProp, submit, submitError, workspacePath, workspaceSupported, stagedContext, clearStagedContext, runActive, queuedMessages.length])
+  }, [client, sessionId, actor, bootState.actor, variablesProp, submit, submitError, workspacePath, workspaceSupported, stagedContext, clearStagedContext, runActive, queuedMessages.length, escalation, workers, liveBashJobs, derivedBashJobs, tasks])
 
   const handleStop = useCallback(() => {
     if (!runId) {
@@ -705,6 +947,78 @@ return
           throw new Error('start_run did not return a run_id')
         }
         return { runId: result.runId }
+      },
+      goalStart: async ({ prompt, maxTurns, tickInterval, runOverrides }) => {
+        await awaitChatReady()
+        // Mint a client-side session id if we don't have one yet. The
+        // chat-session machine is the single mint point so we stay in
+        // sync with its UUID.
+        let sid = actor.getSnapshot().context.sessionId
+        if (!sid) {
+          sid = await machine.loadSession(undefined)
+        }
+
+        // Assemble session.variables. For autopilot we know the
+        // workspace dir definitively — the launcher provisioned a
+        // worktree before calling startGoal and passed it down as the
+        // ``workspaceDir`` prop. Prefer that over the boot machine's
+        // capabilities snapshot (which may not have hydrated yet when
+        // the autopilot button fires on a freshly-spawned tab) and over
+        // ``workspaceSupported`` (which starts false and only flips
+        // true after boot's first capabilities push).
+        //
+        // Fallback order: workspaceDir prop → bootState capabilities →
+        // local workspacePath state.
+        const caps = bootState.actor.getSnapshot().context.capabilities as
+          | { workspacePath?: string | null; workspaceSupported?: boolean }
+          | undefined
+        const liveWorkspacePath = workspaceDir ?? caps?.workspacePath ?? workspacePath
+        const workspaceVars: Record<string, unknown> | undefined = liveWorkspacePath
+          ? { workspace_root: liveWorkspacePath }
+          : undefined
+        const baseVariables: Record<string, unknown> = {
+          ...((variablesProp as Record<string, unknown> | undefined) ?? {}),
+          ...(workspaceVars ?? {}),
+        }
+        const variables: Record<string, unknown> = runOverrides
+          ? {
+              ...baseVariables,
+              ...(runOverrides.additionalInstructions
+                ? {
+                    additional_instructions:
+                      typeof baseVariables.additional_instructions === 'string'
+                        ? `${runOverrides.additionalInstructions}\n\n${baseVariables.additional_instructions}`
+                        : runOverrides.additionalInstructions,
+                  }
+                : {}),
+              ...(runOverrides.safeToolOverrides
+                ? { safe_tool_overrides: runOverrides.safeToolOverrides }
+                : {}),
+            }
+          : baseVariables
+
+        await client.serverCall('session.ensure', {
+          session_id: sid,
+          variables,
+        })
+        // Kick off the /goal loop. The agent-side server function
+        // enqueues the initial prompt, installs the tick, and registers
+        // the run-end listener — launcher reacts via ui.goal.update.
+        const goalArgs: Record<string, unknown> = { text: prompt }
+        if (typeof maxTurns === 'number') {
+          goalArgs.max_turns = maxTurns
+        }
+        if (typeof tickInterval === 'number') {
+          goalArgs.tick_interval = tickInterval
+        }
+        await client.serverCall('goal', goalArgs, sid)
+      },
+      goalStop: async () => {
+        const sid = actor.getSnapshot().context.sessionId
+        if (!sid) {
+          return
+        }
+        await client.serverCall('goal.stop', {}, sid).catch(() => {})
       },
       send: async (message) => {
         await awaitChatReady()
@@ -844,6 +1158,36 @@ setWorkspacePath(res.path)
 }
         } catch {}
       }
+    }
+    // Seed the /goal panel from server state on session bind. The
+    // autopilot loop broadcasts ui.goal.update on every state change,
+    // but if a goal is already running when we attach to this session
+    // we need to pull the current snapshot so the panel renders
+    // immediately instead of waiting for the next turn boundary.
+    if (resolvedId) {
+      try {
+        const res = await client.serverCall('goal.status', {}, resolvedId) as { snapshot?: unknown } | undefined
+        const snap = res?.snapshot
+        setGoalSnapshot(snap && typeof snap === 'object' ? snap as GoalSnapshot : null)
+      } catch {
+        setGoalSnapshot(null)
+      }
+    } else {
+      setGoalSnapshot(null)
+    }
+    // Seed the workers panel from server state. Same rationale as goal:
+    // catches the case where workers were spawned earlier and are still
+    // running when we attach.
+    if (resolvedId) {
+      try {
+        const res = await client.serverCall('workers.list', {}, resolvedId) as { snapshot?: unknown } | undefined
+        const snap = res?.snapshot
+        setWorkers(Array.isArray(snap) ? snap as WorkerSummary[] : [])
+      } catch {
+        setWorkers([])
+      }
+    } else {
+      setWorkers([])
     }
     setUI('chat')
   }, [client, loadSession, workspaceSupported, onSessionChange])
@@ -1046,7 +1390,9 @@ args.text = text
                   )}
                 </AnimatePresence>
               </div>
+              <GoalPanel snapshot={goalSnapshot} />
               <Tasks tasks={tasks} />
+              <WorkersPanel workers={visibleWorkers} onKill={handleWorkerKill} />
               <BashJobs
                 jobs={bashJobs}
                 onKill={handleBashKill}
@@ -1066,6 +1412,12 @@ args.text = text
                   client.cancelQueuedMessage(sessionId, id).catch(() => {})
                 }}
               />
+              <Notifications
+                notifications={notifications}
+                onDismiss={(id) => setNotifications((prev) => prev.filter((n) => n.id !== id))}
+                onDismissAll={() => setNotifications([])}
+              />
+              <EscalationBanner escalation={escalation} />
               {stagedContext.length > 0 && (
                 // MCP-Apps staged context chips. Each ``ui/update-model-context``
                 // entry shows up here so the user knows what'll be sent on the

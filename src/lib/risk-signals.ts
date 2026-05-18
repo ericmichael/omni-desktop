@@ -13,7 +13,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** Threshold constants — start conservative, tune after dogfooding. */
 export const RISK_THRESHOLDS = {
   stalledTicketDays: 5,
-  selfBlockedHours: 24,
   milestoneQuietDays: 14,
   projectQuietDays: 30,
   inboxUrgentDaysLeft: 1,
@@ -23,7 +22,6 @@ export type RiskSeverity = 'high' | 'medium' | 'low';
 
 export type RiskSignalKind =
   | 'stalled_ticket'
-  | 'self_blocked'
   | 'wip_overflow'
   | 'milestone_overdue'
   | 'milestone_due_soon'
@@ -81,22 +79,6 @@ continue;
     const phase = ticket.phase;
     if (phase !== undefined && phase !== 'idle' && phase !== 'error' && phase !== 'completed') {
       activeCount++;
-    }
-
-    // Self-blocked — awaiting_input for over N hours
-    if (phase === 'awaiting_input') {
-      const age = now - (ticket.phaseChangedAt ?? ticket.updatedAt);
-      if (age >= RISK_THRESHOLDS.selfBlockedHours * 60 * 60 * 1000) {
-        out.push({
-          id: `self_blocked:${ticket.id}`,
-          kind: 'self_blocked',
-          severity: 'high',
-          title: ticket.title,
-          detail: 'Waiting on your input',
-          action: { kind: 'open_ticket', ticketId: ticket.id },
-        });
-      }
-      continue;
     }
 
     // Stalled — unresolved, no phase change (or column change) in N days.

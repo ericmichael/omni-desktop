@@ -19,6 +19,14 @@ import {
 } from '@/shared/machines/chat-session.machine';
 import { createMachineLogger } from '@/shared/machines/machine-logger';
 
+// Tools whose user-visible side-effect is painted entirely by client-
+// side handlers (notify -> Notifications panel, escalate -> banner,
+// goal_complete -> goal state). Their tool_called / tool_result events
+// still flow through the agent's history so the LLM sees them, but we
+// suppress the transcript row so the docked panel / banner is the
+// only render.
+const HIDDEN_TOOLS = new Set(['notify', 'escalate', 'goal_complete']);
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
@@ -66,12 +74,18 @@ return;
           type: 'RUN_STARTED',
           run_id: String(p?.run_id ?? ''),
           session_id: typeof p?.session_id === 'string' ? p.session_id : undefined,
-          // prompt: forwarded so the machine can append the user message
-          // when RUN_STARTED arrives from idle (queued / background-triggered
-          // runs). For runs originated by local submit(), the optimistic
-          // append already happened and the machine's idempotency check
-          // skips the duplicate.
+          // prompt: forwarded so the machine can append the originating
+          // turn when RUN_STARTED arrives from idle (queued / background-
+          // triggered runs). For runs originated by local submit(), the
+          // optimistic append already happened and the machine's
+          // idempotency check skips the duplicate.
+          // prompt_role: tells the machine which role the appended turn
+          // should carry — notification batches (worker / bash-job
+          // completions) arrive as "assistant" so the wakeup reads as
+          // the agent observing its own background activity rather than
+          // a fake user message.
           prompt: typeof p?.prompt === 'string' ? p.prompt : undefined,
+          prompt_role: typeof p?.prompt_role === 'string' ? p.prompt_role : undefined,
         });
       }),
 
@@ -99,10 +113,14 @@ return;
       }),
 
       client.on('tool_called', (p: any) => {
+        const tool = String(p?.tool ?? '');
+        if (HIDDEN_TOOLS.has(tool)) {
+          return;
+        }
         actor.send({
           type: 'TOOL_CALLED',
           call_id: String(p?.call_id ?? ''),
-          tool: String(p?.tool ?? ''),
+          tool,
           input: typeof p?.input === 'string' ? p.input : JSON.stringify(p?.input),
           run_id: typeof p?.run_id === 'string' ? p.run_id : undefined,
           session_id: typeof p?.session_id === 'string' ? p.session_id : undefined,
@@ -112,6 +130,9 @@ return;
       client.on('tool_result', (p: any) => {
         const callId = String(p?.call_id ?? '');
         const tool = String(p?.tool ?? '');
+        if (HIDDEN_TOOLS.has(tool)) {
+          return;
+        }
         const output = typeof p?.output === 'string' ? p.output : JSON.stringify(p?.output);
         const metadata = p?.metadata;
         actor.send({

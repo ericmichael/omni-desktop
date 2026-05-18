@@ -39,11 +39,8 @@ export const ACTIVE_PHASES: TicketPhase[] = [
   'session_creating',
   'ready',
   'running',
-  'continuing',
-  'awaiting_input',
-  'retrying',
 ];
-export const STREAMING_PHASES: TicketPhase[] = ['running', 'continuing'];
+export const STREAMING_PHASES: TicketPhase[] = ['running'];
 
 // ---------------------------------------------------------------------------
 // Store stub
@@ -112,6 +109,8 @@ export type MockBridge = {
   /** Spies. */
   ensureColumn: ReturnType<typeof vi.fn>;
   run: ReturnType<typeof vi.fn>;
+  startGoal: ReturnType<typeof vi.fn>;
+  stopGoal: ReturnType<typeof vi.fn>;
   send: ReturnType<typeof vi.fn>;
   stop: ReturnType<typeof vi.fn>;
   reset: ReturnType<typeof vi.fn>;
@@ -125,6 +124,8 @@ export const makeMockBridge = (): MockBridge => {
   const run = vi.fn((arg: { ticketId: TicketId }): Promise<{ runId: string }> =>
     Promise.resolve({ runId: `run-${arg.ticketId}` })
   );
+  const startGoal = vi.fn(() => Promise.resolve());
+  const stopGoal = vi.fn(() => Promise.resolve());
   const send = vi.fn(() => Promise.resolve());
   const stop = vi.fn(() => Promise.resolve());
   const reset = vi.fn(() => Promise.resolve());
@@ -133,6 +134,8 @@ export const makeMockBridge = (): MockBridge => {
   const bridge: SupervisorBridge = {
     ensureColumn,
     run,
+    startGoal,
+    stopGoal,
     send,
     stop,
     reset,
@@ -156,6 +159,8 @@ export const makeMockBridge = (): MockBridge => {
     },
     ensureColumn,
     run,
+    startGoal,
+    stopGoal,
     send,
     stop,
     reset,
@@ -176,20 +181,12 @@ export type MockEntry = {
    */
   get phase(): TicketPhase;
   set phase(p: TicketPhase);
-  /** Mutable retry-attempt counter (state.retryAttempt). */
-  get retryAttempt(): number;
-  set retryAttempt(n: number);
-  /** Mutable continuation-turn counter. */
-  get continuationTurn(): number;
-  set continuationTurn(n: number);
   /** Read-only view of `state.lastActivity`. */
   get lastActivityAt(): number;
   set lastActivityAt(t: number);
   getLastActivity: () => number;
 
   // --- Spies mapped to the bridge/state surface ------------------------------
-  scheduleRetryTimer: ReturnType<typeof vi.spyOn>;
-  cancelRetryTimer: ReturnType<typeof vi.spyOn>;
   recordActivity: ReturnType<typeof vi.spyOn>;
   stop: ReturnType<typeof vi.fn>;
   /** Bridge `run` spy — the startRun path. */
@@ -223,8 +220,6 @@ export const seedMachine = (ctx: { pm: ProjectManager; bridge: MockBridge }, tic
   const entry: SupervisorEntry = { state, tabId: `tab-${ticketId}` as CodeTabId };
   orchestrator.machines.set(ticketId, entry);
 
-  const scheduleRetryTimerSpy = vi.spyOn(state, 'scheduleRetryTimer');
-  const cancelRetryTimerSpy = vi.spyOn(state, 'cancelRetryTimer');
   const recordActivitySpy = vi.spyOn(state, 'recordActivity');
   const forcePhaseSpy = vi.spyOn(state, 'forcePhase');
 
@@ -237,18 +232,6 @@ export const seedMachine = (ctx: { pm: ProjectManager; bridge: MockBridge }, tic
     set phase(p: TicketPhase) {
       state.forcePhase(p);
     },
-    get retryAttempt() {
-      return state.retryAttempt;
-    },
-    set retryAttempt(n: number) {
-      state.retryAttempt = n;
-    },
-    get continuationTurn() {
-      return state.continuationTurn;
-    },
-    set continuationTurn(n: number) {
-      state.continuationTurn = n;
-    },
     get lastActivityAt() {
       return state.lastActivity;
     },
@@ -256,8 +239,6 @@ export const seedMachine = (ctx: { pm: ProjectManager; bridge: MockBridge }, tic
       state.lastActivity = t;
     },
     getLastActivity: () => state.getLastActivity(),
-    scheduleRetryTimer: scheduleRetryTimerSpy,
-    cancelRetryTimer: cancelRetryTimerSpy,
     recordActivity: recordActivitySpy,
     forcePhase: forcePhaseSpy,
     stop: ctx.bridge.stop,

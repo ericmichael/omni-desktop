@@ -1,6 +1,10 @@
 /**
  * Ticket supervisor lifecycle phase — the single source of truth for
  * where a ticket's supervisor is in its lifecycle.
+ *
+ * The agent-side ``/goal`` loop in omni-code owns continuation, retries,
+ * and stall recovery; the launcher just mirrors snapshots back into
+ * ticket phase, so the only streaming phase is ``running``.
  */
 export type TicketPhase =
   | 'idle' // no supervisor activity
@@ -8,26 +12,20 @@ export type TicketPhase =
   | 'connecting' // WebSocket connecting to sandbox
   | 'session_creating' // session.ensure RPC in flight
   | 'ready' // session exists, no active run
-  | 'running' // start_run sent, streaming messages
-  | 'continuing' // between continuation turns (immediately re-runs)
-  | 'awaiting_input' // agent asked for user input, paused
-  | 'retrying' // waiting for retry timer before re-run
-  | 'error' // terminal error (can retry or reset from here)
+  | 'running' // /goal loop active
+  | 'error' // terminal error
   | 'completed'; // all work done
 
 /**
  * Valid phase transitions. Each key maps to the set of phases it can transition to.
  */
 const TRANSITIONS: Record<TicketPhase, readonly TicketPhase[]> = {
-  idle: ['provisioning', 'connecting', 'retrying'],
+  idle: ['provisioning', 'connecting'],
   provisioning: ['connecting', 'error', 'idle'],
   connecting: ['session_creating', 'error', 'idle'],
   session_creating: ['ready', 'error', 'idle'],
   ready: ['running', 'idle'],
-  running: ['continuing', 'awaiting_input', 'retrying', 'completed', 'idle', 'error'],
-  continuing: ['running', 'completed', 'retrying', 'idle', 'error'],
-  awaiting_input: ['running', 'idle'],
-  retrying: ['provisioning', 'running', 'completed', 'error', 'idle'],
+  running: ['completed', 'idle', 'error'],
   error: ['provisioning', 'idle'],
   completed: ['idle', 'provisioning'],
 };
@@ -42,8 +40,8 @@ export const isActivePhase = (phase: TicketPhase): boolean => {
   return phase !== 'idle' && phase !== 'error' && phase !== 'completed';
 };
 
-/** True if the supervisor is actively streaming (running or continuing). */
+/** True if the supervisor is actively streaming. */
 export const isStreamingPhase = (phase: TicketPhase): boolean => {
-  return phase === 'running' || phase === 'continuing';
+  return phase === 'running';
 };
 

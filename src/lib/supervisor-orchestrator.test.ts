@@ -1,22 +1,21 @@
 /**
- * Integration tests for `SupervisorOrchestrator` — the supervisor lifecycle
- * extracted from `ProjectManager` over Sprint C2c. Constructs a real
+ * Integration tests for `SupervisorOrchestrator`. Constructs a real
  * `ProjectManager` via the shared helper module so the orchestrator runs with
  * its production wiring (host accessors, store adapter, workflow loader),
  * while keeping every external dependency (Docker, WebSockets, fs) stubbed.
  *
  * Coverage areas:
  *   - Token usage accumulation
- *   - Retry loop with exponential backoff (T2)
- *   - Stall detection (streaming + non-streaming timeouts)
  *   - Auto-dispatch concurrency (global + per-column WIP limits)
- *   - handleClientToolCall error responses
- *   - handleMachineRunEnd run-record persistence + branches (T1)
- *   - moveTicketToColumn cancels retries / cleans up workspace (T3)
+ *   - handleMachineRunEnd run-record persistence (T1)
+ *   - moveTicketToColumn cleans up workspace on terminal move (T3)
  *   - validateDispatchPreflight every branch (T5)
  *   - ensureSupervisorInfra idempotency (T5)
  *   - sendSupervisorMessage / resetSupervisorSession (T6)
  *   - restorePersistedTasks + startup cleanup (T7)
+ *
+ * Continuation, retries, and stall detection live in omni-code's ``/goal``
+ * server function — covered by its own tests, not here.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -72,235 +71,6 @@ describe('SupervisorOrchestrator integration', () => {
       const ticket = store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
       // Either undefined (never set) or totalTokens === 0
       expect(ticket.tokenUsage?.totalTokens ?? 0).toBe(0);
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Retry loop
-  // -------------------------------------------------------------------------
-  describe('retry loop', () => {
-    const setupRunningMachine = (): {
-      ctx: PmCtx;
-      mock: MockMachine;
-    } => {
-      const ctx = makePm({ tickets: [{ id: 't1' }] });
-      const mock = seedMachine(ctx, 't1');
-      mock.phase = 'running';
-      return { ctx, mock };
-    };
-
-    it('schedules a retry with exponential backoff after an error run_end', async () => {
-      const { ctx, mock } = setupRunningMachine();
-      mock.retryAttempt = 0;
-
-      mock.simulateRunEnd('error');
-      // handleMachineRunEnd returns a promise via withTicketLock — flush microtasks
-      await vi.runOnlyPendingTimersAsync();
-
-      expect(mock.scheduleRetryTimer).toHaveBeenCalled();
-      const calls = (mock.scheduleRetryTimer as ReturnType<typeof vi.fn>).mock.calls;
-      const delay = calls[0]![0] as number;
-      // handleMachineRunEnd passes attempt = retryAttempt + 1 = 1
-      // scheduleRetry computes: RETRY_BASE_DELAY_MS * 2^1 = 20_000
-      expect(delay).toBe(20_000);
-      void ctx;
-    });
-
-    it('stops retrying after MAX_RETRY_ATTEMPTS and transitions to error', () => {
-      const { ctx, mock } = setupRunningMachine();
-
-      // Directly invoke scheduleRetry with attempt >= MAX_RETRY_ATTEMPTS (=5)
-      orch(ctx.pm).scheduleRetry('t1', 'error', { attempt: 5 });
-
-      expect(mock.phase).toBe('error');
-      expect(mock.scheduleRetryTimer).not.toHaveBeenCalled();
-    });
-
-    it('does not schedule a retry on a "stopped" run_end', async () => {
-      const { mock } = setupRunningMachine();
-
-      mock.simulateRunEnd('stopped');
-      await vi.runOnlyPendingTimersAsync();
-
-      expect(mock.scheduleRetryTimer).not.toHaveBeenCalled();
-      expect(mock.phase).toBe('idle');
-    });
-
-    // ---- T2 wave -------------------------------------------------------
-
-    describe('backoff ladder', () => {
-      const getDelay = (mock: MockMachine, call: number): number => {
-        const calls = (mock.scheduleRetryTimer as ReturnType<typeof vi.fn>).mock.calls;
-        return calls[call]![0] as number;
-      };
-
-      it('produces 10s, 20s, 40s, 80s, 160s for attempts 0..4', () => {
-        const { ctx, mock } = setupRunningMachine();
-        const expected = [10_000, 20_000, 40_000, 80_000, 160_000];
-        for (let attempt = 0; attempt < expected.length; attempt++) {
-          orch(ctx.pm).scheduleRetry('t1', 'error', { attempt });
-          expect(getDelay(mock, attempt)).toBe(expected[attempt]);
-        }
-      });
-
-      it('clamps the delay at MAX_RETRY_BACKOFF_MS (5 minutes) for very large attempts', () => {
-        // Use a workflow config that raises maxRetries so attempt=10 doesn't hit the error branch.
-        const ctx = makePm(
-          { tickets: [{ id: 't1' }] },
-          { workflowConfig: { supervisor: { max_retry_attempts: 100 } } }
-        );
-        const { pm, machines } = ctx;
-        const mock = seedMachine(ctx, 't1');
-        mock.phase = 'running';
-
-        orch(pm).scheduleRetry('t1', 'error', { attempt: 10 });
-        const calls = (mock.scheduleRetryTimer as ReturnType<typeof vi.fn>).mock.calls;
-        expect(calls[0]![0]).toBe(5 * 60 * 1000);
-      });
-
-      it('never calls scheduleRetry with failureClass="completed" from the run-end path', async () => {
-        // decideRunEndAction never returns {type: retry, failureClass: completed}
-        // — continuations go through startMachineRun directly. This test pins
-        // that behavior so the dead "completed" branch in scheduleRetry can be
-        // safely removed.
-        const { ctx, mock } = setupRunningMachine();
-        const schedSpy = vi.fn();
-        (ctx.pm as unknown as { scheduleRetry: typeof schedSpy }).scheduleRetry = schedSpy;
-
-        // Fire every "continuation-like" reason classify_run_end recognizes
-        for (const reason of ['completed', 'done', 'finished', 'success', 'max_turns']) {
-          mock.phase = 'running';
-          mock.simulateRunEnd(reason);
-          await vi.runOnlyPendingTimersAsync();
-        }
-
-        for (const call of schedSpy.mock.calls) {
-          expect(call[1]).not.toBe('completed');
-        }
-      });
-    });
-
-    describe('handleRetryFired', () => {
-      it('bails silently when the ticket has reached a terminal column', async () => {
-        const { ctx, mock } = setupRunningMachine();
-        // Move ticket directly in the store (avoid moveTicketToColumn's cleanup side-effects).
-        const tickets = ctx.store.get('tickets', []);
-        tickets[0]!.columnId = 'done';
-        ctx.store.set('tickets', tickets);
-
-        await orch(ctx.pm).handleRetryFired('t1', 'error', 1, 0);
-
-        expect(mock.phase).toBe('idle');
-        // Must not re-arm a new timer
-        expect(mock.scheduleRetryTimer).not.toHaveBeenCalled();
-      });
-
-      it('requeues with attempt+1 when no concurrency slots are available', async () => {
-        const { ctx, mock } = (() => {
-          const base = setupRunningMachine();
-          // Saturate global concurrency by creating 4 more running machines
-          for (let i = 0; i < 4; i++) {
-            const otherMock = seedMachine(base.ctx, `other-${i}` as TicketId);
-            otherMock.phase = 'running';
-          }
-          return { ctx: base.ctx, mock: base.mock };
-        })();
-
-        await orch(ctx.pm).handleRetryFired('t1', 'error', 2, 0);
-
-        // Timer re-armed with attempt+1 delay = 10_000 * 2^3 = 80_000
-        const calls = (mock.scheduleRetryTimer as ReturnType<typeof vi.fn>).mock.calls;
-        expect(calls.length).toBeGreaterThan(0);
-        expect(calls[calls.length - 1]![0]).toBe(80_000);
-      });
-
-      it('silently releases when the ticket or machine no longer exists', async () => {
-        const { ctx } = setupRunningMachine();
-        // Remove the ticket entirely
-        ctx.store.set('tickets', []);
-        orch(ctx.pm).machines.delete('t1');
-
-        await expect(orch(ctx.pm).handleRetryFired('t1', 'error', 1, 0)).resolves.toBeUndefined();
-      });
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Stall detection
-  // -------------------------------------------------------------------------
-  describe('stall detection', () => {
-    const STALL_TIMEOUT_MS = 5 * 60 * 1000;
-    const STALL_CHECK_INTERVAL_MS = 30_000;
-
-    it('transitions a stalled non-streaming active machine by stopping it', async () => {
-      const ctx = makePm({ tickets: [{ id: 't1' }] });
-      const { pm, machines } = ctx;
-      const mock = seedMachine(ctx, 't1');
-
-      // Active but non-streaming → eligible for stall detection
-      mock.phase = 'provisioning';
-      mock.lastActivityAt = Date.now() - (STALL_TIMEOUT_MS + 10_000);
-
-      // Advance one stall-check tick
-      await vi.advanceTimersByTimeAsync(STALL_CHECK_INTERVAL_MS + 100);
-
-      expect(mock.stop).toHaveBeenCalled();
-    });
-
-    it('does not stall a machine with recent activity', async () => {
-      const ctx = makePm({ tickets: [{ id: 't1' }] });
-      const { pm, machines } = ctx;
-      const mock = seedMachine(ctx, 't1');
-
-      mock.phase = 'provisioning';
-      mock.lastActivityAt = Date.now(); // fresh
-
-      await vi.advanceTimersByTimeAsync(STALL_CHECK_INTERVAL_MS + 100);
-
-      expect(mock.stop).not.toHaveBeenCalled();
-    });
-
-    it('does not stall idle/terminal machines', async () => {
-      const ctx = makePm({ tickets: [{ id: 't1' }] });
-      const { pm, machines } = ctx;
-      const mock = seedMachine(ctx, 't1');
-
-      mock.phase = 'idle';
-      mock.lastActivityAt = Date.now() - (STALL_TIMEOUT_MS + 10_000);
-
-      await vi.advanceTimersByTimeAsync(STALL_CHECK_INTERVAL_MS + 100);
-
-      expect(mock.stop).not.toHaveBeenCalled();
-    });
-
-    it('uses extended timeout for streaming phases (short silence is not a stall)', async () => {
-      const ctx = makePm({ tickets: [{ id: 't1' }] });
-      const { pm, machines } = ctx;
-      const mock = seedMachine(ctx, 't1');
-
-      // Silent for 10 minutes — well past the 5-minute non-streaming timeout,
-      // but far below the 30-minute streaming safety-net.
-      mock.phase = 'running';
-      mock.lastActivityAt = Date.now() - 10 * 60 * 1000;
-
-      await vi.advanceTimersByTimeAsync(STALL_CHECK_INTERVAL_MS + 100);
-
-      expect(mock.stop).not.toHaveBeenCalled();
-    });
-
-    it('fires safety-net for streaming phases that exceed STREAMING_STALL_TIMEOUT_MS', async () => {
-      const STREAMING_STALL_TIMEOUT_MS = 30 * 60 * 1000;
-      const ctx = makePm({ tickets: [{ id: 't1' }] });
-      const { pm, machines } = ctx;
-      const mock = seedMachine(ctx, 't1');
-
-      // Silent for 31 minutes — past the streaming safety-net.
-      mock.phase = 'running';
-      mock.lastActivityAt = Date.now() - (STREAMING_STALL_TIMEOUT_MS + 60_000);
-
-      await vi.advanceTimersByTimeAsync(STALL_CHECK_INTERVAL_MS + 100);
-
-      expect(mock.stop).toHaveBeenCalled();
     });
   });
 
@@ -469,17 +239,19 @@ describe('SupervisorOrchestrator integration', () => {
   // `src/renderer/features/Tickets/*.test.ts` for the equivalent coverage.
 
   // -------------------------------------------------------------------------
-  // T1 — handleMachineRunEnd (run record, continue/complete/stopped/retry)
+  // T1 — handleMachineRunEnd (run record persistence)
+  // Continue / retry / completion decisioning lives in omni-code's ``/goal``
+  // server function; the launcher only persists the run record and fires the
+  // after_run hook at run_end.
   // -------------------------------------------------------------------------
   describe('handleMachineRunEnd', () => {
     /** Build a PM with a single ticket and a streaming machine registered. */
     const setupStreamingMachine = (
-      opts: { reason?: string; continuationTurn?: number; workflowConfig?: Partial<WorkflowConfig> } = {}
+      opts: { workflowConfig?: Partial<WorkflowConfig> } = {}
     ): { ctx: PmCtx; mock: MockMachine } => {
       const ctx = makePm({ tickets: [{ id: 't1' }] }, { workflowConfig: opts.workflowConfig });
       const mock = seedMachine(ctx, 't1');
       mock.phase = 'running';
-      mock.continuationTurn = opts.continuationTurn ?? 0;
       return { ctx, mock };
     };
 
@@ -498,7 +270,6 @@ describe('SupervisorOrchestrator integration', () => {
         const { ctx, mock } = setupStreamingMachine();
         mock.simulateRunEnd('error');
         await vi.runOnlyPendingTimersAsync();
-        // After error the machine was transitioned through retry scheduling; re-set streaming.
         mock.phase = 'running';
         mock.simulateRunEnd('stalled');
         await vi.runOnlyPendingTimersAsync();
@@ -541,105 +312,6 @@ describe('SupervisorOrchestrator integration', () => {
       });
     });
 
-    describe('stopped branch', () => {
-      it('transitions to idle and does not schedule a retry', async () => {
-        const { mock } = setupStreamingMachine();
-        mock.simulateRunEnd('stopped');
-        await vi.runOnlyPendingTimersAsync();
-
-        expect(mock.phase).toBe('idle');
-        expect(mock.scheduleRetryTimer).not.toHaveBeenCalled();
-      });
-
-      it('still persists the run record', async () => {
-        const { ctx, mock } = setupStreamingMachine();
-        mock.simulateRunEnd('stopped');
-        await vi.runOnlyPendingTimersAsync();
-
-        const ticket = ctx.store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
-        expect(ticket.runs).toHaveLength(1);
-        expect(ticket.runs![0]!.endReason).toBe('stopped');
-      });
-    });
-
-    describe('continue branch', () => {
-      it('increments continuationTurn and schedules a start_run after the 500ms delay', async () => {
-        const { ctx, mock } = setupStreamingMachine({ continuationTurn: 0 });
-
-        mock.simulateRunEnd('completed');
-        // Let the withTicketLock microtask run
-        await Promise.resolve();
-        await Promise.resolve();
-        // Now advance the explicit 500ms delay before startMachineRun fires.
-        await vi.advanceTimersByTimeAsync(600);
-
-        expect(mock.continuationTurn).toBe(1);
-        // Phase transitions: continuing (action accepted) → running (start_run dispatched).
-        // startMachineRun flips to `running` synchronously when bridge.run is sent.
-        expect(mock.phase).toBe('running');
-        expect(mock.startRun).toHaveBeenCalled();
-        // Verify the prompt is a continuation prompt. `bridge.run` receives
-        // an options object with `{ ticketId, prompt, ... }`.
-        const lastCall = (mock.startRun as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
-        const prompt = (lastCall[0] as { prompt?: string }).prompt ?? '';
-        expect(prompt).toMatch(/continuation/i);
-        void ctx;
-      });
-
-      it('completes (does not continue) when nextTurn would reach maxContinuationTurns', async () => {
-        // max_continuation_turns default is 10; set turn to 9 so nextTurn = 10 → complete
-        const { mock } = setupStreamingMachine({ continuationTurn: 9 });
-        mock.simulateRunEnd('completed');
-        await vi.runOnlyPendingTimersAsync();
-
-        expect(mock.phase).toBe('completed');
-        expect(mock.startRun).not.toHaveBeenCalled();
-      });
-
-      it('bails to completed when the agent moved the ticket to terminal column mid-run', async () => {
-        const { ctx, mock } = setupStreamingMachine({ continuationTurn: 0 });
-        // Directly mutate the store so handleMachineRunEnd's fresh-ticket re-read
-        // sees the terminal column. Going through moveTicketToColumn would trigger
-        // the cleanup side-effect (machine disposed, entry deleted) which is a
-        // different code path covered elsewhere.
-        const tickets = ctx.store.get('tickets', []);
-        tickets[0]!.columnId = 'done';
-        ctx.store.set('tickets', tickets);
-
-        mock.simulateRunEnd('completed');
-        await vi.runOnlyPendingTimersAsync();
-
-        expect(mock.phase).toBe('completed');
-        expect(mock.startRun).not.toHaveBeenCalled();
-      });
-    });
-
-    describe('retry branch', () => {
-      it('schedules retry on error with attempt = retryAttempt + 1', async () => {
-        const { mock } = setupStreamingMachine();
-        mock.retryAttempt = 2;
-
-        mock.simulateRunEnd('error');
-        await vi.runOnlyPendingTimersAsync();
-
-        expect(mock.scheduleRetryTimer).toHaveBeenCalled();
-      });
-    });
-
-    describe('guard: not streaming', () => {
-      it('ignores run_end when the machine was already transitioned out of streaming', async () => {
-        const { ctx, mock } = setupStreamingMachine();
-        mock.phase = 'idle'; // user hit stop between run_end being queued and arriving
-
-        mock.simulateRunEnd('error');
-        await vi.runOnlyPendingTimersAsync();
-
-        expect(mock.scheduleRetryTimer).not.toHaveBeenCalled();
-        const ticket = ctx.store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
-        // No run record should be persisted when we bail at the guard.
-        expect(ticket.runs ?? []).toHaveLength(0);
-      });
-    });
   });
 
   // -------------------------------------------------------------------------
@@ -655,8 +327,8 @@ describe('SupervisorOrchestrator integration', () => {
       ],
     };
 
-    /** Seed a PM + machine in 'running' phase with a stubbed retry timer. */
-    const setupWithRetryArmed = (pipeline: Pipeline = TEST_PIPELINE): { ctx: PmCtx; mock: MockMachine } => {
+    /** Seed a PM + machine in 'running' phase. */
+    const setupRunning = (pipeline: Pipeline = TEST_PIPELINE): { ctx: PmCtx; mock: MockMachine } => {
       const ctx = makePm({
         pipeline,
         tickets: [{ id: 't1', columnId: 'in_progress' }],
@@ -666,18 +338,17 @@ describe('SupervisorOrchestrator integration', () => {
       return { ctx, mock };
     };
 
-    it('terminal-column move cancels the retry timer and stops the supervisor', async () => {
-      const { ctx, mock } = setupWithRetryArmed();
+    it('terminal-column move stops the supervisor', async () => {
+      const { ctx, mock } = setupRunning();
 
       ctx.pm.moveTicketToColumn('t1', 'done');
       await vi.runOnlyPendingTimersAsync();
 
-      expect(mock.cancelRetryTimer).toHaveBeenCalled();
       expect(mock.stop).toHaveBeenCalled();
     });
 
     it('terminal-column move deletes the machine entry (workspace cleanup)', async () => {
-      const { ctx } = setupWithRetryArmed();
+      const { ctx } = setupRunning();
 
       ctx.pm.moveTicketToColumn('t1', 'done');
       await vi.runOnlyPendingTimersAsync();
@@ -685,28 +356,26 @@ describe('SupervisorOrchestrator integration', () => {
       expect(orch(ctx.pm).machines.has('t1')).toBe(false);
     });
 
-    it('backlog move cancels the retry timer (bug #3)', async () => {
-      const { ctx, mock } = setupWithRetryArmed();
-      // Put the ticket in an active column first so moving back to backlog is a real move.
+    it('backlog move stops the supervisor', async () => {
+      const { ctx } = setupRunning();
       ctx.pm.moveTicketToColumn('t1', 'backlog');
       await vi.runOnlyPendingTimersAsync();
 
-      // A retry scheduled for this ticket must not be allowed to re-dispatch
-      // a shelved ticket later.
-      expect(mock.cancelRetryTimer).toHaveBeenCalled();
+      // Backlog path routes through stopSupervisor → bridge.stopGoal.
+      expect(ctx.bridge.stopGoal).toHaveBeenCalled();
     });
 
-    it('gated-column move cancels the retry timer (bug #3)', async () => {
-      const { ctx, mock } = setupWithRetryArmed(GATED_PIPELINE);
+    it('gated-column move stops the supervisor', async () => {
+      const { ctx } = setupRunning(GATED_PIPELINE);
 
       ctx.pm.moveTicketToColumn('t1', 'review');
       await vi.runOnlyPendingTimersAsync();
 
-      expect(mock.cancelRetryTimer).toHaveBeenCalled();
+      expect(ctx.bridge.stopGoal).toHaveBeenCalled();
     });
 
     it('moving to the terminal column auto-resolves the ticket as completed', async () => {
-      const { ctx } = setupWithRetryArmed();
+      const { ctx } = setupRunning();
       ctx.pm.moveTicketToColumn('t1', 'done');
       await vi.runOnlyPendingTimersAsync();
 
@@ -716,7 +385,7 @@ describe('SupervisorOrchestrator integration', () => {
     });
 
     it('reopen (terminal → non-terminal) clears resolution and resolvedAt', async () => {
-      const { ctx } = setupWithRetryArmed();
+      const { ctx } = setupRunning();
       ctx.pm.resolveTicket('t1', 'completed');
       await vi.runOnlyPendingTimersAsync();
 
@@ -733,12 +402,12 @@ describe('SupervisorOrchestrator integration', () => {
     });
 
     it('is a no-op for an unknown ticket', () => {
-      const { ctx } = setupWithRetryArmed();
+      const { ctx } = setupRunning();
       expect(() => ctx.pm.moveTicketToColumn('nonexistent' as TicketId, 'done')).not.toThrow();
     });
 
     it('is a no-op for an unknown column', () => {
-      const { ctx } = setupWithRetryArmed();
+      const { ctx } = setupRunning();
       ctx.pm.moveTicketToColumn('t1', 'no-such-column');
       const ticket = ctx.store.get('tickets', []).find((t: Ticket) => t.id === 't1')!;
       expect(ticket.columnId).toBe('in_progress');
@@ -888,10 +557,9 @@ describe('SupervisorOrchestrator integration', () => {
       await orch(ctx.pm).startSupervisor('t1' as TicketId);
 
       expect(mock.phase).toBe('running');
-      expect(ctx.bridge.run).toHaveBeenCalledWith(
+      expect(ctx.bridge.startGoal).toHaveBeenCalledWith(
         expect.objectContaining({
           ticketId: 't1',
-          prompt: 'Begin working on this ticket.',
           runOverrides: expect.objectContaining({
             safeToolOverrides: { safe_tool_patterns: ['.*'] },
           }),
@@ -913,7 +581,7 @@ describe('SupervisorOrchestrator integration', () => {
       return { ctx, mock };
     };
 
-    for (const phase of ['idle', 'error', 'ready', 'awaiting_input'] as TicketPhase[]) {
+    for (const phase of ['idle', 'error', 'ready'] as TicketPhase[]) {
       it(`starts a new run via startRun when the machine is in "${phase}"`, async () => {
         const { ctx, mock } = setupWithMachine(phase);
         await orch(ctx.pm).sendSupervisorMessage('t1', 'hello');
@@ -1040,7 +708,7 @@ describe('SupervisorOrchestrator integration', () => {
         tickets: [
           { id: 't-running', phase: 'running' },
           { id: 't-provisioning', phase: 'provisioning' },
-          { id: 't-awaiting', phase: 'awaiting_input' },
+          { id: 't-connecting', phase: 'connecting' },
         ],
       });
       const { pm, store } = ctx;

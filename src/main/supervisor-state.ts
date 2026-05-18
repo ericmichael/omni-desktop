@@ -8,19 +8,16 @@ export type SupervisorStateCallbacks = {
 };
 
 /**
- * Main's phase/retry record for a ticket's autopilot lifecycle. Holds no
+ * Main's phase record for a ticket's autopilot lifecycle. Holds no
  * session id and no WebSocket — the Code column owns both. Driven entirely
- * by forwarded bridge events.
+ * by forwarded bridge events; continuation/retry/stall recovery live in
+ * omni-code's ``/goal`` server function.
  */
 export class SupervisorState {
   readonly ticketId: TicketId;
 
   private phase: TicketPhase = 'idle';
   private runId: string | null = null;
-
-  retryAttempt = 0;
-  continuationTurn = 0;
-  retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   lastActivity: number = Date.now();
 
@@ -82,22 +79,6 @@ export class SupervisorState {
     return next;
   }
 
-  scheduleRetryTimer(delayMs: number, callback: () => void): void {
-    this.cancelRetryTimer();
-    this.transition('retrying');
-    this.retryTimer = setTimeout(() => {
-      this.retryTimer = null;
-      callback();
-    }, delayMs);
-  }
-
-  cancelRetryTimer(): void {
-    if (this.retryTimer) {
-      clearTimeout(this.retryTimer);
-      this.retryTimer = null;
-    }
-  }
-
   recordActivity(): void {
     this.lastActivity = Date.now();
   }
@@ -106,13 +87,7 @@ export class SupervisorState {
     return this.lastActivity;
   }
 
-  resetCounters(): void {
-    this.retryAttempt = 0;
-    this.continuationTurn = 0;
-  }
-
   dispose(): void {
-    this.cancelRetryTimer();
     this.runId = null;
     if (this.phase !== 'idle') {
       this.forcePhase('idle');

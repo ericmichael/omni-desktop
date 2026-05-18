@@ -1736,6 +1736,27 @@ export type SupervisorBridgeRequest =
       prompt: string;
       runOverrides?: RunOverrides;
     }
+  | {
+      /**
+       * Start an autopilot ``/goal`` loop on this ticket's session. The
+       * agent-side ``goal`` server function (in omni-code) owns the loop:
+       * it installs the periodic tick, drives continuation prompts, and
+       * stops when the agent calls ``goal_complete`` or when the launcher
+       * issues a ``goal-stop``. Launcher subscribes to ``goal-update``
+       * events to mirror snapshot state into the ticket record.
+       */
+      kind: 'goal-start';
+      ticketId: TicketId;
+      prompt: string;
+      maxTurns?: number;
+      tickInterval?: number;
+      runOverrides?: RunOverrides;
+    }
+  | {
+      /** Cancel the running ``/goal`` loop on this ticket's session. */
+      kind: 'goal-stop';
+      ticketId: TicketId;
+    }
   | { kind: 'send'; ticketId: TicketId; message: string }
   | { kind: 'stop'; ticketId: TicketId }
   | {
@@ -1744,6 +1765,17 @@ export type SupervisorBridgeRequest =
       ticketId: TicketId;
     }
   | { kind: 'dispose'; ticketId: TicketId };
+
+export type GoalSnapshotPayload = {
+  goal: string;
+  turn: number;
+  max_turns: number;
+  tick_interval?: number;
+  last_reason: string | null;
+  status: 'active' | 'completed' | 'cancelled';
+  started_at: number;
+  completion_reason: string | null;
+};
 
 export type SupervisorBridgeEvent =
   | { kind: 'run-started'; ticketId: TicketId; runId: string }
@@ -1756,7 +1788,17 @@ export type SupervisorBridgeEvent =
       toolName?: string;
     }
   | { kind: 'token-usage'; ticketId: TicketId; usage: TokenUsage }
-  | { kind: 'disconnected'; ticketId: TicketId };
+  | { kind: 'disconnected'; ticketId: TicketId }
+  | {
+      /**
+       * Forwarded ``ui.goal.update`` snapshot from the omniagents ``/goal``
+       * loop. ``snapshot`` is null when no goal is set on the session
+       * (terminal cleanup). The orchestrator maps this onto ticket phase.
+       */
+      kind: 'goal-update';
+      ticketId: TicketId;
+      snapshot: GoalSnapshotPayload | null;
+    };
 
 type SupervisorIpcEvents = Namespaced<
   'supervisor',

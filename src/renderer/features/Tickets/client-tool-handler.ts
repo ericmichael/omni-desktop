@@ -4,10 +4,14 @@
  *
  * Project / ticket / milestone / page / inbox CRUD is served by
  * `omni-projects-mcp` directly to the agent. This file handles only:
- * - escalation / notification channels (`escalate`, `notify`)
  * - supervisor lifecycle (`start_ticket`, `stop_ticket`)
  * - deck UI overlays (`browser_open`, `display_plan`)
  * - app-control + browser-control suites that drive the renderer's webviews
+ *
+ * ``escalate`` / ``notify`` used to live here as no-op stubs. They're
+ * now omniagents builtins routed through the ``client_request``
+ * dispatch path with real UI (Notifications panel + EscalationBanner
+ * in omniagents-ui/App.tsx).
  */
 
 import { listLiveApps, resolveAppHandle } from '@/renderer/features/AppControl/live-registry';
@@ -23,27 +27,6 @@ type ClientToolResult = Awaited<ReturnType<ClientToolCallHandler>>;
 
 const ok = (result: Record<string, unknown>): ClientToolResult => ({ ok: true, result });
 const err = (message: string): ClientToolResult => ({ ok: true, result: { error: message } });
-
-function handleTicketTools(toolName: string, toolArgs: Record<string, unknown>): ClientToolResult | null {
-  switch (toolName) {
-    case 'escalate': {
-      const message = (toolArgs.message as string) ?? '';
-      if (!message) {
-        return err('Empty escalation message');
-      }
-      return ok({ ok: true, message: 'Escalated to human operator' });
-    }
-    case 'notify': {
-      const message = (toolArgs.message as string) ?? '';
-      if (!message) {
-        return err('Empty notification message');
-      }
-      return ok({ ok: true, message: 'Notification sent' });
-    }
-    default:
-      return null;
-  }
-}
 
 /** Supervisor lifecycle — start/stop the autopilot agent on a ticket. */
 async function handleProjectTools(
@@ -525,11 +508,6 @@ export function buildClientToolHandler(opts?: {
 }): ClientToolCallHandler {
   const allowGlobal = opts?.allowGlobal ?? true;
   return async (toolName: string, toolArgs: Record<string, unknown>) => {
-    const ticketResult = handleTicketTools(toolName, toolArgs);
-    if (ticketResult) {
-      return ticketResult;
-    }
-
     const projectResult = await handleProjectTools(toolName, toolArgs);
     if (projectResult) {
       return projectResult;

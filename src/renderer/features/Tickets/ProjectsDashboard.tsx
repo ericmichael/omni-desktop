@@ -10,7 +10,6 @@ import {
   Open16Regular,
   Pin20Filled,
   Play20Filled,
-  Warning16Regular,
 } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
@@ -419,17 +418,14 @@ const RiskStrip = memo(
   ({ signals, hasInFlight }: { signals: RiskSignal[]; hasInFlight: boolean }) => {
     const styles = useStyles();
 
-    let selfBlocked = 0;
     let stalled = 0;
     for (const s of signals) {
-      if (s.kind === 'self_blocked') {
-        selfBlocked++;
-      } else if (s.kind === 'stalled_ticket') {
+      if (s.kind === 'stalled_ticket') {
         stalled++;
       }
     }
 
-    if (!hasInFlight && selfBlocked === 0 && stalled === 0) {
+    if (!hasInFlight && stalled === 0) {
       return null;
     }
 
@@ -448,12 +444,6 @@ const RiskStrip = memo(
               />
               in flight
             </span>
-          </Badge>
-        )}
-        {selfBlocked > 0 && (
-          <Badge color="blue">
-            <Warning16Regular style={{ width: 12, height: 12, marginRight: 4 }} />
-            {selfBlocked} needs input
           </Badge>
         )}
         {stalled > 0 && (
