@@ -12,17 +12,35 @@ import { pgMigrations } from './schema.js';
 export type { Pool } from 'pg';
 
 /**
- * node-postgres does NOT honor `sslmode` from the connection string, so a URL
- * like `…?sslmode=require` connects WITHOUT TLS — which managed Postgres
- * (Azure Flexible Server, etc.) rejects, crashing the server on boot. Derive an
- * explicit `ssl` config from the URL: TLS on for `sslmode=require|verify-*` (or
- * `ssl=true`), off otherwise (local docker Postgres). `rejectUnauthorized:
- * false` accepts the managed CA without bundling it — encrypted, not pinned.
+ * Resolve a connection string + explicit `ssl` config for node-postgres.
+ *
+ * Managed Postgres (Azure Flexible Server, etc.) requires TLS, signalled by
+ * `?sslmode=require` in the URL. BUT node-postgres treats `sslmode=require` as
+ * `verify-full` (full cert validation) and that takes precedence over any
+ * `ssl` option object — so it rejects the managed CA / a self-signed cert
+ * (`DEPTH_ZERO_SELF_SIGNED_CERT`) and the server crashes on boot. So when TLS
+ * is requested we STRIP `sslmode`/`ssl` from the URL and drive TLS purely via
+ * the `ssl` config (`rejectUnauthorized: false` — encrypted, cert not pinned).
+ * No TLS marker → no SSL (local docker Postgres).
  */
-function sslFromConnectionString(connectionString: string): { rejectUnauthorized: boolean } | undefined {
-  return /[?&](sslmode=(require|verify-ca|verify-full)|ssl=true)/.test(connectionString)
-    ? { rejectUnauthorized: false }
-    : undefined;
+function pgConnectConfig(connectionString: string): {
+  connectionString: string;
+  ssl?: { rejectUnauthorized: boolean };
+} {
+  const wantsTls = /[?&](sslmode=(require|verify-ca|verify-full|prefer)|ssl=true)/.test(connectionString);
+  if (!wantsTls) {
+    return { connectionString };
+  }
+  let cleaned = connectionString;
+  try {
+    const url = new URL(connectionString);
+    url.searchParams.delete('sslmode');
+    url.searchParams.delete('ssl');
+    cleaned = url.toString();
+  } catch {
+    // not URL-parseable — leave as-is; the ssl config still applies
+  }
+  return { connectionString: cleaned, ssl: { rejectUnauthorized: false } };
 }
 
 /**
@@ -35,7 +53,8 @@ export async function createPgListener(
   channel: string,
   onNotify: (payload: string) => void
 ): Promise<() => Promise<void>> {
-  const client = new Client({ connectionString, ssl: sslFromConnectionString(connectionString) });
+  const conn = pgConnectConfig(connectionString);
+  const client = new Client(conn);
   await client.connect();
   client.on('notification', (msg) => {
     if (msg.channel === channel && msg.payload) {
@@ -58,7 +77,7 @@ export async function createPgListener(
 
 /** Create a connection pool. The caller owns its lifecycle (`pool.end()`). */
 export function createPgPool(connectionString: string): Pool {
-  return new Pool({ connectionString, ssl: sslFromConnectionString(connectionString) });
+  return new Pool(pgConnectConfig(connectionString));
 }
 
 /** Fixed key for the migration advisory lock (so concurrent replicas serialize). */
