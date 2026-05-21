@@ -82,11 +82,18 @@ outputs=$(az deployment group create --resource-group "$RG" --template-file "$HE
   --query properties.outputs --output json)
 echo "$outputs"
 
-# The registry was created empty; pull the prebuilt images in from SOURCE_ACR
-# (no rebuild), then start the Web App so it can pull the launcher image.
-echo "== importing images $SOURCE_ACR -> $ACR_NAME =="
-az acr import --name "$ACR_NAME" --source "${SOURCE_ACR}.azurecr.io/${LAUNCHER_TAG}" --image "$LAUNCHER_TAG" --force
-az acr import --name "$ACR_NAME" --source "${SOURCE_ACR}.azurecr.io/${DEVBOX_TAG}" --image "$DEVBOX_TAG" --force
+# Images: the current flow builds them straight into $ACR_NAME
+# (scripts/build-launcher-image.sh + `npm run build:devbox{,-min}` → push), so
+# importing is OFF by default — a stray import from SOURCE_ACR would OVERWRITE
+# those freshly-built images with a (possibly stale or missing) copy. Set
+# IMPORT_IMAGES=1 only to seed a brand-new empty registry from another ACR.
+if [[ "${IMPORT_IMAGES:-0}" == "1" ]]; then
+  echo "== importing images $SOURCE_ACR -> $ACR_NAME =="
+  az acr import --name "$ACR_NAME" --source "${SOURCE_ACR}.azurecr.io/${LAUNCHER_TAG}" --image "$LAUNCHER_TAG" --force
+  az acr import --name "$ACR_NAME" --source "${SOURCE_ACR}.azurecr.io/${DEVBOX_TAG}" --image "$DEVBOX_TAG" --force
+else
+  echo "== skipping image import (build into $ACR_NAME directly; IMPORT_IMAGES=1 to seed) =="
+fi
 
 echo "== restarting Web App $SITE_NAME =="
 az webapp restart --resource-group "$RG" --name "$SITE_NAME"
