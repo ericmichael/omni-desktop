@@ -39,8 +39,11 @@ param acrName string = '${namePrefix}launcheracr'
 @description('Launcher server image repo:tag, resolved against the ACR.')
 param launcherImageRepoTag string = 'omni-launcher:latest'
 
-@description('Agent sandbox (devbox) image repo:tag, resolved against the ACR. Defaults to the thin "min" image (fast cold pull); use the full devbox image with OMNI_SANDBOX_DESKTOP=1 for the IDE/desktop.')
+@description('Fast agent sandbox image repo:tag (thin "min" image, fast cold pull) — the default `aci` profile.')
 param agentImageRepoTag string = 'omni-launcher-devbox-min:latest'
+
+@description('Desktop agent sandbox image repo:tag (full devbox: IDE + VNC + toolchains) — the `aci-desktop` profile.')
+param desktopAgentImageRepoTag string = 'omni-launcher-devbox:latest'
 
 @description('TCP port the launcher server listens on inside the container.')
 param launcherPort int = 3001
@@ -393,6 +396,8 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'OMNI_AZURE_LOCATION', value: location }
         { name: 'OMNI_AZURE_REGISTRY', value: acr.properties.loginServer }
         { name: 'OMNI_AZURE_IMAGE', value: '${acr.properties.loginServer}/${agentImageRepoTag}' }
+        // Full devbox image for the `aci-desktop` profile (IDE + VNC).
+        { name: 'OMNI_AZURE_DESKTOP_IMAGE', value: '${acr.properties.loginServer}/${desktopAgentImageRepoTag}' }
         // Delegated subnet the ACI sandbox groups join → private IPs only.
         // Surfaced into the aci profile's `client.subnet_id`.
         { name: 'OMNI_AZURE_SUBNET_ID', value: aciSubnetId }

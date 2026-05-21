@@ -8,7 +8,7 @@ import { createConsoleManager } from '@/main/console-manager';
 import { PROJECT_KEYS } from '@/main/db-store-bridge';
 import { ExtensionManager, registerExtensionHandlers } from '@/main/extension-manager';
 import { registerInboxHandlers } from '@/main/inbox-handlers';
-import { ACI_PROFILE_NAME, writeAciProfile } from '@/main/aci-profile';
+import { ACI_DESKTOP_PROFILE_NAME, ACI_PROFILE_NAME, writeAciProfile } from '@/main/aci-profile';
 import { syncMcpConfig, syncMcpConfigHttp } from '@/main/mcp-config-manager';
 import { MCP_PROJECTS_PATH } from '@/server/mcp-http';
 import { registerMigrationHandlers } from '@/main/migration-handlers';
@@ -160,8 +160,8 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
 
   // When Azure is configured, write the `aci` sandbox profile so `omni serve
   // --profile aci` drives the serverless ACI sandbox. When present, the cloud
-  // LOCKS every agent to `aci` (host/devbox disabled) and the picker shows only
-  // it — see getStoreSnapshot + the ProcessManager lockedProfileName below.
+  // Restricts the picker to the ACI profiles (host/devbox disabled) — see
+  // getStoreSnapshot + the ProcessManager allowedProfileNames below.
   let aciConfigured = false;
   try {
     const aciProfilePath = writeAciProfile(getOmniConfigDir());
@@ -238,9 +238,10 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
             }),
           })
         : undefined,
-      // Cloud with Azure → every agent runs in the serverless ACI sandbox;
-      // host/devbox are not selectable.
-      lockedProfileName: aciConfigured ? ACI_PROFILE_NAME : undefined,
+      // Cloud with Azure → agents run in a serverless ACI sandbox; host/devbox
+      // are not selectable, but the user picks between the fast and desktop
+      // ACI profiles.
+      allowedProfileNames: aciConfigured ? [ACI_PROFILE_NAME, ACI_DESKTOP_PROFILE_NAME] : undefined,
     });
     // Keep this tenant's platform client in sync with its own credentials.
     // (omni-platform delegation for enterprise-platform builds; the ACI sandbox
@@ -289,12 +290,14 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
     const snapshot = getTenant(tenantId).projectManager.getStoreSnapshot();
     // Cloud/ACI: force the picker to `aci` only and make it the selected
     // default. Computed (not persisted) so it tracks the deployment, not a
-    // stale per-tenant setting. Matches the ProcessManager lockedProfileName.
+    // stale per-tenant setting. Matches the ProcessManager allowedProfileNames.
     if (aciConfigured) {
       return {
         ...snapshot,
-        defaultProfileName: ACI_PROFILE_NAME,
-        availableSandboxProfiles: [ACI_PROFILE_NAME],
+        defaultProfileName: snapshot.defaultProfileName === ACI_DESKTOP_PROFILE_NAME
+          ? ACI_DESKTOP_PROFILE_NAME
+          : ACI_PROFILE_NAME,
+        availableSandboxProfiles: [ACI_PROFILE_NAME, ACI_DESKTOP_PROFILE_NAME],
       };
     }
     return snapshot;

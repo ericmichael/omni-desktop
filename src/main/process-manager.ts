@@ -47,10 +47,11 @@ export class ProcessManager {
   private getExtraEnv?: () => Record<string, string>;
   /**
    * When set, every launch uses this profile regardless of the per-project
-   * override or user default. Cloud deployments set it to `aci` so host/devbox
-   * can't be selected (the only sandbox available is the serverless ACI one).
+   * override or user default. Cloud deployments set it to the ACI profiles so
+   * host/devbox can't be selected — but the user can still choose among the
+   * allowed cloud profiles (e.g. `aci` fast vs `aci-desktop`).
    */
-  private lockedProfileName?: string;
+  private allowedProfileNames?: string[];
 
   /** Compute backend (omni-platform delegation). Set when configured. */
   platformClient: IComputeClient | null = null;
@@ -61,8 +62,9 @@ export class ProcessManager {
     getStoreData?: () => ProcessManagerStoreData;
     /** Extra env for spawned `omni serve` (e.g. cloud `OMNI_RUNTIME_TOKEN`). */
     getExtraEnv?: () => Record<string, string>;
-    /** Force every launch onto this profile (cloud locks to `aci`). */
-    lockedProfileName?: string;
+    /** Restrict launches to these profiles (cloud → the ACI profiles). The
+     * user still picks among them; anything outside falls back to the default. */
+    allowedProfileNames?: string[];
   }) {
     this.sendToWindow = arg.sendToWindow;
     this.fetchFn = arg.fetchFn ?? globalThis.fetch;
@@ -71,27 +73,24 @@ export class ProcessManager {
       projects: [],
     }));
     this.getExtraEnv = arg.getExtraEnv;
-    this.lockedProfileName = arg.lockedProfileName;
+    this.allowedProfileNames = arg.allowedProfileNames;
   }
 
   private resolveProfileName(
     projectId: string | undefined,
     override: string | undefined
   ): string {
-    // A locked profile (cloud → `aci`) wins over everything: per-project
-    // overrides and the UI picker can't escape it.
-    if (this.lockedProfileName) {
-      return this.lockedProfileName;
-    }
-    if (override) {
-      return override;
-    }
     const { defaultProfileName, projects } = this.getStoreData();
-    if (!projectId) {
+    const pick =
+      override ??
+      (projectId ? projects.find((p) => p.id === projectId)?.sandboxProfile : undefined) ??
+      defaultProfileName;
+    // An allow-list (cloud → the ACI profiles) constrains the choice: a pick
+    // outside it (e.g. host/devbox) can't escape, falling back to the default.
+    if (this.allowedProfileNames && !this.allowedProfileNames.includes(pick)) {
       return defaultProfileName;
     }
-    const project = projects.find((p) => p.id === projectId);
-    return project?.sandboxProfile ?? defaultProfileName;
+    return pick;
   }
 
   private resolveMode(profileName: string): AgentProcessMode {

@@ -14,10 +14,20 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+/** Fast, minimal cloud sandbox: thin image, no in-sandbox services. */
 export const ACI_PROFILE_NAME = 'aci';
+/** Full cloud sandbox: heavy devbox image + code-server/VNC behind the proxy. */
+export const ACI_DESKTOP_PROFILE_NAME = 'aci-desktop';
 
-/** Build the `aci.yml` content (JSON/YAML) from env, or null if Azure isn't configured. */
-export function buildAciProfile(env: NodeJS.ProcessEnv = process.env): string | null {
+/**
+ * Build an `aci` profile (JSON/YAML), or null if Azure isn't configured.
+ *
+ * ``desktop=false`` → the fast default: thin image, no exposed ports/services,
+ * so the ACI group skips VNet/IP wiring. ``desktop=true`` → the full devbox
+ * image with code-server + VNC on exposed ports, reachable through the
+ * launcher's private-networked /proxy.
+ */
+export function buildAciProfile(env: NodeJS.ProcessEnv = process.env, desktop = false): string | null {
   const subscriptionId = env['OMNI_AZURE_SUBSCRIPTION_ID'];
   if (!subscriptionId) {
     return null;
@@ -45,10 +55,10 @@ export function buildAciProfile(env: NodeJS.ProcessEnv = process.env): string | 
 
   // Delegated subnet → ACI groups get *private* IPs (no public surface). Their
   // service ports are reachable only inside the VNet; the launcher (VNet-
-  // integrated) fronts them via /proxy. Without it, exposed ports fall back to
-  // a public IP.
+  // integrated) fronts them via /proxy. Only the desktop profile exposes ports,
+  // so only it needs the subnet; the fast profile skips VNet wiring entirely.
   const subnetId = env['OMNI_AZURE_SUBNET_ID'];
-  if (subnetId) {
+  if (desktop && subnetId) {
     client['subnet_id'] = subnetId;
   }
 
@@ -65,18 +75,17 @@ export function buildAciProfile(env: NodeJS.ProcessEnv = process.env): string | 
     };
   }
 
-  // Desktop services (code-server + VNC) are opt-in. The fast default is a
-  // thin image with no in-sandbox services: nothing to start, no ports to
-  // expose (so the group skips VNet/IP wiring entirely — fastest provision).
-  // Set OMNI_SANDBOX_DESKTOP=1 with the full devbox image to get the IDE +
-  // desktop; that path uses exposed_ports + the launcher's /proxy.
-  const desktop = env['OMNI_SANDBOX_DESKTOP'] === '1';
+  // Fast profile → thin image, no services/ports. Desktop profile → the full
+  // devbox image (OMNI_AZURE_DESKTOP_IMAGE; falls back to the non-"min" name)
+  // with code-server + VNC on exposed ports behind the launcher's /proxy.
+  const minImage = env['OMNI_AZURE_IMAGE'] ?? 'REPLACE.azurecr.io/omni-launcher-devbox-min:latest';
+  const desktopImage = env['OMNI_AZURE_DESKTOP_IMAGE'] ?? minImage.replace('-devbox-min', '-devbox');
 
   const profile: Record<string, unknown> = {
     version: 1,
     client,
     options: {
-      image: env['OMNI_AZURE_IMAGE'] ?? 'REPLACE.azurecr.io/omni-launcher-devbox-min:latest',
+      image: desktop ? desktopImage : minImage,
       ...(desktop ? { exposed_ports: [8080, 6080] } : {}),
     },
     manifest: { root: '/workspace' },
@@ -95,16 +104,24 @@ export function buildAciProfile(env: NodeJS.ProcessEnv = process.env): string | 
 }
 
 /**
- * Write `<configDir>/sandbox/aci.yml` when Azure is configured. Returns the
- * written path, or null when Azure isn't configured (no-op).
+ * Write both cloud sandbox profiles (`aci.yml` fast + `aci-desktop.yml` full)
+ * to `<configDir>/sandbox/` when Azure is configured. Returns the fast profile's
+ * path, or null when Azure isn't configured (no-op).
  */
 export function writeAciProfile(configDir: string, env: NodeJS.ProcessEnv = process.env): string | null {
-  const content = buildAciProfile(env);
-  if (content === null) {
+  const fast = buildAciProfile(env, false);
+  if (fast === null) {
     return null;
   }
-  const path = join(configDir, 'sandbox', `${ACI_PROFILE_NAME}.yml`);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content, 'utf-8');
-  return path;
+  const dir = join(configDir, 'sandbox');
+  mkdirSync(dir, { recursive: true });
+
+  const fastPath = join(dir, `${ACI_PROFILE_NAME}.yml`);
+  writeFileSync(fastPath, fast, 'utf-8');
+
+  const desktop = buildAciProfile(env, true);
+  if (desktop !== null) {
+    writeFileSync(join(dir, `${ACI_DESKTOP_PROFILE_NAME}.yml`), desktop, 'utf-8');
+  }
+  return fastPath;
 }

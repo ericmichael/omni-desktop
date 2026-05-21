@@ -49,34 +49,44 @@ describe('buildAciProfile', () => {
     expect(p.client.resource_group).toBe('omni-launcher-rg'); // default
   });
 
-  it('is minimal by default: no services, no exposed ports, thin default image', () => {
+  it('fast profile (default): no services, no exposed ports, thin image', () => {
     const p = JSON.parse(
-      buildAciProfile({ OMNI_AZURE_SUBSCRIPTION_ID: 'sub-1' } as NodeJS.ProcessEnv)!
+      buildAciProfile({ OMNI_AZURE_SUBSCRIPTION_ID: 'sub-1', OMNI_AZURE_IMAGE: 'acr/omni-launcher-devbox-min:latest' } as NodeJS.ProcessEnv)!
     );
     expect(p.services).toBeUndefined();
     expect(p.options.exposed_ports).toBeUndefined();
     expect(p.options.image).toContain('devbox-min');
   });
 
-  it('includes desktop services + ports when OMNI_SANDBOX_DESKTOP=1', () => {
+  it('desktop profile: services + ports + full devbox image (derived)', () => {
     const p = JSON.parse(
-      buildAciProfile({
-        OMNI_AZURE_SUBSCRIPTION_ID: 'sub-1',
-        OMNI_SANDBOX_DESKTOP: '1',
-      } as NodeJS.ProcessEnv)!
+      buildAciProfile(
+        { OMNI_AZURE_SUBSCRIPTION_ID: 'sub-1', OMNI_AZURE_IMAGE: 'acr/omni-launcher-devbox-min:latest' } as NodeJS.ProcessEnv,
+        true
+      )!
     );
     expect(p.options.exposed_ports).toEqual([8080, 6080]);
     expect(p.services.code_server.port).toBe(8080);
     expect(p.services.vnc.port).toBe(6080);
+    expect(p.options.image).toBe('acr/omni-launcher-devbox:latest'); // -min derived away
   });
 
-  it('subnet_id flows into the client when set', () => {
+  it('explicit OMNI_AZURE_DESKTOP_IMAGE wins for the desktop profile', () => {
     const p = JSON.parse(
-      buildAciProfile({
-        OMNI_AZURE_SUBSCRIPTION_ID: 'sub-1',
-        OMNI_AZURE_SUBNET_ID: '/subscriptions/s/.../subnets/aci',
-      } as NodeJS.ProcessEnv)!
+      buildAciProfile(
+        { OMNI_AZURE_SUBSCRIPTION_ID: 'sub-1', OMNI_AZURE_DESKTOP_IMAGE: 'acr/custom-desktop:1' } as NodeJS.ProcessEnv,
+        true
+      )!
     );
-    expect(p.client.subnet_id).toBe('/subscriptions/s/.../subnets/aci');
+    expect(p.options.image).toBe('acr/custom-desktop:1');
+  });
+
+  it('subnet_id flows in only for the desktop profile', () => {
+    const env = {
+      OMNI_AZURE_SUBSCRIPTION_ID: 'sub-1',
+      OMNI_AZURE_SUBNET_ID: '/subscriptions/s/.../subnets/aci',
+    } as NodeJS.ProcessEnv;
+    expect(JSON.parse(buildAciProfile(env, false)!).client.subnet_id).toBeUndefined();
+    expect(JSON.parse(buildAciProfile(env, true)!).client.subnet_id).toBe('/subscriptions/s/.../subnets/aci');
   });
 });

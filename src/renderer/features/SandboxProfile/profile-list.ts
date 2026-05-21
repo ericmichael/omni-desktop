@@ -16,7 +16,8 @@ const PROFILE_LABELS: Record<string, string> = {
   host: 'Host (no isolation)',
   devbox: 'Devbox (Docker)',
   platform: 'Cloud (managed)',
-  aci: 'Cloud (Azure)',
+  aci: 'Cloud · Fast',
+  'aci-desktop': 'Cloud · Desktop (IDE + VNC)',
 };
 
 export type ProfileListContext = {
