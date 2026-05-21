@@ -20,6 +20,17 @@
 
 set -euo pipefail
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Load the deployment's recorded secrets/identifiers (gitignored) so a redeploy
+# reuses the live values instead of generating new ones — otherwise deploy.sh
+# would reset the PG password, mint a new AAD app, and target a different site
+# name, breaking the running environment. See deploy.env.sample.
+if [[ -f "$HERE/deploy.env" ]]; then
+  echo "Loading $HERE/deploy.env"
+  # shellcheck disable=SC1091
+  source "$HERE/deploy.env"
+fi
+
 RG="${RG:-omni-launcher-rg}"
 LOCATION="${LOCATION:-southcentralus}"
 SITE_NAME="${SITE_NAME:-omni-launcher}"
@@ -28,7 +39,6 @@ AUTH_MODE="${AUTH_MODE:-easyauth}"
 SOURCE_ACR="${SOURCE_ACR:-omniplatformcr}"
 LAUNCHER_TAG="${LAUNCHER_TAG:-omni-launcher:latest}"
 DEVBOX_TAG="${DEVBOX_TAG:-omni-launcher-devbox:latest}"
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # hex (URL-safe) — base64's +/ would need encoding in the connection string.
 PG_PASSWORD="${PG_PASSWORD:-$(openssl rand -hex 24)}"

@@ -70,6 +70,11 @@ typings/
 .env
 .env.test
 
+# deploy secrets/identifiers (sourced by infra/deploy.sh) — never commit; the
+# committed infra/deploy.env.sample documents the keys + how to fetch values.
+deploy.env
+infra/deploy.env
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 

@@ -3,8 +3,8 @@
 Infrastructure-as-code for the multi-tenant cloud deployment (Path B): the
 launcher server runs as the stateless control plane and provisions agent
 sandboxes as Azure Container Apps directly. `main.bicep` declares everything
-the app's Azure compute client (`src/main/azure-compute/`) and server
-(`src/server/managers.ts`) read at runtime.
+the server (`src/server/managers.ts`) and the `aci` sandbox-profile builder
+(`src/main/aci-profile.ts`) read from the environment at runtime.
 
 ## What it provisions
 
@@ -18,9 +18,10 @@ the app's Azure compute client (`src/main/azure-compute/`) and server
 | PostgreSQL Flexible Server + db | pooled multi-tenant data (RLS) | `OMNI_DATABASE_URL` |
 | Web App for Containers + plan | the launcher server | `OMNI_DATA_API_URL`, `OMNI_AZURE_*`, … |
 
-Role assignments granted to the managed identity: **AcrPull** (on the ACR),
+Role assignments granted to the managed identity: **AcrPull** (on the ACR) and
 **Contributor** (on the resource group — so the app can `PUT`
-`Microsoft.App/containerApps`), **Storage File Data SMB Share Contributor**.
+`Microsoft.App/containerApps`). No Storage Files data-plane role is granted: ACI
+mounts the workspace share via the account key (`AzureFileVolume`), not SMB RBAC.
 
 ## Validate locally (no subscription)
 
@@ -73,8 +74,9 @@ then `az acr build`/push and restart. Same for the agent image
 
 ## How the launcher gets an ARM token
 
-`azure-compute-client.ts` (`acquireManagementToken`) tries three sources in
-priority order:
+The launcher delegates ACI provisioning to the `omniagents[sandbox-aci]` extra
+(baked into the server image), which authenticates via azure-identity. Its
+credential chain tries three sources in priority order:
 
 1. **Service principal** — when `AZURE_CLIENT_ID` + `AZURE_CLIENT_SECRET` +
    `AZURE_TENANT_ID` are all set (explicit opt-out of platform identity).
@@ -86,7 +88,5 @@ priority order:
 
 This template assigns the user-assigned managed identity to the Web App and sets
 `AZURE_CLIENT_ID` to its client id, so **path (2) works out of the box on App
-Service — no service-principal secret required.** (An earlier version only
-supported IMDS, which App Service does not expose; that gap is fixed.) If you
-prefer a service principal anyway, set all three `AZURE_*` settings and path (1)
-takes precedence.
+Service — no service-principal secret required.** If you prefer a service
+principal anyway, set all three `AZURE_*` settings and path (1) takes precedence.

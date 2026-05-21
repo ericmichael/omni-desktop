@@ -10,7 +10,7 @@
 //   - User-assigned managed identity        → AcrPull + create-container-apps + Files
 //
 // The outputs are exactly the env vars the app already reads (see
-// src/main/azure-compute/azure-compute-client.ts and src/server/managers.ts).
+// src/main/aci-profile.ts and src/server/managers.ts).
 //
 // Deploy at resource-group scope:
 //   az deployment group create -g <rg> -f main.bicep -p @main.parameters.json
