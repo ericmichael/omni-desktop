@@ -1,4 +1,4 @@
-export const OMNI_CODE_VERSION = '0.5.2';
+export const OMNI_CODE_VERSION = '0.6.1';
 
 export type VersionCheckResult = {
   isOutdated: boolean;
