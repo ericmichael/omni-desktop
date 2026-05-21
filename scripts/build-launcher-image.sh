@@ -23,9 +23,15 @@ docker build \
   -t "$IMAGE" \
   --build-arg "OMNI_CODE_VERSION=$OMNI_CODE_VERSION" \
   --build-arg "OMNI_PIP_INDEX=$OMNI_PIP_INDEX" \
+  --build-arg "OMNI_INSTALL_CACHEBUST=$(date +%s)" \
   "$ROOT"
 
 if [[ "$PUSH" == "--push" ]]; then
+  # Refresh the registry token (a long build can outlast the previous login)
+  # when pushing to an Azure Container Registry.
+  if [[ "$IMAGE" == *.azurecr.io/* ]]; then
+    az acr login -n "${IMAGE%%.azurecr.io/*}" >/dev/null 2>&1 || true
+  fi
   echo "Pushing $IMAGE"
   docker push "$IMAGE"
 fi
