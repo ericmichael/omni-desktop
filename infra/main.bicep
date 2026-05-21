@@ -200,6 +200,8 @@ resource workspaceShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2
 var vnetName = '${namePrefix}-vnet'
 var aciSubnetName = 'aci'
 var integrationSubnetName = 'appsvc'
+var pgSubnetName = 'pg'
+var peSubnetName = 'privatelink'
 
 resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
   name: vnetName
@@ -231,9 +233,57 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
           ]
         }
       }
+      {
+        // Delegated to Postgres Flexible Server for native VNet integration.
+        name: pgSubnetName
+        properties: {
+          addressPrefix: '10.40.3.0/24'
+          delegations: [
+            {
+              name: 'pg-delegation'
+              properties: { serviceName: 'Microsoft.DBforPostgreSQL/flexibleServers' }
+            }
+          ]
+        }
+      }
+      {
+        // Holds private endpoints (Key Vault, …).
+        name: peSubnetName
+        properties: {
+          addressPrefix: '10.40.4.0/24'
+          privateEndpointNetworkPolicies: 'Disabled'
+        }
+      }
     ]
   }
 }
+
+// Private DNS zones so the VNet (App Service + sandboxes) resolves these
+// services to their private IPs. Linked to the VNet below; the PG server and
+// the KV private endpoint register their A records into these.
+resource pgDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+  name: '${namePrefix}.private.postgres.database.azure.com'
+  location: 'global'
+}
+resource pgDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  parent: pgDnsZone
+  name: 'vnet-link'
+  location: 'global'
+  properties: { registrationEnabled: false, virtualNetwork: { id: vnet.id } }
+}
+resource kvDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+  name: 'privatelink.vaultcore.azure.net'
+  location: 'global'
+}
+resource kvDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  parent: kvDnsZone
+  name: 'vnet-link'
+  location: 'global'
+  properties: { registrationEnabled: false, virtualNetwork: { id: vnet.id } }
+}
+
+var pgSubnetId = '${vnet.id}/subnets/${pgSubnetName}'
+var peSubnetId = '${vnet.id}/subnets/${peSubnetName}'
 
 // String-built ids (rather than `existing` refs) so they carry an implicit
 // dependency on the VNet resource above.
@@ -283,7 +333,14 @@ resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
       backupRetentionDays: 7
       geoRedundantBackup: 'Disabled'
     }
+    // Native VNet integration → the server has a private IP in the `pg` subnet
+    // and NO public endpoint. Resolved via the linked private DNS zone.
+    network: {
+      delegatedSubnetResourceId: pgSubnetId
+      privateDnsZoneArmResourceId: pgDnsZone.id
+    }
   }
+  dependsOn: [pgDnsLink]
 }
 
 resource pgDatabase 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-01' = {
@@ -292,17 +349,6 @@ resource pgDatabase 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08
   properties: {
     charset: 'UTF8'
     collation: 'en_US.utf8'
-  }
-}
-
-// Allow Azure services (the launcher Web App) to reach the server. Tighten to
-// VNet integration for production.
-resource pgAllowAzure 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2024-08-01' = {
-  parent: postgres
-  name: 'AllowAzureServices'
-  properties: {
-    startIpAddress: '0.0.0.0'
-    endIpAddress: '0.0.0.0'
   }
 }
 
@@ -410,7 +456,33 @@ resource kv 'Microsoft.KeyVault/vaults@2023-07-01' = {
     enableSoftDelete: true
     softDeleteRetentionInDays: 90
     enablePurgeProtection: true
-    publicNetworkAccess: 'Enabled'
+    publicNetworkAccess: 'Disabled'
+    networkAcls: { bypass: 'AzureServices', defaultAction: 'Deny' }
+  }
+}
+
+// Private endpoint → the Web App (VNet-integrated) resolves the vault to a
+// private IP via the linked privatelink.vaultcore.azure.net zone.
+resource kvPe 'Microsoft.Network/privateEndpoints@2023-11-01' = {
+  name: '${kvName}-pe'
+  location: location
+  properties: {
+    subnet: { id: peSubnetId }
+    privateLinkServiceConnections: [
+      {
+        name: 'kv'
+        properties: { privateLinkServiceId: kv.id, groupIds: ['vault'] }
+      }
+    ]
+  }
+}
+resource kvPeDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-11-01' = {
+  parent: kvPe
+  name: 'default'
+  properties: {
+    privateDnsZoneConfigs: [
+      { name: 'vault', properties: { privateDnsZoneId: kvDnsZone.id } }
+    ]
   }
 }
 
