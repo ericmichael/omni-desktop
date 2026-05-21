@@ -52,6 +52,16 @@ param launcherPort int = 3001
 ])
 param authMode string = 'easyauth'
 
+@description('AAD app registration (client) ID for EasyAuth. Empty = no EasyAuth (loopback-only; the browser SPA will not connect). Create the app reg out of band — ARM cannot.')
+param aadClientId string = ''
+
+@secure()
+@description('Client secret for the EasyAuth AAD app registration.')
+param aadClientSecret string = ''
+
+@description('Web App name (globally unique, becomes <name>.azurewebsites.net). Knowable up front so the AAD redirect URI can be set before deploy.')
+param siteName string = '${namePrefix}-launcher'
+
 @description('Externally reachable base path appended after the site hostname for the MCP route.')
 param mcpRoutePath string = '/mcp/projects'
 
@@ -99,7 +109,6 @@ var pgName = toLower('${namePrefix}-pg-${suffix}')
 var pgDatabaseName = 'omni'
 var identityName = '${namePrefix}-launcher-mi'
 var planName = '${namePrefix}-launcher-plan'
-var siteName = toLower('${namePrefix}-launcher-${suffix}')
 var workspaceShareName = 'workspaces'
 
 // Built-in role definition IDs.
@@ -337,8 +346,44 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
         // (AzureFileVolume), so the launcher needs it + the share name.
         { name: 'AZURE_STORAGE_ACCOUNT_KEY', value: storage.listKeys().keys[0].value }
         { name: 'OMNI_AZURE_FILE_SHARE', value: workspaceShareName }
+        // Referenced by the EasyAuth (authsettingsV2) AAD provider below.
+        { name: 'MICROSOFT_PROVIDER_AUTHENTICATION_SECRET', value: aadClientSecret }
       ]
     }
+  }
+}
+
+// App Service Authentication (EasyAuth). Created only when an AAD app
+// registration is supplied (ARM/Bicep cannot create the app registration — do
+// it out of band: `az ad app create … --web-redirect-uris
+// https://<site>/.auth/login/aad/callback` — and pass aadClientId/Secret).
+// Without it the SPA can't reach /api/ws-token (gated to loopback-or-easyauth)
+// so the app never connects. Requires `authMode=easyauth` (set above) for the
+// server to trust the injected x-ms-client-principal-id.
+resource siteAuth 'Microsoft.Web/sites/config@2023-12-01' = if (!empty(aadClientId)) {
+  parent: site
+  name: 'authsettingsV2'
+  properties: {
+    platform: { enabled: true }
+    globalValidation: {
+      requireAuthentication: true
+      unauthenticatedClientAction: 'RedirectToLoginPage'
+      redirectToProvider: 'azureactivedirectory'
+    }
+    identityProviders: {
+      azureActiveDirectory: {
+        enabled: true
+        registration: {
+          clientId: aadClientId
+          clientSecretSettingName: 'MICROSOFT_PROVIDER_AUTHENTICATION_SECRET'
+          openIdIssuer: 'https://sts.windows.net/${tenant().tenantId}/'
+        }
+        validation: {
+          allowedAudiences: [aadClientId, 'api://${aadClientId}']
+        }
+      }
+    }
+    login: { tokenStore: { enabled: true } }
   }
 }
 
