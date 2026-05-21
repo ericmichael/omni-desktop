@@ -16,13 +16,15 @@ export default defineConfig(({ mode }) => {
     __PLATFORM_URL__: JSON.stringify(process.env.OMNI_PLATFORM_URL || ''),
   };
 
-  // 'wasm-unsafe-eval' is needed in prod too — the ContextEditor instantiates
-  // WebAssembly, which CSP blocks without it (it does NOT permit arbitrary
-  // eval, unlike 'unsafe-eval'). Dev additionally needs unsafe-inline/eval.
+  // The ContextEditor's WASM runtime uses both WebAssembly instantiation
+  // (needs 'wasm-unsafe-eval') and JS string evaluation / new Function (needs
+  // 'unsafe-eval'), so prod requires both. Dev additionally needs unsafe-inline
+  // for the Vite client. (script-src is the app's own trusted bundle; the app
+  // is behind EasyAuth, and the strict artifact: CSP is unaffected.)
   const cspScriptSrc =
     mode === 'development'
       ? "'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'"
-      : "'self' 'wasm-unsafe-eval'";
+      : "'self' 'unsafe-eval' 'wasm-unsafe-eval'";
 
   return {
     server: {
