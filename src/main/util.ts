@@ -6,7 +6,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { promisify } from 'util';
 
-import { checkOmniVersion } from '@/lib/omni-version';
+import { checkOmniVersion, OMNI_CODE_VERSION } from '@/lib/omni-version';
 import { withResultAsync } from '@/lib/result';
 import type { GpuType, OmniRuntimeInfo, OperatingSystem, WindowProps } from '@/shared/types';
 
@@ -88,6 +88,13 @@ export const getOmniCliPath = (): string => {
     if (devPath) {
       return devPath;
     }
+  }
+  // Cloud/server: use the stable CLI baked into the Docker image (set by the
+  // Dockerfile's ENV OMNI_CLI_PATH=/usr/local/bin/omni). This bypasses the
+  // ephemeral runtime venv entirely — no install at boot, deterministic version.
+  const cliOverride = process.env.OMNI_CLI_PATH;
+  if (cliOverride) {
+    return cliOverride;
   }
   const venvPath = getOmniVenvPath();
   return path.join(venvPath, process.platform === 'win32' ? 'Scripts/omni.exe' : 'bin/omni');
@@ -342,6 +349,23 @@ const getPackageVersion = async (pythonPath: string, packageName: string): Promi
 };
 
 export const getOmniRuntimeInfo = async (): Promise<OmniRuntimeInfo> => {
+  // Cloud/server: the CLI is baked into the image (OMNI_CLI_PATH). It's the
+  // single, reproducible source of truth — report it installed and never
+  // "outdated" so the renderer skips the runtime-venv install entirely.
+  const cliOverride = process.env.OMNI_CLI_PATH;
+  if (cliOverride) {
+    if (!(await isFile(cliOverride))) {
+      return { isInstalled: false };
+    }
+    return {
+      isInstalled: true,
+      version: OMNI_CODE_VERSION,
+      expectedVersion: OMNI_CODE_VERSION,
+      isOutdated: false,
+      omniPath: cliOverride,
+    };
+  }
+
   const omniPath = getOmniCliPath();
   const pythonPath = getOmniPythonPath();
 

@@ -21,6 +21,8 @@
     "preview": "electron-vite preview",
     "download:sandbox": "node scripts/download-sandbox.mjs --force",
     "build:devbox": "docker build -t omni-launcher-devbox:local sandbox-image",
+    "build:devbox-min": "docker build -f sandbox-image/Dockerfile.min -t omni-launcher-devbox-min:local sandbox-image",
+    "build:image": "scripts/build-launcher-image.sh omni-launcher:local",
     "download:vcredist": "node scripts/download-vcredist.mjs",
     "package": "npm run clean && npm run download:sandbox && npm run download:vcredist && npm run build && dotenv -e .env -- electron-builder --config electron-builder.config.ts --publish never",
     "publish": "npm run clean && npm run download:sandbox && npm run download:vcredist && npm run build && dotenv -e .env -- electron-builder --config electron-builder.config.ts --publish always",

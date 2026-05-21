@@ -66,16 +66,19 @@ RUN apt-get update \
 # omniagents' `[all]` extra in a future release to drop this inject.)
 ARG INSTALL_OMNI_CODE=true
 ARG OMNI_PIP_INDEX="https://pypi.fury.io/ericmichael/"
-# Pin exact versions: keeps the cloud image reproducible AND busts this RUN
-# layer's cache when bumped (an unpinned `pipx install` would otherwise reuse a
-# stale cached install on rebuilds). Bump in lockstep with the published pkgs.
-ARG OMNI_CODE_VERSION=0.6.2
-ARG OMNIAGENTS_VERSION=0.7.4
+# Single source of truth for the omni-code version is src/lib/omni-version.ts.
+# The build MUST pass it (scripts/build-launcher-image.sh reads it from there):
+# there is deliberately NO default, so a missing arg fails loudly instead of
+# silently baking a stale version. omniagents is NOT pinned here — it comes
+# transitively from omni-code's own pin; the inject only ADDS the sandbox-aci
+# extra's deps to whatever omniagents omni-code already pulled.
+ARG OMNI_CODE_VERSION
 # Some omni-code deps (e.g. pygit2) lack wheels for this platform and compile
 # from source, so a C toolchain + the relevant -dev headers are needed at
 # install time. Runtime shared libs (libgit2, libffi, …) are pulled in by the
 # -dev packages and kept so the compiled extensions load.
 RUN if [ "$INSTALL_OMNI_CODE" = "true" ]; then \
+      test -n "${OMNI_CODE_VERSION}" || { echo "OMNI_CODE_VERSION build-arg is required" >&2; exit 1; }; \
       apt-get update \
       && apt-get install -y --no-install-recommends \
            python3 python3-venv python3-dev pipx \
@@ -85,8 +88,14 @@ RUN if [ "$INSTALL_OMNI_CODE" = "true" ]; then \
       && PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin \
          pipx install "omni-code==${OMNI_CODE_VERSION}" --pip-args="--extra-index-url ${OMNI_PIP_INDEX}" \
       && PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin \
-         pipx inject omni-code "omniagents[sandbox-aci]==${OMNIAGENTS_VERSION}" --pip-args="--extra-index-url ${OMNI_PIP_INDEX}"; \
+         pipx inject omni-code "omniagents[sandbox-aci]" --pip-args="--extra-index-url ${OMNI_PIP_INDEX}"; \
     fi
+
+# The launcher uses this baked, stable CLI in cloud/server mode instead of the
+# ephemeral runtime venv (see getOmniCliPath / getOmniRuntimeInfo): the image is
+# the single, reproducible source of the agent runtime — no install at boot, no
+# re-resolving versions, survives restarts.
+ENV OMNI_CLI_PATH=/usr/local/bin/omni
 
 COPY --from=build /app/out ./out
 COPY --from=build /app/node_modules ./node_modules

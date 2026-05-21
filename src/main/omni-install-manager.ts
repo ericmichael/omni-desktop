@@ -624,6 +624,16 @@ export class OmniInstallManager {
   };
 
   private runInstall = async (repair?: boolean) => {
+    // Cloud/server: the CLI is baked into the image (OMNI_CLI_PATH). There is no
+    // runtime venv to build and nothing to reinstall — short-circuit so a stray
+    // install request (e.g. the Settings "reinstall" button) can't try to build
+    // a venv that doesn't belong in this deployment.
+    if (process.env.OMNI_CLI_PATH) {
+      this.log.info(c.gray('OMNI_CLI_PATH set — using the image-baked omni CLI; skipping runtime install\r\n'));
+      this.updateStatus({ type: 'completed' });
+      return;
+    }
+
     this.isCancellationRequested = false;
     this.updateStatus({ type: 'starting' });
 
