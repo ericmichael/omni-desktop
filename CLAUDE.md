@@ -66,7 +66,7 @@ Lifecycle pattern: each manager is a factory returning `[instance, cleanup]`. Re
 - `ProcessManager` (`process-manager.ts`) — all agent processes (chat + code tabs) keyed by string ID, driven by `AgentProcess` (`agent-process.ts`); optionally delegates to a `PlatformClient` in enterprise mode
 - `ProjectManager` (`project-manager.ts`) — projects / tickets / pages / inbox / milestones; composes `InboxManager`, `MilestoneManager`, `PageManager`, `SupervisorOrchestrator`, and the `ticket-machine`. Runs schema migrations on boot.
 - `OmniInstallManager` — Python + venv via bundled `uv` binary
-- `ConsoleManager` — PTY terminal (node-pty)
+- `ConsoleManager` — proxies `terminal:*` IPC into `omni serve`'s WebSocket so terminals run inside the sandbox via `omniagents.rpc.terminal_backends.SessionPtyBackend`. The shell lives in the agent process (one PTY per `terminal_id`); main is a thin transport. See `src/main/terminal-proxy.ts` for the WS plumbing and `omni-code/server_functions/terminal.py` for the server-side entry points (`terminal.create`, `terminal.close`).
 - `WorkspaceSyncManager`, `ExtensionManager`, `AppControlManager`
 
 Managers expose a timestamped `getStatus()` and broadcast updates via `sendToWindow` (Electron) / `sendToAll` (server). Store changes fan out on the `store:changed` channel.
