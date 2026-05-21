@@ -39,8 +39,8 @@ param acrName string = '${namePrefix}launcheracr'
 @description('Launcher server image repo:tag, resolved against the ACR.')
 param launcherImageRepoTag string = 'omni-launcher:latest'
 
-@description('Agent sandbox (devbox) image repo:tag, resolved against the ACR.')
-param agentImageRepoTag string = 'omni-launcher-devbox:latest'
+@description('Agent sandbox (devbox) image repo:tag, resolved against the ACR. Defaults to the thin "min" image (fast cold pull); use the full devbox image with OMNI_SANDBOX_DESKTOP=1 for the IDE/desktop.')
+param agentImageRepoTag string = 'omni-launcher-devbox-min:latest'
 
 @description('TCP port the launcher server listens on inside the container.')
 param launcherPort int = 3001

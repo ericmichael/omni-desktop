@@ -5,7 +5,7 @@
     "namePrefix": { "value": "omni" },
     "location": { "value": "southcentralus" },
     "launcherImageRepoTag": { "value": "omni-launcher:latest" },
-    "agentImageRepoTag": { "value": "omni-launcher-devbox:latest" },
+    "agentImageRepoTag": { "value": "omni-launcher-devbox-min:latest" },
     "authMode": { "value": "none" },
     "postgresAdminLogin": { "value": "omniadmin" },
     "postgresAdminPassword": { "value": "" },

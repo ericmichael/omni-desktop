@@ -48,4 +48,35 @@ describe('buildAciProfile', () => {
     expect(p.client.file_share).toBeUndefined();
     expect(p.client.resource_group).toBe('omni-launcher-rg'); // default
   });
+
+  it('is minimal by default: no services, no exposed ports, thin default image', () => {
+    const p = JSON.parse(
+      buildAciProfile({ OMNI_AZURE_SUBSCRIPTION_ID: 'sub-1' } as NodeJS.ProcessEnv)!
+    );
+    expect(p.services).toBeUndefined();
+    expect(p.options.exposed_ports).toBeUndefined();
+    expect(p.options.image).toContain('devbox-min');
+  });
+
+  it('includes desktop services + ports when OMNI_SANDBOX_DESKTOP=1', () => {
+    const p = JSON.parse(
+      buildAciProfile({
+        OMNI_AZURE_SUBSCRIPTION_ID: 'sub-1',
+        OMNI_SANDBOX_DESKTOP: '1',
+      } as NodeJS.ProcessEnv)!
+    );
+    expect(p.options.exposed_ports).toEqual([8080, 6080]);
+    expect(p.services.code_server.port).toBe(8080);
+    expect(p.services.vnc.port).toBe(6080);
+  });
+
+  it('subnet_id flows into the client when set', () => {
+    const p = JSON.parse(
+      buildAciProfile({
+        OMNI_AZURE_SUBSCRIPTION_ID: 'sub-1',
+        OMNI_AZURE_SUBNET_ID: '/subscriptions/s/.../subnets/aci',
+      } as NodeJS.ProcessEnv)!
+    );
+    expect(p.client.subnet_id).toBe('/subscriptions/s/.../subnets/aci');
+  });
 });

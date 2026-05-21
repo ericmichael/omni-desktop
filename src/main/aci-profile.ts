@@ -65,18 +65,29 @@ export function buildAciProfile(env: NodeJS.ProcessEnv = process.env): string | 
     };
   }
 
-  const profile = {
+  // Desktop services (code-server + VNC) are opt-in. The fast default is a
+  // thin image with no in-sandbox services: nothing to start, no ports to
+  // expose (so the group skips VNet/IP wiring entirely — fastest provision).
+  // Set OMNI_SANDBOX_DESKTOP=1 with the full devbox image to get the IDE +
+  // desktop; that path uses exposed_ports + the launcher's /proxy.
+  const desktop = env['OMNI_SANDBOX_DESKTOP'] === '1';
+
+  const profile: Record<string, unknown> = {
     version: 1,
     client,
     options: {
-      image: env['OMNI_AZURE_IMAGE'] ?? 'REPLACE.azurecr.io/omni-launcher-devbox:latest',
-      exposed_ports: [8080, 6080],
+      image: env['OMNI_AZURE_IMAGE'] ?? 'REPLACE.azurecr.io/omni-launcher-devbox-min:latest',
+      ...(desktop ? { exposed_ports: [8080, 6080] } : {}),
     },
     manifest: { root: '/workspace' },
-    services: {
-      code_server: { command: 'code-server --bind-addr 0.0.0.0:8080 --auth none /workspace', port: 8080 },
-      vnc: { command: 'bash /usr/local/bin/start-vnc.sh', port: 6080 },
-    },
+    ...(desktop
+      ? {
+          services: {
+            code_server: { command: 'code-server --bind-addr 0.0.0.0:8080 --auth none /workspace', port: 8080 },
+            vnc: { command: 'bash /usr/local/bin/start-vnc.sh', port: 6080 },
+          },
+        }
+      : {}),
     terminal: { command: 'bash -i', cwd: '/workspace' },
   };
 
