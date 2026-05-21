@@ -105,7 +105,6 @@ var workspaceShareName = 'workspaces'
 // Built-in role definition IDs.
 var roleAcrPull = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
 var roleContributor = 'b24988ac-6180-42a0-ab88-20f7382dd24c'
-var roleStorageFileSmbContributor = '0c867c2a-1d8c-454a-a3db-ab2607f98370'
 
 // ---------------------------------------------------------------------------
 // Identity
@@ -265,16 +264,9 @@ resource raContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
-// Read/write the workspace file share over SMB.
-resource raFiles 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(storage.id, identity.id, roleStorageFileSmbContributor)
-  scope: storage
-  properties: {
-    principalId: identity.properties.principalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleStorageFileSmbContributor)
-  }
-}
+// NOTE: no Storage File SMB role for the identity — ACI mounts the workspace
+// share via the storage account KEY (AzureFileVolume), not SMB RBAC, so the
+// launcher's managed identity needs no Files data-plane role.
 
 // ---------------------------------------------------------------------------
 // Launcher server — Web App for Containers
