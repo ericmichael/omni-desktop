@@ -73,19 +73,18 @@ ARG OMNI_PIP_INDEX="https://pypi.fury.io/ericmichael/"
 # transitively from omni-code's own pin; the inject only ADDS the sandbox-aci
 # extra's deps to whatever omniagents omni-code already pulled.
 ARG OMNI_CODE_VERSION
-# Busts this layer's cache so the unpinned `omniagents[sandbox-aci]` inject
-# re-resolves to the latest published omniagents on every build (otherwise an
-# omniagents-only release wouldn't change any input here and Docker would serve
-# a stale cached install). build-launcher-image.sh passes a fresh value.
-ARG OMNI_INSTALL_CACHEBUST=0
 # Some omni-code deps (e.g. pygit2) lack wheels for this platform and compile
 # from source, so a C toolchain + the relevant -dev headers are needed at
 # install time. Runtime shared libs (libgit2, libffi, …) are pulled in by the
 # -dev packages and kept so the compiled extensions load.
+#
+# Reproducibility: omni-code pins omniagents EXACTLY (==), so a given
+# OMNI_CODE_VERSION resolves to one specific omniagents — the unpinned
+# sandbox-aci inject just adds that extra's deps. Bumping OMNI_CODE_VERSION
+# changes this layer's cache key, so a new release is always re-resolved.
 RUN if [ "$INSTALL_OMNI_CODE" = "true" ]; then \
       test -n "${OMNI_CODE_VERSION}" || { echo "OMNI_CODE_VERSION build-arg is required" >&2; exit 1; }; \
-      echo "omni-code==${OMNI_CODE_VERSION} (cachebust ${OMNI_INSTALL_CACHEBUST})" \
-      && apt-get update \
+      apt-get update \
       && apt-get install -y --no-install-recommends \
            python3 python3-venv python3-dev pipx \
            build-essential pkg-config \

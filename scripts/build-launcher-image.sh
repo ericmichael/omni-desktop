@@ -23,7 +23,6 @@ docker build \
   -t "$IMAGE" \
   --build-arg "OMNI_CODE_VERSION=$OMNI_CODE_VERSION" \
   --build-arg "OMNI_PIP_INDEX=$OMNI_PIP_INDEX" \
-  --build-arg "OMNI_INSTALL_CACHEBUST=$(date +%s)" \
   "$ROOT"
 
 if [[ "$PUSH" == "--push" ]]; then
