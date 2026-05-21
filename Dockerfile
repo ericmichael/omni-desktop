@@ -66,6 +66,11 @@ RUN apt-get update \
 # omniagents' `[all]` extra in a future release to drop this inject.)
 ARG INSTALL_OMNI_CODE=true
 ARG OMNI_PIP_INDEX="https://pypi.fury.io/ericmichael/"
+# Pin exact versions: keeps the cloud image reproducible AND busts this RUN
+# layer's cache when bumped (an unpinned `pipx install` would otherwise reuse a
+# stale cached install on rebuilds). Bump in lockstep with the published pkgs.
+ARG OMNI_CODE_VERSION=0.6.1
+ARG OMNIAGENTS_VERSION=0.7.1
 # Some omni-code deps (e.g. pygit2) lack wheels for this platform and compile
 # from source, so a C toolchain + the relevant -dev headers are needed at
 # install time. Runtime shared libs (libgit2, libffi, …) are pulled in by the
@@ -78,9 +83,9 @@ RUN if [ "$INSTALL_OMNI_CODE" = "true" ]; then \
            libffi-dev libssl-dev libgit2-dev libxml2-dev libxslt1-dev libsqlcipher-dev \
       && rm -rf /var/lib/apt/lists/* \
       && PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin \
-         pipx install omni-code --pip-args="--extra-index-url ${OMNI_PIP_INDEX}" \
+         pipx install "omni-code==${OMNI_CODE_VERSION}" --pip-args="--extra-index-url ${OMNI_PIP_INDEX}" \
       && PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin \
-         pipx inject omni-code "omniagents[sandbox-aci]" --pip-args="--extra-index-url ${OMNI_PIP_INDEX}"; \
+         pipx inject omni-code "omniagents[sandbox-aci]==${OMNIAGENTS_VERSION}" --pip-args="--extra-index-url ${OMNI_PIP_INDEX}"; \
     fi
 
 COPY --from=build /app/out ./out
