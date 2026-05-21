@@ -1,19 +1,23 @@
 import 'dotenv/config';
 
+import { BlockList, isIPv4, isIPv6 } from 'node:net';
+
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify from 'fastify';
 import { existsSync, readFileSync } from 'fs';
-import { BlockList, isIPv4, isIPv6 } from 'node:net';
 import { join, resolve } from 'path';
 
 // Server mode always runs as "development" so util.ts resolves paths from project root
 process.env.NODE_ENV = process.env.NODE_ENV || 'development';
 
+import type { IncomingHttpHeaders } from 'node:http';
+
 import { wireClientManagers, wireGlobalHandlers } from '@/server/managers';
+import { MCP_PROJECTS_PATH, registerMcpHttpRoute } from '@/server/mcp-http';
 import { setupProxyRewriter } from '@/server/proxy-rewriter';
 import { ServerStore } from '@/server/store';
-import { WsHandler } from '@/server/ws-handler';
+import { DEFAULT_TENANT, WsHandler } from '@/server/ws-handler';
 
 // Process-level crash visibility. Log only — do not exit. The server
 // process is typically managed externally (systemd, pm2, docker), so
@@ -28,6 +32,32 @@ process.on('uncaughtException', (err) => {
 
 const PORT = parseInt(process.env['PORT'] ?? '3001', 10);
 const HOST = process.env['HOST'] ?? '0.0.0.0';
+
+/**
+ * When OMNI_AUTH_MODE=easyauth, the server runs behind Azure App Service
+ * EasyAuth, which terminates authentication at the platform edge and injects
+ * `X-MS-Client-Principal-*` headers it strips from inbound spoofing attempts.
+ * In that mode we trust the principal id as the tenant. In every other mode
+ * (loopback / Tailscale / dev) the server is single-tenant and the principal
+ * headers are ignored — a client could otherwise forge them.
+ */
+const IS_EASYAUTH = (process.env['OMNI_AUTH_MODE'] ?? '') === 'easyauth';
+
+/**
+ * Resolve the authenticated tenant for a request. Returns null only in
+ * easyauth mode when the principal header is missing (misconfiguration or an
+ * unauthenticated request that slipped past the edge) — callers reject those.
+ */
+function resolveTenantId(headers: IncomingHttpHeaders): string | null {
+  if (!IS_EASYAUTH) {
+    return DEFAULT_TENANT;
+  }
+  const principalId = headers['x-ms-client-principal-id'];
+  if (typeof principalId === 'string' && principalId.trim()) {
+    return principalId.trim();
+  }
+  return null;
+}
 
 /**
  * Build the allowlist for /api/ws-token. Loopback is always trusted; additional
@@ -65,11 +95,17 @@ function buildTokenAllowList(): { check: (addr: string) => boolean; describe: ()
   }
 
   const check = (addr: string): boolean => {
-    if (!addr) return false;
+    if (!addr) {
+      return false;
+    }
     // Strip IPv4-mapped IPv6 prefix so 100.x addresses match the IPv4 rules
     const normalized = addr.startsWith('::ffff:') ? addr.slice(7) : addr;
-    if (isIPv4(normalized)) return list.check(normalized, 'ipv4');
-    if (isIPv6(normalized)) return list.check(normalized, 'ipv6');
+    if (isIPv4(normalized)) {
+      return list.check(normalized, 'ipv4');
+    }
+    if (isIPv6(normalized)) {
+      return list.check(normalized, 'ipv6');
+    }
     return false;
   };
 
@@ -96,7 +132,11 @@ const main = async () => {
   // extend via OMNI_TRUSTED_CIDRS, e.g. "100.64.0.0/10" for Tailscale).
   fastify.get('/api/ws-token', (request, reply) => {
     const addr = request.socket.remoteAddress ?? '';
-    if (!tokenAllowList.check(addr)) {
+    // Behind EasyAuth the request arrives via the platform edge (not loopback),
+    // but it's already authenticated — the presence of the principal header is
+    // sufficient. Otherwise fall back to the trusted-network allowlist.
+    const easyauthOk = IS_EASYAUTH && typeof request.headers['x-ms-client-principal-id'] === 'string';
+    if (!easyauthOk && !tokenAllowList.check(addr)) {
       reply.code(403).send({ error: 'Forbidden' });
       return;
     }
@@ -112,7 +152,17 @@ const main = async () => {
   setupProxyRewriter(fastify, wsHandler, tokenAllowList.check);
 
   // Wire global (shared) IPC handlers — store, util, config, project, code, chat, sandbox, install
-  const { cleanupGlobalManagers } = wireGlobalHandlers({ wsHandler, store });
+  const { cleanupGlobalManagers, getProcessManager, ensureTenantReady, getTenantRepo, runtimeTokenSecret } =
+    await wireGlobalHandlers({
+      wsHandler,
+      store,
+    });
+
+  // HTTP MCP route — remote agent sandboxes reach their tenant's project data
+  // here (authenticated by the signed runtime token). Local Electron/stdio
+  // doesn't use it; it's harmless when no sandbox calls it.
+  registerMcpHttpRoute(fastify, { runtimeTokenSecret, getTenantRepo });
+  console.log(`[mcp-http] omni-projects MCP available at ${MCP_PROJECTS_PATH}`);
 
   // WebSocket route — each new connection gets its own manager instances.
   // Clients send a sessionId query param; if the server has an existing session
@@ -125,8 +175,22 @@ const main = async () => {
         socket.close(4401, 'Unauthorized');
         return;
       }
+      // Bind the connection to its authenticated tenant. The client-supplied
+      // sessionId is only a reattach key WITHIN this tenant (see WsHandler),
+      // so it can't be used to reach another tenant's session.
+      const tenantId = resolveTenantId(request.headers);
+      if (tenantId === null) {
+        socket.close(4401, 'Unauthorized');
+        return;
+      }
       const sessionId = url.searchParams.get('sessionId') ?? undefined;
 
+      // Create + hydrate the tenant; pass the promise as the session's dispatch
+      // gate. addClient attaches the message listener synchronously (no dropped
+      // messages), and WsHandler defers invoke dispatch until this resolves —
+      // so a write can't race a late hydrate. Console proxies terminals through
+      // the caller tenant's ProcessManager (resolved after readiness).
+      const ready = ensureTenantReady(tenantId);
       wsHandler.addClient(
         socket,
         (session) => {
@@ -134,10 +198,13 @@ const main = async () => {
             handle: session.handle,
             sendToWindow: session.sendToWindow,
             store,
+            processManager: getProcessManager(tenantId),
           });
           session.setCleanup(cleanup);
         },
-        sessionId
+        sessionId,
+        tenantId,
+        ready
       );
     });
   });
@@ -161,11 +228,11 @@ const main = async () => {
           "default-src 'none'",
           "script-src 'unsafe-inline' https:",
           "style-src 'unsafe-inline' https:",
-          "font-src https: data:",
-          "img-src https: data: blob:",
-          "connect-src https: wss: ws: data: blob:",
-          "frame-src about: data: blob: https: http:",
-        ].join('; '),
+          'font-src https: data:',
+          'img-src https: data: blob:',
+          'connect-src https: wss: ws: data: blob:',
+          'frame-src about: data: blob: https: http:',
+        ].join('; ')
       )
       .send(readFileSync(sandboxHtmlPath));
   });

@@ -2,15 +2,19 @@ import React from 'react'
 
 // Server payload from omni-code's /goal autopilot loop (server_functions/goal.py).
 // snapshot=null means no goal is set on this session (panel renders nothing).
+// "paused" is a non-terminal hold state — the periodic tick is off but
+// the goal can be resumed via /goal.resume.
 export type GoalSnapshot = {
   goal: string
   turn: number
   max_turns: number
   tick_interval?: number
   last_reason: string | null
-  status: 'active' | 'completed' | 'cancelled'
+  status: 'active' | 'completed' | 'cancelled' | 'paused'
   started_at: number
   completion_reason: string | null
+  // Auditable artifact attached on terminal states (achieved/blocked).
+  evidence?: string | null
 }
 
 const GOAL_TRUNCATE = 100
@@ -24,6 +28,7 @@ function shortGoal(goal: string, max: number): string {
 function dotClass(status: GoalSnapshot['status']): string {
   if (status === 'active') return 'bg-brand animate-pulse'
   if (status === 'completed') return 'bg-successGreen'
+  if (status === 'paused') return 'bg-warningOrange'
   return 'bg-errorRed'
 }
 
@@ -48,7 +53,16 @@ export function GoalPanel({ snapshot }: { snapshot: GoalSnapshot | null }) {
             {shortGoal(snapshot.goal, GOAL_TRUNCATE)}
           </span>
           {snapshot.status !== 'active' && (
-            <span className={['ml-auto whitespace-nowrap', snapshot.status === 'completed' ? 'text-successGreen' : 'text-errorRed'].join(' ')}>
+            <span
+              className={[
+                'ml-auto whitespace-nowrap',
+                snapshot.status === 'completed'
+                  ? 'text-successGreen'
+                  : snapshot.status === 'paused'
+                    ? 'text-warningOrange'
+                    : 'text-errorRed',
+              ].join(' ')}
+            >
               {snapshot.status}
             </span>
           )}

@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 
 import { defaultColumnId } from './defaults.js';
+import type { ColumnSyncInput, ColumnSyncResult } from './repo-interface.js';
 import { tx, txDeferred } from './tx.js';
 import type {
   ColumnRow,
@@ -14,40 +15,15 @@ import type {
 } from './types.js';
 
 /**
- * Pipeline column definition (FLEET.md or shared defaults). The `logicalId`
- * is the user-facing id; the SQLite primary key is derived from
- * `${projectId}__${logicalId}`.
- */
-export interface ColumnSyncInput {
-  logicalId: string;
-  label: string;
-  description?: string | null;
-  gate?: boolean;
-}
-
-/**
- * Per-ticket remap record returned by `syncColumnsForProject`. The launcher
- * uses `gateLost` to decide whether to attach a "needs human review" comment
- * — a ticket sitting in a gate column got remapped to a non-gate column.
- */
-export interface TicketRemap {
-  ticketId: string;
-  fromColumnId: string;
-  toColumnId: string;
-  fromLabel: string;
-  toLabel: string;
-  gateLost: boolean;
-}
-
-export interface ColumnSyncResult {
-  inserted: string[];
-  removed: string[];
-  remappedTickets: TicketRemap[];
-}
-
-/**
- * Repository wrapping pre-compiled prepared statements for all project data CRUD.
- * Every write method bumps the change sequence for cross-process notification.
+ * Synchronous SQLite repository wrapping pre-compiled prepared statements for
+ * all project data CRUD. Every write method bumps the change sequence for
+ * cross-process notification.
+ *
+ * This is the sync core: the Electron desktop app, the MCP server, and the
+ * one-time JSON→SQLite migration all use it directly. The launcher's
+ * backend-agnostic data layer talks to it through `SqliteProjectsRepo`
+ * (sqlite-repo.ts), which adapts these sync methods to the async
+ * {@link IProjectsRepo} contract that Postgres also satisfies.
  */
 export class ProjectsRepo {
   private stmts: ReturnType<typeof prepareStatements>;
@@ -515,6 +491,18 @@ export class ProjectsRepo {
     });
   }
 
+  // ---- Page content (markdown doc bodies) ----
+
+  getPageContent(pageId: string): string | null {
+    const row = this.stmts.getPageContent.get(pageId) as { body: string } | undefined;
+    return row?.body ?? null;
+  }
+
+  setPageContent(pageId: string, body: string): void {
+    this.stmts.setPageContent.run(pageId, body);
+    this.bumpChangeSeq();
+  }
+
   // ---- Inbox items ----
 
   listAllInboxItems(): InboxRow[] {
@@ -738,6 +726,13 @@ function prepareStatements(db: DatabaseSync) {
     deletePage: db.prepare('DELETE FROM pages WHERE id = ?'),
     deleteAllPages: db.prepare('DELETE FROM pages'),
     listAllPageIds: db.prepare('SELECT id FROM pages'),
+
+    // Page content
+    getPageContent: db.prepare('SELECT body FROM page_content WHERE page_id = ?'),
+    setPageContent: db.prepare(`
+      INSERT INTO page_content (page_id, body) VALUES (?, ?)
+      ON CONFLICT(page_id) DO UPDATE SET body = excluded.body, updated_at = datetime('now')
+    `),
 
     // Inbox items
     listAllInboxItems: db.prepare('SELECT * FROM inbox_items ORDER BY created_at DESC'),

@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid';
 import { map } from 'nanostores';
 
+import { uuidv4 } from '@/lib/uuid';
 import { STATUS_POLL_INTERVAL_MS } from '@/renderer/constants';
 import type { AutoLaunchPhase } from '@/renderer/features/Code/use-code-auto-launch';
 import { destroyAllTerminalsForTab } from '@/renderer/features/Console/state';
@@ -21,6 +22,22 @@ import type {
   ProjectId,
   TicketId,
 } from '@/shared/types';
+
+/**
+ * Resolve the profile a fresh tab should be bound to. Mirrors the chain in
+ * ``ProcessManager.resolveProfileName`` so the value the renderer persists
+ * matches what main would have picked at this moment — after that the tab's
+ * ``profileName`` is sticky regardless of changes to defaults.
+ */
+const seedProfileName = (projectId: ProjectId | null | undefined): string => {
+  const projects = persistedStoreApi.getKey('projects') ?? [];
+  const project = projectId ? projects.find((p) => p.id === projectId) : undefined;
+  const inherited = project?.sandboxProfile;
+  if (typeof inherited === 'string' && inherited.length > 0) {
+    return inherited;
+  }
+  return persistedStoreApi.getKey('defaultProfileName') ?? 'host';
+};
 
 // Re-export agent status/xterm maps so existing imports from Code/state still work.
 // Components can read per-tab status via $agentStatuses.get()[tabId].
@@ -49,7 +66,8 @@ export const codeApi = {
     const tab: CodeTab = {
       id: nanoid(),
       projectId: null,
-      sessionId: nanoid(),
+      sessionId: uuidv4(),
+      profileName: seedProfileName(null),
       createdAt: Date.now(),
     };
     const tabs = [...(persistedStoreApi.getKey('codeTabs') ?? []), tab];
@@ -125,9 +143,10 @@ export const codeApi = {
       id: nanoid(),
       projectId,
       ticketId,
-      sessionId: nanoid(),
+      sessionId: uuidv4(),
       ticketTitle: opts?.ticketTitle,
       workspaceDir: opts?.workspaceDir,
+      profileName: seedProfileName(projectId),
       createdAt: Date.now(),
     };
     const tabs = [...existingTabs, tab];
@@ -140,8 +159,9 @@ export const codeApi = {
     const tab: CodeTab = {
       id: nanoid(),
       projectId: null,
-      sessionId: nanoid(),
+      sessionId: uuidv4(),
       customAppId,
+      profileName: seedProfileName(null),
       createdAt: Date.now(),
     };
     const tabs = [...(persistedStoreApi.getKey('codeTabs') ?? []), tab];
@@ -160,6 +180,32 @@ export const codeApi = {
     const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((t) =>
       t.id === tabId ? { ...t, sessionId } : t
     );
+    await persistedStoreApi.setKey('codeTabs', tabs);
+  },
+
+  setTabProfile: async (tabId: CodeTabId, profileName: string) => {
+    // Profile change = different image. The persisted containerId is
+    // profile-specific so we drop it here — the SDK would silently fall back
+    // anyway, but not sending a definitely-stale id is cleaner.
+    const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((t) => {
+      if (t.id !== tabId) return t;
+      const { containerId: _drop, ...rest } = t;
+      void _drop;
+      return { ...rest, profileName };
+    });
+    await persistedStoreApi.setKey('codeTabs', tabs);
+  },
+
+  setTabContainerId: async (tabId: CodeTabId, containerId: string | undefined) => {
+    const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((t) => {
+      if (t.id !== tabId) return t;
+      if (containerId === undefined) {
+        const { containerId: _drop, ...rest } = t;
+        void _drop;
+        return rest;
+      }
+      return { ...t, containerId };
+    });
     await persistedStoreApi.setKey('codeTabs', tabs);
   },
 };

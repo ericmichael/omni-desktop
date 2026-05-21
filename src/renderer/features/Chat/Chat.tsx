@@ -9,6 +9,7 @@ import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/featur
 import { SandboxPicker } from '@/renderer/features/SandboxProfile/SandboxPicker';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
+import { useSandboxActivityPing } from '@/renderer/hooks/use-sandbox-activity-ping';
 import { emitter } from '@/renderer/services/ipc';
 import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import { ChatShell } from '@/renderer/omniagents-ui/ChatShell';
@@ -149,13 +150,18 @@ export const Chat = memo(() => {
   const initialized = useStore($initialized);
   const chatStatus = useStore($chatProcessStatus);
   const store = useStore(persistedStoreApi.$atom);
-  // Per-launch profile override. ``undefined`` = use defaults (user
-  // default → store). Reset when the chat exits so the next idle picks
-  // up store changes again.
-  const [profileOverride, setProfileOverride] = useState<string | undefined>(undefined);
-  const { phase, error, retry, launch, profileName } = useChatAutoLaunch({
-    ...(profileOverride ? { profileNameOverride: profileOverride } : {}),
-  });
+  const { phase, error, retry, launch, profileName } = useChatAutoLaunch();
+  useSandboxActivityPing('chat');
+  // Picker writes the sticky binding (``StoreData.chatProfileName``) — the
+  // hook re-reads on the next render and forwards it as the launch override.
+  // The stored ``chatContainerId`` is profile-specific (different profile
+  // = different image), so clearing it here keeps a stale id from getting
+  // sent on the next start; the SDK would gracefully fall back anyway, but
+  // not sending it at all is cleaner and saves an unnecessary docker query.
+  const handleProfileChange = useCallback((value: string) => {
+    void persistedStoreApi.setKey('chatProfileName', value);
+    void persistedStoreApi.setKey('chatContainerId', null);
+  }, []);
   const [greeting] = useState(getGreeting);
   const [runningMounted, setRunningMounted] = useState(false);
   const [isEnterprise, setIsEnterprise] = useState(false);
@@ -232,7 +238,7 @@ export const Chat = memo(() => {
               phase === 'idle' ? (
                 <SandboxPicker
                   value={profileName}
-                  onChange={setProfileOverride}
+                  onChange={handleProfileChange}
                   context={{ isEnterprise }}
                 />
               ) : undefined
@@ -256,7 +262,7 @@ export const Chat = memo(() => {
             sandboxLabel={sandboxLabel}
             sandboxOptions={sandboxOptions}
             currentSandboxProfile={profileName}
-            onSandboxChange={setProfileOverride}
+            onSandboxChange={handleProfileChange}
             sessionId={chatSessionId}
             onSessionChange={handleSessionChange}
             variables={variables}

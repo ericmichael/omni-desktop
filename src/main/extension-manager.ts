@@ -363,6 +363,30 @@ const sleep = (ms: number): Promise<void> =>
 // IPC factory
 // ---------------------------------------------------------------------------
 
+/**
+ * Register extension:* handlers. `resolve(event) => ExtensionManager` picks the
+ * instance — `() => mgr` for Electron, or per-tenant on the server. Returns the
+ * channel names registered.
+ */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+export function registerExtensionHandlers(ipc: IIpcListener, resolve: (event: unknown) => ExtensionManager): string[] {
+  const channels: string[] = [];
+  const h = (ch: string, fn: (m: ExtensionManager, ...args: any[]) => unknown): void => {
+    ipc.handle(ch, (event: unknown, ...args: any[]) => fn(resolve(event), ...args));
+    channels.push(ch);
+  };
+
+  h('extension:list-descriptors', (m) => m.listDescriptors());
+  h('extension:set-enabled', (m, id, enabled) => m.setEnabled(id, enabled));
+  h('extension:get-instance-status', (m, id, cwd) => m.getInstanceStatus(id, cwd));
+  h('extension:ensure-instance', (m, id, cwd) => m.ensureInstance(id, cwd));
+  h('extension:release-instance', (m, id, cwd) => m.releaseInstance(id, cwd));
+  h('extension:get-logs', (m, id, cwd) => m.getLogs(id, cwd));
+
+  return channels;
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
 export const createExtensionManager = (args: {
   ipc: IIpcListener;
   store: Store;
@@ -370,26 +394,13 @@ export const createExtensionManager = (args: {
 }) => {
   const { ipc, store, sendToWindow } = args;
   const manager = new ExtensionManager({ store, sendToWindow });
-
-  ipc.handle('extension:list-descriptors', () => manager.listDescriptors());
-  ipc.handle('extension:set-enabled', async (_, id, enabled) => {
-    await manager.setEnabled(id, enabled);
-  });
-  ipc.handle('extension:get-instance-status', (_, id, cwd) => manager.getInstanceStatus(id, cwd));
-  ipc.handle('extension:ensure-instance', (_, id, cwd) => manager.ensureInstance(id, cwd));
-  ipc.handle('extension:release-instance', (_, id, cwd) => {
-    manager.releaseInstance(id, cwd);
-  });
-  ipc.handle('extension:get-logs', (_, id, cwd) => manager.getLogs(id, cwd));
+  const channels = registerExtensionHandlers(ipc, () => manager);
 
   const cleanup = async () => {
     await manager.cleanup();
-    ipcMain.removeHandler('extension:list-descriptors');
-    ipcMain.removeHandler('extension:set-enabled');
-    ipcMain.removeHandler('extension:get-instance-status');
-    ipcMain.removeHandler('extension:ensure-instance');
-    ipcMain.removeHandler('extension:release-instance');
-    ipcMain.removeHandler('extension:get-logs');
+    for (const ch of channels) {
+      ipcMain.removeHandler(ch);
+    }
   };
 
   return [manager, cleanup] as const;

@@ -48,6 +48,13 @@ import type { IpcRendererEvents, Page, PageId, Project, ProjectId } from '@/shar
 export interface PageManagerStore {
   getPages(): Page[];
   setPages(pages: Page[]): void;
+  /**
+   * Optional DB-backed content store for markdown docs. When present, doc
+   * bodies are read/written here (the source of truth) instead of disk files;
+   * notebooks always stay on disk. Absent → legacy filesystem mode.
+   */
+  getContent?(pageId: PageId): Promise<string | null>;
+  setContent?(pageId: PageId, body: string): Promise<void>;
 }
 
 export type PageManagerWindowSender = <T extends keyof IpcRendererEvents>(
@@ -81,6 +88,8 @@ export class PageManager {
   private newId: () => string;
   private now: () => number;
   private watcher: PageWatcherManager;
+  /** DB-backed (doc) pages currently watched by an editor — no FS watch exists for them. */
+  private dbWatched = new Set<PageId>();
 
   constructor(deps: PageManagerDeps) {
     this.store = deps.store;
@@ -134,18 +143,23 @@ export class PageManager {
     pages.push(page);
     this.writeAll(pages);
 
-    // Seed the .md / .py file on disk. Pending-write markers keep the watcher's
-    // echo-suppression from firing a spurious page:content-changed on this first write.
     const filePath = this.getPageFilePath(page);
     const rawInitial = page.kind === 'notebook' ? MARIMO_NOTEBOOK_TEMPLATE : getTemplate(template);
-    // Normalize markdown so disk content is canonical CommonMark and
-    // downstream readers (Yoopta, agents, grep) get a parseable file. Skip
-    // notebooks — those are .py source, not markdown.
+    // Normalize markdown so content is canonical CommonMark and downstream
+    // readers (Yoopta, agents, grep) get a parseable body. Skip notebooks —
+    // those are .py source, not markdown.
     const initialContent = page.kind === 'notebook' ? rawInitial : normalizeMarkdown(rawInitial);
-    this.watcher.notePendingWrite(filePath, initialContent);
-    void ensureDirectory(path.dirname(filePath)).then(() =>
-      fs.writeFile(filePath, initialContent, 'utf-8').catch(() => {})
-    );
+    if (this.isDbBacked(page)) {
+      // Markdown doc → DB source of truth.
+      void this.store.setContent!(page.id, initialContent).catch(() => {});
+    } else {
+      // Seed the .md / .py file on disk. Pending-write markers keep the
+      // watcher's echo-suppression from firing a spurious content-changed.
+      this.watcher.notePendingWrite(filePath, initialContent);
+      void ensureDirectory(path.dirname(filePath)).then(() =>
+        fs.writeFile(filePath, initialContent, 'utf-8').catch(() => {})
+      );
+    }
     // Notebook pages need the glass CSS sidecar so marimo's css_file= reference
     // resolves on first open. Default to glass-off; the renderer rewrites it
     // immediately before launching the marimo webview.
@@ -207,17 +221,39 @@ export class PageManager {
 
   // ---------- File I/O ----------
 
+  /** Whether this page's body is DB-backed (markdown docs when a content store is wired). */
+  private isDbBacked(page: Page): boolean {
+    return page.kind !== 'notebook' && !!this.store.getContent;
+  }
+
+  private async readFileSafe(filePath: string): Promise<string | null> {
+    try {
+      return await fs.readFile(filePath, 'utf-8');
+    } catch {
+      return null;
+    }
+  }
+
   readContent = async (pageId: PageId): Promise<string> => {
     const page = this.getById(pageId);
     if (!page) {
       return '';
     }
-    const filePath = this.getPageFilePath(page);
-    try {
-      return await fs.readFile(filePath, 'utf-8');
-    } catch {
+    if (this.isDbBacked(page)) {
+      const stored = await this.store.getContent!(pageId);
+      if (stored != null) {
+        return stored;
+      }
+      // Migrate-on-read: import legacy on-disk content into the DB once, then
+      // serve from the DB henceforth.
+      const legacy = await this.readFileSafe(this.getPageFilePath(page));
+      if (legacy != null && this.store.setContent) {
+        await this.store.setContent(pageId, legacy);
+        return legacy;
+      }
       return '';
     }
+    return (await this.readFileSafe(this.getPageFilePath(page))) ?? '';
   };
 
   writeContent = async (pageId: PageId, content: string): Promise<void> => {
@@ -225,13 +261,16 @@ export class PageManager {
     if (!page) {
       return;
     }
+    // Canonicalize markdown; notebook pages stay raw (.py, not markdown).
+    const normalized = page.kind === 'notebook' ? content : normalizeMarkdown(content);
+    if (this.isDbBacked(page)) {
+      await this.store.setContent!(pageId, normalized);
+      return;
+    }
     const filePath = this.getPageFilePath(page);
     await ensureDirectory(path.dirname(filePath));
-    // Canonicalize markdown so what lands on disk parses cleanly under
-    // marked / Yoopta / remark / grep. Notebook pages stay raw — they're
-    // .py, not markdown. The pending-write echo suppression must see the
-    // exact bytes that hit disk, so normalize first, then note, then write.
-    const normalized = page.kind === 'notebook' ? content : normalizeMarkdown(content);
+    // The pending-write echo suppression must see the exact bytes that hit
+    // disk, so normalize first, then note, then write.
     this.watcher.notePendingWrite(filePath, normalized);
     await fs.writeFile(filePath, normalized, 'utf-8');
   };
@@ -241,6 +280,12 @@ export class PageManager {
     const page = this.getById(pageId);
     if (!page) {
       return null;
+    }
+    // DB-backed docs have no file to watch — record interest so an external
+    // write (other replica / agent) can be pushed via reemitWatchedContent.
+    if (this.isDbBacked(page)) {
+      this.dbWatched.add(pageId);
+      return { content: await this.readContent(pageId) };
     }
     const filePath = this.getPageFilePath(page);
     await this.watcher.subscribe(filePath);
@@ -258,8 +303,28 @@ export class PageManager {
     if (!page) {
       return;
     }
+    if (this.isDbBacked(page)) {
+      this.dbWatched.delete(pageId);
+      return;
+    }
     const filePath = this.getPageFilePath(page);
     this.watcher.unsubscribe(filePath);
+  };
+
+  /**
+   * Re-read and re-emit content for every DB-backed page an editor is watching.
+   * Called when an external change is detected (the SQLite change-watcher, which
+   * is page-agnostic). The renderer drops bodies identical to its buffer, so
+   * re-emitting unchanged pages is harmless.
+   */
+  reemitWatchedContent = async (): Promise<void> => {
+    for (const pageId of this.dbWatched) {
+      try {
+        this.sendToWindow('page:content-changed', pageId, await this.readContent(pageId));
+      } catch {
+        // page may have been deleted; ignore
+      }
+    }
   };
 
   /** Absolute filesystem path for a notebook page (null for non-notebook or unknown pages). */

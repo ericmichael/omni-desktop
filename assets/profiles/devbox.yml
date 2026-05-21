@@ -109,3 +109,13 @@ services:
     command: "bash /usr/local/bin/start-vnc.sh"
     port: 6080
     user: "1000:1000"
+
+# Defaults for the launcher's Terminal app. The shell runs inside the
+# container as uid 1000 (matching `run_as`) so file ownership is
+# consistent with the agent's bash tool. cwd defaults to the manifest
+# root — single-source projects land at /workspace/<mountName> via the
+# layout established by the init: block above.
+terminal:
+  command: "bash -i"
+  user: "1000:1000"
+  cwd: "/workspace"

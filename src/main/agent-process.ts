@@ -10,7 +10,7 @@ import path from 'node:path';
 
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
-import type { PlatformClient } from '@/main/platform-client';
+import type { IComputeClient } from '@/main/platform-client';
 import { HOST_PROFILE_NAME, resolveProfile } from '@/main/profile-resolver';
 import { getOmniCliPath, getOmniConfigDir, isDirectory, pathExists } from '@/main/util';
 import { downloadWorkspace } from '@/main/workspace-sync';
@@ -18,6 +18,7 @@ import type {
   AgentProcessData,
   AgentProcessStatus,
   LogEntry,
+  SandboxPauseResult,
   WithTimestamp,
 } from '@/shared/types';
 
@@ -83,6 +84,14 @@ export type AgentProcessStartArg = {
    */
   sessionId?: string;
   /**
+   * Docker container id captured from a previous run. Forwarded as
+   * ``--container-id`` so omni serve can attempt a warm reattach via
+   * ``client.resume(state)`` instead of always creating a fresh container.
+   * Safe to pass a stale id — the SDK falls back to a fresh container +
+   * snapshot rehydrate if the original is gone.
+   */
+  containerId?: string;
+  /**
    * Used in serve mode as the spawn ``cwd`` for resolving relative
    * paths in source-path. For git-remote sources, the launcher passes
    * its own state dir since there's no project workspace on disk.
@@ -117,6 +126,8 @@ type ServeReadyPayload = {
   ports: { ui: number };
   container_id?: string | null;
   container_name?: string | null;
+  /** Which resume tier the SDK ended up taking. See ``AgentProcessData.resume``. */
+  resume?: 'reused' | 'rehydrated' | 'fresh' | null;
   _debug?: Record<string, unknown>;
 };
 
@@ -131,8 +142,108 @@ const servePayloadToData = (payload: ServeReadyPayload): AgentProcessData => {
     containerId: payload.container_id ?? undefined,
     containerName: payload.container_name ?? undefined,
     port: payload.ports.ui,
+    ...(payload.resume ? { resume: payload.resume } : {}),
   };
 };
+
+const SERVER_CALL_TIMEOUT_MS = 8_000;
+
+/**
+ * Open a one-shot JSON-RPC WebSocket to omni serve, send one
+ * ``server_call`` for *fn*, await the result, then close. Used by
+ * lifecycle calls (pause/unpause) that don't need a long-lived control
+ * channel. Auth tokens travel in the wsUrl query string so we don't have
+ * to re-derive them here.
+ */
+async function oneShotServerCall(wsUrl: string, fn: string): Promise<SandboxPauseResult> {
+  return new Promise<SandboxPauseResult>((resolve) => {
+    let settled = false;
+    const finish = (result: SandboxPauseResult) => {
+      if (settled) return;
+      settled = true;
+      try {
+        socket.close();
+      } catch {
+        // ignore
+      }
+      resolve(result);
+    };
+
+    const socket = new WsWebSocket(wsUrl);
+    const timer = setTimeout(
+      () => finish({ ok: false, supported: false, reason: `${fn} timed out` }),
+      SERVER_CALL_TIMEOUT_MS
+    );
+
+    socket.once('open', () => {
+      try {
+        socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'server_call',
+            params: { function: fn, args: {} },
+          })
+        );
+      } catch (err) {
+        clearTimeout(timer);
+        finish({
+          ok: false,
+          supported: false,
+          reason: `${fn} send failed: ${(err as Error).message ?? err}`,
+        });
+      }
+    });
+
+    socket.on('message', (raw) => {
+      clearTimeout(timer);
+      let msg: unknown;
+      try {
+        msg = JSON.parse(String(raw));
+      } catch {
+        finish({ ok: false, supported: false, reason: `${fn} returned unparseable payload` });
+        return;
+      }
+      if (typeof msg !== 'object' || msg === null) {
+        finish({ ok: false, supported: false, reason: `${fn} returned non-object payload` });
+        return;
+      }
+      const obj = msg as Record<string, unknown>;
+      if ('error' in obj && obj.error && typeof obj.error === 'object') {
+        const errMsg = String((obj.error as Record<string, unknown>).message ?? `${fn} rpc error`);
+        finish({ ok: false, supported: false, reason: errMsg });
+        return;
+      }
+      const result = obj.result;
+      if (typeof result !== 'object' || result === null) {
+        finish({ ok: false, supported: false, reason: `${fn} returned no result` });
+        return;
+      }
+      const r = result as Record<string, unknown>;
+      finish({
+        ok: r.ok === true,
+        supported: r.supported !== false,
+        ...(typeof r.paused === 'boolean' ? { paused: r.paused } : {}),
+        ...(typeof r.reason === 'string' ? { reason: r.reason } : {}),
+      });
+    });
+
+    socket.on('error', (err) => {
+      clearTimeout(timer);
+      finish({
+        ok: false,
+        supported: false,
+        reason: `${fn} ws error: ${(err as Error).message ?? err}`,
+      });
+    });
+
+    socket.on('close', () => {
+      // If the socket closes before we got a result, treat as failure.
+      // The settled guard makes this a no-op in the normal path.
+      finish({ ok: false, supported: false, reason: `${fn} ws closed unexpectedly` });
+    });
+  });
+}
 
 // ---------------------------------------------------------------------------
 // AgentProcess
@@ -151,8 +262,9 @@ export class AgentProcess {
   private jsonEmitted = false;
   private lastStartArg: AgentProcessStartArg | null = null;
   private fetchFn: FetchFn;
-  private platformClient: PlatformClient | null = null;
+  private platformClient: IComputeClient | null = null;
   private platformSessionId: string | null = null;
+  private getExtraEnv?: () => Record<string, string>;
 
   constructor(opts: {
     mode: AgentProcessMode;
@@ -160,13 +272,20 @@ export class AgentProcess {
     ipcRawOutput: (data: string) => void;
     onStatusChange: (status: WithTimestamp<AgentProcessStatus>) => void;
     fetchFn?: FetchFn;
-    platformClient?: PlatformClient;
+    platformClient?: IComputeClient;
+    /**
+     * Extra env merged into the spawned `omni serve` (serve mode), evaluated
+     * per start. Cloud uses this to inject a fresh per-tenant
+     * `OMNI_RUNTIME_TOKEN` for the agent's HTTP MCP calls.
+     */
+    getExtraEnv?: () => Record<string, string>;
   }) {
     this.mode = opts.mode;
     this.ipcRawOutput = opts.ipcRawOutput;
     this.onStatusChange = opts.onStatusChange;
     this.fetchFn = opts.fetchFn ?? globalThis.fetch;
     this.platformClient = opts.platformClient ?? null;
+    this.getExtraEnv = opts.getExtraEnv;
     this.status = { type: 'uninitialized', timestamp: Date.now() };
     this.log = new SimpleLogger((entry) => {
       this.ipcRawOutput(entry.message);
@@ -261,6 +380,75 @@ export class AgentProcess {
     await this.stop();
   };
 
+  /**
+   * Freeze every process in the sandbox container without releasing it.
+   * Returns the result the omni-code server function emitted: ``ok``,
+   * ``supported``, ``paused``, optional ``reason``. Callers should treat
+   * ``supported: false`` as "this backend doesn't pause — fall back to
+   * stop/shutdown if you want to free resources." A successful pause flips
+   * ``AgentProcessData.paused`` to true for the renderer.
+   */
+  pause = async (): Promise<SandboxPauseResult> => {
+    return this.callSandboxLifecycle('sandbox.pause', true);
+  };
+
+  /**
+   * Thaw a paused sandbox container. Idempotent — calling on an
+   * already-running container is a no-op as far as the user is concerned
+   * (the server function returns supported=true, paused=false).
+   */
+  unpause = async (): Promise<SandboxPauseResult> => {
+    return this.callSandboxLifecycle('sandbox.unpause', false);
+  };
+
+  /**
+   * Fire-and-forget presence ping. Resets the sandbox's idle timer so it
+   * doesn't pause while the user is actively interacting with a client
+   * surface. Throttling is the renderer's responsibility — we just relay.
+   */
+  notifyActivity = (): void => {
+    if (this.status.type !== 'running' && this.status.type !== 'connecting') return;
+    const data = (this.status as Extract<AgentProcessStatus, { type: 'running' | 'connecting' }>).data;
+    if (!data.wsUrl) return;
+    void oneShotServerCall(data.wsUrl, 'sandbox.notify_activity').catch(() => {
+      // Best-effort. A dropped ping costs us ~60s of headroom (the
+      // renderer's throttle window) before the next one tries.
+    });
+  };
+
+  private callSandboxLifecycle = async (
+    fn: 'sandbox.pause' | 'sandbox.unpause',
+    intendedPaused: boolean
+  ): Promise<SandboxPauseResult> => {
+    if (this.mode === 'platform') {
+      return { ok: false, supported: false, reason: 'platform mode does not implement pause yet' };
+    }
+    if (this.status.type !== 'running' && this.status.type !== 'connecting') {
+      return { ok: false, supported: false, reason: 'sandbox is not running' };
+    }
+    const data = (this.status as Extract<AgentProcessStatus, { type: 'running' | 'connecting' }>).data;
+    const wsUrl = data.wsUrl;
+    if (!wsUrl) {
+      return { ok: false, supported: false, reason: 'no ws_url available' };
+    }
+    try {
+      const result = await oneShotServerCall(wsUrl, fn);
+      // Trust the server function's reported paused state when supported.
+      if (result.ok && result.supported) {
+        this.updateAgentProcessData({
+          paused: result.paused ?? intendedPaused,
+        });
+      } else if (!result.supported) {
+        // Backend doesn't support pause — surface that to callers but
+        // don't pretend the local state changed.
+      }
+      return result;
+    } catch (err) {
+      const message = (err as Error).message ?? String(err);
+      return { ok: false, supported: true, reason: message };
+    }
+  };
+
   resizePty = (_cols: number, _rows: number): void => {};
 
   // --- Serve mode ---
@@ -308,7 +496,12 @@ export class AgentProcess {
     this.stderrBuffer = '';
     this.jsonEmitted = false;
 
-    const env = { ...process.env, ...DEFAULT_ENV, ...shellEnvSync() } as Record<string, string>;
+    const env = {
+      ...process.env,
+      ...DEFAULT_ENV,
+      ...shellEnvSync(),
+      ...(this.getExtraEnv?.() ?? {}),
+    } as Record<string, string>;
     const args: string[] = ['serve', '--output', 'json'];
     // One ``--source <json>`` per source — omni serve's argparse uses
     // ``action="append"``, so each emits a fresh dict.
@@ -335,6 +528,12 @@ export class AgentProcess {
     args.push('--snapshot-dir', path.join(getOmniConfigDir(), 'snapshots'));
     if (arg.sessionId) {
       args.push('--session-id', arg.sessionId);
+    }
+    // ``--container-id`` flips omni serve to ``client.resume(state)`` for a
+    // warm reattach. The SDK silently falls back to a fresh container +
+    // snapshot rehydrate if the id is stale, so it is always safe to pass.
+    if (arg.containerId) {
+      args.push('--container-id', arg.containerId);
     }
     if (resolved.kind === 'file') {
       args.push('--profile', resolved.path);
@@ -462,6 +661,24 @@ export class AgentProcess {
 
   private updateStatus = (status: AgentProcessStatus): void => {
     this.status = { ...status, timestamp: Date.now() };
+    this.onStatusChange(this.status);
+  };
+
+  /** Patch fields on the embedded ``AgentProcessData`` without changing the
+   *  status state. No-op unless we're in a state that carries data
+   *  (``running`` or ``connecting``). Used by pause/unpause to flip the
+   *  ``paused`` indicator without redoing the readiness payload. */
+  private updateAgentProcessData = (patch: Partial<AgentProcessData>): void => {
+    if (this.status.type !== 'running' && this.status.type !== 'connecting') return;
+    const current = this.status as Extract<
+      WithTimestamp<AgentProcessStatus>,
+      { type: 'running' | 'connecting' }
+    >;
+    this.status = {
+      ...current,
+      data: { ...current.data, ...patch },
+      timestamp: Date.now(),
+    };
     this.onStatusChange(this.status);
   };
 

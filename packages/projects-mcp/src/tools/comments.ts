@@ -1,13 +1,11 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { DatabaseSync } from 'node:sqlite';
-import type { ProjectsRepo } from 'omni-projects-db';
-import { commentId } from 'omni-projects-db';
+import { commentId, type IProjectsRepo, nowTimestamp } from 'omni-projects-db';
 import { z } from 'zod';
 
 const json = (data: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data) }] });
 const err = (message: string) => ({ content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }], isError: true as const });
 
-export function registerCommentTools(server: McpServer, db: DatabaseSync, repo: ProjectsRepo): void {
+export function registerCommentTools(server: McpServer, repo: IProjectsRepo): void {
   server.tool(
     'add_ticket_comment',
     'Add a comment to a ticket. Use this to record decisions, findings, progress, blockers, or anything useful for future runs.',
@@ -17,14 +15,17 @@ export function registerCommentTools(server: McpServer, db: DatabaseSync, repo: 
       author: z.enum(['agent', 'human']).optional().describe('Comment author (default: human).'),
     },
     async ({ ticket_id, content, author }) => {
-      const exists = repo.getTicket(ticket_id);
+      const exists = await repo.getTicket(ticket_id);
       if (!exists) return err(`Ticket not found: ${ticket_id}`);
 
       const id = commentId();
-      db.prepare(
-        'INSERT INTO ticket_comments (id, ticket_id, author, content) VALUES (?, ?, ?, ?)'
-      ).run(id, ticket_id, author ?? 'human', content);
-      repo.bumpChangeSeq();
+      await repo.upsertComment({
+        id,
+        ticket_id,
+        author: author ?? 'human',
+        content,
+        created_at: nowTimestamp(),
+      });
 
       return json({ ok: true, comment_id: id });
     }
@@ -35,13 +36,13 @@ export function registerCommentTools(server: McpServer, db: DatabaseSync, repo: 
     'Read comments on a ticket. Returns the comment history — decisions, findings, progress notes, and blockers.',
     { ticket_id: z.string().describe('The ticket ID to read comments for.') },
     async ({ ticket_id }) => {
-      const exists = repo.getTicket(ticket_id);
+      const exists = await repo.getTicket(ticket_id);
       if (!exists) return err(`Ticket not found: ${ticket_id}`);
 
-      const comments = repo.listCommentsByTicket(ticket_id);
+      const comments = await repo.listCommentsByTicket(ticket_id);
 
       return json({
-        comments: comments.map(c => ({
+        comments: comments.map((c) => ({
           id: c.id,
           author: c.author,
           content: c.content,

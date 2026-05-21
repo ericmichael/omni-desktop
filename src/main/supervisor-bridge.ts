@@ -34,15 +34,23 @@ export class SupervisorBridge {
     private readonly requestTimeoutMs = 120_000
   ) {}
 
-  registerIpc(ipc: IIpcListener): string[] {
+  /**
+   * Register the bridge IPC handlers. `resolve(event)` picks the bridge
+   * instance to act on — defaults to `this` (single-manager Electron app); the
+   * per-tenant server passes a resolver that selects the caller's tenant
+   * bridge from the HandlerContext. Accessing another instance's private
+   * fields is fine here — TS scopes `private` to the class, not the instance.
+   */
+  registerIpc(ipc: IIpcListener, resolve: (event: unknown) => SupervisorBridge = () => this): string[] {
     ipc.handle(
       'supervisor:dispatch-result',
-      (_event: unknown, requestId: string, ok: boolean, result?: { runId?: string }, error?: string) => {
-        const pending = this.pending.get(requestId);
+      (event: unknown, requestId: string, ok: boolean, result?: { runId?: string }, error?: string) => {
+        const bridge = resolve(event);
+        const pending = bridge.pending.get(requestId);
         if (!pending) {
           return;
         }
-        this.pending.delete(requestId);
+        bridge.pending.delete(requestId);
         clearTimeout(pending.timer);
         if (ok) {
           pending.resolve(result ?? {});
@@ -51,8 +59,8 @@ export class SupervisorBridge {
         }
       }
     );
-    ipc.handle('supervisor:event', (_event: unknown, payload: SupervisorBridgeEvent) => {
-      for (const handler of this.eventHandlers) {
+    ipc.handle('supervisor:event', (event: unknown, payload: SupervisorBridgeEvent) => {
+      for (const handler of resolve(event).eventHandlers) {
         try {
           handler(payload);
         } catch (err) {

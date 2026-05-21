@@ -21,8 +21,18 @@ export type TerminalState =
       exitCode: number;
     });
 
+export type TerminalCreateError =
+  | { kind: 'process_not_ready' }
+  | { kind: 'backend_unavailable'; message: string };
+
 export const $terminalsByTab = atom<Record<string, TerminalState[]>>({});
 export const $activeTerminalIdByTab = atom<Record<string, string | null>>({});
+/**
+ * Per-tab transient error after a failed `createTerminal`. Cleared on the
+ * next successful create. The Terminal panel reads this to show an
+ * actionable empty-state when the agent process isn't running.
+ */
+export const $terminalCreateErrorByTab = atom<Record<string, TerminalCreateError | null>>({});
 
 export const terminalsForTab = (tabId: string) => computed($terminalsByTab, (map) => map[tabId] ?? []);
 export const activeTerminalIdForTab = (tabId: string) =>
@@ -81,8 +91,14 @@ return pending;
  * working shell instead of an empty panel. On subsequent visits (already
  * hydrated), do nothing: if the user destroyed everything on purpose, leave
  * the panel empty until they click `+`.
+ *
+ * The renderer no longer chooses a cwd — terminals route through omni
+ * serve's :class:`SessionPtyBackend` (sandbox profiles) or
+ * :class:`HostPtyBackend` (host profile), and the cwd is the backend's
+ * decision. The renderer's old host-path cwd would land sandbox shells
+ * in a directory that doesn't exist inside the container.
  */
-export const ensureTerminalForTab = async (tabId: string, cwd?: string): Promise<void> => {
+export const ensureTerminalForTab = async (tabId: string): Promise<void> => {
   const firstVisit = !hydratedTabs.has(tabId) && !pendingHydrations.has(tabId);
   await hydrateTerminalsForTab(tabId);
   if (!firstVisit) {
@@ -90,17 +106,47 @@ return;
 }
   const list = $terminalsByTab.get()[tabId] ?? [];
   if (list.length === 0) {
-    await createTerminal(tabId, cwd);
+    try {
+      await createTerminal(tabId);
+    } catch {
+      // createTerminal already populated $terminalCreateErrorByTab; the
+      // panel renders an actionable empty-state from that atom.
+    }
   }
 };
 
-export const createTerminal = async (tabId: string, cwd?: string): Promise<string> => {
-  const id = await emitter.invoke('terminal:create', tabId, cwd);
-  const terminal = buildTerminalState(tabId, id);
-  const existing = $terminalsByTab.get()[tabId] ?? [];
-  setTerminalsForTab(tabId, [...existing, terminal]);
-  setActiveTerminal(tabId, id);
-  return id;
+export const createTerminal = async (tabId: string): Promise<string> => {
+  try {
+    const id = await emitter.invoke('terminal:create', tabId);
+    clearTerminalCreateError(tabId);
+    const terminal = buildTerminalState(tabId, id);
+    const existing = $terminalsByTab.get()[tabId] ?? [];
+    setTerminalsForTab(tabId, [...existing, terminal]);
+    setActiveTerminal(tabId, id);
+    return id;
+  } catch (err) {
+    setTerminalCreateError(tabId, classifyCreateError(err));
+    throw err;
+  }
+};
+
+const classifyCreateError = (err: unknown): TerminalCreateError => {
+  const message = err instanceof Error ? err.message : String(err);
+  // Main process tags errors as `[<kind>] <message>` — see console-manager.ts.
+  if (message.includes('[process_not_ready]')) return { kind: 'process_not_ready' };
+  return { kind: 'backend_unavailable', message };
+};
+
+const setTerminalCreateError = (tabId: string, error: TerminalCreateError): void => {
+  $terminalCreateErrorByTab.set({ ...$terminalCreateErrorByTab.get(), [tabId]: error });
+};
+
+const clearTerminalCreateError = (tabId: string): void => {
+  const current = $terminalCreateErrorByTab.get();
+  if (!(tabId in current)) return;
+  const next = { ...current };
+  delete next[tabId];
+  $terminalCreateErrorByTab.set(next);
 };
 
 export const destroyTerminal = async (tabId: string, id?: string): Promise<void> => {

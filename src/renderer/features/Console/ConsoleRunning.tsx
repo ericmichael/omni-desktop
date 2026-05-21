@@ -7,6 +7,7 @@ import { ConsoleXterm } from '@/renderer/features/Console/ConsoleXterm';
 import type { TerminalState } from '@/renderer/features/Console/state';
 import {
   $activeTerminalIdByTab,
+  $terminalCreateErrorByTab,
   $terminalsByTab,
   createTerminal,
   destroyTerminal,
@@ -117,6 +118,23 @@ const useStyles = makeStyles({
   xtermWrap: { position: 'relative', width: '100%', height: '100%', minHeight: 0 },
   xtermPane: { position: 'absolute', inset: 0 },
   xtermPaneHidden: { display: 'none' },
+  emptyState: {
+    display: 'flex',
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+    padding: tokens.spacingVerticalXL,
+    textAlign: 'center',
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase300,
+  },
+  emptyStateHint: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground4,
+  },
 });
 
 type TerminalTabButtonProps = {
@@ -174,24 +192,26 @@ XtermPane.displayName = 'XtermPane';
 
 type ConsoleStartedProps = {
   tabId: string;
-  /** cwd used when the user hits the + button to open a new terminal in this column. */
-  cwd?: string;
 };
 
-export const ConsoleStarted = memo(({ tabId, cwd }: ConsoleStartedProps) => {
+export const ConsoleStarted = memo(({ tabId }: ConsoleStartedProps) => {
   const styles = useStyles();
   const terminalsByTab = useStore($terminalsByTab);
   const activeByTab = useStore($activeTerminalIdByTab);
+  const createErrorByTab = useStore($terminalCreateErrorByTab);
   const terminals = useMemo(() => terminalsByTab[tabId] ?? [], [terminalsByTab, tabId]);
   const activeId = activeByTab[tabId] ?? null;
+  const createError = createErrorByTab[tabId] ?? null;
 
   useEffect(() => {
-    void ensureTerminalForTab(tabId, cwd);
-  }, [tabId, cwd]);
+    void ensureTerminalForTab(tabId);
+  }, [tabId]);
 
   const handleNewTab = useCallback(() => {
-    void createTerminal(tabId, cwd);
-  }, [tabId, cwd]);
+    void createTerminal(tabId);
+  }, [tabId]);
+
+  const showEmptyState = terminals.length === 0 && createError !== null;
 
   return (
     <div className={styles.root}>
@@ -217,15 +237,35 @@ export const ConsoleStarted = memo(({ tabId, cwd }: ConsoleStartedProps) => {
         </div>
       </div>
       <div className={styles.xtermWrap}>
-        {terminals.map((t) => (
-          <XtermPane
-            key={t.id}
-            terminal={t}
-            hidden={t.id !== activeId}
-            className={styles.xtermPane}
-            hiddenClassName={styles.xtermPaneHidden}
-          />
-        ))}
+        {showEmptyState ? (
+          <div className={styles.emptyState}>
+            {createError?.kind === 'process_not_ready' ? (
+              <>
+                <div>Open a code session to launch a terminal.</div>
+                <div className={styles.emptyStateHint}>
+                  Terminals now run inside the sandbox. Start a workspace from the Code app, then click + above.
+                </div>
+              </>
+            ) : (
+              <>
+                <div>Terminal unavailable.</div>
+                <div className={styles.emptyStateHint}>
+                  {createError && 'message' in createError ? createError.message : 'Unknown error'}
+                </div>
+              </>
+            )}
+          </div>
+        ) : (
+          terminals.map((t) => (
+            <XtermPane
+              key={t.id}
+              terminal={t}
+              hidden={t.id !== activeId}
+              className={styles.xtermPane}
+              hiddenClassName={styles.xtermPaneHidden}
+            />
+          ))
+        )}
       </div>
     </div>
   );

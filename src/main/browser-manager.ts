@@ -554,17 +554,9 @@ export interface CreateBrowserManagerOptions {
   now?: () => number;
 }
 
-/**
- * Registers browser:* IPC handlers and returns the manager + cleanup.
- *
- * Every mutating handler broadcasts a full `browser:state-changed` snapshot
- * so every renderer re-renders from the same source of truth — simpler than
- * per-channel diffs and plenty fast for the tiny payload sizes at play.
- */
-export function createBrowserManager(options: CreateBrowserManagerOptions): [BrowserManager, () => void] {
-  const { ipc, sendToWindow, store } = options;
-
-  const storeAdapter: BrowserStoreSurface = {
+/** Adapt a key/value store (ServerStore / electron-store / PgSettingsStore) to the browser surface. */
+export function makeBrowserStoreAdapter(store: ElectronStoreLike): BrowserStoreSurface {
+  return {
     getProfiles: () => (store.get('browserProfiles') as BrowserProfile[]) ?? [],
     setProfiles: (p) => store.set('browserProfiles', p),
     getTabsets: () => (store.get('browserTabsets') as Record<BrowserTabsetId, BrowserTabset>) ?? {},
@@ -574,148 +566,147 @@ export function createBrowserManager(options: CreateBrowserManagerOptions): [Bro
     getBookmarks: () => (store.get('browserBookmarks') as BrowserBookmark[]) ?? [],
     setBookmarks: (b) => store.set('browserBookmarks', b),
   };
+}
 
-  const manager = new BrowserManager({
-    store: storeAdapter,
-    newId: options.newId ?? (() => `b-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`),
-    now: options.now ?? (() => Date.now()),
-  });
+/** A per-context browser instance + its snapshot broadcaster. */
+export type BrowserContext = { manager: BrowserManager; broadcast: () => void };
 
-  const broadcast = () => sendToWindow('browser:state-changed', manager.getSnapshot());
+/**
+ * Register browser:* handlers. `resolve(event)` picks the {@link BrowserContext}
+ * — `() => ctx` for Electron, per-tenant on the server. Every mutating handler
+ * broadcasts a full `browser:state-changed` snapshot for that context.
+ */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+export function registerBrowserHandlers(ipc: IIpcListener, resolve: (event: unknown) => BrowserContext): string[] {
+  const channels: string[] = [];
+  const h = (ch: string, fn: (ctx: BrowserContext, ...args: any[]) => unknown): void => {
+    ipc.handle(ch, (event: unknown, ...args: any[]) => fn(resolve(event), ...args));
+    channels.push(ch);
+  };
 
   // Read-only
-  ipc.handle('browser:get-state', () => manager.getSnapshot());
-  ipc.handle('browser:history-list', (_: unknown, opts?: Parameters<BrowserManager['listHistory']>[0]) =>
-    manager.listHistory(opts)
-  );
-  ipc.handle('browser:suggest', (_: unknown, q: string, opts?: Parameters<BrowserManager['suggest']>[1]) =>
-    manager.suggest(q, opts)
-  );
+  h('browser:get-state', ({ manager }) => manager.getSnapshot());
+  h('browser:history-list', ({ manager }, opts) => manager.listHistory(opts));
+  h('browser:suggest', ({ manager }, q, opts) => manager.suggest(q, opts));
 
   // Profiles
-  ipc.handle('browser:profile-add', (_: unknown, input: { label: string; incognito?: boolean }) => {
+  h('browser:profile-add', ({ manager, broadcast }, input) => {
     const p = manager.addProfile(input);
     broadcast();
     return p;
   });
-  ipc.handle('browser:profile-remove', (_: unknown, id: BrowserProfileId) => {
+  h('browser:profile-remove', ({ manager, broadcast }, id) => {
     manager.removeProfile(id);
     broadcast();
   });
 
   // Tabsets
-  ipc.handle('browser:tabset-ensure', (_: unknown, id: BrowserTabsetId, opts?: Parameters<BrowserManager['ensureTabset']>[1]) => {
+  h('browser:tabset-ensure', ({ manager, broadcast }, id, opts) => {
     const ts = manager.ensureTabset(id, opts);
     broadcast();
     return ts;
   });
-  ipc.handle('browser:tabset-remove', (_: unknown, id: BrowserTabsetId) => {
+  h('browser:tabset-remove', ({ manager, broadcast }, id) => {
     manager.removeTabset(id);
     broadcast();
   });
-  ipc.handle('browser:tabset-set-profile', (_: unknown, id: BrowserTabsetId, profileId: BrowserProfileId) => {
+  h('browser:tabset-set-profile', ({ manager, broadcast }, id, profileId) => {
     manager.setTabsetProfile(id, profileId);
     broadcast();
   });
 
   // Tabs
-  ipc.handle(
-    'browser:tab-create',
-    (_: unknown, tabsetId: BrowserTabsetId, opts?: Parameters<BrowserManager['createTab']>[1]) => {
-      const t = manager.createTab(tabsetId, opts);
-      broadcast();
-      return t;
-    }
-  );
-  ipc.handle('browser:tab-close', (_: unknown, tabsetId: BrowserTabsetId, tabId: BrowserTabId) => {
+  h('browser:tab-create', ({ manager, broadcast }, tabsetId, opts) => {
+    const t = manager.createTab(tabsetId, opts);
+    broadcast();
+    return t;
+  });
+  h('browser:tab-close', ({ manager, broadcast }, tabsetId, tabId) => {
     manager.closeTab(tabsetId, tabId);
     broadcast();
   });
-  ipc.handle('browser:tab-activate', (_: unknown, tabsetId: BrowserTabsetId, tabId: BrowserTabId) => {
+  h('browser:tab-activate', ({ manager, broadcast }, tabsetId, tabId) => {
     manager.activateTab(tabsetId, tabId);
     broadcast();
   });
-  ipc.handle(
-    'browser:tab-navigate',
-    (_: unknown, tabsetId: BrowserTabsetId, tabId: BrowserTabId, url: string) => {
-      manager.navigateTab(tabsetId, tabId, url);
-      broadcast();
-    }
-  );
-  ipc.handle(
-    'browser:tab-update-meta',
-    (
-      _: unknown,
-      tabsetId: BrowserTabsetId,
-      tabId: BrowserTabId,
-      patch: { title?: string; favicon?: string; url?: string }
-    ) => {
-      manager.updateTabMeta(tabsetId, tabId, patch);
-      broadcast();
-    }
-  );
-  ipc.handle(
-    'browser:tab-reorder',
-    (_: unknown, tabsetId: BrowserTabsetId, tabIds: BrowserTabId[]) => {
-      manager.reorderTabs(tabsetId, tabIds);
-      broadcast();
-    }
-  );
-  ipc.handle(
-    'browser:tab-pin',
-    (_: unknown, tabsetId: BrowserTabsetId, tabId: BrowserTabId, pinned: boolean) => {
-      manager.pinTab(tabsetId, tabId, pinned);
-      broadcast();
-    }
-  );
-  ipc.handle(
-    'browser:tab-duplicate',
-    (_: unknown, tabsetId: BrowserTabsetId, tabId: BrowserTabId) => {
-      const t = manager.duplicateTab(tabsetId, tabId);
-      broadcast();
-      return t;
-    }
-  );
-  ipc.handle('browser:tab-reopen', (_: unknown, tabsetId: BrowserTabsetId) => {
+  h('browser:tab-navigate', ({ manager, broadcast }, tabsetId, tabId, url) => {
+    manager.navigateTab(tabsetId, tabId, url);
+    broadcast();
+  });
+  h('browser:tab-update-meta', ({ manager, broadcast }, tabsetId, tabId, patch) => {
+    manager.updateTabMeta(tabsetId, tabId, patch);
+    broadcast();
+  });
+  h('browser:tab-reorder', ({ manager, broadcast }, tabsetId, tabIds) => {
+    manager.reorderTabs(tabsetId, tabIds);
+    broadcast();
+  });
+  h('browser:tab-pin', ({ manager, broadcast }, tabsetId, tabId, pinned) => {
+    manager.pinTab(tabsetId, tabId, pinned);
+    broadcast();
+  });
+  h('browser:tab-duplicate', ({ manager, broadcast }, tabsetId, tabId) => {
+    const t = manager.duplicateTab(tabsetId, tabId);
+    broadcast();
+    return t;
+  });
+  h('browser:tab-reopen', ({ manager, broadcast }, tabsetId) => {
     const t = manager.reopenTab(tabsetId);
     if (t) broadcast();
     return t;
   });
 
-  // History
-  ipc.handle(
-    'browser:history-record',
-    (_: unknown, entry: { url: string; title?: string; profileId: BrowserProfileId }) => {
-      manager.recordHistory(entry);
-      // History changes don't affect tabsets/profiles/bookmarks, so don't
-      // broadcast a full snapshot — renderers read history on demand.
-    }
-  );
-  ipc.handle('browser:history-clear', (_: unknown, opts?: { profileId?: BrowserProfileId }) => {
-    manager.clearHistory(opts);
-  });
+  // History (no snapshot broadcast — renderers read history on demand)
+  h('browser:history-record', ({ manager }, entry) => manager.recordHistory(entry));
+  h('browser:history-clear', ({ manager }, opts) => manager.clearHistory(opts));
 
   // Bookmarks
-  ipc.handle(
-    'browser:bookmark-add',
-    (_: unknown, input: { url: string; title: string; folder?: string }) => {
-      const b = manager.addBookmark(input);
-      broadcast();
-      return b;
-    }
-  );
-  ipc.handle('browser:bookmark-remove', (_: unknown, id: string) => {
+  h('browser:bookmark-add', ({ manager, broadcast }, input) => {
+    const b = manager.addBookmark(input);
+    broadcast();
+    return b;
+  });
+  h('browser:bookmark-remove', ({ manager, broadcast }, id) => {
     manager.removeBookmark(id);
     broadcast();
   });
 
+  return channels;
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+/**
+ * Build a BrowserManager + its broadcaster over a key/value store. Used to
+ * construct per-tenant browser contexts on the server.
+ */
+export function buildBrowserContext(
+  store: ElectronStoreLike,
+  sendToWindow: SendToWindow,
+  opts?: { newId?: () => string; now?: () => number }
+): BrowserContext {
+  const manager = new BrowserManager({
+    store: makeBrowserStoreAdapter(store),
+    newId: opts?.newId ?? (() => `b-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`),
+    now: opts?.now ?? (() => Date.now()),
+  });
+  return { manager, broadcast: () => sendToWindow('browser:state-changed', manager.getSnapshot()) };
+}
+
+/**
+ * Registers browser:* IPC handlers and returns the manager + cleanup
+ * (single-context Electron app).
+ */
+export function createBrowserManager(options: CreateBrowserManagerOptions): [BrowserManager, () => void] {
+  const { ipc, sendToWindow, store } = options;
+  const ctx = buildBrowserContext(store, sendToWindow, { newId: options.newId, now: options.now });
+  registerBrowserHandlers(ipc, () => ctx);
+
   // Seed broadcast so renderers get current state on startup even before any mutation.
-  // Fire on next tick to avoid broadcasting before the window exists.
-  queueMicrotask(broadcast);
+  queueMicrotask(ctx.broadcast);
 
   const cleanup = () => {
     // No resources to release — all state is in the store. Kept for parity
     // with other manager factories so wiring sites can await it.
   };
-  return [manager, cleanup];
+  return [ctx.manager, cleanup];
 }

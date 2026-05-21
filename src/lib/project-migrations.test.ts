@@ -67,7 +67,7 @@ describe('runMigrations', () => {
         expect(t.phase).toBe('idle');
       }
       // Fall-through means schemaVersion ends up at the current version.
-      expect(store.get('schemaVersion')).toBe(22);
+      expect(store.get('schemaVersion')).toBe(24);
     });
   });
 
@@ -422,14 +422,14 @@ describe('runMigrations', () => {
   });
 
   describe('full ladder and idempotency', () => {
-    it('runs v0 → v22 end-to-end without throwing', () => {
+    it('runs v0 → v23 end-to-end without throwing', () => {
       const store = makeStore({
         // schemaVersion undefined → takes the initial boot path.
         tickets: [{ id: 't1', status: 'in_progress' }],
         projects: [{ id: 'p1', label: 'A', workspaceDir: '/tmp/w' }],
       });
       expect(() => runMigrations(store, makeDeps())).not.toThrow();
-      expect(store.get('schemaVersion')).toBe(22);
+      expect(store.get('schemaVersion')).toBe(24);
     });
 
     it('v21 → v22 maps docker→devbox, drops legacy sandbox keys, strips Project.sandbox', () => {
@@ -445,7 +445,8 @@ describe('runMigrations', () => {
         ],
       });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(22);
+      // v21→v22 → falls through to v22→v23 (sticky profile seeding).
+      expect(store.get('schemaVersion')).toBe(24);
       expect(store.get('defaultProfileName')).toBe('devbox');
       expect(store.get('sandboxBackend')).toBeUndefined();
       expect(store.get('sandboxProfiles')).toBeUndefined();
@@ -479,9 +480,9 @@ describe('runMigrations', () => {
       }
     });
 
-    it('is a no-op on an already-migrated v22 store', () => {
+    it('is a no-op on an already-migrated v23 store', () => {
       const store = makeStore({
-        schemaVersion: 22,
+        schemaVersion: 23,
         tickets: [{ id: 't1', phase: 'idle' }],
         projects: [],
         milestones: [],
@@ -491,7 +492,7 @@ describe('runMigrations', () => {
       const deps = makeDeps();
       runMigrations(store, deps);
 
-      expect(store.get('schemaVersion')).toBe(22);
+      expect(store.get('schemaVersion')).toBe(24);
       expect(deps.writeProjectContextBrief).not.toHaveBeenCalled();
     });
 
@@ -511,8 +512,8 @@ describe('runMigrations', () => {
       for (const t of tickets) {
         expect(t).not.toHaveProperty('supervisorSessionId');
       }
-      // Falls through to v20, which is the current head.
-      expect(store.get('schemaVersion')).toBe(22);
+      // Falls through to v23, the current head.
+      expect(store.get('schemaVersion')).toBe(24);
     });
 
     it('v18 → v19 backfills installedBundles from existing skillSources', () => {
@@ -535,7 +536,7 @@ describe('runMigrations', () => {
       });
       runMigrations(store, makeDeps());
 
-      expect(store.get('schemaVersion')).toBe(22);
+      expect(store.get('schemaVersion')).toBe(24);
       const bundles = store.get('installedBundles') as Record<string, { skillNames: string[] }>;
       expect(Object.keys(bundles).sort()).toEqual([
         'anthropics/skills:creative-skills',
@@ -547,7 +548,7 @@ describe('runMigrations', () => {
 
     it('calls repairProjectRoots on idempotent v-current boot', () => {
       const store = makeStore({
-        schemaVersion: 22,
+        schemaVersion: 23,
         tickets: [],
         projects: [],
         milestones: [],
@@ -556,6 +557,127 @@ describe('runMigrations', () => {
       const repair = vi.fn();
       runMigrations(store, makeDeps({ repairProjectRoots: repair }));
       expect(repair).toHaveBeenCalled();
+    });
+
+    it('v22 → v23 seeds chatProfileName from defaultProfileName', () => {
+      const store = makeStore({
+        schemaVersion: 22,
+        defaultProfileName: 'devbox',
+        tickets: [],
+        projects: [],
+        codeTabs: [],
+      });
+      runMigrations(store, makeDeps());
+      expect(store.get('schemaVersion')).toBe(24);
+      expect(store.get('chatProfileName')).toBe('devbox');
+    });
+
+    it('v22 → v23 falls back to "host" when defaultProfileName is missing', () => {
+      const store = makeStore({
+        schemaVersion: 22,
+        tickets: [],
+        projects: [],
+        codeTabs: [],
+      });
+      runMigrations(store, makeDeps());
+      expect(store.get('chatProfileName')).toBe('host');
+    });
+
+    it('v22 → v23 leaves existing chatProfileName untouched', () => {
+      const store = makeStore({
+        schemaVersion: 22,
+        defaultProfileName: 'host',
+        chatProfileName: 'devbox',
+        tickets: [],
+        projects: [],
+        codeTabs: [],
+      });
+      runMigrations(store, makeDeps());
+      expect(store.get('chatProfileName')).toBe('devbox');
+    });
+
+    it('v22 → v23 seeds codeTab.profileName from project.sandboxProfile when set', () => {
+      const store = makeStore({
+        schemaVersion: 22,
+        defaultProfileName: 'host',
+        tickets: [],
+        projects: [
+          { id: 'p1', label: 'A', sandboxProfile: 'devbox' },
+          { id: 'p2', label: 'B', sandboxProfile: null },
+          { id: 'p3', label: 'C' },
+        ],
+        codeTabs: [
+          { id: 't1', projectId: 'p1', createdAt: 1 },
+          { id: 't2', projectId: 'p2', createdAt: 2 },
+          { id: 't3', projectId: 'p3', createdAt: 3 },
+          { id: 't4', projectId: null, createdAt: 4 },
+        ],
+      });
+      runMigrations(store, makeDeps());
+      const tabs = store.get('codeTabs', []) as Array<Record<string, unknown>>;
+      expect(tabs[0]!.profileName).toBe('devbox'); // inherited
+      expect(tabs[1]!.profileName).toBe('host');   // project's profile is null → default
+      expect(tabs[2]!.profileName).toBe('host');   // no project profile → default
+      expect(tabs[3]!.profileName).toBe('host');   // no project at all → default
+    });
+
+    it('v22 → v23 leaves an already-set codeTab.profileName untouched', () => {
+      const store = makeStore({
+        schemaVersion: 22,
+        defaultProfileName: 'host',
+        tickets: [],
+        projects: [{ id: 'p1', label: 'A', sandboxProfile: 'devbox' }],
+        codeTabs: [
+          { id: 't1', projectId: 'p1', profileName: 'platform', createdAt: 1 },
+        ],
+      });
+      runMigrations(store, makeDeps());
+      const tabs = store.get('codeTabs', []) as Array<Record<string, unknown>>;
+      expect(tabs[0]!.profileName).toBe('platform');
+    });
+
+    it('v23 → v24 re-mints nanoid session ids as UUIDs', () => {
+      const store = makeStore({
+        schemaVersion: 23,
+        tickets: [],
+        projects: [],
+        chatSessionId: 'OYbCE-pm2i13D29_L0zfW',
+        codeTabs: [
+          { id: 't1', projectId: null, sessionId: 'OYbCE-pm2i13D29_L0zfW', createdAt: 1 },
+          { id: 't2', projectId: null, sessionId: 'V1StGXR8_Z5jdHi6B-myT', createdAt: 2 },
+        ],
+      });
+      runMigrations(store, makeDeps({ newSessionId: () => '11111111-2222-4333-8444-555555555555' }));
+
+      expect(store.get('schemaVersion')).toBe(24);
+      expect(store.get('chatSessionId')).toBe('11111111-2222-4333-8444-555555555555');
+      const tabs = store.get('codeTabs', []) as Array<Record<string, unknown>>;
+      expect(tabs[0]!.sessionId).toBe('11111111-2222-4333-8444-555555555555');
+      expect(tabs[1]!.sessionId).toBe('11111111-2222-4333-8444-555555555555');
+    });
+
+    it('v23 → v24 leaves session ids that are already UUIDs untouched', () => {
+      const store = makeStore({
+        schemaVersion: 23,
+        tickets: [],
+        projects: [],
+        chatSessionId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+        codeTabs: [
+          { id: 't1', projectId: null, sessionId: 'ffffffff-0000-4111-8222-333333333333', createdAt: 1 },
+        ],
+      });
+      runMigrations(store, makeDeps({ newSessionId: () => 'SHOULD-NOT-BE-USED' }));
+
+      expect(store.get('chatSessionId')).toBe('aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
+      const tabs = store.get('codeTabs', []) as Array<Record<string, unknown>>;
+      expect(tabs[0]!.sessionId).toBe('ffffffff-0000-4111-8222-333333333333');
+    });
+
+    it('v23 → v24 is a no-op when there are no sessions to migrate', () => {
+      const store = makeStore({ schemaVersion: 23, tickets: [], projects: [] });
+      runMigrations(store, makeDeps());
+      expect(store.get('schemaVersion')).toBe(24);
+      expect(store.get('chatSessionId')).toBeUndefined();
     });
 
     it('v19 → v20 renames legacy "code" to "spaces" and "deck" to "tile"', () => {
@@ -567,7 +689,7 @@ describe('runMigrations', () => {
         codeLayoutMode: 'deck',
       });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(22);
+      expect(store.get('schemaVersion')).toBe(24);
       expect(store.get('layoutMode')).toBe('spaces');
       expect(store.get('codeLayoutMode')).toBe('tile');
     });
@@ -581,7 +703,7 @@ describe('runMigrations', () => {
         codeLayoutMode: 'spaces',
       });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(22);
+      expect(store.get('schemaVersion')).toBe(24);
       expect(store.get('layoutMode')).toBe('spaces');
       expect(store.get('codeLayoutMode')).toBe('tile');
     });
@@ -595,7 +717,7 @@ describe('runMigrations', () => {
         codeLayoutMode: 'focus',
       });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(22);
+      expect(store.get('schemaVersion')).toBe(24);
       expect(store.get('layoutMode')).toBe('projects');
       expect(store.get('codeLayoutMode')).toBe('focus');
     });

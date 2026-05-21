@@ -15,12 +15,14 @@ import { Input } from './components/Input'
 import { ArtifactPortalProvider, type Attachment,MessageList } from './components/MessageList'
 import { QueuedMessages } from './components/QueuedMessages'
 import { GoalPanel, type GoalSnapshot } from './components/GoalPanel'
+import { WakeupPanel, type WakeupSnapshot } from './components/WakeupPanel'
 import { WorkersPanel, type WorkerSummary, type WorkersKillResult } from './components/WorkersPanel'
 import { ResizableDivider } from './components/ResizableDivider'
 import { type SessionItem,SessionList } from './components/SessionList'
 import { Sidebar } from './components/Sidebar'
 import { Tasks, type TaskSummary } from './components/Tasks'
 import { Notifications, type NotificationInfo } from './components/Notifications'
+import { RecapPanel, type RecapInfo } from './components/RecapPanel'
 import { EscalationBanner, type EscalationInfo } from './components/EscalationBanner'
 import { WorkspacePicker } from './components/WorkspacePicker'
 import { OmniAgentsHeaderActionsPortal, OmniAgentsHeaderActionsProvider } from './header-actions'
@@ -95,6 +97,7 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   // starts from its own history-derived state.
   const [liveBashJobs, setLiveBashJobs] = useState<BashJobSummary[] | null>(null)
   const [goalSnapshot, setGoalSnapshot] = useState<GoalSnapshot | null>(null)
+  const [wakeupSnapshot, setWakeupSnapshot] = useState<WakeupSnapshot | null>(null)
   const [workers, setWorkers] = useState<WorkerSummary[]>([])
   // Dismissed IDs for each docked panel. Snapshotted on user submit:
   // every item currently in a terminal state gets added so it disappears
@@ -108,6 +111,9 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   // Notifications accumulate from the agent's `notify` builtin calls;
   // dismissed manually via the docked panel buttons.
   const [notifications, setNotifications] = useState<NotificationInfo[]>([])
+  // Most recent session recap (from /recap or a programmatic trigger).
+  // Single-slot — a new recap replaces the old; dismissible.
+  const [recap, setRecap] = useState<RecapInfo | null>(null)
   // Pending agent escalation — the next user submit becomes the reply.
   const [escalation, setEscalation] = useState<EscalationInfo | null>(null)
   // Element backing the maximized-artifact portal. Callback ref triggers a
@@ -362,6 +368,28 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
         }
         return
       }
+      if (fn === 'ui.recap') {
+        // Session recap pushed from the server (/recap or a programmatic
+        // trigger). Single-slot panel; newest replaces any prior recap.
+        const request_id = String(p?.request_id ?? '')
+        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
+        const currentSessionId = actor.getSnapshot().context.sessionId
+        if (eventSessionId && currentSessionId && currentSessionId !== eventSessionId) {
+          if (request_id) {
+            client.clientResponse(request_id, true, { ack: true }).catch(() => {})
+          }
+          return
+        }
+        const args = p?.args || {}
+        const text = typeof args?.text === 'string' ? args.text : ''
+        if (text) {
+          setRecap({ text, timestamp: Date.now() })
+        }
+        if (request_id) {
+          client.clientResponse(request_id, true, { ack: true }).catch(() => {})
+        }
+        return
+      }
       if (fn === 'ui.goal.update') {
         // Two consumers for the /goal autopilot snapshot:
         //   1. The local GoalPanel chip rendered above the input — every
@@ -392,6 +420,32 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
             ticketId,
             snapshot: (snap === null || snap === undefined) ? null : snap as any,
           })
+        }
+        if (request_id) {
+          client.clientResponse(request_id, true, { ack: true }).catch(() => {})
+        }
+        return
+      }
+      if (fn === 'ui.wakeup.update') {
+        // schedule_wakeup tick loop snapshot. Fired on start, every tick,
+        // and on cancel/exhaustion. snapshot=null means torn down (panel
+        // clears). Source: omni-code server_functions/wakeup.py. No ticket
+        // mapping — just refresh the local WakeupPanel chip.
+        const request_id = String(p?.request_id ?? '')
+        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined
+        const currentSessionId = actor.getSnapshot().context.sessionId
+        if (eventSessionId && currentSessionId && currentSessionId !== eventSessionId) {
+          if (request_id) {
+            client.clientResponse(request_id, true, { ack: true }).catch(() => {})
+          }
+          return
+        }
+        const args = p?.args || {}
+        const snap = args?.snapshot
+        if (snap === null || snap === undefined) {
+          setWakeupSnapshot(null)
+        } else if (typeof snap === 'object') {
+          setWakeupSnapshot(snap as WakeupSnapshot)
         }
         if (request_id) {
           client.clientResponse(request_id, true, { ack: true }).catch(() => {})
@@ -469,19 +523,20 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   // Live override (from ui.bash_jobs.update broadcasts and bash_jobs.* server
   // calls) takes precedence over history-derived state when present. Mirror
   // the Tasks behavior: while a run is active keep everything visible (minus
-  // dismissed exits), but once idle drop exited jobs so the panel hides
-  // itself.
+  // dismissed exits), and once idle drop successful exits but keep failures
+  // (non-zero/null exit_code) visible until the user dismisses them.
   const bashJobs = useMemo(() => {
     const source = liveBashJobs ?? derivedBashJobs
     const live = source.filter(j => !(!j.running && dismissedJobIds.has(j.job_id)))
-    return runActive ? live : live.filter(j => j.running)
+    return runActive ? live : live.filter(j => j.running || j.exit_code !== 0)
   }, [liveBashJobs, derivedBashJobs, runActive, dismissedJobIds])
 
-  // Same shape for workers: drop dismissed exits, then hide all exits
-  // when idle so the dock disappears between runs.
+  // Same shape for workers: drop dismissed exits, then idle-hide only
+  // successful completions so failures (error/cancelled) stay visible
+  // until the user dismisses them.
   const visibleWorkers = useMemo(() => {
     const live = workers.filter(w => !(w.status !== 'running' && dismissedWorkerIds.has(w.worker_id)))
-    return runActive ? live : live.filter(w => w.status === 'running')
+    return runActive ? live : live.filter(w => w.status !== 'completed')
   }, [workers, runActive, dismissedWorkerIds])
 
   // Clear the live override on session change so the next session starts
@@ -561,15 +616,17 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   // moved below handleSubmit
 
   const handleSubmit = useCallback(async (text: string, files?: File[], runOverrides?: import('@/shared/types').RunOverrides): Promise<{ runId: string } | undefined> => {
-    // Dismiss currently-terminal items from each docked panel so the
-    // next run starts with a clean dock. Items spawned during the new
-    // run aren't in the set yet and will stay visible until the user's
-    // next submit. Fires for slash commands too — a slash is still a
-    // user-initiated step boundary.
+    // Dismiss successfully-completed items from each docked panel so the
+    // next run starts with a clean dock. Failures (worker error/cancelled,
+    // non-zero/null bash exit) stick until the user dismisses them so a
+    // quietly-failed background task isn't lost behind the next prompt.
+    // Items spawned during the new run aren't in the set yet and will stay
+    // visible until the user's next submit. Fires for slash commands too
+    // — a slash is still a user-initiated step boundary.
     setDismissedWorkerIds(prev => {
       const next = new Set(prev)
       for (const w of workers) {
-        if (w.status !== 'running') next.add(w.worker_id)
+        if (w.status === 'completed') next.add(w.worker_id)
       }
       return next
     })
@@ -577,7 +634,7 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
       const next = new Set(prev)
       const source = liveBashJobs ?? derivedBashJobs
       for (const j of source) {
-        if (!j.running) next.add(j.job_id)
+        if (!j.running && j.exit_code === 0) next.add(j.job_id)
       }
       return next
     })
@@ -676,6 +733,19 @@ args = { value: parsed }
           }
         }
         const result = await client.serverCall(name, args, sessionId)
+        // /recap renders in the docked RecapPanel via the ui.recap
+        // broadcast — don't also dump it into the chat transcript. The
+        // return value carries the text as a fallback if the broadcast
+        // was dropped.
+        if (name.toLowerCase() === 'recap') {
+          const text = typeof (result as { text?: unknown })?.text === 'string'
+            ? (result as { text: string }).text
+            : ''
+          if (text) {
+            setRecap({ text, timestamp: Date.now() })
+          }
+          return
+        }
         const formatted = JSON.stringify(result, null, 2)
         appendResponse(formatted === 'null' ? 'Done.' : formatted)
         return
@@ -1175,6 +1245,21 @@ setWorkspacePath(res.path)
     } else {
       setGoalSnapshot(null)
     }
+    // Seed the wakeup panel from server state. Same rationale as goal —
+    // picks up a schedule that was already running before we attached.
+    // wakeup.status may not be registered on every agent; silently
+    // ignore so the panel stays empty.
+    if (resolvedId) {
+      try {
+        const res = await client.serverCall('wakeup.status', {}, resolvedId) as { snapshot?: unknown } | undefined
+        const snap = res?.snapshot
+        setWakeupSnapshot(snap && typeof snap === 'object' ? snap as WakeupSnapshot : null)
+      } catch {
+        setWakeupSnapshot(null)
+      }
+    } else {
+      setWakeupSnapshot(null)
+    }
     // Seed the workers panel from server state. Same rationale as goal:
     // catches the case where workers were spawned earlier and are still
     // running when we attach.
@@ -1391,6 +1476,7 @@ args.text = text
                 </AnimatePresence>
               </div>
               <GoalPanel snapshot={goalSnapshot} />
+              <WakeupPanel snapshot={wakeupSnapshot} />
               <Tasks tasks={tasks} />
               <WorkersPanel workers={visibleWorkers} onKill={handleWorkerKill} />
               <BashJobs
@@ -1417,6 +1503,7 @@ args.text = text
                 onDismiss={(id) => setNotifications((prev) => prev.filter((n) => n.id !== id))}
                 onDismissAll={() => setNotifications([])}
               />
+              <RecapPanel recap={recap} onDismiss={() => setRecap(null)} />
               <EscalationBanner escalation={escalation} />
               {stagedContext.length > 0 && (
                 // MCP-Apps staged context chips. Each ``ui/update-model-context``

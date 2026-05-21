@@ -36,6 +36,15 @@ type UseAutoLaunchOptions = {
    * non-null when launching (pre-mint upstream).
    */
   sessionId?: string;
+  /**
+   * Docker container id from a previous launch. Forwarded to ``omni serve``
+   * so the SDK can warm-reattach via ``client.resume(state)``. Stale ids
+   * are safe — the SDK falls back to a fresh container + snapshot
+   * rehydrate. The renderer reads back the resolved id from the readiness
+   * payload (which may differ in the rehydrate / fresh tiers) and persists
+   * it for the next launch.
+   */
+  containerId?: string;
   /** Logger tag. */
   logLabel?: string;
 };
@@ -62,6 +71,8 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
   profileNameOverrideRef.current = opts.profileNameOverride;
   const sessionIdRef = useRef(opts.sessionId);
   sessionIdRef.current = opts.sessionId;
+  const containerIdRef = useRef(opts.containerId);
+  containerIdRef.current = opts.containerId;
   const storeRef = useRef(store);
   storeRef.current = store;
 
@@ -151,6 +162,7 @@ return;
             ? { profileNameOverride: profileNameOverrideRef.current }
             : {}),
           ...(sessionIdRef.current ? { sessionId: sessionIdRef.current } : {}),
+          ...(containerIdRef.current ? { containerId: containerIdRef.current } : {}),
         });
         sendBack({ type: 'CONFIG_OK' });
       })();

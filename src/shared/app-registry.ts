@@ -74,6 +74,11 @@ export const BUILTIN_APPS: AppDescriptor[] = [
     label: 'Terminal',
     icon: 'WindowConsole20Regular',
     kind: 'builtin-terminal',
+    // Terminals route through `omni serve`'s `SessionPtyBackend`, so the
+    // shell needs a running agent process. We keep the app `scope: 'always'`
+    // because the renderer shows an actionable "Open a code session"
+    // empty state when no process is attached (the dock icon staying
+    // visible communicates that the feature exists).
     scope: 'always',
     builtin: true,
     order: 40,

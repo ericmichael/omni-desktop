@@ -1,26 +1,23 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { DatabaseSync } from 'node:sqlite';
-import type { ProjectsRepo } from 'omni-projects-db';
-import { milestoneId } from 'omni-projects-db';
-import type { MilestoneRow } from 'omni-projects-db';
+import { type IProjectsRepo, milestoneId, nowTimestamp } from 'omni-projects-db';
 import { z } from 'zod';
 
 const json = (data: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data) }] });
 const err = (message: string) => ({ content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }], isError: true as const });
 
-export function registerMilestoneTools(server: McpServer, db: DatabaseSync, repo: ProjectsRepo): void {
+export function registerMilestoneTools(server: McpServer, repo: IProjectsRepo): void {
   server.tool(
     'list_milestones',
     'List all milestones for a project.',
     { project_id: z.string().describe('The project ID to list milestones for') },
     async ({ project_id }) => {
-      const exists = repo.getProject(project_id);
+      const exists = await repo.getProject(project_id);
       if (!exists) return err(`Project not found: ${project_id}`);
 
-      const milestones = repo.listMilestonesByProject(project_id);
+      const milestones = await repo.listMilestonesByProject(project_id);
 
       return json({
-        milestones: milestones.map(m => ({
+        milestones: milestones.map((m) => ({
           id: m.id,
           title: m.title,
           description: m.description,
@@ -48,7 +45,7 @@ export function registerMilestoneTools(server: McpServer, db: DatabaseSync, repo
       pinned: z.boolean().optional().describe('Pin the milestone to Home on creation.'),
     },
     async ({ project_id, title, description, branch, due_date, pinned }) => {
-      const exists = repo.getProject(project_id);
+      const exists = await repo.getProject(project_id);
       if (!exists) return err(`Project not found: ${project_id}`);
 
       if (due_date) {
@@ -57,19 +54,21 @@ export function registerMilestoneTools(server: McpServer, db: DatabaseSync, repo
       }
 
       const id = milestoneId();
-      db.prepare(`
-        INSERT INTO milestones (id, project_id, title, description, branch, due_date, pinned_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(
+      const now = nowTimestamp();
+      await repo.upsertMilestone({
         id,
         project_id,
         title,
-        description ?? '',
-        branch ?? null,
-        due_date ?? null,
-        pinned ? new Date().toISOString() : null
-      );
-      repo.bumpChangeSeq();
+        description: description ?? '',
+        branch: branch ?? null,
+        brief: null,
+        status: 'active',
+        due_date: due_date ?? null,
+        completed_at: null,
+        pinned_at: pinned ? now : null,
+        created_at: now,
+        updated_at: now,
+      });
 
       return json({ id, title });
     }
@@ -89,53 +88,41 @@ export function registerMilestoneTools(server: McpServer, db: DatabaseSync, repo
       pinned: z.boolean().optional().describe('true pins the milestone to Home, false unpins it.'),
     },
     async ({ milestone_id, title, description, branch, status, brief, due_date, pinned }) => {
-      const existing = repo.getMilestone(milestone_id);
+      const existing = await repo.getMilestone(milestone_id);
       if (!existing) return err(`Milestone not found: ${milestone_id}`);
 
-      const sets: string[] = [];
-      const params: unknown[] = [];
-
-      if (title !== undefined) { sets.push('title = ?'); params.push(title); }
-      if (description !== undefined) { sets.push('description = ?'); params.push(description); }
-      if (branch !== undefined) { sets.push('branch = ?'); params.push(branch || null); }
-      if (brief !== undefined) { sets.push('brief = ?'); params.push(brief); }
+      const next = { ...existing };
+      if (title !== undefined) next.title = title;
+      if (description !== undefined) next.description = description;
+      if (branch !== undefined) next.branch = branch || null;
+      if (brief !== undefined) next.brief = brief;
 
       if (status !== undefined) {
-        sets.push('status = ?');
-        params.push(status);
+        next.status = status;
         if (status === 'completed' && existing.status !== 'completed') {
-          sets.push("completed_at = datetime('now')");
+          next.completed_at = nowTimestamp();
         }
         if (status !== 'completed') {
-          sets.push('completed_at = NULL');
+          next.completed_at = null;
         }
       }
 
       if (due_date !== undefined) {
         if (due_date === '') {
-          sets.push('due_date = NULL');
+          next.due_date = null;
         } else {
           const parsed = Date.parse(due_date);
           if (Number.isNaN(parsed)) return err('Invalid due_date. Use an ISO date like 2026-04-30.');
-          sets.push('due_date = ?');
-          params.push(due_date);
+          next.due_date = due_date;
         }
       }
 
       if (pinned !== undefined) {
-        if (pinned) {
-          sets.push("pinned_at = datetime('now')");
-        } else {
-          sets.push('pinned_at = NULL');
-        }
+        next.pinned_at = pinned ? nowTimestamp() : null;
       }
 
-      if (sets.length === 0) return json({ ok: true });
-
-      sets.push("updated_at = datetime('now')");
-      params.push(milestone_id);
-      db.prepare(`UPDATE milestones SET ${sets.join(', ')} WHERE id = ?`).run(...params);
-      repo.bumpChangeSeq();
+      next.updated_at = nowTimestamp();
+      await repo.upsertMilestone(next);
 
       return json({ ok: true });
     }
@@ -146,7 +133,7 @@ export function registerMilestoneTools(server: McpServer, db: DatabaseSync, repo
     'Read a milestone brief — the deliverable-focused document describing goals and scope.',
     { milestone_id: z.string().describe('The milestone ID to read the brief for') },
     async ({ milestone_id }) => {
-      const existing = repo.getMilestone(milestone_id);
+      const existing = await repo.getMilestone(milestone_id);
       if (!existing) return err(`Milestone not found: ${milestone_id}`);
 
       return json({ brief: existing.brief ?? '' });

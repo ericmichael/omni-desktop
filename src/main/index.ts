@@ -116,7 +116,7 @@ if (process.env.NODE_ENV === 'development' || process.env.OMNI_DEBUG_PORT) {
 
 const OMNI_CONFIG_DIR = getOmniConfigDir();
 const store = getStore();
-const { repo } = openProjectDb();
+const { repo, asyncRepo } = openProjectDb();
 
 // One-time migration: move project data from electron-store JSON to SQLite.
 // This is idempotent — it skips if the DB already has projects.
@@ -196,11 +196,6 @@ try {
 const main = new MainProcessManager({ store });
 let isShuttingDown = false;
 
-// Create ConsoleManager for terminal functionality
-const [, cleanupConsole] = createConsoleManager({
-  ipc: main.ipc,
-  sendToWindow: main.sendToWindow,
-});
 // Forward-reference for the BrowserManager — created further down, but
 // AppControlManager needs its popup callback at construction time so
 // `setWindowOpenHandler` can route `window.open` into `BrowserManager.createTab`.
@@ -234,6 +229,16 @@ const [processManager, cleanupProcessManager] = createProcessManager({
     projects: repo.listProjects().map(rowToProject),
   }),
 });
+
+// Create ConsoleManager — proxies terminal:* IPC into omni serve's
+// WebSocket. Constructed after ProcessManager because it needs the
+// agent process status to find the right WS URL per tab.
+const [, cleanupConsole] = createConsoleManager({
+  ipc: main.ipc,
+  sendToWindow: main.sendToWindow,
+  processManager,
+});
+
 registerSnapshotHandlers(main.ipc);
 
 // Startup snapshot GC. Code tabs cascade-delete on remove; this sweep
@@ -262,7 +267,9 @@ const [projectManager, cleanupProject] = createProjectManager({
   store,
   processManager,
   appControlManager,
-  repo,
+  // Async repo backs the cached projection; sync repo drives the change-watcher.
+  repo: asyncRepo,
+  changeSeqRepo: repo,
 });
 // Wire up the store snapshot provider so MainProcessManager serves project data from SQLite
 main.getStoreSnapshot = () => projectManager.getStoreSnapshot();
@@ -573,8 +580,8 @@ registerUtilHandlers(main.ipc, {
   fetchFn: ((input, init) => net.fetch(input as string, init)) as typeof globalThis.fetch,
   launcherVersion: app.getVersion(),
 });
-registerSkillsHandlers(main.ipc, OMNI_CONFIG_DIR, store);
-registerMigrationHandlers(main.ipc, {
+registerSkillsHandlers(main.ipc, () => OMNI_CONFIG_DIR, () => store);
+registerMigrationHandlers(main.ipc, () => ({
   get: () => store.get('pagesMigration') ?? null,
   set: (value) => {
     if (value === null) {
@@ -587,7 +594,7 @@ registerMigrationHandlers(main.ipc, {
     // dedicated event channel.
     main.getWindow()?.webContents.send('store:changed', store.store);
   },
-});
+}));
 
 //#endregion
 

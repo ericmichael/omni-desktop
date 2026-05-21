@@ -5,9 +5,19 @@ export { migrations } from './schema.js';
 export type { Migration } from './schema.js';
 export { tx } from './tx.js';
 
-// Repository
+// Repository — sync SQLite core + async backend-agnostic contract/adapter
 export { ProjectsRepo } from './repo.js';
-export type { ColumnSyncInput, ColumnSyncResult, TicketRemap } from './repo.js';
+export { SqliteProjectsRepo } from './sqlite-repo.js';
+export type { ColumnSyncInput, ColumnSyncResult, IProjectsRepo, TicketRemap } from './repo-interface.js';
+
+// Postgres backend (multi-tenant cloud). Importing these pulls in the `pg`
+// driver, so consumers load them only when OMNI_DATABASE_URL is set.
+export { PgProjectsRepo } from './pg/pg-repo.js';
+export { createPgListener, createPgPool, runPgMigrations } from './pg/connection.js';
+export { loadTenantSettings, saveTenantSettings } from './pg/settings.js';
+export type { Pool as PgPool } from './pg/connection.js';
+export { pgMigrations } from './pg/schema.js';
+export type { PgMigration } from './pg/schema.js';
 
 // Types
 export type {
@@ -34,7 +44,7 @@ export {
 } from './ids.js';
 
 // Timestamps
-export { toIso, fromIso } from './timestamps.js';
+export { toIso, fromIso, nowTimestamp } from './timestamps.js';
 
 // Defaults
 export {

@@ -207,21 +207,33 @@ export function registerUtilHandlers(ipc: IIpcListener, opts: UtilHandlerOptions
 }
 
 /**
- * Register `skills:*` handlers. Skills live under the config dir.
+ * Register `skills:*` handlers. Skills live under a config dir (the
+ * `<dir>/skills` + `<dir>/skills-disabled` folders) with source/bundle metadata
+ * in the store. Both are resolved per-invoke from the event: `() => x` for the
+ * single-tenant Electron app, or per-tenant on the server (each tenant gets its
+ * own skills directory + settings store).
  */
-export function registerSkillsHandlers(ipc: IIpcListener, configDir: string, store: SkillStore): void {
-  ipc.handle('skills:list', () => listSkills(configDir, store));
-  ipc.handle('skills:install', (_: unknown, filePath: string) => installSkillFromFile(configDir, filePath, store));
-  ipc.handle('skills:uninstall', (_: unknown, name: string) => uninstallSkill(configDir, name, store));
-  ipc.handle('skills:set-enabled', (_: unknown, name: string, enabled: boolean) =>
-    setSkillEnabled(configDir, name, enabled)
+export function registerSkillsHandlers(
+  ipc: IIpcListener,
+  resolveConfigDir: (event: unknown) => string,
+  resolveStore: (event: unknown) => SkillStore
+): void {
+  ipc.handle('skills:list', (e: unknown) => listSkills(resolveConfigDir(e), resolveStore(e)));
+  ipc.handle('skills:install', (e: unknown, filePath: string) =>
+    installSkillFromFile(resolveConfigDir(e), filePath, resolveStore(e))
+  );
+  ipc.handle('skills:uninstall', (e: unknown, name: string) =>
+    uninstallSkill(resolveConfigDir(e), name, resolveStore(e))
+  );
+  ipc.handle('skills:set-enabled', (e: unknown, name: string, enabled: boolean) =>
+    setSkillEnabled(resolveConfigDir(e), name, enabled)
   );
   ipc.handle('skills:fetch-marketplace', (_: unknown, repo: string) => fetchMarketplace(repo));
-  ipc.handle('skills:install-marketplace-plugin', (_: unknown, repo: string, name: string) =>
-    installMarketplacePlugin(configDir, repo, name, store)
+  ipc.handle('skills:install-marketplace-plugin', (e: unknown, repo: string, name: string) =>
+    installMarketplacePlugin(resolveConfigDir(e), repo, name, resolveStore(e))
   );
-  ipc.handle('skills:update-marketplace-plugin', (_: unknown, repo: string, name: string) =>
-    updateMarketplacePlugin(configDir, repo, name, store)
+  ipc.handle('skills:update-marketplace-plugin', (e: unknown, repo: string, name: string) =>
+    updateMarketplacePlugin(resolveConfigDir(e), repo, name, resolveStore(e))
   );
-  ipc.handle('skills:check-bundle-updates', () => checkBundleUpdates(store));
+  ipc.handle('skills:check-bundle-updates', (e: unknown) => checkBundleUpdates(resolveStore(e)));
 }

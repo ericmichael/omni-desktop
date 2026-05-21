@@ -1158,7 +1158,6 @@ type SidecarBodyProps = {
   app: AppDescriptor;
   originTabId: CodeTabId;
   sandboxUrls: { services?: Record<string, string> } | undefined;
-  terminalCwd?: string;
   previewUrl?: string;
   onPreviewUrlChange?: (url: string) => void;
   isGlass?: boolean;
@@ -1176,7 +1175,6 @@ const SidecarBody = memo(
     app,
     originTabId,
     sandboxUrls,
-    terminalCwd,
     previewUrl,
     onPreviewUrlChange,
     isGlass,
@@ -1208,7 +1206,7 @@ const SidecarBody = memo(
         />
       );
     } else if (app.kind === 'builtin-terminal') {
-      body = <ConsoleStarted tabId={originTabId} cwd={terminalCwd} />;
+      body = <ConsoleStarted tabId={originTabId} />;
     } else if (app.kind === 'builtin-code') {
       body = sandboxUrls?.services?.['code_server'] ? (
         <Webview src={sandboxUrls.services['code_server']} showUnavailable={false} registry={registryProps} />
@@ -1250,7 +1248,6 @@ const SidecarColumn = memo(
     originTab,
     app,
     sandboxUrls,
-    terminalCwd,
     previewUrl,
     onPreviewUrlChange,
     onClose,
@@ -1261,7 +1258,6 @@ const SidecarColumn = memo(
     originTab: CodeTab;
     app: AppDescriptor;
     sandboxUrls: { services?: Record<string, string> } | undefined;
-    terminalCwd?: string;
     previewUrl?: string;
     onPreviewUrlChange?: (url: string) => void;
     onClose: () => void;
@@ -1325,7 +1321,6 @@ const SidecarColumn = memo(
                 app={mountedApp}
                 originTabId={originTab.id}
                 sandboxUrls={sandboxUrls}
-                terminalCwd={terminalCwd}
                 previewUrl={previewUrl}
                 onPreviewUrlChange={onPreviewUrlChange}
                 isGlass={isGlass}
@@ -2135,8 +2130,6 @@ export const CodeDeck = memo(() => {
                     tabStatus && (tabStatus.type === 'running' || tabStatus.type === 'connecting')
                       ? tabStatus.data
                       : undefined;
-                  const tabTerminalCwd =
-                    tab.workspaceDir ?? (tab.projectId ? projectMap.get(tab.projectId)?.workspaceDir : undefined);
                   return (
                     <Fragment key={tab.id}>
                       <div style={{ width: getColumnWidth(tab.id) }} className={styles.deckColumnWrap}>
@@ -2211,7 +2204,6 @@ export const CodeDeck = memo(() => {
                             originTab={tab}
                             app={mountedSidecarApp}
                             sandboxUrls={tabSandboxUrls}
-                            terminalCwd={tabTerminalCwd}
                             previewUrl={previewUrls[tab.id]}
                             onPreviewUrlChange={(url) => handlePreviewUrlChange(tab.id, url)}
                             onClose={() => handleActiveAppChange(tab.id, 'chat')}

@@ -10,6 +10,7 @@ import { Button } from '@/renderer/ds';
 import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
+import { useSandboxActivityPing } from '@/renderer/hooks/use-sandbox-activity-ping';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { buildProfileLabel } from '@/renderer/omniagents-ui/sandbox-label';
 import { configApi } from '@/renderer/services/config';
@@ -88,7 +89,6 @@ const CodeRunningView = memo(
     dockTargetId,
     isGlass,
     tabId,
-    terminalCwd,
     agentWorkspaceDir,
     sidecarMode,
     ticketId,
@@ -113,7 +113,6 @@ const CodeRunningView = memo(
     dockTargetId?: string;
     isGlass?: boolean;
     tabId?: string;
-    terminalCwd?: string;
     agentWorkspaceDir?: string;
     sidecarMode?: boolean;
     ticketId?: TicketId;
@@ -163,7 +162,6 @@ const CodeRunningView = memo(
             dockTargetId={dockTargetId}
             isGlass={isGlass}
             tabId={tabId}
-            terminalCwd={terminalCwd}
             agentWorkspaceDir={agentWorkspaceDir}
             sidecarMode={sidecarMode}
             ticketId={ticketId}
@@ -222,12 +220,22 @@ export const CodeTabContent = memo(
     }, [tab.projectId, linkedWorkspaceDir]);
     const workspaceDir = linkedWorkspaceDir ?? resolvedProjectDir;
 
-    // Per-launch profile override held in tab-local state (not persisted).
-    // Resolution chain: override → per-project ``sandboxProfile`` → user
-    // default. Drives the label and the host-vs-container artifact path.
-    const [profileOverride, setProfileOverride] = useState<string | undefined>(undefined);
+    // Sticky profile binding persisted on the tab. The migration backfills
+    // existing installs; ``codeApi.addTab*`` seeds new tabs from the same
+    // resolution chain (per-project ``sandboxProfile`` → user default) so we
+    // don't drift if the user changes defaults later. The picker writes
+    // through ``codeApi.setTabProfile`` and the new value flows back via
+    // ``useStore``. The ``project?.sandboxProfile`` / ``store.defaultProfileName``
+    // fallbacks below only kick in for tabs predating the migration that
+    // somehow got loaded without a stored profileName (defensive).
     const profileName =
-      profileOverride ?? project?.sandboxProfile ?? store.defaultProfileName ?? 'host';
+      tab.profileName ?? project?.sandboxProfile ?? store.defaultProfileName ?? 'host';
+    const handleProfileChange = useCallback(
+      (value: string) => {
+        void codeApi.setTabProfile(tab.id, value);
+      },
+      [tab.id]
+    );
     const sandboxLabel = useMemo(() => buildProfileLabel(profileName), [profileName]);
 
     const [isEnterprise, setIsEnterprise] = useState(false);
@@ -259,12 +267,25 @@ export const CodeTabContent = memo(
 
     const { phase, retry } = useCodeAutoLaunch(tab.id, workspaceDir, {
       ...(tab.projectId ? { projectId: tab.projectId } : {}),
-      ...(profileOverride ? { profileNameOverride: profileOverride } : {}),
+      profileNameOverride: profileName,
       ...(tab.sessionId ? { sessionId: tab.sessionId } : {}),
+      ...(tab.containerId ? { containerId: tab.containerId } : {}),
     });
+    useSandboxActivityPing(tab.id);
 
     const allStatuses = useStore($codeTabStatuses);
     const sandboxStatus = allStatuses[tab.id];
+
+    // Capture the readiness payload's container_id whenever this tab's omni
+    // serve reports running. May differ from what we sent on this launch if
+    // the SDK ended up creating a fresh container (rehydrate / fresh tiers),
+    // which is exactly what we want to persist for the next start.
+    useEffect(() => {
+      if (sandboxStatus?.type !== 'running') return;
+      const next = sandboxStatus.data.containerId;
+      if ((tab.containerId ?? undefined) === next) return;
+      void codeApi.setTabContainerId(tab.id, next);
+    }, [sandboxStatus, tab.id, tab.containerId]);
 
     // Only mount the iframe on ``running``. ``connecting`` arrives the
     // moment omni-serve emits its JSON readiness line — that's before
@@ -373,14 +394,13 @@ export const CodeTabContent = memo(
             sandboxLabel={sandboxLabel}
             sandboxOptions={sandboxOptions}
             currentSandboxProfile={profileName}
-            onSandboxChange={setProfileOverride}
+            onSandboxChange={handleProfileChange}
             onClientToolCall={handleClientToolCall}
             previewUrl={previewUrl}
             onPreviewUrlChange={onPreviewUrlChange}
             dockTargetId={dockTargetId}
             isGlass={isGlass}
             tabId={tab.id}
-            terminalCwd={workspaceDir ?? undefined}
             agentWorkspaceDir={agentWorkspaceDir}
             sidecarMode={sidecarMode}
             ticketId={tab.ticketId as TicketId | undefined}

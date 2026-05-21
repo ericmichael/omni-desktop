@@ -236,4 +236,18 @@ ALTER TABLE projects DROP COLUMN source;
 UPDATE tickets SET pr_review = NULL, pr_merged_at = NULL;
 `,
   },
+  {
+    version: 8,
+    sql: `
+-- Page content moves from disk files into the DB (one model across SQLite +
+-- Postgres; no per-replica filesystem). Markdown docs live here as the source
+-- of truth; notebook (.py) bodies stay on disk (marimo executes them).
+-- Existing on-disk doc content is migrated lazily on first read.
+CREATE TABLE page_content (
+  page_id    TEXT PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,
+  body       TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`,
+  },
 ];

@@ -28,11 +28,12 @@ export interface MigrationStoreAdapter {
  */
 export function registerMigrationHandlers(
   ipc: IIpcListener,
-  store: MigrationStoreAdapter
+  resolve: (event: unknown) => MigrationStoreAdapter
 ): void {
-  ipc.handle('migration:get-pages-state', () => store.get());
+  ipc.handle('migration:get-pages-state', (e: unknown) => resolve(e).get());
 
-  ipc.handle('migration:acknowledge-pages', () => {
+  ipc.handle('migration:acknowledge-pages', (e: unknown) => {
+    const store = resolve(e);
     const state = store.get();
     if (!state) {
       return;
@@ -40,7 +41,8 @@ export function registerMigrationHandlers(
     store.set({ ...state, acknowledged: true });
   });
 
-  ipc.handle('migration:cleanup-legacy-pages', () => {
+  ipc.handle('migration:cleanup-legacy-pages', (e: unknown) => {
+    const store = resolve(e);
     const state = store.get();
     if (!state) {
       return { removed: 0 };

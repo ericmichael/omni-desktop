@@ -9,6 +9,7 @@
  * and the live main-process path can wire real fs writes.
  */
 import { upgradeLegacyInbox } from '@/lib/inbox-migration';
+import { uuidv4 } from '@/lib/uuid';
 import type {
   ColumnId,
   InboxItem,
@@ -37,6 +38,12 @@ export interface IMigrationStore {
 export interface MigrationDeps {
   /** Mint an id (nanoid in production, deterministic in tests). */
   newId: () => string;
+  /**
+   * Mint a session id — must be a real UUID, since `omni serve`'s docker
+   * resume path coerces it to `uuid.UUID`. Defaults to {@link uuidv4};
+   * tests may override for determinism.
+   */
+  newSessionId?: () => string;
   /** Current wall-clock time (Date.now in production, frozen in tests). */
   now: () => number;
   /**
@@ -548,11 +555,77 @@ export function runMigrations(store: IMigrationStore, deps: MigrationDeps): void
     }
 
     store.set('schemaVersion', 22);
+    // Fall through to v22→v23.
+  }
+
+  // v22 → v23: persist sticky profile bindings so a later change to
+  // `defaultProfileName` doesn't silently drift existing chat / code tabs
+  // into a different sandbox. Seeds chatProfileName from the global default
+  // and each codeTab.profileName from the resolution chain used at launch
+  // time (per-project sandboxProfile → default).
+  if ((store.get('schemaVersion', 0) as number) === 22) {
+    const defaultProfile = (store.get('defaultProfileName') as string | undefined) ?? 'host';
+
+    if (store.get('chatProfileName') == null) {
+      store.set('chatProfileName', defaultProfile);
+    }
+
+    const projects = (store.get('projects', []) as Array<Record<string, unknown>>) ?? [];
+    const projectProfile = new Map<string, string>();
+    for (const p of projects) {
+      const id = p.id as string | undefined;
+      const profile = p.sandboxProfile as string | null | undefined;
+      if (id && typeof profile === 'string' && profile.length > 0) {
+        projectProfile.set(id, profile);
+      }
+    }
+
+    const codeTabs = (store.get('codeTabs', []) as Array<Record<string, unknown>>) ?? [];
+    if (codeTabs.length > 0) {
+      const migrated = codeTabs.map((tab) => {
+        if (typeof tab.profileName === 'string') return tab;
+        const projectId = tab.projectId as string | null | undefined;
+        const inherited = projectId ? projectProfile.get(projectId) : undefined;
+        return { ...tab, profileName: inherited ?? defaultProfile };
+      });
+      store.set('codeTabs', migrated as never);
+    }
+
+    store.set('schemaVersion', 23);
+    // Fall through to v23→v24.
+  }
+
+  // v23 → v24: re-mint non-UUID session ids. Early builds minted chat/code
+  // session ids with nanoid, but `omni serve`'s docker resume path coerces the
+  // id to a `uuid.UUID` and throws on a nanoid ("badly formed hexadecimal UUID
+  // string"). Replace any id that isn't a UUID so resume works. The old
+  // workspace snapshot is keyed by the old id, so the tab effectively starts
+  // fresh — acceptable, since those sessions could never resume anyway.
+  if (version === 23 || (store.get('schemaVersion', 0) as number) === 23) {
+    const newSessionId = deps.newSessionId ?? uuidv4;
+    const isUuid = (v: unknown): boolean =>
+      typeof v === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+
+    const chatSessionId = store.get('chatSessionId');
+    if (chatSessionId !== undefined && !isUuid(chatSessionId)) {
+      store.set('chatSessionId', newSessionId());
+    }
+
+    const codeTabs = (store.get('codeTabs', []) as Array<Record<string, unknown>>) ?? [];
+    if (codeTabs.length > 0) {
+      const migrated = codeTabs.map((tab) =>
+        isUuid(tab.sessionId) ? tab : { ...tab, sessionId: newSessionId() }
+      );
+      store.set('codeTabs', migrated as never);
+    }
+
+    store.set('schemaVersion', 24);
     deps.repairProjectRoots?.();
     return;
   }
 
-  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 22) {
+  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 24) {
     deps.repairProjectRoots?.();
     return;
   }

@@ -49,18 +49,17 @@ type CodeWorkspaceLayoutProps = {
    */
   tabId?: string;
   /**
-   * cwd for terminals opened from this layout's dock. When the tab is bound to
-   * a ticket with a worktree, pass the worktree path so shells land there
-   * instead of the global project workspace. Always a host path — the local
-   * terminal runs on the host even when the agent runs in a sandbox.
-   */
-  terminalCwd?: string;
-  /**
-   * What the in-sandbox agent should treat as its workspace root. For host
-   * profiles this matches ``terminalCwd``; for containerized profiles it's
-   * the in-container path (``/workspace/<mountName>``). Plumbed to
-   * ``OmniAgentsApp.workspaceDir`` so ``session.variables.workspace_root``
-   * is valid inside whatever environment the agent's tools execute in.
+   * What the in-sandbox agent should treat as its workspace root.
+   * For host profiles this is the host path; for containerized
+   * profiles it's the in-container path (``/workspace/<mountName>``).
+   * Plumbed to ``OmniAgentsApp.workspaceDir`` so
+   * ``session.variables.workspace_root`` is valid inside whatever
+   * environment the agent's tools execute in.
+   *
+   * Terminals do NOT use this — they route through `omni serve`'s
+   * `SessionPtyBackend` and land at the sandbox profile's
+   * `terminal.cwd`. The renderer has no business choosing a terminal
+   * cwd.
    */
   agentWorkspaceDir?: string;
   /**
@@ -293,7 +292,7 @@ const SurfaceFrame = memo(({ app, isGlass, children }: { app: AppDescriptor; isG
 });
 SurfaceFrame.displayName = 'SurfaceFrame';
 
-const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass, tabId, terminalCwd }: { app: AppDescriptor; src?: string; onUrlChange?: (url: string) => void; isGlass?: boolean; tabId?: string; terminalCwd?: string }) => {
+const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass, tabId }: { app: AppDescriptor; src?: string; onUrlChange?: (url: string) => void; isGlass?: boolean; tabId?: string }) => {
   const styles = useStyles();
   const registryProps = useMemo(() => makeRegistryProps(app, tabId), [app, tabId]);
 
@@ -325,7 +324,7 @@ const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass, tabId, terminalCw
     return (
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
         <SurfaceFrame app={app} isGlass={isGlass}>
-          <ConsoleStarted tabId={tabId} cwd={terminalCwd} />
+          <ConsoleStarted tabId={tabId} />
         </SurfaceFrame>
       </motion.div>
     );
@@ -352,7 +351,7 @@ const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass, tabId, terminalCw
 });
 AppSurfaceView.displayName = 'AppSurfaceView';
 
-export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, variables, codeServerSrc, vncSrc, previewUrl, onPreviewUrlChange, activeApp = 'chat', onActiveAppChange, onReady, headerActionsTargetId, headerActionsCompact, sandboxLabel, sandboxOptions, currentSandboxProfile, onSandboxChange, onClientToolCall, pendingPlan, onPlanDecision, dockTargetId, isGlass, tabId, terminalCwd, agentWorkspaceDir, sidecarMode, ticketId }: CodeWorkspaceLayoutProps) => {
+export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, variables, codeServerSrc, vncSrc, previewUrl, onPreviewUrlChange, activeApp = 'chat', onActiveAppChange, onReady, headerActionsTargetId, headerActionsCompact, sandboxLabel, sandboxOptions, currentSandboxProfile, onSandboxChange, onClientToolCall, pendingPlan, onPlanDecision, dockTargetId, isGlass, tabId, agentWorkspaceDir, sidecarMode, ticketId }: CodeWorkspaceLayoutProps) => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const registry = useMemo(() => buildAppRegistry(store.customApps ?? []), [store.customApps]);
@@ -406,7 +405,7 @@ export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, va
     <div className={mergeClasses(styles.root, isGlass && styles.rootGlass, isGlass && styles.glassChatSurfaces)}>
       <div className={styles.mainArea}>
         <div className={mergeClasses(styles.mainContent, !sidecarMode && activeApp !== 'chat' && styles.mainContentHidden)}>
-          <OmniAgentsApp uiUrl={uiSrc} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables} onReady={handleUiReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} sandboxLabel={sandboxLabel} sandboxOptions={sandboxOptions} currentSandboxProfile={currentSandboxProfile} onSandboxChange={onSandboxChange} onClientToolCall={onClientToolCall} pendingPlan={pendingPlan} onPlanDecision={onPlanDecision} ticketId={ticketId} workspaceDir={agentWorkspaceDir ?? terminalCwd} />
+          <OmniAgentsApp uiUrl={uiSrc} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables} onReady={handleUiReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} sandboxLabel={sandboxLabel} sandboxOptions={sandboxOptions} currentSandboxProfile={currentSandboxProfile} onSandboxChange={onSandboxChange} onClientToolCall={onClientToolCall} pendingPlan={pendingPlan} onPlanDecision={onPlanDecision} ticketId={ticketId} workspaceDir={agentWorkspaceDir} />
         </div>
         {!sidecarMode && (
           <AnimatePresence>
@@ -417,7 +416,6 @@ export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, va
                 onUrlChange={activeDescriptor.kind === 'builtin-browser' ? onPreviewUrlChange : undefined}
                 isGlass={isGlass}
                 tabId={tabId}
-                terminalCwd={terminalCwd}
               />
             )}
           </AnimatePresence>

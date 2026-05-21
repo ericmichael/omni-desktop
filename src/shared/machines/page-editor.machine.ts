@@ -127,6 +127,17 @@ export const pageEditorMachine = setup({
     }),
     clearError: assign({ error: null }),
   },
+
+  guards: {
+    /**
+     * Drop EXTERNAL_CHANGE echoes that match what we already have. Page
+     * content is DB-backed now, so a write round-trips back as an external
+     * change (own replica, the coarse SQLite change-watcher re-emit, etc.);
+     * only a genuinely different body should reload or raise a conflict.
+     */
+    isExternalContentDifferent: ({ context, event }) =>
+      (event as Extract<PageEditorEvent, { type: 'EXTERNAL_CHANGE' }>).content !== context.content,
+  },
 }).createMachine({
   id: 'pageEditor',
   initial: 'loading',
@@ -183,7 +194,9 @@ export const pageEditorMachine = setup({
         ],
         EXTERNAL_CHANGE: {
           // Silent auto-reload — the magic sync experience. Bumps revision
-          // so the view re-keys the editor onto the new content.
+          // so the view re-keys the editor onto the new content. Guarded so a
+          // self-echo (identical body) doesn't needlessly re-key the editor.
+          guard: 'isExternalContentDifferent',
           actions: 'setContentFromExternal',
         },
         EXTERNAL_DELETE: {
@@ -208,6 +221,9 @@ export const pageEditorMachine = setup({
           actions: 'setContentFromLocal',
         },
         EXTERNAL_CHANGE: {
+          // Only a genuinely different body is a conflict; an echo of our own
+          // unsaved buffer is ignored.
+          guard: 'isExternalContentDifferent',
           target: 'conflict',
           actions: 'enterConflictFromChange',
         },

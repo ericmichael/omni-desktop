@@ -15,19 +15,22 @@ import { dirname, join, resolve } from 'node:path';
 import { app } from 'electron';
 
 import { getOmniConfigDir, isDevelopment } from '@/main/util';
+import {
+  buildHttpMcpEntry,
+  buildStdioMcpEntry,
+  type HttpMcpEntry,
+  MCP_ENTRY_NAME,
+  MCP_MANAGED_MARKER,
+  type StdioMcpEntry,
+} from '@/shared/mcp-entry';
 
-const MARKER = 'omni-launcher';
-const ENTRY_NAME = 'omni-projects';
+const MARKER = MCP_MANAGED_MARKER;
+const ENTRY_NAME = MCP_ENTRY_NAME;
 
-interface ManagedServerEntry {
-  type: 'stdio';
-  command: string;
-  args: string[];
-  _managed?: string;
-}
+type ManagedEntry = StdioMcpEntry | HttpMcpEntry;
 
 interface McpJson {
-  mcpServers?: Record<string, ManagedServerEntry | Record<string, unknown>>;
+  mcpServers?: Record<string, ManagedEntry | Record<string, unknown>>;
 }
 
 /**
@@ -49,17 +52,8 @@ export function getMcpBinPath(): string {
   return join(unpacked, 'packages', 'projects-mcp', 'dist', 'cli.js');
 }
 
-function buildDesired(): ManagedServerEntry {
-  return {
-    type: 'stdio',
-    command: 'node',
-    args: [getMcpBinPath()],
-    _managed: MARKER,
-  };
-}
-
-/** Insert or refresh the `omni-projects` entry in mcp.json. */
-export function syncMcpConfig(): void {
+/** Insert or refresh the managed `omni-projects` entry in mcp.json. */
+function writeManagedEntry(desired: ManagedEntry): void {
   const path = join(getOmniConfigDir(), 'mcp.json');
 
   let parsed: McpJson = {};
@@ -73,14 +67,12 @@ export function syncMcpConfig(): void {
   }
 
   const servers = parsed.mcpServers ?? {};
-  const existing = servers[ENTRY_NAME] as ManagedServerEntry | undefined;
+  const existing = servers[ENTRY_NAME] as ManagedEntry | undefined;
 
   // User claimed the entry — don't overwrite.
   if (existing && existing._managed !== MARKER) {
     return;
   }
-
-  const desired = buildDesired();
   if (existing && JSON.stringify(existing) === JSON.stringify(desired)) {
     return;
   }
@@ -91,4 +83,18 @@ export function syncMcpConfig(): void {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(parsed, null, 2)}\n`, 'utf-8');
   console.log(`[mcp-config] wrote ${ENTRY_NAME} entry to ${path}`);
+}
+
+/** Local/desktop: stdio entry → the bundled MCP cli over the local SQLite DB. */
+export function syncMcpConfig(): void {
+  writeManagedEntry(buildStdioMcpEntry(getMcpBinPath()));
+}
+
+/**
+ * Cloud: streamable-http entry → the launcher server's tenant-scoped MCP route.
+ * The agent supplies the per-tenant token via the `${OMNI_RUNTIME_TOKEN}` env
+ * placeholder (set per omni-serve process); the file itself is tenant-agnostic.
+ */
+export function syncMcpConfigHttp(url: string): void {
+  writeManagedEntry(buildHttpMcpEntry(url));
 }

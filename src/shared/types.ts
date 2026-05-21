@@ -134,6 +134,25 @@ export type StoreData = {
   lastWeeklyReviewAt: number | null;
   schemaVersion: number;
   chatSessionId: string | null;
+  /**
+   * Sticky profile binding for the singleton chat process. Snapshotted from
+   * the user's default the first time the chat is launched (or set by the
+   * sandbox picker), then persisted so a later change to ``defaultProfileName``
+   * doesn't silently move the chat — and its workspace snapshot tar — to a
+   * different sandbox. ``null`` only on fresh installs: the chat auto-launch
+   * hook mints it from ``defaultProfileName`` on first start.
+   */
+  chatProfileName: string | null;
+  /**
+   * Docker container id captured from the last successful chat launch, used
+   * on the next start to call ``client.resume(state)`` for warm reattach
+   * (preserves running processes / installed packages / shell sessions). The
+   * SDK falls back silently to a fresh container + snapshot rehydrate if the
+   * container is gone, so a stale id here is never load-bearing. Cleared
+   * whenever ``chatProfileName`` changes (a different profile = a different
+   * image = a meaningless id).
+   */
+  chatContainerId: string | null;
   codeTabs: CodeTab[];
   activeCodeTabId: CodeTabId | null;
   codeLayoutMode: CodeLayoutMode;
@@ -380,6 +399,14 @@ export const schema: Schema<StoreData> = {
     type: ['string', 'null'],
     default: null,
   },
+  chatProfileName: {
+    type: ['string', 'null'],
+    default: null,
+  },
+  chatContainerId: {
+    type: ['string', 'null'],
+    default: null,
+  },
   codeTabs: {
     type: 'array',
     default: [],
@@ -392,6 +419,8 @@ export const schema: Schema<StoreData> = {
           sessionId: { type: 'string' },
           ticketTitle: { type: 'string' },
           workspaceDir: { type: 'string' },
+          profileName: { type: 'string' },
+          containerId: { type: 'string' },
           createdAt: { type: 'number' },
         },
         required: ['id', 'createdAt'],
@@ -822,6 +851,28 @@ export type AgentProcessData = {
   containerName?: string;
   /** Host port the agent's WS/HTTP server is bound to. */
   port?: number;
+  /**
+   * Which fallback tier the SDK's resume path took for this start. Only
+   * meaningful when the launcher passed a previous container id back:
+   *   - ``'reused'``    — warm reattach succeeded (everything survived)
+   *   - ``'rehydrated'`` — old container gone; fresh container + snapshot tar
+   *                       (workspace files survived, runtime state didn't)
+   *   - ``'fresh'``     — both gone; manifest-only seed
+   *   - ``undefined``   — no resume was requested (first launch / non-docker)
+   *
+   * The renderer toasts on ``'rehydrated'`` so the user understands why their
+   * running dev server / shell session went away.
+   */
+  resume?: 'reused' | 'rehydrated' | 'fresh';
+  /**
+   * True when the sandbox container is currently frozen via docker pause
+   * (cgroup freezer). RAM is held; CPU is zero; tool calls into the
+   * container hang until unpause. The renderer uses this to show a
+   * "paused" badge and to trigger ``sandbox.unpause`` on activity.
+   * Unset / false when the backend doesn't support pause or when we
+   * never asked.
+   */
+  paused?: boolean;
 };
 
 export type AgentProcessStatus =
@@ -859,6 +910,15 @@ export type AgentProcessStartOptions = {
    * same id for its session.
    */
   sessionId?: string;
+  /**
+   * Docker container id from a previous launch. Passed to omni serve as
+   * ``--container-id`` so the SDK can attempt a warm reattach via
+   * ``client.resume(state)`` instead of always creating a fresh container.
+   * If the container is no longer alive, the SDK silently falls back to
+   * fresh container + snapshot rehydrate — a stale id is never an error,
+   * just a missed opportunity for warm reattach.
+   */
+  containerId?: string;
 };
 
 /**
@@ -908,6 +968,20 @@ export type CodeTab = {
   workspaceDir?: string;
   /** When set, this tab renders as a global app column (webview) instead of an agent session. */
   customAppId?: string;
+  /**
+   * Sticky profile binding for this tab. Snapshotted from the resolution chain
+   * (per-project ``sandboxProfile`` → user default) when the tab is created,
+   * then persisted so a later default change doesn't silently drift the
+   * workspace into another sandbox.
+   */
+  profileName?: string;
+  /**
+   * Docker container id captured from the last successful launch of this tab.
+   * Sent back on the next start so omni-code can ``client.resume(state)`` for
+   * warm reattach. Stale ids are safe — the SDK falls back to fresh container
+   * + snapshot rehydrate. Cleared whenever ``profileName`` changes.
+   */
+  containerId?: string;
   createdAt: number;
 };
 
@@ -1408,8 +1482,33 @@ type AgentProcessIpcEvents = Namespaced<
     rebuild: (processId: string, arg: AgentProcessStartOptions) => void;
     resize: (processId: string, cols: number, rows: number) => void;
     'get-status': (processId: string) => WithTimestamp<AgentProcessStatus>;
+    /**
+     * Freeze the sandbox container via ``docker pause``. Returns an
+     * envelope that distinguishes "ok" from "backend doesn't support
+     * pause" so callers can decide between updating UI state, falling
+     * through to stop/shutdown, or surfacing an error.
+     */
+    pause: (processId: string) => SandboxPauseResult;
+    /** Thaw a previously-paused container. Same envelope shape as ``pause``. */
+    unpause: (processId: string) => SandboxPauseResult;
+    /**
+     * Reset the sandbox's idle timer. Fire-and-forget; used by the
+     * renderer to signal "user is engaging with this sandbox surface"
+     * (chat scroll, code tab focus, etc.) so the watcher doesn't pause
+     * during continuous interaction.
+     */
+    'notify-activity': (processId: string) => void;
   }
 >;
+
+/** Result envelope returned by ``agent-process:pause`` / ``:unpause``.
+ *  Mirrors the omni-code server-function schema. */
+export type SandboxPauseResult = {
+  ok: boolean;
+  supported: boolean;
+  paused?: boolean;
+  reason?: string;
+};
 
 type SnapshotIpcEvents = Namespaced<
   'snapshot',
@@ -1462,7 +1561,7 @@ type UtilIpcEvents = Namespaced<
 type TerminalIpcEvents = Namespaced<
   'terminal',
   {
-    create: (tabId: string, cwd?: string) => string;
+    create: (tabId: string) => string;
     list: (tabId: string) => string[];
     write: (id: string, data: string) => void;
     resize: (id: string, cols: number, rows: number) => void;

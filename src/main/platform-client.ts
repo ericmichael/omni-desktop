@@ -30,6 +30,24 @@ export type PlatformSession = {
   error?: string;
 };
 
+/**
+ * The compute surface `AgentProcess` drives in *platform mode* (a remote agent
+ * the launcher connects to). `PlatformClient` (omni-platform delegation)
+ * implements it. NOTE: the Azure path is NOT platform mode — it's host-runs-
+ * agent, where `omni serve` runs locally and drives a serverless ACI container
+ * via the `aci` sandbox profile (omniagents AzureContainerSandbox).
+ */
+export interface IComputeClient {
+  startSession(
+    agentSlug: string,
+    domain?: string,
+    gitRepo?: { url: string; branch?: string }
+  ): Promise<PlatformSession>;
+  waitForSession(sessionId: string, maxAttempts?: number): Promise<PlatformSession>;
+  stopSession(sessionId: string): Promise<void>;
+  finalizeWorkspace(sessionId: string): Promise<{ downloadSasUrl: string }>;
+}
+
 export type PlatformPolicy = {
   project?: {
     name: string;
@@ -93,7 +111,7 @@ export type AuthTokenResponse = {
 // Client
 // ---------------------------------------------------------------------------
 
-export class PlatformClient {
+export class PlatformClient implements IComputeClient {
   private config: PlatformConfig;
   private log: SimpleLogger;
   private fetchFn: typeof globalThis.fetch;

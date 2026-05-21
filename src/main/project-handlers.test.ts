@@ -73,7 +73,7 @@ const makeManager = () => ({
 describe('registerProjectHandlers', () => {
   it('registers all expected channels', () => {
     const ipc = new StubIpc();
-    const channels = registerProjectHandlers(ipc, makeManager() as never);
+    const channels = registerProjectHandlers(ipc, () => makeManager() as never);
     expect(channels).toEqual(EXPECTED_CHANNELS);
     for (const ch of EXPECTED_CHANNELS) {
       expect(ipc.handlers.has(ch), `missing handler for ${ch}`).toBe(true);
@@ -83,7 +83,7 @@ describe('registerProjectHandlers', () => {
   it('project:add-project delegates with project data', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerProjectHandlers(ipc, mgr as never);
+    registerProjectHandlers(ipc, () => mgr as never);
     ipc.invoke('project:add-project', { label: 'New' });
     expect(mgr.addProject).toHaveBeenCalledWith({ label: 'New' });
   });
@@ -91,7 +91,7 @@ describe('registerProjectHandlers', () => {
   it('project:update-project delegates with id and patch', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerProjectHandlers(ipc, mgr as never);
+    registerProjectHandlers(ipc, () => mgr as never);
     ipc.invoke('project:update-project', 'proj-1', { label: 'Renamed' });
     expect(mgr.updateProject).toHaveBeenCalledWith('proj-1', { label: 'Renamed' });
   });
@@ -99,7 +99,7 @@ describe('registerProjectHandlers', () => {
   it('project:remove-project delegates with id', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerProjectHandlers(ipc, mgr as never);
+    registerProjectHandlers(ipc, () => mgr as never);
     ipc.invoke('project:remove-project', 'proj-1');
     expect(mgr.removeProject).toHaveBeenCalledWith('proj-1');
   });
@@ -107,7 +107,7 @@ describe('registerProjectHandlers', () => {
   it('project:add-ticket delegates with ticket data', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerProjectHandlers(ipc, mgr as never);
+    registerProjectHandlers(ipc, () => mgr as never);
     ipc.invoke('project:add-ticket', { title: 'Bug fix', projectId: 'p1' });
     expect(mgr.addTicket).toHaveBeenCalledWith({ title: 'Bug fix', projectId: 'p1' });
   });
@@ -115,7 +115,7 @@ describe('registerProjectHandlers', () => {
   it('project:get-tickets delegates with projectId', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerProjectHandlers(ipc, mgr as never);
+    registerProjectHandlers(ipc, () => mgr as never);
     ipc.invoke('project:get-tickets', 'proj-1');
     expect(mgr.getTicketsByProject).toHaveBeenCalledWith('proj-1');
   });
@@ -123,7 +123,7 @@ describe('registerProjectHandlers', () => {
   it('project:move-ticket-to-column delegates with ticketId and columnId', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerProjectHandlers(ipc, mgr as never);
+    registerProjectHandlers(ipc, () => mgr as never);
     ipc.invoke('project:move-ticket-to-column', 't1', 'in_progress');
     expect(mgr.moveTicketToColumn).toHaveBeenCalledWith('t1', 'in_progress');
   });
@@ -131,7 +131,7 @@ describe('registerProjectHandlers', () => {
   it('project:resolve-ticket delegates with ticketId and resolution', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerProjectHandlers(ipc, mgr as never);
+    registerProjectHandlers(ipc, () => mgr as never);
     ipc.invoke('project:resolve-ticket', 't1', 'completed');
     expect(mgr.resolveTicket).toHaveBeenCalledWith('t1', 'completed');
   });
@@ -139,7 +139,7 @@ describe('registerProjectHandlers', () => {
   it('project:get-pipeline calls ensureWorkflowLoaded then getPipeline', async () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerProjectHandlers(ipc, mgr as never);
+    registerProjectHandlers(ipc, () => mgr as never);
     await ipc.invoke('project:get-pipeline', 'proj-1');
     expect(mgr.ensureWorkflowLoaded).toHaveBeenCalledWith('proj-1');
     expect(mgr.getPipeline).toHaveBeenCalledWith('proj-1');
@@ -148,7 +148,7 @@ describe('registerProjectHandlers', () => {
   it('project:read-context delegates with projectId', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerProjectHandlers(ipc, mgr as never);
+    registerProjectHandlers(ipc, () => mgr as never);
     ipc.invoke('project:read-context', 'proj-1');
     expect(mgr.readContext).toHaveBeenCalledWith('proj-1');
   });
@@ -156,7 +156,7 @@ describe('registerProjectHandlers', () => {
   it('project:write-context delegates with projectId and content', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerProjectHandlers(ipc, mgr as never);
+    registerProjectHandlers(ipc, () => mgr as never);
     ipc.invoke('project:write-context', 'proj-1', '# Context');
     expect(mgr.writeContext).toHaveBeenCalledWith('proj-1', '# Context');
   });
@@ -164,7 +164,7 @@ describe('registerProjectHandlers', () => {
   it('project:list-artifacts delegates with ticketId and optional dirPath', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerProjectHandlers(ipc, mgr as never);
+    registerProjectHandlers(ipc, () => mgr as never);
     ipc.invoke('project:list-artifacts', 't1', 'sub/dir');
     expect(mgr.listArtifacts).toHaveBeenCalledWith('t1', 'sub/dir');
   });
@@ -172,7 +172,7 @@ describe('registerProjectHandlers', () => {
   it('project:get-files-changed delegates with ticketId + sourceId', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerProjectHandlers(ipc, mgr as never);
+    registerProjectHandlers(ipc, () => mgr as never);
     ipc.invoke('project:get-files-changed', 't1', 'src1');
     expect(mgr.getFilesChanged).toHaveBeenCalledWith('t1', 'src1');
   });
@@ -180,7 +180,7 @@ describe('registerProjectHandlers', () => {
   it('project:set-pr-review delegates with ticketId + sourceId + review status', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerProjectHandlers(ipc, mgr as never);
+    registerProjectHandlers(ipc, () => mgr as never);
     ipc.invoke('project:set-pr-review', 't1', 'src1', 'approved');
     expect(mgr.setPrReview).toHaveBeenCalledWith('t1', 'src1', 'approved');
   });
@@ -188,7 +188,7 @@ describe('registerProjectHandlers', () => {
   it('project:check-merge delegates with ticketId + sourceId', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerProjectHandlers(ipc, mgr as never);
+    registerProjectHandlers(ipc, () => mgr as never);
     ipc.invoke('project:check-merge', 't1', 'src1');
     expect(mgr.checkPrMerge).toHaveBeenCalledWith('t1', 'src1');
   });
@@ -196,7 +196,7 @@ describe('registerProjectHandlers', () => {
   it('project:merge-ticket delegates with ticketId + sourceId', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerProjectHandlers(ipc, mgr as never);
+    registerProjectHandlers(ipc, () => mgr as never);
     ipc.invoke('project:merge-ticket', 't1', 'src1');
     expect(mgr.mergePrTicket).toHaveBeenCalledWith('t1', 'src1');
   });

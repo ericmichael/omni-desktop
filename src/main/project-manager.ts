@@ -4,7 +4,7 @@ import type Store from 'electron-store';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import fs from 'fs/promises';
 import { nanoid } from 'nanoid';
-import type { ProjectsRepo, TicketRemap } from 'omni-projects-db';
+import type { ColumnRow, IProjectsRepo, ProjectsRepo, TicketRemap } from 'omni-projects-db';
 import { commentId } from 'omni-projects-db';
 import path from 'path';
 import { promisify } from 'util';
@@ -24,7 +24,6 @@ import { type HistoryRow, parseSessionHistoryRows } from '@/lib/session-history'
 import { slugifyUnique } from '@/lib/slugify-unique';
 import { DbChangeWatcher } from '@/main/db-change-watcher';
 import {
-  buildStoreSnapshot,
   commentToRow,
   inboxItemToRow,
   milestoneToRow,
@@ -36,6 +35,7 @@ import {
   rowToProject,
   rowToTask,
   rowToTicket,
+  rowsToPipeline,
   taskToRow,
   ticketToRow,
 } from '@/main/db-store-bridge';
@@ -155,8 +155,56 @@ export class ProjectManager {
   private store: Store<StoreData>;
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
 
-  /** When set, all project data is read/written via SQLite instead of electron-store. */
-  private repo: ProjectsRepo | undefined;
+  /**
+   * When set, all project data is persisted via this async repo (SQLite
+   * locally, Postgres in cloud) and served from {@link cache}. The public
+   * accessors stay synchronous by reading the in-memory projection; async is
+   * confined to {@link init} (hydration) and {@link enqueuePersist}
+   * (write-through). Absent → legacy electron-store mode (some tests).
+   */
+  private repo: IProjectsRepo | undefined;
+
+  /**
+   * In-memory read-model projection of all project data. Hydrated once from
+   * {@link repo} in {@link init}, mutated synchronously on every write (so the
+   * next read sees it), and re-hydrated when {@link changeWatcher} detects an
+   * external (MCP-subprocess) write. Only populated when {@link repo} is set.
+   */
+  private cache: {
+    projects: Project[];
+    tickets: Ticket[];
+    milestones: Milestone[];
+    pages: Page[];
+    inboxItems: InboxItem[];
+    tasks: Task[];
+    columns: Map<ProjectId, ColumnRow[]>;
+    configs: Map<ProjectId, string | null>;
+  } = {
+    projects: [],
+    tickets: [],
+    milestones: [],
+    pages: [],
+    inboxItems: [],
+    tasks: [],
+    columns: new Map(),
+    configs: new Map(),
+  };
+
+  /**
+   * Synchronous SQLite handle used ONLY by {@link changeWatcher} for
+   * `_change_seq` polling (not part of the async data contract). Absent in
+   * Postgres mode, where external-write detection is LISTEN/NOTIFY instead.
+   */
+  private changeSeqRepo: ProjectsRepo | undefined;
+
+  /** Host skills dir for this manager's projects (per-tenant on the server; default global). */
+  private skillsDir: string | undefined;
+
+  /** Serialized write-through persistence chain — see {@link enqueuePersist}. */
+  private persistChain: Promise<void> = Promise.resolve();
+
+  /** Resolves once the initial cache hydration + boot wiring completes. */
+  readonly whenReady: Promise<void>;
 
   /** When set, detects MCP server writes and refreshes the UI. */
   private changeWatcher: DbChangeWatcher | undefined;
@@ -201,23 +249,22 @@ export class ProjectManager {
       sendToWindow: ProjectManager['sendToWindow'];
       processManager?: ProcessManager;
       appControlManager?: import('@/main/app-control-manager').AppControlManager;
-      /** Optional: shared SQLite repo. When provided, project data is stored in SQLite. */
-      repo?: ProjectsRepo;
+      /** Optional async repo. When provided, project data is persisted here and cached in memory. */
+      repo?: IProjectsRepo;
+      /** Optional sync SQLite handle for the change-watcher (omit in Postgres mode). */
+      changeSeqRepo?: ProjectsRepo;
+      /** Host skills directory for this manager's projects (per-tenant on the server). */
+      skillsDir?: string;
     },
     deps?: Partial<ProjectManagerDeps>
   ) {
     this.store = arg.store;
     this.sendToWindow = arg.sendToWindow;
+    this.skillsDir = arg.skillsDir;
     this.processManager = arg.processManager;
     this.appControlManager = arg.appControlManager;
     this.repo = arg.repo;
-    // Set up cross-process change detection when using SQLite
-    if (this.repo) {
-      this.changeWatcher = new DbChangeWatcher(this.repo, () => {
-        this.broadcastStoreSnapshot();
-      });
-      this.changeWatcher.start();
-    }
+    this.changeSeqRepo = arg.changeSeqRepo;
     this.bridge = deps?.bridge ?? new SupervisorBridge(arg.sendToWindow);
     this.workflowLoader =
       deps?.workflowLoader ??
@@ -233,15 +280,38 @@ export class ProjectManager {
           // SQLite is the source of truth — re-sync pipeline_columns from
           // the new FLEET.md and remap any orphaned tickets. The store
           // snapshot broadcast carries the new pipeline to the renderer.
-          this.syncPipelineForProject(projectId);
+          void this.syncPipelineForProject(projectId);
         },
       });
     const pageStore: PageManagerStore = this.repo
       ? {
-          getPages: () => this.repo!.listAllPages().map(rowToPage),
+          getPages: () => this.cache.pages,
           setPages: (items) => {
-            this.repo!.replaceAllPages(items.map(pageToRow));
+            this.cache.pages = items;
+            const rows = items.map(pageToRow);
+            this.enqueuePersist(() => this.repo!.replaceAllPages(rows));
             this.noteLocalWriteAndBroadcast();
+          },
+          // Markdown doc bodies live in the DB (source of truth); PageManager
+          // routes notebooks to disk regardless. Content reads/writes chain on
+          // the persist queue so a write lands AFTER the page row it
+          // references (the page_content→pages FK) and reads are
+          // read-after-write consistent.
+          getContent: (pageId) => {
+            const p = this.persistChain.then(() => this.repo!.getPageContent(pageId));
+            return p;
+          },
+          setContent: (pageId, body) => {
+            const p = this.persistChain
+              .then(() => this.repo!.setPageContent(pageId, body))
+              // Note our own write so the SQLite change-watcher doesn't treat it
+              // as external and re-emit it back to the writing editor.
+              .then(() => this.changeWatcher?.noteLocalWrite())
+              .catch((err) => {
+                console.error('[ProjectManager] setPageContent failed:', err);
+              });
+            this.persistChain = p;
+            return p;
           },
         }
       : {
@@ -257,9 +327,11 @@ export class ProjectManager {
     });
     const inboxStore: InboxManagerStore = this.repo
       ? {
-          getInboxItems: () => this.repo!.listAllInboxItems().map(rowToInboxItem),
+          getInboxItems: () => this.cache.inboxItems,
           setInboxItems: (items) => {
-            this.repo!.replaceAllInboxItems(items.map(inboxItemToRow));
+            this.cache.inboxItems = items;
+            const rows = items.map(inboxItemToRow);
+            this.enqueuePersist(() => this.repo!.replaceAllInboxItems(rows));
             this.noteLocalWriteAndBroadcast();
           },
           getTickets: () => this.getTickets(),
@@ -293,9 +365,11 @@ export class ProjectManager {
 
     const milestoneStore: MilestoneManagerStore = this.repo
       ? {
-          getMilestones: () => this.repo!.listAllMilestones().map(rowToMilestone),
+          getMilestones: () => this.cache.milestones,
           setMilestones: (items) => {
-            this.repo!.replaceAllMilestones(items.map(milestoneToRow));
+            this.cache.milestones = items;
+            const rows = items.map(milestoneToRow);
+            this.enqueuePersist(() => this.repo!.replaceAllMilestones(rows));
             this.noteLocalWriteAndBroadcast();
           },
           getTickets: () => this.getTickets(),
@@ -325,12 +399,12 @@ export class ProjectManager {
         getPlatformCredentials: () => this.store.get('platform'),
         getCodeTabs: () => (this.store.get('codeTabs', []) ?? []) as Array<{ id: string; ticketId?: string }>,
         getPersistedTasks: () =>
-          this.repo
-            ? this.repo.listAllTasks().map(rowToTask)
-            : (this.store.get('tasks', []) as Task[]),
+          this.repo ? this.cache.tasks : (this.store.get('tasks', []) as Task[]),
         setPersistedTasks: (tasks) => {
           if (this.repo) {
-            this.repo.replaceAllTasks(tasks.map(taskToRow));
+            this.cache.tasks = tasks;
+            const rows = tasks.map(taskToRow);
+            this.enqueuePersist(() => this.repo!.replaceAllTasks(rows));
             this.noteLocalWriteAndBroadcast();
           } else {
             this.store.set('tasks', tasks);
@@ -342,13 +416,15 @@ export class ProjectManager {
         // repo is absent (legacy electron-store mode in tests).
         upsertPersistedTask: this.repo
           ? (task: Task) => {
-              this.repo!.upsertTask(taskToRow(task));
+              this.cache.tasks = [...this.cache.tasks.filter((t) => t.id !== task.id), task];
+              this.enqueuePersist(() => this.repo!.upsertTask(taskToRow(task)));
               this.noteLocalWriteAndBroadcast();
             }
           : undefined,
         deletePersistedTask: this.repo
           ? (taskId) => {
-              this.repo!.deleteTask(taskId);
+              this.cache.tasks = this.cache.tasks.filter((t) => t.id !== taskId);
+              this.enqueuePersist(() => this.repo!.deleteTask(taskId));
               this.noteLocalWriteAndBroadcast();
             }
           : undefined,
@@ -374,9 +450,109 @@ export class ProjectManager {
       appControlManager: this.appControlManager,
     });
 
+    this.whenReady = this.init();
+  }
+
+  /**
+   * Hydrate the in-memory projection, wire external-change detection, restore
+   * supervisor tasks, and start the auto-dispatch + inbox-sweep loops. Async
+   * so the cache is populated from {@link repo} before anything reads it; the
+   * constructor kicks this off and exposes the promise as {@link whenReady}.
+   * For SqliteProjectsRepo the awaits resolve on microtasks (no real I/O), so
+   * the cache is ready before any IPC handler runs on a later macrotask.
+   */
+  private init = async (): Promise<void> => {
+    if (this.repo) {
+      try {
+        await this.hydrate();
+      } catch (err) {
+        console.error('[ProjectManager] initial hydrate failed:', err);
+      }
+      if (this.changeSeqRepo) {
+        // External (MCP-subprocess) writes bump _change_seq → re-hydrate the
+        // projection AND re-emit content for any DB-backed page an editor is
+        // watching (the watcher is page-agnostic; the renderer drops echoes).
+        this.changeWatcher = new DbChangeWatcher(this.changeSeqRepo, () => {
+          void this.refreshFromExternal();
+          void this.pages.reemitWatchedContent();
+        });
+        this.changeWatcher.start();
+      }
+    }
+    // restorePersistedTasks reads tasks through the supervisor store adapter,
+    // which now reads the cache — so it must run after hydration.
+    this.supervisors.restorePersistedTasks();
     this.supervisors.startAutoDispatch();
     this.startInboxSweep();
-  }
+    if (this.repo) {
+      this.broadcastStoreSnapshot();
+    }
+  };
+
+  /** Re-load the entire projection from the repo (after an external write). */
+  /** Re-load the projection (change-watcher in SQLite, LISTEN/NOTIFY in cloud). */
+  refreshFromExternal = async (): Promise<void> => {
+    try {
+      await this.hydrate();
+      this.broadcastStoreSnapshot();
+    } catch (err) {
+      console.error('[ProjectManager] refresh after external change failed:', err);
+    }
+  };
+
+  /** Load all project data from the repo into {@link cache}. */
+  private hydrate = async (): Promise<void> => {
+    const repo = this.repo;
+    if (!repo) {
+      return;
+    }
+    const [projRows, msRows, pageRows, inboxRows, taskRows] = await Promise.all([
+      repo.listProjects(),
+      repo.listAllMilestones(),
+      repo.listAllPages(),
+      repo.listAllInboxItems(),
+      repo.listAllTasks(),
+    ]);
+    this.cache.projects = projRows.map(rowToProject);
+    this.cache.milestones = msRows.map(rowToMilestone);
+    this.cache.pages = pageRows.map(rowToPage);
+    this.cache.inboxItems = inboxRows.map(rowToInboxItem);
+    this.cache.tasks = taskRows.map(rowToTask);
+
+    const tickRows = await repo.listAllTickets();
+    this.cache.tickets = await Promise.all(
+      tickRows.map(async (row) => rowToTicket(row, await repo.listCommentsByTicket(row.id)))
+    );
+
+    const columns = new Map<ProjectId, ColumnRow[]>();
+    const configs = new Map<ProjectId, string | null>();
+    for (const p of this.cache.projects) {
+      columns.set(p.id, await repo.listColumns(p.id));
+      configs.set(p.id, await repo.getProjectConfig(p.id));
+    }
+    this.cache.columns = columns;
+    this.cache.configs = configs;
+  };
+
+  /**
+   * Queue a write-through persistence task. The cache is already updated
+   * synchronously by the caller; this flushes the change to the repo in order.
+   * `noteLocalWrite` runs after the write so the change-watcher attributes the
+   * resulting `_change_seq` bump to us (not an external process).
+   */
+  private enqueuePersist = (task: () => Promise<void>): void => {
+    this.persistChain = this.persistChain.then(async () => {
+      try {
+        await task();
+        this.changeWatcher?.noteLocalWrite();
+      } catch (err) {
+        console.error('[ProjectManager] persist failed:', err);
+      }
+    });
+  };
+
+  /** Await all queued persistence — used by cleanup and any durability barrier. */
+  flushPersists = (): Promise<void> => this.persistChain;
 
   /**
    * Read the `ProjectConfig` for a project. Reads the persisted JSON column
@@ -390,7 +566,7 @@ export class ProjectManager {
       return null;
     }
     if (this.repo) {
-      const stored = this.repo.getProjectConfig(projectId);
+      const stored = this.cache.configs.get(projectId);
       if (stored) {
         try {
           return JSON.parse(stored) as ProjectConfig;
@@ -404,7 +580,7 @@ export class ProjectManager {
 
   /** Resolve the defaults `projectToConfig` needs from the launcher's environment. */
   private getProjectConfigDefaults = (): ProjectConfigDefaults => ({
-    skillsDir: path.join(getOmniConfigDir(), 'skills'),
+    skillsDir: this.skillsDir ?? path.join(getOmniConfigDir(), 'skills'),
     projectsMcpCliPath: getMcpBinPath(),
     defaultDockerImage: 'omni-sandbox:latest',
   });
@@ -431,18 +607,44 @@ export class ProjectManager {
 
   // #region Broadcast helpers
 
-  /** Broadcast a full store snapshot to the renderer (SQLite + electron-store merged). */
+  /**
+   * Assemble a full StoreData snapshot from the in-memory projection merged
+   * with the electron-store settings. Mirrors db-store-bridge's
+   * `buildStoreSnapshot`, but reads the cache instead of the (now async) repo
+   * so it stays synchronous. Each project gets its pipeline attached from the
+   * cached columns.
+   */
+  private buildSnapshotFromCache = (): StoreData => {
+    const projects = this.cache.projects.map((p) => {
+      const cols = this.cache.columns.get(p.id);
+      return cols && cols.length > 0 ? { ...p, pipeline: rowsToPipeline(cols) } : p;
+    });
+    return {
+      ...this.store.store,
+      projects,
+      tickets: this.cache.tickets,
+      milestones: this.cache.milestones,
+      pages: this.cache.pages,
+      inboxItems: this.cache.inboxItems,
+      tasks: this.cache.tasks,
+    };
+  };
+
+  /** Broadcast a full store snapshot to the renderer (projection + electron-store merged). */
   private broadcastStoreSnapshot = (): void => {
     if (this.repo) {
-      this.sendToWindow('store:changed', buildStoreSnapshot(this.repo, this.store));
+      this.sendToWindow('store:changed', this.buildSnapshotFromCache());
     } else {
       this.sendToWindow('store:changed', this.store.store);
     }
   };
 
-  /** After a local SQLite write: suppress self-notification and broadcast. */
+  /**
+   * After a local write: broadcast the updated projection. The `_change_seq`
+   * self-notification suppression now happens in {@link enqueuePersist} (after
+   * the async write actually lands), so this just refreshes the UI.
+   */
   private noteLocalWriteAndBroadcast = (): void => {
-    this.changeWatcher?.noteLocalWrite();
     this.broadcastStoreSnapshot();
   };
 
@@ -452,7 +654,7 @@ export class ProjectManager {
    */
   getStoreSnapshot = (): StoreData => {
     if (this.repo) {
-      return buildStoreSnapshot(this.repo, this.store);
+      return this.buildSnapshotFromCache();
     }
     return this.store.store;
   };
@@ -463,23 +665,33 @@ export class ProjectManager {
 
   private getProjects = (): Project[] => {
     if (this.repo) {
-      return this.repo.listProjects().map(rowToProject);
+      return this.cache.projects;
     }
     return this.store.get('projects', []);
   };
 
   private setProjects = (projects: Project[]): void => {
     if (this.repo) {
-      this.repo.replaceAllProjects(projects.map(projectToRow));
+      const repo = this.repo;
+      this.cache.projects = projects;
       // Recompute `config` for every project so the manifest stays in sync
       // with the source fields. `replaceAllProjects` leaves the column
       // untouched on upsert (it's not in the SET clause), so we rewrite it
       // explicitly here.
       const defaults = this.getProjectConfigDefaults();
-      for (const project of projects) {
-        const config = projectToConfig(project, defaults);
-        this.repo.setProjectConfig(project.id, JSON.stringify(config));
+      const configs = projects.map((p) => [p.id, JSON.stringify(projectToConfig(p, defaults))] as const);
+      for (const [id, cfg] of configs) {
+        this.cache.configs.set(id, cfg);
       }
+      // Snapshot rows synchronously so a later mutation of the array can't
+      // alter what gets persisted once the queued write runs.
+      const rows = projects.map(projectToRow);
+      this.enqueuePersist(async () => {
+        await repo.replaceAllProjects(rows);
+        for (const [id, cfg] of configs) {
+          await repo.setProjectConfig(id, cfg);
+        }
+      });
       this.noteLocalWriteAndBroadcast();
     } else {
       this.store.set('projects', projects);
@@ -518,7 +730,7 @@ export class ProjectManager {
     void this.pages.writeContent(rootPage.id, DEFAULT_BRIEF_TEMPLATE).catch(() => {});
     // Seed pipeline_columns immediately with the source-appropriate defaults
     // so tickets created before FLEET.md loads have a valid FK target.
-    this.syncPipelineForProject(project.id);
+    void this.syncPipelineForProject(project.id);
     // Eagerly load FLEET.md from the first source so the pipeline is ready
     // when the UI fetches it. Personal / context-only projects (no source)
     // have no FLEET.md and no workflow to load — they use SIMPLE_COLUMNS.
@@ -695,7 +907,7 @@ export class ProjectManager {
     } else if (source?.kind === 'git-remote') {
       await this.workflowLoader.loadFromRemote(projectId, source.repoUrl, source.defaultBranch);
     }
-    this.syncPipelineForProject(projectId);
+    await this.syncPipelineForProject(projectId);
   };
 
   /**
@@ -705,17 +917,18 @@ export class ProjectManager {
    * is remapped to a non-gate column. No-op when running without a SQLite
    * repo (legacy electron-store mode used only by some tests).
    */
-  private syncPipelineForProject = (projectId: ProjectId): void => {
-    if (!this.repo) {
+  private syncPipelineForProject = async (projectId: ProjectId): Promise<void> => {
+    const repo = this.repo;
+    if (!repo) {
       return;
     }
 
-    const project = this.getProjects().find((p) => p.id === projectId);
+    const project = this.cache.projects.find((p) => p.id === projectId);
     if (!project) {
       return;
     }
 
-    const hasExisting = this.repo.listColumns(projectId).length > 0;
+    const hasExisting = (this.cache.columns.get(projectId)?.length ?? 0) > 0;
     const defs = resolvePipelineDefs({
       hasSource: project.sources.length > 0,
       hasExisting,
@@ -725,23 +938,43 @@ export class ProjectManager {
       return;
     }
 
-    let result;
-    try {
-      result = this.repo.syncColumnsForProject(projectId, defs);
-    } catch (err) {
-      console.warn(`[ProjectManager] syncColumnsForProject failed for ${projectId}:`, err);
-      return;
-    }
+    // The remap is a transaction in the repo (columns + ticket reassignment),
+    // so serialize it on the persist chain and re-hydrate the affected slice
+    // of the projection afterwards. `await` the chain so callers that await
+    // this method see the cache already updated.
+    await (this.persistChain = this.persistChain.then(async () => {
+      let changed = false;
+      try {
+        const result = await repo.syncColumnsForProject(projectId, defs);
 
-    for (const remap of result.remappedTickets) {
-      if (remap.gateLost) {
-        this.appendGateLostComment(projectId, remap);
+        // Gate-lost comments — written before re-hydrate so the refreshed
+        // tickets carry them.
+        for (const remap of result.remappedTickets) {
+          if (remap.gateLost) {
+            await this.appendGateLostComment(repo, projectId, remap);
+          }
+        }
+
+        // Columns and ticket column_ids changed in the DB — refresh both for
+        // this project in the cache.
+        this.cache.columns.set(projectId, await repo.listColumns(projectId));
+        const tickRows = await repo.listTicketsByProject(projectId);
+        const refreshed = await Promise.all(
+          tickRows.map(async (r) => rowToTicket(r, await repo.listCommentsByTicket(r.id)))
+        );
+        const byId = new Map(refreshed.map((t) => [t.id, t]));
+        this.cache.tickets = this.cache.tickets.map((t) => byId.get(t.id) ?? t);
+
+        this.changeWatcher?.noteLocalWrite();
+        changed = result.inserted.length > 0 || result.removed.length > 0 || result.remappedTickets.length > 0;
+      } catch (err) {
+        console.warn(`[ProjectManager] syncColumnsForProject failed for ${projectId}:`, err);
+        return;
       }
-    }
-
-    if (result.inserted.length || result.removed.length || result.remappedTickets.length) {
-      this.noteLocalWriteAndBroadcast();
-    }
+      if (changed) {
+        this.broadcastStoreSnapshot();
+      }
+    }));
   };
 
   /**
@@ -749,15 +982,17 @@ export class ProjectManager {
    * removed. The comment is authored as `agent` because the ticket_comments
    * CHECK constraint only permits `agent`/`human`; the prefix makes the
    * provenance obvious in the discussion view and in `get_ticket_comments`
-   * output.
+   * output. Called from within the serialized persist block of
+   * {@link syncPipelineForProject}, so it awaits the repo write directly.
    */
-  private appendGateLostComment = (projectId: ProjectId, remap: TicketRemap): void => {
-    if (!this.repo) {
-return;
-}
+  private appendGateLostComment = async (
+    repo: IProjectsRepo,
+    projectId: ProjectId,
+    remap: TicketRemap
+  ): Promise<void> => {
     const content = `[Pipeline change] This ticket was in the gate column "${remap.fromLabel}", which was removed from FLEET.md. It has been remapped to "${remap.toLabel}". Please re-evaluate whether human review is still needed.`;
     try {
-      this.repo.upsertComment({
+      await repo.upsertComment({
         id: commentId(),
         ticket_id: remap.ticketId,
         author: 'agent',
@@ -770,10 +1005,10 @@ return;
   };
 
   getPipeline = (projectId: ProjectId): Pipeline => {
-    // SQLite pipeline_columns is the source of truth — `syncPipelineForProject`
-    // keeps it in sync with FLEET.md or the source-based defaults.
+    // The cached pipeline_columns are the source of truth —
+    // `syncPipelineForProject` keeps them in sync with FLEET.md / defaults.
     if (this.repo) {
-      const rows = this.repo.listColumns(projectId);
+      const rows = this.cache.columns.get(projectId) ?? [];
       if (rows.length > 0) {
         return {
           columns: rows.map((r) => ({
@@ -837,26 +1072,26 @@ return;
 
   private getTickets = (): Ticket[] => {
     if (this.repo) {
-      return this.repo.listAllTickets().map((row) => {
-        const comments = this.repo!.listCommentsByTicket(row.id);
-        return rowToTicket(row, comments);
-      });
+      return this.cache.tickets;
     }
     return this.store.get('tickets', []);
   };
 
   private setTickets = (tickets: Ticket[]): void => {
     if (this.repo) {
-      this.repo.replaceAllTickets(tickets.map(ticketToRow));
-      // Also sync inline comments to the comments table
-      for (const ticket of tickets) {
-        if (ticket.comments && ticket.comments.length > 0) {
-          this.repo.replaceCommentsForTicket(
-            ticket.id,
-            ticket.comments.map((c) => commentToRow(c, ticket.id))
-          );
+      const repo = this.repo;
+      this.cache.tickets = tickets;
+      // Snapshot rows synchronously (immune to later mutation of the array).
+      const rows = tickets.map(ticketToRow);
+      const commentSets = tickets
+        .filter((t) => t.comments && t.comments.length > 0)
+        .map((t) => [t.id, t.comments!.map((c) => commentToRow(c, t.id))] as const);
+      this.enqueuePersist(async () => {
+        await repo.replaceAllTickets(rows);
+        for (const [ticketId, commentRows] of commentSets) {
+          await repo.replaceCommentsForTicket(ticketId, commentRows);
         }
-      }
+      });
       this.noteLocalWriteAndBroadcast();
     } else {
       this.store.set('tickets', tickets);
@@ -880,17 +1115,21 @@ return;
       updatedAt: now,
     };
     if (this.repo) {
+      const repo = this.repo;
       // Per-row write: avoids the read-all → mutate → write-all pattern that
       // races with MCP and re-churns every other ticket in the table on each
       // edit. `upsertTicket` is a single INSERT ON CONFLICT touching exactly
       // this row.
-      this.repo.upsertTicket(ticketToRow(ticket));
-      if (ticket.comments && ticket.comments.length > 0) {
-        this.repo.replaceCommentsForTicket(
-          ticket.id,
-          ticket.comments.map((c) => commentToRow(c, ticket.id))
-        );
-      }
+      this.cache.tickets = [...this.cache.tickets, ticket];
+      this.enqueuePersist(async () => {
+        await repo.upsertTicket(ticketToRow(ticket));
+        if (ticket.comments && ticket.comments.length > 0) {
+          await repo.replaceCommentsForTicket(
+            ticket.id,
+            ticket.comments.map((c) => commentToRow(c, ticket.id))
+          );
+        }
+      });
       this.noteLocalWriteAndBroadcast();
     } else {
       const tickets = this.getTickets();
@@ -902,23 +1141,25 @@ return;
 
   updateTicket = (id: TicketId, patch: Partial<Omit<Ticket, 'id' | 'projectId' | 'createdAt'>>): void => {
     if (this.repo) {
-      const row = this.repo.getTicket(id);
-      if (!row) {
+      const repo = this.repo;
+      const current = this.cache.tickets.find((t) => t.id === id);
+      if (!current) {
         return;
       }
-      const comments = this.repo.listCommentsByTicket(id);
-      const current = rowToTicket(row, comments);
       const next: Ticket = { ...current, ...patch, updatedAt: Date.now() };
-      this.repo.upsertTicket(ticketToRow(next));
-      if (patch.comments) {
-        // Only re-sync comments when the patch actually includes them. The
-        // old `setTickets` path replayed every ticket's comments on every
-        // edit — that's where the write amplification came from.
-        this.repo.replaceCommentsForTicket(
-          id,
-          patch.comments.map((c) => commentToRow(c, id))
-        );
-      }
+      this.cache.tickets = this.cache.tickets.map((t) => (t.id === id ? next : t));
+      this.enqueuePersist(async () => {
+        await repo.upsertTicket(ticketToRow(next));
+        if (patch.comments) {
+          // Only re-sync comments when the patch actually includes them. The
+          // old `setTickets` path replayed every ticket's comments on every
+          // edit — that's where the write amplification came from.
+          await repo.replaceCommentsForTicket(
+            id,
+            patch.comments.map((c) => commentToRow(c, id))
+          );
+        }
+      });
       this.noteLocalWriteAndBroadcast();
       return;
     }
@@ -945,9 +1186,11 @@ return;
     }
 
     if (this.repo) {
+      const repo = this.repo;
       // Per-row delete. `ticket_comments` cascades automatically via the
       // FK; supervisor `tasks.ticket_id` is SET NULL so tasks survive.
-      this.repo.deleteTicket(id);
+      this.cache.tickets = this.cache.tickets.filter((t) => t.id !== id);
+      this.enqueuePersist(() => repo.deleteTicket(id));
       this.noteLocalWriteAndBroadcast();
       return;
     }
@@ -1084,9 +1327,7 @@ return;
       }
     }
     if (!task) {
-      const storedTasks = this.repo
-        ? this.repo.listAllTasks().map(rowToTask)
-        : (this.store.get('tasks') ?? []);
+      const storedTasks = this.repo ? this.cache.tasks : (this.store.get('tasks') ?? []);
       task = storedTasks.find((t: Task) => t.ticketId === ticketId);
     }
 
@@ -1522,6 +1763,8 @@ return;
       clearInterval(this.inboxSweepTimer);
       this.inboxSweepTimer = null;
     }
+    // Drain any queued write-through persistence before tearing down.
+    await this.flushPersists();
     this.workflowLoader.dispose();
     await this.pages.dispose();
 
@@ -1548,27 +1791,31 @@ export const createProjectManager = (arg: {
   store: Store<StoreData>;
   processManager?: ProcessManager;
   appControlManager?: import('@/main/app-control-manager').AppControlManager;
-  /** Optional: shared SQLite repo. When provided, project data is stored in SQLite. */
-  repo?: ProjectsRepo;
+  /** Optional async repo. When provided, project data is persisted here and cached in memory. */
+  repo?: IProjectsRepo;
+  /** Optional sync SQLite handle for the change-watcher (omit in Postgres mode). */
+  changeSeqRepo?: ProjectsRepo;
 }) => {
-  const { ipc, sendToWindow, store, processManager, appControlManager, repo } = arg;
+  const { ipc, sendToWindow, store, processManager, appControlManager, repo, changeSeqRepo } = arg;
 
   // Run migration
   ProjectManager.migrateToSupervisor(store);
 
-  const projectManager = new ProjectManager({ store, sendToWindow, processManager, appControlManager, repo });
+  const projectManager = new ProjectManager({ store, sendToWindow, processManager, appControlManager, repo, changeSeqRepo });
   const { supervisors, milestones, inbox, pages, bridge } = projectManager;
-  supervisors.restorePersistedTasks();
+  // Cache hydration + restorePersistedTasks now run inside ProjectManager.init()
+  // (the constructor kicks it off; awaited via projectManager.whenReady).
 
   // Per-module IPC handler registration. Each helper returns the channel
   // names it registered so the cleanup loop below can remove them all in
   // one pass without a 50-line removeHandler block.
+  // Single-manager (Electron) wiring: every resolver returns the one manager.
   const channels = [
-    ...registerProjectHandlers(ipc, projectManager),
-    ...registerSupervisorHandlers(ipc, supervisors),
-    ...registerMilestoneHandlers(ipc, milestones),
-    ...registerPageHandlers(ipc, pages, (projectId) => projectManager.getProjectDir(projectId)),
-    ...registerInboxHandlers(ipc, inbox),
+    ...registerProjectHandlers(ipc, () => projectManager),
+    ...registerSupervisorHandlers(ipc, () => supervisors),
+    ...registerMilestoneHandlers(ipc, () => milestones),
+    ...registerPageHandlers(ipc, () => pages, (_event, projectId) => projectManager.getProjectDir(projectId)),
+    ...registerInboxHandlers(ipc, () => inbox),
     ...bridge.registerIpc(ipc),
   ];
 

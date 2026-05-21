@@ -1,26 +1,23 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { DatabaseSync } from 'node:sqlite';
-import type { ProjectsRepo } from 'omni-projects-db';
-import { pageId, readPageContent, writePageContent } from 'omni-projects-db';
-import type { PageRow } from 'omni-projects-db';
+import { type IProjectsRepo, nowTimestamp, pageId } from 'omni-projects-db';
 import { z } from 'zod';
 
 const json = (data: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data) }] });
 const err = (message: string) => ({ content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }], isError: true as const });
 
-export function registerPageTools(server: McpServer, db: DatabaseSync, repo: ProjectsRepo, pagesDir: string): void {
+export function registerPageTools(server: McpServer, repo: IProjectsRepo): void {
   server.tool(
     'list_pages',
     'List omni-projects documentation pages (markdown notes/specs/plans tied to a project) as a flat list with parent/child relationships. NOT for filesystem files — use list_directory / glob_files / grep_files for those.',
     { project_id: z.string().describe('The omni-projects project ID (proj_*). NOT a filesystem path.') },
     async ({ project_id }) => {
-      const exists = repo.getProject(project_id);
+      const exists = await repo.getProject(project_id);
       if (!exists) return err(`Project not found: ${project_id}`);
 
-      const pages = repo.listPagesByProject(project_id);
+      const pages = await repo.listPagesByProject(project_id);
 
       return json({
-        pages: pages.map(p => ({
+        pages: pages.map((p) => ({
           id: p.id,
           title: p.title,
           icon: p.icon,
@@ -51,10 +48,10 @@ export function registerPageTools(server: McpServer, db: DatabaseSync, repo: Pro
             `not workspace files. Use read_file for source files.`
         );
       }
-      const page = repo.getPage(page_id);
+      const page = await repo.getPage(page_id);
       if (!page) return err(`Page not found: ${page_id}`);
 
-      const content = readPageContent(pagesDir, page.project_id, page.id);
+      const content = await repo.getPageContent(page.id);
 
       return json({
         id: page.id,
@@ -80,19 +77,25 @@ export function registerPageTools(server: McpServer, db: DatabaseSync, repo: Pro
       icon: z.string().optional().describe('Optional emoji icon for sidebar display.'),
     },
     async ({ project_id, title, parent_id, content, icon }) => {
-      const project = repo.getProject(project_id);
+      const project = await repo.getProject(project_id);
       if (!project) return err(`Project not found: ${project_id}`);
 
       const id = pageId();
-      const sortOrder = Date.now();
-
-      db.prepare(`
-        INSERT INTO pages (id, project_id, parent_id, title, icon, sort_order)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(id, project_id, parent_id ?? null, title, icon ?? null, sortOrder);
-      repo.bumpChangeSeq();
-
-      writePageContent(pagesDir, project_id, id, content?.trim() ? content : `# ${title}\n`);
+      const now = nowTimestamp();
+      await repo.upsertPage({
+        id,
+        project_id,
+        parent_id: parent_id ?? null,
+        title,
+        icon: icon ?? null,
+        sort_order: Date.now(),
+        is_root: 0,
+        kind: 'doc',
+        properties: null,
+        created_at: now,
+        updated_at: now,
+      });
+      await repo.setPageContent(id, content?.trim() ? content : `# ${title}\n`);
 
       return json({ id, title, parent_id: parent_id ?? null });
     }
@@ -108,24 +111,19 @@ export function registerPageTools(server: McpServer, db: DatabaseSync, repo: Pro
       icon: z.string().optional().describe('New emoji icon.'),
     },
     async ({ page_id, title, content, icon }) => {
-      const page = repo.getPage(page_id);
+      const page = await repo.getPage(page_id);
       if (!page) return err(`Page not found: ${page_id}`);
 
-      const sets: string[] = [];
-      const params: unknown[] = [];
-
-      if (title !== undefined) { sets.push('title = ?'); params.push(title); }
-      if (icon !== undefined) { sets.push('icon = ?'); params.push(icon || null); }
-
-      if (sets.length > 0) {
-        sets.push("updated_at = datetime('now')");
-        params.push(page_id);
-        db.prepare(`UPDATE pages SET ${sets.join(', ')} WHERE id = ?`).run(...params);
-        repo.bumpChangeSeq();
+      if (title !== undefined || icon !== undefined) {
+        const next = { ...page };
+        if (title !== undefined) next.title = title;
+        if (icon !== undefined) next.icon = icon || null;
+        next.updated_at = nowTimestamp();
+        await repo.upsertPage(next);
       }
 
       if (content !== undefined) {
-        writePageContent(pagesDir, page.project_id, page.id, content);
+        await repo.setPageContent(page.id, content);
       }
 
       return json({ ok: true });

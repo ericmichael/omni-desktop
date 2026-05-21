@@ -1,9 +1,8 @@
-import type { DatabaseSync } from 'node:sqlite';
-
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { InboxRow,ProjectsRepo  } from 'omni-projects-db';
-import { DEFAULT_COLUMNS, defaultColumnId, inboxId, pageId, projectId, ticketId, tx, writePageContent } from 'omni-projects-db';
+import { inboxId, type InboxRow, type IProjectsRepo, nowTimestamp, ticketId } from 'omni-projects-db';
 import { z } from 'zod';
+
+import { seedProject, slugify } from '../seed.js';
 
 const json = (data: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data) }] });
 const err = (message: string) => ({ content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }], isError: true as const });
@@ -23,11 +22,7 @@ function serializeItem(item: InboxRow) {
   };
 }
 
-function slugify(label: string): string {
-  return label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-}
-
-export function registerInboxTools(server: McpServer, db: DatabaseSync, repo: ProjectsRepo, pagesDir: string): void {
+export function registerInboxTools(server: McpServer, repo: IProjectsRepo): void {
   server.tool(
     'list_inbox',
     'List inbox items, optionally filtered by status. Default: active items (new + shaped, excluding promoted).',
@@ -37,17 +32,12 @@ export function registerInboxTools(server: McpServer, db: DatabaseSync, repo: Pr
       ),
     },
     async ({ status }) => {
-      let sql: string;
-      const params: unknown[] = [];
-
-      if (status) {
-        sql = 'SELECT * FROM inbox_items WHERE status = ? AND promoted_to IS NULL ORDER BY created_at DESC';
-        params.push(status);
-      } else {
-        sql = "SELECT * FROM inbox_items WHERE status IN ('new','shaped') AND promoted_to IS NULL ORDER BY created_at DESC";
-      }
-
-      const items = db.prepare(sql).all(...params) as InboxRow[];
+      const all = await repo.listAllInboxItems();
+      const items = all.filter((it) => {
+        if (it.promoted_to) return false;
+        if (status) return it.status === status;
+        return it.status === 'new' || it.status === 'shaped';
+      });
       return json({ items: items.map(serializeItem) });
     }
   );
@@ -62,10 +52,19 @@ export function registerInboxTools(server: McpServer, db: DatabaseSync, repo: Pr
     },
     async ({ title, description, project_id }) => {
       const id = inboxId();
-      db.prepare(
-        'INSERT INTO inbox_items (id, title, note, project_id) VALUES (?, ?, ?, ?)'
-      ).run(id, title, description ?? null, project_id ?? null);
-      repo.bumpChangeSeq();
+      const now = nowTimestamp();
+      await repo.upsertInboxItem({
+        id,
+        title,
+        note: description ?? null,
+        project_id: project_id ?? null,
+        status: 'new',
+        shaping: null,
+        later_at: null,
+        promoted_to: null,
+        created_at: now,
+        updated_at: now,
+      });
 
       return json({ id, title });
     }
@@ -85,57 +84,42 @@ export function registerInboxTools(server: McpServer, db: DatabaseSync, repo: Pr
       not_doing: z.string().optional().describe('Explicitly out-of-scope work.'),
     },
     async ({ item_id, title, description, status, project_id, outcome, appetite, not_doing }) => {
-      const item = repo.getInboxItem(item_id);
-      if (!item) {
-return err(`Inbox item not found: ${item_id}`);
-}
+      const item = await repo.getInboxItem(item_id);
+      if (!item) return err(`Inbox item not found: ${item_id}`);
 
-      const sets: string[] = [];
-      const params: unknown[] = [];
+      const next = { ...item };
+      if (title !== undefined) next.title = title;
+      if (description !== undefined) next.note = description;
+      if (project_id !== undefined) next.project_id = project_id || null;
 
-      if (title !== undefined) {
- sets.push('title = ?'); params.push(title); 
-}
-      if (description !== undefined) {
- sets.push('note = ?'); params.push(description); 
-}
-      if (project_id !== undefined) {
- sets.push('project_id = ?'); params.push(project_id || null); 
-}
-
-      // Shape the item if shaping fields provided
+      // Shape the item if shaping fields provided.
       if (outcome !== undefined || appetite !== undefined || not_doing !== undefined) {
         const existing = item.shaping ? JSON.parse(item.shaping) : {};
         const shaping = {
           outcome: outcome ?? existing.outcome ?? '',
           appetite: appetite ?? existing.appetite ?? 'medium',
-          ...(not_doing !== undefined ? { notDoing: not_doing } : existing.notDoing ? { notDoing: existing.notDoing } : {}),
+          ...(not_doing !== undefined
+            ? { notDoing: not_doing }
+            : existing.notDoing
+              ? { notDoing: existing.notDoing }
+              : {}),
         };
-        sets.push('shaping = ?');
-        params.push(JSON.stringify(shaping));
-        // Auto-transition to shaped if not already
+        next.shaping = JSON.stringify(shaping);
+        // Auto-transition to shaped if not already.
         if (!status && item.status === 'new') {
-          sets.push('status = ?');
-          params.push('shaped');
+          next.status = 'shaped';
         }
       }
 
       if (status !== undefined) {
-        sets.push('status = ?');
-        params.push(status);
+        next.status = status;
         if (status === 'later') {
-          sets.push("later_at = datetime('now')");
+          next.later_at = nowTimestamp();
         }
       }
 
-      if (sets.length === 0) {
-return json({ ok: true });
-}
-
-      sets.push("updated_at = datetime('now')");
-      params.push(item_id);
-      db.prepare(`UPDATE inbox_items SET ${sets.join(', ')} WHERE id = ?`).run(...params);
-      repo.bumpChangeSeq();
+      next.updated_at = nowTimestamp();
+      await repo.upsertInboxItem(next);
 
       return json({ ok: true });
     }
@@ -146,11 +130,9 @@ return json({ ok: true });
     'Remove an inbox item.',
     { item_id: z.string().describe('The inbox item ID to delete') },
     async ({ item_id }) => {
-      const result = db.prepare('DELETE FROM inbox_items WHERE id = ?').run(item_id);
-      if (result.changes === 0) {
-return err(`Inbox item not found: ${item_id}`);
-}
-      repo.bumpChangeSeq();
+      const item = await repo.getInboxItem(item_id);
+      if (!item) return err(`Inbox item not found: ${item_id}`);
+      await repo.deleteInboxItem(item_id);
       return json({ ok: true });
     }
   );
@@ -164,31 +146,51 @@ return err(`Inbox item not found: ${item_id}`);
       milestone_id: z.string().optional().describe('Optional milestone to assign the new ticket to.'),
     },
     async ({ item_id, project_id, milestone_id }) => {
-      const item = repo.getInboxItem(item_id);
-      if (!item) {
-return err(`Inbox item not found: ${item_id}`);
-}
+      const item = await repo.getInboxItem(item_id);
+      if (!item) return err(`Inbox item not found: ${item_id}`);
 
-      const cols = repo.listColumns(project_id);
+      const cols = await repo.listColumns(project_id);
       const firstCol = cols[0];
-      if (!firstCol) {
-return err(`Project not found or has no pipeline: ${project_id}`);
-}
+      if (!firstCol) return err(`Project not found or has no pipeline: ${project_id}`);
 
       const tktId = ticketId();
+      const now = nowTimestamp();
+      // Create the durable artifact (ticket) first, then mark the item
+      // promoted — IProjectsRepo has no cross-statement transaction.
+      await repo.upsertTicket({
+        id: tktId,
+        project_id,
+        milestone_id: milestone_id ?? null,
+        column_id: firstCol.id,
+        title: item.title,
+        description: item.note ?? '',
+        priority: 'medium',
+        branch: null,
+        blocked_by: '[]',
+        shaping: null,
+        resolution: null,
+        resolved_at: null,
+        archived_at: null,
+        column_changed_at: null,
+        use_worktree: 0,
+        worktree_path: null,
+        worktree_name: null,
+        supervisor_session_id: null,
+        phase: null,
+        phase_changed_at: null,
+        supervisor_task_id: null,
+        token_usage: null,
+        runs: '[]',
+        pr_review: null,
+        pr_merged_at: null,
+        created_at: now,
+        updated_at: now,
+      });
 
-      tx(db, () => {
-        db.prepare(`
-          INSERT INTO tickets (id, project_id, milestone_id, column_id, title, description, priority)
-          VALUES (?, ?, ?, ?, ?, ?, 'medium')
-        `).run(tktId, project_id, milestone_id ?? null, firstCol.id, item.title, item.note ?? '');
-
-        const promotion = JSON.stringify({ kind: 'ticket', id: tktId, at: new Date().toISOString() });
-        db.prepare(`
-          UPDATE inbox_items SET promoted_to = ?, updated_at = datetime('now') WHERE id = ?
-        `).run(promotion, item_id);
-
-        repo.bumpChangeSeq();
+      await repo.upsertInboxItem({
+        ...item,
+        promoted_to: JSON.stringify({ kind: 'ticket', id: tktId, at: new Date().toISOString() }),
+        updated_at: nowTimestamp(),
       });
 
       return json({ ok: true, ticket_ids: [tktId] });
@@ -203,48 +205,24 @@ return err(`Project not found or has no pipeline: ${project_id}`);
       label: z.string().optional().describe('Optional label for the new project.'),
     },
     async ({ item_id, label }) => {
-      const item = repo.getInboxItem(item_id);
-      if (!item) {
-return err(`Inbox item not found: ${item_id}`);
-}
+      const item = await repo.getInboxItem(item_id);
+      if (!item) return err(`Inbox item not found: ${item_id}`);
 
       const projLabel = label || item.title;
       const slug = slugify(projLabel);
 
-      const existing = repo.getProjectBySlug(slug);
-      if (existing) {
-return err(`A project with slug "${slug}" already exists.`);
-}
+      const existing = await repo.getProjectBySlug(slug);
+      if (existing) return err(`A project with slug "${slug}" already exists.`);
 
-      const projId = projectId();
+      const seeded = await seedProject(repo, { label: projLabel });
 
-      tx(db, () => {
-        db.prepare(
-          'INSERT INTO projects (id, label, slug) VALUES (?, ?, ?)'
-        ).run(projId, projLabel, slug);
-
-        for (let i = 0; i < DEFAULT_COLUMNS.length; i++) {
-          const col = DEFAULT_COLUMNS[i]!;
-          db.prepare(
-            'INSERT INTO pipeline_columns (id, project_id, label, description, sort_order, gate) VALUES (?, ?, ?, ?, ?, ?)'
-          ).run(defaultColumnId(projId, col.logicalId), projId, col.label, null, i, col.gate ? 1 : 0);
-        }
-
-        const rootId = pageId();
-        db.prepare(
-          'INSERT INTO pages (id, project_id, parent_id, title, sort_order, is_root) VALUES (?, ?, NULL, ?, 0, 1)'
-        ).run(rootId, projId, projLabel);
-        writePageContent(pagesDir, projId, rootId, `# ${projLabel}\n`);
-
-        const promotion = JSON.stringify({ kind: 'project', id: projId, at: new Date().toISOString() });
-        db.prepare(`
-          UPDATE inbox_items SET promoted_to = ?, updated_at = datetime('now') WHERE id = ?
-        `).run(promotion, item_id);
-
-        repo.bumpChangeSeq();
+      await repo.upsertInboxItem({
+        ...item,
+        promoted_to: JSON.stringify({ kind: 'project', id: seeded.id, at: new Date().toISOString() }),
+        updated_at: nowTimestamp(),
       });
 
-      return json({ ok: true, project_id: projId, label: projLabel, slug });
+      return json({ ok: true, project_id: seeded.id, label: seeded.label, slug: seeded.slug });
     }
   );
 }

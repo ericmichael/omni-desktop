@@ -6,7 +6,7 @@ import type { StoreData } from '@/shared/types';
 
 const STORE_PATH = join(homedir(), '.config', 'Omni Code', 'config.json');
 
-const DEFAULTS: StoreData = {
+export const DEFAULTS: StoreData = {
   defaultProfileName: 'host',
   optInToLauncherPrereleases: false,
   previewFeatures: false,
@@ -21,6 +21,8 @@ const DEFAULTS: StoreData = {
   tickets: [],
   schemaVersion: 0,
   chatSessionId: null,
+  chatProfileName: null,
+  chatContainerId: null,
   codeTabs: [],
   activeCodeTabId: null,
   codeLayoutMode: 'tile',

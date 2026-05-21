@@ -19,7 +19,12 @@ export type { AutoLaunchPhase };
 export const useCodeAutoLaunch = (
   tabId: CodeTabId,
   workspaceDir: string | null,
-  opts?: { projectId?: string; profileNameOverride?: string; sessionId?: string }
+  opts?: {
+    projectId?: string;
+    profileNameOverride?: string;
+    sessionId?: string;
+    containerId?: string;
+  }
 ) => {
   const { phase, error, retry, launch, actor } = useAutoLaunch({
     processId: tabId,
@@ -27,6 +32,7 @@ export const useCodeAutoLaunch = (
     ...(opts?.projectId ? { projectId: opts.projectId } : {}),
     ...(opts?.profileNameOverride ? { profileNameOverride: opts.profileNameOverride } : {}),
     ...(opts?.sessionId ? { sessionId: opts.sessionId } : {}),
+    ...(opts?.containerId ? { containerId: opts.containerId } : {}),
     logLabel: 'autoLaunch:code',
   });
 

@@ -36,7 +36,7 @@ const makeOrchestrator = () => ({
 describe('registerSupervisorHandlers', () => {
   it('registers all expected channels', () => {
     const ipc = new StubIpc();
-    const channels = registerSupervisorHandlers(ipc, makeOrchestrator() as never);
+    const channels = registerSupervisorHandlers(ipc, () => makeOrchestrator() as never);
     expect(channels).toEqual(EXPECTED_CHANNELS);
     for (const ch of EXPECTED_CHANNELS) {
       expect(ipc.handlers.has(ch), `missing handler for ${ch}`).toBe(true);
@@ -46,7 +46,7 @@ describe('registerSupervisorHandlers', () => {
   it('project:ensure-supervisor-infra delegates with ticketId', () => {
     const ipc = new StubIpc();
     const orch = makeOrchestrator();
-    registerSupervisorHandlers(ipc, orch as never);
+    registerSupervisorHandlers(ipc, () => orch as never);
     ipc.invoke('project:ensure-supervisor-infra', 't1');
     expect(orch.ensureSupervisorInfraLocked).toHaveBeenCalledWith('t1');
   });
@@ -54,7 +54,7 @@ describe('registerSupervisorHandlers', () => {
   it('project:start-supervisor delegates with ticketId', () => {
     const ipc = new StubIpc();
     const orch = makeOrchestrator();
-    registerSupervisorHandlers(ipc, orch as never);
+    registerSupervisorHandlers(ipc, () => orch as never);
     ipc.invoke('project:start-supervisor', 't1');
     expect(orch.startSupervisor).toHaveBeenCalledWith('t1');
   });
@@ -62,7 +62,7 @@ describe('registerSupervisorHandlers', () => {
   it('project:stop-supervisor delegates with ticketId', () => {
     const ipc = new StubIpc();
     const orch = makeOrchestrator();
-    registerSupervisorHandlers(ipc, orch as never);
+    registerSupervisorHandlers(ipc, () => orch as never);
     ipc.invoke('project:stop-supervisor', 't1');
     expect(orch.stopSupervisor).toHaveBeenCalledWith('t1');
   });
@@ -70,7 +70,7 @@ describe('registerSupervisorHandlers', () => {
   it('project:send-supervisor-message delegates with ticketId and message', () => {
     const ipc = new StubIpc();
     const orch = makeOrchestrator();
-    registerSupervisorHandlers(ipc, orch as never);
+    registerSupervisorHandlers(ipc, () => orch as never);
     ipc.invoke('project:send-supervisor-message', 't1', 'hello');
     expect(orch.sendSupervisorMessage).toHaveBeenCalledWith('t1', 'hello');
   });
@@ -78,7 +78,7 @@ describe('registerSupervisorHandlers', () => {
   it('project:set-auto-dispatch delegates with projectId and enabled flag', () => {
     const ipc = new StubIpc();
     const orch = makeOrchestrator();
-    registerSupervisorHandlers(ipc, orch as never);
+    registerSupervisorHandlers(ipc, () => orch as never);
     ipc.invoke('project:set-auto-dispatch', 'p1', true);
     expect(orch.setAutoDispatch).toHaveBeenCalledWith('p1', true);
   });
@@ -86,7 +86,7 @@ describe('registerSupervisorHandlers', () => {
   it('project:get-active-wip-tickets delegates with no args', () => {
     const ipc = new StubIpc();
     const orch = makeOrchestrator();
-    registerSupervisorHandlers(ipc, orch as never);
+    registerSupervisorHandlers(ipc, () => orch as never);
     ipc.invoke('project:get-active-wip-tickets');
     expect(orch.getActiveWipTickets).toHaveBeenCalledOnce();
   });
@@ -94,7 +94,7 @@ describe('registerSupervisorHandlers', () => {
   it('project:get-tasks delegates with no args', () => {
     const ipc = new StubIpc();
     const orch = makeOrchestrator();
-    registerSupervisorHandlers(ipc, orch as never);
+    registerSupervisorHandlers(ipc, () => orch as never);
     ipc.invoke('project:get-tasks');
     expect(orch.listTasks).toHaveBeenCalledOnce();
   });
@@ -102,7 +102,7 @@ describe('registerSupervisorHandlers', () => {
   it('project:finalize-ticket-cleanup delegates with ticketId', () => {
     const ipc = new StubIpc();
     const orch = makeOrchestrator();
-    registerSupervisorHandlers(ipc, orch as never);
+    registerSupervisorHandlers(ipc, () => orch as never);
     ipc.invoke('project:finalize-ticket-cleanup', 't1');
     expect(orch.finalizeTicketCleanup).toHaveBeenCalledWith('t1');
   });

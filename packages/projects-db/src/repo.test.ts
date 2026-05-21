@@ -12,8 +12,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { defaultColumnId } from './defaults.js';
 import { ticketId } from './ids.js';
 import { runMigrations } from './migrate.js';
-import type { ColumnSyncInput } from './repo.js';
 import { ProjectsRepo } from './repo.js';
+import type { ColumnSyncInput } from './repo-interface.js';
 
 const PROJECT_ID = 'proj_test';
 

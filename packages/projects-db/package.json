@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "nanoid": "^5.1.5",
+    "pg": "^8.21.0",
     "remark-gfm": "^4.0.1",
     "remark-parse": "^11.0.0",
     "remark-stringify": "^11.0.0",
@@ -33,6 +34,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/pg": "^8.20.0",
     "tsup": "^8.0.0",
     "typescript": "^5.7.0"
   }
