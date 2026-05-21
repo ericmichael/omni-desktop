@@ -113,10 +113,11 @@ var pgDatabaseName = 'omni'
 var identityName = '${namePrefix}-launcher-mi'
 var planName = '${namePrefix}-launcher-plan'
 var workspaceShareName = 'workspaces'
+var kvName = take('${namePrefix}-kv-${suffix}', 24)
 
 // Built-in role definition IDs.
 var roleAcrPull = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
-var roleContributor = 'b24988ac-6180-42a0-ab88-20f7382dd24c'
+var roleKvSecretsUser = '4633458b-17de-408a-b874-0445c86b69e6'
 
 // ---------------------------------------------------------------------------
 // Identity
@@ -136,7 +137,10 @@ resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   location: location
   properties: {
     sku: { name: 'PerGB2018' }
-    retentionInDays: 30
+    // Audit-log retention. 90d is a dev default; a PHI deployment wants ~6y,
+    // which exceeds Log Analytics' 730d interactive max — use the archive tier
+    // or export to immutable storage for long-term retention there.
+    retentionInDays: 90
   }
 }
 
@@ -317,15 +321,48 @@ resource raAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
-// Create/manage container apps in this resource group (the in-app compute
-// client PUTs Microsoft.App/containerApps). Contributor is broad — replace
-// with a custom role limited to Microsoft.App/* for least privilege.
-resource raContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, identity.id, roleContributor)
+// Least-privilege role for the launcher: manage ACI sandbox container groups
+// (create/delete/exec) and join the sandbox subnet — instead of Contributor on
+// the whole resource group. The launcher provisions sandboxes by PUTting
+// Microsoft.ContainerInstance/containerGroups directly (omniagents sandbox-aci).
+resource roleAciManager 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
+  name: guid(resourceGroup().id, 'aci-sandbox-manager')
+  properties: {
+    roleName: '${namePrefix}-aci-sandbox-manager-${suffix}'
+    description: 'Manage ACI sandbox container groups + join the sandbox subnet.'
+    assignableScopes: [resourceGroup().id]
+    permissions: [
+      {
+        actions: [
+          'Microsoft.ContainerInstance/containerGroups/read'
+          'Microsoft.ContainerInstance/containerGroups/write'
+          'Microsoft.ContainerInstance/containerGroups/delete'
+          'Microsoft.ContainerInstance/containerGroups/start/action'
+          'Microsoft.ContainerInstance/containerGroups/stop/action'
+          'Microsoft.ContainerInstance/containerGroups/restart/action'
+          'Microsoft.ContainerInstance/containerGroups/containers/exec/action'
+          'Microsoft.ContainerInstance/containerGroups/containers/logs/read'
+          'Microsoft.ContainerInstance/locations/operations/read'
+          'Microsoft.ContainerInstance/operations/read'
+          // ACI VNet deployment joins the delegated subnet (+ legacy networkProfile path).
+          'Microsoft.Network/virtualNetworks/read'
+          'Microsoft.Network/virtualNetworks/subnets/read'
+          'Microsoft.Network/virtualNetworks/subnets/join/action'
+          'Microsoft.Network/networkProfiles/read'
+          'Microsoft.Network/networkProfiles/write'
+          'Microsoft.Network/networkProfiles/delete'
+        ]
+      }
+    ]
+  }
+}
+
+resource raAciManager 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, identity.id, 'aci-sandbox-manager')
   properties: {
     principalId: identity.properties.principalId
     principalType: 'ServicePrincipal'
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleContributor)
+    roleDefinitionId: roleAciManager.id
   }
 }
 
@@ -354,6 +391,74 @@ var dataApiUrl = 'https://${siteHostName}${mcpRoutePath}'
 // URL-encode the password — a generated password can contain `/`, `+`, `@`,
 // etc. which otherwise corrupt the connection-string URL and crash pg on boot.
 var pgConnString = 'postgresql://${postgresAdminLogin}:${uriComponent(postgresAdminPassword)}@${postgres.properties.fullyQualifiedDomainName}:5432/${pgDatabaseName}?sslmode=require'
+
+// ---------------------------------------------------------------------------
+// Key Vault — runtime secrets live here, not as plaintext app settings. The
+// Web App reads them via Key Vault references resolved with its managed
+// identity (keyVaultReferenceIdentity below). RBAC auth mode (no access
+// policies). Public access stays on here; the network tranche adds a private
+// endpoint + turns it off.
+// ---------------------------------------------------------------------------
+
+resource kv 'Microsoft.KeyVault/vaults@2023-07-01' = {
+  name: kvName
+  location: location
+  properties: {
+    sku: { family: 'A', name: 'standard' }
+    tenantId: tenant().tenantId
+    enableRbacAuthorization: true
+    enableSoftDelete: true
+    softDeleteRetentionInDays: 90
+    enablePurgeProtection: true
+    publicNetworkAccess: 'Enabled'
+  }
+}
+
+resource kvSecretDbUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: kv
+  name: 'omni-database-url'
+  properties: { value: pgConnString }
+}
+resource kvSecretRuntimeToken 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: kv
+  name: 'runtime-token-secret'
+  properties: { value: runtimeTokenSecret }
+}
+resource kvSecretWsToken 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: kv
+  name: 'ws-token'
+  properties: { value: wsToken }
+}
+resource kvSecretAadSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: kv
+  name: 'aad-client-secret'
+  properties: { value: aadClientSecret }
+}
+resource kvSecretStorageKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: kv
+  name: 'storage-account-key'
+  properties: { value: storage.listKeys().keys[0].value }
+}
+resource kvSecretAcrPassword 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: kv
+  name: 'acr-password'
+  properties: { value: acr.listCredentials().passwords[0].value }
+}
+
+// The Web App's managed identity may read secrets.
+resource raKvSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(kv.id, identity.id, roleKvSecretsUser)
+  scope: kv
+  properties: {
+    principalId: identity.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleKvSecretsUser)
+  }
+}
+
+// Helper: build a Key Vault reference app-setting value for a secret name.
+func kvRef(vaultUri string, secretName string) string =>
+  '@Microsoft.KeyVault(SecretUri=${vaultUri}secrets/${secretName})'
 
 resource site 'Microsoft.Web/sites@2023-12-01' = {
   name: siteName
@@ -386,9 +491,9 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'PORT', value: string(launcherPort) }
         { name: 'DOCKER_REGISTRY_SERVER_URL', value: 'https://${acr.properties.loginServer}' }
         { name: 'OMNI_AUTH_MODE', value: authMode }
-        { name: 'OMNI_DATABASE_URL', value: pgConnString }
-        { name: 'OMNI_RUNTIME_TOKEN_SECRET', value: runtimeTokenSecret }
-        { name: 'OMNI_WS_TOKEN', value: wsToken }
+        { name: 'OMNI_DATABASE_URL', value: kvRef(kv.properties.vaultUri, 'omni-database-url') }
+        { name: 'OMNI_RUNTIME_TOKEN_SECRET', value: kvRef(kv.properties.vaultUri, 'runtime-token-secret') }
+        { name: 'OMNI_WS_TOKEN', value: kvRef(kv.properties.vaultUri, 'ws-token') }
         { name: 'OMNI_DATA_API_URL', value: dataApiUrl }
         { name: 'OMNI_AZURE_SUBSCRIPTION_ID', value: subscription().subscriptionId }
         { name: 'OMNI_AZURE_RESOURCE_GROUP', value: resourceGroup().name }
@@ -404,20 +509,31 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'OMNI_AZURE_ACR_USERNAME', value: acr.name }
         // ACI pulls the devbox image from this (private) ACR using these admin
         // creds, surfaced into the aci sandbox profile's `registry` block.
-        { name: 'OMNI_AZURE_ACR_PASSWORD', value: acr.listCredentials().passwords[0].value }
+        { name: 'OMNI_AZURE_ACR_PASSWORD', value: kvRef(kv.properties.vaultUri, 'acr-password') }
         { name: 'OMNI_AZURE_CPU', value: agentCpu }
         { name: 'OMNI_AZURE_MEMORY', value: agentMemory }
         { name: 'AZURE_CLIENT_ID', value: identity.properties.clientId }
         { name: 'AZURE_STORAGE_ACCOUNT_NAME', value: storage.name }
         // The ACI sandbox mounts the workspace file share via the account key
         // (AzureFileVolume), so the launcher needs it + the share name.
-        { name: 'AZURE_STORAGE_ACCOUNT_KEY', value: storage.listKeys().keys[0].value }
+        { name: 'AZURE_STORAGE_ACCOUNT_KEY', value: kvRef(kv.properties.vaultUri, 'storage-account-key') }
         { name: 'OMNI_AZURE_FILE_SHARE', value: workspaceShareName }
         // Referenced by the EasyAuth (authsettingsV2) AAD provider below.
-        { name: 'MICROSOFT_PROVIDER_AUTHENTICATION_SECRET', value: aadClientSecret }
+        { name: 'MICROSOFT_PROVIDER_AUTHENTICATION_SECRET', value: kvRef(kv.properties.vaultUri, 'aad-client-secret') }
       ]
     }
   }
+  // KV references resolve via the managed identity — ensure the secrets exist
+  // and the read role is granted before the app starts.
+  dependsOn: [
+    kvSecretDbUrl
+    kvSecretRuntimeToken
+    kvSecretWsToken
+    kvSecretAadSecret
+    kvSecretStorageKey
+    kvSecretAcrPassword
+    raKvSecretsUser
+  ]
 }
 
 // App Service Authentication (EasyAuth). Created only when an AAD app
@@ -451,6 +567,67 @@ resource siteAuth 'Microsoft.Web/sites/config@2023-12-01' = if (!empty(aadClient
       }
     }
     login: { tokenStore: { enabled: true } }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Audit logging — ship resource logs + metrics to Log Analytics so access to
+// each component is recorded (HIPAA audit-controls posture). Retention is the
+// workspace's (see `logs` above; bump to archive tier for long-term).
+// ---------------------------------------------------------------------------
+
+resource diagSite 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+  scope: site
+  name: 'to-logs'
+  properties: {
+    workspaceId: logs.id
+    logs: [{ categoryGroup: 'allLogs', enabled: true }]
+    metrics: [{ category: 'AllMetrics', enabled: true }]
+  }
+}
+
+resource diagPg 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+  scope: postgres
+  name: 'to-logs'
+  properties: {
+    workspaceId: logs.id
+    logs: [{ categoryGroup: 'allLogs', enabled: true }]
+    metrics: [{ category: 'AllMetrics', enabled: true }]
+  }
+}
+
+resource diagAcr 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+  scope: acr
+  name: 'to-logs'
+  properties: {
+    workspaceId: logs.id
+    logs: [{ categoryGroup: 'allLogs', enabled: true }]
+    metrics: [{ category: 'AllMetrics', enabled: true }]
+  }
+}
+
+resource diagKv 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+  scope: kv
+  name: 'to-logs'
+  properties: {
+    workspaceId: logs.id
+    logs: [{ categoryGroup: 'allLogs', enabled: true }]
+    metrics: [{ category: 'AllMetrics', enabled: true }]
+  }
+}
+
+// Azure Files data-plane access (who read/wrote/deleted workspace files).
+resource diagFiles 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+  scope: fileService
+  name: 'to-logs'
+  properties: {
+    workspaceId: logs.id
+    logs: [
+      { category: 'StorageRead', enabled: true }
+      { category: 'StorageWrite', enabled: true }
+      { category: 'StorageDelete', enabled: true }
+    ]
+    metrics: [{ category: 'Transaction', enabled: true }]
   }
 }
 
