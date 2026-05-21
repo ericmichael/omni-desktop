@@ -376,7 +376,7 @@ resource siteAuth 'Microsoft.Web/sites/config@2023-12-01' = if (!empty(aadClient
         registration: {
           clientId: aadClientId
           clientSecretSettingName: 'MICROSOFT_PROVIDER_AUTHENTICATION_SECRET'
-          openIdIssuer: 'https://sts.windows.net/${tenant().tenantId}/'
+          openIdIssuer: 'https://login.microsoftonline.com/${tenant().tenantId}/v2.0'
         }
         validation: {
           allowedAudiences: [aadClientId, 'api://${aadClientId}']
