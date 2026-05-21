@@ -286,7 +286,9 @@ resource plan 'Microsoft.Web/serverfarms@2023-12-01' = {
 
 var siteHostName = '${siteName}.azurewebsites.net'
 var dataApiUrl = 'https://${siteHostName}${mcpRoutePath}'
-var pgConnString = 'postgresql://${postgresAdminLogin}:${postgresAdminPassword}@${postgres.properties.fullyQualifiedDomainName}:5432/${pgDatabaseName}?sslmode=require'
+// URL-encode the password — a generated password can contain `/`, `+`, `@`,
+// etc. which otherwise corrupt the connection-string URL and crash pg on boot.
+var pgConnString = 'postgresql://${postgresAdminLogin}:${uriComponent(postgresAdminPassword)}@${postgres.properties.fullyQualifiedDomainName}:5432/${pgDatabaseName}?sslmode=require'
 
 resource site 'Microsoft.Web/sites@2023-12-01' = {
   name: siteName

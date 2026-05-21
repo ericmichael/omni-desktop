@@ -27,7 +27,8 @@ LAUNCHER_TAG="${LAUNCHER_TAG:-omni-launcher:latest}"
 DEVBOX_TAG="${DEVBOX_TAG:-omni-launcher-devbox:latest}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-PG_PASSWORD="${PG_PASSWORD:-$(openssl rand -base64 24)}"
+# hex (URL-safe) — base64's +/ would need encoding in the connection string.
+PG_PASSWORD="${PG_PASSWORD:-$(openssl rand -hex 24)}"
 RUNTIME_TOKEN_SECRET="${RUNTIME_TOKEN_SECRET:-$(openssl rand -hex 32)}"
 WS_TOKEN="${WS_TOKEN:-$(openssl rand -hex 16)}"
 
