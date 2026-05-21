@@ -316,6 +316,9 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
     siteConfig: {
       linuxFxVersion: 'DOCKER|${acr.properties.loginServer}/${launcherImageRepoTag}'
       alwaysOn: true
+      // The renderer's transport dials /ws — App Service disables WebSockets by
+      // default, silently closing the upgrade and triggering a reconnect loop.
+      webSocketsEnabled: true
       ftpsState: 'Disabled'
       acrUseManagedIdentityCreds: true
       acrUserManagedIdentityID: identity.properties.clientId
