@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 
 import { ipcMain } from 'electron';
@@ -11,13 +11,14 @@ import {
   type AgentProcessStartArg,
   type FetchFn,
 } from '@/main/agent-process';
-import type { PlatformClient } from '@/main/platform-client';
+import type { IComputeClient } from '@/main/platform-client';
 import type { IIpcListener } from '@/shared/ipc-listener';
 import type {
   AgentProcessStartOptions,
   AgentProcessStatus,
   IpcRendererEvents,
   Project,
+  SandboxPauseResult,
   WithTimestamp,
 } from '@/shared/types';
 
@@ -43,14 +44,17 @@ export class ProcessManager {
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   private fetchFn: FetchFn;
   private getStoreData: () => ProcessManagerStoreData;
+  private getExtraEnv?: () => Record<string, string>;
 
-  /** Set by the platform integration when in enterprise mode. */
-  platformClient: PlatformClient | null = null;
+  /** Compute backend (omni-platform delegation). Set when configured. */
+  platformClient: IComputeClient | null = null;
 
   constructor(arg: {
     sendToWindow: ProcessManager['sendToWindow'];
     fetchFn?: FetchFn;
     getStoreData?: () => ProcessManagerStoreData;
+    /** Extra env for spawned `omni serve` (e.g. cloud `OMNI_RUNTIME_TOKEN`). */
+    getExtraEnv?: () => Record<string, string>;
   }) {
     this.sendToWindow = arg.sendToWindow;
     this.fetchFn = arg.fetchFn ?? globalThis.fetch;
@@ -58,6 +62,7 @@ export class ProcessManager {
       defaultProfileName: 'host',
       projects: [],
     }));
+    this.getExtraEnv = arg.getExtraEnv;
   }
 
   private resolveProfileName(
@@ -153,6 +158,7 @@ export class ProcessManager {
       },
       fetchFn: this.fetchFn,
       platformClient: this.platformClient ?? undefined,
+      getExtraEnv: this.getExtraEnv,
     });
     this.processes.set(processId, proc);
     return proc;
@@ -171,6 +177,9 @@ export class ProcessManager {
     }
     if (opts.sessionId) {
       startArg.sessionId = opts.sessionId;
+    }
+    if (opts.containerId) {
+      startArg.containerId = opts.containerId;
     }
     const gitRepo = this.resolvePlatformGitRepo(profileName, opts.workspaceDir, opts.projectId);
     if (gitRepo) {
@@ -210,6 +219,7 @@ export class ProcessManager {
             }
             return result;
           }
+          this.ensureWorkspaceDir(source.workspaceDir);
           return {
             mountName: source.mountName,
             kind: this.directoryHasGit(source.workspaceDir) ? 'local-git' : 'local',
@@ -222,6 +232,7 @@ export class ProcessManager {
     // synthesize one source from the workspaceDir we were given,
     // defaulting mountName to the basename.
     if (!workspaceDir) return [];
+    this.ensureWorkspaceDir(workspaceDir);
     const mountName = path.basename(workspaceDir) || 'workspace';
     return [{
       mountName,
@@ -236,6 +247,22 @@ export class ProcessManager {
       return existsSync(path.join(workspaceDir, '.git'));
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * A `local` source's directory must exist or `omni serve` rejects it
+   * ("Workspace directory not found"). On a fresh host (notably the cloud
+   * container, where a project's default `~/Omni/Workspace` doesn't exist yet)
+   * create it — an empty workspace is a valid starting point. Best-effort:
+   * if creation fails, let omni serve surface the original error.
+   */
+  private ensureWorkspaceDir(workspaceDir: string): void {
+    if (!workspaceDir) return;
+    try {
+      mkdirSync(workspaceDir, { recursive: true });
+    } catch {
+      // ignore — omni serve will report if the path is genuinely unusable
     }
   }
 
@@ -267,6 +294,9 @@ export class ProcessManager {
       ...(opts.sessionId ?? lastOpts?.sessionId
         ? { sessionId: (opts.sessionId ?? lastOpts?.sessionId) as string }
         : {}),
+      ...(opts.containerId ?? lastOpts?.containerId
+        ? { containerId: (opts.containerId ?? lastOpts?.containerId) as string }
+        : {}),
     };
     const startArg = this.buildStartArg(merged);
     const mode = this.resolveMode(startArg.profileName);
@@ -282,6 +312,22 @@ export class ProcessManager {
 
   resizePty = (processId: string, cols: number, rows: number): void => {
     this.processes.get(processId)?.resizePty(cols, rows);
+  };
+
+  pause = async (processId: string): Promise<SandboxPauseResult> => {
+    const proc = this.processes.get(processId);
+    if (!proc) return { ok: false, supported: false, reason: 'process not found' };
+    return proc.pause();
+  };
+
+  unpause = async (processId: string): Promise<SandboxPauseResult> => {
+    const proc = this.processes.get(processId);
+    if (!proc) return { ok: false, supported: false, reason: 'process not found' };
+    return proc.unpause();
+  };
+
+  notifyActivity = (processId: string): void => {
+    this.processes.get(processId)?.notifyActivity();
   };
 
   /**
@@ -334,6 +380,33 @@ export class ProcessManager {
   };
 }
 
+/**
+ * Register the `agent-process:*` IPC handlers. `resolve(event)` picks the
+ * ProcessManager to act on — `() => mgr` for the single-manager Electron app,
+ * or `event => registry.get(event.tenantId).processManager` for the per-tenant
+ * server. Returns the channel names for cleanup.
+ */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+export function registerProcessHandlers(ipc: IIpcListener, resolve: (event: unknown) => ProcessManager): string[] {
+  const channels: string[] = [];
+  const h = (ch: string, fn: (pm: ProcessManager, ...args: any[]) => unknown): void => {
+    ipc.handle(ch, (event: unknown, ...args: any[]) => fn(resolve(event), ...args));
+    channels.push(ch);
+  };
+
+  h('agent-process:start', (pm, processId, startArg) => pm.start(processId, startArg));
+  h('agent-process:stop', (pm, processId) => pm.stop(processId));
+  h('agent-process:rebuild', (pm, processId, rebuildArg) => pm.rebuild(processId, rebuildArg));
+  h('agent-process:resize', (pm, processId, cols, rows) => pm.resizePty(processId, cols, rows));
+  h('agent-process:get-status', (pm, processId) => pm.getStatus(processId));
+  h('agent-process:pause', (pm, processId) => pm.pause(processId));
+  h('agent-process:unpause', (pm, processId) => pm.unpause(processId));
+  h('agent-process:notify-activity', (pm, processId) => pm.notifyActivity(processId));
+
+  return channels;
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
 export const createProcessManager = (arg: {
   ipc: IIpcListener;
   sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
@@ -343,30 +416,13 @@ export const createProcessManager = (arg: {
   const { ipc, sendToWindow, fetchFn, getStoreData } = arg;
 
   const processManager = new ProcessManager({ sendToWindow, fetchFn, getStoreData });
-
-  ipc.handle('agent-process:start', (_, processId, startArg) => {
-    processManager.start(processId, startArg);
-  });
-  ipc.handle('agent-process:stop', async (_, processId) => {
-    await processManager.stop(processId);
-  });
-  ipc.handle('agent-process:rebuild', async (_, processId, rebuildArg) => {
-    await processManager.rebuild(processId, rebuildArg);
-  });
-  ipc.handle('agent-process:resize', (_, processId, cols, rows) => {
-    processManager.resizePty(processId, cols, rows);
-  });
-  ipc.handle('agent-process:get-status', (_, processId) => {
-    return processManager.getStatus(processId);
-  });
+  const channels = registerProcessHandlers(ipc, () => processManager);
 
   const cleanup = async () => {
     await processManager.cleanup();
-    ipcMain.removeHandler('agent-process:start');
-    ipcMain.removeHandler('agent-process:stop');
-    ipcMain.removeHandler('agent-process:rebuild');
-    ipcMain.removeHandler('agent-process:resize');
-    ipcMain.removeHandler('agent-process:get-status');
+    for (const ch of channels) {
+      ipcMain.removeHandler(ch);
+    }
   };
 
   return [processManager, cleanup] as const;
