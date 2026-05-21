@@ -149,39 +149,20 @@ resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
 // registry creds; tighten to managed-identity pull later).
 // ---------------------------------------------------------------------------
 
+// ACR stays PUBLICLY reachable (admin-credential-protected). Azure Container
+// Instances cannot pull from a private-endpoint-only ACR — the ACI service
+// performs the image pull outside the container's VNet, so disabling public
+// access yields InaccessibleImage. (AKS supports private ACR pull; ACI does
+// not.) The registry holds only container images — no PHI — so a credentialed
+// public registry is acceptable; the data-bearing resources (PG/KV/Storage)
+// are private. Keep Standard since no private endpoint is used.
 resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: acrName
   location: location
-  // Premium is required for private endpoints / public-access control.
-  sku: { name: 'Premium' }
+  sku: { name: 'Standard' }
   properties: {
     adminUserEnabled: true
-    publicNetworkAccess: 'Disabled'
-  }
-}
-
-// Private endpoint so the VNet-joined launcher + sandboxes pull images over
-// privatelink.azurecr.io instead of the public registry endpoint.
-resource acrPe 'Microsoft.Network/privateEndpoints@2023-11-01' = {
-  name: '${acrName}-pe'
-  location: location
-  properties: {
-    subnet: { id: peSubnetId }
-    privateLinkServiceConnections: [
-      {
-        name: 'registry'
-        properties: { privateLinkServiceId: acr.id, groupIds: ['registry'] }
-      }
-    ]
-  }
-}
-resource acrPeDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-11-01' = {
-  parent: acrPe
-  name: 'default'
-  properties: {
-    privateDnsZoneConfigs: [
-      { name: 'registry', properties: { privateDnsZoneId: acrDnsZone.id } }
-    ]
+    publicNetworkAccess: 'Enabled'
   }
 }
 
@@ -346,16 +327,7 @@ resource fileDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020
   location: 'global'
   properties: { registrationEnabled: false, virtualNetwork: { id: vnet.id } }
 }
-resource acrDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
-  name: 'privatelink.azurecr.io'
-  location: 'global'
-}
-resource acrDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
-  parent: acrDnsZone
-  name: 'vnet-link'
-  location: 'global'
-  properties: { registrationEnabled: false, virtualNetwork: { id: vnet.id } }
-}
+// (No ACR private DNS zone — ACR stays public; see the ACR resource note.)
 
 // NSG fencing the untrusted sandbox tier: the launcher may reach the service
 // ports; sandboxes may reach the private endpoints (Storage/ACR) + DNS +
