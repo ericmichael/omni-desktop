@@ -112,6 +112,13 @@ export type StoreData = {
    * `devbox` (docker with code-server + VNC). Enterprise adds `platform`.
    */
   defaultProfileName: string;
+  /**
+   * Sandbox profiles the UI picker should offer. When set by the backend
+   * (e.g. a cloud/ACI deployment forces `['aci']` to disable host/devbox),
+   * the picker shows exactly these. Unset → the renderer falls back to the
+   * built-in list (`host`/`devbox`, plus `platform` on enterprise builds).
+   */
+  availableSandboxProfiles?: string[];
   launcherWindowProps?: WindowProps;
   appWindowProps?: WindowProps;
   optInToLauncherPrereleases: boolean;

@@ -176,11 +176,11 @@ export const Chat = memo(() => {
   const theme = store.theme ?? 'teams-light';
   const sandboxLabel = useMemo(() => buildProfileLabel(profileName), [profileName]);
   const sandboxOptions = useMemo(
-    () => getAvailableProfileNames({ isEnterprise }).map((name) => ({
+    () => getAvailableProfileNames({ isEnterprise, available: store.availableSandboxProfiles }).map((name) => ({
       value: name,
       label: getProfileMenuLabel(name),
     })),
-    [isEnterprise]
+    [isEnterprise, store.availableSandboxProfiles]
   );
 
   const chatSessionId = store.chatSessionId ?? undefined;
@@ -239,7 +239,7 @@ export const Chat = memo(() => {
                 <SandboxPicker
                   value={profileName}
                   onChange={handleProfileChange}
-                  context={{ isEnterprise }}
+                  context={{ isEnterprise, available: store.availableSandboxProfiles }}
                 />
               ) : undefined
             }

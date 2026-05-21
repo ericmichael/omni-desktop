@@ -45,6 +45,12 @@ export class ProcessManager {
   private fetchFn: FetchFn;
   private getStoreData: () => ProcessManagerStoreData;
   private getExtraEnv?: () => Record<string, string>;
+  /**
+   * When set, every launch uses this profile regardless of the per-project
+   * override or user default. Cloud deployments set it to `aci` so host/devbox
+   * can't be selected (the only sandbox available is the serverless ACI one).
+   */
+  private lockedProfileName?: string;
 
   /** Compute backend (omni-platform delegation). Set when configured. */
   platformClient: IComputeClient | null = null;
@@ -55,6 +61,8 @@ export class ProcessManager {
     getStoreData?: () => ProcessManagerStoreData;
     /** Extra env for spawned `omni serve` (e.g. cloud `OMNI_RUNTIME_TOKEN`). */
     getExtraEnv?: () => Record<string, string>;
+    /** Force every launch onto this profile (cloud locks to `aci`). */
+    lockedProfileName?: string;
   }) {
     this.sendToWindow = arg.sendToWindow;
     this.fetchFn = arg.fetchFn ?? globalThis.fetch;
@@ -63,12 +71,18 @@ export class ProcessManager {
       projects: [],
     }));
     this.getExtraEnv = arg.getExtraEnv;
+    this.lockedProfileName = arg.lockedProfileName;
   }
 
   private resolveProfileName(
     projectId: string | undefined,
     override: string | undefined
   ): string {
+    // A locked profile (cloud → `aci`) wins over everything: per-project
+    // overrides and the UI picker can't escape it.
+    if (this.lockedProfileName) {
+      return this.lockedProfileName;
+    }
     if (override) {
       return override;
     }

@@ -1,3 +1,4 @@
+import { useStore } from '@nanostores/react';
 import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -10,6 +11,7 @@ import {
 } from '@/renderer/features/Projects/SourcesEditor';
 import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
 import { emitter } from '@/renderer/services/ipc';
+import { persistedStoreApi } from '@/renderer/services/store';
 import type { Project } from '@/shared/types';
 
 import { ticketApi } from './state';
@@ -137,9 +139,10 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
   useEffect(() => {
     emitter.invoke('platform:is-enterprise').then(setIsEnterprise);
   }, []);
+  const storeData = useStore(persistedStoreApi.$atom);
   const availableProfiles = useMemo(
-    () => getAvailableProfileNames({ isEnterprise }),
-    [isEnterprise]
+    () => getAvailableProfileNames({ isEnterprise, available: storeData.availableSandboxProfiles }),
+    [isEnterprise, storeData.availableSandboxProfiles]
   );
   const handleSandboxProfileChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {

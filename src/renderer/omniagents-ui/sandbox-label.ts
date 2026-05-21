@@ -9,6 +9,7 @@ const KNOWN_PROFILE_LABELS: Record<string, string> = {
   host: 'Host',
   devbox: 'Devbox',
   platform: 'Platform',
+  aci: 'Cloud',
 };
 
 const titleCase = (s: string): string =>

@@ -8,7 +8,7 @@ import { createConsoleManager } from '@/main/console-manager';
 import { PROJECT_KEYS } from '@/main/db-store-bridge';
 import { ExtensionManager, registerExtensionHandlers } from '@/main/extension-manager';
 import { registerInboxHandlers } from '@/main/inbox-handlers';
-import { writeAciProfile } from '@/main/aci-profile';
+import { ACI_PROFILE_NAME, writeAciProfile } from '@/main/aci-profile';
 import { syncMcpConfig, syncMcpConfigHttp } from '@/main/mcp-config-manager';
 import { MCP_PROJECTS_PATH } from '@/server/mcp-http';
 import { registerMigrationHandlers } from '@/main/migration-handlers';
@@ -159,10 +159,13 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
   }
 
   // When Azure is configured, write the `aci` sandbox profile so `omni serve
-  // --profile aci` drives the serverless ACI sandbox. Selected via the agent's
-  // defaultProfileName (deployment/operator setting); no-op otherwise.
+  // --profile aci` drives the serverless ACI sandbox. When present, the cloud
+  // LOCKS every agent to `aci` (host/devbox disabled) and the picker shows only
+  // it — see getStoreSnapshot + the ProcessManager lockedProfileName below.
+  let aciConfigured = false;
   try {
     const aciProfilePath = writeAciProfile(getOmniConfigDir());
+    aciConfigured = aciProfilePath !== null;
     if (aciProfilePath) {
       console.log(`[aci] wrote sandbox profile to ${aciProfilePath}`);
     }
@@ -235,6 +238,9 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
             }),
           })
         : undefined,
+      // Cloud with Azure → every agent runs in the serverless ACI sandbox;
+      // host/devbox are not selectable.
+      lockedProfileName: aciConfigured ? ACI_PROFILE_NAME : undefined,
     });
     // Keep this tenant's platform client in sync with its own credentials.
     // (omni-platform delegation for enterprise-platform builds; the ACI sandbox
@@ -279,7 +285,20 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
     }
     await t.projectManager.whenReady;
   };
-  const getStoreSnapshot = (tenantId: string): StoreData => getTenant(tenantId).projectManager.getStoreSnapshot();
+  const getStoreSnapshot = (tenantId: string): StoreData => {
+    const snapshot = getTenant(tenantId).projectManager.getStoreSnapshot();
+    // Cloud/ACI: force the picker to `aci` only and make it the selected
+    // default. Computed (not persisted) so it tracks the deployment, not a
+    // stale per-tenant setting. Matches the ProcessManager lockedProfileName.
+    if (aciConfigured) {
+      return {
+        ...snapshot,
+        defaultProfileName: ACI_PROFILE_NAME,
+        availableSandboxProfiles: [ACI_PROFILE_NAME],
+      };
+    }
+    return snapshot;
+  };
   /**
    * A tenant-scoped repo for the HTTP MCP route. Postgres: a fresh
    * tenant-scoped PgProjectsRepo (RLS isolates it). SQLite: the single shared

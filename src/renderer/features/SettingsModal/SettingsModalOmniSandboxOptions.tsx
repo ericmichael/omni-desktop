@@ -78,8 +78,8 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
   }, [checkCliStatus]);
 
   const availableProfiles = useMemo<string[]>(
-    () => getAvailableProfileNames({ isEnterprise }),
-    [isEnterprise]
+    () => getAvailableProfileNames({ isEnterprise, available: store.availableSandboxProfiles }),
+    [isEnterprise, store.availableSandboxProfiles]
   );
 
   const onChangeProfile = useCallback((e: ChangeEvent<HTMLSelectElement>) => {

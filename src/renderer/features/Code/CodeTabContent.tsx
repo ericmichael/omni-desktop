@@ -243,11 +243,11 @@ export const CodeTabContent = memo(
       emitter.invoke('platform:is-enterprise').then(setIsEnterprise);
     }, []);
     const sandboxOptions = useMemo(
-      () => getAvailableProfileNames({ isEnterprise }).map((name) => ({
+      () => getAvailableProfileNames({ isEnterprise, available: store.availableSandboxProfiles }).map((name) => ({
         value: name,
         label: getProfileMenuLabel(name),
       })),
-      [isEnterprise]
+      [isEnterprise, store.availableSandboxProfiles]
     );
 
     // What the agent should treat as its workspace root. For host profiles

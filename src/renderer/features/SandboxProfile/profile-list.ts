@@ -16,14 +16,24 @@ const PROFILE_LABELS: Record<string, string> = {
   host: 'Host (no isolation)',
   devbox: 'Devbox (Docker)',
   platform: 'Cloud (managed)',
+  aci: 'Cloud (Azure)',
 };
 
 export type ProfileListContext = {
   /** Build was compiled with ``OMNI_PLATFORM_URL`` set. */
   isEnterprise: boolean;
+  /**
+   * Backend-provided profile list (``StoreData.availableSandboxProfiles``).
+   * When set, it's authoritative — e.g. a cloud/ACI deployment sends
+   * ``['aci']`` to offer only that and hide host/devbox.
+   */
+  available?: string[];
 };
 
 export const getAvailableProfileNames = (ctx: ProfileListContext): string[] => {
+  if (ctx.available && ctx.available.length > 0) {
+    return [...ctx.available];
+  }
   return ctx.isEnterprise
     ? [...OPEN_SOURCE_PROFILES, ...ENTERPRISE_EXTRA_PROFILES]
     : [...OPEN_SOURCE_PROFILES];
