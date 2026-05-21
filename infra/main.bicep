@@ -181,6 +181,59 @@ resource workspaceShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2
 }
 
 // ---------------------------------------------------------------------------
+// Virtual network — keeps ACI sandboxes private. The agent sandbox groups join
+// the delegated `aci` subnet and get *private* IPs (no public surface); their
+// service ports (code-server, VNC) are reachable only inside the VNet. The
+// launcher's App Service joins the `appsvc` subnet via regional VNet
+// integration, so it can reach those private IPs and front them through its own
+// EasyAuth-protected /proxy. RFC1918 traffic routes through the VNet by default,
+// so Postgres (public FQDN) keeps using the normal outbound path.
+// ---------------------------------------------------------------------------
+
+var vnetName = '${namePrefix}-vnet'
+var aciSubnetName = 'aci'
+var integrationSubnetName = 'appsvc'
+
+resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
+  name: vnetName
+  location: location
+  properties: {
+    addressSpace: { addressPrefixes: ['10.40.0.0/16'] }
+    subnets: [
+      {
+        name: aciSubnetName
+        properties: {
+          addressPrefix: '10.40.1.0/24'
+          delegations: [
+            {
+              name: 'aci-delegation'
+              properties: { serviceName: 'Microsoft.ContainerInstance/containerGroups' }
+            }
+          ]
+        }
+      }
+      {
+        name: integrationSubnetName
+        properties: {
+          addressPrefix: '10.40.2.0/24'
+          delegations: [
+            {
+              name: 'appsvc-delegation'
+              properties: { serviceName: 'Microsoft.Web/serverFarms' }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
+
+// String-built ids (rather than `existing` refs) so they carry an implicit
+// dependency on the VNet resource above.
+var aciSubnetId = '${vnet.id}/subnets/${aciSubnetName}'
+var integrationSubnetId = '${vnet.id}/subnets/${integrationSubnetName}'
+
+// ---------------------------------------------------------------------------
 // Container Apps managed environment (agent sandboxes spawn into this).
 // ---------------------------------------------------------------------------
 
@@ -313,6 +366,9 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
     serverFarmId: plan.id
     httpsOnly: true
     keyVaultReferenceIdentity: identity.id
+    // Regional VNet integration — outbound to private (RFC1918) ACI IPs routes
+    // through the `appsvc` subnet so the launcher can reach the sandboxes.
+    virtualNetworkSubnetId: integrationSubnetId
     siteConfig: {
       linuxFxVersion: 'DOCKER|${acr.properties.loginServer}/${launcherImageRepoTag}'
       alwaysOn: true
@@ -337,6 +393,9 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'OMNI_AZURE_LOCATION', value: location }
         { name: 'OMNI_AZURE_REGISTRY', value: acr.properties.loginServer }
         { name: 'OMNI_AZURE_IMAGE', value: '${acr.properties.loginServer}/${agentImageRepoTag}' }
+        // Delegated subnet the ACI sandbox groups join → private IPs only.
+        // Surfaced into the aci profile's `client.subnet_id`.
+        { name: 'OMNI_AZURE_SUBNET_ID', value: aciSubnetId }
         { name: 'OMNI_AZURE_ACR_USERNAME', value: acr.name }
         // ACI pulls the devbox image from this (private) ACR using these admin
         // creds, surfaced into the aci sandbox profile's `registry` block.
@@ -407,3 +466,5 @@ output postgresDatabase string = pgDatabaseName
 output managedIdentityClientId string = identity.properties.clientId
 output managedIdentityPrincipalId string = identity.properties.principalId
 output agentImage string = '${acr.properties.loginServer}/${agentImageRepoTag}'
+output vnetName string = vnet.name
+output aciSubnetId string = aciSubnetId

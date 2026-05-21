@@ -239,4 +239,27 @@ describe('rewriteStatusUrls', () => {
     rewriteStatusUrls(data, 'test');
     expect(data.someOtherField).toBe('http://localhost:9999/should-not-change');
   });
+
+  it('rewrites entries in the nested services map', () => {
+    const data: Record<string, string | Record<string, string> | undefined> = {
+      uiUrl: 'http://localhost:8082/',
+      services: {
+        code_server: 'http://10.40.1.4:8080/',
+        vnc: 'http://10.40.1.4:6080/vnc.html',
+      },
+    };
+    rewriteStatusUrls(data, 'chat');
+    const services = data.services as Record<string, string>;
+    expect(services.code_server).toBe('/proxy/chat-svc-code_server/');
+    expect(services.vnc).toBe('/proxy/chat-svc-vnc/vnc.html');
+  });
+
+  it('leaves already-proxied service URLs untouched', () => {
+    const data: Record<string, string | Record<string, string> | undefined> = {
+      services: { code_server: '/proxy/chat-svc-code_server/' },
+    };
+    rewriteStatusUrls(data, 'chat');
+    const services = data.services as Record<string, string>;
+    expect(services.code_server).toBe('/proxy/chat-svc-code_server/');
+  });
 });

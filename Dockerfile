@@ -69,8 +69,8 @@ ARG OMNI_PIP_INDEX="https://pypi.fury.io/ericmichael/"
 # Pin exact versions: keeps the cloud image reproducible AND busts this RUN
 # layer's cache when bumped (an unpinned `pipx install` would otherwise reuse a
 # stale cached install on rebuilds). Bump in lockstep with the published pkgs.
-ARG OMNI_CODE_VERSION=0.6.1
-ARG OMNIAGENTS_VERSION=0.7.1
+ARG OMNI_CODE_VERSION=0.6.2
+ARG OMNIAGENTS_VERSION=0.7.4
 # Some omni-code deps (e.g. pygit2) lack wheels for this platform and compile
 # from source, so a C toolchain + the relevant -dev headers are needed at
 # install time. Runtime shared libs (libgit2, libffi, …) are pulled in by the

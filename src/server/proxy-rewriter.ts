@@ -427,30 +427,57 @@ function wsRewriteScript(proxyName: string): string {
 /**
  * Rewrite localhost URLs in a status data object to relative proxy paths and register upstreams.
  */
-export const rewriteStatusUrls = (data: Record<string, string | undefined>, proxyName: string): void => {
+export const rewriteStatusUrls = (
+  data: Record<string, string | Record<string, string> | undefined>,
+  proxyName: string
+): void => {
   const urlFields = ['uiUrl', 'wsUrl', 'sandboxUrl', 'codeServerUrl', 'noVncUrl'];
 
   for (const field of urlFields) {
     const url = data[field];
-    if (!url) {
+    if (typeof url !== 'string' || !url) {
       continue;
     }
+    const proxyPath = registerAndRewrite(url, `${proxyName}-${field}`);
+    if (proxyPath) {
+      data[field] = proxyPath;
+    }
+  }
 
-    try {
-      if (url.includes('/proxy/')) {
+  // Sandbox service URLs (code_server, vnc, …) live in a nested map, not flat
+  // fields. Rewrite each so they too route through the launcher's proxy — the
+  // raw upstream (e.g. a private ACI IP) never reaches the browser.
+  const services = data['services'];
+  if (services && typeof services === 'object') {
+    for (const [name, url] of Object.entries(services)) {
+      if (typeof url !== 'string' || !url) {
         continue;
       }
-      const parsed = new URL(url);
-      const proxyKey = `${proxyName}-${field}`;
-      const upstream = `${parsed.protocol}//${parsed.host}`;
-
-      upstreamMap.set(proxyKey, upstream);
-
-      const proxyPath = `/proxy/${proxyKey}${parsed.pathname}${parsed.search}`;
-      console.log(`[proxy-rewrite] ${field}: ${url} → ${proxyPath} (upstream: ${upstream})`);
-      data[field] = proxyPath;
-    } catch {
-      // Not a valid URL, skip
+      const proxyPath = registerAndRewrite(url, `${proxyName}-svc-${name}`);
+      if (proxyPath) {
+        services[name] = proxyPath;
+      }
     }
   }
 };
+
+/**
+ * Register ``url``'s origin as an upstream under ``proxyKey`` and return the
+ * relative ``/proxy/<key>/...`` path. Returns ``null`` if the value is already
+ * proxied or isn't a valid URL.
+ */
+function registerAndRewrite(url: string, proxyKey: string): string | null {
+  try {
+    if (url.includes('/proxy/')) {
+      return null;
+    }
+    const parsed = new URL(url);
+    const upstream = `${parsed.protocol}//${parsed.host}`;
+    upstreamMap.set(proxyKey, upstream);
+    const proxyPath = `/proxy/${proxyKey}${parsed.pathname}${parsed.search}`;
+    console.log(`[proxy-rewrite] ${proxyKey}: ${url} → ${proxyPath} (upstream: ${upstream})`);
+    return proxyPath;
+  } catch {
+    return null;
+  }
+}

@@ -43,6 +43,15 @@ export function buildAciProfile(env: NodeJS.ProcessEnv = process.env): string | 
     };
   }
 
+  // Delegated subnet → ACI groups get *private* IPs (no public surface). Their
+  // service ports are reachable only inside the VNet; the launcher (VNet-
+  // integrated) fronts them via /proxy. Without it, exposed ports fall back to
+  // a public IP.
+  const subnetId = env['OMNI_AZURE_SUBNET_ID'];
+  if (subnetId) {
+    client['subnet_id'] = subnetId;
+  }
+
   // Azure Files mount = the durable workspace (the container is disposable).
   // ACI mounts via the account key (AzureFileVolume), not SMB RBAC.
   const account = env['AZURE_STORAGE_ACCOUNT_NAME'];
