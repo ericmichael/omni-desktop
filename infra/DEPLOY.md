@@ -33,13 +33,25 @@ The launcher image version is pinned in **one** place — `src/lib/omni-version.
 
 ## A. Ship a code change
 
+> **ACR is private** (public access off), so a push from outside the VNet is
+> blocked. For a dev push, briefly toggle public access around the push:
+> ```bash
+> az acr update -n "$ACR_NAME" --public-network-enabled true
+> # … build + push …
+> az acr update -n "$ACR_NAME" --public-network-enabled false
+> ```
+> (A production pipeline would build from inside the VNet / an ACR agent pool
+> instead of toggling.)
+
 ```bash
 source infra/deploy.env
+az acr update -n "$ACR_NAME" --public-network-enabled true   # dev: open for the push
 
 # 1. Build + push the launcher image (reads OMNI_CODE_VERSION from omni-version.ts).
 #    Re-logs in to ACR before push (long builds outlast the token).
 OMNI_PIP_INDEX="$OMNI_PIP_INDEX" \
   scripts/build-launcher-image.sh "$ACR_NAME.azurecr.io/omni-launcher:latest" --push
+az acr update -n "$ACR_NAME" --public-network-enabled false  # close it again
 
 # 2. VERIFY the bake before relying on it (cached layers can serve stale pkgs).
 docker run --rm --entrypoint sh "$ACR_NAME.azurecr.io/omni-launcher:latest" -c \
@@ -95,6 +107,25 @@ to seed from another registry.
 | `OMNI_AZURE_DESKTOP_IMAGE` | desktop sandbox image (`-devbox`) |
 | `OMNI_AZURE_SUBNET_ID` | delegated subnet → ACI gets private IPs (desktop profile) |
 | `OMNI_DATABASE_URL`, `OMNI_RUNTIME_TOKEN_SECRET`, `OMNI_WS_TOKEN` | secrets (also in `deploy.env`) |
+
+## Network posture (all internal resources private)
+
+Everything except the launcher's public front door is VNet-only:
+
+| Resource | Access |
+|---|---|
+| App Service (launcher) | public + EasyAuth (the only ingress) |
+| Postgres | private (VNet-integrated, public off) |
+| Key Vault | private endpoint, public off |
+| Storage / Azure Files | private endpoint (`file`), public off |
+| ACR | Premium, private endpoint, public off |
+| Sandboxes (ACI) | VNet-joined (private IPs); `omni-aci-nsg` denies sandbox→DB / →launcher / →peer |
+
+Implications: the App Service pulls its image over the VNet (`vnetImagePullEnabled`);
+**all** sandbox launches now pay the VNet NIC-provisioning time (the fast profile
+no longer skips it); private DNS zones (`postgres`, `vaultcore`, `file`, `azurecr.io`)
+are VNet-linked so names resolve to the private IPs. Encryption at rest is
+platform-managed (CMK is a documented future add when org policy requires it).
 
 ## Gotchas (learned the hard way)
 
