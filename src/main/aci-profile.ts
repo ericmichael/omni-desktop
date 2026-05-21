@@ -53,12 +53,12 @@ export function buildAciProfile(env: NodeJS.ProcessEnv = process.env, desktop = 
     };
   }
 
-  // Delegated subnet → ACI groups get *private* IPs (no public surface). Their
-  // service ports are reachable only inside the VNet; the launcher (VNet-
-  // integrated) fronts them via /proxy. Only the desktop profile exposes ports,
-  // so only it needs the subnet; the fast profile skips VNet wiring entirely.
+  // Delegated subnet → ACI groups join the VNet with *private* IPs. Both
+  // profiles join (not just desktop): a no-service sandbox still needs the VNet
+  // to reach the private Storage/ACR endpoints. The desktop profile additionally
+  // exposes ports (private IP) fronted by the launcher's /proxy.
   const subnetId = env['OMNI_AZURE_SUBNET_ID'];
-  if (desktop && subnetId) {
+  if (subnetId) {
     client['subnet_id'] = subnetId;
   }
 

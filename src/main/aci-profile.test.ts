@@ -81,12 +81,12 @@ describe('buildAciProfile', () => {
     expect(p.options.image).toBe('acr/custom-desktop:1');
   });
 
-  it('subnet_id flows in only for the desktop profile', () => {
+  it('subnet_id flows into both profiles (both join the VNet)', () => {
     const env = {
       OMNI_AZURE_SUBSCRIPTION_ID: 'sub-1',
       OMNI_AZURE_SUBNET_ID: '/subscriptions/s/.../subnets/aci',
     } as NodeJS.ProcessEnv;
-    expect(JSON.parse(buildAciProfile(env, false)!).client.subnet_id).toBeUndefined();
+    expect(JSON.parse(buildAciProfile(env, false)!).client.subnet_id).toBe('/subscriptions/s/.../subnets/aci');
     expect(JSON.parse(buildAciProfile(env, true)!).client.subnet_id).toBe('/subscriptions/s/.../subnets/aci');
   });
 });

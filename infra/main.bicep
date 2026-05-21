@@ -152,9 +152,36 @@ resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
 resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: acrName
   location: location
-  sku: { name: 'Standard' }
+  // Premium is required for private endpoints / public-access control.
+  sku: { name: 'Premium' }
   properties: {
     adminUserEnabled: true
+    publicNetworkAccess: 'Disabled'
+  }
+}
+
+// Private endpoint so the VNet-joined launcher + sandboxes pull images over
+// privatelink.azurecr.io instead of the public registry endpoint.
+resource acrPe 'Microsoft.Network/privateEndpoints@2023-11-01' = {
+  name: '${acrName}-pe'
+  location: location
+  properties: {
+    subnet: { id: peSubnetId }
+    privateLinkServiceConnections: [
+      {
+        name: 'registry'
+        properties: { privateLinkServiceId: acr.id, groupIds: ['registry'] }
+      }
+    ]
+  }
+}
+resource acrPeDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-11-01' = {
+  parent: acrPe
+  name: 'default'
+  properties: {
+    privateDnsZoneConfigs: [
+      { name: 'registry', properties: { privateDnsZoneId: acrDnsZone.id } }
+    ]
   }
 }
 
@@ -170,6 +197,33 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   properties: {
     minimumTlsVersion: 'TLS1_2'
     allowBlobPublicAccess: false
+    publicNetworkAccess: 'Disabled'
+    networkAcls: { bypass: 'AzureServices', defaultAction: 'Deny' }
+  }
+}
+
+// Private endpoint for the Files share — the launcher + sandboxes (both VNet-
+// joined) mount/read it over the private `privatelink.file.core.windows.net`.
+resource storagePe 'Microsoft.Network/privateEndpoints@2023-11-01' = {
+  name: '${storageName}-file-pe'
+  location: location
+  properties: {
+    subnet: { id: peSubnetId }
+    privateLinkServiceConnections: [
+      {
+        name: 'file'
+        properties: { privateLinkServiceId: storage.id, groupIds: ['file'] }
+      }
+    ]
+  }
+}
+resource storagePeDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-11-01' = {
+  parent: storagePe
+  name: 'default'
+  properties: {
+    privateDnsZoneConfigs: [
+      { name: 'file', properties: { privateDnsZoneId: fileDnsZone.id } }
+    ]
   }
 }
 
@@ -213,6 +267,7 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
         name: aciSubnetName
         properties: {
           addressPrefix: '10.40.1.0/24'
+          networkSecurityGroup: { id: aciNsg.id }
           delegations: [
             {
               name: 'aci-delegation'
@@ -280,6 +335,95 @@ resource kvDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-0
   name: 'vnet-link'
   location: 'global'
   properties: { registrationEnabled: false, virtualNetwork: { id: vnet.id } }
+}
+resource fileDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+  name: 'privatelink.file.core.windows.net'
+  location: 'global'
+}
+resource fileDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  parent: fileDnsZone
+  name: 'vnet-link'
+  location: 'global'
+  properties: { registrationEnabled: false, virtualNetwork: { id: vnet.id } }
+}
+resource acrDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+  name: 'privatelink.azurecr.io'
+  location: 'global'
+}
+resource acrDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  parent: acrDnsZone
+  name: 'vnet-link'
+  location: 'global'
+  properties: { registrationEnabled: false, virtualNetwork: { id: vnet.id } }
+}
+
+// NSG fencing the untrusted sandbox tier: the launcher may reach the service
+// ports; sandboxes may reach the private endpoints (Storage/ACR) + DNS +
+// internet (package installs, ACI platform), but NOT the database, the
+// launcher, or each other.
+resource aciNsg 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
+  name: '${namePrefix}-aci-nsg'
+  location: location
+  properties: {
+    securityRules: [
+      {
+        name: 'allow-launcher-to-services'
+        properties: {
+          priority: 100, direction: 'Inbound', access: 'Allow', protocol: 'Tcp'
+          sourceAddressPrefix: '10.40.2.0/24', sourcePortRange: '*'
+          destinationAddressPrefix: '*', destinationPortRanges: ['8080', '6080']
+        }
+      }
+      {
+        name: 'deny-vnet-inbound'
+        properties: {
+          priority: 200, direction: 'Inbound', access: 'Deny', protocol: '*'
+          sourceAddressPrefix: 'VirtualNetwork', sourcePortRange: '*'
+          destinationAddressPrefix: '*', destinationPortRange: '*'
+        }
+      }
+      {
+        name: 'allow-private-endpoints'
+        properties: {
+          priority: 100, direction: 'Outbound', access: 'Allow', protocol: '*'
+          sourceAddressPrefix: '*', sourcePortRange: '*'
+          destinationAddressPrefix: '10.40.4.0/24', destinationPortRange: '*'
+        }
+      }
+      {
+        name: 'allow-azure-dns'
+        properties: {
+          priority: 110, direction: 'Outbound', access: 'Allow', protocol: '*'
+          sourceAddressPrefix: '*', sourcePortRange: '*'
+          destinationAddressPrefix: '168.63.129.16', destinationPortRange: '53'
+        }
+      }
+      {
+        name: 'deny-to-database'
+        properties: {
+          priority: 120, direction: 'Outbound', access: 'Deny', protocol: '*'
+          sourceAddressPrefix: '*', sourcePortRange: '*'
+          destinationAddressPrefix: '10.40.3.0/24', destinationPortRange: '*'
+        }
+      }
+      {
+        name: 'deny-to-launcher'
+        properties: {
+          priority: 130, direction: 'Outbound', access: 'Deny', protocol: '*'
+          sourceAddressPrefix: '*', sourcePortRange: '*'
+          destinationAddressPrefix: '10.40.2.0/24', destinationPortRange: '*'
+        }
+      }
+      {
+        name: 'deny-sandbox-to-sandbox'
+        properties: {
+          priority: 140, direction: 'Outbound', access: 'Deny', protocol: '*'
+          sourceAddressPrefix: '*', sourcePortRange: '*'
+          destinationAddressPrefix: '10.40.1.0/24', destinationPortRange: '*'
+        }
+      }
+    ]
+  }
 }
 
 var pgSubnetId = '${vnet.id}/subnets/${pgSubnetName}'
@@ -549,6 +693,9 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
     // Regional VNet integration — outbound to private (RFC1918) ACI IPs routes
     // through the `appsvc` subnet so the launcher can reach the sandboxes.
     virtualNetworkSubnetId: integrationSubnetId
+    // Pull the launcher's own container image from the private ACR through the
+    // VNet (required once ACR public access is off).
+    vnetImagePullEnabled: true
     siteConfig: {
       linuxFxVersion: 'DOCKER|${acr.properties.loginServer}/${launcherImageRepoTag}'
       alwaysOn: true
