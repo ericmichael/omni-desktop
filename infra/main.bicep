@@ -175,12 +175,30 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   location: location
   sku: { name: 'Standard_LRS' }
   kind: 'StorageV2'
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: { '${identity.id}': {} }
+  }
   properties: {
     minimumTlsVersion: 'TLS1_2'
     allowBlobPublicAccess: false
     publicNetworkAccess: 'Disabled'
     networkAcls: { bypass: 'AzureServices', defaultAction: 'Deny' }
+    // Encrypt at rest with the customer-managed key (CMK) in Key Vault.
+    encryption: {
+      identity: { userAssignedIdentity: identity.id }
+      keySource: 'Microsoft.Keyvault'
+      keyvaultproperties: {
+        keyname: cmkKey.name
+        keyvaulturi: take(kv.properties.vaultUri, length(kv.properties.vaultUri) - 1)
+      }
+      services: {
+        file: { enabled: true, keyType: 'Account' }
+        blob: { enabled: true, keyType: 'Account' }
+      }
+    }
   }
+  dependsOn: [raKvCrypto]
 }
 
 // Private endpoint for the Files share — the launcher + sandboxes (both VNet-
@@ -431,6 +449,10 @@ resource managedEnv 'Microsoft.App/managedEnvironments@2024-03-01' = {
 resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
   name: pgName
   location: location
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: { '${identity.id}': {} }
+  }
   sku: {
     name: postgresSkuName
     tier: 'Burstable'
@@ -455,8 +477,14 @@ resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
       delegatedSubnetResourceId: pgSubnetId
       privateDnsZoneArmResourceId: pgDnsZone.id
     }
+    // Encrypt at rest with the customer-managed key (CMK).
+    dataEncryption: {
+      type: 'AzureKeyVault'
+      primaryKeyURI: cmkKey.properties.keyUriWithVersion
+      primaryUserAssignedIdentityId: identity.id
+    }
   }
-  dependsOn: [pgDnsLink]
+  dependsOn: [pgDnsLink, raKvCrypto]
 }
 
 resource pgDatabase 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-01' = {
@@ -641,6 +669,34 @@ resource raKvSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = 
     principalId: identity.properties.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleKvSecretsUser)
+  }
+}
+
+// --- Customer-managed key (CMK) for encryption at rest -------------------- #
+// Storage + Postgres encrypt at rest with this key instead of a Microsoft-
+// managed one, so key rotation/revocation is under our control. The managed
+// identity is granted crypto access; Storage/PG reach the (private) vault via
+// its AzureServices firewall bypass.
+resource cmkKey 'Microsoft.KeyVault/vaults/keys@2023-07-01' = {
+  parent: kv
+  name: 'cmk-encryption'
+  properties: {
+    kty: 'RSA'
+    keySize: 3072
+    keyOps: ['wrapKey', 'unwrapKey']
+  }
+}
+
+// Key Vault Crypto Service Encryption User — lets the identity wrap/unwrap with
+// the CMK on behalf of Storage/PG.
+var roleKvCryptoEncUser = 'e147488a-f6f5-4113-8e2d-b22465e65bf6'
+resource raKvCrypto 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(kv.id, identity.id, roleKvCryptoEncUser)
+  scope: kv
+  properties: {
+    principalId: identity.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleKvCryptoEncUser)
   }
 }
 
