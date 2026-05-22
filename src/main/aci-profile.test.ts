@@ -81,6 +81,19 @@ describe('buildAciProfile', () => {
     expect(p.options.image).toBe('acr/custom-desktop:1');
   });
 
+  it('uses managed-identity registry when OMNI_AZURE_IDENTITY_ID is set', () => {
+    const p = JSON.parse(
+      buildAciProfile({
+        OMNI_AZURE_SUBSCRIPTION_ID: 'sub-1',
+        OMNI_AZURE_REGISTRY: 'acr.azurecr.io',
+        OMNI_AZURE_IDENTITY_ID: '/subscriptions/s/.../userAssignedIdentities/mi',
+        OMNI_AZURE_ACR_USERNAME: 'acr',
+        OMNI_AZURE_ACR_PASSWORD: 'acr-pw',
+      } as NodeJS.ProcessEnv)!
+    );
+    expect(p.client.registry).toEqual({ server: 'acr.azurecr.io', identity: '/subscriptions/s/.../userAssignedIdentities/mi' });
+  });
+
   it('subnet_id flows into both profiles (both join the VNet)', () => {
     const env = {
       OMNI_AZURE_SUBSCRIPTION_ID: 'sub-1',

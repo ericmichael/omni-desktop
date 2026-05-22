@@ -161,7 +161,9 @@ resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   location: location
   sku: { name: 'Standard' }
   properties: {
-    adminUserEnabled: true
+    // Admin user off — both the launcher (App Service MI) and the sandboxes
+    // (ACI group MI) pull via the managed identity's AcrPull, no shared password.
+    adminUserEnabled: false
     publicNetworkAccess: 'Enabled'
   }
 }
@@ -655,11 +657,6 @@ resource kvSecretStorageKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   name: 'storage-account-key'
   properties: { value: storage.listKeys().keys[0].value }
 }
-resource kvSecretAcrPassword 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
-  parent: kv
-  name: 'acr-password'
-  properties: { value: acr.listCredentials().passwords[0].value }
-}
 
 // The Web App's managed identity may read secrets.
 resource raKvSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
@@ -753,10 +750,9 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
         // Delegated subnet the ACI sandbox groups join → private IPs only.
         // Surfaced into the aci profile's `client.subnet_id`.
         { name: 'OMNI_AZURE_SUBNET_ID', value: aciSubnetId }
-        { name: 'OMNI_AZURE_ACR_USERNAME', value: acr.name }
-        // ACI pulls the devbox image from this (private) ACR using these admin
-        // creds, surfaced into the aci sandbox profile's `registry` block.
-        { name: 'OMNI_AZURE_ACR_PASSWORD', value: kvRef(kv.properties.vaultUri, 'acr-password') }
+        // ACI pulls the devbox image via this managed identity (AcrPull),
+        // surfaced into the aci profile's registry.identity — no admin password.
+        { name: 'OMNI_AZURE_IDENTITY_ID', value: identity.id }
         { name: 'OMNI_AZURE_CPU', value: agentCpu }
         { name: 'OMNI_AZURE_MEMORY', value: agentMemory }
         { name: 'AZURE_CLIENT_ID', value: identity.properties.clientId }
@@ -778,7 +774,6 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
     kvSecretWsToken
     kvSecretAadSecret
     kvSecretStorageKey
-    kvSecretAcrPassword
     raKvSecretsUser
   ]
 }

@@ -40,12 +40,16 @@ export function buildAciProfile(env: NodeJS.ProcessEnv = process.env, desktop = 
     location: env['OMNI_AZURE_LOCATION'] ?? 'southcentralus',
   };
 
-  // Registry creds so ACI can pull the devbox image from the private ACR
-  // (a container group needs explicit pull auth — there's no ambient identity).
+  // Registry pull auth for the ACI group. Prefer a user-assigned managed
+  // identity (OMNI_AZURE_IDENTITY_ID, with AcrPull) — no shared admin password.
+  // Fall back to admin username/password if no identity is configured.
   const registryServer = env['OMNI_AZURE_REGISTRY'];
+  const registryIdentity = env['OMNI_AZURE_IDENTITY_ID'];
   const registryUser = env['OMNI_AZURE_ACR_USERNAME'];
   const registryPassword = env['OMNI_AZURE_ACR_PASSWORD'];
-  if (registryServer && registryUser && registryPassword) {
+  if (registryServer && registryIdentity) {
+    client['registry'] = { server: registryServer, identity: registryIdentity };
+  } else if (registryServer && registryUser && registryPassword) {
     client['registry'] = {
       server: registryServer,
       username: registryUser,
