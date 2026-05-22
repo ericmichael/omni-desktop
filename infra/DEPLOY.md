@@ -118,14 +118,15 @@ Everything except the launcher's public front door is VNet-only:
 | Postgres | private (VNet-integrated, public off) |
 | Key Vault | private endpoint, public off |
 | Storage / Azure Files | private endpoint (`file`), public off |
-| ACR | Premium, private endpoint, public off |
+| ACR | public, **admin user off** — launcher + sandboxes pull via managed-identity AcrPull (ACI can't pull from a private-endpoint-only ACR) |
 | Sandboxes (ACI) | VNet-joined (private IPs); `omni-aci-nsg` denies sandbox→DB / →launcher / →peer |
 
-Implications: the App Service pulls its image over the VNet (`vnetImagePullEnabled`);
-**all** sandbox launches now pay the VNet NIC-provisioning time (the fast profile
-no longer skips it); private DNS zones (`postgres`, `vaultcore`, `file`, `azurecr.io`)
-are VNet-linked so names resolve to the private IPs. Encryption at rest is
-platform-managed (CMK is a documented future add when org policy requires it).
+Implications: **all** sandbox launches now pay the VNet NIC-provisioning time
+(the fast profile no longer skips it); private DNS zones (`postgres`,
+`vaultcore`, `file`) are VNet-linked so names resolve to the private IPs.
+**Encryption at rest is customer-managed (CMK)** for Storage + Postgres — an RSA
+key in Key Vault (`cmk-encryption`); the managed identity holds the crypto role.
+No ACR admin password exists; image pushes use `az acr login` (AAD).
 
 ## Gotchas (learned the hard way)
 
