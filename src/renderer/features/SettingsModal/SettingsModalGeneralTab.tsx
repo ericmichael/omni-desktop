@@ -6,6 +6,7 @@ import { SettingsModalOptInToLauncherPrereleases } from '@/renderer/features/Set
 import { SettingsModalPreviewFeatures } from '@/renderer/features/SettingsModal/SettingsModalPreviewFeatures';
 import { SettingsModalWeeklyReviewDay } from '@/renderer/features/SettingsModal/SettingsModalWeeklyReviewDay';
 import { SettingsModalWipLimit } from '@/renderer/features/SettingsModal/SettingsModalWipLimit';
+import { isElectron } from '@/renderer/services/ipc';
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXL },
@@ -27,8 +28,13 @@ export const SettingsModalGeneralTab = memo(() => {
       <SettingsModalOmniSandboxOptions />
       <div className={styles.divider} />
       <SettingsModalPreviewFeatures />
-      <div className={styles.divider} />
-      <SettingsModalOptInToLauncherPrereleases />
+      {/* Launcher auto-update is Electron-only; cloud updates via the container image. */}
+      {isElectron && (
+        <>
+          <div className={styles.divider} />
+          <SettingsModalOptInToLauncherPrereleases />
+        </>
+      )}
     </div>
   );
 });

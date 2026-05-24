@@ -3,30 +3,39 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 import { app, dialog, net, protocol, shell } from 'electron';
+import { writeFileSync } from 'fs';
 import { migrateFromJson } from 'omni-projects-db';
-import { resolve } from 'path';
+import { join, resolve } from 'path';
 import { assert } from 'tsafe';
 import { pathToFileURL } from 'url';
 
+import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig } from '@/lib/agent-config';
 import { getArtifactsDir } from '@/lib/artifacts';
 import { createAppControlManager } from '@/main/app-control-manager';
 import { createBrowserManager } from '@/main/browser-manager';
+import { migrateAgentConfigFromFiles } from '@/main/config-files-migration';
+import { materializeAgentConfig } from '@/main/config-materializer';
 import { createConsoleManager } from '@/main/console-manager';
 import { rowToProject } from '@/main/db-store-bridge';
 import { createDownloadsManager } from '@/main/downloads-manager';
 import { createExtensionManager } from '@/main/extension-manager';
 import { MainProcessManager } from '@/main/main-process-manager';
-import { syncMcpConfig } from '@/main/mcp-config-manager';
+import { getMcpBinPath } from '@/main/mcp-config-manager';
+import { registerMigrationHandlers } from '@/main/migration-handlers';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
+import { migrateLegacyPagesToConfigDir } from '@/main/pages-relocation-migration';
 import { createPermissionsManager } from '@/main/permissions-manager';
 import { registerPlatformIpc } from '@/main/platform-ipc';
 import { createPlatformClient } from '@/main/platform-mode';
 import { createProcessManager } from '@/main/process-manager';
-import { registerMigrationHandlers } from '@/main/migration-handlers';
-import { migrateLegacyPagesToConfigDir } from '@/main/pages-relocation-migration';
 import { backfillProjectConfigs } from '@/main/project-config-backfill';
 import { closeProjectDb, getDb,openProjectDb } from '@/main/project-db';
 import { createProjectManager } from '@/main/project-manager';
+import {
+  DEFAULT_CHAT_SNAPSHOT_TTL_MS,
+  gcStaleSnapshots,
+  registerSnapshotHandlers,
+} from '@/main/snapshot-manager';
 import { getStore } from '@/main/store';
 import {
   ensureDirectory,
@@ -37,13 +46,14 @@ import {
   isDirectory,
   isFile,
 } from '@/main/util';
-import {
-  DEFAULT_CHAT_SNAPSHOT_TTL_MS,
-  gcStaleSnapshots,
-  registerSnapshotHandlers,
-} from '@/main/snapshot-manager';
 import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
-import { registerConfigHandlers, registerSkillsHandlers, registerUtilHandlers } from '@/shared/ipc-handlers';
+import {
+  registerConfigHandlers,
+  registerSettingsConfigHandlers,
+  registerSkillsHandlers,
+  registerUtilHandlers,
+} from '@/shared/ipc-handlers';
+import { buildStdioMcpEntry } from '@/shared/mcp-entry';
 
 // Process-level crash visibility. Log only — do not exit. Killing the
 // Electron main process from an unhandled rejection would take the whole
@@ -187,11 +197,32 @@ try {
   console.error('[ProjectDb] Failed to migrate legacy pages:', err);
 }
 
-try {
-  syncMcpConfig();
-} catch (err) {
-  console.error('[mcp-config] failed to sync:', err);
+/**
+ * Materialize the agent's on-disk config from the store (desktop = single user,
+ * plaintext). The store is the source of truth; these files are a derived copy
+ * `omni serve` reads. Merges the managed `omni-projects` stdio MCP entry and
+ * writes a real `.env`. Runs at startup and after every `settings:*` write.
+ */
+function materializeDesktopConfig(): void {
+  try {
+    materializeAgentConfig({
+      configDir: OMNI_CONFIG_DIR,
+      models: store.get('modelsConfig') ?? emptyModelsConfig(),
+      mcp: store.get('mcpConfig') ?? emptyMcpConfig(),
+      network: store.get('networkConfig') ?? emptyNetworkConfig(),
+      mode: 'plaintext',
+      managedMcpEntry: buildStdioMcpEntry(getMcpBinPath()),
+    });
+    writeFileSync(join(OMNI_CONFIG_DIR, '.env'), store.get('envVars') ?? '', 'utf-8');
+  } catch (err) {
+    console.error('[config-materializer] desktop materialize failed:', err);
+  }
 }
+
+// Import any pre-v23 on-disk config files into the store once, then make the
+// store the source of truth that materialize writes back out.
+migrateAgentConfigFromFiles(store, OMNI_CONFIG_DIR);
+materializeDesktopConfig();
 
 const main = new MainProcessManager({ store });
 let isShuttingDown = false;
@@ -249,9 +280,13 @@ void (async () => {
   try {
     const keep = new Set<string>();
     const chatSessionId = store.get('chatSessionId');
-    if (chatSessionId) keep.add(chatSessionId);
+    if (chatSessionId) {
+keep.add(chatSessionId);
+}
     for (const tab of store.get('codeTabs') ?? []) {
-      if (tab.sessionId) keep.add(tab.sessionId);
+      if (tab.sessionId) {
+keep.add(tab.sessionId);
+}
     }
     const deleted = await gcStaleSnapshots({ keep, ttlMs: DEFAULT_CHAT_SNAPSHOT_TTL_MS });
     if (deleted.length > 0) {
@@ -581,6 +616,14 @@ registerUtilHandlers(main.ipc, {
   launcherVersion: app.getVersion(),
 });
 registerSkillsHandlers(main.ipc, () => OMNI_CONFIG_DIR, () => store);
+registerSettingsConfigHandlers(
+  main.ipc,
+  () => store,
+  () => {
+    materializeDesktopConfig();
+    main.sendToWindow('store:changed', main.getStoreSnapshot ? main.getStoreSnapshot() : store.store);
+  }
+);
 registerMigrationHandlers(main.ipc, () => ({
   get: () => store.get('pagesMigration') ?? null,
   set: (value) => {

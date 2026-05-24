@@ -17,7 +17,7 @@ import {
   Spinner,
   Switch,
 } from '@/renderer/ds';
-import { emitter } from '@/renderer/services/ipc';
+import { emitter, isElectron } from '@/renderer/services/ipc';
 import type {
   BundleUpdateInfo,
   MarketplaceManifest,
@@ -301,10 +301,13 @@ return <FormSkeleton fields={4} />;
             <Globe20Regular style={{ marginRight: 4 }} />
             Install from marketplace
           </Button>
-          <Button size="sm" variant="ghost" onClick={installFromFile}>
-            <ArrowDownload20Regular style={{ marginRight: 4 }} />
-            Install from file
-          </Button>
+          {/* Local-file picker is desktop-only — the server has no client filesystem. */}
+          {isElectron && (
+            <Button size="sm" variant="ghost" onClick={installFromFile}>
+              <ArrowDownload20Regular style={{ marginRight: 4 }} />
+              Install from file
+            </Button>
+          )}
         </div>
       </div>
 

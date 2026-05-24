@@ -7,7 +7,7 @@ import { OnboardingCredentialsStep } from '@/renderer/features/Onboarding/Onboar
 import { OnboardingModelStep } from '@/renderer/features/Onboarding/OnboardingModelStep';
 import { OnboardingProviderTypeStep } from '@/renderer/features/Onboarding/OnboardingProviderTypeStep';
 import { OnboardingValidationStep } from '@/renderer/features/Onboarding/OnboardingValidationStep';
-import { configApi } from '@/renderer/services/config';
+import { agentConfigApi } from '@/renderer/services/config';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { ModelsConfig, ProviderEntry } from '@/shared/types';
 
@@ -65,9 +65,7 @@ export const OnboardingWizard = memo(() => {
 
   useEffect(() => {
     const check = async () => {
-      const configDir = await configApi.getOmniConfigDir();
-      const existing = (await configApi.readJsonFile(`${configDir}/models.json`)) as ModelsConfig | null;
-      const exists = hasProviders(existing);
+      const exists = hasProviders(await agentConfigApi.getModels());
       setModelsExist(exists);
       setStep(exists ? 'cli' : 'provider');
     };
@@ -93,11 +91,7 @@ return;
     const modelKey = modelId.split('/').pop() || modelId;
     const label = displayName.trim() || modelKey;
 
-    const configDir = await configApi.getOmniConfigDir();
-    const existing = (await configApi.readJsonFile(`${configDir}/models.json`)) as ModelsConfig | null;
-
-    const config: ModelsConfig =
-      existing?.version === 3 ? existing : { version: 3, default: null, voice_default: null, providers: {} };
+    const config = await agentConfigApi.getModels();
 
     const provider: ProviderEntry = config.providers[providerName] ?? { type: providerType, models: {} };
     provider.type = providerType;
@@ -121,7 +115,7 @@ provider.base_url = baseUrl.trim();
 config.default = `${providerName}/${modelKey}`;
 }
 
-    await configApi.writeJsonFile(`${configDir}/models.json`, config);
+    await agentConfigApi.setModels(config);
     goToStep('validate');
   }, [providerType, modelId, displayName, apiKey, baseUrl, goToStep]);
 

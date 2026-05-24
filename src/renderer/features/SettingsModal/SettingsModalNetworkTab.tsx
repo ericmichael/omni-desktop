@@ -4,7 +4,7 @@ import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { Button, Card, Checkbox, FormField, FormSkeleton, IconButton, Input, SaveBar, SectionLabel, Switch } from '@/renderer/ds';
-import { configApi } from '@/renderer/services/config';
+import { agentConfigApi } from '@/renderer/services/config';
 import type { NetworkConfig } from '@/shared/types';
 
 type Preset = {
@@ -161,7 +161,6 @@ const useStyles = makeStyles({
 
 export const SettingsModalNetworkTab = memo(() => {
   const styles = useStyles();
-  const [configDir, setConfigDir] = useState<string | null>(null);
   const [config, setConfig] = useState<NetworkConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [dirty, setDirty] = useState(false);
@@ -170,29 +169,13 @@ export const SettingsModalNetworkTab = memo(() => {
   const [newHost, setNewHost] = useState('');
   const [newDenyHost, setNewDenyHost] = useState('');
 
-  const filePath = configDir ? `${configDir}/network.json` : null;
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const dir = await configApi.getOmniConfigDir();
-      setConfigDir(dir);
-      const data = await configApi.readJsonFile(`${dir}/network.json`);
-      if (data && typeof data === 'object') {
-        const raw = data as Record<string, unknown>;
-        const migrated = migrateConfig(raw);
-        // Auto-save if the on-disk format is stale (e.g. allowedHosts instead of allowlist)
-        // so the Python proxy runtime can read the correct keys.
-        const needsMigration = 'allowedHosts' in raw || !('allowlist' in raw);
-        if (needsMigration) {
-          await configApi.writeJsonFile(`${dir}/network.json`, buildSavePayload(migrated));
-        }
-        setConfig(migrated);
-      } else {
-        const newConfig = emptyConfig();
-        await configApi.writeJsonFile(`${dir}/network.json`, buildSavePayload(newConfig));
-        setConfig(newConfig);
-      }
+      // Stored config holds the expanded (preset-merged) shape; `migrateConfig`
+      // strips preset hosts back out so the UI allowlist shows only manual entries.
+      const data = await agentConfigApi.getNetwork();
+      setConfig(migrateConfig(data as unknown as Record<string, unknown>));
       setDirty(false);
       setError(null);
     } catch (e) {
@@ -207,20 +190,20 @@ export const SettingsModalNetworkTab = memo(() => {
   }, [load]);
 
   const save = useCallback(async () => {
-    if (!filePath || !config) {
+    if (!config) {
       return;
     }
     setSaving(true);
     setError(null);
     try {
-      await configApi.writeJsonFile(filePath, buildSavePayload(config));
+      await agentConfigApi.setNetwork(buildSavePayload(config));
       setDirty(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save');
     } finally {
       setSaving(false);
     }
-  }, [filePath, config]);
+  }, [config]);
 
   const updateConfig = useCallback((updater: (prev: NetworkConfig) => NetworkConfig) => {
     setConfig((prev) => {

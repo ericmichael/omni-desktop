@@ -58,14 +58,18 @@ export function WorkspacePicker({
 
   useEffect(() => {
     (async () => {
-      let start = initialPath
+      // Start at the agent's LIVE working directory — the container manifest
+      // root for a sandbox, a host dir for the host target — resolved from the
+      // server. This is authoritative over ``initialPath``, which may carry a
+      // host project path (store.workspaceDir) that doesn't exist inside a
+      // container and would make the (sandbox-aware) lister fail.
+      let start: string | undefined
+      try {
+        const res = await client.serverCall('fs_get_workspace_root', {}, sessionId) as any
+        start = res?.path
+      } catch {}
       if (!start) {
-        try {
-          // Start picker at the agent's workspace root (manifest root for
-          // sandboxed clients), not omni serve's host cwd.
-          const res = await client.serverCall('fs_get_workspace_root', {}, sessionId) as any
-          start = res?.path
-        } catch {}
+        start = initialPath
       }
       if (!start) {
         try {

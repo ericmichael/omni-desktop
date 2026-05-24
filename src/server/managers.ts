@@ -1,16 +1,18 @@
-import { readFileSync } from 'fs';
-import { createPgListener, createPgPool, migrateFromJson, PgProjectsRepo, runPgMigrations } from 'omni-projects-db';
+import { readFileSync, writeFileSync } from 'fs';
 import type { IProjectsRepo, PgPool, ProjectsRepo } from 'omni-projects-db';
+import { createPgListener, createPgPool, migrateFromJson, PgProjectsRepo, runPgMigrations } from 'omni-projects-db';
 import { join } from 'path';
 
+import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig, parseEnvVars } from '@/lib/agent-config';
+import { ACI_DESKTOP_PROFILE_NAME, ACI_PROFILE_NAME, writeAciProfile } from '@/main/aci-profile';
 import { type BrowserContext, buildBrowserContext, registerBrowserHandlers } from '@/main/browser-manager';
+import { migrateAgentConfigFromFiles } from '@/main/config-files-migration';
+import { collectSecretEnv, materializeAgentConfig } from '@/main/config-materializer';
 import { createConsoleManager } from '@/main/console-manager';
 import { PROJECT_KEYS } from '@/main/db-store-bridge';
 import { ExtensionManager, registerExtensionHandlers } from '@/main/extension-manager';
 import { registerInboxHandlers } from '@/main/inbox-handlers';
-import { ACI_DESKTOP_PROFILE_NAME, ACI_PROFILE_NAME, writeAciProfile } from '@/main/aci-profile';
-import { syncMcpConfig, syncMcpConfigHttp } from '@/main/mcp-config-manager';
-import { MCP_PROJECTS_PATH } from '@/server/mcp-http';
+import { getMcpBinPath } from '@/main/mcp-config-manager';
 import { registerMigrationHandlers } from '@/main/migration-handlers';
 import { registerMilestoneHandlers } from '@/main/milestone-handlers';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
@@ -19,20 +21,28 @@ import { migrateLegacyPagesToConfigDir } from '@/main/pages-relocation-migration
 import { PlatformClient } from '@/main/platform-client';
 import { createPlatformClient, isEnterpriseBuild, PLATFORM_URL } from '@/main/platform-mode';
 import { ProcessManager, registerProcessHandlers } from '@/main/process-manager';
-import { registerProjectHandlers } from '@/main/project-handlers';
 import { backfillProjectConfigs } from '@/main/project-config-backfill';
 import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
+import { registerProjectHandlers } from '@/main/project-handlers';
 import { ProjectManager } from '@/main/project-manager';
 import { registerSupervisorHandlers } from '@/main/supervisor-handlers';
 import { getOmniConfigDir } from '@/main/util';
 import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
 import { ServerIpcAdapter } from '@/server/ipc-adapter';
+import { MCP_PROJECTS_PATH } from '@/server/mcp-http';
 import { PgSettingsStore } from '@/server/pg-settings-store';
 import { resolveRuntimeTokenSecret, signRuntimeToken } from '@/server/runtime-token';
 import type { ServerStore } from '@/server/store';
-import { DEFAULT_TENANT } from '@/server/ws-handler';
 import type { HandlerContext, WsHandler } from '@/server/ws-handler';
-import { registerConfigHandlers, registerSkillsHandlers, registerUtilHandlers } from '@/shared/ipc-handlers';
+import { DEFAULT_TENANT } from '@/server/ws-handler';
+import {
+  registerConfigHandlers,
+  registerSettingsConfigHandlers,
+  registerSkillsHandlers,
+  registerUtilHandlers,
+  type SettingsConfigStore,
+} from '@/shared/ipc-handlers';
+import { buildHttpMcpEntry, buildStdioMcpEntry } from '@/shared/mcp-entry';
 import type { IpcRendererEvents, Project, StoreData } from '@/shared/types';
 import { firstSource } from '@/shared/types';
 
@@ -142,21 +152,12 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
     }
   }
 
-  try {
-    if (dbUrl) {
-      // Cloud (Postgres): the agent reaches project data over the network via
-      // the launcher server's own loopback MCP route (omni serve runs in this
-      // same container). Per-tenant auth comes from OMNI_RUNTIME_TOKEN in the
-      // omni-serve env (injected below), expanded into the entry's header.
-      const port = process.env['PORT'] ?? '3001';
-      syncMcpConfigHttp(`http://127.0.0.1:${port}${MCP_PROJECTS_PATH}`);
-    } else {
-      // Local/desktop: stdio MCP over the local SQLite DB.
-      syncMcpConfig();
-    }
-  } catch (err) {
-    console.error('[mcp-config] failed to sync:', err);
-  }
+  // The managed `omni-projects` MCP entry is no longer written globally here —
+  // it's merged per-tenant by materializeTenant() (below), so each tenant's
+  // mcp.json carries the right transport: the loopback HTTP route in cloud
+  // (auth via the per-tenant OMNI_RUNTIME_TOKEN), or the bundled stdio cli
+  // over the shared SQLite DB locally.
+  const port = process.env['PORT'] ?? '3001';
 
   // When Azure is configured, write the `aci` sandbox profile so `omni serve
   // --profile aci` drives the serverless ACI sandbox. When present, the cloud
@@ -236,6 +237,19 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
               tenantId,
               sessionId: crypto.randomUUID(),
             }),
+            // Redirect the child `omni serve` to this tenant's config dir so it
+            // reads the materialized (secret-free) configs. The launcher's own
+            // getOmniConfigDir() is unaffected.
+            XDG_CONFIG_HOME: join(configDir, '.config'),
+            // The user's .env, injected directly (no .env file is written in
+            // cloud — a .env *is* the env).
+            ...parseEnvVars(settings.get('envVars') ?? ''),
+            // Real values for the ${OMNI_SECRET_*} refs the materializer wrote
+            // into models.json / mcp.json — resolved by the agent's loaders.
+            ...collectSecretEnv(
+              settings.get('modelsConfig') ?? emptyModelsConfig(),
+              settings.get('mcpConfig') ?? emptyMcpConfig()
+            ),
           })
         : undefined,
       // Cloud with Azure → agents run in a serverless ACI sandbox; host/devbox
@@ -274,6 +288,34 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
   const getProcessManager = (tenantId: string): ProcessManager => getTenant(tenantId).processManager;
   const getSettings = (tenantId: string): SettingsStore => getTenant(tenantId).settings;
   /**
+   * Write a tenant's agent config (models/mcp/network) to disk from its store.
+   * Cloud (Postgres): per-tenant `<configDir>/.config/omni_code` in `'refs'`
+   * mode — secrets become `${OMNI_SECRET_*}` refs resolved from the agent env
+   * (see getExtraEnv). Local (SQLite, single tenant): the shared config dir in
+   * `'plaintext'` mode plus a real `.env`, mirroring desktop. The managed
+   * `omni-projects` MCP entry is merged per transport.
+   */
+  const materializeTenant = (tenantId: string): void => {
+    const t = getTenant(tenantId);
+    try {
+      materializeAgentConfig({
+        configDir: dbUrl ? join(t.configDir, '.config', 'omni_code') : getOmniConfigDir(),
+        models: t.settings.get('modelsConfig') ?? emptyModelsConfig(),
+        mcp: t.settings.get('mcpConfig') ?? emptyMcpConfig(),
+        network: t.settings.get('networkConfig') ?? emptyNetworkConfig(),
+        mode: dbUrl ? 'refs' : 'plaintext',
+        managedMcpEntry: dbUrl
+          ? buildHttpMcpEntry(`http://127.0.0.1:${port}${MCP_PROJECTS_PATH}`)
+          : buildStdioMcpEntry(getMcpBinPath()),
+      });
+      if (!dbUrl) {
+        writeFileSync(join(getOmniConfigDir(), '.env'), t.settings.get('envVars') ?? '', 'utf-8');
+      }
+    } catch (err) {
+      console.error(`[config-materializer] failed for tenant ${tenantId}:`, err);
+    }
+  };
+  /**
    * Create (if needed) and fully hydrate a tenant's settings + projection. The
    * server awaits this on WS connect BEFORE processing any of the connection's
    * messages, so a write never races a late hydrate that would clobber either
@@ -285,6 +327,9 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
       await t.settings.whenReady;
     }
     await t.projectManager.whenReady;
+    // Settings are hydrated now — write the agent's on-disk config so the next
+    // omni-serve spawn for this tenant reads fresh model/mcp/network files.
+    materializeTenant(tenantId);
   };
   const getStoreSnapshot = (tenantId: string): StoreData => {
     const snapshot = getTenant(tenantId).projectManager.getStoreSnapshot();
@@ -340,7 +385,17 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
   const defaultTenant = getTenant(DEFAULT_TENANT);
   // Bridge handlers: register once on any bridge with a tenant resolver.
   defaultTenant.projectManager.bridge.registerIpc(ipc, (e) => tenantPM(e).bridge);
-  await defaultTenant.projectManager.whenReady;
+  // Local single-tenant server: import any pre-v23 on-disk config files into the
+  // shared store once (cloud tenants start empty — never import a shared file).
+  if (!dbUrl) {
+    migrateAgentConfigFromFiles(
+      getSettings(DEFAULT_TENANT) as unknown as SettingsConfigStore,
+      getOmniConfigDir()
+    );
+  }
+  // Awaits settings + projection readiness AND materializes the agent config —
+  // so the default tenant's on-disk config is current before serving requests.
+  await ensureTenantReady(DEFAULT_TENANT);
 
   // Multi-replica cache coherence: LISTEN for Postgres change notifications and
   // re-hydrate the affected tenant's projection + settings — but only for
@@ -362,7 +417,12 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
         }
         void t.projectManager.refreshFromExternal();
         if (t.settings instanceof PgSettingsStore) {
-          void t.settings.reload().then(() => wsHandler.sendToTenant(tid, 'store:changed', getStoreSnapshot(tid)));
+          void t.settings.reload().then(() => {
+            // Foreign settings write (another replica / the MCP): re-materialize
+            // so this replica's on-disk config matches before it spawns an agent.
+            materializeTenant(tid);
+            wsHandler.sendToTenant(tid, 'store:changed', getStoreSnapshot(tid));
+          });
         }
       }
     };
@@ -536,6 +596,15 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
     ipc,
     (e) => getTenant((e as HandlerContext).tenantId).configDir,
     (e) => getSettings((e as HandlerContext).tenantId) as never
+  );
+  registerSettingsConfigHandlers(
+    ipc,
+    (e) => getSettings((e as HandlerContext).tenantId) as unknown as SettingsConfigStore,
+    (e) => {
+      const tenantId = (e as HandlerContext).tenantId;
+      materializeTenant(tenantId);
+      wsHandler.sendToTenant(tenantId, 'store:changed', getStoreSnapshot(tenantId));
+    }
   );
   registerMigrationHandlers(ipc, (e) => {
     const tenantId = (e as HandlerContext).tenantId;

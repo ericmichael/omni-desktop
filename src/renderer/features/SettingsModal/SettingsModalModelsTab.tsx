@@ -4,15 +4,11 @@ import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, Button, Card, Checkbox, FormField, FormSkeleton, IconButton, Input, SaveBar, SectionLabel, Select } from '@/renderer/ds';
-import { configApi } from '@/renderer/services/config';
+import { agentConfigApi } from '@/renderer/services/config';
 import type { ModelEntry, ModelsConfig, ProviderEntry } from '@/shared/types';
 
 const PROVIDER_TYPES: ProviderEntry['type'][] = ['openai', 'azure', 'openai-compatible', 'litellm'];
 const REASONING_OPTIONS = ['none', 'low', 'medium', 'high'] as const;
-
-function emptyConfig(): ModelsConfig {
-  return { version: 3, default: null, voice_default: null, providers: {} };
-}
 
 function emptyProvider(): ProviderEntry {
   return { type: 'openai', models: {} };
@@ -117,7 +113,6 @@ const useStyles = makeStyles({
 
 export const SettingsModalModelsTab = memo(() => {
   const styles = useStyles();
-  const [configDir, setConfigDir] = useState<string | null>(null);
   const [config, setConfig] = useState<ModelsConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [dirty, setDirty] = useState(false);
@@ -128,21 +123,10 @@ export const SettingsModalModelsTab = memo(() => {
   const [newProviderName, setNewProviderName] = useState('');
   const [newModelId, setNewModelId] = useState('');
 
-  const filePath = configDir ? `${configDir}/models.json` : null;
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const dir = await configApi.getOmniConfigDir();
-      setConfigDir(dir);
-      const data = await configApi.readJsonFile(`${dir}/models.json`);
-      if (data && typeof data === 'object' && 'version' in data) {
-        setConfig(data as ModelsConfig);
-      } else {
-        const newConfig = emptyConfig();
-        await configApi.writeJsonFile(`${dir}/models.json`, newConfig);
-        setConfig(newConfig);
-      }
+      setConfig(await agentConfigApi.getModels());
       setDirty(false);
       setError(null);
     } catch (e) {
@@ -159,20 +143,20 @@ export const SettingsModalModelsTab = memo(() => {
   const modelKeys = useMemo(() => (config ? collectModelKeys(config) : []), [config]);
 
   const save = useCallback(async () => {
-    if (!filePath || !config) {
+    if (!config) {
       return;
     }
     setSaving(true);
     setError(null);
     try {
-      await configApi.writeJsonFile(filePath, config);
+      await agentConfigApi.setModels(config);
       setDirty(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save');
     } finally {
       setSaving(false);
     }
-  }, [filePath, config]);
+  }, [config]);
 
   const updateConfig = useCallback((updater: (prev: ModelsConfig) => ModelsConfig) => {
     setConfig((prev) => {

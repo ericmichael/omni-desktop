@@ -4,17 +4,18 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { buildSessionVariables } from '@/lib/client-tools';
+import { Spinner } from '@/renderer/ds';
 import { FloatingWidget } from '@/renderer/features/Omni/FloatingWidget';
 import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
 import { SandboxPicker } from '@/renderer/features/SandboxProfile/SandboxPicker';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
 import { useSandboxActivityPing } from '@/renderer/hooks/use-sandbox-activity-ping';
-import { emitter } from '@/renderer/services/ipc';
 import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import { ChatShell } from '@/renderer/omniagents-ui/ChatShell';
 import { getGreeting } from '@/renderer/omniagents-ui/greeting';
 import { buildProfileLabel } from '@/renderer/omniagents-ui/sandbox-label';
+import { emitter } from '@/renderer/services/ipc';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
 
 import { $chatProcessStatus } from './state';
@@ -27,6 +28,34 @@ const useStyles = makeStyles({
   flex1Relative: { flex: '1 1 0', minHeight: 0, position: 'relative' },
   absoluteInsetZ0: { position: 'absolute', inset: 0, zIndex: 0 },
   absoluteInsetZ10: { position: 'absolute', inset: 0, zIndex: 10 },
+  // Non-blocking transition scrim shown over the still-mounted conversation
+  // while an in-place sandbox switch runs. Dims (not hides) the chat and blocks
+  // re-clicks; the conversation reappears intact when the switch resolves.
+  switchScrim: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 20,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    backdropFilter: 'blur(1px)',
+    WebkitBackdropFilter: 'blur(1px)',
+  },
+  switchCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: tokens.spacingVerticalS,
+    padding: `${tokens.spacingVerticalXL} ${tokens.spacingHorizontalXXL}`,
+    borderRadius: tokens.borderRadiusXLarge,
+    backgroundColor: tokens.colorNeutralBackground1,
+    boxShadow: tokens.shadow28,
+    maxWidth: '320px',
+    textAlign: 'center',
+  },
+  switchTitle: { fontSize: tokens.fontSizeBase400, fontWeight: tokens.fontWeightSemibold, color: tokens.colorNeutralForeground1 },
+  switchHint: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 },
   // Inner surface bg/border colors for chat content come from the Tailwind
   // var overrides pushed at the deck-bg root in MainContent (--color-bgCard,
   // --color-background, etc. resolve to the glass scrim). This class only
@@ -269,6 +298,15 @@ export const Chat = memo(() => {
             onClientToolCall={toolHandler}
             workspaceDir={store.workspaceDir ?? undefined}
           />
+          {chatData.switching && (
+            <div className={styles.switchScrim}>
+              <div className={styles.switchCard}>
+                <Spinner size="md" />
+                <span className={styles.switchTitle}>Switching to {getProfileMenuLabel(profileName)}…</span>
+                <span className={styles.switchHint}>Your conversation and files are preserved.</span>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

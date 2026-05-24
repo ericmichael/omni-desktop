@@ -4,7 +4,7 @@ import { map } from 'nanostores';
 
 import { DEFAULT_XTERM_OPTIONS, STATUS_POLL_INTERVAL_MS } from '@/renderer/constants';
 import { emitter, ipc } from '@/renderer/services/ipc';
-import type { AgentProcessStartOptions, AgentProcessStatus, SandboxPauseResult, WithTimestamp } from '@/shared/types';
+import type { AgentProcessStartOptions, AgentProcessStatus, SandboxPauseResult, SandboxSwitchResult, WithTimestamp } from '@/shared/types';
 
 /** Statuses for all agent processes, keyed by processId. */
 export const $agentStatuses = map<Record<string, WithTimestamp<AgentProcessStatus>>>({});
@@ -84,6 +84,10 @@ export const agentProcessApi = {
 
   unpause: (processId: string): Promise<SandboxPauseResult> => {
     return emitter.invoke('agent-process:unpause', processId);
+  },
+
+  switchSandbox: (processId: string, profileName: string): Promise<SandboxSwitchResult> => {
+    return emitter.invoke('agent-process:switch-sandbox', processId, profileName);
   },
 
   notifyActivity: (processId: string): void => {

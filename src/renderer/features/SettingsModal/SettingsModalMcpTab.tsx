@@ -4,14 +4,10 @@ import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
 import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, Button, FormField, FormSkeleton, IconButton, Input, SaveBar, SectionLabel, Select } from '@/renderer/ds';
-import { configApi } from '@/renderer/services/config';
+import { agentConfigApi } from '@/renderer/services/config';
 import type { McpConfig, McpServerEntry } from '@/shared/types';
 
 const SERVER_TYPES: NonNullable<McpServerEntry['type']>[] = ['stdio', 'sse', 'http', 'streamable_http'];
-
-function emptyConfig(): McpConfig {
-  return { mcpServers: {} };
-}
 
 function emptyServer(): McpServerEntry {
   return { type: 'stdio', command: '', args: [] };
@@ -70,7 +66,6 @@ const useStyles = makeStyles({
 
 export const SettingsModalMcpTab = memo(() => {
   const styles = useStyles();
-  const [configDir, setConfigDir] = useState<string | null>(null);
   const [config, setConfig] = useState<McpConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [dirty, setDirty] = useState(false);
@@ -79,21 +74,10 @@ export const SettingsModalMcpTab = memo(() => {
   const [expandedServer, setExpandedServer] = useState<string | null>(null);
   const [newServerName, setNewServerName] = useState('');
 
-  const filePath = configDir ? `${configDir}/mcp.json` : null;
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const dir = await configApi.getOmniConfigDir();
-      setConfigDir(dir);
-      const data = await configApi.readJsonFile(`${dir}/mcp.json`);
-      if (data && typeof data === 'object' && 'mcpServers' in data) {
-        setConfig(data as McpConfig);
-      } else {
-        const newConfig = emptyConfig();
-        await configApi.writeJsonFile(`${dir}/mcp.json`, newConfig);
-        setConfig(newConfig);
-      }
+      setConfig(await agentConfigApi.getMcp());
       setDirty(false);
       setError(null);
     } catch (e) {
@@ -108,20 +92,20 @@ export const SettingsModalMcpTab = memo(() => {
   }, [load]);
 
   const save = useCallback(async () => {
-    if (!filePath || !config) {
+    if (!config) {
       return;
     }
     setSaving(true);
     setError(null);
     try {
-      await configApi.writeJsonFile(filePath, config);
+      await agentConfigApi.setMcp(config);
       setDirty(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save');
     } finally {
       setSaving(false);
     }
-  }, [filePath, config]);
+  }, [config]);
 
   const updateConfig = useCallback((updater: (prev: McpConfig) => McpConfig) => {
     setConfig((prev) => {

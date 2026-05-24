@@ -203,6 +203,32 @@ export type StoreData = {
   /** User-added custom apps for the workspace dock. */
   customApps: CustomAppEntry[];
 
+  /**
+   * Agent model providers — the source of truth for what the desktop wrote to
+   * `models.json`. Materialized to `<configDir>/models.json` at agent launch.
+   * In cloud, provider/model `api_key` values are rewritten to `${OMNI_SECRET_*}`
+   * refs on disk and the real values injected into the agent env, so secrets
+   * never touch the (shared, ephemeral) container disk. See `config-materializer.ts`.
+   */
+  modelsConfig: ModelsConfig;
+  /** Agent MCP servers (`mcp.json`). Same materialization + secret handling as `modelsConfig`. */
+  mcpConfig: McpConfig;
+  /** Sandbox network egress policy (`network.json`). Non-secret; materialized verbatim. */
+  networkConfig: NetworkConfig;
+  /**
+   * Raw `.env` contents for the agent. On desktop, materialized to a real
+   * `.env` file. In cloud, parsed and injected directly into the agent process
+   * env (a `.env` *is* the env — no file is written).
+   */
+  envVars: string;
+  /**
+   * One-shot guard for the v23 migration that imported pre-existing on-disk
+   * `models.json`/`mcp.json`/`network.json`/`.env` into the store keys above.
+   * Set once the import runs (desktop + local single-tenant server only — cloud
+   * tenants start empty so a shared file never leaks across tenants).
+   */
+  agentConfigMigratedFromFiles?: boolean;
+
   /** Voice mode audio device + processing preferences. */
   audioSettings: AudioSettings;
 
@@ -674,6 +700,25 @@ export const schema: Schema<StoreData> = {
       required: ['id', 'label', 'icon', 'url', 'order'],
     },
   },
+  glassTone: { type: 'string', default: 'dark' },
+  modelsConfig: {
+    type: 'object',
+    default: { version: 3, default: null, voice_default: null, providers: {} },
+  },
+  mcpConfig: { type: 'object', default: { mcpServers: {} } },
+  networkConfig: {
+    type: 'object',
+    default: {
+      enabled: false,
+      presets: [],
+      allowlist: [],
+      denylist: [],
+      allow_private_ips: false,
+      enable_socks5: false,
+    },
+  },
+  envVars: { type: 'string', default: '' },
+  agentConfigMigratedFromFiles: { type: 'boolean', default: false },
   audioSettings: {
     type: 'object',
     default: {
@@ -880,6 +925,13 @@ export type AgentProcessData = {
    * never asked.
    */
   paused?: boolean;
+  /**
+   * True while an in-place sandbox switch is running (`sandbox.switch`): the
+   * process and WS stay up, but the sandbox is being torn down + rebuilt. The
+   * renderer overlays a "Switching to <profile>…" scrim over the (still-mounted)
+   * conversation and reloads the service panes when it clears.
+   */
+  switching?: boolean;
 };
 
 export type AgentProcessStatus =
@@ -1505,6 +1557,16 @@ type AgentProcessIpcEvents = Namespaced<
      * during continuous interaction.
      */
     'notify-activity': (processId: string) => void;
+    /**
+     * Switch a running agent's sandbox to a different profile **in place** —
+     * the `omni serve` process and its WebSocket stay up, so the conversation
+     * never drops. Calls the `sandbox.switch` server function; on success the
+     * main process updates this agent's `services`/`containerId` (the in-sandbox
+     * service panes reload to the new URLs). Returns `{ok:false}` for profiles
+     * that can't switch in place (e.g. `host` / a missing profile file), so the
+     * caller can fall back to a stop+relaunch.
+     */
+    'switch-sandbox': (processId: string, profileName: string) => SandboxSwitchResult;
   }
 >;
 
@@ -1515,6 +1577,35 @@ export type SandboxPauseResult = {
   supported: boolean;
   paused?: boolean;
   reason?: string;
+  /** Raw server-function result, when a caller needs fields beyond the envelope. */
+  data?: Record<string, unknown>;
+};
+
+/** Result of an in-place `sandbox.switch`. */
+export type SandboxSwitchResult = {
+  ok: boolean;
+  /** New profile name once switched (display label). */
+  profile?: string;
+  /** New backend client type (`docker` / `aci` / …). */
+  backend?: string;
+  /** New container id (docker/aci); absent for unix_local. */
+  containerId?: string;
+  /** New in-sandbox service URLs (code_server / vnc / …). */
+  services?: Record<string, string>;
+  /** Failure detail; present when `ok` is false. */
+  reason?: string;
+  /**
+   * When `ok` is false: whether the caller should fall back to a full
+   * stop+relaunch. True for "can't switch in place" (host/missing profile) and
+   * for a `lost` sandbox; false when omni-code rolled back to the previous
+   * profile (the session is still alive — relaunching would be wrong).
+   */
+  fallback?: boolean;
+  /**
+   * How a failed switch ended on the omni-code side: `rolled_back` (previous
+   * profile restored, session live) or `lost` (sandbox gone, must relaunch).
+   */
+  recovered?: 'rolled_back' | 'lost';
 };
 
 type SnapshotIpcEvents = Namespaced<
@@ -1589,6 +1680,27 @@ type ConfigIpcEvents = Namespaced<
     'write-json-file': (path: string, data: unknown) => void;
     'read-text-file': (path: string) => string | null;
     'write-text-file': (path: string, content: string) => void;
+  }
+>;
+
+/**
+ * Typed agent-config API. Replaces the path-based `config:*` file I/O for the
+ * four Settings configs whose source of truth is the (per-tenant, in cloud)
+ * store rather than a file: model providers, MCP servers, network policy, and
+ * `.env`. The backend persists them as store keys and re-materializes the
+ * agent's on-disk config; the renderer never names a file path.
+ */
+type SettingsConfigIpcEvents = Namespaced<
+  'settings',
+  {
+    'get-models-config': () => ModelsConfig;
+    'set-models-config': (config: ModelsConfig) => void;
+    'get-mcp-config': () => McpConfig;
+    'set-mcp-config': (config: McpConfig) => void;
+    'get-network-config': () => NetworkConfig;
+    'set-network-config': (config: NetworkConfig) => void;
+    'get-env': () => string;
+    'set-env': (content: string) => void;
   }
 >;
 
@@ -2381,6 +2493,7 @@ export type IpcEvents = MainProcessIpcEvents &
   TerminalIpcEvents &
   StoreIpcEvents &
   ConfigIpcEvents &
+  SettingsConfigIpcEvents &
   SkillsIpcEvents &
   ProjectIpcEvents &
   MilestoneIpcEvents &

@@ -536,6 +536,9 @@ resource roleAciManager 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
           'Microsoft.ContainerInstance/containerGroups/containers/logs/read'
           'Microsoft.ContainerInstance/locations/operations/read'
           'Microsoft.ContainerInstance/operations/read'
+          // ACI attaches the user-assigned MI (omni-launcher-mi) for ACR pull;
+          // assigning a UAMI to a resource needs this action on the MI's scope.
+          'Microsoft.ManagedIdentity/userAssignedIdentities/assign/action'
           // ACI VNet deployment joins the delegated subnet (+ legacy networkProfile path).
           'Microsoft.Network/virtualNetworks/read'
           'Microsoft.Network/virtualNetworks/subnets/read'

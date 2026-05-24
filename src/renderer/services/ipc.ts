@@ -2,7 +2,12 @@ import { ElectronTransportEmitter, ElectronTransportListener } from '@/renderer/
 import { WsTransportEmitter, WsTransportListener } from '@/renderer/transport/ws-transport';
 import type { TransportEmitter, TransportListener } from '@/shared/transport';
 
-const isElectron = typeof window !== 'undefined' && 'electron' in window;
+/**
+ * True in the Electron desktop app, false in the browser/server build. Drives
+ * hiding controls that are no-ops in hosted mode (host-filesystem pickers, the
+ * runtime installer, the in-PATH CLI, launcher auto-update, local-file imports).
+ */
+export const isElectron = typeof window !== 'undefined' && 'electron' in window;
 
 const createTransport = (): { emitter: TransportEmitter; ipc: TransportListener } => {
   if (isElectron) {

@@ -6,7 +6,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { getArtifactsDir, getContainerArtifactsDir, profileRunsOnHost } from '@/lib/artifacts';
 import { buildSessionVariables } from '@/lib/client-tools';
 import { SessionStartupShell } from '@/renderer/common/SessionStartupShell';
-import { Button } from '@/renderer/ds';
+import { Button, Spinner } from '@/renderer/ds';
 import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
@@ -35,6 +35,33 @@ const useStyles = makeStyles({
   errorRetry: { marginTop: tokens.spacingVerticalL },
   flexColFullRelative: { display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative' },
   flex1Relative: { flex: '1 1 0', minHeight: 0, position: 'relative' },
+  // In-place sandbox-switch scrim — dims the still-mounted agent column while
+  // the sandbox is rebuilt; the conversation reappears intact when it clears.
+  switchScrim: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 20,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    backdropFilter: 'blur(1px)',
+    WebkitBackdropFilter: 'blur(1px)',
+  },
+  switchCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: tokens.spacingVerticalS,
+    padding: `${tokens.spacingVerticalXL} ${tokens.spacingHorizontalXXL}`,
+    borderRadius: tokens.borderRadiusXLarge,
+    backgroundColor: tokens.colorNeutralBackground1,
+    boxShadow: tokens.shadow28,
+    maxWidth: '320px',
+    textAlign: 'center',
+  },
+  switchTitle: { fontSize: tokens.fontSizeBase400, fontWeight: tokens.fontWeightSemibold, color: tokens.colorNeutralForeground1 },
+  switchHint: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 },
   spinnerPill: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -92,6 +119,7 @@ const CodeRunningView = memo(
     agentWorkspaceDir,
     sidecarMode,
     ticketId,
+    switching,
   }: {
     sandboxUrls: { uiUrl: string; services?: Record<string, string> };
     sessionId?: string;
@@ -116,6 +144,7 @@ const CodeRunningView = memo(
     agentWorkspaceDir?: string;
     sidecarMode?: boolean;
     ticketId?: TicketId;
+    switching?: boolean;
   }) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
@@ -167,6 +196,17 @@ const CodeRunningView = memo(
             ticketId={ticketId}
           />
         </div>
+        {switching && (
+          <div className={styles.switchScrim}>
+            <div className={styles.switchCard}>
+              <Spinner size="md" />
+              <span className={styles.switchTitle}>
+                Switching to {getProfileMenuLabel(currentSandboxProfile ?? 'host')}…
+              </span>
+              <span className={styles.switchHint}>Your conversation and files are preserved.</span>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -404,6 +444,7 @@ export const CodeTabContent = memo(
             agentWorkspaceDir={agentWorkspaceDir}
             sidecarMode={sidecarMode}
             ticketId={tab.ticketId as TicketId | undefined}
+            switching={sandboxStatus?.type === 'running' && !!sandboxStatus.data.switching}
           />
         ) : phase === 'error' ? (
           <CodeErrorView tabId={tab.id} retry={retry} />

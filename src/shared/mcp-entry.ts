@@ -32,6 +32,27 @@ export interface HttpMcpEntry {
   _managed?: string;
 }
 
+/** Either managed entry shape the launcher injects into a tenant's mcp.json. */
+export type ManagedMcpEntry = StdioMcpEntry | HttpMcpEntry;
+
+/**
+ * Merge the launcher-managed `omni-projects` entry into a set of user MCP
+ * servers. Idempotent and respectful of a user override: if an `omni-projects`
+ * entry exists WITHOUT the managed marker the user has "claimed" the name, so
+ * it is left untouched; otherwise the managed entry is (re)written. Pure — the
+ * config materializer calls this before writing `mcp.json`.
+ */
+export function mergeManagedMcpEntry<T>(
+  servers: Record<string, T>,
+  managed: ManagedMcpEntry
+): Record<string, T | ManagedMcpEntry> {
+  const existing = servers[MCP_ENTRY_NAME] as { _managed?: string } | undefined;
+  if (existing && existing._managed !== MCP_MANAGED_MARKER) {
+    return servers;
+  }
+  return { ...servers, [MCP_ENTRY_NAME]: managed };
+}
+
 /** Local desktop/server: spawn the bundled stdio MCP cli over the local DB. */
 export function buildStdioMcpEntry(binPath: string): StdioMcpEntry {
   return { type: 'stdio', command: 'node', args: [binPath], _managed: MCP_MANAGED_MARKER };

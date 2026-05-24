@@ -1,9 +1,10 @@
 import type { ReadableAtom } from 'nanostores';
 import { atom } from 'nanostores';
 
+import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig } from '@/lib/agent-config';
 import { migrateLayoutMode } from '@/lib/store-init';
 import { emitter, ipc } from '@/renderer/services/ipc';
-import type { ModelsConfig, OperatingSystem, StoreData } from '@/shared/types';
+import type { OperatingSystem, StoreData } from '@/shared/types';
 
 const getDefaults = (): StoreData => ({
   defaultProfileName: 'host',
@@ -36,6 +37,10 @@ const getDefaults = (): StoreData => ({
   skillSources: {},
   installedBundles: {},
   customApps: [],
+  modelsConfig: emptyModelsConfig(),
+  mcpConfig: emptyMcpConfig(),
+  networkConfig: emptyNetworkConfig(),
+  envVars: '',
   browserProfiles: [],
   browserTabsets: {},
   browserHistory: [],
@@ -143,15 +148,12 @@ const init = async () => {
     await persistedStoreApi.setKey('workspaceDir', defaultDir);
   }
 
-  // Existing-user migration: if onboardingComplete is not set, check if models.json already has providers
+  // Existing-user migration: if onboardingComplete is not set, mark it done when
+  // model providers are already configured (now sourced from the store, not a file).
   if (!store.onboardingComplete) {
     try {
-      const configDir = await emitter.invoke('config:get-omni-config-dir');
-      const modelsConfig = (await emitter.invoke(
-        'config:read-json-file',
-        `${configDir}/models.json`
-      )) as ModelsConfig | null;
-      if (modelsConfig?.providers && Object.keys(modelsConfig.providers).length > 0) {
+      const modelsConfig = await emitter.invoke('settings:get-models-config');
+      if (Object.keys(modelsConfig.providers).length > 0) {
         await persistedStoreApi.setKey('onboardingComplete', true);
       }
     } catch {

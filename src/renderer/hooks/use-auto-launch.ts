@@ -9,6 +9,8 @@ import {
   type OmniRuntimeReadiness,
   retryRuntimeCheck,
 } from '@/renderer/features/Omni/state';
+import { getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
+import { toast } from '@/renderer/features/Toast/state';
 import { $agentStatuses, agentProcessApi } from '@/renderer/services/agent-process';
 import { emitter } from '@/renderer/services/ipc';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
@@ -127,11 +129,8 @@ sendBack({ type: 'INSTALL_CANCELLED' });
       let cancelled = false;
       (async () => {
         try {
-          const configDir = await emitter.invoke('config:get-omni-config-dir');
-          const modelsConfig = (await emitter.invoke('config:read-json-file', `${configDir}/models.json`)) as {
-            providers?: Record<string, unknown>;
-          } | null;
-          const hasProviders = modelsConfig?.providers && Object.keys(modelsConfig.providers).length > 0;
+          const modelsConfig = await emitter.invoke('settings:get-models-config');
+          const hasProviders = Object.keys(modelsConfig.providers).length > 0;
           if (cancelled) {
 return;
 }
@@ -264,12 +263,15 @@ return;
 };
   }, [initialized, opts.workspaceDir, actor]);
 
-  // Restart when the per-launch sandbox profile override changes. The in-
-  // composer SandboxPicker writes this; the running omni-serve was bound to
-  // the *previous* profile, so the container has to be torn down, the
-  // machine reset, and LAUNCH re-fired explicitly. The general auto-launch
-  // effect above won't re-trigger on its own — none of its deps change on
-  // RESET — so we must drive the next launch from here.
+  // React to a per-launch sandbox profile override change (written by the
+  // SandboxPicker). Prefer an **in-place switch** over the live `omni serve`:
+  // `sandbox.switch` snapshots the workspace, brings up the new backend, and
+  // re-attaches it without restarting the process — so the WebSocket and the
+  // conversation stay up; only the in-sandbox service panes reload. Fall back
+  // to the old stop → RESET → LAUNCH only when an in-place switch isn't
+  // possible (no live session yet, or `host`/missing profile, or the switch
+  // failed). The general auto-launch effect above won't re-trigger on its own
+  // (no dep changes on RESET), so we drive the relaunch from here.
   const previousProfileOverrideRef = useRef(opts.profileNameOverride);
   useEffect(() => {
     const previous = previousProfileOverrideRef.current;
@@ -277,20 +279,50 @@ return;
     if (!initialized || previous === opts.profileNameOverride) {
       return;
     }
+    const nextProfile = opts.profileNameOverride;
     let cancelled = false;
     void (async () => {
+      if (nextProfile) {
+        const res = await agentProcessApi.switchSandbox(processIdRef.current, nextProfile);
+        if (cancelled) {
+          return;
+        }
+        const label = getProfileMenuLabel(nextProfile);
+        if (res.ok) {
+          // Switched in place; the new services/containerId arrived via the
+          // AgentProcessData status update — no relaunch, conversation intact.
+          toast.success(`Now running on ${label}`);
+          return;
+        }
+        if (!res.fallback) {
+          // omni-code rolled back — the previous sandbox is still live, so
+          // don't relaunch; just tell the user the switch didn't take.
+          toast.error(
+            `Couldn't switch to ${label}`,
+            res.recovered === 'rolled_back' ? 'Restored the previous sandbox.' : res.reason
+          );
+          return;
+        }
+        if (res.recovered === 'lost') {
+          toast.warning(`Sandbox was lost during the switch — restarting on ${label}…`);
+        }
+        // else: an unsupported in-place target (host/missing) — a normal
+        // stop+relaunch, no toast needed.
+      }
+      // Fallback: tear down + relaunch on the new profile (idle/pre-launch,
+      // host/missing profile, or a lost sandbox).
       await agentProcessApi.stop(processIdRef.current);
       if (cancelled) {
-return;
-}
+        return;
+      }
       actor.send({ type: 'RESET' });
       if (workspaceDirRef.current) {
         actor.send({ type: 'LAUNCH' });
       }
     })();
     return () => {
- cancelled = true;
-};
+      cancelled = true;
+    };
   }, [initialized, opts.profileNameOverride, actor]);
 
   const retry = useCallback(() => {

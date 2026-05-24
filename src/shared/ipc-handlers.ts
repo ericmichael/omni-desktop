@@ -9,6 +9,7 @@ import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';
 import { WebSocket as WsWebSocket } from 'ws';
 
+import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig } from '@/lib/agent-config';
 import type { SkillStore } from '@/main/skills';
 import { installSkillFromFile, listSkills, setSkillEnabled, uninstallSkill } from '@/main/skills';
 import {
@@ -36,6 +37,7 @@ import {
   validateUserPath,
 } from '@/main/util';
 import type { IIpcListener } from '@/shared/ipc-listener';
+import type { McpConfig, ModelsConfig, NetworkConfig, StoreData } from '@/shared/types';
 
 export interface UtilHandlerOptions {
   /**
@@ -88,6 +90,50 @@ export function registerConfigHandlers(ipc: IIpcListener, configDir: string): vo
     validateConfigPath(filePath, configDir);
     await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, content, 'utf-8');
+  });
+}
+
+/**
+ * Minimal store surface the settings-config handlers need. Satisfied by
+ * electron-store, the server `ServerStore`, and the per-tenant `PgSettingsStore`.
+ */
+export interface SettingsConfigStore {
+  get<K extends keyof StoreData>(key: K): StoreData[K] | undefined;
+  set<K extends keyof StoreData>(key: K, value: StoreData[K]): void;
+}
+
+/**
+ * Register the typed `settings:*` agent-config channels. These replace the
+ * path-based `config:*` file I/O for the four configs whose source of truth is
+ * the store: model providers, MCP servers, network policy, and `.env`. The
+ * store backend (electron-store / ServerStore / per-tenant PgSettingsStore) is
+ * resolved per-invoke; `afterWrite` is the transport's hook to broadcast
+ * `store:changed` and re-materialize the agent's on-disk config.
+ */
+export function registerSettingsConfigHandlers(
+  ipc: IIpcListener,
+  resolveStore: (event: unknown) => SettingsConfigStore,
+  afterWrite: (event: unknown) => void
+): void {
+  ipc.handle('settings:get-models-config', (e: unknown) => resolveStore(e).get('modelsConfig') ?? emptyModelsConfig());
+  ipc.handle('settings:set-models-config', (e: unknown, config: ModelsConfig) => {
+    resolveStore(e).set('modelsConfig', config);
+    afterWrite(e);
+  });
+  ipc.handle('settings:get-mcp-config', (e: unknown) => resolveStore(e).get('mcpConfig') ?? emptyMcpConfig());
+  ipc.handle('settings:set-mcp-config', (e: unknown, config: McpConfig) => {
+    resolveStore(e).set('mcpConfig', config);
+    afterWrite(e);
+  });
+  ipc.handle('settings:get-network-config', (e: unknown) => resolveStore(e).get('networkConfig') ?? emptyNetworkConfig());
+  ipc.handle('settings:set-network-config', (e: unknown, config: NetworkConfig) => {
+    resolveStore(e).set('networkConfig', config);
+    afterWrite(e);
+  });
+  ipc.handle('settings:get-env', (e: unknown) => resolveStore(e).get('envVars') ?? '');
+  ipc.handle('settings:set-env', (e: unknown, content: string) => {
+    resolveStore(e).set('envVars', content);
+    afterWrite(e);
   });
 }
 

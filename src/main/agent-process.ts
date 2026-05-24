@@ -1,17 +1,16 @@
 import type { ChildProcess } from 'node:child_process';
 import { spawn } from 'node:child_process';
+import path from 'node:path';
 
 import c from 'ansi-colors';
 import { shellEnvSync } from 'shell-env';
 import { assert } from 'tsafe';
 import { WebSocket as WsWebSocket } from 'ws';
 
-import path from 'node:path';
-
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
 import type { IComputeClient } from '@/main/platform-client';
-import { HOST_PROFILE_NAME, resolveProfile } from '@/main/profile-resolver';
+import { resolveProfile } from '@/main/profile-resolver';
 import { getOmniCliPath, getOmniConfigDir, isDirectory, pathExists } from '@/main/util';
 import { downloadWorkspace } from '@/main/workspace-sync';
 import type {
@@ -19,6 +18,7 @@ import type {
   AgentProcessStatus,
   LogEntry,
   SandboxPauseResult,
+  SandboxSwitchResult,
   WithTimestamp,
 } from '@/shared/types';
 
@@ -155,11 +155,17 @@ const SERVER_CALL_TIMEOUT_MS = 8_000;
  * channel. Auth tokens travel in the wsUrl query string so we don't have
  * to re-derive them here.
  */
-async function oneShotServerCall(wsUrl: string, fn: string): Promise<SandboxPauseResult> {
+async function oneShotServerCall(
+  wsUrl: string,
+  fn: string,
+  args: Record<string, unknown> = {}
+): Promise<SandboxPauseResult> {
   return new Promise<SandboxPauseResult>((resolve) => {
     let settled = false;
     const finish = (result: SandboxPauseResult) => {
-      if (settled) return;
+      if (settled) {
+return;
+}
       settled = true;
       try {
         socket.close();
@@ -182,7 +188,7 @@ async function oneShotServerCall(wsUrl: string, fn: string): Promise<SandboxPaus
             jsonrpc: '2.0',
             id: 1,
             method: 'server_call',
-            params: { function: fn, args: {} },
+            params: { function: fn, args },
           })
         );
       } catch (err) {
@@ -223,6 +229,7 @@ async function oneShotServerCall(wsUrl: string, fn: string): Promise<SandboxPaus
       finish({
         ok: r.ok === true,
         supported: r.supported !== false,
+        data: r,
         ...(typeof r.paused === 'boolean' ? { paused: r.paused } : {}),
         ...(typeof r.reason === 'string' ? { reason: r.reason } : {}),
       });
@@ -402,14 +409,82 @@ export class AgentProcess {
   };
 
   /**
+   * Switch this running agent's sandbox to *profileName* in place via the
+   * ``sandbox.switch`` server function — no process restart, the WS stays up,
+   * the conversation never drops. On success, patch the running status'
+   * ``services``/``containerId`` so the renderer's in-sandbox panes (code-
+   * server / VNC) reload to the new URLs; ``uiUrl``/``wsUrl`` are unchanged
+   * (same serve process). Returns ``ok:false`` for profiles that can't switch
+   * in place (``host`` / a missing file) so the caller can fall back to a
+   * stop+relaunch.
+   */
+  switchSandbox = async (profileName: string): Promise<SandboxSwitchResult> => {
+    if (this.mode === 'platform') {
+      return { ok: false, fallback: true, reason: 'platform mode does not support in-place sandbox switch' };
+    }
+    if (this.status.type !== 'running' && this.status.type !== 'connecting') {
+      return { ok: false, fallback: true, reason: 'sandbox is not running' };
+    }
+    const resolved = resolveProfile(profileName);
+    if (resolved.kind !== 'file') {
+      // ``host`` (builtin-default) and missing profiles have no --profile path
+      // to switch to; the caller falls back to a full stop+relaunch.
+      return { ok: false, fallback: true, reason: `profile "${profileName}" cannot switch in place (${resolved.kind})` };
+    }
+    const data = (this.status as Extract<AgentProcessStatus, { type: 'running' | 'connecting' }>).data;
+    const wsUrl = data.wsUrl;
+    if (!wsUrl) {
+      return { ok: false, fallback: true, reason: 'no ws_url available' };
+    }
+    // Flag the transition so the renderer can overlay a scrim over the (still
+    // mounted) conversation. Cleared in `finally` regardless of outcome.
+    this.updateAgentProcessData({ switching: true });
+    try {
+      const res = await oneShotServerCall(wsUrl, 'sandbox.switch', { profile: resolved.path });
+      const raw = res.data ?? {};
+      if (!res.ok) {
+        const recovered = raw.recovered === 'lost' || raw.recovered === 'rolled_back' ? raw.recovered : undefined;
+        // Rolled back → the old session is alive; don't relaunch. Lost (or no
+        // recovery info) → the sandbox is gone; relaunch to recover.
+        return {
+          ok: false,
+          fallback: recovered !== 'rolled_back',
+          ...(recovered ? { recovered } : {}),
+          reason: res.reason ?? 'switch failed',
+        };
+      }
+      const services =
+        raw.services && typeof raw.services === 'object'
+          ? (raw.services as Record<string, string>)
+          : undefined;
+      const containerId = typeof raw.container_id === 'string' ? raw.container_id : undefined;
+      const backend = typeof raw.backend === 'string' ? raw.backend : undefined;
+      const profile = typeof raw.profile === 'string' ? raw.profile : profileName;
+      // uiUrl/wsUrl stay put (same omni serve) — only the service panes reload.
+      this.updateAgentProcessData({ ...(services ? { services } : {}), containerId });
+      // Keep a future cold relaunch aligned with the now-active profile.
+      if (this.lastStartArg) {
+        this.lastStartArg = { ...this.lastStartArg, profileName };
+      }
+      return { ok: true, profile, backend, containerId, services };
+    } finally {
+      this.updateAgentProcessData({ switching: false });
+    }
+  };
+
+  /**
    * Fire-and-forget presence ping. Resets the sandbox's idle timer so it
    * doesn't pause while the user is actively interacting with a client
    * surface. Throttling is the renderer's responsibility — we just relay.
    */
   notifyActivity = (): void => {
-    if (this.status.type !== 'running' && this.status.type !== 'connecting') return;
+    if (this.status.type !== 'running' && this.status.type !== 'connecting') {
+return;
+}
     const data = (this.status as Extract<AgentProcessStatus, { type: 'running' | 'connecting' }>).data;
-    if (!data.wsUrl) return;
+    if (!data.wsUrl) {
+return;
+}
     void oneShotServerCall(data.wsUrl, 'sandbox.notify_activity').catch(() => {
       // Best-effort. A dropped ping costs us ~60s of headroom (the
       // renderer's throttle window) before the next one tries.
@@ -514,7 +589,9 @@ export class AgentProcess {
         desc.repoUrl = s.repoUrl;
       }
       if (s.kind === 'local-git' || s.kind === 'git-remote') {
-        if (s.ref) desc.ref = s.ref;
+        if (s.ref) {
+desc.ref = s.ref;
+}
       }
       args.push('--source', JSON.stringify(desc));
     }
@@ -565,12 +642,16 @@ export class AgentProcess {
       child.stdout.on('data', this.handleStdout);
       child.stderr.on('data', this.handleStderr);
       child.on('error', (error: Error) => {
-        if (this.childProcess && this.childProcess !== child) return;
+        if (this.childProcess && this.childProcess !== child) {
+return;
+}
         this.childProcess = null;
         this.updateStatus({ type: 'error', error: { message: error.message } });
       });
       child.on('close', (exitCode, signal) => {
-        if (this.childProcess && this.childProcess !== child) return;
+        if (this.childProcess && this.childProcess !== child) {
+return;
+}
         this.childProcess = null;
         if (this.status.type === 'exiting' || this.status.type === 'stopping') {
           this.updateStatus({ type: 'exited' });
@@ -581,10 +662,16 @@ export class AgentProcess {
           return;
         }
         const reason = signal ? `signal ${signal}` : `code ${exitCode}`;
+        // omni serve emits structured launch failures (bad source, seed-size
+        // cap, profile errors) as a ``{"error": "..."}`` line. Surface that
+        // message directly; otherwise fall back to the raw stderr tail.
+        const structured = this.structuredError();
         const tail = this.tailStderr();
-        const message = tail
-          ? `omni serve exited (${reason})\n\n${tail}`
-          : `omni serve exited (${reason})`;
+        const message = structured
+          ? structured
+          : tail
+            ? `omni serve exited (${reason})\n\n${tail}`
+            : `omni serve exited (${reason})`;
         this.updateStatus({ type: 'error', error: { message } });
       });
     } catch (error) {
@@ -630,7 +717,9 @@ export class AgentProcess {
       this.updateStatus({ type: 'connecting', data: { uiUrl: '' } });
 
       const ready = await this.platformClient.waitForSession(session.sessionId);
-      if (this.isStopping()) return;
+      if (this.isStopping()) {
+return;
+}
 
       const wsUrl = ready.websocketUrl!;
       let uiUrl = wsUrl.replace(/^wss?:/, 'https:').replace(/\/ws$/, '');
@@ -647,7 +736,9 @@ export class AgentProcess {
       this.log.info(c.cyan('Waiting for platform container services to accept connections...\r\n'));
       await this.waitForReady(data);
     } catch (error) {
-      if (this.isStopping()) return;
+      if (this.isStopping()) {
+return;
+}
       this.updateStatus({ type: 'error', error: { message: (error as Error).message } });
     }
   };
@@ -669,7 +760,9 @@ export class AgentProcess {
    *  (``running`` or ``connecting``). Used by pause/unpause to flip the
    *  ``paused`` indicator without redoing the readiness payload. */
   private updateAgentProcessData = (patch: Partial<AgentProcessData>): void => {
-    if (this.status.type !== 'running' && this.status.type !== 'connecting') return;
+    if (this.status.type !== 'running' && this.status.type !== 'connecting') {
+return;
+}
     const current = this.status as Extract<
       WithTimestamp<AgentProcessStatus>,
       { type: 'running' | 'connecting' }
@@ -688,7 +781,9 @@ export class AgentProcess {
     const str = data.toString();
     this.ipcRawOutput(str);
     process.stdout.write(str);
-    if (this.jsonEmitted) return;
+    if (this.jsonEmitted) {
+return;
+}
     this.stdoutBuffer += str;
     const lines = this.stdoutBuffer.split(/\r?\n/);
     this.stdoutBuffer = lines.pop() ?? '';
@@ -705,16 +800,22 @@ export class AgentProcess {
   };
 
   private tryParseStdoutLine = (line: string): void => {
-    if (this.jsonEmitted) return;
+    if (this.jsonEmitted) {
+return;
+}
     const trimmed = line.trim();
-    if (!(trimmed.startsWith('{') && trimmed.endsWith('}'))) return;
+    if (!(trimmed.startsWith('{') && trimmed.endsWith('}'))) {
+return;
+}
     let parsed: Record<string, unknown>;
     try {
       parsed = JSON.parse(trimmed);
     } catch {
       return;
     }
-    if (!('sandbox_url' in parsed) || !('ui_url' in parsed)) return;
+    if (!('sandbox_url' in parsed) || !('ui_url' in parsed)) {
+return;
+}
     const data = servePayloadToData(parsed as unknown as ServeReadyPayload);
     this.jsonEmitted = true;
     this.updateStatus({ type: 'connecting', data });
@@ -742,7 +843,9 @@ export class AgentProcess {
           let settled = false;
           const socket = new WsWebSocket(url);
           const finish = (result: boolean): void => {
-            if (settled) return;
+            if (settled) {
+return;
+}
             settled = true;
             clearTimeout(timer);
             try {
@@ -780,11 +883,15 @@ export class AgentProcess {
     }
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      if (this.isStopping()) return;
+      if (this.isStopping()) {
+return;
+}
       const httpOk = await checkHttp(data.uiUrl);
       const wsOk = wsCheckUrl ? await checkWs(wsCheckUrl) : true;
       if (httpOk && wsOk) {
-        if (this.isStopping()) return;
+        if (this.isStopping()) {
+return;
+}
         this.updateStatus({ type: 'running', data });
         const label = this.mode === 'platform' ? 'Platform sandbox' : 'Sandbox';
         this.log.info(c.green.bold(`${label} started\r\n`));
@@ -793,7 +900,9 @@ export class AgentProcess {
       await new Promise<void>((r) => setTimeout(r, 1000));
     }
 
-    if (this.isStopping()) return;
+    if (this.isStopping()) {
+return;
+}
     this.updateStatus({
       type: 'error',
       error: { message: `Services did not become ready within ${maxAttempts} seconds.` },
@@ -828,6 +937,35 @@ export class AgentProcess {
   // eslint-disable-next-line no-control-regex
   private static readonly ANSI_RE = /\x1b\[[0-9;]*[A-Za-z]/g;
 
+  /**
+   * Extract a structured launch error from stderr. ``omni serve`` prints
+   * launch failures as a single JSON line ``{"error": "source: …"}`` (bad
+   * source, seed-size cap, profile errors). Returns the last such message, or
+   * null if stderr carries only a raw traceback / log noise.
+   */
+  private structuredError = (): string | null => {
+    const cleaned = this.stderrBuffer.replace(AgentProcess.ANSI_RE, '');
+    const lines = cleaned
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith('{') && l.includes('"error"'));
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      if (!line) {
+        continue;
+      }
+      try {
+        const obj = JSON.parse(line) as { error?: unknown };
+        if (typeof obj.error === 'string' && obj.error.trim()) {
+          return obj.error;
+        }
+      } catch {
+        /* not a JSON error line — keep scanning */
+      }
+    }
+    return null;
+  };
+
   private tailStderr = (maxLines = 20, maxChars = 2000): string => {
     const cleaned = this.stderrBuffer.replace(AgentProcess.ANSI_RE, '');
     const lines = cleaned
@@ -835,7 +973,9 @@ export class AgentProcess {
       .map((l) => l.trimEnd())
       .filter((l) => l.length > 0);
     const tail = lines.slice(-maxLines).join('\n');
-    if (tail.length <= maxChars) return tail;
+    if (tail.length <= maxChars) {
+return tail;
+}
     return `…${tail.slice(tail.length - maxChars)}`;
   };
 }

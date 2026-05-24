@@ -19,6 +19,7 @@ import type {
   IpcRendererEvents,
   Project,
   SandboxPauseResult,
+  SandboxSwitchResult,
   WithTimestamp,
 } from '@/shared/types';
 
@@ -107,7 +108,9 @@ export class ProcessManager {
     workspaceDir: string,
     projectId: string | undefined
   ): { url: string; branch?: string } | undefined {
-    if (profileName !== 'platform') return undefined;
+    if (profileName !== 'platform') {
+return undefined;
+}
     const { projects } = this.getStoreData();
 
     // Explicit git-remote project (single-source platform path; multi-source
@@ -135,7 +138,9 @@ export class ProcessManager {
         timeout: 3000,
         encoding: 'utf-8',
       }).trim();
-      if (!url) return undefined;
+      if (!url) {
+return undefined;
+}
 
       let branch: string | undefined;
       try {
@@ -144,7 +149,9 @@ export class ProcessManager {
           timeout: 3000,
           encoding: 'utf-8',
         }).trim();
-        if (branch === 'HEAD') branch = undefined; // detached HEAD
+        if (branch === 'HEAD') {
+branch = undefined;
+} // detached HEAD
       } catch { /* ignore */ }
 
       return branch ? { url, branch } : { url };
@@ -244,7 +251,9 @@ export class ProcessManager {
     // No project on file (Personal/scratch tab with raw workspaceDir):
     // synthesize one source from the workspaceDir we were given,
     // defaulting mountName to the basename.
-    if (!workspaceDir) return [];
+    if (!workspaceDir) {
+return [];
+}
     this.ensureWorkspaceDir(workspaceDir);
     const mountName = path.basename(workspaceDir) || 'workspace';
     return [{
@@ -255,7 +264,9 @@ export class ProcessManager {
   }
 
   private directoryHasGit(workspaceDir: string): boolean {
-    if (!workspaceDir) return false;
+    if (!workspaceDir) {
+return false;
+}
     try {
       return existsSync(path.join(workspaceDir, '.git'));
     } catch {
@@ -271,7 +282,9 @@ export class ProcessManager {
    * if creation fails, let omni serve surface the original error.
    */
   private ensureWorkspaceDir(workspaceDir: string): void {
-    if (!workspaceDir) return;
+    if (!workspaceDir) {
+return;
+}
     try {
       mkdirSync(workspaceDir, { recursive: true });
     } catch {
@@ -289,7 +302,9 @@ export class ProcessManager {
 
   stop = async (processId: string): Promise<void> => {
     const proc = this.processes.get(processId);
-    if (!proc) return;
+    if (!proc) {
+return;
+}
     await proc.stop();
     this.processes.delete(processId);
   };
@@ -319,7 +334,9 @@ export class ProcessManager {
 
   getStatus = (processId: string): WithTimestamp<AgentProcessStatus> => {
     const proc = this.processes.get(processId);
-    if (proc) return proc.getStatus();
+    if (proc) {
+return proc.getStatus();
+}
     return { type: 'uninitialized', timestamp: Date.now() };
   };
 
@@ -329,14 +346,26 @@ export class ProcessManager {
 
   pause = async (processId: string): Promise<SandboxPauseResult> => {
     const proc = this.processes.get(processId);
-    if (!proc) return { ok: false, supported: false, reason: 'process not found' };
+    if (!proc) {
+return { ok: false, supported: false, reason: 'process not found' };
+}
     return proc.pause();
   };
 
   unpause = async (processId: string): Promise<SandboxPauseResult> => {
     const proc = this.processes.get(processId);
-    if (!proc) return { ok: false, supported: false, reason: 'process not found' };
+    if (!proc) {
+return { ok: false, supported: false, reason: 'process not found' };
+}
     return proc.unpause();
+  };
+
+  switchSandbox = async (processId: string, profileName: string): Promise<SandboxSwitchResult> => {
+    const proc = this.processes.get(processId);
+    if (!proc) {
+return { ok: false, reason: 'process not found' };
+}
+    return proc.switchSandbox(profileName);
   };
 
   notifyActivity = (processId: string): void => {
@@ -349,9 +378,13 @@ export class ProcessManager {
    */
   getRunningWsUrlForTicket(ticketId: string, codeTabs: Array<{ id: string; ticketId?: string }>): string | null {
     for (const tab of codeTabs) {
-      if (tab.ticketId !== ticketId) continue;
+      if (tab.ticketId !== ticketId) {
+continue;
+}
       const proc = this.processes.get(tab.id);
-      if (!proc) continue;
+      if (!proc) {
+continue;
+}
       const status = proc.getStatus();
       if (status.type === 'running' && status.data.wsUrl) {
         return status.data.wsUrl;
@@ -370,9 +403,13 @@ export class ProcessManager {
    */
   getProjectContainerId(projectId: string): string | null {
     for (const [processId, opts] of this.lastStartArgs.entries()) {
-      if (opts.projectId !== projectId) continue;
+      if (opts.projectId !== projectId) {
+continue;
+}
       const proc = this.processes.get(processId);
-      if (!proc) continue;
+      if (!proc) {
+continue;
+}
       const status = proc.getStatus();
       // ``running`` is the post-connect state; ``connecting`` already has
       // ``data.containerId`` because the readiness payload arrives before
@@ -415,6 +452,7 @@ export function registerProcessHandlers(ipc: IIpcListener, resolve: (event: unkn
   h('agent-process:pause', (pm, processId) => pm.pause(processId));
   h('agent-process:unpause', (pm, processId) => pm.unpause(processId));
   h('agent-process:notify-activity', (pm, processId) => pm.notifyActivity(processId));
+  h('agent-process:switch-sandbox', (pm, processId, profileName) => pm.switchSandbox(processId, profileName));
 
   return channels;
 }

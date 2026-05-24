@@ -5,14 +5,13 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Button, Card, FormField, MessageBar, MessageBarBody, SectionLabel, Select } from '@/renderer/ds';
 import { $launcherVersion } from '@/renderer/features/Banner/state';
-import { $chatProcessStatus } from '@/renderer/features/Chat/state';
 import {
   $omniInstallProcessStatus,
   $omniRuntimeInfo,
   omniInstallApi,
 } from '@/renderer/features/Omni/state';
 import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
-import { emitter } from '@/renderer/services/ipc';
+import { emitter, isElectron } from '@/renderer/services/ipc';
 import { persistedStoreApi, selectWorkspaceDir } from '@/renderer/services/store';
 import { detectGlassTone } from '@/renderer/theme/glass-vars';
 import type { OmniTheme } from '@/shared/types';
@@ -137,15 +136,20 @@ return;
 
   return (
     <div className={styles.root}>
-      <SectionLabel>Workspace</SectionLabel>
-      <Card>
-        <FormField label="Workspace directory">
-          <span className={styles.text}>{store.workspaceDir ?? 'Default'}</span>
-          <Button size="sm" variant="ghost" onClick={selectWorkspaceDir}>
-            Change
-          </Button>
-        </FormField>
-      </Card>
+      {/* Host-filesystem concept; hosted mode mounts a workspace via Azure Files. */}
+      {isElectron && (
+        <>
+          <SectionLabel>Workspace</SectionLabel>
+          <Card>
+            <FormField label="Workspace directory">
+              <span className={styles.text}>{store.workspaceDir ?? 'Default'}</span>
+              <Button size="sm" variant="ghost" onClick={selectWorkspaceDir}>
+                Change
+              </Button>
+            </FormField>
+          </Card>
+        </>
+      )}
 
       {showSandboxSection && (
         <>
@@ -197,7 +201,8 @@ return;
         </FormField>
       </Card>
 
-      {!isEnterprise && (
+      {/* Runtime install + CLI-in-PATH are host operations; in cloud the runtime is image-baked. */}
+      {!isEnterprise && isElectron && (
         <>
           <SectionLabel className={styles.sectionLabelSpaced}>Runtime</SectionLabel>
           <Card>
