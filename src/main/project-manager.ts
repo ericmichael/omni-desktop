@@ -9,8 +9,8 @@ import { commentId } from 'omni-projects-db';
 import path from 'path';
 import { promisify } from 'util';
 
-import { getArtifactsDir } from '@/lib/artifacts';
-import { listArtifactEntries, readArtifactFile, resolveArtifactPath } from '@/lib/artifacts-fs';
+import { getArtifactsDir, getContainerArtifactsDir } from '@/lib/artifacts';
+import { resolveArtifactPath } from '@/lib/artifacts-fs';
 import { buildContainerSeedPatch, getContainerFilesChanged } from '@/lib/container-files-changed';
 import { getGitFilesChanged, resolveTicketDiffBase } from '@/lib/git-files-changed';
 import { INBOX_SWEEP_INTERVAL_MS } from '@/lib/inbox-expiry';
@@ -22,6 +22,7 @@ import { projectToConfig } from '@/lib/project-to-config';
 import { resolvePipelineDefs } from '@/lib/resolve-pipeline-defs';
 import { type HistoryRow, parseSessionHistoryRows } from '@/lib/session-history';
 import { slugifyUnique } from '@/lib/slugify-unique';
+import { type ArtifactStore, DockerArtifactStore, HostFsArtifactStore } from '@/main/artifact-store';
 import { DbChangeWatcher } from '@/main/db-change-watcher';
 import {
   commentToRow,
@@ -29,13 +30,13 @@ import {
   milestoneToRow,
   pageToRow,
   projectToRow,
+  rowsToPipeline,
   rowToInboxItem,
   rowToMilestone,
   rowToPage,
   rowToProject,
   rowToTask,
   rowToTicket,
-  rowsToPipeline,
   taskToRow,
   ticketToRow,
 } from '@/main/db-store-bridge';
@@ -51,12 +52,7 @@ import { registerProjectHandlers } from '@/main/project-handlers';
 import { SupervisorBridge } from '@/main/supervisor-bridge';
 import { registerSupervisorHandlers } from '@/main/supervisor-handlers';
 import { SupervisorOrchestrator } from '@/main/supervisor-orchestrator';
-import {
-  getDefaultWorkspaceDir,
-  getOmniConfigDir,
-  getProjectDir,
-  getProjectPagesDir,
-} from '@/main/util';
+import { getDefaultWorkspaceDir, getOmniConfigDir, getProjectDir, getProjectPagesDir } from '@/main/util';
 import { WorkflowLoader } from '@/main/workflow-loader';
 import type { IIpcListener } from '@/shared/ipc-listener';
 import type { ProjectConfig } from '@/shared/manifest';
@@ -84,7 +80,6 @@ import type {
   TicketPriority,
 } from '@/shared/types';
 import { firstSource } from '@/shared/types';
-import type { ProjectSource } from '@/shared/types';
 
 const execFileAsync = promisify(execFile);
 
@@ -224,6 +219,9 @@ export class ProjectManager {
   /** Optional AppControlManager — when set, autopilot agents get the `app_*` client tools. */
   private appControlManager?: import('@/main/app-control-manager').AppControlManager;
 
+  /** Cloud override for per-ticket artifact storage (Azure Files on ACI). */
+  private artifactStoreFor?: (ticketId: TicketId) => ArtifactStore | null;
+
   /** Page lifecycle owner — CRUD, file I/O, root-page seeding, watcher. */
   readonly pages: PageManager;
 
@@ -255,12 +253,16 @@ export class ProjectManager {
       changeSeqRepo?: ProjectsRepo;
       /** Host skills directory for this manager's projects (per-tenant on the server). */
       skillsDir?: string;
+      /** Cloud override: resolve a per-ticket artifact store (e.g. Azure Files
+       *  for ACI). When it returns a store, it wins over the host/docker default. */
+      artifactStoreFor?: (ticketId: TicketId) => ArtifactStore | null;
     },
     deps?: Partial<ProjectManagerDeps>
   ) {
     this.store = arg.store;
     this.sendToWindow = arg.sendToWindow;
     this.skillsDir = arg.skillsDir;
+    this.artifactStoreFor = arg.artifactStoreFor;
     this.processManager = arg.processManager;
     this.appControlManager = arg.appControlManager;
     this.repo = arg.repo;
@@ -398,8 +400,7 @@ export class ProjectManager {
         getWipLimit: () => this.store.get('wipLimit') ?? 3,
         getPlatformCredentials: () => this.store.get('platform'),
         getCodeTabs: () => (this.store.get('codeTabs', []) ?? []) as Array<{ id: string; ticketId?: string }>,
-        getPersistedTasks: () =>
-          this.repo ? this.cache.tasks : (this.store.get('tasks', []) as Task[]),
+        getPersistedTasks: () => (this.repo ? this.cache.tasks : (this.store.get('tasks', []) as Task[])),
         setPersistedTasks: (tasks) => {
           if (this.repo) {
             this.cache.tasks = tasks;
@@ -442,6 +443,7 @@ export class ProjectManager {
         moveTicketToColumn: (ticketId, columnId) => this.moveTicketToColumn(ticketId, columnId),
         updateProject: (projectId, patch) => this.updateProject(projectId, patch),
         getPagesByProject: (projectId) => this.pages.getByProject(projectId),
+        getAgentArtifactsDir: (ticketId) => this.getAgentArtifactsDir(ticketId),
       },
       workflowLoader: this.workflowLoader,
       sendToWindow: this.sendToWindow,
@@ -740,9 +742,7 @@ export class ProjectManager {
     const primarySource = project.sources[0];
     if (primarySource?.kind === 'local') {
       const workspaceDir = this.getProjectDir(project.id) ?? primarySource.workspaceDir;
-      void this.workflowLoader
-        .load(project.id, workspaceDir)
-        .then(() => this.syncPipelineForProject(project.id));
+      void this.workflowLoader.load(project.id, workspaceDir).then(() => this.syncPipelineForProject(project.id));
     } else if (primarySource?.kind === 'git-remote') {
       void this.workflowLoader
         .loadFromRemote(project.id, primarySource.repoUrl, primarySource.defaultBranch)
@@ -1268,15 +1268,47 @@ export class ProjectManager {
     return getArtifactsDir(getOmniConfigDir(), ticketId);
   };
 
-  listArtifacts = async (ticketId: TicketId, dirPath?: string): Promise<ArtifactFileEntry[]> => {
-    return listArtifactEntries(this.getArtifactsRoot(ticketId), dirPath);
+  /**
+   * The artifacts dir *as the agent should write it*, resolved by the same
+   * substrate check the reader (`resolveArtifactStore`) uses, so the agent
+   * writes exactly where the launcher reads: a running container →
+   * `/workspace/.omni-artifacts/<id>`; otherwise the host dir. Surfaced to
+   * autopilot agents via the supervisor prompt.
+   */
+  getAgentArtifactsDir = (ticketId: TicketId): string => {
+    const ticket = this.getTicketById(ticketId);
+    const containerId = ticket ? (this.processManager?.getProjectContainerId(ticket.projectId) ?? null) : null;
+    return containerId ? getContainerArtifactsDir(ticketId) : getArtifactsDir(getOmniConfigDir(), ticketId);
   };
 
-  readArtifact = async (ticketId: TicketId, relativePath: string): Promise<ArtifactFileContent> => {
-    return readArtifactFile(this.getArtifactsRoot(ticketId), relativePath);
+  /**
+   * Pick the artifact store for a ticket by its sandbox substrate: a running
+   * devbox container → read from the container (`/artifacts` volume) via
+   * `DockerArtifactStore`; otherwise the host dir. (Cloud/ACI injects an
+   * Azure Files store in the server build via `artifactStoreFor`.)
+   */
+  private resolveArtifactStore = (ticketId: TicketId): ArtifactStore => {
+    const injected = this.artifactStoreFor?.(ticketId);
+    if (injected) {
+      return injected;
+    }
+    const ticket = this.getTicketById(ticketId);
+    const containerId = ticket ? (this.processManager?.getProjectContainerId(ticket.projectId) ?? null) : null;
+    return containerId ? new DockerArtifactStore(containerId) : new HostFsArtifactStore(getOmniConfigDir());
   };
+
+  listArtifacts = (ticketId: TicketId, dirPath?: string): Promise<ArtifactFileEntry[]> =>
+    this.resolveArtifactStore(ticketId).list(ticketId, dirPath);
+
+  readArtifact = (ticketId: TicketId, relativePath: string): Promise<ArtifactFileContent> =>
+    this.resolveArtifactStore(ticketId).read(ticketId, relativePath);
+
+  writeArtifact = (ticketId: TicketId, relativePath: string, data: Buffer): Promise<void> =>
+    this.resolveArtifactStore(ticketId).write(ticketId, relativePath, data);
 
   openArtifactExternal = async (ticketId: TicketId, relativePath: string): Promise<void> => {
+    // Host-fs only: opening in an external app needs a real host path. For
+    // container substrates this is a no-op until artifact materialization lands.
     const fullPath = resolveArtifactPath(this.getArtifactsRoot(ticketId), relativePath);
     await shell.openPath(fullPath);
   };
@@ -1342,9 +1374,7 @@ export class ProjectManager {
       gitDir = source.workspaceDir;
     }
 
-    const milestoneBranch = ticket.milestoneId
-      ? this.milestones.getById(ticket.milestoneId)?.branch
-      : undefined;
+    const milestoneBranch = ticket.milestoneId ? this.milestones.getById(ticket.milestoneId)?.branch : undefined;
     let preferredBase: string | undefined;
     if (worktreePath) {
       preferredBase = this.milestones.resolveTicketBranch(ticket) ?? task?.branch;
@@ -1388,13 +1418,11 @@ export class ProjectManager {
    * entry for *this* source only (other sources' reviews are
    * unaffected).
    */
-  setPrReview = (
-    ticketId: TicketId,
-    sourceId: string,
-    review: 'approved' | 'changes_requested' | null
-  ): void => {
+  setPrReview = (ticketId: TicketId, sourceId: string, review: 'approved' | 'changes_requested' | null): void => {
     const ticket = this.getTicketById(ticketId);
-    if (!ticket) return;
+    if (!ticket) {
+      return;
+    }
     const existing = ticket.prReview ?? {};
     let next: Ticket['prReview'];
     if (review === null) {
@@ -1654,9 +1682,7 @@ export class ProjectManager {
       now: () => Date.now(),
       writeProjectContextBrief: (project) => {
         try {
-          const pages = (store.get('pages', []) as Page[]).filter(
-            (p) => p.projectId === project.id && p.isRoot
-          );
+          const pages = (store.get('pages', []) as Page[]).filter((p) => p.projectId === project.id && p.isRoot);
           const rootPage = pages[0];
           if (!rootPage) {
             return;
@@ -1801,7 +1827,14 @@ export const createProjectManager = (arg: {
   // Run migration
   ProjectManager.migrateToSupervisor(store);
 
-  const projectManager = new ProjectManager({ store, sendToWindow, processManager, appControlManager, repo, changeSeqRepo });
+  const projectManager = new ProjectManager({
+    store,
+    sendToWindow,
+    processManager,
+    appControlManager,
+    repo,
+    changeSeqRepo,
+  });
   const { supervisors, milestones, inbox, pages, bridge } = projectManager;
   // Cache hydration + restorePersistedTasks now run inside ProjectManager.init()
   // (the constructor kicks it off; awaited via projectManager.whenReady).
@@ -1814,7 +1847,11 @@ export const createProjectManager = (arg: {
     ...registerProjectHandlers(ipc, () => projectManager),
     ...registerSupervisorHandlers(ipc, () => supervisors),
     ...registerMilestoneHandlers(ipc, () => milestones),
-    ...registerPageHandlers(ipc, () => pages, (_event, projectId) => projectManager.getProjectDir(projectId)),
+    ...registerPageHandlers(
+      ipc,
+      () => pages,
+      (_event, projectId) => projectManager.getProjectDir(projectId)
+    ),
     ...registerInboxHandlers(ipc, () => inbox),
     ...bridge.registerIpc(ipc),
   ];

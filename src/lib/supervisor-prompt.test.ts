@@ -129,4 +129,17 @@ describe('buildSupervisorPrompt', () => {
     const prompt = buildSupervisorPrompt(makeTicket(), makeProject(), PIPELINE);
     expect(prompt).not.toContain('## Workspace Layout');
   });
+
+  it('surfaces the artifacts dir + PR writeup paths when provided', () => {
+    const prompt = buildSupervisorPrompt(makeTicket(), makeProject(), PIPELINE, {
+      artifactsDir: '/workspace/.omni-artifacts/t1',
+    });
+    expect(prompt).toContain('## Output for the user');
+    expect(prompt).toContain('/workspace/.omni-artifacts/t1/pr/PR_TITLE.md');
+    expect(prompt).toContain('/workspace/.omni-artifacts/t1/pr/PR_BODY.md');
+  });
+
+  it('omits the artifacts section when no artifactsDir is provided', () => {
+    expect(buildSupervisorPrompt(makeTicket(), makeProject(), PIPELINE)).not.toContain('## Output for the user');
+  });
 });

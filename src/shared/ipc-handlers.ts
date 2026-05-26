@@ -5,6 +5,8 @@
  * config:*, util:*, and skills:* handlers. Electron-specific handlers
  * (dialog, shell, window references) remain in `src/main/index.ts`.
  */
+import { randomUUID } from 'node:crypto';
+
 import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';
 import { WebSocket as WsWebSocket } from 'ws';
@@ -31,13 +33,23 @@ import {
   isCliInstalledInPath,
   isDirectory,
   isFile,
+  listRuntimeModels,
   pathExists,
   testModelConnection,
   validateConfigPath,
   validateUserPath,
 } from '@/main/util';
+import { tokenLast4 } from '@/shared/git-credentials';
 import type { IIpcListener } from '@/shared/ipc-listener';
-import type { McpConfig, ModelsConfig, NetworkConfig, StoreData } from '@/shared/types';
+import type { SecretStore } from '@/shared/secret-store';
+import type {
+  GitCredential,
+  GitCredentialInput,
+  McpConfig,
+  ModelsConfig,
+  NetworkConfig,
+  StoreData,
+} from '@/shared/types';
 
 export interface UtilHandlerOptions {
   /**
@@ -125,7 +137,10 @@ export function registerSettingsConfigHandlers(
     resolveStore(e).set('mcpConfig', config);
     afterWrite(e);
   });
-  ipc.handle('settings:get-network-config', (e: unknown) => resolveStore(e).get('networkConfig') ?? emptyNetworkConfig());
+  ipc.handle(
+    'settings:get-network-config',
+    (e: unknown) => resolveStore(e).get('networkConfig') ?? emptyNetworkConfig()
+  );
   ipc.handle('settings:set-network-config', (e: unknown, config: NetworkConfig) => {
     resolveStore(e).set('networkConfig', config);
     afterWrite(e);
@@ -134,6 +149,63 @@ export function registerSettingsConfigHandlers(
   ipc.handle('settings:set-env', (e: unknown, content: string) => {
     resolveStore(e).set('envVars', content);
     afterWrite(e);
+  });
+}
+
+/**
+ * Register the write-only `git-cred:*` channels. Metadata (the `GitCredential[]`
+ * list) lives in the store and is safe to broadcast; the token bytes go to the
+ * injected `SecretStore` and never round-trip to the renderer. `set` upserts by
+ * host — host-scoped means one credential per host, reused across projects.
+ * `afterWrite` broadcasts `store:changed` (the secret store has no snapshot).
+ */
+export function registerGitCredentialHandlers(
+  ipc: IIpcListener,
+  resolveStore: (event: unknown) => SettingsConfigStore,
+  resolveSecretStore: (event: unknown) => SecretStore,
+  afterWrite: (event: unknown) => void
+): void {
+  const list = (e: unknown): GitCredential[] => resolveStore(e).get('gitCredentials') ?? [];
+
+  ipc.handle('git-cred:list', (e: unknown) => list(e));
+
+  ipc.handle('git-cred:set', async (e: unknown, input: GitCredentialInput) => {
+    const host = input.host.trim().toLowerCase();
+    const username = input.username.trim();
+    const token = input.token;
+    if (!host || !token) {
+      throw new Error('git-cred:set requires a host and a token');
+    }
+    const store = resolveStore(e);
+    const secrets = resolveSecretStore(e);
+    const existing = list(e);
+    // Upsert by host: replace the existing host entry (reusing its id so the
+    // secret slot is overwritten) or mint a fresh one.
+    const prior = existing.find((c) => c.host === host);
+    const id = prior?.id ?? randomUUID();
+    await secrets.setGitToken(id, token);
+    const next: GitCredential = {
+      id,
+      host,
+      username: username || 'git',
+      last4: tokenLast4(token),
+      createdAt: prior?.createdAt ?? Date.now(),
+      ...(input.label?.trim() ? { label: input.label.trim() } : {}),
+    };
+    store.set('gitCredentials', [...existing.filter((c) => c.id !== id), next]);
+    afterWrite(e);
+    return store.get('gitCredentials') ?? [];
+  });
+
+  ipc.handle('git-cred:delete', async (e: unknown, id: string) => {
+    const store = resolveStore(e);
+    await resolveSecretStore(e).deleteGitToken(id);
+    store.set(
+      'gitCredentials',
+      (store.get('gitCredentials') ?? []).filter((c) => c.id !== id)
+    );
+    afterWrite(e);
+    return store.get('gitCredentials') ?? [];
   });
 }
 
@@ -192,6 +264,7 @@ export function registerUtilHandlers(ipc: IIpcListener, opts: UtilHandlerOptions
   });
   ipc.handle('util:check-models-configured', () => checkModelsConfigured());
   ipc.handle('util:test-model-connection', (_: unknown, modelRef?: string) => testModelConnection(modelRef));
+  ipc.handle('util:list-models', () => listRuntimeModels());
 
   ipc.handle('util:rebuild-sandbox-image', async () => {
     // Sandbox Dockerfiles now live in omni-code. Trigger rebuild via the CLI.

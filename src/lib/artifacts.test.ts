@@ -23,13 +23,11 @@ describe('getArtifactsDir', () => {
 });
 
 describe('getContainerArtifactsDir', () => {
-  it('constructs the correct container-side path using posix separators', () => {
-    const result = getContainerArtifactsDir('ticket-123');
-    expect(result).toBe('/home/user/.config/omni_code/tickets/ticket-123/artifacts');
+  it('is the per-ticket dir under the workspace .omni-artifacts dir', () => {
+    expect(getContainerArtifactsDir('ticket-123')).toBe('/workspace/.omni-artifacts/ticket-123');
   });
 
   it('always uses forward slashes regardless of OS', () => {
-    const result = getContainerArtifactsDir('abc');
-    expect(result).not.toContain('\\');
+    expect(getContainerArtifactsDir('abc')).not.toContain('\\');
   });
 });

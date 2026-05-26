@@ -12,7 +12,7 @@
  * quotes the storage key safely.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
 /** Fast, minimal cloud sandbox: thin image, no in-sandbox services. */
 export const ACI_PROFILE_NAME = 'aci';

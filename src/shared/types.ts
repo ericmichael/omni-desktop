@@ -2,11 +2,7 @@ import type { Rectangle } from 'electron/main';
 import type { Schema } from 'electron-store';
 
 import type { CustomAppEntry } from '@/shared/app-registry';
-import type {
-  ExtensionDescriptor,
-  ExtensionEnsureResult,
-  ExtensionInstanceState,
-} from '@/shared/extensions';
+import type { ExtensionDescriptor, ExtensionEnsureResult, ExtensionInstanceState } from '@/shared/extensions';
 
 // Normally we'd use SWR or some query library, but I had some issues with react render cycles and the easiest fix
 // was to just move all the fetching outside react. Also SWR doesn't narrow its data field when the request is
@@ -202,6 +198,21 @@ export type StoreData = {
 
   /** User-added custom apps for the workspace dock. */
   customApps: CustomAppEntry[];
+
+  /**
+   * Stored git credentials (metadata only — token bytes live in the
+   * `SecretStore`, keyed by `id`). Host-scoped: a `git-remote` source resolves
+   * its credential by matching the URL host. Safe to broadcast to the renderer
+   * because it carries no secret. See `git-credentials.ts`.
+   */
+  gitCredentials: GitCredential[];
+
+  /**
+   * Linked GitHub account (display metadata only — the OAuth token lives in the
+   * `SecretStore` as the `github.com` credential). Drives the "Connect GitHub"
+   * state and repo discovery. Undefined when no account is linked.
+   */
+  githubAccount?: GithubAccount;
 
   /**
    * Agent model providers — the source of truth for what the desktop wrote to
@@ -445,20 +456,20 @@ export const schema: Schema<StoreData> = {
     default: [],
     items: {
       type: 'object',
-        properties: {
-          id: { type: 'string' },
-          projectId: { type: ['string', 'null'] },
-          ticketId: { type: 'string' },
-          sessionId: { type: 'string' },
-          ticketTitle: { type: 'string' },
-          workspaceDir: { type: 'string' },
-          profileName: { type: 'string' },
-          containerId: { type: 'string' },
-          createdAt: { type: 'number' },
-        },
-        required: ['id', 'createdAt'],
+      properties: {
+        id: { type: 'string' },
+        projectId: { type: ['string', 'null'] },
+        ticketId: { type: 'string' },
+        sessionId: { type: 'string' },
+        ticketTitle: { type: 'string' },
+        workspaceDir: { type: 'string' },
+        profileName: { type: 'string' },
+        containerId: { type: 'string' },
+        createdAt: { type: 'number' },
       },
+      required: ['id', 'createdAt'],
     },
+  },
   activeCodeTabId: {
     type: ['string', 'null'],
     default: null,
@@ -646,16 +657,7 @@ export const schema: Schema<StoreData> = {
         loopStatus: { type: 'string', enum: ['running', 'completed', 'stopped', 'error'] },
         seedKey: { type: 'string' },
       },
-      required: [
-        'id',
-        'projectId',
-        'title',
-        'description',
-        'priority',
-        'blockedBy',
-        'createdAt',
-        'updatedAt',
-      ],
+      required: ['id', 'projectId', 'title', 'description', 'priority', 'blockedBy', 'createdAt', 'updatedAt'],
     },
   },
   platform: {
@@ -698,6 +700,22 @@ export const schema: Schema<StoreData> = {
         columnScoped: { type: 'boolean' },
       },
       required: ['id', 'label', 'icon', 'url', 'order'],
+    },
+  },
+  gitCredentials: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        host: { type: 'string' },
+        username: { type: 'string' },
+        last4: { type: 'string' },
+        label: { type: 'string' },
+        createdAt: { type: 'number' },
+      },
+      required: ['id', 'host', 'username', 'last4', 'createdAt'],
     },
   },
   glassTone: { type: 'string', default: 'dark' },
@@ -1017,7 +1035,6 @@ export type CodeTabId = string;
 
 export type CodeLayoutMode = 'tile' | 'focus';
 
-
 export type CodeTab = {
   id: CodeTabId;
   projectId: ProjectId | null;
@@ -1108,8 +1125,75 @@ export type Pipeline = {
 
 // --- Core entities ---
 
-/** Credential reference for git-remote sources. Resolved at clone time by the platform. */
-export type GitCredentialRef = { kind: 'platform-managed'; credentialId: string };
+/**
+ * A stored git credential, keyed by host. Credentials are host-scoped and
+ * resolved implicitly: a `git-remote` source authenticates with the entry whose
+ * `host` matches the source URL's host, so a token is entered once per host and
+ * reused across every project. This object holds *metadata only* — the token
+ * bytes live in the main/server `SecretStore` (keyed by `id`) and never enter
+ * the renderer or the `store:changed` snapshot. See `git-credentials.ts`.
+ */
+export type GitCredential = {
+  id: string;
+  /** Bare host the token authenticates, e.g. `github.com`, `gitlab.example.org`. */
+  host: string;
+  /**
+   * HTTPS basic-auth username paired with the token. GitHub PATs use
+   * `x-access-token`; GitLab uses `oauth2`. Editable for other hosts.
+   */
+  username: string;
+  /** Last 4 chars of the token, for display only. Never the token itself. */
+  last4: string;
+  /** Optional human label shown in the credential list. */
+  label?: string;
+  createdAt: number;
+};
+
+/**
+ * Linked GitHub account metadata (display only — the OAuth token lives in the
+ * `SecretStore` as the `github.com` [[GitCredential]]). Connecting an account
+ * both authenticates clone/push and unlocks repo discovery. Safe to broadcast
+ * to the renderer.
+ */
+export type GithubAccount = {
+  login: string;
+  avatarUrl?: string;
+  /** OAuth scopes granted on the stored token (e.g. `repo`, `read:org`). */
+  scopes?: string[];
+  /** API host the account is on — `github.com` or a GitHub Enterprise host. */
+  host: string;
+  connectedAt: number;
+};
+
+/** Connection status for the linked GitHub account. */
+export type GithubStatus = { connected: boolean; account?: GithubAccount };
+
+/** An account that owns repositories — the linked user, or an org they belong
+ *  to. Drives the owner selector in the repo picker. */
+export type GithubOwner = { login: string; kind: 'user' | 'org'; avatarUrl?: string };
+
+/** A scoped repo query: search `query` within one owner. Empty `query` returns
+ *  that owner's most-recently-pushed repos. */
+export type GithubRepoQuery = { owner: string; kind: 'user' | 'org'; query: string };
+
+/** A repository discovered via a linked provider (GitHub, Azure DevOps, …), for
+ *  the source picker. Provider-agnostic. */
+export type RemoteRepo = {
+  /** `owner/name` (GitHub) or `project/repo` (Azure DevOps). */
+  fullName: string;
+  /** HTTPS clone URL. */
+  cloneUrl: string;
+  defaultBranch: string;
+  private: boolean;
+  /** Last push time (epoch ms) — drives most-recent-first ordering. */
+  pushedAt?: number;
+};
+
+/**
+ * Device-flow user code, pushed to the renderer mid-link so the connect UI can
+ * display the code the user must enter at `verificationUri`.
+ */
+export type GithubDeviceCode = { userCode: string; verificationUri: string; expiresIn: number };
 
 /**
  * One repo/directory attached to a project. Projects can have any number
@@ -1124,11 +1208,12 @@ export type GitCredentialRef = { kind: 'platform-managed'; credentialId: string 
  *   (e.g. ``launcher``). Defaults to a slug derived from path or repo
  *   name; must be unique within a project.
  * - `kind`: `local` (host directory) or `git-remote` (URL the container
- *   clones).
+ *   clones; private repos authenticate with the host-matched
+ *   [[GitCredential]], resolved at clone time — never stored on the source).
  */
 export type ProjectSource = (
   | { kind: 'local'; workspaceDir: string; gitDetected?: boolean }
-  | { kind: 'git-remote'; repoUrl: string; defaultBranch?: string; credentials?: GitCredentialRef }
+  | { kind: 'git-remote'; repoUrl: string; defaultBranch?: string }
 ) & {
   id: string;
   mountName: string;
@@ -1143,9 +1228,8 @@ export type ProjectSource = (
  * Multi-source-aware callers (PR UI, container seeding, per-source merge)
  * iterate ``project.sources`` directly.
  */
-export const firstSource = (
-  project: { sources: ProjectSource[] } | undefined | null
-): ProjectSource | undefined => project?.sources[0];
+export const firstSource = (project: { sources: ProjectSource[] } | undefined | null): ProjectSource | undefined =>
+  project?.sources[0];
 
 export type Project = {
   id: ProjectId;
@@ -1648,6 +1732,8 @@ type UtilIpcEvents = Namespaced<
     'get-cli-in-path-status': () => { installed: boolean; symlinkPath: string };
     'check-models-configured': () => boolean;
     'test-model-connection': (modelRef?: string) => { success: boolean; output: string };
+    /** Live merged model list from `omni model list --json` (includes discovered models). */
+    'list-models': () => RuntimeModelList;
     'list-directory': (path: string) => { name: string; path: string; isDirectory: boolean }[];
     'rebuild-sandbox-image': () => { success: boolean; error?: string };
   }
@@ -1684,6 +1770,24 @@ type ConfigIpcEvents = Namespaced<
 >;
 
 /**
+ * ChatGPT (Codex) OAuth API. Main runs the browser PKCE flow and writes tokens
+ * to the omni-code config dir; the renderer drives sign-in from Settings.
+ */
+type CodexIpcEvents = Namespaced<
+  'codex',
+  {
+    /** Open the consent page, await the loopback callback, persist tokens. */
+    login: () => CodexAuthStatus;
+    /** Remove the stored tokens. */
+    logout: () => void;
+    /** Current sign-in status, read from the token store. */
+    status: () => CodexAuthStatus;
+  }
+>;
+
+export type CodexAuthStatus = { signedIn: boolean; accountId?: string };
+
+/**
  * Typed agent-config API. Replaces the path-based `config:*` file I/O for the
  * four Settings configs whose source of truth is the (per-tenant, in cloud)
  * store rather than a file: model providers, MCP servers, network policy, and
@@ -1701,6 +1805,66 @@ type SettingsConfigIpcEvents = Namespaced<
     'set-network-config': (config: NetworkConfig) => void;
     'get-env': () => string;
     'set-env': (content: string) => void;
+  }
+>;
+
+/** Payload for creating/replacing a git credential. The token is sent up once
+ *  and never returned — handlers persist it to the `SecretStore` and echo back
+ *  metadata only. */
+export type GitCredentialInput = {
+  host: string;
+  username: string;
+  /** The PAT / token. Write-only: never round-trips back to the renderer. */
+  token: string;
+  label?: string;
+};
+
+/**
+ * Git credential management. Write-only by design: `set` accepts a plaintext
+ * token but every channel returns metadata (`GitCredential[]`) only, so the
+ * token never re-enters the renderer or the `store:changed` snapshot. Host-
+ * scoped — `set` upserts by host (one credential per host).
+ */
+type GitCredentialIpcEvents = Namespaced<
+  'git-cred',
+  {
+    list: () => GitCredential[];
+    set: (input: GitCredentialInput) => GitCredential[];
+    delete: (id: string) => GitCredential[];
+  }
+>;
+
+/**
+ * GitHub account linking. `link` runs the OAuth device flow (emitting
+ * `github:device-code` to the renderer with the user code mid-flow), stores the
+ * token as the `github.com` credential, and saves profile metadata. Discovery
+ * (`list-owners` / `search-repos`) reads that token in the main process; it
+ * never crosses to the renderer.
+ */
+type GithubIpcEvents = Namespaced<
+  'github',
+  {
+    link: () => GithubStatus;
+    status: () => GithubStatus;
+    unlink: () => void;
+    /** Owners to scope discovery by: the linked user plus their orgs. */
+    'list-owners': () => GithubOwner[];
+    /** Server-side repo search scoped to one owner (empty query → recent). */
+    'search-repos': (query: GithubRepoQuery) => RemoteRepo[];
+  }
+>;
+
+/**
+ * Azure DevOps discovery, authenticated by the stored `dev.azure.com` PAT
+ * credential (no separate OAuth — the credential is the link). Org-scoped: the
+ * user supplies the org (typed in the picker), and `list-repos` lists every
+ * repo across that org's projects, filtered by `query`.
+ */
+type AzureIpcEvents = Namespaced<
+  'azure',
+  {
+    /** Repos in an org across its projects, name-filtered by `query`. */
+    'list-repos': (input: { org: string; query: string }) => RemoteRepo[];
   }
 >;
 
@@ -1836,7 +2000,6 @@ type SkillsIpcEvents = Namespaced<
   }
 >;
 
-
 /**
  * Project & Ticket API. Main process handles these events, renderer process invokes them.
  */
@@ -1849,9 +2012,7 @@ type ProjectIpcEvents = Namespaced<
     /** Resolved project directory — `Projects/<slug>/` or the default workspace root for Personal. Null if the project is unknown. */
     'get-dir': (projectId: ProjectId) => string | null;
     'check-git-repo': (workspaceDir: string) => GitRepoInfo;
-    'add-ticket': (
-      ticket: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'columnId'>
-    ) => Ticket;
+    'add-ticket': (ticket: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'columnId'>) => Ticket;
     'update-ticket': (id: TicketId, patch: Partial<Omit<Ticket, 'id' | 'projectId' | 'createdAt'>>) => void;
     'remove-ticket': (id: TicketId) => void;
     'get-tickets': (projectId: ProjectId) => Ticket[];
@@ -1885,11 +2046,7 @@ type ProjectIpcEvents = Namespaced<
      */
     'finalize-ticket-cleanup': (ticketId: TicketId) => boolean;
     /** Set or clear one source's PR review decision on a ticket. Pass null to clear. */
-    'set-pr-review': (
-      ticketId: TicketId,
-      sourceId: string,
-      review: 'approved' | 'changes_requested' | null
-    ) => void;
+    'set-pr-review': (ticketId: TicketId, sourceId: string, review: 'approved' | 'changes_requested' | null) => void;
     /** Dry-run apply one source's container patch onto its host repo; reports conflicts. */
     'check-merge': (ticketId: TicketId, sourceId: string) => PrMergeCheck;
     /** Apply one source's container patch onto its host repo. */
@@ -2065,10 +2222,7 @@ type MilestoneIpcEvents = Namespaced<
   {
     'get-items': (projectId: ProjectId) => Milestone[];
     'add-item': (item: Omit<Milestone, 'id' | 'createdAt' | 'updatedAt'>) => Milestone;
-    'update-item': (
-      id: MilestoneId,
-      patch: Partial<Omit<Milestone, 'id' | 'projectId' | 'createdAt'>>
-    ) => void;
+    'update-item': (id: MilestoneId, patch: Partial<Omit<Milestone, 'id' | 'projectId' | 'createdAt'>>) => void;
     'remove-item': (id: MilestoneId) => void;
   }
 >;
@@ -2083,16 +2237,19 @@ type PageIpcEvents = Namespaced<
     /** All pages across all projects. Used by the global Inbox view. */
     'get-all': () => Page[];
     /** Create a new page. Optional `template` seeds the body with starter content. */
-    'add-item': (item: Omit<Page, 'id' | 'createdAt' | 'updatedAt'>, template?: import('@/lib/page-templates').TemplateKey) => Page;
+    'add-item': (
+      item: Omit<Page, 'id' | 'createdAt' | 'updatedAt'>,
+      template?: import('@/lib/page-templates').TemplateKey
+    ) => Page;
     'update-item': (id: PageId, patch: Partial<Omit<Page, 'id' | 'projectId' | 'createdAt'>>) => void;
     'remove-item': (id: PageId) => void;
     'read-content': (pageId: PageId) => string;
     'write-content': (pageId: PageId, content: string) => void;
-    'reorder': (pageId: PageId, newParentId: PageId | null, newSortOrder: number) => void;
+    reorder: (pageId: PageId, newParentId: PageId | null, newSortOrder: number) => void;
     /** Subscribe to external-edit notifications for a page's file. Returns the current on-disk content. */
-    'watch': (pageId: PageId) => { content: string } | null;
+    watch: (pageId: PageId) => { content: string } | null;
     /** Unsubscribe from external-edit notifications. */
-    'unwatch': (pageId: PageId) => void;
+    unwatch: (pageId: PageId) => void;
     /**
      * Resolve a notebook page to its on-disk `.py` absolute path and the
      * containing project directory (used as the cwd for the marimo extension
@@ -2149,17 +2306,9 @@ type InboxIpcEvents = Namespaced<
     /** Active view: status !== 'later' and not promoted. */
     'get-active': () => InboxItem[];
     /** Create a new item. Defaults status to 'new'. */
-    add: (input: {
-      title: string;
-      note?: string;
-      projectId?: ProjectId | null;
-      attachments?: string[];
-    }) => InboxItem;
+    add: (input: { title: string; note?: string; projectId?: ProjectId | null; attachments?: string[] }) => InboxItem;
     /** Patch basic fields. Status transitions use the dedicated verbs below. */
-    update: (
-      id: InboxItemId,
-      patch: Partial<Pick<InboxItem, 'title' | 'note' | 'projectId' | 'attachments'>>
-    ) => void;
+    update: (id: InboxItemId, patch: Partial<Pick<InboxItem, 'title' | 'note' | 'projectId' | 'attachments'>>) => void;
     /** Hard delete. Use sparingly — prefer defer/promote for audit trail. */
     remove: (id: InboxItemId) => void;
     /** Attach or overwrite shaping. Sets status to 'shaped' unless item is in 'later'. */
@@ -2301,11 +2450,7 @@ type AppControlIpcEvents = Namespaced<
       ref: string,
       options?: { button?: import('@/shared/app-control-types').AppClickButton }
     ) => void;
-    fill: (
-      handleId: import('@/shared/app-control-types').AppHandleId,
-      ref: string,
-      text: string
-    ) => void;
+    fill: (handleId: import('@/shared/app-control-types').AppHandleId, ref: string, text: string) => void;
     type: (handleId: import('@/shared/app-control-types').AppHandleId, text: string) => void;
     press: (handleId: import('@/shared/app-control-types').AppHandleId, key: string) => void;
     scroll: (
@@ -2313,10 +2458,7 @@ type AppControlIpcEvents = Namespaced<
       options: { dx?: number; dy?: number; toTop?: boolean; toBottom?: boolean }
     ) => void;
     'inject-css': (handleId: import('@/shared/app-control-types').AppHandleId, css: string) => string;
-    'remove-inserted-css': (
-      handleId: import('@/shared/app-control-types').AppHandleId,
-      key: string
-    ) => void;
+    'remove-inserted-css': (handleId: import('@/shared/app-control-types').AppHandleId, key: string) => void;
     find: (
       handleId: import('@/shared/app-control-types').AppHandleId,
       query: string,
@@ -2347,9 +2489,7 @@ type AppControlIpcEvents = Namespaced<
     ) => string;
     'set-viewport': (
       handleId: import('@/shared/app-control-types').AppHandleId,
-      options:
-        | { width: number; height: number; deviceScaleFactor?: number; mobile?: boolean }
-        | { clear: true }
+      options: { width: number; height: number; deviceScaleFactor?: number; mobile?: boolean } | { clear: true }
     ) => void;
     'set-user-agent': (handleId: import('@/shared/app-control-types').AppHandleId, ua: string) => void;
     'set-zoom': (handleId: import('@/shared/app-control-types').AppHandleId, factor: number) => void;
@@ -2384,10 +2524,7 @@ type AppControlIpcEvents = Namespaced<
       which: 'local' | 'session',
       entries: Record<string, string>
     ) => void;
-    'storage-clear': (
-      handleId: import('@/shared/app-control-types').AppHandleId,
-      which: 'local' | 'session'
-    ) => void;
+    'storage-clear': (handleId: import('@/shared/app-control-types').AppHandleId, which: 'local' | 'session') => void;
   }
 >;
 
@@ -2409,7 +2546,10 @@ type BrowserIpcEvents = Namespaced<
     'profile-add': (input: { label: string; incognito?: boolean }) => BrowserProfile;
     'profile-remove': (id: BrowserProfileId) => void;
     /** Idempotent. Ensures a tabset exists and returns it; creates a blank tab on first call. */
-    'tabset-ensure': (id: BrowserTabsetId, opts?: { profileId?: BrowserProfileId; initialUrl?: string }) => BrowserTabset;
+    'tabset-ensure': (
+      id: BrowserTabsetId,
+      opts?: { profileId?: BrowserProfileId; initialUrl?: string }
+    ) => BrowserTabset;
     'tabset-remove': (id: BrowserTabsetId) => void;
     /** Switch a tabset to a different profile; swaps its partition on remount. */
     'tabset-set-profile': (id: BrowserTabsetId, profileId: BrowserProfileId) => void;
@@ -2493,7 +2633,11 @@ export type IpcEvents = MainProcessIpcEvents &
   TerminalIpcEvents &
   StoreIpcEvents &
   ConfigIpcEvents &
+  CodexIpcEvents &
   SettingsConfigIpcEvents &
+  GitCredentialIpcEvents &
+  GithubIpcEvents &
+  AzureIpcEvents &
   SkillsIpcEvents &
   ProjectIpcEvents &
   MilestoneIpcEvents &
@@ -2587,7 +2731,6 @@ type ToastIpcRendererEvents = Namespaced<
     show: [ToastPayload];
   }
 >;
-
 
 /**
  * Project events. Main process emits these events, renderer process listens to them.
@@ -2684,7 +2827,11 @@ type BrowserIpcRendererEvents = Namespaced<
 /**
  * Intersection of all the events emitted by main process that the renderer can listen to.
  */
+/** Main→renderer: the device-flow user code to display while `github:link` polls. */
+type GithubIpcRendererEvents = Namespaced<'github', { 'device-code': [GithubDeviceCode] }>;
+
 export type IpcRendererEvents = TerminalIpcRendererEvents &
+  GithubIpcRendererEvents &
   MainProcessIpcRendererEvents &
   OmniInstallProcessIpcRendererEvents &
   AgentProcessIpcRendererEvents &
@@ -2701,19 +2848,39 @@ export type IpcRendererEvents = TerminalIpcRendererEvents &
 
 // #region Config file types
 
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
+
 export type ModelEntry = {
   model: string;
   label?: string;
   realtime?: boolean;
-  reasoning?: 'low' | 'medium' | 'high';
+  reasoning?: ReasoningEffort;
   max_input_tokens?: number;
   max_output_tokens?: number;
   api_key?: string;
   model_settings?: Record<string, unknown>;
 };
 
+/** One entry from `omni model list --json` — the live, merged runtime view. */
+export type RuntimeModelEntry = {
+  name: string;
+  label?: string;
+  provider?: string;
+  realtime?: boolean;
+  reasoning?: ReasoningEffort;
+};
+
+export type RuntimeModelList = {
+  models: RuntimeModelEntry[];
+  default: string | null;
+  voice_default: string | null;
+};
+
 export type ProviderEntry = {
-  type: 'openai' | 'azure' | 'openai-compatible' | 'litellm';
+  // `openai-oauth` — ChatGPT (Codex) subscription auth. No `api_key`; the
+  // runtime authenticates with stored OAuth tokens (see codex.json /
+  // omni_code.codex_auth) and talks the Responses API to the Codex backend.
+  type: 'openai' | 'azure' | 'openai-compatible' | 'litellm' | 'openai-oauth';
   api_key?: string;
   base_url?: string;
   api_version?: string;

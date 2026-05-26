@@ -28,15 +28,18 @@ import { ProjectManager } from '@/main/project-manager';
 import { registerSupervisorHandlers } from '@/main/supervisor-handlers';
 import { getOmniConfigDir } from '@/main/util';
 import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
+import { AzureFilesArtifactStore } from '@/server/azure-artifact-store';
 import { ServerIpcAdapter } from '@/server/ipc-adapter';
 import { MCP_PROJECTS_PATH } from '@/server/mcp-http';
 import { PgSettingsStore } from '@/server/pg-settings-store';
 import { resolveRuntimeTokenSecret, signRuntimeToken } from '@/server/runtime-token';
+import { ServerSecretStore } from '@/server/secret-store';
 import type { ServerStore } from '@/server/store';
 import type { HandlerContext, WsHandler } from '@/server/ws-handler';
 import { DEFAULT_TENANT } from '@/server/ws-handler';
 import {
   registerConfigHandlers,
+  registerGitCredentialHandlers,
   registerSettingsConfigHandlers,
   registerSkillsHandlers,
   registerUtilHandlers,
@@ -200,6 +203,11 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
   // agent launch; verified by the route).
   const runtimeTokenSecret = resolveRuntimeTokenSecret();
 
+  // Git tokens, encrypted at rest, keyed by credential id (ids are globally
+  // unique UUIDs and a tenant can only name its own via its per-tenant
+  // `gitCredentials` list, so a shared store stays tenant-isolated in practice).
+  const secretStore = new ServerSecretStore();
+
   /** Per-tenant settings store: Postgres-backed in cloud, the shared JSON store locally. */
   type SettingsStore = ServerStore | PgSettingsStore;
   type TenantInstance = {
@@ -227,7 +235,9 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
       getStoreData: () => ({
         defaultProfileName: settings.get('defaultProfileName') ?? 'host',
         projects: ref?.projectManager.getStoreSnapshot().projects ?? [],
+        gitCredentials: settings.get('gitCredentials') ?? [],
       }),
+      resolveGitToken: (id) => secretStore.getGitToken(id),
       // Cloud: mint a fresh per-tenant runtime token for each omni-serve spawn,
       // so the agent's HTTP MCP calls resolve to THIS tenant's data. The route
       // verifies it; an untrusted sandbox can't forge another tenant.
@@ -265,6 +275,15 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
     };
     applyPlatformClient();
     settings.onDidAnyChange(() => applyPlatformClient());
+    // Cloud (ACI): artifacts live inside the workspace
+    // (`/workspace/.omni-artifacts/<ticketId>`), which the ACI sandbox already
+    // mounts from the workspace Azure Files share. So the control plane reads
+    // that same share out-of-band, keyed `.omni-artifacts/<ticketId>` — no
+    // second share. Tickets don't collide because the id is a globally-unique
+    // nanoid. Unset on desktop/local → the host/docker resolver is used instead.
+    const artAccount = process.env.AZURE_STORAGE_ACCOUNT_NAME;
+    const artKey = process.env.AZURE_STORAGE_ACCOUNT_KEY;
+    const artShare = process.env.OMNI_AZURE_FILE_SHARE ?? 'workspaces';
     const projectManager = new ProjectManager({
       store: settings as any,
       sendToWindow: tenantSend,
@@ -274,6 +293,11 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
       repo: pgPool ? new PgProjectsRepo(pgPool, tenantId, replicaId) : asyncRepo,
       changeSeqRepo: pgPool ? undefined : syncRepo,
       skillsDir: join(configDir, 'skills'),
+      ...(artAccount && artKey
+        ? {
+            artifactStoreFor: () => new AzureFilesArtifactStore({ account: artAccount, key: artKey, share: artShare }),
+          }
+        : {}),
     });
     // Per-tenant extensions + browser, backed by the same tenant settings store
     // (enabledExtensions / browser profiles/tabs/history/bookmarks are per-user).
@@ -339,9 +363,8 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
     if (aciConfigured) {
       return {
         ...snapshot,
-        defaultProfileName: snapshot.defaultProfileName === ACI_DESKTOP_PROFILE_NAME
-          ? ACI_DESKTOP_PROFILE_NAME
-          : ACI_PROFILE_NAME,
+        defaultProfileName:
+          snapshot.defaultProfileName === ACI_DESKTOP_PROFILE_NAME ? ACI_DESKTOP_PROFILE_NAME : ACI_PROFILE_NAME,
         availableSandboxProfiles: [ACI_PROFILE_NAME, ACI_DESKTOP_PROFILE_NAME],
       };
     }
@@ -370,7 +393,11 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
   registerProjectHandlers(ipc, tenantPM);
   registerSupervisorHandlers(ipc, (e) => tenantPM(e).supervisors);
   registerMilestoneHandlers(ipc, (e) => tenantPM(e).milestones);
-  registerPageHandlers(ipc, (e) => tenantPM(e).pages, (e, projectId) => tenantPM(e).getProjectDir(projectId));
+  registerPageHandlers(
+    ipc,
+    (e) => tenantPM(e).pages,
+    (e, projectId) => tenantPM(e).getProjectDir(projectId)
+  );
   registerInboxHandlers(ipc, (e) => tenantPM(e).inbox);
   registerProcessHandlers(ipc, (e) => getTenant((e as HandlerContext).tenantId).processManager);
   registerExtensionHandlers(ipc, (e) => getTenant((e as HandlerContext).tenantId).extension);
@@ -388,10 +415,7 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
   // Local single-tenant server: import any pre-v23 on-disk config files into the
   // shared store once (cloud tenants start empty — never import a shared file).
   if (!dbUrl) {
-    migrateAgentConfigFromFiles(
-      getSettings(DEFAULT_TENANT) as unknown as SettingsConfigStore,
-      getOmniConfigDir()
-    );
+    migrateAgentConfigFromFiles(getSettings(DEFAULT_TENANT) as unknown as SettingsConfigStore, getOmniConfigDir());
   }
   // Awaits settings + projection readiness AND materializes the agent config —
   // so the default tenant's on-disk config is current before serving requests.
@@ -606,6 +630,15 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
       wsHandler.sendToTenant(tenantId, 'store:changed', getStoreSnapshot(tenantId));
     }
   );
+  registerGitCredentialHandlers(
+    ipc,
+    (e) => getSettings((e as HandlerContext).tenantId) as unknown as SettingsConfigStore,
+    () => secretStore,
+    (e) => {
+      const tenantId = (e as HandlerContext).tenantId;
+      wsHandler.sendToTenant(tenantId, 'store:changed', getStoreSnapshot(tenantId));
+    }
+  );
   registerMigrationHandlers(ipc, (e) => {
     const tenantId = (e as HandlerContext).tenantId;
     const settings = getSettings(tenantId);
@@ -762,11 +795,7 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
       t.extension.cleanup(),
       t.settings instanceof PgSettingsStore ? t.settings.flush() : Promise.resolve(),
     ]);
-    const results = await Promise.allSettled([
-      syncManager.dispose(),
-      cleanupOmniInstall(),
-      ...tenantCleanups,
-    ]);
+    const results = await Promise.allSettled([syncManager.dispose(), cleanupOmniInstall(), ...tenantCleanups]);
     closeProjectDb();
     if (pgPool) {
       await pgPool.end();

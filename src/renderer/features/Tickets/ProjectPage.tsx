@@ -1,5 +1,6 @@
 import { makeStyles, tokens } from '@fluentui/react-components';
 import {
+  Add20Regular,
   ArrowLeft20Regular,
   Board20Regular,
   Delete20Regular,
@@ -23,6 +24,7 @@ import {
 } from '@/renderer/ds';
 import { PageView } from '@/renderer/features/Pages/PageView';
 import { $pages } from '@/renderer/features/Pages/state';
+import { AddSourceDialog } from '@/renderer/features/Projects/AddSourceDialog';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { ProjectId } from '@/shared/types';
 
@@ -109,8 +111,11 @@ export const ProjectActions = memo(({ projectId }: { projectId: ProjectId }) => 
   const [editFormOpen, setEditFormOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [pipelineSettingsOpen, setPipelineSettingsOpen] = useState(false);
+  const [addSourceOpen, setAddSourceOpen] = useState(false);
 
   const handleOpenBoard = useCallback(() => ticketApi.goToBoard(projectId), [projectId]);
+  const handleOpenAddSource = useCallback(() => setAddSourceOpen(true), []);
+  const handleCloseAddSource = useCallback(() => setAddSourceOpen(false), []);
   const handleOpenEdit = useCallback(() => setEditFormOpen(true), []);
   const handleOpenPipelineSettings = useCallback(() => setPipelineSettingsOpen(true), []);
   const handleOpenDelete = useCallback(() => setDeleteConfirmOpen(true), []);
@@ -138,6 +143,9 @@ export const ProjectActions = memo(({ projectId }: { projectId: ProjectId }) => 
               Board
             </MenuItem>
             <MenuDivider />
+            <MenuItem icon={<Add20Regular />} onClick={handleOpenAddSource}>
+              Add source…
+            </MenuItem>
             <MenuItem icon={<Settings20Regular />} onClick={handleOpenEdit}>
               Project settings
             </MenuItem>
@@ -158,6 +166,7 @@ export const ProjectActions = memo(({ projectId }: { projectId: ProjectId }) => 
         </MenuPopover>
       </Menu>
 
+      <AddSourceDialog open={addSourceOpen} onClose={handleCloseAddSource} project={project} />
       {editFormOpen && <ProjectForm open={editFormOpen} onClose={handleCloseEdit} editProject={project} />}
       <PipelineSettingsDialog projectId={projectId} open={pipelineSettingsOpen} onClose={handleClosePipelineSettings} />
       <ConfirmDialog

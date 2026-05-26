@@ -1,5 +1,17 @@
-import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
-import { Apps20Regular, Cube20Regular, Globe20Regular, Lightbulb20Regular, MicSettings20Regular, Person20Regular, PlugConnected20Regular, PuzzlePiece20Regular,Settings20Regular, WindowConsole20Regular } from '@fluentui/react-icons';
+import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
+import {
+  Apps20Regular,
+  Branch20Regular,
+  Cube20Regular,
+  Globe20Regular,
+  Lightbulb20Regular,
+  MicSettings20Regular,
+  Person20Regular,
+  PlugConnected20Regular,
+  PuzzlePiece20Regular,
+  Settings20Regular,
+  WindowConsole20Regular,
+} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useState } from 'react';
 
@@ -10,6 +22,7 @@ import { SettingsModalAudioTab } from '@/renderer/features/SettingsModal/Setting
 import { SettingsModalEnvironmentTab } from '@/renderer/features/SettingsModal/SettingsModalEnvironmentTab';
 import { SettingsModalExtensionsTab } from '@/renderer/features/SettingsModal/SettingsModalExtensionsTab';
 import { SettingsModalGeneralTab } from '@/renderer/features/SettingsModal/SettingsModalGeneralTab';
+import { SettingsModalGitTab } from '@/renderer/features/SettingsModal/SettingsModalGitTab';
 import { SettingsModalMcpTab } from '@/renderer/features/SettingsModal/SettingsModalMcpTab';
 import { SettingsModalModelsTab } from '@/renderer/features/SettingsModal/SettingsModalModelsTab';
 import { SettingsModalNetworkTab } from '@/renderer/features/SettingsModal/SettingsModalNetworkTab';
@@ -22,6 +35,7 @@ const TABS = [
   { value: 'Environment', label: 'Environment', icon: <WindowConsole20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Models', label: 'Models', icon: <Cube20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'MCP', label: 'MCP Servers', icon: <PlugConnected20Regular style={{ width: 18, height: 18 }} /> },
+  { value: 'Git', label: 'Git', icon: <Branch20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Apps', label: 'Apps', icon: <Apps20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Skills', label: 'Skills', icon: <Lightbulb20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Audio', label: 'Audio', icon: <MicSettings20Regular style={{ width: 18, height: 18 }} /> },
@@ -195,10 +209,7 @@ export const SettingsPage = memo(() => {
   const isGlass = !!store.codeDeckBackground;
   const [activeTab, setActiveTab] = useState<SettingsTab>('General');
 
-  const handleNav = useCallback(
-    (tab: SettingsTab) => () => setActiveTab(tab),
-    []
-  );
+  const handleNav = useCallback((tab: SettingsTab) => () => setActiveTab(tab), []);
 
   return (
     <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
@@ -212,10 +223,7 @@ export const SettingsPage = memo(() => {
             <button
               key={tab.value}
               onClick={handleNav(tab.value)}
-              className={mergeClasses(
-                styles.navItem,
-                activeTab === tab.value && styles.navItemActive
-              )}
+              className={mergeClasses(styles.navItem, activeTab === tab.value && styles.navItemActive)}
             >
               {tab.icon}
               {tab.label}
@@ -230,10 +238,7 @@ export const SettingsPage = memo(() => {
           <button
             key={tab.value}
             onClick={handleNav(tab.value)}
-            className={mergeClasses(
-              styles.mobileTab,
-              activeTab === tab.value && styles.mobileTabActive
-            )}
+            className={mergeClasses(styles.mobileTab, activeTab === tab.value && styles.mobileTabActive)}
           >
             {tab.icon}
             {tab.label}
@@ -248,6 +253,7 @@ export const SettingsPage = memo(() => {
           {activeTab === 'Environment' && <SettingsModalEnvironmentTab />}
           {activeTab === 'Models' && <SettingsModalModelsTab />}
           {activeTab === 'MCP' && <SettingsModalMcpTab />}
+          {activeTab === 'Git' && <SettingsModalGitTab />}
           {activeTab === 'Apps' && <SettingsModalAppsTab />}
           {activeTab === 'Skills' && <SettingsModalSkillsTab />}
           {activeTab === 'Audio' && <SettingsModalAudioTab />}

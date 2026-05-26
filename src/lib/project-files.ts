@@ -205,7 +205,6 @@ const ProjectSourceSchema: z.ZodType<ProjectSource> = z.discriminatedUnion('kind
     mountName: z.string(),
     repoUrl: z.string(),
     defaultBranch: z.string().optional(),
-    credentials: z.object({ kind: z.literal('platform-managed'), credentialId: z.string() }).optional(),
   }),
 ]) as unknown as z.ZodType<ProjectSource>;
 

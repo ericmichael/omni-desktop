@@ -1,14 +1,18 @@
+import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
-import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { AnimatedDialog, Button, DialogBody, DialogContent, DialogFooter, DialogHeader, Input, Select, Switch } from '@/renderer/ds';
 import {
-  draftsToSources,
-  type SourceDraft,
-  SourcesEditor,
-  sourcesToDrafts,
-} from '@/renderer/features/Projects/SourcesEditor';
+  AnimatedDialog,
+  Button,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  Input,
+  Select,
+  Switch,
+} from '@/renderer/ds';
 import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -122,19 +126,13 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
   const isEdit = Boolean(editProject);
 
   const [label, setLabel] = useState(editProject?.label ?? '');
-  const [drafts, setDrafts] = useState<SourceDraft[]>(() => sourcesToDrafts(editProject?.sources ?? []));
-  const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [autoDispatch, setAutoDispatch] = useState(editProject?.autoDispatch ?? false);
-  const [dueDate, setDueDate] = useState(
-    editProject?.dueDate !== undefined ? toInputDate(editProject.dueDate) : ''
-  );
+  const [dueDate, setDueDate] = useState(editProject?.dueDate !== undefined ? toInputDate(editProject.dueDate) : '');
 
   // Per-project sandbox profile (null = inherit user-default).
-  const [sandboxProfile, setSandboxProfile] = useState<string | null>(
-    editProject?.sandboxProfile ?? null
-  );
+  const [sandboxProfile, setSandboxProfile] = useState<string | null>(editProject?.sandboxProfile ?? null);
   const [isEnterprise, setIsEnterprise] = useState(false);
   useEffect(() => {
     emitter.invoke('platform:is-enterprise').then(setIsEnterprise);
@@ -144,12 +142,9 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
     () => getAvailableProfileNames({ isEnterprise, available: storeData.availableSandboxProfiles }),
     [isEnterprise, storeData.availableSandboxProfiles]
   );
-  const handleSandboxProfileChange = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
-      setSandboxProfile(e.target.value === INHERIT_PROFILE ? null : e.target.value);
-    },
-    []
-  );
+  const handleSandboxProfileChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSandboxProfile(e.target.value === INHERIT_PROFILE ? null : e.target.value);
+  }, []);
 
   const isValid = label.trim().length > 0;
 
@@ -161,31 +156,34 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
     if (!isValid || isSubmitting) {
       return;
     }
-    const conv = draftsToSources(drafts);
-    if (!conv.ok) {
-      setSubmitError(conv.error);
-      return;
-    }
-    setSubmitError(null);
     setIsSubmitting(true);
 
-    const slug = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'project';
+    const slug =
+      label
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 60) || 'project';
     const dueDateMs = fromInputDate(dueDate);
 
     try {
       if (isEdit && editProject) {
+        // Sources are managed from the sidebar / ⋯ menu — omit them so the edit
+        // form never overwrites them.
         await ticketApi.updateProject(editProject.id, {
           label: label.trim(),
-          sources: conv.sources,
           autoDispatch,
           sandboxProfile,
           dueDate: dueDateMs,
         });
       } else {
+        // New projects start empty; sources are added afterward via the
+        // sidebar's Sources branch or the project page's ⋯ menu.
         await ticketApi.addProject({
           label: label.trim(),
           slug,
-          sources: conv.sources,
+          sources: [],
           ...(sandboxProfile ? { sandboxProfile } : {}),
           ...(dueDateMs !== undefined ? { dueDate: dueDateMs } : {}),
         });
@@ -194,13 +192,13 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
     } finally {
       setIsSubmitting(false);
     }
-  }, [isValid, isSubmitting, isEdit, editProject, label, drafts, autoDispatch, sandboxProfile, dueDate, onClose]);
+  }, [isValid, isSubmitting, isEdit, editProject, label, autoDispatch, sandboxProfile, dueDate, onClose]);
 
   const handleDueDateChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setDueDate(e.target.value);
   }, []);
 
-  const hasAtLeastOneSource = drafts.length > 0;
+  const hasAtLeastOneSource = (editProject?.sources.length ?? 0) > 0;
   return (
     <AnimatedDialog open={open} onClose={onClose}>
       <DialogContent className="sm:max-w-lg">
@@ -210,20 +208,7 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
           <div className={styles.section}>
             <div className={styles.fieldGroup}>
               <label className={styles.label}>Name</label>
-              <Input
-                type="text"
-                value={label}
-                onChange={handleLabelChange}
-                placeholder="my-project"
-              />
-            </div>
-          </div>
-
-          {/* Sources */}
-          <div className={styles.section}>
-            <div className={styles.fieldGroup}>
-              <label className={styles.label}>Sources</label>
-              <SourcesEditor value={drafts} onChange={setDrafts} />
+              <Input type="text" value={label} onChange={handleLabelChange} placeholder="my-project" />
             </div>
           </div>
 
@@ -232,10 +217,7 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
             <div className={styles.section}>
               <div className={styles.fieldGroup}>
                 <label className={styles.label}>Sandbox profile</label>
-                <Select
-                  value={sandboxProfile ?? INHERIT_PROFILE}
-                  onChange={handleSandboxProfileChange}
-                >
+                <Select value={sandboxProfile ?? INHERIT_PROFILE} onChange={handleSandboxProfileChange}>
                   <option value={INHERIT_PROFILE}>Inherit default</option>
                   {availableProfiles.map((name) => (
                     <option key={name} value={name}>
@@ -267,12 +249,6 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
               <Input type="date" value={dueDate} onChange={handleDueDateChange} />
             </div>
           </div>
-
-          {submitError && (
-            <div role="alert" style={{ color: 'var(--colorPaletteRedForeground1)' }}>
-              {submitError}
-            </div>
-          )}
         </DialogBody>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>

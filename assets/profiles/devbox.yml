@@ -59,6 +59,11 @@ init:
   # above). The agent's tools run as run_as (uid 1000), so chown the
   # workspace tree to that uid before services or the agent start.
   - "chown -R 1000:1000 /workspace"
+  # Ticket artifacts (PR writeup, notes, deliverables) live inside the
+  # workspace at /workspace/.omni-artifacts/<ticketId> — a dot-dir sibling of
+  # the source mounts, so it rides the snapshot like the sources but the
+  # leading dot keeps it out of the per-source seed/diff loop below. The agent
+  # creates it on first write (the workspace is already chowned to uid 1000).
   # PR baseline: after seeding, snapshot each per-source subdirectory's
   # state as a tagged commit ``refs/tags/omni/seed`` inside that
   # source's git repo. The launcher diffs against that tag per source

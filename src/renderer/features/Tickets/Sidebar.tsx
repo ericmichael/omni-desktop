@@ -32,6 +32,7 @@ import {
 import { $activeInbox } from '@/renderer/features/Inbox/state';
 import { $milestones, milestoneApi } from '@/renderer/features/Initiatives/state';
 import { $pages, pageApi } from '@/renderer/features/Pages/state';
+import { AddSourceDialog } from '@/renderer/features/Projects/AddSourceDialog';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { Milestone } from '@/shared/types';
 
@@ -185,10 +186,12 @@ export const TicketsSidebar = memo(({ onNavigate, type = 'inline', open = true, 
   const [formOpen, setFormOpen] = useState(false);
   const [milestoneFormProjectId, setMilestoneFormProjectId] = useState<string | null>(null);
   const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null);
+  const [addSourceProjectId, setAddSourceProjectId] = useState<string | null>(null);
   const [projectsOpen, setProjectsOpen] = useState(true);
 
   const projects = store.projects;
   const selectedValue = viewToNavValue(view);
+  const addSourceProject = projects.find((p) => p.id === addSourceProjectId);
 
   const handleOpenForm = useCallback(() => setFormOpen(true), []);
   const handleCloseForm = useCallback(() => setFormOpen(false), []);
@@ -198,6 +201,18 @@ export const TicketsSidebar = memo(({ onNavigate, type = 'inline', open = true, 
     setMilestoneFormProjectId(null);
     setEditingMilestone(null);
   }, []);
+  const handleAddSource = useCallback((projectId: string) => setAddSourceProjectId(projectId), []);
+  const handleCloseAddSource = useCallback(() => setAddSourceProjectId(null), []);
+  const handleRemoveSource = useCallback(
+    (projectId: string, sourceId: string) => {
+      const project = projects.find((p) => p.id === projectId);
+      if (!project) {
+        return;
+      }
+      void ticketApi.updateProject(projectId, { sources: project.sources.filter((s) => s.id !== sourceId) });
+    },
+    [projects]
+  );
   const toggleProjects = useCallback(() => setProjectsOpen((v) => !v), []);
   const handleOpenChange = useCallback(
     (_event: unknown, data: { open: boolean }) => {
@@ -304,11 +319,14 @@ export const TicketsSidebar = memo(({ onNavigate, type = 'inline', open = true, 
               onExpandProject={handleExpandProject}
               onCreateMilestone={handleCreateMilestone}
               onEditMilestone={handleEditMilestone}
+              onAddSource={handleAddSource}
+              onRemoveSource={handleRemoveSource}
             />
           ))}
       </NavDrawerBody>
 
       <ProjectForm open={formOpen} onClose={handleCloseForm} />
+      {addSourceProject && <AddSourceDialog open onClose={handleCloseAddSource} project={addSourceProject} />}
       <AnimatedDialog
         open={milestoneFormProjectId !== null || editingMilestone !== null}
         onClose={handleCloseMilestoneForm}

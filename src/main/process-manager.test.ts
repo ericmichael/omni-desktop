@@ -60,13 +60,17 @@ vi.mock('node:child_process', async () => {
 // ---------------------------------------------------------------------------
 
 import { ProcessManager, type ProcessManagerStoreData } from '@/main/process-manager';
-import type { AgentProcessStatus, Project, WithTimestamp } from '@/shared/types';
+import { gitTokenEnvName } from '@/shared/git-credentials';
+import type { AgentProcessStatus, GitCredential, Project, WithTimestamp } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makePm(opts?: { storeData?: Partial<ProcessManagerStoreData> }) {
+function makePm(opts?: {
+  storeData?: Partial<ProcessManagerStoreData>;
+  resolveGitToken?: (credentialId: string) => Promise<string | undefined>;
+}) {
   hoisted.agentProcessInstances = [];
   const sendCalls: Array<{ channel: string; args: unknown[] }> = [];
   const storeData: ProcessManagerStoreData = {
@@ -79,6 +83,7 @@ function makePm(opts?: { storeData?: Partial<ProcessManagerStoreData> }) {
       sendCalls.push({ channel, args });
     }) as never,
     getStoreData: () => storeData,
+    resolveGitToken: opts?.resolveGitToken,
   });
   return { pm, sendCalls };
 }
@@ -102,15 +107,15 @@ describe('ProcessManager', () => {
       ['devbox', 'serve'],
       ['custom-profile', 'serve'],
       ['platform', 'platform'],
-    ] as const)('defaultProfileName=%s resolves to mode=%s', (profileName, expectedMode) => {
+    ] as const)('defaultProfileName=%s resolves to mode=%s', async (profileName, expectedMode) => {
       const { pm } = makePm({ storeData: { defaultProfileName: profileName } });
-      pm.start('test-1', { workspaceDir: '/tmp/ws' });
+      await pm.start('test-1', { workspaceDir: '/tmp/ws' });
 
       expect(hoisted.agentProcessInstances).toHaveLength(1);
       expect(hoisted.agentProcessInstances[0]!.mode).toBe(expectedMode);
     });
 
-    it('per-project sandboxProfile overrides defaultProfileName', () => {
+    it('per-project sandboxProfile overrides defaultProfileName', async () => {
       const project: Project = {
         id: 'proj_1',
         label: 'Proj',
@@ -122,14 +127,14 @@ describe('ProcessManager', () => {
       const { pm } = makePm({
         storeData: { defaultProfileName: 'host', projects: [project] },
       });
-      pm.start('tab-1', { workspaceDir: '/tmp/ws', projectId: 'proj_1' });
+      await pm.start('tab-1', { workspaceDir: '/tmp/ws', projectId: 'proj_1' });
 
       expect(hoisted.agentProcessInstances[0]!.mode).toBe('platform');
     });
 
-    it('forwards profileName + projectId in the start arg', () => {
+    it('forwards profileName + projectId in the start arg', async () => {
       const { pm } = makePm({ storeData: { defaultProfileName: 'devbox' } });
-      pm.start('tab-1', { workspaceDir: '/tmp', projectId: 'proj_x' });
+      await pm.start('tab-1', { workspaceDir: '/tmp', projectId: 'proj_x' });
 
       expect(hoisted.agentProcessInstances[0]!.start).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -148,9 +153,9 @@ describe('ProcessManager', () => {
       expect(status.type).toBe('uninitialized');
     });
 
-    it('returns status from AgentProcess when process exists', () => {
+    it('returns status from AgentProcess when process exists', async () => {
       const { pm } = makePm();
-      pm.start('proc-1', { workspaceDir: '/tmp' });
+      await pm.start('proc-1', { workspaceDir: '/tmp' });
 
       const mockStatus: WithTimestamp<AgentProcessStatus> = {
         type: 'running',
@@ -166,10 +171,7 @@ describe('ProcessManager', () => {
   describe('getRunningWsUrlForTicket', () => {
     it('returns null when no code tabs match the ticketId', () => {
       const { pm } = makePm();
-      const result = pm.getRunningWsUrlForTicket('ticket-1', [
-        { id: 'tab-1', ticketId: 'ticket-2' },
-        { id: 'tab-2' },
-      ]);
+      const result = pm.getRunningWsUrlForTicket('ticket-1', [{ id: 'tab-1', ticketId: 'ticket-2' }, { id: 'tab-2' }]);
       expect(result).toBeNull();
     });
 
@@ -179,9 +181,9 @@ describe('ProcessManager', () => {
       expect(result).toBeNull();
     });
 
-    it('returns wsUrl when matching tab has a running process', () => {
+    it('returns wsUrl when matching tab has a running process', async () => {
       const { pm } = makePm();
-      pm.start('tab-1', { workspaceDir: '/tmp' });
+      await pm.start('tab-1', { workspaceDir: '/tmp' });
 
       hoisted.agentProcessInstances[0]!.getStatus.mockReturnValue({
         type: 'running',
@@ -193,9 +195,9 @@ describe('ProcessManager', () => {
       expect(result).toBe('ws://localhost:9000/ws');
     });
 
-    it('returns null when matching tab process is not running', () => {
+    it('returns null when matching tab process is not running', async () => {
       const { pm } = makePm();
-      pm.start('tab-1', { workspaceDir: '/tmp' });
+      await pm.start('tab-1', { workspaceDir: '/tmp' });
 
       hoisted.agentProcessInstances[0]!.getStatus.mockReturnValue({
         type: 'starting',
@@ -208,9 +210,9 @@ describe('ProcessManager', () => {
   });
 
   describe('lifecycle', () => {
-    it('start creates an AgentProcess and calls start', () => {
+    it('start creates an AgentProcess and calls start', async () => {
       const { pm } = makePm();
-      pm.start('proc-1', { workspaceDir: '/tmp/ws' });
+      await pm.start('proc-1', { workspaceDir: '/tmp/ws' });
 
       expect(hoisted.agentProcessInstances).toHaveLength(1);
       expect(hoisted.agentProcessInstances[0]!.start).toHaveBeenCalledWith(
@@ -218,16 +220,16 @@ describe('ProcessManager', () => {
       );
     });
 
-    it('start reuses existing process on same mode', () => {
+    it('start reuses existing process on same mode', async () => {
       const { pm } = makePm();
-      pm.start('proc-1', { workspaceDir: '/tmp/ws' });
-      pm.start('proc-1', { workspaceDir: '/tmp/ws2' });
+      await pm.start('proc-1', { workspaceDir: '/tmp/ws' });
+      await pm.start('proc-1', { workspaceDir: '/tmp/ws2' });
 
       expect(hoisted.agentProcessInstances).toHaveLength(1);
       expect(hoisted.agentProcessInstances[0]!.start).toHaveBeenCalledTimes(2);
     });
 
-    it('start creates new process when mode changes', () => {
+    it('start creates new process when mode changes', async () => {
       const storeData: ProcessManagerStoreData = {
         defaultProfileName: 'host',
         projects: [],
@@ -237,13 +239,13 @@ describe('ProcessManager', () => {
         getStoreData: () => storeData,
       });
 
-      pm.start('proc-1', { workspaceDir: '/tmp' });
+      await pm.start('proc-1', { workspaceDir: '/tmp' });
       expect(hoisted.agentProcessInstances).toHaveLength(1);
       expect(hoisted.agentProcessInstances[0]!.mode).toBe('serve');
 
       // Flip to platform — different mode → new instance
       storeData.defaultProfileName = 'platform';
-      pm.start('proc-1', { workspaceDir: '/tmp' });
+      await pm.start('proc-1', { workspaceDir: '/tmp' });
 
       expect(hoisted.agentProcessInstances).toHaveLength(2);
       expect(hoisted.agentProcessInstances[1]!.mode).toBe('platform');
@@ -252,7 +254,7 @@ describe('ProcessManager', () => {
 
     it('stop removes process from map', async () => {
       const { pm } = makePm();
-      pm.start('proc-1', { workspaceDir: '/tmp' });
+      await pm.start('proc-1', { workspaceDir: '/tmp' });
 
       await pm.stop('proc-1');
 
@@ -262,8 +264,8 @@ describe('ProcessManager', () => {
 
     it('cleanup exits all processes', async () => {
       const { pm } = makePm();
-      pm.start('a', { workspaceDir: '/tmp/a' });
-      pm.start('b', { workspaceDir: '/tmp/b' });
+      await pm.start('a', { workspaceDir: '/tmp/a' });
+      await pm.start('b', { workspaceDir: '/tmp/b' });
 
       await pm.cleanup();
 
@@ -271,6 +273,54 @@ describe('ProcessManager', () => {
       expect(hoisted.agentProcessInstances[1]!.exit).toHaveBeenCalled();
       expect(pm.getStatus('a').type).toBe('uninitialized');
       expect(pm.getStatus('b').type).toBe('uninitialized');
+    });
+  });
+
+  describe('git-remote auth', () => {
+    const gitProject = (): Project => ({
+      id: 'proj_git',
+      label: 'Git',
+      slug: 'git',
+      createdAt: 0,
+      sources: [{ id: 'src1', mountName: 'svc', kind: 'git-remote', repoUrl: 'https://github.com/acme/private.git' }],
+    });
+    const cred: GitCredential = {
+      id: 'cred-123',
+      host: 'github.com',
+      username: 'x-access-token',
+      last4: 'beef',
+      createdAt: 0,
+    };
+
+    it('attaches auth + injects the token env when a host credential matches', async () => {
+      const { pm } = makePm({
+        storeData: { projects: [gitProject()], gitCredentials: [cred] },
+        resolveGitToken: async (id) => (id === 'cred-123' ? 'ghp_thetoken' : undefined),
+      });
+      await pm.start('proc-1', { workspaceDir: '/tmp', projectId: 'proj_git' });
+
+      const startArg = hoisted.agentProcessInstances[0]!.start.mock.calls[0]![0] as {
+        sources: Array<{ kind: string; auth?: { tokenEnv: string; username: string } }>;
+        gitTokenEnv?: Record<string, string>;
+      };
+      const envName = gitTokenEnvName('cred-123');
+      expect(startArg.sources[0]!.auth).toEqual({ tokenEnv: envName, username: 'x-access-token' });
+      expect(startArg.gitTokenEnv).toEqual({ [envName]: 'ghp_thetoken' });
+    });
+
+    it('leaves the source unauthenticated when no credential matches the host', async () => {
+      const { pm } = makePm({
+        storeData: { projects: [gitProject()], gitCredentials: [{ ...cred, host: 'gitlab.com' }] },
+        resolveGitToken: async () => 'unused',
+      });
+      await pm.start('proc-1', { workspaceDir: '/tmp', projectId: 'proj_git' });
+
+      const startArg = hoisted.agentProcessInstances[0]!.start.mock.calls[0]![0] as {
+        sources: Array<{ auth?: unknown }>;
+        gitTokenEnv?: Record<string, string>;
+      };
+      expect(startArg.sources[0]!.auth).toBeUndefined();
+      expect(startArg.gitTokenEnv).toBeUndefined();
     });
   });
 });

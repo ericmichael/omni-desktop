@@ -33,10 +33,7 @@ import { nanoid } from 'nanoid';
 import { logicalColumnId } from 'omni-projects-db';
 import path from 'path';
 
-import type {
-  IWindowSender,
-  IWorkflowLoader,
-} from '@/lib/project-manager-deps';
+import type { IWindowSender, IWorkflowLoader } from '@/lib/project-manager-deps';
 import { hasTemplateExpressions, renderTemplate, type TemplateVariables } from '@/lib/template';
 import { claimsCollide, decideWorktreeAction, resolveWorkspaceClaim } from '@/lib/worktree';
 import type { AppControlManager } from '@/main/app-control-manager';
@@ -45,7 +42,7 @@ import type { SupervisorBridge } from '@/main/supervisor-bridge';
 import { buildSupervisorPrompt, type SupervisorContext } from '@/main/supervisor-prompt';
 import { SupervisorState } from '@/main/supervisor-state';
 import { getProjectPagesDir } from '@/main/util';
-import { createWorktree, generateWorktreeName, isWorktreeDirty,removeWorktree } from '@/main/worktree-ops';
+import { createWorktree, generateWorktreeName, isWorktreeDirty, removeWorktree } from '@/main/worktree-ops';
 import { requireLocalWorkspaceDir } from '@/shared/project-source';
 import { isActivePhase, type TicketPhase } from '@/shared/ticket-phase';
 import type {
@@ -96,7 +93,6 @@ export interface SupervisorEntry {
   /** The Code tab driving this supervisor. Resolved from `store.getCodeTabs()`. */
   tabId: CodeTabId;
 }
-
 
 // ---------------------------------------------------------------------------
 // Narrow store surface — just the slices the orchestrator reads and writes.
@@ -155,6 +151,11 @@ export interface SupervisorOrchestratorHost {
   // off `ticket.projectId` via `getProjectPagesDir` — the host no longer
   // needs to expose a directory resolver for this.
   getPagesByProject(projectId: ProjectId): Page[];
+
+  /** Agent-facing artifacts dir for a ticket, resolved per profile (host dir vs
+   *  container `/workspace/.omni-artifacts/<id>`). Surfaced in the supervisor
+   *  prompt; must match where the launcher's ArtifactStore reads. */
+  getAgentArtifactsDir(ticketId: TicketId): string;
 }
 
 // ---------------------------------------------------------------------------
@@ -587,7 +588,10 @@ export class SupervisorOrchestrator {
     if (!project || firstSource(project)?.kind !== 'local') {
       return null;
     }
-    const claim = resolveWorkspaceClaim(ticket, (firstSource(project) as Extract<ProjectSource, { kind: 'local' }> | undefined)?.workspaceDir);
+    const claim = resolveWorkspaceClaim(
+      ticket,
+      (firstSource(project) as Extract<ProjectSource, { kind: 'local' }> | undefined)?.workspaceDir
+    );
     if (!claim) {
       return null;
     }
@@ -599,7 +603,10 @@ export class SupervisorOrchestrator {
       if (!other || other.projectId !== ticket.projectId) {
         continue;
       }
-      const otherClaim = resolveWorkspaceClaim(other, (firstSource(project) as Extract<ProjectSource, { kind: 'local' }> | undefined)?.workspaceDir);
+      const otherClaim = resolveWorkspaceClaim(
+        other,
+        (firstSource(project) as Extract<ProjectSource, { kind: 'local' }> | undefined)?.workspaceDir
+      );
       if (otherClaim && claimsCollide(claim, otherClaim)) {
         return other;
       }
@@ -673,7 +680,11 @@ export class SupervisorOrchestrator {
       console.log(`[SupervisorOrchestrator] Reusing existing worktree "${worktreeName}" for ticket ${ticketId}`);
     } else if (wtAction.action === 'create') {
       worktreeName = generateWorktreeName();
-      worktreePath = await createWorktree(requireLocalWorkspaceDir(firstSource(project)), effectiveBranch!, worktreeName);
+      worktreePath = await createWorktree(
+        requireLocalWorkspaceDir(firstSource(project)),
+        effectiveBranch!,
+        worktreeName
+      );
       workspaceDir = worktreePath;
       this.deps.host.updateTicket(ticketId, { worktreePath, worktreeName });
     }
@@ -773,9 +784,7 @@ export class SupervisorOrchestrator {
     state.recordActivity();
 
     const ticket = this.deps.host.getTicketById(ticketId);
-    const maxTurns = ticket
-      ? this.getEffectiveMaxContinuationTurns(ticket.projectId)
-      : MAX_CONTINUATION_TURNS;
+    const maxTurns = ticket ? this.getEffectiveMaxContinuationTurns(ticket.projectId) : MAX_CONTINUATION_TURNS;
 
     // Compose the supervisor framing as the goal text. The column's
     // session.ensure path also sees ticket_id / project_id / workspace_dir
@@ -900,7 +909,7 @@ export class SupervisorOrchestrator {
    * abort — the hook still runs at the project-directory level where that
    * pathway is exercised.
    */
-   
+
   private execHookInContainer(_tabId: CodeTabId, _command: string): Promise<boolean> {
     return Promise.resolve(true);
   }
@@ -1086,8 +1095,7 @@ export class SupervisorOrchestrator {
         }
         const collision = this.findWorkspaceCollision(ticketId);
         if (collision) {
-          const hint =
-            ticket.useWorktree === false ? ' Enable worktrees on this ticket to run them in parallel.' : '';
+          const hint = ticket.useWorktree === false ? ' Enable worktrees on this ticket to run them in parallel.' : '';
           throw new Error(`"${collision.title}" is already running in this workspace — stop it first.${hint}`);
         }
         await this.ensureColumn(ticketId);
@@ -1160,7 +1168,11 @@ export class SupervisorOrchestrator {
       if (ticket.worktreePath && ticket.worktreeName) {
         const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId);
         if (firstSource(project)?.kind === 'local') {
-          await removeWorktree(requireLocalWorkspaceDir(firstSource(project)), ticket.worktreePath, ticket.worktreeName);
+          await removeWorktree(
+            requireLocalWorkspaceDir(firstSource(project)),
+            ticket.worktreePath,
+            ticket.worktreeName
+          );
         }
         this.deps.host.updateTicket(ticket.id, { worktreePath: undefined, worktreeName: undefined });
         cleaned++;
@@ -1305,10 +1317,16 @@ export class SupervisorOrchestrator {
     if (project.sources.length === 0) {
       return `Project "${project.label}" has no repository — supervisors require a workspace or git remote`;
     }
-    if (firstSource(project)?.kind === 'local' && !(firstSource(project) as Extract<ProjectSource, { kind: 'local' }> | undefined)?.workspaceDir) {
+    if (
+      firstSource(project)?.kind === 'local' &&
+      !(firstSource(project) as Extract<ProjectSource, { kind: 'local' }> | undefined)?.workspaceDir
+    ) {
       return `Project "${project.label}" has no workspace directory configured`;
     }
-    if (firstSource(project)?.kind === 'git-remote' && !(firstSource(project) as Extract<ProjectSource, { kind: 'git-remote' }> | undefined)?.repoUrl) {
+    if (
+      firstSource(project)?.kind === 'git-remote' &&
+      !(firstSource(project) as Extract<ProjectSource, { kind: 'git-remote' }> | undefined)?.repoUrl
+    ) {
       return `Project "${project.label}" has no repository URL configured`;
     }
 
@@ -1439,7 +1457,6 @@ export class SupervisorOrchestrator {
     }
   };
 
-
   /**
    * Build the full supervisor prompt, incorporating FLEET.md custom prompt if present.
    */
@@ -1449,7 +1466,7 @@ export class SupervisorOrchestrator {
     const pipeline = this.deps.host.getPipeline(ticket.projectId);
 
     // Gather context for the supervisor prompt
-    const context: SupervisorContext = {};
+    const context: SupervisorContext = { artifactsDir: this.deps.host.getAgentArtifactsDir(ticketId) };
 
     // Project brief: read the root page's body. Routed through PageManager
     // so the lookup follows the same projectId-keyed layout the rest of the

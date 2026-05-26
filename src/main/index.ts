@@ -12,13 +12,20 @@ import { pathToFileURL } from 'url';
 import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig } from '@/lib/agent-config';
 import { getArtifactsDir } from '@/lib/artifacts';
 import { createAppControlManager } from '@/main/app-control-manager';
+import { listRepos as azureListRepos } from '@/main/azure-repos';
 import { createBrowserManager } from '@/main/browser-manager';
+import { getStatus as codexStatus, loginWithBrowser, logout as codexLogout } from '@/main/codex-auth';
 import { migrateAgentConfigFromFiles } from '@/main/config-files-migration';
 import { materializeAgentConfig } from '@/main/config-materializer';
 import { createConsoleManager } from '@/main/console-manager';
 import { rowToProject } from '@/main/db-store-bridge';
 import { createDownloadsManager } from '@/main/downloads-manager';
 import { createExtensionManager } from '@/main/extension-manager';
+import {
+  linkWithDeviceFlow as githubLink,
+  listOrgs as githubListOrgs,
+  searchRepos as githubSearchRepos,
+} from '@/main/github-auth';
 import { MainProcessManager } from '@/main/main-process-manager';
 import { getMcpBinPath } from '@/main/mcp-config-manager';
 import { registerMigrationHandlers } from '@/main/migration-handlers';
@@ -29,13 +36,10 @@ import { registerPlatformIpc } from '@/main/platform-ipc';
 import { createPlatformClient } from '@/main/platform-mode';
 import { createProcessManager } from '@/main/process-manager';
 import { backfillProjectConfigs } from '@/main/project-config-backfill';
-import { closeProjectDb, getDb,openProjectDb } from '@/main/project-db';
+import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
 import { createProjectManager } from '@/main/project-manager';
-import {
-  DEFAULT_CHAT_SNAPSHOT_TTL_MS,
-  gcStaleSnapshots,
-  registerSnapshotHandlers,
-} from '@/main/snapshot-manager';
+import { ElectronSecretStore } from '@/main/secret-store';
+import { DEFAULT_CHAT_SNAPSHOT_TTL_MS, gcStaleSnapshots, registerSnapshotHandlers } from '@/main/snapshot-manager';
 import { getStore } from '@/main/store';
 import {
   ensureDirectory,
@@ -47,13 +51,16 @@ import {
   isFile,
 } from '@/main/util';
 import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
+import { tokenLast4 } from '@/shared/git-credentials';
 import {
   registerConfigHandlers,
+  registerGitCredentialHandlers,
   registerSettingsConfigHandlers,
   registerSkillsHandlers,
   registerUtilHandlers,
 } from '@/shared/ipc-handlers';
 import { buildStdioMcpEntry } from '@/shared/mcp-entry';
+import type { GitCredential, GithubOwner, GithubRepoQuery, GithubStatus, RemoteRepo } from '@/shared/types';
 
 // Process-level crash visibility. Log only — do not exit. Killing the
 // Electron main process from an unhandled rejection would take the whole
@@ -126,6 +133,7 @@ if (process.env.NODE_ENV === 'development' || process.env.OMNI_DEBUG_PORT) {
 
 const OMNI_CONFIG_DIR = getOmniConfigDir();
 const store = getStore();
+const secretStore = new ElectronSecretStore();
 const { repo, asyncRepo } = openProjectDb();
 
 // One-time migration: move project data from electron-store JSON to SQLite.
@@ -235,8 +243,8 @@ const [appControlManager, cleanupAppControl] = createAppControlManager({
   ipc: main.ipc,
   onBrowserPopup: (tabsetId, url, disposition) => {
     if (!browserManagerRef) {
-return;
-}
+      return;
+    }
     // `background-tab` maps to Cmd/Ctrl+click: open without stealing focus.
     // Everything else (`foreground-tab`, `new-window`, `default`) activates.
     const activate = disposition !== 'background-tab';
@@ -258,7 +266,9 @@ const [processManager, cleanupProcessManager] = createProcessManager({
   getStoreData: () => ({
     defaultProfileName: store.get('defaultProfileName') ?? 'host',
     projects: repo.listProjects().map(rowToProject),
+    gitCredentials: store.get('gitCredentials') ?? [],
   }),
+  resolveGitToken: (id) => secretStore.getGitToken(id),
 });
 
 // Create ConsoleManager — proxies terminal:* IPC into omni serve's
@@ -281,12 +291,12 @@ void (async () => {
     const keep = new Set<string>();
     const chatSessionId = store.get('chatSessionId');
     if (chatSessionId) {
-keep.add(chatSessionId);
-}
+      keep.add(chatSessionId);
+    }
     for (const tab of store.get('codeTabs') ?? []) {
       if (tab.sessionId) {
-keep.add(tab.sessionId);
-}
+        keep.add(tab.sessionId);
+      }
     }
     const deleted = await gcStaleSnapshots({ keep, ttlMs: DEFAULT_CHAT_SNAPSHOT_TTL_MS });
     if (deleted.length > 0) {
@@ -474,11 +484,11 @@ app.on('ready', () => {
           "default-src 'none'",
           "script-src 'unsafe-inline' https:",
           "style-src 'unsafe-inline' https:",
-          "font-src https: data:",
-          "img-src https: data: blob:",
-          "connect-src https: wss: ws: data: blob:",
-          "frame-src about: data: blob: https: http:",
-        ].join('; '),
+          'font-src https: data:',
+          'img-src https: data: blob:',
+          'connect-src https: wss: ws: data: blob:',
+          'frame-src about: data: blob: https: http:',
+        ].join('; ')
       );
       return new Response(upstream.body, {
         status: upstream.status,
@@ -615,12 +625,24 @@ registerUtilHandlers(main.ipc, {
   fetchFn: ((input, init) => net.fetch(input as string, init)) as typeof globalThis.fetch,
   launcherVersion: app.getVersion(),
 });
-registerSkillsHandlers(main.ipc, () => OMNI_CONFIG_DIR, () => store);
+registerSkillsHandlers(
+  main.ipc,
+  () => OMNI_CONFIG_DIR,
+  () => store
+);
 registerSettingsConfigHandlers(
   main.ipc,
   () => store,
   () => {
     materializeDesktopConfig();
+    main.sendToWindow('store:changed', main.getStoreSnapshot ? main.getStoreSnapshot() : store.store);
+  }
+);
+registerGitCredentialHandlers(
+  main.ipc,
+  () => store,
+  () => secretStore,
+  () => {
     main.sendToWindow('store:changed', main.getStoreSnapshot ? main.getStoreSnapshot() : store.store);
   }
 );
@@ -672,5 +694,105 @@ main.ipc.handle('util:select-file', async (_, path, filters) => {
 });
 main.ipc.handle('util:open-directory', (_, path) => shell.openPath(path));
 main.ipc.handle('util:open-external', (_, url) => shell.openExternal(url));
+
+//#endregion
+
+//#region Codex (ChatGPT OAuth) handlers
+
+main.ipc.handle('codex:login', () => loginWithBrowser((url) => void shell.openExternal(url)));
+main.ipc.handle('codex:logout', () => codexLogout());
+main.ipc.handle('codex:status', () => codexStatus());
+
+//#endregion
+
+//#region GitHub account linking (OAuth device flow → github.com credential)
+
+// Stable credential id for the OAuth-linked github.com token, so link / unlink /
+// clone-time injection all reference the same SecretStore slot.
+const GITHUB_CRED_ID = 'github-oauth';
+const githubFetch = ((input, init) => net.fetch(input as string, init)) as typeof globalThis.fetch;
+
+const broadcastStore = (): void =>
+  main.sendToWindow('store:changed', main.getStoreSnapshot ? main.getStoreSnapshot() : store.store);
+
+const githubStatus = (): GithubStatus => {
+  const account = store.get('githubAccount');
+  return account ? { connected: true, account } : { connected: false };
+};
+
+main.ipc.handle('github:status', () => githubStatus());
+
+main.ipc.handle('github:link', async () => {
+  const { token, account } = await githubLink({
+    fetchFn: githubFetch,
+    openUrl: (url) => void shell.openExternal(url),
+    onCode: (code) => main.sendToWindow('github:device-code', code),
+  });
+  // The token becomes the host's git credential (replacing any prior entry for
+  // that host), so private clone/push works through the same injection path.
+  await secretStore.setGitToken(GITHUB_CRED_ID, token);
+  const creds = (store.get('gitCredentials') ?? []).filter((c) => c.id !== GITHUB_CRED_ID && c.host !== account.host);
+  const cred: GitCredential = {
+    id: GITHUB_CRED_ID,
+    host: account.host,
+    username: 'x-access-token',
+    last4: tokenLast4(token),
+    label: `@${account.login} (GitHub)`,
+    createdAt: Date.now(),
+  };
+  store.set('gitCredentials', [...creds, cred]);
+  store.set('githubAccount', account);
+  broadcastStore();
+  return githubStatus();
+});
+
+main.ipc.handle('github:unlink', async () => {
+  await secretStore.deleteGitToken(GITHUB_CRED_ID);
+  store.set(
+    'gitCredentials',
+    (store.get('gitCredentials') ?? []).filter((c) => c.id !== GITHUB_CRED_ID)
+  );
+  store.delete('githubAccount');
+  broadcastStore();
+});
+
+const requireGithubToken = async (): Promise<string> => {
+  const token = await secretStore.getGitToken(GITHUB_CRED_ID);
+  if (!token) {
+    throw new Error('No GitHub account linked');
+  }
+  return token;
+};
+
+main.ipc.handle('github:list-owners', async (): Promise<GithubOwner[]> => {
+  const token = await requireGithubToken();
+  const account = store.get('githubAccount');
+  // The linked user is always the first owner; their orgs follow.
+  const self: GithubOwner[] = account
+    ? [{ login: account.login, kind: 'user', ...(account.avatarUrl ? { avatarUrl: account.avatarUrl } : {}) }]
+    : [];
+  return [...self, ...(await githubListOrgs(githubFetch, token))];
+});
+
+main.ipc.handle('github:search-repos', async (_, query: GithubRepoQuery): Promise<RemoteRepo[]> => {
+  return githubSearchRepos(githubFetch, await requireGithubToken(), query);
+});
+
+//#endregion
+
+//#region Azure DevOps discovery (authenticated by the stored dev.azure.com PAT)
+
+const requireAzureToken = async (): Promise<string> => {
+  const cred = (store.get('gitCredentials') ?? []).find((c) => c.host === 'dev.azure.com');
+  const token = cred ? await secretStore.getGitToken(cred.id) : undefined;
+  if (!token) {
+    throw new Error('No Azure DevOps token — add a dev.azure.com credential first');
+  }
+  return token;
+};
+
+main.ipc.handle('azure:list-repos', async (_, input: { org: string; query: string }): Promise<RemoteRepo[]> => {
+  return azureListRepos(githubFetch, await requireAzureToken(), input.org, input.query);
+});
 
 //#endregion

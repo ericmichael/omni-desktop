@@ -7,13 +7,20 @@ export type SupervisorContext = {
   recentComments?: { author: string; content: string }[];
   /** Titles of blocking tickets that are not yet completed. */
   blockerTitles?: string[];
+  /**
+   * Where the agent should write persistent output — resolved per profile by
+   * the host (host dir / container `/workspace/.omni-artifacts/<id>`). Autopilot agents have no
+   * code-tab to inject this via session variables, so it's surfaced in the
+   * prompt; it must match where the launcher's ArtifactStore reads.
+   */
+  artifactsDir?: string;
 };
 
 /** Render optional context sections (project brief, comments, blockers). */
 const buildContextSection = (ctx?: SupervisorContext): string => {
   if (!ctx) {
-return '';
-}
+    return '';
+  }
   const parts: string[] = [];
 
   if (ctx.projectBrief) {
@@ -27,10 +34,14 @@ return '';
   }
 
   if (ctx.recentComments && ctx.recentComments.length > 0) {
-    const formatted = ctx.recentComments
-      .map((c) => `[${c.author}]: ${c.content}`)
-      .join('\n\n');
+    const formatted = ctx.recentComments.map((c) => `[${c.author}]: ${c.content}`).join('\n\n');
     parts.push(`\n\n## Recent Comments\n${formatted}`);
+  }
+
+  if (ctx.artifactsDir) {
+    parts.push(
+      `\n\n## Output for the user\nWrite progress notes, research, and any deliverables that should persist to \`${ctx.artifactsDir}\` — files there appear in this ticket's **Artifacts** tab in the launcher. Keep an accurate PR writeup current as you work (the **PR** tab reads these):\n- \`${ctx.artifactsDir}/pr/PR_TITLE.md\` — one short line (≤70 chars), no markdown.\n- \`${ctx.artifactsDir}/pr/PR_BODY.md\` — markdown with **Summary** and **Test plan** sections.\nRefresh these whenever the scope of your work shifts.`
+    );
   }
 
   return parts.join('');

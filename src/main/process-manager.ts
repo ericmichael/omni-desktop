@@ -12,10 +12,12 @@ import {
   type FetchFn,
 } from '@/main/agent-process';
 import type { IComputeClient } from '@/main/platform-client';
+import { gitTokenEnvName, resolveCredentialForUrl } from '@/shared/git-credentials';
 import type { IIpcListener } from '@/shared/ipc-listener';
 import type {
   AgentProcessStartOptions,
   AgentProcessStatus,
+  GitCredential,
   IpcRendererEvents,
   Project,
   SandboxPauseResult,
@@ -26,6 +28,9 @@ import type {
 export type ProcessManagerStoreData = {
   defaultProfileName: string;
   projects: Project[];
+  /** Stored git credential metadata (host-scoped). Tokens are read lazily via
+   *  `resolveGitToken`; this list only drives host matching. */
+  gitCredentials?: GitCredential[];
 };
 
 /**
@@ -46,6 +51,9 @@ export class ProcessManager {
   private fetchFn: FetchFn;
   private getStoreData: () => ProcessManagerStoreData;
   private getExtraEnv?: () => Record<string, string>;
+  /** Read a git token by credential id (from the SecretStore). Absent → no
+   *  private-remote auth (tokens never reach this class except through here). */
+  private resolveGitToken?: (credentialId: string) => Promise<string | undefined>;
   /**
    * When set, every launch uses this profile regardless of the per-project
    * override or user default. Cloud deployments set it to the ACI profiles so
@@ -63,24 +71,26 @@ export class ProcessManager {
     getStoreData?: () => ProcessManagerStoreData;
     /** Extra env for spawned `omni serve` (e.g. cloud `OMNI_RUNTIME_TOKEN`). */
     getExtraEnv?: () => Record<string, string>;
+    /** Read a git token by credential id, for private-remote auth at clone time. */
+    resolveGitToken?: (credentialId: string) => Promise<string | undefined>;
     /** Restrict launches to these profiles (cloud → the ACI profiles). The
      * user still picks among them; anything outside falls back to the default. */
     allowedProfileNames?: string[];
   }) {
     this.sendToWindow = arg.sendToWindow;
     this.fetchFn = arg.fetchFn ?? globalThis.fetch;
-    this.getStoreData = arg.getStoreData ?? (() => ({
-      defaultProfileName: 'host',
-      projects: [],
-    }));
+    this.getStoreData =
+      arg.getStoreData ??
+      (() => ({
+        defaultProfileName: 'host',
+        projects: [],
+      }));
     this.getExtraEnv = arg.getExtraEnv;
+    this.resolveGitToken = arg.resolveGitToken;
     this.allowedProfileNames = arg.allowedProfileNames;
   }
 
-  private resolveProfileName(
-    projectId: string | undefined,
-    override: string | undefined
-  ): string {
+  private resolveProfileName(projectId: string | undefined, override: string | undefined): string {
     const { defaultProfileName, projects } = this.getStoreData();
     const pick =
       override ??
@@ -109,8 +119,8 @@ export class ProcessManager {
     projectId: string | undefined
   ): { url: string; branch?: string } | undefined {
     if (profileName !== 'platform') {
-return undefined;
-}
+      return undefined;
+    }
     const { projects } = this.getStoreData();
 
     // Explicit git-remote project (single-source platform path; multi-source
@@ -139,8 +149,8 @@ return undefined;
         encoding: 'utf-8',
       }).trim();
       if (!url) {
-return undefined;
-}
+        return undefined;
+      }
 
       let branch: string | undefined;
       try {
@@ -150,9 +160,11 @@ return undefined;
           encoding: 'utf-8',
         }).trim();
         if (branch === 'HEAD') {
-branch = undefined;
-} // detached HEAD
-      } catch { /* ignore */ }
+          branch = undefined;
+        } // detached HEAD
+      } catch {
+        /* ignore */
+      }
 
       return branch ? { url, branch } : { url };
     } catch {
@@ -184,7 +196,7 @@ branch = undefined;
     return proc;
   }
 
-  private buildStartArg(opts: AgentProcessStartOptions): AgentProcessStartArg {
+  private async buildStartArg(opts: AgentProcessStartOptions): Promise<AgentProcessStartArg> {
     const profileName = this.resolveProfileName(opts.projectId, opts.profileNameOverride);
     const sources = this.resolveProjectSources(opts.workspaceDir, opts.projectId);
     const startArg: AgentProcessStartArg = {
@@ -205,7 +217,49 @@ branch = undefined;
     if (gitRepo) {
       startArg.gitRepo = gitRepo;
     }
+    // Resolve a stored credential for each private git-remote source, attach the
+    // auth hint to the descriptor, and collect the token env (value off-disk).
+    const gitTokenEnv = await this.resolveGitAuth(sources);
+    if (gitTokenEnv) {
+      startArg.gitTokenEnv = gitTokenEnv;
+    }
     return startArg;
+  }
+
+  /**
+   * For each ``git-remote`` source, match a stored credential by host and read
+   * its token. Mutates the source in place with an ``auth`` hint and returns the
+   * `{ tokenEnvName: token }` map to inject into the agent process env, or
+   * ``undefined`` when nothing matched. Tokens never touch disk or argv — only
+   * the env-var *name* rides along in the source descriptor.
+   */
+  private async resolveGitAuth(sources: AgentProcessSource[]): Promise<Record<string, string> | undefined> {
+    const resolve = this.resolveGitToken;
+    if (!resolve) {
+      return undefined;
+    }
+    const { gitCredentials } = this.getStoreData();
+    if (!gitCredentials?.length) {
+      return undefined;
+    }
+    const env: Record<string, string> = {};
+    for (const source of sources) {
+      if (source.kind !== 'git-remote') {
+        continue;
+      }
+      const cred = resolveCredentialForUrl(gitCredentials, source.repoUrl);
+      if (!cred) {
+        continue;
+      }
+      const token = await resolve(cred.id);
+      if (!token) {
+        continue;
+      }
+      const tokenEnv = gitTokenEnvName(cred.id);
+      source.auth = { tokenEnv, username: cred.username };
+      env[tokenEnv] = token;
+    }
+    return Object.keys(env).length > 0 ? env : undefined;
   }
 
   /**
@@ -215,10 +269,7 @@ branch = undefined;
    * ``.git`` entry, since the launcher's stored ``gitDetected`` flag
    * isn't guaranteed to be fresh for every code path that lands here.
    */
-  private resolveProjectSources(
-    workspaceDir: string,
-    projectId: string | undefined
-  ): AgentProcessSource[] {
+  private resolveProjectSources(workspaceDir: string, projectId: string | undefined): AgentProcessSource[] {
     // Translate each Project.source (which carries id + mountName) into
     // the AgentProcessSource shape ``omni serve`` understands. Per-source
     // git-detection happens here so the wire format already commits to
@@ -252,21 +303,23 @@ branch = undefined;
     // synthesize one source from the workspaceDir we were given,
     // defaulting mountName to the basename.
     if (!workspaceDir) {
-return [];
-}
+      return [];
+    }
     this.ensureWorkspaceDir(workspaceDir);
     const mountName = path.basename(workspaceDir) || 'workspace';
-    return [{
-      mountName,
-      kind: this.directoryHasGit(workspaceDir) ? 'local-git' : 'local',
-      workspaceDir,
-    }];
+    return [
+      {
+        mountName,
+        kind: this.directoryHasGit(workspaceDir) ? 'local-git' : 'local',
+        workspaceDir,
+      },
+    ];
   }
 
   private directoryHasGit(workspaceDir: string): boolean {
     if (!workspaceDir) {
-return false;
-}
+      return false;
+    }
     try {
       return existsSync(path.join(workspaceDir, '.git'));
     } catch {
@@ -283,8 +336,8 @@ return false;
    */
   private ensureWorkspaceDir(workspaceDir: string): void {
     if (!workspaceDir) {
-return;
-}
+      return;
+    }
     try {
       mkdirSync(workspaceDir, { recursive: true });
     } catch {
@@ -292,9 +345,9 @@ return;
     }
   }
 
-  start = (processId: string, opts: AgentProcessStartOptions): void => {
+  start = async (processId: string, opts: AgentProcessStartOptions): Promise<void> => {
     this.lastStartArgs.set(processId, opts);
-    const startArg = this.buildStartArg(opts);
+    const startArg = await this.buildStartArg(opts);
     const mode = this.resolveMode(startArg.profileName);
     const proc = this.getOrCreate(processId, mode);
     proc.start(startArg);
@@ -303,8 +356,8 @@ return;
   stop = async (processId: string): Promise<void> => {
     const proc = this.processes.get(processId);
     if (!proc) {
-return;
-}
+      return;
+    }
     await proc.stop();
     this.processes.delete(processId);
   };
@@ -313,20 +366,20 @@ return;
     const lastOpts = this.lastStartArgs.get(processId);
     const merged: AgentProcessStartOptions = {
       workspaceDir: opts.workspaceDir || lastOpts?.workspaceDir || '',
-      ...(opts.projectId ?? lastOpts?.projectId
+      ...((opts.projectId ?? lastOpts?.projectId)
         ? { projectId: (opts.projectId ?? lastOpts?.projectId) as string }
         : {}),
-      ...(opts.profileNameOverride ?? lastOpts?.profileNameOverride
+      ...((opts.profileNameOverride ?? lastOpts?.profileNameOverride)
         ? { profileNameOverride: (opts.profileNameOverride ?? lastOpts?.profileNameOverride) as string }
         : {}),
-      ...(opts.sessionId ?? lastOpts?.sessionId
+      ...((opts.sessionId ?? lastOpts?.sessionId)
         ? { sessionId: (opts.sessionId ?? lastOpts?.sessionId) as string }
         : {}),
-      ...(opts.containerId ?? lastOpts?.containerId
+      ...((opts.containerId ?? lastOpts?.containerId)
         ? { containerId: (opts.containerId ?? lastOpts?.containerId) as string }
         : {}),
     };
-    const startArg = this.buildStartArg(merged);
+    const startArg = await this.buildStartArg(merged);
     const mode = this.resolveMode(startArg.profileName);
     const proc = this.getOrCreate(processId, mode);
     await proc.rebuild(startArg);
@@ -335,8 +388,8 @@ return;
   getStatus = (processId: string): WithTimestamp<AgentProcessStatus> => {
     const proc = this.processes.get(processId);
     if (proc) {
-return proc.getStatus();
-}
+      return proc.getStatus();
+    }
     return { type: 'uninitialized', timestamp: Date.now() };
   };
 
@@ -347,24 +400,24 @@ return proc.getStatus();
   pause = async (processId: string): Promise<SandboxPauseResult> => {
     const proc = this.processes.get(processId);
     if (!proc) {
-return { ok: false, supported: false, reason: 'process not found' };
-}
+      return { ok: false, supported: false, reason: 'process not found' };
+    }
     return proc.pause();
   };
 
   unpause = async (processId: string): Promise<SandboxPauseResult> => {
     const proc = this.processes.get(processId);
     if (!proc) {
-return { ok: false, supported: false, reason: 'process not found' };
-}
+      return { ok: false, supported: false, reason: 'process not found' };
+    }
     return proc.unpause();
   };
 
   switchSandbox = async (processId: string, profileName: string): Promise<SandboxSwitchResult> => {
     const proc = this.processes.get(processId);
     if (!proc) {
-return { ok: false, reason: 'process not found' };
-}
+      return { ok: false, reason: 'process not found' };
+    }
     return proc.switchSandbox(profileName);
   };
 
@@ -379,12 +432,12 @@ return { ok: false, reason: 'process not found' };
   getRunningWsUrlForTicket(ticketId: string, codeTabs: Array<{ id: string; ticketId?: string }>): string | null {
     for (const tab of codeTabs) {
       if (tab.ticketId !== ticketId) {
-continue;
-}
+        continue;
+      }
       const proc = this.processes.get(tab.id);
       if (!proc) {
-continue;
-}
+        continue;
+      }
       const status = proc.getStatus();
       if (status.type === 'running' && status.data.wsUrl) {
         return status.data.wsUrl;
@@ -404,12 +457,12 @@ continue;
   getProjectContainerId(projectId: string): string | null {
     for (const [processId, opts] of this.lastStartArgs.entries()) {
       if (opts.projectId !== projectId) {
-continue;
-}
+        continue;
+      }
       const proc = this.processes.get(processId);
       if (!proc) {
-continue;
-}
+        continue;
+      }
       const status = proc.getStatus();
       // ``running`` is the post-connect state; ``connecting`` already has
       // ``data.containerId`` because the readiness payload arrives before
@@ -463,10 +516,11 @@ export const createProcessManager = (arg: {
   sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   fetchFn?: FetchFn;
   getStoreData?: () => ProcessManagerStoreData;
+  resolveGitToken?: (credentialId: string) => Promise<string | undefined>;
 }) => {
-  const { ipc, sendToWindow, fetchFn, getStoreData } = arg;
+  const { ipc, sendToWindow, fetchFn, getStoreData, resolveGitToken } = arg;
 
-  const processManager = new ProcessManager({ sendToWindow, fetchFn, getStoreData });
+  const processManager = new ProcessManager({ sendToWindow, fetchFn, getStoreData, resolveGitToken });
   const channels = registerProcessHandlers(ipc, () => processManager);
 
   const cleanup = async () => {

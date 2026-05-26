@@ -292,15 +292,7 @@ const stopPropagation = (e: React.SyntheticEvent) => e.stopPropagation();
  * Fluent's native chevron is visually hidden, so this is the real toggle.
  */
 const BranchIcon = memo(
-  ({
-    icon,
-    value,
-    onToggle,
-  }: {
-    icon: React.ReactNode;
-    value: string;
-    onToggle: (value: string) => void;
-  }) => {
+  ({ icon, value, onToggle }: { icon: React.ReactNode; value: string; onToggle: (value: string) => void }) => {
     const styles = useStyles();
     const handleClick = useCallback(
       (e: React.MouseEvent) => {
@@ -310,12 +302,7 @@ const BranchIcon = memo(
       [value, onToggle]
     );
     return (
-      <span
-        role="presentation"
-        className={styles.branchIconStack}
-        onMouseDown={stopPropagation}
-        onClick={handleClick}
-      >
+      <span role="presentation" className={styles.branchIconStack} onMouseDown={stopPropagation} onClick={handleClick}>
         <span className={`branch-icon-default ${styles.branchIconDefault}`}>{icon}</span>
         <ChevronRight16Regular className={`branch-icon-chevron ${styles.branchIconChevron}`} />
       </span>
@@ -328,8 +315,8 @@ BranchIcon.displayName = 'BranchIcon';
 function shortenPath(fullPath: string): string {
   const parts = fullPath.replace(/\\/g, '/').split('/').filter(Boolean);
   if (parts.length <= 2) {
-return fullPath;
-}
+    return fullPath;
+  }
   return parts.slice(-2).join('/');
 }
 
@@ -343,8 +330,8 @@ function shortenRepoUrl(url: string): string {
     // Not a valid URL — try extracting from ssh-style (git@host:org/repo.git)
     const sshMatch = url.match(/:([^/].*?)(?:\.git)?$/);
     if (sshMatch) {
-return sshMatch[1]!;
-}
+      return sshMatch[1]!;
+    }
     return url;
   }
 }
@@ -362,6 +349,10 @@ type SidebarTreeProps = {
   onCreateMilestone?: (projectId: ProjectId) => void;
   /** Called when user requests to edit an existing milestone. */
   onEditMilestone?: (milestone: Milestone) => void;
+  /** Called when user requests to add a source to a project. */
+  onAddSource?: (projectId: ProjectId) => void;
+  /** Called when user requests to remove a source from a project. */
+  onRemoveSource?: (projectId: ProjectId, sourceId: string) => void;
 };
 
 /** Build child pages for a given parentId, sorted by sortOrder. */
@@ -443,7 +434,11 @@ const PageTreeItem = memo(
 
     const actionButtons = (
       // eslint-disable-next-line jsx-a11y/no-static-element-interactions
-      <span className={`action-buttons ${styles.actionButtons}`} onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+      <span
+        className={`action-buttons ${styles.actionButtons}`}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+      >
         <button
           type="button"
           aria-label="Add sub-page"
@@ -543,60 +538,85 @@ PageTreeItem.displayName = 'PageTreeItem';
 
 // ─── Ticket tree item ────────────────────────────────────────────────────────
 
-const TicketTreeItem = memo(({ ticket, onSelect, onItemClick }: { ticket: Ticket; onSelect: (value: string) => void; onItemClick: (value: string) => void }) => {
-  const styles = useStyles();
-  const phase = ticket.phase;
-  const isRunning = phase != null && isActivePhase(phase);
-  const value = `ticket:${ticket.id}`;
+const TicketTreeItem = memo(
+  ({
+    ticket,
+    onSelect,
+    onItemClick,
+  }: {
+    ticket: Ticket;
+    onSelect: (value: string) => void;
+    onItemClick: (value: string) => void;
+  }) => {
+    const styles = useStyles();
+    const phase = ticket.phase;
+    const isRunning = phase != null && isActivePhase(phase);
+    const value = `ticket:${ticket.id}`;
 
-  const actionButtons = (
-    // eslint-disable-next-line jsx-a11y/no-static-element-interactions
-    <span className={`action-buttons ${styles.actionButtons}`} onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
-      {isRunning && <span className={styles.liveDot} />}
-      <Menu positioning={{ position: 'below', align: 'end' }}>
-        <MenuTrigger>
-          <button type="button" aria-label="Ticket actions" className={styles.nativeBtn}>
-            <MoreHorizontal16Regular />
-          </button>
-        </MenuTrigger>
-        <MenuPopover>
-          <MenuList>
-            <MenuItem icon={<Open20Regular />} onClick={() => void openTicketInCode(ticket.id)}>
-              Open in Code
-            </MenuItem>
-            {!isRunning && !ticket.resolution && (
-              <MenuItem
-                icon={<Play20Filled />}
-                onClick={() => {
-                  void ticketApi.startSupervisor(ticket.id);
-                }}
-              >
-                Start autopilot
-              </MenuItem>
-            )}
-          </MenuList>
-        </MenuPopover>
-      </Menu>
-    </span>
-  );
-
-  return (
-    <TreeItem itemType="leaf" value={value} className={styles.hoverableItem} onClick={() => onItemClick(value)}>
-      <TreeItemLayout
-        iconBefore={<Document16Regular className={styles.icon} />}
-        aside={isRunning ? <span className={styles.liveDot} /> : actionButtons}
+    const actionButtons = (
+      // eslint-disable-next-line jsx-a11y/no-static-element-interactions
+      <span
+        className={`action-buttons ${styles.actionButtons}`}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
       >
-        <span className={styles.truncate}>{ticket.title}</span>
-      </TreeItemLayout>
-    </TreeItem>
-  );
-});
+        {isRunning && <span className={styles.liveDot} />}
+        <Menu positioning={{ position: 'below', align: 'end' }}>
+          <MenuTrigger>
+            <button type="button" aria-label="Ticket actions" className={styles.nativeBtn}>
+              <MoreHorizontal16Regular />
+            </button>
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              <MenuItem icon={<Open20Regular />} onClick={() => void openTicketInCode(ticket.id)}>
+                Open in Code
+              </MenuItem>
+              {!isRunning && !ticket.resolution && (
+                <MenuItem
+                  icon={<Play20Filled />}
+                  onClick={() => {
+                    void ticketApi.startSupervisor(ticket.id);
+                  }}
+                >
+                  Start autopilot
+                </MenuItem>
+              )}
+            </MenuList>
+          </MenuPopover>
+        </Menu>
+      </span>
+    );
+
+    return (
+      <TreeItem itemType="leaf" value={value} className={styles.hoverableItem} onClick={() => onItemClick(value)}>
+        <TreeItemLayout
+          iconBefore={<Document16Regular className={styles.icon} />}
+          aside={isRunning ? <span className={styles.liveDot} /> : actionButtons}
+        >
+          <span className={styles.truncate}>{ticket.title}</span>
+        </TreeItemLayout>
+      </TreeItem>
+    );
+  }
+);
 TicketTreeItem.displayName = 'TicketTreeItem';
 
 // ─── Main tree ───────────────────────────────────────────────────────────────
 
 export const SidebarTree = memo(
-  ({ projects, pages, milestones, tickets, onSelect, onExpandProject, onCreateMilestone, onEditMilestone }: SidebarTreeProps) => {
+  ({
+    projects,
+    pages,
+    milestones,
+    tickets,
+    onSelect,
+    onExpandProject,
+    onCreateMilestone,
+    onEditMilestone,
+    onAddSource,
+    onRemoveSource,
+  }: SidebarTreeProps) => {
     const styles = useStyles();
     const [openItems, setOpenItems] = useState<Set<string>>(new Set());
     const rename = useInlineRename();
@@ -613,10 +633,10 @@ export const SidebarTree = memo(
           setOpenItems((prev) => {
             const next = new Set(prev);
             if (data.open) {
-next.add(value);
-} else {
-next.delete(value);
-}
+              next.add(value);
+            } else {
+              next.delete(value);
+            }
             return next;
           });
           // Fetch data when expanding a project
@@ -627,8 +647,8 @@ next.delete(value);
           // Label click on a branch: always open (never toggle closed) + navigate
           setOpenItems((prev) => {
             if (prev.has(value)) {
-return prev;
-}
+              return prev;
+            }
             const next = new Set(prev);
             next.add(value);
             return next;
@@ -637,8 +657,8 @@ return prev;
           handledByOpenChange.current = true;
           // Reset after this event cycle
           requestAnimationFrame(() => {
- handledByOpenChange.current = false; 
-});
+            handledByOpenChange.current = false;
+          });
         }
       },
       [onSelect, onExpandProject]
@@ -735,18 +755,19 @@ return prev;
     }, [projects, milestones, tickets, pages]);
 
     return (
-      <Tree
-        aria-label="Project tree"
-        className={styles.tree}
-        openItems={openItems}
-        onOpenChange={handleOpenChange}
-      >
+      <Tree aria-label="Project tree" className={styles.tree} openItems={openItems} onOpenChange={handleOpenChange}>
         {projects.map((project) => {
           const data = projectData[project.id];
           if (!data) {
-return null;
-}
-          const { milestones: projectMilestones, ticketsByMilestone, looseTickets, rootPages, activeTicketCount } = data;
+            return null;
+          }
+          const {
+            milestones: projectMilestones,
+            ticketsByMilestone,
+            looseTickets,
+            rootPages,
+            activeTicketCount,
+          } = data;
 
           const projectValue = `project:${project.id}`;
 
@@ -764,19 +785,18 @@ return null;
               onMouseDown={stopPropagation}
               onClick={stopPropagation}
             >
-              <button
-                type="button"
-                aria-label="Unpin project"
-                className={styles.nativeBtn}
-                onClick={handleProjectPin}
-              >
+              <button type="button" aria-label="Unpin project" className={styles.nativeBtn} onClick={handleProjectPin}>
                 <Pin16Filled />
               </button>
             </span>
           ) : null;
           const projectActions = (
             // eslint-disable-next-line jsx-a11y/no-static-element-interactions
-            <span className={`action-buttons ${styles.actionButtons}`} onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+            <span
+              className={`action-buttons ${styles.actionButtons}`}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            >
               {!projectPinned && (
                 <button
                   type="button"
@@ -795,8 +815,8 @@ return null;
                   e.stopPropagation();
                   const rootPage = Object.values(pages).find((p) => p.projectId === project.id && p.isRoot);
                   if (!rootPage) {
-return;
-}
+                    return;
+                  }
                   const siblings = Object.values(pages).filter((p) => p.parentId === rootPage.id);
                   const maxSort = siblings.reduce((max, p) => Math.max(max, p.sortOrder), 0);
                   void pageApi
@@ -832,8 +852,8 @@ return;
                       onClick={() => {
                         const rootPage = Object.values(pages).find((p) => p.projectId === project.id && p.isRoot);
                         if (!rootPage) {
-return;
-}
+                          return;
+                        }
                         const siblings = Object.values(pages).filter((p) => p.parentId === rootPage.id);
                         const maxSort = siblings.reduce((max, p) => Math.max(max, p.sortOrder), 0);
                         void pageApi
@@ -874,258 +894,388 @@ return;
               className={mergeClasses(styles.hoverableItem, styles.hoverableBranch)}
               onClick={() => handleItemClick(projectValue)}
             >
-                <TreeItemLayout
-                  iconBefore={<BranchIcon icon={<Folder16Regular className={styles.icon} />} value={projectValue} onToggle={handleToggle} />}
-                  aside={projectAside}
-                >
-                  <span className={styles.titleRow}>
-                    <span className={styles.titleRowMain}>{project.label}</span>
-                    <span className={`${styles.badge} ${styles.titleRowTrail}`}>({activeTicketCount})</span>
-                  </span>
-                </TreeItemLayout>
+              <TreeItemLayout
+                iconBefore={
+                  <BranchIcon
+                    icon={<Folder16Regular className={styles.icon} />}
+                    value={projectValue}
+                    onToggle={handleToggle}
+                  />
+                }
+                aside={projectAside}
+              >
+                <span className={styles.titleRow}>
+                  <span className={styles.titleRowMain}>{project.label}</span>
+                  <span className={`${styles.badge} ${styles.titleRowTrail}`}>({activeTicketCount})</span>
+                </span>
+              </TreeItemLayout>
 
               <Tree>
-                  {/* Pages */}
-                  {rootPages.length > 0 && (
-                    <TreeItem itemType="branch" value={`pages:${project.id}`} className={styles.hoverableBranch}>
-                      <TreeItemLayout iconBefore={<BranchIcon icon={<DocumentMultiple16Regular className={styles.icon} />} value={`pages:${project.id}`} onToggle={handleToggle} />}>
-                        <span className={styles.titleRow}>
-                          <span className={styles.titleRowMain}>Pages</span>
-                          <span className={`${styles.badge} ${styles.titleRowTrail}`}>({rootPages.length})</span>
-                        </span>
-                      </TreeItemLayout>
-                      <Tree>
-                        {rootPages.map((page) => (
-                          <PageTreeItem
-                            key={page.id}
-                            page={page}
-                            pages={pages}
-                            onSelect={onSelect}
-                            renamingId={rename.renamingId}
-                            renameValue={rename.renameValue}
-                            setRenameValue={rename.setRenameValue}
-                            onStartRename={rename.startRename}
-                            onFinishRename={handleFinishRename}
-                            onCancelRename={rename.cancelRename}
-                            onItemClick={handleItemClick}
-                            onToggle={handleToggle}
-                          />
-                        ))}
-                      </Tree>
-                    </TreeItem>
-                  )}
-
-                  {/* Board — branch grouping milestones + loose-ticket backlog.
-                      Clicking the label navigates to the unified board view
-                      (matches project rows); the chevron just expands. */}
-                  <TreeItem
-                    itemType="branch"
-                    value={`board:${project.id}`}
-                    className={mergeClasses(styles.hoverableItem, styles.hoverableBranch)}
-                    onClick={() => handleItemClick(`board:${project.id}`)}
-                  >
-                    <TreeItemLayout iconBefore={<BranchIcon icon={<Board16Regular className={styles.icon} />} value={`board:${project.id}`} onToggle={handleToggle} />}>
+                {/* Pages */}
+                {rootPages.length > 0 && (
+                  <TreeItem itemType="branch" value={`pages:${project.id}`} className={styles.hoverableBranch}>
+                    <TreeItemLayout
+                      iconBefore={
+                        <BranchIcon
+                          icon={<DocumentMultiple16Regular className={styles.icon} />}
+                          value={`pages:${project.id}`}
+                          onToggle={handleToggle}
+                        />
+                      }
+                    >
                       <span className={styles.titleRow}>
-                        <span className={styles.titleRowMain}>Board</span>
-                        <span className={`${styles.badge} ${styles.titleRowTrail}`}>({activeTicketCount})</span>
+                        <span className={styles.titleRowMain}>Pages</span>
+                        <span className={`${styles.badge} ${styles.titleRowTrail}`}>({rootPages.length})</span>
                       </span>
                     </TreeItemLayout>
                     <Tree>
-                      {/* Milestones */}
-                  {projectMilestones.map((milestone) => {
-                    const milestoneTickets = ticketsByMilestone[milestone.id] ?? [];
-                    const milestoneValue = `milestone:${milestone.id}:${project.id}`;
+                      {rootPages.map((page) => (
+                        <PageTreeItem
+                          key={page.id}
+                          page={page}
+                          pages={pages}
+                          onSelect={onSelect}
+                          renamingId={rename.renamingId}
+                          renameValue={rename.renameValue}
+                          setRenameValue={rename.setRenameValue}
+                          onStartRename={rename.startRename}
+                          onFinishRename={handleFinishRename}
+                          onCancelRename={rename.cancelRename}
+                          onItemClick={handleItemClick}
+                          onToggle={handleToggle}
+                        />
+                      ))}
+                    </Tree>
+                  </TreeItem>
+                )}
 
-                    const handleNewMilestoneTicket = () => {
-                      void ticketApi
-                        .addTicket({
-                          projectId: project.id,
-                          milestoneId: milestone.id,
-                          title: 'Untitled',
-                          description: '',
-                          priority: 'medium',
-                          blockedBy: [],
-                        })
-                        .then((ticket) => ticketApi.goToTicket(ticket.id));
-                    };
+                {/* Board — branch grouping milestones + loose-ticket backlog.
+                      Clicking the label navigates to the unified board view
+                      (matches project rows); the chevron just expands. */}
+                <TreeItem
+                  itemType="branch"
+                  value={`board:${project.id}`}
+                  className={mergeClasses(styles.hoverableItem, styles.hoverableBranch)}
+                  onClick={() => handleItemClick(`board:${project.id}`)}
+                >
+                  <TreeItemLayout
+                    iconBefore={
+                      <BranchIcon
+                        icon={<Board16Regular className={styles.icon} />}
+                        value={`board:${project.id}`}
+                        onToggle={handleToggle}
+                      />
+                    }
+                  >
+                    <span className={styles.titleRow}>
+                      <span className={styles.titleRowMain}>Board</span>
+                      <span className={`${styles.badge} ${styles.titleRowTrail}`}>({activeTicketCount})</span>
+                    </span>
+                  </TreeItemLayout>
+                  <Tree>
+                    {/* Milestones */}
+                    {projectMilestones.map((milestone) => {
+                      const milestoneTickets = ticketsByMilestone[milestone.id] ?? [];
+                      const milestoneValue = `milestone:${milestone.id}:${project.id}`;
 
-                    const milestonePinned = milestone.pinnedAt !== undefined;
-                    const handleMilestonePin = (e: React.MouseEvent) => {
-                      e.stopPropagation();
-                      void milestoneApi.updateMilestone(milestone.id, {
-                        pinnedAt: milestonePinned ? undefined : Date.now(),
-                      });
-                    };
-                    const milestonePinSlot = milestonePinned ? (
+                      const handleNewMilestoneTicket = () => {
+                        void ticketApi
+                          .addTicket({
+                            projectId: project.id,
+                            milestoneId: milestone.id,
+                            title: 'Untitled',
+                            description: '',
+                            priority: 'medium',
+                            blockedBy: [],
+                          })
+                          .then((ticket) => ticketApi.goToTicket(ticket.id));
+                      };
+
+                      const milestonePinned = milestone.pinnedAt !== undefined;
+                      const handleMilestonePin = (e: React.MouseEvent) => {
+                        e.stopPropagation();
+                        void milestoneApi.updateMilestone(milestone.id, {
+                          pinnedAt: milestonePinned ? undefined : Date.now(),
+                        });
+                      };
+                      const milestonePinSlot = milestonePinned ? (
+                        <span
+                          role="presentation"
+                          className={styles.pinSlotVisible}
+                          onMouseDown={stopPropagation}
+                          onClick={stopPropagation}
+                        >
+                          <button
+                            type="button"
+                            aria-label="Unpin milestone"
+                            className={styles.nativeBtn}
+                            onClick={handleMilestonePin}
+                          >
+                            <Pin16Filled />
+                          </button>
+                        </span>
+                      ) : null;
+
+                      const milestoneActions = (
+                        // eslint-disable-next-line jsx-a11y/no-static-element-interactions
+                        <span
+                          className={`action-buttons ${styles.actionButtons}`}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {!milestonePinned && (
+                            <button
+                              type="button"
+                              aria-label="Pin milestone to this week"
+                              className={styles.nativeBtn}
+                              onClick={handleMilestonePin}
+                            >
+                              <Pin16Regular />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            aria-label="New ticket"
+                            className={styles.nativeBtn}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleNewMilestoneTicket();
+                            }}
+                          >
+                            <Add16Regular />
+                          </button>
+                          <Menu positioning={{ position: 'below', align: 'end' }}>
+                            <MenuTrigger>
+                              <button type="button" aria-label="Milestone actions" className={styles.nativeBtn}>
+                                <MoreHorizontal16Regular />
+                              </button>
+                            </MenuTrigger>
+                            <MenuPopover>
+                              <MenuList>
+                                <MenuItem icon={<Add16Regular />} onClick={handleNewMilestoneTicket}>
+                                  New ticket
+                                </MenuItem>
+                                <MenuItem icon={<Edit20Regular />} onClick={() => onEditMilestone?.(milestone)}>
+                                  Edit milestone
+                                </MenuItem>
+                                <MenuDivider />
+                                <MenuItem
+                                  icon={<Checkmark12Regular />}
+                                  onClick={() =>
+                                    void milestoneApi.updateMilestone(milestone.id, { status: 'completed' })
+                                  }
+                                >
+                                  Complete
+                                </MenuItem>
+                                <MenuItem
+                                  onClick={() =>
+                                    void milestoneApi.updateMilestone(milestone.id, { status: 'archived' })
+                                  }
+                                >
+                                  Archive
+                                </MenuItem>
+                                <MenuDivider />
+                                <MenuItem
+                                  icon={<Delete20Regular />}
+                                  onClick={() => void milestoneApi.removeMilestone(milestone.id)}
+                                >
+                                  Delete
+                                </MenuItem>
+                              </MenuList>
+                            </MenuPopover>
+                          </Menu>
+                        </span>
+                      );
+
+                      const milestoneAside = (
+                        <>
+                          {milestonePinSlot}
+                          {milestoneActions}
+                        </>
+                      );
+
+                      const milestoneIsBranch = milestoneTickets.length > 0;
+                      return (
+                        <TreeItem
+                          key={milestone.id}
+                          itemType={milestoneIsBranch ? 'branch' : 'leaf'}
+                          value={milestoneValue}
+                          className={mergeClasses(styles.hoverableItem, milestoneIsBranch && styles.hoverableBranch)}
+                          onClick={() => handleItemClick(milestoneValue)}
+                        >
+                          <TreeItemLayout
+                            iconBefore={
+                              milestoneIsBranch ? (
+                                <BranchIcon
+                                  icon={<Flag16Regular className={styles.icon} />}
+                                  value={milestoneValue}
+                                  onToggle={handleToggle}
+                                />
+                              ) : (
+                                <Flag16Regular className={styles.icon} />
+                              )
+                            }
+                            aside={milestoneAside}
+                          >
+                            <span className={styles.titleRow}>
+                              <span className={styles.titleRowMain}>{milestone.title}</span>
+                              <span className={`${styles.badge} ${styles.titleRowTrail}`}>
+                                ({milestoneTickets.length})
+                              </span>
+                            </span>
+                          </TreeItemLayout>
+                          {milestoneTickets.length > 0 && (
+                            <Tree>
+                              {milestoneTickets.map((ticket) => (
+                                <TicketTreeItem
+                                  key={ticket.id}
+                                  ticket={ticket}
+                                  onSelect={onSelect}
+                                  onItemClick={handleItemClick}
+                                />
+                              ))}
+                            </Tree>
+                          )}
+                        </TreeItem>
+                      );
+                    })}
+
+                    {/* Loose tickets (no milestone) */}
+                    {looseTickets.length > 0 && (
+                      <TreeItem itemType="branch" value={`backlog:${project.id}`} className={styles.hoverableBranch}>
+                        <TreeItemLayout
+                          iconBefore={
+                            <BranchIcon
+                              icon={<TaskListSquareLtr16Regular className={styles.icon} />}
+                              value={`backlog:${project.id}`}
+                              onToggle={handleToggle}
+                            />
+                          }
+                        >
+                          <span className={styles.titleRow}>
+                            <span className={styles.titleRowMain}>Backlog</span>
+                            <span className={`${styles.badge} ${styles.titleRowTrail}`}>({looseTickets.length})</span>
+                          </span>
+                        </TreeItemLayout>
+                        <Tree>
+                          {looseTickets.map((ticket) => (
+                            <TicketTreeItem
+                              key={ticket.id}
+                              ticket={ticket}
+                              onSelect={onSelect}
+                              onItemClick={handleItemClick}
+                            />
+                          ))}
+                        </Tree>
+                      </TreeItem>
+                    )}
+                  </Tree>
+                </TreeItem>
+
+                {/* Sources — always a branch so the + (add) affordance is
+                      reachable even with zero sources. Each leaf has a ⋯ Remove. */}
+                <TreeItem
+                  itemType="branch"
+                  value={`sources:${project.id}`}
+                  className={mergeClasses(styles.hoverableItem, styles.hoverableBranch)}
+                >
+                  <TreeItemLayout
+                    iconBefore={
+                      <BranchIcon
+                        icon={<Link16Regular className={styles.icon} />}
+                        value={`sources:${project.id}`}
+                        onToggle={handleToggle}
+                      />
+                    }
+                    aside={
                       <span
-                        role="presentation"
-                        className={styles.pinSlotVisible}
+                        className={`action-buttons ${styles.actionButtons}`}
                         onMouseDown={stopPropagation}
                         onClick={stopPropagation}
                       >
                         <button
                           type="button"
-                          aria-label="Unpin milestone"
-                          className={styles.nativeBtn}
-                          onClick={handleMilestonePin}
-                        >
-                          <Pin16Filled />
-                        </button>
-                      </span>
-                    ) : null;
-
-                    const milestoneActions = (
-                      // eslint-disable-next-line jsx-a11y/no-static-element-interactions
-                      <span className={`action-buttons ${styles.actionButtons}`} onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
-                        {!milestonePinned && (
-                          <button
-                            type="button"
-                            aria-label="Pin milestone to this week"
-                            className={styles.nativeBtn}
-                            onClick={handleMilestonePin}
-                          >
-                            <Pin16Regular />
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          aria-label="New ticket"
+                          aria-label="Add source"
                           className={styles.nativeBtn}
                           onClick={(e) => {
- e.stopPropagation(); handleNewMilestoneTicket();
-}}
+                            e.stopPropagation();
+                            onAddSource?.(project.id);
+                          }}
                         >
                           <Add16Regular />
                         </button>
-                        <Menu positioning={{ position: 'below', align: 'end' }}>
-                          <MenuTrigger>
-                            <button type="button" aria-label="Milestone actions" className={styles.nativeBtn}>
-                              <MoreHorizontal16Regular />
-                            </button>
-                          </MenuTrigger>
-                          <MenuPopover>
-                            <MenuList>
-                              <MenuItem icon={<Add16Regular />} onClick={handleNewMilestoneTicket}>
-                                New ticket
-                              </MenuItem>
-                              <MenuItem icon={<Edit20Regular />} onClick={() => onEditMilestone?.(milestone)}>
-                                Edit milestone
-                              </MenuItem>
-                              <MenuDivider />
-                              <MenuItem
-                                icon={<Checkmark12Regular />}
-                                onClick={() => void milestoneApi.updateMilestone(milestone.id, { status: 'completed' })}
-                              >
-                                Complete
-                              </MenuItem>
-                              <MenuItem
-                                onClick={() => void milestoneApi.updateMilestone(milestone.id, { status: 'archived' })}
-                              >
-                                Archive
-                              </MenuItem>
-                              <MenuDivider />
-                              <MenuItem
-                                icon={<Delete20Regular />}
-                                onClick={() => void milestoneApi.removeMilestone(milestone.id)}
-                              >
-                                Delete
-                              </MenuItem>
-                            </MenuList>
-                          </MenuPopover>
-                        </Menu>
                       </span>
-                    );
-
-                    const milestoneAside = (
-                      <>
-                        {milestonePinSlot}
-                        {milestoneActions}
-                      </>
-                    );
-
-                    const milestoneIsBranch = milestoneTickets.length > 0;
-                    return (
-                      <TreeItem
-                        key={milestone.id}
-                        itemType={milestoneIsBranch ? 'branch' : 'leaf'}
-                        value={milestoneValue}
-                        className={mergeClasses(styles.hoverableItem, milestoneIsBranch && styles.hoverableBranch)}
-                        onClick={() => handleItemClick(milestoneValue)}
-                      >
-                        <TreeItemLayout
-                          iconBefore={
-                            milestoneIsBranch
-                              ? <BranchIcon icon={<Flag16Regular className={styles.icon} />} value={milestoneValue} onToggle={handleToggle} />
-                              : <Flag16Regular className={styles.icon} />
-                          }
-                          aside={milestoneAside}
-                        >
-                          <span className={styles.titleRow}>
-                            <span className={styles.titleRowMain}>{milestone.title}</span>
-                            <span className={`${styles.badge} ${styles.titleRowTrail}`}>({milestoneTickets.length})</span>
-                          </span>
-                        </TreeItemLayout>
-                        {milestoneTickets.length > 0 && (
-                          <Tree>
-                            {milestoneTickets.map((ticket) => (
-                              <TicketTreeItem key={ticket.id} ticket={ticket} onSelect={onSelect} onItemClick={handleItemClick} />
-                            ))}
-                          </Tree>
-                        )}
-                      </TreeItem>
-                    );
-                  })}
-
-                      {/* Loose tickets (no milestone) */}
-                      {looseTickets.length > 0 && (
-                        <TreeItem itemType="branch" value={`backlog:${project.id}`} className={styles.hoverableBranch}>
-                          <TreeItemLayout iconBefore={<BranchIcon icon={<TaskListSquareLtr16Regular className={styles.icon} />} value={`backlog:${project.id}`} onToggle={handleToggle} />}>
-                            <span className={styles.titleRow}>
-                              <span className={styles.titleRowMain}>Backlog</span>
-                              <span className={`${styles.badge} ${styles.titleRowTrail}`}>({looseTickets.length})</span>
-                            </span>
-                          </TreeItemLayout>
-                          <Tree>
-                            {looseTickets.map((ticket) => (
-                              <TicketTreeItem key={ticket.id} ticket={ticket} onSelect={onSelect} onItemClick={handleItemClick} />
-                            ))}
-                          </Tree>
-                        </TreeItem>
-                      )}
-                    </Tree>
-                  </TreeItem>
-
-                  {/* One leaf per source. Folder icon for local, globe for git-remote. */}
-                  {project.sources.map((s) =>
-                    s.kind === 'local' ? (
-                      <TreeItem
-                        key={s.id}
-                        itemType="leaf"
-                        value={`source:${project.id}:${s.id}`}
-                        className={styles.hoverableItem}
-                      >
-                        <TreeItemLayout iconBefore={<Link16Regular className={styles.icon} />}>
-                          <span className={styles.sourceLabel} title={s.workspaceDir}>
-                            {shortenPath(s.workspaceDir)}
-                          </span>
+                    }
+                  >
+                    <span className={styles.titleRow}>
+                      <span className={styles.titleRowMain}>Sources</span>
+                      <span className={`${styles.badge} ${styles.titleRowTrail}`}>({project.sources.length})</span>
+                    </span>
+                  </TreeItemLayout>
+                  <Tree>
+                    {project.sources.length === 0 ? (
+                      <TreeItem itemType="leaf" value={`sources-empty:${project.id}`}>
+                        <TreeItemLayout>
+                          <span className={styles.sourceLabel}>No sources — click + to add</span>
                         </TreeItemLayout>
                       </TreeItem>
                     ) : (
-                      <TreeItem
-                        key={s.id}
-                        itemType="leaf"
-                        value={`source:${project.id}:${s.id}`}
-                        className={styles.hoverableItem}
-                      >
-                        <TreeItemLayout iconBefore={<Globe16Regular className={styles.icon} />}>
-                          <span className={styles.sourceLabel} title={s.repoUrl}>
-                            {shortenRepoUrl(s.repoUrl)}
-                          </span>
-                        </TreeItemLayout>
-                      </TreeItem>
-                    )
-                  )}
-                </Tree>
+                      project.sources.map((s) => {
+                        const isLocal = s.kind === 'local';
+                        const label = isLocal ? shortenPath(s.workspaceDir) : shortenRepoUrl(s.repoUrl);
+                        const title = isLocal ? s.workspaceDir : s.repoUrl;
+                        return (
+                          <TreeItem
+                            key={s.id}
+                            itemType="leaf"
+                            value={`source:${project.id}:${s.id}`}
+                            className={styles.hoverableItem}
+                          >
+                            <TreeItemLayout
+                              iconBefore={
+                                isLocal ? (
+                                  <Link16Regular className={styles.icon} />
+                                ) : (
+                                  <Globe16Regular className={styles.icon} />
+                                )
+                              }
+                              aside={
+                                <span
+                                  className={`action-buttons ${styles.actionButtons}`}
+                                  onMouseDown={stopPropagation}
+                                  onClick={stopPropagation}
+                                >
+                                  <Menu positioning={{ position: 'below', align: 'end' }}>
+                                    <MenuTrigger>
+                                      <button type="button" aria-label="Source actions" className={styles.nativeBtn}>
+                                        <MoreHorizontal16Regular />
+                                      </button>
+                                    </MenuTrigger>
+                                    <MenuPopover>
+                                      <MenuList>
+                                        <MenuItem
+                                          icon={<Delete20Regular />}
+                                          onClick={() => onRemoveSource?.(project.id, s.id)}
+                                        >
+                                          Remove source
+                                        </MenuItem>
+                                      </MenuList>
+                                    </MenuPopover>
+                                  </Menu>
+                                </span>
+                              }
+                            >
+                              <span className={styles.sourceLabel} title={title}>
+                                {label}
+                              </span>
+                            </TreeItemLayout>
+                          </TreeItem>
+                        );
+                      })
+                    )}
+                  </Tree>
+                </TreeItem>
+              </Tree>
             </TreeItem>
           );
         })}

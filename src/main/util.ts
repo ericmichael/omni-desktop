@@ -8,7 +8,7 @@ import { promisify } from 'util';
 
 import { checkOmniVersion, OMNI_CODE_VERSION } from '@/lib/omni-version';
 import { withResultAsync } from '@/lib/result';
-import type { GpuType, OmniRuntimeInfo, OperatingSystem, WindowProps } from '@/shared/types';
+import type { GpuType, OmniRuntimeInfo, OperatingSystem, RuntimeModelList, WindowProps } from '@/shared/types';
 
 const execAsync = promisify(exec);
 
@@ -603,6 +603,29 @@ export const installCliToPath = async (): Promise<
 //#endregion
 
 //#region Omni CLI commands
+
+/**
+ * List the runtime's available models via `omni model list --json`.
+ *
+ * This is the live, merged view (defaults + user config + platform governance +
+ * OAuth-discovered models like Codex), which can include models not present in
+ * the store's `models.json` — used to populate the Settings model pickers.
+ * Returns an empty list if the CLI is unavailable or errors.
+ */
+export const listRuntimeModels = async (): Promise<RuntimeModelList> => {
+  const omniPath = getOmniCliPath();
+  try {
+    const { stdout } = await execAsync(`"${omniPath}" model list --json`, { timeout: 30_000 });
+    const parsed = JSON.parse(stdout) as RuntimeModelList;
+    return {
+      models: Array.isArray(parsed.models) ? parsed.models : [],
+      default: parsed.default ?? null,
+      voice_default: parsed.voice_default ?? null,
+    };
+  } catch {
+    return { models: [], default: null, voice_default: null };
+  }
+};
 
 /**
  * Check if models are configured by running `omni model check`.

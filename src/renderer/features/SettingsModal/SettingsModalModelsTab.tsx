@@ -5,10 +5,11 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, Button, Card, Checkbox, FormField, FormSkeleton, IconButton, Input, SaveBar, SectionLabel, Select } from '@/renderer/ds';
 import { agentConfigApi } from '@/renderer/services/config';
+import { emitter } from '@/renderer/services/ipc';
 import type { ModelEntry, ModelsConfig, ProviderEntry } from '@/shared/types';
 
-const PROVIDER_TYPES: ProviderEntry['type'][] = ['openai', 'azure', 'openai-compatible', 'litellm'];
-const REASONING_OPTIONS = ['none', 'low', 'medium', 'high'] as const;
+const PROVIDER_TYPES: ProviderEntry['type'][] = ['openai', 'azure', 'openai-compatible', 'litellm', 'openai-oauth'];
+const REASONING_OPTIONS = ['none', 'low', 'medium', 'high', 'xhigh'] as const;
 
 function emptyProvider(): ProviderEntry {
   return { type: 'openai', models: {} };
@@ -122,6 +123,9 @@ export const SettingsModalModelsTab = memo(() => {
   const [editingModel, setEditingModel] = useState<{ provider: string; modelId: string } | null>(null);
   const [newProviderName, setNewProviderName] = useState('');
   const [newModelId, setNewModelId] = useState('');
+  // Live merged model list from the runtime (`omni model list --json`), which
+  // includes models not in the store — notably OAuth-discovered Codex models.
+  const [runtimeModelNames, setRuntimeModelNames] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -140,7 +144,55 @@ export const SettingsModalModelsTab = memo(() => {
     load();
   }, [load]);
 
-  const modelKeys = useMemo(() => (config ? collectModelKeys(config) : []), [config]);
+  useEffect(() => {
+    emitter
+      .invoke('util:list-models')
+      .then((res) => setRuntimeModelNames(res.models.map((m) => m.name)))
+      .catch(() => setRuntimeModelNames([]));
+  }, []);
+
+  // Union of store-configured keys and the live runtime list, so discovered
+  // models (e.g. Codex) are selectable as the default/voice model.
+  const modelKeys = useMemo(() => {
+    const storeKeys = config ? collectModelKeys(config) : [];
+    return Array.from(new Set([...storeKeys, ...runtimeModelNames])).sort();
+  }, [config, runtimeModelNames]);
+
+  /**
+   * Called after a successful ChatGPT sign-in. Registers the built-in `codex`
+   * provider in the store (so the user never hand-adds it; models stay empty —
+   * the runtime discovers them). Makes a Codex model the default ONLY when no
+   * other provider is configured; otherwise the existing setup is left alone
+   * and Codex is just available via the picker / `/model`. Returns the model
+   * that became the default, or undefined if the default was left unchanged.
+   */
+  const applyCodexSignIn = useCallback(async (): Promise<string | undefined> => {
+    const current = await agentConfigApi.getModels();
+    const runtime = await emitter.invoke('util:list-models').catch(() => null);
+    const codexNames = (runtime?.models ?? [])
+      .filter((m) => m.provider === 'openai-oauth' || m.name.startsWith('codex/'))
+      .map((m) => m.name);
+    const preferred = codexNames.find((n) => n.endsWith('/gpt-5.5')) ?? codexNames[0];
+
+    const hasOtherProviders = Object.keys(current.providers).some((name) => name !== 'codex');
+    const next: ModelsConfig = {
+      ...current,
+      providers: {
+        ...current.providers,
+        codex: current.providers.codex ?? { type: 'openai-oauth', models: {} },
+      },
+    };
+
+    let madeDefault: string | undefined;
+    if (!hasOtherProviders && preferred) {
+      next.default = preferred;
+      madeDefault = preferred;
+    }
+
+    await agentConfigApi.setModels(next);
+    await load();
+    return madeDefault;
+  }, [load]);
 
   const save = useCallback(async () => {
     if (!config) {
@@ -325,7 +377,10 @@ export const SettingsModalModelsTab = memo(() => {
 
   return (
     <div className={styles.root}>
-      <SectionLabel>Defaults</SectionLabel>
+      <SectionLabel>ChatGPT (Codex)</SectionLabel>
+      <CodexSignInCard onSignedIn={applyCodexSignIn} />
+
+      <SectionLabel className={styles.sectionLabelSpaced}>Defaults</SectionLabel>
       <Card>
         <FormField label="Default model">
           <Select value={config.default ?? ''} onChange={onChangeDefault}>
@@ -392,6 +447,86 @@ export const SettingsModalModelsTab = memo(() => {
 });
 SettingsModalModelsTab.displayName = 'SettingsModalModelsTab';
 
+/**
+ * Sign in to a ChatGPT subscription (Codex). Main runs the browser PKCE flow
+ * and stores tokens in the omni-code config dir; the runtime refreshes them.
+ *
+ * Signing in is all the user should need: on success we make a discovered
+ * Codex model the default (and register the built-in `codex` provider in the
+ * store so it's visible), so the agent uses ChatGPT immediately — no manual
+ * provider setup. `onSignedIn` does that and returns the chosen model ref.
+ */
+const CodexSignInCard = memo(({ onSignedIn }: { onSignedIn: () => Promise<string | undefined> }) => {
+  const styles = useStyles();
+  const [status, setStatus] = useState<{ signedIn: boolean; accountId?: string } | null>(null);
+  const [activeModel, setActiveModel] = useState<string | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    emitter.invoke('codex:status').then(setStatus).catch(() => setStatus({ signedIn: false }));
+  }, []);
+
+  const onSignIn = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await emitter.invoke('codex:login');
+      setStatus(next);
+      if (next.signedIn) {
+        setActiveModel(await onSignedIn());
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Sign-in failed');
+    } finally {
+      setBusy(false);
+    }
+  }, [onSignedIn]);
+
+  const onSignOut = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await emitter.invoke('codex:logout');
+      setStatus({ signedIn: false });
+      setActiveModel(undefined);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Sign-out failed');
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  return (
+    <Card>
+      <div className={styles.rowGap2}>
+        <div className={styles.headerContent}>
+          <div className={styles.headerName}>
+            {status?.signedIn ? 'Signed in to ChatGPT' : 'Use your ChatGPT subscription'}
+          </div>
+          <div className={styles.headerSummary}>
+            {status?.signedIn
+              ? activeModel
+                ? `Using ${activeModel} — switch models any time below or with /model in chat`
+                : 'ChatGPT models are available — switch with /model in chat or set a default below'
+              : error ?? 'Drive the agent through ChatGPT Plus/Pro/Team via the Codex Responses API.'}
+          </div>
+        </div>
+        {status?.signedIn ? (
+          <Button size="sm" variant="ghost" onClick={onSignOut} isDisabled={busy}>
+            Sign out
+          </Button>
+        ) : (
+          <Button size="sm" onClick={onSignIn} isDisabled={busy}>
+            {busy ? 'Waiting for browser…' : 'Sign in with ChatGPT'}
+          </Button>
+        )}
+      </div>
+    </Card>
+  );
+});
+CodexSignInCard.displayName = 'CodexSignInCard';
+
 const ProviderRow = memo(
   ({
     name,
@@ -423,6 +558,8 @@ const ProviderRow = memo(
     const showBaseUrl =
       provider.type === 'azure' || provider.type === 'openai-compatible' || provider.type === 'litellm';
     const showApiVersion = provider.type === 'azure';
+    // OAuth providers authenticate via the ChatGPT sign-in above, not a key.
+    const showApiKey = provider.type !== 'openai-oauth';
 
     const onClickRemove = useCallback(() => {
       onRemove(name);
@@ -470,16 +607,18 @@ const ProviderRow = memo(
                 ))}
               </Select>
             </FormField>
-            <FormField label="API Key">
-              <Input
-                type="text"
-                value={provider.api_key ?? ''}
-                onChange={onChangeApiKey}
-                placeholder="sk-..."
-                mono
-                className={styles.flex1}
-              />
-            </FormField>
+            {showApiKey && (
+              <FormField label="API Key">
+                <Input
+                  type="text"
+                  value={provider.api_key ?? ''}
+                  onChange={onChangeApiKey}
+                  placeholder="sk-..."
+                  mono
+                  className={styles.flex1}
+                />
+              </FormField>
+            )}
             {showBaseUrl && (
               <FormField label="Base URL">
                 <Input

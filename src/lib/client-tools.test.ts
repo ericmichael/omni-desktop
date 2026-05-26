@@ -127,14 +127,13 @@ describe('client_tools shape', () => {
     expect(vars.additional_instructions).not.toContain('/home/user/');
   });
 
-  it('PR writeup guidance falls back to the container path when artifactsDir is omitted', () => {
+  it('PR writeup guidance falls back to the uniform container artifacts mount when artifactsDir is omitted', () => {
     const vars = buildSessionVariables({
       surface: 'code',
       context: { ticketId: 'tkt-1' },
     }) as { additional_instructions: string };
-    expect(vars.additional_instructions).toContain(
-      '/home/user/.config/omni_code/tickets/tkt-1/artifacts/pr/PR_TITLE.md'
-    );
+    expect(vars.additional_instructions).toContain('/workspace/.omni-artifacts/tkt-1/pr/PR_TITLE.md');
+    expect(vars.additional_instructions).not.toContain('/home/user/');
   });
 
   it('renders the workspace layout when sources are present', () => {

@@ -1,14 +1,22 @@
+import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
-import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { AnimatedDialog, Button, DialogBody, DialogContent, DialogFooter, DialogHeader, Input, Select } from '@/renderer/ds';
+import {
+  AnimatedDialog,
+  Button,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  Input,
+  Select,
+} from '@/renderer/ds';
 import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { Project } from '@/shared/types';
 
-import { draftsToSources, type SourceDraft, SourcesEditor, sourcesToDrafts } from './SourcesEditor';
 import { projectsApi } from './state';
 
 /** Sentinel value for the "Inherit default" option in the profile <Select>. */
@@ -59,18 +67,12 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
   const isEdit = Boolean(editProject);
 
   const [label, setLabel] = useState(editProject?.label ?? '');
-  const [drafts, setDrafts] = useState<SourceDraft[]>(() => sourcesToDrafts(editProject?.sources ?? []));
-  const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [dueDate, setDueDate] = useState(
-    editProject?.dueDate !== undefined ? toInputDate(editProject.dueDate) : ''
-  );
+  const [dueDate, setDueDate] = useState(editProject?.dueDate !== undefined ? toInputDate(editProject.dueDate) : '');
 
   // Per-project sandbox profile. ``null``/missing means "inherit user-default".
-  const [sandboxProfile, setSandboxProfile] = useState<string | null>(
-    editProject?.sandboxProfile ?? null
-  );
+  const [sandboxProfile, setSandboxProfile] = useState<string | null>(editProject?.sandboxProfile ?? null);
   const [isEnterprise, setIsEnterprise] = useState(false);
   useEffect(() => {
     emitter.invoke('platform:is-enterprise').then(setIsEnterprise);
@@ -80,12 +82,9 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
     () => getAvailableProfileNames({ isEnterprise, available: storeData.availableSandboxProfiles }),
     [isEnterprise, storeData.availableSandboxProfiles]
   );
-  const handleSandboxProfileChange = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
-      setSandboxProfile(e.target.value === INHERIT_PROFILE ? null : e.target.value);
-    },
-    []
-  );
+  const handleSandboxProfileChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSandboxProfile(e.target.value === INHERIT_PROFILE ? null : e.target.value);
+  }, []);
 
   const isValid = label.trim().length > 0;
 
@@ -97,30 +96,33 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
     if (!isValid || isSubmitting) {
       return;
     }
-    const conv = draftsToSources(drafts);
-    if (!conv.ok) {
-      setSubmitError(conv.error);
-      return;
-    }
-    setSubmitError(null);
     setIsSubmitting(true);
 
-    const slug = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'project';
+    const slug =
+      label
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 60) || 'project';
     const dueDateMs = fromInputDate(dueDate);
 
     try {
       if (isEdit && editProject) {
+        // Sources are managed from the sidebar / ⋯ menu — omit them here so the
+        // edit form never overwrites them.
         await projectsApi.updateProject(editProject.id, {
           label: label.trim(),
-          sources: conv.sources,
           sandboxProfile,
           dueDate: dueDateMs,
         });
       } else {
+        // New projects start empty; sources are added afterward via the
+        // sidebar's Sources branch or the project page's ⋯ menu.
         await projectsApi.addProject({
           label: label.trim(),
           slug,
-          sources: conv.sources,
+          sources: [],
           ...(sandboxProfile ? { sandboxProfile } : {}),
           ...(dueDateMs !== undefined ? { dueDate: dueDateMs } : {}),
         });
@@ -129,7 +131,7 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
     } finally {
       setIsSubmitting(false);
     }
-  }, [isValid, isSubmitting, isEdit, editProject, label, drafts, sandboxProfile, dueDate, onClose]);
+  }, [isValid, isSubmitting, isEdit, editProject, label, sandboxProfile, dueDate, onClose]);
 
   const handleDueDateChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setDueDate(e.target.value);
@@ -149,11 +151,6 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
               placeholder="my-project"
               className={styles.fullWidth}
             />
-          </div>
-
-          <div className={styles.field}>
-            <label className={styles.label}>Sources</label>
-            <SourcesEditor value={drafts} onChange={setDrafts} />
           </div>
 
           {/* Sandbox — only in edit mode. New projects inherit the default. */}
@@ -177,19 +174,8 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
 
           <div className={styles.field}>
             <label className={styles.label}>Due date</label>
-            <Input
-              type="date"
-              value={dueDate}
-              onChange={handleDueDateChange}
-              className={styles.fullWidth}
-            />
+            <Input type="date" value={dueDate} onChange={handleDueDateChange} className={styles.fullWidth} />
           </div>
-
-          {submitError && (
-            <div role="alert" style={{ color: 'var(--colorPaletteRedForeground1)' }}>
-              {submitError}
-            </div>
-          )}
         </DialogBody>
         <DialogFooter className={styles.footer}>
           <Button variant="ghost" onClick={onClose}>

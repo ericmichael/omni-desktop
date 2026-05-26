@@ -58,7 +58,20 @@ export type AgentProcessMode = 'serve' | 'platform';
 export type AgentProcessSource = { mountName: string } & (
   | { kind: 'local-git'; workspaceDir: string; ref?: string }
   | { kind: 'local'; workspaceDir: string }
-  | { kind: 'git-remote'; repoUrl: string; ref?: string }
+  | {
+      kind: 'git-remote';
+      repoUrl: string;
+      ref?: string;
+      /**
+       * Authentication hint for a private remote. Carries the *name* of the env
+       * var holding the token (the value travels in ``gitTokenEnv`` on the start
+       * arg, never on disk or argv) plus the HTTPS basic-auth username. Absent
+       * for public repos. omni serve routes a source with ``auth`` to the
+       * ``AuthenticatedGitRepo`` seed entry, which configures a git credential
+       * helper from the env var so clone + fetch + push all authenticate.
+       */
+      auth?: { tokenEnv: string; username: string };
+    }
 );
 
 export type AgentProcessStartArg = {
@@ -105,6 +118,14 @@ export type AgentProcessStartArg = {
   preSyncedShareName?: string;
   /** Platform mode: git-remote URL the platform container clones. */
   gitRepo?: { url: string; branch?: string };
+  /**
+   * `{ envVarName: token }` for private git remotes, merged into the spawned
+   * `omni serve` process env. The matching env var *name* is referenced by each
+   * git-remote source's `auth.tokenEnv`; the token value lives only here (in
+   * process env), never on disk or in the `--source` argv — mirroring how cloud
+   * model/MCP secrets are injected.
+   */
+  gitTokenEnv?: Record<string, string>;
 };
 
 export type FetchFn = typeof globalThis.fetch;
@@ -164,8 +185,8 @@ async function oneShotServerCall(
     let settled = false;
     const finish = (result: SandboxPauseResult) => {
       if (settled) {
-return;
-}
+        return;
+      }
       settled = true;
       try {
         socket.close();
@@ -305,11 +326,7 @@ export class AgentProcess {
   getStatus = (): WithTimestamp<AgentProcessStatus> => this.status;
 
   start = async (arg: AgentProcessStartArg): Promise<void> => {
-    if (
-      this.status.type === 'starting' ||
-      this.status.type === 'connecting' ||
-      this.status.type === 'running'
-    ) {
+    if (this.status.type === 'starting' || this.status.type === 'connecting' || this.status.type === 'running') {
       return;
     }
 
@@ -347,11 +364,8 @@ export class AgentProcess {
           try {
             this.ipcRawOutput('Finalizing workspace download...\r\n');
             const { downloadSasUrl } = await this.platformClient.finalizeWorkspace(sessionId);
-            await downloadWorkspace(
-              this.lastStartArg.workspaceDir,
-              downloadSasUrl,
-              this.fetchFn,
-              (msg) => this.ipcRawOutput(`${msg}\r\n`)
+            await downloadWorkspace(this.lastStartArg.workspaceDir, downloadSasUrl, this.fetchFn, (msg) =>
+              this.ipcRawOutput(`${msg}\r\n`)
             );
             this.ipcRawOutput('Workspace downloaded successfully\r\n');
           } catch (error) {
@@ -429,7 +443,11 @@ export class AgentProcess {
     if (resolved.kind !== 'file') {
       // ``host`` (builtin-default) and missing profiles have no --profile path
       // to switch to; the caller falls back to a full stop+relaunch.
-      return { ok: false, fallback: true, reason: `profile "${profileName}" cannot switch in place (${resolved.kind})` };
+      return {
+        ok: false,
+        fallback: true,
+        reason: `profile "${profileName}" cannot switch in place (${resolved.kind})`,
+      };
     }
     const data = (this.status as Extract<AgentProcessStatus, { type: 'running' | 'connecting' }>).data;
     const wsUrl = data.wsUrl;
@@ -454,9 +472,7 @@ export class AgentProcess {
         };
       }
       const services =
-        raw.services && typeof raw.services === 'object'
-          ? (raw.services as Record<string, string>)
-          : undefined;
+        raw.services && typeof raw.services === 'object' ? (raw.services as Record<string, string>) : undefined;
       const containerId = typeof raw.container_id === 'string' ? raw.container_id : undefined;
       const backend = typeof raw.backend === 'string' ? raw.backend : undefined;
       const profile = typeof raw.profile === 'string' ? raw.profile : profileName;
@@ -479,12 +495,12 @@ export class AgentProcess {
    */
   notifyActivity = (): void => {
     if (this.status.type !== 'running' && this.status.type !== 'connecting') {
-return;
-}
+      return;
+    }
     const data = (this.status as Extract<AgentProcessStatus, { type: 'running' | 'connecting' }>).data;
     if (!data.wsUrl) {
-return;
-}
+      return;
+    }
     void oneShotServerCall(data.wsUrl, 'sandbox.notify_activity').catch(() => {
       // Best-effort. A dropped ping costs us ~60s of headroom (the
       // renderer's throttle window) before the next one tries.
@@ -576,6 +592,9 @@ return;
       ...DEFAULT_ENV,
       ...shellEnvSync(),
       ...(this.getExtraEnv?.() ?? {}),
+      // Per-launch git tokens for private remotes. Last so a token env name can
+      // never be shadowed by ambient/extra env.
+      ...(arg.gitTokenEnv ?? {}),
     } as Record<string, string>;
     const args: string[] = ['serve', '--output', 'json'];
     // One ``--source <json>`` per source — omni serve's argparse uses
@@ -587,11 +606,14 @@ return;
       }
       if (s.kind === 'git-remote') {
         desc.repoUrl = s.repoUrl;
+        if (s.auth) {
+          desc.auth = s.auth;
+        }
       }
       if (s.kind === 'local-git' || s.kind === 'git-remote') {
         if (s.ref) {
-desc.ref = s.ref;
-}
+          desc.ref = s.ref;
+        }
       }
       args.push('--source', JSON.stringify(desc));
     }
@@ -643,15 +665,15 @@ desc.ref = s.ref;
       child.stderr.on('data', this.handleStderr);
       child.on('error', (error: Error) => {
         if (this.childProcess && this.childProcess !== child) {
-return;
-}
+          return;
+        }
         this.childProcess = null;
         this.updateStatus({ type: 'error', error: { message: error.message } });
       });
       child.on('close', (exitCode, signal) => {
         if (this.childProcess && this.childProcess !== child) {
-return;
-}
+          return;
+        }
         this.childProcess = null;
         if (this.status.type === 'exiting' || this.status.type === 'stopping') {
           this.updateStatus({ type: 'exited' });
@@ -699,18 +721,13 @@ return;
       if (arg.gitRepo) {
         this.log.info(
           c.cyan(
-            `Container will clone ${arg.gitRepo.url}` +
-              `${arg.gitRepo.branch ? ` (${arg.gitRepo.branch})` : ''}\r\n`
+            `Container will clone ${arg.gitRepo.url}` + `${arg.gitRepo.branch ? ` (${arg.gitRepo.branch})` : ''}\r\n`
           )
         );
       } else if (arg.preSyncedShareName) {
         this.log.info(c.cyan(`Using pre-synced share: ${arg.preSyncedShareName}\r\n`));
       } else {
-        this.log.info(
-          c.yellow(
-            'Workspace upload disabled — container starts with an empty workspace\r\n'
-          )
-        );
+        this.log.info(c.yellow('Workspace upload disabled — container starts with an empty workspace\r\n'));
       }
 
       this.log.info(c.cyan(`Session ${session.sessionId} created, waiting for container...\r\n`));
@@ -718,8 +735,8 @@ return;
 
       const ready = await this.platformClient.waitForSession(session.sessionId);
       if (this.isStopping()) {
-return;
-}
+        return;
+      }
 
       const wsUrl = ready.websocketUrl!;
       let uiUrl = wsUrl.replace(/^wss?:/, 'https:').replace(/\/ws$/, '');
@@ -737,8 +754,8 @@ return;
       await this.waitForReady(data);
     } catch (error) {
       if (this.isStopping()) {
-return;
-}
+        return;
+      }
       this.updateStatus({ type: 'error', error: { message: (error as Error).message } });
     }
   };
@@ -761,12 +778,9 @@ return;
    *  ``paused`` indicator without redoing the readiness payload. */
   private updateAgentProcessData = (patch: Partial<AgentProcessData>): void => {
     if (this.status.type !== 'running' && this.status.type !== 'connecting') {
-return;
-}
-    const current = this.status as Extract<
-      WithTimestamp<AgentProcessStatus>,
-      { type: 'running' | 'connecting' }
-    >;
+      return;
+    }
+    const current = this.status as Extract<WithTimestamp<AgentProcessStatus>, { type: 'running' | 'connecting' }>;
     this.status = {
       ...current,
       data: { ...current.data, ...patch },
@@ -782,8 +796,8 @@ return;
     this.ipcRawOutput(str);
     process.stdout.write(str);
     if (this.jsonEmitted) {
-return;
-}
+      return;
+    }
     this.stdoutBuffer += str;
     const lines = this.stdoutBuffer.split(/\r?\n/);
     this.stdoutBuffer = lines.pop() ?? '';
@@ -801,12 +815,12 @@ return;
 
   private tryParseStdoutLine = (line: string): void => {
     if (this.jsonEmitted) {
-return;
-}
+      return;
+    }
     const trimmed = line.trim();
     if (!(trimmed.startsWith('{') && trimmed.endsWith('}'))) {
-return;
-}
+      return;
+    }
     let parsed: Record<string, unknown>;
     try {
       parsed = JSON.parse(trimmed);
@@ -814,8 +828,8 @@ return;
       return;
     }
     if (!('sandbox_url' in parsed) || !('ui_url' in parsed)) {
-return;
-}
+      return;
+    }
     const data = servePayloadToData(parsed as unknown as ServeReadyPayload);
     this.jsonEmitted = true;
     this.updateStatus({ type: 'connecting', data });
@@ -844,8 +858,8 @@ return;
           const socket = new WsWebSocket(url);
           const finish = (result: boolean): void => {
             if (settled) {
-return;
-}
+              return;
+            }
             settled = true;
             clearTimeout(timer);
             try {
@@ -884,14 +898,14 @@ return;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       if (this.isStopping()) {
-return;
-}
+        return;
+      }
       const httpOk = await checkHttp(data.uiUrl);
       const wsOk = wsCheckUrl ? await checkWs(wsCheckUrl) : true;
       if (httpOk && wsOk) {
         if (this.isStopping()) {
-return;
-}
+          return;
+        }
         this.updateStatus({ type: 'running', data });
         const label = this.mode === 'platform' ? 'Platform sandbox' : 'Sandbox';
         this.log.info(c.green.bold(`${label} started\r\n`));
@@ -901,8 +915,8 @@ return;
     }
 
     if (this.isStopping()) {
-return;
-}
+      return;
+    }
     this.updateStatus({
       type: 'error',
       error: { message: `Services did not become ready within ${maxAttempts} seconds.` },
@@ -974,8 +988,8 @@ return;
       .filter((l) => l.length > 0);
     const tail = lines.slice(-maxLines).join('\n');
     if (tail.length <= maxChars) {
-return tail;
-}
+      return tail;
+    }
     return `…${tail.slice(tail.length - maxChars)}`;
   };
 }

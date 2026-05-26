@@ -37,6 +37,7 @@ export const DEFAULTS: StoreData = {
   skillSources: {},
   installedBundles: {},
   customApps: [],
+  gitCredentials: [],
   modelsConfig: emptyModelsConfig(),
   mcpConfig: emptyMcpConfig(),
   networkConfig: emptyNetworkConfig(),
