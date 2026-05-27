@@ -42,6 +42,102 @@ export function loadTenantSettings(pool: Pool, tenantId: string): Promise<Record
   });
 }
 
+// ---- Teams: split settings (team_settings + user_settings_v2) ----
+//
+// team_settings is RLS-scoped by app.current_tenant (= team id); user_settings_v2
+// by app.current_principal. Each runs in its own scoped tx so FORCE RLS applies.
+
+async function principalTx<T>(
+  pool: Pool,
+  principalId: string,
+  fn: (client: PoolClient) => Promise<T>,
+  originId = ''
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query("SELECT set_config('app.current_principal', $1, true)", [principalId]);
+    await client.query("SELECT set_config('app.current_origin', $1, true)", [originId]);
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // surface the original error
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** Read a team's settings-base blob (team_settings), or null if none yet. */
+export function loadTeamSettings(pool: Pool, teamId: string): Promise<Record<string, unknown> | null> {
+  return tenantTx(pool, teamId, async (c) => {
+    const r = await c.query('SELECT data FROM team_settings WHERE team_id = $1', [teamId]);
+    return (r.rows[0]?.data ?? null) as Record<string, unknown> | null;
+  });
+}
+
+/** Upsert a team's settings-base blob (full-document write-through). */
+export async function saveTeamSettings(
+  pool: Pool,
+  teamId: string,
+  data: Record<string, unknown>,
+  originId = ''
+): Promise<void> {
+  await tenantTx(
+    pool,
+    teamId,
+    (c) =>
+      c.query(
+        `INSERT INTO team_settings (team_id, data) VALUES ($1, $2::jsonb)
+         ON CONFLICT (team_id) DO UPDATE SET
+           data = EXCLUDED.data,
+           updated_at = to_char((now() AT TIME ZONE 'utc'), 'YYYY-MM-DD HH24:MI:SS.MS')`,
+        [teamId, JSON.stringify(data)]
+      ),
+    originId
+  );
+}
+
+/** Read a principal's overlay blob (user_settings_v2), or null if none yet. */
+export function loadUserSettings(pool: Pool, principalId: string): Promise<Record<string, unknown> | null> {
+  return principalTx(pool, principalId, async (c) => {
+    const r = await c.query('SELECT data FROM user_settings_v2 WHERE principal_id = $1', [principalId]);
+    return (r.rows[0]?.data ?? null) as Record<string, unknown> | null;
+  });
+}
+
+/** Upsert a principal's overlay blob (full-document write-through). */
+export async function saveUserSettings(
+  pool: Pool,
+  principalId: string,
+  data: Record<string, unknown>,
+  originId = ''
+): Promise<void> {
+  await principalTx(
+    pool,
+    principalId,
+    (c) =>
+      c.query(
+        `INSERT INTO user_settings_v2 (principal_id, data) VALUES ($1, $2::jsonb)
+         ON CONFLICT (principal_id) DO UPDATE SET
+           data = EXCLUDED.data,
+           updated_at = to_char((now() AT TIME ZONE 'utc'), 'YYYY-MM-DD HH24:MI:SS.MS')`,
+        [principalId, JSON.stringify(data)]
+      ),
+    originId
+  );
+}
+
+/** Read the legacy single-blob user_settings row (for one-time per-principal migration). */
+export function loadLegacyUserSettings(pool: Pool, principalId: string): Promise<Record<string, unknown> | null> {
+  return loadTenantSettings(pool, principalId);
+}
+
 /** Upsert a tenant's settings blob (full-document write-through). */
 export async function saveTenantSettings(
   pool: Pool,

@@ -42,6 +42,8 @@ DEVBOX_TAG="${DEVBOX_TAG:-omni-launcher-devbox:latest}"
 
 # hex (URL-safe) — base64's +/ would need encoding in the connection string.
 PG_PASSWORD="${PG_PASSWORD:-$(openssl rand -hex 24)}"
+# Password for the non-superuser omni_app role the launcher connects as (RLS-enforced).
+OMNI_APP_PASSWORD="${OMNI_APP_PASSWORD:-$(openssl rand -hex 24)}"
 RUNTIME_TOKEN_SECRET="${RUNTIME_TOKEN_SECRET:-$(openssl rand -hex 32)}"
 WS_TOKEN="${WS_TOKEN:-$(openssl rand -hex 16)}"
 
@@ -65,7 +67,8 @@ echo "Auth mode      : $AUTH_MODE${AAD_CLIENT_ID:+ (AAD $AAD_CLIENT_ID)}"
 az group create --name "$RG" --location "$LOCATION" --output none
 
 params=(location="$LOCATION" siteName="$SITE_NAME" acrName="$ACR_NAME" authMode="$AUTH_MODE"
-  postgresAdminPassword="$PG_PASSWORD" runtimeTokenSecret="$RUNTIME_TOKEN_SECRET" wsToken="$WS_TOKEN"
+  postgresAdminPassword="$PG_PASSWORD" omniAppPassword="$OMNI_APP_PASSWORD"
+  runtimeTokenSecret="$RUNTIME_TOKEN_SECRET" wsToken="$WS_TOKEN"
   aadClientId="${AAD_CLIENT_ID:-}" aadClientSecret="${AAD_CLIENT_SECRET:-}")
 
 echo "== what-if =="
@@ -100,4 +103,4 @@ az webapp restart --resource-group "$RG" --name "$SITE_NAME"
 
 echo
 echo "Done. App: $(echo "$outputs" | python3 -c 'import json,sys; print(json.load(sys.stdin)["launcherUrl"]["value"])')"
-echo "Next (multi-tenant prod): create the non-superuser omni_app SQL role + repoint OMNI_DATABASE_URL — see README.md."
+echo "Note: the launcher auto-provisions the non-superuser omni_app role on boot (OMNI_DATABASE_ADMIN_URL) and refuses to start if its data role can bypass RLS. No manual SQL step."

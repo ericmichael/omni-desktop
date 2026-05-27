@@ -59,6 +59,8 @@ export type TicketRow = {
   // Launcher-specific (v6) — PR review state
   pr_review: string | null;             // JSON { status, at } or null
   pr_merged_at: string | null;          // epoch ms, stringified
+  // Teams (SQLite v9 / PG v6) — assigned member's principal id, or null
+  assignee: string | null;
   created_at: string;
   updated_at: string;
 };

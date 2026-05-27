@@ -49,16 +49,15 @@ then `az acr build`/push and restart. Same for the agent image
 
 ## Manual post-provision steps (not expressible in Bicep)
 
-1. **Non-superuser `omni_app` Postgres role** — RLS is bypassed by superusers,
-   so the app MUST connect as a non-superuser. The Flexible Server admin is a
-   superuser-equivalent; create the app role and point `OMNI_DATABASE_URL` at
-   it. Mirror `docker/postgres-init.sql`:
-   ```sql
-   CREATE ROLE omni_app LOGIN PASSWORD '…' NOSUPERUSER NOBYPASSRLS;
-   GRANT ALL ON DATABASE omni TO omni_app;
-   -- then grant schema/table privileges (see docker/postgres-init.sql)
-   ```
-   Update the Web App's `OMNI_DATABASE_URL` to use `omni_app`.
+1. **Non-superuser `omni_app` Postgres role — now automated.** RLS is bypassed by
+   superusers, so the app MUST connect as a non-superuser. The launcher does this
+   itself on boot: `omniAppPassword` (a deploy.sh-generated secret) is baked into
+   `OMNI_DATABASE_URL` (the `omni_app` DSN), while the admin DSN is surfaced as
+   `OMNI_DATABASE_ADMIN_URL` and used only at startup to create `omni_app`, grant
+   it DML, and run migrations as the owner (so RLS applies to `omni_app`). The
+   server then **refuses to start** if its data role can bypass RLS
+   (`src/server/pg-bootstrap.ts`). Because the Flexible Server is private, this
+   in-container bootstrap replaces the old reach-the-DB-with-psql step.
 
 2. **EasyAuth (App Service Authentication) — now automated.** `authMode=easyauth`
    makes the server trust `x-ms-client-principal-id` as the tenant, and the

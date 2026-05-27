@@ -3,6 +3,7 @@ import { atom } from 'nanostores';
 
 import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig } from '@/lib/agent-config';
 import { migrateLayoutMode } from '@/lib/store-init';
+import { loadTeams, loadWhoami } from '@/renderer/features/Teams/state';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import type { OperatingSystem, StoreData } from '@/shared/types';
 
@@ -160,6 +161,11 @@ const init = async () => {
       // If we can't read the config, just leave onboardingComplete as false
     }
   }
+
+  // Teams/cloud: learn our principal + memberships so "my work" filters and the
+  // team switcher work. No-op (null/empty) in single-user/local mode.
+  void loadWhoami();
+  void loadTeams();
 
   $initialized.set(true);
 };

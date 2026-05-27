@@ -104,7 +104,7 @@ describe.skipIf(!URL)('PgProjectsRepo (live Postgres)', () => {
       archived_at: null, column_changed_at: null, use_worktree: 0, worktree_path: null,
       worktree_name: null, supervisor_session_id: null, phase: null, phase_changed_at: null,
       supervisor_task_id: null, token_usage: null, runs: '[]', pr_review: null,
-      pr_merged_at: null, created_at: '2026-01-01 00:00:00.000', updated_at: '2026-01-01 00:00:00.000',
+      pr_merged_at: null, assignee: null, created_at: '2026-01-01 00:00:00.000', updated_at: '2026-01-01 00:00:00.000',
     });
     await repoA.replaceCommentsForTicket('t1', [
       { id: 'c1', ticket_id: 't1', author: 'agent', content: 'hi', created_at: '2026-01-01 00:00:01.000' },

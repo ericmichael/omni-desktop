@@ -43,6 +43,7 @@ import {
   Tab,
   TabList,
 } from '@/renderer/ds';
+import { AssigneePicker } from '@/renderer/features/Tickets/AssigneePicker';
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -437,6 +438,8 @@ export const TicketDetail = memo(
                 </MenuList>
               </MenuPopover>
             </Menu>
+
+            <AssigneePicker ticketId={ticketId} assignee={ticket.assignee} />
 
             <PhaseStatus phase={phase} onChat={handleOpenChat} onAutopilot={handleStartAutopilot} />
 

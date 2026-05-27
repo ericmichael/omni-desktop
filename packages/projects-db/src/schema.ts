@@ -250,4 +250,12 @@ CREATE TABLE page_content (
 );
 `,
   },
+  {
+    version: 9,
+    sql: `
+-- Ticket assignee (principal id). Per-user WIP/review need "whose ticket is this".
+-- Nullable; single-user (Electron/local) installs leave it NULL.
+ALTER TABLE tickets ADD COLUMN assignee TEXT;
+`,
+  },
 ];

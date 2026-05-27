@@ -74,6 +74,7 @@ interface JsonTicket {
   // shape so we don't have to special-case the unmigrated electron-store dump.
   prReview?: { status: 'approved' | 'changes_requested'; at: number } | Record<string, { status: 'approved' | 'changes_requested'; at: number }>;
   prMergedAt?: number | Record<string, number>;
+  assignee?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -287,6 +288,7 @@ return 0;
         // since pre-multi-source rows have no source ids to key on.
         pr_review: t.prReview ? JSON.stringify(t.prReview) : null,
         pr_merged_at: t.prMergedAt !== undefined && t.prMergedAt !== null ? JSON.stringify(t.prMergedAt) : null,
+        assignee: t.assignee ?? null,
         created_at: toIso(t.createdAt),
         updated_at: toIso(t.updatedAt),
       });

@@ -19,6 +19,7 @@ import {
 } from '@/renderer/ds';
 import { $activeInbox } from '@/renderer/features/Inbox/state';
 import { $milestones, milestoneApi } from '@/renderer/features/Initiatives/state';
+import { $currentPrincipal } from '@/renderer/features/Teams/state';
 import { $tickets, ticketApi } from '@/renderer/features/Tickets/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { Milestone, MilestoneId, Project, ProjectId } from '@/shared/types';
@@ -367,6 +368,7 @@ export const WeekPlanDialog = memo(({ open, onClose }: WeekPlanDialogProps) => {
   }, [store.tickets, milestones, now]);
 
   const tickets = useStore($tickets);
+  const reviewPrincipal = useStore($currentPrincipal);
 
   // Pin targets: every project + every active milestone. Sorted with projects
   // first, then milestones, each group oldest-first for predictability.
@@ -387,6 +389,11 @@ export const WeekPlanDialog = memo(({ open, onClose }: WeekPlanDialogProps) => {
 continue;
 }
           if (ticket.resolution !== undefined) {
+continue;
+}
+          // Teams: a weekly review is personal — count only my assigned work.
+          // Single-user (no principal): count all open tickets (legacy).
+          if (reviewPrincipal && ticket.assignee !== reviewPrincipal) {
 continue;
 }
           openCount++;
@@ -420,7 +427,7 @@ continue;
       });
 
     return [...projectTargets, ...milestoneTargets];
-  }, [store.projects, milestones, tickets]);
+  }, [store.projects, milestones, tickets, reviewPrincipal]);
 
   // Pin set, seeded from currently-pinned projects and milestones.
   const [pinSet, setPinSet] = useState<Set<PinKey>>(() => {

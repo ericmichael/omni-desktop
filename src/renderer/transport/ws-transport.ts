@@ -32,6 +32,8 @@ const INITIAL_RECONNECT_DELAY = 500;
 const MAX_RECONNECT_DELAY = 10_000;
 
 const SESSION_ID_KEY = 'omni-session-id';
+/** Active team id (teams/cloud mode); sent as ?team= so the server scopes the session. */
+const ACTIVE_TEAM_KEY = 'omni-active-team';
 
 import { uuidv4 } from '@/lib/uuid';
 
@@ -42,6 +44,19 @@ function getOrCreateSessionId(): string {
     localStorage.setItem(SESSION_ID_KEY, id);
   }
   return id;
+}
+
+/** Persisted active team, or null until the user picks one (defaults to their personal team). */
+export function getActiveTeamId(): string | null {
+  return localStorage.getItem(ACTIVE_TEAM_KEY);
+}
+
+/** Set the active team and reconnect the socket so the server re-scopes the session. */
+export function setActiveTeamId(teamId: string): void {
+  localStorage.setItem(ACTIVE_TEAM_KEY, teamId);
+  // A full reload is the simplest correct reconnect: it re-dials /ws with the
+  // new ?team= and re-hydrates every store from the new scope.
+  location.reload();
 }
 
 /**
@@ -81,7 +96,9 @@ export class WsTransportEmitter implements TransportEmitter {
 
   private getWsUrl(token: string): string {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${location.host}/ws?sessionId=${encodeURIComponent(this.sessionId)}&token=${encodeURIComponent(token)}`;
+    const team = getActiveTeamId();
+    const teamParam = team ? `&team=${encodeURIComponent(team)}` : '';
+    return `${protocol}//${location.host}/ws?sessionId=${encodeURIComponent(this.sessionId)}&token=${encodeURIComponent(token)}${teamParam}`;
   }
 
   private async connect(): Promise<void> {

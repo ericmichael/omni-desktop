@@ -1,6 +1,16 @@
 import { readFileSync, writeFileSync } from 'fs';
 import type { IProjectsRepo, PgPool, ProjectsRepo } from 'omni-projects-db';
-import { createPgListener, createPgPool, migrateFromJson, PgProjectsRepo, runPgMigrations } from 'omni-projects-db';
+import {
+  ControlPlaneRepo,
+  createPgListener,
+  createPgPool,
+  loadLegacyUserSettings,
+  migrateFromJson,
+  PgProjectsRepo,
+  runPgMigrations,
+  saveTeamSettings,
+  saveUserSettings,
+} from 'omni-projects-db';
 import { join } from 'path';
 
 import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig, parseEnvVars } from '@/lib/agent-config';
@@ -28,11 +38,15 @@ import { ProjectManager } from '@/main/project-manager';
 import { registerSupervisorHandlers } from '@/main/supervisor-handlers';
 import { getOmniConfigDir } from '@/main/util';
 import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
+import { requireRole } from '@/server/authz';
 import { AzureFilesArtifactStore } from '@/server/azure-artifact-store';
 import { ServerIpcAdapter } from '@/server/ipc-adapter';
 import { MCP_PROJECTS_PATH } from '@/server/mcp-http';
-import { PgSettingsStore } from '@/server/pg-settings-store';
+import { CompositeSettingsStore } from '@/server/composite-settings-store';
+import { assertNonBypassingRole, ensureAppRole, grantAppPrivileges } from '@/server/pg-bootstrap';
+import { PgSecretStore } from '@/server/pg-secret-store';
 import { resolveRuntimeTokenSecret, signRuntimeToken } from '@/server/runtime-token';
+import { registerTeamHandlers } from '@/server/team-handlers';
 import { ServerSecretStore } from '@/server/secret-store';
 import type { ServerStore } from '@/server/store';
 import type { HandlerContext, WsHandler } from '@/server/ws-handler';
@@ -46,6 +60,8 @@ import {
   type SettingsConfigStore,
 } from '@/shared/ipc-handlers';
 import { buildHttpMcpEntry, buildStdioMcpEntry } from '@/shared/mcp-entry';
+import { maskMcpConfig, maskModelsConfig, restoreMaskedModels } from '@/shared/secret-mask';
+import { classify } from '@/shared/settings-layers';
 import type { IpcRendererEvents, Project, StoreData } from '@/shared/types';
 import { firstSource } from '@/shared/types';
 
@@ -84,15 +100,35 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
   //   - else → the shared local SQLite file (mirrors Electron). `syncRepo`
   //     drives the change-watcher and the one-time JSON/pages migrations.
   const dbUrl = process.env['OMNI_DATABASE_URL'];
+  // Admin DSN, set only in the managed/cloud deployment. When present, the
+  // server bootstraps the non-superuser `omni_app` role + runs migrations as
+  // the admin owner, then serves traffic via the (RLS-enforced) omni_app pool.
+  const dbAdminUrl = process.env['OMNI_DATABASE_ADMIN_URL'];
   let asyncRepo: IProjectsRepo;
   let syncRepo: ProjectsRepo | undefined;
   let pgPool: PgPool | undefined;
+  // Persistent admin pool (cloud only) — owns the schema; used for migrations
+  // and the teams control plane (which must bypass the dormant control-plane RLS).
+  let pgAdminPool: PgPool | undefined;
 
   if (dbUrl) {
     pgPool = createPgPool(dbUrl);
-    await runPgMigrations(pgPool);
+    if (dbAdminUrl) {
+      // Least-privilege posture: provision omni_app + run migrations as admin
+      // (owner), so RLS is enforced on the omni_app pool below.
+      await ensureAppRole(dbAdminUrl, dbUrl);
+      pgAdminPool = createPgPool(dbAdminUrl);
+      await runPgMigrations(pgAdminPool);
+      await grantAppPrivileges(dbAdminUrl);
+      // Fail-closed: never serve multi-tenant traffic on a role that bypasses RLS.
+      await assertNonBypassingRole(pgPool);
+    } else {
+      // Self-hosted single-tenant: the configured role owns the schema and runs
+      // migrations directly (no separate admin URL, no RLS-bypass guard).
+      await runPgMigrations(pgPool);
+    }
     asyncRepo = new PgProjectsRepo(pgPool, DEFAULT_TENANT);
-    console.log(`[ProjectDb] Using Postgres backend (tenant: ${DEFAULT_TENANT})`);
+    console.log(`[ProjectDb] Using Postgres backend`);
   } else {
     // Both this server and any agent-spawned MCP stdio subprocesses read/write
     // the same projects.db via WAL.
@@ -203,13 +239,22 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
   // agent launch; verified by the route).
   const runtimeTokenSecret = resolveRuntimeTokenSecret();
 
-  // Git tokens, encrypted at rest, keyed by credential id (ids are globally
-  // unique UUIDs and a tenant can only name its own via its per-tenant
-  // `gitCredentials` list, so a shared store stays tenant-isolated in practice).
+  // Git tokens. Cloud (Postgres): durable, RLS-isolated PgSecretStore keyed by
+  // (principal, cred). Local/Electron: the on-disk ServerSecretStore.
   const secretStore = new ServerSecretStore();
+  const pgSecret = pgPool ? new PgSecretStore(pgPool) : undefined;
 
-  /** Per-tenant settings store: Postgres-backed in cloud, the shared JSON store locally. */
-  type SettingsStore = ServerStore | PgSettingsStore;
+  // Teams control plane (cloud only) — users/teams/memberships/invitations.
+  // Accessed via the admin pool (or the PG owner self-hosted), which bypasses
+  // the dormant control-plane RLS; isolation is app-level (scoped by principal).
+  const controlPlanePool = pgAdminPool ?? pgPool;
+  const controlPlane = controlPlanePool ? new ControlPlaneRepo(controlPlanePool) : undefined;
+  // Teams activate under easyauth multi-tenant; PG-without-easyauth is one
+  // 'local' team, SQLite/Electron has no teams.
+  const teamsEnabled = !!(pgPool && process.env['OMNI_AUTH_MODE'] === 'easyauth');
+
+  /** Per-(team, principal) settings: composite (team base + user overlay) in cloud, shared JSON locally. */
+  type SettingsStore = ServerStore | CompositeSettingsStore;
   type TenantInstance = {
     projectManager: ProjectManager;
     processManager: ProcessManager;
@@ -219,15 +264,27 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
     configDir: string;
   };
   const tenants = new Map<string, TenantInstance>();
+  /** Registry key: a team's data scope is shared, but settings + broadcasts are per-principal. */
+  const tenantKey = (teamId: string, principalId: string): string => `${teamId}::${principalId}`;
 
-  const createTenant = (tenantId: string): TenantInstance => {
-    // Postgres: a per-tenant user_settings row (RLS-isolated). SQLite/local:
-    // the single shared ServerStore (one tenant only).
-    const settings: SettingsStore = pgPool ? new PgSettingsStore(pgPool, tenantId, replicaId) : store;
-    // Per-tenant config dir (skills live under <configDir>/skills). Postgres
-    // mode isolates per tenant; local/SQLite keeps the shared config dir.
-    const configDir = pgPool ? join(getOmniConfigDir(), 'tenants', tenantId) : getOmniConfigDir();
-    const tenantSend: SendToWindow = (channel, ...args) => wsHandler.sendToTenant(tenantId, channel, ...args);
+  const createTenant = (teamId: string, principalId: string = teamId): TenantInstance => {
+    // Cloud: composite store (team_settings base ⊕ this principal's overlay).
+    // SQLite/local: the single shared ServerStore (one tenant only).
+    const settings: SettingsStore = pgPool
+      ? new CompositeSettingsStore(pgPool, teamId, principalId, replicaId)
+      : store;
+    // Per-(team, principal) config dir so two members' materialized secret-free
+    // configs don't collide. Local/SQLite keeps the shared config dir.
+    const configDir = pgPool
+      ? join(getOmniConfigDir(), 'tenants', teamId, 'users', principalId)
+      : getOmniConfigDir();
+    // Cloud: route this instance's broadcasts to ONLY this principal's sessions
+    // (user-scoped store keys must not leak to other team members). Project-data
+    // changes by other members reach this principal via the NOTIFY re-hydrate.
+    // Local: broadcast to all (single user).
+    const tenantSend: SendToWindow = pgPool
+      ? (channel, ...args) => wsHandler.sendToPrincipalInTeam(teamId, principalId, channel, ...args)
+      : (channel, ...args) => wsHandler.sendToTenant(teamId, channel, ...args);
     let ref: TenantInstance | undefined;
     const processManager = new ProcessManager({
       sendToWindow: tenantSend,
@@ -237,25 +294,29 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
         projects: ref?.projectManager.getStoreSnapshot().projects ?? [],
         gitCredentials: settings.get('gitCredentials') ?? [],
       }),
-      resolveGitToken: (id) => secretStore.getGitToken(id),
-      // Cloud: mint a fresh per-tenant runtime token for each omni-serve spawn,
-      // so the agent's HTTP MCP calls resolve to THIS tenant's data. The route
-      // verifies it; an untrusted sandbox can't forge another tenant.
+      // Cloud: git/github tokens are this principal's (U-identity), so agent
+      // pushes carry their own identity. Local: the on-disk store.
+      resolveGitToken: (id) =>
+        pgSecret ? pgSecret.getUserGitToken(principalId, id) : secretStore.getGitToken(id),
+      // Cloud: mint a fresh per-(team, principal) runtime token for each
+      // omni-serve spawn, so the agent's HTTP MCP calls resolve to THIS team's
+      // data as THIS user. The route verifies it; a sandbox can't forge another.
       getExtraEnv: dbUrl
         ? () => ({
             OMNI_RUNTIME_TOKEN: signRuntimeToken(runtimeTokenSecret, {
-              tenantId,
+              tenantId: teamId,
+              principalId,
               sessionId: crypto.randomUUID(),
             }),
-            // Redirect the child `omni serve` to this tenant's config dir so it
-            // reads the materialized (secret-free) configs. The launcher's own
-            // getOmniConfigDir() is unaffected.
+            // Redirect the child `omni serve` to this (team, principal) config
+            // dir so it reads the materialized (secret-free) merged configs.
             XDG_CONFIG_HOME: join(configDir, '.config'),
-            // The user's .env, injected directly (no .env file is written in
-            // cloud — a .env *is* the env).
+            // The merged (team base ⊕ user overlay) .env, injected directly.
             ...parseEnvVars(settings.get('envVars') ?? ''),
             // Real values for the ${OMNI_SECRET_*} refs the materializer wrote
-            // into models.json / mcp.json — resolved by the agent's loaders.
+            // into the merged models.json / mcp.json — resolved by the agent's
+            // loaders. settings.get returns the merged config, so origin-aware
+            // resolution falls out: each provider's key is its own layer's.
             ...collectSecretEnv(
               settings.get('modelsConfig') ?? emptyModelsConfig(),
               settings.get('mcpConfig') ?? emptyMcpConfig()
@@ -290,9 +351,22 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
       processManager,
       // Postgres: a tenant-scoped PgProjectsRepo (RLS-isolated). SQLite: the
       // single shared repo + sync change-watcher (one tenant only).
-      repo: pgPool ? new PgProjectsRepo(pgPool, tenantId, replicaId) : asyncRepo,
+      repo: pgPool ? new PgProjectsRepo(pgPool, teamId, replicaId) : asyncRepo,
       changeSeqRepo: pgPool ? undefined : syncRepo,
       skillsDir: join(configDir, 'skills'),
+      // Teams: per-user WIP/review. Only in multi-tenant cloud — local stays global.
+      ...(teamsEnabled ? { currentPrincipal: principalId } : {}),
+      // Teams: toast the assignee (their own sessions) when assigned a ticket.
+      ...(teamsEnabled
+        ? {
+            onAssign: (assignee: string, ticket: import('@/shared/types').Ticket) =>
+              wsHandler.sendToPrincipalInTeam(teamId, assignee, 'toast:show', {
+                level: 'info',
+                title: 'Ticket assigned to you',
+                description: ticket.title,
+              }),
+          }
+        : {}),
       ...(artAccount && artKey
         ? {
             artifactStoreFor: () => new AzureFilesArtifactStore({ account: artAccount, key: artKey, share: artShare }),
@@ -304,13 +378,16 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
     const extension = new ExtensionManager({ store: settings as any, sendToWindow: tenantSend });
     const browser = buildBrowserContext(settings as any, tenantSend);
     ref = { projectManager, processManager, settings, extension, browser, configDir };
-    tenants.set(tenantId, ref);
+    tenants.set(tenantKey(teamId, principalId), ref);
     return ref;
   };
 
-  const getTenant = (tenantId: string): TenantInstance => tenants.get(tenantId) ?? createTenant(tenantId);
-  const getProcessManager = (tenantId: string): ProcessManager => getTenant(tenantId).processManager;
-  const getSettings = (tenantId: string): SettingsStore => getTenant(tenantId).settings;
+  const getTenant = (tenantId: string, principalId: string = tenantId): TenantInstance =>
+    tenants.get(tenantKey(tenantId, principalId)) ?? createTenant(tenantId, principalId);
+  const getProcessManager = (tenantId: string, principalId: string = tenantId): ProcessManager =>
+    getTenant(tenantId, principalId).processManager;
+  const getSettings = (tenantId: string, principalId: string = tenantId): SettingsStore =>
+    getTenant(tenantId, principalId).settings;
   /**
    * Write a tenant's agent config (models/mcp/network) to disk from its store.
    * Cloud (Postgres): per-tenant `<configDir>/.config/omni_code` in `'refs'`
@@ -319,8 +396,8 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
    * `'plaintext'` mode plus a real `.env`, mirroring desktop. The managed
    * `omni-projects` MCP entry is merged per transport.
    */
-  const materializeTenant = (tenantId: string): void => {
-    const t = getTenant(tenantId);
+  const materializeTenant = (tenantId: string, principalId: string = tenantId): void => {
+    const t = getTenant(tenantId, principalId);
     try {
       materializeAgentConfig({
         configDir: dbUrl ? join(t.configDir, '.config', 'omni_code') : getOmniConfigDir(),
@@ -345,18 +422,27 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
    * messages, so a write never races a late hydrate that would clobber either
    * cache. Settings hydrate first so the projection's init reads real prefs.
    */
-  const ensureTenantReady = async (tenantId: string): Promise<void> => {
-    const t = getTenant(tenantId);
-    if (t.settings instanceof PgSettingsStore) {
+  const ensureTenantReady = async (tenantId: string, principalId: string = tenantId): Promise<void> => {
+    const t = getTenant(tenantId, principalId);
+    if (t.settings instanceof CompositeSettingsStore) {
       await t.settings.whenReady;
     }
     await t.projectManager.whenReady;
     // Settings are hydrated now — write the agent's on-disk config so the next
     // omni-serve spawn for this tenant reads fresh model/mcp/network files.
-    materializeTenant(tenantId);
+    materializeTenant(tenantId, principalId);
   };
-  const getStoreSnapshot = (tenantId: string): StoreData => {
-    const snapshot = getTenant(tenantId).projectManager.getStoreSnapshot();
+  const getStoreSnapshot = (tenantId: string, principalId: string = tenantId): StoreData => {
+    let snapshot = getTenant(tenantId, principalId).projectManager.getStoreSnapshot();
+    // Cloud/teams: the merged snapshot carries the shared team model/MCP keys —
+    // mask them before they reach the renderer's mirrored store.
+    if (pgPool) {
+      snapshot = {
+        ...snapshot,
+        modelsConfig: maskModelsConfig(snapshot.modelsConfig ?? emptyModelsConfig()),
+        mcpConfig: maskMcpConfig(snapshot.mcpConfig ?? emptyMcpConfig()),
+      };
+    }
     // Cloud/ACI: force the picker to `aci` only and make it the selected
     // default. Computed (not persisted) so it tracks the deployment, not a
     // stale per-tenant setting. Matches the ProcessManager allowedProfileNames.
@@ -371,6 +457,19 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
     return snapshot;
   };
   /**
+   * Broadcast a (team, principal) store snapshot. Cloud: to ONLY that principal's
+   * sessions (the snapshot carries user-scoped keys that must not leak to other
+   * team members). Local: to all (single user). Team-base changes that should
+   * reach the whole team are broadcast separately by the team-settings handlers.
+   */
+  const sendSnapshot = (tenantId: string, principalId: string = tenantId): void => {
+    if (pgPool) {
+      wsHandler.sendToPrincipalInTeam(tenantId, principalId, 'store:changed', getStoreSnapshot(tenantId, principalId));
+    } else {
+      wsHandler.sendToTenant(tenantId, 'store:changed', getStoreSnapshot(tenantId, principalId));
+    }
+  };
+  /**
    * A tenant-scoped repo for the HTTP MCP route. Postgres: a fresh
    * tenant-scoped PgProjectsRepo (RLS isolates it). SQLite: the single shared
    * repo (one tenant only). Writes flow through this repo, so the LISTEN/NOTIFY
@@ -379,8 +478,67 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
    */
   const getTenantRepo = (tenantId: string): IProjectsRepo =>
     pgPool ? new PgProjectsRepo(pgPool, tenantId, replicaId) : asyncRepo;
+
+  /** Profile claims pulled from EasyAuth headers for the users table. */
+  type PrincipalClaims = { email?: string | null; displayName?: string | null; idp?: string | null };
+
+  /**
+   * Lazily migrate a principal into the teams model on first sight: ensure the
+   * users row, create their personal team (id == principal, so existing project
+   * rows keyed tenant_id = principal need no rewrite), and bifurcate their legacy
+   * single-blob `user_settings` into team_settings (team base) + user_settings_v2
+   * (overlay) per the layer map — so the effective merged config is unchanged
+   * (no re-onboarding). Idempotent: skipped once the users row exists. PG only.
+   */
+  const ensureUserBootstrapped = async (principal: string, claims: PrincipalClaims = {}): Promise<void> => {
+    if (!controlPlane || !pgPool) return;
+    const existing = await controlPlane.getUser(principal);
+    await controlPlane.ensureUser(principal, claims);
+    if (existing) return; // already bootstrapped
+    const label = claims.displayName ? `${claims.displayName}'s Team` : 'Personal';
+    await controlPlane.createTeam({ id: principal, label, kind: 'personal', ownerId: principal });
+    // Bifurcate any legacy settings blob (keyed by principal == personal team id).
+    try {
+      const legacy = await loadLegacyUserSettings(pgPool, principal);
+      if (legacy) {
+        const teamData: Record<string, unknown> = {};
+        const userTop: Record<string, unknown> = {};
+        const userByTeam: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(legacy)) {
+          const cls = classify(k as keyof StoreData);
+          if (cls.layer === 'team') teamData[k] = v;
+          else if (cls.scope === 'team') userByTeam[k] = v;
+          else userTop[k] = v; // global / identity / infra
+        }
+        await saveTeamSettings(pgPool, principal, teamData, replicaId);
+        await saveUserSettings(pgPool, principal, { ...userTop, byTeam: { [principal]: userByTeam } }, replicaId);
+      }
+    } catch (err) {
+      console.error(`[teams] legacy settings bifurcation failed for ${principal}:`, err);
+    }
+  };
+
+  /**
+   * Resolve the active team for a connecting principal. Returns the requested
+   * team if the principal is a member; null if they requested a team they don't
+   * belong to (caller rejects the connection); the personal team otherwise.
+   */
+  const resolveActiveTeam = async (principal: string, requested?: string): Promise<string | null> => {
+    if (!controlPlane) return principal; // no teams → data scope is the principal
+    const teams = await controlPlane.listTeamsForPrincipal(principal);
+    if (requested) {
+      return teams.some((t) => t.id === requested) ? requested : null;
+    }
+    // Default to the personal team (id == principal).
+    return principal;
+  };
+  /** Resolve the caller's (team, principal) TenantInstance from the per-invoke HandlerContext. */
+  const ctxTenant = (event: unknown): TenantInstance => {
+    const c = event as HandlerContext;
+    return getTenant(c.tenantId, c.principalId ?? c.tenantId);
+  };
   /** Resolve the caller's tenant ProjectManager from the per-invoke HandlerContext. */
-  const tenantPM = (event: unknown): ProjectManager => getTenant((event as HandlerContext).tenantId).projectManager;
+  const tenantPM = (event: unknown): ProjectManager => ctxTenant(event).projectManager;
 
   // --- Global managers (shared across tenants) ---
   const [omniInstall, cleanupOmniInstall] = createOmniInstallManager({
@@ -399,9 +557,9 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
     (e, projectId) => tenantPM(e).getProjectDir(projectId)
   );
   registerInboxHandlers(ipc, (e) => tenantPM(e).inbox);
-  registerProcessHandlers(ipc, (e) => getTenant((e as HandlerContext).tenantId).processManager);
-  registerExtensionHandlers(ipc, (e) => getTenant((e as HandlerContext).tenantId).extension);
-  registerBrowserHandlers(ipc, (e) => getTenant((e as HandlerContext).tenantId).browser);
+  registerProcessHandlers(ipc, (e) => ctxTenant(e).processManager);
+  registerExtensionHandlers(ipc, (e) => ctxTenant(e).extension);
+  registerBrowserHandlers(ipc, (e) => ctxTenant(e).browser);
 
   // Eagerly create + hydrate the default tenant so its cache is warm before the
   // server serves requests (matters for Postgres, where hydration is real I/O).
@@ -428,38 +586,43 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
   // burst collapses into one re-hydrate.
   let stopListener: (() => Promise<void>) | undefined;
   if (pgPool && dbUrl) {
-    const pendingRefresh = new Set<string>();
+    // Tenant instances are keyed `${teamId}::${principalId}`. A team/project
+    // change ({t}) re-hydrates every member instance of that team; a user
+    // settings change ({u}) re-hydrates that principal's instances.
+    const pendingTeams = new Set<string>();
+    const pendingPrincipals = new Set<string>();
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     const flushRefresh = () => {
       refreshTimer = undefined;
-      const ids = [...pendingRefresh];
-      pendingRefresh.clear();
-      for (const tid of ids) {
-        const t = tenants.get(tid);
-        if (!t) {
-          continue;
-        }
-        void t.projectManager.refreshFromExternal();
-        if (t.settings instanceof PgSettingsStore) {
-          void t.settings.reload().then(() => {
-            // Foreign settings write (another replica / the MCP): re-materialize
-            // so this replica's on-disk config matches before it spawns an agent.
-            materializeTenant(tid);
-            wsHandler.sendToTenant(tid, 'store:changed', getStoreSnapshot(tid));
-          });
+      const teams = [...pendingTeams];
+      const principals = [...pendingPrincipals];
+      pendingTeams.clear();
+      pendingPrincipals.clear();
+      for (const [key, t] of tenants) {
+        const sep = key.indexOf('::');
+        const teamId = sep >= 0 ? key.slice(0, sep) : key;
+        const principalId = sep >= 0 ? key.slice(sep + 2) : key;
+        if (teams.includes(teamId)) {
+          // Foreign project/team-base write: re-hydrate the projection + team layer.
+          void t.projectManager.refreshFromExternal();
+          if (t.settings instanceof CompositeSettingsStore) {
+            void t.settings.reloadTeam().then(() => {
+              materializeTenant(teamId, principalId);
+              sendSnapshot(teamId, principalId);
+            });
+          }
+        } else if (principals.includes(principalId) && t.settings instanceof CompositeSettingsStore) {
+          // Foreign user-overlay write (same user, another replica/device).
+          void t.settings.reloadUser().then(() => sendSnapshot(teamId, principalId));
         }
       }
     };
     stopListener = await createPgListener(dbUrl, 'omni_change', (payload) => {
       try {
-        const { t, o, p } = JSON.parse(payload) as { t?: string; o?: string; p?: string };
-        if (!t || !tenants.has(t)) {
-          return; // missing tenant, or a tenant we don't host
-        }
-        if (p) {
-          // Page-content change → push the new body to this tenant's editors.
-          // Emit unconditionally (no origin skip); the renderer ignores an echo
-          // that matches its buffer.
+        const { t, u, o, p } = JSON.parse(payload) as { t?: string; u?: string; o?: string; p?: string };
+        if (p && t) {
+          // Page-content change → push the new body to the team's editors.
+          // Emit unconditionally (no origin skip); the renderer drops an echo.
           void new PgProjectsRepo(pgPool!, t)
             .getPageContent(p)
             .then((body) => wsHandler.sendToTenant(t, 'page:content-changed', p, body ?? ''))
@@ -467,10 +630,11 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
           return;
         }
         if (o === replicaId) {
-          return; // our own projection write — cache is already current
+          return; // our own write — cache is already current
         }
-        pendingRefresh.add(t);
-        if (!refreshTimer) {
+        if (t) pendingTeams.add(t);
+        if (u) pendingPrincipals.add(u);
+        if ((t || u) && !refreshTimer) {
           refreshTimer = setTimeout(flushRefresh, 50);
         }
       } catch {
@@ -571,9 +735,9 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
   ipc.handle('store:get-key', (ctx, key) => {
     const k = key as keyof import('@/shared/types').StoreData;
     if (PROJECT_KEYS.has(k)) {
-      return getStoreSnapshot(ctx.tenantId)[k];
+      return getStoreSnapshot(ctx.tenantId, ctx.principalId)[k];
     }
-    return getSettings(ctx.tenantId).get(k);
+    return getSettings(ctx.tenantId, ctx.principalId).get(k);
   });
   ipc.handle('store:set-key', (ctx, key, value) => {
     const k = key as keyof import('@/shared/types').StoreData;
@@ -582,21 +746,21 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
         `store:set-key for project key "${String(k)}" is not allowed when SQLite is active. Use ProjectManager APIs.`
       );
     }
-    getSettings(ctx.tenantId).set(k, value as never);
-    wsHandler.sendToTenant(ctx.tenantId, 'store:changed', getStoreSnapshot(ctx.tenantId));
+    getSettings(ctx.tenantId, ctx.principalId).set(k, value as never);
+    sendSnapshot(ctx.tenantId, ctx.principalId);
   });
-  ipc.handle('store:get', (ctx) => getStoreSnapshot(ctx.tenantId));
+  ipc.handle('store:get', (ctx) => getStoreSnapshot(ctx.tenantId, ctx.principalId));
   ipc.handle('store:set', (ctx, data) => {
     const conflicts = [...PROJECT_KEYS].filter((k) => k in data);
     if (conflicts.length > 0) {
       throw new Error(`store:set with project keys [${conflicts.join(', ')}] is not allowed when SQLite is active.`);
     }
-    getSettings(ctx.tenantId).store = data;
-    wsHandler.sendToTenant(ctx.tenantId, 'store:changed', getStoreSnapshot(ctx.tenantId));
+    getSettings(ctx.tenantId, ctx.principalId).store = data;
+    sendSnapshot(ctx.tenantId, ctx.principalId);
   });
   ipc.handle('store:reset', (ctx) => {
-    getSettings(ctx.tenantId).clear();
-    wsHandler.sendToTenant(ctx.tenantId, 'store:changed', getStoreSnapshot(ctx.tenantId));
+    getSettings(ctx.tenantId, ctx.principalId).clear();
+    sendSnapshot(ctx.tenantId, ctx.principalId);
   });
 
   // Main process status (simplified for server)
@@ -618,30 +782,160 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
   registerUtilHandlers(ipc, { fetchFn: globalThis.fetch, launcherVersion });
   registerSkillsHandlers(
     ipc,
-    (e) => getTenant((e as HandlerContext).tenantId).configDir,
-    (e) => getSettings((e as HandlerContext).tenantId) as never
+    (e) => ctxTenant(e).configDir,
+    (e) => getSettings((e as HandlerContext).tenantId, (e as HandlerContext).principalId) as never
   );
   registerSettingsConfigHandlers(
     ipc,
-    (e) => getSettings((e as HandlerContext).tenantId) as unknown as SettingsConfigStore,
+    (e) => getSettings((e as HandlerContext).tenantId, (e as HandlerContext).principalId) as unknown as SettingsConfigStore,
     (e) => {
-      const tenantId = (e as HandlerContext).tenantId;
-      materializeTenant(tenantId);
-      wsHandler.sendToTenant(tenantId, 'store:changed', getStoreSnapshot(tenantId));
-    }
+      const c = e as HandlerContext;
+      materializeTenant(c.tenantId, c.principalId);
+      sendSnapshot(c.tenantId, c.principalId);
+    },
+    // Cloud/teams: never echo shared secret values back to the renderer; a
+    // save that didn't change a masked field preserves the stored value.
+    pgPool
+      ? { maskModels: maskModelsConfig, maskMcp: maskMcpConfig, restoreModels: restoreMaskedModels }
+      : {}
   );
   registerGitCredentialHandlers(
     ipc,
-    (e) => getSettings((e as HandlerContext).tenantId) as unknown as SettingsConfigStore,
-    () => secretStore,
+    (e) => getSettings((e as HandlerContext).tenantId, (e as HandlerContext).principalId) as unknown as SettingsConfigStore,
+    // Cloud: git tokens are this principal's identity (PgSecretStore); local: on-disk store.
+    (e) => (pgSecret ? pgSecret.forPrincipal((e as HandlerContext).principalId) : secretStore),
     (e) => {
-      const tenantId = (e as HandlerContext).tenantId;
-      wsHandler.sendToTenant(tenantId, 'store:changed', getStoreSnapshot(tenantId));
+      const c = e as HandlerContext;
+      sendSnapshot(c.tenantId, c.principalId);
     }
   );
+  // Teams control plane (cloud only). No-op channels in SQLite/local mode.
+  registerTeamHandlers(ipc, controlPlane);
+
+  // Team-base (shared) agent config editing — admin-gated. A change affects
+  // every member, so refresh all local instances of the team and broadcast.
+  const teamDefaultsStatus = (s: SettingsStore): import('@/shared/types').TeamDefaultsStatus =>
+    s instanceof CompositeSettingsStore
+      ? {
+          hasModels: s.getTeamBase('modelsConfig') != null,
+          hasMcp: s.getTeamBase('mcpConfig') != null,
+          hasEnv: s.getTeamBase('envVars') != null,
+          hasNetwork: s.getTeamBase('networkConfig') != null,
+        }
+      : { hasModels: false, hasMcp: false, hasEnv: false, hasNetwork: false };
+  const refreshTeamMembers = (teamId: string): void => {
+    for (const [key, t] of tenants) {
+      if (!key.startsWith(`${teamId}::`)) continue;
+      const principalId = key.slice(teamId.length + 2);
+      if (t.settings instanceof CompositeSettingsStore) {
+        void t.settings.reloadTeam().then(() => {
+          materializeTenant(teamId, principalId);
+          sendSnapshot(teamId, principalId);
+        });
+      }
+    }
+  };
+  // Identity for the renderer's "my work" filters: the caller's principal in
+  // teams/cloud, null in single-user/local (→ filters fall back to "all").
+  ipc.handle('team:whoami', (e) => (teamsEnabled ? (e as HandlerContext).principalId : null));
+
+  const teamSummariesFor = async (principal: string): Promise<import('@/shared/types').TeamSummary[]> => {
+    if (!controlPlane) return [];
+    return (await controlPlane.listTeamsForPrincipal(principal)).map((r) => ({
+      id: r.id,
+      label: r.label,
+      kind: r.kind,
+      role: r.role,
+    }));
+  };
+
+  // --- Self-service membership ---
+  ipc.handle('team:leave', async (e) => {
+    const c = e as HandlerContext;
+    if (!controlPlane) return [];
+    const role = await controlPlane.getMembershipRole(c.tenantId, c.principalId);
+    if (role === 'owner') {
+      throw new Error('Transfer ownership before leaving the team.');
+    }
+    await controlPlane.removeMember(c.tenantId, c.principalId);
+    return teamSummariesFor(c.principalId);
+  });
+  ipc.handle('team:rename', async (e, label) => {
+    const c = e as HandlerContext;
+    if (!controlPlane) return [];
+    await requireRole(controlPlane, c.tenantId, c.principalId, 'admin');
+    await controlPlane.renameTeam(c.tenantId, String(label).trim() || 'Team');
+    return teamSummariesFor(c.principalId);
+  });
+  ipc.handle('team:delete', async (e) => {
+    const c = e as HandlerContext;
+    if (!controlPlane) return [];
+    await requireRole(controlPlane, c.tenantId, c.principalId, 'owner');
+    const team = await controlPlane.getTeam(c.tenantId);
+    if (team?.kind === 'personal') {
+      throw new Error('Cannot delete your personal team.');
+    }
+    // Block deletion while the team still owns projects (project data is keyed
+    // by tenant_id, not FK-cascaded — require it emptied first).
+    const projects = await getTenantRepo(c.tenantId).listProjects();
+    if (projects.length > 0) {
+      throw new Error('Remove the team’s projects before deleting it.');
+    }
+    await controlPlane.deleteTeam(c.tenantId);
+    return teamSummariesFor(c.principalId);
+  });
+  ipc.handle('team:transfer-ownership', async (e, userId) => {
+    const c = e as HandlerContext;
+    if (!controlPlane) return [];
+    await requireRole(controlPlane, c.tenantId, c.principalId, 'owner');
+    const target = String(userId);
+    await controlPlane.setRole(c.tenantId, target, 'owner');
+    await controlPlane.setRole(c.tenantId, c.principalId, 'admin');
+    return (await controlPlane.listMembers(c.tenantId)).map((m) => ({
+      userId: m.user_id,
+      email: m.email,
+      displayName: m.display_name,
+      role: m.role,
+    }));
+  });
+
+  ipc.handle('team-settings:status', (e) => {
+    const c = e as HandlerContext;
+    return teamDefaultsStatus(getSettings(c.tenantId, c.principalId));
+  });
+  ipc.handle('team-settings:publish-from-mine', async (e) => {
+    const c = e as HandlerContext;
+    if (controlPlane) await requireRole(controlPlane, c.tenantId, c.principalId, 'admin');
+    const s = getSettings(c.tenantId, c.principalId);
+    if (s instanceof CompositeSettingsStore) {
+      // Adopt the caller's effective (merged) config as the team default.
+      s.setTeamBase('modelsConfig', s.get('modelsConfig'));
+      s.setTeamBase('mcpConfig', s.get('mcpConfig'));
+      s.setTeamBase('envVars', s.get('envVars'));
+      s.setTeamBase('networkConfig', s.get('networkConfig'));
+      await s.flush();
+      refreshTeamMembers(c.tenantId);
+    }
+    return teamDefaultsStatus(s);
+  });
+  ipc.handle('team-settings:clear', async (e) => {
+    const c = e as HandlerContext;
+    if (controlPlane) await requireRole(controlPlane, c.tenantId, c.principalId, 'admin');
+    const s = getSettings(c.tenantId, c.principalId);
+    if (s instanceof CompositeSettingsStore) {
+      s.setTeamBase('modelsConfig', emptyModelsConfig());
+      s.setTeamBase('mcpConfig', emptyMcpConfig());
+      s.setTeamBase('envVars', '');
+      s.setTeamBase('networkConfig', emptyNetworkConfig());
+      await s.flush();
+      refreshTeamMembers(c.tenantId);
+    }
+    return teamDefaultsStatus(s);
+  });
+
   registerMigrationHandlers(ipc, (e) => {
-    const tenantId = (e as HandlerContext).tenantId;
-    const settings = getSettings(tenantId);
+    const c = e as HandlerContext;
+    const settings = getSettings(c.tenantId, c.principalId);
     return {
       get: () => settings.get('pagesMigration') ?? null,
       set: (value) => {
@@ -650,7 +944,7 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
         } else {
           settings.set('pagesMigration', value);
         }
-        wsHandler.sendToTenant(tenantId, 'store:changed', getStoreSnapshot(tenantId));
+        sendSnapshot(c.tenantId, c.principalId);
       },
     };
   });
@@ -692,7 +986,7 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
   };
 
   ipc.handle('platform:is-enterprise', () => isEnterpriseBuild());
-  ipc.handle('platform:get-auth', (ctx) => getSettings(ctx.tenantId).get('platform') ?? null);
+  ipc.handle('platform:get-auth', (ctx) => getSettings(ctx.tenantId, ctx.principalId).get('platform') ?? null);
   ipc.handle('platform:sign-in', async (ctx) => {
     if (!isEnterpriseBuild()) {
       throw new Error('Not an enterprise build');
@@ -740,7 +1034,7 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
     };
   });
   ipc.handle('platform:sign-out', (ctx) => {
-    const settings = getSettings(ctx.tenantId);
+    const settings = getSettings(ctx.tenantId, ctx.principalId);
     settings.delete('platform');
     settings.set('defaultProfileName', 'host');
     wsHandler.sendToTenant(ctx.tenantId, 'platform:auth-changed', null);
@@ -753,7 +1047,7 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
   }
 
   ipc.handle('platform:get-dashboards', async (ctx) => {
-    const settings = getSettings(ctx.tenantId);
+    const settings = getSettings(ctx.tenantId, ctx.principalId);
     const creds = settings.get('platform');
     if (!creds?.accessToken || !isEnterpriseBuild()) {
       return [];
@@ -793,12 +1087,15 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
       t.projectManager.exit(),
       t.processManager.cleanup(),
       t.extension.cleanup(),
-      t.settings instanceof PgSettingsStore ? t.settings.flush() : Promise.resolve(),
+      t.settings instanceof CompositeSettingsStore ? t.settings.flush() : Promise.resolve(),
     ]);
     const results = await Promise.allSettled([syncManager.dispose(), cleanupOmniInstall(), ...tenantCleanups]);
     closeProjectDb();
     if (pgPool) {
       await pgPool.end();
+    }
+    if (pgAdminPool) {
+      await pgAdminPool.end();
     }
     const errors = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected').map((r) => r.reason);
     if (errors.length > 0) {
@@ -806,7 +1103,17 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
     }
   };
 
-  return { cleanupGlobalManagers, getProcessManager, ensureTenantReady, getTenantRepo, runtimeTokenSecret };
+  return {
+    cleanupGlobalManagers,
+    getProcessManager,
+    ensureTenantReady,
+    getTenantRepo,
+    runtimeTokenSecret,
+    teamsEnabled,
+    controlPlane,
+    ensureUserBootstrapped,
+    resolveActiveTeam,
+  };
 };
 
 /**

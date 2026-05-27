@@ -122,17 +122,38 @@ export interface SettingsConfigStore {
  * resolved per-invoke; `afterWrite` is the transport's hook to broadcast
  * `store:changed` and re-materialize the agent's on-disk config.
  */
+/**
+ * Optional secret-masking hooks (cloud/teams). `maskModels`/`maskMcp` blank out
+ * shared secret values before a config reaches the renderer; `restoreModels`
+ * re-applies the stored value on save so a sentinel round-trip never clobbers
+ * the real secret. Omitted in Electron/local (a user's own keys, no masking).
+ */
+export interface SettingsSecretMask {
+  maskModels?: (c: ModelsConfig) => ModelsConfig;
+  maskMcp?: (c: McpConfig) => McpConfig;
+  restoreModels?: (incoming: ModelsConfig, stored: ModelsConfig) => ModelsConfig;
+}
+
 export function registerSettingsConfigHandlers(
   ipc: IIpcListener,
   resolveStore: (event: unknown) => SettingsConfigStore,
-  afterWrite: (event: unknown) => void
+  afterWrite: (event: unknown) => void,
+  mask: SettingsSecretMask = {}
 ): void {
-  ipc.handle('settings:get-models-config', (e: unknown) => resolveStore(e).get('modelsConfig') ?? emptyModelsConfig());
+  ipc.handle('settings:get-models-config', (e: unknown) => {
+    const c = resolveStore(e).get('modelsConfig') ?? emptyModelsConfig();
+    return mask.maskModels ? mask.maskModels(c) : c;
+  });
   ipc.handle('settings:set-models-config', (e: unknown, config: ModelsConfig) => {
-    resolveStore(e).set('modelsConfig', config);
+    const store = resolveStore(e);
+    const next = mask.restoreModels ? mask.restoreModels(config, store.get('modelsConfig') ?? emptyModelsConfig()) : config;
+    store.set('modelsConfig', next);
     afterWrite(e);
   });
-  ipc.handle('settings:get-mcp-config', (e: unknown) => resolveStore(e).get('mcpConfig') ?? emptyMcpConfig());
+  ipc.handle('settings:get-mcp-config', (e: unknown) => {
+    const c = resolveStore(e).get('mcpConfig') ?? emptyMcpConfig();
+    return mask.maskMcp ? mask.maskMcp(c) : c;
+  });
   ipc.handle('settings:set-mcp-config', (e: unknown, config: McpConfig) => {
     resolveStore(e).set('mcpConfig', config);
     afterWrite(e);

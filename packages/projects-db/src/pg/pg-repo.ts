@@ -287,8 +287,8 @@ export class PgProjectsRepo implements IProjectsRepo {
          blocked_by, shaping, resolution, resolved_at, archived_at, column_changed_at,
          use_worktree, worktree_path, worktree_name, supervisor_session_id,
          phase, phase_changed_at, supervisor_task_id, token_usage, runs,
-         pr_review, pr_merged_at, created_at, updated_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
+         pr_review, pr_merged_at, assignee, created_at, updated_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
        ON CONFLICT (id) DO UPDATE SET
          project_id = EXCLUDED.project_id, milestone_id = EXCLUDED.milestone_id,
          column_id = EXCLUDED.column_id, title = EXCLUDED.title, description = EXCLUDED.description,
@@ -300,6 +300,7 @@ export class PgProjectsRepo implements IProjectsRepo {
          phase = EXCLUDED.phase, phase_changed_at = EXCLUDED.phase_changed_at,
          supervisor_task_id = EXCLUDED.supervisor_task_id, token_usage = EXCLUDED.token_usage,
          runs = EXCLUDED.runs, pr_review = EXCLUDED.pr_review, pr_merged_at = EXCLUDED.pr_merged_at,
+         assignee = EXCLUDED.assignee,
          updated_at = EXCLUDED.updated_at`,
       [
         this.tenantId, row.id, row.project_id, row.milestone_id, row.column_id,
@@ -308,7 +309,7 @@ export class PgProjectsRepo implements IProjectsRepo {
         row.archived_at, row.column_changed_at,
         row.use_worktree, row.worktree_path, row.worktree_name, row.supervisor_session_id,
         row.phase, row.phase_changed_at, row.supervisor_task_id, row.token_usage, row.runs,
-        row.pr_review, row.pr_merged_at, row.created_at, row.updated_at,
+        row.pr_review, row.pr_merged_at, row.assignee, row.created_at, row.updated_at,
       ]
     );
   }

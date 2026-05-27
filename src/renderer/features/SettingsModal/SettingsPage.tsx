@@ -28,6 +28,7 @@ import { SettingsModalModelsTab } from '@/renderer/features/SettingsModal/Settin
 import { SettingsModalNetworkTab } from '@/renderer/features/SettingsModal/SettingsModalNetworkTab';
 import { SettingsModalResetButton } from '@/renderer/features/SettingsModal/SettingsModalResetButton';
 import { SettingsModalSkillsTab } from '@/renderer/features/SettingsModal/SettingsModalSkillsTab';
+import { SettingsModalTeamsTab } from '@/renderer/features/SettingsModal/SettingsModalTeamsTab';
 import { persistedStoreApi } from '@/renderer/services/store';
 
 const TABS = [
@@ -42,6 +43,7 @@ const TABS = [
   { value: 'Network', label: 'Network', icon: <Globe20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Extensions', label: 'Extensions', icon: <PuzzlePiece20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Account', label: 'Account', icon: <Person20Regular style={{ width: 18, height: 18 }} /> },
+  { value: 'Teams', label: 'Teams', icon: <Person20Regular style={{ width: 18, height: 18 }} /> },
 ] as const;
 
 type SettingsTab = (typeof TABS)[number]['value'];
@@ -260,6 +262,7 @@ export const SettingsPage = memo(() => {
           {activeTab === 'Network' && <SettingsModalNetworkTab />}
           {activeTab === 'Extensions' && <SettingsModalExtensionsTab />}
           {activeTab === 'Account' && <SettingsModalAccountTab />}
+          {activeTab === 'Teams' && <SettingsModalTeamsTab />}
           {activeTab === 'General' && (
             <div className={styles.footer}>
               <SettingsModalResetButton />

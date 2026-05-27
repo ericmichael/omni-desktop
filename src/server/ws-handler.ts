@@ -24,7 +24,10 @@ export const DEFAULT_TENANT = 'local';
  * Server-mode managers receive this object in the Electron `event` slot.
  */
 export type HandlerContext = {
+  /** Data-scope key. In teams/cloud this is the active team id; else the principal/DEFAULT_TENANT. */
   tenantId: string;
+  /** Authenticated identity. Equals tenantId in single-user/local mode; the EasyAuth principal in cloud. */
+  principalId: string;
   sessionId: string;
   sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
 };
@@ -36,8 +39,10 @@ type CtxHandler = (ctx: HandlerContext, ...args: unknown[]) => unknown | Promise
 
 type PersistentSession = {
   sessionId: string;
-  /** Authenticated tenant this session belongs to (EasyAuth principal id, or DEFAULT_TENANT). */
+  /** Data-scope key (active team id in cloud; else principal/DEFAULT_TENANT). */
   tenantId: string;
+  /** Authenticated identity (EasyAuth principal; equals tenantId in single-user mode). */
+  principalId: string;
   ws: WebSocket | null;
   handlers: Map<string, CtxHandler>;
   cleanup?: () => Promise<void>;
@@ -156,6 +161,32 @@ export class WsHandler {
   }
 
   /**
+   * Send an event to only one principal's sessions within a team. Used for
+   * user-scoped store keys (codeTabs, activeTicketId, …) so one member's
+   * personal/UI state never leaks to the rest of the team via `store:changed`.
+   */
+  sendToPrincipalInTeam<T extends keyof IpcRendererEvents>(
+    teamId: string,
+    principalId: string,
+    channel: T,
+    ...args: IpcRendererEvents[T]
+  ): void {
+    const wireArgs = structuredClone(args);
+    this.runEventInterceptors(channel, wireArgs);
+    const message = JSON.stringify({ type: 'event', channel, args: wireArgs });
+    for (const session of this.wsSessions.values()) {
+      if (
+        session.tenantId === teamId &&
+        session.principalId === principalId &&
+        session.ws &&
+        session.ws.readyState === 1 /* WebSocket.OPEN */
+      ) {
+        session.ws.send(message);
+      }
+    }
+  }
+
+  /**
    * Send an event to a specific client.
    */
   sendTo<T extends keyof IpcRendererEvents>(ws: WebSocket, channel: T, ...args: IpcRendererEvents[T]): void {
@@ -189,13 +220,15 @@ export class WsHandler {
     }) => void,
     sessionId?: string,
     tenantId: string = DEFAULT_TENANT,
-    ready?: Promise<void>
+    ready?: Promise<void>,
+    principalId: string = tenantId
   ): void {
-    // Persistent sessions are keyed by tenant + client sessionId so a client
-    // can only ever reattach to its OWN tenant's session — a guessed/reused
-    // sessionId from another tenant resolves to a different key and starts
-    // fresh instead of hijacking. Principal ids and UUIDs never contain "::".
-    const persistentKey = sessionId ? `${tenantId}::${sessionId}` : undefined;
+    // Persistent sessions are keyed by tenant + principal + client sessionId so a
+    // client can only ever reattach to its OWN (team, principal) session — a
+    // guessed/reused sessionId resolves to a different key and starts fresh
+    // instead of hijacking. Two members of one team don't collide, and one
+    // principal switching teams gets a distinct session. Ids never contain "::".
+    const persistentKey = sessionId ? `${tenantId}::${principalId}::${sessionId}` : undefined;
     const existingSession = persistentKey ? this.persistentSessions.get(persistentKey) : undefined;
 
     if (existingSession) {
@@ -213,6 +246,7 @@ export class WsHandler {
       const session: PersistentSession = {
         sessionId: id,
         tenantId,
+        principalId,
         ws,
         handlers: new Map(),
         ready,
@@ -224,7 +258,7 @@ export class WsHandler {
         },
       };
       this.wsSessions.set(ws, session);
-      this.persistentSessions.set(`${tenantId}::${id}`, session);
+      this.persistentSessions.set(`${tenantId}::${principalId}::${id}`, session);
 
       if (onConnect) {
         onConnect({
@@ -306,6 +340,7 @@ export class WsHandler {
     // can scope their work and route events back to only this caller's tenant.
     const ctx: HandlerContext = {
       tenantId: session?.tenantId ?? DEFAULT_TENANT,
+      principalId: session?.principalId ?? session?.tenantId ?? DEFAULT_TENANT,
       sessionId: session?.sessionId ?? '',
       sendToWindow: session?.sendToWindow ?? (() => {}),
     };

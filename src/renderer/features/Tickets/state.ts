@@ -67,6 +67,13 @@ export const $pipeline = atom<Pipeline | null>(null);
 export const $activeMilestoneId = atom<MilestoneId | 'all'>('all');
 
 /**
+ * Board assignee filter (teams). `'all'` = everyone, `'me'` = assigned to the
+ * current principal, `'unassigned'` = no assignee, or a specific member's
+ * principal id. Always `'all'` effectively in single-user mode.
+ */
+export const $assigneeFilter = atom<'all' | 'me' | 'unassigned' | string>('all');
+
+/**
  * Which tickets view is active: dashboard, project detail, inbox, or ticket detail.
  */
 export type TicketsView =
@@ -273,6 +280,14 @@ export const ticketApi = {
   },
   moveTicketToColumn: (ticketId: TicketId, columnId: ColumnId): Promise<void> => {
     return emitter.invoke('project:move-ticket-to-column', ticketId, columnId);
+  },
+  /** Assign (principal id) or unassign (null) — team ownership is unchanged; any member may call. */
+  assignTicket: async (ticketId: TicketId, assignee: string | null): Promise<void> => {
+    await emitter.invoke('project:assign-ticket', ticketId, assignee);
+    const existing = $tickets.get()[ticketId];
+    if (existing) {
+      $tickets.setKey(ticketId, { ...existing, assignee: assignee || undefined, updatedAt: Date.now() });
+    }
   },
   resolveTicket: async (ticketId: TicketId, resolution: import('@/shared/types').TicketResolution): Promise<void> => {
     await emitter.invoke('project:resolve-ticket', ticketId, resolution);

@@ -273,4 +273,174 @@ CREATE TRIGGER page_content_notify AFTER INSERT OR UPDATE OR DELETE ON page_cont
   FOR EACH ROW EXECUTE FUNCTION omni_notify_page_content();
 `,
   },
+  {
+    version: 6,
+    sql: `
+-- Ticket assignee (principal id). Per-user WIP/review need "whose ticket is this".
+-- Nullable; mirrors the SQLite v9 column. RLS already scopes tickets by team.
+ALTER TABLE tickets ADD COLUMN assignee TEXT;
+`,
+  },
+  {
+    version: 7,
+    sql: `
+-- Teams control plane. A deployment hosts many independent teams; a team is the
+-- RLS tenant (app.current_tenant = team id) and owns projects. Users are
+-- members with roles. Personal teams reuse the owner's principal id as the team
+-- id (so existing project rows, already keyed tenant_id = principal, need no
+-- rewrite when a solo user is migrated).
+--
+-- These tables are accessed by the launcher via the ADMIN pool (owner) with
+-- app-level principal scoping, NOT the omni_app pool — membership must be read
+-- before a team is selected, and an admin must write rows for teams the caller
+-- isn't yet a member of (bootstrap/invite). RLS here is ENABLE (not FORCE) as
+-- dormant defense-in-depth: the owner bypasses it, a stray omni_app access is
+-- still isolated to the calling principal.
+CREATE TABLE users (
+  id           TEXT PRIMARY KEY,        -- EasyAuth principal id (or 'local')
+  email        TEXT,
+  display_name TEXT,
+  idp          TEXT,
+  created_at   TEXT NOT NULL DEFAULT ${TS_DEFAULT},
+  updated_at   TEXT NOT NULL DEFAULT ${TS_DEFAULT}
+);
+CREATE TABLE teams (
+  id          TEXT PRIMARY KEY,         -- personal team id == owning principal id
+  label       TEXT NOT NULL,
+  kind        TEXT NOT NULL DEFAULT 'shared' CHECK (kind IN ('personal','shared')),
+  created_by  TEXT NOT NULL,
+  created_at  TEXT NOT NULL DEFAULT ${TS_DEFAULT},
+  updated_at  TEXT NOT NULL DEFAULT ${TS_DEFAULT}
+);
+CREATE TABLE team_members (
+  team_id  TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  user_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role     TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner','admin','member')),
+  added_at TEXT NOT NULL DEFAULT ${TS_DEFAULT},
+  PRIMARY KEY (team_id, user_id)
+);
+CREATE INDEX idx_team_members_user ON team_members(user_id);
+CREATE TABLE invitations (
+  id          TEXT PRIMARY KEY,
+  team_id     TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  email       TEXT NOT NULL,
+  role        TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('admin','member')),
+  invited_by  TEXT NOT NULL,
+  token       TEXT NOT NULL UNIQUE,
+  status      TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','revoked')),
+  created_at  TEXT NOT NULL DEFAULT ${TS_DEFAULT},
+  accepted_at TEXT
+);
+CREATE INDEX idx_invitations_team ON invitations(team_id);
+CREATE INDEX idx_invitations_email ON invitations(email);
+
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+CREATE POLICY self ON users
+  USING (id = current_setting('app.current_principal', true));
+ALTER TABLE teams ENABLE ROW LEVEL SECURITY;
+CREATE POLICY member ON teams
+  USING (id IN (SELECT team_id FROM team_members WHERE user_id = current_setting('app.current_principal', true)));
+ALTER TABLE team_members ENABLE ROW LEVEL SECURITY;
+CREATE POLICY self_membership ON team_members
+  USING (user_id = current_setting('app.current_principal', true));
+ALTER TABLE invitations ENABLE ROW LEVEL SECURITY;
+CREATE POLICY member ON invitations
+  USING (team_id IN (SELECT team_id FROM team_members WHERE user_id = current_setting('app.current_principal', true)));
+`,
+  },
+  {
+    version: 8,
+    sql: `
+-- Settings split (see docs/teams-settings-merge.md):
+--   team_settings   — admin-gated team base (models/mcp/env/network/skills/...).
+--                     RLS-scoped by app.current_tenant (= team id), like project data.
+--   user_settings_v2 — per-principal overlay + personal/UI state. RLS-scoped by
+--                     app.current_principal. Per-(user,team) keys live under
+--                     data->'byTeam'->team_id; global keys at the top level.
+-- Both are on the omni_app pool with FORCE RLS — their key equals the GUC
+-- directly, so writes pass WITH CHECK without any membership lookup.
+CREATE TABLE team_settings (
+  team_id    TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+  data       JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TEXT NOT NULL DEFAULT ${TS_DEFAULT}
+);
+ALTER TABLE team_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE team_settings FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON team_settings
+  USING (team_id = current_setting('app.current_tenant', true))
+  WITH CHECK (team_id = current_setting('app.current_tenant', true));
+
+CREATE TABLE user_settings_v2 (
+  principal_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  data         JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at   TEXT NOT NULL DEFAULT ${TS_DEFAULT}
+);
+ALTER TABLE user_settings_v2 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_settings_v2 FORCE ROW LEVEL SECURITY;
+CREATE POLICY principal_isolation ON user_settings_v2
+  USING (principal_id = current_setting('app.current_principal', true))
+  WITH CHECK (principal_id = current_setting('app.current_principal', true));
+
+-- Multi-replica notify: team_settings/user_settings_v2 lack the tenant_id
+-- column the v3 trigger reads, so dedicated trigger fns. team change → {t};
+-- user change → {u}. The listener maps these to a re-hydrate + targeted send.
+CREATE FUNCTION omni_notify_team_settings() RETURNS trigger AS $$
+BEGIN
+  PERFORM pg_notify('omni_change', json_build_object(
+    't', COALESCE(NEW.team_id, OLD.team_id),
+    'o', current_setting('app.current_origin', true))::text);
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER team_settings_notify AFTER INSERT OR UPDATE OR DELETE ON team_settings
+  FOR EACH ROW EXECUTE FUNCTION omni_notify_team_settings();
+
+CREATE FUNCTION omni_notify_user_settings() RETURNS trigger AS $$
+BEGIN
+  PERFORM pg_notify('omni_change', json_build_object(
+    'u', COALESCE(NEW.principal_id, OLD.principal_id),
+    'o', current_setting('app.current_origin', true))::text);
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER user_settings_v2_notify AFTER INSERT OR UPDATE OR DELETE ON user_settings_v2
+  FOR EACH ROW EXECUTE FUNCTION omni_notify_user_settings();
+`,
+  },
+  {
+    version: 9,
+    sql: `
+-- Secrets move into Postgres (durable + RLS-isolated), replacing the ephemeral
+-- on-disk file store in cloud. Two scopes:
+--   user_secrets  — per-principal (git/github tokens; follow the user, U-identity).
+--   team_secrets  — per-team (shared model/MCP keys; admin-rotated, masked in UI).
+-- Encrypted at rest with OMNI_SECRET_KEY (required in cloud). On the omni_app
+-- pool with FORCE RLS, keyed directly on the GUCs.
+CREATE TABLE user_secrets (
+  principal_id TEXT NOT NULL,
+  cred_id      TEXT NOT NULL,
+  ciphertext   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL DEFAULT ${TS_DEFAULT},
+  PRIMARY KEY (principal_id, cred_id)
+);
+ALTER TABLE user_secrets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_secrets FORCE ROW LEVEL SECURITY;
+CREATE POLICY principal_isolation ON user_secrets
+  USING (principal_id = current_setting('app.current_principal', true))
+  WITH CHECK (principal_id = current_setting('app.current_principal', true));
+
+CREATE TABLE team_secrets (
+  team_id    TEXT NOT NULL,
+  ref_name   TEXT NOT NULL,
+  ciphertext TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT ${TS_DEFAULT},
+  PRIMARY KEY (team_id, ref_name)
+);
+ALTER TABLE team_secrets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE team_secrets FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON team_secrets
+  USING (team_id = current_setting('app.current_tenant', true))
+  WITH CHECK (team_id = current_setting('app.current_tenant', true));
+`,
+  },
 ];

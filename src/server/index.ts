@@ -60,6 +60,34 @@ function resolveTenantId(headers: IncomingHttpHeaders): string | null {
 }
 
 /**
+ * Best-effort profile claims for the `users` table, from the EasyAuth headers
+ * the edge injects: `x-ms-client-principal-name` (UPN/email), `-idp`, and the
+ * base64 `x-ms-client-principal` claims blob (parsed for a display name).
+ */
+function principalClaims(headers: IncomingHttpHeaders): { email?: string; displayName?: string; idp?: string } {
+  const str = (v: string | string[] | undefined): string | undefined =>
+    typeof v === 'string' && v.trim() ? v.trim() : undefined;
+  const email = str(headers['x-ms-client-principal-name']);
+  const idp = str(headers['x-ms-client-principal-idp']);
+  let displayName: string | undefined;
+  const blob = str(headers['x-ms-client-principal']);
+  if (blob) {
+    try {
+      const decoded = JSON.parse(Buffer.from(blob, 'base64').toString('utf-8')) as {
+        claims?: Array<{ typ?: string; val?: string }>;
+      };
+      const nameClaim = decoded.claims?.find(
+        (c) => c.typ === 'name' || c.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'
+      );
+      displayName = nameClaim?.val;
+    } catch {
+      // malformed blob — fall back to email-derived name
+    }
+  }
+  return { email, idp, displayName: displayName ?? email };
+}
+
+/**
  * Build the allowlist for /api/ws-token. Loopback is always trusted; additional
  * networks can be opted in via OMNI_TRUSTED_CIDRS (comma-separated).
  *
@@ -152,11 +180,19 @@ const main = async () => {
   setupProxyRewriter(fastify, wsHandler, tokenAllowList.check);
 
   // Wire global (shared) IPC handlers — store, util, config, project, code, chat, sandbox, install
-  const { cleanupGlobalManagers, getProcessManager, ensureTenantReady, getTenantRepo, runtimeTokenSecret } =
-    await wireGlobalHandlers({
-      wsHandler,
-      store,
-    });
+  const {
+    cleanupGlobalManagers,
+    getProcessManager,
+    ensureTenantReady,
+    getTenantRepo,
+    runtimeTokenSecret,
+    teamsEnabled,
+    ensureUserBootstrapped,
+    resolveActiveTeam,
+  } = await wireGlobalHandlers({
+    wsHandler,
+    store,
+  });
 
   // HTTP MCP route — remote agent sandboxes reach their tenant's project data
   // here (authenticated by the signed runtime token). Local Electron/stdio
@@ -175,37 +211,80 @@ const main = async () => {
         socket.close(4401, 'Unauthorized');
         return;
       }
-      // Bind the connection to its authenticated tenant. The client-supplied
-      // sessionId is only a reattach key WITHIN this tenant (see WsHandler),
-      // so it can't be used to reach another tenant's session.
-      const tenantId = resolveTenantId(request.headers);
-      if (tenantId === null) {
+      // The authenticated identity (EasyAuth principal, or DEFAULT_TENANT).
+      const principal = resolveTenantId(request.headers);
+      if (principal === null) {
         socket.close(4401, 'Unauthorized');
         return;
       }
       const sessionId = url.searchParams.get('sessionId') ?? undefined;
+      const requestedTeam = url.searchParams.get('team') ?? undefined;
 
-      // Create + hydrate the tenant; pass the promise as the session's dispatch
-      // gate. addClient attaches the message listener synchronously (no dropped
-      // messages), and WsHandler defers invoke dispatch until this resolves —
-      // so a write can't race a late hydrate. Console proxies terminals through
-      // the caller tenant's ProcessManager (resolved after readiness).
-      const ready = ensureTenantReady(tenantId);
-      wsHandler.addClient(
-        socket,
-        (session) => {
-          const cleanup = wireClientManagers({
-            handle: session.handle,
-            sendToWindow: session.sendToWindow,
-            store,
-            processManager: getProcessManager(tenantId),
-          });
-          session.setCleanup(cleanup);
-        },
-        sessionId,
-        tenantId,
-        ready
-      );
+      // In single-user/local mode the data scope IS the principal — bind
+      // synchronously (no control plane). In teams/cloud mode we must first
+      // bootstrap the user + resolve/verify their active team, which is async;
+      // buffer any early frames and replay them so nothing is dropped.
+      if (!teamsEnabled) {
+        const ready = ensureTenantReady(principal);
+        wsHandler.addClient(
+          socket,
+          (session) => {
+            const cleanup = wireClientManagers({
+              handle: session.handle,
+              sendToWindow: session.sendToWindow,
+              store,
+              processManager: getProcessManager(principal),
+            });
+            session.setCleanup(cleanup);
+          },
+          sessionId,
+          principal,
+          ready,
+          principal
+        );
+        return;
+      }
+
+      // Teams mode: buffer frames until (team, principal) is resolved.
+      const buffered: unknown[] = [];
+      const buffer = (raw: unknown): void => {
+        buffered.push(raw);
+      };
+      socket.on('message', buffer);
+      void (async () => {
+        try {
+          const claims = principalClaims(request.headers);
+          await ensureUserBootstrapped(principal, claims);
+          const teamId = await resolveActiveTeam(principal, requestedTeam);
+          if (teamId === null) {
+            socket.close(4403, 'Forbidden: not a member of the requested team');
+            return;
+          }
+          const ready = ensureTenantReady(teamId, principal);
+          socket.off('message', buffer);
+          wsHandler.addClient(
+            socket,
+            (session) => {
+              const cleanup = wireClientManagers({
+                handle: session.handle,
+                sendToWindow: session.sendToWindow,
+                store,
+                processManager: getProcessManager(teamId, principal),
+              });
+              session.setCleanup(cleanup);
+            },
+            sessionId,
+            teamId,
+            ready,
+            principal
+          );
+          // Replay frames that arrived during async resolution.
+          for (const raw of buffered) socket.emit('message', raw);
+        } catch (err) {
+          console.error('[ws] team resolution failed:', err);
+          socket.close(4500, 'Server error during team resolution');
+        }
+      })();
     });
   });
 

@@ -645,6 +645,7 @@ export const schema: Schema<StoreData> = {
         // Per-source maps keyed by ProjectSource.id.
         prReview: { type: 'object' },
         prMergedAt: { type: 'object' },
+        assignee: { type: 'string' },
         // Kanban fields
         columnId: { type: 'string' },
         currentPhaseId: { type: ['string', 'null'] },
@@ -1465,6 +1466,12 @@ export type Ticket = {
   archivedAt?: number;
   /** Agent/human comments — serves as persistent memory across runs. */
   comments?: TicketComment[];
+  /**
+   * Assigned member's principal id (cloud/teams). Drives per-user WIP and the
+   * weekly review ("my work"). Undefined = unassigned; single-user (Electron/
+   * local) installs leave it unset.
+   */
+  assignee?: string;
   /** History of supervisor runs on this ticket. */
   runs?: TicketRun[];
   /** Populated by the seed script; tracked in seed-manifest for reset. */
@@ -1834,6 +1841,86 @@ type GitCredentialIpcEvents = Namespaced<
   }
 >;
 
+/** Team role within a team (cloud/teams mode). */
+export type TeamRole = 'owner' | 'admin' | 'member';
+
+/** A team the current user belongs to, with their role. */
+export type TeamSummary = {
+  id: string;
+  label: string;
+  kind: 'personal' | 'shared';
+  role: TeamRole;
+};
+
+/** A member of a team (admin views). */
+export type TeamMember = {
+  userId: string;
+  email: string | null;
+  displayName: string | null;
+  role: TeamRole;
+};
+
+/** A pending invitation to a team. */
+export type TeamInvitation = {
+  id: string;
+  email: string;
+  role: 'admin' | 'member';
+  token: string;
+};
+
+/**
+ * Teams control plane (cloud only). Membership reads are scoped to the caller;
+ * mutations are role-gated server-side. Switching the active team is a
+ * client-side reconnect with `?team=<id>`, not a channel here. No-op in
+ * single-user/local mode (returns empty / the implicit personal team).
+ */
+type TeamIpcEvents = Namespaced<
+  'team',
+  {
+    list: () => TeamSummary[];
+    'get-my-role': () => TeamRole | null;
+    /** The caller's principal id in teams/cloud mode; null in single-user/local (drives "my work" filters). */
+    whoami: () => string | null;
+    create: (label: string) => TeamSummary[];
+    /** Leave the active team. Owners must transfer ownership first. */
+    leave: () => TeamSummary[];
+    rename: (label: string) => TeamSummary[];
+    /** Delete the active team (owner only; non-personal, no projects). */
+    delete: () => TeamSummary[];
+    'transfer-ownership': (userId: string) => TeamMember[];
+    invite: (email: string, role: 'admin' | 'member') => TeamInvitation[];
+    'accept-invite': (token: string) => TeamSummary[];
+    'revoke-invite': (id: string) => TeamInvitation[];
+    'list-members': () => TeamMember[];
+    'remove-member': (userId: string) => TeamMember[];
+    'set-role': (userId: string, role: TeamRole) => TeamMember[];
+    'list-invites': () => TeamInvitation[];
+  }
+>;
+
+/** Which parts of the team-base agent config are currently set. */
+export type TeamDefaultsStatus = {
+  hasModels: boolean;
+  hasMcp: boolean;
+  hasEnv: boolean;
+  hasNetwork: boolean;
+};
+
+/**
+ * Team-base (shared) agent config editing. Admin-gated server-side.
+ * `publish-from-mine` adopts the caller's effective models/mcp/env/network as the
+ * team default for everyone; `clear` removes the team base (members fall back to
+ * their own overlay). No-op (all false) in single-user/local mode.
+ */
+type TeamSettingsIpcEvents = Namespaced<
+  'team-settings',
+  {
+    status: () => TeamDefaultsStatus;
+    'publish-from-mine': () => TeamDefaultsStatus;
+    clear: () => TeamDefaultsStatus;
+  }
+>;
+
 /**
  * GitHub account linking. `link` runs the OAuth device flow (emitting
  * `github:device-code` to the renderer with the user code mid-flow), stores the
@@ -2039,6 +2126,8 @@ type ProjectIpcEvents = Namespaced<
     'send-supervisor-message': (ticketId: TicketId, message: string) => void;
     'reset-supervisor-session': (ticketId: TicketId) => void;
     'resolve-ticket': (ticketId: TicketId, resolution: TicketResolution) => void;
+    /** Assign (string principal id) or unassign (null) a ticket. Team ownership is unaffected; any member may call. */
+    'assign-ticket': (ticketId: TicketId, assignee: string | null) => void;
     /**
      * Retry the deferred cleanup for a completed ticket whose worktree was
      * dirty. Returns true when cleanup succeeded, false when the worktree
@@ -2636,6 +2725,8 @@ export type IpcEvents = MainProcessIpcEvents &
   CodexIpcEvents &
   SettingsConfigIpcEvents &
   GitCredentialIpcEvents &
+  TeamIpcEvents &
+  TeamSettingsIpcEvents &
   GithubIpcEvents &
   AzureIpcEvents &
   SkillsIpcEvents &

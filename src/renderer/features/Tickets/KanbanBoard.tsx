@@ -15,7 +15,9 @@ import type { Column, ColumnId, ProjectId, Ticket, TicketId } from '@/shared/typ
 
 import { KanbanCard } from './KanbanCard';
 import { KanbanColumn } from './KanbanColumn';
-import { $activeMilestoneId, $pipeline, $tickets, ticketApi } from './state';
+import { $currentPrincipal } from '@/renderer/features/Teams/state';
+import { AssigneeFilter } from './AssigneeFilter';
+import { $activeMilestoneId, $assigneeFilter, $pipeline, $tickets, ticketApi } from './state';
 
 type VisibilityFilter = 'active' | 'archived' | 'all';
 
@@ -29,6 +31,13 @@ const useStyles = makeStyles({
   loadingText: {
     fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground2,
+  },
+  toolbar: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingTop: tokens.spacingVerticalS,
   },
   board: {
     display: 'flex',
@@ -54,6 +63,8 @@ export const KanbanBoard = memo(({ projectId, visibilityFilter = 'active' }: { p
   const pipeline = useStore($pipeline);
   const tickets = useStore($tickets);
   const activeMilestoneId = useStore($activeMilestoneId);
+  const assigneeFilter = useStore($assigneeFilter);
+  const currentPrincipal = useStore($currentPrincipal);
 
   const [activeTicket, setActiveTicket] = useState<{ ticket: Ticket; column: Column } | null>(null);
 
@@ -69,6 +80,15 @@ export const KanbanBoard = memo(({ projectId, visibilityFilter = 'active' }: { p
           if (activeMilestoneId !== 'all' && t.milestoneId !== activeMilestoneId) {
             return false;
           }
+          // Assignee filter (teams): 'all' = everyone, 'me' = current principal,
+          // 'unassigned' = no assignee, else a specific member's principal id.
+          if (assigneeFilter === 'me') {
+            if (t.assignee !== currentPrincipal) return false;
+          } else if (assigneeFilter === 'unassigned') {
+            if (t.assignee) return false;
+          } else if (assigneeFilter !== 'all') {
+            if (t.assignee !== assigneeFilter) return false;
+          }
           if (visibilityFilter === 'active') {
             return !t.archivedAt;
           }
@@ -78,7 +98,7 @@ export const KanbanBoard = memo(({ projectId, visibilityFilter = 'active' }: { p
           return true;
         }
       ),
-    [tickets, projectId, activeMilestoneId, visibilityFilter]
+    [tickets, projectId, activeMilestoneId, assigneeFilter, currentPrincipal, visibilityFilter]
   );
 
   const ticketsByColumn = useMemo(() => {
@@ -179,6 +199,9 @@ export const KanbanBoard = memo(({ projectId, visibilityFilter = 'active' }: { p
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >
+      <div className={styles.toolbar}>
+        <AssigneeFilter />
+      </div>
       <div className={styles.board}>
         {pipeline.columns.map((column) => (
           <KanbanColumn

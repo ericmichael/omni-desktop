@@ -306,7 +306,7 @@ export class ProjectsRepo {
       row.use_worktree, row.worktree_path, row.worktree_name,
       row.supervisor_session_id, row.phase, row.phase_changed_at,
       row.supervisor_task_id, row.token_usage, row.runs,
-      row.pr_review, row.pr_merged_at,
+      row.pr_review, row.pr_merged_at, row.assignee,
       row.created_at, row.updated_at,
     );
     this.bumpChangeSeq();
@@ -341,7 +341,7 @@ export class ProjectsRepo {
           row.use_worktree, row.worktree_path, row.worktree_name,
           row.supervisor_session_id, row.phase, row.phase_changed_at,
           row.supervisor_task_id, row.token_usage, row.runs,
-          row.pr_review, row.pr_merged_at,
+          row.pr_review, row.pr_merged_at, row.assignee,
           row.created_at, row.updated_at,
         );
       }
@@ -661,9 +661,9 @@ function prepareStatements(db: DatabaseSync) {
         blocked_by, shaping, resolution, resolved_at, archived_at, column_changed_at,
         use_worktree, worktree_path, worktree_name, supervisor_session_id,
         phase, phase_changed_at, supervisor_task_id, token_usage, runs,
-        pr_review, pr_merged_at,
+        pr_review, pr_merged_at, assignee,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         project_id = excluded.project_id, milestone_id = excluded.milestone_id,
         column_id = excluded.column_id, title = excluded.title, description = excluded.description,
@@ -676,6 +676,7 @@ function prepareStatements(db: DatabaseSync) {
         supervisor_task_id = excluded.supervisor_task_id, token_usage = excluded.token_usage,
         runs = excluded.runs,
         pr_review = excluded.pr_review, pr_merged_at = excluded.pr_merged_at,
+        assignee = excluded.assignee,
         updated_at = excluded.updated_at
     `),
     deleteTicket: db.prepare('DELETE FROM tickets WHERE id = ?'),

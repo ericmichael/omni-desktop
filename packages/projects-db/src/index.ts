@@ -14,7 +14,24 @@ export type { ColumnSyncInput, ColumnSyncResult, IProjectsRepo, TicketRemap } fr
 // driver, so consumers load them only when OMNI_DATABASE_URL is set.
 export { PgProjectsRepo } from './pg/pg-repo.js';
 export { createPgListener, createPgPool, runPgMigrations } from './pg/connection.js';
-export { loadTenantSettings, saveTenantSettings } from './pg/settings.js';
+export {
+  loadTenantSettings,
+  saveTenantSettings,
+  loadTeamSettings,
+  saveTeamSettings,
+  loadUserSettings,
+  saveUserSettings,
+  loadLegacyUserSettings,
+} from './pg/settings.js';
+export { ControlPlaneRepo } from './pg/control-plane.js';
+export type {
+  TeamRole,
+  UserRow,
+  TeamRow,
+  TeamMembershipRow,
+  TeamWithRole,
+  InvitationRow,
+} from './pg/control-plane.js';
 export type { Pool as PgPool } from './pg/connection.js';
 export { pgMigrations } from './pg/schema.js';
 export type { PgMigration } from './pg/schema.js';

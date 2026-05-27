@@ -36,6 +36,7 @@ export function registerProjectHandlers(ipc: IIpcListener, resolve: (event: unkn
   // Kanban
   h('project:move-ticket-to-column', (pm, ticketId, columnId) => pm.moveTicketToColumn(ticketId, columnId));
   h('project:resolve-ticket', (pm, ticketId, resolution) => pm.resolveTicket(ticketId, resolution));
+  h('project:assign-ticket', (pm, ticketId, assignee) => pm.assignTicket(ticketId, assignee));
   h('project:get-pipeline', async (pm, projectId) => {
     await pm.ensureWorkflowLoaded(projectId);
     return pm.getPipeline(projectId);

@@ -92,11 +92,12 @@ First-ever provision into an empty registry: build + push the three images
 first (workflow A + the devbox builds), or `IMPORT_IMAGES=1 SOURCE_ACR=<other>`
 to seed from another registry.
 
-## Post-provision (manual, once)
+## Post-provision
 
-- **Non-superuser `omni_app` Postgres role** — RLS is bypassed by superusers, so
-  the app must connect as a non-superuser. See `README.md` → "Manual
-  post-provision steps" and mirror `docker/postgres-init.sql`.
+- **Non-superuser `omni_app` Postgres role — automated.** The launcher
+  provisions `omni_app` on boot from `OMNI_DATABASE_ADMIN_URL` and connects as it
+  via `OMNI_DATABASE_URL`, refusing to start if that role can bypass RLS. No
+  manual SQL step. See `README.md` → "Manual post-provision steps".
 
 ## App settings worth knowing (set by bicep)
 

@@ -29,6 +29,7 @@ import {
 import { MainProcessManager } from '@/main/main-process-manager';
 import { getMcpBinPath } from '@/main/mcp-config-manager';
 import { registerMigrationHandlers } from '@/main/migration-handlers';
+import { registerTeamHandlers } from '@/server/team-handlers';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
 import { migrateLegacyPagesToConfigDir } from '@/main/pages-relocation-migration';
 import { createPermissionsManager } from '@/main/permissions-manager';
@@ -646,6 +647,19 @@ registerGitCredentialHandlers(
     main.sendToWindow('store:changed', main.getStoreSnapshot ? main.getStoreSnapshot() : store.store);
   }
 );
+// Desktop has no teams — register the channels as no-ops (controlPlane undefined)
+// so the shared renderer's Teams UI resolves cleanly to "just you".
+registerTeamHandlers(main.ipc, undefined);
+const noTeamDefaults = { hasModels: false, hasMcp: false, hasEnv: false, hasNetwork: false };
+main.ipc.handle('team-settings:status', () => noTeamDefaults);
+main.ipc.handle('team-settings:publish-from-mine', () => noTeamDefaults);
+main.ipc.handle('team-settings:clear', () => noTeamDefaults);
+// Desktop has no teams — these resolve to "just you".
+main.ipc.handle('team:whoami', () => null);
+main.ipc.handle('team:leave', () => []);
+main.ipc.handle('team:rename', () => []);
+main.ipc.handle('team:delete', () => []);
+main.ipc.handle('team:transfer-ownership', () => []);
 registerMigrationHandlers(main.ipc, () => ({
   get: () => store.get('pagesMigration') ?? null,
   set: (value) => {

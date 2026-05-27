@@ -36,6 +36,7 @@ import { AddSourceDialog } from '@/renderer/features/Projects/AddSourceDialog';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { Milestone } from '@/shared/types';
 
+import { TeamSwitcher } from '@/renderer/features/Teams/TeamSwitcher';
 import { MilestoneForm } from './MilestoneForm';
 import { ProjectForm } from './ProjectForm';
 import { SidebarTree } from './SidebarTree';
@@ -280,6 +281,7 @@ export const TicketsSidebar = memo(({ onNavigate, type = 'inline', open = true, 
       {/* ── Header ── */}
       <div className={styles.header}>
         <Subtitle2 className={styles.headerTitle}>Projects</Subtitle2>
+        <TeamSwitcher />
         <IconButton aria-label="New project" icon={<Add20Regular />} size="sm" onClick={handleOpenForm} />
         {type === 'overlay' && (
           <IconButton aria-label="Close navigation" icon={<Dismiss20Regular />} size="sm" onClick={onClose} />

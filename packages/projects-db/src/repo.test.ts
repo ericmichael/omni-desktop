@@ -417,4 +417,16 @@ describe('replaceAll* preserves child data', () => {
     expect(repo.getTask('tk_1')).toBeUndefined();
     expect(repo.getTask('tk_2')).toBeTruthy();
   });
+
+  it('upsertTicket: assignee round-trips and updates', () => {
+    const id = seedTicket('backlog', 'tkt_assignee');
+    const row = repo.getTicket(id)!;
+    expect(row.assignee).toBeNull();
+
+    repo.upsertTicket({ ...row, assignee: 'principal-abc' });
+    expect(repo.getTicket(id)!.assignee).toBe('principal-abc');
+
+    repo.upsertTicket({ ...repo.getTicket(id)!, assignee: null });
+    expect(repo.getTicket(id)!.assignee).toBeNull();
+  });
 });

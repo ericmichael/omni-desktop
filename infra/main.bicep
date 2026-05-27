@@ -75,6 +75,10 @@ param postgresAdminLogin string = 'omniadmin'
 @description('PostgreSQL administrator password.')
 param postgresAdminPassword string
 
+@secure()
+@description('Password for the non-superuser application role (omni_app) the launcher connects as. RLS-enforced; the admin role is used only for one-time bootstrap + migrations.')
+param omniAppPassword string
+
 @description('PostgreSQL Flexible Server SKU.')
 param postgresSkuName string = 'Standard_B1ms'
 
@@ -586,6 +590,10 @@ var dataApiUrl = 'https://${siteHostName}${mcpRoutePath}'
 // URL-encode the password — a generated password can contain `/`, `+`, `@`,
 // etc. which otherwise corrupt the connection-string URL and crash pg on boot.
 var pgConnString = 'postgresql://${postgresAdminLogin}:${uriComponent(postgresAdminPassword)}@${postgres.properties.fullyQualifiedDomainName}:5432/${pgDatabaseName}?sslmode=require'
+// The launcher connects as the non-superuser `omni_app` role (RLS-enforced).
+// The admin DSN above is surfaced separately and used only at boot to create
+// omni_app + run migrations. See src/server/pg-bootstrap.ts.
+var pgAppConnString = 'postgresql://omni_app:${uriComponent(omniAppPassword)}@${postgres.properties.fullyQualifiedDomainName}:5432/${pgDatabaseName}?sslmode=require'
 
 // ---------------------------------------------------------------------------
 // Key Vault — runtime secrets live here, not as plaintext app settings. The
@@ -635,9 +643,16 @@ resource kvPeDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-1
   }
 }
 
+// App connection (omni_app, RLS-enforced) — what the launcher uses at runtime.
 resource kvSecretDbUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   parent: kv
   name: 'omni-database-url'
+  properties: { value: pgAppConnString }
+}
+// Admin connection — used only at boot to bootstrap omni_app + run migrations.
+resource kvSecretDbAdminUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: kv
+  name: 'omni-database-admin-url'
   properties: { value: pgConnString }
 }
 resource kvSecretRuntimeToken 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
@@ -739,6 +754,7 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'DOCKER_REGISTRY_SERVER_URL', value: 'https://${acr.properties.loginServer}' }
         { name: 'OMNI_AUTH_MODE', value: authMode }
         { name: 'OMNI_DATABASE_URL', value: kvRef(kv.properties.vaultUri, 'omni-database-url') }
+        { name: 'OMNI_DATABASE_ADMIN_URL', value: kvRef(kv.properties.vaultUri, 'omni-database-admin-url') }
         { name: 'OMNI_RUNTIME_TOKEN_SECRET', value: kvRef(kv.properties.vaultUri, 'runtime-token-secret') }
         { name: 'OMNI_WS_TOKEN', value: kvRef(kv.properties.vaultUri, 'ws-token') }
         { name: 'OMNI_DATA_API_URL', value: dataApiUrl }
@@ -773,6 +789,7 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
   // and the read role is granted before the app starts.
   dependsOn: [
     kvSecretDbUrl
+    kvSecretDbAdminUrl
     kvSecretRuntimeToken
     kvSecretWsToken
     kvSecretAadSecret

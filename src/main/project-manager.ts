@@ -222,6 +222,12 @@ export class ProjectManager {
   /** Cloud override for per-ticket artifact storage (Azure Files on ACI). */
   private artifactStoreFor?: (ticketId: TicketId) => ArtifactStore | null;
 
+  /** Teams/cloud: the principal this instance serves (per-user WIP/review). */
+  private currentPrincipal?: string;
+
+  /** Teams/cloud: notify a member when assigned a ticket (cross-principal). */
+  private onAssign?: (assignee: string, ticket: Ticket) => void;
+
   /** Page lifecycle owner — CRUD, file I/O, root-page seeding, watcher. */
   readonly pages: PageManager;
 
@@ -256,6 +262,11 @@ export class ProjectManager {
       /** Cloud override: resolve a per-ticket artifact store (e.g. Azure Files
        *  for ACI). When it returns a store, it wins over the host/docker default. */
       artifactStoreFor?: (ticketId: TicketId) => ArtifactStore | null;
+      /** Teams/cloud: the principal this manager instance serves. Drives per-user
+       *  WIP + weekly review ("my work"). Undefined in single-user/local mode. */
+      currentPrincipal?: string;
+      /** Teams/cloud: notify a member they were assigned a ticket (cross-principal). */
+      onAssign?: (assignee: string, ticket: Ticket) => void;
     },
     deps?: Partial<ProjectManagerDeps>
   ) {
@@ -263,6 +274,8 @@ export class ProjectManager {
     this.sendToWindow = arg.sendToWindow;
     this.skillsDir = arg.skillsDir;
     this.artifactStoreFor = arg.artifactStoreFor;
+    this.currentPrincipal = arg.currentPrincipal;
+    this.onAssign = arg.onAssign;
     this.processManager = arg.processManager;
     this.appControlManager = arg.appControlManager;
     this.repo = arg.repo;
@@ -398,6 +411,7 @@ export class ProjectManager {
         setTickets: (tickets) => this.setTickets(tickets),
         getProjects: () => this.getProjects(),
         getWipLimit: () => this.store.get('wipLimit') ?? 3,
+        getCurrentPrincipal: () => this.currentPrincipal,
         getPlatformCredentials: () => this.store.get('platform'),
         getCodeTabs: () => (this.store.get('codeTabs', []) ?? []) as Array<{ id: string; ticketId?: string }>,
         getPersistedTasks: () => (this.repo ? this.cache.tasks : (this.store.get('tasks', []) as Task[])),
@@ -1170,6 +1184,25 @@ export class ProjectManager {
     }
     tickets[index] = { ...tickets[index]!, ...patch, updatedAt: Date.now() };
     this.setTickets(tickets);
+  };
+
+  /**
+   * Assign (or unassign) a ticket to a team member. Ownership stays with the
+   * team — `assignee` is an additive, optional pointer that drives the "my work"
+   * filters (WIP, weekly review) and nothing else. `null`/empty clears it. Any
+   * team member may reassign; the ticket never leaves the team. A dedicated
+   * method (not `updateTicket` over IPC) so clearing survives JSON transport,
+   * where an `undefined` field would be dropped.
+   */
+  assignTicket = (id: TicketId, assignee: string | null): void => {
+    this.updateTicket(id, { assignee: assignee || undefined });
+    // Notify the assignee (teams/cloud) — skip self-assignment.
+    if (assignee && assignee !== this.currentPrincipal && this.onAssign) {
+      const ticket = (this.repo ? this.cache.tickets : this.getTickets()).find((t) => t.id === id);
+      if (ticket) {
+        this.onAssign(assignee, ticket);
+      }
+    }
   };
 
   removeTicket = (id: TicketId): void => {

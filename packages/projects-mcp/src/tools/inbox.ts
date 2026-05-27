@@ -183,6 +183,7 @@ export function registerInboxTools(server: McpServer, repo: IProjectsRepo): void
         runs: '[]',
         pr_review: null,
         pr_merged_at: null,
+        assignee: null,
         created_at: now,
         updated_at: now,
       });

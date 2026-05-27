@@ -20,12 +20,17 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 const DEFAULT_TTL_SEC = 12 * 60 * 60; // 12h — comfortably longer than a session.
 
 export interface RuntimeTokenClaims {
+  /** Data-scope key — the active team id in teams mode (else principal/DEFAULT_TENANT). */
   tenantId: string;
+  /** Authenticated principal that launched the agent (teams mode). Optional for back-compat. */
+  principalId?: string;
   sessionId: string;
 }
 
 interface TokenPayload {
   tid: string;
+  /** Launching principal (teams mode). */
+  pid?: string;
   sid: string;
   iat: number;
   exp: number;
@@ -69,7 +74,13 @@ export function signRuntimeToken(
   now = Date.now()
 ): string {
   const iat = Math.floor(now / 1000);
-  const payload: TokenPayload = { tid: claims.tenantId, sid: claims.sessionId, iat, exp: iat + ttlSec };
+  const payload: TokenPayload = {
+    tid: claims.tenantId,
+    ...(claims.principalId ? { pid: claims.principalId } : {}),
+    sid: claims.sessionId,
+    iat,
+    exp: iat + ttlSec,
+  };
   const segment = b64url(Buffer.from(JSON.stringify(payload)));
   const sig = b64url(hmac(secret, segment));
   return `${segment}.${sig}`;
@@ -110,5 +121,5 @@ export function verifyRuntimeToken(
   if (payload.exp * 1000 <= now) {
     return null;
   }
-  return { tenantId: payload.tid, sessionId: payload.sid };
+  return { tenantId: payload.tid, principalId: payload.pid, sessionId: payload.sid };
 }

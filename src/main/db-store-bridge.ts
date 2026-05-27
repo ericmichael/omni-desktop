@@ -193,6 +193,8 @@ export function rowToTicket(row: TicketRow, comments?: CommentRow[]): Ticket {
     }
   }
 
+  if (row.assignee) ticket.assignee = row.assignee;
+
   if (comments && comments.length > 0) {
     ticket.comments = comments.map(rowToComment);
   }
@@ -346,6 +348,7 @@ export function ticketToRow(t: Ticket): TicketRow {
     runs: JSON.stringify(t.runs ?? []),
     pr_review: t.prReview && Object.keys(t.prReview).length > 0 ? JSON.stringify(t.prReview) : null,
     pr_merged_at: t.prMergedAt && Object.keys(t.prMergedAt).length > 0 ? JSON.stringify(t.prMergedAt) : null,
+    assignee: t.assignee ?? null,
     created_at: toIso(t.createdAt),
     updated_at: toIso(t.updatedAt),
   };
