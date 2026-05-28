@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { useEffect, useMemo } from 'react';
 
+import { serverOrigin } from '@/renderer/services/ipc';
 import type { PlanItem } from '@/shared/chat-types';
 import type { TicketId } from '@/shared/types';
 
@@ -53,7 +54,10 @@ const ThemeSync = ({ children }: { children: ReactNode }) => {
 };
 
 export const OmniAgentsApp = ({ uiUrl, sessionId, onSessionChange, variables, greeting, onReady, headerActionsTargetId, headerActionsCompact, pendingMessages, sandboxLabel, sandboxOptions, currentSandboxProfile, onSandboxChange, onClientToolCall, pendingPlan, onPlanDecision, ticketId, workspaceDir }: OmniAgentsAppProps) => {
-  const normalizedUrl = useMemo(() => new URL(uiUrl, window.location.origin).toString(), [uiUrl]);
+  // Resolve relative ``/proxy/...`` payloads against the launcher's actual
+  // origin — same-origin in browser server mode, cloud baseUrl in
+  // cloud-linked Electron. If uiUrl is already absolute, the base is ignored.
+  const normalizedUrl = useMemo(() => new URL(uiUrl, serverOrigin()).toString(), [uiUrl]);
 
   return (
     <UiConfigProvider uiUrl={normalizedUrl}>

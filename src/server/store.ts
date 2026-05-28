@@ -14,6 +14,7 @@ export const DEFAULTS: StoreData = {
   layoutMode: 'chat',
   theme: 'tokyo-night',
   onboardingComplete: false,
+  cloudMode: null,
   projects: [],
   milestones: [],
   pages: [],

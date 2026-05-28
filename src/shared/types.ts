@@ -99,6 +99,29 @@ export type AudioSettings = {
   autoGainControl: boolean;
 };
 
+/**
+ * Identity claims pulled from the AAD token (id_token / access_token) at
+ * link time. Only the bits we display + the oid used for cross-tab identity.
+ */
+export type CloudAccount = {
+  /** Stable AAD object id. Survives email + display-name changes. */
+  oid: string;
+  /** Display name from the id_token (preferred for UI). */
+  name?: string;
+  /** Email / UPN. */
+  email?: string;
+};
+
+export type CloudMode = {
+  /** Origin of the launcher cloud (e.g. ``https://omni.example.com``). */
+  url: string;
+  /** AAD tenant the cloud is registered in. Cached from /.well-known/omni-cloud. */
+  tenantId: string;
+  /** AAD client id of the launcher's app registration. Used for token refresh. */
+  clientId: string;
+  account: CloudAccount;
+};
+
 export type StoreData = {
   workspaceDir?: string;
   /**
@@ -123,6 +146,22 @@ export type StoreData = {
   layoutMode: LayoutMode;
   theme: OmniTheme;
   onboardingComplete: boolean;
+  /**
+   * Set when the Electron app is connected to a deployed cloud launcher.
+   * When non-null the renderer routes its transport to ``url`` over WebSocket
+   * (Bearer-authenticated against AAD) instead of using local Electron IPC,
+   * so chat sessions, projects, tickets etc. live in the cloud's Postgres
+   * and sync to any other Electron / web client signed in as the same user.
+   *
+   * ``url`` is the launcher origin (no trailing slash).
+   * ``tenantId`` + ``clientId`` are discovered from
+   * ``<url>/.well-known/omni-cloud`` at link time so the renderer doesn't
+   * need them — they're cached here for token refresh.
+   * ``account`` is what we display in the UI; the access + refresh tokens
+   * themselves live in {@link ElectronSecretStore} under the ``entra`` id.
+   * ``null`` is the standalone-Electron mode (today's default).
+   */
+  cloudMode: CloudMode | null;
   projects: Project[];
   milestones: Milestone[];
   pages: Page[];
@@ -422,6 +461,25 @@ export const schema: Schema<StoreData> = {
   onboardingComplete: {
     type: 'boolean',
     default: false,
+  },
+  cloudMode: {
+    type: ['object', 'null'],
+    default: null,
+    properties: {
+      url: { type: 'string' },
+      tenantId: { type: 'string' },
+      clientId: { type: 'string' },
+      account: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          email: { type: 'string' },
+          oid: { type: 'string' },
+        },
+        required: ['oid'],
+      },
+    },
+    required: ['url', 'tenantId', 'clientId', 'account'],
   },
   wipLimit: {
     type: 'number',
@@ -1802,6 +1860,51 @@ export type CodexAuthStatus = { signedIn: boolean; accountId?: string };
 export type CodexDeviceCode = { userCode: string; verificationUri: string };
 
 /**
+ * Cloud-link API. ``cloud:link`` opens the AAD device-code flow against the
+ * launcher discovered via *url*, surfaces the user code through
+ * ``cloud:device-code``, polls until approved, then persists the tokens +
+ * the ``cloudMode`` flag in the store. The renderer is expected to reload
+ * after a successful link so the transport switches to the cloud variant
+ * at boot. ``cloud:unlink`` clears both. ``cloud:get-access-token`` is the
+ * renderer's hook for fetching a fresh Bearer (refreshes via the stored
+ * refresh token when near-expiry).
+ */
+type CloudIpcEvents = Namespaced<
+  'cloud',
+  {
+    status: () => CloudStatus;
+    link: (url: string) => CloudStatus;
+    unlink: () => void;
+    'get-access-token': () => string;
+    /**
+     * Fetch a fresh WS auth token from the linked cloud's ``/api/ws-token``.
+     * Runs in main so the request escapes the renderer's CORS sandbox — the
+     * Bearer header would otherwise trigger a CORS preflight that EasyAuth's
+     * 302-to-AAD-login can't satisfy. Returns the opaque token the renderer
+     * passes in the WebSocket upgrade URL.
+     */
+    'get-ws-token': () => string;
+  }
+>;
+
+export type CloudStatus =
+  | { connected: false }
+  | {
+      connected: true;
+      url: string;
+      tenantId: string;
+      clientId: string;
+      account: CloudAccount;
+    };
+
+/** Device-code payload for the renderer to display while `cloud:link` polls. */
+export type CloudDeviceCode = {
+  userCode: string;
+  verificationUri: string;
+  verificationUriComplete?: string;
+};
+
+/**
  * Typed agent-config API. Replaces the path-based `config:*` file I/O for the
  * four Settings configs whose source of truth is the (per-tenant, in cloud)
  * store rather than a file: model providers, MCP servers, network policy, and
@@ -2115,7 +2218,6 @@ type ProjectIpcEvents = Namespaced<
     'get-next-ticket': (projectId: ProjectId) => Ticket | null;
     'move-ticket-to-column': (ticketId: TicketId, columnId: ColumnId) => void;
     'get-pipeline': (projectId: ProjectId) => Pipeline;
-    'get-session-history': (sessionId: string) => SessionMessage[];
     'list-artifacts': (ticketId: TicketId, dirPath?: string) => ArtifactFileEntry[];
     'read-artifact': (ticketId: TicketId, relativePath: string) => ArtifactFileContent;
     'open-artifact-external': (ticketId: TicketId, relativePath: string) => void;
@@ -2730,6 +2832,7 @@ export type IpcEvents = MainProcessIpcEvents &
   StoreIpcEvents &
   ConfigIpcEvents &
   CodexIpcEvents &
+  CloudIpcEvents &
   SettingsConfigIpcEvents &
   GitCredentialIpcEvents &
   TeamIpcEvents &
@@ -2931,9 +3034,13 @@ type GithubIpcRendererEvents = Namespaced<'github', { 'device-code': [GithubDevi
 /** Main→renderer: the device-flow user code to display while `codex:link` polls. */
 type CodexIpcRendererEvents = Namespaced<'codex', { 'device-code': [CodexDeviceCode] }>;
 
+/** Main→renderer: the AAD device-code to display while `cloud:link` polls. */
+type CloudIpcRendererEvents = Namespaced<'cloud', { 'device-code': [CloudDeviceCode] }>;
+
 export type IpcRendererEvents = TerminalIpcRendererEvents &
   GithubIpcRendererEvents &
   CodexIpcRendererEvents &
+  CloudIpcRendererEvents &
   MainProcessIpcRendererEvents &
   OmniInstallProcessIpcRendererEvents &
   AgentProcessIpcRendererEvents &

@@ -11,6 +11,7 @@ import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
 import type { IComputeClient } from '@/main/platform-client';
 import { resolveProfile } from '@/main/profile-resolver';
+import { getSnapshotStore } from '@/main/snapshot-blob-store';
 import { getOmniCliPath, getOmniConfigDir, isDirectory, pathExists } from '@/main/util';
 import { downloadWorkspace } from '@/main/workspace-sync';
 import type {
@@ -627,9 +628,22 @@ export class AgentProcess {
     // unconditionally lets omni serve generate a session_id on first start
     // (we capture it from the readiness payload) and resume from the stored
     // tar on subsequent starts when the caller passes sessionId back.
-    args.push('--snapshot-dir', path.join(getOmniConfigDir(), 'snapshots'));
+    const snapshotDir = path.join(getOmniConfigDir(), 'snapshots');
+    args.push('--snapshot-dir', snapshotDir);
     if (arg.sessionId) {
       args.push('--session-id', arg.sessionId);
+      // Cloud durability: launcher container disk is ephemeral, so pull a
+      // prior snapshot tar from Azure Blob if one exists. No-op when
+      // OMNI_AZURE_SNAPSHOT_CONTAINER isn't set (desktop, self-hosted).
+      try {
+        const pulled = await getSnapshotStore().pull(arg.sessionId, snapshotDir);
+        if (pulled) {
+          this.log.info(c.cyan(`Restored snapshot from blob for session ${arg.sessionId}\r\n`));
+        }
+      } catch (err) {
+        // Best-effort — omni serve will start fresh if the pull fails.
+        console.error('[snapshot-blob] pull failed:', err);
+      }
     }
     // ``--container-id`` flips omni serve to ``client.resume(state)`` for a
     // warm reattach. The SDK silently falls back to a fresh container +
@@ -678,6 +692,14 @@ export class AgentProcess {
           return;
         }
         this.childProcess = null;
+        // Push the snapshot tar to blob durability before reporting status.
+        // No-op when not configured or when sessionId is unset. Fire-and-
+        // forget — the renderer's exit handling shouldn't wait on Azure I/O.
+        if (arg.sessionId) {
+          void getSnapshotStore()
+            .push(arg.sessionId, snapshotDir)
+            .catch((err) => console.error('[snapshot-blob] push failed:', err));
+        }
         if (this.status.type === 'exiting' || this.status.type === 'stopping') {
           this.updateStatus({ type: 'exited' });
           return;

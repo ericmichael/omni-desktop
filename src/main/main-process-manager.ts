@@ -117,6 +117,12 @@ export class MainProcessManager {
   };
 
   createWindow = () => {
+    // Pass the persisted cloudMode (if any) into the renderer via
+    // additionalArguments so the renderer transport can synchronously decide
+    // local-IPC vs. cloud-WS at boot — without an async pre-init step. Re-
+    // reading this requires a window reload, which matches the link/unlink
+    // UX (the cloud handlers prompt for a reload after they fire).
+    const cloudMode = this.store.get('cloudMode') ?? null;
     const window = new BrowserWindow({
       minWidth: 800,
       minHeight: 600,
@@ -127,6 +133,7 @@ export class MainProcessManager {
         contextIsolation: true,
         devTools: isDevelopment(),
         webviewTag: true,
+        additionalArguments: [`--omni-cloud-mode=${JSON.stringify(cloudMode)}`],
       },
       autoHideMenuBar: true, // Hide the menu bar
       frame: true, // Keep window frame/chrome

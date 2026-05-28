@@ -62,11 +62,21 @@ export async function ensureAppRole(adminUrl: string, appUrl: string): Promise<v
   const client = new Client(adminClientConfig(adminUrl));
   await client.connect();
   try {
+    // CREATE path: full attribute set, settable by a CREATEROLE-holding admin
+    // (works on first deploy when the role doesn't exist yet).
+    //
+    // ALTER path: SET ONLY THE PASSWORD. On Azure PG Flexible Server the
+    // admin role lacks SUPERUSER, and Postgres requires SUPERUSER to *change*
+    // the SUPERUSER attribute — even when setting it to its current value.
+    // Including NOSUPERUSER/NOBYPASSRLS on a re-deploy fails with 42501
+    // (permission denied to alter role) and crashloops the launcher. The
+    // attributes were locked in at CREATE time and on Azure Flex can't be
+    // escalated anyway, so the ALTER is purely a password sync.
     await client.query(`DO $do$ BEGIN
       IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${APP_ROLE}') THEN
         CREATE ROLE ${APP_ROLE} LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD ${lit};
       ELSE
-        ALTER ROLE ${APP_ROLE} LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD ${lit};
+        ALTER ROLE ${APP_ROLE} PASSWORD ${lit};
       END IF;
     END $do$;`);
     await client.query(`GRANT USAGE ON SCHEMA public TO ${APP_ROLE}`);
@@ -94,6 +104,37 @@ export async function grantAppPrivileges(adminUrl: string): Promise<void> {
   try {
     await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${APP_ROLE}`);
     await client.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${APP_ROLE}`);
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * Bootstrap the sibling `omni_sessions` database for omniagents' PG history
+ * backend. Connects as admin against the sessions DB and:
+ *   - grants USAGE + CREATE on schema public to omni_app (so the omniagents
+ *     PgSessionStorage can CREATE TABLE IF NOT EXISTS on its first connect),
+ *   - sets default privileges so any tables omni_app later creates auto-grant
+ *     DML back to itself (no-op in single-role mode, but future-proof if a
+ *     separate sessions-owner role is introduced).
+ *
+ * Idempotent. omni_app is assumed to already exist (created by ensureAppRole
+ * against the main DB; PG roles are server-scoped, so the same role works
+ * across databases).
+ */
+export async function ensureSessionsDb(sessionsAdminUrl: string): Promise<void> {
+  const client = new Client(adminClientConfig(sessionsAdminUrl));
+  await client.connect();
+  try {
+    await client.query(`GRANT USAGE, CREATE ON SCHEMA public TO ${APP_ROLE}`);
+    await client.query(
+      `ALTER DEFAULT PRIVILEGES FOR ROLE ${APP_ROLE} IN SCHEMA public ` +
+        `GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${APP_ROLE}`
+    );
+    await client.query(
+      `ALTER DEFAULT PRIVILEGES FOR ROLE ${APP_ROLE} IN SCHEMA public ` +
+        `GRANT USAGE, SELECT ON SEQUENCES TO ${APP_ROLE}`
+    );
   } finally {
     await client.end();
   }

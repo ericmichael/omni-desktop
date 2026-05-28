@@ -15,7 +15,7 @@ import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import { ChatShell } from '@/renderer/omniagents-ui/ChatShell';
 import { getGreeting } from '@/renderer/omniagents-ui/greeting';
 import { buildProfileLabel } from '@/renderer/omniagents-ui/sandbox-label';
-import { emitter } from '@/renderer/services/ipc';
+import { emitter, serverOrigin } from '@/renderer/services/ipc';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
 
 import { $chatProcessStatus } from './state';
@@ -135,7 +135,10 @@ const SandboxRunningView = memo(
     workspaceDir?: string;
   }) => {
     const uiSrc = useMemo(() => {
-      const url = new URL(sandboxUrls.uiUrl, window.location.origin);
+      // ``serverOrigin()`` returns the cloud baseUrl in cloud-linked Electron
+      // (where window.location.origin is localhost:5173 / file:// and would
+      // resolve the cloud's relative `/proxy/...` to the wrong host).
+      const url = new URL(sandboxUrls.uiUrl, serverOrigin());
       if (theme !== 'default') {
         url.searchParams.set('theme', theme);
       }

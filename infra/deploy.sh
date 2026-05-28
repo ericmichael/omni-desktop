@@ -45,6 +45,9 @@ PG_PASSWORD="${PG_PASSWORD:-$(openssl rand -hex 24)}"
 # Password for the non-superuser omni_app role the launcher connects as (RLS-enforced).
 OMNI_APP_PASSWORD="${OMNI_APP_PASSWORD:-$(openssl rand -hex 24)}"
 RUNTIME_TOKEN_SECRET="${RUNTIME_TOKEN_SECRET:-$(openssl rand -hex 32)}"
+# AES-256-GCM key (32 bytes, base64) for PgSecretStore. Rotating it orphans
+# every existing user_secrets / team_secrets row, so pin in deploy.env.
+OMNI_SECRET_KEY="${OMNI_SECRET_KEY:-$(openssl rand -base64 32)}"
 WS_TOKEN="${WS_TOKEN:-$(openssl rand -hex 16)}"
 
 # EasyAuth needs an AAD app registration (ARM can't create it). Create one for
@@ -68,7 +71,7 @@ az group create --name "$RG" --location "$LOCATION" --output none
 
 params=(location="$LOCATION" siteName="$SITE_NAME" acrName="$ACR_NAME" authMode="$AUTH_MODE"
   postgresAdminPassword="$PG_PASSWORD" omniAppPassword="$OMNI_APP_PASSWORD"
-  runtimeTokenSecret="$RUNTIME_TOKEN_SECRET" wsToken="$WS_TOKEN"
+  runtimeTokenSecret="$RUNTIME_TOKEN_SECRET" omniSecretKey="$OMNI_SECRET_KEY" wsToken="$WS_TOKEN"
   aadClientId="${AAD_CLIENT_ID:-}" aadClientSecret="${AAD_CLIENT_SECRET:-}")
 
 echo "== what-if =="
@@ -100,6 +103,47 @@ fi
 
 echo "== restarting Web App $SITE_NAME =="
 az webapp restart --resource-group "$RG" --name "$SITE_NAME"
+
+# ---------------------------------------------------------------------------
+# Build + deploy the ACI orphan-cleanup Function (TimerTrigger).
+# Skip with SKIP_FUNCTION_DEPLOY=1 if you only want infra reconcile (rare —
+# the bicep created the Function App as an empty shell that won't fire any
+# code until this step uploads the package).
+# ---------------------------------------------------------------------------
+FUNC_APP_NAME=$(echo "$outputs" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("aciCleanupFunctionName",{}).get("value",""))')
+if [[ -n "$FUNC_APP_NAME" && "${SKIP_FUNCTION_DEPLOY:-0}" != "1" ]]; then
+  echo "== building ACI cleanup Function =="
+  FN_DIR="$HERE/functions/aci-cleanup"
+  (
+    cd "$FN_DIR"
+    if [[ ! -d node_modules ]]; then
+      npm install --no-audit --no-fund >/dev/null
+    fi
+    npm run build >/dev/null
+  )
+  # Package: include host.json + dist/ + node_modules (production only).
+  echo "== packaging =="
+  ZIP="/tmp/aci-cleanup-$(date +%s).zip"
+  (
+    cd "$FN_DIR"
+    rm -rf node_modules_prod
+    cp -r node_modules node_modules_prod
+    # Prune devDeps from the copy so the upload stays small.
+    (cd node_modules_prod && npm prune --omit=dev >/dev/null 2>&1 || true)
+    rm -f "$ZIP"
+    # `zip -r` from inside the dir so paths in the archive are relative.
+    mv node_modules node_modules_dev && mv node_modules_prod node_modules
+    zip -qr "$ZIP" host.json package.json dist node_modules
+    mv node_modules node_modules_prod && mv node_modules_dev node_modules
+    rm -rf node_modules_prod
+  )
+  echo "== deploying $ZIP to $FUNC_APP_NAME =="
+  az functionapp deployment source config-zip -g "$RG" -n "$FUNC_APP_NAME" --src "$ZIP" >/dev/null
+  rm -f "$ZIP"
+  echo "ACI cleanup Function deployed (runs every 30 min + on startup)."
+else
+  echo "== skipping ACI cleanup Function deploy =="
+fi
 
 echo
 echo "Done. App: $(echo "$outputs" | python3 -c 'import json,sys; print(json.load(sys.stdin)["launcherUrl"]["value"])')"

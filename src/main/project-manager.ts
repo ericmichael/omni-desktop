@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'child_process';
+import { spawn } from 'child_process';
 import { ipcMain, shell } from 'electron';
 import type Store from 'electron-store';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
@@ -7,7 +7,6 @@ import { nanoid } from 'nanoid';
 import type { ColumnRow, IProjectsRepo, ProjectsRepo, TicketRemap } from 'omni-projects-db';
 import { commentId } from 'omni-projects-db';
 import path from 'path';
-import { promisify } from 'util';
 
 import { getArtifactsDir, getContainerArtifactsDir } from '@/lib/artifacts';
 import { resolveArtifactPath } from '@/lib/artifacts-fs';
@@ -20,7 +19,6 @@ import { runMigrations as runSchemaMigrations } from '@/lib/project-migrations';
 import type { ProjectConfigDefaults } from '@/lib/project-to-config';
 import { projectToConfig } from '@/lib/project-to-config';
 import { resolvePipelineDefs } from '@/lib/resolve-pipeline-defs';
-import { type HistoryRow, parseSessionHistoryRows } from '@/lib/session-history';
 import { slugifyUnique } from '@/lib/slugify-unique';
 import { type ArtifactStore, DockerArtifactStore, HostFsArtifactStore } from '@/main/artifact-store';
 import { DbChangeWatcher } from '@/main/db-change-watcher';
@@ -72,7 +70,6 @@ import type {
   PrMergeResult,
   Project,
   ProjectId,
-  SessionMessage,
   StoreData,
   Task,
   Ticket,
@@ -81,13 +78,10 @@ import type {
 } from '@/shared/types';
 import { firstSource } from '@/shared/types';
 
-const execFileAsync = promisify(execFile);
-
 /**
- * Run ``git apply`` with the patch piped via stdin. ``execFile`` doesn't
- * support stdin, so this small helper uses ``spawn`` and waits for
- * close. Resolves with stderr on non-zero exit so callers can surface
- * the apply failure verbatim.
+ * Run ``git apply`` with the patch piped via stdin. Uses ``spawn`` and waits
+ * for close. Resolves with stderr on non-zero exit so callers can surface the
+ * apply failure verbatim.
  */
 const gitApplyStdin = (
   cwd: string,
@@ -1775,43 +1769,6 @@ export class ProjectManager {
       console.log(`[ProjectManager] repaired ${repairedPages.length} missing root pages`);
     }
   }
-
-  // #endregion
-
-  // #region Session history
-
-  getSessionHistory = async (sessionId: string): Promise<SessionMessage[]> => {
-    const dbPath = path.join(
-      getOmniConfigDir(),
-      'sandbox',
-      'omniagents',
-      'sessions',
-      'omni_code',
-      'omni',
-      'sessions.db'
-    );
-
-    try {
-      await fs.access(dbPath);
-    } catch {
-      return [];
-    }
-
-    const query = `SELECT id, msg_json, created_at FROM history WHERE session_id = '${sessionId.replace(/'/g, "''")}' ORDER BY id ASC`;
-
-    try {
-      const { stdout } = await execFileAsync('sqlite3', ['-json', dbPath, query], { maxBuffer: 10 * 1024 * 1024 });
-      if (!stdout.trim()) {
-        return [];
-      }
-
-      const rows = JSON.parse(stdout) as HistoryRow[];
-      return parseSessionHistoryRows(rows);
-    } catch (err) {
-      console.error('[ProjectManager] Failed to query session history:', err);
-      return [];
-    }
-  };
 
   // #endregion
 

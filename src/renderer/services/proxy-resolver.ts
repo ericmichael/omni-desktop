@@ -16,13 +16,23 @@
  * frame-ancestors, so this code is a no-op there.
  */
 
+import { isCloudLinked, isElectron, serverOrigin } from '@/renderer/services/ipc';
+
 /** Reverse map populated as we register upstreams, used to "un-proxy" reported URLs. */
 const upstreamByName = new Map<string, string>();
 const nameByOrigin = new Map<string, string>();
 /** De-dup in-flight registrations per origin. */
 const pendingByOrigin = new Map<string, Promise<void>>();
 
-const isElectron = typeof window !== 'undefined' && 'electron' in window;
+/**
+ * The launcher's origin from the renderer's perspective. In browser server
+ * mode that's same-origin. In cloud-linked Electron the renderer is loaded
+ * from localhost:5173 (dev) or file:// (prod) but the launcher lives at
+ * the cloud baseUrl — so all ``/proxy/...`` URL construction and "is this
+ * already proxied?" detection must anchor against the cloud, not the
+ * renderer's own origin.
+ */
+const launcherOrigin = (): string => serverOrigin();
 
 const slug = (origin: string): string =>
   origin
@@ -34,7 +44,7 @@ const proxyNameFor = (origin: string): string => `ext-${slug(origin)}`;
 
 const tryParseUrl = (raw: string): URL | null => {
   try {
-    return new URL(raw, typeof location !== 'undefined' ? location.origin : 'http://localhost/');
+    return new URL(raw, launcherOrigin());
   } catch {
     return null;
   }
@@ -44,13 +54,11 @@ const isExternalHttp = (url: URL): boolean => {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     return false;
   }
-  if (typeof location === 'undefined') {
+  if (url.origin !== launcherOrigin()) {
     return true;
   }
-  if (url.origin !== location.origin) {
-    return true;
-  }
-  // Same-origin but not already proxied → leave it alone (dev assets, etc.)
+  // Same launcher origin but not already proxied → leave it alone (dev assets,
+  // launcher's own SPA pages, etc.).
   return false;
 };
 
@@ -64,7 +72,10 @@ const ensureRegistered = (origin: string, name: string): Promise<void> => {
   }
   const pending = (async () => {
     try {
-      await fetch('/proxy/_register', {
+      // Absolute URL so cloud-linked Electron hits the cloud's /proxy/_register
+      // instead of localhost:5173 (which has no such route). Browser server-
+      // mode resolves to same-origin same as before.
+      await fetch(`${launcherOrigin()}/proxy/_register`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ name, upstream: origin }),
@@ -95,15 +106,18 @@ export const resolveProxiedSrc = async (rawSrc: string): Promise<string> => {
   if (!parsed) {
     return rawSrc;
   }
-  if (parsed.origin === (typeof location !== 'undefined' ? location.origin : '') &&
-      parsed.pathname.startsWith('/proxy/')) {
+  if (parsed.origin === launcherOrigin() && parsed.pathname.startsWith('/proxy/')) {
     // Already proxied — record the mapping if we recognize the name so
     // unproxyUrl can reverse it later.
     const name = parsed.pathname.slice('/proxy/'.length).split('/')[0] ?? '';
     if (name && !upstreamByName.has(name)) {
       // We don't know the upstream origin from the path alone, so leave it.
     }
-    return parsed.pathname + parsed.search + parsed.hash;
+    // In cloud-linked Electron the iframe needs the absolute URL — Vite
+    // would otherwise resolve the relative path against localhost:5173.
+    return isCloudLinked
+      ? `${launcherOrigin()}${parsed.pathname}${parsed.search}${parsed.hash}`
+      : parsed.pathname + parsed.search + parsed.hash;
   }
   if (!isExternalHttp(parsed)) {
     return rawSrc;
@@ -115,7 +129,10 @@ export const resolveProxiedSrc = async (rawSrc: string): Promise<string> => {
     nameByOrigin.set(origin, name);
   }
   await ensureRegistered(origin, name);
-  return `/proxy/${name}${parsed.pathname}${parsed.search}${parsed.hash}`;
+  // Absolute when cloud-linked so the iframe doesn't resolve against the
+  // renderer's own origin (localhost:5173 / file://).
+  const path = `/proxy/${name}${parsed.pathname}${parsed.search}${parsed.hash}`;
+  return isCloudLinked ? `${launcherOrigin()}${path}` : path;
 };
 
 /**
@@ -131,7 +148,7 @@ export const unproxyUrl = (url: string): string => {
   if (!parsed) {
     return url;
   }
-  if (typeof location !== 'undefined' && parsed.origin !== location.origin) {
+  if (parsed.origin !== launcherOrigin()) {
     return url;
   }
   if (!parsed.pathname.startsWith('/proxy/')) {

@@ -58,7 +58,12 @@ import { ServerIpcAdapter } from '@/server/ipc-adapter';
 import { MCP_PROJECTS_PATH } from '@/server/mcp-http';
 import { CODEX_REFRESH_PATH } from '@/server/codex-refresh-http';
 import { CompositeSettingsStore } from '@/server/composite-settings-store';
-import { assertNonBypassingRole, ensureAppRole, grantAppPrivileges } from '@/server/pg-bootstrap';
+import {
+  assertNonBypassingRole,
+  ensureAppRole,
+  ensureSessionsDb,
+  grantAppPrivileges,
+} from '@/server/pg-bootstrap';
 import { PgSecretStore } from '@/server/pg-secret-store';
 import { resolveRuntimeTokenSecret, signRuntimeToken } from '@/server/runtime-token';
 import { registerTeamHandlers } from '@/server/team-handlers';
@@ -106,7 +111,13 @@ type HandleFn = (
  * reconnections and React re-renders. Each WS session reattaching to the same server
  * gets the existing running container status instead of spawning duplicates.
  */
-export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: ServerStore }) => {
+export const wireGlobalHandlers = async (arg: {
+  wsHandler: WsHandler;
+  store: ServerStore;
+  /** Optional override — pass when the caller (server/index.ts) needs the
+   *  same secret for /api/ws-token signing. Falls back to env resolution. */
+  runtimeTokenSecret?: string;
+}) => {
   const { wsHandler, store } = arg;
   // Ctx-aware registration: shared handlers receive the per-invoke
   // HandlerContext (tenant + session) in the Electron `event` slot, so they
@@ -154,6 +165,21 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
     }
     asyncRepo = new PgProjectsRepo(pgPool, DEFAULT_TENANT);
     console.log(`[ProjectDb] Using Postgres backend`);
+
+    // omniagents session-history DB lives in a sibling logical database on the
+    // same PG server. Grant the omni_app role CREATE on its public schema so
+    // omniagents' PgSessionStorage can install its own schema on first use.
+    // No-op when OMNIAGENTS_HISTORY_ADMIN_URL isn't set (self-hosted single
+    // tenant deployments that don't use the cloud sessions DB).
+    const sessionsAdminUrl = process.env['OMNIAGENTS_HISTORY_ADMIN_URL'];
+    if (sessionsAdminUrl) {
+      try {
+        await ensureSessionsDb(sessionsAdminUrl);
+        console.log('[Sessions] bootstrapped omni_sessions schema grants');
+      } catch (err) {
+        console.error('[Sessions] failed to bootstrap omni_sessions DB:', err);
+      }
+    }
   } else {
     // Both this server and any agent-spawned MCP stdio subprocesses read/write
     // the same projects.db via WAL.
@@ -261,8 +287,10 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
 
   // Secret for signing/verifying the runtime tokens the agent uses to call back
   // into the tenant-scoped HTTP MCP route (minted into the omni-serve env at
-  // agent launch; verified by the route).
-  const runtimeTokenSecret = resolveRuntimeTokenSecret();
+  // agent launch; verified by the route). Use the caller-provided value when
+  // present so server/index.ts (which signs /api/ws-token tokens with the same
+  // secret) and this module are guaranteed to agree.
+  const runtimeTokenSecret = arg.runtimeTokenSecret ?? resolveRuntimeTokenSecret();
 
   // Git tokens. Cloud (Postgres): durable, RLS-isolated PgSecretStore keyed by
   // (principal, cred). Local/Electron: the on-disk ServerSecretStore.
@@ -377,6 +405,20 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
                 }
               }
             }
+            // Cloud sessions persistence: when the deployment provisioned an
+            // omni_sessions Postgres, redirect omniagents' history_db at it
+            // (default is per-(project, agent) SQLite under OMNIAGENTS_HOME,
+            // which is ephemeral on the launcher container's disk). Tenant id
+            // is the team — matches the projects-db RLS scope so chat history
+            // and project rows share the same isolation boundary.
+            const sessionsUrl = process.env['OMNIAGENTS_HISTORY_URL'];
+            const sessionsEnv: Record<string, string> = sessionsUrl
+              ? {
+                  OMNIAGENTS_HISTORY_BACKEND: 'postgres',
+                  OMNIAGENTS_HISTORY_URL: sessionsUrl,
+                  OMNIAGENTS_TENANT_ID: teamId,
+                }
+              : {};
             return {
               OMNI_RUNTIME_TOKEN: signRuntimeToken(runtimeTokenSecret, {
                 tenantId: teamId,
@@ -387,6 +429,7 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
               // OAuth tokens here so PgSecretStore stays current across spawns.
               // Empty when not in cloud → runtime skips the callback.
               ...(codexRefreshUrl ? { OMNI_CODEX_REFRESH_URL: codexRefreshUrl } : {}),
+              ...sessionsEnv,
               // Redirect the child `omni serve` to this (team, principal) config
               // dir so it reads the materialized (secret-free) merged configs.
               XDG_CONFIG_HOME: join(configDir, '.config'),

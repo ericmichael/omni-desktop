@@ -14,9 +14,18 @@ import Store from 'electron-store';
 
 import type { SecretStore } from '@/shared/secret-store';
 
+type EncryptedBlob = { v: string; enc: boolean };
+
 type SecretsSchema = {
-  /** `id` → base64 of (encrypted, or plaintext when `enc` is false) token bytes. */
-  gitTokens: Record<string, { v: string; enc: boolean }>;
+  /** `id` → encrypted token bytes (b64). */
+  gitTokens: Record<string, EncryptedBlob>;
+  /**
+   * `id` → encrypted JSON blob (b64). Holds opaque OAuth token bundles
+   * (e.g. Entra access+refresh+expires) that don't fit the single-string
+   * shape of {@link SecretStore}. Same envelope as gitTokens, separate slot
+   * so a corrupt entry on one side doesn't take out the other.
+   */
+  oauthTokens: Record<string, EncryptedBlob>;
 };
 
 let _store: Store<SecretsSchema> | undefined;
@@ -26,10 +35,30 @@ function getSecretsStore(): Store<SecretsSchema> {
     _store = new Store<SecretsSchema>({
       name: 'git-secrets',
       clearInvalidConfig: true,
-      defaults: { gitTokens: {} },
+      defaults: { gitTokens: {}, oauthTokens: {} },
     });
   }
   return _store;
+}
+
+function encryptString(value: string): EncryptedBlob {
+  if (safeStorage.isEncryptionAvailable()) {
+    return { v: safeStorage.encryptString(value).toString('base64'), enc: true };
+  }
+  console.warn('[secret-store] OS encryption unavailable — storing secret unencrypted in userData');
+  return { v: Buffer.from(value, 'utf-8').toString('base64'), enc: false };
+}
+
+function decryptBlob(entry: EncryptedBlob | undefined): string | undefined {
+  if (!entry) return undefined;
+  const buf = Buffer.from(entry.v, 'base64');
+  if (!entry.enc) return buf.toString('utf-8');
+  try {
+    return safeStorage.decryptString(buf);
+  } catch (err) {
+    console.error('[secret-store] failed to decrypt secret:', err);
+    return undefined;
+  }
 }
 
 export class ElectronSecretStore implements SecretStore {
@@ -38,31 +67,13 @@ export class ElectronSecretStore implements SecretStore {
   setGitToken(id: string, token: string): Promise<void> {
     const store = getSecretsStore();
     const tokens = { ...store.get('gitTokens') };
-    if (safeStorage.isEncryptionAvailable()) {
-      tokens[id] = { v: safeStorage.encryptString(token).toString('base64'), enc: true };
-    } else {
-      console.warn('[secret-store] OS encryption unavailable — storing git token unencrypted in userData');
-      tokens[id] = { v: Buffer.from(token, 'utf-8').toString('base64'), enc: false };
-    }
+    tokens[id] = encryptString(token);
     store.set('gitTokens', tokens);
     return Promise.resolve();
   }
 
   getGitToken(id: string): Promise<string | undefined> {
-    const entry = getSecretsStore().get('gitTokens')[id];
-    if (!entry) {
-      return Promise.resolve(undefined);
-    }
-    const buf = Buffer.from(entry.v, 'base64');
-    if (!entry.enc) {
-      return Promise.resolve(buf.toString('utf-8'));
-    }
-    try {
-      return Promise.resolve(safeStorage.decryptString(buf));
-    } catch (err) {
-      console.error(`[secret-store] failed to decrypt git token ${id}:`, err);
-      return Promise.resolve(undefined);
-    }
+    return Promise.resolve(decryptBlob(getSecretsStore().get('gitTokens')[id]));
   }
 
   deleteGitToken(id: string): Promise<void> {
@@ -73,5 +84,36 @@ export class ElectronSecretStore implements SecretStore {
       store.set('gitTokens', tokens);
     }
     return Promise.resolve();
+  }
+}
+
+/**
+ * Store an opaque JSON token bundle (e.g. Entra ID OAuth tokens) under
+ * *id*, encrypted the same way as git tokens.
+ */
+export function setOauthTokens(id: string, tokens: Record<string, unknown>): void {
+  const store = getSecretsStore();
+  const map = { ...store.get('oauthTokens') };
+  map[id] = encryptString(JSON.stringify(tokens));
+  store.set('oauthTokens', map);
+}
+
+export function getOauthTokens(id: string): Record<string, unknown> | undefined {
+  const plain = decryptBlob(getSecretsStore().get('oauthTokens')[id]);
+  if (!plain) return undefined;
+  try {
+    const parsed = JSON.parse(plain) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function deleteOauthTokens(id: string): void {
+  const store = getSecretsStore();
+  const map = { ...store.get('oauthTokens') };
+  if (id in map) {
+    delete map[id];
+    store.set('oauthTokens', map);
   }
 }

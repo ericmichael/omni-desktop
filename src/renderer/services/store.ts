@@ -15,6 +15,7 @@ const getDefaults = (): StoreData => ({
   layoutMode: 'chat',
   theme: 'teams-light',
   onboardingComplete: false,
+  cloudMode: null,
   projects: [],
   milestones: [],
   pages: [],

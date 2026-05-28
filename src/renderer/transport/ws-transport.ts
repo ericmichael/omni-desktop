@@ -60,8 +60,27 @@ export function setActiveTeamId(teamId: string): void {
 }
 
 /**
- * WebSocket-based transport emitter for browser mode.
- * Sends JSON-RPC-like invoke messages and waits for responses.
+ * Optional cloud-link configuration. When set, ``WsTransportEmitter`` opens
+ * the WebSocket against the cloud at *baseUrl* and delegates ws-token
+ * acquisition to *getWsToken* (which runs in the Electron main process —
+ * it has the Entra access token and can call ``/api/ws-token`` without
+ * tripping CORS preflight that the renderer's cross-origin fetch would).
+ * Browser server-mode leaves the config unset and keeps the same-origin
+ * fetch behaviour.
+ */
+export type WsTransportConfig = {
+  /** Absolute origin of the cloud launcher, e.g. ``https://omni.example.com``. */
+  baseUrl: string;
+  /** Resolver for a fresh WS auth token. In Electron cloud mode this crosses
+   *  the preload bridge to main, which fetches /api/ws-token with a Bearer. */
+  getWsToken: () => Promise<string>;
+};
+
+/**
+ * WebSocket-based transport emitter. Two modes:
+ *   - Browser server-mode: same-origin /api/ws-token + ws://<host>/ws.
+ *   - Cloud-linked Electron: absolute baseUrl + Bearer header to the cloud,
+ *     WS upgrade against the same host.
  */
 export class WsTransportEmitter implements TransportEmitter {
   private ws: WebSocket | null = null;
@@ -73,13 +92,47 @@ export class WsTransportEmitter implements TransportEmitter {
   private messageQueue: string[] = [];
   private sessionId = getOrCreateSessionId();
   private authToken: string | null = null;
+  private readonly cloud: WsTransportConfig | null;
+  private readonly wsHost: string;
 
-  constructor() {
+  constructor(cloud?: WsTransportConfig) {
+    this.cloud = cloud ?? null;
+    // Pre-compute the WS host once. For browser mode use ``location.host``
+    // (the SPA's origin); for cloud-linked Electron the renderer is loaded
+    // from a file:// URL so ``location`` is useless and we derive the host
+    // from cloud.baseUrl.
+    if (cloud) {
+      try {
+        this.wsHost = new URL(cloud.baseUrl).host;
+      } catch {
+        throw new Error(`WsTransportEmitter: invalid cloud baseUrl: ${cloud.baseUrl}`);
+      }
+    } else {
+      this.wsHost = location.host;
+    }
     void this.connect();
+  }
+
+  private isHttps(): boolean {
+    if (this.cloud) {
+      try {
+        return new URL(this.cloud.baseUrl).protocol === 'https:';
+      } catch {
+        return false;
+      }
+    }
+    return location.protocol === 'https:';
   }
 
   private async fetchAuthToken(): Promise<string> {
     if (this.authToken) {
+      return this.authToken;
+    }
+    // Cloud-linked Electron: delegate to main (cross-origin fetch + Bearer
+    // would trip CORS preflight; EasyAuth's redirect on the OPTIONS request
+    // fails it). Browser server-mode: same-origin cookie auth.
+    if (this.cloud) {
+      this.authToken = await this.cloud.getWsToken();
       return this.authToken;
     }
     const res = await fetch('/api/ws-token', { credentials: 'same-origin' });
@@ -95,10 +148,10 @@ export class WsTransportEmitter implements TransportEmitter {
   }
 
   private getWsUrl(token: string): string {
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const protocol = this.isHttps() ? 'wss:' : 'ws:';
     const team = getActiveTeamId();
     const teamParam = team ? `&team=${encodeURIComponent(team)}` : '';
-    return `${protocol}//${location.host}/ws?sessionId=${encodeURIComponent(this.sessionId)}&token=${encodeURIComponent(token)}${teamParam}`;
+    return `${protocol}//${this.wsHost}/ws?sessionId=${encodeURIComponent(this.sessionId)}&token=${encodeURIComponent(token)}${teamParam}`;
   }
 
   private async connect(): Promise<void> {
@@ -153,6 +206,12 @@ export class WsTransportEmitter implements TransportEmitter {
 
     ws.onclose = () => {
       this.ws = null;
+      // Bust the cached ws-token. The server's signed tokens are short-TTL
+      // and a stale one (e.g. cached across a server redeploy that rotated
+      // the signing secret, or just past its 5-min TTL) would spin the
+      // reconnect loop indefinitely — every dial would fail with the same
+      // bad token and the cache would never refresh.
+      this.authToken = null;
       // Reject all pending requests
       for (const [id, pending] of this.pending) {
         pending.reject(new Error('WebSocket connection closed'));

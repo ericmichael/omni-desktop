@@ -42,9 +42,6 @@ export function registerProjectHandlers(ipc: IIpcListener, resolve: (event: unkn
     return pm.getPipeline(projectId);
   });
 
-  // Session history
-  h('project:get-session-history', (pm, sessionId) => pm.getSessionHistory(sessionId));
-
   // Artifacts
   h('project:list-artifacts', (pm, ticketId, dirPath) => pm.listArtifacts(ticketId, dirPath));
   h('project:read-artifact', (pm, ticketId, relativePath) => pm.readArtifact(ticketId, relativePath));

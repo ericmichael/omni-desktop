@@ -14,7 +14,7 @@ import { useSandboxActivityPing } from '@/renderer/hooks/use-sandbox-activity-pi
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { buildProfileLabel } from '@/renderer/omniagents-ui/sandbox-label';
 import { configApi } from '@/renderer/services/config';
-import { emitter } from '@/renderer/services/ipc';
+import { emitter, serverOrigin } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { AppId } from '@/shared/app-registry';
 import type { CodeTab, CodeTabId, TicketId } from '@/shared/types';
@@ -152,7 +152,10 @@ const CodeRunningView = memo(
     const pendingPlan = useStore($pendingPlan);
 
     const uiSrc = useMemo(() => {
-      const url = new URL(sandboxUrls.uiUrl, window.location.origin);
+      // serverOrigin() returns the cloud baseUrl in cloud-linked Electron;
+      // resolving the agent's relative /proxy/... against window.location
+      // would (wrongly) anchor to localhost:5173 / file:// in that mode.
+      const url = new URL(sandboxUrls.uiUrl, serverOrigin());
       if (theme !== 'default') {
         url.searchParams.set('theme', theme);
       }

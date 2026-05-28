@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import { createContext, useContext, useMemo } from 'react';
 
+import { serverOrigin } from '@/renderer/services/ipc';
+
 type UiConfig = {
   uiUrl: string;
   url: URL;
@@ -38,7 +40,12 @@ const buildWsUrl = (url: URL, path: string): string => {
 
 export const UiConfigProvider = ({ uiUrl, children }: { uiUrl: string; children: ReactNode }) => {
   const value = useMemo<UiConfig>(() => {
-    const url = new URL(uiUrl, window.location.origin);
+    // Anchor against the launcher's actual origin — same-origin in browser
+    // server mode, cloud baseUrl in cloud-linked Electron. Downstream
+    // (wsBaseUrl, wsRealtimeUrl, httpBaseUrl, proxyPrefix) all derive from
+    // url.host, so fixing this seam cascades everywhere consumers like
+    // rpc/client.ts, rpc/realtime.ts, TerminalPanel get URLs from us.
+    const url = new URL(uiUrl, serverOrigin());
     const searchParams = url.searchParams;
     const token = searchParams.get('token') || undefined;
     const theme = searchParams.get('theme') || undefined;

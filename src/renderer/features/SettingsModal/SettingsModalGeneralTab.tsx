@@ -1,6 +1,7 @@
 import { makeStyles, tokens } from '@fluentui/react-components';
 import { memo } from 'react';
 
+import { ConnectCloudCard } from '@/renderer/features/SettingsModal/ConnectCloudCard';
 import { SettingsModalOmniSandboxOptions } from '@/renderer/features/SettingsModal/SettingsModalOmniSandboxOptions';
 import { SettingsModalOptInToLauncherPrereleases } from '@/renderer/features/SettingsModal/SettingsModalOptInToLauncherPrereleases';
 import { SettingsModalPreviewFeatures } from '@/renderer/features/SettingsModal/SettingsModalPreviewFeatures';
@@ -21,6 +22,12 @@ export const SettingsModalGeneralTab = memo(() => {
 
   return (
     <div className={styles.root}>
+      {isElectron && (
+        <>
+          <ConnectCloudCard />
+          <div className={styles.divider} />
+        </>
+      )}
       <SettingsModalWipLimit />
       <div className={styles.divider} />
       <SettingsModalWeeklyReviewDay />

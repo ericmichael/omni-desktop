@@ -108,6 +108,46 @@ to seed from another registry.
 | `OMNI_AZURE_DESKTOP_IMAGE` | desktop sandbox image (`-devbox`) |
 | `OMNI_AZURE_SUBNET_ID` | delegated subnet → ACI gets private IPs (desktop profile) |
 | `OMNI_DATABASE_URL`, `OMNI_RUNTIME_TOKEN_SECRET`, `OMNI_WS_TOKEN` | secrets (also in `deploy.env`) |
+| `OMNIAGENTS_HISTORY_URL` | omniagents session DB (Postgres, `omni_sessions`) — chat history durability |
+| `OMNI_AZURE_SNAPSHOT_CONTAINER` / `OMNI_AZURE_AUDIO_CONTAINER` | blob containers for sandbox snapshot tars + realtime audio chunks |
+| `OMNI_AAD_TENANT_ID` / `OMNI_AAD_CLIENT_ID` / `OMNI_CLOUD_NAME` | published by `/.well-known/omni-cloud` so Electron clients can self-configure for cloud-link sign-in |
+
+## Cloud-link from the Electron desktop app
+
+The desktop launcher can link to this deployment so chat sessions, projects,
+and tickets sync to the cloud Postgres and back to the web UI. The user
+opens **Settings → General → Connect to Cloud**, pastes the launcher URL,
+and approves the device-code flow against your AAD tenant.
+
+### AAD app registration must allow public client / device code
+
+The same AAD app reg that EasyAuth uses for the SPA browser flow also
+serves the desktop's device-code flow. **One-time portal toggle**:
+
+```bash
+az ad app update --id "$OMNI_AAD_CLIENT_ID" --is-fallback-public-client true
+```
+
+Equivalent UI path: *App registrations → <app> → Authentication → Advanced
+settings → "Allow public client flows" = Yes*. Without this AAD rejects the
+device-code request with `unauthorized_client`.
+
+### `/.well-known/omni-cloud` must be reachable
+
+The Electron client GETs `https://<launcher>/.well-known/omni-cloud` (public,
+no auth) to discover the tenant + client id. The bicep sets the three env
+vars (`OMNI_AAD_TENANT_ID`, `OMNI_AAD_CLIENT_ID`, `OMNI_CLOUD_NAME`) so this
+endpoint just works. If it returns 503 *Cloud sign-in not configured*, those
+three settings need to be present on the App Service.
+
+### EasyAuth + Bearer tokens
+
+No bicep change needed. The existing `authsettingsV2` config already accepts
+incoming Bearer tokens whose `aud` matches `aadClientId` (or `api://<id>`).
+The Electron client requests the token with scope `<clientId>/.default`,
+which yields the right audience. `unauthenticatedClientAction:
+RedirectToLoginPage` only triggers when no credential is presented at all —
+a valid Bearer is honoured.
 
 ## Network posture (all internal resources private)
 

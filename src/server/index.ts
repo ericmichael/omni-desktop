@@ -17,6 +17,7 @@ import { wireClientManagers, wireGlobalHandlers } from '@/server/managers';
 import { CODEX_REFRESH_PATH, registerCodexRefreshRoute } from '@/server/codex-refresh-http';
 import { MCP_PROJECTS_PATH, registerMcpHttpRoute } from '@/server/mcp-http';
 import { setupProxyRewriter } from '@/server/proxy-rewriter';
+import { resolveRuntimeTokenSecret, signRuntimeToken, verifyRuntimeToken } from '@/server/runtime-token';
 import { ServerStore } from '@/server/store';
 import { DEFAULT_TENANT, WsHandler } from '@/server/ws-handler';
 
@@ -144,12 +145,10 @@ function buildTokenAllowList(): { check: (addr: string) => boolean; describe: ()
 const main = async () => {
   const fastify = Fastify({ logger: true });
 
-  // Generate (or read) a WebSocket auth token. Clients must present this as
-  // a ?token= query param on the /ws connection. Trusted-network browser
-  // clients can fetch it via GET /api/ws-token; non-browser clients should
-  // use the OMNI_WS_TOKEN env var printed below.
-  const wsToken = process.env['OMNI_WS_TOKEN'] ?? crypto.randomUUID();
-  console.log('[auth] WS token:', wsToken);
+  // Hoisted from wireGlobalHandlers so /api/ws-token + /ws can both reach it.
+  // Tokens minted at /api/ws-token are signed with this secret and verified
+  // at /ws (which is excluded from EasyAuth, so the token IS the credential).
+  const runtimeTokenSecret = resolveRuntimeTokenSecret();
 
   const tokenAllowList = buildTokenAllowList();
   console.log(`[auth] /api/ws-token trusted networks: ${tokenAllowList.describe()}`);
@@ -157,19 +156,56 @@ const main = async () => {
   // WebSocket plugin
   await fastify.register(fastifyWebsocket);
 
+  // Cloud-discovery endpoint — Electron clients fetch this after the user
+  // enters the launcher URL, then run the AAD device-code flow against the
+  // returned tenant + client id. Public on purpose (no secrets here; the
+  // values themselves are needed for sign-in to even start). ``name`` is a
+  // display string for the UI.
+  fastify.get('/.well-known/omni-cloud', (_req, reply) => {
+    const tenantId =
+      process.env['OMNI_AAD_TENANT_ID'] ??
+      // Fall back to parsing it out of the EasyAuth-injected issuer URL
+      // (``https://login.microsoftonline.com/<tenant>/v2.0``) if set.
+      (process.env['OMNI_AAD_ISSUER']?.match(/microsoftonline\.com\/([^/]+)/)?.[1]) ??
+      '';
+    const clientId = process.env['OMNI_AAD_CLIENT_ID'] ?? '';
+    if (!tenantId || !clientId) {
+      reply.code(503).send({ error: 'Cloud sign-in not configured on this launcher' });
+      return;
+    }
+    reply.send({
+      tenantId,
+      clientId,
+      name: process.env['OMNI_CLOUD_NAME'] ?? 'Omni Cloud',
+    });
+  });
+
   // Token endpoint — restricted to trusted networks (loopback by default;
   // extend via OMNI_TRUSTED_CIDRS, e.g. "100.64.0.0/10" for Tailscale).
+  // The returned token is signed (HMAC) and includes the caller's identity
+  // (from EasyAuth when present, else DEFAULT_TENANT). /ws bypasses EasyAuth
+  // and verifies this signature instead — see the wsRoutes registration.
   fastify.get('/api/ws-token', (request, reply) => {
     const addr = request.socket.remoteAddress ?? '';
-    // Behind EasyAuth the request arrives via the platform edge (not loopback),
-    // but it's already authenticated — the presence of the principal header is
-    // sufficient. Otherwise fall back to the trusted-network allowlist.
+    const principalId = resolveTenantId(request.headers);
     const easyauthOk = IS_EASYAUTH && typeof request.headers['x-ms-client-principal-id'] === 'string';
     if (!easyauthOk && !tokenAllowList.check(addr)) {
       reply.code(403).send({ error: 'Forbidden' });
       return;
     }
-    reply.send({ token: wsToken });
+    if (principalId === null) {
+      reply.code(401).send({ error: 'Unauthorized' });
+      return;
+    }
+    // Short TTL (5 min) — the renderer fetches a fresh one on each connect/
+    // reconnect, so we don't need long-lived tokens floating around.
+    reply.send({
+      token: signRuntimeToken(
+        runtimeTokenSecret,
+        { tenantId: principalId, principalId, sessionId: crypto.randomUUID() },
+        5 * 60,
+      ),
+    });
   });
 
   // WebSocket handler
@@ -186,7 +222,6 @@ const main = async () => {
     getProcessManager,
     ensureTenantReady,
     getTenantRepo,
-    runtimeTokenSecret,
     teamsEnabled,
     ensureUserBootstrapped,
     resolveActiveTeam,
@@ -194,6 +229,7 @@ const main = async () => {
   } = await wireGlobalHandlers({
     wsHandler,
     store,
+    runtimeTokenSecret,
   });
 
   // HTTP MCP route — remote agent sandboxes reach their tenant's project data
@@ -217,16 +253,16 @@ const main = async () => {
     f.get('/ws', { websocket: true }, (socket, request) => {
       const url = new URL(request.url, `http://${request.hostname}`);
       const token = url.searchParams.get('token');
-      if (token !== wsToken) {
+      // /ws is excluded from EasyAuth (browser WebSocket API can't send
+      // Bearer headers on the upgrade). Auth is the signed token from
+      // /api/ws-token, which embeds the EasyAuth-derived identity. A
+      // forged/expired token fails verification.
+      const claims = token ? verifyRuntimeToken(runtimeTokenSecret, token) : null;
+      if (!claims) {
         socket.close(4401, 'Unauthorized');
         return;
       }
-      // The authenticated identity (EasyAuth principal, or DEFAULT_TENANT).
-      const principal = resolveTenantId(request.headers);
-      if (principal === null) {
-        socket.close(4401, 'Unauthorized');
-        return;
-      }
+      const principal = claims.principalId ?? claims.tenantId;
       const sessionId = url.searchParams.get('sessionId') ?? undefined;
       const requestedTeam = url.searchParams.get('team') ?? undefined;
 

@@ -15,6 +15,12 @@ import { createAppControlManager } from '@/main/app-control-manager';
 import { listRepos as azureListRepos } from '@/main/azure-repos';
 import { createBrowserManager } from '@/main/browser-manager';
 import { getStatus as codexStatus, loginWithBrowser, loginWithDeviceFlow, logout as codexLogout } from '@/main/codex-auth';
+import {
+  ensureFreshAccessToken as ensureFreshEntraToken,
+  getStatus as entraStatus,
+  loginWithDeviceFlow as entraLoginWithDeviceFlow,
+  logout as entraLogout,
+} from '@/main/entra-auth';
 import { migrateAgentConfigFromFiles } from '@/main/config-files-migration';
 import { materializeAgentConfig } from '@/main/config-materializer';
 import { createConsoleManager } from '@/main/console-manager';
@@ -722,15 +728,129 @@ main.ipc.handle('codex:status', () => codexStatus());
 
 //#endregion
 
+//#region Cloud link (Electron ↔ deployed launcher via AAD device flow)
+
+// Hoisted from the GitHub block below so both regions can fan store changes
+// out to the renderer.
+const broadcastStore = (): void =>
+  main.sendToWindow('store:changed', main.getStoreSnapshot ? main.getStoreSnapshot() : store.store);
+
+const cloudStatusFromStore = (): import('@/shared/types').CloudStatus => {
+  const cm = store.get('cloudMode');
+  if (!cm) return { connected: false };
+  const live = entraStatus();
+  // Belt + suspenders: if the secret store has been cleared out (e.g. user
+  // wiped userData) treat the cloudMode flag as stale and report disconnected
+  // so the renderer drops back to local mode after a restart.
+  if (!live.signedIn) return { connected: false };
+  return {
+    connected: true,
+    url: cm.url,
+    tenantId: cm.tenantId,
+    clientId: cm.clientId,
+    account: cm.account,
+  };
+};
+
+main.ipc.handle('cloud:status', () => cloudStatusFromStore());
+
+/** Restart the Electron app on a short delay so the IPC reply (the new
+ *  ``CloudStatus``) flushes to the renderer first. The transport choice is
+ *  baked into the BrowserWindow at creation via ``additionalArguments``, so
+ *  flipping cloud mode requires a fresh process — not just a webContents
+ *  reload. 200ms is enough for the response handshake without making the UI
+ *  feel laggy. */
+const restartAfterCloudModeChange = (): void => {
+  setTimeout(() => {
+    app.relaunch();
+    app.exit(0);
+  }, 200);
+};
+
+main.ipc.handle('cloud:link', async (_, urlInput) => {
+  const url = String(urlInput ?? '').trim().replace(/\/+$/, '');
+  if (!url) {
+    throw new Error('Cloud URL is required');
+  }
+  // 1. Discover the cloud's AAD configuration. Public endpoint, no auth.
+  const discoverRes = await net.fetch(`${url}/.well-known/omni-cloud`);
+  if (!discoverRes.ok) {
+    throw new Error(
+      `Cloud discovery failed (${discoverRes.status}). Is this a launcher URL?`,
+    );
+  }
+  const discovered = (await discoverRes.json()) as { tenantId?: string; clientId?: string };
+  if (!discovered.tenantId || !discovered.clientId) {
+    throw new Error('Cloud discovery returned no tenant/client id');
+  }
+  // 2. Drive the AAD device-code flow against the discovered tenant + client.
+  const result = await entraLoginWithDeviceFlow({
+    tenantId: discovered.tenantId,
+    clientId: discovered.clientId,
+    onCode: (code) => main.sendToWindow('cloud:device-code', code),
+  });
+  if (!result.signedIn) {
+    throw new Error('Cloud sign-in did not produce an account');
+  }
+  // 3. Persist the cloud-mode flag, then restart so the renderer picks up
+  //    the cloud transport on its next boot.
+  store.set('cloudMode', {
+    url,
+    tenantId: discovered.tenantId,
+    clientId: discovered.clientId,
+    account: result.account,
+  });
+  broadcastStore();
+  const status = cloudStatusFromStore();
+  restartAfterCloudModeChange();
+  return status;
+});
+
+main.ipc.handle('cloud:unlink', () => {
+  entraLogout();
+  store.set('cloudMode', null);
+  broadcastStore();
+  // The live renderer is still configured to use the (now broken) cloud
+  // transport — restart so it falls back to local Electron IPC.
+  restartAfterCloudModeChange();
+});
+
+main.ipc.handle('cloud:get-access-token', async () => {
+  const cm = store.get('cloudMode');
+  if (!cm) throw new Error('Not connected to a cloud');
+  return ensureFreshEntraToken(cm.tenantId, cm.clientId);
+});
+
+// Fetch a WS auth token from the linked cloud's /api/ws-token. The renderer
+// can't do this directly: setting Authorization on a cross-origin GET trips
+// CORS preflight, and EasyAuth's 302 redirect for unauthenticated OPTIONS
+// requests fails the CORS check. Running the fetch in main bypasses CORS
+// entirely (Node's fetch is unrestricted) and returns the opaque WS token.
+main.ipc.handle('cloud:get-ws-token', async () => {
+  const cm = store.get('cloudMode');
+  if (!cm) throw new Error('Not connected to a cloud');
+  const accessToken = await ensureFreshEntraToken(cm.tenantId, cm.clientId);
+  const res = await net.fetch(`${cm.url}/api/ws-token`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Cloud ws-token fetch failed: ${res.status} ${res.statusText}`);
+  }
+  const data = (await res.json()) as { token?: string };
+  if (!data.token) {
+    throw new Error('Cloud ws-token response missing "token" field');
+  }
+  return data.token;
+});
+
+//#endregion
+
 //#region GitHub account linking (OAuth device flow → github.com credential)
 
 // Stable credential id for the OAuth-linked github.com token, so link / unlink /
 // clone-time injection all reference the same SecretStore slot.
 const GITHUB_CRED_ID = 'github-oauth';
 const githubFetch = ((input, init) => net.fetch(input as string, init)) as typeof globalThis.fetch;
-
-const broadcastStore = (): void =>
-  main.sendToWindow('store:changed', main.getStoreSnapshot ? main.getStoreSnapshot() : store.store);
 
 const githubStatus = (): GithubStatus => {
   const account = store.get('githubAccount');

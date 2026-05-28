@@ -25,6 +25,7 @@ import path from 'node:path';
 
 import type { IIpcListener } from '@/shared/ipc-listener';
 
+import { getSnapshotStore } from './snapshot-blob-store';
 import { getOmniConfigDir } from './util';
 
 /** TTL applied to chat snapshots that aren't explicitly protected. */
@@ -47,13 +48,19 @@ export async function deleteSnapshot(sessionId: string): Promise<boolean> {
   if (filename.includes('/') || filename.includes('\\') || filename.includes('..')) {
     return false;
   }
+  let unlinked = false;
   try {
     await fs.unlink(path.join(snapshotsDir(), filename));
-    return true;
+    unlinked = true;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
-    throw err;
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
+  // Cascade to blob — the cloud copy is the durable one; leaving it after a
+  // local delete defeats the cascade-on-tab-close semantics. Best-effort.
+  await getSnapshotStore()
+    .remove(sessionId)
+    .catch((err) => console.error('[snapshot-manager] blob remove failed:', err));
+  return unlinked;
 }
 
 /**

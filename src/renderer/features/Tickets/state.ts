@@ -383,11 +383,6 @@ export const ticketApi = {
     return tickets;
   },
 
-  // Session history
-  getSessionHistory: (sessionId: string): Promise<SessionMessage[]> => {
-    return emitter.invoke('project:get-session-history', sessionId);
-  },
-
   // Artifacts
   listArtifacts: (ticketId: TicketId, dirPath?: string): Promise<ArtifactFileEntry[]> => {
     return emitter.invoke('project:list-artifacts', ticketId, dirPath);
