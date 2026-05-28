@@ -14,7 +14,7 @@ import { getArtifactsDir } from '@/lib/artifacts';
 import { createAppControlManager } from '@/main/app-control-manager';
 import { listRepos as azureListRepos } from '@/main/azure-repos';
 import { createBrowserManager } from '@/main/browser-manager';
-import { getStatus as codexStatus, loginWithBrowser, logout as codexLogout } from '@/main/codex-auth';
+import { getStatus as codexStatus, loginWithBrowser, loginWithDeviceFlow, logout as codexLogout } from '@/main/codex-auth';
 import { migrateAgentConfigFromFiles } from '@/main/config-files-migration';
 import { materializeAgentConfig } from '@/main/config-materializer';
 import { createConsoleManager } from '@/main/console-manager';
@@ -714,6 +714,9 @@ main.ipc.handle('util:open-external', (_, url) => shell.openExternal(url));
 //#region Codex (ChatGPT OAuth) handlers
 
 main.ipc.handle('codex:login', () => loginWithBrowser((url) => void shell.openExternal(url)));
+main.ipc.handle('codex:link', () =>
+  loginWithDeviceFlow({ onCode: (code) => main.sendToWindow('codex:device-code', code) })
+);
 main.ipc.handle('codex:logout', () => codexLogout());
 main.ipc.handle('codex:status', () => codexStatus());
 

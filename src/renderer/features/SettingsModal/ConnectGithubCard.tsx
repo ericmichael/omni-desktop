@@ -101,7 +101,13 @@ export const ConnectGithubCard = memo(() => {
 
         {connecting && deviceCode && (
           <div className={styles.codeBox}>
-            <Caption1>Enter this code at {deviceCode.verificationUri} (opened in your browser):</Caption1>
+            <Caption1>
+              Open{' '}
+              <a href={deviceCode.verificationUri} target="_blank" rel="noopener noreferrer">
+                {deviceCode.verificationUri}
+              </a>{' '}
+              and enter this code:
+            </Caption1>
             <span className={styles.code}>{deviceCode.userCode}</span>
             <div className={styles.pending}>
               <Spinner size="sm" />

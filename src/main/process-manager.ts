@@ -50,7 +50,7 @@ export class ProcessManager {
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   private fetchFn: FetchFn;
   private getStoreData: () => ProcessManagerStoreData;
-  private getExtraEnv?: () => Record<string, string>;
+  private getExtraEnv?: () => Record<string, string> | Promise<Record<string, string>>;
   /** Read a git token by credential id (from the SecretStore). Absent → no
    *  private-remote auth (tokens never reach this class except through here). */
   private resolveGitToken?: (credentialId: string) => Promise<string | undefined>;
@@ -69,8 +69,10 @@ export class ProcessManager {
     sendToWindow: ProcessManager['sendToWindow'];
     fetchFn?: FetchFn;
     getStoreData?: () => ProcessManagerStoreData;
-    /** Extra env for spawned `omni serve` (e.g. cloud `OMNI_RUNTIME_TOKEN`). */
-    getExtraEnv?: () => Record<string, string>;
+    /** Extra env for spawned `omni serve` (e.g. cloud `OMNI_RUNTIME_TOKEN`).
+     *  May be async — used by cloud to materialize per-principal codex tokens
+     *  to the spawn's config dir from PgSecretStore before omni-serve starts. */
+    getExtraEnv?: () => Record<string, string> | Promise<Record<string, string>>;
     /** Read a git token by credential id, for private-remote auth at clone time. */
     resolveGitToken?: (credentialId: string) => Promise<string | undefined>;
     /** Restrict launches to these profiles (cloud → the ACI profiles). The

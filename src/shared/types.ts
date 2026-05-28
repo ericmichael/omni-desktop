@@ -1783,8 +1783,12 @@ type ConfigIpcEvents = Namespaced<
 type CodexIpcEvents = Namespaced<
   'codex',
   {
-    /** Open the consent page, await the loopback callback, persist tokens. */
+    /** Open the consent page, await the loopback callback, persist tokens.
+     *  Electron-only: requires browser open + loopback :1455. */
     login: () => CodexAuthStatus;
+    /** Device-flow sign-in (server/headless). Surfaces user code + URL via
+     *  `codex:device-code` then polls until authorized. Works everywhere. */
+    link: () => CodexAuthStatus;
     /** Remove the stored tokens. */
     logout: () => void;
     /** Current sign-in status, read from the token store. */
@@ -1793,6 +1797,9 @@ type CodexIpcEvents = Namespaced<
 >;
 
 export type CodexAuthStatus = { signedIn: boolean; accountId?: string };
+
+/** Device-flow code surface for the renderer to display while `codex:link` polls. */
+export type CodexDeviceCode = { userCode: string; verificationUri: string };
 
 /**
  * Typed agent-config API. Replaces the path-based `config:*` file I/O for the
@@ -2921,8 +2928,12 @@ type BrowserIpcRendererEvents = Namespaced<
 /** Main→renderer: the device-flow user code to display while `github:link` polls. */
 type GithubIpcRendererEvents = Namespaced<'github', { 'device-code': [GithubDeviceCode] }>;
 
+/** Main→renderer: the device-flow user code to display while `codex:link` polls. */
+type CodexIpcRendererEvents = Namespaced<'codex', { 'device-code': [CodexDeviceCode] }>;
+
 export type IpcRendererEvents = TerminalIpcRendererEvents &
   GithubIpcRendererEvents &
+  CodexIpcRendererEvents &
   MainProcessIpcRendererEvents &
   OmniInstallProcessIpcRendererEvents &
   AgentProcessIpcRendererEvents &

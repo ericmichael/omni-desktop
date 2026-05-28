@@ -292,7 +292,7 @@ export class AgentProcess {
   private fetchFn: FetchFn;
   private platformClient: IComputeClient | null = null;
   private platformSessionId: string | null = null;
-  private getExtraEnv?: () => Record<string, string>;
+  private getExtraEnv?: () => Record<string, string> | Promise<Record<string, string>>;
 
   constructor(opts: {
     mode: AgentProcessMode;
@@ -304,9 +304,11 @@ export class AgentProcess {
     /**
      * Extra env merged into the spawned `omni serve` (serve mode), evaluated
      * per start. Cloud uses this to inject a fresh per-tenant
-     * `OMNI_RUNTIME_TOKEN` for the agent's HTTP MCP calls.
+     * `OMNI_RUNTIME_TOKEN` for the agent's HTTP MCP calls, AND for the
+     * codex-token materialization side effect (writing the per-principal
+     * codex.json to the spawn's config dir before omni-serve starts).
      */
-    getExtraEnv?: () => Record<string, string>;
+    getExtraEnv?: () => Record<string, string> | Promise<Record<string, string>>;
   }) {
     this.mode = opts.mode;
     this.ipcRawOutput = opts.ipcRawOutput;
@@ -587,11 +589,12 @@ export class AgentProcess {
     this.stderrBuffer = '';
     this.jsonEmitted = false;
 
+    const extra = (await this.getExtraEnv?.()) ?? {};
     const env = {
       ...process.env,
       ...DEFAULT_ENV,
       ...shellEnvSync(),
-      ...(this.getExtraEnv?.() ?? {}),
+      ...extra,
       // Per-launch git tokens for private remotes. Last so a token env name can
       // never be shadowed by ambient/extra env.
       ...(arg.gitTokenEnv ?? {}),

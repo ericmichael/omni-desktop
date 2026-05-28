@@ -132,6 +132,36 @@ export class PgSecretStore {
     );
   }
 
+  // ---- Codex (ChatGPT OAuth) tokens, keyed by principal ----
+  //
+  // Codex tokens are a JSON bundle ({refresh, access, expires, account_id?}),
+  // not a single string like a git PAT. We reuse the user_secrets table with a
+  // reserved cred_id so the same RLS / encryption story applies and no new
+  // migration is needed.
+
+  async setUserCodexTokens(principalId: string, tokens: Record<string, unknown>): Promise<void> {
+    await this.setUserGitToken(principalId, PgSecretStore.CODEX_CRED_ID, JSON.stringify(tokens));
+  }
+
+  async getUserCodexTokens(principalId: string): Promise<Record<string, unknown> | undefined> {
+    const blob = await this.getUserGitToken(principalId, PgSecretStore.CODEX_CRED_ID);
+    if (!blob) return undefined;
+    try {
+      const parsed = JSON.parse(blob);
+      return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async deleteUserCodexTokens(principalId: string): Promise<void> {
+    await this.deleteUserGitToken(principalId, PgSecretStore.CODEX_CRED_ID);
+  }
+
+  // Sentinel cred_id: not a valid PAT credential id (no host could parse to
+  // this), so no risk of collision with a user-stored git credential.
+  private static readonly CODEX_CRED_ID = '__omni_codex_oauth_tokens__';
+
   // ---- Team (shared model/MCP) secrets, keyed by team ----
 
   async setTeamSecret(teamId: string, refName: string, value: string): Promise<void> {

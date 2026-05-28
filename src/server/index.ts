@@ -14,6 +14,7 @@ process.env.NODE_ENV = process.env.NODE_ENV || 'development';
 import type { IncomingHttpHeaders } from 'node:http';
 
 import { wireClientManagers, wireGlobalHandlers } from '@/server/managers';
+import { CODEX_REFRESH_PATH, registerCodexRefreshRoute } from '@/server/codex-refresh-http';
 import { MCP_PROJECTS_PATH, registerMcpHttpRoute } from '@/server/mcp-http';
 import { setupProxyRewriter } from '@/server/proxy-rewriter';
 import { ServerStore } from '@/server/store';
@@ -189,6 +190,7 @@ const main = async () => {
     teamsEnabled,
     ensureUserBootstrapped,
     resolveActiveTeam,
+    pgSecret,
   } = await wireGlobalHandlers({
     wsHandler,
     store,
@@ -199,6 +201,14 @@ const main = async () => {
   // doesn't use it; it's harmless when no sandbox calls it.
   registerMcpHttpRoute(fastify, { runtimeTokenSecret, getTenantRepo });
   console.log(`[mcp-http] omni-projects MCP available at ${MCP_PROJECTS_PATH}`);
+
+  // Codex token-refresh callback — cloud only. The runtime POSTs refreshed
+  // OAuth tokens here after rotation so PgSecretStore stays current and the
+  // next spawn pre-materializes a non-stale refresh token.
+  if (pgSecret) {
+    registerCodexRefreshRoute(fastify, { runtimeTokenSecret, pgSecret });
+    console.log(`[codex-refresh] callback registered at ${CODEX_REFRESH_PATH}`);
+  }
 
   // WebSocket route — each new connection gets its own manager instances.
   // Clients send a sessionId query param; if the server has an existing session

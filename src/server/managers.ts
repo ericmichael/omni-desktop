@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'fs';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import type { IProjectsRepo, PgPool, ProjectsRepo } from 'omni-projects-db';
 import {
   ControlPlaneRepo,
@@ -35,6 +35,20 @@ import { backfillProjectConfigs } from '@/main/project-config-backfill';
 import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
 import { registerProjectHandlers } from '@/main/project-handlers';
 import { ProjectManager } from '@/main/project-manager';
+import { listRepos as azureListRepos } from '@/main/azure-repos';
+import {
+  type CodexTokens,
+  ensureFreshTokens as codexEnsureFresh,
+  getStatus as codexStatus,
+  loginWithDeviceFlow as codexDeviceLogin,
+  logout as codexLogout,
+} from '@/main/codex-auth';
+import {
+  linkWithDeviceFlow as githubLink,
+  listOrgs as githubListOrgs,
+  searchRepos as githubSearchRepos,
+} from '@/main/github-auth';
+import { registerSnapshotHandlers } from '@/main/snapshot-manager';
 import { registerSupervisorHandlers } from '@/main/supervisor-handlers';
 import { getOmniConfigDir } from '@/main/util';
 import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
@@ -42,6 +56,7 @@ import { requireRole } from '@/server/authz';
 import { AzureFilesArtifactStore } from '@/server/azure-artifact-store';
 import { ServerIpcAdapter } from '@/server/ipc-adapter';
 import { MCP_PROJECTS_PATH } from '@/server/mcp-http';
+import { CODEX_REFRESH_PATH } from '@/server/codex-refresh-http';
 import { CompositeSettingsStore } from '@/server/composite-settings-store';
 import { assertNonBypassingRole, ensureAppRole, grantAppPrivileges } from '@/server/pg-bootstrap';
 import { PgSecretStore } from '@/server/pg-secret-store';
@@ -59,10 +74,20 @@ import {
   registerUtilHandlers,
   type SettingsConfigStore,
 } from '@/shared/ipc-handlers';
+import { tokenLast4 } from '@/shared/git-credentials';
 import { buildHttpMcpEntry, buildStdioMcpEntry } from '@/shared/mcp-entry';
 import { maskMcpConfig, maskModelsConfig, restoreMaskedModels } from '@/shared/secret-mask';
 import { classify } from '@/shared/settings-layers';
-import type { IpcRendererEvents, Project, StoreData } from '@/shared/types';
+import type {
+  GitCredential,
+  GithubOwner,
+  GithubRepoQuery,
+  GithubStatus,
+  IpcRendererEvents,
+  Project,
+  RemoteRepo,
+  StoreData,
+} from '@/shared/types';
 import { firstSource } from '@/shared/types';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -301,27 +326,82 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
       // Cloud: mint a fresh per-(team, principal) runtime token for each
       // omni-serve spawn, so the agent's HTTP MCP calls resolve to THIS team's
       // data as THIS user. The route verifies it; a sandbox can't forge another.
+      //
+      // The codex-refresh callback URL is derived from the same site as the
+      // existing OMNI_DATA_API_URL (data API + codex callback are co-resident).
+      // Falls back to undefined when no cloud URL is configured — the Python
+      // runtime treats absence of OMNI_CODEX_REFRESH_URL as "don't call back".
       getExtraEnv: dbUrl
-        ? () => ({
-            OMNI_RUNTIME_TOKEN: signRuntimeToken(runtimeTokenSecret, {
-              tenantId: teamId,
-              principalId,
-              sessionId: crypto.randomUUID(),
-            }),
-            // Redirect the child `omni serve` to this (team, principal) config
-            // dir so it reads the materialized (secret-free) merged configs.
-            XDG_CONFIG_HOME: join(configDir, '.config'),
-            // The merged (team base ⊕ user overlay) .env, injected directly.
-            ...parseEnvVars(settings.get('envVars') ?? ''),
-            // Real values for the ${OMNI_SECRET_*} refs the materializer wrote
-            // into the merged models.json / mcp.json — resolved by the agent's
-            // loaders. settings.get returns the merged config, so origin-aware
-            // resolution falls out: each provider's key is its own layer's.
-            ...collectSecretEnv(
-              settings.get('modelsConfig') ?? emptyModelsConfig(),
-              settings.get('mcpConfig') ?? emptyMcpConfig()
-            ),
-          })
+        ? async () => {
+            const codexRefreshUrl = (() => {
+              const dataApi = process.env['OMNI_DATA_API_URL'];
+              if (!dataApi) return undefined;
+              try {
+                const u = new URL(dataApi);
+                u.pathname = CODEX_REFRESH_PATH;
+                u.search = '';
+                return u.toString();
+              } catch {
+                return undefined;
+              }
+            })();
+            // Materialize this principal's Codex tokens into the spawn's
+            // config dir (where the runtime expects to find them). PgSecretStore
+            // is the durable source of truth — the launcher container's FS is
+            // ephemeral on Azure. Pre-refresh near-expiry tokens here so the
+            // first call from the spawn doesn't race the clock; runtime-side
+            // refreshes during the spawn's lifetime aren't persisted back (the
+            // refresh token itself is long-lived, so the next spawn just
+            // re-materializes; if `refresh` is ever rotated to invalid, the
+            // user re-signs in).
+            if (pgSecret) {
+              const stored = (await pgSecret.getUserCodexTokens(principalId)) as
+                | (CodexTokens & Record<string, unknown>)
+                | undefined;
+              if (stored?.refresh) {
+                try {
+                  const fresh = await codexEnsureFresh(stored);
+                  if (fresh !== stored) {
+                    await pgSecret.setUserCodexTokens(principalId, fresh as unknown as Record<string, unknown>);
+                  }
+                  const codexPath = join(configDir, '.config', 'omni_code');
+                  mkdirSync(codexPath, { recursive: true });
+                  const tokenFile = join(codexPath, 'codex.json');
+                  writeFileSync(tokenFile, `${JSON.stringify(fresh, null, 2)}\n`, 'utf-8');
+                  chmodSync(tokenFile, 0o600);
+                } catch (err) {
+                  // Best-effort: a stale refresh token shouldn't break a
+                  // non-Codex spawn. The runtime will just see no codex.json
+                  // and skip the openai-oauth provider.
+                  console.error('[codex-materialize] failed to materialize tokens:', err);
+                }
+              }
+            }
+            return {
+              OMNI_RUNTIME_TOKEN: signRuntimeToken(runtimeTokenSecret, {
+                tenantId: teamId,
+                principalId,
+                sessionId: crypto.randomUUID(),
+              }),
+              // Codex token-refresh callback. The runtime POSTs refreshed
+              // OAuth tokens here so PgSecretStore stays current across spawns.
+              // Empty when not in cloud → runtime skips the callback.
+              ...(codexRefreshUrl ? { OMNI_CODEX_REFRESH_URL: codexRefreshUrl } : {}),
+              // Redirect the child `omni serve` to this (team, principal) config
+              // dir so it reads the materialized (secret-free) merged configs.
+              XDG_CONFIG_HOME: join(configDir, '.config'),
+              // The merged (team base ⊕ user overlay) .env, injected directly.
+              ...parseEnvVars(settings.get('envVars') ?? ''),
+              // Real values for the ${OMNI_SECRET_*} refs the materializer wrote
+              // into the merged models.json / mcp.json — resolved by the agent's
+              // loaders. settings.get returns the merged config, so origin-aware
+              // resolution falls out: each provider's key is its own layer's.
+              ...collectSecretEnv(
+                settings.get('modelsConfig') ?? emptyModelsConfig(),
+                settings.get('mcpConfig') ?? emptyMcpConfig()
+              ),
+            };
+          }
         : undefined,
       // Cloud with Azure → agents run in a serverless ACI sandbox; host/devbox
       // are not selectable, but the user picks between the fast and desktop
@@ -809,6 +889,162 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
       sendSnapshot(c.tenantId, c.principalId);
     }
   );
+  // Cascade-delete chat/code-tab snapshots when the renderer closes a tab.
+  // Pure file-system op (no per-tenant data), so the global ipc is fine.
+  registerSnapshotHandlers(ipc);
+
+  // GitHub / Azure DevOps discovery + GitHub status/unlink. All resolve their
+  // token from the per-principal SecretStore (matching the Git-credential and
+  // GitHub OAuth contract used by the Electron handlers). The interactive
+  // sign-in (`github:link`, `codex:*`) still lives in Electron until the
+  // server-mode device-flow UI exists.
+  // Stable id used by Electron when storing the OAuth-linked github.com token.
+  const GITHUB_CRED_ID = 'github-oauth';
+  const resolveSecretsFor = (e: unknown) => {
+    const c = e as HandlerContext;
+    return pgSecret ? pgSecret.forPrincipal(c.principalId) : secretStore;
+  };
+  const resolveSettingsFor = (e: unknown) => {
+    const c = e as HandlerContext;
+    return getSettings(c.tenantId, c.principalId);
+  };
+  const requireGithubTokenFor = async (e: unknown): Promise<string> => {
+    const token = await resolveSecretsFor(e).getGitToken(GITHUB_CRED_ID);
+    if (!token) {
+      throw new Error('No GitHub account linked');
+    }
+    return token;
+  };
+
+  ipc.handle('github:status', (e: unknown): GithubStatus => {
+    const account = resolveSettingsFor(e).get('githubAccount');
+    return account ? { connected: true, account } : { connected: false };
+  });
+
+  // Device-flow sign-in for server/browser mode. The Electron handler in
+  // main/index.ts does the same thing; the only difference is openUrl can't
+  // auto-open a tab from the server, so we no-op it and rely on the renderer
+  // rendering verification_uri as a clickable link.
+  ipc.handle('github:link', async (e: unknown): Promise<GithubStatus> => {
+    const c = e as HandlerContext;
+    const settings = resolveSettingsFor(e);
+    const secrets = resolveSecretsFor(e);
+    const send = pgPool
+      ? <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]): void =>
+          wsHandler.sendToPrincipalInTeam(c.tenantId, c.principalId, channel, ...args)
+      : <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]): void =>
+          wsHandler.sendToTenant(c.tenantId, channel, ...args);
+    const { token, account } = await githubLink({
+      fetchFn: globalThis.fetch,
+      openUrl: () => {
+        /* server mode: the renderer shows the link; we never auto-open */
+      },
+      onCode: (code) => send('github:device-code', code),
+    });
+    await secrets.setGitToken(GITHUB_CRED_ID, token);
+    const creds = (settings.get('gitCredentials') ?? []).filter(
+      (cred: GitCredential) => cred.id !== GITHUB_CRED_ID && cred.host !== account.host
+    );
+    const cred: GitCredential = {
+      id: GITHUB_CRED_ID,
+      host: account.host,
+      username: 'x-access-token',
+      last4: tokenLast4(token),
+      label: `@${account.login} (GitHub)`,
+      createdAt: Date.now(),
+    };
+    settings.set('gitCredentials', [...creds, cred]);
+    settings.set('githubAccount', account);
+    sendSnapshot(c.tenantId, c.principalId);
+    return { connected: true, account };
+  });
+
+  ipc.handle('github:unlink', async (e: unknown) => {
+    const c = e as HandlerContext;
+    const settings = resolveSettingsFor(e);
+    await resolveSecretsFor(e).deleteGitToken(GITHUB_CRED_ID);
+    settings.set(
+      'gitCredentials',
+      (settings.get('gitCredentials') ?? []).filter((cred: GitCredential) => cred.id !== GITHUB_CRED_ID)
+    );
+    settings.delete('githubAccount');
+    sendSnapshot(c.tenantId, c.principalId);
+  });
+
+  ipc.handle('github:list-owners', async (e: unknown): Promise<GithubOwner[]> => {
+    const token = await requireGithubTokenFor(e);
+    const account = resolveSettingsFor(e).get('githubAccount');
+    // The linked user is always the first owner; their orgs follow.
+    const self: GithubOwner[] = account
+      ? [{ login: account.login, kind: 'user', ...(account.avatarUrl ? { avatarUrl: account.avatarUrl } : {}) }]
+      : [];
+    return [...self, ...(await githubListOrgs(globalThis.fetch, token))];
+  });
+
+  ipc.handle('github:search-repos', async (e: unknown, query: GithubRepoQuery): Promise<RemoteRepo[]> => {
+    return githubSearchRepos(globalThis.fetch, await requireGithubTokenFor(e), query);
+  });
+
+  // Codex device-flow sign-in.
+  //
+  //  - Local SQLite mode: tokens go to `<omni-config>/codex.json`, the same
+  //    file the runtime reads (no XDG_CONFIG_HOME override, no per-principal
+  //    nesting). The shared codex-auth helpers handle it.
+  //  - Cloud (pgSecret) mode: the launcher container's filesystem is
+  //    ephemeral (Azure Web App for Containers, no Azure Files mount on the
+  //    launcher itself), so tokens MUST persist in Postgres. Per-principal,
+  //    encrypted, RLS-isolated via PgSecretStore — same substrate as the
+  //    user's git tokens. The per-spawn materializer (below) writes them to
+  //    the per-principal config dir right before omni-serve starts.
+  ipc.handle('codex:status', async (e: unknown) => {
+    if (pgSecret) {
+      const c = e as HandlerContext;
+      const tokens = await pgSecret.getUserCodexTokens(c.principalId);
+      const refresh = typeof tokens?.refresh === 'string' ? tokens.refresh : undefined;
+      const accountId = typeof tokens?.account_id === 'string' ? tokens.account_id : undefined;
+      return refresh ? { signedIn: true, ...(accountId ? { accountId } : {}) } : { signedIn: false };
+    }
+    return codexStatus();
+  });
+
+  ipc.handle('codex:logout', async (e: unknown) => {
+    if (pgSecret) {
+      const c = e as HandlerContext;
+      await pgSecret.deleteUserCodexTokens(c.principalId);
+      return;
+    }
+    codexLogout();
+  });
+
+  ipc.handle('codex:link', async (e: unknown) => {
+    const c = e as HandlerContext;
+    const send = pgPool
+      ? <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]): void =>
+          wsHandler.sendToPrincipalInTeam(c.tenantId, c.principalId, channel, ...args)
+      : <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]): void =>
+          wsHandler.sendToTenant(c.tenantId, channel, ...args);
+    return codexDeviceLogin({
+      onCode: (code) => send('codex:device-code', code),
+      // Route persistence to PgSecretStore in cloud; fall back to the shared
+      // file in local mode (codex-auth's default save).
+      ...(pgSecret
+        ? {
+            save: (tokens) => pgSecret.setUserCodexTokens(c.principalId, tokens as unknown as Record<string, unknown>),
+          }
+        : {}),
+    });
+  });
+
+  ipc.handle('azure:list-repos', async (e: unknown, input: { org: string; query: string }): Promise<RemoteRepo[]> => {
+    const cred = (resolveSettingsFor(e).get('gitCredentials') ?? []).find(
+      (c: GitCredential) => c.host === 'dev.azure.com'
+    );
+    const token = cred ? await resolveSecretsFor(e).getGitToken(cred.id) : undefined;
+    if (!token) {
+      throw new Error('No Azure DevOps token — add a dev.azure.com credential first');
+    }
+    return azureListRepos(globalThis.fetch, token, input.org, input.query);
+  });
   // Teams control plane (cloud only). No-op channels in SQLite/local mode.
   registerTeamHandlers(ipc, controlPlane);
 
@@ -1113,6 +1349,8 @@ export const wireGlobalHandlers = async (arg: { wsHandler: WsHandler; store: Ser
     controlPlane,
     ensureUserBootstrapped,
     resolveActiveTeam,
+    /** Cloud-only secret store — wires the /api/codex/refresh callback. */
+    pgSecret,
   };
 };
 

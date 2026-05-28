@@ -3,10 +3,10 @@ import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, Button, Card, Checkbox, FormField, FormSkeleton, IconButton, Input, SaveBar, SectionLabel, Select } from '@/renderer/ds';
+import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, Button, Caption1, Card, Checkbox, FormField, FormSkeleton, IconButton, Input, SaveBar, SectionLabel, Select, Spinner } from '@/renderer/ds';
 import { agentConfigApi } from '@/renderer/services/config';
-import { emitter } from '@/renderer/services/ipc';
-import type { ModelEntry, ModelsConfig, ProviderEntry } from '@/shared/types';
+import { emitter, ipc } from '@/renderer/services/ipc';
+import type { CodexDeviceCode, ModelEntry, ModelsConfig, ProviderEntry } from '@/shared/types';
 
 const PROVIDER_TYPES: ProviderEntry['type'][] = ['openai', 'azure', 'openai-compatible', 'litellm', 'openai-oauth'];
 const REASONING_OPTIONS = ['none', 'low', 'medium', 'high', 'xhigh'] as const;
@@ -40,6 +40,23 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalS,
   },
   flex1: { flex: '1 1 0' },
+  codexCard: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
+  codeBox: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    padding: tokens.spacingVerticalS,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
+  },
+  codeText: {
+    fontFamily: tokens.fontFamilyMonospace,
+    fontSize: tokens.fontSizeBase500,
+    fontWeight: tokens.fontWeightSemibold,
+    letterSpacing: '0.1em',
+  },
+  pendingRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
   headerRow: {
     display: 'flex',
     alignItems: 'center',
@@ -169,6 +186,9 @@ export const SettingsModalModelsTab = memo(() => {
   const applyCodexSignIn = useCallback(async (): Promise<string | undefined> => {
     const current = await agentConfigApi.getModels();
     const runtime = await emitter.invoke('util:list-models').catch(() => null);
+    // Push the fresh discovery into state so the default picker and the
+    // Codex provider row both reflect sign-in immediately (no modal reopen).
+    setRuntimeModelNames((runtime?.models ?? []).map((m) => m.name));
     const codexNames = (runtime?.models ?? [])
       .filter((m) => m.provider === 'openai-oauth' || m.name.startsWith('codex/'))
       .map((m) => m.name);
@@ -409,22 +429,29 @@ export const SettingsModalModelsTab = memo(() => {
         setExpandedProvider(data.openItems.length > 0 ? String(data.openItems[data.openItems.length - 1]) : null);
         setEditingModel(null);
       }} openItems={expandedProvider ? [expandedProvider] : []}>
-        {Object.entries(config.providers).map(([name, provider]) => (
-          <ProviderRow
-            key={name}
-            name={name}
-            provider={provider}
-            editingModel={editingModel}
-            newModelId={newModelId}
-            onRemove={removeProvider}
-            onUpdateProvider={updateProvider}
-            onAddModel={addModel}
-            onRemoveModel={removeModel}
-            onUpdateModel={updateModel}
-            onToggleEditModel={toggleEditModel}
-            onChangeNewModelId={onChangeNewModelId}
-          />
-        ))}
+        {Object.entries(config.providers).map(([name, provider]) => {
+          const prefix = `${name}/`;
+          const discoveredModels = runtimeModelNames
+            .filter((n) => n.startsWith(prefix))
+            .map((n) => n.slice(prefix.length));
+          return (
+            <ProviderRow
+              key={name}
+              name={name}
+              provider={provider}
+              discoveredModels={discoveredModels}
+              editingModel={editingModel}
+              newModelId={newModelId}
+              onRemove={removeProvider}
+              onUpdateProvider={updateProvider}
+              onAddModel={addModel}
+              onRemoveModel={removeModel}
+              onUpdateModel={updateModel}
+              onToggleEditModel={toggleEditModel}
+              onChangeNewModelId={onChangeNewModelId}
+            />
+          );
+        })}
       </Accordion>
       <div className={styles.addRow}>
         <Input
@@ -462,16 +489,25 @@ const CodexSignInCard = memo(({ onSignedIn }: { onSignedIn: () => Promise<string
   const [activeModel, setActiveModel] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set while the device-flow user_code is live and the user is authorizing.
+  const [deviceCode, setDeviceCode] = useState<CodexDeviceCode | null>(null);
 
   useEffect(() => {
     emitter.invoke('codex:status').then(setStatus).catch(() => setStatus({ signedIn: false }));
   }, []);
 
+  // Main pushes the user code mid-flow; show it while we poll.
+  useEffect(() => ipc.on('codex:device-code', setDeviceCode), []);
+
   const onSignIn = useCallback(async () => {
     setBusy(true);
     setError(null);
+    setDeviceCode(null);
     try {
-      const next = await emitter.invoke('codex:login');
+      // Device flow works in Electron and server/browser mode alike. PKCE
+      // (codex:login) is still available in Electron for a one-click UX but
+      // the device flow's universality wins for a single code path here.
+      const next = await emitter.invoke('codex:link');
       setStatus(next);
       if (next.signedIn) {
         setActiveModel(await onSignedIn());
@@ -480,6 +516,7 @@ const CodexSignInCard = memo(({ onSignedIn }: { onSignedIn: () => Promise<string
       setError(e instanceof Error ? e.message : 'Sign-in failed');
     } finally {
       setBusy(false);
+      setDeviceCode(null);
     }
   }, [onSignedIn]);
 
@@ -499,27 +536,46 @@ const CodexSignInCard = memo(({ onSignedIn }: { onSignedIn: () => Promise<string
 
   return (
     <Card>
-      <div className={styles.rowGap2}>
-        <div className={styles.headerContent}>
-          <div className={styles.headerName}>
-            {status?.signedIn ? 'Signed in to ChatGPT' : 'Use your ChatGPT subscription'}
+      <div className={styles.codexCard}>
+        <div className={styles.rowGap2}>
+          <div className={styles.headerContent}>
+            <div className={styles.headerName}>
+              {status?.signedIn ? 'Signed in to ChatGPT' : 'Use your ChatGPT subscription'}
+            </div>
+            <div className={styles.headerSummary}>
+              {status?.signedIn
+                ? activeModel
+                  ? `Using ${activeModel} — switch models any time below or with /model in chat`
+                  : 'ChatGPT models are available — switch with /model in chat or set a default below'
+                : error ?? 'Drive the agent through ChatGPT Plus/Pro/Team via the Codex Responses API.'}
+            </div>
           </div>
-          <div className={styles.headerSummary}>
-            {status?.signedIn
-              ? activeModel
-                ? `Using ${activeModel} — switch models any time below or with /model in chat`
-                : 'ChatGPT models are available — switch with /model in chat or set a default below'
-              : error ?? 'Drive the agent through ChatGPT Plus/Pro/Team via the Codex Responses API.'}
-          </div>
+          {status?.signedIn ? (
+            <Button size="sm" variant="ghost" onClick={onSignOut} isDisabled={busy}>
+              Sign out
+            </Button>
+          ) : (
+            <Button size="sm" onClick={onSignIn} isDisabled={busy}>
+              {busy ? 'Waiting for authorization…' : 'Sign in with ChatGPT'}
+            </Button>
+          )}
         </div>
-        {status?.signedIn ? (
-          <Button size="sm" variant="ghost" onClick={onSignOut} isDisabled={busy}>
-            Sign out
-          </Button>
-        ) : (
-          <Button size="sm" onClick={onSignIn} isDisabled={busy}>
-            {busy ? 'Waiting for browser…' : 'Sign in with ChatGPT'}
-          </Button>
+
+        {busy && deviceCode && (
+          <div className={styles.codeBox}>
+            <Caption1>
+              Open{' '}
+              <a href={deviceCode.verificationUri} target="_blank" rel="noopener noreferrer">
+                {deviceCode.verificationUri}
+              </a>{' '}
+              and enter this code:
+            </Caption1>
+            <span className={styles.codeText}>{deviceCode.userCode}</span>
+            <div className={styles.pendingRow}>
+              <Spinner size="sm" />
+              <Caption1>Waiting for authorization…</Caption1>
+            </div>
+          </div>
         )}
       </div>
     </Card>
@@ -531,6 +587,7 @@ const ProviderRow = memo(
   ({
     name,
     provider,
+    discoveredModels,
     editingModel,
     newModelId,
     onRemove,
@@ -543,6 +600,7 @@ const ProviderRow = memo(
   }: {
     name: string;
     provider: ProviderEntry;
+    discoveredModels: string[];
     editingModel: { provider: string; modelId: string } | null;
     newModelId: string;
     onRemove: (name: string) => void;
@@ -554,12 +612,17 @@ const ProviderRow = memo(
     onChangeNewModelId: (e: ChangeEvent<HTMLInputElement>) => void;
   }) => {
     const styles = useStyles();
-    const modelCount = Object.keys(provider.models).length;
+    const storedCount = Object.keys(provider.models).length;
+    const isOauth = provider.type === 'openai-oauth';
+    // Show runtime-discovered models for OAuth providers (Codex) where the
+    // store intentionally holds an empty `models: {}` and discovery fills it.
+    const extraDiscovered = isOauth ? discoveredModels.filter((id) => !(id in provider.models)) : [];
+    const modelCount = storedCount + extraDiscovered.length;
     const showBaseUrl =
       provider.type === 'azure' || provider.type === 'openai-compatible' || provider.type === 'litellm';
     const showApiVersion = provider.type === 'azure';
     // OAuth providers authenticate via the ChatGPT sign-in above, not a key.
-    const showApiKey = provider.type !== 'openai-oauth';
+    const showApiKey = !isOauth;
 
     const onClickRemove = useCallback(() => {
       onRemove(name);
@@ -661,22 +724,32 @@ const ProviderRow = memo(
                   />
                 );
               })}
+              {extraDiscovered.map((modelId) => (
+                <div key={`discovered-${modelId}`} className={styles.modelCard}>
+                  <div className={styles.modelHeader}>
+                    <div className={styles.modelId}>{modelId}</div>
+                    <div className={styles.modelLabel}>discovered from ChatGPT</div>
+                  </div>
+                </div>
+              ))}
             </div>
 
-            <div className={styles.rowGap2}>
-              <Input
-                type="text"
-                value={newModelId}
-                onChange={onChangeNewModelId}
-                placeholder="Model ID"
-                mono
-                className={styles.flex1}
-              />
-              <Button size="sm" variant="ghost" onClick={onClickAddModel} isDisabled={!newModelId.trim()}>
-                <Add20Regular className={styles.iconMr} />
-                Add model
-              </Button>
-            </div>
+            {!isOauth && (
+              <div className={styles.rowGap2}>
+                <Input
+                  type="text"
+                  value={newModelId}
+                  onChange={onChangeNewModelId}
+                  placeholder="Model ID"
+                  mono
+                  className={styles.flex1}
+                />
+                <Button size="sm" variant="ghost" onClick={onClickAddModel} isDisabled={!newModelId.trim()}>
+                  <Add20Regular className={styles.iconMr} />
+                  Add model
+                </Button>
+              </div>
+            )}
           </div>
         </AccordionPanel>
       </AccordionItem>

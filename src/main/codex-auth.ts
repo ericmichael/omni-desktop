@@ -35,6 +35,11 @@ export type CodexTokens = {
 
 export type CodexStatus = { signedIn: boolean; accountId?: string };
 
+/** Server/headless device-flow user code + verification URL for the renderer. */
+export type CodexDeviceCode = { userCode: string; verificationUri: string };
+
+const ORIGINATOR = 'omni_code';
+
 function base64Url(buf: Buffer): string {
   return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
@@ -87,6 +92,56 @@ function tokenStorePath(): string {
 /** Persist tokens where the runtime reads them (owner-only). */
 function saveTokens(tokens: CodexTokens): void {
   writeFileSync(tokenStorePath(), `${JSON.stringify(tokens, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 });
+}
+
+/** Refresh a near-expiry access token by trading the stored refresh token at
+ *  `/oauth/token`. Mirrors the Python `_refresh_async` in
+ *  `omniagents.core.providers.codex` so server mode can do its own pre-spawn
+ *  refresh without going through the runtime. */
+export async function refreshTokens(refreshToken: string): Promise<CodexTokens> {
+  const resp = await fetch(`${ISSUER}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: CLIENT_ID,
+    }).toString(),
+  });
+  if (!resp.ok) {
+    throw new Error(`Codex token refresh failed: ${resp.status}`);
+  }
+  const data = (await resp.json()) as {
+    id_token?: string;
+    access_token: string;
+    refresh_token: string;
+    expires_in?: number;
+  };
+  const tokens: CodexTokens = {
+    refresh: data.refresh_token,
+    access: data.access_token,
+    expires: Date.now() + (data.expires_in ?? 3600) * 1000,
+  };
+  const accountId = extractAccountId(data);
+  if (accountId) {
+    tokens.account_id = accountId;
+  }
+  return tokens;
+}
+
+/** Refresh `tokens` if the access token is near expiry, otherwise return as-is.
+ *  60s skew matches the runtime's `_EXPIRY_SKEW_MS`. */
+export async function ensureFreshTokens(tokens: CodexTokens): Promise<CodexTokens> {
+  const skew = 60_000;
+  if (tokens.expires - skew > Date.now()) {
+    return tokens;
+  }
+  const refreshed = await refreshTokens(tokens.refresh);
+  // Preserve account_id when the refresh response omits it.
+  if (!refreshed.account_id && tokens.account_id) {
+    refreshed.account_id = tokens.account_id;
+  }
+  return refreshed;
 }
 
 /** Current sign-in status, read from the shared token store. */
@@ -238,4 +293,96 @@ export function loginWithBrowser(openUrl: (url: string) => void): Promise<CodexS
       openUrl(buildAuthorizeUrl(challenge, state));
     });
   });
+}
+
+/**
+ * Device-flow Codex sign-in for headless / server mode. Mirrors omniagents'
+ * `codex.device_login()` in Python: ask `auth.openai.com` for a device-auth id
+ * + user code, surface them via `onCode` so the renderer can show them, poll
+ * `/api/accounts/deviceauth/token` until the user authorizes, then exchange
+ * the `authorization_code` at `/oauth/token` for an access/refresh pair and
+ * persist them where the runtime reads them.
+ *
+ * Use this everywhere a browser PKCE flow is impractical (server mode, cloud
+ * deployment). 15-minute timeout, mirroring the Python default.
+ */
+export async function loginWithDeviceFlow(opts: {
+  onCode: (code: CodexDeviceCode) => void;
+  /** Custom persistence. Defaults to writing the shared file (Electron + local
+   *  SQLite server). Cloud server passes a callback that writes to PgSecretStore. */
+  save?: (tokens: CodexTokens) => void | Promise<void>;
+  signal?: AbortSignal;
+}): Promise<CodexStatus> {
+  const ua = { 'User-Agent': `omni_code/${ORIGINATOR}`, 'Content-Type': 'application/json' };
+  const start = await fetch(`${ISSUER}/api/accounts/deviceauth/usercode`, {
+    method: 'POST',
+    headers: ua,
+    body: JSON.stringify({ client_id: CLIENT_ID }),
+    signal: opts.signal,
+  });
+  if (!start.ok) {
+    throw new Error(`Failed to start device auth: ${start.status}`);
+  }
+  const info = (await start.json()) as { device_auth_id: string; user_code: string; interval?: number };
+  const intervalMs = Math.max(Number(info.interval ?? 5), 1) * 1000 + 3000;
+
+  opts.onCode({ userCode: info.user_code, verificationUri: `${ISSUER}/codex/device` });
+
+  const deadline = Date.now() + 15 * 60 * 1000;
+  const sleep = (ms: number): Promise<void> =>
+    new Promise((r) => {
+      setTimeout(r, ms);
+    });
+  while (Date.now() < deadline) {
+    if (opts.signal?.aborted) {
+      throw new Error('Codex device authorization cancelled');
+    }
+    const resp = await fetch(`${ISSUER}/api/accounts/deviceauth/token`, {
+      method: 'POST',
+      headers: ua,
+      body: JSON.stringify({ device_auth_id: info.device_auth_id, user_code: info.user_code }),
+      signal: opts.signal,
+    });
+    if (resp.status === 200) {
+      const data = (await resp.json()) as { authorization_code: string; code_verifier: string };
+      const tokenResp = await fetch(`${ISSUER}/oauth/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          code: data.authorization_code,
+          redirect_uri: `${ISSUER}/deviceauth/callback`,
+          client_id: CLIENT_ID,
+          code_verifier: data.code_verifier,
+        }).toString(),
+        signal: opts.signal,
+      });
+      if (!tokenResp.ok) {
+        throw new Error(`Codex token exchange failed: ${tokenResp.status}`);
+      }
+      const exchanged = (await tokenResp.json()) as {
+        id_token?: string;
+        access_token: string;
+        refresh_token: string;
+        expires_in?: number;
+      };
+      const tokens: CodexTokens = {
+        refresh: exchanged.refresh_token,
+        access: exchanged.access_token,
+        expires: Date.now() + (exchanged.expires_in ?? 3600) * 1000,
+      };
+      const accountId = extractAccountId(exchanged);
+      if (accountId) {
+        tokens.account_id = accountId;
+      }
+      await (opts.save ?? saveTokens)(tokens);
+      return { signedIn: true, accountId: tokens.account_id };
+    }
+    // 403/404 means "user hasn't authorized yet" — keep polling.
+    if (resp.status !== 403 && resp.status !== 404) {
+      throw new Error(`Codex device authorization failed: ${resp.status}`);
+    }
+    await sleep(intervalMs);
+  }
+  throw new Error('Codex device authorization timed out');
 }
