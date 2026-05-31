@@ -47,6 +47,8 @@ export function registerProjectHandlers(ipc: IIpcListener, resolve: (event: unkn
   h('project:read-artifact', (pm, ticketId, relativePath) => pm.readArtifact(ticketId, relativePath));
   h('project:open-artifact-external', (pm, ticketId, relativePath) => pm.openArtifactExternal(ticketId, relativePath));
   h('project:get-files-changed', (pm, ticketId, sourceId) => pm.getFilesChanged(ticketId, sourceId));
+  h('project:get-code-tab-files-changed', (pm, tabId, sourceId) => pm.getCodeTabFilesChanged(tabId, sourceId));
+  h('project:apply-code-tab-source-changes', (pm, tabId, sourceId) => pm.applyCodeTabSourceChanges(tabId, sourceId));
 
   // Local PR flow (per-source — sourceId is one of the project's ProjectSource ids)
   h('project:set-pr-review', (pm, ticketId, sourceId, review) => pm.setPrReview(ticketId, sourceId, review));

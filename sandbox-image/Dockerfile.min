@@ -22,7 +22,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 
-ARG NODE_MAJOR=20
+ARG NODE_MAJOR=22
 
 # A lean, wheels-friendly base: VCS, a system Python + venv/pip, fast search,
 # JSON, and the privilege-drop tools the entrypoint uses. No build toolchain —

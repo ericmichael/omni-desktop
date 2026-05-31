@@ -2349,6 +2349,8 @@ type ProjectIpcEvents = Namespaced<
      * iterates ``project.sources`` and calls this per source.
      */
     'get-files-changed': (ticketId: TicketId, sourceId: string) => DiffResponse;
+    'get-code-tab-files-changed': (tabId: CodeTabId, sourceId: string) => DiffResponse;
+    'apply-code-tab-source-changes': (tabId: CodeTabId, sourceId: string) => PrMergeResult;
     // Supervisor operations
     'ensure-supervisor-infra': (ticketId: TicketId) => void;
     'start-supervisor': (ticketId: TicketId) => void;

@@ -58,6 +58,7 @@ import { DEFAULT_PIPELINE, SIMPLE_PIPELINE } from '@/shared/pipeline-defaults';
 import type {
   ArtifactFileContent,
   ArtifactFileEntry,
+  CodeTabId,
   ColumnId,
   DiffResponse,
   InboxItem,
@@ -1411,6 +1412,70 @@ export class ProjectManager {
 
     const mergeBase = await resolveTicketDiffBase(gitDir, preferredBase);
     return getGitFilesChanged({ gitDir, mergeBase });
+  };
+
+  getCodeTabFilesChanged = async (tabId: CodeTabId, sourceId: string): Promise<DiffResponse> => {
+    const empty: DiffResponse = { totalFiles: 0, totalAdditions: 0, totalDeletions: 0, hasChanges: false, files: [] };
+    const tab = ((this.store.get('codeTabs') ?? []) as Array<{
+      id: string;
+      projectId: ProjectId | null;
+      workspaceDir?: string;
+    }>).find((t) => t.id === tabId);
+    if (!tab) {
+      return empty;
+    }
+
+    const project = tab.projectId ? this.getProjects().find((p) => p.id === tab.projectId) : undefined;
+    const source = project?.sources.find((s) => s.id === sourceId);
+    if (source) {
+      const containerId = this.processManager?.getProcessContainerId(tabId) ?? null;
+      if (containerId) {
+        return getContainerFilesChanged({ containerId, mountName: source.mountName });
+      }
+      if (source.kind === 'local') {
+        return getGitFilesChanged({ gitDir: source.workspaceDir, mergeBase: 'HEAD' }).catch(() => empty);
+      }
+    }
+
+    if (!project && tab.workspaceDir && sourceId === tab.workspaceDir) {
+      return getGitFilesChanged({ gitDir: tab.workspaceDir, mergeBase: 'HEAD' }).catch(() => empty);
+    }
+
+    return empty;
+  };
+
+  applyCodeTabSourceChanges = async (tabId: CodeTabId, sourceId: string): Promise<PrMergeResult> => {
+    const tab = ((this.store.get('codeTabs') ?? []) as Array<{
+      id: string;
+      projectId: ProjectId | null;
+    }>).find((t) => t.id === tabId);
+    if (!tab?.projectId) {
+      return { ok: false, error: 'Code tab is not attached to a project' };
+    }
+    const project = this.getProjects().find((p) => p.id === tab.projectId);
+    if (!project) {
+      return { ok: false, error: 'Project not found' };
+    }
+    const source = project.sources.find((s) => s.id === sourceId);
+    if (!source) {
+      return { ok: false, error: `Source not found: ${sourceId}` };
+    }
+    if (source.kind !== 'local') {
+      return { ok: false, error: 'Applying changes to host is only supported for local sources' };
+    }
+    const containerId = this.processManager?.getProcessContainerId(tabId) ?? null;
+    if (!containerId) {
+      return { ok: false, error: 'No running sandbox for this code tab' };
+    }
+    const patch = await buildContainerSeedPatch(containerId, source.mountName);
+    if (!patch.trim()) {
+      return { ok: false, error: 'No changes to apply' };
+    }
+    const applied = await gitApplyStdin(source.workspaceDir, ['--whitespace=nowarn'], patch);
+    if (!applied.ok) {
+      return { ok: false, error: `git apply failed: ${applied.stderr}` };
+    }
+    return { ok: true, mergeCommitSha: 'apply' };
   };
 
   // #endregion

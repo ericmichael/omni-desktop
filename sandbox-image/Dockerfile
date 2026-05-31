@@ -98,7 +98,7 @@ RUN usermod -l user -d /home/user -m ubuntu 2>/dev/null \
 RUN git lfs install --system
 
 ENV NVM_DIR=/opt/nvm
-ENV NODE_VERSION=20.18.1
+ENV NODE_VERSION=22.13.1
 
 RUN mkdir -p "${NVM_DIR}" \
     && curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash \

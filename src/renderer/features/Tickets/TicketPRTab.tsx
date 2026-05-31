@@ -4,9 +4,9 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { SelectTabData } from '@/renderer/ds';
-import { IconButton, ListSkeleton, Tab, TabList } from '@/renderer/ds';
+import { Button, IconButton, ListSkeleton, Tab, TabList } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { DiffGroup,DiffResponse, FileDiff, TicketId } from '@/shared/types';
+import type { CodeTabId, DiffGroup,DiffResponse, FileDiff, ProjectSource, TicketId } from '@/shared/types';
 
 import { $tickets, ticketApi } from './state';
 import { TicketPROverview } from './TicketPROverview';
@@ -457,7 +457,7 @@ FileListItem.displayName = 'FileListItem';
  * (FilesChangedPane) picks which source is active.
  */
 const FilesChangedContent = memo(
-  ({ ticketId, sourceId }: { ticketId: TicketId; sourceId: string }) => {
+  ({ scope, sourceId }: { scope: ChangesScope; sourceId: string }) => {
   const styles = useStyles();
   const [data, setData] = useState<DiffResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -466,6 +466,8 @@ const FilesChangedContent = memo(
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [listWidthPercent, setListWidthPercent] = useState(DEFAULT_LIST_PERCENT);
   const [isDragging, setIsDragging] = useState(false);
+  const [applyBusy, setApplyBusy] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
   const splitRef = useRef<HTMLDivElement>(null);
 
   // Reset file selection when the active source switches.
@@ -477,7 +479,9 @@ const FilesChangedContent = memo(
 
   const fetchData = useCallback(async () => {
     try {
-      const resp = await ticketApi.getFilesChanged(ticketId, sourceId);
+      const resp = scope.kind === 'ticket'
+        ? await ticketApi.getFilesChanged(scope.ticketId, sourceId)
+        : await ticketApi.getCodeTabFilesChanged(scope.tabId, sourceId);
       setData(resp);
       if (resp.files.length > 0 && !selectedKey) {
         setSelectedKey(fileKey(resp.files[0]!));
@@ -487,7 +491,7 @@ const FilesChangedContent = memo(
     } finally {
       setLoading(false);
     }
-  }, [ticketId, sourceId, selectedKey]);
+  }, [scope, sourceId, selectedKey]);
 
   // Fetch on mount + poll
   useEffect(() => {
@@ -499,6 +503,22 @@ const FilesChangedContent = memo(
   const handleRefresh = useCallback(() => {
     void fetchData();
   }, [fetchData]);
+
+  const handleApply = useCallback(async () => {
+    if (scope.kind !== 'code-tab') return;
+    setApplyBusy(true);
+    setApplyError(null);
+    try {
+      const result = await ticketApi.applyCodeTabSourceChanges(scope.tabId, sourceId);
+      if (!result.ok) {
+        setApplyError(result.error);
+        return;
+      }
+      await fetchData();
+    } finally {
+      setApplyBusy(false);
+    }
+  }, [fetchData, scope, sourceId]);
 
   const handleSelectFile = useCallback((key: string) => {
     setSelectedKey(key);
@@ -556,6 +576,12 @@ const FilesChangedContent = memo(
         {data.totalAdditions > 0 && <span className={styles.greenText}>+{data.totalAdditions}</span>}
         {data.totalDeletions > 0 && <span className={styles.redText}>-{data.totalDeletions}</span>}
         <div className={styles.flex1} />
+        {applyError && <span className={styles.emptySubText}>{applyError}</span>}
+        {scope.kind === 'code-tab' && (
+          <Button size="sm" onClick={handleApply} isDisabled={applyBusy}>
+            {applyBusy ? 'Applying…' : 'Apply to host'}
+          </Button>
+        )}
         <IconButton aria-label="Refresh" icon={<ArrowSync20Regular />} size="sm" onClick={handleRefresh} />
       </div>
 
@@ -627,21 +653,32 @@ const FilesChangedContent = memo(
 });
 FilesChangedContent.displayName = 'FilesChangedContent';
 
+type ChangesScope = { kind: 'ticket'; ticketId: TicketId } | { kind: 'code-tab'; tabId: CodeTabId };
+
+const useSourcesForChanges = (scope: ChangesScope): ProjectSource[] => {
+  const tickets = useStore($tickets);
+  const store = useStore(persistedStoreApi.$atom);
+  return useMemo(() => {
+    if (scope.kind === 'ticket') {
+      const ticket = tickets[scope.ticketId];
+      if (!ticket) return [];
+      const project = store.projects.find((p) => p.id === ticket.projectId);
+      return project?.sources ?? [];
+    }
+    const tab = store.codeTabs.find((t) => t.id === scope.tabId);
+    const project = tab?.projectId ? store.projects.find((p) => p.id === tab.projectId) : undefined;
+    return project?.sources ?? [];
+  }, [scope, store.codeTabs, store.projects, tickets]);
+};
+
 /**
  * Source-picker shell for the Files Changed sub-tab. Renders one
  * TabList row across project.sources and shows the active source's
  * file-diff pane below. Single-source projects skip the picker.
  */
-const FilesChangedPane = memo(({ ticketId }: { ticketId: TicketId }) => {
+const FilesChangedPane = memo(({ scope }: { scope: ChangesScope }) => {
   const styles = useStyles();
-  const tickets = useStore($tickets);
-  const store = useStore(persistedStoreApi.$atom);
-  const sources = useMemo(() => {
-    const ticket = tickets[ticketId];
-    if (!ticket) return [];
-    const project = store.projects.find((p) => p.id === ticket.projectId);
-    return project?.sources ?? [];
-  }, [tickets, store.projects, ticketId]);
+  const sources = useSourcesForChanges(scope);
 
   const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
   // Track the previous sources signature so we can reset the active id
@@ -684,7 +721,7 @@ const FilesChangedPane = memo(({ ticketId }: { ticketId: TicketId }) => {
         </div>
       )}
       <div className={styles.tabContent}>
-        <FilesChangedContent ticketId={ticketId} sourceId={activeSourceId} />
+        <FilesChangedContent scope={scope} sourceId={activeSourceId} />
       </div>
     </div>
   );
@@ -716,9 +753,14 @@ export const TicketPRTab = memo(({ ticketId }: { ticketId: TicketId }) => {
       {/* Sub-tab content */}
       <div className={styles.tabContent}>
         {activeSubTab === 'Overview' && <TicketPROverview ticketId={ticketId} />}
-        {activeSubTab === 'Files Changed' && <FilesChangedPane ticketId={ticketId} />}
+        {activeSubTab === 'Files Changed' && <FilesChangedPane scope={{ kind: 'ticket', ticketId }} />}
       </div>
     </div>
   );
 });
 TicketPRTab.displayName = 'TicketPRTab';
+
+export const ChangesTab = memo(({ tabId }: { tabId: CodeTabId }) => (
+  <FilesChangedPane scope={{ kind: 'code-tab', tabId }} />
+));
+ChangesTab.displayName = 'ChangesTab';
