@@ -21,7 +21,22 @@ type EventMessage = {
   args: unknown[];
 };
 
-type ServerMessage = ResponseMessage | EventMessage;
+/**
+ * Cloud→client reverse-invoke. The transport routes it to a handler registered
+ * via {@link WsTransportEmitter.addReverseHandler} and sends back the response
+ * (or error) as a `reverse-response`. Used for the cloud's
+ * `compute:start-session`, `compute:tunnel-*`, etc. callbacks.
+ */
+type ReverseInvokeMessage = {
+  type: 'reverse-invoke';
+  id: number;
+  channel: string;
+  args: unknown[];
+};
+
+type ServerMessage = ResponseMessage | EventMessage | ReverseInvokeMessage;
+
+export type ReverseHandler = (...args: unknown[]) => unknown | Promise<unknown>;
 
 type PendingRequest = {
   resolve: (value: unknown) => void;
@@ -87,6 +102,8 @@ export class WsTransportEmitter implements TransportEmitter {
   private nextId = 1;
   private pending = new Map<number, PendingRequest>();
   private listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+  /** Reverse-RPC handlers — server can invoke these via `reverse-invoke`. */
+  private reverseHandlers = new Map<string, ReverseHandler>();
   private reconnectDelay = INITIAL_RECONNECT_DELAY;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private messageQueue: string[] = [];
@@ -94,6 +111,9 @@ export class WsTransportEmitter implements TransportEmitter {
   private authToken: string | null = null;
   private readonly cloud: WsTransportConfig | null;
   private readonly wsHost: string;
+  /** Subscribers to (re)connection events. Used by main-ws-client to re-
+   *  register the machine identity after a reconnect (Phase 6). */
+  private connectListeners = new Set<() => void>();
 
   constructor(cloud?: WsTransportConfig) {
     this.cloud = cloud ?? null;
@@ -174,6 +194,16 @@ export class WsTransportEmitter implements TransportEmitter {
         ws.send(msg);
       }
       this.messageQueue = [];
+
+      // Notify subscribers so they can replay setup work (e.g. re-register
+      // the machine identity with the cloud — see Phase 6).
+      for (const cb of this.connectListeners) {
+        try {
+          cb();
+        } catch (err) {
+          console.error('[ws-transport] connect listener threw:', err);
+        }
+      }
     };
 
     ws.onmessage = (event) => {
@@ -201,6 +231,8 @@ export class WsTransportEmitter implements TransportEmitter {
             listener(...msg.args);
           }
         }
+      } else if (msg.type === 'reverse-invoke') {
+        void this.dispatchReverseInvoke(msg);
       }
     };
 
@@ -272,6 +304,68 @@ export class WsTransportEmitter implements TransportEmitter {
         this.listeners.delete(channel);
       }
     };
+  }
+
+  /**
+   * Register a handler for a reverse-RPC channel — the cloud may dispatch
+   * `reverse-invoke` frames on it and the handler's return value is sent
+   * back as `reverse-response`. Only one handler per channel; re-registering
+   * replaces the previous one.
+   *
+   * Returns an unsubscriber that removes the handler.
+   */
+  addReverseHandler(channel: string, handler: ReverseHandler): () => void {
+    this.reverseHandlers.set(channel, handler);
+    return () => {
+      const current = this.reverseHandlers.get(channel);
+      if (current === handler) {
+        this.reverseHandlers.delete(channel);
+      }
+    };
+  }
+
+  /**
+   * Subscribe to (re)connect events. Fires immediately on each successful
+   * `ws.onopen`. Used by callers that need to replay setup work after a
+   * reconnect (Phase 6: re-register the machine identity with the cloud).
+   */
+  onConnect(cb: () => void): () => void {
+    this.connectListeners.add(cb);
+    // Fire immediately if we're already connected so callers that subscribe
+    // late don't miss the first open.
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try {
+        cb();
+      } catch (err) {
+        console.error('[ws-transport] connect listener threw:', err);
+      }
+    }
+    return () => {
+      this.connectListeners.delete(cb);
+    };
+  }
+
+  private async dispatchReverseInvoke(msg: ReverseInvokeMessage): Promise<void> {
+    const handler = this.reverseHandlers.get(msg.channel);
+    const respond = (payload: { result?: unknown; error?: string }): void => {
+      const out = JSON.stringify({ type: 'reverse-response', id: msg.id, ...payload });
+      // Send only when the WS is still open — closing mid-flight is the
+      // cloud's problem to recover from (it'll time out and surface
+      // host-offline).
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(out);
+      }
+    };
+    if (!handler) {
+      respond({ error: `No reverse handler for channel: ${msg.channel}` });
+      return;
+    }
+    try {
+      const result = await handler(...(msg.args ?? []));
+      respond({ result });
+    } catch (err) {
+      respond({ error: err instanceof Error ? err.message : String(err) });
+    }
   }
 }
 

@@ -154,6 +154,7 @@ export class AzureBlobSnapshotStore implements SnapshotStore {
       console.error(`[snapshot-blob] remove failed for ${sessionId}:`, err);
     }
   }
+
 }
 
 let _store: SnapshotStore | undefined;

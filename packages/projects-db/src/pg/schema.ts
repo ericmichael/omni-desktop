@@ -443,4 +443,27 @@ CREATE POLICY tenant_isolation ON team_secrets
   WITH CHECK (team_id = current_setting('app.current_tenant', true));
 `,
   },
+  {
+    version: 10,
+    sql: `
+-- Per-principal registry of Electron clients available as local compute hosts.
+-- Each row is one user's laptop/desktop the cloud can dispatch sandbox
+-- lifecycle to (computer-as-sandbox). principal_id references users(id) so it
+-- is removed if the user is removed. Accessed via the ADMIN pool with
+-- principal-scoping in application code (same model as the teams control
+-- plane); RLS is dormant defense-in-depth.
+CREATE TABLE machines (
+  machine_id    TEXT PRIMARY KEY,
+  principal_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  label         TEXT NOT NULL,
+  platform      TEXT NOT NULL,
+  registered_at TEXT NOT NULL DEFAULT ${TS_DEFAULT},
+  last_seen_at  TEXT NOT NULL DEFAULT ${TS_DEFAULT}
+);
+CREATE INDEX idx_machines_principal ON machines(principal_id);
+ALTER TABLE machines ENABLE ROW LEVEL SECURITY;
+CREATE POLICY principal_isolation ON machines
+  USING (principal_id = current_setting('app.current_principal', true));
+`,
+  },
 ];

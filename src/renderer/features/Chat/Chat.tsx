@@ -5,6 +5,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { buildSessionVariables } from '@/lib/client-tools';
 import { Spinner } from '@/renderer/ds';
+import { SessionStatusBanner } from '@/renderer/features/Banner/SessionStatusBanner';
 import { FloatingWidget } from '@/renderer/features/Omni/FloatingWidget';
 import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
 import { SandboxPicker } from '@/renderer/features/SandboxProfile/SandboxPicker';
@@ -16,6 +17,7 @@ import { ChatShell } from '@/renderer/omniagents-ui/ChatShell';
 import { getGreeting } from '@/renderer/omniagents-ui/greeting';
 import { buildProfileLabel } from '@/renderer/omniagents-ui/sandbox-label';
 import { emitter, serverOrigin } from '@/renderer/services/ipc';
+import { $machines } from '@/renderer/services/machines';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
 
 import { $chatProcessStatus } from './state';
@@ -206,13 +208,14 @@ export const Chat = memo(() => {
 
   const isGlass = !!store.codeDeckBackground;
   const theme = store.theme ?? 'teams-light';
-  const sandboxLabel = useMemo(() => buildProfileLabel(profileName), [profileName]);
+  const machines = useStore($machines);
+  const sandboxLabel = useMemo(() => buildProfileLabel(profileName, machines), [profileName, machines]);
   const sandboxOptions = useMemo(
     () => getAvailableProfileNames({ isEnterprise, available: store.availableSandboxProfiles }).map((name) => ({
       value: name,
-      label: getProfileMenuLabel(name),
+      label: getProfileMenuLabel(name, machines),
     })),
-    [isEnterprise, store.availableSandboxProfiles]
+    [isEnterprise, store.availableSandboxProfiles, machines]
   );
 
   const chatSessionId = store.chatSessionId ?? undefined;
@@ -257,6 +260,7 @@ export const Chat = memo(() => {
 
   return (
     <div className={mergeClasses(styles.fullSizeRelative, isGlass && styles.glassRoot)}>
+      <SessionStatusBanner status={chatStatus} />
       {showShell && (
         <div className={styles.absoluteInsetZ0}>
           <ChatShell

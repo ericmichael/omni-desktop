@@ -2,12 +2,13 @@ import { makeStyles, tokens } from '@fluentui/react-components';
 import { memo } from 'react';
 
 import { ConnectCloudCard } from '@/renderer/features/SettingsModal/ConnectCloudCard';
+import { MachinesCard } from '@/renderer/features/SettingsModal/MachinesCard';
 import { SettingsModalOmniSandboxOptions } from '@/renderer/features/SettingsModal/SettingsModalOmniSandboxOptions';
 import { SettingsModalOptInToLauncherPrereleases } from '@/renderer/features/SettingsModal/SettingsModalOptInToLauncherPrereleases';
 import { SettingsModalPreviewFeatures } from '@/renderer/features/SettingsModal/SettingsModalPreviewFeatures';
 import { SettingsModalWeeklyReviewDay } from '@/renderer/features/SettingsModal/SettingsModalWeeklyReviewDay';
 import { SettingsModalWipLimit } from '@/renderer/features/SettingsModal/SettingsModalWipLimit';
-import { isElectron } from '@/renderer/services/ipc';
+import { isCloudLinked, isElectron } from '@/renderer/services/ipc';
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXL },
@@ -25,6 +26,12 @@ export const SettingsModalGeneralTab = memo(() => {
       {isElectron && (
         <>
           <ConnectCloudCard />
+          <div className={styles.divider} />
+        </>
+      )}
+      {isCloudLinked && (
+        <>
+          <MachinesCard />
           <div className={styles.divider} />
         </>
       )}

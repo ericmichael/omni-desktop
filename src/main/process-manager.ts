@@ -34,15 +34,54 @@ export type ProcessManagerStoreData = {
 };
 
 /**
+ * Detect the `local:<machineId>` profile-name shape and pull out the
+ * machine id. `null` for non-local profiles.
+ */
+export const parseLocalProfile = (profileName: string): string | null => {
+  if (!profileName.startsWith('local:')) return null;
+  const id = profileName.slice('local:'.length).trim();
+  return id.length > 0 ? id : null;
+};
+
+/**
+ * Computer-as-sandbox: prepares a per-session `host_bridge` sandbox profile
+ * pointing the cloud `omni serve`'s sandbox at a user's laptop. Implemented by
+ * `HostBridgePreparer` (cloud); injected so `ProcessManager` stays free of
+ * server imports. `prepare` asks the laptop to stand up `omni sandbox-host`
+ * and returns the profile path; `release` tears it down.
+ */
+export interface IHostBridgePreparer {
+  prepare(
+    machineId: string,
+    sandboxKey: string,
+    opts: { workspaceDir?: string }
+  ): Promise<{ profilePath: string }>;
+  release(machineId: string, sandboxKey: string): Promise<void>;
+  /** Live online state + friendly label for a machine, for the host-offline
+   *  overlay. Backed by the cloud's `MachineRegistry`. */
+  machineState(machineId: string): { online: boolean; label?: string };
+}
+
+/**
+ * Result envelope from `compute:adopt-session` (Phase 6). The cloud calls it
+ * after a laptop reconnects; an `adopted: true` flips the cloud's view of
+ * the session from `disconnected` → `running` without a fresh spawn.
+ */
+export type AgentAdoptResult =
+  | { adopted: true; wsUrl: string; uiUrl: string; containerId?: string }
+  | { adopted: false };
+
+/**
  * Unified process manager for all agent processes (chat + code tabs).
  *
  * Every agent process is keyed by a string ID:
  *   - `"chat"` for the singleton chat process
  *   - A CodeTabId for code-tab processes
  *
- * Profile resolution: per-project override > user-default. Profile name
- * `"platform"` routes to the deferred PlatformClient code path; everything
- * else spawns ``omni serve --profile <resolved>``.
+ * Profile resolution: per-project override > user-default. The `"platform"`
+ * profile and any `local:<machineId>` profile route to `compute` mode (an
+ * `IComputeClient` drives the lifecycle); everything else spawns
+ * ``omni serve --profile <resolved>``.
  */
 export class ProcessManager {
   private processes = new Map<string, AgentProcess>();
@@ -50,7 +89,16 @@ export class ProcessManager {
   private sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
   private fetchFn: FetchFn;
   private getStoreData: () => ProcessManagerStoreData;
-  private getExtraEnv?: () => Record<string, string> | Promise<Record<string, string>>;
+  /**
+   * Resolves the env merged into each `omni serve` spawn (model API keys,
+   * runtime tokens, codex materialization, etc.).
+   *
+   * Public so the local-compute reverse handlers (cloud-dispatched starts on
+   * this Electron) can swap in the cloud-shipped materialized env per-start
+   * and restore the original afterwards. The cloud serialises its start calls
+   * per machine, so the temporary swap is race-free in that path.
+   */
+  getExtraEnv?: () => Record<string, string> | Promise<Record<string, string>>;
   /** Read a git token by credential id (from the SecretStore). Absent → no
    *  private-remote auth (tokens never reach this class except through here). */
   private resolveGitToken?: (credentialId: string) => Promise<string | undefined>;
@@ -65,6 +113,18 @@ export class ProcessManager {
   /** Compute backend (omni-platform delegation). Set when configured. */
   platformClient: IComputeClient | null = null;
 
+  /**
+   * Computer-as-sandbox: prepares a `host_bridge` profile so `local:<machineId>`
+   * launches run `omni serve` HERE (the agent stays put) with the user's laptop
+   * as the sandbox backend. Cloud-only; undefined elsewhere. See
+   * `src/server/host-bridge-preparer.ts`.
+   */
+  private hostBridge?: IHostBridgePreparer;
+
+  /** processId → machineId for live `local:<machineId>` sessions, so stop()
+   *  can tell the laptop to tear down its `omni sandbox-host`. */
+  private localSandboxKeys = new Map<string, string>();
+
   constructor(arg: {
     sendToWindow: ProcessManager['sendToWindow'];
     fetchFn?: FetchFn;
@@ -78,6 +138,8 @@ export class ProcessManager {
     /** Restrict launches to these profiles (cloud → the ACI profiles). The
      * user still picks among them; anything outside falls back to the default. */
     allowedProfileNames?: string[];
+    /** Computer-as-sandbox preparer (cloud-only). */
+    hostBridge?: IHostBridgePreparer;
   }) {
     this.sendToWindow = arg.sendToWindow;
     this.fetchFn = arg.fetchFn ?? globalThis.fetch;
@@ -90,6 +152,7 @@ export class ProcessManager {
     this.getExtraEnv = arg.getExtraEnv;
     this.resolveGitToken = arg.resolveGitToken;
     this.allowedProfileNames = arg.allowedProfileNames;
+    this.hostBridge = arg.hostBridge;
   }
 
   private resolveProfileName(projectId: string | undefined, override: string | undefined): string {
@@ -100,6 +163,12 @@ export class ProcessManager {
       defaultProfileName;
     // An allow-list (cloud → the ACI profiles) constrains the choice: a pick
     // outside it (e.g. host/devbox) can't escape, falling back to the default.
+    // Local-machine profiles (`local:<machineId>`) are an implicit override —
+    // they're always allowed because the registry verified the principal owns
+    // the machine before they ever appeared in the picker.
+    if (parseLocalProfile(pick)) {
+      return pick;
+    }
     if (this.allowedProfileNames && !this.allowedProfileNames.includes(pick)) {
       return defaultProfileName;
     }
@@ -107,7 +176,23 @@ export class ProcessManager {
   }
 
   private resolveMode(profileName: string): AgentProcessMode {
-    return profileName === 'platform' ? 'platform' : 'serve';
+    // `compute` mode = delegate to an `IComputeClient` (the omni-platform
+    // delegation path). Everything else — including `local:<machineId>`
+    // (computer-as-sandbox) — spawns `omni serve` here; `local:` differs only
+    // in that it runs with a `host_bridge` profile pointing the sandbox at the
+    // user's laptop.
+    if (profileName === 'platform') return 'compute';
+    return 'serve';
+  }
+
+  /**
+   * The compute client to drive a launch of *profileName*, or `null` to mean
+   * "spawn omni serve locally (serve mode)". Only the `'platform'` profile
+   * (omni-platform delegation) uses a compute client.
+   */
+  resolveComputeClient(profileName: string): IComputeClient | null {
+    if (profileName === 'platform') return this.platformClient;
+    return null;
   }
 
   /**
@@ -174,7 +259,11 @@ export class ProcessManager {
     }
   }
 
-  private getOrCreate(processId: string, mode: AgentProcessMode): AgentProcess {
+  private getOrCreate(
+    processId: string,
+    mode: AgentProcessMode,
+    computeClient?: IComputeClient | null
+  ): AgentProcess {
     const existing = this.processes.get(processId);
     if (existing && existing.mode === mode) {
       return existing;
@@ -191,7 +280,7 @@ export class ProcessManager {
         this.sendToWindow('agent-process:status', processId, status);
       },
       fetchFn: this.fetchFn,
-      platformClient: this.platformClient ?? undefined,
+      computeClient: computeClient ?? this.platformClient ?? undefined,
       getExtraEnv: this.getExtraEnv,
     });
     this.processes.set(processId, proc);
@@ -330,11 +419,17 @@ export class ProcessManager {
   }
 
   /**
-   * A `local` source's directory must exist or `omni serve` rejects it
-   * ("Workspace directory not found"). On a fresh host (notably the cloud
-   * container, where a project's default `~/Omni/Workspace` doesn't exist yet)
-   * create it — an empty workspace is a valid starting point. Best-effort:
-   * if creation fails, let omni serve surface the original error.
+   * A `local` source's directory must exist or the agent's pre-flight check
+   * rejects it ("Workspace directory not found"). On a fresh host — notably
+   * the cloud container, where a project's default `~/Omni/Workspace` doesn't
+   * exist yet — create it. An empty workspace is a valid starting point.
+   *
+   * Failures are logged at WARN: the previous silent-catch made the
+   * downstream "Workspace directory not found" error impossible to debug
+   * because the actual mkdir failure (permission denied / EROFS / ENOENT on
+   * the parent / etc.) never surfaced anywhere. The caller still treats
+   * mkdir-failed as a normal "missing dir" so it can fall through to the
+   * agent's own existence check; this log just lets us SEE why.
    */
   private ensureWorkspaceDir(workspaceDir: string): void {
     if (!workspaceDir) {
@@ -342,16 +437,46 @@ export class ProcessManager {
     }
     try {
       mkdirSync(workspaceDir, { recursive: true });
-    } catch {
-      // ignore — omni serve will report if the path is genuinely unusable
+    } catch (err) {
+      console.warn(
+        `[process-manager] ensureWorkspaceDir failed for "${workspaceDir}": ${(err as Error).message}`
+      );
     }
+  }
+
+  /**
+   * For a `local:<machineId>` profile, ask the laptop (via the host bridge) to
+   * stand up its `omni sandbox-host` and return the path of a per-session
+   * `host_bridge` profile that points this spawn's sandbox at it. The agent
+   * still runs HERE (serve mode); only the sandbox backend is the laptop.
+   * Returns `null` for non-local profiles. The `sandboxKey` is the stable
+   * processId — it keys the laptop's exec server and the relay path.
+   */
+  private async prepareHostBridge(
+    processId: string,
+    profileName: string,
+    workspaceDir: string | undefined
+  ): Promise<string | null> {
+    const machineId = parseLocalProfile(profileName);
+    if (!machineId) return null;
+    if (!this.hostBridge) {
+      throw new Error(`local sandbox needs a host bridge (machine ${machineId}) — not available`);
+    }
+    const { profilePath } = await this.hostBridge.prepare(machineId, processId, { workspaceDir });
+    this.localSandboxKeys.set(processId, machineId);
+    return profilePath;
   }
 
   start = async (processId: string, opts: AgentProcessStartOptions): Promise<void> => {
     this.lastStartArgs.set(processId, opts);
     const startArg = await this.buildStartArg(opts);
+    const profilePath = await this.prepareHostBridge(processId, startArg.profileName, opts.workspaceDir);
+    if (profilePath) {
+      startArg.explicitProfilePath = profilePath;
+    }
     const mode = this.resolveMode(startArg.profileName);
-    const proc = this.getOrCreate(processId, mode);
+    const client = this.resolveComputeClient(startArg.profileName);
+    const proc = this.getOrCreate(processId, mode, client);
     proc.start(startArg);
   };
 
@@ -362,6 +487,11 @@ export class ProcessManager {
     }
     await proc.stop();
     this.processes.delete(processId);
+    const machineId = this.localSandboxKeys.get(processId);
+    if (machineId && this.hostBridge) {
+      this.localSandboxKeys.delete(processId);
+      void this.hostBridge.release(machineId, processId).catch(() => {});
+    }
   };
 
   rebuild = async (processId: string, opts: AgentProcessStartOptions): Promise<void> => {
@@ -382,17 +512,99 @@ export class ProcessManager {
         : {}),
     };
     const startArg = await this.buildStartArg(merged);
+    const profilePath = await this.prepareHostBridge(processId, startArg.profileName, merged.workspaceDir);
+    if (profilePath) {
+      startArg.explicitProfilePath = profilePath;
+    }
     const mode = this.resolveMode(startArg.profileName);
-    const proc = this.getOrCreate(processId, mode);
+    const client = this.resolveComputeClient(startArg.profileName);
+    const proc = this.getOrCreate(processId, mode, client);
     await proc.rebuild(startArg);
   };
 
   getStatus = (processId: string): WithTimestamp<AgentProcessStatus> => {
     const proc = this.processes.get(processId);
-    if (proc) {
-      return proc.getStatus();
+    const status = proc ? proc.getStatus() : { type: 'uninitialized' as const, timestamp: Date.now() };
+    return this.withHostOfflineOverlay(processId, status);
+  };
+
+  /**
+   * Computer-as-sandbox sticky host-offline overlay. For a `running` session
+   * whose laptop (`local:<machineId>`) WS has dropped, flag `data.hostOffline`
+   * so the renderer shows a non-destructive banner over the still-running cloud
+   * session (the agent + chat are in the cloud and unaffected; only its sandbox
+   * tools are unreachable). Poll-driven, so the banner persists across polls and
+   * clears automatically once the machine reconnects (and `resumeOnReconnect`
+   * re-establishes the sandbox). No-op for non-local sessions or when online.
+   */
+  private withHostOfflineOverlay(
+    processId: string,
+    status: WithTimestamp<AgentProcessStatus>
+  ): WithTimestamp<AgentProcessStatus> {
+    const machineId = this.localSandboxKeys.get(processId);
+    if (!machineId || !this.hostBridge || status.type !== 'running') {
+      return status;
     }
-    return { type: 'uninitialized', timestamp: Date.now() };
+    const st = this.hostBridge.machineState(machineId);
+    if (st.online) {
+      return status;
+    }
+    return {
+      ...status,
+      data: {
+        ...status.data,
+        hostOffline: true,
+        ...(st.label ? { hostOfflineMachineLabel: st.label } : {}),
+      },
+    };
+  }
+
+  /**
+   * Called when a machine goes offline. Broadcasts a `host-offline` overlay
+   * (`agent-process:status` event) for every running local session on it, so
+   * renderers flip to the banner immediately. The renderer poll early-returns
+   * once a session is `running`, so without this push the overlay would never
+   * surface for a live session (going offline produces no status-change event —
+   * omni-serve keeps running in the cloud).
+   */
+  broadcastHostOffline = (machineId: string): void => {
+    for (const [processId, mid] of this.localSandboxKeys.entries()) {
+      if (mid !== machineId) continue;
+      const proc = this.processes.get(processId);
+      if (!proc) continue;
+      const overlaid = this.withHostOfflineOverlay(processId, proc.getStatus());
+      if (overlaid.type === 'running' && overlaid.data.hostOffline) {
+        this.sendToWindow('agent-process:status', processId, overlaid);
+      }
+    }
+  };
+
+  /**
+   * Called when a machine reconnects. Rebuilds every local session anchored to
+   * it so the sandbox exec channel is re-established (a fresh `omni sandbox-host`
+   * + `omni serve` with a new host_bridge profile). Chat history survives via
+   * PgSessionStorage and the workspace lives on the laptop's disk, so this is a
+   * clean resume — only an in-flight agent turn (if any) is lost. The cloud's
+   * `localSandboxKeys` is the source of truth (the registry's per-machine anchors
+   * are dropped while the machine is offline; these survive).
+   */
+  resumeOnReconnect = async (machineId: string): Promise<void> => {
+    const toResume = [...this.localSandboxKeys.entries()]
+      .filter(([, mid]) => mid === machineId)
+      .map(([processId]) => processId);
+    for (const processId of toResume) {
+      // Skip if a (re)start is already in flight — guards against WS-reconnect
+      // flapping triggering overlapping rebuilds.
+      const st = this.processes.get(processId)?.getStatus().type;
+      if (st === 'starting' || st === 'connecting') continue;
+      const opts = this.lastStartArgs.get(processId);
+      if (!opts) continue;
+      try {
+        await this.rebuild(processId, opts);
+      } catch (err) {
+        console.error(`[host-bridge] resume rebuild failed for ${processId}:`, (err as Error).message);
+      }
+    }
   };
 
   resizePty = (processId: string, cols: number, rows: number): void => {

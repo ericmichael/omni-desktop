@@ -106,7 +106,7 @@ describe('ProcessManager', () => {
       ['host', 'serve'],
       ['devbox', 'serve'],
       ['custom-profile', 'serve'],
-      ['platform', 'platform'],
+      ['platform', 'compute'],
     ] as const)('defaultProfileName=%s resolves to mode=%s', async (profileName, expectedMode) => {
       const { pm } = makePm({ storeData: { defaultProfileName: profileName } });
       await pm.start('test-1', { workspaceDir: '/tmp/ws' });
@@ -129,7 +129,7 @@ describe('ProcessManager', () => {
       });
       await pm.start('tab-1', { workspaceDir: '/tmp/ws', projectId: 'proj_1' });
 
-      expect(hoisted.agentProcessInstances[0]!.mode).toBe('platform');
+      expect(hoisted.agentProcessInstances[0]!.mode).toBe('compute');
     });
 
     it('forwards profileName + projectId in the start arg', async () => {
@@ -243,12 +243,12 @@ describe('ProcessManager', () => {
       expect(hoisted.agentProcessInstances).toHaveLength(1);
       expect(hoisted.agentProcessInstances[0]!.mode).toBe('serve');
 
-      // Flip to platform — different mode → new instance
+      // Flip to platform profile — different mode (compute) → new instance
       storeData.defaultProfileName = 'platform';
       await pm.start('proc-1', { workspaceDir: '/tmp' });
 
       expect(hoisted.agentProcessInstances).toHaveLength(2);
-      expect(hoisted.agentProcessInstances[1]!.mode).toBe('platform');
+      expect(hoisted.agentProcessInstances[1]!.mode).toBe('compute');
       expect(hoisted.agentProcessInstances[0]!.exit).toHaveBeenCalled();
     });
 

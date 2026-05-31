@@ -104,7 +104,7 @@ export const setupProxyRewriter = (
       const status = args[1] as Record<string, unknown> | undefined;
       if (status && (status.type === 'running' || status.type === 'connecting') && status.data) {
         const proxyPrefix = processId === 'chat' ? 'chat' : `code-${processId}`;
-        rewriteStatusUrls(status.data as Record<string, string | undefined>, proxyPrefix);
+        rewriteStatusUrls(status.data as Record<string, string | undefined>, proxyPrefix, processId);
       }
     }
 
@@ -112,7 +112,7 @@ export const setupProxyRewriter = (
       const taskId = args[0] as string;
       const status = args[1] as Record<string, unknown> | undefined;
       if (status && (status.type === 'running' || status.type === 'connecting') && status.data) {
-        rewriteStatusUrls(status.data as Record<string, string | undefined>, `project-${taskId}`);
+        rewriteStatusUrls(status.data as Record<string, string | undefined>, `project-${taskId}`, taskId);
       }
     }
   });
@@ -124,7 +124,7 @@ export const setupProxyRewriter = (
     const status = result as Record<string, unknown> | undefined;
     if (status && (status.type === 'running' || status.type === 'connecting') && status.data) {
       const proxyPrefix = processId === 'chat' ? 'chat' : `code-${processId}`;
-      rewriteStatusUrls(status.data as Record<string, string | undefined>, proxyPrefix);
+      rewriteStatusUrls(status.data as Record<string, string | undefined>, proxyPrefix, processId);
     }
     return result;
   });
@@ -425,11 +425,20 @@ function wsRewriteScript(proxyName: string): string {
 }
 
 /**
- * Rewrite localhost URLs in a status data object to relative proxy paths and register upstreams.
+ * Rewrite localhost URLs in a status data object to relative `/proxy/<name>/...`
+ * paths and register their upstream origins.
+ *
+ * For computer-as-sandbox (`host_bridge`) sessions this needs no special
+ * handling: the agent's `ws_url`/`ui_url` belong to the cloud's own
+ * `omni serve` (reachable here, like ACI), so they go through the normal proxy.
+ * The laptop is reached only by the cloud `omni serve` itself, via the
+ * `/proxy/local/<machineId>/<sessionId>/<port>` relay configured in its
+ * `host_bridge` profile — never surfaced in this readiness payload.
  */
 export const rewriteStatusUrls = (
   data: Record<string, string | Record<string, string> | undefined>,
-  proxyName: string
+  proxyName: string,
+  _processId?: string
 ): void => {
   const urlFields = ['uiUrl', 'wsUrl', 'sandboxUrl', 'codeServerUrl', 'noVncUrl'];
 
@@ -481,3 +490,4 @@ function registerAndRewrite(url: string, proxyKey: string): string | null {
     return null;
   }
 }
+

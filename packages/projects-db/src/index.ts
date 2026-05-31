@@ -32,6 +32,8 @@ export type {
   TeamWithRole,
   InvitationRow,
 } from './pg/control-plane.js';
+export { MachinesRepo } from './pg/machines.js';
+export type { MachineRow } from './pg/machines.js';
 export type { Pool as PgPool } from './pg/connection.js';
 export { pgMigrations } from './pg/schema.js';
 export type { PgMigration } from './pg/schema.js';

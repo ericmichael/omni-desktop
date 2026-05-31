@@ -15,6 +15,7 @@ import type { IncomingHttpHeaders } from 'node:http';
 
 import { wireClientManagers, wireGlobalHandlers } from '@/server/managers';
 import { CODEX_REFRESH_PATH, registerCodexRefreshRoute } from '@/server/codex-refresh-http';
+import { setupLocalTunnelProxy } from '@/server/local-tunnel-proxy';
 import { MCP_PROJECTS_PATH, registerMcpHttpRoute } from '@/server/mcp-http';
 import { setupProxyRewriter } from '@/server/proxy-rewriter';
 import { resolveRuntimeTokenSecret, signRuntimeToken, verifyRuntimeToken } from '@/server/runtime-token';
@@ -226,11 +227,20 @@ const main = async () => {
     ensureUserBootstrapped,
     resolveActiveTeam,
     pgSecret,
+    machineRegistry,
   } = await wireGlobalHandlers({
     wsHandler,
     store,
     runtimeTokenSecret,
   });
+
+  // Cloud-relayed tunnel routes for computer-as-sandbox (Phase 3). The route
+  // is `/proxy/local/:machineId/:sessionId/*` and bytes flow over the
+  // already-authenticated WS via `compute:tunnel-*` reverse-RPCs. No-op
+  // when no machine registry exists (e.g. SQLite single-tenant mode).
+  if (machineRegistry) {
+    setupLocalTunnelProxy(fastify, wsHandler, machineRegistry);
+  }
 
   // HTTP MCP route — remote agent sandboxes reach their tenant's project data
   // here (authenticated by the signed runtime token). Local Electron/stdio
@@ -265,6 +275,17 @@ const main = async () => {
       const principal = claims.principalId ?? claims.tenantId;
       const sessionId = url.searchParams.get('sessionId') ?? undefined;
       const requestedTeam = url.searchParams.get('team') ?? undefined;
+
+      // Release the WS binding from the machine registry when this socket
+      // closes — same hook for single-user and teams modes; the registry is a
+      // no-op when not in cloud (machinesRepo undefined). The host-offline
+      // banner is driven by the poll-based `data.hostOffline` overlay in
+      // ProcessManager.getStatus (which keeps the cloud session running and
+      // overlays a non-destructive banner) — NOT a one-shot error status here,
+      // which would unmount the still-running cloud chat UI.
+      socket.on('close', () => {
+        machineRegistry?.releaseWs(socket);
+      });
 
       // In single-user/local mode the data scope IS the principal — bind
       // synchronously (no control plane). In teams/cloud mode we must first

@@ -6,17 +6,24 @@
  * (the parent component holds the override state — picker is purely
  * controlled). Mirrors the workspace switcher pattern: change the choice
  * before launching, no persistence beyond this session.
+ *
+ * Profiles are grouped into "Cloud" (host/devbox/aci/platform) and "My
+ * computers" (one entry per registered Electron). Each local entry shows
+ * an online/offline indicator pulled from `$machines`.
  */
 
 import { Checkmark16Regular, ChevronDown16Regular, Cube16Regular } from '@fluentui/react-icons';
+import { useStore } from '@nanostores/react';
 import { memo, useCallback } from 'react';
 
 import { Menu, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@/renderer/ds';
+import { $machines } from '@/renderer/services/machines';
 
 import {
   type ProfileListContext,
   getAvailableProfileNames,
   getProfileMenuLabel,
+  isLocalProfile,
 } from './profile-list';
 
 export type SandboxPickerProps = {
@@ -31,7 +38,8 @@ export type SandboxPickerProps = {
 };
 
 export const SandboxPicker = memo(({ value, onChange, context, disabled }: SandboxPickerProps) => {
-  const names = getAvailableProfileNames(context);
+  const machines = useStore($machines);
+  const names = getAvailableProfileNames({ ...context, machines });
 
   const handleSelect = useCallback(
     (name: string) => {
@@ -41,6 +49,11 @@ export const SandboxPicker = memo(({ value, onChange, context, disabled }: Sandb
     },
     [onChange, value]
   );
+
+  // Two groups: cloud (everything that isn't `local:*`) and "My computers".
+  // We keep ordering inside each group as supplied by `getAvailableProfileNames`.
+  const cloudNames = names.filter((n) => !isLocalProfile(n));
+  const localNames = names.filter(isLocalProfile);
 
   return (
     <Menu>
@@ -52,14 +65,14 @@ export const SandboxPicker = memo(({ value, onChange, context, disabled }: Sandb
         >
           <span className="inline-flex items-center gap-1">
             <Cube16Regular />
-            {getProfileMenuLabel(value)}
+            {getProfileMenuLabel(value, machines)}
           </span>
           <ChevronDown16Regular />
         </button>
       </MenuTrigger>
       <MenuPopover>
         <MenuList>
-          {names.map((name) => {
+          {cloudNames.map((name) => {
             const selected = name === value;
             return (
               <MenuItem
@@ -69,10 +82,31 @@ export const SandboxPicker = memo(({ value, onChange, context, disabled }: Sandb
                   selected ? <Checkmark16Regular className="text-brand" /> : <span className="w-4" />
                 }
               >
-                {getProfileMenuLabel(name)}
+                {getProfileMenuLabel(name, machines)}
               </MenuItem>
             );
           })}
+          {localNames.length > 0 && (
+            <>
+              <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-fg-subtle border-t border-stroke-1 mt-1 pt-2">
+                My computers
+              </div>
+              {localNames.map((name) => {
+                const selected = name === value;
+                return (
+                  <MenuItem
+                    key={name}
+                    onClick={() => handleSelect(name)}
+                    icon={
+                      selected ? <Checkmark16Regular className="text-brand" /> : <span className="w-4" />
+                    }
+                  >
+                    {getProfileMenuLabel(name, machines)}
+                  </MenuItem>
+                );
+              })}
+            </>
+          )}
         </MenuList>
       </MenuPopover>
     </Menu>

@@ -9,6 +9,9 @@
  * under ``<config>/sandbox/`` and merge them in here.
  */
 
+import { $machines } from '@/renderer/services/machines';
+import type { MachineSummary } from '@/shared/types';
+
 const OPEN_SOURCE_PROFILES = ['host', 'devbox'] as const;
 const ENTERPRISE_EXTRA_PROFILES = ['platform'] as const;
 
@@ -29,6 +32,13 @@ export type ProfileListContext = {
    * ``['aci']`` to offer only that and hide host/devbox.
    */
   available?: string[];
+  /**
+   * Cloud-side machine registry for the signed-in principal. Used to render
+   * friendly labels (`Local · Eric-MacBook (●)`) for `local:<id>` profile
+   * names. Optional — when absent, `local:*` entries fall through to the
+   * truncated id.
+   */
+  machines?: MachineSummary[];
 };
 
 export const getAvailableProfileNames = (ctx: ProfileListContext): string[] => {
@@ -43,10 +53,38 @@ export const getAvailableProfileNames = (ctx: ProfileListContext): string[] => {
 const titleCase = (s: string): string =>
   s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
 
+/** True for `local:<machineId>` profile names. */
+export const isLocalProfile = (name: string): boolean => name.startsWith('local:');
+
+/** Pull the machineId from a `local:<machineId>` profile name. */
+export const machineIdFromProfile = (name: string): string | null =>
+  isLocalProfile(name) ? name.slice('local:'.length) : null;
+
 /**
  * Long-form label used in pickers and settings ("Host (no isolation)"). For
  * compact status chips (e.g. "Devbox", "Cloud") use ``buildProfileLabel``
  * from ``@/renderer/omniagents-ui/sandbox-label``.
+ *
+ * For `local:<machineId>` profiles the machine's friendly label + online status
+ * come from the `machines` list; it defaults to the live `$machines` store so
+ * EVERY caller resolves the computer name (not just those that thread it
+ * through). Only when the id is genuinely unknown do we fall back to a short id.
+ * Pass an explicit `machines` from a `useStore($machines)` subscription where
+ * the label must re-render as the list loads / online status flips.
  */
-export const getProfileMenuLabel = (name: string): string =>
-  PROFILE_LABELS[name] ?? titleCase(name);
+export const getProfileMenuLabel = (
+  name: string,
+  machines: MachineSummary[] = $machines.get()
+): string => {
+  if (PROFILE_LABELS[name]) return PROFILE_LABELS[name];
+  const machineId = machineIdFromProfile(name);
+  if (machineId) {
+    const machine = machines.find((m) => m.machineId === machineId);
+    if (machine) {
+      const dot = machine.online ? '●' : '○';
+      return `Local · ${machine.label} (${dot})`;
+    }
+    return `Local · ${machineId.slice(0, 8)}`;
+  }
+  return PROFILE_LABELS[name] ?? titleCase(name);
+};

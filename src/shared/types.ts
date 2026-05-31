@@ -937,11 +937,26 @@ type OkStatus<StatusType extends string, Data = void> = Data extends void
 
 /**
  * A status object that contains an error message and optionally some context. It represents an ERROR/bad status.
+ *
+ * `kind` is an optional discriminant the renderer reads to render specialised
+ * banners (e.g. `'host-offline'` triggers the "your laptop is offline" banner
+ * with the machine label; `'machine-at-capacity'` triggers the "stop a
+ * session or switch to cloud" banner). Absent `kind` ⇒ generic "something
+ * went wrong" surface with `message`.
  */
 type ErrorStatus = {
   type: 'error';
   error: {
     message: string;
+    kind?: 'host-offline' | 'machine-at-capacity' | 'message';
+    /** Populated when `kind === 'host-offline' | 'machine-at-capacity'`. */
+    machineId?: string;
+    /** Populated when `kind === 'host-offline' | 'machine-at-capacity'`. */
+    machineLabel?: string;
+    /** Populated when `kind === 'machine-at-capacity'`. */
+    maxSessions?: number;
+    /** Populated when `kind === 'machine-at-capacity'`. */
+    currentSessions?: number;
     context?: Record<string, unknown>;
   };
 };
@@ -1009,6 +1024,26 @@ export type AgentProcessData = {
    * conversation and reloads the service panes when it clears.
    */
   switching?: boolean;
+  /**
+   * Computer-as-sandbox: true while the laptop hosting this session's sandbox
+   * (`local:<machineId>`) is offline (its WS to the cloud dropped). The agent
+   * itself keeps running in the cloud — chat history + the conversation UI stay
+   * up — but its tools (exec/file/PTY) are unreachable. The renderer overlays a
+   * non-destructive "Your laptop is offline" banner over the still-running
+   * session rather than tearing it down. Cleared (and the sandbox re-established)
+   * when the laptop reconnects.
+   */
+  hostOffline?: boolean;
+  /** Friendly label of the offline host, for the banner. */
+  hostOfflineMachineLabel?: string;
+  /**
+   * Where this agent process is anchored — `'cloud'` for ACI/platform/local-
+   * laptop-running-omni-serve, `{kind: 'local', machineId}` for sessions the
+   * cloud dispatched to a registered Electron via reverse-RPC. Used by
+   * Settings → Machines and (Phase 7) the developer logs to associate
+   * activity with the right machine.
+   */
+  computeLocation?: 'cloud' | { kind: 'local'; machineId: string };
 };
 
 export type AgentProcessStatus =
@@ -1884,6 +1919,19 @@ type CloudIpcEvents = Namespaced<
      * passes in the WebSocket upgrade URL.
      */
     'get-ws-token': () => string;
+    /**
+     * Local Electron's persisted machine identity (id + editable label +
+     * platform). Used by the renderer's Settings → Cloud card to render the
+     * "this is what the cloud sees you as" chip and to compare against the
+     * cloud-side machines list to mark the calling row as `isSelf`.
+     */
+    'get-machine-identity': () => MachineIdentity;
+    /**
+     * Rename the local Electron's machine label. Persisted to
+     * `<configDir>/machine.json` and (when cloud-linked) replayed to the cloud
+     * via `machine:register` so the new label flows through.
+     */
+    'set-machine-label': (label: string) => MachineIdentity;
   }
 >;
 
@@ -1896,6 +1944,79 @@ export type CloudStatus =
       clientId: string;
       account: CloudAccount;
     };
+
+/** Stable identity persisted in `<configDir>/machine.json`. */
+export type MachineIdentity = {
+  machineId: string;
+  label: string;
+  platform: string;
+};
+
+/**
+ * Per-(principal) summary of a machine the cloud has seen. Used by the
+ * Settings → Machines card and the SandboxPicker. `online` reflects whether
+ * the cloud currently holds a live WS for that id; `isSelf` is `true` when
+ * `machineId` matches the calling Electron's own identity.
+ */
+export type MachineSummary = {
+  machineId: string;
+  label: string;
+  platform: string;
+  online: boolean;
+  isSelf: boolean;
+  registeredAt: string;
+  lastSeenAt: string;
+};
+
+/**
+ * Per-principal machine registry — the cloud-side view of every Electron the
+ * user has signed in from. Powers the SandboxPicker's "My computers" group
+ * and the Settings → Machines card. No-op in single-user/local mode (returns
+ * an empty list).
+ *
+ * `register` is invoked by the cloud-linked Electron over its existing WS at
+ * boot; the cloud upserts the row scoped to the authenticated principal.
+ * Removing a machine is explicit and severs its right to receive reverse-RPC
+ * dispatches even if it later reconnects with the same id.
+ */
+type MachineIpcEvents = Namespaced<
+  'machine',
+  {
+    register: (info: MachineIdentity) => { accepted: boolean };
+    list: () => MachineSummary[];
+    rename: (machineId: string, label: string) => MachineSummary[];
+    remove: (machineId: string) => MachineSummary[];
+  }
+>;
+
+
+/**
+ * Renderer→main bridge for cloud reverse-RPC dispatch. The renderer owns the
+ * cloud WS (in cloud-linked Electron) but compute lives in main; when the
+ * cloud sends a `reverse-invoke`, the renderer forwards it through this one
+ * channel and main resolves it against a per-channel registry.
+ *
+ * NOT user-callable — internal plumbing. Carries arbitrary (channel, args).
+ */
+type ReverseRpcIpcEvents = {
+  'reverse-rpc:dispatch': (channel: string, args: unknown[]) => unknown;
+  /**
+   * Laptop → cloud: a WS frame inbound from the local omni-serve that the
+   * cloud should forward to the renderer end of the tunnel. The cloud's
+   * local-tunnel-proxy registers a per-tunnel routing entry keyed by
+   * `tunnelId` and pipes the bytes onto the awaiting client WebSocket.
+   *
+   * Sent via `localEmitter.invoke` from renderer→main path: main pushes a
+   * `tunnel:emit-incoming` event the renderer translates into this WS-invoke.
+   * Returns `void` (fire-and-forget; we ignore the ack).
+   */
+  'tunnel:incoming': (event: {
+    tunnelId: string;
+    dataBase64: string;
+    binary: boolean;
+    close?: boolean;
+  }) => void;
+};
 
 /** Device-code payload for the renderer to display while `cloud:link` polls. */
 export type CloudDeviceCode = {
@@ -2833,6 +2954,8 @@ export type IpcEvents = MainProcessIpcEvents &
   ConfigIpcEvents &
   CodexIpcEvents &
   CloudIpcEvents &
+  MachineIpcEvents &
+  ReverseRpcIpcEvents &
   SettingsConfigIpcEvents &
   GitCredentialIpcEvents &
   TeamIpcEvents &
@@ -3037,10 +3160,36 @@ type CodexIpcRendererEvents = Namespaced<'codex', { 'device-code': [CodexDeviceC
 /** Main→renderer: the AAD device-code to display while `cloud:link` polls. */
 type CloudIpcRendererEvents = Namespaced<'cloud', { 'device-code': [CloudDeviceCode] }>;
 
+/**
+ * Main→renderer: pushed by the cloud whenever a principal's machine list
+ * changes (registration, label edit, removal, online/offline). The renderer
+ * mirrors it into a nanostore so the picker and Settings card refresh in
+ * place without polling.
+ */
+type MachineIpcRendererEvents = Namespaced<'machine', { 'list-changed': [MachineSummary[]] }>;
+
+/**
+ * Main → renderer (cloud-linked Electron only): an inbound tunnel frame from
+ * local omni-serve that the cloud expects on its `tunnel:incoming` WS
+ * channel. The renderer's tunnel bridge re-emits it onto the cloud WS via
+ * `emitter.invoke('tunnel:incoming', event)`. No-op outside cloud-linked
+ * mode (the listener is never attached).
+ */
+type TunnelIpcRendererEvents = Namespaced<
+  'tunnel',
+  {
+    'emit-incoming': [
+      { tunnelId: string; dataBase64: string; binary: boolean; close?: boolean },
+    ];
+  }
+>;
+
 export type IpcRendererEvents = TerminalIpcRendererEvents &
   GithubIpcRendererEvents &
   CodexIpcRendererEvents &
   CloudIpcRendererEvents &
+  MachineIpcRendererEvents &
+  TunnelIpcRendererEvents &
   MainProcessIpcRendererEvents &
   OmniInstallProcessIpcRendererEvents &
   AgentProcessIpcRendererEvents &

@@ -9,6 +9,22 @@ type InvokeMessage = {
   args: unknown[];
 };
 
+type ReverseResponseMessage = {
+  type: 'reverse-response';
+  id: number;
+  result?: unknown;
+  error?: string;
+};
+
+/** All client→server frames the dispatcher recognises. */
+type InboundMessage = InvokeMessage | ReverseResponseMessage;
+
+/** Default timeout for cloud→client reverse RPCs. Long enough to cover the
+ *  slowest expected operation (sandbox start = ~25 s in the worst case for a
+ *  cold image pull), short enough that a hung Electron doesn't wedge the
+ *  cloud forever. Callers may override per-call. */
+const DEFAULT_REVERSE_TIMEOUT_MS = 30_000;
+
 /**
  * Fallback tenant for connections with no authenticated identity — i.e.
  * loopback / Tailscale / dev where EasyAuth isn't in front of the server.
@@ -22,6 +38,11 @@ export const DEFAULT_TENANT = 'local';
  * tenant so a shared (global) handler can scope reads/writes and route events
  * back to only the caller's tenant via {@link WsHandler.sendToTenant}.
  * Server-mode managers receive this object in the Electron `event` slot.
+ *
+ * `ws` is the active WebSocket the invoke came in on — used by handlers that
+ * need to bind a per-WS resource to the caller (e.g. `machine:register`
+ * tracks which WS to dispatch reverse-RPCs to). `null` only inside cleanup
+ * or when the underlying session is reattaching mid-flight.
  */
 export type HandlerContext = {
   /** Data-scope key. In teams/cloud this is the active team id; else the principal/DEFAULT_TENANT. */
@@ -29,6 +50,7 @@ export type HandlerContext = {
   /** Authenticated identity. Equals tenantId in single-user/local mode; the EasyAuth principal in cloud. */
   principalId: string;
   sessionId: string;
+  ws: WebSocket | null;
   sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
 };
 
@@ -70,6 +92,13 @@ type ResultWrapper = (result: unknown, args: unknown[]) => unknown;
  * Sessions persist until server restart. When a client disconnects and reconnects
  * with the same session ID, it reattaches to its existing managers/containers.
  */
+type PendingReverse = {
+  resolve: (value: unknown) => void;
+  reject: (err: Error) => void;
+  /** Cancel the timeout when the response arrives. */
+  cancel: () => void;
+};
+
 export class WsHandler {
   private globalHandlers = new Map<string, CtxHandler>();
   /** Active WebSocket → session ID mapping (for message routing) */
@@ -78,6 +107,12 @@ export class WsHandler {
   private persistentSessions = new Map<string, PersistentSession>();
   private eventInterceptors: EventInterceptor[] = [];
   private resultWrappers = new Map<string, ResultWrapper>();
+  /** Per-WS pending reverse-RPC requests, keyed by the monotonic id we sent. */
+  private pendingReverse = new WeakMap<WebSocket, Map<number, PendingReverse>>();
+  /** Monotonic id source for outbound reverse-invokes. Per-WS would be neater
+   *  but a single counter is fine — collisions matter only within one WS
+   *  pending map, and the id space (Number.MAX_SAFE_INTEGER) is huge. */
+  private nextReverseId = 1;
 
   /**
    * Register a global handler for a channel (shared across all clients).
@@ -287,6 +322,17 @@ export class WsHandler {
     });
 
     ws.on('close', () => {
+      // Reject every in-flight reverse-RPC bound to this WS so the cloud
+      // dispatcher fails fast instead of waiting on the configured timeout.
+      const pending = this.pendingReverse.get(ws);
+      if (pending) {
+        for (const [, p] of pending) {
+          p.cancel();
+          p.reject(new Error('ws-closed'));
+        }
+        pending.clear();
+        this.pendingReverse.delete(ws);
+      }
       const session = this.wsSessions.get(ws);
       if (session) {
         // Only detach the WS — do NOT cleanup managers.
@@ -296,6 +342,55 @@ export class WsHandler {
         }
         this.wsSessions.delete(ws);
         console.log(`[ws-handler] Session ${session.sessionId} detached (WS closed)`);
+      }
+    });
+  }
+
+  /**
+   * Send a cloud→client reverse-invoke and resolve with the client's
+   * reverse-response. Rejects on timeout, WS close mid-flight, or a non-`ok`
+   * reverse-response error.
+   *
+   * Auth: the WS was already authenticated upstream (signed runtime token),
+   * so the caller is responsible for verifying that `ws` is the right
+   * machine's WS BEFORE invoking — e.g. through `MachineRegistry.getActiveWs`.
+   */
+  invokeOnWs<T = unknown>(
+    ws: WebSocket,
+    channel: string,
+    args: unknown[],
+    opts: { timeoutMs?: number } = {}
+  ): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      if (ws.readyState !== 1 /* OPEN */) {
+        reject(new Error('ws-not-open'));
+        return;
+      }
+      const id = this.nextReverseId++;
+      let map = this.pendingReverse.get(ws);
+      if (!map) {
+        map = new Map();
+        this.pendingReverse.set(ws, map);
+      }
+      const timer = setTimeout(() => {
+        const m = this.pendingReverse.get(ws);
+        if (m?.delete(id)) {
+          reject(new Error(`reverse-rpc timeout (${channel})`));
+        }
+      }, opts.timeoutMs ?? DEFAULT_REVERSE_TIMEOUT_MS);
+      const pending: PendingReverse = {
+        resolve: (v) => resolve(v as T),
+        reject,
+        cancel: () => clearTimeout(timer),
+      };
+      map.set(id, pending);
+      try {
+        ws.send(JSON.stringify({ type: 'reverse-invoke', id, channel, args }));
+      } catch (err) {
+        // Synchronous send-throw — clean up and surface.
+        map.delete(id);
+        pending.cancel();
+        reject(err as Error);
       }
     });
   }
@@ -316,10 +411,27 @@ export class WsHandler {
   }
 
   private async handleMessage(ws: WebSocket, raw: unknown): Promise<void> {
-    let msg: InvokeMessage;
+    let msg: InboundMessage;
     try {
-      msg = JSON.parse(String(raw)) as InvokeMessage;
+      msg = JSON.parse(String(raw)) as InboundMessage;
     } catch {
+      return;
+    }
+
+    // Client→cloud responses to a previously-sent reverse-invoke. Route to the
+    // pending map and resolve / reject the awaiter.
+    if (msg.type === 'reverse-response') {
+      if (typeof msg.id !== 'number') return;
+      const map = this.pendingReverse.get(ws);
+      const pending = map?.get(msg.id);
+      if (!pending) return; // late / unknown id — drop silently
+      map!.delete(msg.id);
+      pending.cancel();
+      if (msg.error) {
+        pending.reject(new Error(msg.error));
+      } else {
+        pending.resolve(msg.result);
+      }
       return;
     }
 
@@ -342,6 +454,7 @@ export class WsHandler {
       tenantId: session?.tenantId ?? DEFAULT_TENANT,
       principalId: session?.principalId ?? session?.tenantId ?? DEFAULT_TENANT,
       sessionId: session?.sessionId ?? '',
+      ws,
       sendToWindow: session?.sendToWindow ?? (() => {}),
     };
 

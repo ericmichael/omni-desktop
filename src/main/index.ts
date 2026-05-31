@@ -21,6 +21,10 @@ import {
   loginWithDeviceFlow as entraLoginWithDeviceFlow,
   logout as entraLogout,
 } from '@/main/entra-auth';
+import { getOrCreateMachineIdentity, renameMachine } from '@/main/machine-identity';
+import { wireComputeReverseHandlers } from '@/main/compute-reverse-handlers';
+import { wireReverseRpcRouter } from '@/main/reverse-rpc-bridge';
+import { wireTunnelReverseHandlers } from '@/main/tunnel-handler';
 import { migrateAgentConfigFromFiles } from '@/main/config-files-migration';
 import { materializeAgentConfig } from '@/main/config-materializer';
 import { createConsoleManager } from '@/main/console-manager';
@@ -424,6 +428,9 @@ async function cleanup() {
   isShuttingDown = true;
 
   cleanupPlatform();
+  cleanupReverseRpc();
+  cleanupComputeReverse();
+  cleanupTunnelReverse();
   await syncManager.dispose();
   const results = await Promise.allSettled([
     cleanupConsole(),
@@ -819,6 +826,37 @@ main.ipc.handle('cloud:get-access-token', async () => {
   const cm = store.get('cloudMode');
   if (!cm) throw new Error('Not connected to a cloud');
   return ensureFreshEntraToken(cm.tenantId, cm.clientId);
+});
+
+// Stable per-install machine identity used by the cloud's "computer-as-
+// sandbox" registry. Lives in `<configDir>/machine.json` so it survives
+// upgrades + electron-store resets. Renderer reads this once at boot to
+// invoke `machine:register` over the WS to the cloud.
+main.ipc.handle('cloud:get-machine-identity', () => {
+  return getOrCreateMachineIdentity(OMNI_CONFIG_DIR);
+});
+
+main.ipc.handle('cloud:set-machine-label', (_, label) => {
+  const next = String(label ?? '').trim() || 'Unnamed machine';
+  return renameMachine(OMNI_CONFIG_DIR, next);
+});
+
+// Wire the renderer → main reverse-RPC dispatcher (Phase 2). The cloud's
+// reverse-invoke frames hit the renderer's WS first; the renderer-side
+// shim (`renderer/services/compute.ts`) forwards them here so main-side
+// compute handlers can resolve them.
+const cleanupReverseRpc = wireReverseRpcRouter(main.ipc);
+
+// Computer-as-sandbox — main handles the cloud's compute:* reverse-RPCs by
+// standing up an `omni sandbox-host` exec server (the agent stays in the
+// cloud; only the sandbox backend runs here).
+const cleanupComputeReverse = wireComputeReverseHandlers();
+
+// Tunnel relay (Phase 3). Inbound WS frames from local omni-serve are
+// pushed to the renderer via this Electron IPC event; the renderer's
+// tunnel bridge re-emits them on the cloud WS via `tunnel:incoming`.
+const cleanupTunnelReverse = wireTunnelReverseHandlers((event) => {
+  main.sendToWindow('tunnel:emit-incoming', event);
 });
 
 // Fetch a WS auth token from the linked cloud's /api/ws-token. The renderer

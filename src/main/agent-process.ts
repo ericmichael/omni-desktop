@@ -10,7 +10,7 @@ import { WebSocket as WsWebSocket } from 'ws';
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
 import type { IComputeClient } from '@/main/platform-client';
-import { resolveProfile } from '@/main/profile-resolver';
+import { type ResolvedProfile, resolveProfile } from '@/main/profile-resolver';
 import { getSnapshotStore } from '@/main/snapshot-blob-store';
 import { getOmniCliPath, getOmniConfigDir, isDirectory, pathExists } from '@/main/util';
 import { downloadWorkspace } from '@/main/workspace-sync';
@@ -30,15 +30,18 @@ import type {
 /**
  * Two paths exist after the v22 cut:
  *
- *   - ``serve``    — spawn ``omni serve --profile <path>``; the resolved
- *                    profile drives the SandboxSession (unix_local / docker
- *                    / e2b / …) and any long-running services in it.
- *   - ``platform`` — call ``PlatformClient.startSession`` and connect to the
- *                    cloud-hosted agent. Deferred refactor: a follow-up
- *                    converts this into a custom ``SandboxClient`` so it
- *                    rejoins the ``serve`` path.
+ *   - ``serve``   — spawn ``omni serve --profile <path>``; the resolved
+ *                   profile drives the SandboxSession (unix_local / docker
+ *                   / e2b / …) and any long-running services in it.
+ *   - ``compute`` — delegate the sandbox lifecycle to an {@link IComputeClient}
+ *                   instead of spawning ``omni serve`` here. Two impls exist:
+ *                   ``PlatformClient`` (omni-platform delegation) and
+ *                   ``RemoteElectronComputeClient`` (computer-as-sandbox: the
+ *                   sandbox runs on a laptop the user owns, driven over the
+ *                   cloud↔laptop reverse-RPC WS). Both connect to a remote
+ *                   ``omni serve`` rather than a local child process.
  */
-export type AgentProcessMode = 'serve' | 'platform';
+export type AgentProcessMode = 'serve' | 'compute';
 
 /**
  * How one source for the sandbox workspace should be seeded. Mirrors
@@ -111,14 +114,27 @@ export type AgentProcessStartArg = {
    * its own state dir since there's no project workspace on disk.
    */
   workspaceDir?: string;
-  /** Platform mode: agent slug for the platform's policy resolution. */
+  /** Compute mode: agent slug for the platform's policy resolution. */
   agentSlug?: string;
-  /** Platform mode: domain slug override. */
+  /** Compute mode: domain slug override. */
   domain?: string;
-  /** Platform mode: pre-synced share name (skips the one-shot upload). */
+  /** Compute mode: pre-synced share name (skips the one-shot upload). */
   preSyncedShareName?: string;
-  /** Platform mode: git-remote URL the platform container clones. */
+  /** Compute mode: git-remote URL the remote container clones. */
   gitRepo?: { url: string; branch?: string };
+  /**
+   * Local-compute (computer-as-sandbox) extras forwarded to the
+   * `IComputeClient.startSession` extras param so the laptop's local
+   * `ProcessManager` knows what profile / env / workspace to spawn against.
+   * Ignored by `PlatformClient`.
+   */
+  localComputeExtras?: {
+    sessionId?: string;
+    profileName?: string;
+    workspaceDir?: string;
+    projectId?: string;
+    env?: Record<string, string>;
+  };
   /**
    * `{ envVarName: token }` for private git remotes, merged into the spawned
    * `omni serve` process env. The matching env var *name* is referenced by each
@@ -127,6 +143,14 @@ export type AgentProcessStartArg = {
    * model/MCP secrets are injected.
    */
   gitTokenEnv?: Record<string, string>;
+  /**
+   * Explicit profile file path, bypassing name-based resolution. Set by the
+   * cloud for `local:<machineId>` (computer-as-sandbox) sessions: the launcher
+   * writes a per-session `host_bridge` profile (pointing `omni serve`'s sandbox
+   * at the user's laptop via the relay) and passes its path here. When set,
+   * `profileName` is only used for labelling.
+   */
+  explicitProfilePath?: string;
 };
 
 export type FetchFn = typeof globalThis.fetch;
@@ -291,9 +315,18 @@ export class AgentProcess {
   private jsonEmitted = false;
   private lastStartArg: AgentProcessStartArg | null = null;
   private fetchFn: FetchFn;
-  private platformClient: IComputeClient | null = null;
-  private platformSessionId: string | null = null;
+  private computeClient: IComputeClient | null = null;
+  private computeSessionId: string | null = null;
   private getExtraEnv?: () => Record<string, string> | Promise<Record<string, string>>;
+  /**
+   * Children we deliberately killed via {@link killProcess} (SIGTERM → SIGKILL).
+   * Their late `close` events should NOT flip status to `error("signal SIGKILL")`
+   * — that's what the user asked for. Without this guard the late close from a
+   * killed child can land AFTER a new child has been spawned by `start()` and
+   * hijack the new process's status with a stale SIGKILL message.
+   * WeakSet so the entry GCs with the ChildProcess.
+   */
+  private intentionallyKilled: WeakSet<ChildProcess> = new WeakSet();
 
   constructor(opts: {
     mode: AgentProcessMode;
@@ -301,7 +334,7 @@ export class AgentProcess {
     ipcRawOutput: (data: string) => void;
     onStatusChange: (status: WithTimestamp<AgentProcessStatus>) => void;
     fetchFn?: FetchFn;
-    platformClient?: IComputeClient;
+    computeClient?: IComputeClient;
     /**
      * Extra env merged into the spawned `omni serve` (serve mode), evaluated
      * per start. Cloud uses this to inject a fresh per-tenant
@@ -315,7 +348,7 @@ export class AgentProcess {
     this.ipcRawOutput = opts.ipcRawOutput;
     this.onStatusChange = opts.onStatusChange;
     this.fetchFn = opts.fetchFn ?? globalThis.fetch;
-    this.platformClient = opts.platformClient ?? null;
+    this.computeClient = opts.computeClient ?? null;
     this.getExtraEnv = opts.getExtraEnv;
     this.status = { type: 'uninitialized', timestamp: Date.now() };
     this.log = new SimpleLogger((entry) => {
@@ -336,8 +369,8 @@ export class AgentProcess {
     this.lastStartArg = arg;
     this.updateStatus({ type: 'starting' });
 
-    if (this.mode === 'platform') {
-      await this.startPlatformSession(arg);
+    if (this.mode === 'compute') {
+      await this.startComputeSession(arg);
       return;
     }
 
@@ -345,12 +378,12 @@ export class AgentProcess {
   };
 
   stop = async (): Promise<void> => {
-    if (this.mode === 'platform') {
+    if (this.mode === 'compute') {
       this.updateStatus({ type: 'stopping' });
-      if (this.platformSessionId && this.platformClient) {
-        const sessionId = this.platformSessionId;
+      if (this.computeSessionId && this.computeClient) {
+        const sessionId = this.computeSessionId;
         try {
-          await this.platformClient.stopSession(sessionId);
+          await this.computeClient.stopSession(sessionId);
         } catch {
           // best-effort cleanup
         }
@@ -366,7 +399,7 @@ export class AgentProcess {
         ) {
           try {
             this.ipcRawOutput('Finalizing workspace download...\r\n');
-            const { downloadSasUrl } = await this.platformClient.finalizeWorkspace(sessionId);
+            const { downloadSasUrl } = await this.computeClient.finalizeWorkspace(sessionId);
             await downloadWorkspace(this.lastStartArg.workspaceDir, downloadSasUrl, this.fetchFn, (msg) =>
               this.ipcRawOutput(`${msg}\r\n`)
             );
@@ -376,7 +409,7 @@ export class AgentProcess {
           }
         }
 
-        this.platformSessionId = null;
+        this.computeSessionId = null;
       }
       this.updateStatus({ type: 'exited' });
       return;
@@ -436,8 +469,8 @@ export class AgentProcess {
    * stop+relaunch.
    */
   switchSandbox = async (profileName: string): Promise<SandboxSwitchResult> => {
-    if (this.mode === 'platform') {
-      return { ok: false, fallback: true, reason: 'platform mode does not support in-place sandbox switch' };
+    if (this.mode === 'compute') {
+      return { ok: false, fallback: true, reason: 'compute mode does not support in-place sandbox switch' };
     }
     if (this.status.type !== 'running' && this.status.type !== 'connecting') {
       return { ok: false, fallback: true, reason: 'sandbox is not running' };
@@ -514,8 +547,8 @@ export class AgentProcess {
     fn: 'sandbox.pause' | 'sandbox.unpause',
     intendedPaused: boolean
   ): Promise<SandboxPauseResult> => {
-    if (this.mode === 'platform') {
-      return { ok: false, supported: false, reason: 'platform mode does not implement pause yet' };
+    if (this.mode === 'compute') {
+      return { ok: false, supported: false, reason: 'compute mode does not implement pause yet' };
     }
     if (this.status.type !== 'running' && this.status.type !== 'connecting') {
       return { ok: false, supported: false, reason: 'sandbox is not running' };
@@ -548,15 +581,36 @@ export class AgentProcess {
   // --- Serve mode ---
 
   private startServeSession = async (arg: AgentProcessStartArg): Promise<void> => {
-    // Every local-* source must exist on disk before we shell out.
+    // Every local-* source must exist on disk before we shell out. Last-ditch
+    // mkdir before the existence check — `ProcessManager.ensureWorkspaceDir`
+    // already ran but may have failed silently (in which case it logged a
+    // warning). If THIS mkdir also fails, surface the underlying error in the
+    // status message so the renderer banner is debuggable, instead of the
+    // generic "directory not found".
     for (const s of arg.sources) {
       if (s.kind === 'local' || s.kind === 'local-git') {
         if (!(await isDirectory(s.workspaceDir))) {
-          this.updateStatus({
-            type: 'error',
-            error: { message: `Workspace directory not found: ${s.workspaceDir} (source ${s.mountName})` },
-          });
-          return;
+          try {
+            const { mkdir } = await import('node:fs/promises');
+            await mkdir(s.workspaceDir, { recursive: true });
+          } catch (mkErr) {
+            this.updateStatus({
+              type: 'error',
+              error: {
+                message:
+                  `Workspace directory not found: ${s.workspaceDir} (source ${s.mountName}) ` +
+                  `— mkdir failed: ${(mkErr as Error).message}`,
+              },
+            });
+            return;
+          }
+          if (!(await isDirectory(s.workspaceDir))) {
+            this.updateStatus({
+              type: 'error',
+              error: { message: `Workspace directory not found: ${s.workspaceDir} (source ${s.mountName})` },
+            });
+            return;
+          }
         }
       }
     }
@@ -570,7 +624,11 @@ export class AgentProcess {
       return;
     }
 
-    const resolved = resolveProfile(arg.profileName);
+    // Cloud computer-as-sandbox: a per-session `host_bridge` profile written by
+    // the launcher, used verbatim. Otherwise resolve by name through the chain.
+    const resolved: ResolvedProfile = arg.explicitProfilePath
+      ? { kind: 'file', path: arg.explicitProfilePath }
+      : resolveProfile(arg.profileName);
     if (resolved.kind === 'missing') {
       this.updateStatus({
         type: 'error',
@@ -681,14 +739,44 @@ export class AgentProcess {
       child.stdout.on('data', this.handleStdout);
       child.stderr.on('data', this.handleStderr);
       child.on('error', (error: Error) => {
-        if (this.childProcess && this.childProcess !== child) {
+        // Same guards as the `close` handler — don't hijack a newer spawn
+        // or an intentional kill with a stale spawn-failure status.
+        if (this.childProcess !== null && this.childProcess !== child) {
+          return;
+        }
+        if (this.intentionallyKilled.has(child)) {
           return;
         }
         this.childProcess = null;
         this.updateStatus({ type: 'error', error: { message: error.message } });
       });
       child.on('close', (exitCode, signal) => {
-        if (this.childProcess && this.childProcess !== child) {
+        // A killed-child late close event must not blow away the status of a
+        // newer process that `start()` may have spawned in the meantime. Two
+        // independent checks:
+        //   1. If childProcess points elsewhere (a newer spawn took over), the
+        //      close belongs to an OLD child — ignore.
+        //   2. If we intentionally killed this child via killProcess(), the
+        //      next status was the caller's responsibility (`stopping` →
+        //      `exited`), and the SIGTERM/SIGKILL signal lines are noise.
+        if (this.childProcess !== null && this.childProcess !== child) {
+          return;
+        }
+        if (this.intentionallyKilled.has(child)) {
+          this.intentionallyKilled.delete(child);
+          // Only clear childProcess if it still points at THIS child — a
+          // concurrent start may have already assigned a new one.
+          if (this.childProcess === child) {
+            this.childProcess = null;
+          }
+          // Don't touch status: stop()/exit() already set it to 'exited' or
+          // the caller transitioned to 'starting' for the replacement.
+          // Still push snapshot to blob for durability of the killed session.
+          if (arg.sessionId) {
+            void getSnapshotStore()
+              .push(arg.sessionId, snapshotDir)
+              .catch((err) => console.error('[snapshot-blob] push failed:', err));
+          }
           return;
         }
         this.childProcess = null;
@@ -727,21 +815,27 @@ export class AgentProcess {
     }
   };
 
-  // --- Platform mode (deferred refactor; see AgentProcessMode docs) ---
+  // --- Compute mode (IComputeClient-backed: PlatformClient or
+  //     RemoteElectronComputeClient; see AgentProcessMode docs) ---
 
-  private startPlatformSession = async (arg: AgentProcessStartArg): Promise<void> => {
-    if (!this.platformClient) {
-      this.updateStatus({ type: 'error', error: { message: 'Platform client not configured' } });
+  private startComputeSession = async (arg: AgentProcessStartArg): Promise<void> => {
+    if (!this.computeClient) {
+      this.updateStatus({ type: 'error', error: { message: 'Compute client not configured' } });
       return;
     }
 
     const agentSlug = arg.agentSlug ?? 'omni_code';
 
     try {
-      this.log.info(c.cyan(`Requesting sandbox from platform (agent: ${agentSlug})...\r\n`));
+      this.log.info(c.cyan(`Requesting sandbox from compute backend (agent: ${agentSlug})...\r\n`));
 
-      const session = await this.platformClient.startSession(agentSlug, arg.domain, arg.gitRepo);
-      this.platformSessionId = session.sessionId;
+      const session = await this.computeClient.startSession(
+        agentSlug,
+        arg.domain,
+        arg.gitRepo,
+        arg.localComputeExtras
+      );
+      this.computeSessionId = session.sessionId;
 
       if (arg.gitRepo) {
         this.log.info(
@@ -758,13 +852,22 @@ export class AgentProcess {
       this.log.info(c.cyan(`Session ${session.sessionId} created, waiting for container...\r\n`));
       this.updateStatus({ type: 'connecting', data: { uiUrl: '' } });
 
-      const ready = await this.platformClient.waitForSession(session.sessionId);
+      const ready = await this.computeClient.waitForSession(session.sessionId);
       if (this.isStopping()) {
         return;
       }
 
       const wsUrl = ready.websocketUrl!;
-      let uiUrl = wsUrl.replace(/^wss?:/, 'https:').replace(/\/ws$/, '');
+      // Derive the UI/HTTP origin from the WS URL by mapping the scheme, NOT by
+      // force-rewriting to ``https:``. ``PlatformClient`` returns a TLS gateway
+      // (``wss://`` → ``https://``); ``RemoteElectronComputeClient`` returns the
+      // laptop's plain-HTTP loopback (``ws://`` → ``http://``). Forcing https on
+      // the latter made the readiness HTTP probe fail forever (TLS handshake
+      // against a plain-HTTP server).
+      let uiUrl = wsUrl
+        .replace(/^wss:/i, 'https:')
+        .replace(/^ws:/i, 'http:')
+        .replace(/\/ws$/, '');
       if (ready.authToken) {
         const sep = uiUrl.includes('?') ? '&' : '?';
         uiUrl = `${uiUrl}${sep}token=${encodeURIComponent(ready.authToken)}`;
@@ -774,14 +877,55 @@ export class AgentProcess {
         wsUrl,
         containerId: ready.containerId,
       };
+
+      // When the compute backend's ``waitForSession`` already guarantees the
+      // sandbox is serving, skip our own HTTP/WS readiness probe.
+      // ``RemoteElectronComputeClient`` only reports ``active`` once the
+      // laptop's OWN ``AgentProcess`` reached ``running`` (its local readiness
+      // probe passed), and the loopback ``wsUrl`` it returns isn't reachable
+      // from the cloud anyway — re-probing it here is both redundant and wrong
+      // (it's what hung the session at "connecting"). The proxy-rewriter
+      // relabels these URLs to ``/proxy/local/<machineId>/<sessionId>/...`` for
+      // the renderer downstream.
+      if (this.computeClient.confirmsReadiness) {
+        this.updateStatus({ type: 'running', data });
+        this.log.info(c.green.bold('Compute sandbox started\r\n'));
+        return;
+      }
+
       this.updateStatus({ type: 'connecting', data });
-      this.log.info(c.cyan('Waiting for platform container services to accept connections...\r\n'));
+      this.log.info(c.cyan('Waiting for compute backend services to accept connections...\r\n'));
       await this.waitForReady(data);
     } catch (error) {
       if (this.isStopping()) {
         return;
       }
-      this.updateStatus({ type: 'error', error: { message: (error as Error).message } });
+      // Surface structured ComputeError envelopes (host-offline, machine-at-
+      // capacity) so the renderer can show the right banner. ComputeError is
+      // shaped { kind, machineId, machineLabel, extras } — `errorEnvelope`
+      // splats those onto the AgentProcessStatus error field.
+      type ErrorVariant = Extract<AgentProcessStatus, { type: 'error' }>;
+      const errorEnvelope: ErrorVariant['error'] = {
+        message: (error as Error).message,
+      };
+      const ce = error as {
+        kind?: 'host-offline' | 'machine-at-capacity' | 'machine-removed';
+        machineId?: string;
+        machineLabel?: string;
+        extras?: Record<string, unknown>;
+      };
+      if (ce.kind === 'host-offline' || ce.kind === 'machine-at-capacity') {
+        errorEnvelope.kind = ce.kind;
+        if (ce.machineId) errorEnvelope.machineId = ce.machineId;
+        if (ce.machineLabel) errorEnvelope.machineLabel = ce.machineLabel;
+        if (typeof ce.extras?.['maxSessions'] === 'number') {
+          errorEnvelope.maxSessions = ce.extras['maxSessions'] as number;
+        }
+        if (typeof ce.extras?.['currentSessions'] === 'number') {
+          errorEnvelope.currentSessions = ce.extras['currentSessions'] as number;
+        }
+      }
+      this.updateStatus({ type: 'error', error: errorEnvelope });
     }
   };
 
@@ -865,7 +1009,7 @@ export class AgentProcess {
   // -- Readiness polling --
 
   private waitForReady = async (data: AgentProcessData): Promise<void> => {
-    const maxAttempts = this.mode === 'platform' ? 120 : 120;
+    const maxAttempts = 120;
 
     const checkHttp = async (url: string): Promise<boolean> => {
       try {
@@ -904,10 +1048,10 @@ export class AgentProcess {
       }
     };
 
-    // Platform mode requires the auth token on WS connections; carry it
-    // through from the uiUrl query.
+    // Compute mode (PlatformClient) requires the auth token on WS connections;
+    // carry it through from the uiUrl query.
     let wsCheckUrl = data.wsUrl;
-    if (wsCheckUrl && this.mode === 'platform') {
+    if (wsCheckUrl && this.mode === 'compute') {
       try {
         const uiParsed = new URL(data.uiUrl);
         const token = uiParsed.searchParams.get('token');
@@ -932,7 +1076,7 @@ export class AgentProcess {
           return;
         }
         this.updateStatus({ type: 'running', data });
-        const label = this.mode === 'platform' ? 'Platform sandbox' : 'Sandbox';
+        const label = this.mode === 'compute' ? 'Compute sandbox' : 'Sandbox';
         this.log.info(c.green.bold(`${label} started\r\n`));
         return;
       }
@@ -950,16 +1094,33 @@ export class AgentProcess {
 
   // -- Process management --
 
-  private killProcess = (timeout = 10_000): Promise<void> => {
+  /**
+   * SIGTERM, then SIGKILL after the grace period.
+   *
+   * The grace was 10s; uvicorn under live WS connections regularly needs
+   * 15-20s to drain (closes every client socket gracefully before
+   * shutting down). 30s leaves comfortable headroom without making the
+   * worst case feel unbounded.
+   *
+   * The child is added to {@link intentionallyKilled} so its `close`
+   * event handler skips the `error("signal SIGKILL")` status update —
+   * the caller is responsible for whatever status comes next (either
+   * `exited` from stop()/exit(), or `starting` from a back-to-back
+   * rebuild's start()).
+   */
+  private killProcess = (timeout = 30_000): Promise<void> => {
     const child = this.childProcess;
     if (!child || child.exitCode !== null) {
       this.childProcess = null;
       return Promise.resolve();
     }
+    this.intentionallyKilled.add(child);
     return new Promise<void>((resolve) => {
       const onExit = (): void => {
         clearTimeout(timer);
-        this.childProcess = null;
+        if (this.childProcess === child) {
+          this.childProcess = null;
+        }
         resolve();
       };
       child.once('close', onExit);
@@ -967,7 +1128,9 @@ export class AgentProcess {
       const timer = setTimeout(() => {
         child.removeListener('close', onExit);
         child.kill('SIGKILL');
-        this.childProcess = null;
+        if (this.childProcess === child) {
+          this.childProcess = null;
+        }
         resolve();
       }, timeout);
     });

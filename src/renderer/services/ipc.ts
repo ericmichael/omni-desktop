@@ -54,7 +54,33 @@ export const serverWsOrigin = (): string => {
   return origin.replace(/^http(s?):/i, 'ws$1:');
 };
 
-const createTransport = (): { emitter: TransportEmitter; ipc: TransportListener } => {
+/**
+ * Bundled transport surface returned by {@link createTransport}.
+ *
+ * - `emitter` is the renderer's invoke channel. In standalone Electron it is
+ *   `ElectronTransportEmitter` (Electron IPC → main). In browser/server mode
+ *   it is `WsTransportEmitter` (renderer → server WS). In cloud-linked
+ *   Electron it routes invokes to the cloud WS — so it must NOT be used for
+ *   channels handled only in local main (cloud-link flow, machine identity,
+ *   shell dialogs, etc.); those use {@link localEmitter} instead.
+ * - `localEmitter` is Electron IPC → local main. In cloud-linked Electron it
+ *   is a separate `ElectronTransportEmitter`; in every other mode it equals
+ *   `emitter`. Callers don't need to branch — they pick the right emitter
+ *   based on which side handles the channel.
+ * - `ipc` listens for server-pushed events (main → renderer / cloud → renderer).
+ * - `wsEmitter` is the underlying WsTransportEmitter when the active
+ *   transport is WS-backed (browser server mode OR cloud-linked Electron);
+ *   `null` in standalone Electron. Exposed so callers can register
+ *   reverse-RPC handlers + connect listeners.
+ */
+type TransportBundle = {
+  emitter: TransportEmitter;
+  localEmitter: TransportEmitter;
+  ipc: TransportListener;
+  wsEmitter: WsTransportEmitter | null;
+};
+
+const createTransport = (): TransportBundle => {
   // Electron + cloud-linked → bootstrap a WS against the cloud launcher.
   // ws-token fetching is delegated to main via cloud:get-ws-token because
   // the renderer's cross-origin GET + Bearer would trip CORS preflight and
@@ -70,21 +96,28 @@ const createTransport = (): { emitter: TransportEmitter; ipc: TransportListener 
     });
     return {
       emitter: wsEmitter,
+      localEmitter: electronEmitter,
       ipc: new WsTransportListener(wsEmitter),
+      wsEmitter,
     };
   }
 
   if (isElectron) {
+    const electronEmitter = new ElectronTransportEmitter();
     return {
-      emitter: new ElectronTransportEmitter(),
+      emitter: electronEmitter,
+      localEmitter: electronEmitter,
       ipc: new ElectronTransportListener(),
+      wsEmitter: null,
     };
   }
 
   const wsEmitter = new WsTransportEmitter();
   return {
     emitter: wsEmitter,
+    localEmitter: wsEmitter,
     ipc: new WsTransportListener(wsEmitter),
+    wsEmitter,
   };
 };
 
@@ -101,3 +134,20 @@ export const ipc: TransportListener = transport.ipc;
  * In Electron: backed by IPC. In browser: backed by WebSocket.
  */
 export const emitter: TransportEmitter = transport.emitter;
+
+/**
+ * Electron-IPC-only emitter for channels that ALWAYS resolve in local main —
+ * cloud-link handlers (`cloud:link`, `cloud:get-ws-token`, `cloud:get-machine-
+ * identity`, `cloud:set-machine-label`), local file dialogs, etc. In
+ * standalone Electron and browser/server mode this is the same as
+ * {@link emitter}; in cloud-linked Electron it is the local Electron IPC and
+ * therefore does NOT route over the cloud WS.
+ */
+export const localEmitter: TransportEmitter = transport.localEmitter;
+
+/**
+ * The underlying WS transport when active (browser server mode + cloud-linked
+ * Electron); `null` in standalone Electron. Exposed so the compute layer can
+ * register reverse-RPC handlers and replay setup work on reconnect.
+ */
+export const wsEmitter: import('@/renderer/transport/ws-transport').WsTransportEmitter | null = transport.wsEmitter;

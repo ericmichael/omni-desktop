@@ -7,6 +7,7 @@ import { getArtifactsDir, getContainerArtifactsDir, profileRunsOnHost } from '@/
 import { buildSessionVariables } from '@/lib/client-tools';
 import { SessionStartupShell } from '@/renderer/common/SessionStartupShell';
 import { Button, Spinner } from '@/renderer/ds';
+import { SessionStatusBanner } from '@/renderer/features/Banner/SessionStatusBanner';
 import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
@@ -15,6 +16,7 @@ import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { buildProfileLabel } from '@/renderer/omniagents-ui/sandbox-label';
 import { configApi } from '@/renderer/services/config';
 import { emitter, serverOrigin } from '@/renderer/services/ipc';
+import { $machines } from '@/renderer/services/machines';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { AppId } from '@/shared/app-registry';
 import type { CodeTab, CodeTabId, TicketId } from '@/shared/types';
@@ -279,7 +281,8 @@ export const CodeTabContent = memo(
       },
       [tab.id]
     );
-    const sandboxLabel = useMemo(() => buildProfileLabel(profileName), [profileName]);
+    const machines = useStore($machines);
+    const sandboxLabel = useMemo(() => buildProfileLabel(profileName, machines), [profileName, machines]);
 
     const [isEnterprise, setIsEnterprise] = useState(false);
     useEffect(() => {
@@ -288,9 +291,9 @@ export const CodeTabContent = memo(
     const sandboxOptions = useMemo(
       () => getAvailableProfileNames({ isEnterprise, available: store.availableSandboxProfiles }).map((name) => ({
         value: name,
-        label: getProfileMenuLabel(name),
+        label: getProfileMenuLabel(name, machines),
       })),
-      [isEnterprise, store.availableSandboxProfiles]
+      [isEnterprise, store.availableSandboxProfiles, machines]
     );
 
     // What the agent should treat as its workspace root. For host profiles
@@ -422,6 +425,7 @@ export const CodeTabContent = memo(
 
     return (
       <div className={mergeClasses(styles.fullSizeRelative, !isVisible && styles.hidden)}>
+        <SessionStatusBanner status={sandboxStatus} />
         {sandboxUrls ? (
           <CodeRunningView
             sandboxUrls={sandboxUrls}

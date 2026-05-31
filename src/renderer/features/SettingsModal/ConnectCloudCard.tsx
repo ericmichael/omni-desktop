@@ -18,13 +18,12 @@
  */
 
 import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
 import { Body1, Button, Caption1, Card, FormField, Input, Spinner } from '@/renderer/ds';
-import { emitter, ipc, isElectron } from '@/renderer/services/ipc';
-import { persistedStoreApi } from '@/renderer/services/store';
-import type { CloudDeviceCode } from '@/shared/types';
+import { MachineIdentityChip } from '@/renderer/features/SettingsModal/MachineIdentityChip';
+import { ipc, isElectron, localEmitter } from '@/renderer/services/ipc';
+import type { CloudDeviceCode, CloudStatus } from '@/shared/types';
 
 const useStyles = makeStyles({
   card: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
@@ -54,14 +53,23 @@ const useStyles = makeStyles({
 
 export const ConnectCloudCard = memo(() => {
   const styles = useStyles();
-  const storeData = useStore(persistedStoreApi.$atom);
-  const cloudMode = storeData.cloudMode;
 
   const [url, setUrl] = useState('');
   const [connecting, setConnecting] = useState(false);
   const [deviceCode, setDeviceCode] = useState<CloudDeviceCode | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [restarting, setRestarting] = useState(false);
+
+  // Link state is a LOCAL-main concept (the `cloudMode` electron-store flag).
+  // It must NOT be read from `persistedStoreApi`/`$store` — in cloud-linked
+  // mode that mirror reflects the CLOUD's store, which has no `cloudMode`, so
+  // the card would always look disconnected and the Disconnect button would
+  // never render. Ask local main directly via `cloud:status`.
+  const [cloudStatus, setCloudStatus] = useState<CloudStatus | null>(null);
+  useEffect(() => {
+    void localEmitter.invoke('cloud:status').then(setCloudStatus);
+  }, []);
+  const cloudMode = cloudStatus?.connected ? cloudStatus : null;
 
   // Main process emits the AAD device code mid-flow; show it while polling.
   useEffect(() => ipc.on('cloud:device-code', setDeviceCode), []);
@@ -71,7 +79,11 @@ export const ConnectCloudCard = memo(() => {
     setError(null);
     setDeviceCode(null);
     try {
-      await emitter.invoke('cloud:link', url);
+      // cloud:link / cloud:unlink are handled in LOCAL main (they mutate the
+      // electron-store cloudMode flag + secret store). They must NOT route over
+      // the cloud WS — once linked, `emitter` points at the cloud, so an unlink
+      // sent there would never reach local main. Always use `localEmitter`.
+      await localEmitter.invoke('cloud:link', url);
       // Main relaunches the app on a short delay; show a transient message
       // so the user knows what's happening when the window blanks.
       setRestarting(true);
@@ -86,7 +98,7 @@ export const ConnectCloudCard = memo(() => {
   const onDisconnect = useCallback(async () => {
     setError(null);
     try {
-      await emitter.invoke('cloud:unlink');
+      await localEmitter.invoke('cloud:unlink');
       setRestarting(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to disconnect');
@@ -116,6 +128,12 @@ export const ConnectCloudCard = memo(() => {
                   ? `Signed in as ${cloudMode.account.name ?? cloudMode.account.email ?? cloudMode.account.oid} · sessions sync to the cloud Postgres`
                   : 'Sign in with Microsoft Entra ID to sync your chat sessions, projects, and tickets with the deployed launcher (and the web UI).')}
             </Caption1>
+            {/* The chip is how the cloud identifies this device — surface it
+                regardless of link state so the user knows their machine id
+                before connecting and can verify it's stable across reboots. */}
+            <div style={{ marginTop: 6 }}>
+              <MachineIdentityChip />
+            </div>
           </div>
           {cloudMode ? (
             <Button size="sm" variant="ghost" onClick={onDisconnect}>

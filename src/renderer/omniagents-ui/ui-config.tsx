@@ -26,9 +26,21 @@ const getProxyPrefix = (pathname: string): string | null => {
   if (!pathname.startsWith('/proxy/')) {
     return null;
   }
-  const parts = pathname.split('/').filter(Boolean);
+  const parts = pathname.split('/').filter(Boolean); // ['proxy', <name>, ...]
   if (parts.length < 2) {
     return null;
+  }
+  // Local-tunnel paths (computer-as-sandbox) carry the machine + session id in
+  // the prefix itself: `/proxy/local/<machineId>/<sessionId>/...`. The upstream
+  // is served under all four segments and the cloud route is
+  // `/proxy/local/:machineId/:sessionId/*`, so the prefix MUST include them —
+  // otherwise `resolvePath('/ws')` collapses to `/proxy/local/ws`, which no
+  // route matches. Every other proxy is the flat `/proxy/<name>/...` shape.
+  if (parts[1] === 'local') {
+    if (parts.length < 4) {
+      return null;
+    }
+    return `/proxy/local/${parts[2]}/${parts[3]}`;
   }
   return `/proxy/${parts[1]}`;
 };

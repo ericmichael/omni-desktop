@@ -4,7 +4,10 @@ import { atom } from 'nanostores';
 import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig } from '@/lib/agent-config';
 import { migrateLayoutMode } from '@/lib/store-init';
 import { loadTeams, loadWhoami } from '@/renderer/features/Teams/state';
+import { initComputeBridge } from '@/renderer/services/compute';
 import { emitter, ipc } from '@/renderer/services/ipc';
+import { initMachines } from '@/renderer/services/machines';
+import { initTunnelBridge } from '@/renderer/services/tunnel-bridge';
 import type { OperatingSystem, StoreData } from '@/shared/types';
 
 const getDefaults = (): StoreData => ({
@@ -167,6 +170,19 @@ const init = async () => {
   // team switcher work. No-op (null/empty) in single-user/local mode.
   void loadWhoami();
   void loadTeams();
+
+  // Computer-as-sandbox: read this Electron's stable identity and (when
+  // cloud-linked) register it with the cloud so it appears in the picker.
+  // No-op in browser/server mode.
+  void initMachines();
+
+  // Bridge the cloud's compute reverse-RPCs through to local Electron main.
+  // No-op outside cloud-linked Electron.
+  initComputeBridge();
+
+  // Pipe local omni-serve tunnel frames from main back up to the cloud.
+  // No-op outside cloud-linked Electron.
+  initTunnelBridge();
 
   $initialized.set(true);
 };

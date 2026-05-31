@@ -5,6 +5,7 @@ import {
   createPgListener,
   createPgPool,
   loadLegacyUserSettings,
+  MachinesRepo,
   migrateFromJson,
   PgProjectsRepo,
   runPgMigrations,
@@ -31,6 +32,7 @@ import { migrateLegacyPagesToConfigDir } from '@/main/pages-relocation-migration
 import { PlatformClient } from '@/main/platform-client';
 import { createPlatformClient, isEnterpriseBuild, PLATFORM_URL } from '@/main/platform-mode';
 import { ProcessManager, registerProcessHandlers } from '@/main/process-manager';
+import { HostBridgePreparer } from '@/server/host-bridge-preparer';
 import { backfillProjectConfigs } from '@/main/project-config-backfill';
 import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
 import { registerProjectHandlers } from '@/main/project-handlers';
@@ -55,6 +57,7 @@ import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
 import { requireRole } from '@/server/authz';
 import { AzureFilesArtifactStore } from '@/server/azure-artifact-store';
 import { ServerIpcAdapter } from '@/server/ipc-adapter';
+import { MachineRegistry } from '@/server/machine-registry';
 import { MCP_PROJECTS_PATH } from '@/server/mcp-http';
 import { CODEX_REFRESH_PATH } from '@/server/codex-refresh-http';
 import { CompositeSettingsStore } from '@/server/composite-settings-store';
@@ -302,6 +305,91 @@ export const wireGlobalHandlers = async (arg: {
   // the dormant control-plane RLS; isolation is app-level (scoped by principal).
   const controlPlanePool = pgAdminPool ?? pgPool;
   const controlPlane = controlPlanePool ? new ControlPlaneRepo(controlPlanePool) : undefined;
+  // Per-principal machines registry — Electrons that registered as
+  // computer-as-sandbox compute targets. Same admin-pool model as the
+  // control plane.
+  const machinesRepo = controlPlanePool ? new MachinesRepo(controlPlanePool) : undefined;
+  // Sync cache of `local:<machineId>` picker entries per principal, fed by
+  // `broadcastMachines` (which has the async summaries) and read sync by
+  // `getStoreSnapshot`. The single per-tenant `HostBridgePreparer` handles all
+  // machines, so there is no per-machine client map to maintain.
+  const localMachineIdsByPrincipal = new Map<string, string[]>();
+  // Push a fresh machine summary list to every session of *principal* whenever
+  // anything changes (bind, release, rename, remove). Hoisted so the registry
+  // can call into it without knowing about WsHandler. Also nudges the store
+  // snapshot so the sandbox picker reflects the new machine immediately.
+  const broadcastMachines = async (principal: string): Promise<void> => {
+    if (!machineRegistry) return;
+    try {
+      const summaries = await machineRegistry.listForPrincipal(principal);
+      // Renderer cares about *its* view; isSelf is recomputed there since the
+      // caller machineId depends on which Electron is listening.
+      wsHandler.sendToPrincipalInTeam(principal, principal, 'machine:list-changed', summaries);
+      localMachineIdsByPrincipal.set(principal, summaries.map((m) => m.machineId));
+      // Replay store snapshot so availableSandboxProfiles + picker refresh.
+      // Iterate every tenant instance for the principal (across teams).
+      for (const [key] of tenants) {
+        if (!key.endsWith(`::${principal}`) && key !== principal) continue;
+        const sep = key.indexOf('::');
+        const teamId = sep >= 0 ? key.slice(0, sep) : key;
+        sendSnapshot(teamId, principal);
+      }
+    } catch (err) {
+      console.error('[machines] broadcastMachines failed:', err);
+    }
+  };
+  /**
+   * Adoption flow (Phase 6). When a machine reconnects, ask the laptop's
+   * Electron which of its previously-anchored sessions are still running.
+   * For each adopted session, push a fresh `agent-process:status`
+   * `running` envelope so the renderer flips out of the host-offline
+   * banner without restarting omni-serve. For sessions the laptop no
+   * longer knows about, push an error so the renderer can prompt restart.
+   */
+  const adoptSessionsOnReconnect = async (machineId: string, principal: string): Promise<void> => {
+    if (!machineRegistry) return;
+    // host_bridge model: the agent runs in the CLOUD (it survived the laptop's
+    // disconnect) — only the sandbox exec channel to the laptop broke. On
+    // reconnect, rebuild each local session anchored to this machine so the
+    // channel is re-established (fresh `omni sandbox-host` + `omni serve` with a
+    // new host_bridge profile). Chat history survives (PgSessionStorage) and the
+    // workspace lives on the laptop's disk, so it's a clean resume. The cloud's
+    // per-tenant ProcessManager is the source of truth for which sessions are on
+    // this machine (the registry's anchors are dropped while a machine is
+    // offline; the ProcessManager's map persists).
+    for (const [key, t] of tenants) {
+      if (!key.endsWith(`::${principal}`) && key !== principal) continue;
+      try {
+        await t.processManager.resumeOnReconnect(machineId);
+      } catch (err) {
+        console.error(`[host-bridge] resumeOnReconnect failed for ${machineId}:`, (err as Error).message);
+      }
+    }
+  };
+
+  // Push a host-offline overlay to every local session on a machine that just
+  // went offline (its laptop WS dropped). The agent keeps running in the cloud;
+  // this only flips the renderer banner. Iterates the principal's tenant(s).
+  const broadcastHostOfflineForPrincipal = (machineId: string, principal: string): void => {
+    for (const [key, t] of tenants) {
+      if (!key.endsWith(`::${principal}`) && key !== principal) continue;
+      try {
+        t.processManager.broadcastHostOffline(machineId);
+      } catch (err) {
+        console.error(`[host-bridge] broadcastHostOffline failed for ${machineId}:`, (err as Error).message);
+      }
+    }
+  };
+
+  const machineRegistry: MachineRegistry | undefined = machinesRepo
+    ? new MachineRegistry(machinesRepo, {
+        onChanged: (p) => void broadcastMachines(p),
+        onMachineOnline: (mid, pid) => void adoptSessionsOnReconnect(mid, pid),
+        onMachineOffline: (mid, pid) => broadcastHostOfflineForPrincipal(mid, pid),
+      })
+    : undefined;
+
+
   // Teams activate under easyauth multi-tenant; PG-without-easyauth is one
   // 'local' team, SQLite/Electron has no teams.
   const teamsEnabled = !!(pgPool && process.env['OMNI_AUTH_MODE'] === 'easyauth');
@@ -448,8 +536,23 @@ export const wireGlobalHandlers = async (arg: {
         : undefined,
       // Cloud with Azure → agents run in a serverless ACI sandbox; host/devbox
       // are not selectable, but the user picks between the fast and desktop
-      // ACI profiles.
-      allowedProfileNames: aciConfigured ? [ACI_PROFILE_NAME, ACI_DESKTOP_PROFILE_NAME] : undefined,
+      // ACI profiles. Local machines (`local:<id>`) are appended to the
+      // allow-list per-tenant when the principal has any registered.
+      allowedProfileNames: aciConfigured
+        ? [ACI_PROFILE_NAME, ACI_DESKTOP_PROFILE_NAME]
+        : undefined,
+      // Computer-as-sandbox: when a machine registry exists (cloud), a
+      // `local:<machineId>` pick spawns `omni serve` HERE with a host_bridge
+      // profile pointing the sandbox at the user's laptop. No registry → the
+      // picker never shows local machines, so the preparer is never invoked.
+      hostBridge: machineRegistry
+        ? new HostBridgePreparer(
+            wsHandler,
+            machineRegistry,
+            configDir,
+            Number.parseInt(process.env['PORT'] ?? '3001', 10)
+          )
+        : undefined,
     });
     // Keep this tenant's platform client in sync with its own credentials.
     // (omni-platform delegation for enterprise-platform builds; the ACI sandbox
@@ -459,6 +562,10 @@ export const wireGlobalHandlers = async (arg: {
     };
     applyPlatformClient();
     settings.onDidAnyChange(() => applyPlatformClient());
+    // Computer-as-sandbox: the per-principal set of `local:<machineId>` picker
+    // entries is derived from the machine registry in `broadcastMachines` (a
+    // sync cache read by `getStoreSnapshot`). The single `HostBridgePreparer`
+    // injected above handles every machine — no per-machine client to refresh.
     // Cloud (ACI): artifacts live inside the workspace
     // (`/workspace/.omni-artifacts/<ticketId>`), which the ACI sandbox already
     // mounts from the workspace Azure Files share. So the control plane reads
@@ -566,15 +673,42 @@ export const wireGlobalHandlers = async (arg: {
         mcpConfig: maskMcpConfig(snapshot.mcpConfig ?? emptyMcpConfig()),
       };
     }
-    // Cloud/ACI: force the picker to `aci` only and make it the selected
-    // default. Computed (not persisted) so it tracks the deployment, not a
-    // stale per-tenant setting. Matches the ProcessManager allowedProfileNames.
+    // Computer-as-sandbox: every registered machine for this principal becomes
+    // a `local:<machineId>` profile entry. The renderer's picker pulls
+    // labels + online status from `$machines` so we only need the id here.
+    const localProfiles: string[] = (localMachineIdsByPrincipal.get(principalId) ?? []).map(
+      (id) => `local:${id}`
+    );
+    // Cloud/ACI: the picker offers the two ACI profiles plus the principal's
+    // own machines. The default is COMPUTED (not blindly persisted) so a stale
+    // value can't leak in — but we HONOR a persisted default that's valid in
+    // this deployment: either ACI profile, or one of the user's registered
+    // machines. Defaulting to `local:<my-laptop>` gives instant exploratory
+    // chats (agent in cloud, sandbox on the laptop — no ACI spin-up). Anything
+    // else (a leftover `host`/`devbox`, or a machine that's since been removed)
+    // falls back to fast ACI.
     if (aciConfigured) {
+      const validDefaults = new Set([ACI_PROFILE_NAME, ACI_DESKTOP_PROFILE_NAME, ...localProfiles]);
+      const persisted = snapshot.defaultProfileName;
+      const effectiveDefault =
+        persisted && validDefaults.has(persisted) ? persisted : ACI_PROFILE_NAME;
       return {
         ...snapshot,
-        defaultProfileName:
-          snapshot.defaultProfileName === ACI_DESKTOP_PROFILE_NAME ? ACI_DESKTOP_PROFILE_NAME : ACI_PROFILE_NAME,
-        availableSandboxProfiles: [ACI_PROFILE_NAME, ACI_DESKTOP_PROFILE_NAME],
+        defaultProfileName: effectiveDefault,
+        availableSandboxProfiles: [
+          ACI_PROFILE_NAME,
+          ACI_DESKTOP_PROFILE_NAME,
+          ...localProfiles,
+        ],
+      };
+    }
+    if (localProfiles.length > 0) {
+      return {
+        ...snapshot,
+        availableSandboxProfiles: [
+          ...(snapshot.availableSandboxProfiles ?? ['host', 'devbox']),
+          ...localProfiles,
+        ],
       };
     }
     return snapshot;
@@ -1091,6 +1225,50 @@ export const wireGlobalHandlers = async (arg: {
   // Teams control plane (cloud only). No-op channels in SQLite/local mode.
   registerTeamHandlers(ipc, controlPlane);
 
+  // ---- Machines (computer-as-sandbox) ----
+  //
+  // Cloud-linked Electrons register themselves on their WS at boot; the cloud
+  // tracks the live WS per machineId so it can dispatch reverse-RPC sandbox
+  // lifecycle calls to the right Electron. PG-backed list survives restarts;
+  // online flag reflects whether a live WS is currently bound. SQLite/local
+  // mode has no registry (the renderer can't see other machines anyway), so
+  // the channels are no-ops returning the empty list.
+  ipc.handle('machine:register', async (e: unknown, info: unknown) => {
+    const c = e as HandlerContext;
+    if (!machineRegistry || !c.ws) {
+      return { accepted: false };
+    }
+    const i = info as { machineId?: string; label?: string; platform?: string };
+    if (!i?.machineId || typeof i.machineId !== 'string') {
+      return { accepted: false };
+    }
+    await machineRegistry.bindFromWs(c.ws, c.principalId, {
+      machineId: i.machineId,
+      label: typeof i.label === 'string' && i.label.trim() ? i.label.trim() : 'Unnamed machine',
+      platform: typeof i.platform === 'string' && i.platform.trim() ? i.platform.trim() : 'unknown',
+    });
+    return { accepted: true };
+  });
+  ipc.handle('machine:list', async (e: unknown) => {
+    const c = e as HandlerContext;
+    if (!machineRegistry) return [];
+    return machineRegistry.listForPrincipal(c.principalId);
+  });
+  ipc.handle('machine:rename', async (e: unknown, machineId: unknown, label: unknown) => {
+    const c = e as HandlerContext;
+    if (!machineRegistry) return [];
+    const id = String(machineId);
+    const next = String(label ?? '').trim() || 'Unnamed machine';
+    await machineRegistry.rename(c.principalId, id, next);
+    return machineRegistry.listForPrincipal(c.principalId);
+  });
+  ipc.handle('machine:remove', async (e: unknown, machineId: unknown) => {
+    const c = e as HandlerContext;
+    if (!machineRegistry) return [];
+    await machineRegistry.remove(c.principalId, String(machineId));
+    return machineRegistry.listForPrincipal(c.principalId);
+  });
+
   // Team-base (shared) agent config editing — admin-gated. A change affects
   // every member, so refresh all local instances of the team and broadcast.
   const teamDefaultsStatus = (s: SettingsStore): import('@/shared/types').TeamDefaultsStatus =>
@@ -1394,6 +1572,8 @@ export const wireGlobalHandlers = async (arg: {
     resolveActiveTeam,
     /** Cloud-only secret store — wires the /api/codex/refresh callback. */
     pgSecret,
+    /** Cloud-only — `server/index.ts` releases the WS binding on close. */
+    machineRegistry,
   };
 };
 
