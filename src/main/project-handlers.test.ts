@@ -30,6 +30,8 @@ const EXPECTED_CHANNELS = [
   'project:read-artifact',
   'project:open-artifact-external',
   'project:get-files-changed',
+  'project:get-code-tab-files-changed',
+  'project:apply-code-tab-source-changes',
   'project:set-pr-review',
   'project:check-merge',
   'project:merge-ticket',
@@ -58,6 +60,8 @@ const makeManager = () => ({
   readArtifact: vi.fn(() => ({ relativePath: '', mimeType: '', textContent: null, size: 0 })),
   openArtifactExternal: vi.fn(),
   getFilesChanged: vi.fn(() => ({ totalFiles: 0, totalAdditions: 0, totalDeletions: 0, hasChanges: false, files: [] })),
+  getCodeTabFilesChanged: vi.fn(() => ({ totalFiles: 0, totalAdditions: 0, totalDeletions: 0, hasChanges: false, files: [] })),
+  applyCodeTabSourceChanges: vi.fn(async () => ({ ok: true, mergeCommitSha: 'apply' })),
   readContext: vi.fn(() => ''),
   writeContext: vi.fn(),
   listProjectFiles: vi.fn(() => []),
@@ -173,6 +177,22 @@ describe('registerProjectHandlers', () => {
     registerProjectHandlers(ipc, () => mgr as never);
     ipc.invoke('project:get-files-changed', 't1', 'src1');
     expect(mgr.getFilesChanged).toHaveBeenCalledWith('t1', 'src1');
+  });
+
+  it('project:get-code-tab-files-changed delegates with tabId + sourceId', () => {
+    const ipc = new StubIpc();
+    const mgr = makeManager();
+    registerProjectHandlers(ipc, () => mgr as never);
+    ipc.invoke('project:get-code-tab-files-changed', 'tab1', 'src1');
+    expect(mgr.getCodeTabFilesChanged).toHaveBeenCalledWith('tab1', 'src1');
+  });
+
+  it('project:apply-code-tab-source-changes delegates with tabId + sourceId', () => {
+    const ipc = new StubIpc();
+    const mgr = makeManager();
+    registerProjectHandlers(ipc, () => mgr as never);
+    ipc.invoke('project:apply-code-tab-source-changes', 'tab1', 'src1');
+    expect(mgr.applyCodeTabSourceChanges).toHaveBeenCalledWith('tab1', 'src1');
   });
 
   it('project:set-pr-review delegates with ticketId + sourceId + review status', () => {

@@ -824,11 +824,11 @@ const CodeSessionHeader = memo(
                 </MenuTrigger>
                 <MenuPopover>
                   <MenuList>
-                    {ticketId && onOpenPanel && (
+                    {onOpenPanel && (
                       <>
-                        <MenuItem onClick={() => onOpenPanel('overview')}>Overview</MenuItem>
-                        <MenuItem onClick={() => onOpenPanel('pr')}>PR</MenuItem>
-                        <MenuItem onClick={() => onOpenPanel('artifacts')}>Artifacts</MenuItem>
+                        {ticketId && <MenuItem onClick={() => onOpenPanel('overview')}>Overview</MenuItem>}
+                        <MenuItem onClick={() => onOpenPanel('pr')}>Changes</MenuItem>
+                        {ticketId && <MenuItem onClick={() => onOpenPanel('artifacts')}>Artifacts</MenuItem>}
                         <MenuDivider />
                       </>
                     )}
@@ -952,7 +952,7 @@ const DeckColumn = memo(
             }
             onClose={() => onClose(tab.id)}
             ticketId={tab.ticketId as TicketId | undefined}
-            onOpenPanel={tab.ticketId ? setActivePanel : undefined}
+            onOpenPanel={tab.ticketId || tab.projectId ? setActivePanel : undefined}
             dragSurfaceProps={listeners}
             dragHandle={
               <button
@@ -968,8 +968,8 @@ const DeckColumn = memo(
           />
           <div className={styles.flex1MinH0Relative}>
             {children}
-            {tab.ticketId && (
-              <TicketPanelOverlay panel={activePanel} ticketId={tab.ticketId as TicketId} onClose={handleClosePanel} />
+            {(tab.ticketId || tab.projectId) && (
+              <TicketPanelOverlay panel={activePanel} ticketId={tab.ticketId as TicketId | undefined} tabId={tab.id} onClose={handleClosePanel} />
             )}
           </div>
         </div>
@@ -1614,7 +1614,7 @@ const CodeSessionPane = memo(
           actions={actions}
           onClose={() => onClose(tab.id)}
           ticketId={tab.ticketId as TicketId | undefined}
-          onOpenPanel={tab.ticketId ? setActivePanel : undefined}
+          onOpenPanel={tab.ticketId || tab.projectId ? setActivePanel : undefined}
           isGlass={isGlass}
         />
         <div className={styles.flex1MinH0Relative}>
@@ -1630,8 +1630,8 @@ const CodeSessionPane = memo(
             onPreviewUrlChange={onPreviewUrlChange}
             isGlass={isGlass}
           />
-          {tab.ticketId && (
-            <TicketPanelOverlay panel={activePanel} ticketId={tab.ticketId as TicketId} onClose={handleClosePanel} />
+          {(tab.ticketId || tab.projectId) && (
+            <TicketPanelOverlay panel={activePanel} ticketId={tab.ticketId as TicketId | undefined} tabId={tab.id} onClose={handleClosePanel} />
           )}
         </div>
       </div>

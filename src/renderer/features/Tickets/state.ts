@@ -396,6 +396,12 @@ export const ticketApi = {
   getFilesChanged: (ticketId: TicketId, sourceId: string): Promise<DiffResponse> => {
     return emitter.invoke('project:get-files-changed', ticketId, sourceId);
   },
+  getCodeTabFilesChanged: (tabId: string, sourceId: string): Promise<DiffResponse> => {
+    return emitter.invoke('project:get-code-tab-files-changed', tabId, sourceId);
+  },
+  applyCodeTabSourceChanges: (tabId: string, sourceId: string): Promise<import('@/shared/types').PrMergeResult> => {
+    return emitter.invoke('project:apply-code-tab-source-changes', tabId, sourceId);
+  },
 
   // Context files (replaces project.brief)
   readContext: (projectId: ProjectId): Promise<string> => {

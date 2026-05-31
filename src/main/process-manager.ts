@@ -689,6 +689,18 @@ export class ProcessManager {
     return null;
   }
 
+  getProcessContainerId(processId: string): string | null {
+    const proc = this.processes.get(processId);
+    if (!proc) {
+      return null;
+    }
+    const status = proc.getStatus();
+    if ((status.type === 'running' || status.type === 'connecting') && status.data.containerId) {
+      return status.data.containerId;
+    }
+    return null;
+  }
+
   cleanup = async (): Promise<void> => {
     const exits = Array.from(this.processes.values()).map((p) => p.exit());
     await Promise.allSettled(exits);
