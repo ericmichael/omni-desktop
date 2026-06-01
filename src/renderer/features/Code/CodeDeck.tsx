@@ -41,6 +41,7 @@ import {
 import { BrowserView } from '@/renderer/features/Browser/BrowserView';
 import { ConsoleStarted } from '@/renderer/features/Console/ConsoleRunning';
 import { $previewRequest, clearPreviewRequest } from '@/renderer/features/Tickets/preview-bridge';
+import { PullRequestBanner } from '@/renderer/features/Tickets/PullRequestBanner';
 import { ticketApi } from '@/renderer/features/Tickets/state';
 import {
   TicketBannerActions,
@@ -966,6 +967,7 @@ const DeckColumn = memo(
               </button>
             }
           />
+          {tab.projectId && <PullRequestBanner scope={{ kind: 'code-tab', tabId: tab.id }} />}
           <div className={styles.flex1MinH0Relative}>
             {children}
             {(tab.ticketId || tab.projectId) && (
@@ -1617,6 +1619,7 @@ const CodeSessionPane = memo(
           onOpenPanel={tab.ticketId || tab.projectId ? setActivePanel : undefined}
           isGlass={isGlass}
         />
+        {tab.projectId && <PullRequestBanner scope={{ kind: 'code-tab', tabId: tab.id }} />}
         <div className={styles.flex1MinH0Relative}>
           <CodeTabContent
             tab={tab}

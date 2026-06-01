@@ -49,11 +49,14 @@ export function registerProjectHandlers(ipc: IIpcListener, resolve: (event: unkn
   h('project:get-files-changed', (pm, ticketId, sourceId) => pm.getFilesChanged(ticketId, sourceId));
   h('project:get-code-tab-files-changed', (pm, tabId, sourceId) => pm.getCodeTabFilesChanged(tabId, sourceId));
   h('project:apply-code-tab-source-changes', (pm, tabId, sourceId) => pm.applyCodeTabSourceChanges(tabId, sourceId));
+  h('project:detect-code-tab-pull-request', (pm, tabId, sourceId) => pm.detectCodeTabPullRequest(tabId, sourceId));
+  h('project:detect-code-tab-pull-requests', (pm, tabId) => pm.detectCodeTabPullRequests(tabId));
+  h('project:detect-chat-pull-requests', (pm) => pm.detectChatPullRequests());
 
-  // Local PR flow (per-source — sourceId is one of the project's ProjectSource ids)
-  h('project:set-pr-review', (pm, ticketId, sourceId, review) => pm.setPrReview(ticketId, sourceId, review));
+  // Sync to host + PR detection (per-source — sourceId is one of the project's ProjectSource ids)
   h('project:check-merge', (pm, ticketId, sourceId) => pm.checkPrMerge(ticketId, sourceId));
   h('project:merge-ticket', (pm, ticketId, sourceId) => pm.mergePrTicket(ticketId, sourceId));
+  h('project:detect-pull-request', (pm, ticketId, sourceId) => pm.detectPullRequest(ticketId, sourceId));
 
   // Context + project files
   h('project:read-context', (pm, projectId) => pm.readContext(projectId));

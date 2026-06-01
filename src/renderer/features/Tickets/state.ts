@@ -336,13 +336,6 @@ export const ticketApi = {
     void ticketApi.fetchTasks();
     return ok;
   },
-  setPrReview: (
-    ticketId: TicketId,
-    sourceId: string,
-    review: 'approved' | 'changes_requested' | null
-  ): Promise<void> => {
-    return emitter.invoke('project:set-pr-review', ticketId, sourceId, review);
-  },
   checkMerge: (
     ticketId: TicketId,
     sourceId: string
@@ -356,6 +349,12 @@ export const ticketApi = {
     const result = await emitter.invoke('project:merge-ticket', ticketId, sourceId);
     void ticketApi.fetchTasks();
     return result;
+  },
+  detectPullRequest: (
+    ticketId: TicketId,
+    sourceId: string
+  ): Promise<import('@/shared/types').ContainerPullRequest | null> => {
+    return emitter.invoke('project:detect-pull-request', ticketId, sourceId);
   },
   sendSupervisorMessage: (ticketId: TicketId, message: string): Promise<void> => {
     // Optimistically add the user's message to the chat so it appears immediately
@@ -401,6 +400,12 @@ export const ticketApi = {
   },
   applyCodeTabSourceChanges: (tabId: string, sourceId: string): Promise<import('@/shared/types').PrMergeResult> => {
     return emitter.invoke('project:apply-code-tab-source-changes', tabId, sourceId);
+  },
+  detectCodeTabPullRequest: (
+    tabId: string,
+    sourceId: string
+  ): Promise<import('@/shared/types').ContainerPullRequest | null> => {
+    return emitter.invoke('project:detect-code-tab-pull-request', tabId, sourceId);
   },
 
   // Context files (replaces project.brief)

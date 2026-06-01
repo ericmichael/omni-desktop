@@ -159,25 +159,6 @@ export function rowToTicket(row: TicketRow, comments?: CommentRow[]): Ticket {
   const runs = parseJsonOr<unknown[]>(row.runs, []);
   if (runs.length > 0) ticket.runs = runs as Ticket['runs'];
 
-  if (row.pr_review) {
-    try {
-      const parsed = JSON.parse(row.pr_review) as unknown;
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        // Validate each map entry's shape; drop malformed ones rather than
-        // crash. Stored value is Record<sourceId, { status, at }>.
-        const out: Record<string, { status: 'approved' | 'changes_requested'; at: number }> = {};
-        for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-          const entry = v as { status?: string; at?: number };
-          if (entry?.status === 'approved' || entry?.status === 'changes_requested') {
-            out[k] = { status: entry.status, at: entry.at ?? Date.now() };
-          }
-        }
-        if (Object.keys(out).length > 0) ticket.prReview = out;
-      }
-    } catch {
-      // Malformed JSON in the column — treat as no review.
-    }
-  }
   if (row.pr_merged_at) {
     try {
       const parsed = JSON.parse(row.pr_merged_at) as unknown;
@@ -346,7 +327,9 @@ export function ticketToRow(t: Ticket): TicketRow {
     supervisor_task_id: (t.supervisorTaskId as string) ?? null,
     token_usage: jsonStrOrNull(t.tokenUsage),
     runs: JSON.stringify(t.runs ?? []),
-    pr_review: t.prReview && Object.keys(t.prReview).length > 0 ? JSON.stringify(t.prReview) : null,
+    // Legacy column — per-source review was removed with the local PR flow.
+    // Kept null so the omni-projects-db row schema stays satisfied.
+    pr_review: null,
     pr_merged_at: t.prMergedAt && Object.keys(t.prMergedAt).length > 0 ? JSON.stringify(t.prMergedAt) : null,
     assignee: t.assignee ?? null,
     created_at: toIso(t.createdAt),

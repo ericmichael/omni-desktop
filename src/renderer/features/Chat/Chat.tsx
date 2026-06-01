@@ -11,6 +11,7 @@ import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/featur
 import { SandboxPicker } from '@/renderer/features/SandboxProfile/SandboxPicker';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
+import { PullRequestBanner } from '@/renderer/features/Tickets/PullRequestBanner';
 import { useSandboxActivityPing } from '@/renderer/hooks/use-sandbox-activity-ping';
 import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import { ChatShell } from '@/renderer/omniagents-ui/ChatShell';
@@ -261,6 +262,7 @@ export const Chat = memo(() => {
   return (
     <div className={mergeClasses(styles.fullSizeRelative, isGlass && styles.glassRoot)}>
       <SessionStatusBanner status={chatStatus} />
+      <PullRequestBanner scope={{ kind: 'chat' }} floating />
       {showShell && (
         <div className={styles.absoluteInsetZ0}>
           <ChatShell

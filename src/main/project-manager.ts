@@ -1,4 +1,3 @@
-import { spawn } from 'child_process';
 import { ipcMain, shell } from 'electron';
 import type Store from 'electron-store';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
@@ -10,10 +9,11 @@ import path from 'path';
 
 import { getArtifactsDir, getContainerArtifactsDir } from '@/lib/artifacts';
 import { resolveArtifactPath } from '@/lib/artifacts-fs';
-import { buildContainerSeedPatch, getContainerFilesChanged } from '@/lib/container-files-changed';
+import { getContainerFilesChanged } from '@/lib/container-files-changed';
+import { detectContainerPullRequest, detectContainerPullRequests } from '@/lib/container-pull-request';
+import { getContainerChangeSet, mirrorContainerChangesToHost } from '@/lib/container-sync';
 import { getGitFilesChanged, resolveTicketDiffBase } from '@/lib/git-files-changed';
 import { INBOX_SWEEP_INTERVAL_MS } from '@/lib/inbox-expiry';
-import { checkMerge, mergeBranch } from '@/lib/pr-merge';
 import type { IWorkflowLoader, ProjectManagerDeps } from '@/lib/project-manager-deps';
 import { runMigrations as runSchemaMigrations } from '@/lib/project-migrations';
 import type { ProjectConfigDefaults } from '@/lib/project-to-config';
@@ -60,6 +60,7 @@ import type {
   ArtifactFileEntry,
   CodeTabId,
   ColumnId,
+  ContainerPullRequest,
   DiffResponse,
   InboxItem,
   IpcRendererEvents,
@@ -78,38 +79,6 @@ import type {
   TicketPriority,
 } from '@/shared/types';
 import { firstSource } from '@/shared/types';
-
-/**
- * Run ``git apply`` with the patch piped via stdin. Uses ``spawn`` and waits
- * for close. Resolves with stderr on non-zero exit so callers can surface the
- * apply failure verbatim.
- */
-const gitApplyStdin = (
-  cwd: string,
-  extraArgs: string[],
-  patch: string
-): Promise<{ ok: true } | { ok: false; stderr: string }> =>
-  new Promise((resolve) => {
-    const child = spawn('git', ['-C', cwd, 'apply', ...extraArgs, '-'], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    let stderr = '';
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-    child.on('error', (err) => {
-      resolve({ ok: false, stderr: err.message });
-    });
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolve({ ok: true });
-      } else {
-        resolve({ ok: false, stderr: stderr || `git apply exited ${code}` });
-      }
-    });
-    child.stdin.write(patch);
-    child.stdin.end();
-  });
 
 const DEFAULT_BRIEF_TEMPLATE = `## Problem
 
@@ -1467,69 +1436,97 @@ export class ProjectManager {
     if (!containerId) {
       return { ok: false, error: 'No running sandbox for this code tab' };
     }
-    const patch = await buildContainerSeedPatch(containerId, source.mountName);
-    if (!patch.trim()) {
+    const result = await mirrorContainerChangesToHost(containerId, source.mountName, source.workspaceDir);
+    if (!result.ok) {
+      return { ok: false, error: result.error ?? 'Sync failed' };
+    }
+    if (result.copied === 0 && result.removed === 0) {
       return { ok: false, error: 'No changes to apply' };
     }
-    const applied = await gitApplyStdin(source.workspaceDir, ['--whitespace=nowarn'], patch);
-    if (!applied.ok) {
-      return { ok: false, error: `git apply failed: ${applied.stderr}` };
+    return { ok: true, mergeCommitSha: 'sync' };
+  };
+
+  /** Resolve a code tab's project + running container, or null if unavailable. */
+  private codeTabPrContext = (tabId: CodeTabId): { project: Project; containerId: string } | null => {
+    const tab = ((this.store.get('codeTabs') ?? []) as Array<{
+      id: string;
+      projectId: ProjectId | null;
+    }>).find((t) => t.id === tabId);
+    if (!tab?.projectId) {
+      return null;
     }
-    return { ok: true, mergeCommitSha: 'apply' };
+    const project = this.getProjects().find((p) => p.id === tab.projectId);
+    if (!project) {
+      return null;
+    }
+    const containerId = this.processManager?.getProcessContainerId(tabId) ?? null;
+    if (!containerId) {
+      return null;
+    }
+    return { project, containerId };
+  };
+
+  /**
+   * Detect an open GitHub/Azure PR for one source's branch in a code tab's
+   * container. Mirror of {@link detectPullRequest} for the code-tab surface
+   * (per-source — used by the Files Changed view). Best-effort → null.
+   */
+  detectCodeTabPullRequest = async (
+    tabId: CodeTabId,
+    sourceId: string
+  ): Promise<ContainerPullRequest | null> => {
+    const ctx = this.codeTabPrContext(tabId);
+    const source = ctx?.project.sources.find((s) => s.id === sourceId);
+    if (!ctx || !source) {
+      return null;
+    }
+    return detectContainerPullRequest(ctx.containerId, source.mountName);
+  };
+
+  /**
+   * Detect open PRs across *all* of a code tab's sources (one per source that
+   * has one). Used by the deck banner — a multi-source project can have a PR per
+   * repo. Best-effort → empty array.
+   */
+  detectCodeTabPullRequests = async (tabId: CodeTabId): Promise<ContainerPullRequest[]> => {
+    const ctx = this.codeTabPrContext(tabId);
+    if (!ctx) {
+      return [];
+    }
+    const found: ContainerPullRequest[] = [];
+    for (const source of ctx.project.sources) {
+      found.push(...(await detectContainerPullRequests(ctx.containerId, source.mountName)));
+    }
+    return found;
+  };
+
+  /**
+   * Detect open PRs for the singleton chat session's workspace. The chat runs
+   * under the ``"chat"`` process key against ``store.workspaceDir`` (no project,
+   * so a single source mounted at the workspace basename → at most one PR).
+   * Returns an array for a uniform banner contract. Best-effort → empty array.
+   */
+  detectChatPullRequests = async (): Promise<ContainerPullRequest[]> => {
+    const containerId = this.processManager?.getProcessContainerId('chat') ?? null;
+    if (!containerId) {
+      return [];
+    }
+    const workspaceDir = this.store.get('workspaceDir') as string | undefined;
+    if (!workspaceDir) {
+      return [];
+    }
+    const mountName = path.basename(workspaceDir) || 'workspace';
+    return detectContainerPullRequests(containerId, mountName);
   };
 
   // #endregion
 
-  // #region Local PR flow (approve / merge)
+  // #region Sync to host
 
   /**
-   * Resolve the base + feature branch for a ticket's merge. The base is the
-   * milestone branch (falling back to `main` when the milestone has none);
-   * the feature branch is `ticket/<worktreeName>` created by `createWorktree`.
-   */
-  private resolvePrBranches = (ticket: Ticket): { base?: string; feature?: string; reason?: string } => {
-    const project = this.getProjects().find((p) => p.id === ticket.projectId);
-    if (!project) {
-      return { reason: 'Project not found' };
-    }
-    if (firstSource(project)?.kind !== 'local') {
-      return { reason: 'Merge is only supported for projects with a local git repo' };
-    }
-    if (!ticket.worktreeName) {
-      return { reason: 'Ticket has no worktree yet — nothing to merge' };
-    }
-    const feature = `ticket/${ticket.worktreeName}`;
-    const milestone = ticket.milestoneId ? this.milestones.getById(ticket.milestoneId) : undefined;
-    const base = milestone?.branch ?? 'main';
-    return { base, feature };
-  };
-
-  /**
-   * Set or clear one source's PR review on a ticket. ``prReview`` is a
-   * map keyed by ``ProjectSource.id``; passing ``null`` removes the
-   * entry for *this* source only (other sources' reviews are
-   * unaffected).
-   */
-  setPrReview = (ticketId: TicketId, sourceId: string, review: 'approved' | 'changes_requested' | null): void => {
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket) {
-      return;
-    }
-    const existing = ticket.prReview ?? {};
-    let next: Ticket['prReview'];
-    if (review === null) {
-      const copy = { ...existing };
-      delete copy[sourceId];
-      next = Object.keys(copy).length === 0 ? undefined : copy;
-    } else {
-      next = { ...existing, [sourceId]: { status: review, at: Date.now() } };
-    }
-    this.updateTicket(ticketId, { prReview: next });
-  };
-
-  /**
-   * Dry-run ``git apply --check`` of one source's container patch onto
-   * its host workspace. Reports conflicts independently per source.
+   * Report whether one source has container changes to sync to its host. The
+   * container is authoritative, so there's no conflict concept — ``ready`` just
+   * means "there's something to mirror." Requires a running container.
    */
   checkPrMerge = async (ticketId: TicketId, sourceId: string): Promise<PrMergeCheck> => {
     const ticket = this.getTicketById(ticketId);
@@ -1545,47 +1542,34 @@ export class ProjectManager {
       return { ready: false, reason: `Source not found: ${sourceId}` };
     }
     if (source.kind !== 'local') {
-      return { ready: false, reason: 'Merge is only supported for local sources' };
+      return { ready: false, reason: 'Sync to host is only supported for local sources' };
     }
 
-    // Container-backed: dry-run git apply --check of this source's seed patch.
     const containerId = this.processManager?.getProjectContainerId(project.id) ?? null;
-    if (containerId) {
-      const patch = await buildContainerSeedPatch(containerId, source.mountName);
-      if (!patch.trim()) {
-        return { ready: false, reason: 'No changes to merge' };
-      }
-      const check = await gitApplyStdin(source.workspaceDir, ['--check'], patch);
-      return {
-        ready: true,
-        base: 'host workspace',
-        feature: `container/${source.mountName}`,
-        hasConflicts: !check.ok,
-        conflictingFiles: [],
-        ahead: 1,
-      };
+    if (!containerId) {
+      return { ready: false, reason: 'No running session for this project' };
     }
-
-    // No running container — legacy worktree fallback.
-    const { base, feature, reason } = this.resolvePrBranches(ticket);
-    if (!base || !feature) {
-      return { ready: false, reason: reason ?? 'No running session for this project' };
+    const { copy, remove } = await getContainerChangeSet(containerId, source.mountName);
+    const changed = copy.length + remove.length;
+    if (changed === 0) {
+      return { ready: false, reason: 'No changes to sync' };
     }
-    const res = await checkMerge(source.workspaceDir, base, feature);
     return {
       ready: true,
-      base,
-      feature,
-      hasConflicts: res.hasConflicts,
-      conflictingFiles: res.conflictingFiles,
-      ahead: res.ahead,
+      base: 'host workspace',
+      feature: `container/${source.mountName}`,
+      hasConflicts: false,
+      conflictingFiles: [],
+      ahead: changed,
     };
   };
 
   /**
-   * Apply one source's container patch onto its host workspace. Stamps
-   * ``prMergedAt[sourceId]`` on success — a ticket is fully merged when
-   * every touched source has a timestamp here.
+   * Mirror one source's changed-vs-seed container files onto its host workspace
+   * ("sync to host"). Idempotent and repeatable — the container is
+   * authoritative, so re-running re-copies the current files. Stamps
+   * ``prMergedAt[sourceId]`` with the last-sync time. Requires a running
+   * container.
    */
   mergePrTicket = async (ticketId: TicketId, sourceId: string): Promise<PrMergeResult> => {
     const ticket = this.getTicketById(ticketId);
@@ -1601,47 +1585,54 @@ export class ProjectManager {
       return { ok: false, error: `Source not found: ${sourceId}` };
     }
     if (source.kind !== 'local') {
-      return { ok: false, error: 'Merge is only supported for local sources' };
-    }
-    // Per-source approval gate.
-    if (ticket.prReview?.[sourceId]?.status !== 'approved') {
-      return { ok: false, error: 'This source must be approved before merging' };
-    }
-    if (ticket.prMergedAt?.[sourceId] !== undefined) {
-      return { ok: false, error: 'This source is already merged' };
+      return { ok: false, error: 'Sync to host is only supported for local sources' };
     }
 
     const containerId = this.processManager?.getProjectContainerId(project.id) ?? null;
-    if (containerId) {
-      const patch = await buildContainerSeedPatch(containerId, source.mountName);
-      if (!patch.trim()) {
-        return { ok: false, error: 'No changes to merge' };
-      }
-      const applied = await gitApplyStdin(source.workspaceDir, ['--whitespace=nowarn'], patch);
-      if (!applied.ok) {
-        return { ok: false, error: `git apply failed: ${applied.stderr}` };
-      }
-      this.updateTicket(ticketId, {
-        prMergedAt: { ...(ticket.prMergedAt ?? {}), [sourceId]: Date.now() },
-      });
-      return { ok: true, mergeCommitSha: 'apply' };
+    if (!containerId) {
+      return { ok: false, error: 'No running session for this project' };
     }
-
-    // No running container — fall back to legacy worktree merge.
-    const { base, feature, reason } = this.resolvePrBranches(ticket);
-    if (!base || !feature) {
-      return { ok: false, error: reason ?? 'No running session for this project' };
+    const result = await mirrorContainerChangesToHost(containerId, source.mountName, source.workspaceDir);
+    if (!result.ok) {
+      return { ok: false, error: result.error ?? 'Sync failed' };
     }
-    const title = ticket.title?.trim() || 'ticket';
-    const message = `Merge ${feature} into ${base}\n\n${title}`;
-    const res = await mergeBranch(source.workspaceDir, base, feature, message);
-    if (!res.ok) {
-      return { ok: false, error: res.error ?? 'Merge failed' };
+    if (result.copied === 0 && result.removed === 0) {
+      return { ok: false, error: 'No changes to sync' };
     }
     this.updateTicket(ticketId, {
       prMergedAt: { ...(ticket.prMergedAt ?? {}), [sourceId]: Date.now() },
     });
-    return { ok: true, mergeCommitSha: res.mergeCommitSha! };
+    return { ok: true, mergeCommitSha: 'sync' };
+  };
+
+  /**
+   * Detect an open GitHub PR for one source's branch by running ``gh pr view``
+   * inside the project's running container. Returns ``null`` when there's no
+   * running container, no PR, or the source can't have one (plain directory /
+   * no remote). Best-effort — never throws.
+   */
+  detectPullRequest = async (
+    ticketId: TicketId,
+    sourceId: string
+  ): Promise<ContainerPullRequest | null> => {
+    const ticket = this.getTicketById(ticketId);
+    if (!ticket) {
+      return null;
+    }
+    const project = this.getProjects().find((p) => p.id === ticket.projectId);
+    if (!project) {
+      return null;
+    }
+    const source = project.sources.find((s) => s.id === sourceId);
+    if (!source) {
+      return null;
+    }
+    const containerId = this.processManager?.getProjectContainerId(project.id) ?? null;
+    if (!containerId) {
+      return null;
+    }
+    const pr = await detectContainerPullRequest(containerId, source.mountName);
+    return pr;
   };
 
   // #endregion
@@ -1689,7 +1680,7 @@ export class ProjectManager {
     }
 
     // Clear resolution/archive when moving away from terminal column (reopen).
-    // Also clear any deferred-cleanup flag + PR review since the ticket is active again.
+    // Also clear any deferred-cleanup flag since the ticket is active again.
     const ticket2 = this.getTicketById(ticketId);
     if (ticket2?.resolution && !this.isTerminalColumn(ticket.projectId, columnId)) {
       this.updateTicket(ticketId, {
@@ -1697,7 +1688,6 @@ export class ProjectManager {
         resolvedAt: undefined,
         archivedAt: undefined,
         cleanupPending: undefined,
-        prReview: undefined,
       });
     }
 

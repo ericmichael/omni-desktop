@@ -701,8 +701,7 @@ export const schema: Schema<StoreData> = {
         resolvedAt: { type: 'number' },
         archivedAt: { type: 'number' },
         cleanupPending: { type: 'boolean' },
-        // Per-source maps keyed by ProjectSource.id.
-        prReview: { type: 'object' },
+        // Per-source map keyed by ProjectSource.id (last sync-to-host timestamps).
         prMergedAt: { type: 'object' },
         assignee: { type: 'string' },
         // Kanban fields
@@ -1525,17 +1524,11 @@ export type Ticket = {
    */
   cleanupPending?: boolean;
 
-  // --- Local PR flow (per source) ---
+  // --- Sync to host (per source) ---
   /**
-   * Reviewer decision per source. Keyed by ``ProjectSource.id``.
-   * A ticket touching three sources may have three review states.
-   * Approve gate for merging is evaluated per source.
-   */
-  prReview?: Record<string, { status: 'approved' | 'changes_requested'; at: number }>;
-  /**
-   * Stamped per source when that source's container changes have been
-   * applied to its host. Keyed by ``ProjectSource.id``. A ticket is
-   * fully merged when every touched source has a timestamp here.
+   * Stamped per source when that source's container changes were last applied
+   * to its host working copy ("synced"). Keyed by ``ProjectSource.id``.
+   * (Legacy DB column name: ``pr_merged_at``.)
    */
   prMergedAt?: Record<string, number>;
 
@@ -1676,6 +1669,20 @@ export type PrMergeCheck =
     };
 
 export type PrMergeResult = { ok: true; mergeCommitSha: string } | { ok: false; error: string };
+
+/**
+ * A GitHub pull request detected for one source's branch by running
+ * ``gh pr view`` inside the running container (where the agent pushed the
+ * branch and ``gh`` is authenticated). Absent (null) when the source has no
+ * open PR — e.g. a plain local directory, a git repo with no remote, or a
+ * branch the agent hasn't opened a PR for yet.
+ */
+export interface ContainerPullRequest {
+  number: number;
+  url: string;
+  /** GitHub PR state, e.g. ``"OPEN"``. We only surface OPEN PRs. */
+  state: string;
+}
 
 // #endregion
 
@@ -2346,6 +2353,12 @@ type ProjectIpcEvents = Namespaced<
     'get-files-changed': (ticketId: TicketId, sourceId: string) => DiffResponse;
     'get-code-tab-files-changed': (tabId: CodeTabId, sourceId: string) => DiffResponse;
     'apply-code-tab-source-changes': (tabId: CodeTabId, sourceId: string) => PrMergeResult;
+    /** Detect an open PR for one source's branch in a code tab's container. Null when none. */
+    'detect-code-tab-pull-request': (tabId: CodeTabId, sourceId: string) => ContainerPullRequest | null;
+    /** Detect open PRs across all of a code tab's sources (deck banner, multi-source). */
+    'detect-code-tab-pull-requests': (tabId: CodeTabId) => ContainerPullRequest[];
+    /** Detect open PRs for the singleton chat session's workspace (0 or 1). */
+    'detect-chat-pull-requests': () => ContainerPullRequest[];
     // Supervisor operations
     'ensure-supervisor-infra': (ticketId: TicketId) => void;
     'start-supervisor': (ticketId: TicketId) => void;
@@ -2361,12 +2374,15 @@ type ProjectIpcEvents = Namespaced<
      * still has uncommitted changes (cleanupPending stays set).
      */
     'finalize-ticket-cleanup': (ticketId: TicketId) => boolean;
-    /** Set or clear one source's PR review decision on a ticket. Pass null to clear. */
-    'set-pr-review': (ticketId: TicketId, sourceId: string, review: 'approved' | 'changes_requested' | null) => void;
     /** Dry-run apply one source's container patch onto its host repo; reports conflicts. */
     'check-merge': (ticketId: TicketId, sourceId: string) => PrMergeCheck;
-    /** Apply one source's container patch onto its host repo. */
+    /** Apply one source's container patch onto its host repo ("sync to host"). */
     'merge-ticket': (ticketId: TicketId, sourceId: string) => PrMergeResult;
+    /**
+     * Detect an open GitHub PR for one source's branch by running
+     * ``gh pr view`` inside the running container. Null when there's no PR.
+     */
+    'detect-pull-request': (ticketId: TicketId, sourceId: string) => ContainerPullRequest | null;
     'set-auto-dispatch': (projectId: ProjectId, enabled: boolean) => void;
     'get-active-wip-tickets': () => Ticket[];
     // Context file operations (replaces project.brief)

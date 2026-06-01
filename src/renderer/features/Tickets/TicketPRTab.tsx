@@ -6,8 +6,9 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SelectTabData } from '@/renderer/ds';
 import { Button, IconButton, ListSkeleton, Tab, TabList } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { CodeTabId, DiffGroup,DiffResponse, FileDiff, ProjectSource, TicketId } from '@/shared/types';
+import type { CodeTabId, ContainerPullRequest, DiffGroup,DiffResponse, FileDiff, ProjectSource, TicketId } from '@/shared/types';
 
+import { PullRequestBadge } from './PullRequestBadge';
 import { $tickets, ticketApi } from './state';
 import { TicketPROverview } from './TicketPROverview';
 
@@ -468,21 +469,30 @@ const FilesChangedContent = memo(
   const [isDragging, setIsDragging] = useState(false);
   const [applyBusy, setApplyBusy] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
+  const [pullRequest, setPullRequest] = useState<ContainerPullRequest | null>(null);
   const splitRef = useRef<HTMLDivElement>(null);
 
-  // Reset file selection when the active source switches.
+  // Reset file selection + PR badge when the active source switches.
   useEffect(() => {
     setSelectedKey(null);
     setData(null);
+    setPullRequest(null);
     setLoading(true);
   }, [sourceId]);
 
   const fetchData = useCallback(async () => {
     try {
-      const resp = scope.kind === 'ticket'
-        ? await ticketApi.getFilesChanged(scope.ticketId, sourceId)
-        : await ticketApi.getCodeTabFilesChanged(scope.tabId, sourceId);
+      const [resp, pr] = await Promise.all([
+        scope.kind === 'ticket'
+          ? ticketApi.getFilesChanged(scope.ticketId, sourceId)
+          : ticketApi.getCodeTabFilesChanged(scope.tabId, sourceId),
+        (scope.kind === 'ticket'
+          ? ticketApi.detectPullRequest(scope.ticketId, sourceId)
+          : ticketApi.detectCodeTabPullRequest(scope.tabId, sourceId)
+        ).catch(() => null),
+      ]);
       setData(resp);
+      setPullRequest(pr);
       if (resp.files.length > 0 && !selectedKey) {
         setSelectedKey(fileKey(resp.files[0]!));
       }
@@ -561,6 +571,7 @@ const FilesChangedContent = memo(
         <BranchCompare20Regular style={{ width: 32, height: 32 }} className={styles.emptyIcon} />
         <p className={styles.emptyText}>No changes detected</p>
         <p className={styles.emptySubText}>File changes will appear here when the agent modifies files</p>
+        {pullRequest && <PullRequestBadge pr={pullRequest} />}
         <IconButton aria-label="Refresh" icon={<ArrowSync20Regular />} size="sm" onClick={handleRefresh} />
       </div>
     );
@@ -576,6 +587,7 @@ const FilesChangedContent = memo(
         {data.totalAdditions > 0 && <span className={styles.greenText}>+{data.totalAdditions}</span>}
         {data.totalDeletions > 0 && <span className={styles.redText}>-{data.totalDeletions}</span>}
         <div className={styles.flex1} />
+        {pullRequest && <PullRequestBadge pr={pullRequest} />}
         {applyError && <span className={styles.emptySubText}>{applyError}</span>}
         {scope.kind === 'code-tab' && (
           <Button size="sm" onClick={handleApply} isDisabled={applyBusy}>

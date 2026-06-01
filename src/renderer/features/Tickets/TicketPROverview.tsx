@@ -1,12 +1,9 @@
 import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import {
   ArrowSync20Regular,
-  BranchCompare20Regular,
   BranchRequest20Regular,
   Checkmark20Filled,
   Delete20Regular,
-  Dismiss20Regular,
-  Warning20Filled,
 } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
@@ -14,8 +11,9 @@ import Markdown from 'react-markdown';
 
 import { Button, CardSkeleton, IconButton } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { PrMergeCheck, ProjectSource, TicketId } from '@/shared/types';
+import type { ContainerPullRequest, PrMergeCheck, ProjectSource, TicketId } from '@/shared/types';
 
+import { PullRequestBadge } from './PullRequestBadge';
 import { $tickets, ticketApi } from './state';
 
 const POLL_INTERVAL_MS = 5_000;
@@ -129,26 +127,8 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteGreenForeground1,
     fontSize: tokens.fontSizeBase300,
   },
-  mergeStatusWarn: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '6px',
-    color: tokens.colorPaletteYellowForeground2,
-    fontSize: tokens.fontSizeBase300,
-  },
   mergeMeta: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 },
   mergeError: { fontSize: tokens.fontSizeBase200, color: tokens.colorPaletteRedForeground1 },
-  mergedBanner: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    ...shorthands.border('1px', 'solid', tokens.colorPalettePurpleBorderActive),
-    backgroundColor: tokens.colorPalettePurpleBackground2,
-    color: tokens.colorPalettePurpleForeground2,
-    borderRadius: tokens.borderRadiusMedium,
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-  },
-  mergedTitle: { display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 },
   untouchedNote: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
@@ -168,76 +148,54 @@ const useStyles = makeStyles({
 /** Map of sourceId → latest merge check result (null = still loading). */
 type MergeChecks = Record<string, PrMergeCheck | null>;
 
-/** Whether a source has committed work the user can review/merge. */
+/** Map of sourceId → detected GitHub PR (null = none / not yet detected). */
+type PrLinks = Record<string, ContainerPullRequest | null>;
+
+/** Whether a source has changes the user can sync to the host. */
 function isTouched(check: PrMergeCheck | null | undefined): boolean {
   return !!(check && check.ready && check.ahead > 0);
 }
 
 /**
- * Per-source review + merge card. Stateless w.r.t. the merge check — the
- * parent owns ``mergeChecks`` so it can compute roll-up counts and
- * orchestrate "Merge all approved". The card calls ``onMergeCheckRefresh``
- * after a merge attempt to keep the parent's state fresh.
+ * Per-source "sync to host" card. Stateless w.r.t. the merge check — the parent
+ * owns ``mergeChecks`` so it can compute roll-up counts and orchestrate "Sync
+ * all". The card calls ``onMergeCheckRefresh`` after a sync attempt to keep the
+ * parent's state fresh. When the agent has opened a PR for the source's branch,
+ * a clickable PR badge opens it in the built-in browser.
  */
 const TicketPRSourceCard = memo(
   ({
     ticketId,
     source,
     mergeCheck,
+    pullRequest,
     onMergeCheckRefresh,
   }: {
     ticketId: TicketId;
     source: ProjectSource;
     mergeCheck: PrMergeCheck | null;
+    pullRequest: ContainerPullRequest | null;
     onMergeCheckRefresh: (sourceId: string) => Promise<void>;
   }) => {
     const styles = useStyles();
     const tickets = useStore($tickets);
     const ticket = tickets[ticketId];
-    const review = ticket?.prReview?.[source.id];
-    const mergedAt = ticket?.prMergedAt?.[source.id];
+    const syncedAt = ticket?.prMergedAt?.[source.id];
 
-    const [mergeBusy, setMergeBusy] = useState(false);
-    const [mergeError, setMergeError] = useState<string | null>(null);
-    const [reviewBusy, setReviewBusy] = useState(false);
+    const [syncBusy, setSyncBusy] = useState(false);
+    const [syncError, setSyncError] = useState<string | null>(null);
 
-    const handleApprove = useCallback(async () => {
-      setReviewBusy(true);
-      try {
-        await ticketApi.setPrReview(
-          ticketId,
-          source.id,
-          review?.status === 'approved' ? null : 'approved'
-        );
-      } finally {
-        setReviewBusy(false);
-      }
-    }, [ticketId, source.id, review?.status]);
-
-    const handleRequestChanges = useCallback(async () => {
-      setReviewBusy(true);
-      try {
-        await ticketApi.setPrReview(
-          ticketId,
-          source.id,
-          review?.status === 'changes_requested' ? null : 'changes_requested'
-        );
-      } finally {
-        setReviewBusy(false);
-      }
-    }, [ticketId, source.id, review?.status]);
-
-    const handleMerge = useCallback(async () => {
-      setMergeBusy(true);
-      setMergeError(null);
+    const handleSync = useCallback(async () => {
+      setSyncBusy(true);
+      setSyncError(null);
       try {
         const result = await ticketApi.mergeTicket(ticketId, source.id);
         if (!result.ok) {
-          setMergeError(result.error);
+          setSyncError(result.error);
           void onMergeCheckRefresh(source.id);
         }
       } finally {
-        setMergeBusy(false);
+        setSyncBusy(false);
       }
     }, [ticketId, source.id, onMergeCheckRefresh]);
 
@@ -246,15 +204,10 @@ const TicketPRSourceCard = memo(
       [onMergeCheckRefresh, source.id]
     );
 
-    const canMerge =
-      !mergedAt &&
-      review?.status === 'approved' &&
-      mergeCheck !== null &&
-      mergeCheck.ready &&
-      !mergeCheck.hasConflicts &&
-      mergeCheck.ahead > 0;
-    const canReview =
-      !mergedAt && mergeCheck !== null && mergeCheck.ready && mergeCheck.ahead > 0;
+    // Sync is idempotent + repeatable (container is authoritative), so it
+    // stays available even after a prior sync — no gate on ``syncedAt``.
+    const canSync =
+      mergeCheck !== null && mergeCheck.ready && !mergeCheck.hasConflicts && mergeCheck.ahead > 0;
 
     const sourceLocation =
       source.kind === 'local'
@@ -263,101 +216,47 @@ const TicketPRSourceCard = memo(
           ? source.repoUrl
           : '';
 
-    // Merged → collapsed banner only.
-    if (mergedAt) {
-      return (
-        <div className={styles.mergedBanner}>
-          <span className={styles.mergedTitle}>
-            <BranchCompare20Regular />
-            {source.mountName} · Merged
-          </span>
-          <span className={styles.mergeMeta}>{new Date(mergedAt).toLocaleString()}</span>
-        </div>
-      );
-    }
-
     return (
       <div className={styles.reviewSection}>
         <div className={styles.sectionHeadingRow}>
           <h3 className={styles.sectionHeading}>{source.mountName}</h3>
-          <span className={styles.mergeMeta} title={sourceLocation}>
-            {source.kind}
-          </span>
-        </div>
-        <div className={styles.reviewActions}>
-          <Button
-            size="sm"
-            variant={review?.status === 'approved' ? 'primary' : 'ghost'}
-            onClick={handleApprove}
-            isDisabled={reviewBusy || !canReview}
-            leftIcon={<Checkmark20Filled />}
-          >
-            {review?.status === 'approved' ? 'Approved' : 'Approve'}
-          </Button>
-          <Button
-            size="sm"
-            variant={review?.status === 'changes_requested' ? 'primary' : 'ghost'}
-            onClick={handleRequestChanges}
-            isDisabled={reviewBusy || !canReview}
-            leftIcon={<Dismiss20Regular />}
-          >
-            {review?.status === 'changes_requested' ? 'Changes requested' : 'Request changes'}
-          </Button>
-          {review && (
-            <span className={styles.mergeMeta}>
-              {review.status === 'approved' ? 'Approved' : 'Changes requested'} ·{' '}
-              {new Date(review.at).toLocaleString()}
+          <div className={styles.reviewActions}>
+            {pullRequest && <PullRequestBadge pr={pullRequest} />}
+            <span className={styles.mergeMeta} title={sourceLocation}>
+              {source.kind}
             </span>
-          )}
+          </div>
         </div>
         <div className={styles.mergeSection}>
           {mergeCheck === null ? (
-            <span className={styles.mergeMeta}>Checking merge…</span>
+            <span className={styles.mergeMeta}>Checking for changes…</span>
           ) : !mergeCheck.ready ? (
             <span className={styles.mergeMeta}>{mergeCheck.reason}</span>
           ) : (
-            <>
-              <span className={styles.mergeMeta}>
-                Merging <code>{mergeCheck.feature}</code> → <code>{mergeCheck.base}</code>
-                {mergeCheck.ahead > 0 && (
-                  <>
-                    {' '}
-                    · {mergeCheck.ahead} commit{mergeCheck.ahead === 1 ? '' : 's'}
-                  </>
-                )}
-              </span>
-              {mergeCheck.hasConflicts ? (
-                <span className={styles.mergeStatusWarn}>
-                  <Warning20Filled />
-                  Merge has conflicts
-                </span>
-              ) : mergeCheck.ahead > 0 ? (
-                <span className={styles.mergeStatusOk}>
-                  <Checkmark20Filled />
-                  Ready to merge
-                </span>
-              ) : null}
-            </>
+            <span className={styles.mergeStatusOk}>
+              <Checkmark20Filled />
+              {mergeCheck.ahead} file{mergeCheck.ahead === 1 ? '' : 's'} to sync to host
+            </span>
           )}
-          {mergeError && <span className={styles.mergeError}>{mergeError}</span>}
+          {syncedAt && (
+            <span className={styles.mergeMeta}>Last synced {new Date(syncedAt).toLocaleString()}</span>
+          )}
+          {syncError && <span className={styles.mergeError}>{syncError}</span>}
           <div className={styles.reviewActions}>
             <Button
               size="sm"
-              onClick={handleMerge}
-              isDisabled={!canMerge || mergeBusy}
-              leftIcon={<BranchCompare20Regular />}
+              onClick={handleSync}
+              isDisabled={!canSync || syncBusy}
+              leftIcon={<ArrowSync20Regular />}
             >
-              {mergeBusy ? 'Merging…' : 'Merge'}
+              {syncBusy ? 'Syncing…' : syncedAt ? 'Re-sync to host' : 'Sync to host'}
             </Button>
             <IconButton
-              aria-label="Re-check merge"
+              aria-label="Re-check changes"
               icon={<ArrowSync20Regular />}
               size="sm"
               onClick={handleRefresh}
             />
-            {review?.status !== 'approved' && (
-              <span className={styles.mergeMeta}>Approve to enable merging.</span>
-            )}
           </div>
         </div>
       </div>
@@ -380,6 +279,7 @@ export const TicketPROverview = memo(({ ticketId }: { ticketId: TicketId }) => {
   const sources = project?.sources ?? [];
 
   const [mergeChecks, setMergeChecks] = useState<MergeChecks>({});
+  const [prLinks, setPrLinks] = useState<PrLinks>({});
   const [mergeAllBusy, setMergeAllBusy] = useState(false);
   const [cleanupBusy, setCleanupBusy] = useState(false);
   const [cleanupError, setCleanupError] = useState<string | null>(null);
@@ -409,8 +309,12 @@ export const TicketPROverview = memo(({ ticketId }: { ticketId: TicketId }) => {
 
   const refreshOne = useCallback(
     async (sourceId: string) => {
-      const result = await ticketApi.checkMerge(ticketId, sourceId);
-      setMergeChecks((prev) => ({ ...prev, [sourceId]: result }));
+      const [check, pr] = await Promise.all([
+        ticketApi.checkMerge(ticketId, sourceId),
+        ticketApi.detectPullRequest(ticketId, sourceId).catch(() => null),
+      ]);
+      setMergeChecks((prev) => ({ ...prev, [sourceId]: check }));
+      setPrLinks((prev) => ({ ...prev, [sourceId]: pr }));
     },
     [ticketId]
   );
@@ -420,10 +324,10 @@ export const TicketPROverview = memo(({ ticketId }: { ticketId: TicketId }) => {
     await Promise.all(sources.map((s) => refreshOne(s.id)));
   }, [sources, refreshOne]);
 
-  // Re-check whenever the source list, ticket review state, or merged state changes.
+  // Re-check whenever the source list or synced state changes.
   useEffect(() => {
     void refreshAll();
-  }, [refreshAll, ticket?.prReview, ticket?.prMergedAt]);
+  }, [refreshAll, ticket?.prMergedAt]);
 
   const handleRefresh = useCallback(() => {
     void fetchData();
@@ -443,25 +347,21 @@ export const TicketPROverview = memo(({ ticketId }: { ticketId: TicketId }) => {
     }
   }, [ticketId]);
 
-  // Bucket sources by their current merge state.
-  const { touchedSources, untouchedSources, mergedCount, approvedUnmergedCount } = useMemo(() => {
+  // Bucket sources by their current sync state. A source is "touched" if it
+  // has changes to sync or has been synced at least once; "syncable" if it has
+  // changes ready to mirror (sync is repeatable, so synced sources still count).
+  const { touchedSources, untouchedSources, mergedCount, syncableCount } = useMemo(() => {
     const touched: ProjectSource[] = [];
     const untouched: ProjectSource[] = [];
     let merged = 0;
-    let approvedUnmerged = 0;
+    let syncable = 0;
     for (const s of sources) {
       const check = mergeChecks[s.id];
-      const isMerged = !!ticket?.prMergedAt?.[s.id];
-      if (isMerged) {
-        merged += 1;
+      const synced = !!ticket?.prMergedAt?.[s.id];
+      if (isTouched(check) || synced) {
         touched.push(s);
-        continue;
-      }
-      if (isTouched(check)) {
-        touched.push(s);
-        if (ticket?.prReview?.[s.id]?.status === 'approved') {
-          approvedUnmerged += 1;
-        }
+        if (synced) merged += 1;
+        if (check && check.ready && !check.hasConflicts && check.ahead > 0) syncable += 1;
       } else {
         untouched.push(s);
       }
@@ -470,16 +370,16 @@ export const TicketPROverview = memo(({ ticketId }: { ticketId: TicketId }) => {
       touchedSources: touched,
       untouchedSources: untouched,
       mergedCount: merged,
-      approvedUnmergedCount: approvedUnmerged,
+      syncableCount: syncable,
     };
-  }, [sources, mergeChecks, ticket?.prMergedAt, ticket?.prReview]);
+  }, [sources, mergeChecks, ticket?.prMergedAt]);
 
   const handleMergeAll = useCallback(async () => {
     setMergeAllBusy(true);
     try {
       for (const s of touchedSources) {
-        if (ticket?.prMergedAt?.[s.id]) continue;
-        if (ticket?.prReview?.[s.id]?.status !== 'approved') continue;
+        const check = mergeChecks[s.id];
+        if (!check || !check.ready || check.hasConflicts || check.ahead === 0) continue;
         const result = await ticketApi.mergeTicket(ticketId, s.id);
         if (!result.ok) {
           // Stop on first failure — user can inspect the offending card.
@@ -490,7 +390,7 @@ export const TicketPROverview = memo(({ ticketId }: { ticketId: TicketId }) => {
     } finally {
       setMergeAllBusy(false);
     }
-  }, [touchedSources, ticket?.prMergedAt, ticket?.prReview, ticketId, refreshOne]);
+  }, [touchedSources, mergeChecks, ticketId, refreshOne]);
 
   if (loading) {
     return <CardSkeleton cards={3} />;
@@ -548,7 +448,7 @@ export const TicketPROverview = memo(({ ticketId }: { ticketId: TicketId }) => {
 
       {sources.length === 0 ? (
         <p className={styles.emptyText}>
-          <em>This project has no sources attached — nothing to review.</em>
+          <em>This project has no sources attached — nothing to sync.</em>
         </p>
       ) : (
         <>
@@ -560,19 +460,17 @@ export const TicketPROverview = memo(({ ticketId }: { ticketId: TicketId }) => {
                   ? 'Checking sources…'
                   : touchedSources.length === 0
                     ? 'No source has committed changes yet'
-                    : `${mergedCount} of ${touchedSources.length} merged`}
+                    : `${mergedCount} of ${touchedSources.length} synced`}
               </span>
             </div>
-            {approvedUnmergedCount > 1 && (
+            {syncableCount > 1 && (
               <Button
                 size="sm"
                 onClick={handleMergeAll}
                 isDisabled={mergeAllBusy}
-                leftIcon={<BranchCompare20Regular />}
+                leftIcon={<ArrowSync20Regular />}
               >
-                {mergeAllBusy
-                  ? 'Merging…'
-                  : `Merge ${approvedUnmergedCount} approved`}
+                {mergeAllBusy ? 'Syncing…' : `Sync ${syncableCount} to host`}
               </Button>
             )}
           </div>
@@ -588,6 +486,7 @@ export const TicketPROverview = memo(({ ticketId }: { ticketId: TicketId }) => {
                 ticketId={ticketId}
                 source={source}
                 mergeCheck={mergeChecks[source.id] ?? null}
+                pullRequest={prLinks[source.id] ?? null}
                 onMergeCheckRefresh={refreshOne}
               />
             ))
