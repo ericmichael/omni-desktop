@@ -47,6 +47,7 @@ import { openTicketInCode } from '@/renderer/services/navigation';
 import { isActivePhase } from '@/shared/ticket-phase';
 import type { Milestone, Page, PageId, Project, ProjectId, Ticket } from '@/shared/types';
 
+import { getProjectRootLevelPages } from './sidebar-tree-model';
 import { ticketApi } from './state';
 
 const useStyles = makeStyles({
@@ -742,8 +743,7 @@ export const SidebarTree = memo(
           }
         }
 
-        const rootPage = Object.values(pages).find((p) => p.projectId === project.id && p.isRoot);
-        const rootPages = rootPage ? getChildPages(pages, rootPage.id) : [];
+        const rootPages = getProjectRootLevelPages(pages, project.id);
 
         result[project.id] = {
           milestones: projectMilestones,
