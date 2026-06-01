@@ -579,7 +579,7 @@ const TicketTreeItem = memo(
                 <MenuItem
                   icon={<Play20Filled />}
                   onClick={() => {
-                    void ticketApi.startSupervisor(ticket.id);
+                    ticketApi.requestStartSupervisor(ticket.id);
                   }}
                 >
                   Start autopilot

@@ -21,7 +21,7 @@ export function registerSupervisorHandlers(
   };
 
   h('project:ensure-supervisor-infra', (s, ticketId) => s.ensureSupervisorInfraLocked(ticketId));
-  h('project:start-supervisor', (s, ticketId) => s.startSupervisor(ticketId));
+  h('project:start-supervisor', (s, ticketId, profileName) => s.startSupervisor(ticketId, profileName));
   h('project:stop-supervisor', (s, ticketId) => s.stopSupervisor(ticketId));
   h('project:send-supervisor-message', (s, ticketId, message) => s.sendSupervisorMessage(ticketId, message));
   h('project:reset-supervisor-session', (s, ticketId) => s.resetSupervisorSession(ticketId));

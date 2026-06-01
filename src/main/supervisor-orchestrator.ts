@@ -724,7 +724,7 @@ export class SupervisorOrchestrator {
    *
    * Idempotent.
    */
-  ensureColumn = async (ticketId: TicketId): Promise<SupervisorEntry> => {
+  ensureColumn = async (ticketId: TicketId, profileName?: string): Promise<SupervisorEntry> => {
     const ticket = this.deps.host.getTicketById(ticketId);
     if (!ticket) {
       throw new Error(`Ticket not found: ${ticketId}`);
@@ -755,7 +755,7 @@ export class SupervisorOrchestrator {
     }
 
     try {
-      await this.deps.bridge.ensureColumn({ ticketId, workspaceDir });
+      await this.deps.bridge.ensureColumn({ ticketId, workspaceDir, profileName });
     } catch (err) {
       state.forcePhase('error' as TicketPhase);
       throw err;
@@ -856,7 +856,7 @@ export class SupervisorOrchestrator {
    * submits the initial run prompt through the same `handleSubmit` path the
    * user's keyboard uses.
    */
-  startSupervisor = (ticketId: TicketId): Promise<void> => {
+  startSupervisor = (ticketId: TicketId, profileName?: string): Promise<void> => {
     return this.withTicketLock(ticketId, async () => {
       const preflightError = this.validateDispatchPreflight(ticketId);
       if (preflightError) {
@@ -885,7 +885,7 @@ export class SupervisorOrchestrator {
       }
 
       console.log(`[SupervisorOrchestrator] startSupervisor: ensureColumn for ${ticketId}...`);
-      const entry = await this.ensureColumn(ticketId);
+      const entry = await this.ensureColumn(ticketId, profileName);
 
       const phase = entry.state.getPhase();
       if (phase === 'idle' || phase === 'error' || phase === 'completed') {

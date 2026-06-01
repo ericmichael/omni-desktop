@@ -108,6 +108,9 @@ async function ensureColumn(request: Extract<SupervisorBridgeRequest, { kind: 'e
   const tabs = persistedStoreApi.getKey('codeTabs') ?? [];
   const existing = tabs.find((t) => t.ticketId === request.ticketId);
   if (existing) {
+    if (request.profileName && existing.profileName !== request.profileName) {
+      await codeApi.setTabProfile(existing.id, request.profileName);
+    }
     await persistedStoreApi.setKey('activeCodeTabId', existing.id);
     await persistedStoreApi.setKey('layoutMode', 'spaces');
     return;
@@ -119,6 +122,7 @@ async function ensureColumn(request: Extract<SupervisorBridgeRequest, { kind: 'e
   await codeApi.addTabForTicket(request.ticketId, ticket.projectId, {
     ticketTitle: ticket.title,
     workspaceDir: request.workspaceDir,
+    profileName: request.profileName,
   });
   await persistedStoreApi.setKey('layoutMode', 'spaces');
 }

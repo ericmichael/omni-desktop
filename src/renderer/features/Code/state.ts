@@ -127,17 +127,25 @@ export const codeApi = {
   addTabForTicket: async (
     ticketId: TicketId,
     projectId: ProjectId,
-    opts?: { ticketTitle?: string; workspaceDir?: string }
+    opts?: { ticketTitle?: string; workspaceDir?: string; profileName?: string }
   ): Promise<CodeTab> => {
     const existingTabs = persistedStoreApi.getKey('codeTabs') ?? [];
     const existing = existingTabs.find((t) => t.ticketId === ticketId);
     if (existing) {
-      if (opts?.workspaceDir && existing.workspaceDir !== opts.workspaceDir) {
-        const updated = existingTabs.map((t) => (t.id === existing.id ? { ...t, workspaceDir: opts.workspaceDir } : t));
+      const { containerId: _drop, ...existingWithoutContainer } = existing;
+      void _drop;
+      const baseExisting = opts?.profileName ? existingWithoutContainer : existing;
+      const nextExisting = {
+        ...baseExisting,
+        ...(opts?.workspaceDir ? { workspaceDir: opts.workspaceDir } : {}),
+        ...(opts?.profileName ? { profileName: opts.profileName } : {}),
+      };
+      if (nextExisting.workspaceDir !== existing.workspaceDir || nextExisting.profileName !== existing.profileName) {
+        const updated = existingTabs.map((t) => (t.id === existing.id ? nextExisting : t));
         await persistedStoreApi.setKey('codeTabs', updated);
       }
       await persistedStoreApi.setKey('activeCodeTabId', existing.id);
-      return { ...existing, ...(opts?.workspaceDir ? { workspaceDir: opts.workspaceDir } : {}) };
+      return nextExisting;
     }
     const tab: CodeTab = {
       id: nanoid(),
@@ -146,7 +154,7 @@ export const codeApi = {
       sessionId: uuidv4(),
       ticketTitle: opts?.ticketTitle,
       workspaceDir: opts?.workspaceDir,
-      profileName: seedProfileName(projectId),
+      profileName: opts?.profileName ?? seedProfileName(projectId),
       createdAt: Date.now(),
     };
     const tabs = [...existingTabs, tab];

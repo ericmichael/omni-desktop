@@ -2,6 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invoke = vi.fn(() => Promise.resolve());
 const on = vi.fn();
+const getKey = vi.fn(() => []);
+const setKey = vi.fn(() => Promise.resolve());
+const atomGet = vi.fn(() => ({ tickets: [] }));
+const addTabForTicket = vi.fn(() => Promise.resolve());
+const setTabProfile = vi.fn(() => Promise.resolve());
 
 vi.mock('@/renderer/services/ipc', () => ({
   emitter: { invoke },
@@ -10,14 +15,14 @@ vi.mock('@/renderer/services/ipc', () => ({
 
 vi.mock('@/renderer/services/store', () => ({
   persistedStoreApi: {
-    getKey: vi.fn(() => []),
-    setKey: vi.fn(() => Promise.resolve()),
-    $atom: { get: vi.fn(() => ({ tickets: [] })) },
+    getKey,
+    setKey,
+    $atom: { get: atomGet },
   },
 }));
 
 vi.mock('@/renderer/features/Code/state', () => ({
-  codeApi: { addTabForTicket: vi.fn(() => Promise.resolve()) },
+  codeApi: { addTabForTicket, setTabProfile },
 }));
 
 const makeActor = (ticketId: string) => ({
@@ -32,8 +37,16 @@ const makeActor = (ticketId: string) => ({
 
 describe('renderer supervisor bridge', () => {
   beforeEach(() => {
+    vi.resetModules();
     invoke.mockClear();
     on.mockClear();
+    getKey.mockReset();
+    getKey.mockReturnValue([]);
+    setKey.mockClear();
+    atomGet.mockReset();
+    atomGet.mockReturnValue({ tickets: [] });
+    addTabForTicket.mockClear();
+    setTabProfile.mockClear();
   });
 
   it('does not emit disconnected when an actor is replaced during effect churn', async () => {
@@ -67,5 +80,45 @@ describe('renderer supervisor bridge', () => {
       kind: 'disconnected',
       ticketId: 'ticket-remove',
     });
+  });
+
+  it('creates a ticket tab with the requested sandbox profile', async () => {
+    const { startSupervisorBridge } = await import('@/renderer/services/supervisor-bridge');
+    atomGet.mockReturnValue({ tickets: [{ id: 't1', projectId: 'p1', title: 'Ticket one' }] } as never);
+    startSupervisorBridge();
+    const dispatch = on.mock.calls.find(([channel]) => channel === 'supervisor:dispatch')?.[1];
+
+    dispatch('req-1', { kind: 'ensure-column', ticketId: 't1', workspaceDir: '/ws', profileName: 'aci' });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    expect(addTabForTicket).toHaveBeenCalledWith('t1', 'p1', {
+      ticketTitle: 'Ticket one',
+      workspaceDir: '/ws',
+      profileName: 'aci',
+    });
+    expect(invoke).toHaveBeenCalledWith('supervisor:dispatch-result', 'req-1', true, {}, undefined);
+  });
+
+  it('updates an existing ticket tab to the requested sandbox profile', async () => {
+    const { startSupervisorBridge } = await import('@/renderer/services/supervisor-bridge');
+    getKey.mockImplementation(((key: string) => {
+      if (key === 'codeTabs') {
+        return [{ id: 'tab-1', ticketId: 't1', profileName: 'host' }];
+      }
+      return [];
+    }) as never);
+    startSupervisorBridge();
+    const dispatch = on.mock.calls.find(([channel]) => channel === 'supervisor:dispatch')?.[1];
+
+    dispatch('req-2', { kind: 'ensure-column', ticketId: 't1', profileName: 'devbox' });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    expect(setTabProfile).toHaveBeenCalledWith('tab-1', 'devbox');
+    expect(addTabForTicket).not.toHaveBeenCalled();
+    expect(setKey).toHaveBeenCalledWith('activeCodeTabId', 'tab-1');
   });
 });
