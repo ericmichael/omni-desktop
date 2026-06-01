@@ -144,6 +144,15 @@ export type AgentProcessStartArg = {
    */
   gitTokenEnv?: Record<string, string>;
   /**
+   * Boot-time credential descriptors for the sandbox: one per linked host the
+   * project's sources reference (git-remote URL *and* each local-git checkout's
+   * own remote). Forwarded as `--credential <json>` to `omni serve`, which
+   * configures git + the host's CLI (`gh` / `az devops`) inside the container so
+   * the agent authenticates for *every* source kind, not just cloned remotes.
+   * Token values ride in `gitTokenEnv` (process env), referenced here by name.
+   */
+  credentials?: Array<{ url: string; username: string; tokenEnv: string }>;
+  /**
    * Explicit profile file path, bypassing name-based resolution. Set by the
    * cloud for `local:<machineId>` (computer-as-sandbox) sessions: the launcher
    * writes a per-session `host_bridge` profile (pointing `omni serve`'s sandbox
@@ -679,6 +688,12 @@ export class AgentProcess {
       }
       args.push('--source', JSON.stringify(desc));
     }
+    // One ``--credential <json>`` per linked host the project uses. Token values
+    // are not here — they ride in ``gitTokenEnv`` (merged into env above) and are
+    // referenced by ``tokenEnv`` name.
+    for (const cred of arg.credentials ?? []) {
+      args.push('--credential', JSON.stringify(cred));
+    }
     if (arg.projectId) {
       args.push('--project', arg.projectId);
     }
@@ -829,12 +844,7 @@ export class AgentProcess {
     try {
       this.log.info(c.cyan(`Requesting sandbox from compute backend (agent: ${agentSlug})...\r\n`));
 
-      const session = await this.computeClient.startSession(
-        agentSlug,
-        arg.domain,
-        arg.gitRepo,
-        arg.localComputeExtras
-      );
+      const session = await this.computeClient.startSession(agentSlug, arg.domain, arg.gitRepo, arg.localComputeExtras);
       this.computeSessionId = session.sessionId;
 
       if (arg.gitRepo) {
@@ -864,10 +874,7 @@ export class AgentProcess {
       // laptop's plain-HTTP loopback (``ws://`` → ``http://``). Forcing https on
       // the latter made the readiness HTTP probe fail forever (TLS handshake
       // against a plain-HTTP server).
-      let uiUrl = wsUrl
-        .replace(/^wss:/i, 'https:')
-        .replace(/^ws:/i, 'http:')
-        .replace(/\/ws$/, '');
+      let uiUrl = wsUrl.replace(/^wss:/i, 'https:').replace(/^ws:/i, 'http:').replace(/\/ws$/, '');
       if (ready.authToken) {
         const sep = uiUrl.includes('?') ? '&' : '?';
         uiUrl = `${uiUrl}${sep}token=${encodeURIComponent(ready.authToken)}`;

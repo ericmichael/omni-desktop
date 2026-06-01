@@ -8,11 +8,13 @@
  * the renderer freely while the tokens stay in the main/server process.
  *
  * Implementations:
- *   - Electron: `ElectronSecretStore` — OS keychain via `safeStorage`, blob in
- *     a dedicated electron-store file (`src/main/secret-store.ts`).
- *   - Server:   `ServerSecretStore` — AES-256-GCM at rest with a server key
- *     (`src/server/secret-store.ts`). The per-tenant cloud variant slots in
- *     behind the same interface.
+ *   - Local: `LocalSecretStore` — AES-256-GCM at rest in a shared
+ *     `git-secrets.json` (`src/main/secret-store.ts`), used by BOTH the Electron
+ *     desktop shell and local single-tenant server mode, so a credential linked
+ *     in one shell is usable in the other (`src/server/secret-store.ts`
+ *     re-exports it as `ServerSecretStore`).
+ *   - Cloud: `PgSecretStore` — per-tenant rows in Postgres, behind the same
+ *     interface.
  */
 export interface SecretStore {
   /** Store (or replace) the token for a credential id. */

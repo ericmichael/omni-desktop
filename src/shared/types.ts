@@ -158,7 +158,8 @@ export type StoreData = {
    * ``<url>/.well-known/omni-cloud`` at link time so the renderer doesn't
    * need them — they're cached here for token refresh.
    * ``account`` is what we display in the UI; the access + refresh tokens
-   * themselves live in {@link ElectronSecretStore} under the ``entra`` id.
+   * themselves live in the local secret store (`git-secrets.json`) under the
+   * ``entra`` id.
    * ``null`` is the standalone-Electron mode (today's default).
    */
   cloudMode: CloudMode | null;
@@ -1989,7 +1990,6 @@ type MachineIpcEvents = Namespaced<
   }
 >;
 
-
 /**
  * Renderer→main bridge for cloud reverse-RPC dispatch. The renderer owns the
  * cloud WS (in cloud-linked Electron) but compute lives in main; when the
@@ -2010,12 +2010,7 @@ type ReverseRpcIpcEvents = {
    * `tunnel:emit-incoming` event the renderer translates into this WS-invoke.
    * Returns `void` (fire-and-forget; we ignore the ack).
    */
-  'tunnel:incoming': (event: {
-    tunnelId: string;
-    dataBase64: string;
-    binary: boolean;
-    close?: boolean;
-  }) => void;
+  'tunnel:incoming': (event: { tunnelId: string; dataBase64: string; binary: boolean; close?: boolean }) => void;
 };
 
 /** Device-code payload for the renderer to display while `cloud:link` polls. */
@@ -3180,9 +3175,7 @@ type MachineIpcRendererEvents = Namespaced<'machine', { 'list-changed': [Machine
 type TunnelIpcRendererEvents = Namespaced<
   'tunnel',
   {
-    'emit-incoming': [
-      { tunnelId: string; dataBase64: string; binary: boolean; close?: boolean },
-    ];
+    'emit-incoming': [{ tunnelId: string; dataBase64: string; binary: boolean; close?: boolean }];
   }
 >;
 

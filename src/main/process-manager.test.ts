@@ -59,6 +59,11 @@ vi.mock('node:child_process', async () => {
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
 
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
 import { ProcessManager, type ProcessManagerStoreData } from '@/main/process-manager';
 import { gitTokenEnvName } from '@/shared/git-credentials';
 import type { AgentProcessStatus, GitCredential, Project, WithTimestamp } from '@/shared/types';
@@ -292,6 +297,11 @@ describe('ProcessManager', () => {
       createdAt: 0,
     };
 
+    afterEach(() => {
+      // Reset the stubbed git-remote lookup so it doesn't leak between tests.
+      vi.mocked(execFileSync).mockReset();
+    });
+
     it('attaches auth + injects the token env when a host credential matches', async () => {
       const { pm } = makePm({
         storeData: { projects: [gitProject()], gitCredentials: [cred] },
@@ -302,10 +312,52 @@ describe('ProcessManager', () => {
       const startArg = hoisted.agentProcessInstances[0]!.start.mock.calls[0]![0] as {
         sources: Array<{ kind: string; auth?: { tokenEnv: string; username: string } }>;
         gitTokenEnv?: Record<string, string>;
+        credentials?: Array<{ url: string; username: string; tokenEnv: string }>;
       };
       const envName = gitTokenEnvName('cred-123');
       expect(startArg.sources[0]!.auth).toEqual({ tokenEnv: envName, username: 'x-access-token' });
       expect(startArg.gitTokenEnv).toEqual({ [envName]: 'ghp_thetoken' });
+      // Boot-time bundle: one descriptor for the git-remote host (no token value).
+      expect(startArg.credentials).toEqual([
+        { url: 'https://github.com/acme/private.git', username: 'x-access-token', tokenEnv: envName },
+      ]);
+    });
+
+    it('builds a credential for a local-git checkout from its own remote (no clone auth hint)', async () => {
+      // Real temp git repo with a real origin remote so directoryHasGit() and
+      // resolveGitRemote() (both real, via uninstrumented fs/git) resolve without
+      // relying on module-mock propagation into the source under test.
+      const checkout = mkdtempSync(path.join(tmpdir(), 'omni-localgit-'));
+      const cp = (await vi.importActual('node:child_process')) as typeof import('node:child_process');
+      cp.execFileSync('git', ['init', '-q'], { cwd: checkout });
+      cp.execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/private.git'], { cwd: checkout });
+      const localProject: Project = {
+        id: 'proj_local',
+        label: 'Local',
+        slug: 'local',
+        createdAt: 0,
+        sources: [{ id: 'src1', mountName: 'svc', kind: 'local', workspaceDir: checkout }],
+      };
+      const { pm } = makePm({
+        storeData: { projects: [localProject], gitCredentials: [cred] },
+        resolveGitToken: async (id) => (id === 'cred-123' ? 'ghp_thetoken' : undefined),
+      });
+      await pm.start('proc-1', { workspaceDir: checkout, projectId: 'proj_local' });
+
+      const startArg = hoisted.agentProcessInstances[0]!.start.mock.calls[0]![0] as {
+        sources: Array<{ kind: string; auth?: unknown }>;
+        gitTokenEnv?: Record<string, string>;
+        credentials?: Array<{ url: string; username: string; tokenEnv: string }>;
+      };
+      const envName = gitTokenEnvName('cred-123');
+      expect(startArg.sources[0]!.kind).toBe('local-git');
+      // local-git is seeded by archive, not cloned → no clone-time auth hint…
+      expect(startArg.sources[0]!.auth).toBeUndefined();
+      // …but the token + boot-time credential are still injected for git/gh/az.
+      expect(startArg.gitTokenEnv).toEqual({ [envName]: 'ghp_thetoken' });
+      expect(startArg.credentials).toEqual([
+        { url: 'https://github.com/acme/private.git', username: 'x-access-token', tokenEnv: envName },
+      ]);
     });
 
     it('leaves the source unauthenticated when no credential matches the host', async () => {

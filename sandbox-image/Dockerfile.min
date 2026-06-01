@@ -2,11 +2,12 @@
 #
 # This is the thin counterpart to sandbox-image/Dockerfile. It contains only
 # what the agent needs to be useful immediately over `exec`/file ops: a shell,
-# git, Python, Node, and a few search/JSON CLIs. Everything heavy in the full
-# image (TeX Live, LibreOffice, the XFCE+VNC desktop, azure-cli/mssql,
-# Playwright/Firefox, postgres/redis, the pyenv/rbenv/pip stacks, code-server)
-# is intentionally absent — those live in the full image and are selected via a
-# heavier "desktop" profile when a task actually needs them.
+# git, Python, Node, a few search/JSON CLIs, plus the `gh` and `az` CLIs the boot
+# credential pass logs into. Everything heavy in the full image (TeX Live,
+# LibreOffice, the XFCE+VNC desktop, the mssql/odbc drivers, Playwright/Firefox,
+# postgres/redis, the pyenv/rbenv/pip stacks, code-server) is intentionally
+# absent — those live in the full image and are selected via a heavier "desktop"
+# profile when a task actually needs them.
 #
 # Why: ACI cold-pulls the whole image on every sandbox launch, so pull time is
 # ~linear in image size. Dropping the bulk takes the pulled bytes from ~3.3 GB
@@ -23,6 +24,16 @@ ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 
 ARG NODE_MAJOR=22
+
+# Global npm installs as the run_as user (uid 1000): the default prefix is /usr
+# (root-owned), so `npm install -g` would fail with EACCES. Point the global
+# prefix at a user-owned dir on PATH so the agent can install global CLIs (the
+# full image gets this via its chowned nvm; this is the system-node equivalent).
+# `yarn` below installs here, and it's chowned to uid 1000 after. System Python
+# needs no equivalent — the agent uses venvs / `pip install --user` (both
+# user-owned), and system `pip` is PEP-668-managed regardless.
+ENV NPM_CONFIG_PREFIX=/opt/npm-global
+ENV PATH="/opt/npm-global/bin:${PATH}"
 
 # A lean, wheels-friendly base: VCS, a system Python + venv/pip, fast search,
 # JSON, and the privilege-drop tools the entrypoint uses. No build toolchain —
@@ -54,12 +65,43 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get purge -y --auto-remove \
     && rm -rf /var/lib/apt/lists/*
 
+# Hand the npm global prefix to uid 1000 so the agent's `npm -g` can write it
+# (yarn was installed into it above as root). Small — only the global-package
+# tree, not the system node install.
+RUN mkdir -p /opt/npm-global && chown -R 1000:1000 /opt/npm-global
+
 # Rename the default ubuntu user (uid 1000) to "user" with home /home/user —
 # the entrypoint, mounts, and gosu calls all assume /home/user.
 RUN usermod -l user -d /home/user -m ubuntu 2>/dev/null \
     && groupmod -n user ubuntu 2>/dev/null || true
 
 RUN git lfs install --system
+
+# GitHub CLI (gh) + Azure CLI with the azure-devops extension, so the sandbox's
+# boot credential pass can log `gh` / `az devops` in for the agent (parity with
+# the full image, which ships these). Deliberately WITHOUT the full image's
+# mssql/odbc drivers (msodbcsql18, mssql-tools18) — heavy and unrelated to
+# git/devops auth. NOTE: azure-cli itself still adds meaningful size to this
+# otherwise-lean image; gh alone is small.
+#
+# Keys are referenced via signed-by directly (Microsoft's armored .asc, GitHub's
+# prebuilt .gpg) so we don't have to pull gnupg into this base just to dearmor.
+# The azure-devops extension installs into a shared AZURE_EXTENSION_DIR (made
+# world-readable) so the agent's run_as user (uid 1000) sees it, not just the
+# root that ran the build.
+ENV AZURE_EXTENSION_DIR=/usr/lib/azure-cli-extensions
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc -o /usr/share/keyrings/microsoft.asc \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft.asc] https://packages.microsoft.com/repos/azure-cli/ noble main" > /etc/apt/sources.list.d/azure-cli.list \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod a+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends azure-cli gh \
+    && mkdir -p "$AZURE_EXTENSION_DIR" \
+    && az extension add --name azure-devops \
+    && chmod -R a+rX "$AZURE_EXTENSION_DIR" \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY entrypoint.min.sh /usr/local/bin/omni-sandbox-entrypoint
 RUN chmod +x /usr/local/bin/omni-sandbox-entrypoint

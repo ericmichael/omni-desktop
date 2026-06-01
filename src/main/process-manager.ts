@@ -51,11 +51,7 @@ export const parseLocalProfile = (profileName: string): string | null => {
  * and returns the profile path; `release` tears it down.
  */
 export interface IHostBridgePreparer {
-  prepare(
-    machineId: string,
-    sandboxKey: string,
-    opts: { workspaceDir?: string }
-  ): Promise<{ profilePath: string }>;
+  prepare(machineId: string, sandboxKey: string, opts: { workspaceDir?: string }): Promise<{ profilePath: string }>;
   release(machineId: string, sandboxKey: string): Promise<void>;
   /** Live online state + friendly label for a machine, for the host-offline
    *  overlay. Backed by the cloud's `MachineRegistry`. */
@@ -259,11 +255,7 @@ export class ProcessManager {
     }
   }
 
-  private getOrCreate(
-    processId: string,
-    mode: AgentProcessMode,
-    computeClient?: IComputeClient | null
-  ): AgentProcess {
+  private getOrCreate(processId: string, mode: AgentProcessMode, computeClient?: IComputeClient | null): AgentProcess {
     const existing = this.processes.get(processId);
     if (existing && existing.mode === mode) {
       return existing;
@@ -310,21 +302,39 @@ export class ProcessManager {
     }
     // Resolve a stored credential for each private git-remote source, attach the
     // auth hint to the descriptor, and collect the token env (value off-disk).
-    const gitTokenEnv = await this.resolveGitAuth(sources);
-    if (gitTokenEnv) {
-      startArg.gitTokenEnv = gitTokenEnv;
+    const gitAuth = await this.resolveGitAuth(sources);
+    if (gitAuth) {
+      startArg.gitTokenEnv = gitAuth.env;
+      if (gitAuth.credentials.length > 0) {
+        startArg.credentials = gitAuth.credentials;
+      }
     }
     return startArg;
   }
 
   /**
-   * For each ``git-remote`` source, match a stored credential by host and read
-   * its token. Mutates the source in place with an ``auth`` hint and returns the
-   * `{ tokenEnvName: token }` map to inject into the agent process env, or
-   * ``undefined`` when nothing matched. Tokens never touch disk or argv — only
-   * the env-var *name* rides along in the source descriptor.
+   * Resolve git credentials for the sandbox, scoped to the hosts the project's
+   * sources actually reference. For each source we determine its remote URL —
+   * a ``git-remote`` carries it directly; a ``local-git`` checkout's is read from
+   * its own ``origin`` — match a stored credential by host, and read the token.
+   *
+   * Returns the `{ tokenEnvName: token }` env map (tokens never touch disk/argv;
+   * only the env-var *name* travels) plus a deduped ``credentials`` bundle
+   * (`{ url, username, tokenEnv }`) the launcher forwards as ``--credential`` so
+   * ``omni serve`` configures git + the host's CLI (`gh` / `az devops`) at boot
+   * for every linked host — covering local-git checkouts, not just clones.
+   *
+   * ``git-remote`` sources additionally get the in-place ``auth`` hint they need
+   * for clone-time auth (the boot pass runs after ``create()``, too late to help
+   * the clone itself).
    */
-  private async resolveGitAuth(sources: AgentProcessSource[]): Promise<Record<string, string> | undefined> {
+  private async resolveGitAuth(sources: AgentProcessSource[]): Promise<
+    | {
+        env: Record<string, string>;
+        credentials: Array<{ url: string; username: string; tokenEnv: string }>;
+      }
+    | undefined
+  > {
     const resolve = this.resolveGitToken;
     if (!resolve) {
       return undefined;
@@ -334,23 +344,45 @@ export class ProcessManager {
       return undefined;
     }
     const env: Record<string, string> = {};
+    const credentials: Array<{ url: string; username: string; tokenEnv: string }> = [];
+    const seen = new Set<string>();
     for (const source of sources) {
-      if (source.kind !== 'git-remote') {
+      let url: string | undefined;
+      if (source.kind === 'git-remote') {
+        url = source.repoUrl;
+      } else if (source.kind === 'local-git') {
+        url = this.resolveGitRemote(source.workspaceDir)?.url;
+      }
+      if (!url) {
         continue;
       }
-      const cred = resolveCredentialForUrl(gitCredentials, source.repoUrl);
+      const cred = resolveCredentialForUrl(gitCredentials, url);
       if (!cred) {
         continue;
       }
       const token = await resolve(cred.id);
       if (!token) {
+        // The credential metadata matched the source's host, but no token could
+        // be read from this runtime's secret store. Surface it — otherwise the
+        // private clone proceeds unauthenticated and fails with an opaque error.
+        console.warn(
+          `[process-manager] credential for ${cred.host} (${cred.id}) is linked but its token ` +
+            `could not be read here; re-link it in Settings → Git`
+        );
         continue;
       }
       const tokenEnv = gitTokenEnvName(cred.id);
-      source.auth = { tokenEnv, username: cred.username };
       env[tokenEnv] = token;
+      if (source.kind === 'git-remote') {
+        source.auth = { tokenEnv, username: cred.username };
+      }
+      const key = `${tokenEnv}|${url}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        credentials.push({ url, username: cred.username, tokenEnv });
+      }
     }
-    return Object.keys(env).length > 0 ? env : undefined;
+    return Object.keys(env).length > 0 ? { env, credentials } : undefined;
   }
 
   /**
@@ -438,9 +470,7 @@ export class ProcessManager {
     try {
       mkdirSync(workspaceDir, { recursive: true });
     } catch (err) {
-      console.warn(
-        `[process-manager] ensureWorkspaceDir failed for "${workspaceDir}": ${(err as Error).message}`
-      );
+      console.warn(`[process-manager] ensureWorkspaceDir failed for "${workspaceDir}": ${(err as Error).message}`);
     }
   }
 
@@ -743,10 +773,11 @@ export const createProcessManager = (arg: {
   fetchFn?: FetchFn;
   getStoreData?: () => ProcessManagerStoreData;
   resolveGitToken?: (credentialId: string) => Promise<string | undefined>;
+  getExtraEnv?: () => Record<string, string> | Promise<Record<string, string>>;
 }) => {
-  const { ipc, sendToWindow, fetchFn, getStoreData, resolveGitToken } = arg;
+  const { ipc, sendToWindow, fetchFn, getStoreData, resolveGitToken, getExtraEnv } = arg;
 
-  const processManager = new ProcessManager({ sendToWindow, fetchFn, getStoreData, resolveGitToken });
+  const processManager = new ProcessManager({ sendToWindow, fetchFn, getStoreData, resolveGitToken, getExtraEnv });
   const channels = registerProcessHandlers(ipc, () => processManager);
 
   const cleanup = async () => {

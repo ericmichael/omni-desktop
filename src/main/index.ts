@@ -9,12 +9,17 @@ import { join, resolve } from 'path';
 import { assert } from 'tsafe';
 import { pathToFileURL } from 'url';
 
-import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig } from '@/lib/agent-config';
+import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig, parseEnvVars } from '@/lib/agent-config';
 import { getArtifactsDir } from '@/lib/artifacts';
 import { createAppControlManager } from '@/main/app-control-manager';
 import { listRepos as azureListRepos } from '@/main/azure-repos';
 import { createBrowserManager } from '@/main/browser-manager';
-import { getStatus as codexStatus, loginWithBrowser, loginWithDeviceFlow, logout as codexLogout } from '@/main/codex-auth';
+import {
+  getStatus as codexStatus,
+  loginWithBrowser,
+  loginWithDeviceFlow,
+  logout as codexLogout,
+} from '@/main/codex-auth';
 import {
   ensureFreshAccessToken as ensureFreshEntraToken,
   getStatus as entraStatus,
@@ -49,7 +54,7 @@ import { createProcessManager } from '@/main/process-manager';
 import { backfillProjectConfigs } from '@/main/project-config-backfill';
 import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
 import { createProjectManager } from '@/main/project-manager';
-import { ElectronSecretStore } from '@/main/secret-store';
+import { LocalSecretStore } from '@/main/secret-store';
 import { DEFAULT_CHAT_SNAPSHOT_TTL_MS, gcStaleSnapshots, registerSnapshotHandlers } from '@/main/snapshot-manager';
 import { getStore } from '@/main/store';
 import {
@@ -144,7 +149,7 @@ if (process.env.NODE_ENV === 'development' || process.env.OMNI_DEBUG_PORT) {
 
 const OMNI_CONFIG_DIR = getOmniConfigDir();
 const store = getStore();
-const secretStore = new ElectronSecretStore();
+const secretStore = new LocalSecretStore();
 const { repo, asyncRepo } = openProjectDb();
 
 // One-time migration: move project data from electron-store JSON to SQLite.
@@ -280,6 +285,11 @@ const [processManager, cleanupProcessManager] = createProcessManager({
     gitCredentials: store.get('gitCredentials') ?? [],
   }),
   resolveGitToken: (id) => secretStore.getGitToken(id),
+  // Inject the user's Settings → Environment vars into the `omni serve` process
+  // (the agent/model loop), mirroring server mode's getExtraEnv. The sandbox
+  // *container* gets these separately via the materialized `<config>/.env`,
+  // which omni serve folds into manifest.environment (`_inject_user_env`).
+  getExtraEnv: () => parseEnvVars(store.get('envVars') ?? ''),
 });
 
 // Create ConsoleManager — proxies terminal:* IPC into omni serve's
@@ -775,16 +785,16 @@ const restartAfterCloudModeChange = (): void => {
 };
 
 main.ipc.handle('cloud:link', async (_, urlInput) => {
-  const url = String(urlInput ?? '').trim().replace(/\/+$/, '');
+  const url = String(urlInput ?? '')
+    .trim()
+    .replace(/\/+$/, '');
   if (!url) {
     throw new Error('Cloud URL is required');
   }
   // 1. Discover the cloud's AAD configuration. Public endpoint, no auth.
   const discoverRes = await net.fetch(`${url}/.well-known/omni-cloud`);
   if (!discoverRes.ok) {
-    throw new Error(
-      `Cloud discovery failed (${discoverRes.status}). Is this a launcher URL?`,
-    );
+    throw new Error(`Cloud discovery failed (${discoverRes.status}). Is this a launcher URL?`);
   }
   const discovered = (await discoverRes.json()) as { tenantId?: string; clientId?: string };
   if (!discovered.tenantId || !discovered.clientId) {

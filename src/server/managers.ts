@@ -61,12 +61,7 @@ import { MachineRegistry } from '@/server/machine-registry';
 import { MCP_PROJECTS_PATH } from '@/server/mcp-http';
 import { CODEX_REFRESH_PATH } from '@/server/codex-refresh-http';
 import { CompositeSettingsStore } from '@/server/composite-settings-store';
-import {
-  assertNonBypassingRole,
-  ensureAppRole,
-  ensureSessionsDb,
-  grantAppPrivileges,
-} from '@/server/pg-bootstrap';
+import { assertNonBypassingRole, ensureAppRole, ensureSessionsDb, grantAppPrivileges } from '@/server/pg-bootstrap';
 import { PgSecretStore } from '@/server/pg-secret-store';
 import { resolveRuntimeTokenSecret, signRuntimeToken } from '@/server/runtime-token';
 import { registerTeamHandlers } from '@/server/team-handlers';
@@ -325,7 +320,10 @@ export const wireGlobalHandlers = async (arg: {
       // Renderer cares about *its* view; isSelf is recomputed there since the
       // caller machineId depends on which Electron is listening.
       wsHandler.sendToPrincipalInTeam(principal, principal, 'machine:list-changed', summaries);
-      localMachineIdsByPrincipal.set(principal, summaries.map((m) => m.machineId));
+      localMachineIdsByPrincipal.set(
+        principal,
+        summaries.map((m) => m.machineId)
+      );
       // Replay store snapshot so availableSandboxProfiles + picker refresh.
       // Iterate every tenant instance for the principal (across teams).
       for (const [key] of tenants) {
@@ -389,7 +387,6 @@ export const wireGlobalHandlers = async (arg: {
       })
     : undefined;
 
-
   // Teams activate under easyauth multi-tenant; PG-without-easyauth is one
   // 'local' team, SQLite/Electron has no teams.
   const teamsEnabled = !!(pgPool && process.env['OMNI_AUTH_MODE'] === 'easyauth');
@@ -411,14 +408,10 @@ export const wireGlobalHandlers = async (arg: {
   const createTenant = (teamId: string, principalId: string = teamId): TenantInstance => {
     // Cloud: composite store (team_settings base ⊕ this principal's overlay).
     // SQLite/local: the single shared ServerStore (one tenant only).
-    const settings: SettingsStore = pgPool
-      ? new CompositeSettingsStore(pgPool, teamId, principalId, replicaId)
-      : store;
+    const settings: SettingsStore = pgPool ? new CompositeSettingsStore(pgPool, teamId, principalId, replicaId) : store;
     // Per-(team, principal) config dir so two members' materialized secret-free
     // configs don't collide. Local/SQLite keeps the shared config dir.
-    const configDir = pgPool
-      ? join(getOmniConfigDir(), 'tenants', teamId, 'users', principalId)
-      : getOmniConfigDir();
+    const configDir = pgPool ? join(getOmniConfigDir(), 'tenants', teamId, 'users', principalId) : getOmniConfigDir();
     // Cloud: route this instance's broadcasts to ONLY this principal's sessions
     // (user-scoped store keys must not leak to other team members). Project-data
     // changes by other members reach this principal via the NOTIFY re-hydrate.
@@ -437,8 +430,7 @@ export const wireGlobalHandlers = async (arg: {
       }),
       // Cloud: git/github tokens are this principal's (U-identity), so agent
       // pushes carry their own identity. Local: the on-disk store.
-      resolveGitToken: (id) =>
-        pgSecret ? pgSecret.getUserGitToken(principalId, id) : secretStore.getGitToken(id),
+      resolveGitToken: (id) => (pgSecret ? pgSecret.getUserGitToken(principalId, id) : secretStore.getGitToken(id)),
       // Cloud: mint a fresh per-(team, principal) runtime token for each
       // omni-serve spawn, so the agent's HTTP MCP calls resolve to THIS team's
       // data as THIS user. The route verifies it; a sandbox can't forge another.
@@ -538,9 +530,7 @@ export const wireGlobalHandlers = async (arg: {
       // are not selectable, but the user picks between the fast and desktop
       // ACI profiles. Local machines (`local:<id>`) are appended to the
       // allow-list per-tenant when the principal has any registered.
-      allowedProfileNames: aciConfigured
-        ? [ACI_PROFILE_NAME, ACI_DESKTOP_PROFILE_NAME]
-        : undefined,
+      allowedProfileNames: aciConfigured ? [ACI_PROFILE_NAME, ACI_DESKTOP_PROFILE_NAME] : undefined,
       // Computer-as-sandbox: when a machine registry exists (cloud), a
       // `local:<machineId>` pick spawns `omni serve` HERE with a host_bridge
       // profile pointing the sandbox at the user's laptop. No registry → the
@@ -629,8 +619,11 @@ export const wireGlobalHandlers = async (arg: {
   const materializeTenant = (tenantId: string, principalId: string = tenantId): void => {
     const t = getTenant(tenantId, principalId);
     try {
+      // Per-tenant config dir in cloud (matches the spawn's XDG_CONFIG_HOME), the
+      // shared dir locally — the same dir omni serve's get_config_dir() resolves.
+      const cfgDir = dbUrl ? join(t.configDir, '.config', 'omni_code') : getOmniConfigDir();
       materializeAgentConfig({
-        configDir: dbUrl ? join(t.configDir, '.config', 'omni_code') : getOmniConfigDir(),
+        configDir: cfgDir,
         models: t.settings.get('modelsConfig') ?? emptyModelsConfig(),
         mcp: t.settings.get('mcpConfig') ?? emptyMcpConfig(),
         network: t.settings.get('networkConfig') ?? emptyNetworkConfig(),
@@ -639,9 +632,11 @@ export const wireGlobalHandlers = async (arg: {
           ? buildHttpMcpEntry(`http://127.0.0.1:${port}${MCP_PROJECTS_PATH}`)
           : buildStdioMcpEntry(getMcpBinPath()),
       });
-      if (!dbUrl) {
-        writeFileSync(join(getOmniConfigDir(), '.env'), t.settings.get('envVars') ?? '', 'utf-8');
-      }
+      // Write `.env` next to the materialized configs in BOTH modes so omni
+      // serve can read it into the sandbox container's manifest.environment
+      // (`_inject_user_env`). Cloud also injects these into the agent *process*
+      // env via getExtraEnv; this covers the container (the agent's tools).
+      writeFileSync(join(cfgDir, '.env'), t.settings.get('envVars') ?? '', 'utf-8');
     } catch (err) {
       console.error(`[config-materializer] failed for tenant ${tenantId}:`, err);
     }
@@ -676,9 +671,7 @@ export const wireGlobalHandlers = async (arg: {
     // Computer-as-sandbox: every registered machine for this principal becomes
     // a `local:<machineId>` profile entry. The renderer's picker pulls
     // labels + online status from `$machines` so we only need the id here.
-    const localProfiles: string[] = (localMachineIdsByPrincipal.get(principalId) ?? []).map(
-      (id) => `local:${id}`
-    );
+    const localProfiles: string[] = (localMachineIdsByPrincipal.get(principalId) ?? []).map((id) => `local:${id}`);
     // Cloud/ACI: the picker offers the two ACI profiles plus the principal's
     // own machines. The default is COMPUTED (not blindly persisted) so a stale
     // value can't leak in — but we HONOR a persisted default that's valid in
@@ -690,25 +683,17 @@ export const wireGlobalHandlers = async (arg: {
     if (aciConfigured) {
       const validDefaults = new Set([ACI_PROFILE_NAME, ACI_DESKTOP_PROFILE_NAME, ...localProfiles]);
       const persisted = snapshot.defaultProfileName;
-      const effectiveDefault =
-        persisted && validDefaults.has(persisted) ? persisted : ACI_PROFILE_NAME;
+      const effectiveDefault = persisted && validDefaults.has(persisted) ? persisted : ACI_PROFILE_NAME;
       return {
         ...snapshot,
         defaultProfileName: effectiveDefault,
-        availableSandboxProfiles: [
-          ACI_PROFILE_NAME,
-          ACI_DESKTOP_PROFILE_NAME,
-          ...localProfiles,
-        ],
+        availableSandboxProfiles: [ACI_PROFILE_NAME, ACI_DESKTOP_PROFILE_NAME, ...localProfiles],
       };
     }
     if (localProfiles.length > 0) {
       return {
         ...snapshot,
-        availableSandboxProfiles: [
-          ...(snapshot.availableSandboxProfiles ?? ['host', 'devbox']),
-          ...localProfiles,
-        ],
+        availableSandboxProfiles: [...(snapshot.availableSandboxProfiles ?? ['host', 'devbox']), ...localProfiles],
       };
     }
     return snapshot;
@@ -1044,7 +1029,8 @@ export const wireGlobalHandlers = async (arg: {
   );
   registerSettingsConfigHandlers(
     ipc,
-    (e) => getSettings((e as HandlerContext).tenantId, (e as HandlerContext).principalId) as unknown as SettingsConfigStore,
+    (e) =>
+      getSettings((e as HandlerContext).tenantId, (e as HandlerContext).principalId) as unknown as SettingsConfigStore,
     (e) => {
       const c = e as HandlerContext;
       materializeTenant(c.tenantId, c.principalId);
@@ -1052,13 +1038,12 @@ export const wireGlobalHandlers = async (arg: {
     },
     // Cloud/teams: never echo shared secret values back to the renderer; a
     // save that didn't change a masked field preserves the stored value.
-    pgPool
-      ? { maskModels: maskModelsConfig, maskMcp: maskMcpConfig, restoreModels: restoreMaskedModels }
-      : {}
+    pgPool ? { maskModels: maskModelsConfig, maskMcp: maskMcpConfig, restoreModels: restoreMaskedModels } : {}
   );
   registerGitCredentialHandlers(
     ipc,
-    (e) => getSettings((e as HandlerContext).tenantId, (e as HandlerContext).principalId) as unknown as SettingsConfigStore,
+    (e) =>
+      getSettings((e as HandlerContext).tenantId, (e as HandlerContext).principalId) as unknown as SettingsConfigStore,
     // Cloud: git tokens are this principal's identity (PgSecretStore); local: on-disk store.
     (e) => (pgSecret ? pgSecret.forPrincipal((e as HandlerContext).principalId) : secretStore),
     (e) => {

@@ -205,7 +205,14 @@ RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor
 
 ENV PATH="/opt/mssql-tools18/bin:${PATH}"
 
-RUN az extension add --name azure-devops
+# Install the azure-devops extension into a shared, world-readable dir so the
+# agent's run_as user (uid 1000) can use `az devops` — a bare `az extension add`
+# as root lands in /root/.azure and is invisible to uid 1000, which is who the
+# agent/terminal and the boot credential pass actually run as.
+ENV AZURE_EXTENSION_DIR=/usr/lib/azure-cli-extensions
+RUN mkdir -p "$AZURE_EXTENSION_DIR" \
+    && az extension add --name azure-devops \
+    && chmod -R a+rX "$AZURE_EXTENSION_DIR"
 
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
@@ -214,8 +221,14 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && apt-get update && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
 
+# pipx installs into PIPX_HOME and drops console-script symlinks in PIPX_BIN_DIR.
+# Both are under /opt/pipx (owned by uid 1000 in the chown step below) and on
+# PATH, so the agent can `pipx install` without write access to the root-owned,
+# security-sensitive /usr/local/bin (which holds the root-run entrypoint +
+# apply-network-isolation.sh — chowning it would be a privilege-escalation hole).
 ENV PIPX_HOME=/opt/pipx
-ENV PIPX_BIN_DIR=/usr/local/bin
+ENV PIPX_BIN_DIR=/opt/pipx/bin
+ENV PATH="/opt/pipx/bin:${PATH}"
 ENV ELAN_HOME=/opt/elan
 ENV PATH="${ELAN_HOME}/bin:${PATH}"
 
@@ -226,6 +239,33 @@ RUN curl -fsSL https://raw.githubusercontent.com/leanprover/elan/master/elan-ini
     && lake --version
 
 RUN npm install -g @playwright/cli@0.1.1
+
+# The pyenv / rbenv / nvm toolchains are installed as root at build time, but the
+# agent runs as uid 1000 (the profile's run_as). Hand the toolchain roots to uid
+# 1000 so the agent can install packages with console scripts without `pyenv`/
+# `rbenv` `rehash` failing on the root-owned shims dir ("isn't writable"), and so
+# global `pip` / `gem` / `npm -g` installs land where it can write. The container
+# is single-user; owning its own toolchains is the normal dev-machine posture,
+# and the sandbox + network boundary is the real fence. Done after the last
+# build-time write into each (the `npm -g` above is the final one). pipx's home
+# is created here too so the agent can `pipx install` (its bin dir is on PATH).
+#
+# elan (Lean) and playwright are handled differently: a recursive chown would
+# copy-up ~3 GB (the 2.5 GB baked Lean toolchain + 0.6 GB browsers) into a new
+# layer. Instead, hand uid 1000 only the specific dirs each writes NEW entries
+# into — `elan toolchain install` creates a new dir under toolchains/ (and touches
+# bin/tmp/settings.toml/env), and `playwright install <browser>` creates a new
+# browser dir plus a link in the tiny .links/ registry. The multi-GB baked
+# contents stay root-owned and read-only (used read-only: the default Lean
+# toolchain + chromium still run). Without this, a Lean project that pins a
+# non-default toolchain, or installing any non-chromium browser, fails with
+# EACCES on the root-owned dirs.
+RUN mkdir -p "${PIPX_HOME}" "${PIPX_BIN_DIR}" \
+    && chown -R 1000:1000 "${PYENV_ROOT}" "${RBENV_ROOT}" "${NVM_DIR}" "${PIPX_HOME}" \
+    && chown 1000:1000 "${ELAN_HOME}" "${ELAN_HOME}/bin" "${ELAN_HOME}/tmp" "${ELAN_HOME}/toolchains" \
+                       "${ELAN_HOME}/settings.toml" "${ELAN_HOME}/env" \
+    && chown 1000:1000 "${PLAYWRIGHT_BROWSERS_PATH}" \
+    && chown -R 1000:1000 "${PLAYWRIGHT_BROWSERS_PATH}/.links"
 
 # Shape B: the agent runs on the host (omni serve), not inside this
 # container. We no longer pipx-install omni-code into the image — the
