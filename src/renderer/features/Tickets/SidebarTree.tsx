@@ -351,6 +351,8 @@ type SidebarTreeProps = {
   onEditMilestone?: (milestone: Milestone) => void;
   /** Called when user requests to add a source to a project. */
   onAddSource?: (projectId: ProjectId) => void;
+  /** Called when user requests to edit an existing source. */
+  onEditSource?: (projectId: ProjectId, sourceId: string) => void;
   /** Called when user requests to remove a source from a project. */
   onRemoveSource?: (projectId: ProjectId, sourceId: string) => void;
 };
@@ -615,6 +617,7 @@ export const SidebarTree = memo(
     onCreateMilestone,
     onEditMilestone,
     onAddSource,
+    onEditSource,
     onRemoveSource,
   }: SidebarTreeProps) => {
     const styles = useStyles();
@@ -1253,6 +1256,12 @@ export const SidebarTree = memo(
                                     </MenuTrigger>
                                     <MenuPopover>
                                       <MenuList>
+                                        <MenuItem
+                                          icon={<Edit20Regular />}
+                                          onClick={() => onEditSource?.(project.id, s.id)}
+                                        >
+                                          Edit source
+                                        </MenuItem>
                                         <MenuItem
                                           icon={<Delete20Regular />}
                                           onClick={() => onRemoveSource?.(project.id, s.id)}

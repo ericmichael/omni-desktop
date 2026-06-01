@@ -33,10 +33,11 @@ import { $activeInbox } from '@/renderer/features/Inbox/state';
 import { $milestones, milestoneApi } from '@/renderer/features/Initiatives/state';
 import { $pages, pageApi } from '@/renderer/features/Pages/state';
 import { AddSourceDialog } from '@/renderer/features/Projects/AddSourceDialog';
+import { EditSourceDialog } from '@/renderer/features/Projects/EditSourceDialog';
+import { TeamSwitcher } from '@/renderer/features/Teams/TeamSwitcher';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { Milestone } from '@/shared/types';
 
-import { TeamSwitcher } from '@/renderer/features/Teams/TeamSwitcher';
 import { MilestoneForm } from './MilestoneForm';
 import { ProjectForm } from './ProjectForm';
 import { SidebarTree } from './SidebarTree';
@@ -188,11 +189,14 @@ export const TicketsSidebar = memo(({ onNavigate, type = 'inline', open = true, 
   const [milestoneFormProjectId, setMilestoneFormProjectId] = useState<string | null>(null);
   const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null);
   const [addSourceProjectId, setAddSourceProjectId] = useState<string | null>(null);
+  const [editSource, setEditSource] = useState<{ projectId: string; sourceId: string } | null>(null);
   const [projectsOpen, setProjectsOpen] = useState(true);
 
   const projects = store.projects;
   const selectedValue = viewToNavValue(view);
   const addSourceProject = projects.find((p) => p.id === addSourceProjectId);
+  const editSourceProject = editSource ? projects.find((p) => p.id === editSource.projectId) : undefined;
+  const editSourceSource = editSourceProject?.sources.find((s) => s.id === editSource?.sourceId);
 
   const handleOpenForm = useCallback(() => setFormOpen(true), []);
   const handleCloseForm = useCallback(() => setFormOpen(false), []);
@@ -204,6 +208,11 @@ export const TicketsSidebar = memo(({ onNavigate, type = 'inline', open = true, 
   }, []);
   const handleAddSource = useCallback((projectId: string) => setAddSourceProjectId(projectId), []);
   const handleCloseAddSource = useCallback(() => setAddSourceProjectId(null), []);
+  const handleEditSource = useCallback(
+    (projectId: string, sourceId: string) => setEditSource({ projectId, sourceId }),
+    []
+  );
+  const handleCloseEditSource = useCallback(() => setEditSource(null), []);
   const handleRemoveSource = useCallback(
     (projectId: string, sourceId: string) => {
       const project = projects.find((p) => p.id === projectId);
@@ -322,6 +331,7 @@ export const TicketsSidebar = memo(({ onNavigate, type = 'inline', open = true, 
               onCreateMilestone={handleCreateMilestone}
               onEditMilestone={handleEditMilestone}
               onAddSource={handleAddSource}
+              onEditSource={handleEditSource}
               onRemoveSource={handleRemoveSource}
             />
           ))}
@@ -329,6 +339,14 @@ export const TicketsSidebar = memo(({ onNavigate, type = 'inline', open = true, 
 
       <ProjectForm open={formOpen} onClose={handleCloseForm} />
       {addSourceProject && <AddSourceDialog open onClose={handleCloseAddSource} project={addSourceProject} />}
+      {editSourceProject && editSourceSource && (
+        <EditSourceDialog
+          open
+          onClose={handleCloseEditSource}
+          project={editSourceProject}
+          source={editSourceSource}
+        />
+      )}
       <AnimatedDialog
         open={milestoneFormProjectId !== null || editingMilestone !== null}
         onClose={handleCloseMilestoneForm}
