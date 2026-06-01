@@ -716,10 +716,10 @@ export const wireGlobalHandlers = async (arg: {
    * tenant-scoped PgProjectsRepo (RLS isolates it). SQLite: the single shared
    * repo (one tenant only). Writes flow through this repo, so the LISTEN/NOTIFY
    * (Postgres) and change-watcher (SQLite) layers keep ProjectManager caches
-   * coherent automatically — the same path used by the launcher's own writes.
+   * coherent automatically.
    */
   const getTenantRepo = (tenantId: string): IProjectsRepo =>
-    pgPool ? new PgProjectsRepo(pgPool, tenantId, replicaId) : asyncRepo;
+    pgPool ? new PgProjectsRepo(pgPool, tenantId) : asyncRepo;
 
   /** Profile claims pulled from EasyAuth headers for the users table. */
   type PrincipalClaims = { email?: string | null; displayName?: string | null; idp?: string | null };
