@@ -2361,7 +2361,7 @@ type ProjectIpcEvents = Namespaced<
     'detect-chat-pull-requests': () => ContainerPullRequest[];
     // Supervisor operations
     'ensure-supervisor-infra': (ticketId: TicketId) => void;
-    'start-supervisor': (ticketId: TicketId) => void;
+    'start-supervisor': (ticketId: TicketId, profileName?: string) => void;
     'stop-supervisor': (ticketId: TicketId) => void;
     'send-supervisor-message': (ticketId: TicketId, message: string) => void;
     'reset-supervisor-session': (ticketId: TicketId) => void;
@@ -2425,6 +2425,7 @@ export type SupervisorBridgeRequest =
       kind: 'ensure-column';
       ticketId: TicketId;
       workspaceDir?: string;
+      profileName?: string;
     }
   | {
       /**

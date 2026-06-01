@@ -56,7 +56,15 @@ describe('registerSupervisorHandlers', () => {
     const orch = makeOrchestrator();
     registerSupervisorHandlers(ipc, () => orch as never);
     ipc.invoke('project:start-supervisor', 't1');
-    expect(orch.startSupervisor).toHaveBeenCalledWith('t1');
+    expect(orch.startSupervisor).toHaveBeenCalledWith('t1', undefined);
+  });
+
+  it('project:start-supervisor delegates with selected profile', () => {
+    const ipc = new StubIpc();
+    const orch = makeOrchestrator();
+    registerSupervisorHandlers(ipc, () => orch as never);
+    ipc.invoke('project:start-supervisor', 't1', 'aci-desktop');
+    expect(orch.startSupervisor).toHaveBeenCalledWith('t1', 'aci-desktop');
   });
 
   it('project:stop-supervisor delegates with ticketId', () => {

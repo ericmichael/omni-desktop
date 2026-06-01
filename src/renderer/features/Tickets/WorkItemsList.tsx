@@ -253,7 +253,7 @@ const TicketRow = memo(({ ticket, selected, hovered, unresolvedBlockers, milesto
   }, [ticket.id]);
 
   const handleAutopilot = useCallback(() => {
-    void ticketApi.startSupervisor(ticket.id);
+    ticketApi.requestStartSupervisor(ticket.id);
   }, [ticket.id]);
 
   const handleStopPropagation = useCallback((e: React.MouseEvent) => {

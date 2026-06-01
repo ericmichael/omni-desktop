@@ -543,6 +543,17 @@ describe('SupervisorOrchestrator integration', () => {
         expect.objectContaining({ ticketId: 't1' })
       );
     });
+
+    it('forwards a one-off profile to the bridge', async () => {
+      const ctx = makePm({
+        source: { kind: 'local', workspaceDir: '/tmp/fake' },
+        tickets: [{ id: 't1' }],
+      });
+      await orch(ctx.pm).ensureColumn('t1' as TicketId, 'aci-desktop');
+      expect(ctx.bridge.ensureColumn).toHaveBeenCalledWith(
+        expect.objectContaining({ ticketId: 't1', profileName: 'aci-desktop' })
+      );
+    });
   });
 
   describe('startSupervisor', () => {
@@ -564,6 +575,19 @@ describe('SupervisorOrchestrator integration', () => {
             safeToolOverrides: { safe_tool_patterns: ['.*'] },
           }),
         })
+      );
+    });
+
+    it('passes the selected profile into code tab setup before starting', async () => {
+      const ctx = makePm({
+        source: { kind: 'local', workspaceDir: '/tmp/fake' },
+        tickets: [{ id: 't1' }],
+      });
+
+      await orch(ctx.pm).startSupervisor('t1' as TicketId, 'local:machine-1');
+
+      expect(ctx.bridge.ensureColumn).toHaveBeenCalledWith(
+        expect.objectContaining({ ticketId: 't1', profileName: 'local:machine-1' })
       );
     });
   });

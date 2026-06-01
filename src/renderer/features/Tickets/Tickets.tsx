@@ -15,7 +15,8 @@ import { MilestoneDetail } from './MilestoneDetail';
 import { ProjectActions, ProjectPage } from './ProjectPage';
 import { ProjectsDashboard } from './ProjectsDashboard';
 import { TicketsSidebar } from './Sidebar';
-import { $activeWipTickets, $ticketsView, $wipDialogPendingTicket, ticketApi } from './state';
+import { $activeWipTickets, $ticketsView, $wipDialogPendingProfileName, $wipDialogPendingTicket, ticketApi } from './state';
+import { TicketAutopilotLaunchDialog } from './TicketAutopilotLaunchDialog';
 import { TicketDetail } from './TicketDetail';
 import { WipLimitDialog } from './WipLimitDialog';
 import { WorkItemsList } from './WorkItemsList';
@@ -199,7 +200,7 @@ export const Tickets = memo(() => {
   }, [view]);
   const handleRetryTicketAutopilot = useCallback(() => {
     if (view.type === 'ticket') {
-      void ticketApi.startSupervisor(view.ticketId);
+      ticketApi.requestStartSupervisor(view.ticketId);
     }
   }, [view]);
   const mobileBackHandler =
@@ -359,6 +360,7 @@ export const Tickets = memo(() => {
       )}
 
       <WipLimitOverlay />
+      <TicketAutopilotLaunchDialog />
     </div>
   );
 });
@@ -371,18 +373,21 @@ const WipLimitOverlay = memo(() => {
 
   const handleDrop = useCallback((_droppedTicketId: string) => {
     const pending = $wipDialogPendingTicket.get();
+    const profileName = $wipDialogPendingProfileName.get();
     $wipDialogPendingTicket.set(null);
+    $wipDialogPendingProfileName.set(undefined);
     // After stopping the dropped ticket, start the pending one
     if (pending) {
       // Small delay to let the stop propagate
       setTimeout(() => {
-        void ticketApi.startSupervisor(pending.id);
+        void ticketApi.startSupervisor(pending.id, { profileName });
       }, 500);
     }
   }, []);
 
   const handleCancel = useCallback(() => {
     $wipDialogPendingTicket.set(null);
+    $wipDialogPendingProfileName.set(undefined);
   }, []);
 
   if (!pendingTicket) {

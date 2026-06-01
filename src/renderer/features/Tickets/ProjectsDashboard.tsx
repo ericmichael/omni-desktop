@@ -499,7 +499,7 @@ const MilestoneCard = memo(
 
     const handleStart = useCallback(() => {
       if (nextUp) {
-        void ticketApi.startSupervisor(nextUp.id);
+        ticketApi.requestStartSupervisor(nextUp.id);
       }
     }, [nextUp]);
 
@@ -601,7 +601,7 @@ const ProjectCard = memo(
 
     const handleStart = useCallback(() => {
       if (nextUp) {
-        void ticketApi.startSupervisor(nextUp.id);
+        ticketApi.requestStartSupervisor(nextUp.id);
       }
     }, [nextUp]);
 

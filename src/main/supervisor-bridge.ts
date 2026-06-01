@@ -90,7 +90,7 @@ export class SupervisorBridge {
     });
   }
 
-  ensureColumn(arg: { ticketId: TicketId; workspaceDir?: string }): Promise<void> {
+  ensureColumn(arg: { ticketId: TicketId; workspaceDir?: string; profileName?: string }): Promise<void> {
     return this.dispatch({ kind: 'ensure-column', ...arg }).then(() => {});
   }
 

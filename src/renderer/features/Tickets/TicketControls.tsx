@@ -70,7 +70,7 @@ const useTicketAutomation = (ticketId: TicketId) => {
     supervisorTask?.status.type === 'connecting' ||
     supervisorTask?.status.type === 'starting';
 
-  const handleStart = useCallback(() => ticketApi.startSupervisor(ticketId), [ticketId]);
+  const handleStart = useCallback(() => ticketApi.requestStartSupervisor(ticketId), [ticketId]);
   const handleStop = useCallback(() => ticketApi.stopSupervisor(ticketId), [ticketId]);
   const handleReset = useCallback(() => ticketApi.resetSupervisorSession(ticketId), [ticketId]);
 

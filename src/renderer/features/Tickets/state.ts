@@ -181,6 +181,8 @@ export const $activeWipTickets = atom<Ticket[]>([]);
  * Set by startSupervisor when the WIP limit is hit. Cleared by dialog actions.
  */
 export const $wipDialogPendingTicket = atom<Ticket | null>(null);
+export const $wipDialogPendingProfileName = atom<string | undefined>(undefined);
+export const $autopilotLaunchTicketId = atom<TicketId | null>(null);
 
 export const ticketApi = {
   // Projects (delegated to shared Projects module)
@@ -309,11 +311,14 @@ export const ticketApi = {
     }
     void ticketApi.fetchTasks();
   },
-  startSupervisor: async (ticketId: TicketId): Promise<void> => {
+  requestStartSupervisor: (ticketId: TicketId): void => {
+    $autopilotLaunchTicketId.set(ticketId);
+  },
+  startSupervisor: async (ticketId: TicketId, opts?: { profileName?: string }): Promise<void> => {
     // Clear old messages when starting a fresh supervisor session
     $supervisorMessages.setKey(ticketId, []);
     try {
-      await emitter.invoke('project:start-supervisor', ticketId);
+      await emitter.invoke('project:start-supervisor', ticketId, opts?.profileName);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.startsWith('WIP_LIMIT:')) {
@@ -322,6 +327,7 @@ export const ticketApi = {
         const ticket = $tickets.get()[ticketId] ?? persistedStoreApi.$atom.get().tickets.find((t) => t.id === ticketId);
         if (ticket) {
           $wipDialogPendingTicket.set(ticket);
+          $wipDialogPendingProfileName.set(opts?.profileName);
         }
         return;
       }

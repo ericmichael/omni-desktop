@@ -282,7 +282,7 @@ export const TicketDetail = memo(
     }, [ticketId]);
 
     const handleStartAutopilot = useCallback(() => {
-      void ticketApi.startSupervisor(ticketId);
+      ticketApi.requestStartSupervisor(ticketId);
     }, [ticketId]);
 
     const handleDelete = useCallback(() => {
