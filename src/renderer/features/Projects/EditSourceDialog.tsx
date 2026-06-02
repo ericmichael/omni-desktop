@@ -194,7 +194,13 @@ export const EditSourceDialog = memo(({ open, onClose, project, source }: EditSo
                 <label className={styles.label}>
                   Default branch <span className={styles.hint}>(optional)</span>
                 </label>
-                <Input type="text" value={branch} onChange={handleBranch} placeholder="main" className={styles.full} />
+                <Input
+                  type="text"
+                  value={branch}
+                  onChange={handleBranch}
+                  placeholder="Leave blank for the repo's default branch"
+                  className={styles.full}
+                />
               </div>
             )}
 

@@ -337,7 +337,7 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
                     type="text"
                     value={branch}
                     onChange={handleBranch}
-                    placeholder="main"
+                    placeholder="Leave blank for the repo's default branch"
                     className={styles.full}
                   />
                 </div>
