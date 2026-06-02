@@ -15,13 +15,7 @@ import {
 } from '@/renderer/services/agent-process';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type {
-  CodeLayoutMode,
-  CodeTab,
-  CodeTabId,
-  ProjectId,
-  TicketId,
-} from '@/shared/types';
+import type { CodeLayoutMode, CodeTab, CodeTabId, ProjectId, TicketId } from '@/shared/types';
 
 /**
  * Resolve the profile a fresh tab should be bound to. Mirrors the chain in
@@ -38,6 +32,17 @@ const seedProfileName = (projectId: ProjectId | null | undefined): string => {
   }
   return persistedStoreApi.getKey('defaultProfileName') ?? 'host';
 };
+
+const resolveAvailableProfileName = (name: string): string => {
+  const available = persistedStoreApi.getKey('availableSandboxProfiles');
+  if (!available || available.length === 0 || available.includes(name)) {
+    return name;
+  }
+  return available[0] ?? 'host';
+};
+
+export const resolveCodeTabProfileName = (projectId: ProjectId | null | undefined): string =>
+  resolveAvailableProfileName(seedProfileName(projectId));
 
 // Re-export agent status/xterm maps so existing imports from Code/state still work.
 // Components can read per-tab status via $agentStatuses.get()[tabId].
@@ -67,7 +72,8 @@ export const codeApi = {
       id: nanoid(),
       projectId: null,
       sessionId: uuidv4(),
-      profileName: seedProfileName(null),
+      profileName: resolveCodeTabProfileName(null),
+      profileNameExplicit: false,
       createdAt: Date.now(),
     };
     const tabs = [...(persistedStoreApi.getKey('codeTabs') ?? []), tab];
@@ -120,7 +126,20 @@ export const codeApi = {
   },
 
   setTabProject: async (tabId: CodeTabId, projectId: ProjectId) => {
-    const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((t) => (t.id === tabId ? { ...t, projectId } : t));
+    const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((t) => {
+      if (t.id !== tabId) {
+        return t;
+      }
+      const profileName = t.profileNameExplicit
+        ? resolveAvailableProfileName(t.profileName ?? seedProfileName(projectId))
+        : resolveCodeTabProfileName(projectId);
+      if (profileName === t.profileName) {
+        return { ...t, projectId, profileName };
+      }
+      const { containerId: _drop, ...rest } = t;
+      void _drop;
+      return { ...rest, projectId, profileName };
+    });
     await persistedStoreApi.setKey('codeTabs', tabs);
   },
 
@@ -154,7 +173,8 @@ export const codeApi = {
       sessionId: uuidv4(),
       ticketTitle: opts?.ticketTitle,
       workspaceDir: opts?.workspaceDir,
-      profileName: opts?.profileName ?? seedProfileName(projectId),
+      profileName: opts?.profileName ?? resolveCodeTabProfileName(projectId),
+      profileNameExplicit: Boolean(opts?.profileName),
       createdAt: Date.now(),
     };
     const tabs = [...existingTabs, tab];
@@ -169,7 +189,8 @@ export const codeApi = {
       projectId: null,
       sessionId: uuidv4(),
       customAppId,
-      profileName: seedProfileName(null),
+      profileName: resolveCodeTabProfileName(null),
+      profileNameExplicit: false,
       createdAt: Date.now(),
     };
     const tabs = [...(persistedStoreApi.getKey('codeTabs') ?? []), tab];
@@ -178,16 +199,12 @@ export const codeApi = {
   },
 
   setTabAppId: async (tabId: CodeTabId, customAppId: string) => {
-    const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((t) =>
-      t.id === tabId ? { ...t, customAppId } : t
-    );
+    const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((t) => (t.id === tabId ? { ...t, customAppId } : t));
     await persistedStoreApi.setKey('codeTabs', tabs);
   },
 
   setTabSessionId: async (tabId: CodeTabId, sessionId: string | undefined) => {
-    const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((t) =>
-      t.id === tabId ? { ...t, sessionId } : t
-    );
+    const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((t) => (t.id === tabId ? { ...t, sessionId } : t));
     await persistedStoreApi.setKey('codeTabs', tabs);
   },
 
@@ -196,17 +213,21 @@ export const codeApi = {
     // profile-specific so we drop it here — the SDK would silently fall back
     // anyway, but not sending a definitely-stale id is cleaner.
     const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((t) => {
-      if (t.id !== tabId) return t;
+      if (t.id !== tabId) {
+        return t;
+      }
       const { containerId: _drop, ...rest } = t;
       void _drop;
-      return { ...rest, profileName };
+      return { ...rest, profileName, profileNameExplicit: true };
     });
     await persistedStoreApi.setKey('codeTabs', tabs);
   },
 
   setTabContainerId: async (tabId: CodeTabId, containerId: string | undefined) => {
     const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((t) => {
-      if (t.id !== tabId) return t;
+      if (t.id !== tabId) {
+        return t;
+      }
       if (containerId === undefined) {
         const { containerId: _drop, ...rest } = t;
         void _drop;

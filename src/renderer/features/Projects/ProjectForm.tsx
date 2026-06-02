@@ -60,135 +60,140 @@ type ProjectFormProps = {
   open: boolean;
   onClose: () => void;
   editProject?: Project;
+  showSandboxForCreate?: boolean;
+  submitLabel?: string;
+  onCreated?: (project: Project) => void;
 };
 
-export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProps) => {
-  const styles = useStyles();
-  const isEdit = Boolean(editProject);
+export const ProjectForm = memo(
+  ({ open, onClose, editProject, showSandboxForCreate = false, submitLabel, onCreated }: ProjectFormProps) => {
+    const styles = useStyles();
+    const isEdit = Boolean(editProject);
 
-  const [label, setLabel] = useState(editProject?.label ?? '');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+    const [label, setLabel] = useState(editProject?.label ?? '');
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [dueDate, setDueDate] = useState(editProject?.dueDate !== undefined ? toInputDate(editProject.dueDate) : '');
+    const [dueDate, setDueDate] = useState(editProject?.dueDate !== undefined ? toInputDate(editProject.dueDate) : '');
 
-  // Per-project sandbox profile. ``null``/missing means "inherit user-default".
-  const [sandboxProfile, setSandboxProfile] = useState<string | null>(editProject?.sandboxProfile ?? null);
-  const [isEnterprise, setIsEnterprise] = useState(false);
-  useEffect(() => {
-    emitter.invoke('platform:is-enterprise').then(setIsEnterprise);
-  }, []);
-  const storeData = useStore(persistedStoreApi.$atom);
-  const availableProfiles = useMemo(
-    () => getAvailableProfileNames({ isEnterprise, available: storeData.availableSandboxProfiles }),
-    [isEnterprise, storeData.availableSandboxProfiles]
-  );
-  const handleSandboxProfileChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSandboxProfile(e.target.value === INHERIT_PROFILE ? null : e.target.value);
-  }, []);
+    // Per-project sandbox profile. ``null``/missing means "inherit user-default".
+    const [sandboxProfile, setSandboxProfile] = useState<string | null>(editProject?.sandboxProfile ?? null);
+    const [isEnterprise, setIsEnterprise] = useState(false);
+    useEffect(() => {
+      emitter.invoke('platform:is-enterprise').then(setIsEnterprise);
+    }, []);
+    const storeData = useStore(persistedStoreApi.$atom);
+    const availableProfiles = useMemo(
+      () => getAvailableProfileNames({ isEnterprise, available: storeData.availableSandboxProfiles }),
+      [isEnterprise, storeData.availableSandboxProfiles]
+    );
+    const handleSandboxProfileChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+      setSandboxProfile(e.target.value === INHERIT_PROFILE ? null : e.target.value);
+    }, []);
 
-  const isValid = label.trim().length > 0;
+    const isValid = label.trim().length > 0;
 
-  const handleLabelChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setLabel(e.target.value);
-  }, []);
+    const handleLabelChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+      setLabel(e.target.value);
+    }, []);
 
-  const handleSubmit = useCallback(async () => {
-    if (!isValid || isSubmitting) {
-      return;
-    }
-    setIsSubmitting(true);
-
-    const slug =
-      label
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-|-$/g, '')
-        .slice(0, 60) || 'project';
-    const dueDateMs = fromInputDate(dueDate);
-
-    try {
-      if (isEdit && editProject) {
-        // Sources are managed from the sidebar / ⋯ menu — omit them here so the
-        // edit form never overwrites them.
-        await projectsApi.updateProject(editProject.id, {
-          label: label.trim(),
-          sandboxProfile,
-          dueDate: dueDateMs,
-        });
-      } else {
-        // New projects start empty; sources are added afterward via the
-        // sidebar's Sources branch or the project page's ⋯ menu.
-        await projectsApi.addProject({
-          label: label.trim(),
-          slug,
-          sources: [],
-          ...(sandboxProfile ? { sandboxProfile } : {}),
-          ...(dueDateMs !== undefined ? { dueDate: dueDateMs } : {}),
-        });
+    const handleSubmit = useCallback(async () => {
+      if (!isValid || isSubmitting) {
+        return;
       }
-      onClose();
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [isValid, isSubmitting, isEdit, editProject, label, sandboxProfile, dueDate, onClose]);
+      setIsSubmitting(true);
 
-  const handleDueDateChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setDueDate(e.target.value);
-  }, []);
+      const slug =
+        label
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-|-$/g, '')
+          .slice(0, 60) || 'project';
+      const dueDateMs = fromInputDate(dueDate);
 
-  return (
-    <AnimatedDialog open={open} onClose={onClose}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>{isEdit ? 'Edit Project' : 'New Project'}</DialogHeader>
-        <DialogBody className={styles.body}>
-          <div className={styles.field}>
-            <label className={styles.label}>Name</label>
-            <Input
-              type="text"
-              value={label}
-              onChange={handleLabelChange}
-              placeholder="my-project"
-              className={styles.fullWidth}
-            />
-          </div>
+      try {
+        if (isEdit && editProject) {
+          // Sources are managed from the sidebar / ⋯ menu — omit them here so the
+          // edit form never overwrites them.
+          await projectsApi.updateProject(editProject.id, {
+            label: label.trim(),
+            sandboxProfile,
+            dueDate: dueDateMs,
+          });
+        } else {
+          // New projects start empty; sources are added afterward via the
+          // sidebar's Sources branch or the project page's ⋯ menu.
+          const project = await projectsApi.addProject({
+            label: label.trim(),
+            slug,
+            sources: [],
+            ...(sandboxProfile ? { sandboxProfile } : {}),
+            ...(dueDateMs !== undefined ? { dueDate: dueDateMs } : {}),
+          });
+          onCreated?.(project);
+        }
+        onClose();
+      } finally {
+        setIsSubmitting(false);
+      }
+    }, [isValid, isSubmitting, isEdit, editProject, label, sandboxProfile, dueDate, onClose, onCreated]);
 
-          {/* Sandbox — only in edit mode. New projects inherit the default. */}
-          {isEdit && (
+    const handleDueDateChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+      setDueDate(e.target.value);
+    }, []);
+
+    return (
+      <AnimatedDialog open={open} onClose={onClose}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>{isEdit ? 'Edit Project' : 'New Project'}</DialogHeader>
+          <DialogBody className={styles.body}>
             <div className={styles.field}>
-              <label className={styles.label}>Sandbox</label>
-              <Select
-                value={sandboxProfile ?? INHERIT_PROFILE}
-                onChange={handleSandboxProfileChange}
+              <label className={styles.label}>Name</label>
+              <Input
+                type="text"
+                value={label}
+                onChange={handleLabelChange}
+                placeholder="my-project"
                 className={styles.fullWidth}
-              >
-                <option value={INHERIT_PROFILE}>Inherit default</option>
-                {availableProfiles.map((name) => (
-                  <option key={name} value={name}>
-                    {getProfileMenuLabel(name)}
-                  </option>
-                ))}
-              </Select>
+              />
             </div>
-          )}
 
-          <div className={styles.field}>
-            <label className={styles.label}>Due date</label>
-            <Input type="date" value={dueDate} onChange={handleDueDateChange} className={styles.fullWidth} />
-          </div>
-        </DialogBody>
-        <DialogFooter className={styles.footer}>
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={handleSubmit} isDisabled={!isValid || isSubmitting}>
-            {isEdit ? 'Save' : 'Create'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </AnimatedDialog>
-  );
-});
+            {(isEdit || showSandboxForCreate) && (
+              <div className={styles.field}>
+                <label className={styles.label}>Sandbox</label>
+                <Select
+                  value={sandboxProfile ?? INHERIT_PROFILE}
+                  onChange={handleSandboxProfileChange}
+                  className={styles.fullWidth}
+                >
+                  <option value={INHERIT_PROFILE}>Inherit default</option>
+                  {availableProfiles.map((name) => (
+                    <option key={name} value={name}>
+                      {getProfileMenuLabel(name)}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            )}
+
+            <div className={styles.field}>
+              <label className={styles.label}>Due date</label>
+              <Input type="date" value={dueDate} onChange={handleDueDateChange} className={styles.fullWidth} />
+            </div>
+          </DialogBody>
+          <DialogFooter className={styles.footer}>
+            <Button variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button onClick={handleSubmit} isDisabled={!isValid || isSubmitting}>
+              {submitLabel ?? (isEdit ? 'Save' : 'Create')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </AnimatedDialog>
+    );
+  }
+);
 ProjectForm.displayName = 'ProjectForm';
 
 /** Format an epoch-ms timestamp as a local YYYY-MM-DD string for <input type="date">. */
