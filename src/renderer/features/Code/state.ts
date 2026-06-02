@@ -204,7 +204,17 @@ export const codeApi = {
   },
 
   setTabSessionId: async (tabId: CodeTabId, sessionId: string | undefined) => {
-    const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((t) => (t.id === tabId ? { ...t, sessionId } : t));
+    const tabs = (persistedStoreApi.getKey('codeTabs') ?? []).map((t) => {
+      if (t.id !== tabId) {
+        return t;
+      }
+      if ((t.sessionId ?? undefined) === sessionId) {
+        return { ...t, sessionId };
+      }
+      const { containerId: _drop, ...rest } = t;
+      void _drop;
+      return { ...rest, sessionId };
+    });
     await persistedStoreApi.setKey('codeTabs', tabs);
   },
 

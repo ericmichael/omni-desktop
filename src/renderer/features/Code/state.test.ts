@@ -151,6 +151,25 @@ describe('code tab sandbox profile resolution', () => {
     expect(store.codeTabs[0]?.containerId).toBeUndefined();
   });
 
+  it('clears stale container id when session id changes', async () => {
+    resetStore({ codeTabs: [tab({ sessionId: 'session-1', containerId: 'old-container' })] });
+    const { codeApi } = await import('./state');
+
+    await codeApi.setTabSessionId('tab-1', 'session-2');
+
+    expect(store.codeTabs[0]).toMatchObject({ sessionId: 'session-2' });
+    expect(store.codeTabs[0]?.containerId).toBeUndefined();
+  });
+
+  it('preserves container id when session id is unchanged', async () => {
+    resetStore({ codeTabs: [tab({ sessionId: 'session-1', containerId: 'container-1' })] });
+    const { codeApi } = await import('./state');
+
+    await codeApi.setTabSessionId('tab-1', 'session-1');
+
+    expect(store.codeTabs[0]).toMatchObject({ sessionId: 'session-1', containerId: 'container-1' });
+  });
+
   it('sets created projects on the setup tab without replacing a one-off sandbox', async () => {
     resetStore({
       defaultProfileName: 'host',
