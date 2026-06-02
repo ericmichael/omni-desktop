@@ -158,8 +158,8 @@ return existing
           'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
         fontSize: 13,
         theme: {
-          background: '#0b0f14',
-          foreground: '#e5e7eb',
+          background: 'var(--color-background)',
+          foreground: 'var(--color-foreground)',
         },
       })
       const fit = new FitAddon()
@@ -567,7 +567,7 @@ containersRef.current.delete(tabId)
       ].join(' ')}
       aria-hidden={open ? undefined : true}
     >
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute inset-0 bg-background/60" onClick={onClose} />
       <div
         className={[
           'absolute left-0 right-0 bottom-0 h-[50vh] sm:h-[70vh] bg-bgColumn border-t border-bgCardAlt flex flex-col transition-transform',

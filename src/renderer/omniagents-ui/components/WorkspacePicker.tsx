@@ -90,7 +90,7 @@ export function WorkspacePicker({
   }, [manualInput, load])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70" onClick={onClose}>
       <div
         className="bg-bgMain border border-bgCardAlt rounded-xl shadow-2xl w-full max-w-lg mx-4 flex flex-col"
         style={{ maxHeight: '80vh' }}
@@ -177,7 +177,7 @@ setEditingPath(false)
         <div className="flex-1 overflow-y-auto min-h-0" style={{ maxHeight: '50vh' }}>
           {loading ? (
             <div className="flex items-center justify-center py-8">
-              <div className="animate-spin rounded-full h-5 w-5 border-2 border-brand border-t-transparent" />
+              <div className="animate-spin rounded-full h-5 w-5 border-2 border-primary border-t-transparent" />
             </div>
           ) : error ? (
             <div className="px-4 py-6 text-sm text-errorRed text-center">{error}</div>
@@ -212,7 +212,7 @@ setEditingPath(false)
           <button
             onClick={() => currentPath && onSelect(currentPath)}
             disabled={!currentPath}
-            className="px-4 py-1.5 text-sm font-medium bg-brand text-white rounded-lg hover:brightness-110 disabled:opacity-50 transition-all"
+            className="px-4 py-1.5 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:brightness-110 disabled:opacity-50 transition-all"
           >
             Use This Folder
           </button>

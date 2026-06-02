@@ -39,7 +39,7 @@ function formatTimeRemaining(unixTimestamp: number): string {
 }
 
 function dotClass(status: WakeupSnapshot['status']): string {
-  if (status === 'active') return 'bg-brand animate-pulse'
+  if (status === 'active') return 'bg-primary animate-pulse'
   return 'bg-errorRed'
 }
 

@@ -64,7 +64,7 @@ return job.wall_time_ms
 
 function dotClass(job: BashJobSummary): string {
   if (job.running) {
-return 'bg-brand animate-pulse'
+return 'bg-primary animate-pulse'
 }
   return job.exit_code === 0 ? 'bg-successGreen' : 'bg-errorRed'
 }
@@ -335,7 +335,7 @@ onClose()
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/70"
       onClick={onClose}
       role="dialog"
       aria-modal="true"

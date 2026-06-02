@@ -52,7 +52,7 @@ function liveElapsedMs(worker: WorkerSummary, nowMs: number): number {
 }
 
 function dotClass(worker: WorkerSummary): string {
-  if (worker.status === 'running') return 'bg-brand animate-pulse'
+  if (worker.status === 'running') return 'bg-primary animate-pulse'
   if (worker.status === 'completed') return 'bg-successGreen'
   return 'bg-errorRed'
 }

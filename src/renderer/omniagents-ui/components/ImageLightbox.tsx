@@ -57,7 +57,7 @@ return
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/90"
       onClick={onClose}
     >
       {/* Controls */}
@@ -66,27 +66,27 @@ return
         onClick={(e) => e.stopPropagation()}
       >
         <button
-          className="w-8 h-8 rounded bg-white/20 hover:bg-white/30 text-white text-sm"
+          className="w-8 h-8 rounded bg-muted/70 hover:bg-muted text-foreground text-sm"
           onClick={() => setScale((s) => Math.min(s + 0.5, 5))}
           aria-label="Zoom in"
         >
           +
         </button>
         <button
-          className="w-8 h-8 rounded bg-white/20 hover:bg-white/30 text-white text-sm"
+          className="w-8 h-8 rounded bg-muted/70 hover:bg-muted text-foreground text-sm"
           onClick={() => setScale((s) => Math.max(s - 0.5, 0.25))}
           aria-label="Zoom out"
         >
           −
         </button>
         <button
-          className="h-8 px-2 rounded bg-white/20 hover:bg-white/30 text-white text-xs"
+          className="h-8 px-2 rounded bg-muted/70 hover:bg-muted text-foreground text-xs"
           onClick={resetView}
         >
           Reset
         </button>
         <button
-          className="w-8 h-8 rounded bg-white/20 hover:bg-white/30 text-white text-sm"
+          className="w-8 h-8 rounded bg-muted/70 hover:bg-muted text-foreground text-sm"
           onClick={onClose}
           aria-label="Close"
         >

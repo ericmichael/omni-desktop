@@ -12,7 +12,7 @@ import { CodeBlock } from './code-block'
 export type ToolProps = ComponentProps<typeof Collapsible>
 
 export const Tool = ({ className, ...props }: ToolProps) => (
-  <Collapsible className={cn('group not-prose mb-4 w-full rounded-md border bg-muted', className)} {...props} />
+  <Collapsible className={cn('group not-prose mb-4 w-full min-w-0 max-w-full overflow-hidden rounded-md border bg-muted', className)} {...props} />
 )
 
 export type ToolPart = ToolUIPart | DynamicToolUIPart
@@ -57,12 +57,12 @@ export const ToolHeader = ({ className, title, preview, type, state, toolName, .
   const derivedName = type === 'dynamic-tool' ? toolName : type.split('-').slice(1).join('-')
 
   return (
-    <CollapsibleTrigger className={cn('flex w-full items-center gap-4 p-3 text-left', className)} {...props}>
+    <CollapsibleTrigger className={cn('flex w-full min-w-0 items-center gap-4 p-3 text-left', className)} {...props}>
       <div className="flex items-center gap-2 min-w-0 flex-1">
         <WrenchIcon className="size-4 text-muted-foreground flex-shrink-0" />
         <span className="inline-flex items-center gap-1 min-w-0 text-sm">
           <span className="font-medium text-foreground">{title ?? derivedName}</span>
-          {preview ? <span className="text-muted-foreground truncate">({preview})</span> : null}
+          {preview ? <span className="min-w-0 truncate text-muted-foreground">({preview})</span> : null}
         </span>
       </div>
       {getStatusBadge(state)}
@@ -76,7 +76,7 @@ export type ToolContentProps = ComponentProps<typeof CollapsibleContent>
 export const ToolContent = ({ className, ...props }: ToolContentProps) => (
   <CollapsibleContent
     className={cn(
-      'data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 space-y-4 p-4 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in',
+      'data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 min-w-0 max-w-full space-y-4 overflow-hidden p-4 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in',
       className
     )}
     {...props}
