@@ -45,6 +45,7 @@ const pullRequest: ContainerPullRequest = {
   number: 42,
   url: 'https://github.com/acme/app/pull/42',
   state: 'OPEN',
+  sourceMountName: 'omni-desktop',
 };
 
 let container: HTMLDivElement;
@@ -85,6 +86,8 @@ async function renderBanner(
 describe('PullRequestBanner PR links', () => {
   it('opens code-tab pull requests in the originating tab preview', async () => {
     const badge = await renderBanner({ kind: 'code-tab', tabId: 'tab_123' });
+
+    expect(badge.textContent).toContain('omni-desktop · PR #42');
 
     act(() => {
       badge.click();

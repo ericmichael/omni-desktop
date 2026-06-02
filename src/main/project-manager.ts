@@ -73,6 +73,8 @@ import type {
   PrMergeResult,
   Project,
   ProjectId,
+  ProjectSource,
+  PullRequestLink,
   StoreData,
   Task,
   Ticket,
@@ -1451,10 +1453,13 @@ export class ProjectManager {
   };
 
   /** Resolve a code tab's project + running container, or null if unavailable. */
-  private codeTabPrContext = (tabId: CodeTabId): { project: Project; containerId: string } | null => {
+  private codeTabPrContext = (tabId: CodeTabId): { project: Project; containerId: string; tab: { id: string; projectId: ProjectId | null; ticketId?: TicketId; sessionId?: string; workspaceDir?: string } } | null => {
     const tab = ((this.store.get('codeTabs') ?? []) as Array<{
       id: string;
       projectId: ProjectId | null;
+      ticketId?: TicketId;
+      sessionId?: string;
+      workspaceDir?: string;
     }>).find((t) => t.id === tabId);
     if (!tab?.projectId) {
       return null;
@@ -1467,7 +1472,58 @@ export class ProjectManager {
     if (!containerId) {
       return null;
     }
-    return { project, containerId };
+    return { project, containerId, tab };
+  };
+
+  private attachPrContext = (
+    pr: ContainerPullRequest,
+    project: Project,
+    source: ProjectSource,
+    context: { ticketId?: TicketId; codeTabId?: CodeTabId; sessionId?: string; workspaceDir?: string }
+  ): ContainerPullRequest => ({
+    ...pr,
+    projectId: project.id,
+    sourceId: source.id,
+    sourceMountName: source.mountName,
+    ...context,
+  });
+
+  private persistTicketPullRequests = (ticketId: TicketId | undefined, prs: ContainerPullRequest[]): void => {
+    if (!ticketId || prs.length === 0) {
+      return;
+    }
+    const ticket = this.getTicketById(ticketId);
+    if (!ticket) {
+      return;
+    }
+    const now = Date.now();
+    const byKey = new Map((ticket.pullRequests ?? []).map((link) => [`${link.sourceId}:${link.url}`, link]));
+    for (const pr of prs) {
+      if (!pr.projectId || !pr.sourceId || !pr.sourceMountName) {
+        continue;
+      }
+      const key = `${pr.sourceId}:${pr.url}`;
+      const existing = byKey.get(key);
+      const link: PullRequestLink = {
+        ...(existing ?? { createdAt: now }),
+        url: pr.url,
+        number: pr.number,
+        state: pr.state,
+        projectId: pr.projectId,
+        sourceId: pr.sourceId,
+        sourceMountName: pr.sourceMountName,
+        ...(pr.provider ? { provider: pr.provider } : {}),
+        ...(pr.branch ? { branch: pr.branch } : {}),
+        ...(pr.title ? { title: pr.title } : {}),
+        ticketId,
+        ...(pr.codeTabId ? { codeTabId: pr.codeTabId } : {}),
+        ...(pr.sessionId ? { sessionId: pr.sessionId } : {}),
+        ...(pr.workspaceDir ? { workspaceDir: pr.workspaceDir } : {}),
+        lastSeenAt: now,
+      };
+      byKey.set(key, link);
+    }
+    this.updateTicket(ticketId, { pullRequests: [...byKey.values()] });
   };
 
   /**
@@ -1484,7 +1540,18 @@ export class ProjectManager {
     if (!ctx || !source) {
       return null;
     }
-    return detectContainerPullRequest(ctx.containerId, source.mountName);
+    const pr = await detectContainerPullRequest(ctx.containerId, source.mountName);
+    if (!pr) {
+      return null;
+    }
+    const enriched = this.attachPrContext(pr, ctx.project, source, {
+      ticketId: ctx.tab.ticketId,
+      codeTabId: tabId,
+      sessionId: ctx.tab.sessionId,
+      workspaceDir: ctx.tab.workspaceDir,
+    });
+    this.persistTicketPullRequests(ctx.tab.ticketId, [enriched]);
+    return enriched;
   };
 
   /**
@@ -1499,8 +1566,17 @@ export class ProjectManager {
     }
     const found: ContainerPullRequest[] = [];
     for (const source of ctx.project.sources) {
-      found.push(...(await detectContainerPullRequests(ctx.containerId, source.mountName)));
+      const prs = (await detectContainerPullRequests(ctx.containerId, source.mountName)).map((pr) =>
+        this.attachPrContext(pr, ctx.project, source, {
+          ticketId: ctx.tab.ticketId,
+          codeTabId: tabId,
+          sessionId: ctx.tab.sessionId,
+          workspaceDir: ctx.tab.workspaceDir,
+        })
+      );
+      found.push(...prs);
     }
+    this.persistTicketPullRequests(ctx.tab.ticketId, found);
     return found;
   };
 
@@ -1636,7 +1712,12 @@ export class ProjectManager {
       return null;
     }
     const pr = await detectContainerPullRequest(containerId, source.mountName);
-    return pr;
+    if (!pr) {
+      return null;
+    }
+    const enriched = this.attachPrContext(pr, project, source, { ticketId });
+    this.persistTicketPullRequests(ticketId, [enriched]);
+    return enriched;
   };
 
   // #endregion

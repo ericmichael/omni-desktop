@@ -16,11 +16,13 @@ describe('parsePullRequestJson', () => {
       number: 42,
       url: 'https://github.com/acme/repo/pull/42',
       state: 'OPEN',
+      title: 'Ship source details',
     });
     expect(parsePullRequestJson(out)).toEqual({
       number: 42,
       url: 'https://github.com/acme/repo/pull/42',
       state: 'OPEN',
+      title: 'Ship source details',
     });
   });
 
@@ -124,12 +126,12 @@ describe('parseAzurePullRequestList', () => {
 describe('parsePullRequestListJson (GitHub, all open PRs)', () => {
   it('returns every open PR in the array', () => {
     const out = JSON.stringify([
-      { number: 1, url: 'https://x/pull/1', state: 'OPEN' },
+      { number: 1, url: 'https://x/pull/1', state: 'OPEN', title: 'One' },
       { number: 2, url: 'https://x/pull/2', state: 'CLOSED' },
       { number: 3, url: 'https://x/pull/3', state: 'OPEN' },
     ]);
     expect(parsePullRequestListJson(out)).toEqual([
-      { number: 1, url: 'https://x/pull/1', state: 'OPEN' },
+      { number: 1, url: 'https://x/pull/1', state: 'OPEN', title: 'One' },
       { number: 3, url: 'https://x/pull/3', state: 'OPEN' },
     ]);
   });
