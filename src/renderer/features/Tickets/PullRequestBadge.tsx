@@ -31,6 +31,8 @@ const useStyles = makeStyles({
  */
 export const PullRequestBadge = memo(({ pr, tabId }: { pr: ContainerPullRequest; tabId?: string }) => {
   const styles = useStyles();
+  const label = pr.sourceMountName ? `${pr.sourceMountName} · PR #${pr.number}` : `PR #${pr.number}`;
+  const title = [pr.title, pr.sourceMountName, pr.branch, pr.url].filter(Boolean).join(' · ');
   const handleOpen = useCallback(
     () => (tabId === undefined ? requestPreviewOpen(pr.url) : requestPreviewOpen(pr.url, tabId)),
     [pr.url, tabId]
@@ -49,12 +51,12 @@ export const PullRequestBadge = memo(({ pr, tabId }: { pr: ContainerPullRequest;
       role="button"
       tabIndex={0}
       className={styles.prBadge}
-      title={pr.url}
+      title={title || pr.url}
       onClick={handleOpen}
       onKeyDown={handleKeyDown}
     >
       <Open16Regular />
-      PR #{pr.number}
+      {label}
     </span>
   );
 });

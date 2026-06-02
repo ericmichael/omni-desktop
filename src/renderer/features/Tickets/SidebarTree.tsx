@@ -352,6 +352,8 @@ type SidebarTreeProps = {
   onEditMilestone?: (milestone: Milestone) => void;
   /** Called when user requests to add a source to a project. */
   onAddSource?: (projectId: ProjectId) => void;
+  /** Called when user opens source details. */
+  onOpenSource?: (projectId: ProjectId, sourceId: string) => void;
   /** Called when user requests to edit an existing source. */
   onEditSource?: (projectId: ProjectId, sourceId: string) => void;
   /** Called when user requests to remove a source from a project. */
@@ -618,6 +620,7 @@ export const SidebarTree = memo(
     onCreateMilestone,
     onEditMilestone,
     onAddSource,
+    onOpenSource,
     onEditSource,
     onRemoveSource,
   }: SidebarTreeProps) => {
@@ -1235,6 +1238,7 @@ export const SidebarTree = memo(
                             className={styles.hoverableItem}
                           >
                             <TreeItemLayout
+                              onClick={() => onOpenSource?.(project.id, s.id)}
                               iconBefore={
                                 isLocal ? (
                                   <Link16Regular className={styles.icon} />

@@ -92,11 +92,12 @@ export function isAzureDevOpsHost(host: string): boolean {
 // GitHub (pure parse + I/O)
 // ---------------------------------------------------------------------------
 
-/** Shape of the JSON ``gh pr view --json number,url,state`` returns. */
+/** Shape of the JSON ``gh pr view --json number,url,state,title`` returns. */
 interface GhPrView {
   number?: number;
   url?: string;
   state?: string;
+  title?: string;
 }
 
 /**
@@ -117,7 +118,7 @@ export function parsePullRequestJson(stdout: string): ContainerPullRequest | nul
     return null;
   }
 
-  return { number: parsed.number, url: parsed.url, state: parsed.state };
+  return { number: parsed.number, url: parsed.url, state: parsed.state, ...(parsed.title ? { title: parsed.title } : {}) };
 }
 
 /**
@@ -138,7 +139,7 @@ export function parsePullRequestListJson(stdout: string): ContainerPullRequest[]
   const out: ContainerPullRequest[] = [];
   for (const item of arr as GhPrView[]) {
     if (typeof item?.number === 'number' && typeof item.url === 'string' && item.state === 'OPEN') {
-      out.push({ number: item.number, url: item.url, state: item.state });
+      out.push({ number: item.number, url: item.url, state: item.state, ...(item.title ? { title: item.title } : {}) });
     }
   }
   return out;
@@ -242,8 +243,12 @@ async function resolveProvider(
 /** GitHub: ``gh pr view`` resolves the primary PR for the current branch. */
 async function detectGitHubPullRequest(containerId: string, mountName: string): Promise<ContainerPullRequest | null> {
   try {
-    const out = await containerExec(containerId, mountName, ['gh', 'pr', 'view', '--json', 'number,url,state']);
-    return parsePullRequestJson(out);
+    const [out, branch] = await Promise.all([
+      containerExec(containerId, mountName, ['gh', 'pr', 'view', '--json', 'number,url,state,title']),
+      containerCurrentBranch(containerId, mountName),
+    ]);
+    const pr = parsePullRequestJson(out);
+    return pr ? { ...pr, provider: 'github', ...(branch ? { branch } : {}) } : null;
   } catch {
     return null;
   }
@@ -268,9 +273,9 @@ async function detectGitHubPullRequests(containerId: string, mountName: string):
       '--state',
       'open',
       '--json',
-      'number,url,state',
+      'number,url,state,title',
     ]);
-    return parsePullRequestListJson(out);
+    return parsePullRequestListJson(out).map((pr) => ({ ...pr, provider: 'github' as const, branch }));
   } catch {
     return [];
   }
@@ -296,7 +301,7 @@ async function detectAzurePullRequestList(containerId: string, mountName: string
       'json',
       ...(branch ? ['--source-branch', branch] : []),
     ]);
-    return parseAzurePullRequestListAll(out);
+    return parseAzurePullRequestListAll(out).map((pr) => ({ ...pr, provider: 'azure' as const, ...(branch ? { branch } : {}) }));
   } catch {
     return [];
   }

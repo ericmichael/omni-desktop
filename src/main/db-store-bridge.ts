@@ -39,6 +39,7 @@ import type {
   Project,
   ProjectId,
   ProjectSource,
+  PullRequestLink,
   ShapingData,
   StoreData,
   Task,
@@ -158,6 +159,9 @@ export function rowToTicket(row: TicketRow, comments?: CommentRow[]): Ticket {
 
   const runs = parseJsonOr<unknown[]>(row.runs, []);
   if (runs.length > 0) ticket.runs = runs as Ticket['runs'];
+
+  const pullRequests = parseJsonOr<PullRequestLink[]>(row.pr_review, []);
+  if (Array.isArray(pullRequests) && pullRequests.length > 0) ticket.pullRequests = pullRequests;
 
   if (row.pr_merged_at) {
     try {
@@ -327,9 +331,7 @@ export function ticketToRow(t: Ticket): TicketRow {
     supervisor_task_id: (t.supervisorTaskId as string) ?? null,
     token_usage: jsonStrOrNull(t.tokenUsage),
     runs: JSON.stringify(t.runs ?? []),
-    // Legacy column — per-source review was removed with the local PR flow.
-    // Kept null so the omni-projects-db row schema stays satisfied.
-    pr_review: null,
+    pr_review: t.pullRequests && t.pullRequests.length > 0 ? JSON.stringify(t.pullRequests) : null,
     pr_merged_at: t.prMergedAt && Object.keys(t.prMergedAt).length > 0 ? JSON.stringify(t.prMergedAt) : null,
     assignee: t.assignee ?? null,
     created_at: toIso(t.createdAt),

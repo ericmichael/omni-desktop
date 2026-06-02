@@ -1489,6 +1489,24 @@ export type TicketRun = {
   tokenUsage?: TokenUsage;
 };
 
+export type PullRequestLink = {
+  url: string;
+  number: number;
+  state: string;
+  projectId: ProjectId;
+  sourceId: string;
+  sourceMountName: string;
+  provider?: 'github' | 'azure';
+  branch?: string;
+  title?: string;
+  ticketId?: TicketId;
+  codeTabId?: CodeTabId;
+  sessionId?: string;
+  workspaceDir?: string;
+  createdAt: number;
+  lastSeenAt: number;
+};
+
 export type Ticket = {
   id: TicketId;
   projectId: ProjectId;
@@ -1562,6 +1580,7 @@ export type Ticket = {
   assignee?: string;
   /** History of supervisor runs on this ticket. */
   runs?: TicketRun[];
+  pullRequests?: PullRequestLink[];
   /** Populated by the seed script; tracked in seed-manifest for reset. */
   seedKey?: string;
 };
@@ -1681,8 +1700,17 @@ export type PrMergeResult = { ok: true; mergeCommitSha: string } | { ok: false; 
 export interface ContainerPullRequest {
   number: number;
   url: string;
-  /** GitHub PR state, e.g. ``"OPEN"``. We only surface OPEN PRs. */
   state: string;
+  title?: string;
+  sourceId?: string;
+  sourceMountName?: string;
+  projectId?: ProjectId;
+  ticketId?: TicketId;
+  codeTabId?: CodeTabId;
+  sessionId?: string;
+  workspaceDir?: string;
+  provider?: 'github' | 'azure';
+  branch?: string;
 }
 
 // #endregion
