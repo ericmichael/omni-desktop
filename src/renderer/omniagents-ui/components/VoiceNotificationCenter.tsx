@@ -42,7 +42,7 @@ function ToolIcon() {
 
 function CheckIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0 text-green-400">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0 text-success">
       <polyline points="20 6 9 17 4 12" />
     </svg>
   )
@@ -50,7 +50,7 @@ function CheckIcon() {
 
 function ShieldIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0 text-yellow-400">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0 text-warning">
       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
     </svg>
   )
@@ -64,11 +64,11 @@ function NotificationCard({ n, onApprove, onReject, onDismiss }: {
 }) {
   return (
     <div
-      className="pointer-events-auto max-w-[320px] rounded-xl border border-white/10 px-4 py-3 transition-all duration-300 ease-out"
+      className="pointer-events-auto max-w-[320px] rounded-xl border border-border px-4 py-3 transition-all duration-300 ease-out"
       style={{
-        background: 'rgba(36, 36, 40, 0.75)',
+        background: 'color-mix(in srgb, var(--color-card) 85%, transparent)',
         backdropFilter: 'blur(40px) saturate(1.6)',
-        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 0.5px 0 rgba(255, 255, 255, 0.06)',
+        boxShadow: 'var(--shadow-lg)',
       }}
       onClick={() => n.type !== 'tool_approval' && onDismiss?.(n.id)}
     >
@@ -77,29 +77,29 @@ function NotificationCard({ n, onApprove, onReject, onDismiss }: {
         {n.type === 'tool_called' && <ToolIcon />}
         {n.type === 'tool_result' && <CheckIcon />}
         {n.type === 'tool_approval' && <ShieldIcon />}
-        <span className="text-xs font-medium text-white/90 truncate">
+        <span className="text-xs font-medium text-foreground truncate">
           {n.type === 'tool_approval' ? 'Approve tool call?' : n.tool}
         </span>
       </div>
 
       {/* Body */}
       {n.type === 'tool_called' && n.input && (
-        <div className="text-xs text-white/50 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
+        <div className="text-xs text-muted-foreground font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
           {truncate(n.input, 120)}
         </div>
       )}
 
       {n.type === 'tool_result' && n.output && (
-        <div className="text-xs text-white/50 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
+        <div className="text-xs text-muted-foreground font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
           {truncate(n.output, 120)}
         </div>
       )}
 
       {n.type === 'tool_approval' && (
         <>
-          <div className="text-xs text-white/70 font-medium mt-0.5">{n.tool}</div>
+          <div className="text-xs text-foreground/70 font-medium mt-0.5">{n.tool}</div>
           {n.input && (
-            <div className="text-xs text-white/50 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
+            <div className="text-xs text-muted-foreground font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
               {truncate(n.input, 120)}
             </div>
           )}
@@ -108,7 +108,7 @@ function NotificationCard({ n, onApprove, onReject, onDismiss }: {
               onClick={(e) => {
  e.stopPropagation(); onApprove?.(n.request_id!) 
 }}
-              className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-green-500/20 text-green-400 hover:bg-green-500/30 border border-green-500/20 transition-colors"
+              className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-success/20 text-success hover:bg-success/30 border border-success/20 transition-colors"
             >
               Approve
             </button>
@@ -116,7 +116,7 @@ function NotificationCard({ n, onApprove, onReject, onDismiss }: {
               onClick={(e) => {
  e.stopPropagation(); onReject?.(n.request_id!) 
 }}
-              className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/20 transition-colors"
+              className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-destructive/20 text-destructive hover:bg-destructive/30 border border-destructive/20 transition-colors"
             >
               Reject
             </button>

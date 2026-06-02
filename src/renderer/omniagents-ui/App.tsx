@@ -1460,7 +1460,7 @@ args.text = text
           )}
           <div className="flex-1 flex flex-row min-h-0 min-w-0">
             <div className="flex-1 flex flex-col min-h-0 min-w-0">
-              <div ref={setChatColumnEl} className="flex-1 min-h-0 relative flex flex-col">
+              <div ref={setChatColumnEl} className="flex-1 min-h-0 min-w-0 overflow-x-hidden relative flex flex-col">
                 <ArtifactPortalProvider target={chatColumnEl}>
                   <MessageList
                     items={items}

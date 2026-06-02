@@ -211,7 +211,7 @@ function MessageBubble({ index, role, content, attachments, stagedContext, react
   if (role === 'user') {
     return (
       <div className="flex justify-end">
-        <div className="flex flex-col items-end max-w-[85%] sm:max-w-[70%] space-y-2">
+        <div className="flex min-w-0 max-w-[85%] flex-col items-end space-y-2 sm:max-w-[70%]">
           {attachments && attachments.length > 0 ? (
             <div className="flex flex-wrap gap-2 w-full justify-end">
               {attachments.map((att, i) => (
@@ -222,7 +222,7 @@ function MessageBubble({ index, role, content, attachments, stagedContext, react
           {stagedContext && stagedContext.length > 0 ? (
             <StagedContextRibbon entries={stagedContext} />
           ) : null}
-          <div className="rounded-[18px] bg-primary text-primary-foreground px-4 py-3 text-sm">
+          <div className="max-w-full overflow-hidden rounded-[18px] bg-primary text-primary-foreground px-4 py-3 text-sm">
             <MessageResponse>{content}</MessageResponse>
           </div>
         </div>
@@ -232,7 +232,7 @@ function MessageBubble({ index, role, content, attachments, stagedContext, react
   if (role === 'system') {
     return (
       <div className="flex justify-start">
-        <div className="flex flex-col items-start max-w-[85%] sm:max-w-[70%]">
+        <div className="flex min-w-0 max-w-[85%] flex-col items-start sm:max-w-[70%]">
           {attachments && attachments.length > 0 ? (
             <div className="mb-1 flex flex-wrap gap-2 w-full">
               {attachments.map((att, i) => (
@@ -240,7 +240,7 @@ function MessageBubble({ index, role, content, attachments, stagedContext, react
               ))}
             </div>
           ) : null}
-          <div className="rounded-lg bg-secondary text-secondary-foreground border border-border px-4 py-3 text-sm">
+          <div className="max-w-full overflow-hidden rounded-lg border border-border bg-secondary px-4 py-3 text-sm text-secondary-foreground">
             <MessageResponse>{content}</MessageResponse>
           </div>
         </div>
@@ -250,7 +250,7 @@ function MessageBubble({ index, role, content, attachments, stagedContext, react
   // assistant
   return (
     <div className="flex justify-start">
-      <div className="flex flex-col items-start max-w-[85%] sm:max-w-[70%]">
+      <div className="flex min-w-0 max-w-[85%] flex-col items-start sm:max-w-[70%]">
         {attachments && attachments.length > 0 ? (
           <div className="mb-1 flex flex-wrap gap-2 w-full">
             {attachments.map((att, i) => (
@@ -258,8 +258,8 @@ function MessageBubble({ index, role, content, attachments, stagedContext, react
             ))}
           </div>
         ) : null}
-        <div className="flex flex-col items-start">
-          <div className="text-sm text-foreground">
+        <div className="flex min-w-0 max-w-full flex-col items-start overflow-hidden">
+          <div className="min-w-0 max-w-full overflow-hidden text-sm text-foreground">
             <MessageResponse>{content}</MessageResponse>
           </div>
           <div className="mt-1 flex items-center gap-1">
@@ -405,7 +405,7 @@ return
 
   return (
     <div className="flex justify-start" data-artifact-id={item.artifact_id || undefined}>
-      <div className="w-full min-w-0">
+      <div className="w-full min-w-0 max-w-full overflow-hidden">
         {artifact}
       </div>
     </div>
@@ -463,7 +463,7 @@ function InlineHtmlPreview({ content, maximized }: { content: string; maximized?
     <iframe
       srcDoc={srcDoc}
       sandbox="allow-scripts"
-      style={{ width: '100%', height: maximized ? '100%' : height, border: 'none', borderRadius: 6, background: '#fff' }}
+      style={{ width: '100%', height: maximized ? '100%' : height, border: 'none', borderRadius: 6, background: 'var(--color-background)' }}
     />
   )
 }
@@ -495,9 +495,9 @@ function PreambleRow({ text }: { text?: string }) {
 return null
 }
   return (
-    <div className="flex items-start gap-2">
+    <div className="flex min-w-0 max-w-full items-start gap-2 overflow-hidden">
       <span className="text-warning animate-pulse mt-[2px]">✶</span>
-      <div className="prose-sm prose-warning">
+      <div className="prose-sm prose-warning min-w-0 max-w-full overflow-hidden">
         <MessageResponse>{text}</MessageResponse>
       </div>
     </div>
@@ -901,7 +901,7 @@ return undefined
 
   return (
     <div className="flex justify-start">
-      <div className="w-full min-w-0">
+      <div className="w-full min-w-0 max-w-full overflow-hidden">
         <Tool>
           <ToolHeader
             type={`tool-${item.tool}`}
@@ -959,21 +959,21 @@ function ApprovalCard({ item, onDecision, queuePosition, queueTotal }: { item: A
   const showQueueBadge = typeof queueTotal === 'number' && queueTotal > 1
 
   return (
-    <div className="rounded-md border border-warning bg-secondary p-3 relative">
+    <div className="relative min-w-0 max-w-full overflow-hidden rounded-md border border-warning bg-secondary p-3">
       {showQueueBadge ? (
         <div className="absolute top-2 right-2 text-[10px] uppercase tracking-wide text-warning bg-warning/10 border border-warning/40 rounded px-1.5 py-0.5">
           {queuePosition} of {queueTotal} pending
         </div>
       ) : null}
-      <div className="text-sm font-semibold text-warning pr-24">
+      <div className="break-words pr-24 text-sm font-semibold text-warning">
         {isMcp ? 'Approve MCP call' : `Approve ${item.tool}`}
         {headerSuffix}
       </div>
-      {summary ? <div className="text-xs text-muted-foreground mt-0.5">{summary}</div> : null}
+      {summary ? <div className="mt-0.5 break-words text-xs text-muted-foreground">{summary}</div> : null}
       <div className="mt-2">
         {richBody ? (
           <>
-            <div className={`${expanded ? 'max-h-none' : 'max-h-[40vh]'} overflow-auto`}>
+            <div className={`${expanded ? 'max-h-none' : 'max-h-[40vh]'} min-w-0 max-w-full overflow-auto`}>
               {richBody}
             </div>
             {canCollapse ? (
@@ -1013,7 +1013,7 @@ function PlanCard({ item, onDecision }: { item: PlanItem; onDecision?: (approved
   return (
     <Plan defaultOpen>
       <PlanHeader>
-        <div>
+        <div className="min-w-0 max-w-full">
           <PlanTitle>{item.title}</PlanTitle>
           {item.description ? <PlanDescription>{item.description}</PlanDescription> : null}
         </div>
@@ -1023,7 +1023,7 @@ function PlanCard({ item, onDecision }: { item: PlanItem; onDecision?: (approved
           {item.steps.map((step, i) => (
             <li key={i} className="flex items-start gap-2">
               <CheckCircleIcon className="size-4 shrink-0 mt-0.5 text-muted-foreground" />
-              <div>
+              <div className="min-w-0 max-w-full overflow-hidden">
                 <div className="text-sm font-medium">{step.title}</div>
                 {step.description ? <div className="text-xs text-muted-foreground">{step.description}</div> : null}
               </div>

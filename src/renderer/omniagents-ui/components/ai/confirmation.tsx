@@ -48,7 +48,7 @@ export const Confirmation = ({ className, approval, state, ...props }: Confirmat
         className={cn(
           'flex flex-col gap-2',
           isPending &&
-            'border-2 border-amber-500 bg-amber-500/10 ring-2 ring-amber-500/40 animate-[pulse_2.5s_ease-in-out_infinite] shadow-[0_0_0_0_rgba(245,158,11,0.5)]',
+            'border-2 border-warning bg-warning/10 ring-2 ring-warning/40 animate-[pulse_2.5s_ease-in-out_infinite]',
           className
         )}
         {...props}

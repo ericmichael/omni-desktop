@@ -205,7 +205,14 @@ const streamdownPlugins = { cjk, code, math, mermaid }
 export const MessageResponse = memo(
   ({ className, ...props }: MessageResponseProps) => (
     <Streamdown
-      className={cn('size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0', className)}
+      className={cn(
+        'size-full min-w-0 max-w-full overflow-hidden break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
+        '[&_a]:break-words [&_a]:[overflow-wrap:anywhere] [&_code]:break-words [&_code]:[overflow-wrap:anywhere]',
+        '[&_p]:break-words [&_li]:break-words [&_h1]:break-words [&_h2]:break-words [&_h3]:break-words [&_h4]:break-words',
+        '[&_img]:max-w-full [&_svg]:max-w-full [&_.katex-display]:max-w-full [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden',
+        '[&_[data-streamdown="code-block"]]:max-w-full [&_[data-streamdown="code-block"]]:min-w-0 [&_[data-streamdown="table-wrapper"]]:max-w-full [&_[data-streamdown="table-wrapper"]]:min-w-0 [&_[data-streamdown="table-wrapper"]]:overflow-hidden',
+        className
+      )}
       plugins={streamdownPlugins}
       {...props}
     />

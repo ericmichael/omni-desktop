@@ -49,7 +49,7 @@ export function Notifications({ notifications, onDismiss, onDismissAll }: Props)
               className="flex items-start gap-2 text-xs leading-5"
             >
               <span
-                className="inline-block w-1.5 h-1.5 rounded-full bg-brand flex-shrink-0 mt-1.5"
+                className="inline-block w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0 mt-1.5"
                 aria-hidden
               />
               <span className="min-w-0 flex-1 text-textPrimary">

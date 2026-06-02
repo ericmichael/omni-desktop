@@ -91,13 +91,13 @@ const useStyles = makeStyles({
     zIndex: 40,
     overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground1,
-    boxShadow: `0 1px 0 rgba(255,255,255,0.04) inset`,
+    boxShadow: tokens.shadow4,
   },
   surfaceCardGlass: {
     backgroundColor: tokens.colorNeutralBackground1,
     backdropFilter: 'var(--glass-blur)',
     WebkitBackdropFilter: 'var(--glass-blur)',
-    boxShadow: `0 1px 0 rgba(255,255,255,0.10) inset, 0 -1px 0 rgba(255,255,255,0.04) inset`,
+    boxShadow: tokens.shadow8,
   },
   surfaceInner: { display: 'flex', height: '100%', flexDirection: 'column', backgroundColor: 'inherit' },
   surfaceHeader: {
@@ -228,7 +228,7 @@ const useStyles = makeStyles({
       backgroundColor: `color-mix(in srgb, ${tokens.colorBrandBackground} 70%, transparent)`,
       backdropFilter: 'var(--glass-blur-light)',
       WebkitBackdropFilter: 'var(--glass-blur-light)',
-      boxShadow: `0 1px 0 0 rgba(255,255,255,0.14) inset, 0 2px 8px -2px rgba(0,0,0,0.15)`,
+      boxShadow: tokens.shadow8,
     },
     '& .chat-input-footer': {
       position: 'relative',
@@ -236,7 +236,7 @@ const useStyles = makeStyles({
       backgroundColor: 'transparent',
       backdropFilter: 'none',
       WebkitBackdropFilter: 'none',
-      borderTop: `1px solid rgba(255, 255, 255, 0.14)`,
+      borderTop: `1px solid ${tokens.colorNeutralStroke1}`,
     },
     '& .chat-input-footer::before': {
       content: '""',
@@ -246,7 +246,7 @@ const useStyles = makeStyles({
       bottom: '12px',
       left: '12px',
       borderRadius: '24px',
-      boxShadow: '0 0 0 9999px rgba(255, 255, 255, 0.06)',
+      boxShadow: `0 0 0 9999px color-mix(in srgb, ${tokens.colorNeutralBackground1} 30%, transparent)`,
       pointerEvents: 'none',
       zIndex: 0,
     },

@@ -13,7 +13,7 @@ const MAX_VISIBLE = 5
 
 const DOT_CLASS: Record<TaskSummary['status'], string> = {
   pending: 'bg-textSubtle/50',
-  in_progress: 'bg-brand',
+  in_progress: 'bg-primary',
   completed: 'bg-successGreen',
 }
 
@@ -48,7 +48,7 @@ return null
         </div>
         {live ? (
           <div className="mt-1.5 flex items-center gap-2 text-xs text-brand">
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand animate-pulse flex-shrink-0" />
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse flex-shrink-0" />
             <span className="italic text-shimmer truncate">
               {live.activeForm || live.subject}
             </span>

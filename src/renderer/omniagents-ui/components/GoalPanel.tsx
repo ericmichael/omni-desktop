@@ -26,7 +26,7 @@ function shortGoal(goal: string, max: number): string {
 }
 
 function dotClass(status: GoalSnapshot['status']): string {
-  if (status === 'active') return 'bg-brand animate-pulse'
+  if (status === 'active') return 'bg-primary animate-pulse'
   if (status === 'completed') return 'bg-successGreen'
   if (status === 'paused') return 'bg-warningOrange'
   return 'bg-errorRed'
