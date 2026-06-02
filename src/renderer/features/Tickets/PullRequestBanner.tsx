@@ -91,11 +91,12 @@ export const PullRequestBanner = memo(
     if (prs.length === 0) {
       return null;
     }
+    const tabId = scope.kind === 'code-tab' ? scope.tabId : undefined;
     return (
       <div className={mergeClasses(styles.banner, floating && styles.floating)}>
         <span className={styles.label}>Pull request{prs.length > 1 ? 's' : ''}</span>
         {prs.map((pr) => (
-          <PullRequestBadge key={pr.url} pr={pr} />
+          <PullRequestBadge key={pr.url} pr={pr} tabId={tabId} />
         ))}
       </div>
     );
