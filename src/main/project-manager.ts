@@ -55,6 +55,7 @@ import { WorkflowLoader } from '@/main/workflow-loader';
 import type { IIpcListener } from '@/shared/ipc-listener';
 import type { ProjectConfig } from '@/shared/manifest';
 import { DEFAULT_PIPELINE, SIMPLE_PIPELINE } from '@/shared/pipeline-defaults';
+import { validateProjectSources } from '@/shared/project-source';
 import type {
   ArtifactFileContent,
   ArtifactFileEntry,
@@ -734,6 +735,9 @@ export class ProjectManager {
     const index = projects.findIndex((p) => p.id === id);
     if (index === -1) {
       return;
+    }
+    if (patch.sources) {
+      validateProjectSources(patch.sources);
     }
     projects[index] = { ...projects[index]!, ...patch };
     this.setProjects(projects);

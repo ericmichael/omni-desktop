@@ -27,6 +27,7 @@ import {
 import { GitCredentialDialog } from '@/renderer/features/SettingsModal/GitCredentialDialog';
 import { DirectoryBrowserDialog } from '@/renderer/features/Tickets/DirectoryBrowserDialog';
 import { persistedStoreApi } from '@/renderer/services/store';
+import { duplicateSourceIdentityMessage, sourceIdentityKey } from '@/shared/project-source';
 import type { Project, ProjectSource } from '@/shared/types';
 
 import { CredentialStatus } from './CredentialStatus';
@@ -125,6 +126,12 @@ export const EditSourceDialog = memo(({ open, onClose, project, source }: EditSo
       source.kind === 'local'
         ? { id: source.id, mountName, kind: 'local', workspaceDir: path }
         : { id: source.id, mountName, kind: 'git-remote', repoUrl: path, ...(trimmedBranch ? { defaultBranch: trimmedBranch } : {}) };
+
+    const existingIdentities = new Set(project.sources.filter((s) => s.id !== source.id).map(sourceIdentityKey));
+    if (existingIdentities.has(sourceIdentityKey(next))) {
+      setError(duplicateSourceIdentityMessage(next));
+      return;
+    }
 
     setSaving(true);
     setError(null);
