@@ -50,6 +50,15 @@ export default defineConfig({
   renderer: {
     root: '.',
     define: platformDefines,
+    // Pre-bundle streamdown + its plugins at server start. They lazy-load
+    // inner chunks (e.g. streamdown's `highlighted-body`), so if Vite
+    // discovers them on first markdown render it re-optimizes mid-session,
+    // changing chunk hashes and 404-ing any already-open page with "Failed to
+    // fetch dynamically imported module". Forcing them into the initial
+    // optimize pass keeps the hashes stable.
+    optimizeDeps: {
+      include: ['streamdown', '@streamdown/code', '@streamdown/math', '@streamdown/mermaid', '@streamdown/cjk'],
+    },
     plugins: [
       tailwindcss(),
       react(),
