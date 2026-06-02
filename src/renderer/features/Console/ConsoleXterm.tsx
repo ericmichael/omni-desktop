@@ -1,6 +1,6 @@
 import { makeStyles } from '@fluentui/react-components';
 import { debounce } from 'es-toolkit/compat';
-import { memo, useEffect, useRef } from 'react';
+import { memo, useCallback, useEffect, useRef } from 'react';
 import { assert } from 'tsafe';
 
 import type { TerminalState } from '@/renderer/features/Console/state';
@@ -11,7 +11,7 @@ const useStyles = makeStyles({
   root: { width: '100%', height: '100%' },
 });
 
-export const ConsoleXterm = memo(({ terminal }: { terminal: TerminalState }) => {
+export const ConsoleXterm = memo(({ terminal, isActive }: { terminal: TerminalState; isActive: boolean }) => {
   const theme = useXTermTheme();
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -50,7 +50,6 @@ export const ConsoleXterm = memo(({ terminal }: { terminal: TerminalState }) => 
     const raf = requestAnimationFrame(() => {
       fit();
       terminal.xterm.refresh(0, terminal.xterm.rows - 1);
-      terminal.xterm.focus();
     });
 
     return () => {
@@ -60,7 +59,19 @@ export const ConsoleXterm = memo(({ terminal }: { terminal: TerminalState }) => 
     };
   }, [terminal.fitAddon, terminal.id, terminal.xterm, theme]);
 
+  useEffect(() => {
+    if (!isActive) {
+      return;
+    }
+    const raf = requestAnimationFrame(() => terminal.xterm.focus());
+    return () => cancelAnimationFrame(raf);
+  }, [isActive, terminal.xterm]);
+
+  const handlePointerDownCapture = useCallback(() => {
+    terminal.xterm.focus();
+  }, [terminal.xterm]);
+
   const styles = useStyles();
-  return <div ref={ref} className={styles.root} />;
+  return <div ref={ref} className={styles.root} onPointerDownCapture={handlePointerDownCapture} />;
 });
 ConsoleXterm.displayName = 'ConsoleXterm';

@@ -179,13 +179,14 @@ TerminalTabButton.displayName = 'TerminalTabButton';
 type XtermPaneProps = {
   terminal: TerminalState;
   hidden: boolean;
+  isActive: boolean;
   className: string;
   hiddenClassName: string;
 };
 
-const XtermPane = memo(({ terminal, hidden, className, hiddenClassName }: XtermPaneProps) => (
+const XtermPane = memo(({ terminal, hidden, isActive, className, hiddenClassName }: XtermPaneProps) => (
   <div className={mergeClasses(className, hidden && hiddenClassName)}>
-    <ConsoleXterm terminal={terminal} />
+    <ConsoleXterm terminal={terminal} isActive={isActive} />
   </div>
 ));
 XtermPane.displayName = 'XtermPane';
@@ -261,6 +262,7 @@ export const ConsoleStarted = memo(({ tabId }: ConsoleStartedProps) => {
               key={t.id}
               terminal={t}
               hidden={t.id !== activeId}
+              isActive={t.id === activeId}
               className={styles.xtermPane}
               hiddenClassName={styles.xtermPaneHidden}
             />
