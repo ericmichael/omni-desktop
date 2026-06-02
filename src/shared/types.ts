@@ -1145,6 +1145,7 @@ export type CodeTab = {
    * workspace into another sandbox.
    */
   profileName?: string;
+  profileNameExplicit?: boolean;
   /**
    * Docker container id captured from the last successful launch of this tab.
    * Sent back on the next start so omni-code can ``client.resume(state)`` for
