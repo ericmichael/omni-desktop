@@ -29,9 +29,12 @@ const useStyles = makeStyles({
  * (same bridge the agent's ``browser_open`` tool uses). Shared by the ticket PR
  * overview and the per-source Files Changed view (ticket + code-tab scopes).
  */
-export const PullRequestBadge = memo(({ pr }: { pr: ContainerPullRequest }) => {
+export const PullRequestBadge = memo(({ pr, tabId }: { pr: ContainerPullRequest; tabId?: string }) => {
   const styles = useStyles();
-  const handleOpen = useCallback(() => requestPreviewOpen(pr.url), [pr.url]);
+  const handleOpen = useCallback(
+    () => (tabId === undefined ? requestPreviewOpen(pr.url) : requestPreviewOpen(pr.url, tabId)),
+    [pr.url, tabId]
+  );
   const handleKeyDown = useCallback(
     (e: ReactKeyboardEvent) => {
       if (e.key === 'Enter' || e.key === ' ') {
