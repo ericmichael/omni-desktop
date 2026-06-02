@@ -306,6 +306,7 @@ export type SeedArgs = {
   autoDispatch?: boolean;
   /** When set, the seeded project gets a local or git-remote source. */
   source?: { kind: 'local'; workspaceDir: string } | { kind: 'git-remote'; repoUrl: string; defaultBranch?: string };
+  sources?: Project['sources'];
   /** When set, overrides wipLimit (defaults to 100 so WIP doesn't block tests). */
   wipLimit?: number;
   tickets?: Array<Partial<Ticket> & { id: string; columnId?: string }>;
@@ -314,10 +315,7 @@ export type SeedArgs = {
 export const seedStore = (args: SeedArgs = {}): IStore => {
   const projectId = args.projectId ?? 'proj-1';
   const pipeline = args.pipeline ?? TEST_PIPELINE;
-  const sourcesArg = (args as { sources?: unknown[]; source?: unknown }).sources
-    ?? ((args as { source?: unknown }).source != null
-      ? [{ id: 's1', mountName: 'work', ...((args as { source: object }).source) }]
-      : []);
+  const sourcesArg = args.sources ?? (args.source !== undefined ? [{ id: 's1', mountName: 'work', ...args.source }] : []);
   const project: Project = {
     id: projectId,
     label: 'Test Project',

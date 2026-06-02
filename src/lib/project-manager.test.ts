@@ -89,6 +89,49 @@ describe('ProjectManager', () => {
     });
   });
 
+  describe('updateProject source validation', () => {
+    it('rejects duplicate mount names before persisting sources', () => {
+      const { pm, store } = makePm();
+
+      expect(() =>
+        pm.updateProject('proj-1', {
+          sources: [
+            { id: 's1', mountName: 'repo', kind: 'local', workspaceDir: '/tmp/repo-a' },
+            { id: 's2', mountName: 'repo', kind: 'local', workspaceDir: '/tmp/repo-b' },
+          ],
+        })
+      ).toThrow('Duplicate mount name');
+      expect(store.get('projects', [])[0]?.sources).toEqual([]);
+    });
+
+    it('rejects duplicate source identities before persisting sources', () => {
+      const { pm, store } = makePm();
+
+      expect(() =>
+        pm.updateProject('proj-1', {
+          sources: [
+            { id: 's1', mountName: 'repo', kind: 'git-remote', repoUrl: 'https://github.com/owner/repo.git' },
+            { id: 's2', mountName: 'repo-copy', kind: 'git-remote', repoUrl: 'git@github.com:owner/repo.git' },
+          ],
+        })
+      ).toThrow('already includes that repository');
+      expect(store.get('projects', [])[0]?.sources).toEqual([]);
+    });
+
+    it('persists different sources with unique mount names and identities', () => {
+      const { pm, store } = makePm();
+
+      pm.updateProject('proj-1', {
+        sources: [
+          { id: 's1', mountName: 'repo', kind: 'git-remote', repoUrl: 'https://github.com/owner/repo.git' },
+          { id: 's2', mountName: 'repo-2', kind: 'git-remote', repoUrl: 'https://github.com/owner/repo-2.git' },
+        ],
+      });
+
+      expect(store.get('projects', [])[0]?.sources).toHaveLength(2);
+    });
+  });
+
   // -------------------------------------------------------------------------
   // T9 — Milestone CRUD (in-memory only, no fs)
   // -------------------------------------------------------------------------

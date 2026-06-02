@@ -30,6 +30,7 @@ import { GitCredentialDialog } from '@/renderer/features/SettingsModal/GitCreden
 import { DirectoryBrowserDialog } from '@/renderer/features/Tickets/DirectoryBrowserDialog';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
+import { duplicateSourceIdentityMessage, sourceIdentityKey } from '@/shared/project-source';
 import type { Project, ProjectSource, RemoteRepo } from '@/shared/types';
 
 import { CredentialStatus } from './CredentialStatus';
@@ -130,6 +131,11 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
         return;
       }
       const taken = new Set(project.sources.map((s) => s.mountName));
+      const existingIdentities = new Set(project.sources.map(sourceIdentityKey));
+      if (existingIdentities.has(sourceIdentityKey(built))) {
+        setError(duplicateSourceIdentityMessage(built));
+        return;
+      }
       let next: ProjectSource = built;
       if (taken.has(built.mountName)) {
         if (!autoSuffix) {

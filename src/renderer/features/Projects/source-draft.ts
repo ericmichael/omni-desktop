@@ -5,6 +5,7 @@
  * Drafts carry the original `ProjectSource.id` when editing (so per-source
  * ticket PR state stays attached); fresh drafts get a new id at convert time.
  */
+import { validateProjectSources } from '@/shared/project-source';
 import type { ProjectSource } from '@/shared/types';
 
 export type SourceDraft = {
@@ -71,6 +72,11 @@ export function draftsToSources(
       const branch = d.defaultBranch.trim();
       sources.push({ ...baseFields, kind: 'git-remote', repoUrl: path, ...(branch ? { defaultBranch: branch } : {}) });
     }
+  }
+  try {
+    validateProjectSources(sources);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Invalid project sources.' };
   }
   return { ok: true, sources };
 }
