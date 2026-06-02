@@ -221,7 +221,12 @@ export const Chat = memo(() => {
 
   const chatSessionId = store.chatSessionId ?? undefined;
   const handleSessionChange = useCallback((sessionId: string | undefined) => {
-    persistedStoreApi.setKey('chatSessionId', sessionId ?? null);
+    const previous = persistedStoreApi.getKey('chatSessionId') ?? null;
+    const next = sessionId ?? null;
+    if (previous !== next) {
+      void persistedStoreApi.setKey('chatContainerId', null);
+    }
+    persistedStoreApi.setKey('chatSessionId', next);
   }, []);
 
   // Every chat goes through `omni serve` after the v22 cut — the JSON-RPC
