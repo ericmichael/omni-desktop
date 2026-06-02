@@ -37,8 +37,9 @@ function dotClass(status: GoalSnapshot['status']): string {
 //   Active:    ● goal · <text>
 //   Completed: ● goal · <text> · completed
 //   Cancelled: ● goal · <text> · cancelled
-export function GoalPanel({ snapshot }: { snapshot: GoalSnapshot | null }) {
+export function GoalPanel({ snapshot, onDismiss }: { snapshot: GoalSnapshot | null; onDismiss?: () => void }) {
   if (!snapshot) return null
+  const terminal = snapshot.status === 'completed' || snapshot.status === 'cancelled'
   return (
     <div className="px-3 pt-2">
       <div className="rounded-md border border-bgCardAlt bg-bgCardAlt/60 px-2.5 py-1.5">
@@ -66,6 +67,17 @@ export function GoalPanel({ snapshot }: { snapshot: GoalSnapshot | null }) {
               {snapshot.status}
             </span>
           )}
+          {terminal && onDismiss ? (
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="ml-1 text-textSubtle hover:text-textPrimary transition-colors px-1.5 py-0.5 rounded hover:bg-bgCardAlt"
+              title="Dismiss goal status"
+              aria-label="Dismiss goal status"
+            >
+              dismiss
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

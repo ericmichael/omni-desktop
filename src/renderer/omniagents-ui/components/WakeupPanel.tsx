@@ -48,7 +48,7 @@ function dotClass(status: WakeupSnapshot['status']): string {
 //   Active recurring:  ● wakeup · <text> · every 5m · 3 fires
 //   Active one-shot:   ● wakeup · <text> · in 30s
 //   Cancelled:         ● wakeup · <text>                   cancelled
-export function WakeupPanel({ snapshot }: { snapshot: WakeupSnapshot | null }) {
+export function WakeupPanel({ snapshot, onDismiss }: { snapshot: WakeupSnapshot | null; onDismiss?: () => void }) {
   if (!snapshot) return null
 
   const tail: string[] = []
@@ -95,6 +95,17 @@ export function WakeupPanel({ snapshot }: { snapshot: WakeupSnapshot | null }) {
               {snapshot.status}
             </span>
           )}
+          {snapshot.status !== 'active' && onDismiss ? (
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="ml-1 text-textSubtle hover:text-textPrimary transition-colors px-1.5 py-0.5 rounded hover:bg-bgCardAlt"
+              title="Dismiss wakeup status"
+              aria-label="Dismiss wakeup status"
+            >
+              dismiss
+            </button>
+          ) : null}
         </div>
       </div>
     </div>
