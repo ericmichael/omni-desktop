@@ -226,6 +226,7 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
     })
     const offRunStarted = client.on('run_started', () => {
       setRunActive(true)
+      setRecap(null)
       onSessionChangeRef.current?.(actor.getSnapshot().context.sessionId)
       refreshSessions()
     })
@@ -497,7 +498,7 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   // metadata carries a `tasks_snapshot` / `bash_jobs_snapshot` overwrites the
   // running snapshot, so the latest one wins. This makes the panels self-
   // populating on session load (history replay) without a separate listener.
-  const { tasks, derivedBashJobs } = useMemo(() => {
+  const { rawTasks, tasks, derivedBashJobs } = useMemo(() => {
     let lastTasks: TaskSummary[] = []
     let lastJobs: BashJobSummary[] = []
     for (const it of items) {
@@ -517,7 +518,7 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
     // the panel quiets down between runs.
     const liveTasks = lastTasks.filter(t => !(t.status === 'completed' && dismissedTaskIds.has(t.id)))
     const filteredTasks = runActive ? liveTasks : liveTasks.filter(t => t.status !== 'completed')
-    return { tasks: filteredTasks, derivedBashJobs: lastJobs }
+    return { rawTasks: lastTasks, tasks: filteredTasks, derivedBashJobs: lastJobs }
   }, [items, runActive, dismissedTaskIds])
 
   // Live override (from ui.bash_jobs.update broadcasts and bash_jobs.* server
@@ -590,6 +591,25 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
     }
   }, [client, sessionId])
 
+  const handleBashDismiss = useCallback((job_id: string) => {
+    setDismissedJobIds(prev => {
+      const next = new Set(prev)
+      next.add(job_id)
+      return next
+    })
+  }, [])
+
+  const handleWorkerDismiss = useCallback((worker_id: string) => {
+    setDismissedWorkerIds(prev => {
+      const next = new Set(prev)
+      next.add(worker_id)
+      return next
+    })
+  }, [])
+
+  const handleGoalDismiss = useCallback(() => setGoalSnapshot(null), [])
+  const handleWakeupDismiss = useCallback(() => setWakeupSnapshot(null), [])
+
   useEffect(() => {
     const handler = () => setIsLargeScreen(window.innerWidth >= 1024)
     window.addEventListener('resize', handler)
@@ -640,10 +660,16 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
     })
     setDismissedTaskIds(prev => {
       const next = new Set(prev)
-      for (const t of tasks) {
+      for (const t of rawTasks) {
         if (t.status === 'completed') next.add(t.id)
       }
       return next
+    })
+    setGoalSnapshot(prev => {
+      if (prev?.status === 'completed' || prev?.status === 'cancelled') {
+        return null
+      }
+      return prev
     })
 
     // Escalation reply: when the agent is paused on an ``escalate``
@@ -908,7 +934,7 @@ setWorkspaceLocked(true)
       submitError(String((e as Error)?.message || 'Failed to start run'))
       return undefined
     }
-  }, [client, sessionId, actor, bootState.actor, variablesProp, submit, submitError, workspacePath, workspaceSupported, stagedContext, clearStagedContext, runActive, queuedMessages.length, escalation, workers, liveBashJobs, derivedBashJobs, tasks])
+  }, [client, sessionId, actor, bootState.actor, variablesProp, submit, submitError, workspacePath, workspaceSupported, stagedContext, clearStagedContext, runActive, queuedMessages.length, escalation, workers, liveBashJobs, derivedBashJobs, rawTasks])
 
   const handleStop = useCallback(() => {
     if (!runId) {
@@ -1475,15 +1501,16 @@ args.text = text
                   )}
                 </AnimatePresence>
               </div>
-              <GoalPanel snapshot={goalSnapshot} />
-              <WakeupPanel snapshot={wakeupSnapshot} />
+              <GoalPanel snapshot={goalSnapshot} onDismiss={handleGoalDismiss} />
+              <WakeupPanel snapshot={wakeupSnapshot} onDismiss={handleWakeupDismiss} />
               <Tasks tasks={tasks} />
-              <WorkersPanel workers={visibleWorkers} onKill={handleWorkerKill} />
+              <WorkersPanel workers={visibleWorkers} onKill={handleWorkerKill} onDismiss={handleWorkerDismiss} />
               <BashJobs
                 jobs={bashJobs}
                 onKill={handleBashKill}
                 onTail={handleBashTail}
                 onWarmup={handleBashWarmup}
+                onDismiss={handleBashDismiss}
               />
               <QueuedMessages
                 items={queuedMessages}

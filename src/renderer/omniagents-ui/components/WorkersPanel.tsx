@@ -62,9 +62,10 @@ type RowProps = {
   nowMs: number
   isKilling: boolean
   onKill?: (worker_id: string) => void
+  onDismiss?: (worker_id: string) => void
 }
 
-function WorkerRow({ worker, nowMs, isKilling, onKill }: RowProps) {
+function WorkerRow({ worker, nowMs, isKilling, onKill, onDismiss }: RowProps) {
   const elapsed = formatElapsed(liveElapsedMs(worker, nowMs))
   const tail = worker.status === 'running' ? elapsed : `${worker.status} · ${elapsed}`
   return (
@@ -93,6 +94,17 @@ function WorkerRow({ worker, nowMs, isKilling, onKill }: RowProps) {
           {isKilling ? '…' : '✕'}
         </button>
       ) : null}
+      {onDismiss && worker.status !== 'running' ? (
+        <button
+          type="button"
+          onClick={onDismiss.bind(null, worker.worker_id)}
+          className="text-textSubtle hover:text-textPrimary transition-colors px-1.5 py-0.5 rounded hover:bg-bgCardAlt"
+          title={`Dismiss worker ${worker.worker_id}`}
+          aria-label={`Dismiss worker ${worker.worker_id}`}
+        >
+          dismiss
+        </button>
+      ) : null}
     </li>
   )
 }
@@ -100,11 +112,12 @@ function WorkerRow({ worker, nowMs, isKilling, onKill }: RowProps) {
 type Props = {
   workers: WorkerSummary[]
   onKill?: (worker_id: string) => Promise<WorkersKillResult>
+  onDismiss?: (worker_id: string) => void
 }
 
 // Docked workers panel. Mirrors BashJobs structurally so the two stack
 // as a single visual unit. Renders nothing when there are no workers.
-export function WorkersPanel({ workers, onKill }: Props) {
+export function WorkersPanel({ workers, onKill, onDismiss }: Props) {
   const [, setNowTick] = useState(0)
   const anyRunning = workers.some(w => w.status === 'running')
   useEffect(() => {
@@ -181,6 +194,7 @@ export function WorkersPanel({ workers, onKill }: Props) {
               nowMs={nowMs}
               isKilling={killing.has(w.worker_id)}
               onKill={onKill ? handleKill : undefined}
+              onDismiss={onDismiss}
             />
           ))}
         </ul>

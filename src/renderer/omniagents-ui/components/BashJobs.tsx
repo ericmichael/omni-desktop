@@ -79,12 +79,13 @@ type BashJobRowProps = {
   isKilling: boolean
   onShowLogs?: (jobId: string) => void
   onKill?: (jobId: string) => void
+  onDismiss?: (jobId: string) => void
 }
 
 // One row of the docked panel. Pulled out of the parent map so the per-row
 // callbacks can use `.bind(null, jobId)` instead of inline arrows — keeps
 // `react/jsx-no-bind` satisfied without growing the parent component.
-function BashJobRow({ job, nowMs, isKilling, onShowLogs, onKill }: BashJobRowProps) {
+function BashJobRow({ job, nowMs, isKilling, onShowLogs, onKill, onDismiss }: BashJobRowProps) {
   const elapsed = formatElapsed(liveElapsedMs(job, nowMs))
   const tail = job.running ? elapsed : `exit ${job.exit_code} · ${elapsed}`
   return (
@@ -126,6 +127,17 @@ function BashJobRow({ job, nowMs, isKilling, onShowLogs, onKill }: BashJobRowPro
           {isKilling ? '…' : '✕'}
         </button>
       ) : null}
+      {onDismiss && !job.running ? (
+        <button
+          type="button"
+          onClick={onDismiss.bind(null, job.job_id)}
+          className="text-textSubtle hover:text-textPrimary transition-colors px-1.5 py-0.5 rounded hover:bg-bgCardAlt"
+          title={`Dismiss job ${job.job_id}`}
+          aria-label={`Dismiss job ${job.job_id}`}
+        >
+          dismiss
+        </button>
+      ) : null}
     </li>
   )
 }
@@ -134,13 +146,14 @@ type Props = {
   jobs: BashJobSummary[]
   onKill?: (job_id: string) => Promise<BashJobsKillResult>
   onTail?: (job_id: string, lines?: number) => Promise<BashJobsTailResult>
+  onDismiss?: (job_id: string) => void
   // Optional: fired once on mount when at least one job is running, so the
   // server-side sweeper has a chance to capture a service handle and start
   // pushing ``ui.bash_jobs.update`` broadcasts on natural exits.
   onWarmup?: () => Promise<unknown>
 }
 
-export function BashJobs({ jobs, onKill, onTail, onWarmup }: Props) {
+export function BashJobs({ jobs, onKill, onTail, onWarmup, onDismiss }: Props) {
   // 1Hz tick while at least one job is running so elapsed time updates.
   const [, setNowTick] = useState(0)
   const anyRunning = jobs.some(j => j.running)
@@ -250,6 +263,7 @@ return null
                 isKilling={killing.has(j.job_id)}
                 onShowLogs={rowShowLogs}
                 onKill={rowKill}
+                onDismiss={onDismiss}
               />
             ))}
           </ul>
