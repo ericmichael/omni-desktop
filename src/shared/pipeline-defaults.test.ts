@@ -47,8 +47,14 @@ describe('SIMPLE_PIPELINE', () => {
     }
   });
 
-  it('starts with backlog and ends with done', () => {
+  it('starts with backlog and ends with completed', () => {
     expect(SIMPLE_PIPELINE.columns[0]!.id).toBe('backlog');
-    expect(SIMPLE_PIPELINE.columns[SIMPLE_PIPELINE.columns.length - 1]!.id).toBe('done');
+    expect(SIMPLE_PIPELINE.columns[SIMPLE_PIPELINE.columns.length - 1]!.id).toBe('completed');
+  });
+
+  it('has a gated review column', () => {
+    const review = SIMPLE_PIPELINE.columns.find((c) => c.id === 'review');
+    expect(review).toBeDefined();
+    expect(review!.gate).toBe(true);
   });
 });

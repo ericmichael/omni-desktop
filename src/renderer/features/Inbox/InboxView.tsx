@@ -154,8 +154,7 @@ export const InboxView = memo(
     const visible = tab === 'active' ? active : tab === 'later' ? later : promoted;
 
     useEffect(() => {
-      if (!selectedItemId) {
-        setSelectedId(null);
+      if (selectedItemId === undefined) {
         return;
       }
 
@@ -174,6 +173,19 @@ export const InboxView = memo(
       }
       setTab('active');
     }, [selectedItemId, itemsById]);
+
+    useEffect(() => {
+      if (!selectedItem || selectedItemId !== undefined) {
+        return;
+      }
+      if (selectedItem.promotedTo) {
+        setTab('archive');
+      } else if (selectedItem.status === 'later') {
+        setTab('later');
+      } else {
+        setTab('active');
+      }
+    }, [selectedItem, selectedItemId]);
 
     const handleBack = useCallback(() => {
       if (selectedItemId) {

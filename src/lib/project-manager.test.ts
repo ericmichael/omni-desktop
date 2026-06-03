@@ -583,10 +583,12 @@ describe('ProjectManager', () => {
       store.set('projects', projects);
 
       const pipeline = pm.getPipeline('proj-1');
-      // SIMPLE_PIPELINE has 3 columns: backlog, in_progress, done
+      // SIMPLE_PIPELINE has 3 columns: backlog, review, completed
       expect(pipeline.columns).toHaveLength(3);
       expect(pipeline.columns[0]!.id).toBe('backlog');
-      expect(pipeline.columns[2]!.id).toBe('done');
+      expect(pipeline.columns[1]!.id).toBe('review');
+      expect(pipeline.columns[1]!.gate).toBe(true);
+      expect(pipeline.columns[2]!.id).toBe('completed');
     });
 
     it('falls back to DEFAULT_PIPELINE for projects with a source but no pipeline', () => {
