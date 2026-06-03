@@ -55,6 +55,7 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [transcripts, setTranscripts] = useState<Array<{ id: string; role: 'user' | 'assistant'; text: string; timestamp: number }>>([])
   const [chatInput, setChatInput] = useState('')
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
   const activeAudioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set())
   const playbackDestRef = useRef<MediaStreamAudioDestinationNode | null>(null)
@@ -538,6 +539,12 @@ console.log('[ui] VoiceModal init', { base: wsRealtimeUrl, token, debug: debugEn
 console.log('[ui] event', t, p)
 }
 
+      if (t === 'realtime_error') {
+        const message = String(p?.error_message || p?.error || 'Voice mode error')
+        setErrorMessage(message)
+        setOrbState(isMutedRef.current ? OrbState.IDLE : OrbState.LISTENING)
+      }
+
       // State machine transitions based on realtime events:
       // IDLE → LISTENING (user unmutes)
       // LISTENING → THINKING (agent starts response)
@@ -762,6 +769,7 @@ console.log('[ui] play audio', { bytes: bytes.length, samples: samples.length, s
         if (!active) {
 return
 }
+        setErrorMessage(null)
         try {
           const res = await client.startSession(sessionId)
           const newSid = String(res?.session_id || '')
@@ -772,9 +780,17 @@ onSessionCreated(newSid)
           if (debugEnabled) {
 console.log('[ui] session started', res)
 }
-        } catch {}
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e || 'Failed to start voice session')
+          setErrorMessage(message)
+          if (debugEnabled) {
+console.error('[ui] start session failed', e)
+}
+        }
       })
       .catch((e) => {
+        const message = e instanceof Error ? e.message : String(e || 'Failed to connect voice websocket')
+        setErrorMessage(message)
  if (debugEnabled) {
 console.error('[ui] connect failed', e)
 } 
@@ -805,8 +821,9 @@ clientRef.current.stopSession(sid).catch(() => {})
       setNotifications([])
       setTranscripts([])
       setChatInput('')
+      setErrorMessage(null)
     }
-  }, [isOpen])
+  }, [debugEnabled, isOpen, onSessionCreated, sessionId, token, wsRealtimeUrl])
 
   // Look up the kind of an in-flight approval so handleApprove/Reject
   // can pick the right RPC. MCP-side notifications stash the
@@ -1058,6 +1075,7 @@ console.log('[VoiceModal] SPEAKING finished, transition to', effectiveState)
             Live
           </span>
           <span className="text-xs text-muted-foreground/60 font-mono tabular-nums">{formattedTime}</span>
+          {errorMessage && <span className="text-xs text-destructive max-w-[360px] truncate" title={errorMessage}>Voice error: {errorMessage}</span>}
         </div>
         <div className="flex items-center gap-2">
           {/* Toggle sidebar */}
