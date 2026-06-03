@@ -174,3 +174,81 @@
 .yoopta-ui-floating-action-button:focus-visible {
   box-shadow: 0 0 0 2px var(--colorNeutralBackground1), 0 0 0 4px var(--colorBrandStroke1);
 }
+
+/* -- Glass mode ------------------------------------------------------------ */
+
+body:has(.omni-glass) {
+  --yoopta-glass-panel: color-mix(in srgb, var(--colorNeutralBackground1) 72%, transparent);
+  --yoopta-glass-panel-soft: color-mix(in srgb, var(--colorNeutralBackground2) 56%, transparent);
+  --yoopta-glass-panel-strong: color-mix(in srgb, var(--colorNeutralBackground1) 86%, transparent);
+  --yoopta-glass-border: color-mix(in srgb, var(--colorNeutralStroke1) 86%, transparent);
+}
+
+.omni-glass .yoopta-editor,
+.omni-glass .yoopta-editor * {
+  border-color: var(--yoopta-glass-border);
+}
+
+.omni-glass .yoopta-callout,
+.omni-glass .yoopta-code,
+.omni-glass .yoopta-table,
+.omni-glass .yoopta-accordion-list,
+.omni-glass .yoopta-accordion-list-item,
+.omni-glass .yoopta-blockquote,
+.omni-glass [class*='yoopta-callout'],
+.omni-glass [class*='yoopta-code'],
+.omni-glass [class*='yoopta-table'],
+.omni-glass [class*='yoopta-accordion'],
+.omni-glass [class*='yoopta-blockquote'] {
+  background-color: var(--yoopta-glass-panel-soft) !important;
+  border-color: var(--yoopta-glass-border) !important;
+  backdrop-filter: var(--glass-blur-light);
+  -webkit-backdrop-filter: var(--glass-blur-light);
+}
+
+.omni-glass .yoopta-divider,
+.omni-glass [class*='yoopta-divider'] {
+  border-color: var(--yoopta-glass-border) !important;
+  background-color: var(--yoopta-glass-border) !important;
+}
+
+body:has(.omni-glass) .yoopta-ui-slash-command-content,
+body:has(.omni-glass) [class*='yoopta-ui-floating-toolbar-content'],
+body:has(.omni-glass) [class*='yoopta-ui-floating-toolbar-root'],
+body:has(.omni-glass) [class*='yoopta-ui-block-options-content'],
+body:has(.omni-glass) [class*='yoopta-ui-action-menu-list-content'],
+body:has(.omni-glass) .yoopta-ui-floating-block-actions {
+  background-color: var(--yoopta-glass-panel) !important;
+  border-color: var(--yoopta-glass-border) !important;
+  box-shadow: 0 1px 0 rgb(255 255 255 / 0.08) inset, var(--shadow16);
+  backdrop-filter: var(--glass-blur-light);
+  -webkit-backdrop-filter: var(--glass-blur-light);
+}
+
+body:has(.omni-glass) .yoopta-ui-slash-command-input,
+body:has(.omni-glass) .yoopta-ui-slash-command-input-trigger,
+body:has(.omni-glass) .yoopta-ui-slash-command-footer,
+body:has(.omni-glass) .yoopta-ui-slash-command-item-icon,
+body:has(.omni-glass) .yoopta-ui-slash-command-kbd {
+  background-color: var(--yoopta-glass-panel-soft) !important;
+  border-color: var(--yoopta-glass-border) !important;
+}
+
+body:has(.omni-glass) .yoopta-ui-slash-command-item:hover,
+body:has(.omni-glass) .yoopta-ui-slash-command-item[data-selected='true'],
+body:has(.omni-glass) [class*='yoopta-ui-floating-toolbar-button']:hover,
+body:has(.omni-glass) [class*='yoopta-ui-block-options-item']:hover,
+body:has(.omni-glass) [class*='yoopta-ui-block-options-item'][data-selected='true'],
+body:has(.omni-glass) [class*='yoopta-ui-action-menu-list-item']:hover,
+body:has(.omni-glass) [class*='yoopta-ui-action-menu-list-item'][data-selected='true'],
+body:has(.omni-glass) .yoopta-ui-floating-action-button:hover,
+body:has(.omni-glass) .yoopta-ui-floating-action-button:active {
+  background-color: var(--yoopta-glass-panel-soft) !important;
+}
+
+body:has(.omni-glass) .yoopta-ui-slash-command-separator,
+body:has(.omni-glass) [class*='yoopta-ui-floating-toolbar-separator'],
+body:has(.omni-glass) [class*='yoopta-ui-block-options-separator'],
+body:has(.omni-glass) [class*='yoopta-ui-action-menu-list-separator'] {
+  background-color: var(--yoopta-glass-border) !important;
+}

@@ -1,4 +1,4 @@
-import { makeStyles, shorthands, Skeleton, SkeletonItem, tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, shorthands, Skeleton, SkeletonItem, tokens } from '@fluentui/react-components';
 import { ArrowLeft20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { useSelector } from '@xstate/react';
@@ -8,6 +8,7 @@ import { IconButton } from '@/renderer/ds';
 import { NotebookView } from '@/renderer/features/Notebooks/NotebookView';
 import { acquirePageEditor, releasePageEditor } from '@/renderer/features/Pages/page-editor-registry';
 import { ticketApi } from '@/renderer/features/Tickets/state';
+import { persistedStoreApi } from '@/renderer/services/store';
 import type { PageId, ProjectId } from '@/shared/types';
 
 import { PageBreadcrumb } from './Breadcrumb';
@@ -40,6 +41,9 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     height: '100%',
     width: '100%',
+  },
+  rootGlass: {
+    backgroundColor: 'transparent',
   },
   header: {
     flexShrink: 0,
@@ -114,6 +118,12 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalM,
     flexWrap: 'wrap',
+  },
+  bannerGlass: {
+    backgroundColor: tokens.colorNeutralBackground3,
+    backdropFilter: 'var(--glass-blur-light)',
+    WebkitBackdropFilter: 'var(--glass-blur-light)',
+    boxShadow: tokens.shadow8,
   },
   bannerText: {
     flex: '1 1 auto',
@@ -224,6 +234,7 @@ const navigateUpPageHierarchy = (pageId: PageId, projectId: ProjectId, pages: Re
 const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
   const styles = useStyles();
   const pages = useStore($pages);
+  const isGlass = useStore(persistedStoreApi.$atom).codeDeckBackground != null;
   const page = pages[pageId];
 
   const handleBack = useCallback(() => {
@@ -347,7 +358,7 @@ const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
     phase === 'dirty' && isSaving ? 'Saving…' : phase === 'dirty' ? 'Unsaved' : justSaved ? 'Saved' : '';
 
   return (
-    <div className={styles.root}>
+    <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)} data-slot="page-view">
       {/* Header: Back + Breadcrumb + Title + save affordance */}
       <div className={styles.header}>
         {!page.isRoot && (
@@ -374,7 +385,7 @@ const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
 
       {/* External-change banner */}
       {showConflict && (
-        <div className={styles.banner} role="status">
+        <div className={mergeClasses(styles.banner, isGlass && styles.bannerGlass)} role="status" data-slot="page-conflict-banner">
           <span className={styles.bannerText}>
             This page was updated somewhere else. Your changes haven’t been saved over it yet.
           </span>

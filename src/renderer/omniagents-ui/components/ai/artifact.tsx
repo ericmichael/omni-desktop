@@ -9,13 +9,13 @@ import { cn } from '@/renderer/omniagents-ui/lib/utils'
 export type ArtifactProps = HTMLAttributes<HTMLDivElement>
 
 export const Artifact = ({ className, ...props }: ArtifactProps) => (
-  <div className={cn('flex flex-col overflow-hidden rounded-lg border bg-background shadow-sm', className)} {...props} />
+  <div data-slot="artifact" className={cn('flex flex-col overflow-hidden rounded-lg border bg-background shadow-sm', className)} {...props} />
 )
 
 export type ArtifactHeaderProps = HTMLAttributes<HTMLDivElement>
 
 export const ArtifactHeader = ({ className, ...props }: ArtifactHeaderProps) => (
-  <div className={cn('flex items-center justify-between border-b bg-muted/50 px-4 py-3', className)} {...props} />
+  <div data-slot="artifact-header" className={cn('flex items-center justify-between border-b bg-muted/50 px-4 py-3', className)} {...props} />
 )
 
 export type ArtifactCloseProps = ComponentProps<typeof Button>

@@ -202,6 +202,79 @@
   --color-accent-600: #a82e21;
 }
 
+.omni-glass {
+  --glass-panel: color-mix(in srgb, var(--color-card) 72%, transparent);
+  --glass-panel-soft: color-mix(in srgb, var(--color-muted) 58%, transparent);
+  --glass-panel-strong: color-mix(in srgb, var(--color-card) 86%, transparent);
+  --glass-panel-border: color-mix(in srgb, var(--color-border) 85%, transparent);
+  --glass-code-bg: color-mix(in srgb, var(--color-background) 78%, transparent);
+}
+
+.omni-glass [data-slot='card'],
+.omni-glass [data-slot='tool'],
+.omni-glass [data-slot='artifact'],
+.omni-glass [data-slot='alert'] {
+  background: var(--glass-panel);
+  border-color: var(--glass-panel-border);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 0.08) inset, 0 18px 48px rgb(0 0 0 / 0.16);
+  backdrop-filter: var(--glass-blur-light);
+  -webkit-backdrop-filter: var(--glass-blur-light);
+}
+
+.omni-glass [data-slot='card-header'],
+.omni-glass [data-slot='card-footer'],
+.omni-glass [data-slot='artifact-header'],
+.omni-glass [data-slot='tool-input-panel'],
+.omni-glass [data-slot='tool-output-panel']:not([data-error='true']),
+.omni-glass [data-slot='code-block'],
+.omni-glass [data-slot='markdown'] pre {
+  background: var(--glass-panel-soft);
+  border-color: var(--glass-panel-border);
+  backdrop-filter: var(--glass-blur-light);
+  -webkit-backdrop-filter: var(--glass-blur-light);
+}
+
+.omni-glass [data-slot='code-block'] pre,
+.omni-glass [data-slot='markdown'] pre {
+  background-color: var(--glass-code-bg) !important;
+}
+
+.omni-glass [data-slot='code-block'] [data-slot='code-block-header'] {
+  background: var(--glass-panel-strong);
+}
+
+.omni-glass [data-slot='markdown'] {
+  color: var(--color-foreground);
+  --tw-prose-body: var(--color-foreground);
+  --tw-prose-headings: var(--color-foreground);
+  --tw-prose-lead: var(--color-muted-foreground);
+  --tw-prose-links: var(--color-primary);
+  --tw-prose-bold: var(--color-foreground);
+  --tw-prose-counters: var(--color-muted-foreground);
+  --tw-prose-bullets: var(--color-muted-foreground);
+  --tw-prose-hr: var(--glass-panel-border);
+  --tw-prose-quotes: var(--color-foreground);
+  --tw-prose-quote-borders: var(--glass-panel-border);
+  --tw-prose-captions: var(--color-muted-foreground);
+  --tw-prose-code: var(--color-foreground);
+  --tw-prose-pre-code: var(--color-foreground);
+  --tw-prose-pre-bg: var(--glass-code-bg);
+  --tw-prose-th-borders: var(--glass-panel-border);
+  --tw-prose-td-borders: var(--glass-panel-border);
+}
+
+.omni-glass [data-slot='markdown'] :where(code):not(:where(pre code)) {
+  background: var(--glass-panel-soft);
+  border: 1px solid var(--glass-panel-border);
+}
+
+.omni-glass-mobile-top-app-bar {
+  background: var(--glass-panel);
+  border-color: var(--glass-panel-border);
+  backdrop-filter: var(--glass-blur-light);
+  -webkit-backdrop-filter: var(--glass-blur-light);
+}
+
 /* Base styles */
 ::selection {
   background-color: var(--selection-color);

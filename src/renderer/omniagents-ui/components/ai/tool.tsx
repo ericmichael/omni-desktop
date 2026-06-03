@@ -12,7 +12,7 @@ import { CodeBlock } from './code-block'
 export type ToolProps = ComponentProps<typeof Collapsible>
 
 export const Tool = ({ className, ...props }: ToolProps) => (
-  <Collapsible className={cn('group not-prose mb-4 w-full min-w-0 max-w-full overflow-hidden rounded-md border bg-muted', className)} {...props} />
+  <Collapsible data-slot="tool" className={cn('group not-prose mb-4 w-full min-w-0 max-w-full overflow-hidden rounded-md border bg-muted', className)} {...props} />
 )
 
 export type ToolPart = ToolUIPart | DynamicToolUIPart
@@ -90,7 +90,7 @@ export type ToolInputProps = ComponentProps<'div'> & {
 export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
   <div className={cn('space-y-2 overflow-hidden', className)} {...props}>
     <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">Parameters</h4>
-    <div className="rounded-md bg-muted/50">
+    <div data-slot="tool-input-panel" className="rounded-md bg-muted/50">
       <CodeBlock code={JSON.stringify(input, null, 2)} language="json" />
     </div>
   </div>
@@ -117,7 +117,7 @@ return null
   return (
     <div className={cn('space-y-2', className)} {...props}>
       <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">{errorText ? 'Error' : 'Result'}</h4>
-      <div className={cn('overflow-x-auto rounded-md text-xs [&_table]:w-full', errorText ? 'bg-destructive/10 text-destructive' : 'bg-muted/50 text-foreground')}>
+      <div data-slot="tool-output-panel" data-error={errorText ? 'true' : undefined} className={cn('overflow-x-auto rounded-md text-xs [&_table]:w-full', errorText ? 'bg-destructive/10 text-destructive' : 'bg-muted/50 text-foreground')}>
         {errorText && <div>{errorText}</div>}
         {Output}
       </div>
