@@ -128,6 +128,8 @@ assets/bin/vc_redist.x64.exe
 # Playwright artifacts
 .playwright-cli/
 .playwright-mcp/
+artifacts/playwright-report/
+artifacts/playwright-results/
 
 # Stray screenshots
 *.png

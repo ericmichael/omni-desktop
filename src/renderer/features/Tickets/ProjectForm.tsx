@@ -208,7 +208,13 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
           <div className={styles.section}>
             <div className={styles.fieldGroup}>
               <label className={styles.label}>Name</label>
-              <Input type="text" value={label} onChange={handleLabelChange} placeholder="my-project" />
+              <Input
+                aria-label="Project name"
+                type="text"
+                value={label}
+                onChange={handleLabelChange}
+                placeholder="my-project"
+              />
             </div>
           </div>
 
@@ -246,7 +252,7 @@ export const ProjectForm = memo(({ open, onClose, editProject }: ProjectFormProp
           <div className={styles.section}>
             <div className={styles.fieldGroup}>
               <label className={styles.label}>Due date</label>
-              <Input type="date" value={dueDate} onChange={handleDueDateChange} />
+              <Input aria-label="Project due date" type="date" value={dueDate} onChange={handleDueDateChange} />
             </div>
           </div>
         </DialogBody>

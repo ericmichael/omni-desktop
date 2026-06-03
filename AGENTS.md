@@ -158,6 +158,15 @@ PY
 
 - A successful browser/server chat proof should show the submitted prompt and assistant response in the page body.
 
+## Permanent Playwright E2E Suite
+
+- Committed E2E tests use native Playwright Test, not throwaway YAML or one-off scripts.
+- Add permanent user-story coverage under `tests/e2e/specs/` and shared startup helpers under `tests/e2e/fixtures/` or `tests/e2e/support/`.
+- Prefer `getByRole`, `getByLabel`, and visible product language. Add `data-testid` only when no stable accessible selector exists.
+- Keep mode-specific launch details in fixtures; specs should cover shared stories across `server-local` and `electron-local` where possible.
+- Commands: `npm run test:e2e:server`, `npm run test:e2e:electron`, `npm run test:e2e`, `npm run test:e2e:headed`, `npm run test:e2e:ui`.
+- Playwright reports and traces live under `artifacts/playwright-report/` and `artifacts/playwright-results/`.
+
 ## Debugging Workflow
 
 - Start with the narrowest proof: dependency install, app launch, CDP availability, then one user-visible assertion.
