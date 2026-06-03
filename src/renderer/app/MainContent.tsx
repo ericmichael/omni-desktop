@@ -157,7 +157,7 @@ return prev;
 
   return (
     <div
-      className={mergeClasses(styles.root, showDeckBg && styles.rootWithDeckBg)}
+      className={mergeClasses(styles.root, showDeckBg && styles.rootWithDeckBg, showDeckBg && 'omni-glass')}
       style={
         showDeckBg
           ? {

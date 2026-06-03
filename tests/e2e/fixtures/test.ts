@@ -1,6 +1,17 @@
-import { type Browser, chromium, expect, type Page, test as base } from '@playwright/test';
+import {
+  type Browser,
+  type BrowserContext,
+  _electron as electron,
+  type ElectronApplication,
+  expect,
+  type Page,
+  test as base,
+  type TestInfo,
+} from '@playwright/test';
+import electronExecutablePath from 'electron';
 import type { ManagedProcess } from 'tests/e2e/support/process';
 import { killTcpPort, startProcess, waitForHttpOk } from 'tests/e2e/support/process';
+import { attachProofVideo, visualProofEnabled } from 'tests/e2e/support/proof';
 import {
   createE2eState,
   type E2eState,
@@ -33,28 +44,37 @@ type E2eApp = {
 };
 
 const serverUrl = process.env.E2E_SERVER_URL ?? 'http://127.0.0.1:3001/';
+const proofViewport = { width: 1920, height: 1080 };
+const proofSlowMo = Number(process.env.VISUAL_PROOF_SLOW_MO_MS ?? '120');
 
-async function findElectronRendererPage(browser: Browser, timeoutMs: number): Promise<Page> {
-  const deadline = Date.now() + timeoutMs;
-
-  while (Date.now() < deadline) {
-    for (const context of browser.contexts()) {
-      for (const page of context.pages()) {
-        if (page.url().includes('localhost') || page.url().startsWith('file:')) {
-          return page;
-        }
+function videoOptions(testInfo: TestInfo, launchIndex: number) {
+  return visualProofEnabled
+    ? {
+        dir: testInfo.outputPath(`videos-${launchIndex}`),
+        size: proofViewport,
+        showActions: { duration: 900, position: 'bottom-right' as const, fontSize: 18 },
       }
-    }
-    await new Promise((resolve) => {
-      setTimeout(resolve, 250);
-    });
-  }
-
-  throw new Error('Timed out waiting for Electron renderer page');
+    : undefined;
 }
 
-async function launchServerLocal(browser: Browser, state: E2eState): Promise<LaunchedApp> {
+function viewportOptions() {
+  return visualProofEnabled ? { viewport: proofViewport } : {};
+}
+
+async function attachPageVideo(page: Page, testInfo: TestInfo, name: string): Promise<void> {
+  const video = page.video();
+  const path = video ? await video.path().catch(() => null) : null;
+  await attachProofVideo(testInfo, name, path);
+}
+
+async function launchServerLocal(
+  browser: Browser,
+  state: E2eState,
+  testInfo: TestInfo,
+  launchIndex: number
+): Promise<LaunchedApp> {
   let serverProcess: ManagedProcess | null = null;
+  let context: BrowserContext | null = null;
 
   if (!process.env.E2E_SERVER_URL) {
     const parsed = new URL(serverUrl);
@@ -75,13 +95,15 @@ async function launchServerLocal(browser: Browser, state: E2eState): Promise<Lau
   }
 
   await waitForHttpOk(serverUrl, 90_000);
-  const page = await browser.newPage();
+  context = await browser.newContext({ ...viewportOptions(), recordVideo: videoOptions(testInfo, launchIndex) });
+  const page = await context.newPage();
   await page.goto(serverUrl, { waitUntil: 'domcontentloaded' });
 
   return {
     page,
     close: async () => {
-      await page.close().catch(() => undefined);
+      await context?.close().catch(() => undefined);
+      await attachPageVideo(page, testInfo, `server-local video ${launchIndex}`);
       await serverProcess?.stop();
       if (serverProcess) {
         await killTcpPort(new URL(serverUrl).port || '3001');
@@ -90,40 +112,34 @@ async function launchServerLocal(browser: Browser, state: E2eState): Promise<Lau
   };
 }
 
-async function launchElectronLocal(state: E2eState, workerIndex: number): Promise<LaunchedApp> {
-  const debugPort = process.env.E2E_ELECTRON_CDP_PORT ?? String(9444 + workerIndex);
-  const cdpUrl = process.env.E2E_ELECTRON_CDP_URL ?? `http://127.0.0.1:${debugPort}`;
-  let electronProcess: ManagedProcess | null = null;
-  const launchedElectron = !process.env.E2E_ELECTRON_CDP_URL;
-
-  if (launchedElectron) {
-    electronProcess = startProcess({
-      command: 'npm',
-      args: ['run', 'dev'],
-      cwd: process.cwd(),
-      env: {
-        XDG_CONFIG_HOME: state.xdgConfigHome,
-        OMNI_DEBUG_PORT: debugPort,
-        OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? process.env.SANDBOX_OPENAI_BASE_URL ?? 'http://127.0.0.1:9/v1',
-        OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? process.env.SANDBOX_OPENAI_API_KEY ?? 'test-key',
-        DISPLAY: process.env.DISPLAY ?? ':0',
-      },
-    });
+async function launchElectronLocal(state: E2eState, testInfo: TestInfo, launchIndex: number): Promise<LaunchedApp> {
+  const electronApp: ElectronApplication = await electron.launch({
+    executablePath: electronExecutablePath,
+    args: ['.'],
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      XDG_CONFIG_HOME: state.xdgConfigHome,
+      OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? process.env.SANDBOX_OPENAI_BASE_URL ?? 'http://127.0.0.1:9/v1',
+      OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? process.env.SANDBOX_OPENAI_API_KEY ?? 'test-key',
+      DISPLAY: process.env.DISPLAY ?? ':0',
+    },
+    recordVideo: videoOptions(testInfo, launchIndex),
+    slowMo: visualProofEnabled ? proofSlowMo : undefined,
+  });
+  const page = await electronApp.firstWindow({ timeout: 120_000 });
+  if (visualProofEnabled) {
+    const browserWindow = await electronApp.browserWindow(page);
+    await browserWindow.evaluate((window, size) => window.setSize(size.width, size.height), proofViewport);
+    await page.setViewportSize(proofViewport);
   }
-
-  await waitForHttpOk(`${cdpUrl}/json/version`, 120_000);
-  const connectedBrowser = await chromium.connectOverCDP(cdpUrl);
-  const page = await findElectronRendererPage(connectedBrowser, 120_000);
   await page.waitForLoadState('domcontentloaded');
 
   return {
     page,
     close: async () => {
-      await connectedBrowser.close().catch(() => undefined);
-      await electronProcess?.stop();
-      if (launchedElectron) {
-        await killTcpPort(debugPort);
-      }
+      await electronApp.close().catch(() => undefined);
+      await attachPageVideo(page, testInfo, `electron-local video ${launchIndex}`);
     },
   };
 }
@@ -143,10 +159,14 @@ export const test = base.extend<E2eFixtures>({
       seedElectronState(state, seedState);
     }
 
-    const launch = () =>
-      launchMode === 'server-local'
-        ? launchServerLocal(browser, state)
-        : launchElectronLocal(state, testInfo.workerIndex);
+    let launchIndex = 0;
+    const launch = () => {
+      launchIndex += 1;
+      const currentLaunch = launchIndex;
+      return launchMode === 'server-local'
+        ? launchServerLocal(browser, state, testInfo, currentLaunch)
+        : launchElectronLocal(state, testInfo, currentLaunch);
+    };
 
     let launched = await launch();
     const app: E2eApp = {

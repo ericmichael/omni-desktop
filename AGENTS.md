@@ -165,7 +165,9 @@ PY
 - Prefer `getByRole`, `getByLabel`, and visible product language. Add `data-testid` only when no stable accessible selector exists.
 - Keep mode-specific launch details in fixtures; specs should cover shared stories across `server-local` and `electron-local` where possible.
 - Commands: `npm run test:e2e:server`, `npm run test:e2e:electron`, `npm run test:e2e`, `npm run test:e2e:headed`, `npm run test:e2e:ui`.
-- Playwright reports and traces live under `artifacts/playwright-report/` and `artifacts/playwright-results/`.
+- Visual proof commands: `npm run test:e2e:proof`, `npm run test:e2e:proof:server`, `npm run test:e2e:proof:electron`. These run the same specs with `VISUAL_PROOF=1`, retaining screenshots, traces, and 1080p videos with action overlays. Set `VISUAL_PROOF_SLOW_MO_MS=<ms>` to adjust proof playback speed.
+- Playwright reports and traces live under `artifacts/playwright-report/` and `artifacts/playwright-results/`. Visual proof reports live under `artifacts/playwright-proof-report/` and `artifacts/playwright-proof-results/`.
+- Before moving any ticket to the `Review` column, generate visual proof artifacts for the user-facing behavior changed by the ticket. The user expects to inspect the Playwright proof report first to gain confidence that the app works from the user's perspective before reviewing the agent's work. In the ticket handoff, cite the exact proof command run and the proof report/results paths.
 
 ## Debugging Workflow
 

@@ -130,6 +130,8 @@ assets/bin/vc_redist.x64.exe
 .playwright-mcp/
 artifacts/playwright-report/
 artifacts/playwright-results/
+artifacts/playwright-proof-report/
+artifacts/playwright-proof-results/
 
 # Stray screenshots
 *.png

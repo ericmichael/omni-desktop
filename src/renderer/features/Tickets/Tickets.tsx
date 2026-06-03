@@ -294,7 +294,7 @@ export const Tickets = memo(() => {
                 mobileTicketErrorActions
               ) : undefined
             }
-            className="bg-surface-raised"
+            className={isGlass ? 'omni-glass-mobile-top-app-bar' : 'bg-surface-raised'}
           />
         </div>
 

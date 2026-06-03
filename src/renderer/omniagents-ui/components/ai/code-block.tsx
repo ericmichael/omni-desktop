@@ -220,13 +220,14 @@ export const CodeBlockContainer = ({ className, language, style, ...props }: HTM
   <div
     className={cn('group relative w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-md border bg-background text-foreground', className)}
     data-language={language}
+    data-slot="code-block"
     style={{ containIntrinsicSize: 'auto 200px', contentVisibility: 'auto', ...style }}
     {...props}
   />
 )
 
 export const CodeBlockHeader = ({ children, className, ...props }: HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn('flex items-center justify-between border-b bg-muted/80 px-3 py-2 text-muted-foreground text-xs', className)} {...props}>
+  <div data-slot="code-block-header" className={cn('flex items-center justify-between border-b bg-muted/80 px-3 py-2 text-muted-foreground text-xs', className)} {...props}>
     {children}
   </div>
 )

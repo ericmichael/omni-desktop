@@ -1,4 +1,4 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import {
   Add20Regular,
   ArrowLeft20Regular,
@@ -52,6 +52,11 @@ const useStyles = makeStyles({
       display: 'flex',
     },
   },
+  desktopHeaderGlass: {
+    backgroundColor: tokens.colorNeutralBackground1,
+    backdropFilter: 'var(--glass-blur-light)',
+    WebkitBackdropFilter: 'var(--glass-blur-light)',
+  },
   headerTitle: {
     display: 'flex',
     flexDirection: 'column',
@@ -70,6 +75,7 @@ export const ProjectPage = memo(({ projectId }: { projectId: ProjectId }) => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const pages = useStore($pages);
+  const isGlass = !!store.codeDeckBackground;
 
   const project = useMemo(() => store.projects.find((p) => p.id === projectId), [store.projects, projectId]);
   const rootPage = useMemo(
@@ -87,7 +93,7 @@ export const ProjectPage = memo(({ projectId }: { projectId: ProjectId }) => {
 
   return (
     <div className={styles.root}>
-      <div className={styles.desktopHeader}>
+      <div className={mergeClasses(styles.desktopHeader, isGlass && styles.desktopHeaderGlass)} data-slot="project-page-header">
         <IconButton aria-label="Back to Home" icon={<ArrowLeft20Regular />} size="sm" onClick={handleBack} />
         <div className={styles.headerTitle}>
           <Caption1>Projects</Caption1>
