@@ -242,7 +242,7 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
           <DialogBody className={styles.body}>
             <div className={styles.field}>
               <label className={styles.label}>Source</label>
-              <Select value={provider} onChange={handleProvider} className={styles.full}>
+              <Select aria-label="Source type" value={provider} onChange={handleProvider} className={styles.full}>
                 {githubLinked && <option value="github">GitHub</option>}
                 <option value="azure">Azure DevOps</option>
                 <option value="local">Local folder</option>
@@ -300,6 +300,7 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
                     Mount name <span className={styles.hint}>(folder under /workspace/)</span>
                   </label>
                   <Input
+                    aria-label="Source mount name"
                     type="text"
                     value={localMount}
                     onChange={handleLocalMount}
@@ -315,6 +316,7 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
                 <div className={styles.field}>
                   <label className={styles.label}>Repo URL</label>
                   <Input
+                    aria-label="Repo URL"
                     type="text"
                     value={repoUrl}
                     onChange={handleRepoUrl}
@@ -328,6 +330,7 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
                     Mount name <span className={styles.hint}>(folder under /workspace/)</span>
                   </label>
                   <Input
+                    aria-label="Source mount name"
                     type="text"
                     value={urlMount}
                     onChange={handleUrlMount}
@@ -340,6 +343,7 @@ export const AddSourceDialog = memo(({ open, onClose, project }: AddSourceDialog
                     Default branch <span className={styles.hint}>(optional)</span>
                   </label>
                   <Input
+                    aria-label="Default branch"
                     type="text"
                     value={branch}
                     onChange={handleBranch}

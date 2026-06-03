@@ -1,4 +1,4 @@
-import { makeStyles, shorthands,Skeleton, SkeletonItem, tokens } from '@fluentui/react-components';
+import { makeStyles, shorthands, Skeleton, SkeletonItem, tokens } from '@fluentui/react-components';
 import { ArrowLeft20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { useSelector } from '@xstate/react';
@@ -263,7 +263,7 @@ const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
     (md: string) => {
       actor.send({ type: 'LOCAL_EDIT', content: md });
     },
-    [actor],
+    [actor]
   );
 
   // -------------------------------------------------------------------------
@@ -300,8 +300,8 @@ const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
   const [title, setTitle] = useState(page?.title ?? '');
   useEffect(() => {
     if (page) {
-setTitle(page.title);
-}
+      setTitle(page.title);
+    }
   }, [page]);
 
   // -------------------------------------------------------------------------
@@ -339,18 +339,12 @@ setTitle(page.title);
   }, [actor]);
 
   if (!page) {
-return null;
-}
+    return null;
+  }
 
   const showConflict = phase === 'conflict';
   const saveLabel =
-    phase === 'dirty' && isSaving
-      ? 'Saving…'
-      : phase === 'dirty'
-        ? 'Unsaved'
-        : justSaved
-          ? 'Saved'
-          : '';
+    phase === 'dirty' && isSaving ? 'Saving…' : phase === 'dirty' ? 'Unsaved' : justSaved ? 'Saved' : '';
 
   return (
     <div className={styles.root}>
@@ -358,17 +352,13 @@ return null;
       <div className={styles.header}>
         {!page.isRoot && (
           <div className={styles.backRow}>
-            <IconButton
-              aria-label="Back"
-              icon={<ArrowLeft20Regular />}
-              size="sm"
-              onClick={handleBack}
-            />
+            <IconButton aria-label="Back" icon={<ArrowLeft20Regular />} size="sm" onClick={handleBack} />
             <PageBreadcrumb projectId={projectId} pageId={pageId} />
           </div>
         )}
         <div className={styles.titleRow}>
           <input
+            aria-label="Page title"
             className={page.isRoot ? styles.titleInputLarge : styles.titleInput}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -424,7 +414,6 @@ return null;
             </Suspense>
           )}
         </div>
-
       </div>
     </div>
   );
@@ -482,6 +471,7 @@ const NotebookPageView = memo(({ pageId, projectId }: PageViewProps) => {
         )}
         <div className={styles.titleRow}>
           <input
+            aria-label="Page title"
             className={page.isRoot ? styles.titleInputLarge : styles.titleInput}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
