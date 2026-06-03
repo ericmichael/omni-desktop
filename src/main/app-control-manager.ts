@@ -10,7 +10,7 @@
  * Per the Phase-2 design, everything is Electron-only. Screenshot/console
  * use Electron APIs directly; snapshot/click/fill use CDP via `wc.debugger`.
  */
-import { ipcMain, webContents as webContentsNS } from 'electron';
+import { ipcMain, shell, webContents as webContentsNS } from 'electron';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -188,14 +188,12 @@ export class AppControlManager {
   // -- popup handler ------------------------------------------------------
 
   /**
-   * Install `setWindowOpenHandler` on a browser-kind webContents so
-   * `window.open` and `target="_blank"` create a new tab in the same tabset
-   * instead of opening a native OS window. Idempotent per webContents via
-   * the `popupHandlerInstalled` flag.
+   * Install `setWindowOpenHandler` on controllable webContents so popups are
+   * either routed into browser tabs or handed to the user's default browser.
+   * Idempotent per webContents via the `popupHandlerInstalled` flag.
    */
   private attachPopupHandler(entry: AppEntry): void {
-    const tabsetId = entry.registration.browserTabsetId;
-    if (!tabsetId || entry.popupHandlerInstalled || !this.onBrowserPopup) {
+    if (entry.popupHandlerInstalled) {
       return;
     }
     if (entry.webContentsId === undefined) {
@@ -205,9 +203,17 @@ export class AppControlManager {
     if (!wc || wc.isDestroyed()) {
       return;
     }
+    const tabsetId = entry.registration.browserTabsetId;
+    if (!tabsetId && entry.registration.kind !== 'webview') {
+      return;
+    }
     const onPopup = this.onBrowserPopup;
     wc.setWindowOpenHandler((details) => {
-      onPopup(tabsetId, details.url, details.disposition);
+      if (tabsetId && onPopup) {
+        onPopup(tabsetId, details.url, details.disposition);
+      } else {
+        void shell.openExternal(details.url);
+      }
       return { action: 'deny' };
     });
     entry.popupHandlerInstalled = true;

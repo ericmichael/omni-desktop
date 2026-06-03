@@ -15,6 +15,18 @@ import { isControllableKind } from '@/shared/app-control-types';
 
 const isElectron = typeof window !== 'undefined' && 'electron' in window;
 
+const embeddedUserAgent = (() => {
+  if (typeof navigator === 'undefined') {
+    return undefined;
+  }
+  const normalized = navigator.userAgent
+    .replace(/\s+Electron\/\S+/g, '')
+    .replace(/\s+omni-desktop\/\S+/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return normalized || undefined;
+})();
+
 /**
  * Metadata a surface passes to `<Webview>` so it can self-register with the
  * app-control registry. Omit to opt out (e.g. transient previews).
@@ -737,6 +749,7 @@ return;
         key={`${partition ?? 'default'}:${reloadNonce}`}
         ref={callbackRef}
         src={src}
+        useragent={embeddedUserAgent}
         {...(partition ? { partition } : {})}
         style={{ width: '100%', height: '100%' }}
       />
