@@ -1,31 +1,32 @@
-import { AnimatePresence,motion } from 'framer-motion'
-import { ChevronDownIcon } from 'lucide-react'
-import React, { useMemo, useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion';
+import { ChevronDownIcon } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
 
-import type { ActivityGroupData } from './activity-group'
-import { computeGroupSummary, formatGroupSummary } from './activity-group'
-import { formatArgsPreview,ToolCard } from './MessageList'
+import type { ActivityGroupData } from './activity-group';
+import { computeGroupSummary, formatGroupSummary } from './activity-group';
+import { formatArgsPreview, ToolCard } from './MessageList';
 
 export function ActivityGroup({ group, statusText }: { group: ActivityGroupData; statusText?: string }) {
   // Singleton without grouping — render as plain ToolCard
   if (group.tools.length === 1 && !group.runId) {
-    return <ToolCard item={group.tools[0]!} />
+    return <ToolCard item={group.tools[0]!} />;
   }
 
-  return <GroupCard group={group} statusText={statusText} />
+  return <GroupCard group={group} statusText={statusText} />;
 }
 
 function GroupCard({ group, statusText }: { group: ActivityGroupData; statusText?: string }) {
-  const [expanded, setExpanded] = useState(false)
-  const summary = useMemo(() => computeGroupSummary(group.tools), [group.tools])
-  const summaryText = useMemo(() => formatGroupSummary(summary), [summary])
-  const latest = group.tools[group.tools.length - 1]
-  const preview = formatArgsPreview(latest?.input || '', 60)
+  const [expanded, setExpanded] = useState(false);
+  const summary = useMemo(() => computeGroupSummary(group.tools), [group.tools]);
+  const summaryText = useMemo(() => formatGroupSummary(summary), [summary]);
+  const latest = group.tools[group.tools.length - 1];
+  const preview = formatArgsPreview(latest?.input || '', 60);
 
   return (
-    <motion.div layout className="space-y-2">
+    <motion.div layout data-slot="activity-group" className="space-y-2">
       <button
-        onClick={() => setExpanded(v => !v)}
+        onClick={() => setExpanded((v) => !v)}
+        data-slot="activity-group-trigger"
         className="w-full flex items-center gap-2 px-3 py-3 rounded-md bg-secondary text-sm hover:bg-accent transition-colors text-left min-w-0"
       >
         {group.isRunning ? (
@@ -35,7 +36,7 @@ function GroupCard({ group, statusText }: { group: ActivityGroupData; statusText
               <AnimatePresence mode="wait">
                 {statusText ? (
                   <motion.span
-                    key={`status-${  statusText}`}
+                    key={`status-${statusText}`}
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -8 }}
@@ -81,7 +82,7 @@ function GroupCard({ group, statusText }: { group: ActivityGroupData; statusText
             transition={{ duration: 0.25 }}
             className="overflow-hidden"
           >
-            <div className="space-y-2 pl-4 border-l-2 border-border ml-3">
+            <div data-slot="activity-group-content" className="space-y-2 pl-4 border-l-2 border-border ml-3">
               {group.tools.map((t, i) => (
                 <ToolCard key={t.call_id || i} item={t} />
               ))}
@@ -90,5 +91,5 @@ function GroupCard({ group, statusText }: { group: ActivityGroupData; statusText
         )}
       </AnimatePresence>
     </motion.div>
-  )
+  );
 }
