@@ -42,14 +42,7 @@ describe('resolvePipelineDefs', () => {
       workflow: null,
     });
     expect(defs).not.toBeNull();
-    expect(defs!.map((d) => d.logicalId)).toEqual([
-      'backlog',
-      'spec',
-      'implementation',
-      'review',
-      'pr',
-      'completed',
-    ]);
+    expect(defs!.map((d) => d.logicalId)).toEqual(['backlog', 'spec', 'implementation', 'review', 'pr', 'completed']);
     expect(defs!.find((d) => d.logicalId === 'review')!.gate).toBe(true);
   });
 
@@ -59,13 +52,12 @@ describe('resolvePipelineDefs', () => {
       hasExisting: false,
       workflow: null,
     });
-    expect(defs!.map((d) => d.logicalId)).toEqual(['backlog', 'active', 'done']);
+    expect(defs!.map((d) => d.logicalId)).toEqual(['backlog', 'review', 'completed']);
+    expect(defs!.find((d) => d.logicalId === 'review')!.gate).toBe(true);
   });
 
   it('returns null when SQLite has columns and FLEET.md is absent — leaves existing rows alone', () => {
-    expect(
-      resolvePipelineDefs({ hasSource: true, hasExisting: true, workflow: null })
-    ).toBeNull();
+    expect(resolvePipelineDefs({ hasSource: true, hasExisting: true, workflow: null })).toBeNull();
   });
 
   it('returns null when SQLite has columns and FLEET.md has no pipeline section', () => {

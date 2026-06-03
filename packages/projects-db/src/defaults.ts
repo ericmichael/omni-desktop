@@ -28,8 +28,8 @@ export const DEFAULT_COLUMNS: ColumnDef[] = [
 
 export const SIMPLE_COLUMNS: ColumnDef[] = [
   { logicalId: 'backlog', label: 'Backlog' },
-  { logicalId: 'active', label: 'Active' },
-  { logicalId: 'done', label: 'Done' },
+  { logicalId: 'review', label: 'Review', gate: true },
+  { logicalId: 'completed', label: 'Completed' },
 ];
 
 /**
@@ -37,8 +37,7 @@ export const SIMPLE_COLUMNS: ColumnDef[] = [
  * logical id. Format: `${projectId}__${logicalId}`. Globally unique because
  * project IDs are themselves unique.
  */
-export const defaultColumnId = (projectId: string, logicalId: string): string =>
-  `${projectId}__${logicalId}`;
+export const defaultColumnId = (projectId: string, logicalId: string): string => `${projectId}__${logicalId}`;
 
 /**
  * Inverse of `defaultColumnId` — extract the logical id portion. Returns
