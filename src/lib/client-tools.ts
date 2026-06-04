@@ -636,6 +636,30 @@ export const UI_CLIENT_TOOLS = [
   },
 ] as const;
 
+/**
+ * Voice tools — registered only when the local voice runtime is active
+ * (Electron / self-hosted local mode). `speak` is the explicit TTS channel:
+ * the agent calls it to say something out loud, mirroring the ghostty/Jarvis
+ * paradigm. Execution is local (VoiceService) via the client-tool round-trip,
+ * so nothing is spoken unless the agent chooses to speak it. `safe` so it
+ * never triggers an approval prompt.
+ */
+export const VOICE_CLIENT_TOOLS = [
+  {
+    name: 'speak',
+    safe: true,
+    description:
+      'Say a short message to the user out loud via text-to-speech. This is your VOICE — the user hears it. Keep it brief and natural (one or two sentences). Text you return at the end of your turn is NOT spoken; only what you pass to speak() is heard. Speak before long tool work so the user knows what you are doing, and speak the result when done.',
+    parameters: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', description: 'What to say out loud. Short and conversational.' },
+      },
+      required: ['message'],
+    },
+  },
+] as const;
+
 type ClientToolDef = { name: string; safe?: boolean; [k: string]: unknown };
 
 /** Extract tool names that are marked safe (read-only, no approval needed). */
@@ -797,7 +821,29 @@ export type SessionVariablesArgs = {
   context?: ContextIdentifierOpts;
   /** Prepended to additional_instructions when autopilot is true. */
   supervisorPrompt?: string;
+  /**
+   * Enable local voice mode: registers the `speak` client tool and injects the
+   * speak-first persona guidance. Set by the renderer only when the local
+   * voice runtime is active (Electron / self-hosted local). See VoiceService.
+   */
+  voice?: boolean;
 };
+
+/**
+ * Persona guidance for voice mode, appended to additional_instructions. The
+ * `speak` tool is the spoken channel; the chat (final text) is silent — so the
+ * agent must voice anything it wants heard. Kept short; the tool description
+ * carries the rest.
+ */
+const VOICE_GUIDANCE = [
+  '## Voice mode',
+  '',
+  'The user is talking to you by voice. Reply by **calling the `speak` tool** — that is the only thing the user hears. Text you return at the end of your turn is shown silently in the chat, never spoken.',
+  '',
+  '- Speak in short, natural sentences. If you did not say it with `speak`, the user did not hear it.',
+  '- Speak a brief acknowledgement before any long tool work ("One moment, checking that now."), and speak the outcome when finished.',
+  '- Put long details (paths, commands, code) in your returned text and just tell the user you have done so — do not read them aloud.',
+].join('\n');
 
 const CHAT_CLIENT_TOOLS: readonly ClientToolDef[] = [
   ...PROJECT_CLIENT_TOOLS,
@@ -812,11 +858,16 @@ const CODE_CLIENT_TOOLS: readonly ClientToolDef[] = [
 ];
 
 export const buildSessionVariables = (args: SessionVariablesArgs): Record<string, unknown> => {
-  const { surface, autopilot = false, context, supervisorPrompt } = args;
-  const tools = surface === 'code' ? CODE_CLIENT_TOOLS : CHAT_CLIENT_TOOLS;
+  const { surface, autopilot = false, context, supervisorPrompt, voice = false } = args;
+  const baseTools = surface === 'code' ? CODE_CLIENT_TOOLS : CHAT_CLIENT_TOOLS;
+  const tools: readonly ClientToolDef[] = voice ? [...baseTools, ...VOICE_CLIENT_TOOLS] : baseTools;
   const baseInstructions = buildContextIdentifiers(context);
-  const instructions =
-    autopilot && supervisorPrompt ? `${supervisorPrompt}\n\n${baseInstructions}` : baseInstructions;
+  const parts = [
+    autopilot && supervisorPrompt ? supervisorPrompt : '',
+    voice ? VOICE_GUIDANCE : '',
+    baseInstructions,
+  ].filter(Boolean);
+  const instructions = parts.join('\n\n');
 
   return {
     client_tools: tools,

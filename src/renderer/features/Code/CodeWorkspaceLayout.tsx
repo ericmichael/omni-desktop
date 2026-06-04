@@ -25,6 +25,7 @@ type CodeWorkspaceLayoutProps = {
   sessionId?: string;
   onSessionChange?: (sessionId: string | undefined) => void;
   variables?: Record<string, unknown>;
+  voiceVariables?: Record<string, unknown>;
   codeServerSrc?: string;
   vncSrc?: string;
   previewUrl?: string;
@@ -351,7 +352,7 @@ const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass, tabId }: { app: A
 });
 AppSurfaceView.displayName = 'AppSurfaceView';
 
-export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, variables, codeServerSrc, vncSrc, previewUrl, onPreviewUrlChange, activeApp = 'chat', onActiveAppChange, onReady, headerActionsTargetId, headerActionsCompact, sandboxLabel, sandboxOptions, currentSandboxProfile, onSandboxChange, onClientToolCall, pendingPlan, onPlanDecision, dockTargetId, isGlass, tabId, agentWorkspaceDir, sidecarMode, ticketId }: CodeWorkspaceLayoutProps) => {
+export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, variables, voiceVariables, codeServerSrc, vncSrc, previewUrl, onPreviewUrlChange, activeApp = 'chat', onActiveAppChange, onReady, headerActionsTargetId, headerActionsCompact, sandboxLabel, sandboxOptions, currentSandboxProfile, onSandboxChange, onClientToolCall, pendingPlan, onPlanDecision, dockTargetId, isGlass, tabId, agentWorkspaceDir, sidecarMode, ticketId }: CodeWorkspaceLayoutProps) => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const registry = useMemo(() => buildAppRegistry(store.customApps ?? []), [store.customApps]);
@@ -405,7 +406,7 @@ export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, va
     <div className={mergeClasses(styles.root, isGlass && styles.rootGlass, isGlass && styles.glassChatSurfaces)}>
       <div className={styles.mainArea}>
         <div className={mergeClasses(styles.mainContent, !sidecarMode && activeApp !== 'chat' && styles.mainContentHidden)}>
-          <OmniAgentsApp uiUrl={uiSrc} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables} onReady={handleUiReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} sandboxLabel={sandboxLabel} sandboxOptions={sandboxOptions} currentSandboxProfile={currentSandboxProfile} onSandboxChange={onSandboxChange} onClientToolCall={onClientToolCall} pendingPlan={pendingPlan} onPlanDecision={onPlanDecision} ticketId={ticketId} workspaceDir={agentWorkspaceDir} />
+          <OmniAgentsApp uiUrl={uiSrc} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables} voiceVariables={voiceVariables} onReady={handleUiReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} sandboxLabel={sandboxLabel} sandboxOptions={sandboxOptions} currentSandboxProfile={currentSandboxProfile} onSandboxChange={onSandboxChange} onClientToolCall={onClientToolCall} pendingPlan={pendingPlan} onPlanDecision={onPlanDecision} ticketId={ticketId} workspaceDir={agentWorkspaceDir} />
         </div>
         {!sidecarMode && (
           <AnimatePresence>

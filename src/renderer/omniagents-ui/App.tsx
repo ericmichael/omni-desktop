@@ -38,7 +38,7 @@ export type ClientToolCallHandler = (
   args: Record<string, unknown>,
 ) => Promise<{ ok: boolean; result?: Record<string, unknown>; error?: Record<string, unknown> }>;
 
-export function App({ sessionId: sessionIdProp, onSessionChange, variables: variablesProp, greeting, onReady, headerActionsTargetId, headerActionsCompact, pendingMessages, sandboxLabel: sandboxLabelProp, sandboxOptions, currentSandboxProfile, onSandboxChange, onClientToolCall, pendingPlan, onPlanDecision, ticketId, workspaceDir }: { sessionId?: string; onSessionChange?: (sessionId: string | undefined) => void; variables?: Record<string, unknown>; greeting?: string; onReady?: () => void; headerActionsTargetId?: string; headerActionsCompact?: boolean; pendingMessages?: PendingMessage[]; sandboxLabel?: string; sandboxOptions?: { value: string; label: string }[]; currentSandboxProfile?: string; onSandboxChange?: (value: string) => void; onClientToolCall?: ClientToolCallHandler; pendingPlan?: import('@/shared/chat-types').PlanItem | null; onPlanDecision?: (approved: boolean) => void; ticketId?: TicketId; workspaceDir?: string }) {
+export function App({ sessionId: sessionIdProp, onSessionChange, variables: variablesProp, voiceVariables, greeting, onReady, headerActionsTargetId, headerActionsCompact, pendingMessages, sandboxLabel: sandboxLabelProp, sandboxOptions, currentSandboxProfile, onSandboxChange, onClientToolCall, pendingPlan, onPlanDecision, ticketId, workspaceDir }: { sessionId?: string; onSessionChange?: (sessionId: string | undefined) => void; variables?: Record<string, unknown>; voiceVariables?: Record<string, unknown>; greeting?: string; onReady?: () => void; headerActionsTargetId?: string; headerActionsCompact?: boolean; pendingMessages?: PendingMessage[]; sandboxLabel?: string; sandboxOptions?: { value: string; label: string }[]; currentSandboxProfile?: string; onSandboxChange?: (value: string) => void; onClientToolCall?: ClientToolCallHandler; pendingPlan?: import('@/shared/chat-types').PlanItem | null; onPlanDecision?: (approved: boolean) => void; ticketId?: TicketId; workspaceDir?: string }) {
   const uiConfig = useUiConfig()
   const launcherStore = useStore(persistedStoreApi.$atom)
   const [ui, setUI] = useState<UIState>('connecting')
@@ -124,6 +124,8 @@ export function App({ sessionId: sessionIdProp, onSessionChange, variables: vari
   const [queuedMessages, setQueuedMessages] = useState<import('./rpc/client').QueuedMessage[]>([])
   const readyRef = useRef(false)
   const onClientToolCallRef = useRef(onClientToolCall)
+  // Armed by the mic button so the next run (and only that run) gets the speak tool.
+  const voiceRunRef = useRef(false)
   useEffect(() => {
  onClientToolCallRef.current = onClientToolCall
 }, [onClientToolCall])
@@ -865,8 +867,15 @@ param.filename = f.name
       const workspaceVars: Record<string, unknown> | undefined = (liveWorkspacePath && liveWorkspaceSupported)
         ? { workspace_root: liveWorkspacePath }
         : undefined
-      const baseVariables: Record<string, unknown> | undefined = (variablesProp || workspaceVars)
-        ? { ...variablesProp, ...workspaceVars }
+      // One-shot voice arming: a submission from the mic button uses the
+      // voice-enabled variables (speak tool + persona) for *this run only*;
+      // every other run (typed, or another column) stays speak-free. The ref
+      // is per-App-instance, so columns don't race.
+      const useVoiceRun = voiceRunRef.current
+      voiceRunRef.current = false
+      const variablesSource = useVoiceRun && voiceVariables ? voiceVariables : variablesProp
+      const baseVariables: Record<string, unknown> | undefined = (variablesSource || workspaceVars)
+        ? { ...variablesSource, ...workspaceVars }
         : undefined
       // Merge per-dispatch overrides (from the orchestrator's bridge.run call)
       // on top of the column's locally owned variables. The orchestrator owns
@@ -934,7 +943,13 @@ setWorkspaceLocked(true)
       submitError(String((e as Error)?.message || 'Failed to start run'))
       return undefined
     }
-  }, [client, sessionId, actor, bootState.actor, variablesProp, submit, submitError, workspacePath, workspaceSupported, stagedContext, clearStagedContext, runActive, queuedMessages.length, escalation, workers, liveBashJobs, derivedBashJobs, rawTasks])
+  }, [client, sessionId, actor, bootState.actor, variablesProp, voiceVariables, submit, submitError, workspacePath, workspaceSupported, stagedContext, clearStagedContext, runActive, queuedMessages.length, escalation, workers, liveBashJobs, derivedBashJobs, rawTasks])
+
+  // Submit from the mic button: arm the speak tool for just this run.
+  const handleVoiceSubmit = useCallback((text: string) => {
+    voiceRunRef.current = true
+    void handleSubmit(text)
+  }, [handleSubmit])
 
   const handleStop = useCallback(() => {
     if (!runId) {
@@ -1562,6 +1577,7 @@ args.text = text
                 thinking={thinking}
                 onStop={handleStop}
                 onSubmit={(text, files) => { void handleSubmit(text, files); }}
+                onVoiceSubmit={handleVoiceSubmit}
                 voiceEnabled={voiceEnabled}
                 workspacePath={workspaceSupported ? workspacePath : undefined}
                 workspaceLocked={workspaceLocked}

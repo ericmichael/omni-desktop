@@ -16,6 +16,7 @@ type OmniAgentsAppProps = {
   sessionId?: string;
   onSessionChange?: (sessionId: string | undefined) => void;
   variables?: Record<string, unknown>;
+  voiceVariables?: Record<string, unknown>;
   greeting?: string;
   onReady?: () => void;
   headerActionsTargetId?: string;
@@ -53,7 +54,7 @@ const ThemeSync = ({ children }: { children: ReactNode }) => {
   return <>{children}</>;
 };
 
-export const OmniAgentsApp = ({ uiUrl, sessionId, onSessionChange, variables, greeting, onReady, headerActionsTargetId, headerActionsCompact, pendingMessages, sandboxLabel, sandboxOptions, currentSandboxProfile, onSandboxChange, onClientToolCall, pendingPlan, onPlanDecision, ticketId, workspaceDir }: OmniAgentsAppProps) => {
+export const OmniAgentsApp = ({ uiUrl, sessionId, onSessionChange, variables, voiceVariables, greeting, onReady, headerActionsTargetId, headerActionsCompact, pendingMessages, sandboxLabel, sandboxOptions, currentSandboxProfile, onSandboxChange, onClientToolCall, pendingPlan, onPlanDecision, ticketId, workspaceDir }: OmniAgentsAppProps) => {
   // Resolve relative ``/proxy/...`` payloads against the launcher's actual
   // origin — same-origin in browser server mode, cloud baseUrl in
   // cloud-linked Electron. If uiUrl is already absolute, the base is ignored.
@@ -63,7 +64,7 @@ export const OmniAgentsApp = ({ uiUrl, sessionId, onSessionChange, variables, gr
     <UiConfigProvider uiUrl={normalizedUrl}>
       <RPCClientProvider>
         <ThemeSync>
-          <OmniAgentsCore sessionId={sessionId} onSessionChange={onSessionChange} variables={variables} greeting={greeting} onReady={onReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} pendingMessages={pendingMessages} sandboxLabel={sandboxLabel} sandboxOptions={sandboxOptions} currentSandboxProfile={currentSandboxProfile} onSandboxChange={onSandboxChange} onClientToolCall={onClientToolCall} pendingPlan={pendingPlan} onPlanDecision={onPlanDecision} ticketId={ticketId} workspaceDir={workspaceDir} />
+          <OmniAgentsCore sessionId={sessionId} onSessionChange={onSessionChange} variables={variables} voiceVariables={voiceVariables} greeting={greeting} onReady={onReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} pendingMessages={pendingMessages} sandboxLabel={sandboxLabel} sandboxOptions={sandboxOptions} currentSandboxProfile={currentSandboxProfile} onSandboxChange={onSandboxChange} onClientToolCall={onClientToolCall} pendingPlan={pendingPlan} onPlanDecision={onPlanDecision} ticketId={ticketId} workspaceDir={workspaceDir} />
         </ThemeSync>
       </RPCClientProvider>
     </UiConfigProvider>

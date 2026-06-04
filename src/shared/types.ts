@@ -142,6 +142,8 @@ export type StoreData = {
   appWindowProps?: WindowProps;
   optInToLauncherPrereleases: boolean;
   previewFeatures: boolean;
+  /** Local voice (Option A): use on-device Parakeet STT + Pocket TTS instead of a hosted voice model. */
+  localVoiceEnabled: boolean;
 
   layoutMode: LayoutMode;
   theme: OmniTheme;
@@ -443,6 +445,10 @@ export const schema: Schema<StoreData> = {
     default: false,
   },
   previewFeatures: {
+    type: 'boolean',
+    default: false,
+  },
+  localVoiceEnabled: {
     type: 'boolean',
     default: false,
   },
@@ -1750,6 +1756,28 @@ type OmniInstallProcessIpcEvents = Namespaced<
   }
 >;
 
+/** Local voice (Option A) — STT/TTS run launcher-side via the ONNX sidecar. */
+export interface VoiceStatus {
+  state: 'idle' | 'provisioning' | 'starting' | 'ready' | 'error';
+  stt: boolean;
+  tts: boolean;
+  sampleRate: number | null;
+  error?: string;
+}
+
+type VoiceIpcEvents = Namespaced<
+  'voice',
+  {
+    'get-status': () => VoiceStatus;
+    /** Ensure the venv is provisioned and the sidecar is running. */
+    start: () => VoiceStatus;
+    /** PCM16LE mono base64 in → recognized text out. */
+    transcribe: (pcmBase64: string, sampleRate: number) => string;
+    /** Synthesize `text`; audio streams back via the `voice:audio` renderer event keyed by `streamId`. */
+    speak: (streamId: string, text: string, voice?: string) => void;
+  }
+>;
+
 /**
  * Unified agent process API. Main process handles these events, renderer process invokes them.
  * All operations are keyed by a processId — "chat" for the chat tab, CodeTabId for code tabs.
@@ -2989,6 +3017,7 @@ export type BrowserDownloadEntry = {
  */
 export type IpcEvents = MainProcessIpcEvents &
   OmniInstallProcessIpcEvents &
+  VoiceIpcEvents &
   AgentProcessIpcEvents &
   SnapshotIpcEvents &
   UtilIpcEvents &
@@ -3055,6 +3084,16 @@ type OmniInstallProcessIpcRendererEvents = Namespaced<
     status: [WithTimestamp<OmniInstallProcessStatus>];
     log: [WithTimestamp<LogEntry>];
     'raw-output': [string];
+  }
+>;
+
+type VoiceIpcRendererEvents = Namespaced<
+  'voice',
+  {
+    /** One streamed TTS chunk (PCM16LE base64) for the `speak` call `streamId`. */
+    audio: [{ streamId: string; pcm: string; sampleRate: number }];
+    /** Terminal marker for a `speak` stream. */
+    'audio-end': [{ streamId: string }];
   }
 >;
 
@@ -3233,6 +3272,7 @@ export type IpcRendererEvents = TerminalIpcRendererEvents &
   TunnelIpcRendererEvents &
   MainProcessIpcRendererEvents &
   OmniInstallProcessIpcRendererEvents &
+  VoiceIpcRendererEvents &
   AgentProcessIpcRendererEvents &
   DevIpcRendererEvents &
   StoreIpcRendererEvents &

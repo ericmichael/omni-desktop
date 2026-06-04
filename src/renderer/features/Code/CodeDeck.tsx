@@ -50,6 +50,8 @@ import {
 } from '@/renderer/features/Tickets/TicketControls';
 import { type TicketPanel, TicketPanelOverlay } from '@/renderer/features/Tickets/TicketPanelOverlay';
 import { persistedStoreApi } from '@/renderer/services/store';
+import { $recordingScope } from '@/renderer/services/voice-recording';
+import { VoiceGlow } from './VoiceGlow';
 import type { AppHandleScope } from '@/shared/app-control-types';
 import { makeAppHandleId } from '@/shared/app-control-types';
 import type { AppDescriptor, AppId, CustomAppEntry } from '@/shared/app-registry';
@@ -209,13 +211,22 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     minHeight: 0,
+    position: 'relative',
     ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
     borderRadius: tokens.borderRadiusXLarge,
+    // Contain the recording glow within the card. (The earlier hard edge was a
+    // mask-after-filter bug in VoiceGlow, now fixed — so clipping the genuinely
+    // soft glow just keeps it inside the column instead of spilling.)
     overflow: 'hidden',
     margin: tokens.spacingHorizontalS,
     backgroundColor: 'transparent',
+    transitionProperty: 'border-color',
+    transitionDuration: tokens.durationFaster,
+    transitionTimingFunction: tokens.curveEasyEase,
     ':hover .revealOnHover': { opacity: 1 },
     ':focus-within .revealOnHover': { opacity: 1 },
+    // Highlight the hovered column with the brand accent stroke token.
+    ':hover': { ...shorthands.borderColor(tokens.colorBrandStroke1) },
   },
   deckDockSlot: { minHeight: 0 },
   cardNoRightMargin: {
@@ -911,6 +922,7 @@ const DeckColumn = memo(
     const styles = useStyles();
     const [activePanel, setActivePanel] = useState<TicketPanel | null>(null);
     const handleClosePanel = useCallback(() => setActivePanel(null), []);
+    const recordingScope = useStore($recordingScope);
 
     return (
       <div
@@ -925,6 +937,7 @@ const DeckColumn = memo(
             hasSidecar && styles.cardNoRightMargin
           )}
         >
+          {recordingScope === tab.id && <VoiceGlow />}
           <CodeSessionHeader
             label={label}
             ticketTitle={ticketTitle}

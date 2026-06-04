@@ -3,9 +3,13 @@ import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, Button, Caption1, Card, Checkbox, FormField, FormSkeleton, IconButton, Input, SaveBar, SectionLabel, Select, Spinner } from '@/renderer/ds';
+import { useStore } from '@nanostores/react';
+
+import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, Button, Caption1, Card, Checkbox, FormField, FormSkeleton, IconButton, Input, Radio, RadioGroup, SaveBar, SectionLabel, Select, Spinner } from '@/renderer/ds';
 import { agentConfigApi } from '@/renderer/services/config';
 import { emitter, ipc } from '@/renderer/services/ipc';
+import { persistedStoreApi } from '@/renderer/services/store';
+import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
 import type { CodexDeviceCode, ModelEntry, ModelsConfig, ProviderEntry } from '@/shared/types';
 
 const PROVIDER_TYPES: ProviderEntry['type'][] = ['openai', 'azure', 'openai-compatible', 'litellm', 'openai-oauth'];
@@ -254,6 +258,25 @@ export const SettingsModalModelsTab = memo(() => {
     [updateConfig]
   );
 
+  // Voice provider: Hosted is the models.json `voice_default` (cloud realtime);
+  // Local is the launcher-side on-device stack (Parakeet + Pocket), persisted
+  // separately. They're mutually exclusive.
+  const localVoiceEnabled = useStore(persistedStoreApi.$atom).localVoiceEnabled;
+  const localVoiceCapable = isLocalVoiceCapable();
+  const onChangeVoiceProvider = useCallback(
+    (value: string) => {
+      void persistedStoreApi.setKey('localVoiceEnabled', value === 'local');
+      updateConfig((c) => ({
+        ...c,
+        // Hosted needs a non-null model so the row stays selected; seed the
+        // first available one (user refines via the Model dropdown). Off/Local
+        // clear it.
+        voice_default: value === 'hosted' ? (c.voice_default ?? modelKeys[0] ?? null) : null,
+      }));
+    },
+    [updateConfig, modelKeys]
+  );
+
   const addProvider = useCallback(() => {
     const name = newProviderName.trim();
     if (!name) {
@@ -412,16 +435,49 @@ export const SettingsModalModelsTab = memo(() => {
             ))}
           </Select>
         </FormField>
-        <FormField label="Voice model">
-          <Select value={config.voice_default ?? ''} onChange={onChangeVoiceDefault}>
-            <option value="">None</option>
-            {modelKeys.map((k) => (
-              <option key={k} value={k}>
-                {k}
-              </option>
-            ))}
-          </Select>
+        <FormField label="Voice">
+          <RadioGroup
+            layout="horizontal"
+            value={localVoiceEnabled ? 'local' : config.voice_default ? 'hosted' : 'off'}
+            onChange={(_, data) => onChangeVoiceProvider(data.value)}
+          >
+            <Radio value="off" label="Off" />
+            <Radio value="hosted" label="Hosted" />
+            <Radio
+              value="local"
+              label="Local"
+              disabled={!localVoiceCapable}
+              title={localVoiceCapable ? undefined : 'Not available in this deployment'}
+            />
+          </RadioGroup>
         </FormField>
+        {!localVoiceEnabled && config.voice_default !== null ? (
+          <FormField label="Model">
+            <Select value={config.voice_default ?? ''} onChange={onChangeVoiceDefault}>
+              <option value="">None</option>
+              {modelKeys.map((k) => (
+                <option key={k} value={k}>
+                  {k}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+        ) : null}
+        {localVoiceEnabled ? (
+          <>
+            <FormField label="Speech-to-text">
+              <Select value="parakeet" disabled>
+                <option value="parakeet">Parakeet 0.6B</option>
+              </Select>
+            </FormField>
+            <FormField label="Text-to-speech">
+              <Select value="pocket" disabled>
+                <option value="pocket">Pocket</option>
+              </Select>
+            </FormField>
+            <Caption1>Runs on this machine · models download on first use.</Caption1>
+          </>
+        ) : null}
       </Card>
 
       <SectionLabel className={styles.sectionLabelSpaced}>Providers</SectionLabel>

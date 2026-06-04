@@ -2,7 +2,12 @@ import { ArrowUpIcon, CheckIcon, FolderIcon, Loader2Icon, LockIcon,MicIcon, Moni
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { PromptInput, PromptInputActions,PromptInputTextarea } from './promptkit/PromptInput'
+import { useStore } from '@nanostores/react'
+
 import { VoiceModal } from './VoiceModal'
+import { LocalVoiceButton } from './LocalVoiceButton'
+import { isLocalVoiceCapable } from '@/renderer/services/voice-client'
+import { persistedStoreApi } from '@/renderer/services/store'
 
 /** Trailing path segment, tolerant of both `/` and `\` separators and trailing slashes. Falls back to the input when nothing would be left. */
 function basename(p: string): string {
@@ -12,14 +17,19 @@ function basename(p: string): string {
   return tail || p
 }
 
-export function Input({ disabled, thinking, onStop, onSubmit, voiceEnabled, workspacePath, workspaceLocked, onWorkspaceClick, sandboxLabel, sandboxLocked, sandboxLoading, sandboxOptions, currentSandboxProfile, onSandboxChange, sessionId, onVoiceSessionCreated, onVoiceClose }:
-  { disabled?: boolean; thinking?: boolean; onStop?: () => void; onSubmit: (text: string, files?: File[]) => void; voiceEnabled?: boolean; workspacePath?: string | null; workspaceLocked?: boolean; onWorkspaceClick?: () => void; sandboxLabel?: string; sandboxLocked?: boolean; sandboxLoading?: boolean; sandboxOptions?: { value: string; label: string }[]; currentSandboxProfile?: string; onSandboxChange?: (value: string) => void; sessionId?: string; onVoiceSessionCreated?: (id: string) => void; onVoiceClose?: () => void }) {
+export function Input({ disabled, thinking, onStop, onSubmit, onVoiceSubmit, voiceEnabled, workspacePath, workspaceLocked, onWorkspaceClick, sandboxLabel, sandboxLocked, sandboxLoading, sandboxOptions, currentSandboxProfile, onSandboxChange, sessionId, onVoiceSessionCreated, onVoiceClose }:
+  { disabled?: boolean; thinking?: boolean; onStop?: () => void; onSubmit: (text: string, files?: File[]) => void; onVoiceSubmit?: (text: string) => void; voiceEnabled?: boolean; workspacePath?: string | null; workspaceLocked?: boolean; onWorkspaceClick?: () => void; sandboxLabel?: string; sandboxLocked?: boolean; sandboxLoading?: boolean; sandboxOptions?: { value: string; label: string }[]; currentSandboxProfile?: string; onSandboxChange?: (value: string) => void; sessionId?: string; onVoiceSessionCreated?: (id: string) => void; onVoiceClose?: () => void }) {
   const [text, setText] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const [history, setHistory] = useState<string[]>([])
   const [historyIndex, setHistoryIndex] = useState(0)
   const [historyDraft, setHistoryDraft] = useState('')
   const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false)
+  // Local voice (Option A): shown when the user picked it in Settings → Models
+  // → Voice and the deployment can run it. Takes precedence over the realtime
+  // VoiceModal mic button.
+  const localVoiceEnabled = useStore(persistedStoreApi.$atom).localVoiceEnabled
+  const localVoiceSupported = localVoiceEnabled && isLocalVoiceCapable()
   const [sandboxMenuOpen, setSandboxMenuOpen] = useState(false)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -317,7 +327,11 @@ fileInputRef.current.value = ''
             </div>
 
             <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-              {voiceEnabled ? (
+              {localVoiceSupported ? (
+                // Local models active → push-to-talk replaces the realtime
+                // VoiceModal mic button entirely.
+                <LocalVoiceButton onSubmit={(t) => (onVoiceSubmit ?? onSubmit)(t)} />
+              ) : voiceEnabled ? (
                 <button
                   type="button"
                   onClick={() => setIsVoiceModalOpen(true)}

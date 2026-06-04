@@ -5,6 +5,8 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { getArtifactsDir, getContainerArtifactsDir, profileRunsOnHost } from '@/lib/artifacts';
 import { buildSessionVariables } from '@/lib/client-tools';
+import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
+import { VoiceScopeContext } from '@/renderer/services/voice-recording';
 import { SessionStartupShell } from '@/renderer/common/SessionStartupShell';
 import { Button, Spinner } from '@/renderer/ds';
 import { SessionStatusBanner } from '@/renderer/features/Banner/SessionStatusBanner';
@@ -102,6 +104,7 @@ const CodeRunningView = memo(
     sessionId,
     onSessionChange,
     variables,
+    voiceVariables,
     activeApp,
     onActiveAppChange,
     onReady,
@@ -127,6 +130,7 @@ const CodeRunningView = memo(
     sessionId?: string;
     onSessionChange?: (sessionId: string | undefined) => void;
     variables?: Record<string, unknown>;
+    voiceVariables?: Record<string, unknown>;
     activeApp: AppId;
     onActiveAppChange?: (app: AppId) => void;
     onReady: () => void;
@@ -177,6 +181,7 @@ const CodeRunningView = memo(
             sessionId={sessionId}
             onSessionChange={onSessionChange}
             variables={variables}
+            voiceVariables={voiceVariables}
             codeServerSrc={codeServerSrc}
             vncSrc={vncSrc}
             previewUrl={previewUrl}
@@ -282,6 +287,7 @@ export const CodeTabContent = memo(
       [tab.id]
     );
     const machines = useStore($machines);
+    const localVoice = store.localVoiceEnabled && isLocalVoiceCapable();
     const sandboxLabel = useMemo(() => buildProfileLabel(profileName, machines), [profileName, machines]);
 
     const [isEnterprise, setIsEnterprise] = useState(false);
@@ -388,7 +394,7 @@ export const CodeTabContent = memo(
       return store.tickets.some((t) => t.id === tab.ticketId && t.autopilot === true);
     }, [tab.ticketId, store.tickets]);
 
-    const clientToolVariables = useMemo(() => {
+    const baseSessionArgs = useMemo(() => {
       const artifactsDir = tab.ticketId
         ? profileRunsOnHost(profileName)
           ? hostConfigDir
@@ -396,8 +402,8 @@ export const CodeTabContent = memo(
             : undefined
           : getContainerArtifactsDir(tab.ticketId)
         : undefined;
-      return buildSessionVariables({
-        surface: 'code',
+      return {
+        surface: 'code' as const,
         autopilot: ticketAutopilot,
         context: {
           ...(project ? { projectId: project.id, projectLabel: project.label, sources: project.sources } : {}),
@@ -405,8 +411,15 @@ export const CodeTabContent = memo(
           ...(artifactsDir ? { artifactsDir } : {}),
           ...(tab.workspaceDir ? { workspaceDir: tab.workspaceDir } : {}),
         },
-      });
+      };
     }, [tab.ticketId, tab.workspaceDir, project, profileName, hostConfigDir, ticketAutopilot]);
+
+    // Base runs are speak-free; the mic button arms the voice variant per-run.
+    const clientToolVariables = useMemo(() => buildSessionVariables(baseSessionArgs), [baseSessionArgs]);
+    const voiceVariables = useMemo(
+      () => (localVoice ? buildSessionVariables({ ...baseSessionArgs, voice: true }) : undefined),
+      [baseSessionArgs, localVoice],
+    );
 
     // No project selected — show project picker
     if (!tab.projectId) {
@@ -427,11 +440,13 @@ export const CodeTabContent = memo(
       <div className={mergeClasses(styles.fullSizeRelative, !isVisible && styles.hidden)}>
         <SessionStatusBanner status={sandboxStatus} />
         {sandboxUrls ? (
+          <VoiceScopeContext.Provider value={tab.id}>
           <CodeRunningView
             sandboxUrls={sandboxUrls}
             sessionId={tab.sessionId}
             onSessionChange={handleSessionChange}
             variables={clientToolVariables}
+            voiceVariables={voiceVariables}
             activeApp={activeApp}
             onActiveAppChange={onActiveAppChange}
             onReady={() => {}}
@@ -453,6 +468,7 @@ export const CodeTabContent = memo(
             ticketId={tab.ticketId as TicketId | undefined}
             switching={sandboxStatus?.type === 'running' && !!sandboxStatus.data.switching}
           />
+          </VoiceScopeContext.Provider>
         ) : phase === 'error' ? (
           <CodeErrorView tabId={tab.id} retry={retry} />
         ) : (

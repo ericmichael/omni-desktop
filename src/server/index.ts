@@ -17,6 +17,8 @@ import { wireClientManagers, wireGlobalHandlers } from '@/server/managers';
 import { CODEX_REFRESH_PATH, registerCodexRefreshRoute } from '@/server/codex-refresh-http';
 import { setupLocalTunnelProxy } from '@/server/local-tunnel-proxy';
 import { MCP_PROJECTS_PATH, registerMcpHttpRoute } from '@/server/mcp-http';
+import { registerVoiceRoutes, VOICE_HTTP_PREFIX } from '@/server/voice-http';
+import { isEnterpriseBuild } from '@/main/platform-mode';
 import { setupProxyRewriter } from '@/server/proxy-rewriter';
 import { resolveRuntimeTokenSecret, signRuntimeToken, verifyRuntimeToken } from '@/server/runtime-token';
 import { ServerStore } from '@/server/store';
@@ -247,6 +249,14 @@ const main = async () => {
   // doesn't use it; it's harmless when no sandbox calls it.
   registerMcpHttpRoute(fastify, { runtimeTokenSecret, getTenantRepo });
   console.log(`[mcp-http] omni-projects MCP available at ${MCP_PROJECTS_PATH}`);
+
+  // Local voice (Option A) — self-hosted only. STT/TTS run on this host, so it
+  // must not be a managed/cloud deployment. The renderer gates on the same
+  // condition (isLocalVoiceCapable → !cloudMode); this is the server-side guard.
+  if (!isEnterpriseBuild()) {
+    registerVoiceRoutes(fastify);
+    console.log(`[voice] local voice routes registered at ${VOICE_HTTP_PREFIX}`);
+  }
 
   // Codex token-refresh callback — cloud only. The runtime POSTs refreshed
   // OAuth tokens here after rotation so PgSecretStore stays current and the

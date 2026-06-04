@@ -61,6 +61,15 @@ export default {
       to: './mcp-sandbox',
       filter: '*.html',
     },
+    {
+      // Local voice sidecar (Option A). Python ONNX deps are provisioned at
+      // runtime into a dedicated uv venv by VoiceService; only the script
+      // (+ requirements) ships. Resolved via process.resourcesPath in
+      // voice-service.ts.
+      from: 'voice-sidecar',
+      to: './voice-sidecar',
+      filter: ['*.py', '*.txt'],
+    },
   ],
   mac: {
     target: ['dmg'],

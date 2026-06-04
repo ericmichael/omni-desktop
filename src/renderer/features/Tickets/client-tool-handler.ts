@@ -20,6 +20,7 @@ import { requestPreviewOpen } from '@/renderer/features/Tickets/preview-bridge';
 import { ticketApi } from '@/renderer/features/Tickets/state';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { emitter } from '@/renderer/services/ipc';
+import { getVoiceClient } from '@/renderer/services/voice-client';
 import type { AppClickButton, AppConsoleLevel } from '@/shared/app-control-types';
 import type { ProjectId, TicketId } from '@/shared/types';
 
@@ -500,6 +501,26 @@ return err('Missing tabset_id, tab_id, or url');
  * `allowGlobal` (default true) controls whether the caller can drive the
  * global dock apps via `app_*` tools. Autopilot sessions pass `false`.
  */
+/**
+ * Voice mode: the agent's spoken channel. `speak` synthesizes locally and plays
+ * the audio (VoiceClient owns the AudioContext), so the user hears it. Only
+ * registered as a tool when voice mode is on (see buildSessionVariables).
+ */
+async function handleVoiceTools(
+  toolName: string,
+  toolArgs: Record<string, unknown>,
+): Promise<ClientToolResult | null> {
+  if (toolName !== 'speak') return null;
+  const message = String(toolArgs.message ?? '').trim();
+  if (!message) return ok({ spoken: false });
+  try {
+    await getVoiceClient().speak(message);
+    return ok({ spoken: true });
+  } catch (e) {
+    return err(String(e));
+  }
+}
+
 export function buildClientToolHandler(opts?: {
   ticketId?: TicketId;
   projectId?: ProjectId;
@@ -508,6 +529,11 @@ export function buildClientToolHandler(opts?: {
 }): ClientToolCallHandler {
   const allowGlobal = opts?.allowGlobal ?? true;
   return async (toolName: string, toolArgs: Record<string, unknown>) => {
+    const voiceResult = await handleVoiceTools(toolName, toolArgs);
+    if (voiceResult) {
+      return voiceResult;
+    }
+
     const projectResult = await handleProjectTools(toolName, toolArgs);
     if (projectResult) {
       return projectResult;

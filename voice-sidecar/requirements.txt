@@ -1,0 +1,13 @@
+# Local voice sidecar (Option A) — ONNX Runtime only, NO PyTorch.
+# Installed into a dedicated uv venv by VoiceService.ensureProvisioned().
+# The pocket-tts runtime (pocket_tts_onnx.py) + ONNX bundles are NOT pip
+# packages — the sidecar fetches them from the open HF repo
+# KevinAHM/pocket-tts-onnx at runtime (cached) via huggingface_hub.
+onnx-asr
+onnxruntime
+soundfile
+numpy
+scipy
+sentencepiece
+safetensors
+huggingface_hub

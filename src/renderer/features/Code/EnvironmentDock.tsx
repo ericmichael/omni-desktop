@@ -30,9 +30,10 @@ const useStyles = makeStyles({
     paddingRight: tokens.spacingHorizontalSNudge,
     paddingTop: '5px',
     paddingBottom: '5px',
-    borderRadius: '14px',
+    // Match the code deck column border: same stroke token + radius.
+    borderRadius: tokens.borderRadiusXLarge,
     backgroundColor: tokens.colorNeutralBackground1,
-    boxShadow: `0 1px 12px rgba(0,0,0,0.10), 0 0 0 1px ${tokens.colorNeutralStroke2}`,
+    boxShadow: `0 1px 12px rgba(0,0,0,0.10), 0 0 0 1px ${tokens.colorNeutralStroke1}`,
     flexShrink: 0,
   },
   dockGlass: {

@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+"""Local voice sidecar for the Omni Code launcher (Option A).
+
+Runs entirely on ONNX Runtime — NO PyTorch:
+  - STT: NVIDIA Parakeet CTC via ``onnx_asr``
+  - TTS: Kyutai Pocket TTS via ``pocket_tts_onnx`` (KevinAHM/pocket-tts-onnx)
+
+Both model stacks self-provision from Hugging Face on first use (cached). The
+launcher provisions the Python env with the bundled ``uv`` and spawns this
+process; the renderer captures the mic and plays back the audio.
+
+Transport: newline-delimited JSON on stdin/stdout (one object per line).
+  stdout: protocol messages only (responses + events). stderr: human logs.
+
+Requests (stdin):
+  {"id": "1", "op": "ping"}
+  {"id": "2", "op": "stt", "audio": "<base64 pcm16le mono>", "sample_rate": 24000}
+  {"id": "3", "op": "tts", "text": "Hello.", "voice": "alba"}
+
+Responses / events (stdout):
+  {"event": "ready", "stt": true, "tts": true, "sample_rate": 24000}
+  {"id": "1", "ok": true, "event": "pong"}
+  {"id": "2", "ok": true, "text": "hello world"}
+  {"id": "3", "event": "audio", "pcm": "<base64 pcm16le>", "sample_rate": 24000}
+  {"id": "3", "ok": true, "event": "done"}
+  {"id": "?", "ok": false, "error": "..."}            # per-request failure
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import os
+import sys
+import threading
+import traceback
+from typing import Any, Optional
+
+import numpy as np
+
+STT_SAMPLE_RATE = 16000          # Parakeet expects 16 kHz mono
+TTS_REPO = "KevinAHM/pocket-tts-onnx"
+
+_stdout_lock = threading.Lock()
+
+
+def log(*a: Any) -> None:
+    print("[voice-sidecar]", *a, file=sys.stderr, flush=True)
+
+
+def emit(obj: dict) -> None:
+    """Write one protocol message as a single JSON line to stdout."""
+    line = json.dumps(obj, separators=(",", ":"))
+    with _stdout_lock:
+        sys.stdout.write(line + "\n")
+        sys.stdout.flush()
+
+
+# ---------------------------------------------------------------------------
+# Audio helpers
+# ---------------------------------------------------------------------------
+
+def pcm16_b64_to_float32(b64: str) -> np.ndarray:
+    raw = base64.b64decode(b64)
+    return np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+
+
+def float32_to_pcm16_b64(x: np.ndarray) -> str:
+    x = np.clip(np.asarray(x, dtype=np.float32), -1.0, 1.0)
+    pcm = (x * 32767.0).astype("<i2").tobytes()
+    return base64.b64encode(pcm).decode("ascii")
+
+
+def resample(x: np.ndarray, src_sr: int, dst_sr: int) -> np.ndarray:
+    if src_sr == dst_sr or x.size == 0:
+        return x.astype(np.float32, copy=False)
+    from math import gcd
+    g = gcd(int(src_sr), int(dst_sr))
+    up, down = int(dst_sr // g), int(src_sr // g)
+    try:
+        from scipy.signal import resample_poly
+        return resample_poly(x, up, down).astype(np.float32)
+    except Exception:
+        # Linear-interp fallback if scipy is unavailable.
+        n = int(round(x.size * dst_sr / src_sr))
+        idx = np.linspace(0, x.size - 1, num=n, dtype=np.float32)
+        return np.interp(idx, np.arange(x.size, dtype=np.float32), x).astype(np.float32)
+
+
+# ---------------------------------------------------------------------------
+# Engines
+# ---------------------------------------------------------------------------
+
+class SttEngine:
+    def __init__(self, model_name: str):
+        import onnx_asr
+        log(f"loading STT model {model_name} ...")
+        self._model = onnx_asr.load_model(model_name)
+        log("STT ready")
+
+    def transcribe(self, audio: np.ndarray, sample_rate: int) -> str:
+        a = resample(audio, sample_rate, STT_SAMPLE_RATE)
+        text = self._model.recognize(a, sample_rate=STT_SAMPLE_RATE)
+        return (text or "").strip()
+
+
+class TtsEngine:
+    def __init__(self, language: str, precision: str, default_voice: str,
+                 runtime_dir: Optional[str], bundle_dir: Optional[str]):
+        runtime_dir, models_dir = _resolve_tts_assets(runtime_dir, bundle_dir, language)
+        if runtime_dir not in sys.path:
+            sys.path.insert(0, runtime_dir)
+        from pocket_tts_onnx import PocketTTSOnnx
+        log(f"loading TTS bundle {language} ({precision}) ...")
+        self._tts = PocketTTSOnnx(
+            models_dir=models_dir, language=language, precision=precision,
+        )
+        self.sample_rate = int(self._tts.sample_rate)
+        self.default_voice = default_voice
+        log(f"TTS ready (sample_rate={self.sample_rate})")
+
+    def synth_stream(self, text: str, voice: Optional[str]):
+        """Yield float32 audio chunks at self.sample_rate."""
+        v = voice or self.default_voice
+        stream = getattr(self._tts, "stream", None)
+        if callable(stream):
+            try:
+                for chunk in stream(text, voice=v):
+                    yield np.asarray(chunk, dtype=np.float32)
+                return
+            except Exception as exc:  # fall back to one-shot
+                log(f"stream() failed ({exc!r}); falling back to generate()")
+        yield np.asarray(self._tts.generate(text, voice=v), dtype=np.float32)
+
+
+def _resolve_tts_assets(runtime_dir: Optional[str], bundle_dir: Optional[str],
+                        language: str) -> tuple[str, str]:
+    """Return (runtime_dir, models_dir), downloading from HF if not provided."""
+    if runtime_dir and bundle_dir:
+        return runtime_dir, bundle_dir
+    from huggingface_hub import snapshot_download
+    log(f"fetching TTS runtime + bundle from {TTS_REPO} (cached) ...")
+    snap = snapshot_download(
+        TTS_REPO,
+        allow_patterns=["pocket_tts_onnx.py", f"onnx/{language}/*"],
+    )
+    return snap, os.path.join(snap, "onnx")
+
+
+# ---------------------------------------------------------------------------
+# Request handling
+# ---------------------------------------------------------------------------
+
+def handle(req: dict, stt: Optional[SttEngine], tts: Optional[TtsEngine]) -> None:
+    rid = req.get("id")
+    op = req.get("op")
+
+    if op == "ping":
+        emit({"id": rid, "ok": True, "event": "pong"})
+        return
+
+    if op == "stt":
+        if stt is None:
+            emit({"id": rid, "ok": False, "error": "STT disabled"})
+            return
+        audio = pcm16_b64_to_float32(req["audio"])
+        text = stt.transcribe(audio, int(req.get("sample_rate", STT_SAMPLE_RATE)))
+        emit({"id": rid, "ok": True, "text": text})
+        return
+
+    if op == "tts":
+        if tts is None:
+            emit({"id": rid, "ok": False, "error": "TTS disabled"})
+            return
+        text = (req.get("text") or "").strip()
+        if not text:
+            emit({"id": rid, "ok": True, "event": "done"})
+            return
+        for chunk in tts.synth_stream(text, req.get("voice")):
+            if chunk.size:
+                emit({"id": rid, "event": "audio",
+                      "pcm": float32_to_pcm16_b64(chunk),
+                      "sample_rate": tts.sample_rate})
+        emit({"id": rid, "ok": True, "event": "done", "sample_rate": tts.sample_rate})
+        return
+
+    emit({"id": rid, "ok": False, "error": f"unknown op {op!r}"})
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(description="Omni Code local voice sidecar (ONNX, torch-free)")
+    p.add_argument("--language", default="english_2026-04")
+    p.add_argument("--precision", default="int8", choices=["int8", "fp32"])
+    p.add_argument("--voice", default="alba", help="Default TTS voice (predefined name or wav path)")
+    p.add_argument("--stt-model", default="nemo-parakeet-ctc-0.6b")
+    p.add_argument("--runtime-dir", default=os.environ.get("POCKET_TTS_RUNTIME_DIR"))
+    p.add_argument("--bundle-dir", default=os.environ.get("POCKET_TTS_BUNDLE_DIR"))
+    p.add_argument("--no-stt", action="store_true")
+    p.add_argument("--no-tts", action="store_true")
+    p.add_argument("--selftest", action="store_true", help="Run an in-process TTS→STT round-trip and exit")
+    args = p.parse_args()
+
+    stt = None if args.no_stt else SttEngine(args.stt_model)
+    tts = None if args.no_tts else TtsEngine(
+        args.language, args.precision, args.voice, args.runtime_dir, args.bundle_dir)
+
+    if args.selftest:
+        ok = _selftest(stt, tts)
+        sys.exit(0 if ok else 1)
+
+    emit({"event": "ready",
+          "stt": stt is not None,
+          "tts": tts is not None,
+          "sample_rate": tts.sample_rate if tts else None})
+
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            req = json.loads(line)
+        except Exception as exc:
+            emit({"ok": False, "error": f"bad json: {exc}"})
+            continue
+        try:
+            handle(req, stt, tts)
+        except Exception as exc:
+            log("request error:\n" + traceback.format_exc())
+            emit({"id": req.get("id"), "ok": False, "error": str(exc)})
+
+
+def _selftest(stt: Optional[SttEngine], tts: Optional[TtsEngine]) -> bool:
+    text = "Hello, this is a test of local voice synthesis."
+    if tts is None or stt is None:
+        log("selftest needs both engines"); return False
+    chunks = list(tts.synth_stream(text, None))
+    audio = np.concatenate(chunks) if chunks else np.zeros(0, np.float32)
+    log(f"TTS produced {audio.size / tts.sample_rate:.2f}s @ {tts.sample_rate} Hz in {len(chunks)} chunk(s)")
+    heard = stt.transcribe(audio, tts.sample_rate)
+    log(f"STT heard: {heard!r}")
+    ok = "local voice" in heard.lower()
+    log("SELFTEST", "OK" if ok else "FAIL")
+    return ok
+
+
+if __name__ == "__main__":
+    main()

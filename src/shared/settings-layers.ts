@@ -63,6 +63,7 @@ export const SETTINGS_LAYERS: Partial<Record<StoreKey, KeyClass>> = {
   codeLayoutMode: { layer: 'user', scope: 'global' },
   audioSettings: { layer: 'user', scope: 'global' },
   previewFeatures: { layer: 'user', scope: 'global' },
+  localVoiceEnabled: { layer: 'user', scope: 'global' },
   weeklyReviewDay: { layer: 'user', scope: 'global' },
   browserProfiles: { layer: 'user', scope: 'global' },
   browserHistory: { layer: 'user', scope: 'global' },

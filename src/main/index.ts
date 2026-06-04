@@ -14,6 +14,7 @@ import { getArtifactsDir } from '@/lib/artifacts';
 import { createAppControlManager } from '@/main/app-control-manager';
 import { listRepos as azureListRepos } from '@/main/azure-repos';
 import { createBrowserManager } from '@/main/browser-manager';
+import { getVoiceService } from '@/main/voice-service';
 import {
   getStatus as codexStatus,
   loginWithBrowser,
@@ -425,6 +426,25 @@ main.ipc.handle('workspace-sync:get-share-name', (_, projectId) => {
   return syncManager.getShareName(projectId);
 });
 main.ipc.handle('omni-install-process:get-status', () => omniInstall.getStatus());
+
+// Local voice (Option A): launcher-side STT/TTS via the ONNX sidecar. Works in
+// every Electron mode (compute runs wherever, but the mic + STT/TTS + the
+// `speak` client tool all execute here on the user's machine).
+const voice = getVoiceService();
+main.ipc.handle('voice:get-status', () => voice.getStatus());
+main.ipc.handle('voice:start', async () => {
+  await voice.start();
+  return voice.getStatus();
+});
+main.ipc.handle('voice:transcribe', (_e, pcmBase64, sampleRate) => voice.transcribe(pcmBase64, sampleRate));
+main.ipc.handle('voice:speak', async (_e, streamId, text, voiceName) => {
+  await voice.speak(
+    text,
+    (pcm, sampleRate) => main.sendToWindow('voice:audio', { streamId, pcm, sampleRate }),
+    voiceName,
+  );
+  main.sendToWindow('voice:audio-end', { streamId });
+});
 
 //#region App lifecycle
 

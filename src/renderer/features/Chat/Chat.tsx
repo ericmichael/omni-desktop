@@ -4,6 +4,7 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { buildSessionVariables } from '@/lib/client-tools';
+import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
 import { Spinner } from '@/renderer/ds';
 import { SessionStatusBanner } from '@/renderer/features/Banner/SessionStatusBanner';
 import { FloatingWidget } from '@/renderer/features/Omni/FloatingWidget';
@@ -118,6 +119,7 @@ const SandboxRunningView = memo(
     sessionId,
     onSessionChange,
     variables,
+    voiceVariables,
     onClientToolCall,
     workspaceDir,
   }: {
@@ -134,6 +136,7 @@ const SandboxRunningView = memo(
     sessionId?: string;
     onSessionChange?: (sessionId: string | undefined) => void;
     variables?: Record<string, unknown>;
+    voiceVariables?: Record<string, unknown>;
     onClientToolCall?: Parameters<typeof OmniAgentsApp>[0]['onClientToolCall'];
     workspaceDir?: string;
   }) => {
@@ -159,7 +162,7 @@ const SandboxRunningView = memo(
       <div className={styles.flexColFullRelative}>
         <div className={styles.flex1Relative}>
           <div className={styles.fullSizeRelative}>
-            <OmniAgentsApp uiUrl={uiSrc} greeting={greeting} sandboxLabel={sandboxLabel} sandboxOptions={sandboxOptions} currentSandboxProfile={currentSandboxProfile} onSandboxChange={onSandboxChange} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables ?? buildSessionVariables({ surface: 'chat' })} onClientToolCall={onClientToolCall ?? buildClientToolHandler()} pendingPlan={pendingPlan} onPlanDecision={resolvePlanApproval} workspaceDir={workspaceDir} />
+            <OmniAgentsApp uiUrl={uiSrc} greeting={greeting} sandboxLabel={sandboxLabel} sandboxOptions={sandboxOptions} currentSandboxProfile={currentSandboxProfile} onSandboxChange={onSandboxChange} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables ?? buildSessionVariables({ surface: 'chat' })} voiceVariables={voiceVariables} onClientToolCall={onClientToolCall ?? buildClientToolHandler()} pendingPlan={pendingPlan} onPlanDecision={resolvePlanApproval} workspaceDir={workspaceDir} />
             {vncSrc && (
               <FloatingWidget
                 src={vncSrc}
@@ -200,7 +203,16 @@ export const Chat = memo(() => {
   const [greeting] = useState(getGreeting);
   const [runningMounted, setRunningMounted] = useState(false);
   const [isEnterprise, setIsEnterprise] = useState(false);
+  // Base runs have no speak tool. When local voice is enabled, a separate
+  // voice-enabled variant is used for runs triggered by the mic button only
+  // (App arms it per-submission) — so typed messages stay speak-free and
+  // multiple columns don't all talk.
+  const localVoice = store.localVoiceEnabled && isLocalVoiceCapable();
   const variables = useMemo(() => buildSessionVariables({ surface: 'chat' }), []);
+  const voiceVariables = useMemo(
+    () => (localVoice ? buildSessionVariables({ surface: 'chat', voice: true }) : undefined),
+    [localVoice],
+  );
   const toolHandler = useMemo(() => buildClientToolHandler(), []);
 
   useEffect(() => {
@@ -309,6 +321,7 @@ export const Chat = memo(() => {
             sessionId={chatSessionId}
             onSessionChange={handleSessionChange}
             variables={variables}
+            voiceVariables={voiceVariables}
             onClientToolCall={toolHandler}
             workspaceDir={store.workspaceDir ?? undefined}
           />
