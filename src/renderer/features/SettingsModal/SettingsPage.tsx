@@ -4,6 +4,7 @@ import {
   Branch20Regular,
   Cube20Regular,
   Globe20Regular,
+  Keyboard20Regular,
   Lightbulb20Regular,
   MicSettings20Regular,
   Person20Regular,
@@ -23,6 +24,7 @@ import { SettingsModalEnvironmentTab } from '@/renderer/features/SettingsModal/S
 import { SettingsModalExtensionsTab } from '@/renderer/features/SettingsModal/SettingsModalExtensionsTab';
 import { SettingsModalGeneralTab } from '@/renderer/features/SettingsModal/SettingsModalGeneralTab';
 import { SettingsModalGitTab } from '@/renderer/features/SettingsModal/SettingsModalGitTab';
+import { SettingsModalHotkeysTab } from '@/renderer/features/SettingsModal/SettingsModalHotkeysTab';
 import { SettingsModalMcpTab } from '@/renderer/features/SettingsModal/SettingsModalMcpTab';
 import { SettingsModalModelsTab } from '@/renderer/features/SettingsModal/SettingsModalModelsTab';
 import { SettingsModalNetworkTab } from '@/renderer/features/SettingsModal/SettingsModalNetworkTab';
@@ -40,6 +42,7 @@ const TABS = [
   { value: 'Apps', label: 'Apps', icon: <Apps20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Skills', label: 'Skills', icon: <Lightbulb20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Audio', label: 'Audio', icon: <MicSettings20Regular style={{ width: 18, height: 18 }} /> },
+  { value: 'Hotkeys', label: 'Hotkeys', icon: <Keyboard20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Network', label: 'Network', icon: <Globe20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Extensions', label: 'Extensions', icon: <PuzzlePiece20Regular style={{ width: 18, height: 18 }} /> },
   { value: 'Account', label: 'Account', icon: <Person20Regular style={{ width: 18, height: 18 }} /> },
@@ -259,6 +262,7 @@ export const SettingsPage = memo(() => {
           {activeTab === 'Apps' && <SettingsModalAppsTab />}
           {activeTab === 'Skills' && <SettingsModalSkillsTab />}
           {activeTab === 'Audio' && <SettingsModalAudioTab />}
+          {activeTab === 'Hotkeys' && <SettingsModalHotkeysTab />}
           {activeTab === 'Network' && <SettingsModalNetworkTab />}
           {activeTab === 'Extensions' && <SettingsModalExtensionsTab />}
           {activeTab === 'Account' && <SettingsModalAccountTab />}

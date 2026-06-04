@@ -7,15 +7,58 @@
  * recording, reading its scope from `VoiceScopeContext` (provided per column by
  * `CodeTabContent`). `CodeDeck` reads the store and glows the matching column.
  */
-import { createContext } from 'react';
-
 import { atom } from 'nanostores';
+import { createContext } from 'react';
 
 /** Scope id (code tab id) of the column currently recording, or null. */
 export const $recordingScope = atom<string | null>(null);
 
+/**
+ * Scope id of the deck column the pointer is currently over, so the voice-toggle
+ * hotkey knows which column to act on. `null` when over no column. Set by
+ * `CodeTabContent` on hover.
+ */
+export const $hoveredVoiceScope = atom<string | null>(null);
+
+/** Stable scope id for the Chat tab's single voice surface. */
+export const CHAT_VOICE_SCOPE = 'chat';
+
 /** Per-column scope id, provided around the agent UI subtree. */
 export const VoiceScopeContext = createContext<string | null>(null);
+
+/**
+ * Mic controls a `LocalVoiceButton` exposes to the global voice hotkey:
+ * `toggle` (start/stop-and-send — same as a click), and discrete `start` / `stop`
+ * for push-to-talk (hold to talk, release to send).
+ */
+export interface VoiceMicControls {
+  toggle: () => void;
+  start: () => void;
+  stop: () => void;
+  /** Whether this mic is currently capturing — lets the hotkey tell a "toggle on" tap from a "toggle off" tap. */
+  isRecording: () => boolean;
+}
+
+/**
+ * Registry of per-scope mic controls. Each `LocalVoiceButton` registers under
+ * its scope id; the voice hotkey resolves a target scope (hovered column /
+ * active chat) and drives that column's mic.
+ */
+const voiceMics = new Map<string, VoiceMicControls>();
+
+export function registerVoiceMic(scope: string, controls: VoiceMicControls): () => void {
+  voiceMics.set(scope, controls);
+  return () => {
+    if (voiceMics.get(scope) === controls) {
+      voiceMics.delete(scope);
+    }
+  };
+}
+
+/** Controls for the mic mounted at `scope`, or undefined if none. */
+export function getVoiceMic(scope: string): VoiceMicControls | undefined {
+  return voiceMics.get(scope);
+}
 
 /**
  * Live mic level (0..1), updated by the capture meter every animation frame and

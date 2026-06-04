@@ -19,6 +19,7 @@ import { AuthGate } from '@/renderer/features/Auth/AuthGate';
 import { QuickCapture } from '@/renderer/features/Inbox/QuickCapture';
 import { MigrationNotice } from '@/renderer/features/MigrationNotice/MigrationNotice';
 import { ToastContainer } from '@/renderer/features/Toast/ToastContainer';
+import { VoiceHotkeys } from '@/renderer/features/Voice/VoiceHotkeys';
 import { SyncBar } from '@/renderer/features/WorkspaceSync/SyncBar';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { applyCssVars, fluentThemes, isThemeDark } from '@/renderer/theme/fluent-themes';
@@ -86,6 +87,7 @@ export const App = () => {
                   <MainContent />
                 </div>
                 <QuickCapture />
+                <VoiceHotkeys />
                 <SyncBar />
               </AuthGate>
             </SystemInfoLoadingGate>

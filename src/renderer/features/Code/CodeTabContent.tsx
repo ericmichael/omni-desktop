@@ -19,7 +19,7 @@ import { emitter, serverOrigin } from '@/renderer/services/ipc';
 import { $machines } from '@/renderer/services/machines';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
-import { VoiceScopeContext } from '@/renderer/services/voice-recording';
+import { $hoveredVoiceScope, VoiceScopeContext } from '@/renderer/services/voice-recording';
 import type { AppId } from '@/shared/app-registry';
 import type { CodeTab, CodeTabId, TicketId } from '@/shared/types';
 import { firstSource } from '@/shared/types';
@@ -422,6 +422,13 @@ return;
     // Base runs are speak-free; the mic button arms the voice variant per-run.
     const clientToolVariables = useMemo(() => buildSessionVariables(baseSessionArgs), [baseSessionArgs]);
     const personaInstructions = getActivePersona(store).instructions;
+    // Track pointer hover per column so the voice-toggle hotkey targets it.
+    const onColumnMouseEnter = useCallback(() => $hoveredVoiceScope.set(tab.id), [tab.id]);
+    const onColumnMouseLeave = useCallback(() => {
+      if ($hoveredVoiceScope.get() === tab.id) {
+$hoveredVoiceScope.set(null);
+}
+    }, [tab.id]);
     const voiceVariables = useMemo(
       () =>
         localVoice
@@ -446,7 +453,11 @@ return;
     }
 
     return (
-      <div className={mergeClasses(styles.fullSizeRelative, !isVisible && styles.hidden)}>
+      <div
+        className={mergeClasses(styles.fullSizeRelative, !isVisible && styles.hidden)}
+        onMouseEnter={onColumnMouseEnter}
+        onMouseLeave={onColumnMouseLeave}
+      >
         <SessionStatusBanner status={sandboxStatus} />
         {sandboxUrls ? (
           <VoiceScopeContext.Provider value={tab.id}>

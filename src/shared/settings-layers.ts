@@ -66,6 +66,7 @@ export const SETTINGS_LAYERS: Partial<Record<StoreKey, KeyClass>> = {
   localVoiceEnabled: { layer: 'user', scope: 'global' },
   voicePersonas: { layer: 'user', scope: 'global' },
   activeVoicePersonaId: { layer: 'user', scope: 'global' },
+  voiceToggleHotkey: { layer: 'user', scope: 'global' },
   weeklyReviewDay: { layer: 'user', scope: 'global' },
   browserProfiles: { layer: 'user', scope: 'global' },
   browserHistory: { layer: 'user', scope: 'global' },

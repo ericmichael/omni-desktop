@@ -152,6 +152,11 @@ export type StoreData = {
   voicePersonas: VoicePersona[];
   /** Id of the selected voice persona (built-in or custom). Empty/stale → Default. */
   activeVoicePersonaId: string;
+  /**
+   * Hotkey (react-hotkeys-hook combo, e.g. `alt+v`) that toggles voice recording
+   * on the hovered code-deck column or the active chat. Null = unbound.
+   */
+  voiceToggleHotkey: string | null;
 
   layoutMode: LayoutMode;
   theme: OmniTheme;
@@ -478,6 +483,10 @@ export const schema: Schema<StoreData> = {
   activeVoicePersonaId: {
     type: 'string',
     default: 'default',
+  },
+  voiceToggleHotkey: {
+    type: ['string', 'null'],
+    default: null,
   },
 
   layoutMode: {

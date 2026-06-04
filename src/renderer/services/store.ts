@@ -16,6 +16,7 @@ const getDefaults = (): StoreData => ({
   previewFeatures: false,
   voicePersonas: [],
   activeVoicePersonaId: 'default',
+  voiceToggleHotkey: null,
 
   layoutMode: 'chat',
   theme: 'teams-light',

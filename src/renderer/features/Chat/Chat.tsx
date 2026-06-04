@@ -21,6 +21,7 @@ import { emitter, serverOrigin } from '@/renderer/services/ipc';
 import { $machines } from '@/renderer/services/machines';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
 import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
+import { CHAT_VOICE_SCOPE, VoiceScopeContext } from '@/renderer/services/voice-recording';
 import { getActivePersona } from '@/shared/voice-personas';
 
 import { $chatProcessStatus } from './state';
@@ -163,7 +164,9 @@ const SandboxRunningView = memo(
       <div className={styles.flexColFullRelative}>
         <div className={styles.flex1Relative}>
           <div className={styles.fullSizeRelative}>
+            <VoiceScopeContext.Provider value={CHAT_VOICE_SCOPE}>
             <OmniAgentsApp uiUrl={uiSrc} greeting={greeting} sandboxLabel={sandboxLabel} sandboxOptions={sandboxOptions} currentSandboxProfile={currentSandboxProfile} onSandboxChange={onSandboxChange} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables ?? buildSessionVariables({ surface: 'chat' })} voiceVariables={voiceVariables} onClientToolCall={onClientToolCall ?? buildClientToolHandler()} pendingPlan={pendingPlan} onPlanDecision={resolvePlanApproval} workspaceDir={workspaceDir} />
+            </VoiceScopeContext.Provider>
             {vncSrc && (
               <FloatingWidget
                 src={vncSrc}

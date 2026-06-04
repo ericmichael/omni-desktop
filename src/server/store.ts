@@ -13,6 +13,7 @@ export const DEFAULTS: StoreData = {
   previewFeatures: false,
   voicePersonas: [],
   activeVoicePersonaId: 'default',
+  voiceToggleHotkey: null,
   layoutMode: 'chat',
   theme: 'tokyo-night',
   onboardingComplete: false,
