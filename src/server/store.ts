@@ -11,6 +11,8 @@ export const DEFAULTS: StoreData = {
   defaultProfileName: 'host',
   optInToLauncherPrereleases: false,
   previewFeatures: false,
+  voicePersonas: [],
+  activeVoicePersonaId: 'default',
   layoutMode: 'chat',
   theme: 'tokyo-night',
   onboardingComplete: false,

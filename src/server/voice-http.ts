@@ -26,7 +26,9 @@ export function registerVoiceRoutes(fastify: FastifyInstance): void {
 
   fastify.post(`${VOICE_HTTP_PREFIX}/transcribe`, async (request) => {
     const { pcm, sampleRate } = (request.body ?? {}) as { pcm?: string; sampleRate?: number };
-    if (!pcm) return { text: '' };
+    if (!pcm) {
+return { text: '' };
+}
     const text = await voice.transcribe(pcm, sampleRate ?? 24000);
     return { text };
   });
@@ -34,7 +36,9 @@ export function registerVoiceRoutes(fastify: FastifyInstance): void {
   // Non-streaming for the browser: accumulate the utterance and return it whole.
   fastify.post(`${VOICE_HTTP_PREFIX}/speak`, async (request) => {
     const { text, voice: voiceName } = (request.body ?? {}) as { text?: string; voice?: string };
-    if (!text) return { pcm: '', sampleRate: 24000 };
+    if (!text) {
+return { pcm: '', sampleRate: 24000 };
+}
     const chunks: Buffer[] = [];
     let sampleRate = 24000;
     await voice.speak(
@@ -46,5 +50,17 @@ export function registerVoiceRoutes(fastify: FastifyInstance): void {
       voiceName,
     );
     return { pcm: Buffer.concat(chunks).toString('base64'), sampleRate };
+  });
+
+  fastify.post(`${VOICE_HTTP_PREFIX}/import-sample`, async (request) => {
+    const { personaId, filename, data } = (request.body ?? {}) as {
+      personaId?: string;
+      filename?: string;
+      data?: string;
+    };
+    if (!personaId || !data) {
+return { file: '', embeddingFile: '' };
+}
+    return await voice.importSample(personaId, filename ?? 'sample.wav', data);
   });
 }

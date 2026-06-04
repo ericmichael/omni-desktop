@@ -5,8 +5,6 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { getArtifactsDir, getContainerArtifactsDir, profileRunsOnHost } from '@/lib/artifacts';
 import { buildSessionVariables } from '@/lib/client-tools';
-import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
-import { VoiceScopeContext } from '@/renderer/services/voice-recording';
 import { SessionStartupShell } from '@/renderer/common/SessionStartupShell';
 import { Button, Spinner } from '@/renderer/ds';
 import { SessionStatusBanner } from '@/renderer/features/Banner/SessionStatusBanner';
@@ -20,9 +18,12 @@ import { configApi } from '@/renderer/services/config';
 import { emitter, serverOrigin } from '@/renderer/services/ipc';
 import { $machines } from '@/renderer/services/machines';
 import { persistedStoreApi } from '@/renderer/services/store';
+import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
+import { VoiceScopeContext } from '@/renderer/services/voice-recording';
 import type { AppId } from '@/shared/app-registry';
 import type { CodeTab, CodeTabId, TicketId } from '@/shared/types';
 import { firstSource } from '@/shared/types';
+import { getActivePersona } from '@/shared/voice-personas';
 
 import { CodeEmptyState } from './CodeEmptyState';
 import { CodeWorkspaceLayout } from './CodeWorkspaceLayout';
@@ -333,9 +334,13 @@ export const CodeTabContent = memo(
     // the SDK ended up creating a fresh container (rehydrate / fresh tiers),
     // which is exactly what we want to persist for the next start.
     useEffect(() => {
-      if (sandboxStatus?.type !== 'running') return;
+      if (sandboxStatus?.type !== 'running') {
+return;
+}
       const next = sandboxStatus.data.containerId;
-      if ((tab.containerId ?? undefined) === next) return;
+      if ((tab.containerId ?? undefined) === next) {
+return;
+}
       void codeApi.setTabContainerId(tab.id, next);
     }, [sandboxStatus, tab.id, tab.containerId]);
 
@@ -416,9 +421,13 @@ export const CodeTabContent = memo(
 
     // Base runs are speak-free; the mic button arms the voice variant per-run.
     const clientToolVariables = useMemo(() => buildSessionVariables(baseSessionArgs), [baseSessionArgs]);
+    const personaInstructions = getActivePersona(store).instructions;
     const voiceVariables = useMemo(
-      () => (localVoice ? buildSessionVariables({ ...baseSessionArgs, voice: true }) : undefined),
-      [baseSessionArgs, localVoice],
+      () =>
+        localVoice
+          ? buildSessionVariables({ ...baseSessionArgs, voice: true, personaInstructions })
+          : undefined,
+      [baseSessionArgs, localVoice, personaInstructions],
     );
 
     // No project selected — show project picker

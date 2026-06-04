@@ -1,11 +1,11 @@
 import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
+import { useStore } from '@nanostores/react';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { useStore } from '@nanostores/react';
-
 import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, Button, Caption1, Card, Checkbox, FormField, FormSkeleton, IconButton, Input, Radio, RadioGroup, SaveBar, SectionLabel, Select, Spinner } from '@/renderer/ds';
+import { SettingsModalVoicePersonas } from '@/renderer/features/SettingsModal/SettingsModalVoicePersonas';
 import { agentConfigApi } from '@/renderer/services/config';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -476,6 +476,7 @@ export const SettingsModalModelsTab = memo(() => {
               </Select>
             </FormField>
             <Caption1>Runs on this machine · models download on first use.</Caption1>
+            <SettingsModalVoicePersonas />
           </>
         ) : null}
       </Card>

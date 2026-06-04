@@ -4,7 +4,6 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { buildSessionVariables } from '@/lib/client-tools';
-import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
 import { Spinner } from '@/renderer/ds';
 import { SessionStatusBanner } from '@/renderer/features/Banner/SessionStatusBanner';
 import { FloatingWidget } from '@/renderer/features/Omni/FloatingWidget';
@@ -21,6 +20,8 @@ import { buildProfileLabel } from '@/renderer/omniagents-ui/sandbox-label';
 import { emitter, serverOrigin } from '@/renderer/services/ipc';
 import { $machines } from '@/renderer/services/machines';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
+import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
+import { getActivePersona } from '@/shared/voice-personas';
 
 import { $chatProcessStatus } from './state';
 import { useChatAutoLaunch } from './use-chat-auto-launch';
@@ -208,10 +209,14 @@ export const Chat = memo(() => {
   // (App arms it per-submission) — so typed messages stay speak-free and
   // multiple columns don't all talk.
   const localVoice = store.localVoiceEnabled && isLocalVoiceCapable();
+  const personaInstructions = getActivePersona(store).instructions;
   const variables = useMemo(() => buildSessionVariables({ surface: 'chat' }), []);
   const voiceVariables = useMemo(
-    () => (localVoice ? buildSessionVariables({ surface: 'chat', voice: true }) : undefined),
-    [localVoice],
+    () =>
+      localVoice
+        ? buildSessionVariables({ surface: 'chat', voice: true, personaInstructions })
+        : undefined,
+    [localVoice, personaInstructions],
   );
   const toolHandler = useMemo(() => buildClientToolHandler(), []);
 

@@ -3,6 +3,7 @@ import type { Schema } from 'electron-store';
 
 import type { CustomAppEntry } from '@/shared/app-registry';
 import type { ExtensionDescriptor, ExtensionEnsureResult, ExtensionInstanceState } from '@/shared/extensions';
+import type { VoicePersona } from '@/shared/voice-personas';
 
 // Normally we'd use SWR or some query library, but I had some issues with react render cycles and the easiest fix
 // was to just move all the fetching outside react. Also SWR doesn't narrow its data field when the request is
@@ -144,6 +145,13 @@ export type StoreData = {
   previewFeatures: boolean;
   /** Local voice (Option A): use on-device Parakeet STT + Pocket TTS instead of a hosted voice model. */
   localVoiceEnabled: boolean;
+  /**
+   * User-created voice personas (local voice only). Built-in personas (Default,
+   * Jarvis) live in code (`shared/voice-personas.ts`), never here.
+   */
+  voicePersonas: VoicePersona[];
+  /** Id of the selected voice persona (built-in or custom). Empty/stale → Default. */
+  activeVoicePersonaId: string;
 
   layoutMode: LayoutMode;
   theme: OmniTheme;
@@ -451,6 +459,25 @@ export const schema: Schema<StoreData> = {
   localVoiceEnabled: {
     type: 'boolean',
     default: false,
+  },
+  voicePersonas: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        name: { type: 'string' },
+        builtin: { type: 'boolean' },
+        instructions: { type: 'string' },
+        voice: { type: 'object' },
+      },
+      required: ['id', 'name', 'builtin', 'instructions', 'voice'],
+    },
+  },
+  activeVoicePersonaId: {
+    type: 'string',
+    default: 'default',
   },
 
   layoutMode: {
@@ -1775,6 +1802,16 @@ type VoiceIpcEvents = Namespaced<
     transcribe: (pcmBase64: string, sampleRate: number) => string;
     /** Synthesize `text`; audio streams back via the `voice:audio` renderer event keyed by `streamId`. */
     speak: (streamId: string, text: string, voice?: string) => void;
+    /**
+     * Import a voice-clone sample for a persona: writes the audio, precomputes
+     * the mimi embedding once, and returns the stored wav + `.npy` paths. The
+     * `.npy` path goes into the persona's `voice.embeddingFile`.
+     */
+    'import-sample': (
+      personaId: string,
+      filename: string,
+      dataBase64: string,
+    ) => { file: string; embeddingFile: string };
   }
 >;
 

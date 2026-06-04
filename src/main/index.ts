@@ -445,6 +445,9 @@ main.ipc.handle('voice:speak', async (_e, streamId, text, voiceName) => {
   );
   main.sendToWindow('voice:audio-end', { streamId });
 });
+main.ipc.handle('voice:import-sample', (_e, personaId, filename, dataBase64) =>
+  voice.importSample(personaId, filename, dataBase64),
+);
 
 //#region App lifecycle
 

@@ -827,6 +827,12 @@ export type SessionVariablesArgs = {
    * voice runtime is active (Electron / self-hosted local). See VoiceService.
    */
   voice?: boolean;
+  /**
+   * Voice persona character (e.g. Jarvis), appended to additional_instructions
+   * in voice mode. Empty for the neutral Default persona. Ignored unless
+   * `voice` is true. See `shared/voice-personas.ts`.
+   */
+  personaInstructions?: string;
 };
 
 /**
@@ -858,13 +864,14 @@ const CODE_CLIENT_TOOLS: readonly ClientToolDef[] = [
 ];
 
 export const buildSessionVariables = (args: SessionVariablesArgs): Record<string, unknown> => {
-  const { surface, autopilot = false, context, supervisorPrompt, voice = false } = args;
+  const { surface, autopilot = false, context, supervisorPrompt, voice = false, personaInstructions } = args;
   const baseTools = surface === 'code' ? CODE_CLIENT_TOOLS : CHAT_CLIENT_TOOLS;
   const tools: readonly ClientToolDef[] = voice ? [...baseTools, ...VOICE_CLIENT_TOOLS] : baseTools;
   const baseInstructions = buildContextIdentifiers(context);
   const parts = [
     autopilot && supervisorPrompt ? supervisorPrompt : '',
     voice ? VOICE_GUIDANCE : '',
+    voice && personaInstructions ? personaInstructions : '',
     baseInstructions,
   ].filter(Boolean);
   const instructions = parts.join('\n\n');

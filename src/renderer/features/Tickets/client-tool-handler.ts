@@ -20,9 +20,11 @@ import { requestPreviewOpen } from '@/renderer/features/Tickets/preview-bridge';
 import { ticketApi } from '@/renderer/features/Tickets/state';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
 import { emitter } from '@/renderer/services/ipc';
+import { persistedStoreApi } from '@/renderer/services/store';
 import { getVoiceClient } from '@/renderer/services/voice-client';
 import type { AppClickButton, AppConsoleLevel } from '@/shared/app-control-types';
 import type { ProjectId, TicketId } from '@/shared/types';
+import { getActivePersona, resolveVoiceArg } from '@/shared/voice-personas';
 
 type ClientToolResult = Awaited<ReturnType<ClientToolCallHandler>>;
 
@@ -510,11 +512,16 @@ async function handleVoiceTools(
   toolName: string,
   toolArgs: Record<string, unknown>,
 ): Promise<ClientToolResult | null> {
-  if (toolName !== 'speak') return null;
+  if (toolName !== 'speak') {
+return null;
+}
   const message = String(toolArgs.message ?? '').trim();
-  if (!message) return ok({ spoken: false });
+  if (!message) {
+return ok({ spoken: false });
+}
   try {
-    await getVoiceClient().speak(message);
+    const persona = getActivePersona(persistedStoreApi.get());
+    await getVoiceClient().speak(message, resolveVoiceArg(persona));
     return ok({ spoken: true });
   } catch (e) {
     return err(String(e));

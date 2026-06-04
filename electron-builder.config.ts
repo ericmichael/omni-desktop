@@ -64,11 +64,12 @@ export default {
     {
       // Local voice sidecar (Option A). Python ONNX deps are provisioned at
       // runtime into a dedicated uv venv by VoiceService; only the script
-      // (+ requirements) ships. Resolved via process.resourcesPath in
-      // voice-service.ts.
+      // (+ requirements) ships. Built-in persona embeddings (voices/*.emb.npy)
+      // ship too — embedding-only, no source audio. Resolved via
+      // process.resourcesPath in voice-service.ts.
       from: 'voice-sidecar',
       to: './voice-sidecar',
-      filter: ['*.py', '*.txt'],
+      filter: ['*.py', '*.txt', 'voices/**'],
     },
   ],
   mac: {

@@ -14,6 +14,8 @@ const getDefaults = (): StoreData => ({
   defaultProfileName: 'host',
   optInToLauncherPrereleases: false,
   previewFeatures: false,
+  voicePersonas: [],
+  activeVoicePersonaId: 'default',
 
   layoutMode: 'chat',
   theme: 'teams-light',

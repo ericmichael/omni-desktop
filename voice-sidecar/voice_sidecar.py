@@ -120,9 +120,13 @@ class TtsEngine:
         self.default_voice = default_voice
         log(f"TTS ready (sample_rate={self.sample_rate})")
 
-    def synth_stream(self, text: str, voice: Optional[str]):
-        """Yield float32 audio chunks at self.sample_rate."""
-        v = voice or self.default_voice
+    def synth_stream(self, text: str, voice):
+        """Yield float32 audio chunks at self.sample_rate.
+
+        ``voice`` may be a predefined name, an audio path, an ``.npy`` embedding
+        path, or a precomputed embedding ndarray. See ``_resolve_voice``.
+        """
+        v = self._resolve_voice(voice if voice is not None else self.default_voice)
         stream = getattr(self._tts, "stream", None)
         if callable(stream):
             try:
@@ -132,6 +136,37 @@ class TtsEngine:
             except Exception as exc:  # fall back to one-shot
                 log(f"stream() failed ({exc!r}); falling back to generate()")
         yield np.asarray(self._tts.generate(text, voice=v), dtype=np.float32)
+
+    def _resolve_voice(self, voice):
+        """Resolve a voice arg to what Pocket TTS wants, avoiding re-encodes.
+
+        - ``np.ndarray`` / predefined name → passed straight through.
+        - ``*.npy`` path → loaded as a precomputed embedding (no encoder run).
+        - audio path (wav/flac/…) → uses a sibling ``<name>.emb.npy`` cache when
+          fresh, else encodes once via the mimi encoder and writes the cache.
+        """
+        if not isinstance(voice, str):
+            return voice
+        if voice.lower().endswith(".npy"):
+            if os.path.exists(voice):
+                return np.load(voice)
+            log(f"embedding {voice!r} missing; using default voice")
+            return self.default_voice
+        if voice.lower().endswith((".wav", ".flac", ".mp3", ".ogg", ".m4a")) and os.path.exists(voice):
+            cache = os.path.splitext(voice)[0] + ".emb.npy"
+            if os.path.exists(cache) and os.path.getmtime(cache) >= os.path.getmtime(voice):
+                return np.load(cache)
+            emb = self.encode_to(voice, cache)
+            return emb
+        return voice  # predefined name
+
+    def encode_to(self, src: str, out: str) -> np.ndarray:
+        """Encode an audio file to a mimi embedding and persist it as ``out`` (.npy)."""
+        emb = self._tts.encode_voice(src)
+        os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+        np.save(out, emb)
+        log(f"encoded voice embedding {src} -> {out}")
+        return emb
 
 
 def _resolve_tts_assets(runtime_dir: Optional[str], bundle_dir: Optional[str],
@@ -169,6 +204,19 @@ def handle(req: dict, stt: Optional[SttEngine], tts: Optional[TtsEngine]) -> Non
         emit({"id": rid, "ok": True, "text": text})
         return
 
+    if op == "encode_voice":
+        if tts is None:
+            emit({"id": rid, "ok": False, "error": "TTS disabled"})
+            return
+        src = req.get("file")
+        if not src or not os.path.exists(src):
+            emit({"id": rid, "ok": False, "error": f"audio file not found: {src!r}"})
+            return
+        out = req.get("cache") or (os.path.splitext(src)[0] + ".emb.npy")
+        tts.encode_to(src, out)
+        emit({"id": rid, "ok": True, "embedding_file": out})
+        return
+
     if op == "tts":
         if tts is None:
             emit({"id": rid, "ok": False, "error": "TTS disabled"})
@@ -199,7 +247,19 @@ def main() -> None:
     p.add_argument("--no-stt", action="store_true")
     p.add_argument("--no-tts", action="store_true")
     p.add_argument("--selftest", action="store_true", help="Run an in-process TTS→STT round-trip and exit")
+    p.add_argument("--encode", metavar="AUDIO",
+                   help="Authoring: encode AUDIO to a mimi embedding (.npy) and exit. Pair with --out.")
+    p.add_argument("--out", help="Output .npy path for --encode (default: <audio>.emb.npy)")
     args = p.parse_args()
+
+    # Authoring mode: produce a precomputed embedding (e.g. voices/jarvis.emb.npy)
+    # from a master sample, so built-in personas can ship embedding-only. STT not needed.
+    if args.encode:
+        tts = TtsEngine(args.language, args.precision, args.voice, args.runtime_dir, args.bundle_dir)
+        out = args.out or (os.path.splitext(args.encode)[0] + ".emb.npy")
+        tts.encode_to(args.encode, out)
+        log(f"wrote {out}")
+        sys.exit(0)
 
     stt = None if args.no_stt else SttEngine(args.stt_model)
     tts = None if args.no_tts else TtsEngine(

@@ -15,14 +15,15 @@
  */
 
 import { type ChildProcess, spawn } from 'child_process';
-import { app } from 'electron';
 import { execFile } from 'child_process';
+import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
 
 import { getOmniRuntimeDir, getUVExecutablePath, isDevelopment } from '@/main/util';
 import type { VoiceStatus } from '@/shared/types';
+import { BUILTIN_VOICE_FALLBACKS } from '@/shared/voice-personas';
 
 const execFileAsync = promisify(execFile);
 
@@ -50,13 +51,21 @@ const voiceVenvDir = (): string => path.join(getOmniRuntimeDir(), '.voice-venv')
 const voiceVenvPython = (): string =>
   path.join(voiceVenvDir(), process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
 
-/** Resolve the sidecar script — repo path in dev, extraResources when packaged. */
-const sidecarScriptPath = (): string => {
+/** Dir holding the sidecar — repo path in dev, extraResources when packaged. */
+const voiceSidecarDir = (): string => {
   if (isDevelopment() || !app.isPackaged || !process.resourcesPath) {
-    return path.resolve(path.join(__dirname, '..', '..', 'voice-sidecar', 'voice_sidecar.py'));
+    return path.resolve(path.join(__dirname, '..', '..', 'voice-sidecar'));
   }
-  return path.resolve(path.join(process.resourcesPath, 'voice-sidecar', 'voice_sidecar.py'));
+  return path.resolve(path.join(process.resourcesPath, 'voice-sidecar'));
 };
+
+const sidecarScriptPath = (): string => path.join(voiceSidecarDir(), 'voice_sidecar.py');
+
+/** Dir of bundled built-in persona embeddings (voice-sidecar/voices/<id>.emb.npy). */
+const bundledVoicesDir = (): string => path.join(voiceSidecarDir(), 'voices');
+
+/** Where user-imported voice samples + their embeddings live. */
+const voiceSamplesDir = (): string => path.join(app.getPath('userData'), 'voice-samples');
 
 export class VoiceService {
   private proc: ChildProcess | null = null;
@@ -76,8 +85,12 @@ export class VoiceService {
 
   /** Provision the venv (idempotent) then spawn the sidecar. Safe to call repeatedly. */
   async start(): Promise<void> {
-    if (this.status.state === 'ready') return;
-    if (this.starting) return this.starting;
+    if (this.status.state === 'ready') {
+return;
+}
+    if (this.starting) {
+return this.starting;
+}
     this.starting = this._start().finally(() => {
       this.starting = null;
     });
@@ -116,7 +129,9 @@ export class VoiceService {
 
   /** Create the venv + install ONNX deps with the bundled uv if missing. */
   async ensureProvisioned(): Promise<void> {
-    if (fs.existsSync(voiceVenvPython())) return;
+    if (fs.existsSync(voiceVenvPython())) {
+return;
+}
     this.status = { ...this.status, state: 'provisioning' };
     const uv = getUVExecutablePath();
     const venv = voiceVenvDir();
@@ -150,7 +165,56 @@ export class VoiceService {
     voice?: string,
   ): Promise<void> {
     await this.start();
-    await this.request({ op: 'tts', text, voice: voice || this.voice }, onAudio);
+    await this.request({ op: 'tts', text, voice: this.resolveVoice(voice) }, onAudio);
+  }
+
+  /**
+   * Resolve a renderer-supplied voice arg to what the sidecar consumes:
+   * - `builtin:<id>` → the bundled `<id>.emb.npy` if present, else the persona's
+   *   predefined fallback (so a missing-asset build still talks).
+   * - anything else (predefined name, absolute `.npy`/wav path) → unchanged.
+   */
+  private resolveVoice(voice?: string): string {
+    if (!voice) {
+return this.voice;
+}
+    if (!voice.startsWith('builtin:')) {
+return voice;
+}
+    const id = voice.slice('builtin:'.length);
+    const npy = path.join(bundledVoicesDir(), `${id}.emb.npy`);
+    if (fs.existsSync(npy)) {
+return npy;
+}
+    const fallback = BUILTIN_VOICE_FALLBACKS[id];
+    if (fallback) {
+      console.warn(`[voice] bundled embedding for '${id}' missing; falling back to '${fallback}'`);
+      return fallback;
+    }
+    return this.voice;
+  }
+
+  /**
+   * Import a voice-clone sample: persist the audio under userData, precompute
+   * its mimi embedding once (sidecar `encode_voice`), and return both paths. The
+   * `.npy` is what later `speak()` calls reference, so no re-encoding ever runs.
+   */
+  async importSample(
+    personaId: string,
+    filename: string,
+    dataBase64: string,
+  ): Promise<{ file: string; embeddingFile: string }> {
+    await this.start();
+    const dir = voiceSamplesDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const ext = path.extname(filename || '').toLowerCase() || '.wav';
+    const file = path.join(dir, `${personaId}${ext}`);
+    fs.writeFileSync(file, Buffer.from(dataBase64, 'base64'));
+    const cache = path.join(dir, `${personaId}.emb.npy`);
+    const res = (await this.request({ op: 'encode_voice', file, cache })) as {
+      embedding_file?: string;
+    };
+    return { file, embeddingFile: res.embedding_file ?? cache };
   }
 
   private request(
@@ -161,7 +225,7 @@ export class VoiceService {
       return Promise.reject(new Error('voice sidecar not running'));
     }
     const id = String(++this.seq);
-    const line = JSON.stringify({ id, ...payload }) + '\n';
+    const line = `${JSON.stringify({ id, ...payload })  }\n`;
     return new Promise<unknown>((resolve, reject) => {
       this.pending.set(id, { resolve, reject, onAudio });
       this.proc!.stdin!.write(line, (err) => {
@@ -179,7 +243,9 @@ export class VoiceService {
     while ((nl = this.stdoutBuf.indexOf('\n')) >= 0) {
       const line = this.stdoutBuf.slice(0, nl).trim();
       this.stdoutBuf = this.stdoutBuf.slice(nl + 1);
-      if (!line) continue;
+      if (!line) {
+continue;
+}
       let msg: Record<string, unknown>;
       try {
         msg = JSON.parse(line);
@@ -204,9 +270,13 @@ export class VoiceService {
       return;
     }
     const id = msg.id != null ? String(msg.id) : null;
-    if (!id) return;
+    if (!id) {
+return;
+}
     const p = this.pending.get(id);
-    if (!p) return;
+    if (!p) {
+return;
+}
 
     if (msg.event === 'audio' && typeof msg.pcm === 'string') {
       p.onAudio?.(msg.pcm, typeof msg.sample_rate === 'number' ? msg.sample_rate : 24000);
@@ -247,6 +317,8 @@ export class VoiceService {
 
 let _instance: VoiceService | null = null;
 export const getVoiceService = (): VoiceService => {
-  if (!_instance) _instance = new VoiceService();
+  if (!_instance) {
+_instance = new VoiceService();
+}
   return _instance;
 };

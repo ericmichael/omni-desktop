@@ -15,14 +15,28 @@ import type { IpcEvents, IpcRendererEvents, VoiceStatus } from '@/shared/types';
 
 const isElectron = typeof window !== 'undefined' && !!(window as { electron?: unknown }).electron;
 
+/** Read a File's bytes as a base64 string (no data: prefix). */
+async function fileToBase64(file: File): Promise<string> {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < buf.length; i++) {
+bin += String.fromCharCode(buf[i] ?? 0);
+}
+  return btoa(bin);
+}
+
 /** PCM16LE base64 → Float32 [-1,1]. */
 function pcm16ToFloat32(b64: string): Float32Array {
   const bin = atob(b64);
   const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  for (let i = 0; i < bin.length; i++) {
+bytes[i] = bin.charCodeAt(i);
+}
   const i16 = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2));
   const out = new Float32Array(i16.length);
-  for (let i = 0; i < i16.length; i++) out[i] = (i16[i] ?? 0) / 32768;
+  for (let i = 0; i < i16.length; i++) {
+out[i] = (i16[i] ?? 0) / 32768;
+}
   return out;
 }
 
@@ -47,18 +61,24 @@ class VoiceClient {
   }
 
   async getStatus(): Promise<VoiceStatus> {
-    if (this.emitter) return this.emitter.invoke('voice:get-status');
+    if (this.emitter) {
+return this.emitter.invoke('voice:get-status');
+}
     return (await fetch('/api/voice/status').then((r) => r.json())) as VoiceStatus;
   }
 
   async start(): Promise<VoiceStatus> {
-    if (this.emitter) return this.emitter.invoke('voice:start');
+    if (this.emitter) {
+return this.emitter.invoke('voice:start');
+}
     return (await fetch('/api/voice/start', { method: 'POST' }).then((r) => r.json())) as VoiceStatus;
   }
 
   /** PCM16LE mono base64 at `sampleRate` → recognized text. */
   async transcribe(pcmBase64: string, sampleRate: number): Promise<string> {
-    if (this.emitter) return this.emitter.invoke('voice:transcribe', pcmBase64, sampleRate);
+    if (this.emitter) {
+return this.emitter.invoke('voice:transcribe', pcmBase64, sampleRate);
+}
     const res = await fetch('/api/voice/transcribe', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -67,15 +87,39 @@ class VoiceClient {
     return (res as { text?: string }).text ?? '';
   }
 
+  /**
+   * Import a voice-clone sample for `personaId`. Reads the File as base64 and
+   * routes to the local sidecar (IPC in Electron, HTTP in self-hosted server).
+   * Returns the stored wav + precomputed `.npy` embedding paths.
+   */
+  async importSample(
+    personaId: string,
+    file: File,
+  ): Promise<{ file: string; embeddingFile: string }> {
+    const dataBase64 = await fileToBase64(file);
+    if (this.emitter) {
+      return this.emitter.invoke('voice:import-sample', personaId, file.name, dataBase64);
+    }
+    return (await fetch('/api/voice/import-sample', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ personaId, filename: file.name, data: dataBase64 }),
+    }).then((r) => r.json())) as { file: string; embeddingFile: string };
+  }
+
   /** Synthesize and play `text`. Resolves when playback has been scheduled. */
   async speak(text: string, voice?: string): Promise<void> {
     const ctx = this.ctx();
-    if (ctx.state === 'suspended') await ctx.resume();
+    if (ctx.state === 'suspended') {
+await ctx.resume();
+}
     this.nextStartAt = Math.max(this.nextStartAt, ctx.currentTime);
 
     const play = (pcmBase64: string, sampleRate: number): void => {
       const f32 = pcm16ToFloat32(pcmBase64);
-      if (!f32.length) return;
+      if (!f32.length) {
+return;
+}
       const buf = ctx.createBuffer(1, f32.length, sampleRate);
       buf.getChannelData(0).set(f32);
       const src = ctx.createBufferSource();
@@ -90,10 +134,14 @@ class VoiceClient {
       const streamId = `s${++this.seq}`;
       await new Promise<void>((resolve, reject) => {
         const offAudio = this.listener!.on('voice:audio', (_e, p) => {
-          if (p.streamId === streamId) play(p.pcm, p.sampleRate);
+          if (p.streamId === streamId) {
+play(p.pcm, p.sampleRate);
+}
         });
         const offEnd = this.listener!.on('voice:audio-end', (_e, p) => {
-          if (p.streamId !== streamId) return;
+          if (p.streamId !== streamId) {
+return;
+}
           offAudio();
           offEnd();
           resolve();
@@ -114,7 +162,9 @@ class VoiceClient {
       body: JSON.stringify({ text, voice }),
     }).then((r) => r.json());
     const { pcm, sampleRate } = res as { pcm: string; sampleRate: number };
-    if (pcm) play(pcm, sampleRate);
+    if (pcm) {
+play(pcm, sampleRate);
+}
   }
 }
 
@@ -131,7 +181,9 @@ function isVoiceCloudLinked(): boolean {
 
 let _client: VoiceClient | null = null;
 export const getVoiceClient = (): VoiceClient => {
-  if (!_client) _client = new VoiceClient();
+  if (!_client) {
+_client = new VoiceClient();
+}
   return _client;
 };
 
