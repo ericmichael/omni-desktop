@@ -232,7 +232,7 @@ function MessageBubble({ index, role, content, attachments, stagedContext, react
   if (role === 'system') {
     return (
       <div className="flex justify-start">
-        <div className="flex min-w-0 max-w-[85%] flex-col items-start sm:max-w-[70%]">
+        <div className="flex w-full min-w-0 max-w-full flex-col items-start">
           {attachments && attachments.length > 0 ? (
             <div className="mb-1 flex flex-wrap gap-2 w-full">
               {attachments.map((att, i) => (
@@ -250,7 +250,7 @@ function MessageBubble({ index, role, content, attachments, stagedContext, react
   // assistant
   return (
     <div className="flex justify-start">
-      <div className="flex min-w-0 max-w-[85%] flex-col items-start sm:max-w-[70%]">
+      <div className="flex w-full min-w-0 max-w-full flex-col items-start">
         {attachments && attachments.length > 0 ? (
           <div className="mb-1 flex flex-wrap gap-2 w-full">
             {attachments.map((att, i) => (
