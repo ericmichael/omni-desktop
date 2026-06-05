@@ -14,15 +14,31 @@
  * in omniagents-ui/App.tsx).
  */
 
-import { listLiveApps, resolveAppHandle } from '@/renderer/features/AppControl/live-registry';
+import { keysToBytes } from '@/lib/tmux-keys';
+import { listAppsForScope } from '@/renderer/features/AppControl/app-catalog';
+import { requestAppLaunch } from '@/renderer/features/AppControl/app-launch-bridge';
+import { resolveAppHandle } from '@/renderer/features/AppControl/live-registry';
+import { codeApi } from '@/renderer/features/Code/state';
+import {
+  $activeTerminalIdByTab,
+  $terminalsByTab,
+  createTerminal,
+  hydrateTerminalsForTab,
+  type TerminalState,
+} from '@/renderer/features/Console/state';
+import { watchColumnRun } from '@/renderer/features/GlobalAgent/orchestrator-watch';
 import { requestPlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
 import { requestPreviewOpen } from '@/renderer/features/Tickets/preview-bridge';
 import { ticketApi } from '@/renderer/features/Tickets/state';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
+import { $agentStatuses } from '@/renderer/services/agent-process';
 import { emitter } from '@/renderer/services/ipc';
+import { getSessionController, listSessionRunStates } from '@/renderer/services/session-control';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { getVoiceClient } from '@/renderer/services/voice-client';
-import type { AppClickButton, AppConsoleLevel } from '@/shared/app-control-types';
+import type { AppClickButton, AppConsoleLevel, AppScopeFilter } from '@/shared/app-control-types';
+import { makeAppHandleId, parseAppHandleId } from '@/shared/app-control-types';
+import { buildAppRegistry } from '@/shared/app-registry';
 import type { ProjectId, TicketId } from '@/shared/types';
 import { getActivePersona, resolveVoiceArg } from '@/shared/voice-personas';
 
@@ -68,14 +84,14 @@ async function handleProjectTools(
 async function handleUITools(
   toolName: string,
   toolArgs: Record<string, unknown>,
-  tabId?: string,
+  tabId?: string
 ): Promise<ClientToolResult | null> {
   switch (toolName) {
     case 'browser_open': {
       const url = (toolArgs.url as string) ?? '';
       if (!url) {
-return err('Missing url');
-}
+        return err('Missing url');
+      }
       requestPreviewOpen(url, tabId);
       return ok({ ok: true, url });
     }
@@ -96,6 +112,46 @@ return err('Missing url');
 }
 
 /**
+ * `launch_app` — mount a (lazily-rendered) dock app in a column so it becomes
+ * drivable. Column callers may only target their own column; the superuser may
+ * target any column and may pass a handleId as `app_id`.
+ */
+function handleLaunchApp(toolArgs: Record<string, unknown>, filter: AppScopeFilter): ClientToolResult {
+  const raw = String(toolArgs.app_id ?? '');
+  if (!raw) {
+    return err('Missing app_id');
+  }
+  // Superuser callers may pass a full handleId (tab-<id>:terminal).
+  const parsed = parseAppHandleId(raw);
+  const appId = parsed?.appId ?? raw;
+  let tabId = (typeof toolArgs.tab_id === 'string' && toolArgs.tab_id) || parsed?.tabId || filter.tabId;
+
+  if (!filter.allColumns && filter.tabId && tabId !== filter.tabId) {
+    return err('You can only launch apps in your own column.');
+  }
+  if (!tabId) {
+    return err('Missing tab_id — which column should the app open in? Call list_workspace for ids.');
+  }
+  if (appId === 'chat') {
+    return err('chat is the conversation surface, not a launchable app.');
+  }
+
+  const registry = buildAppRegistry(persistedStoreApi.getKey('customApps') ?? []);
+  const desc = registry.find((a) => a.id === appId);
+  if (!desc) {
+    return err(`Unknown app: "${appId}". Call list_apps to see valid ids.`);
+  }
+  if (!desc.columnScoped) {
+    return err(
+      `"${appId}" is a global app, not a column app — drive it directly with the app_* tools once it is visible.`
+    );
+  }
+
+  requestAppLaunch(tabId, appId);
+  return ok({ handle_id: makeAppHandleId('column', appId, tabId), tab_id: tabId, status: 'opening' });
+}
+
+/**
  * App-control tools. Dispatches the full `app_*` family — discovery, history,
  * input, snapshot, capture, page primitives (scroll/find/wait/inject_css/etc.),
  * and per-webview state (cookies/storage/network) — against the live webview
@@ -104,18 +160,25 @@ return err('Missing url');
 async function handleAppControlTools(
   toolName: string,
   toolArgs: Record<string, unknown>,
-  filter: { tabId?: string; allowGlobal: boolean },
-  currentTicketId?: TicketId,
+  filter: AppScopeFilter,
+  currentTicketId?: TicketId
 ): Promise<ClientToolResult | null> {
   if (toolName === 'list_apps') {
-    const apps = listLiveApps(filter).map((a) => ({
-      id: a.appId,
+    const apps = listAppsForScope(filter).map((a) => ({
+      // Superuser callers address apps by handleId (the same id exists in many
+      // columns); column callers use the bare id. We return both.
+      id: filter.allColumns ? a.handleId : a.id,
+      app_id: a.id,
+      handle_id: a.handleId,
       kind: a.kind,
       scope: a.scope,
       url: a.url ?? null,
       title: a.title ?? null,
       label: a.label,
       controllable: a.controllable,
+      running: a.running,
+      available: a.available,
+      ...(a.column ? { column: a.column } : a.tabId ? { tab_id: a.tabId } : {}),
     }));
     return ok({ apps });
   }
@@ -181,11 +244,7 @@ async function handleAppControlTools(
       }
       case 'app_console': {
         const level = toolArgs.min_level as AppConsoleLevel | undefined;
-        const entries = await emitter.invoke(
-          'app:console',
-          handleId,
-          level ? { minLevel: level } : {}
-        );
+        const entries = await emitter.invoke('app:console', handleId, level ? { minLevel: level } : {});
         return ok({ entries });
       }
       case 'app_snapshot': {
@@ -243,24 +302,24 @@ async function handleAppControlTools(
       case 'app_inject_css': {
         const css = (toolArgs.css as string) ?? '';
         if (!css) {
-return err('Missing css');
-}
+          return err('Missing css');
+        }
         const key = await emitter.invoke('app:inject-css', handleId, css);
         return ok({ key });
       }
       case 'app_remove_inserted_css': {
         const key = (toolArgs.key as string) ?? '';
         if (!key) {
-return err('Missing key');
-}
+          return err('Missing key');
+        }
         await emitter.invoke('app:remove-inserted-css', handleId, key);
         return ok({ ok: true });
       }
       case 'app_find_in_page': {
         const query = (toolArgs.query as string) ?? '';
         if (!query) {
-return err('Missing query');
-}
+          return err('Missing query');
+        }
         const result = await emitter.invoke('app:find', handleId, query, {
           caseSensitive: toolArgs.case_sensitive === true,
           forward: toolArgs.forward !== false,
@@ -272,8 +331,7 @@ return err('Missing query');
         try {
           const res = await emitter.invoke('app:wait-for', handleId, {
             selector: typeof toolArgs.selector === 'string' ? (toolArgs.selector as string) : undefined,
-            urlIncludes:
-              typeof toolArgs.url_includes === 'string' ? (toolArgs.url_includes as string) : undefined,
+            urlIncludes: typeof toolArgs.url_includes === 'string' ? (toolArgs.url_includes as string) : undefined,
             networkIdle: toolArgs.network_idle === true,
             timeoutMs: typeof toolArgs.timeout_ms === 'number' ? (toolArgs.timeout_ms as number) : undefined,
           });
@@ -285,23 +343,19 @@ return err('Missing query');
       case 'app_scroll_to_ref': {
         const ref = (toolArgs.ref as string) ?? '';
         if (!ref) {
-return err('Missing ref');
-}
+          return err('Missing ref');
+        }
         await emitter.invoke('app:scroll-to-ref', handleId, ref);
         return ok({ ok: true });
       }
       case 'app_pdf': {
-        const path = await emitter.invoke(
-          'app:pdf',
-          handleId,
-          {
-            ...(currentTicketId ? { artifactsSubdir: currentTicketId } : {}),
-            ...(typeof toolArgs.landscape === 'boolean' ? { landscape: toolArgs.landscape as boolean } : {}),
-            ...(typeof toolArgs.print_background === 'boolean'
-              ? { printBackground: toolArgs.print_background as boolean }
-              : {}),
-          }
-        );
+        const path = await emitter.invoke('app:pdf', handleId, {
+          ...(currentTicketId ? { artifactsSubdir: currentTicketId } : {}),
+          ...(typeof toolArgs.landscape === 'boolean' ? { landscape: toolArgs.landscape as boolean } : {}),
+          ...(typeof toolArgs.print_background === 'boolean'
+            ? { printBackground: toolArgs.print_background as boolean }
+            : {}),
+        });
         return ok({ path });
       }
       case 'app_set_viewport': {
@@ -332,8 +386,8 @@ return err('Missing ref');
       case 'app_set_zoom': {
         const factor = Number(toolArgs.factor);
         if (!Number.isFinite(factor)) {
-return err('Missing numeric factor');
-}
+          return err('Missing numeric factor');
+        }
         await emitter.invoke('app:set-zoom', handleId, factor);
         return ok({ ok: true });
       }
@@ -351,8 +405,8 @@ return err('Missing numeric factor');
         const name = (toolArgs.name as string) ?? '';
         const value = (toolArgs.value as string) ?? '';
         if (!url || !name) {
-return err('Missing url or name');
-}
+          return err('Missing url or name');
+        }
         await emitter.invoke('app:cookies-set', handleId, {
           url,
           name,
@@ -380,8 +434,8 @@ return err('Missing url or name');
       case 'app_storage_get': {
         const which = toolArgs.which as 'local' | 'session';
         if (which !== 'local' && which !== 'session') {
-return err('which must be "local" or "session"');
-}
+          return err('which must be "local" or "session"');
+        }
         const entries = await emitter.invoke('app:storage-get', handleId, which);
         return ok({ entries });
       }
@@ -389,19 +443,19 @@ return err('which must be "local" or "session"');
         const which = toolArgs.which as 'local' | 'session';
         const entries = toolArgs.entries as Record<string, string> | undefined;
         if (which !== 'local' && which !== 'session') {
-return err('which must be "local" or "session"');
-}
+          return err('which must be "local" or "session"');
+        }
         if (!entries || typeof entries !== 'object') {
-return err('Missing entries object');
-}
+          return err('Missing entries object');
+        }
         await emitter.invoke('app:storage-set', handleId, which, entries);
         return ok({ ok: true });
       }
       case 'app_storage_clear': {
         const which = toolArgs.which as 'local' | 'session';
         if (which !== 'local' && which !== 'session') {
-return err('which must be "local" or "session"');
-}
+          return err('which must be "local" or "session"');
+        }
         await emitter.invoke('app:storage-clear', handleId, which);
         return ok({ ok: true });
       }
@@ -451,8 +505,8 @@ async function handleBrowserTools(
       case 'browser_tab_create': {
         const tabsetId = (toolArgs.tabset_id as string) ?? '';
         if (!tabsetId) {
-return err('Missing tabset_id');
-}
+          return err('Missing tabset_id');
+        }
         const tab = await emitter.invoke('browser:tab-create', tabsetId, {
           ...(typeof toolArgs.url === 'string' ? { url: toolArgs.url as string } : {}),
           ...(typeof toolArgs.activate === 'boolean' ? { activate: toolArgs.activate as boolean } : {}),
@@ -463,8 +517,8 @@ return err('Missing tabset_id');
         const tabsetId = (toolArgs.tabset_id as string) ?? '';
         const tabId = (toolArgs.tab_id as string) ?? '';
         if (!tabsetId || !tabId) {
-return err('Missing tabset_id or tab_id');
-}
+          return err('Missing tabset_id or tab_id');
+        }
         await emitter.invoke('browser:tab-close', tabsetId, tabId);
         return ok({ ok: true });
       }
@@ -472,8 +526,8 @@ return err('Missing tabset_id or tab_id');
         const tabsetId = (toolArgs.tabset_id as string) ?? '';
         const tabId = (toolArgs.tab_id as string) ?? '';
         if (!tabsetId || !tabId) {
-return err('Missing tabset_id or tab_id');
-}
+          return err('Missing tabset_id or tab_id');
+        }
         await emitter.invoke('browser:tab-activate', tabsetId, tabId);
         return ok({ ok: true });
       }
@@ -482,8 +536,8 @@ return err('Missing tabset_id or tab_id');
         const tabId = (toolArgs.tab_id as string) ?? '';
         const url = (toolArgs.url as string) ?? '';
         if (!tabsetId || !tabId || !url) {
-return err('Missing tabset_id, tab_id, or url');
-}
+          return err('Missing tabset_id, tab_id, or url');
+        }
         await emitter.invoke('browser:tab-navigate', tabsetId, tabId, url);
         return ok({ ok: true });
       }
@@ -508,17 +562,14 @@ return err('Missing tabset_id, tab_id, or url');
  * the audio (VoiceClient owns the AudioContext), so the user hears it. Only
  * registered as a tool when voice mode is on (see buildSessionVariables).
  */
-async function handleVoiceTools(
-  toolName: string,
-  toolArgs: Record<string, unknown>,
-): Promise<ClientToolResult | null> {
+async function handleVoiceTools(toolName: string, toolArgs: Record<string, unknown>): Promise<ClientToolResult | null> {
   if (toolName !== 'speak') {
-return null;
-}
+    return null;
+  }
   const message = String(toolArgs.message ?? '').trim();
   if (!message) {
-return ok({ spoken: false });
-}
+    return ok({ spoken: false });
+  }
   try {
     const persona = getActivePersona(persistedStoreApi.get());
     await getVoiceClient().speak(message, resolveVoiceArg(persona));
@@ -528,13 +579,274 @@ return ok({ spoken: false });
   }
 }
 
+/**
+ * Workspace-introspection + column-lifecycle tools (global orchestrator only).
+ * `list_workspace` is the orchestrator's map of the deck; `open_column` /
+ * `close_column` manage columns via `codeApi`.
+ */
+async function handleWorkspaceTools(
+  toolName: string,
+  toolArgs: Record<string, unknown>
+): Promise<ClientToolResult | null> {
+  switch (toolName) {
+    case 'list_workspace': {
+      const store = persistedStoreApi.get();
+      const runStates = listSessionRunStates();
+      const statuses = $agentStatuses.get();
+      const projects = store.projects ?? [];
+      const tickets = store.tickets ?? [];
+      const columns = (store.codeTabs ?? []).map((t) => {
+        const run = runStates[t.id];
+        return {
+          tab_id: t.id,
+          session_id: t.sessionId ?? null,
+          profile: t.profileName ?? null,
+          project_id: t.projectId ?? null,
+          project: t.projectId ? (projects.find((p) => p.id === t.projectId)?.label ?? null) : null,
+          ticket_id: t.ticketId ?? null,
+          ticket: t.ticketId ? (tickets.find((x) => x.id === t.ticketId)?.title ?? t.ticketTitle ?? null) : null,
+          app: t.customAppId ?? null,
+          sandbox: statuses[t.id]?.type ?? 'uninitialized',
+          // Structured pointer at the conversation; drill in with column_transcript.
+          // `latest_cursor` is the high-water mark — poll column_transcript(after:)
+          // and compare to know if a column advanced.
+          transcript: run
+            ? { total: run.transcript.total, latest_cursor: run.transcript.latestCursor, last: run.transcript.last }
+            : { total: 0, latest_cursor: null },
+          run: run
+            ? { running: run.running, run_id: run.runId ?? null, awaiting_approval: run.awaitingApproval }
+            : { running: false, awaiting_approval: [] },
+        };
+      });
+      return ok({ columns, active_tab_id: store.activeCodeTabId ?? null });
+    }
+    case 'open_column': {
+      const projectId = typeof toolArgs.project_id === 'string' ? toolArgs.project_id : undefined;
+      const ticketId = typeof toolArgs.ticket_id === 'string' ? toolArgs.ticket_id : undefined;
+      try {
+        if (ticketId) {
+          const ticket = (persistedStoreApi.getKey('tickets') ?? []).find((t) => t.id === ticketId);
+          if (!ticket) {
+            return err(`Unknown ticket: ${ticketId}`);
+          }
+          const tab = await codeApi.addTabForTicket(ticketId as TicketId, ticket.projectId, {
+            ticketTitle: ticket.title,
+          });
+          return ok({ tab_id: tab.id });
+        }
+        const tab = await codeApi.addTab();
+        if (projectId) {
+          await codeApi.setTabProject(tab.id, projectId as ProjectId);
+        }
+        return ok({ tab_id: tab.id });
+      } catch (e) {
+        return err(String(e));
+      }
+    }
+    case 'close_column': {
+      const tabId = String(toolArgs.tab_id ?? '');
+      if (!tabId) {
+        return err('Missing tab_id');
+      }
+      try {
+        await codeApi.removeTab(tabId);
+        return ok({ closed: true });
+      } catch (e) {
+        return err(String(e));
+      }
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Column-control tools (global orchestrator only). Reach into another column's
+ * live agent via the session-control registry — send a message, decide a
+ * pending approval, cancel a run.
+ */
+async function handleColumnTools(
+  toolName: string,
+  toolArgs: Record<string, unknown>
+): Promise<ClientToolResult | null> {
+  if (
+    toolName !== 'column_send' &&
+    toolName !== 'column_decide' &&
+    toolName !== 'column_cancel' &&
+    toolName !== 'column_transcript' &&
+    toolName !== 'column_read_entry'
+  ) {
+    return null;
+  }
+  const tabId = String(toolArgs.tab_id ?? '');
+  if (!tabId) {
+    return err('Missing tab_id — call list_workspace for column ids.');
+  }
+  const controller = getSessionController(tabId);
+  if (!controller) {
+    return err(`No live agent for column "${tabId}". It may not be open or booted yet.`);
+  }
+  try {
+    switch (toolName) {
+      case 'column_transcript': {
+        const after = typeof toolArgs.after === 'number' ? toolArgs.after : undefined;
+        const before = typeof toolArgs.before === 'number' ? toolArgs.before : undefined;
+        const limit = typeof toolArgs.limit === 'number' ? toolArgs.limit : undefined;
+        const page = controller.getTranscript({ after, before, limit });
+        return ok({
+          total: page.total,
+          latest_cursor: page.latestCursor,
+          has_more: page.hasMore,
+          entries: page.entries,
+        });
+      }
+      case 'column_read_entry': {
+        const cursor = typeof toolArgs.cursor === 'number' ? toolArgs.cursor : -1;
+        const entry = controller.getEntry(cursor);
+        return entry ? ok(entry) : err(`No transcript entry with cursor ${cursor} (it may have been removed).`);
+      }
+      case 'column_send': {
+        const message = String(toolArgs.message ?? '');
+        if (!message) {
+          return err('Missing message');
+        }
+        const res = (await controller.sendMessage(message)) as { runId?: string } | undefined;
+        // Watch this column so its run-end pushes a wakeup back to the
+        // orchestrator (instead of the orchestrator polling list_workspace).
+        watchColumnRun(tabId, res?.runId);
+        return ok({ sent: true, run_id: res?.runId ?? null });
+      }
+      case 'column_decide': {
+        const requestId = String(toolArgs.request_id ?? '');
+        if (!requestId) {
+          return err('Missing request_id');
+        }
+        const decision = toolArgs.decision === 'reject' ? 'reject' : 'approve';
+        await controller.decideApproval(requestId, decision);
+        return ok({ decided: decision });
+      }
+      case 'column_cancel':
+        await controller.stopRun();
+        return ok({ cancelled: true });
+      default:
+        return null;
+    }
+  } catch (e) {
+    return err(String(e));
+  }
+}
+
+/** Resolve a column's terminal — explicit id, else the active one, else the first. */
+function resolveTerminal(tabId: string, terminalId?: string): TerminalState | undefined {
+  const terms = $terminalsByTab.get()[tabId] ?? [];
+  if (terminalId) {
+    return terms.find((t) => t.id === terminalId);
+  }
+  const activeId = $activeTerminalIdByTab.get()[tabId];
+  return terms.find((t) => t.id === activeId) ?? terms[0];
+}
+
+/** Read the xterm scrollback (rendered screen + history) as plain text. */
+function captureTerminalBuffer(term: TerminalState, maxLines?: number): string {
+  const buf = term.xterm.buffer.active;
+  const total = buf.length;
+  const start = maxLines && maxLines > 0 ? Math.max(0, total - maxLines) : 0;
+  const lines: string[] = [];
+  for (let y = start; y < total; y++) {
+    const line = buf.getLine(y);
+    lines.push(line ? line.translateToString(true) : '');
+  }
+  while (lines.length > 0 && lines[lines.length - 1] === '') {
+    lines.pop();
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Terminal-copilot tools (global orchestrator only). Drive a column's VISIBLE
+ * terminal the way `tmux send-keys` / `capture-pane` do — type keys, read the
+ * screen — so the orchestrator can help the user with terminal work. Column
+ * agents have their own `bash`; this is for the shared, watched terminal.
+ */
+async function handleTerminalTools(
+  toolName: string,
+  toolArgs: Record<string, unknown>
+): Promise<ClientToolResult | null> {
+  if (!toolName.startsWith('terminal_')) {
+    return null;
+  }
+  const tabId = String(toolArgs.tab_id ?? '');
+  if (!tabId) {
+    return err('Missing tab_id — call list_workspace for column ids.');
+  }
+
+  if (toolName === 'terminal_open') {
+    try {
+      const id = await createTerminal(tabId);
+      return ok({ terminal_id: id });
+    } catch (e) {
+      return err(String(e));
+    }
+  }
+
+  // Make sure the renderer reflects the column's terminals before resolving.
+  await hydrateTerminalsForTab(tabId).catch(() => {});
+
+  if (toolName === 'terminal_list') {
+    const terms = $terminalsByTab.get()[tabId] ?? [];
+    return ok({
+      terminals: terms.map((t) => ({ terminal_id: t.id, running: t.isRunning })),
+      active_terminal_id: $activeTerminalIdByTab.get()[tabId] ?? null,
+    });
+  }
+
+  const term = resolveTerminal(tabId, typeof toolArgs.terminal_id === 'string' ? toolArgs.terminal_id : undefined);
+  if (!term) {
+    return err(`No terminal open in column "${tabId}". Call terminal_open first.`);
+  }
+
+  switch (toolName) {
+    case 'terminal_capture': {
+      const lines = typeof toolArgs.lines === 'number' ? toolArgs.lines : undefined;
+      return ok({ terminal_id: term.id, content: captureTerminalBuffer(term, lines) });
+    }
+    case 'terminal_send_keys': {
+      const keys = toolArgs.keys;
+      if (!Array.isArray(keys) || keys.length === 0 || !keys.every((k) => typeof k === 'string')) {
+        return err('`keys` must be a non-empty array of strings (tmux-style key tokens).');
+      }
+      if (!term.isRunning) {
+        return err(`Terminal "${term.id}" has exited; open a new one with terminal_open.`);
+      }
+      const bytes = keysToBytes(keys as string[], {
+        literal: toolArgs.literal === true,
+        ...(typeof toolArgs.count === 'number' ? { count: toolArgs.count } : {}),
+      });
+      await emitter.invoke('terminal:write', term.id, bytes);
+      return ok({ sent: keys.length, terminal_id: term.id });
+    }
+    default:
+      return null;
+  }
+}
+
 export function buildClientToolHandler(opts?: {
   ticketId?: TicketId;
   projectId?: ProjectId;
   tabId?: string;
   allowGlobal?: boolean;
+  /**
+   * Workspace-superuser scope for the headless global orchestrator: sees and
+   * drives every column's apps (addressed by handleId) and unlocks the
+   * workspace/column tools.
+   */
+  superuser?: boolean;
 }): ClientToolCallHandler {
+  const superuser = opts?.superuser ?? false;
   const allowGlobal = opts?.allowGlobal ?? true;
+  const appFilter: AppScopeFilter = superuser
+    ? { allowGlobal: true, allColumns: true }
+    : { tabId: opts?.tabId, allowGlobal };
   return async (toolName: string, toolArgs: Record<string, unknown>) => {
     const voiceResult = await handleVoiceTools(toolName, toolArgs);
     if (voiceResult) {
@@ -556,12 +868,26 @@ export function buildClientToolHandler(opts?: {
       return browserResult;
     }
 
-    const appResult = await handleAppControlTools(
-      toolName,
-      toolArgs,
-      { tabId: opts?.tabId, allowGlobal },
-      opts?.ticketId,
-    );
+    if (superuser) {
+      const wsResult = await handleWorkspaceTools(toolName, toolArgs);
+      if (wsResult) {
+        return wsResult;
+      }
+      const colResult = await handleColumnTools(toolName, toolArgs);
+      if (colResult) {
+        return colResult;
+      }
+      const termResult = await handleTerminalTools(toolName, toolArgs);
+      if (termResult) {
+        return termResult;
+      }
+    }
+
+    if (toolName === 'launch_app') {
+      return handleLaunchApp(toolArgs, appFilter);
+    }
+
+    const appResult = await handleAppControlTools(toolName, toolArgs, appFilter, opts?.ticketId);
     if (appResult) {
       return appResult;
     }

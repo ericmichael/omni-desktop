@@ -54,13 +54,212 @@ export const CODE_UI_TOOLS = [
     name: 'browser_open',
     safe: true,
     description:
-      'Mount this session\'s browser sidecar and point it at `url`. Opens the sidecar if it is not already showing. Use to surface a running web app, dev server, or page to the user; for subsequent navigation use `app_navigate` against the `browser` app id.',
+      "Mount this session's browser sidecar and point it at `url`. Opens the sidecar if it is not already showing. Use to surface a running web app, dev server, or page to the user; for subsequent navigation use `app_navigate` against the `browser` app id.",
     parameters: {
       type: 'object',
       properties: {
         url: { type: 'string', description: 'The URL to load (e.g. "http://localhost:3000")' },
       },
       required: ['url'],
+    },
+  },
+  {
+    name: 'launch_app',
+    safe: true,
+    description:
+      'Open (mount) an app in a workspace column so it becomes drivable. Apps mount lazily — an app `list_apps` reports with `running: false` has no live surface until you launch it. For column-scoped apps (`code`, `desktop`/VNC, `terminal`, `browser`) pass the target column via `tab_id`; omit it to use your own column. Returns `{ handle_id }` — pass that as `app_id` to the `app_*` tools. Note: a column shows one non-chat app at a time, so launching one replaces whatever was mounted in that column.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: {
+          type: 'string',
+          description: 'App id from `list_apps` (e.g. "terminal", "code", "desktop", "browser").',
+        },
+        tab_id: {
+          type: 'string',
+          description: 'Target column id (from `list_workspace`). Omit to use your own column.',
+        },
+      },
+      required: ['app_id'],
+    },
+  },
+] as const;
+
+/**
+ * Global-orchestrator-only tools. Registered solely for the headless global
+ * agent (`surface: 'global'`) — the workspace superuser that owns no column but
+ * observes and drives every one. `list_workspace` is its map; `column_*` reach
+ * into another column's agent (send / approve / cancel) via the renderer's
+ * per-column RPC clients; `open_column` / `close_column` manage the deck itself.
+ *
+ * Autopilot start/stop is NOT here — that's the shared `start_ticket` /
+ * `stop_ticket` in {@link PROJECT_CLIENT_TOOLS}.
+ */
+export const WORKSPACE_CLIENT_TOOLS = [
+  {
+    name: 'list_workspace',
+    safe: true,
+    description:
+      'Survey the whole Tile workspace: every open column with its `tab_id`, session id, sandbox profile, bound project/ticket, the app it is currently showing, and its agent run state (idle / running / awaiting-approval). Plus the global dock apps. Call this first — the `tab_id` values it returns are what `launch_app` and the `column_*` tools need.',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'open_column',
+    safe: true,
+    description:
+      'Open a new agent column in the Tile workspace and start its sandbox. Optionally bind it to a project (and a ticket) so the sandbox mounts that project. Returns `{ tab_id }`.',
+    parameters: {
+      type: 'object',
+      properties: {
+        project_id: {
+          type: 'string',
+          description: 'Project to open the column on. Omit for an unbound column the user will configure.',
+        },
+        ticket_id: { type: 'string', description: 'Ticket to bind the column to (implies its project).' },
+      },
+    },
+  },
+  {
+    name: 'close_column',
+    description:
+      'Close a workspace column and stop its sandbox. Destructive — the conversation and any unsaved in-sandbox state go away. Confirm with the user before calling.',
+    parameters: {
+      type: 'object',
+      properties: { tab_id: { type: 'string', description: 'Column id from `list_workspace`.' } },
+      required: ['tab_id'],
+    },
+  },
+  {
+    name: 'column_send',
+    safe: true,
+    description:
+      "Send a message to another column's agent — starts a run there as if the user typed it. Use to delegate or steer work in a specific column. The target runs autonomously; poll its state with `list_workspace`.",
+    parameters: {
+      type: 'object',
+      properties: {
+        tab_id: { type: 'string' },
+        message: { type: 'string', description: "The instruction to send to that column's agent." },
+      },
+      required: ['tab_id', 'message'],
+    },
+  },
+  {
+    name: 'column_decide',
+    safe: true,
+    description:
+      "Approve or reject a tool-call approval that a column's agent is blocked on. Get the `request_id` and which columns are awaiting approval from `list_workspace`.",
+    parameters: {
+      type: 'object',
+      properties: {
+        tab_id: { type: 'string' },
+        request_id: { type: 'string', description: 'Approval request id from `list_workspace`.' },
+        decision: { type: 'string', enum: ['approve', 'reject'] },
+      },
+      required: ['tab_id', 'request_id', 'decision'],
+    },
+  },
+  {
+    name: 'column_cancel',
+    safe: true,
+    description: "Cancel / interrupt the in-flight run of a column's agent.",
+    parameters: {
+      type: 'object',
+      properties: { tab_id: { type: 'string' } },
+      required: ['tab_id'],
+    },
+  },
+  {
+    name: 'column_transcript',
+    safe: true,
+    description:
+      "Read a window of a column's conversation — messages, tool calls/results, pending approvals — to see what that agent is doing. Returns `{ total, latest_cursor, entries, has_more }`; every entry carries a stable `cursor` and entries are chronological. **To poll incrementally**, pass `after: <the cursor you last saw>` (or a prior `latest_cursor`) — you get only what's new; an empty result means nothing changed. Omit `after` for the newest `limit` entries; pass `before: <cursor>` to page backward through history. Long fields cap at 2000 chars with the entry's `truncated` map giving each cut field's FULL length — use `column_read_entry` for the complete text. `list_workspace` returns each column's `latest_cursor` so you can spot which advanced.",
+    parameters: {
+      type: 'object',
+      properties: {
+        tab_id: { type: 'string' },
+        after: {
+          type: 'number',
+          description: 'Return only entries newer than this cursor (incremental polling).',
+        },
+        before: {
+          type: 'number',
+          description: 'Return entries older than this cursor (page backward through history).',
+        },
+        limit: { type: 'number', description: 'Max entries to return (default 20, max 100).' },
+      },
+      required: ['tab_id'],
+    },
+  },
+  {
+    name: 'column_read_entry',
+    safe: true,
+    description:
+      "Read a single transcript entry in full — no truncation. Use after `column_transcript` shows an entry whose `truncated` map flags a long message or tool output you need complete. `cursor` is the entry's stable id from `column_transcript`.",
+    parameters: {
+      type: 'object',
+      properties: {
+        tab_id: { type: 'string' },
+        cursor: { type: 'number', description: 'Stable entry cursor from `column_transcript`.' },
+      },
+      required: ['tab_id', 'cursor'],
+    },
+  },
+  {
+    name: 'terminal_list',
+    safe: true,
+    description:
+      "List a column's open terminals (their `terminal_id`s and which is active). Call before `terminal_send_keys` / `terminal_capture` only if you need a specific terminal; otherwise those default to the column's active terminal.",
+    parameters: {
+      type: 'object',
+      properties: { tab_id: { type: 'string' } },
+      required: ['tab_id'],
+    },
+  },
+  {
+    name: 'terminal_open',
+    safe: true,
+    description:
+      'Open a new terminal in a column and make it active. Use when the user has none, or you want a fresh shell. Returns its `terminal_id`. The terminal is visible to the user.',
+    parameters: {
+      type: 'object',
+      properties: { tab_id: { type: 'string' } },
+      required: ['tab_id'],
+    },
+  },
+  {
+    name: 'terminal_capture',
+    safe: true,
+    description:
+      "Capture the visible contents of a column's terminal — like `tmux capture-pane`. Returns the rendered screen + scrollback as text (exactly what the user sees). Use to read command output, errors, or current state before deciding what to send. This is the terminal's `snapshot`.",
+    parameters: {
+      type: 'object',
+      properties: {
+        tab_id: { type: 'string' },
+        lines: { type: 'number', description: 'Max trailing lines to return (default: full scrollback).' },
+        terminal_id: { type: 'string', description: "Target terminal; omit for the column's active one." },
+      },
+      required: ['tab_id'],
+    },
+  },
+  {
+    name: 'terminal_send_keys',
+    safe: true,
+    description:
+      'Send keys to a column\'s VISIBLE terminal — like `tmux send-keys`. `keys` is an ordered list of tokens; each is resolved as a key name (`C-c`, `Enter`, `Up`, `Down`, `Escape`, `Tab`, `M-b`, `F5`, `BSpace`, …) or, if unrecognized, typed literally. `literal: true` types every token verbatim (tmux `-l`); `count` repeats the whole sequence (tmux `-N`). This drives the SAME terminal the user is watching. Examples: run a command → `["git status", "Enter"]`; interrupt → `["C-c"]`; quit vim → `["Escape", ":q!", "Enter"]`. Tokens are sent back-to-back with no pacing (tmux-faithful): for a guaranteed double Ctrl-C — where the program must handle the first SIGINT before the second arrives — call this twice and check with `terminal_capture` between, rather than `["C-c", "C-c"]` in one call.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tab_id: { type: 'string' },
+        keys: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Ordered tmux-style key tokens.',
+        },
+        literal: { type: 'boolean', description: 'Type every token verbatim (tmux `-l`).' },
+        count: { type: 'number', description: 'Repeat the whole sequence N times (tmux `-N`).' },
+        terminal_id: { type: 'string', description: "Target terminal; omit for the column's active one." },
+      },
+      required: ['tab_id', 'keys'],
     },
   },
 ] as const;
@@ -111,7 +310,7 @@ export const APP_CONTROL_TOOLS = [
     name: 'app_snapshot_diff',
     safe: true,
     description:
-      "Capture a fresh snapshot and return only what changed since the previous `app_snapshot_diff` call (first call returns everything as `added`). Use between steps of a long automation to save context — no need to re-send an entire tree when only a toast appeared or a row was removed.",
+      'Capture a fresh snapshot and return only what changed since the previous `app_snapshot_diff` call (first call returns everything as `added`). Use between steps of a long automation to save context — no need to re-send an entire tree when only a toast appeared or a row was removed.',
     parameters: {
       type: 'object',
       properties: { app_id: { type: 'string' } },
@@ -168,7 +367,7 @@ export const APP_CONTROL_TOOLS = [
     name: 'app_type',
     safe: true,
     description:
-      'Type text at the currently focused element — no ref targeting. Use `app_fill` if you want to replace a field\'s value; use `app_type` when the element is already focused (e.g. after a click).',
+      "Type text at the currently focused element — no ref targeting. Use `app_fill` if you want to replace a field's value; use `app_type` when the element is already focused (e.g. after a click).",
     parameters: {
       type: 'object',
       properties: {
@@ -181,8 +380,7 @@ export const APP_CONTROL_TOOLS = [
   {
     name: 'app_press',
     safe: true,
-    description:
-      'Press a single key (e.g. `Enter`, `Escape`, `ArrowLeft`). Goes to the focused element.',
+    description: 'Press a single key (e.g. `Enter`, `Escape`, `ArrowLeft`). Goes to the focused element.',
     parameters: {
       type: 'object',
       properties: {
@@ -211,7 +409,7 @@ export const APP_CONTROL_TOOLS = [
     name: 'app_eval',
     safe: true,
     description:
-      'Run a JavaScript expression in the app\'s page context and return the result. The expression must be serialisable (primitives, arrays, objects). Use sparingly — `app_snapshot` + `app_click` is usually better.',
+      "Run a JavaScript expression in the app's page context and return the result. The expression must be serialisable (primitives, arrays, objects). Use sparingly — `app_snapshot` + `app_click` is usually better.",
     parameters: {
       type: 'object',
       properties: {
@@ -252,7 +450,7 @@ export const APP_CONTROL_TOOLS = [
   {
     name: 'app_back',
     safe: true,
-    description: 'Navigate back in the app\'s history, if possible.',
+    description: "Navigate back in the app's history, if possible.",
     parameters: {
       type: 'object',
       properties: { app_id: { type: 'string' } },
@@ -262,7 +460,7 @@ export const APP_CONTROL_TOOLS = [
   {
     name: 'app_forward',
     safe: true,
-    description: 'Navigate forward in the app\'s history, if possible.',
+    description: "Navigate forward in the app's history, if possible.",
     parameters: {
       type: 'object',
       properties: { app_id: { type: 'string' } },
@@ -394,8 +592,7 @@ export const APP_CONTROL_TOOLS = [
   {
     name: 'app_set_user_agent',
     safe: true,
-    description:
-      "Override the User-Agent header the app sends. Pass an empty string to restore the default.",
+    description: 'Override the User-Agent header the app sends. Pass an empty string to restore the default.',
     parameters: {
       type: 'object',
       properties: { app_id: { type: 'string' }, user_agent: { type: 'string' } },
@@ -512,7 +709,7 @@ export const APP_CONTROL_TOOLS = [
     name: 'app_network_log',
     safe: true,
     description:
-      "Read the last N network requests the app made — method, URL, status, mimeType, timing. Useful for diagnosing failing fetches, authentication errors, or slow requests. Pass `clear: true` to reset the buffer after reading.",
+      'Read the last N network requests the app made — method, URL, status, mimeType, timing. Useful for diagnosing failing fetches, authentication errors, or slow requests. Pass `clear: true` to reset the buffer after reading.',
     parameters: {
       type: 'object',
       properties: {
@@ -520,7 +717,10 @@ export const APP_CONTROL_TOOLS = [
         limit: { type: 'number', description: 'Max entries to return (default 100, up to 500 buffered).' },
         since: { type: 'number', description: 'CDP timestamp to filter from.' },
         url_includes: { type: 'string' },
-        status_min: { type: 'number', description: 'Only entries with status >= this value (e.g. 400 to find failures).' },
+        status_min: {
+          type: 'number',
+          description: 'Only entries with status >= this value (e.g. 400 to find failures).',
+        },
         clear: { type: 'boolean' },
       },
       required: ['app_id'],
@@ -700,7 +900,7 @@ const PROJECT_GUIDANCE = [
   '',
   '- Ticket resolution (`completed` / `wont_do` / `duplicate` / `cancelled`) is UI-only; there is no client tool for it.',
   '- `start_ticket` can fail with `WIP_LIMIT:` if too many tickets are already active. Tell the user and suggest a running ticket to stop.',
-  '- Pipelines come from a linked project\'s `FLEET.md` or the built-in default; not configurable via tools.',
+  "- Pipelines come from a linked project's `FLEET.md` or the built-in default; not configurable via tools.",
   '',
   '## Visible to the human',
   '',
@@ -794,7 +994,7 @@ const buildContextIdentifiers = (opts?: ContextIdentifierOpts): string => {
         `- \`${artifactsDir}/pr/PR_BODY.md\` — markdown with a **Summary** section (what and why) and a **Test plan** section (how to verify). Keep it grounded in the diff.`,
         `- \`${artifactsDir}/pr/CI_STATUS.md\` — optional. Latest CI/test status, if you've produced any.`,
         '',
-        "Refresh these whenever the scope or nature of your work shifts — don't wait for a column change or for the work to be \"done.\" If nothing material has changed, leave them alone.",
+        'Refresh these whenever the scope or nature of your work shifts — don\'t wait for a column change or for the work to be "done." If nothing material has changed, leave them alone.',
       ].join('\n')
     );
   }
@@ -816,7 +1016,7 @@ const buildContextIdentifiers = (opts?: ContextIdentifierOpts): string => {
  * whitelists were the source of the "tool calls require approval" bug.
  */
 export type SessionVariablesArgs = {
-  surface: 'chat' | 'code';
+  surface: 'chat' | 'code' | 'global';
   autopilot?: boolean;
   context?: ContextIdentifierOpts;
   /** Prepended to additional_instructions when autopilot is true. */
@@ -858,18 +1058,42 @@ const CHAT_CLIENT_TOOLS: readonly ClientToolDef[] = [
   ...BROWSER_CLIENT_TOOLS,
 ];
 
-const CODE_CLIENT_TOOLS: readonly ClientToolDef[] = [
-  ...CHAT_CLIENT_TOOLS,
-  ...CODE_UI_TOOLS,
-];
+const CODE_CLIENT_TOOLS: readonly ClientToolDef[] = [...CHAT_CLIENT_TOOLS, ...CODE_UI_TOOLS];
+
+/**
+ * The headless workspace orchestrator: everything a code column has, plus the
+ * workspace-superuser tools. App-scope enforcement (this caller may drive every
+ * column's apps, addressed by `handle_id`) lives in the renderer's
+ * `buildClientToolHandler`, not in the tool list.
+ */
+const GLOBAL_CLIENT_TOOLS: readonly ClientToolDef[] = [...CODE_CLIENT_TOOLS, ...WORKSPACE_CLIENT_TOOLS];
+
+/**
+ * Persona/role guidance for the global orchestrator, appended to
+ * additional_instructions when `surface: 'global'`. Explains the superuser
+ * stance and the addressing rule the tool schemas can't convey (the same app
+ * id exists in many columns → address by `handle_id`).
+ */
+const GLOBAL_GUIDANCE = [
+  '## You are the workspace orchestrator',
+  '',
+  'You operate the entire Tile workspace on the user’s behalf — usually by voice. You own no column of your own; instead you observe and drive every column.',
+  '',
+  '- `list_workspace` is your map: open columns, their sessions, sandbox profiles, bound project/ticket, and run state. `list_apps` shows every app across all columns (each with a `handle_id`) plus the global dock apps.',
+  '- Act inside a column with `column_send` (instruct its agent), `column_decide` (approve/reject what it is blocked on), `column_cancel` (stop it), and `start_ticket` / `stop_ticket` (autopilot). Shape the deck with `open_column`, `close_column`, and `launch_app`.',
+  '- Drive any column’s apps with the `app_*` tools using the `handle_id` from `list_apps` — not a bare name, because the same app (e.g. `terminal`) exists in many columns.',
+  '- Narrate what you are doing, and confirm with the user before anything destructive (closing a column, cancelling a run).',
+].join('\n');
 
 export const buildSessionVariables = (args: SessionVariablesArgs): Record<string, unknown> => {
   const { surface, autopilot = false, context, supervisorPrompt, voice = false, personaInstructions } = args;
-  const baseTools = surface === 'code' ? CODE_CLIENT_TOOLS : CHAT_CLIENT_TOOLS;
+  const baseTools =
+    surface === 'global' ? GLOBAL_CLIENT_TOOLS : surface === 'code' ? CODE_CLIENT_TOOLS : CHAT_CLIENT_TOOLS;
   const tools: readonly ClientToolDef[] = voice ? [...baseTools, ...VOICE_CLIENT_TOOLS] : baseTools;
   const baseInstructions = buildContextIdentifiers(context);
   const parts = [
     autopilot && supervisorPrompt ? supervisorPrompt : '',
+    surface === 'global' ? GLOBAL_GUIDANCE : '',
     voice ? VOICE_GUIDANCE : '',
     voice && personaInstructions ? personaInstructions : '',
     baseInstructions,
@@ -878,9 +1102,7 @@ export const buildSessionVariables = (args: SessionVariablesArgs): Record<string
 
   return {
     client_tools: tools,
-    safe_tool_overrides: autopilot
-      ? { safe_tool_patterns: ['.*'] }
-      : { safe_tool_names: extractSafeToolNames(tools) },
+    safe_tool_overrides: autopilot ? { safe_tool_patterns: ['.*'] } : { safe_tool_names: extractSafeToolNames(tools) },
     additional_instructions: instructions,
     // Structured ticket context — omniagents persists these into
     // ``session.variables`` so omni-code tools / server functions /

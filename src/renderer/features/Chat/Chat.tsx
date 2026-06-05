@@ -192,7 +192,7 @@ export const Chat = memo(() => {
   const initialized = useStore($initialized);
   const chatStatus = useStore($chatProcessStatus);
   const store = useStore(persistedStoreApi.$atom);
-  const { phase, error, retry, launch, profileName } = useChatAutoLaunch();
+  const { phase, error, retry, launch, profileName, workspaceDir: sessionWorkspaceDir } = useChatAutoLaunch();
   useSandboxActivityPing('chat');
   // Picker writes the sticky binding (``StoreData.chatProfileName``) — the
   // hook re-reads on the next render and forwards it as the launch override.
@@ -331,7 +331,7 @@ export const Chat = memo(() => {
             variables={variables}
             voiceVariables={voiceVariables}
             onClientToolCall={toolHandler}
-            workspaceDir={store.workspaceDir ?? undefined}
+            workspaceDir={sessionWorkspaceDir ?? store.workspaceDir ?? undefined}
           />
           {chatData.switching && (
             <div className={styles.switchScrim}>

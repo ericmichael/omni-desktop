@@ -249,6 +249,15 @@ export function registerUtilHandlers(ipc: IIpcListener, opts: UtilHandlerOptions
     validateUserPath(dirPath, { checkDepth: true });
     return ensureDirectory(dirPath);
   });
+  ipc.handle('util:session-workspace-dir', async (_: unknown, baseDir: string, sessionId: string) => {
+    // Sanitize the id to a single safe path segment (defense-in-depth — ids are
+    // uuids, but never let a session id traverse out of Sessions/).
+    const safeId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '') || 'default';
+    const dir = join(baseDir, 'Sessions', safeId);
+    validateUserPath(dir, { checkDepth: true });
+    await ensureDirectory(dir);
+    return dir;
+  });
   ipc.handle('util:list-directory', async (_: unknown, dirPath: string) => {
     validateUserPath(dirPath);
     try {

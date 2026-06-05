@@ -157,6 +157,11 @@ export type StoreData = {
    * on the hovered code-deck column or the active chat. Null = unbound.
    */
   voiceToggleHotkey: string | null;
+  /**
+   * Separate global hotkey that toggles voice on the workspace (global) agent,
+   * opening its panel. Independent of `voiceToggleHotkey`. Null = unbound.
+   */
+  globalVoiceToggleHotkey: string | null;
 
   layoutMode: LayoutMode;
   theme: OmniTheme;
@@ -485,6 +490,10 @@ export const schema: Schema<StoreData> = {
     default: 'default',
   },
   voiceToggleHotkey: {
+    type: ['string', 'null'],
+    default: null,
+  },
+  globalVoiceToggleHotkey: {
     type: ['string', 'null'],
     default: null,
   },
@@ -1932,6 +1941,13 @@ type UtilIpcEvents = Namespaced<
     'get-default-install-dir': () => string;
     'get-default-workspace-dir': () => string;
     'ensure-directory': (path: string) => boolean;
+    /**
+     * Resolve (and create) a per-session scratch workspace under
+     * `<baseDir>/Sessions/<sessionId>`. Used by ambient surfaces (Chat,
+     * Orchestrator) that aren't bound to a project, so each session gets an
+     * isolated dir instead of mounting the whole workspace tree.
+     */
+    'session-workspace-dir': (baseDir: string, sessionId: string) => string;
     'open-directory': (path: string) => string;
     /** Open a URL in the user's default browser via Electron `shell.openExternal`. */
     'open-external': (url: string) => void;

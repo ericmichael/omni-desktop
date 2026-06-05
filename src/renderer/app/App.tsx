@@ -16,6 +16,8 @@ import { MainContent } from '@/renderer/app/MainContent';
 import { syncTheme } from '@/renderer/constants';
 import { SystemInfoLoadingGate, SystemInfoProvider } from '@/renderer/contexts/SystemInfoContext';
 import { AuthGate } from '@/renderer/features/Auth/AuthGate';
+import { GlobalAgent } from '@/renderer/features/GlobalAgent/GlobalAgent';
+import { GlobalAgentAmbientGlow } from '@/renderer/features/GlobalAgent/GlobalAgentAmbientGlow';
 import { QuickCapture } from '@/renderer/features/Inbox/QuickCapture';
 import { MigrationNotice } from '@/renderer/features/MigrationNotice/MigrationNotice';
 import { ToastContainer } from '@/renderer/features/Toast/ToastContainer';
@@ -87,6 +89,8 @@ export const App = () => {
                   <MainContent />
                 </div>
                 <QuickCapture />
+                <GlobalAgent />
+                <GlobalAgentAmbientGlow />
                 <VoiceHotkeys />
                 <SyncBar />
               </AuthGate>

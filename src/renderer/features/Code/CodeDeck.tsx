@@ -38,8 +38,10 @@ import {
   MenuTrigger,
   SegmentedControl,
 } from '@/renderer/ds';
+import { $appLaunchRequest, clearAppLaunchRequest } from '@/renderer/features/AppControl/app-launch-bridge';
 import { BrowserView } from '@/renderer/features/Browser/BrowserView';
 import { ConsoleStarted } from '@/renderer/features/Console/ConsoleRunning';
+import { GlobalAgentToggle } from '@/renderer/features/GlobalAgent/GlobalAgentToggle';
 import { $previewRequest, clearPreviewRequest } from '@/renderer/features/Tickets/preview-bridge';
 import { PullRequestBanner } from '@/renderer/features/Tickets/PullRequestBanner';
 import { ticketApi } from '@/renderer/features/Tickets/state';
@@ -51,17 +53,17 @@ import {
 import { type TicketPanel, TicketPanelOverlay } from '@/renderer/features/Tickets/TicketPanelOverlay';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { $recordingScope } from '@/renderer/services/voice-recording';
-import { VoiceGlow } from './VoiceGlow';
 import type { AppHandleScope } from '@/shared/app-control-types';
 import { makeAppHandleId } from '@/shared/app-control-types';
 import type { AppDescriptor, AppId, CustomAppEntry } from '@/shared/app-registry';
 import { buildAppRegistry } from '@/shared/app-registry';
-import { firstSource } from '@/shared/types';
 import type { CodeLayoutMode, CodeTab, CodeTabId, TicketId, TicketResolution } from '@/shared/types';
+import { firstSource } from '@/shared/types';
 
 import { AppIcon } from './AppIcon';
 import { CodeTabContent } from './CodeTabContent';
 import { $codeTabStatuses, codeApi } from './state';
+import { VoiceGlow } from './VoiceGlow';
 
 /** Sentinel customAppId meaning "show the app launcher picker". */
 const APP_LAUNCHER_ID = '__launcher__';
@@ -111,7 +113,15 @@ const useStyles = makeStyles({
     alignItems: 'center',
     [`@media (min-width: ${SNAP_SCROLL_WIDTH + 1}px)`]: { display: 'none' },
   },
-  deckHeaderActions: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
+  deckHeaderActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    // Pin to the right edge even when `deckHeaderNav` is hidden on wide screens
+    // (where `space-between` would otherwise leave the lone actions group at the
+    // start).
+    marginLeft: 'auto',
+  },
   flexItemsCenter: { display: 'flex', alignItems: 'center' },
   gap1: { gap: tokens.spacingHorizontalXS },
   gap2: { gap: tokens.spacingHorizontalS },
@@ -730,6 +740,7 @@ const CodeDeckHeader = memo(
               </MenuList>
             </MenuPopover>
           </Menu>
+          <GlobalAgentToggle />
         </div>
       </div>
     );
@@ -1847,6 +1858,27 @@ export const CodeDeck = memo(() => {
       setPreviewUrls((prev) => ({ ...prev, [targetTabId]: req.url }));
       setActiveApps((prev) => ({ ...prev, [targetTabId]: 'browser' }));
       clearPreviewRequest();
+    });
+    return unsubscribe;
+  }, []);
+
+  // `launch_app` client tool → open (not toggle) a dock app in a column so its
+  // webview mounts and becomes drivable. Same fire-every-update listener pattern
+  // as the preview bridge above.
+  useEffect(() => {
+    const seen = new Set<string>();
+    const unsubscribe = $appLaunchRequest.listen((req) => {
+      if (!req || seen.has(req.id)) {
+        return;
+      }
+      seen.add(req.id);
+      setActiveApps((prev) => ({ ...prev, [req.tabId as CodeTabId]: req.appId }));
+      if (req.appId !== 'chat') {
+        setLastSidecarAppByTab((prev) =>
+          prev[req.tabId as CodeTabId] === req.appId ? prev : { ...prev, [req.tabId as CodeTabId]: req.appId }
+        );
+      }
+      clearAppLaunchRequest();
     });
     return unsubscribe;
   }, []);

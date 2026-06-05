@@ -3,6 +3,7 @@ import { useEffect, useMemo } from 'react';
 
 import { uuidv4 } from '@/lib/uuid';
 import { type AutoLaunchPhase,useAutoLaunch } from '@/renderer/hooks/use-auto-launch';
+import { useSessionWorkspaceDir } from '@/renderer/hooks/use-session-workspace-dir';
 import { persistedStoreApi } from '@/renderer/services/store';
 
 import { $chatProcessStatus } from './state';
@@ -36,9 +37,13 @@ export const useChatAutoLaunch = () => {
   }, [persistedProfile]);
   const profileName = persistedProfile ?? store.defaultProfileName ?? 'host';
 
+  // Chat is an ambient surface, not a project — give it an isolated per-session
+  // scratch dir instead of mounting the whole workspace tree.
+  const workspaceDir = useSessionWorkspaceDir(store.workspaceDir, sessionId);
+
   const { phase, error, retry, launch } = useAutoLaunch({
     processId: 'chat',
-    workspaceDir: store.workspaceDir ?? null,
+    workspaceDir,
     sessionId,
     profileNameOverride: profileName,
     ...(store.chatContainerId ? { containerId: store.chatContainerId } : {}),
@@ -64,6 +69,8 @@ export const useChatAutoLaunch = () => {
     retry,
     launch,
     profileName,
+    /** Resolved per-session scratch dir actually mounted (for the workspace chip). */
+    workspaceDir,
     resumeTier: chatStatus.type === 'running' ? chatStatus.data.resume : undefined,
   };
 };

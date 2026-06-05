@@ -1,7 +1,8 @@
 /**
- * Hotkeys settings. Currently one binding: a global hotkey that toggles voice
- * recording on the hovered code-deck column or the active chat. The recorder
- * captures a key combo and stores it in react-hotkeys-hook format (e.g. `alt+v`).
+ * Hotkeys settings. Two voice bindings: one that toggles recording on the
+ * hovered code-deck column / active chat, and a separate one that opens and
+ * records to the workspace (global) agent. The recorder captures a key combo and
+ * stores it in react-hotkeys-hook format (e.g. `alt+v`).
  */
 
 import { makeStyles, tokens } from '@fluentui/react-components';
@@ -64,7 +65,7 @@ function eventToCombo(e: KeyboardEvent): string | null {
     return null;
   }
   const mods = MOD_ORDER.filter((m) =>
-    m === 'ctrl' ? e.ctrlKey : m === 'alt' ? e.altKey : m === 'shift' ? e.shiftKey : e.metaKey,
+    m === 'ctrl' ? e.ctrlKey : m === 'alt' ? e.altKey : m === 'shift' ? e.shiftKey : e.metaKey
   );
   return [...mods, key].join('+');
 }
@@ -89,8 +90,8 @@ function HotkeyRecorder({
 
   useEffect(() => {
     if (!recording) {
-return;
-}
+      return;
+    }
     const onKey = (e: KeyboardEvent) => {
       e.preventDefault();
       e.stopPropagation();
@@ -115,17 +116,26 @@ return;
     <div className={styles.controls}>
       <span className={styles.combo}>{recording ? 'Press keys…' : value ? formatCombo(value) : 'Not set'}</span>
       <Button onClick={startRecording}>{recording ? 'Recording…' : 'Record'}</Button>
-      {value ? <Button variant="ghost" onClick={clear}>Clear</Button> : null}
+      {value ? (
+        <Button variant="ghost" onClick={clear}>
+          Clear
+        </Button>
+      ) : null}
     </div>
   );
 }
 
 export function SettingsModalHotkeysTab(): React.ReactElement {
   const styles = useStyles();
-  const hotkey = useStore(persistedStoreApi.$atom).voiceToggleHotkey;
+  const store = useStore(persistedStoreApi.$atom);
+  const hotkey = store.voiceToggleHotkey;
+  const globalHotkey = store.globalVoiceToggleHotkey;
 
   const setVoiceHotkey = useCallback((combo: string | null) => {
     void persistedStoreApi.setKey('voiceToggleHotkey', combo);
+  }, []);
+  const setGlobalVoiceHotkey = useCallback((combo: string | null) => {
+    void persistedStoreApi.setKey('globalVoiceToggleHotkey', combo);
   }, []);
 
   return (
@@ -143,6 +153,16 @@ export function SettingsModalHotkeysTab(): React.ReactElement {
               </Caption1>
             </div>
             <HotkeyRecorder value={hotkey} onChange={setVoiceHotkey} />
+          </div>
+          <div className={styles.row}>
+            <div className={styles.label}>
+              <Body1Strong>Workspace agent hotkey</Body1Strong>
+              <Caption1>
+                Opens the workspace (global) agent and records to it. Same tap-to-toggle / hold-to-talk gesture. A
+                separate binding from the column hotkey above. Tile mode only.
+              </Caption1>
+            </div>
+            <HotkeyRecorder value={globalHotkey} onChange={setGlobalVoiceHotkey} />
           </div>
         </Card>
       </div>

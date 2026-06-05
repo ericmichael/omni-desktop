@@ -10,11 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import {
-  buildSessionVariables,
-  extractSafeToolNames,
-  PROJECT_CLIENT_TOOLS,
-} from '@/lib/client-tools';
+import { buildSessionVariables, extractSafeToolNames, PROJECT_CLIENT_TOOLS } from '@/lib/client-tools';
 
 describe('client_tools shape', () => {
   it('every tool has name, description, and parameters', () => {
@@ -57,6 +53,64 @@ describe('client_tools shape', () => {
     expect(names).toContain('browser_open');
     expect(names).toContain('display_plan');
     expect(names).toContain('browser_list_tabsets');
+  });
+
+  it('global surface includes the workspace-orchestrator tools plus everything code has', () => {
+    const vars = buildSessionVariables({ surface: 'global' }) as {
+      client_tools: { name: string }[];
+      additional_instructions: string;
+    };
+    const names = vars.client_tools.map((t) => t.name);
+    // workspace-superuser tools
+    expect(names).toContain('list_workspace');
+    expect(names).toContain('open_column');
+    expect(names).toContain('close_column');
+    expect(names).toContain('column_send');
+    expect(names).toContain('column_decide');
+    expect(names).toContain('column_cancel');
+    expect(names).toContain('column_transcript');
+    expect(names).toContain('column_read_entry');
+    expect(names).toContain('terminal_send_keys');
+    expect(names).toContain('terminal_capture');
+    expect(names).toContain('terminal_list');
+    expect(names).toContain('terminal_open');
+    expect(names).toContain('launch_app');
+    // inherits code + chat tools
+    expect(names).toContain('browser_open');
+    expect(names).toContain('list_apps');
+    expect(names).toContain('start_ticket');
+    // role guidance present
+    expect(vars.additional_instructions).toContain('workspace orchestrator');
+  });
+
+  it('launch_app is available on the code surface, not chat', () => {
+    const code = buildSessionVariables({ surface: 'code' }) as { client_tools: { name: string }[] };
+    const chat = buildSessionVariables({ surface: 'chat' }) as { client_tools: { name: string }[] };
+    expect(code.client_tools.map((t) => t.name)).toContain('launch_app');
+    expect(chat.client_tools.map((t) => t.name)).not.toContain('launch_app');
+  });
+
+  it('workspace tools are absent from chat and code surfaces', () => {
+    for (const surface of ['chat', 'code'] as const) {
+      const names = (buildSessionVariables({ surface }) as { client_tools: { name: string }[] }).client_tools.map(
+        (t) => t.name
+      );
+      expect(names).not.toContain('list_workspace');
+      expect(names).not.toContain('column_send');
+    }
+  });
+
+  it('global surface keeps close_column behind approval but column_* + launch_app safe', () => {
+    const vars = buildSessionVariables({ surface: 'global' }) as {
+      safe_tool_overrides: { safe_tool_names?: string[] };
+    };
+    const safe = vars.safe_tool_overrides.safe_tool_names!;
+    expect(safe).toContain('list_workspace');
+    expect(safe).toContain('launch_app');
+    expect(safe).toContain('column_send');
+    expect(safe).toContain('column_cancel');
+    // destructive workspace mutation must require approval
+    expect(safe).not.toContain('close_column');
   });
 
   it('interactive mode uses safe_tool_names (allowlist of read-only tools)', () => {
@@ -144,14 +198,22 @@ describe('client_tools shape', () => {
         sources: [
           { id: 's1', mountName: 'launcher', kind: 'local', workspaceDir: '/home/emm/Omni/Workspace/launcher' },
           { id: 's2', mountName: 'omni-code', kind: 'local', workspaceDir: '/home/emm/Omni/Workspace/omni-code' },
-          { id: 's3', mountName: 'omniagents', kind: 'git-remote', repoUrl: 'https://github.com/anthropic/omniagents', defaultBranch: 'main' },
+          {
+            id: 's3',
+            mountName: 'omniagents',
+            kind: 'git-remote',
+            repoUrl: 'https://github.com/anthropic/omniagents',
+            defaultBranch: 'main',
+          },
         ],
       },
     }) as { additional_instructions: string };
     expect(vars.additional_instructions).toContain('## Workspace Layout');
     expect(vars.additional_instructions).toContain('3 sources co-mounted');
     expect(vars.additional_instructions).toContain('`/workspace/launcher/`');
-    expect(vars.additional_instructions).toContain('`/workspace/omniagents/` — https://github.com/anthropic/omniagents@main (git-remote)');
+    expect(vars.additional_instructions).toContain(
+      '`/workspace/omniagents/` — https://github.com/anthropic/omniagents@main (git-remote)'
+    );
   });
 
   it('omits the workspace layout when sources is empty', () => {

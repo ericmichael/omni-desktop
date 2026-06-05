@@ -23,6 +23,9 @@ export const $hoveredVoiceScope = atom<string | null>(null);
 /** Stable scope id for the Chat tab's single voice surface. */
 export const CHAT_VOICE_SCOPE = 'chat';
 
+/** Stable scope id for the headless global orchestrator's voice surface. */
+export const GLOBAL_VOICE_SCOPE = 'global';
+
 /** Per-column scope id, provided around the agent UI subtree. */
 export const VoiceScopeContext = createContext<string | null>(null);
 
@@ -46,13 +49,40 @@ export interface VoiceMicControls {
  */
 const voiceMics = new Map<string, VoiceMicControls>();
 
+/**
+ * Scopes that asked to start recording before their mic existed (e.g. the global
+ * agent activated cold by its hotkey — the mic only registers once the panel's
+ * agent UI mounts). Consumed when the mic registers.
+ */
+const pendingArms = new Set<string>();
+
 export function registerVoiceMic(scope: string, controls: VoiceMicControls): () => void {
   voiceMics.set(scope, controls);
+  // Honor a start requested before this mic existed (toggle it on).
+  if (pendingArms.delete(scope) && !controls.isRecording()) {
+    controls.start();
+  }
   return () => {
     if (voiceMics.get(scope) === controls) {
       voiceMics.delete(scope);
     }
   };
+}
+
+/**
+ * Start recording on `scope`'s mic now if present, else arm it to start (as a
+ * toggle-on) the moment the mic registers. Returns true if started immediately.
+ */
+export function startOrArmVoiceMic(scope: string): boolean {
+  const mic = voiceMics.get(scope);
+  if (mic) {
+    if (!mic.isRecording()) {
+      mic.start();
+    }
+    return true;
+  }
+  pendingArms.add(scope);
+  return false;
 }
 
 /** Controls for the mic mounted at `scope`, or undefined if none. */

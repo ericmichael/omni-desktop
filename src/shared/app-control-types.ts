@@ -143,6 +143,13 @@ export type AppClickButton = 'left' | 'right' | 'middle';
 export type AppScopeFilter = {
   tabId?: string;
   allowGlobal: boolean;
+  /**
+   * Superuser scope — the headless global orchestrator. When true, the caller
+   * sees and can drive *every* column's apps (not just `tabId`'s), and apps are
+   * addressed by full `handleId` rather than bare `appId` (the same id exists in
+   * many columns). Implies cross-column visibility regardless of `tabId`.
+   */
+  allColumns?: boolean;
 };
 
 // Re-export so downstream files don't need a second import path.

@@ -441,3 +441,28 @@ body.resizing {
 .prose-warning :where(ol > li::marker, ul > li::marker) {
   color: inherit !important;
 }
+
+/* ── Global agent (orchestrator) surface ───────────────────────────────────
+   A faint brand (indigo) wash on the omniagents surfaces so the workspace-agent
+   panel reads as visually distinct from code-deck columns. Scoped to
+   `.omni-global-agent`; the overrides cascade into the omniagents tree rendered
+   inside the panel (a closer ancestor than `:root`/`[data-theme]`), so columns
+   elsewhere are unaffected. Tune the triplets here to taste. */
+.omni-global-agent {
+  --omni-bgMain: 17 17 27; /* zinc-950 nudged toward indigo */
+  --omni-bgColumn: 28 28 40;
+  --omni-bgCard: 28 28 40;
+  --omni-bgCardAlt: 44 44 60;
+}
+[data-theme='teams-light'] .omni-global-agent {
+  --omni-bgMain: 248 248 255; /* faint lavender on white */
+  --omni-bgColumn: 244 244 252;
+  --omni-bgCard: 240 240 250;
+  --omni-bgCardAlt: 230 230 245;
+}
+[data-theme='teams-dark'] .omni-global-agent {
+  --omni-bgMain: 33 33 46;
+  --omni-bgColumn: 45 45 60;
+  --omni-bgCard: 50 50 66;
+  --omni-bgCardAlt: 64 64 84;
+}
