@@ -40,6 +40,12 @@ from typing import Any, Optional
 import numpy as np
 
 STT_SAMPLE_RATE = 16000          # Parakeet expects 16 kHz mono
+# The exported Parakeet encoder bakes in a fixed relative-positional-encoding
+# buffer (~946 frames ≈ 75 s at 8x/16 kHz subsampling). Audio past that ceiling
+# fails the attention broadcast, so long inputs are split into sub-limit windows
+# cut on silence. These stay well under the ceiling with margin to spare.
+STT_WINDOW_S = 20.0              # preferred window length
+STT_HARD_MAX_S = 40.0           # absolute cap per window (<< encoder ceiling)
 TTS_REPO = "KevinAHM/pocket-tts-onnx"
 
 _stdout_lock = threading.Lock()
@@ -72,6 +78,43 @@ def float32_to_pcm16_b64(x: np.ndarray) -> str:
     return base64.b64encode(pcm).decode("ascii")
 
 
+def _quietest_boundary(audio: np.ndarray, lo: int, hi: int, hop: int) -> int:
+    """Return the start index of the lowest-energy ``hop``-sized frame in [lo, hi)."""
+    best, best_e = lo, None
+    for i in range(lo, hi, hop):
+        seg = audio[i:i + hop]
+        e = float(np.dot(seg, seg))
+        if best_e is None or e < best_e:
+            best, best_e = i, e
+    return best
+
+
+def chunk_audio(audio: np.ndarray, sr: int,
+                window_s: float = STT_WINDOW_S,
+                hard_max_s: float = STT_HARD_MAX_S):
+    """Yield slices of ``audio``, each <= ``hard_max_s`` long, preferring to cut
+    on the quietest point near ``window_s`` so words aren't split mid-utterance."""
+    n = audio.size
+    hard = int(hard_max_s * sr)
+    if n <= hard:
+        yield audio
+        return
+    win, hop = int(window_s * sr), int(0.02 * sr)  # 20 ms search granularity
+    start = 0
+    while start < n:
+        if n - start <= hard:
+            yield audio[start:]
+            return
+        target = start + win
+        lo = max(start + win // 2, target - win // 2)
+        hi = min(target + win // 2, start + hard, n)
+        cut = _quietest_boundary(audio, lo, hi, hop)
+        if cut <= start:
+            cut = min(start + hard, n)
+        yield audio[start:cut]
+        start = cut
+
+
 def resample(x: np.ndarray, src_sr: int, dst_sr: int) -> np.ndarray:
     if src_sr == dst_sr or x.size == 0:
         return x.astype(np.float32, copy=False)
@@ -101,8 +144,18 @@ class SttEngine:
 
     def transcribe(self, audio: np.ndarray, sample_rate: int) -> str:
         a = resample(audio, sample_rate, STT_SAMPLE_RATE)
-        text = self._model.recognize(a, sample_rate=STT_SAMPLE_RATE)
-        return (text or "").strip()
+        if a.size <= int(STT_HARD_MAX_S * STT_SAMPLE_RATE):
+            text = self._model.recognize(a, sample_rate=STT_SAMPLE_RATE)
+            return (text or "").strip()
+        # Long input: transcribe silence-aligned windows and stitch the results,
+        # otherwise the encoder's positional-encoding ceiling is exceeded.
+        parts = []
+        for chunk in chunk_audio(a, STT_SAMPLE_RATE):
+            t = (self._model.recognize(chunk, sample_rate=STT_SAMPLE_RATE) or "").strip()
+            if t:
+                parts.append(t)
+        log(f"transcribed {a.size / STT_SAMPLE_RATE:.1f}s of audio in {len(parts)} chunk(s)")
+        return " ".join(parts).strip()
 
 
 class TtsEngine:
