@@ -2,7 +2,7 @@
 
 Infrastructure-as-code for the multi-tenant cloud deployment (Path B): the
 launcher server runs as the stateless control plane and provisions agent
-sandboxes as Azure Container Apps directly. `main.bicep` declares everything
+sandboxes as Azure Container Instances (ACI) directly. `main.bicep` declares everything
 the server (`src/server/managers.ts`) and the `aci` sandbox-profile builder
 (`src/main/aci-profile.ts`) read from the environment at runtime.
 
@@ -10,18 +10,20 @@ the server (`src/server/managers.ts`) and the `aci` sandbox-profile builder
 
 | Resource | Purpose | App env var(s) produced |
 |---|---|---|
-| User-assigned managed identity | AcrPull + create-container-apps + Files | `AZURE_CLIENT_ID` |
-| Log Analytics workspace | Container Apps + app logs | — |
-| Container Registry (ACR) | launcher + agent images | `OMNI_AZURE_REGISTRY`, `OMNI_AZURE_ACR_USERNAME` |
+| User-assigned managed identity | AcrPull + manage ACI sandbox groups + Files | `AZURE_CLIENT_ID` |
+| Log Analytics workspace | ACI + app logs | — |
+| Container Registry (ACR) | launcher + agent images (admin off; MI AcrPull) | `OMNI_AZURE_REGISTRY` |
 | Storage account + file share | per-project workspace (Azure Files) | `AZURE_STORAGE_ACCOUNT_NAME` |
-| Container Apps managed environment | where agent sandboxes spawn | `OMNI_AZURE_ENV` |
+| Container Apps managed environment | agent-sandbox env (sandboxes themselves spawn as ACI groups) | `OMNI_AZURE_ENV` |
 | PostgreSQL Flexible Server + db | pooled multi-tenant data (RLS) | `OMNI_DATABASE_URL` |
 | Web App for Containers + plan | the launcher server | `OMNI_DATA_API_URL`, `OMNI_AZURE_*`, … |
 
-Role assignments granted to the managed identity: **AcrPull** (on the ACR) and
-**Contributor** (on the resource group — so the app can `PUT`
-`Microsoft.App/containerApps`). No Storage Files data-plane role is granted: ACI
-mounts the workspace share via the account key (`AzureFileVolume`), not SMB RBAC.
+Role assignments granted to the managed identity: **AcrPull** (on the ACR) and a
+**least-privilege custom role** (`<prefix>-aci-sandbox-manager`, scoped to the
+resource group) granting exactly the ACI container-group verbs the launcher needs
+— create/read/delete/exec + subnet join — **not** Contributor. No Storage Files
+data-plane role is granted: ACI mounts the workspace share via the account key
+(`AzureFileVolume`), not SMB RBAC.
 
 ## Validate locally (no subscription)
 
@@ -44,8 +46,8 @@ value (it must be identical across replicas; see `src/server/runtime-token.ts`).
 
 Chicken-and-egg: the Web App references `launcherImage`. Either push the image
 to a pre-existing registry first, or deploy once (the app will fail to pull),
-then `az acr build`/push and restart. Same for the agent image
-(`OMNI_AZURE_IMAGE` → `<acr>/omni-agent:latest`).
+then `az acr build`/push and restart. Same for the agent sandbox image
+(`OMNI_AZURE_IMAGE` → `<acr>/omni-launcher-devbox-min:latest`).
 
 ## Manual post-provision steps (not expressible in Bicep)
 

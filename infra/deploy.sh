@@ -8,7 +8,7 @@
 #
 # Env overrides:
 #   SITE_NAME                                      Web App name (globally unique; default: omni-launcher)
-#   PG_PASSWORD, RUNTIME_TOKEN_SECRET, WS_TOKEN   secrets (default: random, URL-safe)
+#   PG_PASSWORD, RUNTIME_TOKEN_SECRET             secrets (default: random, URL-safe)
 #   ACR_NAME                                       registry to create (default: omnilauncheracr)
 #   AUTH_MODE                                      easyauth | none (default: easyauth)
 #   AAD_CLIENT_ID / AAD_CLIENT_SECRET             reuse an existing AAD app (else one is created)
@@ -48,7 +48,6 @@ RUNTIME_TOKEN_SECRET="${RUNTIME_TOKEN_SECRET:-$(openssl rand -hex 32)}"
 # AES-256-GCM key (32 bytes, base64) for PgSecretStore. Rotating it orphans
 # every existing user_secrets / team_secrets row, so pin in deploy.env.
 OMNI_SECRET_KEY="${OMNI_SECRET_KEY:-$(openssl rand -base64 32)}"
-WS_TOKEN="${WS_TOKEN:-$(openssl rand -hex 16)}"
 
 # EasyAuth needs an AAD app registration (ARM can't create it). Create one for
 # the known redirect URI unless the caller passed an existing app's creds.
@@ -71,7 +70,7 @@ az group create --name "$RG" --location "$LOCATION" --output none
 
 params=(location="$LOCATION" siteName="$SITE_NAME" acrName="$ACR_NAME" authMode="$AUTH_MODE"
   postgresAdminPassword="$PG_PASSWORD" omniAppPassword="$OMNI_APP_PASSWORD"
-  runtimeTokenSecret="$RUNTIME_TOKEN_SECRET" omniSecretKey="$OMNI_SECRET_KEY" wsToken="$WS_TOKEN"
+  runtimeTokenSecret="$RUNTIME_TOKEN_SECRET" omniSecretKey="$OMNI_SECRET_KEY"
   aadClientId="${AAD_CLIENT_ID:-}" aadClientSecret="${AAD_CLIENT_SECRET:-}")
 
 echo "== what-if =="

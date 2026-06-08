@@ -96,10 +96,6 @@ param runtimeTokenSecret string
 @description('AES-256-GCM key (32 bytes, base64-encoded) for column-level encryption of user/team secrets in PgSecretStore (git tokens, Codex tokens, team-shared API keys). Stable: rotating loses access to existing rows.')
 param omniSecretKey string
 
-@secure()
-@description('Static WebSocket auth token for the launcher (OMNI_WS_TOKEN). Leave empty to set later.')
-param wsToken string = ''
-
 @description('App Service plan SKU for the launcher web app.')
 param launcherPlanSku string = 'P0v3'
 
@@ -777,11 +773,6 @@ resource kvSecretOmniSecretKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = 
   name: 'omni-secret-key'
   properties: { value: omniSecretKey }
 }
-resource kvSecretWsToken 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
-  parent: kv
-  name: 'ws-token'
-  properties: { value: wsToken }
-}
 resource kvSecretAadSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   parent: kv
   name: 'aad-client-secret'
@@ -859,6 +850,9 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
     siteConfig: {
       linuxFxVersion: 'DOCKER|${acr.properties.loginServer}/${launcherImageRepoTag}'
       alwaysOn: true
+      // Liveness probe (src/server/index.ts → GET /healthz, excluded from
+      // EasyAuth below). App Service marks an instance unhealthy on non-2xx.
+      healthCheckPath: '/healthz'
       // The renderer's transport dials /ws — App Service disables WebSockets by
       // default, silently closing the upgrade and triggering a reconnect loop.
       webSocketsEnabled: true
@@ -881,7 +875,6 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
         // Required when OMNI_DATABASE_URL is set — PgSecretStore (git/codex/team
         // secrets, AES-256-GCM) refuses to construct without it.
         { name: 'OMNI_SECRET_KEY', value: kvRef(kv.properties.vaultUri, 'omni-secret-key') }
-        { name: 'OMNI_WS_TOKEN', value: kvRef(kv.properties.vaultUri, 'ws-token') }
         { name: 'OMNI_DATA_API_URL', value: dataApiUrl }
         { name: 'OMNI_AZURE_SUBSCRIPTION_ID', value: subscription().subscriptionId }
         { name: 'OMNI_AZURE_RESOURCE_GROUP', value: resourceGroup().name }
@@ -931,7 +924,6 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
     kvSecretSessionsDbAdminUrl
     kvSecretRuntimeToken
     kvSecretOmniSecretKey
-    kvSecretWsToken
     kvSecretAadSecret
     kvSecretStorageKey
     raKvSecretsUser
@@ -957,9 +949,11 @@ resource siteAuth 'Microsoft.Web/sites/config@2023-12-01' = if (!empty(aadClient
       // Excluded paths bypass EasyAuth entirely; the launcher does its own
       // auth for these:
       //   - /.well-known/omni-cloud — public discovery (no auth required)
+      //   - /healthz — unauthenticated liveness probe (App Service health
+      //     check); no secrets, returns {status:'ok'}.
       //   - /ws — the renderer's browser WebSocket API can't send Bearer
       //     headers on the upgrade. The launcher auths /ws via a signed
-      //     wsToken minted by /api/ws-token (which IS still behind EasyAuth,
+      //     token minted by /api/ws-token (which IS still behind EasyAuth,
       //     so the principal identity is baked into the token there).
       //   - /proxy — reverse-proxy routes to in-sandbox UIs (code-server,
       //     VNC, etc.). EasyAuth-gating breaks iframe loads from cross-
@@ -967,7 +961,7 @@ resource siteAuth 'Microsoft.Web/sites/config@2023-12-01' = if (!empty(aadClient
       //     (~96 bits of entropy) and the sandbox itself runs on a private
       //     VNet; /proxy/_register additionally enforces its own CIDR
       //     allowlist (see src/server/proxy-rewriter.ts isTrusted).
-      excludedPaths: ['/.well-known/omni-cloud', '/ws', '/proxy/*']
+      excludedPaths: ['/.well-known/omni-cloud', '/healthz', '/ws', '/proxy/*']
     }
     identityProviders: {
       azureActiveDirectory: {

@@ -107,7 +107,7 @@ to seed from another registry.
 | `OMNI_AZURE_IMAGE` | fast/default sandbox image (`-devbox-min`) |
 | `OMNI_AZURE_DESKTOP_IMAGE` | desktop sandbox image (`-devbox`) |
 | `OMNI_AZURE_SUBNET_ID` | delegated subnet → ACI gets private IPs (desktop profile) |
-| `OMNI_DATABASE_URL`, `OMNI_RUNTIME_TOKEN_SECRET`, `OMNI_WS_TOKEN` | secrets (also in `deploy.env`) |
+| `OMNI_DATABASE_URL`, `OMNI_RUNTIME_TOKEN_SECRET` | secrets (also in `deploy.env`) |
 | `OMNIAGENTS_HISTORY_URL` | omniagents session DB (Postgres, `omni_sessions`) — chat history durability |
 | `OMNI_AZURE_SNAPSHOT_CONTAINER` / `OMNI_AZURE_AUDIO_CONTAINER` | blob containers for sandbox snapshot tars + realtime audio chunks |
 | `OMNI_AAD_TENANT_ID` / `OMNI_AAD_CLIENT_ID` / `OMNI_CLOUD_NAME` | published by `/.well-known/omni-cloud` so Electron clients can self-configure for cloud-link sign-in |

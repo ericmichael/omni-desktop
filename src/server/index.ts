@@ -98,8 +98,8 @@ function principalClaims(headers: IncomingHttpHeaders): { email?: string; displa
  *
  * Example for Tailscale: OMNI_TRUSTED_CIDRS=100.64.0.0/10,fd7a:115c:a1e0::/48
  *
- * Anything outside this allowlist must supply the token explicitly via
- * ?token= or OMNI_WS_TOKEN, since the token endpoint is what gates /ws auth.
+ * Anything outside this allowlist must obtain a signed token from
+ * /api/ws-token (which gates /ws auth) and pass it as ?token=.
  */
 function buildTokenAllowList(): { check: (addr: string) => boolean; describe: () => string } {
   const list = new BlockList();
@@ -158,6 +158,15 @@ const main = async () => {
 
   // WebSocket plugin
   await fastify.register(fastifyWebsocket);
+
+  // Liveness probe — unauthenticated, no I/O. App Service pings this
+  // (healthCheckPath=/healthz, excluded from EasyAuth in main.bicep). Kept a
+  // pure liveness check on purpose: a readiness probe that touched Postgres
+  // would flap the instance out of rotation on a transient DB blip. /api and
+  // /ws gate themselves.
+  fastify.get('/healthz', (_req, reply) => {
+    reply.send({ status: 'ok' });
+  });
 
   // Cloud-discovery endpoint — Electron clients fetch this after the user
   // enters the launcher URL, then run the AAD device-code flow against the

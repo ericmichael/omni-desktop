@@ -10,7 +10,6 @@
     "postgresAdminLogin": { "value": "omniadmin" },
     "postgresAdminPassword": { "value": "" },
     "runtimeTokenSecret": { "value": "" },
-    "wsToken": { "value": "" },
     "launcherPlanSku": { "value": "P0v3" },
     "agentCpu": { "value": "2.0" },
     "agentMemory": { "value": "4Gi" }
