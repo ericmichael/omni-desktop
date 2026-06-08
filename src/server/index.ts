@@ -402,12 +402,12 @@ const main = async () => {
       .send(readFileSync(sandboxHtmlPath));
   });
 
-  // Serve the built browser renderer as static files. In dev:server mode the
-  // browser bundle is rebuilt on save (`vite build --watch`), so saves
-  // propagate without a manual rebuild — but the page still has to be
-  // reloaded (no HMR via this path). For full HMR, hit Vite directly on its
-  // dev port (`http://<host>:5173`); Vite is configured to proxy /api, /ws,
-  // and /proxy back to this server.
+  // Serve the built browser renderer as static files (populated by
+  // `build:server`). In dev:server mode this static dir is intentionally NOT
+  // rebuilt on save — do dev against the Vite dev server on `http://<host>:5173`,
+  // which has HMR and proxies /api, /ws, and /proxy back here. The `:3001`
+  // static path then just serves whatever build:server last produced (or warns
+  // if absent), so it's only useful as a production-like smoke check.
   const staticDir = resolve(__dirname, '../browser');
   if (existsSync(staticDir)) {
     await fastify.register(fastifyStatic, {

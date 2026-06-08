@@ -47,6 +47,7 @@ STT_SAMPLE_RATE = 16000          # Parakeet expects 16 kHz mono
 STT_WINDOW_S = 20.0              # preferred window length
 STT_HARD_MAX_S = 40.0           # absolute cap per window (<< encoder ceiling)
 TTS_REPO = "KevinAHM/pocket-tts-onnx"
+TTS_OUTPUT_SR = 24000           # Pocket TTS (mimi) output rate; advertised at boot
 
 _stdout_lock = threading.Lock()
 
@@ -240,7 +241,24 @@ def _resolve_tts_assets(runtime_dir: Optional[str], bundle_dir: Optional[str],
 # Request handling
 # ---------------------------------------------------------------------------
 
-def handle(req: dict, stt: Optional[SttEngine], tts: Optional[TtsEngine]) -> None:
+class Lazy:
+    """Defers engine construction until first use, so an STT-only session never
+    pays TTS's memory + load cost (and vice-versa). Halving the peak resident
+    footprint is what keeps the sidecar inside a constrained host's RAM. The
+    protocol loop is single-threaded, so no locking is needed; a failed build
+    leaves ``_obj`` unset so the next request retries."""
+
+    def __init__(self, build):
+        self._build = build
+        self._obj: Any = None
+
+    def get(self) -> Any:
+        if self._obj is None:
+            self._obj = self._build()
+        return self._obj
+
+
+def handle(req: dict, stt: Optional[Lazy], tts: Optional[Lazy]) -> None:
     rid = req.get("id")
     op = req.get("op")
 
@@ -252,8 +270,9 @@ def handle(req: dict, stt: Optional[SttEngine], tts: Optional[TtsEngine]) -> Non
         if stt is None:
             emit({"id": rid, "ok": False, "error": "STT disabled"})
             return
+        engine = stt.get()
         audio = pcm16_b64_to_float32(req["audio"])
-        text = stt.transcribe(audio, int(req.get("sample_rate", STT_SAMPLE_RATE)))
+        text = engine.transcribe(audio, int(req.get("sample_rate", STT_SAMPLE_RATE)))
         emit({"id": rid, "ok": True, "text": text})
         return
 
@@ -266,7 +285,7 @@ def handle(req: dict, stt: Optional[SttEngine], tts: Optional[TtsEngine]) -> Non
             emit({"id": rid, "ok": False, "error": f"audio file not found: {src!r}"})
             return
         out = req.get("cache") or (os.path.splitext(src)[0] + ".emb.npy")
-        tts.encode_to(src, out)
+        tts.get().encode_to(src, out)
         emit({"id": rid, "ok": True, "embedding_file": out})
         return
 
@@ -278,12 +297,13 @@ def handle(req: dict, stt: Optional[SttEngine], tts: Optional[TtsEngine]) -> Non
         if not text:
             emit({"id": rid, "ok": True, "event": "done"})
             return
-        for chunk in tts.synth_stream(text, req.get("voice")):
+        engine = tts.get()
+        for chunk in engine.synth_stream(text, req.get("voice")):
             if chunk.size:
                 emit({"id": rid, "event": "audio",
                       "pcm": float32_to_pcm16_b64(chunk),
-                      "sample_rate": tts.sample_rate})
-        emit({"id": rid, "ok": True, "event": "done", "sample_rate": tts.sample_rate})
+                      "sample_rate": engine.sample_rate})
+        emit({"id": rid, "ok": True, "event": "done", "sample_rate": engine.sample_rate})
         return
 
     emit({"id": rid, "ok": False, "error": f"unknown op {op!r}"})
@@ -314,18 +334,24 @@ def main() -> None:
         log(f"wrote {out}")
         sys.exit(0)
 
-    stt = None if args.no_stt else SttEngine(args.stt_model)
-    tts = None if args.no_tts else TtsEngine(
-        args.language, args.precision, args.voice, args.runtime_dir, args.bundle_dir)
+    # Engines load lazily on first use (see Lazy) so a transcription-only session
+    # never constructs the TTS stack — that halved peak RAM is what keeps the
+    # sidecar from being OOM-killed on a constrained host.
+    stt = None if args.no_stt else Lazy(lambda: SttEngine(args.stt_model))
+    tts = None if args.no_tts else Lazy(lambda: TtsEngine(
+        args.language, args.precision, args.voice, args.runtime_dir, args.bundle_dir))
 
     if args.selftest:
-        ok = _selftest(stt, tts)
+        ok = _selftest(stt.get() if stt else None, tts.get() if tts else None)
         sys.exit(0 if ok else 1)
 
+    # Ready is emitted before any model loads — the process is up and can accept
+    # requests; the first stt/tts op pays its engine's load latency. sample_rate
+    # is the known Pocket output rate (each audio chunk also carries its own).
     emit({"event": "ready",
           "stt": stt is not None,
           "tts": tts is not None,
-          "sample_rate": tts.sample_rate if tts else None})
+          "sample_rate": TTS_OUTPUT_SR if tts is not None else None})
 
     for line in sys.stdin:
         line = line.strip()

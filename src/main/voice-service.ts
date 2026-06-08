@@ -73,7 +73,7 @@ export class VoiceService {
   private pending = new Map<string, Pending>();
   private seq = 0;
   private status: VoiceStatus = { state: 'idle', stt: false, tts: false, sampleRate: null };
-  private readyWaiters: Array<(s: VoiceStatus) => void> = [];
+  private readyWaiters: Array<{ resolve: () => void; reject: (err: Error) => void }> = [];
   private starting: Promise<void> | null = null;
 
   /** Default TTS voice (a predefined Pocket voice, or a wav path for cloning). */
@@ -115,11 +115,22 @@ return this.starting;
       child.on('error', (err) => this.fail(err.message));
 
       await new Promise<void>((resolve, reject) => {
-        const t = setTimeout(() => reject(new Error('voice sidecar did not become ready in 120s')), 120_000);
-        this.readyWaiters.push(() => {
-          clearTimeout(t);
-          resolve();
-        });
+        const waiter = {
+          resolve: () => {
+            clearTimeout(t);
+            resolve();
+          },
+          reject: (err: Error) => {
+            clearTimeout(t);
+            this.readyWaiters = this.readyWaiters.filter((w) => w !== waiter);
+            reject(err);
+          },
+        };
+        const t = setTimeout(
+          () => waiter.reject(new Error('voice sidecar did not become ready in 120s')),
+          120_000,
+        );
+        this.readyWaiters.push(waiter);
       });
     } catch (err) {
       this.fail(err instanceof Error ? err.message : String(err));
@@ -265,8 +276,7 @@ continue;
         tts: Boolean(msg.tts),
         sampleRate: typeof msg.sample_rate === 'number' ? msg.sample_rate : null,
       };
-      const waiters = this.readyWaiters.splice(0);
-      waiters.forEach((w) => w(this.status));
+      this.readyWaiters.splice(0).forEach((w) => w.resolve());
       return;
     }
     const id = msg.id != null ? String(msg.id) : null;
@@ -295,7 +305,10 @@ return;
     const err = new Error(`voice sidecar exited (code ${code})`);
     this.pending.forEach((p) => p.reject(err));
     this.pending.clear();
-    this.readyWaiters.splice(0).forEach((w) => w(this.status));
+    // Reject (not resolve) any in-flight start() so the caller sees the crash
+    // instead of a false "ready" — otherwise voice:start/api returns success
+    // and the next transcribe fails with an opaque "sidecar not running".
+    this.readyWaiters.splice(0).forEach((w) => w.reject(err));
     this.proc = null;
     if (this.status.state !== 'error') {
       this.status = { state: 'idle', stt: false, tts: false, sampleRate: null };
@@ -304,7 +317,7 @@ return;
 
   private fail(message: string): void {
     this.status = { state: 'error', stt: false, tts: false, sampleRate: null, error: message };
-    this.readyWaiters.splice(0).forEach((w) => w(this.status));
+    this.readyWaiters.splice(0).forEach((w) => w.reject(new Error(message)));
   }
 
   dispose(): void {
