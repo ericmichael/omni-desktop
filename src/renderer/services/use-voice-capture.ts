@@ -8,6 +8,7 @@
  */
 import { useCallback, useRef, useState } from 'react';
 
+import { persistedStoreApi } from '@/renderer/services/store';
 import { getVoiceClient } from '@/renderer/services/voice-client';
 import { voiceLevel } from '@/renderer/services/voice-recording';
 
@@ -24,7 +25,9 @@ function floatTo16LE(input: Float32Array): Uint8Array {
 }
 
 function resampleTo24k(input: Float32Array, inRate: number): Float32Array {
-  if (inRate === TARGET_RATE || input.length === 0) return input;
+  if (inRate === TARGET_RATE || input.length === 0) {
+    return input;
+  }
   const ratio = TARGET_RATE / inRate;
   const outLen = Math.round(input.length * ratio);
   const out = new Float32Array(outLen);
@@ -40,7 +43,9 @@ function resampleTo24k(input: Float32Array, inRate: number): Float32Array {
 
 function toBase64(bytes: Uint8Array): string {
   let bin = '';
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i] ?? 0);
+  for (let i = 0; i < bytes.length; i++) {
+    bin += String.fromCharCode(bytes[i] ?? 0);
+  }
   return btoa(bin);
 }
 
@@ -80,8 +85,15 @@ export function useVoiceCapture(): VoiceCapture {
 
   const start = useCallback(async () => {
     chunksRef.current = [];
+    const audioPrefs = persistedStoreApi.$atom.get().audioSettings;
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      audio: {
+        deviceId: audioPrefs.inputDeviceId ? { exact: audioPrefs.inputDeviceId } : undefined,
+        channelCount: 1,
+        echoCancellation: audioPrefs.echoCancellation,
+        noiseSuppression: audioPrefs.noiseSuppression,
+        autoGainControl: audioPrefs.autoGainControl,
+      },
     });
     streamRef.current = stream;
     const ctx = new (window.AudioContext ||
@@ -131,7 +143,9 @@ export function useVoiceCapture(): VoiceCapture {
     cleanup();
 
     const total = chunks.reduce((n, c) => n + c.length, 0);
-    if (!total) return '';
+    if (!total) {
+      return '';
+    }
     const merged = new Float32Array(total);
     let off = 0;
     for (const c of chunks) {
