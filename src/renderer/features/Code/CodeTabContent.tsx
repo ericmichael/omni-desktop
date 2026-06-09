@@ -5,7 +5,6 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { getArtifactsDir, getContainerArtifactsDir, profileRunsOnHost } from '@/lib/artifacts';
 import { buildSessionVariables } from '@/lib/client-tools';
-import { SessionStartupShell } from '@/renderer/common/SessionStartupShell';
 import { Button, Spinner } from '@/renderer/ds';
 import { SessionStatusBanner } from '@/renderer/features/Banner/SessionStatusBanner';
 import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
@@ -35,10 +34,25 @@ const useStyles = makeStyles({
   fullSizeRelative: { width: '100%', height: '100%', position: 'relative' },
   hidden: { display: 'none' },
   flexCenter: { width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  errorWrap: { maxWidth: '448px', textAlign: 'center', paddingLeft: tokens.spacingHorizontalL, paddingRight: tokens.spacingHorizontalL },
-  errorText: { fontSize: tokens.fontSizeBase400, fontWeight: tokens.fontWeightMedium, color: tokens.colorNeutralForeground1 },
+  errorWrap: {
+    maxWidth: '448px',
+    textAlign: 'center',
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+  },
+  errorText: {
+    fontSize: tokens.fontSizeBase400,
+    fontWeight: tokens.fontWeightMedium,
+    color: tokens.colorNeutralForeground1,
+  },
   errorRetry: { marginTop: tokens.spacingVerticalL },
-  flexColFullRelative: { display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative' },
+  flexColFullRelative: {
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    height: '100%',
+    position: 'relative',
+  },
   flex1Relative: { flex: '1 1 0', minHeight: 0, position: 'relative' },
   // In-place sandbox-switch scrim — dims the still-mounted agent column while
   // the sandbox is rebuilt; the conversation reappears intact when it clears.
@@ -65,7 +79,11 @@ const useStyles = makeStyles({
     maxWidth: '320px',
     textAlign: 'center',
   },
-  switchTitle: { fontSize: tokens.fontSizeBase400, fontWeight: tokens.fontWeightSemibold, color: tokens.colorNeutralForeground1 },
+  switchTitle: {
+    fontSize: tokens.fontSizeBase400,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
   switchHint: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 },
   spinnerPill: {
     display: 'inline-flex',
@@ -240,7 +258,20 @@ type CodeTabContentProps = {
 };
 
 export const CodeTabContent = memo(
-  ({ tab, isVisible, activeApp = 'chat', onActiveAppChange, uiMinimal, headerActionsTargetId, headerActionsCompact, previewUrl, onPreviewUrlChange, dockTargetId, isGlass, sidecarMode }: CodeTabContentProps) => {
+  ({
+    tab,
+    isVisible,
+    activeApp = 'chat',
+    onActiveAppChange,
+    uiMinimal,
+    headerActionsTargetId,
+    headerActionsCompact,
+    previewUrl,
+    onPreviewUrlChange,
+    dockTargetId,
+    isGlass,
+    sidecarMode,
+  }: CodeTabContentProps) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
     const project = useMemo(
@@ -252,7 +283,8 @@ export const CodeTabContent = memo(
     // lazily so the sandbox can start even when the user hasn't picked a
     // workspace.
     const projectSource = firstSource(project);
-    const linkedWorkspaceDir = tab.workspaceDir ?? (projectSource?.kind === 'local' ? projectSource.workspaceDir : null) ?? null;
+    const linkedWorkspaceDir =
+      tab.workspaceDir ?? (projectSource?.kind === 'local' ? projectSource.workspaceDir : null) ?? null;
     const [resolvedProjectDir, setResolvedProjectDir] = useState<string | null>(null);
     useEffect(() => {
       if (linkedWorkspaceDir || !tab.projectId) {
@@ -279,8 +311,7 @@ export const CodeTabContent = memo(
     // ``useStore``. The ``project?.sandboxProfile`` / ``store.defaultProfileName``
     // fallbacks below only kick in for tabs predating the migration that
     // somehow got loaded without a stored profileName (defensive).
-    const profileName =
-      tab.profileName ?? project?.sandboxProfile ?? store.defaultProfileName ?? 'host';
+    const profileName = tab.profileName ?? project?.sandboxProfile ?? store.defaultProfileName ?? 'host';
     const handleProfileChange = useCallback(
       (value: string) => {
         void codeApi.setTabProfile(tab.id, value);
@@ -296,10 +327,11 @@ export const CodeTabContent = memo(
       emitter.invoke('platform:is-enterprise').then(setIsEnterprise);
     }, []);
     const sandboxOptions = useMemo(
-      () => getAvailableProfileNames({ isEnterprise, available: store.availableSandboxProfiles }).map((name) => ({
-        value: name,
-        label: getProfileMenuLabel(name, machines),
-      })),
+      () =>
+        getAvailableProfileNames({ isEnterprise, available: store.availableSandboxProfiles }).map((name) => ({
+          value: name,
+          label: getProfileMenuLabel(name, machines),
+        })),
       [isEnterprise, store.availableSandboxProfiles, machines]
     );
 
@@ -335,12 +367,12 @@ export const CodeTabContent = memo(
     // which is exactly what we want to persist for the next start.
     useEffect(() => {
       if (sandboxStatus?.type !== 'running') {
-return;
-}
+        return;
+      }
       const next = sandboxStatus.data.containerId;
       if ((tab.containerId ?? undefined) === next) {
-return;
-}
+        return;
+      }
       void codeApi.setTabContainerId(tab.id, next);
     }, [sandboxStatus, tab.id, tab.containerId]);
 
@@ -367,9 +399,7 @@ return;
     const handleClientToolCall = useMemo(
       () =>
         buildClientToolHandler({
-          ...(tab.ticketId && tab.projectId
-            ? { ticketId: tab.ticketId as TicketId, projectId: tab.projectId }
-            : {}),
+          ...(tab.ticketId && tab.projectId ? { ticketId: tab.ticketId as TicketId, projectId: tab.projectId } : {}),
           tabId: tab.id,
         }),
       [tab.id, tab.ticketId, tab.projectId]
@@ -426,28 +456,19 @@ return;
     const onColumnMouseEnter = useCallback(() => $hoveredVoiceScope.set(tab.id), [tab.id]);
     const onColumnMouseLeave = useCallback(() => {
       if ($hoveredVoiceScope.get() === tab.id) {
-$hoveredVoiceScope.set(null);
-}
+        $hoveredVoiceScope.set(null);
+      }
     }, [tab.id]);
     const voiceVariables = useMemo(
-      () =>
-        localVoice
-          ? buildSessionVariables({ ...baseSessionArgs, voice: true, personaInstructions })
-          : undefined,
-      [baseSessionArgs, localVoice, personaInstructions],
+      () => (localVoice ? buildSessionVariables({ ...baseSessionArgs, voice: true, personaInstructions }) : undefined),
+      [baseSessionArgs, localVoice, personaInstructions]
     );
 
     // No project selected — show project picker
     if (!tab.projectId) {
       return (
         <div className={mergeClasses(styles.fullSize, !isVisible && styles.hidden)}>
-          <SessionStartupShell
-            eyebrow="Workspace Setup"
-            title="Choose a project"
-            description="Open an existing project in this session or create a new one to start working."
-          >
-            <CodeEmptyState tabId={tab.id} embedded />
-          </SessionStartupShell>
+          <CodeEmptyState tabId={tab.id} embedded />
         </div>
       );
     }
@@ -461,33 +482,33 @@ $hoveredVoiceScope.set(null);
         <SessionStatusBanner status={sandboxStatus} />
         {sandboxUrls ? (
           <VoiceScopeContext.Provider value={tab.id}>
-          <CodeRunningView
-            sandboxUrls={sandboxUrls}
-            sessionId={tab.sessionId}
-            onSessionChange={handleSessionChange}
-            variables={clientToolVariables}
-            voiceVariables={voiceVariables}
-            activeApp={activeApp}
-            onActiveAppChange={onActiveAppChange}
-            onReady={() => {}}
-            uiMinimal={uiMinimal}
-            headerActionsTargetId={headerActionsTargetId}
-            headerActionsCompact={headerActionsCompact}
-            sandboxLabel={sandboxLabel}
-            sandboxOptions={sandboxOptions}
-            currentSandboxProfile={profileName}
-            onSandboxChange={handleProfileChange}
-            onClientToolCall={handleClientToolCall}
-            previewUrl={previewUrl}
-            onPreviewUrlChange={onPreviewUrlChange}
-            dockTargetId={dockTargetId}
-            isGlass={isGlass}
-            tabId={tab.id}
-            agentWorkspaceDir={agentWorkspaceDir}
-            sidecarMode={sidecarMode}
-            ticketId={tab.ticketId as TicketId | undefined}
-            switching={sandboxStatus?.type === 'running' && !!sandboxStatus.data.switching}
-          />
+            <CodeRunningView
+              sandboxUrls={sandboxUrls}
+              sessionId={tab.sessionId}
+              onSessionChange={handleSessionChange}
+              variables={clientToolVariables}
+              voiceVariables={voiceVariables}
+              activeApp={activeApp}
+              onActiveAppChange={onActiveAppChange}
+              onReady={() => {}}
+              uiMinimal={uiMinimal}
+              headerActionsTargetId={headerActionsTargetId}
+              headerActionsCompact={headerActionsCompact}
+              sandboxLabel={sandboxLabel}
+              sandboxOptions={sandboxOptions}
+              currentSandboxProfile={profileName}
+              onSandboxChange={handleProfileChange}
+              onClientToolCall={handleClientToolCall}
+              previewUrl={previewUrl}
+              onPreviewUrlChange={onPreviewUrlChange}
+              dockTargetId={dockTargetId}
+              isGlass={isGlass}
+              tabId={tab.id}
+              agentWorkspaceDir={agentWorkspaceDir}
+              sidecarMode={sidecarMode}
+              ticketId={tab.ticketId as TicketId | undefined}
+              switching={sandboxStatus?.type === 'running' && !!sandboxStatus.data.switching}
+            />
           </VoiceScopeContext.Provider>
         ) : phase === 'error' ? (
           <CodeErrorView tabId={tab.id} retry={retry} />
@@ -517,9 +538,7 @@ $hoveredVoiceScope.set(null);
                   d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                 />
               </svg>
-              <span className={styles.spinnerText}>
-                {phase === 'idle' ? 'Restarting sandbox…' : 'Connecting…'}
-              </span>
+              <span className={styles.spinnerText}>{phase === 'idle' ? 'Restarting sandbox…' : 'Connecting…'}</span>
             </motion.div>
           </div>
         )}

@@ -24,7 +24,7 @@ import { ToastContainer } from '@/renderer/features/Toast/ToastContainer';
 import { VoiceHotkeys } from '@/renderer/features/Voice/VoiceHotkeys';
 import { SyncBar } from '@/renderer/features/WorkspaceSync/SyncBar';
 import { persistedStoreApi } from '@/renderer/services/store';
-import { applyCssVars, fluentThemes, isThemeDark } from '@/renderer/theme/fluent-themes';
+import { applyCssVars, applyPwaTheme, fluentThemes, isThemeDark } from '@/renderer/theme/fluent-themes';
 
 import { usePreloadTerminalFont } from './use-preload-terminal-font';
 
@@ -67,6 +67,7 @@ export const App = () => {
     // CSS vars are now injected from fluent-themes.ts (single source of truth).
     // data-theme attribute kept for omniagents-ui backward compat.
     applyCssVars(themeName);
+    applyPwaTheme(themeName);
     if (themeName === 'default') {
       document.documentElement.removeAttribute('data-theme');
     } else {

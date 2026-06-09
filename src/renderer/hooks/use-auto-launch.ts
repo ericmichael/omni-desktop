@@ -280,6 +280,13 @@ return;
       return;
     }
     const nextProfile = opts.profileNameOverride;
+    const status = $agentStatuses.get()[processIdRef.current];
+    const isLiveSession = status?.type === 'running' || status?.type === 'connecting';
+
+    if (!isLiveSession) {
+      return;
+    }
+
     let cancelled = false;
     void (async () => {
       if (nextProfile) {

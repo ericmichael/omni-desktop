@@ -1,5 +1,6 @@
 import {
   makeStyles,
+  mergeClasses,
   NavDrawer,
   NavDrawerBody,
   type NavDrawerProps,
@@ -53,6 +54,11 @@ const useStyles = makeStyles({
        to match the Settings sidebar and the rest of the app's page plane. */
     backgroundColor: tokens.colorNeutralBackground1,
   },
+  drawerOverlay: {
+    boxSizing: 'border-box',
+    paddingLeft: 'env(safe-area-inset-left, 0px)',
+    paddingRight: 'env(safe-area-inset-right, 0px)',
+  },
   header: {
     display: 'flex',
     alignItems: 'center',
@@ -61,11 +67,17 @@ const useStyles = makeStyles({
     paddingTop: tokens.spacingVerticalXXL,
     paddingBottom: tokens.spacingVerticalL,
   },
+  headerOverlay: {
+    paddingTop: `calc(${tokens.spacingVerticalXXL} + env(safe-area-inset-top, 0px))`,
+  },
   headerTitle: {
     flex: '1 1 0',
   },
   body: {
     flex: '1 1 0',
+  },
+  bodyOverlay: {
+    paddingBottom: `calc(${tokens.spacingVerticalL} + env(safe-area-inset-bottom, 0px))`,
   },
   sectionHeader: {
     display: 'flex',
@@ -212,7 +224,10 @@ export const TicketsSidebar = memo(({ onNavigate, type = 'inline', open = true, 
   }, []);
   const handleAddSource = useCallback((projectId: string) => setAddSourceProjectId(projectId), []);
   const handleCloseAddSource = useCallback(() => setAddSourceProjectId(null), []);
-  const handleOpenSource = useCallback((projectId: string, sourceId: string) => setSourceDetail({ projectId, sourceId }), []);
+  const handleOpenSource = useCallback(
+    (projectId: string, sourceId: string) => setSourceDetail({ projectId, sourceId }),
+    []
+  );
   const handleCloseSource = useCallback(() => setSourceDetail(null), []);
   const handleEditSource = useCallback(
     (projectId: string, sourceId: string) => setEditSource({ projectId, sourceId }),
@@ -309,11 +324,11 @@ export const TicketsSidebar = memo(({ onNavigate, type = 'inline', open = true, 
       open={open}
       onOpenChange={handleOpenChange}
       selectedValue={selectedValue}
-      className={styles.drawer}
+      className={mergeClasses(styles.drawer, type === 'overlay' && styles.drawerOverlay)}
       size="small"
     >
       {/* ── Header ── */}
-      <div className={styles.header}>
+      <div className={mergeClasses(styles.header, type === 'overlay' && styles.headerOverlay)}>
         <Subtitle2 className={styles.headerTitle}>Projects</Subtitle2>
         <TeamSwitcher />
         <IconButton aria-label="New project" icon={<Add20Regular />} size="sm" onClick={handleOpenForm} />
@@ -322,7 +337,7 @@ export const TicketsSidebar = memo(({ onNavigate, type = 'inline', open = true, 
         )}
       </div>
 
-      <NavDrawerBody className={styles.body}>
+      <NavDrawerBody className={mergeClasses(styles.body, type === 'overlay' && styles.bodyOverlay)}>
         {/* ── Pinned: Home + Inbox as tree leaves so they share exact
               geometry with the projects tree below. ── */}
         <Tree aria-label="Pinned" className={styles.pinnedTree}>
@@ -377,12 +392,7 @@ export const TicketsSidebar = memo(({ onNavigate, type = 'inline', open = true, 
         />
       )}
       {editSourceProject && editSourceSource && (
-        <EditSourceDialog
-          open
-          onClose={handleCloseEditSource}
-          project={editSourceProject}
-          source={editSourceSource}
-        />
+        <EditSourceDialog open onClose={handleCloseEditSource} project={editSourceProject} source={editSourceSource} />
       )}
       <AnimatedDialog
         open={milestoneFormProjectId !== null || editingMilestone !== null}
