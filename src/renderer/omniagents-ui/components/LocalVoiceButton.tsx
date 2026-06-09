@@ -50,7 +50,9 @@ return;
     // talks. The speak tool is already registered via the localVoiceEnabled
     // setting, so nothing else to toggle here.
     void getVoiceClient().start().catch(() => {});
-    await cap.start().catch(() => {});
+    await cap.start().catch((err) => {
+      console.error('[voice] failed to start local capture', err);
+    });
     if (pendingStopRef.current) {
       pendingStopRef.current = false;
       await stopAndSend();
@@ -93,14 +95,14 @@ return;
     });
   }, [scope]);
 
-  const label = cap.busy ? 'Transcribing…' : cap.recording ? 'Stop and send' : 'Voice input';
+  const label = cap.error ?? (cap.busy ? 'Transcribing…' : cap.recording ? 'Stop and send' : 'Voice input');
 
   return (
     <button
       type="button"
       onClick={onClick}
       className={`flex h-8 w-8 items-center justify-center rounded-2xl ${
-        cap.recording ? 'bg-destructive/15' : 'hover:bg-accent/50'
+        cap.error ? 'bg-destructive/15' : cap.recording ? 'bg-destructive/15' : 'hover:bg-accent/50'
       }`}
       aria-label={label}
       title={label}
@@ -110,7 +112,7 @@ return;
       ) : cap.recording ? (
         <SquareIcon size={20} className="text-destructive" />
       ) : (
-        <MicIcon size={20} className="text-foreground" />
+        <MicIcon size={20} className={cap.error ? 'text-destructive' : 'text-foreground'} />
       )}
     </button>
   );

@@ -68,6 +68,21 @@ type DeviceOption = { deviceId: string; label: string };
 
 const NONE_OPTION = '__default__';
 
+function isStandalonePwa(): boolean {
+  return window.matchMedia('(display-mode: standalone)').matches ||
+    (navigator as Navigator & { standalone?: boolean }).standalone === true;
+}
+
+function microphoneUnavailableMessage(): string {
+  if (!window.isSecureContext) {
+    return 'Microphone access requires HTTPS or localhost on this device.';
+  }
+  if (isStandalonePwa()) {
+    return 'Microphone access is not available in this installed iPhone app. Open Omni in Safari to use voice input.';
+  }
+  return 'Microphone access is not available in this browser.';
+}
+
 function deviceLabel(d: MediaDeviceInfo, fallbackIndex: number): string {
   if (d.label) {
     return d.label;
@@ -92,10 +107,11 @@ export const SettingsModalAudioTab = memo(() => {
 
   const refresh = useCallback(async () => {
     if (!navigator.mediaDevices?.enumerateDevices) {
-      setError('Audio device enumeration is not supported in this environment.');
+      setError(microphoneUnavailableMessage());
       return;
     }
     try {
+      setError(null);
       const devices = await navigator.mediaDevices.enumerateDevices();
       let inIdx = 0;
       let outIdx = 0;
@@ -119,7 +135,8 @@ export const SettingsModalAudioTab = memo(() => {
       setOutputs(outs);
       setNeedsPermission(anyLabelMissing && ins.length > 0);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to enumerate audio devices');
+      setNeedsPermission(true);
+      setError(e instanceof Error ? e.message : 'Audio device enumeration requires microphone permission.');
     }
   }, []);
 
@@ -138,6 +155,10 @@ export const SettingsModalAudioTab = memo(() => {
   }, [refresh]);
 
   const grantPermission = useCallback(async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError(microphoneUnavailableMessage());
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach((t) => t.stop());
@@ -282,7 +303,15 @@ function useInputLevelMeter(deviceId: string | null) {
   const start = useCallback(async () => {
     setError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      const mediaDevices = navigator.mediaDevices;
+      if (!mediaDevices?.getUserMedia) {
+        throw new Error(microphoneUnavailableMessage());
+      }
+      const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctx) {
+        throw new Error('Audio capture is not available in this browser.');
+      }
+      const stream = await mediaDevices.getUserMedia({
         audio: {
           deviceId: deviceId ? { exact: deviceId } : undefined,
           echoCancellation: false,
@@ -291,8 +320,8 @@ function useInputLevelMeter(deviceId: string | null) {
         } as MediaTrackConstraints,
       });
       streamRef.current = stream;
-      const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const ctx = new Ctx();
+      await ctx.resume().catch(() => {});
       ctxRef.current = ctx;
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
