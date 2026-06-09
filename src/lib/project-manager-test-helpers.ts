@@ -312,7 +312,7 @@ export const seedStore = (args: SeedArgs = {}): IStore => {
         id: t.id,
         projectId,
         title: t.title ?? `Ticket ${t.id}`,
-        description: '',
+        description: t.description ?? '',
         priority: t.priority ?? 'medium',
         columnId: t.columnId ?? pipeline.columns[0]!.id,
         blockedBy: t.blockedBy ?? [],

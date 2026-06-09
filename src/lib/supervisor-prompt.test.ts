@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildSupervisorPrompt } from '@/main/supervisor-prompt';
-import type { Pipeline, Project, Ticket } from '@/shared/types';
+import {
+  buildAutopilotAdditionalInstructions,
+  buildAutopilotGoalText,
+  buildSupervisorPrompt,
+} from '@/main/supervisor-prompt';
+import type { Column, Pipeline, Project, Ticket } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const makePipeline = (columns: { id: string; label: string }[]): Pipeline => ({
+const makePipeline = (columns: Column[]): Pipeline => ({
   columns: columns.map((c) => ({
     ...c,
   })),
@@ -40,6 +44,34 @@ const PIPELINE = makePipeline([
   { id: 'col-backlog', label: 'Backlog' },
   { id: 'col-spec', label: 'Spec' },
   { id: 'col-impl', label: 'Implementation' },
+  { id: 'col-done', label: 'Done' },
+]);
+
+const WORKFLOW_PIPELINE = makePipeline([
+  { id: 'col-backlog', label: 'Backlog' },
+  {
+    id: 'col-impl',
+    label: 'Implementation',
+    maxConcurrent: 2,
+    workflow: {
+      purpose: 'Turn the approved plan into a tested product change.',
+      entryCriteria: ['Spec is approved by a human reviewer', 'Dependencies are unblocked'],
+      definitionOfDone: ['Feature flag persists across restarts', 'Targeted Vitest coverage passes'],
+      agentInstructions: 'Keep implementation minimal and preserve public APIs.',
+      recommendedSkills: ['bugfix', 'typescript'],
+      allowedTransitions: ['col-review'],
+      autoDispatch: true,
+    },
+  },
+  {
+    id: 'col-review',
+    label: 'Review',
+    gate: true,
+    workflow: {
+      purpose: 'Human review gate.',
+      definitionOfDone: ['Reviewer has inspected the full PR diff'],
+    },
+  },
   { id: 'col-done', label: 'Done' },
 ]);
 
@@ -141,5 +173,60 @@ describe('buildSupervisorPrompt', () => {
 
   it('omits the artifacts section when no artifactsDir is provided', () => {
     expect(buildSupervisorPrompt(makeTicket(), makeProject(), PIPELINE)).not.toContain('## Output for the user');
+  });
+});
+
+describe('buildAutopilotGoalText', () => {
+  it('includes ticket details and the current column workflow contract', () => {
+    const goalText = buildAutopilotGoalText(makeTicket(), makeProject(), WORKFLOW_PIPELINE);
+
+    expect(goalText).toContain('Title: Add dark mode');
+    expect(goalText).toContain('Implement dark mode across the entire app.');
+    expect(goalText).toContain('Priority: high');
+    expect(goalText).toContain('Current Column: Implementation');
+    expect(goalText).toContain('Turn the approved plan into a tested product change.');
+    expect(goalText).toContain('Spec is approved by a human reviewer');
+    expect(goalText).toContain('Feature flag persists across restarts');
+    expect(goalText).toContain('Keep implementation minimal and preserve public APIs.');
+    expect(goalText).toContain('bugfix');
+    expect(goalText).toContain('col-review');
+    expect(goalText).toMatch(/auto.?dispatch/i);
+    expect(goalText).not.toContain('Reviewer has inspected the full PR diff');
+  });
+
+  it('preserves optional supervisor context in the goal text', () => {
+    const goalText = buildAutopilotGoalText(makeTicket(), makeProject(), WORKFLOW_PIPELINE, {
+      projectBrief: '# My Project\nBuilding a widget system.',
+      blockerTitles: ['Set up database'],
+      recentComments: [{ author: 'human', content: 'Please keep the API stable' }],
+    });
+
+    expect(goalText).toContain('Building a widget system');
+    expect(goalText).toContain('Set up database');
+    expect(goalText).toContain('[human]: Please keep the API stable');
+  });
+});
+
+describe('buildAutopilotAdditionalInstructions', () => {
+  it('contains durable tool, artifact, and gate rules', () => {
+    const additionalInstructions = buildAutopilotAdditionalInstructions(makeTicket(), makeProject(), WORKFLOW_PIPELINE, {
+      artifactsDir: '/workspace/.omni-artifacts/ticket-42',
+    });
+
+    expect(additionalInstructions).toContain('move_ticket');
+    expect(additionalInstructions).toContain('spawn_worker');
+    expect(additionalInstructions).toContain('/workspace/.omni-artifacts/ticket-42');
+    expect(additionalInstructions).toContain('/workspace/.omni-artifacts/ticket-42/pr/PR_TITLE.md');
+    expect(additionalInstructions).toContain('/workspace/.omni-artifacts/ticket-42/pr/PR_BODY.md');
+    expect(additionalInstructions).toMatch(/gate/i);
+  });
+
+  it('does not duplicate ticket-specific goal details or the full current column DoD', () => {
+    const additionalInstructions = buildAutopilotAdditionalInstructions(makeTicket(), makeProject(), WORKFLOW_PIPELINE);
+
+    expect(additionalInstructions).not.toContain('Title: Add dark mode');
+    expect(additionalInstructions).not.toContain('Implement dark mode across the entire app.');
+    expect(additionalInstructions).not.toContain('Feature flag persists across restarts');
+    expect(additionalInstructions).not.toContain('Targeted Vitest coverage passes');
   });
 });
