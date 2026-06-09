@@ -18,6 +18,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 let dir: string;
 let db: ReturnType<typeof openDatabase>;
+let repo: SqliteProjectsRepo;
 let client: Client;
 
 /** Call a tool and parse its single JSON text payload. */
@@ -33,7 +34,7 @@ async function call(name: string, args: Record<string, unknown> = {}): Promise<a
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'omni-mcp-'));
   db = openDatabase(join(dir, 'projects.db'));
-  const repo = new SqliteProjectsRepo(new ProjectsRepo(db));
+  repo = new SqliteProjectsRepo(new ProjectsRepo(db));
   const server = createServer(repo);
 
   const [clientT, serverT] = InMemoryTransport.createLinkedPair();
@@ -95,6 +96,26 @@ describe('omni-projects MCP tools (async IProjectsRepo, SQLite)', () => {
 
     const filteredOut = await call('list_tickets', { project_id: projectId, priority: 'low' });
     expect(filteredOut.tickets.map((t: any) => t.id)).not.toContain(ticketId);
+  });
+
+  it('returns persisted column workflow edits from get_pipeline', async () => {
+    const editedDefinitionOfDone = 'Edited Implementation DoD is exposed through get_pipeline';
+    const columns = await repo.listColumns(projectId);
+    const implementation = columns.find((column) => column.label === 'Implementation');
+    expect(implementation).toBeTruthy();
+
+    const workflow = JSON.parse(implementation!.workflow ?? '{}') as { definitionOfDone?: string[] };
+    await repo.upsertColumn({
+      ...implementation!,
+      workflow: JSON.stringify({
+        ...workflow,
+        definitionOfDone: [editedDefinitionOfDone],
+      }),
+    });
+
+    const pipeline = await call('get_pipeline', { project_id: projectId });
+    const implementationFromTool = pipeline.columns.find((column: any) => column.label === 'Implementation');
+    expect(implementationFromTool.workflow.definitionOfDone).toEqual([editedDefinitionOfDone]);
   });
 
   it('updates a ticket and tracks blockers', async () => {
