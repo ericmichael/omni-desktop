@@ -14,6 +14,7 @@ import {
   MenuList,
   MenuPopover,
   MenuTrigger,
+  mergeClasses,
   NavDrawer,
   NavDrawerBody,
   NavDrawerHeader,
@@ -45,9 +46,7 @@ import type { SessionItem } from './SessionList';
 // `display: none` at every viewport size.
 function useIsDesktop(breakpointPx = 768): boolean {
   const [isDesktop, setIsDesktop] = useState(() =>
-    typeof window !== 'undefined'
-      ? window.matchMedia(`(min-width: ${breakpointPx}px)`).matches
-      : true
+    typeof window !== 'undefined' ? window.matchMedia(`(min-width: ${breakpointPx}px)`).matches : true
   );
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -73,9 +72,10 @@ const BUCKET_LABELS: Record<Bucket, string> = {
 const BUCKET_ORDER: Bucket[] = ['today', 'yesterday', 'previous7', 'previous30', 'older'];
 
 function sessionTimestamp(s: SessionItem): number {
-  const raw = (s as { last_message?: { timestamp?: string }; created_at?: string }).last_message?.timestamp
-    ?? (s as { created_at?: string }).created_at
-    ?? '';
+  const raw =
+    (s as { last_message?: { timestamp?: string }; created_at?: string }).last_message?.timestamp ??
+    (s as { created_at?: string }).created_at ??
+    '';
   const n = Date.parse(raw);
   return Number.isNaN(n) ? 0 : n;
 }
@@ -115,6 +115,11 @@ const useStyles = makeStyles({
     maxWidth: '288px',
     backgroundColor: tokens.colorNeutralBackground1,
   },
+  drawerOverlay: {
+    boxSizing: 'border-box',
+    paddingLeft: 'env(safe-area-inset-left, 0px)',
+    paddingRight: 'env(safe-area-inset-right, 0px)',
+  },
   /* 24px top to match the Settings sidebar and app nav rail. */
   headerStack: {
     display: 'flex',
@@ -122,6 +127,9 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalS,
     paddingTop: tokens.spacingVerticalXXL,
     paddingBottom: tokens.spacingVerticalL,
+  },
+  headerStackOverlay: {
+    paddingTop: `calc(${tokens.spacingVerticalXXL} + env(safe-area-inset-top, 0px))`,
   },
   headerRow: {
     display: 'flex',
@@ -196,6 +204,9 @@ const useStyles = makeStyles({
     paddingTop: tokens.spacingVerticalM,
     paddingBottom: tokens.spacingVerticalM,
   },
+  bodyOverlay: {
+    paddingBottom: `calc(${tokens.spacingVerticalL} + env(safe-area-inset-bottom, 0px))`,
+  },
 });
 
 export function Sidebar({
@@ -220,10 +231,7 @@ export function Sidebar({
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const isDesktop = useIsDesktop();
 
-  const nonEmpty = useMemo(
-    () => sessions.filter((s) => s.message_count > 0),
-    [sessions],
-  );
+  const nonEmpty = useMemo(() => sessions.filter((s) => s.message_count > 0), [sessions]);
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -271,16 +279,13 @@ export function Sidebar({
   const renderSessionRow = (s: SessionItem) => {
     const title = generateSessionTitle(s);
     const timestamp = formatRelativeTime(
-      (s as { last_message?: { timestamp?: string } }).last_message?.timestamp ?? (s as { created_at?: string }).created_at,
+      (s as { last_message?: { timestamp?: string } }).last_message?.timestamp ??
+        (s as { created_at?: string }).created_at
     );
 
     return (
       <div key={s.id} className={styles.sessionRow}>
-        <NavItem
-          className={styles.sessionNavItem}
-          value={s.id}
-          onClick={() => handleSelect(s.id)}
-        >
+        <NavItem className={styles.sessionNavItem} value={s.id} onClick={() => handleSelect(s.id)}>
           <div className={styles.sessionLabel}>
             <span className={styles.sessionTitle}>{title}</span>
             <Caption1 className={styles.sessionMeta}>
@@ -293,19 +298,11 @@ export function Sidebar({
           <div data-reveal="kebab" className={styles.kebabWrap}>
             <Menu>
               <MenuTrigger disableButtonEnhancement>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<MoreHorizontal20Regular />}
-                  aria-label="More actions"
-                />
+                <Button appearance="subtle" size="small" icon={<MoreHorizontal20Regular />} aria-label="More actions" />
               </MenuTrigger>
               <MenuPopover>
                 <MenuList>
-                  <MenuItem
-                    icon={<Delete20Regular />}
-                    onClick={() => setDeleteTargetId(s.id)}
-                  >
+                  <MenuItem icon={<Delete20Regular />} onClick={() => setDeleteTargetId(s.id)}>
                     Delete conversation
                   </MenuItem>
                 </MenuList>
@@ -323,7 +320,7 @@ export function Sidebar({
   return (
     <>
       <NavDrawer
-        className={styles.drawer}
+        className={mergeClasses(styles.drawer, !isDesktop && styles.drawerOverlay)}
         type={isDesktop ? 'inline' : 'overlay'}
         open={open}
         onOpenChange={(_e, d) => {
@@ -336,7 +333,7 @@ export function Sidebar({
         separator
       >
         <NavDrawerHeader>
-          <div className={styles.headerStack}>
+          <div className={mergeClasses(styles.headerStack, !isDesktop && styles.headerStackOverlay)}>
             <div className={styles.headerRow}>
               <Subtitle2>Conversations</Subtitle2>
               <div className={styles.headerActions}>
@@ -368,7 +365,7 @@ export function Sidebar({
           </div>
         </NavDrawerHeader>
 
-        <NavDrawerBody>
+        <NavDrawerBody className={!isDesktop ? styles.bodyOverlay : undefined}>
           {!hasAnySession ? (
             <div className={styles.emptyState}>
               <Chat48Regular className={styles.emptyIcon} />
@@ -403,9 +400,7 @@ export function Sidebar({
         <DialogSurface>
           <DialogBody>
             <DialogTitle>Delete conversation?</DialogTitle>
-            <DialogContent>
-              This conversation will be permanently deleted. You can&apos;t undo this.
-            </DialogContent>
+            <DialogContent>This conversation will be permanently deleted. You can&apos;t undo this.</DialogContent>
             <DialogActions>
               <DialogTrigger disableButtonEnhancement>
                 <Button appearance="secondary">Cancel</Button>
