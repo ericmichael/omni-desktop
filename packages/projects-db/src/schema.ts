@@ -259,7 +259,10 @@ ALTER TABLE tickets ADD COLUMN assignee TEXT;
 `,
   },
   {
-    version: 10,
+    // Version 10 was previously used by a WIP iteration of this branch, so DBs
+    // that ran that build already recorded version 10. The column-adding SQL
+    // below ships as version 11 to guarantee it runs on those DBs too.
+    version: 11,
     sql: `
 -- DB-backed workflow metadata for pipeline columns. Existing columns keep
 -- working; runtime mapping supplies safe defaults when these are NULL.
