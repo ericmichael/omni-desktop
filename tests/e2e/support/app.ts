@@ -69,6 +69,12 @@ export async function openAddSourceDialog(page: Page): Promise<void> {
   await expect(page.getByRole('dialog').filter({ hasText: 'Add source' })).toBeVisible();
 }
 
+export async function openPipelineSettings(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Project actions' }).last().click();
+  await page.getByRole('menuitem', { name: 'Pipeline settings' }).click();
+  await expect(page.getByRole('dialog', { name: 'Pipeline Settings' })).toBeVisible();
+}
+
 export async function addGitSource(page: Page, repoUrl: string, mountName: string): Promise<void> {
   await openAddSourceDialog(page);
   await page.getByRole('combobox', { name: 'Source type' }).selectOption('url');

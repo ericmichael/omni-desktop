@@ -624,7 +624,7 @@ describe('SupervisorOrchestrator integration', () => {
               label: 'In Progress',
               workflow: {
                 purpose: 'Implement the accepted ticket plan.',
-                definitionOfDone: ['Regression test demonstrates prompt channel separation'],
+                definitionOfDone: ['Edited Implementation DoD reaches the agent goal text'],
                 agentInstructions: 'Keep the launcher workflow source of truth in the database.',
               },
             },
@@ -652,7 +652,9 @@ describe('SupervisorOrchestrator integration', () => {
       expect(startGoalArg.prompt).toContain('Title: Split autopilot prompt channels');
       expect(startGoalArg.prompt).toContain('Send the ticket goal separately from durable runtime instructions.');
       expect(startGoalArg.prompt).toContain('Implement the accepted ticket plan.');
-      expect(startGoalArg.prompt).toContain('Regression test demonstrates prompt channel separation');
+      expect(startGoalArg.prompt).toContain('Edited Implementation DoD reaches the agent goal text');
+      expect(startGoalArg.prompt).toContain('move the ticket to `Review`');
+      expect(startGoalArg.prompt).toContain('human gate; move there and stop');
 
       const additionalInstructions = startGoalArg.runOverrides?.additionalInstructions;
       expect(additionalInstructions).toEqual(expect.any(String));
@@ -660,7 +662,7 @@ describe('SupervisorOrchestrator integration', () => {
       expect(additionalInstructions).toContain('spawn_worker');
       expect(additionalInstructions).not.toContain('Title: Split autopilot prompt channels');
       expect(additionalInstructions).not.toContain('Send the ticket goal separately from durable runtime instructions.');
-      expect(additionalInstructions).not.toContain('Regression test demonstrates prompt channel separation');
+      expect(additionalInstructions).not.toContain('Edited Implementation DoD reaches the agent goal text');
       expect(additionalInstructions).not.toBe(startGoalArg.prompt);
     });
   });

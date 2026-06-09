@@ -1,4 +1,4 @@
-import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { Add20Regular, ArrowDown20Regular, ArrowUp20Regular, Delete20Filled } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
@@ -271,6 +271,7 @@ const ColumnEditor = memo(
         <div className={styles.fieldColumn}>
           <label className={styles.fieldLabel}>Definition of done</label>
           <Textarea
+            aria-label={`Definition of done for ${column.label}`}
             value={linesToText(column.workflow?.definitionOfDone)}
             onChange={handleDefinitionOfDoneChange}
             placeholder="One checklist item per line"
@@ -280,6 +281,7 @@ const ColumnEditor = memo(
         <div className={styles.fieldColumn}>
           <label className={styles.fieldLabel}>Agent instructions</label>
           <Textarea
+            aria-label={`Agent instructions for ${column.label}`}
             value={column.workflow?.agentInstructions ?? ''}
             onChange={handleAgentInstructionsChange}
             placeholder="Column-specific instructions for agents"
