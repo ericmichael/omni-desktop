@@ -48,6 +48,7 @@ const useStyles = makeStyles({
     borderTopWidth: '1px',
     borderTopStyle: 'solid',
     borderTopColor: tokens.colorNeutralStroke1,
+    boxSizing: 'border-box',
     paddingBottom: 'env(safe-area-inset-bottom, 0px)',
     '@media (min-width: 640px)': {
       flexDirection: 'column',
@@ -170,7 +171,7 @@ const useStyles = makeStyles({
   /* ── Active indicator bar ── */
   indicator: {
     position: 'absolute',
-    bottom: '0',
+    bottom: 'env(safe-area-inset-bottom, 0px)',
     left: '25%',
     right: '25%',
     height: '3px',

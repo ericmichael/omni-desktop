@@ -35,6 +35,9 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
     boxShadow: `0 1px 12px rgba(0,0,0,0.10), 0 0 0 1px ${tokens.colorNeutralStroke1}`,
     flexShrink: 0,
+    '@media (max-width: 639px)': {
+      paddingBottom: `calc(5px + env(safe-area-inset-bottom, 0px))`,
+    },
   },
   dockGlass: {
     backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 18%, transparent)`,

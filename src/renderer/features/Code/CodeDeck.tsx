@@ -525,6 +525,7 @@ const useStyles = makeStyles({
     ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
     backgroundColor: tokens.colorNeutralBackground2,
     overflowX: 'auto',
+    paddingTop: 'env(safe-area-inset-top, 0px)',
     [`@media (min-width: ${SNAP_SCROLL_WIDTH + 1}px)`]: { display: 'none' },
   },
   mobileTabBarInner: {

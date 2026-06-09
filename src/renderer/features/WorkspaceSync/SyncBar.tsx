@@ -23,6 +23,7 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: '10px',
     height: '32px',
+    paddingBottom: 'env(safe-area-inset-bottom, 0px)',
     paddingLeft: '12px',
     paddingRight: '12px',
     backgroundColor: tokens.colorNeutralBackground1,
@@ -31,6 +32,7 @@ const useStyles = makeStyles({
     borderTopColor: tokens.colorNeutralStroke2,
     fontSize: '12px',
     color: tokens.colorNeutralForeground2,
+    boxSizing: 'content-box',
     '@media (min-width: 640px)': {
       left: '78px', // sidebar width
     },
@@ -82,8 +84,8 @@ const useStyles = makeStyles({
 
 function formatEta(seconds: number): string {
   if (seconds < 60) {
-return `${seconds}s left`;
-}
+    return `${seconds}s left`;
+  }
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
   return secs > 0 ? `${mins}m ${secs}s left` : `${mins}m left`;
@@ -91,11 +93,11 @@ return `${seconds}s left`;
 
 function formatRate(bytesPerSecond: number): string {
   if (bytesPerSecond < 1024) {
-return `${Math.round(bytesPerSecond)} B/s`;
-}
+    return `${Math.round(bytesPerSecond)} B/s`;
+  }
   if (bytesPerSecond < 1024 * 1024) {
-return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`;
-}
+    return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`;
+  }
   return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`;
 }
 
@@ -104,8 +106,8 @@ function useAggregateStatus(statuses: Record<string, WorkspaceSyncStatus>) {
   return useMemo(() => {
     const entries = Object.values(statuses);
     if (entries.length === 0) {
-return null;
-}
+      return null;
+    }
 
     // Find the most "active" status
     const error = entries.find((s) => s.state === 'error');
@@ -130,8 +132,7 @@ return null;
     if (active?.progress) {
       const p = active.progress;
       const pct = p.totalFiles > 0 ? p.completedFiles / p.totalFiles : 0;
-      const phaseLabel =
-        p.phase === 'uploading' ? 'Uploading' : p.phase === 'downloading' ? 'Downloading' : 'Syncing';
+      const phaseLabel = p.phase === 'uploading' ? 'Uploading' : p.phase === 'downloading' ? 'Downloading' : 'Syncing';
       return {
         type: 'progress' as const,
         message: `${phaseLabel} ${p.completedFiles} of ${p.totalFiles} files`,
@@ -172,8 +173,8 @@ export const SyncBar = memo(() => {
   const agg = useAggregateStatus(statuses);
 
   if (!agg) {
-return null;
-}
+    return null;
+  }
 
   const icon =
     agg.type === 'error' ? (
@@ -203,12 +204,7 @@ return null;
 
       {agg.type === 'progress' && agg.progress && (
         <>
-          <ProgressBar
-            className={styles.progress}
-            value={agg.progress.percent}
-            thickness="medium"
-            shape="rounded"
-          />
+          <ProgressBar className={styles.progress} value={agg.progress.percent} thickness="medium" shape="rounded" />
           {agg.progress.rate > 0 && <span className={styles.eta}>{formatRate(agg.progress.rate)}</span>}
           {agg.progress.eta != null && agg.progress.eta > 0 && (
             <span className={styles.eta}>{formatEta(agg.progress.eta)}</span>
