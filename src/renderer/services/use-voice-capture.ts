@@ -49,9 +49,15 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
+function isStandalonePwa(): boolean {
+  return window.matchMedia('(display-mode: standalone)').matches ||
+    (navigator as Navigator & { standalone?: boolean }).standalone === true;
+}
+
 export interface VoiceCapture {
   recording: boolean;
   busy: boolean;
+  error: string | null;
   /** Start mic capture. */
   start: () => Promise<void>;
   /** Stop capture, transcribe, and resolve with the recognized text. */
@@ -63,6 +69,7 @@ export interface VoiceCapture {
 export function useVoiceCapture(): VoiceCapture {
   const [recording, setRecording] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
   const nodeRef = useRef<AudioWorkletNode | ScriptProcessorNode | null>(null);
@@ -84,9 +91,30 @@ export function useVoiceCapture(): VoiceCapture {
   }, []);
 
   const start = useCallback(async () => {
+    setError(null);
     chunksRef.current = [];
     const audioPrefs = persistedStoreApi.$atom.get().audioSettings;
-    const stream = await navigator.mediaDevices.getUserMedia({
+    const mediaDevices = navigator.mediaDevices;
+    if (!window.isSecureContext) {
+      const message = 'Voice input requires HTTPS or localhost on this device.';
+      setError(message);
+      throw new Error(message);
+    }
+    if (!mediaDevices?.getUserMedia) {
+      const message = isStandalonePwa()
+        ? 'Microphone access is not available in this installed iPhone app. Open Omni in Safari to use voice input.'
+        : 'Microphone access is not available in this browser.';
+      setError(message);
+      throw new Error(message);
+    }
+    const AudioContextCtor = window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) {
+      const message = 'Audio capture is not available in this browser.';
+      setError(message);
+      throw new Error(message);
+    }
+    const stream = await mediaDevices.getUserMedia({
       audio: {
         deviceId: audioPrefs.inputDeviceId ? { exact: audioPrefs.inputDeviceId } : undefined,
         channelCount: 1,
@@ -96,8 +124,8 @@ export function useVoiceCapture(): VoiceCapture {
       },
     });
     streamRef.current = stream;
-    const ctx = new (window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const ctx = new AudioContextCtor();
+    await ctx.resume().catch(() => {});
     ctxRef.current = ctx;
     const source = ctx.createMediaStreamSource(stream);
 
@@ -136,6 +164,7 @@ export function useVoiceCapture(): VoiceCapture {
   }, []);
 
   const stop = useCallback(async (): Promise<string> => {
+    setError(null);
     setRecording(false);
     const inRate = ctxRef.current?.sampleRate ?? 48000;
     const chunks = chunksRef.current;
@@ -162,10 +191,11 @@ export function useVoiceCapture(): VoiceCapture {
   }, [cleanup]);
 
   const cancel = useCallback(() => {
+    setError(null);
     setRecording(false);
     chunksRef.current = [];
     cleanup(); // stops stream + analyser + meter loop and resets the level
   }, [cleanup]);
 
-  return { recording, busy, start, stop, cancel };
+  return { recording, busy, error, start, stop, cancel };
 }
