@@ -19,12 +19,18 @@ import { memo, useCallback } from 'react';
 import { Menu, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@/renderer/ds';
 import { $machines } from '@/renderer/services/machines';
 
-import {
-  type ProfileListContext,
-  getAvailableProfileNames,
-  getProfileMenuLabel,
-  isLocalProfile,
-} from './profile-list';
+import { getAvailableProfileNames, getProfileMenuLabel, isLocalProfile, type ProfileListContext } from './profile-list';
+
+const COMPACT_PROFILE_LABELS: Record<string, string> = {
+  host: 'Host',
+  devbox: 'Devbox',
+  platform: 'Platform',
+  aci: 'Cloud',
+  'aci-desktop': 'Desktop',
+};
+
+const getCompactProfileLabel = (name: string): string =>
+  COMPACT_PROFILE_LABELS[name] ?? name.replace(/^local:/, 'Local ');
 
 export type SandboxPickerProps = {
   /** Currently-chosen profile name. */
@@ -35,9 +41,11 @@ export type SandboxPickerProps = {
   context: ProfileListContext;
   /** Disable the picker (e.g. when the agent is already launching). */
   disabled?: boolean;
+  /** Use a shorter trigger for tight toolbar/action-bar placements. */
+  compact?: boolean;
 };
 
-export const SandboxPicker = memo(({ value, onChange, context, disabled }: SandboxPickerProps) => {
+export const SandboxPicker = memo(({ value, onChange, context, disabled, compact = false }: SandboxPickerProps) => {
   const machines = useStore($machines);
   const names = getAvailableProfileNames({ ...context, machines });
 
@@ -61,13 +69,19 @@ export const SandboxPicker = memo(({ value, onChange, context, disabled }: Sandb
         <button
           type="button"
           disabled={disabled}
-          className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-stroke-1 bg-bgCard text-fg-muted text-xs font-medium hover:bg-bgHover hover:border-stroke-2 disabled:opacity-50"
+          className={
+            compact
+              ? 'inline-flex min-w-0 max-w-24 items-center justify-between gap-1 px-2 py-1 rounded-md border border-stroke-1 bg-bgCard text-fg-muted text-xs font-medium hover:bg-bgHover hover:border-stroke-2 disabled:opacity-50'
+              : 'inline-flex items-center gap-1 px-2 py-1 rounded-md border border-stroke-1 bg-bgCard text-fg-muted text-xs font-medium hover:bg-bgHover hover:border-stroke-2 disabled:opacity-50'
+          }
         >
-          <span className="inline-flex items-center gap-1">
-            <Cube16Regular />
-            {getProfileMenuLabel(value, machines)}
+          <span className="inline-flex min-w-0 items-center gap-1">
+            {!compact && <Cube16Regular />}
+            <span className="truncate">
+              {compact ? getCompactProfileLabel(value) : getProfileMenuLabel(value, machines)}
+            </span>
           </span>
-          <ChevronDown16Regular />
+          <ChevronDown16Regular className="shrink-0" />
         </button>
       </MenuTrigger>
       <MenuPopover>
@@ -78,9 +92,7 @@ export const SandboxPicker = memo(({ value, onChange, context, disabled }: Sandb
               <MenuItem
                 key={name}
                 onClick={() => handleSelect(name)}
-                icon={
-                  selected ? <Checkmark16Regular className="text-brand" /> : <span className="w-4" />
-                }
+                icon={selected ? <Checkmark16Regular className="text-brand" /> : <span className="w-4" />}
               >
                 {getProfileMenuLabel(name, machines)}
               </MenuItem>
@@ -97,9 +109,7 @@ export const SandboxPicker = memo(({ value, onChange, context, disabled }: Sandb
                   <MenuItem
                     key={name}
                     onClick={() => handleSelect(name)}
-                    icon={
-                      selected ? <Checkmark16Regular className="text-brand" /> : <span className="w-4" />
-                    }
+                    icon={selected ? <Checkmark16Regular className="text-brand" /> : <span className="w-4" />}
                   >
                     {getProfileMenuLabel(name, machines)}
                   </MenuItem>
