@@ -9,7 +9,7 @@
  *
  * What lives here:
  *   - Phase records mirrored from ``ui.goal.update`` snapshots
- *   - Workspace / worktree provisioning + project hooks
+ *   - Workspace / worktree provisioning
  *   - Concurrency + WIP / dispatch-preflight validation
  *   - Auto-dispatch poll
  *   - Initial supervisor prompt assembly (`buildFullSupervisorPrompt`) —
@@ -30,11 +30,9 @@
 import { existsSync, readFileSync } from 'fs';
 import fs from 'fs/promises';
 import { nanoid } from 'nanoid';
-import { logicalColumnId } from 'omni-projects-db';
 import path from 'path';
 
-import type { IWindowSender, IWorkflowLoader } from '@/lib/project-manager-deps';
-import { hasTemplateExpressions, renderTemplate, type TemplateVariables } from '@/lib/template';
+import type { IWindowSender } from '@/lib/project-manager-deps';
 import { claimsCollide, decideWorktreeAction, resolveWorkspaceClaim } from '@/lib/worktree';
 import type { AppControlManager } from '@/main/app-control-manager';
 import type { ProcessManager } from '@/main/process-manager';
@@ -74,9 +72,8 @@ export const MAX_CONCURRENT_SUPERVISORS = 5;
 /**
  * Maximum continuation turns. Used as the default ``max_turns`` arg
  * passed to omni-code's ``/goal`` server function when neither the
- * project's workflow config nor an explicit override sets one. The
- * agent-side loop is what enforces this budget — the launcher just
- * forwards the value at startGoal time.
+   * agent-side loop is what enforces this budget — the launcher just forwards
+   * the value at startGoal time.
  */
 export const MAX_CONTINUATION_TURNS = 10;
 
@@ -171,7 +168,6 @@ export interface SupervisorOrchestratorHost {
 export interface SupervisorOrchestratorDeps {
   store: SupervisorOrchestratorStore;
   host: SupervisorOrchestratorHost;
-  workflowLoader: IWorkflowLoader;
   sendToWindow: IWindowSender;
   /**
    * Bridge to the renderer's column registry. The renderer owns every sandbox
@@ -180,7 +176,7 @@ export interface SupervisorOrchestratorDeps {
    * only reacts to forwarded events.
    */
   bridge: SupervisorBridge;
-  /** ProcessManager — used to exec hooks in running sandbox containers (git-remote mode). */
+  /** ProcessManager — used to stop Code tab sandboxes during cleanup. */
   processManager?: ProcessManager;
   /**
    * Optional AppControlManager — when present, autopilot agents gain the
@@ -387,7 +383,6 @@ export class SupervisorOrchestrator {
    * the orchestrator's job here is narrow:
    *
    *   - Persist the run record for the ticket's run history.
-   *   - Fire the after_run project hook (best-effort).
    *
    * Phase transitions come from ``handleGoalUpdate`` (the agent-side loop's
    * ``ui.goal.update`` broadcast), NOT from here — a single run ending
@@ -404,20 +399,6 @@ export class SupervisorOrchestrator {
 
       const ticket = this.deps.host.getTicketById(ticketId);
       if (ticket) {
-        // after_run hook (best-effort). Fires once per run regardless of
-        // whether the /goal loop continues — semantics match the
-        // pre-migration behavior.
-        const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId);
-        const afterSource = firstSource(project);
-        if (afterSource?.kind === 'local') {
-          void this.deps.workflowLoader.runHook(ticket.projectId, 'after_run', afterSource.workspaceDir);
-        } else if (afterSource?.kind === 'git-remote') {
-          const hookScript = this.deps.workflowLoader.getConfig(ticket.projectId).hooks?.after_run;
-          if (hookScript && entry.tabId) {
-            void this.execHookInContainer(entry.tabId, hookScript);
-          }
-        }
-
         // Persist run record. startedAt comes from runStartedAt — falling
         // back to updatedAt is a last-resort approximation, since
         // token-usage updates bump updatedAt and would otherwise collapse
@@ -487,8 +468,7 @@ export class SupervisorOrchestrator {
   };
 
   // -------------------------------------------------------------------------
-  // Effective-config accessors — resolve workflow overrides against the
-  // hard-coded defaults above.
+  // Effective-config accessors.
   // -------------------------------------------------------------------------
 
   /**
@@ -500,34 +480,21 @@ export class SupervisorOrchestrator {
     if (!projectId) {
       return MAX_CONCURRENT_SUPERVISORS;
     }
-    const projectLimit = this.deps.workflowLoader.getConfig(projectId).supervisor?.max_concurrent;
-    if (projectLimit !== undefined) {
-      return Math.min(projectLimit, MAX_CONCURRENT_SUPERVISORS);
-    }
     return MAX_CONCURRENT_SUPERVISORS;
   }
 
-  getEffectiveMaxContinuationTurns(projectId: ProjectId): number {
-    return this.deps.workflowLoader.getConfig(projectId).supervisor?.max_continuation_turns ?? MAX_CONTINUATION_TURNS;
+  getEffectiveMaxContinuationTurns(_projectId: ProjectId): number {
+    return MAX_CONTINUATION_TURNS;
   }
 
-  /**
-   * Per-column concurrency limit from FLEET.md, or undefined if not set.
-   * FLEET.md keys are logical ids (`spec`, `implementation`); SQLite column
-   * ids are prefixed (`${projectId}__spec`). Strip the prefix before lookup.
-   */
   getColumnMaxConcurrent(projectId: ProjectId, columnId: ColumnId): number | undefined {
-    const logicalId = logicalColumnId(projectId, columnId);
-    return this.deps.workflowLoader.getConfig(projectId).supervisor?.max_concurrent_by_column?.[logicalId];
+    return this.deps.host.getColumn(projectId, columnId)?.maxConcurrent;
   }
 
-  /** Whether a project opts into auto-dispatch (project flag OR FLEET.md override). */
+  /** Whether a project opts into auto-dispatch. */
   isAutoDispatchEnabled(projectId: ProjectId): boolean {
     const project = this.deps.store.getProjects().find((p) => p.id === projectId);
-    if (project?.autoDispatch) {
-      return true;
-    }
-    return this.deps.workflowLoader.getConfig(projectId).supervisor?.auto_dispatch ?? false;
+    return project?.autoDispatch ?? false;
   }
 
   // -------------------------------------------------------------------------
@@ -716,11 +683,10 @@ export class SupervisorOrchestrator {
    * tracking its phase.
    *
    *   1. Resolve workspace (create / reuse git worktree for local projects).
-   *   2. Run `after_create` hook when a new worktree is cut.
-   *   3. Ask the bridge to ensure the Code tab is mounted + the actor is
+   *   2. Ask the bridge to ensure the Code tab is mounted + the actor is
    *      registered. The column boots its own session id via the normal
    *      chat-boot flow; main never touches it.
-   *   4. Register the SupervisorEntry so forwarded events drive phase/retry.
+   *   3. Register the SupervisorEntry so forwarded events drive phase/retry.
    *
    * Idempotent.
    */
@@ -736,17 +702,7 @@ export class SupervisorOrchestrator {
     }
 
     const resolvedWorkspace = await this.resolveTicketWorkspace(ticketId);
-    const { workspaceDir, worktreePath, worktreeName, action } = resolvedWorkspace;
-
-    if (action === 'create') {
-      const afterCreateOk = await this.deps.workflowLoader.runHook(ticket.projectId, 'after_create', workspaceDir);
-      if (!afterCreateOk) {
-        if (worktreePath && worktreeName && firstSource(project)?.kind === 'local') {
-          await removeWorktree(requireLocalWorkspaceDir(firstSource(project)), worktreePath, worktreeName);
-        }
-        throw new Error('after_create hook failed');
-      }
-    }
+    const { workspaceDir } = resolvedWorkspace;
 
     const existing = this.machines.get(ticketId);
     const state = existing?.state ?? this.createState(ticketId);
@@ -864,45 +820,12 @@ export class SupervisorOrchestrator {
         throw new Error(preflightError);
       }
 
-      const ticket = this.deps.host.getTicketById(ticketId)!;
-      const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId)!;
-
-      const projectSource = firstSource(project);
-      if (projectSource?.kind === 'local') {
-        await this.deps.workflowLoader.load(ticket.projectId, projectSource.workspaceDir);
-        const hookOk = await this.deps.workflowLoader.runHook(
-          ticket.projectId,
-          'before_run',
-          projectSource.workspaceDir
-        );
-        if (!hookOk) {
-          console.warn(`[SupervisorOrchestrator] before_run hook failed for ${ticketId}. Aborting start.`);
-          throw new Error('before_run hook failed');
-        }
-      } else if (projectSource?.kind === 'git-remote') {
-        const effectiveBranch = this.deps.host.resolveTicketBranch(ticket) ?? projectSource.defaultBranch;
-        await this.deps.workflowLoader.loadFromRemote(ticket.projectId, projectSource.repoUrl, effectiveBranch);
-      }
-
       console.log(`[SupervisorOrchestrator] startSupervisor: ensureColumn for ${ticketId}...`);
       const entry = await this.ensureColumn(ticketId, profileName);
 
       const phase = entry.state.getPhase();
       if (phase === 'idle' || phase === 'error' || phase === 'completed') {
         entry.state.forcePhase('ready' as TicketPhase);
-      }
-
-      if (firstSource(project)?.kind === 'git-remote') {
-        const hookScript = this.deps.workflowLoader.getConfig(ticket.projectId).hooks?.before_run;
-        if (hookScript && entry.tabId && this.deps.processManager) {
-          const hookOk = await this.execHookInContainer(entry.tabId, hookScript);
-          if (!hookOk) {
-            console.warn(
-              `[SupervisorOrchestrator] before_run hook failed in container for ${ticketId}. Aborting start.`
-            );
-            throw new Error('before_run hook failed');
-          }
-        }
       }
 
       // Flip the autopilot flag so the column boots its next submit with
@@ -915,18 +838,6 @@ export class SupervisorOrchestrator {
       this.startMachineRun(ticketId);
     });
   };
-
-  /**
-   * Exec a shell hook inside the Code tab's sandbox container. No-op today;
-   * ProcessManager doesn't expose execInContainer directly, so remote-mode
-   * hook execution is a follow-up. Treat as success so the supervisor doesn't
-   * abort — the hook still runs at the project-directory level where that
-   * pathway is exercised.
-   */
-
-  private execHookInContainer(_tabId: CodeTabId, _command: string): Promise<boolean> {
-    return Promise.resolve(true);
-  }
 
   stopSupervisor = (ticketId: TicketId): Promise<void> => {
     return this.withTicketLock(ticketId, async () => {
@@ -952,9 +863,8 @@ export class SupervisorOrchestrator {
   };
 
   /**
-   * Clean up a ticket's workspace: stop and remove its container, delete its
-   * worktree, and run the before_remove hook. Called when a ticket reaches a
-   * terminal column.
+   * Clean up a ticket's workspace: stop and remove its container and delete
+   * its worktree. Called when a ticket reaches a terminal column.
    *
    * If the worktree has uncommitted changes, cleanup is deferred — the ticket
    * is marked `cleanupPending` and the worktree + sandbox stay alive so the
@@ -985,21 +895,6 @@ export class SupervisorOrchestrator {
     }
 
     const taskId = ticket.supervisorTaskId;
-
-    // Run before_remove hook
-    const removeSource = firstSource(project);
-    if (removeSource?.kind === 'local') {
-      const workspaceDir = ticket.worktreePath ?? removeSource.workspaceDir;
-      await this.deps.workflowLoader.runHook(ticket.projectId, 'before_remove', workspaceDir);
-    } else if (removeSource?.kind === 'git-remote') {
-      const hookScript = this.deps.workflowLoader.getConfig(ticket.projectId).hooks?.before_remove;
-      if (hookScript) {
-        const machineEntry = this.machines.get(ticketId);
-        if (machineEntry?.tabId) {
-          await this.execHookInContainer(machineEntry.tabId, hookScript);
-        }
-      }
-    }
 
     // Dispose state + tell renderer to drop the column binding.
     const machineEntry = this.machines.get(ticketId);
@@ -1326,7 +1221,7 @@ export class SupervisorOrchestrator {
     }
 
     // Personal / context-only projects have no source and cannot run supervisors:
-    // there's no workspace to mount and no workflow to execute. Reject explicitly
+    // there's no workspace to mount. Reject explicitly
     // so the user sees a clear message instead of a downstream mount failure.
     if (project.sources.length === 0) {
       return `Project "${project.label}" has no repository — supervisors require a workspace or git remote`;
@@ -1471,10 +1366,7 @@ export class SupervisorOrchestrator {
     }
   };
 
-  /**
-   * Build the full supervisor prompt, incorporating FLEET.md custom prompt if present.
-   */
-  private buildFullSupervisorPrompt(ticketId: TicketId, attempt: number | null = null): string {
+  private buildFullSupervisorPrompt(ticketId: TicketId): string {
     const ticket = this.deps.host.getTicketById(ticketId)!;
     const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId)!;
     const pipeline = this.deps.host.getPipeline(ticket.projectId);
@@ -1530,48 +1422,7 @@ export class SupervisorOrchestrator {
       }
     }
 
-    const basePrompt = buildSupervisorPrompt(ticket, project, pipeline, context);
-    const customPrompt = this.deps.workflowLoader.getPromptTemplate(ticket.projectId);
-
-    if (customPrompt) {
-      let rendered = customPrompt;
-
-      // Render template variables if the prompt contains {{ }} expressions
-      if (hasTemplateExpressions(customPrompt)) {
-        const vars: TemplateVariables = {
-          ticket: {
-            id: ticket.id,
-            title: ticket.title,
-            description: ticket.description || '(no description)',
-            priority: ticket.priority,
-            columnId: logicalColumnId(ticket.projectId, ticket.columnId),
-            branch: this.deps.host.resolveTicketBranch(ticket),
-          },
-          pipeline: {
-            columns: pipeline.columns.map((c) => c.label).join(' → '),
-          },
-          project: (() => {
-            const s = firstSource(project);
-            const dir = s?.kind === 'local' ? s.workspaceDir : s?.kind === 'git-remote' ? s.repoUrl : '';
-            return { label: project.label, workspaceDir: dir };
-          })(),
-          attempt,
-        };
-
-        try {
-          rendered = renderTemplate(customPrompt, vars);
-        } catch (err) {
-          console.warn(
-            `[SupervisorOrchestrator] Template render failed for ${ticketId}: ${(err as Error).message}. Using raw prompt.`
-          );
-          rendered = customPrompt;
-        }
-      }
-
-      return `${basePrompt}\n\n## Project-Specific Instructions (from FLEET.md)\n\n${rendered}`;
-    }
-
-    return basePrompt;
+    return buildSupervisorPrompt(ticket, project, pipeline, context);
   }
 
   /** Release bridge subscription on shutdown. */

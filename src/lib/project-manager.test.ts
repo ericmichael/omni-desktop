@@ -541,7 +541,7 @@ describe('ProjectManager', () => {
   // T-new — getPipeline cascade
   // -------------------------------------------------------------------------
   describe('getPipeline', () => {
-    it('returns project.pipeline when no FLEET.md workflow is loaded', () => {
+    it('returns project.pipeline when present', () => {
       const { pm } = makePm({
         pipeline: {
           columns: [
@@ -553,24 +553,6 @@ describe('ProjectManager', () => {
       });
       const pipeline = pm.getPipeline('proj-1');
       expect(pipeline.columns.map((c) => c.id)).toEqual(['todo', 'done']);
-    });
-
-    it('returns FLEET.md pipeline when workflow has one', () => {
-      const { pm } = makePm(
-        { tickets: [] },
-        {
-          workflowConfig: {
-            pipeline: {
-              columns: [
-                { id: 'inbox', label: 'Inbox' },
-                { id: 'shipped', label: 'Shipped' },
-              ],
-            },
-          },
-        }
-      );
-      const pipeline = pm.getPipeline('proj-1');
-      expect(pipeline.columns.map((c) => c.id)).toEqual(['inbox', 'shipped']);
     });
 
     it('falls back to SIMPLE_PIPELINE for projects without a source', () => {

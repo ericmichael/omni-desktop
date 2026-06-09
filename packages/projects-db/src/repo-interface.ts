@@ -35,7 +35,7 @@ import type {
 } from './types.js';
 
 /**
- * Pipeline column definition (FLEET.md or shared defaults). The `logicalId`
+ * Pipeline column definition. The `logicalId`
  * is the user-facing id; the persisted primary key is derived from
  * `${projectId}__${logicalId}`.
  */

@@ -62,7 +62,7 @@ export interface InboxManagerDeps {
   /**
    * Optional host callback to create a project with the launcher's full
    * lifecycle: slug uniqueness, pipeline seeding, root page, project dir,
-   * workflow loader. When provided, `promoteToProject` delegates to this
+   * root page. When provided, `promoteToProject` delegates to this
    * instead of inserting a minimal project row directly (which would skip
    * pipeline seeding and break subsequent `addTicket` calls).
    *
@@ -286,7 +286,7 @@ throw new InboxPromotionError(`Cannot reactivate promoted item ${id}`);
 
     // Prefer the host's full project-creation path when wired — it seeds
     // pipeline columns, the root page, the project dir, and runs the
-    // workflow loader. Falling back to a direct store insert would create
+    // root page. Falling back to a direct store insert would create
     // a project with no `pipeline_columns` rows, which then breaks the
     // next `addTicket` call with a foreign-key violation.
     let project: Project;

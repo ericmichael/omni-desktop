@@ -1,5 +1,5 @@
 /**
- * Tests for ProjectsRepo.syncColumnsForProject — the FLEET.md → SQLite
+ * Tests for ProjectsRepo.syncColumnsForProject — pipeline defaults → SQLite
  * remap policy.
  */
 import { mkdtempSync, rmSync } from 'node:fs';
