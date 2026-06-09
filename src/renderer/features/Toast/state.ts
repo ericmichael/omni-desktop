@@ -35,7 +35,6 @@ export const toast = {
     addToast({ level: 'success', title, description, copyText: opts.copyText, durationMs: opts.durationMs ?? 5000 }),
   warning: (title: string, description?: string, opts: ToastOpts = {}) =>
     addToast({ level: 'warning', title, description, copyText: opts.copyText, durationMs: opts.durationMs ?? 7000 }),
-  // Errors default to no auto-dismiss so users have time to read/copy them.
   error: (title: string, description?: string, opts: ToastOpts = {}) =>
-    addToast({ level: 'error', title, description, copyText: opts.copyText, durationMs: opts.durationMs ?? 0 }),
+    addToast({ level: 'error', title, description, copyText: opts.copyText, durationMs: opts.durationMs ?? 10000 }),
 };
