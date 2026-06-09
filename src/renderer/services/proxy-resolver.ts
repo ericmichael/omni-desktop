@@ -22,7 +22,25 @@ import { isCloudLinked, isElectron, serverOrigin } from '@/renderer/services/ipc
 const upstreamByName = new Map<string, string>();
 const nameByOrigin = new Map<string, string>();
 /** De-dup in-flight registrations per origin. */
-const pendingByOrigin = new Map<string, Promise<void>>();
+const pendingByOrigin = new Map<string, Promise<ProxyRegistrationResult>>();
+
+type ProxyRegistrationResult =
+  | { ok: true; proxyName: string; proxyPath: string }
+  | { ok: false; reason: string; status?: number };
+
+export type ProxiedSrcResult =
+  | {
+      ok: true;
+      canonicalUrl: string;
+      iframeSrc: string;
+      proxyName?: string;
+    }
+  | {
+      ok: false;
+      canonicalUrl: string;
+      reason: string;
+      status?: number;
+    };
 
 /**
  * The launcher's origin from the renderer's perspective. In browser server
@@ -33,14 +51,6 @@ const pendingByOrigin = new Map<string, Promise<void>>();
  * renderer's own origin.
  */
 const launcherOrigin = (): string => serverOrigin();
-
-const slug = (origin: string): string =>
-  origin
-    .replace(/[^a-zA-Z0-9]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-
-const proxyNameFor = (origin: string): string => `ext-${slug(origin)}`;
 
 const tryParseUrl = (raw: string): URL | null => {
   try {
@@ -62,28 +72,75 @@ const isExternalHttp = (url: URL): boolean => {
   return false;
 };
 
-const ensureRegistered = (origin: string, name: string): Promise<void> => {
-  if (upstreamByName.has(name)) {
-    return Promise.resolve();
+const proxyNameFromPath = (proxyPath: string): string | null => {
+  const parsed = tryParseUrl(proxyPath);
+  if (!parsed || parsed.origin !== launcherOrigin() || !parsed.pathname.startsWith('/proxy/')) {
+    return null;
+  }
+  const rest = parsed.pathname.slice('/proxy/'.length);
+  const slash = rest.indexOf('/');
+  const name = slash === -1 ? rest : rest.slice(0, slash);
+  return name || null;
+};
+
+const readRegistrationError = async (res: Response): Promise<string | null> => {
+  try {
+    const contentType = res.headers.get('content-type')?.toLowerCase() ?? '';
+    if (contentType.includes('application/json')) {
+      const body = (await res.json()) as { error?: unknown; message?: unknown };
+      const message =
+        typeof body.error === 'string' ? body.error : typeof body.message === 'string' ? body.message : '';
+      return message.trim() || null;
+    }
+    const text = await res.text();
+    return text.trim() || null;
+  } catch {
+    return null;
+  }
+};
+
+const ensureRegistered = (url: URL): Promise<ProxyRegistrationResult> => {
+  const origin = url.origin;
+  const knownName = nameByOrigin.get(origin);
+  if (knownName && upstreamByName.has(knownName)) {
+    return Promise.resolve({
+      ok: true,
+      proxyName: knownName,
+      proxyPath: `/proxy/${knownName}${url.pathname}${url.search}`,
+    });
   }
   const existing = pendingByOrigin.get(origin);
   if (existing) {
     return existing;
   }
-  const pending = (async () => {
+  const pending: Promise<ProxyRegistrationResult> = (async (): Promise<ProxyRegistrationResult> => {
     try {
       // Absolute URL so cloud-linked Electron hits the cloud's /proxy/_register
       // instead of localhost:5173 (which has no such route). Browser server-
       // mode resolves to same-origin same as before.
-      await fetch(`${launcherOrigin()}/proxy/_register`, {
+      const res = await fetch(`${launcherOrigin()}/proxy/_register`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name, upstream: origin }),
+        body: JSON.stringify({ upstream: url.href }),
       });
-      upstreamByName.set(name, origin);
+      if (!res.ok) {
+        const detail = await readRegistrationError(res);
+        return {
+          ok: false,
+          reason: `Proxy registration failed${res.status ? ` (${res.status})` : ''}${detail ? `: ${detail}` : ''}`,
+          ...(res.status ? { status: res.status } : {}),
+        };
+      }
+      const body = (await res.json()) as { proxyName?: string; proxyPath?: string };
+      const proxyName = body.proxyName ?? (body.proxyPath ? proxyNameFromPath(body.proxyPath) : null);
+      if (!proxyName || !body.proxyPath) {
+        return { ok: false, reason: 'Proxy registration response missing proxy capability' };
+      }
+      upstreamByName.set(proxyName, origin);
+      nameByOrigin.set(origin, proxyName);
+      return { ok: true, proxyName, proxyPath: body.proxyPath };
     } catch {
-      // Server unreachable — leave unregistered; the iframe load will
-      // surface a normal load error and the retry path will kick in.
+      return { ok: false, reason: 'Proxy registration failed' };
     } finally {
       pendingByOrigin.delete(origin);
     }
@@ -98,13 +155,13 @@ const ensureRegistered = (origin: string, name: string): Promise<void> => {
  * returns the corresponding `/proxy/<name>/<path>` path. Otherwise returns
  * the input unchanged.
  */
-export const resolveProxiedSrc = async (rawSrc: string): Promise<string> => {
+export const resolveProxiedSrc = async (rawSrc: string): Promise<ProxiedSrcResult> => {
   if (!rawSrc || isElectron) {
-    return rawSrc;
+    return { ok: true, canonicalUrl: rawSrc, iframeSrc: rawSrc };
   }
   const parsed = tryParseUrl(rawSrc);
   if (!parsed) {
-    return rawSrc;
+    return { ok: true, canonicalUrl: rawSrc, iframeSrc: rawSrc };
   }
   if (parsed.origin === launcherOrigin() && parsed.pathname.startsWith('/proxy/')) {
     // Already proxied — record the mapping if we recognize the name so
@@ -115,24 +172,38 @@ export const resolveProxiedSrc = async (rawSrc: string): Promise<string> => {
     }
     // In cloud-linked Electron the iframe needs the absolute URL — Vite
     // would otherwise resolve the relative path against localhost:5173.
-    return isCloudLinked
+    const iframeSrc = isCloudLinked
       ? `${launcherOrigin()}${parsed.pathname}${parsed.search}${parsed.hash}`
       : parsed.pathname + parsed.search + parsed.hash;
+    const unproxied = unproxyUrl(iframeSrc);
+    return {
+      ok: true,
+      canonicalUrl: unproxied === iframeSrc ? rawSrc : unproxied,
+      iframeSrc,
+      ...(name ? { proxyName: name } : {}),
+    };
   }
   if (!isExternalHttp(parsed)) {
-    return rawSrc;
+    return { ok: true, canonicalUrl: rawSrc, iframeSrc: rawSrc };
   }
-  const origin = parsed.origin;
-  let name = nameByOrigin.get(origin);
-  if (!name) {
-    name = proxyNameFor(origin);
-    nameByOrigin.set(origin, name);
+  const registered = await ensureRegistered(parsed);
+  if (!registered.ok) {
+    return {
+      ok: false,
+      canonicalUrl: parsed.href,
+      reason: registered.reason,
+      ...(registered.status ? { status: registered.status } : {}),
+    };
   }
-  await ensureRegistered(origin, name);
   // Absolute when cloud-linked so the iframe doesn't resolve against the
   // renderer's own origin (localhost:5173 / file://).
-  const path = `/proxy/${name}${parsed.pathname}${parsed.search}${parsed.hash}`;
-  return isCloudLinked ? `${launcherOrigin()}${path}` : path;
+  const path = `/proxy/${registered.proxyName}${parsed.pathname}${parsed.search}${parsed.hash}`;
+  return {
+    ok: true,
+    canonicalUrl: parsed.href,
+    iframeSrc: isCloudLinked ? `${launcherOrigin()}${path}` : path,
+    proxyName: registered.proxyName,
+  };
 };
 
 /**

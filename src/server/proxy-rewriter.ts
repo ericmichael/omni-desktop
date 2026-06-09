@@ -1,10 +1,48 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { Readable } from 'node:stream';
 import { WebSocket as WsWebSocket } from 'ws';
 
 import type { WsHandler } from '@/server/ws-handler';
 
-/** Map from proxy prefix (e.g. "chat-uiUrl") to upstream origin (e.g. "http://localhost:8082") */
-const upstreamMap = new Map<string, string>();
+const DYNAMIC_PROXY_TTL_MS = 30 * 60 * 1000;
+const REDACTED_QUERY_VALUE = '[REDACTED]';
+const HOP_BY_HOP_HEADERS = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+]);
+const SENSITIVE_QUERY_PARAM_RE = /(?:^|[-_])(token|secret|password|passwd|key|auth|code|sig|signature)(?:$|[-_])/i;
+const HTML_URL_ATTR_RE =
+  /(\s(?:href|src|action|formaction|poster|data|srcset)\s*=\s*)(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi;
+const META_ATTR_RE = /(\s(?:http-equiv|content)\s*=\s*)(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi;
+const CSS_URL_RE = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)'"\s][^)]*?))\s*\)/gi;
+const SKIPPED_STATIC_URL_RE = /^(?:$|#|data:|blob:|javascript:|mailto:|tel:|about:)/i;
+const PROXY_RUNTIME_SHIM_VERSION = 1;
+
+export type ProxySiteClass = 'trusted-internal' | 'dynamic';
+
+export type ProxyRuntimePolicy = {
+  version: typeof PROXY_RUNTIME_SHIM_VERSION;
+  expandedRuntimeUrls: boolean;
+  blockServiceWorkerRegistration: boolean;
+};
+
+type ProxyEntry = {
+  upstream: string;
+  kind: ProxySiteClass;
+  ownerKey?: string;
+  createdAt: number;
+  lastUsedAt: number;
+  expiresAt?: number;
+};
+
+/** Map from proxy prefix (e.g. "chat-uiUrl") to upstream metadata. */
+const upstreamMap = new Map<string, ProxyEntry>();
 
 /** Default allowlist when none is supplied: loopback only. */
 const defaultIsTrusted = (addr: string): boolean => {
@@ -18,8 +56,97 @@ const defaultIsTrusted = (addr: string): boolean => {
  * Used by the preview system to dynamically route arbitrary URLs through the proxy.
  */
 export const registerProxyUpstream = (proxyName: string, upstreamOrigin: string): string => {
-  upstreamMap.set(proxyName, upstreamOrigin);
+  const now = Date.now();
+  upstreamMap.set(proxyName, {
+    upstream: upstreamOrigin,
+    kind: 'trusted-internal',
+    createdAt: now,
+    lastUsedAt: now,
+  });
   return `/proxy/${proxyName}/`;
+};
+
+export const cleanupExpiredProxyRegistrations = (now: number = Date.now()): number => {
+  let deleted = 0;
+  for (const [proxyName, entry] of upstreamMap.entries()) {
+    if (entry.kind === 'dynamic' && entry.expiresAt !== undefined && entry.expiresAt <= now) {
+      upstreamMap.delete(proxyName);
+      deleted += 1;
+    }
+  }
+  return deleted;
+};
+
+export const resetProxyRegistrationsForTests = (): void => {
+  upstreamMap.clear();
+};
+
+const isTruthyEnv = (value: string | undefined): boolean => /^(1|true|yes|on)$/i.test(value ?? '');
+const isFalsyEnv = (value: string | undefined): boolean => /^(0|false|no|off)$/i.test(value ?? '');
+
+export const getProxyRuntimePolicy = (siteClass: ProxySiteClass): ProxyRuntimePolicy => {
+  const runtimeEnv = process.env['OMNI_PROXY_RUNTIME_SHIMS'];
+  const dynamicRuntimeEnv = process.env['OMNI_PROXY_DYNAMIC_RUNTIME_SHIMS'];
+  const expandedRuntimeUrls =
+    !isFalsyEnv(runtimeEnv) &&
+    (siteClass === 'trusted-internal' || isTruthyEnv(dynamicRuntimeEnv) || isTruthyEnv(runtimeEnv));
+
+  return {
+    version: PROXY_RUNTIME_SHIM_VERSION,
+    expandedRuntimeUrls,
+    blockServiceWorkerRegistration: siteClass !== 'trusted-internal',
+  };
+};
+
+const ownerKeyForRequest = (request: FastifyRequest): string | null => {
+  if ((process.env['OMNI_AUTH_MODE'] ?? '') !== 'easyauth') {
+    return 'local-single-tenant';
+  }
+  const principalId = request.headers['x-ms-client-principal-id'];
+  return typeof principalId === 'string' && principalId.trim() ? `principal:${principalId.trim()}` : null;
+};
+
+const mintDynamicProxyName = (): string => `dyn-${crypto.randomUUID().replace(/-/g, '')}`;
+
+const parseHttpUpstream = (upstream: string | undefined): URL | null => {
+  if (!upstream || upstream.length > 4096) {
+    return null;
+  }
+  try {
+    const parsed = new URL(upstream);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const getProxyEntry = (
+  request: FastifyRequest,
+  proxyName: string
+): ProxyEntry | null | 'forbidden' | 'unauthorized' => {
+  const entry = upstreamMap.get(proxyName);
+  if (!entry) {
+    return null;
+  }
+  const now = Date.now();
+  if (entry.kind === 'dynamic' && entry.expiresAt !== undefined && entry.expiresAt <= now) {
+    upstreamMap.delete(proxyName);
+    return null;
+  }
+  if (entry.kind === 'dynamic') {
+    const ownerKey = ownerKeyForRequest(request);
+    if (!ownerKey) {
+      return 'unauthorized';
+    }
+    if (entry.ownerKey !== ownerKey) {
+      return 'forbidden';
+    }
+  }
+  entry.lastUsedAt = now;
+  if (entry.kind === 'dynamic') {
+    entry.expiresAt = now + DYNAMIC_PROXY_TTL_MS;
+  }
+  return entry;
 };
 
 /**
@@ -33,11 +160,16 @@ export const registerProxyUpstream = (proxyName: string, upstreamOrigin: string)
 export const setupProxyRewriter = (
   fastify: FastifyInstance,
   wsHandler: WsHandler,
-  isTrusted: (remoteAddress: string) => boolean = defaultIsTrusted,
+  isTrusted: (remoteAddress: string) => boolean = defaultIsTrusted
 ): void => {
   // --- Combined HTTP + WebSocket proxy ---
   // Register inside a plugin so GET can handle both HTTP and WS upgrades on the same path.
   void fastify.register(async function proxyRoutes(f) {
+    f.removeAllContentTypeParsers();
+    f.addContentTypeParser('*', { parseAs: 'buffer' }, (_request, body, done) => {
+      done(null, body);
+    });
+
     // GET handles both normal HTTP GET and WebSocket upgrades via full declaration syntax
     f.route({
       method: 'GET',
@@ -46,7 +178,7 @@ export const setupProxyRewriter = (
         return handleHttpProxy(request, reply);
       },
       wsHandler: (clientSocket, request) => {
-        const upstreamPath = `/${  (request.params as { '*': string })['*']}`;
+        const upstreamPath = `/${(request.params as { '*': string })['*']}`;
         handleWsProxy(clientSocket, request, upstreamPath);
       },
     });
@@ -77,20 +209,31 @@ export const setupProxyRewriter = (
       }
     },
     handler: async (request, reply) => {
-      const { name, upstream } = request.body as { name?: string; upstream?: string };
-      if (!name || !upstream) {
-        reply.code(400).send({ error: 'Missing name or upstream' });
+      cleanupExpiredProxyRegistrations();
+      const { upstream } = request.body as { name?: string; upstream?: string };
+      const ownerKey = ownerKeyForRequest(request);
+      if (!ownerKey) {
+        reply.code(401).send({ error: 'Unauthorized: missing authenticated principal' });
         return;
       }
-      try {
-        const parsed = new URL(upstream);
-        const origin = `${parsed.protocol}//${parsed.host}`;
-        upstreamMap.set(name, origin);
-        const proxyPath = `/proxy/${name}${parsed.pathname}${parsed.search}`;
-        reply.send({ ok: true, proxyPath });
-      } catch {
-        reply.code(400).send({ error: 'Invalid upstream URL' });
+      const parsed = parseHttpUpstream(upstream);
+      if (!parsed) {
+        reply.code(400).send({ error: 'Invalid upstream URL: expected http(s)' });
+        return;
       }
+      const now = Date.now();
+      const proxyName = mintDynamicProxyName();
+      const origin = `${parsed.protocol}//${parsed.host}`;
+      upstreamMap.set(proxyName, {
+        upstream: origin,
+        kind: 'dynamic',
+        ownerKey,
+        createdAt: now,
+        lastUsedAt: now,
+        expiresAt: now + DYNAMIC_PROXY_TTL_MS,
+      });
+      const proxyPath = `/proxy/${proxyName}${parsed.pathname}${parsed.search}`;
+      reply.send({ ok: true, proxyName, proxyPath, expiresAt: now + DYNAMIC_PROXY_TTL_MS });
     },
   });
 
@@ -143,54 +286,209 @@ export const setupProxyRewriter = (
 };
 
 /**
- * Rewrite URLs in HTML **attributes only** so that absolute and root-relative
+ * Rewrite URLs in HTML attributes only so static same-upstream and root-relative
  * URLs go through the proxy. Avoids touching inline JS/JSON which would break pages.
- *
- * Targets: href, src, action, formaction, poster, data, srcset attributes.
  */
 export function rewriteHtmlUrls(html: string, upstream: string, proxyName: string): string {
-  const proxyPrefix = `/proxy/${proxyName}`;
-
-  let upstreamHost = '';
-  try {
- upstreamHost = new URL(upstream).host; 
-} catch { /* skip */ }
-
-  // Single regex: match URL-bearing HTML attributes whose value starts with
-  // the upstream origin, a protocol-relative //host, or a root-relative /path.
-  // The regex captures (attribute-prefix + opening-quote + url-start).
-  const attrNames = 'href|src|action|formaction|poster|data|srcset';
-
-  // 1. Absolute upstream URLs in attributes:  href="https://upstream/path" → href="/proxy/name/path"
-  if (upstream) {
-    const absRe = new RegExp(
-      `((?:${attrNames})\\s*=\\s*["'])${escapeForRegex(upstream)}`,
-      'gi',
-    );
-    html = html.replace(absRe, `$1${proxyPrefix}`);
-  }
-
-  // 2. Protocol-relative URLs in attributes:  src="//host/path" → src="/proxy/name/path"
-  if (upstreamHost) {
-    const protoRelRe = new RegExp(
-      `((?:${attrNames})\\s*=\\s*["'])//${escapeForRegex(upstreamHost)}`,
-      'gi',
-    );
-    html = html.replace(protoRelRe, `$1${proxyPrefix}`);
-  }
-
-  // 3. Root-relative URLs in attributes:  action="/path" → action="/proxy/name/path"
-  //    Skips values already starting with /proxy/ or // (protocol-relative)
   html = html.replace(
-    new RegExp(`((?:${attrNames})\\s*=\\s*["'])\\/(?!\\/|proxy\\/)`, 'gi'),
-    `$1${proxyPrefix}/`,
+    HTML_URL_ATTR_RE,
+    (match, prefix: string, doubleValue?: string, singleValue?: string, bareValue?: string) => {
+      const value = doubleValue ?? singleValue ?? bareValue ?? '';
+      const attrName = prefix.match(/\s([^\s=]+)\s*=/)?.[1]?.toLowerCase();
+      const rewritten =
+        attrName === 'srcset'
+          ? rewriteSrcset(value, upstream, proxyName)
+          : rewriteStaticUrl(value, upstream, proxyName);
+
+      if (doubleValue !== undefined) {
+        return `${prefix}"${rewritten}"`;
+      }
+      if (singleValue !== undefined) {
+        return `${prefix}'${rewritten}'`;
+      }
+      return `${prefix}${rewritten}`;
+    }
   );
 
-  // 4. Strip CSP <meta> tags — we already strip the HTTP header, but inline CSP
-  //    blocks our injected scripts (console capture, navigation, etc.)
+  html = rewriteMetaRefresh(html, upstream, proxyName);
+
+  // Strip CSP <meta> tags — we already strip the HTTP header, but inline CSP
+  // blocks our injected scripts (console capture, navigation, etc.)
   html = html.replace(/<meta[^>]*http-equiv\s*=\s*["']Content-Security-Policy["'][^>]*>/gi, '');
 
   return html;
+}
+
+export function rewriteMetaRefresh(html: string, upstream: string, proxyName: string): string {
+  return html.replace(/<meta\b[^>]*>/gi, (tag) => {
+    const attrs = parseMetaAttrs(tag);
+    if (attrs['http-equiv']?.toLowerCase() !== 'refresh' || !attrs.content) {
+      return tag;
+    }
+    return tag.replace(
+      META_ATTR_RE,
+      (match, prefix: string, doubleValue?: string, singleValue?: string, bareValue?: string) => {
+        const attrName = prefix.match(/\s([^\s=]+)\s*=/)?.[1]?.toLowerCase();
+        if (attrName !== 'content') {
+          return match;
+        }
+        const value = doubleValue ?? singleValue ?? bareValue ?? '';
+        const rewritten = rewriteMetaRefreshContent(value, upstream, proxyName);
+        if (doubleValue !== undefined) {
+          return `${prefix}"${rewritten}"`;
+        }
+        if (singleValue !== undefined) {
+          return `${prefix}'${rewritten}'`;
+        }
+        return `${prefix}${rewritten}`;
+      }
+    );
+  });
+}
+
+export function rewriteCssUrls(css: string, upstream: string, proxyName: string): string {
+  return css.replace(CSS_URL_RE, (match, doubleValue?: string, singleValue?: string, bareValue?: string) => {
+    const value = (doubleValue ?? singleValue ?? bareValue ?? '').trim();
+    const rewritten = rewriteStaticUrl(value, upstream, proxyName);
+    if (doubleValue !== undefined) {
+      return `url("${rewritten}")`;
+    }
+    if (singleValue !== undefined) {
+      return `url('${rewritten}')`;
+    }
+    return `url(${rewritten})`;
+  });
+}
+
+function parseMetaAttrs(tag: string): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  for (const match of tag.matchAll(META_ATTR_RE)) {
+    const name = match[1]?.match(/\s([^\s=]+)\s*=/)?.[1]?.toLowerCase();
+    if (name) {
+      attrs[name] = match[2] ?? match[3] ?? match[4] ?? '';
+    }
+  }
+  return attrs;
+}
+
+function rewriteMetaRefreshContent(content: string, upstream: string, proxyName: string): string {
+  return content.replace(/(\burl\s*=\s*)(['"]?)([^'";\s]+)\2/i, (match, prefix: string, quote: string, url: string) => {
+    const rewritten = rewriteStaticUrl(url, upstream, proxyName);
+    return `${prefix}${quote}${rewritten}${quote}`;
+  });
+}
+
+function rewriteSrcset(srcset: string, upstream: string, proxyName: string): string {
+  return srcset
+    .split(',')
+    .map((candidate) => {
+      const match = candidate.match(/^(\s*)(\S+)(.*)$/s);
+      if (!match) {
+        return candidate;
+      }
+      const [, leading = '', url = '', descriptor = ''] = match;
+      return `${leading}${rewriteStaticUrl(url, upstream, proxyName)}${descriptor}`;
+    })
+    .join(',');
+}
+
+function rewriteStaticUrl(url: string, upstream: string, proxyName: string): string {
+  if (SKIPPED_STATIC_URL_RE.test(url) || url.startsWith('/proxy/')) {
+    return url;
+  }
+
+  const proxyPrefix = `/proxy/${proxyName}`;
+
+  try {
+    const upstreamUrl = new URL(upstream);
+    if (url.startsWith('/')) {
+      if (url.startsWith('//')) {
+        const protocolRelative = new URL(`${upstreamUrl.protocol}${url}`);
+        if (protocolRelative.host !== upstreamUrl.host) {
+          return url;
+        }
+        return `${proxyPrefix}${protocolRelative.pathname}${protocolRelative.search}${protocolRelative.hash}`;
+      }
+      return `${proxyPrefix}${url}`;
+    }
+
+    const parsed = new URL(url);
+    if (parsed.origin !== upstreamUrl.origin) {
+      return url;
+    }
+    return `${proxyPrefix}${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    if (url.startsWith('/') && !url.startsWith('//')) {
+      return `${proxyPrefix}${url}`;
+    }
+    return url;
+  }
+}
+
+const equivalentWebRuntimeProtocol = (runtimeProtocol: string, upstreamProtocol: string): boolean => {
+  if (runtimeProtocol === upstreamProtocol) {
+    return true;
+  }
+  return (
+    (runtimeProtocol === 'ws:' && upstreamProtocol === 'http:') ||
+    (runtimeProtocol === 'wss:' && upstreamProtocol === 'https:') ||
+    (runtimeProtocol === 'http:' && upstreamProtocol === 'ws:') ||
+    (runtimeProtocol === 'https:' && upstreamProtocol === 'wss:')
+  );
+};
+
+export function rewriteProxyRuntimeUrl(
+  input: string,
+  currentHref: string,
+  upstream: string,
+  proxyName: string,
+  transport: 'http' | 'websocket' = 'http'
+): string {
+  if (SKIPPED_STATIC_URL_RE.test(input)) {
+    return input;
+  }
+
+  try {
+    const locationUrl = new URL(currentHref);
+    const upstreamUrl = new URL(upstream);
+    const runtimeUrl = new URL(input, currentHref);
+    const proxyPrefix = `/proxy/${proxyName}`;
+
+    if (!['http:', 'https:', 'ws:', 'wss:'].includes(runtimeUrl.protocol)) {
+      return input;
+    }
+
+    const alreadyActiveProxy =
+      runtimeUrl.origin === locationUrl.origin &&
+      (runtimeUrl.pathname === proxyPrefix || runtimeUrl.pathname.startsWith(`${proxyPrefix}/`));
+
+    if (alreadyActiveProxy) {
+      const rewritten = new URL(runtimeUrl.toString());
+      if (transport === 'websocket') {
+        rewritten.protocol = locationUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+      }
+      return rewritten.toString();
+    }
+
+    const sameUpstream =
+      runtimeUrl.host === upstreamUrl.host && equivalentWebRuntimeProtocol(runtimeUrl.protocol, upstreamUrl.protocol);
+    const launcherOriginRuntimeUrl = runtimeUrl.origin === locationUrl.origin;
+
+    if (!sameUpstream && !launcherOriginRuntimeUrl) {
+      return input;
+    }
+
+    const rewritten = new URL(locationUrl.origin);
+    if (transport === 'websocket') {
+      rewritten.protocol = locationUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+    }
+    rewritten.pathname = `${proxyPrefix}${runtimeUrl.pathname}`;
+    rewritten.search = runtimeUrl.search;
+    rewritten.hash = runtimeUrl.hash;
+    return rewritten.toString();
+  } catch {
+    return input;
+  }
 }
 
 /** Escape a string for use in a RegExp. */
@@ -198,54 +496,240 @@ export function escapeForRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+export function rewriteLocationHeader(location: string, upstream: string, proxyName: string): string {
+  try {
+    const upstreamUrl = new URL(upstream);
+    const resolved = new URL(location, upstreamUrl);
+    if (resolved.origin !== upstreamUrl.origin) {
+      return resolved.toString();
+    }
+    return `/proxy/${proxyName}${resolved.pathname}${resolved.search}${resolved.hash}`;
+  } catch {
+    return location;
+  }
+}
+
+export function rewriteSetCookieHeader(cookie: string, proxyName: string): string {
+  const parts = cookie
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const [nameValue, ...attributes] = parts;
+  if (!nameValue) {
+    return cookie;
+  }
+
+  const rewritten = [nameValue, `Path=/proxy/${proxyName}`];
+  for (const attribute of attributes) {
+    const [rawName = '', ...rawValueParts] = attribute.split('=');
+    const name = rawName.trim();
+    const lowerName = name.toLowerCase();
+
+    if (lowerName === 'path' || lowerName === 'domain') {
+      continue;
+    }
+    if (lowerName === 'samesite') {
+      const value = rawValueParts.join('=').trim();
+      if (/^(strict|lax|none)$/i.test(value)) {
+        rewritten.push(`${name}=${value}`);
+      }
+      continue;
+    }
+    rewritten.push(attribute);
+  }
+
+  return rewritten.join('; ');
+}
+
+export function redactProxyUrlForLog(url: string): string {
+  try {
+    const isRelative = url.startsWith('/');
+    const parsed = new URL(url, 'http://omni.invalid');
+    for (const key of Array.from(parsed.searchParams.keys())) {
+      if (SENSITIVE_QUERY_PARAM_RE.test(key)) {
+        parsed.searchParams.set(key, REDACTED_QUERY_VALUE);
+      }
+    }
+    if (isRelative) {
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+function isHopByHopHeader(key: string, connectionHeaderNames: Set<string>): boolean {
+  const normalized = key.toLowerCase();
+  return HOP_BY_HOP_HEADERS.has(normalized) || connectionHeaderNames.has(normalized);
+}
+
+function getConnectionHeaderNames(headers: FastifyRequest['headers'] | Headers): Set<string> {
+  const value = headers instanceof Headers ? headers.get('connection') : headers.connection;
+  const values = Array.isArray(value) ? value : value ? [value] : [];
+  return new Set(
+    values
+      .flatMap((headerValue) => String(headerValue).split(','))
+      .map((headerName) => headerName.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
+function rewriteRefererHeader(referer: string, upstream: string, proxyName: string): string | undefined {
+  try {
+    const upstreamUrl = new URL(upstream);
+    const parsed = referer.startsWith('/') ? new URL(referer, upstreamUrl) : new URL(referer);
+    const proxyPrefix = `/proxy/${proxyName}`;
+    if (parsed.pathname === proxyPrefix || parsed.pathname.startsWith(`${proxyPrefix}/`)) {
+      const upstreamPath = parsed.pathname.slice(proxyPrefix.length) || '/';
+      return `${upstreamUrl.origin}${upstreamPath}${parsed.search}${parsed.hash}`;
+    }
+    if (parsed.origin === upstreamUrl.origin) {
+      return parsed.toString();
+    }
+  } catch {
+    /* drop invalid referer */
+  }
+  return undefined;
+}
+
+function buildUpstreamHeaders(request: FastifyRequest, upstream: string, proxyName: string): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const connectionHeaderNames = getConnectionHeaderNames(request.headers);
+  const upstreamUrl = new URL(upstream);
+
+  for (const [key, value] of Object.entries(request.headers)) {
+    const lowerKey = key.toLowerCase();
+    if (lowerKey === 'host' || lowerKey === 'content-length' || isHopByHopHeader(lowerKey, connectionHeaderNames)) {
+      continue;
+    }
+    if (lowerKey === 'origin' || lowerKey === 'referer') {
+      continue;
+    }
+    if (typeof value === 'string') {
+      headers[key] = value;
+    }
+  }
+
+  headers.host = upstreamUrl.host;
+  if (request.headers.origin) {
+    headers.origin = upstreamUrl.origin;
+  }
+  const referer = request.headers.referer;
+  if (typeof referer === 'string') {
+    const rewrittenReferer = rewriteRefererHeader(referer, upstream, proxyName);
+    if (rewrittenReferer) {
+      headers.referer = rewrittenReferer;
+    }
+  }
+
+  return headers;
+}
+
+function splitSetCookieHeader(header: string): string[] {
+  return header.split(/,(?=\s*[^;,\s]+=)/g).map((cookie) => cookie.trim());
+}
+
+function getSetCookieHeaders(headers: Headers): string[] {
+  const getSetCookie = (headers as Headers & { getSetCookie?: () => string[] }).getSetCookie;
+  if (getSetCookie) {
+    return getSetCookie.call(headers);
+  }
+  const combined = headers.get('set-cookie');
+  return combined ? splitSetCookieHeader(combined) : [];
+}
+
+async function* readResponseBodyStream(body: ReadableStream<Uint8Array>): AsyncGenerator<Buffer> {
+  const reader = body.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        return;
+      }
+      if (value) {
+        yield Buffer.from(value);
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 /**
  * Proxy an HTTP request to the upstream service.
  */
-async function handleHttpProxy(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+async function handleHttpProxy(request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply | void> {
   const { proxyName } = request.params as { proxyName: string; '*': string };
   const wildcard = (request.params as { '*': string })['*'];
-  const upstream = upstreamMap.get(proxyName);
+  const entry = getProxyEntry(request, proxyName);
 
-  if (!upstream) {
+  if (entry === 'unauthorized') {
+    reply.code(401).send({ error: 'Unauthorized: missing authenticated principal' });
+    return;
+  }
+  if (entry === 'forbidden') {
+    reply.code(403).send({ error: `Forbidden: proxy "${proxyName}" belongs to another session` });
+    return;
+  }
+  if (!entry) {
     reply.code(502).send({ error: `No upstream registered for proxy "${proxyName}"` });
     return;
   }
+  const { upstream } = entry;
 
   const targetUrl = `${upstream}/${wildcard}${request.url.includes('?') ? `?${request.url.split('?')[1]}` : ''}`;
 
   try {
-    const headers: Record<string, string> = {};
-    for (const [key, value] of Object.entries(request.headers)) {
-      if (key === 'host' || key === 'connection') {
-continue;
-}
-      if (typeof value === 'string') {
-headers[key] = value;
-}
-    }
-
-    const response = await globalThis.fetch(targetUrl, {
+    const headers = buildUpstreamHeaders(request, upstream, proxyName);
+    const body =
+      request.method !== 'GET' && request.method !== 'HEAD' ? (request.body as BodyInit | undefined) : undefined;
+    const fetchInit: RequestInit & { duplex?: 'half' } = {
       method: request.method,
       headers,
-      body: request.method !== 'GET' && request.method !== 'HEAD' ? (request.body as BodyInit) : undefined,
-      // @ts-expect-error -- Node fetch supports duplex for streaming
-      duplex: request.method !== 'GET' && request.method !== 'HEAD' ? 'half' : undefined,
-    });
+      body,
+      redirect: 'manual',
+    };
+    if (body !== undefined) {
+      fetchInit.duplex = 'half';
+    }
+
+    const response = await globalThis.fetch(targetUrl, fetchInit);
 
     const contentType = response.headers.get('content-type') ?? '';
-    const isHtml = contentType.includes('text/html');
+    const normalizedContentType = contentType.toLowerCase();
+    const isHtml = normalizedContentType.includes('text/html');
+    const isCss = normalizedContentType.includes('text/css');
 
     reply.status(response.status);
+    const connectionHeaderNames = getConnectionHeaderNames(response.headers);
     for (const [key, value] of response.headers.entries()) {
-      if (key === 'transfer-encoding' || key === 'content-security-policy' || key === 'x-frame-options') {
-continue;
-}
+      const lowerKey = key.toLowerCase();
+      if (isHopByHopHeader(lowerKey, connectionHeaderNames)) {
+        continue;
+      }
+      if (lowerKey === 'content-security-policy' || lowerKey === 'x-frame-options') {
+        continue;
+      }
       // Strip content-encoding and content-length: fetch() auto-decompresses, so the
       // upstream's compressed content-length/encoding no longer match the decompressed body
-      if (key === 'content-encoding' || key === 'content-length') {
-continue;
-}
+      if (lowerKey === 'content-encoding' || lowerKey === 'content-length') {
+        continue;
+      }
+      if (lowerKey === 'location') {
+        reply.header(key, rewriteLocationHeader(value, upstream, proxyName));
+        continue;
+      }
+      if (lowerKey === 'set-cookie') {
+        continue;
+      }
       reply.header(key, value);
+    }
+    const setCookieHeaders = getSetCookieHeaders(response.headers).map((cookie) =>
+      rewriteSetCookieHeader(cookie, proxyName)
+    );
+    if (setCookieHeaders.length > 0) {
+      reply.header('set-cookie', setCookieHeaders);
     }
 
     if (isHtml && response.body) {
@@ -254,9 +738,13 @@ continue;
       // --- Server-side URL rewriting (primary mechanism) ---
       html = rewriteHtmlUrls(html, upstream, proxyName);
 
-      // Inject <base> tag and minimal scripts (console capture, navigation reporting, WS rewriting)
+      // Inject <base> tag and runtime scripts.
       const baseTag = `<base href="/proxy/${proxyName}/">`;
-      const headPayload = `${baseTag}${navigationCapture()}${consoleCapture()}${wsRewriteScript(proxyName)}`;
+      const headPayload = `${baseTag}${buildProxyRuntimeShim({
+        proxyName,
+        upstream,
+        policy: getProxyRuntimePolicy(entry.kind),
+      })}${consoleCapture()}`;
       // Handle <head>, <HEAD>, or missing <head> (lookahead excludes <header>, <heading>, etc.)
       if (/<head(?=[\s>])/i.test(html)) {
         html = html.replace(/<head(?=[\s>])[^>]*>/i, `$&${headPayload}`);
@@ -268,18 +756,20 @@ continue;
 
       // Prevent caching of rewritten HTML
       reply.header('cache-control', 'no-store');
-      reply.send(html);
-      return;
+      return reply.send(html);
+    }
+
+    if (isCss && response.body) {
+      return reply.send(rewriteCssUrls(await response.text(), upstream, proxyName));
     }
 
     if (response.body) {
-      const buffer = Buffer.from(await response.arrayBuffer());
-      reply.send(buffer);
-      return;
+      return reply.send(Readable.from(readResponseBodyStream(response.body as ReadableStream<Uint8Array>)));
     }
-    reply.send();
-  } catch {
-    reply.code(502).send({ error: 'Proxy request failed' });
+    return reply.send();
+  } catch (error) {
+    request.log.error({ err: error, targetUrl: redactProxyUrlForLog(targetUrl) }, 'Proxy request failed');
+    return reply.code(502).send({ error: 'Proxy request failed' });
   }
 }
 
@@ -292,19 +782,28 @@ function handleWsProxy(
   upstreamPath: string
 ): void {
   const proxyName = (request.params as { proxyName: string }).proxyName;
-  const upstream = upstreamMap.get(proxyName);
+  const entry = getProxyEntry(request, proxyName);
 
-  if (!upstream) {
+  if (entry === 'unauthorized') {
+    clientSocket.close(4401, 'Unauthorized');
+    return;
+  }
+  if (entry === 'forbidden') {
+    clientSocket.close(4403, 'Forbidden');
+    return;
+  }
+  if (!entry) {
     clientSocket.close(4502, `No upstream for "${proxyName}"`);
     return;
   }
+  const { upstream } = entry;
 
   // Convert http(s) upstream to ws(s)
   const wsUpstream = upstream.replace(/^http/, 'ws');
   const query = request.url.includes('?') ? `?${request.url.split('?')[1]}` : '';
   const targetUrl = `${wsUpstream}${upstreamPath}${query}`;
 
-  console.log(`[ws-proxy] ${proxyName}: client → upstream ${targetUrl}`);
+  console.log(`[ws-proxy] ${proxyName}: client → upstream ${redactProxyUrlForLog(targetUrl)}`);
   const upstreamSocket = new WsWebSocket(targetUrl, { handshakeTimeout: 10_000 });
 
   // Buffer client messages until upstream is ready
@@ -366,33 +865,24 @@ function handleWsProxy(
   });
 }
 
-/**
- * Generate a <script> tag for lightweight behaviour capture only.
- * URL rewriting is handled server-side by rewriteHtmlUrls() — this script
- * only handles things that can't be done server-side:
- * 1. target="_blank" → _self (keep navigation in-frame)
- * 2. window.open → location.href
- * 3. Navigation change notifications (pushState/replaceState/popstate)
- * 4. Title change notifications
- */
-function navigationCapture(): string {
-  return `<script>(function(){` +
-    // Keep navigation in-frame
-    `document.addEventListener("click",function(e){` +
-    `var a=e.target;while(a&&a.tagName!=="A")a=a.parentElement;` +
-    `if(a&&(a.target==="_blank"||a.target==="_new"))a.target='_self'` +
-    `},true);` +
-    `window.open=function(u){if(u)location.href=u;return window};` +
-    // Notify parent on navigation
-    `function N(){window.parent.postMessage({type:"__preview_navigate__",url:location.href},"*")}` +
-    `var oPS=history.pushState,oRS=history.replaceState;` +
-    `history.pushState=function(){oPS.apply(this,arguments);N()};` +
-    `history.replaceState=function(){oRS.apply(this,arguments);N()};` +
-    `window.addEventListener("popstate",N);window.addEventListener("hashchange",N);` +
-    // Title notifications
-    `function T(){window.parent.postMessage({type:"__preview_title__",title:document.title},"*")}` +
-    `new MutationObserver(T).observe(document.querySelector("title")||document.head,{childList:true,subtree:true,characterData:true});T()` +
-    `})()</script>`;
+export function buildProxyRuntimeShim({
+  proxyName,
+  upstream,
+  policy,
+}: {
+  proxyName: string;
+  upstream: string;
+  policy: ProxyRuntimePolicy;
+}): string {
+  const config = JSON.stringify({
+    version: policy.version,
+    proxyName,
+    upstreamOrigin: upstream,
+    expandedRuntimeUrls: policy.expandedRuntimeUrls,
+    blockServiceWorkerRegistration: policy.blockServiceWorkerRegistration,
+  });
+
+  return `<script data-omni-proxy-runtime-shim="${PROXY_RUNTIME_SHIM_VERSION}">(function(){"use strict";var C=${config};var P="/proxy/"+C.proxyName;function pair(a,b){return a===b||(a==="ws:"&&b==="http:")||(a==="wss:"&&b==="https:")||(a==="http:"&&b==="ws:")||(a==="https:"&&b==="wss:")}function ignored(v){return /^(?:$|#|data:|blob:|javascript:|mailto:|tel:|about:)/i.test(String(v))}function proxied(u,t){var o=new URL(location.origin);if(t==="websocket")o.protocol=location.protocol==="https:"?"wss:":"ws:";o.pathname=P+u.pathname;o.search=u.search;o.hash=u.hash;return o.toString()}function rewrite(input,t){try{if(ignored(input))return input;var u=new URL(input, location.href);if(["http:","https:","ws:","wss:"].indexOf(u.protocol)===-1)return input;var up=new URL(C.upstreamOrigin);if(u.origin===location.origin&&(u.pathname===P||u.pathname.indexOf(P+"/")===0)){if(t==="websocket")u.protocol=location.protocol==="https:"?"wss:":"ws:";return u.toString()}if(u.host===up.host&&pair(u.protocol,up.protocol))return proxied(u,t);if(u.origin===location.origin)return proxied(u,t);return input}catch(e){return input}}function canonical(){try{var u=new URL(location.href);if(u.origin===location.origin&&(u.pathname===P||u.pathname.indexOf(P+"/")===0)){var up=new URL(C.upstreamOrigin);var path=u.pathname.slice(P.length)||"/";return up.origin+path+u.search+u.hash}}catch(e){}return location.href}function nav(){try{window.parent.postMessage({type:"__preview_navigate__",url:canonical()},"*")}catch(e){}}function title(){try{window.parent.postMessage({type:"__preview_title__",title:document.title},"*")}catch(e){}}document.addEventListener("click",function(e){var a=e.target;while(a&&a.tagName!=="A")a=a.parentElement;if(!a)return;if(a.target==="_blank"||a.target==="_new")a.target="_self";if(C.expandedRuntimeUrls&&a.href)a.href=rewrite(a.href,"http")},true);document.addEventListener("submit",function(e){var f=e.target;if(C.expandedRuntimeUrls&&f&&f.action)f.action=rewrite(f.action,"http")},true);var open=window.open;window.open=function(u,n,s){if(u){var next=C.expandedRuntimeUrls?rewrite(u,"http"):u;location.href=next;return window}return open?open.call(window,u,n,s):null};var ps=history.pushState,rs=history.replaceState;history.pushState=function(){ps.apply(this,arguments);nav()};history.replaceState=function(){rs.apply(this,arguments);nav()};window.addEventListener("popstate",nav);window.addEventListener("hashchange",nav);if(document.head){new MutationObserver(title).observe(document.querySelector("title")||document.head,{childList:true,subtree:true,characterData:true});title()}if(C.blockServiceWorkerRegistration&&navigator.serviceWorker&&navigator.serviceWorker.register){navigator.serviceWorker.register=function(){return Promise.reject(new DOMException("Service worker registration is blocked for this proxied page","SecurityError"))}}if(!C.expandedRuntimeUrls)return;var fetchOrig=window.fetch;if(fetchOrig){window.fetch=function(input,init){var next=input;if(typeof Request!=="undefined"&&input instanceof Request){var url=rewrite(input.url,"http");if(url!==input.url)next=new Request(url,input)}else if(typeof input==="string"||input instanceof URL){next=rewrite(String(input),"http")}return fetchOrig.call(this,next,init)}}var xo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){arguments[1]=rewrite(u,"http");return xo.apply(this,arguments)};if(window.EventSource){var ES=window.EventSource;window.EventSource=function(u,c){return new ES(rewrite(u,"http"),c)};window.EventSource.prototype=ES.prototype}if(window.WebSocket){var WS=window.WebSocket;window.WebSocket=function(u,p){var next=rewrite(u,"websocket");return p?new WS(next,p):new WS(next)};window.WebSocket.prototype=WS.prototype;window.WebSocket.CONNECTING=WS.CONNECTING;window.WebSocket.OPEN=WS.OPEN;window.WebSocket.CLOSING=WS.CLOSING;window.WebSocket.CLOSED=WS.CLOSED}if(window.Worker){var W=window.Worker;window.Worker=function(u,o){return new W(rewrite(u,"http"),o)};window.Worker.prototype=W.prototype}})()</script>`;
 }
 
 /**
@@ -401,7 +891,8 @@ function navigationCapture(): string {
  * Also sends a connection confirmation so the UI knows capture is active.
  */
 function consoleCapture(): string {
-  return `<script>(function(){` +
+  return (
+    `<script>(function(){` +
     `var P=function(l,m){try{window.parent.postMessage({type:"__preview_console__",level:l,message:m},"*")}catch(e){}};` +
     `["log","info","debug","warn","error"].forEach(function(l){` +
     `var o=console[l];console[l]=function(){o.apply(console,arguments);` +
@@ -409,19 +900,8 @@ function consoleCapture(): string {
     `try{return typeof a==="object"?JSON.stringify(a):String(a)}catch(e){return String(a)}` +
     `}).join(" ");P(l==="info"||l==="debug"?"log":l,m)}catch(e){}}});` +
     `P("log","[console connected]")` +
-    `})()</script>`;
-}
-
-/**
- * Generate a <script> tag that patches the WebSocket constructor to rewrite
- * all same-host WS connections through the proxy prefix.
- */
-function wsRewriteScript(proxyName: string): string {
-  // Rewrites ALL same-host WebSocket URLs through the proxy:
-  // ws://host/ws → ws://host/proxy/<proxyName>/ws
-  // ws://host/websockify → ws://host/proxy/<proxyName>/websockify
-  // Already-proxied paths (starting with /proxy/) are left untouched.
-  return `<script>(function(){var P="/proxy/${proxyName}",O=WebSocket;window.WebSocket=function(u,p){var a=new URL(u);if(a.host===location.host&&!a.pathname.startsWith("/proxy/")){a.pathname=P+a.pathname}return p?new O(a.toString(),p):new O(a.toString())};window.WebSocket.prototype=O.prototype;window.WebSocket.CONNECTING=O.CONNECTING;window.WebSocket.OPEN=O.OPEN;window.WebSocket.CLOSING=O.CLOSING;window.WebSocket.CLOSED=O.CLOSED})()</script>`;
+    `})()</script>`
+  );
 }
 
 /**
@@ -482,12 +962,17 @@ function registerAndRewrite(url: string, proxyKey: string): string | null {
     }
     const parsed = new URL(url);
     const upstream = `${parsed.protocol}//${parsed.host}`;
-    upstreamMap.set(proxyKey, upstream);
+    const now = Date.now();
+    upstreamMap.set(proxyKey, {
+      upstream,
+      kind: 'trusted-internal',
+      createdAt: now,
+      lastUsedAt: now,
+    });
     const proxyPath = `/proxy/${proxyKey}${parsed.pathname}${parsed.search}`;
-    console.log(`[proxy-rewrite] ${proxyKey}: ${url} → ${proxyPath} (upstream: ${upstream})`);
+    console.log(`[proxy-rewrite] ${proxyKey}: ${redactProxyUrlForLog(url)} → ${proxyPath} (upstream: ${upstream})`);
     return proxyPath;
   } catch {
     return null;
   }
 }
-

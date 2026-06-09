@@ -1,13 +1,25 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { BROWSER_START_URL } from '@/lib/url';
 import { BrowserManager, type BrowserStoreSurface, DEFAULT_PROFILE_ID } from '@/main/browser-manager';
-import type { BrowserBookmark, BrowserHistoryEntry, BrowserProfile, BrowserTabset, BrowserTabsetId } from '@/shared/types';
+import type {
+  BrowserBookmark,
+  BrowserHistoryEntry,
+  BrowserProfile,
+  BrowserTabset,
+  BrowserTabsetId,
+} from '@/shared/types';
 
-function makeStore(): BrowserStoreSurface {
-  let profiles: BrowserProfile[] = [];
-  let tabsets: Record<BrowserTabsetId, BrowserTabset> = {};
-  let history: BrowserHistoryEntry[] = [];
-  let bookmarks: BrowserBookmark[] = [];
+function makeStore(initial?: {
+  profiles?: BrowserProfile[];
+  tabsets?: Record<BrowserTabsetId, BrowserTabset>;
+  history?: BrowserHistoryEntry[];
+  bookmarks?: BrowserBookmark[];
+}): BrowserStoreSurface {
+  let profiles: BrowserProfile[] = initial?.profiles ?? [];
+  let tabsets: Record<BrowserTabsetId, BrowserTabset> = initial?.tabsets ?? {};
+  let history: BrowserHistoryEntry[] = initial?.history ?? [];
+  let bookmarks: BrowserBookmark[] = initial?.bookmarks ?? [];
   return {
     getProfiles: () => profiles,
     setProfiles: (p) => {
@@ -109,6 +121,46 @@ describe('BrowserManager', () => {
     mgr.navigateTab('nav', activeTabId!, 'localhost:3000');
     const ts = mgr.getSnapshot().tabsets.nav!;
     expect(ts.tabs[0]!.url).toBe('http://localhost:3000');
+  });
+
+  it('does not store relative proxy transport paths on create, update, or history', () => {
+    mgr.ensureTabset('nav');
+    const created = mgr.createTab('nav', { url: '/proxy/ext-https-github-com/acme/repo/pull/42', activate: true });
+    expect(created.url).toBe(BROWSER_START_URL);
+
+    mgr.updateTabMeta('nav', created.id, { url: '/proxy/ext-https-example-com/docs' });
+    expect(mgr.getSnapshot().tabsets.nav!.tabs.find((tab) => tab.id === created.id)!.url).toBe(BROWSER_START_URL);
+
+    mgr.recordHistory({ url: '/proxy/ext-https-example-com/docs', profileId: DEFAULT_PROFILE_ID });
+    expect(mgr.listHistory()).toHaveLength(0);
+  });
+
+  it('normalizes legacy persisted relative proxy transport state', () => {
+    const store = makeStore({
+      tabsets: {
+        legacy: {
+          id: 'legacy',
+          profileId: DEFAULT_PROFILE_ID,
+          activeTabId: 'tab-1',
+          createdAt: 1,
+          updatedAt: 1,
+          tabs: [{ id: 'tab-1', url: '/proxy/ext-https-github-com/acme/repo/pull/42', createdAt: 1, lastActiveAt: 1 }],
+        },
+      },
+      history: [
+        {
+          id: 'h-1',
+          url: '/proxy/ext-https-github-com/acme/repo/pull/42',
+          profileId: DEFAULT_PROFILE_ID,
+          visitedAt: 1,
+        },
+        { id: 'h-2', url: 'https://github.com/acme/repo/pull/42', profileId: DEFAULT_PROFILE_ID, visitedAt: 2 },
+      ],
+    });
+    const manager = new BrowserManager({ store, newId: () => 'id', now: () => 10 });
+
+    expect(manager.getSnapshot().tabsets.legacy!.tabs[0]!.url).toBe(BROWSER_START_URL);
+    expect(manager.listHistory().map((entry) => entry.url)).toEqual(['https://github.com/acme/repo/pull/42']);
   });
 
   it('removeTabset drops the entry', () => {

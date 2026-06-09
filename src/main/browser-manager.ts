@@ -9,7 +9,7 @@
  * narrow store interface so it can be exercised in tests without a live
  * electron-store instance.
  */
-import { BROWSER_START_URL, normalizeAddress } from '@/lib/url';
+import { BROWSER_START_URL, isProxyTransportPath, normalizeAddress, normalizeBrowserStateUrl } from '@/lib/url';
 import type { IIpcListener } from '@/shared/ipc-listener';
 import type {
   BrowserBookmark,
@@ -68,6 +68,7 @@ export class BrowserManager {
 
   constructor(private readonly deps: BrowserManagerDeps) {
     this.ensureDefaultProfile();
+    this.normalizePersistedBrowserState();
   }
 
   // ---------------------------------------------------------------------------
@@ -94,8 +95,8 @@ export class BrowserManager {
     const profiles = this.deps.store.getProfiles();
     const existing = profiles.find((p) => p.id === DEFAULT_PROFILE_ID);
     if (existing) {
-return existing;
-}
+      return existing;
+    }
     const profile: BrowserProfile = {
       id: DEFAULT_PROFILE_ID,
       label: 'Default',
@@ -141,23 +142,20 @@ return existing;
       }
     }
     if (mutated) {
-this.deps.store.setTabsets(next);
-}
+      this.deps.store.setTabsets(next);
+    }
   }
 
   // ---------------------------------------------------------------------------
   // Tabsets
   // ---------------------------------------------------------------------------
 
-  ensureTabset(
-    id: BrowserTabsetId,
-    opts?: { profileId?: BrowserProfileId; initialUrl?: string }
-  ): BrowserTabset {
+  ensureTabset(id: BrowserTabsetId, opts?: { profileId?: BrowserProfileId; initialUrl?: string }): BrowserTabset {
     const tabsets = this.deps.store.getTabsets();
     const existing = tabsets[id];
     if (existing) {
-return existing;
-}
+      return existing;
+    }
     const now = this.deps.now();
     const initialUrl = opts?.initialUrl ?? BROWSER_START_URL;
     const firstTab: BrowserTab = {
@@ -190,8 +188,8 @@ return existing;
   removeTabset(id: BrowserTabsetId): void {
     const tabsets = this.deps.store.getTabsets();
     if (!tabsets[id]) {
-return;
-}
+      return;
+    }
     const { [id]: _removed, ...rest } = tabsets;
     this.deps.store.setTabsets(rest);
   }
@@ -208,7 +206,7 @@ return;
       const now = this.deps.now();
       const tab: BrowserTab = {
         id: this.deps.newId(),
-        url: opts?.url ?? BROWSER_START_URL,
+        url: opts?.url ? normalizeBrowserStateUrl(opts.url) : BROWSER_START_URL,
         createdAt: now,
         lastActiveAt: now,
         ...(opts?.profileId ? { profileId: opts.profileId } : {}),
@@ -229,8 +227,8 @@ return;
     this.mutateTabset(tabsetId, (ts) => {
       const idx = ts.tabs.findIndex((t) => t.id === tabId);
       if (idx < 0) {
-throw new BrowserTabNotFoundError(tabsetId, tabId);
-}
+        throw new BrowserTabNotFoundError(tabsetId, tabId);
+      }
       // Remember the closed tab (minus any blank start-page tabs) so
       // Cmd+Shift+T can resurrect it.
       const closed = ts.tabs[idx]!;
@@ -301,8 +299,8 @@ throw new BrowserTabNotFoundError(tabsetId, tabId);
     this.mutateTabset(tabsetId, (ts) => {
       const tab = ts.tabs.find((t) => t.id === tabId);
       if (!tab) {
-throw new BrowserTabNotFoundError(tabsetId, tabId);
-}
+        throw new BrowserTabNotFoundError(tabsetId, tabId);
+      }
       const now = this.deps.now();
       const tabs = ts.tabs.map((t) =>
         t.id === tabId ? { ...t, url, lastActiveAt: now, title: undefined, favicon: undefined } : t
@@ -319,9 +317,10 @@ throw new BrowserTabNotFoundError(tabsetId, tabId);
     this.mutateTabset(tabsetId, (ts) => {
       const tab = ts.tabs.find((t) => t.id === tabId);
       if (!tab) {
-throw new BrowserTabNotFoundError(tabsetId, tabId);
-}
-      const tabs = ts.tabs.map((t) => (t.id === tabId ? { ...t, ...patch } : t));
+        throw new BrowserTabNotFoundError(tabsetId, tabId);
+      }
+      const normalizedPatch = patch.url ? { ...patch, url: normalizeBrowserStateUrl(patch.url) } : patch;
+      const tabs = ts.tabs.map((t) => (t.id === tabId ? { ...t, ...normalizedPatch } : t));
       return { next: { ...ts, tabs } };
     });
   }
@@ -339,8 +338,8 @@ throw new BrowserTabNotFoundError(tabsetId, tabId);
       }
       // Anything the caller omitted goes to the end (defensive).
       for (const t of byId.values()) {
-ordered.push(t);
-}
+        ordered.push(t);
+      }
       return { next: { ...ts, tabs: ordered } };
     });
   }
@@ -349,8 +348,8 @@ ordered.push(t);
     this.mutateTabset(tabsetId, (ts) => {
       const tab = ts.tabs.find((t) => t.id === tabId);
       if (!tab) {
-throw new BrowserTabNotFoundError(tabsetId, tabId);
-}
+        throw new BrowserTabNotFoundError(tabsetId, tabId);
+      }
       const tabs = ts.tabs.map((t) => (t.id === tabId ? { ...t, pinned } : t));
       return { next: { ...ts, tabs } };
     });
@@ -360,8 +359,8 @@ throw new BrowserTabNotFoundError(tabsetId, tabId);
     return this.mutateTabset(tabsetId, (ts) => {
       const src = ts.tabs.find((t) => t.id === tabId);
       if (!src) {
-throw new BrowserTabNotFoundError(tabsetId, tabId);
-}
+        throw new BrowserTabNotFoundError(tabsetId, tabId);
+      }
       const now = this.deps.now();
       const clone: BrowserTab = {
         ...src,
@@ -380,9 +379,9 @@ throw new BrowserTabNotFoundError(tabsetId, tabId);
   // ---------------------------------------------------------------------------
 
   recordHistory(entry: { url: string; title?: string; profileId: BrowserProfileId }): void {
-    if (!entry.url || entry.url === 'about:blank') {
-return;
-}
+    if (!entry.url || entry.url === 'about:blank' || isProxyTransportPath(entry.url)) {
+      return;
+    }
     const history = this.deps.store.getHistory();
     const last = history[0];
     // Dedupe consecutive visits to the same URL within the same profile.
@@ -404,21 +403,15 @@ return;
     this.deps.store.setHistory(next);
   }
 
-  listHistory(opts?: {
-    query?: string;
-    limit?: number;
-    profileId?: BrowserProfileId;
-  }): BrowserHistoryEntry[] {
+  listHistory(opts?: { query?: string; limit?: number; profileId?: BrowserProfileId }): BrowserHistoryEntry[] {
     const q = (opts?.query ?? '').trim().toLowerCase();
     const limit = opts?.limit ?? 100;
     let entries = this.deps.store.getHistory();
     if (opts?.profileId) {
-entries = entries.filter((e) => e.profileId === opts.profileId);
-}
+      entries = entries.filter((e) => e.profileId === opts.profileId);
+    }
     if (q) {
-      entries = entries.filter(
-        (e) => e.url.toLowerCase().includes(q) || (e.title?.toLowerCase().includes(q) ?? false)
-      );
+      entries = entries.filter((e) => e.url.toLowerCase().includes(q) || (e.title?.toLowerCase().includes(q) ?? false));
     }
     return entries.slice(0, limit);
   }
@@ -456,15 +449,12 @@ entries = entries.filter((e) => e.profileId === opts.profileId);
   // Suggestions
   // ---------------------------------------------------------------------------
 
-  suggest(
-    query: string,
-    opts?: { limit?: number; profileId?: BrowserProfileId }
-  ): BrowserSuggestion[] {
+  suggest(query: string, opts?: { limit?: number; profileId?: BrowserProfileId }): BrowserSuggestion[] {
     const q = query.trim();
     const limit = opts?.limit ?? 8;
     if (!q) {
-return [];
-}
+      return [];
+    }
 
     const qLower = q.toLowerCase();
     const now = this.deps.now();
@@ -474,8 +464,8 @@ return [];
     for (const b of this.deps.store.getBookmarks()) {
       const hay = `${b.title} ${b.url}`.toLowerCase();
       if (!hay.includes(qLower)) {
-continue;
-}
+        continue;
+      }
       out.push({ kind: 'bookmark', url: b.url, title: b.title, score: 100 + hay.indexOf(qLower) * -1 });
     }
 
@@ -484,15 +474,15 @@ continue;
     const seen = new Set<string>(out.map((o) => o.url));
     for (const h of history) {
       if (opts?.profileId && h.profileId !== opts.profileId) {
-continue;
-}
+        continue;
+      }
       if (seen.has(h.url)) {
-continue;
-}
+        continue;
+      }
       const hay = `${h.title ?? ''} ${h.url}`.toLowerCase();
       if (!hay.includes(qLower)) {
-continue;
-}
+        continue;
+      }
       // Decay: last 24h ≈ +30, last week ≈ +15, older ≈ +5
       const ageHours = Math.max(0, (now - h.visitedAt) / 3_600_000);
       const recency = ageHours < 24 ? 30 : ageHours < 24 * 7 ? 15 : 5;
@@ -524,12 +514,40 @@ continue;
     const tabsets = this.deps.store.getTabsets();
     const ts = tabsets[tabsetId];
     if (!ts) {
-throw new BrowserTabsetNotFoundError(tabsetId);
-}
+      throw new BrowserTabsetNotFoundError(tabsetId);
+    }
     const { next, result } = mutator(ts);
     const stamped: BrowserTabset = { ...next, updatedAt: this.deps.now() };
     this.deps.store.setTabsets({ ...tabsets, [tabsetId]: stamped });
     return result as R;
+  }
+
+  private normalizePersistedBrowserState(): void {
+    const tabsets = this.deps.store.getTabsets();
+    let tabsetsChanged = false;
+    const nextTabsets: Record<BrowserTabsetId, BrowserTabset> = {};
+    for (const [id, tabset] of Object.entries(tabsets)) {
+      let tabsetChanged = false;
+      const tabs = tabset.tabs.map((tab) => {
+        const url = normalizeBrowserStateUrl(tab.url);
+        if (url !== tab.url) {
+          tabsetsChanged = true;
+          tabsetChanged = true;
+          return { ...tab, url };
+        }
+        return tab;
+      });
+      nextTabsets[id] = tabsetChanged ? { ...tabset, tabs } : tabset;
+    }
+    if (tabsetsChanged) {
+      this.deps.store.setTabsets(nextTabsets);
+    }
+
+    const history = this.deps.store.getHistory();
+    const nextHistory = history.filter((entry) => !isProxyTransportPath(entry.url));
+    if (nextHistory.length !== history.length) {
+      this.deps.store.setHistory(nextHistory);
+    }
   }
 }
 
@@ -538,9 +556,7 @@ throw new BrowserTabsetNotFoundError(tabsetId);
 // ---------------------------------------------------------------------------
 
 type ElectronStoreLike = {
-  get<K extends 'browserProfiles' | 'browserTabsets' | 'browserHistory' | 'browserBookmarks'>(
-    key: K
-  ): unknown;
+  get<K extends 'browserProfiles' | 'browserTabsets' | 'browserHistory' | 'browserBookmarks'>(key: K): unknown;
   set(key: string, value: unknown): void;
 };
 

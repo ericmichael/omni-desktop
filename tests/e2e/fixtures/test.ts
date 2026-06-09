@@ -88,6 +88,12 @@ async function launchServerLocal(
         HOST: parsed.hostname,
         PORT: parsed.port || '3001',
         OMNI_WEB_AUTO_OPEN: 'false',
+        ...(process.env.OMNI_PROXY_DYNAMIC_RUNTIME_SHIMS
+          ? { OMNI_PROXY_DYNAMIC_RUNTIME_SHIMS: process.env.OMNI_PROXY_DYNAMIC_RUNTIME_SHIMS }
+          : {}),
+        ...(process.env.OMNI_PROXY_RUNTIME_SHIMS
+          ? { OMNI_PROXY_RUNTIME_SHIMS: process.env.OMNI_PROXY_RUNTIME_SHIMS }
+          : {}),
         OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? process.env.SANDBOX_OPENAI_BASE_URL ?? 'http://127.0.0.1:9/v1',
         OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? process.env.SANDBOX_OPENAI_API_KEY ?? 'test-key',
       },
