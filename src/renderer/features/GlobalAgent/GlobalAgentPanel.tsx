@@ -76,9 +76,13 @@ export const GlobalAgentPanel = memo(() => {
       return null;
     }
     const url = new URL(status.data.uiUrl, serverOrigin());
+    const theme = store.theme ?? 'teams-light';
+    if (theme !== 'default') {
+      url.searchParams.set('theme', theme);
+    }
     url.searchParams.set('minimal', 'true');
     return url.toString();
-  }, [status]);
+  }, [status, store.theme]);
 
   if (!uiUrl) {
     return (
