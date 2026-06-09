@@ -1,4 +1,4 @@
-import type { Pipeline, Project, Ticket } from '@/shared/types';
+import type { Column, Pipeline, Project, Ticket } from '@/shared/types';
 
 export type SupervisorContext = {
   /** First ~500 chars of the project's root page content. */
@@ -47,11 +47,67 @@ const buildContextSection = (ctx?: SupervisorContext): string => {
   return parts.join('');
 };
 
+const listSection = (title: string, values?: string[]): string => {
+  if (!values || values.length === 0) {
+    return '';
+  }
+  return `\n${title}:\n${values.map((value) => `- ${value}`).join('\n')}`;
+};
+
+const workflowSection = (column?: Column): string => {
+  const workflow = column?.workflow;
+  if (!column || !workflow) {
+    return '';
+  }
+
+  const parts: string[] = ['\n## Column Contract'];
+  if (workflow.purpose) {
+    parts.push(`Purpose: ${workflow.purpose}`);
+  }
+  const entryCriteria = listSection('Entry criteria', workflow.entryCriteria);
+  if (entryCriteria) {
+    parts.push(entryCriteria);
+  }
+  const definitionOfDone = listSection('Definition of done', workflow.definitionOfDone);
+  if (definitionOfDone) {
+    parts.push(definitionOfDone);
+  }
+  if (workflow.agentInstructions) {
+    parts.push(`Column instructions:\n${workflow.agentInstructions}`);
+  }
+  const recommendedSkills = listSection('Recommended skills', workflow.recommendedSkills);
+  if (recommendedSkills) {
+    parts.push(recommendedSkills);
+  }
+  const allowedTransitions = listSection('Allowed transitions', workflow.allowedTransitions);
+  if (allowedTransitions) {
+    parts.push(allowedTransitions);
+  }
+  if (workflow.autoDispatch !== undefined) {
+    parts.push(`Auto-dispatch: ${workflow.autoDispatch ? 'enabled' : 'disabled'}`);
+  }
+  return parts.join('\n');
+};
+
+const nextTransitionText = (ticket: Ticket, pipeline: Pipeline): string => {
+  const currentIndex = pipeline.columns.findIndex((column) => column.id === ticket.columnId);
+  const currentColumn = currentIndex >= 0 ? pipeline.columns[currentIndex] : undefined;
+  const allowedTransitionIds = currentColumn?.workflow?.allowedTransitions;
+  const nextColumn = allowedTransitionIds?.length
+    ? pipeline.columns.find((column) => column.id === allowedTransitionIds[0])
+    : pipeline.columns[currentIndex + 1];
+  if (!nextColumn) {
+    return 'No next column is available; if the current definition of done is satisfied, call `goal_complete` and stop.';
+  }
+  const gateText = nextColumn.gate ? ' This destination is a human gate; move there and stop without advancing further.' : '';
+  return `When the current column definition of done is satisfied, move the ticket to \`${nextColumn.label}\` with \`move_ticket\`.${gateText}`;
+};
+
 /**
  * Build the system prompt for a supervisor agent session.
  * Single prompt replaces all per-column prompt templates.
  */
-export const buildSupervisorPrompt = (
+export const buildAutopilotGoalText = (
   ticket: Ticket,
   project: Project,
   pipeline: Pipeline,
@@ -83,8 +139,8 @@ Current Column: ${columnLabel}
 ## Pipeline
 ${columnNames}
 
-When your work for the current column is complete, use \`move_ticket\` to advance the ticket to the next column.
-Do not edit YAML files or configuration files to manage ticket state — use your project management tools instead.
+${nextTransitionText(ticket, pipeline)}
+Do not edit YAML files or configuration files to manage ticket state — use your project management tools instead.${workflowSection(currentColumn)}
 
 ## How to Work
 
@@ -94,3 +150,28 @@ Do not edit YAML files or configuration files to manage ticket state — use you
 4. **Verify** — Run tests, check linting, review changes.
 5. **Advance** — When work for the current column is complete, use \`move_ticket\` to advance the ticket.${buildContextSection(context)}`;
 };
+
+export const buildAutopilotAdditionalInstructions = (
+  _ticket: Ticket,
+  _project: Project,
+  _pipeline: Pipeline,
+  context?: SupervisorContext
+): string => {
+  const artifactText = context?.artifactsDir
+    ? `\n\n## Output for the user\nWrite persistent progress notes, research, and deliverables to \`${context.artifactsDir}\`. Keep the PR writeup current:\n- \`${context.artifactsDir}/pr/PR_TITLE.md\` — one short line (≤70 chars), no markdown.\n- \`${context.artifactsDir}/pr/PR_BODY.md\` — markdown with **Summary** and **Test plan** sections.`
+    : '';
+
+  return `You are working on an Omni project ticket.
+
+## Stable Rules
+
+- Use project tools such as \`move_ticket\` to mutate ticket state; never edit DB, YAML, or config files to manage ticket state.
+- Read ticket comments before starting and write a summary comment before ending.
+- Respect gates; never move past a \`gate: true\` column automatically.
+- Follow AGENTS.md for every source file you touch.
+- Use \`spawn_worker\` only for independent subtasks with clear file ownership and acceptance criteria.
+- Activate recommended skills when relevant, and follow activated skill requirements.
+- Use \`goal_complete\` to end the autopilot loop when achieved or truly blocked.${artifactText}`;
+};
+
+export const buildSupervisorPrompt = buildAutopilotGoalText;

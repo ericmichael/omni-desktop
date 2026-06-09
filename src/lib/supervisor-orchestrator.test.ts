@@ -227,6 +227,34 @@ describe('SupervisorOrchestrator integration', () => {
 
       expect(startSpy).not.toHaveBeenCalled();
     });
+
+    it('autoDispatchTick respects the destination active column maxConcurrent after moving from backlog', async () => {
+      const ctx = makePm({
+        autoDispatch: true,
+        pipeline: {
+          columns: [
+            { id: 'backlog', label: 'Backlog' },
+            { id: 'in_progress', label: 'In Progress', maxConcurrent: 1 },
+            { id: 'review', label: 'Review' },
+            { id: 'done', label: 'Done' },
+          ],
+        },
+        tickets: [
+          { id: 'busy', columnId: 'in_progress' },
+          { id: 't-ready', columnId: 'backlog' },
+        ],
+      });
+      const busy = seedMachine(ctx, 'busy');
+      busy.phase = 'running';
+      const startSpy = vi.fn(async () => {});
+      (orch(ctx.pm) as unknown as { startSupervisor: typeof startSpy }).startSupervisor = startSpy;
+
+      await orch(ctx.pm).autoDispatchTick();
+
+      expect(startSpy).not.toHaveBeenCalled();
+      const readyTicket = ctx.store.get('tickets', []).find((t: Ticket) => t.id === 't-ready')!;
+      expect(readyTicket.columnId).toBe('backlog');
+    });
   });
 
   // handleClientToolCall moved out of main — tool dispatch now lives entirely
@@ -583,6 +611,57 @@ describe('SupervisorOrchestrator integration', () => {
       expect(ctx.bridge.ensureColumn).toHaveBeenCalledWith(
         expect.objectContaining({ ticketId: 't1', profileName: 'local:machine-1' })
       );
+    });
+
+    it('passes goal text as prompt and durable rules as additionalInstructions without duplicating the full prompt', async () => {
+      const ctx = makePm({
+        source: { kind: 'local', workspaceDir: '/tmp/fake' },
+        pipeline: {
+          columns: [
+            { id: 'backlog', label: 'Backlog' },
+            {
+              id: 'in_progress',
+              label: 'In Progress',
+              workflow: {
+                purpose: 'Implement the accepted ticket plan.',
+                definitionOfDone: ['Regression test demonstrates prompt channel separation'],
+                agentInstructions: 'Keep the launcher workflow source of truth in the database.',
+              },
+            },
+            { id: 'review', label: 'Review', gate: true },
+            { id: 'done', label: 'Done' },
+          ],
+        },
+        tickets: [
+          {
+            id: 't1',
+            columnId: 'in_progress',
+            title: 'Split autopilot prompt channels',
+            description: 'Send the ticket goal separately from durable runtime instructions.',
+          },
+        ],
+      });
+
+      await orch(ctx.pm).startSupervisor('t1' as TicketId);
+
+      const startGoalCall = ctx.bridge.startGoal.mock.calls[ctx.bridge.startGoal.mock.calls.length - 1];
+      const startGoalArg = startGoalCall?.[0] as {
+        prompt: string;
+        runOverrides?: { additionalInstructions?: string };
+      };
+      expect(startGoalArg.prompt).toContain('Title: Split autopilot prompt channels');
+      expect(startGoalArg.prompt).toContain('Send the ticket goal separately from durable runtime instructions.');
+      expect(startGoalArg.prompt).toContain('Implement the accepted ticket plan.');
+      expect(startGoalArg.prompt).toContain('Regression test demonstrates prompt channel separation');
+
+      const additionalInstructions = startGoalArg.runOverrides?.additionalInstructions;
+      expect(additionalInstructions).toEqual(expect.any(String));
+      expect(additionalInstructions).toContain('move_ticket');
+      expect(additionalInstructions).toContain('spawn_worker');
+      expect(additionalInstructions).not.toContain('Title: Split autopilot prompt channels');
+      expect(additionalInstructions).not.toContain('Send the ticket goal separately from durable runtime instructions.');
+      expect(additionalInstructions).not.toContain('Regression test demonstrates prompt channel separation');
+      expect(additionalInstructions).not.toBe(startGoalArg.prompt);
     });
   });
 

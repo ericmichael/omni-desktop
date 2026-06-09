@@ -37,7 +37,11 @@ import { claimsCollide, decideWorktreeAction, resolveWorkspaceClaim } from '@/li
 import type { AppControlManager } from '@/main/app-control-manager';
 import type { ProcessManager } from '@/main/process-manager';
 import type { SupervisorBridge } from '@/main/supervisor-bridge';
-import { buildSupervisorPrompt, type SupervisorContext } from '@/main/supervisor-prompt';
+import {
+  buildAutopilotAdditionalInstructions,
+  buildAutopilotGoalText,
+  type SupervisorContext,
+} from '@/main/supervisor-prompt';
 import { SupervisorState } from '@/main/supervisor-state';
 import { getProjectPagesDir } from '@/main/util';
 import { createWorktree, generateWorktreeName, isWorktreeDirty, removeWorktree } from '@/main/worktree-ops';
@@ -761,17 +765,17 @@ export class SupervisorOrchestrator {
     // in session.variables (set via buildSessionVariables), so omni-code
     // tools can read structured ticket context without parsing this
     // prompt.
-    const supervisorPrompt = this.buildFullSupervisorPrompt(ticketId);
+    const { goalText, additionalInstructions } = this.buildAutopilotPrompts(ticketId);
 
     console.log(`[SupervisorOrchestrator] startMachineRun: bridge.startGoal for ${ticketId}`);
     state.transition('running' as TicketPhase);
     void this.deps.bridge
       .startGoal({
         ticketId,
-        prompt: supervisorPrompt,
+        prompt: goalText,
         maxTurns,
         runOverrides: {
-          additionalInstructions: supervisorPrompt,
+          additionalInstructions,
           safeToolOverrides: { safe_tool_patterns: ['.*'] },
         },
       })
@@ -1335,16 +1339,16 @@ export class SupervisorOrchestrator {
         continue;
       }
 
-      // Check global + per-column WIP limits
-      if (!this.canStartSupervisor(project.id, nextTicket.columnId)) {
-        continue;
-      }
-
-      // Move from first column to second column (first active column) to start work
       const pipeline = this.deps.host.getPipeline(project.id);
       const firstColumnId = pipeline.columns[0]?.id;
       const terminalColumnId = pipeline.columns[pipeline.columns.length - 1]?.id;
       const firstActiveColumn = pipeline.columns.find((c) => c.id !== firstColumnId && c.id !== terminalColumnId);
+      const dispatchColumnId = firstActiveColumn?.id ?? nextTicket.columnId;
+
+      if (!this.canStartSupervisor(project.id, dispatchColumnId)) {
+        continue;
+      }
+
       const originalColumnId = nextTicket.columnId;
       if (firstActiveColumn) {
         this.deps.host.moveTicketToColumn(nextTicket.id, firstActiveColumn.id);
@@ -1366,7 +1370,7 @@ export class SupervisorOrchestrator {
     }
   };
 
-  private buildFullSupervisorPrompt(ticketId: TicketId): string {
+  private buildAutopilotPrompts(ticketId: TicketId): { goalText: string; additionalInstructions: string } {
     const ticket = this.deps.host.getTicketById(ticketId)!;
     const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId)!;
     const pipeline = this.deps.host.getPipeline(ticket.projectId);
@@ -1422,7 +1426,10 @@ export class SupervisorOrchestrator {
       }
     }
 
-    return buildSupervisorPrompt(ticket, project, pipeline, context);
+    return {
+      goalText: buildAutopilotGoalText(ticket, project, pipeline, context),
+      additionalInstructions: buildAutopilotAdditionalInstructions(ticket, project, pipeline, context),
+    };
   }
 
   /** Release bridge subscription on shutdown. */
