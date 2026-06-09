@@ -90,6 +90,7 @@ const SYNTHETIC_BROWSER_APP: CustomAppEntry = {
 
 const COLUMN_WIDTH = 480;
 const COLUMN_WIDTH_SMALL = 360;
+const LAUNCH_COLUMN_MAX_WIDTH = 640;
 const EXPANDED_COLUMN_WIDTH = 860;
 /** Below this width, deck columns use COLUMN_WIDTH_SMALL. */
 const NARROW_DECK_WIDTH = 800;
@@ -995,7 +996,12 @@ const DeckColumn = memo(
           <div className={styles.flex1MinH0Relative}>
             {children}
             {(tab.ticketId || tab.projectId) && (
-              <TicketPanelOverlay panel={activePanel} ticketId={tab.ticketId as TicketId | undefined} tabId={tab.id} onClose={handleClosePanel} />
+              <TicketPanelOverlay
+                panel={activePanel}
+                ticketId={tab.ticketId as TicketId | undefined}
+                tabId={tab.id}
+                onClose={handleClosePanel}
+              />
             )}
           </div>
         </div>
@@ -1197,15 +1203,7 @@ type SidecarBodyProps = {
  * browser page, loaded code-server session, etc.
  */
 const SidecarBody = memo(
-  ({
-    app,
-    originTabId,
-    sandboxUrls,
-    previewUrl,
-    onPreviewUrlChange,
-    isGlass,
-    hidden,
-  }: SidecarBodyProps) => {
+  ({ app, originTabId, sandboxUrls, previewUrl, onPreviewUrlChange, isGlass, hidden }: SidecarBodyProps) => {
     const styles = useStyles();
     const registryProps = useMemo(
       () => ({
@@ -1658,7 +1656,12 @@ const CodeSessionPane = memo(
             isGlass={isGlass}
           />
           {(tab.ticketId || tab.projectId) && (
-            <TicketPanelOverlay panel={activePanel} ticketId={tab.ticketId as TicketId | undefined} tabId={tab.id} onClose={handleClosePanel} />
+            <TicketPanelOverlay
+              panel={activePanel}
+              ticketId={tab.ticketId as TicketId | undefined}
+              tabId={tab.id}
+              onClose={handleClosePanel}
+            />
           )}
         </div>
       </div>
@@ -1759,6 +1762,7 @@ export const CodeDeck = memo(() => {
   const [previewUrls, setPreviewUrls] = useState<Record<CodeTabId, string>>({});
   const [expandedTabIds, setExpandedTabIds] = useState<ReadonlySet<CodeTabId>>(() => new Set());
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  const [deckViewportWidth, setDeckViewportWidth] = useState(() => window.innerWidth);
 
   useEffect(() => {
     const handler = () => setViewportWidth(window.innerWidth);
@@ -1770,6 +1774,18 @@ export const CodeDeck = memo(() => {
   // single row). Leaves trackpad horizontal gestures alone and ignores wheel
   // events that originated inside a column (chat scrollbacks, etc.).
   const deckScrollRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = deckScrollRef.current;
+    if (!el) {
+      return;
+    }
+    const update = () => setDeckViewportWidth(el.clientWidth || window.innerWidth);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   useEffect(() => {
     const el = deckScrollRef.current;
     if (!el) {
@@ -1960,6 +1976,23 @@ export const CodeDeck = memo(() => {
       return COLUMN_WIDTH;
     },
     [expandedTabIds, viewportWidth]
+  );
+
+  const getTabColumnWidth = useCallback(
+    (tab: CodeTab) => {
+      if (!tab.projectId && !tab.customAppId) {
+        const availableWidth = deckViewportWidth || viewportWidth;
+        if (availableWidth <= SNAP_SCROLL_WIDTH) {
+          return Math.max(280, Math.round(availableWidth * 0.96));
+        }
+        if (availableWidth <= NARROW_DECK_WIDTH) {
+          return COLUMN_WIDTH_SMALL;
+        }
+        return Math.min(LAUNCH_COLUMN_MAX_WIDTH, Math.round(availableWidth * 0.62));
+      }
+      return getColumnWidth(tab.id);
+    },
+    [deckViewportWidth, getColumnWidth, viewportWidth]
   );
 
   const handleSelect = useCallback((id: CodeTabId) => {
@@ -2180,7 +2213,7 @@ export const CodeDeck = memo(() => {
                       : undefined;
                   return (
                     <Fragment key={tab.id}>
-                      <div style={{ width: getColumnWidth(tab.id) }} className={styles.deckColumnWrap}>
+                      <div style={{ width: getTabColumnWidth(tab) }} className={styles.deckColumnWrap}>
                         {isLauncher ? (
                           <AppLauncherColumn
                             tab={tab}
