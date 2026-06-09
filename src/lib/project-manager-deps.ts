@@ -5,25 +5,8 @@
  * instead of requiring real WebSocket servers or file systems.
  */
 
-import type { WorkflowConfig } from '@/lib/workflow';
 import type { SupervisorBridge } from '@/main/supervisor-bridge';
 import type { IpcRendererEvents, StoreData } from '@/shared/types';
-
-// ---------------------------------------------------------------------------
-// IWorkflowLoader — FLEET.md configuration
-// ---------------------------------------------------------------------------
-
-export { type WorkflowConfig } from '@/lib/workflow';
-
-export interface IWorkflowLoader {
-  load(projectId: string, workspaceDir: string): Promise<unknown>;
-  loadFromRemote(projectId: string, repoUrl: string, branch?: string): Promise<unknown>;
-  get(projectId: string): unknown | null;
-  getConfig(projectId: string): WorkflowConfig;
-  getPromptTemplate(projectId: string): string;
-  runHook(projectId: string, hookName: string, workspaceDir: string): Promise<boolean>;
-  dispose(): void;
-}
 
 // ---------------------------------------------------------------------------
 // IWindowSender — sends IPC events to the renderer
@@ -51,6 +34,5 @@ export interface IStore {
 export type ProjectManagerDeps = {
   store: IStore;
   sendToWindow: IWindowSender;
-  workflowLoader: IWorkflowLoader;
   bridge: SupervisorBridge;
 };

@@ -14,7 +14,7 @@ import { detectContainerPullRequest, detectContainerPullRequests } from '@/lib/c
 import { getContainerChangeSet, mirrorContainerChangesToHost } from '@/lib/container-sync';
 import { getGitFilesChanged, resolveTicketDiffBase } from '@/lib/git-files-changed';
 import { INBOX_SWEEP_INTERVAL_MS } from '@/lib/inbox-expiry';
-import type { IWorkflowLoader, ProjectManagerDeps } from '@/lib/project-manager-deps';
+import type { ProjectManagerDeps } from '@/lib/project-manager-deps';
 import { runMigrations as runSchemaMigrations } from '@/lib/project-migrations';
 import type { ProjectConfigDefaults } from '@/lib/project-to-config';
 import { projectToConfig } from '@/lib/project-to-config';
@@ -51,7 +51,6 @@ import { SupervisorBridge } from '@/main/supervisor-bridge';
 import { registerSupervisorHandlers } from '@/main/supervisor-handlers';
 import { SupervisorOrchestrator } from '@/main/supervisor-orchestrator';
 import { getDefaultWorkspaceDir, getOmniConfigDir, getProjectDir, getProjectPagesDir } from '@/main/util';
-import { WorkflowLoader } from '@/main/workflow-loader';
 import type { IIpcListener } from '@/shared/ipc-listener';
 import type { ProjectConfig } from '@/shared/manifest';
 import { DEFAULT_PIPELINE, SIMPLE_PIPELINE } from '@/shared/pipeline-defaults';
@@ -171,9 +170,6 @@ export class ProjectManager {
   /** When set, detects MCP server writes and refreshes the UI. */
   private changeWatcher: DbChangeWatcher | undefined;
 
-  /** Workflow file loader (FLEET.md) per project. */
-  private workflowLoader: IWorkflowLoader;
-
   /** Interval handle for inbox expiry sweep. */
   private inboxSweepTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -248,23 +244,6 @@ export class ProjectManager {
     this.repo = arg.repo;
     this.changeSeqRepo = arg.changeSeqRepo;
     this.bridge = deps?.bridge ?? new SupervisorBridge(arg.sendToWindow);
-    this.workflowLoader =
-      deps?.workflowLoader ??
-      new WorkflowLoader({
-        onChange: (projectId, workflow) => {
-          console.log(
-            `[ProjectManager] FLEET.md reloaded for project ${projectId}${
-              workflow.promptTemplate ? ' (has custom prompt)' : ''
-            }${
-              workflow.config.supervisor ? ' (has supervisor config)' : ''
-            }${workflow.config.hooks ? ' (has hooks)' : ''}`
-          );
-          // SQLite is the source of truth — re-sync pipeline_columns from
-          // the new FLEET.md and remap any orphaned tickets. The store
-          // snapshot broadcast carries the new pipeline to the renderer.
-          void this.syncPipelineForProject(projectId);
-        },
-      });
     const pageStore: PageManagerStore = this.repo
       ? {
           getPages: () => this.cache.pages,
@@ -426,7 +405,6 @@ export class ProjectManager {
         getPagesByProject: (projectId) => this.pages.getByProject(projectId),
         getAgentArtifactsDir: (ticketId) => this.getAgentArtifactsDir(ticketId),
       },
-      workflowLoader: this.workflowLoader,
       sendToWindow: this.sendToWindow,
       bridge: this.bridge,
       processManager: this.processManager,
@@ -712,23 +690,8 @@ export class ProjectManager {
     const rootPage = this.pages.seedRootPage(project);
     void this.pages.writeContent(rootPage.id, DEFAULT_BRIEF_TEMPLATE).catch(() => {});
     // Seed pipeline_columns immediately with the source-appropriate defaults
-    // so tickets created before FLEET.md loads have a valid FK target.
+    // so tickets always have a valid FK target.
     void this.syncPipelineForProject(project.id);
-    // Eagerly load FLEET.md from the first source so the pipeline is ready
-    // when the UI fetches it. Personal / context-only projects (no source)
-    // have no FLEET.md and no workflow to load — they use SIMPLE_COLUMNS.
-    // Multi-source projects load FLEET.md from the first source only; mixing
-    // workflows across sources would need explicit precedence rules we
-    // haven't defined yet.
-    const primarySource = project.sources[0];
-    if (primarySource?.kind === 'local') {
-      const workspaceDir = this.getProjectDir(project.id) ?? primarySource.workspaceDir;
-      void this.workflowLoader.load(project.id, workspaceDir).then(() => this.syncPipelineForProject(project.id));
-    } else if (primarySource?.kind === 'git-remote') {
-      void this.workflowLoader
-        .loadFromRemote(project.id, primarySource.repoUrl, primarySource.defaultBranch)
-        .then(() => this.syncPipelineForProject(project.id));
-    }
     return project;
   };
 
@@ -874,29 +837,9 @@ export class ProjectManager {
 
   // #region Pipeline helpers
 
-  /** Load FLEET.md for a project if not already loaded. */
-  ensureWorkflowLoaded = async (projectId: ProjectId): Promise<void> => {
-    if (this.workflowLoader.get(projectId)) {
-      return;
-    }
-    const project = this.getProjects().find((p) => p.id === projectId);
-    if (!project) {
-      return;
-    }
-
-    const source = firstSource(project);
-    if (source?.kind === 'local') {
-      const workspaceDir = this.getProjectDir(projectId) ?? source.workspaceDir;
-      await this.workflowLoader.load(projectId, workspaceDir);
-    } else if (source?.kind === 'git-remote') {
-      await this.workflowLoader.loadFromRemote(projectId, source.repoUrl, source.defaultBranch);
-    }
-    await this.syncPipelineForProject(projectId);
-  };
-
   /**
-   * Resolve the pipeline column defs for a project (FLEET.md → source-based
-   * defaults) and write them to SQLite via `repo.syncColumnsForProject`. Adds
+   * Resolve the pipeline column defs for a project and write them to SQLite via
+   * `repo.syncColumnsForProject` when a project has no columns yet. Adds
    * a system-style ticket comment when a gate column is removed and a ticket
    * is remapped to a non-gate column. No-op when running without a SQLite
    * repo (legacy electron-store mode used only by some tests).
@@ -916,7 +859,6 @@ export class ProjectManager {
     const defs = resolvePipelineDefs({
       hasSource: project.sources.length > 0,
       hasExisting,
-      workflow: this.workflowLoader.getConfig(projectId),
     });
     if (!defs) {
       return;
@@ -974,7 +916,7 @@ export class ProjectManager {
     projectId: ProjectId,
     remap: TicketRemap
   ): Promise<void> => {
-    const content = `[Pipeline change] This ticket was in the gate column "${remap.fromLabel}", which was removed from FLEET.md. It has been remapped to "${remap.toLabel}". Please re-evaluate whether human review is still needed.`;
+    const content = `[Pipeline change] This ticket was in the gate column "${remap.fromLabel}", which was removed from the project pipeline. It has been remapped to "${remap.toLabel}". Please re-evaluate whether human review is still needed.`;
     try {
       await repo.upsertComment({
         id: commentId(),
@@ -989,8 +931,7 @@ export class ProjectManager {
   };
 
   getPipeline = (projectId: ProjectId): Pipeline => {
-    // The cached pipeline_columns are the source of truth —
-    // `syncPipelineForProject` keeps them in sync with FLEET.md / defaults.
+    // The cached pipeline_columns are the source of truth.
     if (this.repo) {
       const rows = this.cache.columns.get(projectId) ?? [];
       if (rows.length > 0) {
@@ -1006,16 +947,6 @@ export class ProjectManager {
     }
 
     // Legacy electron-store path / fallback before SQLite sync runs.
-    const workflowPipeline = this.workflowLoader.getConfig(projectId).pipeline;
-    if (workflowPipeline && workflowPipeline.columns.length > 0) {
-      return {
-        columns: workflowPipeline.columns.map((col) => ({
-          id: col.id,
-          label: col.label,
-          ...(col.gate ? { gate: true } : {}),
-        })),
-      };
-    }
     const project = this.getProjects().find((p) => p.id === projectId);
     if (project?.pipeline) {
       return project.pipeline;
@@ -1921,7 +1852,6 @@ export class ProjectManager {
     }
     // Drain any queued write-through persistence before tearing down.
     await this.flushPersists();
-    this.workflowLoader.dispose();
     await this.pages.dispose();
 
     // Dispose all supervisor state records + release renderer column bindings.

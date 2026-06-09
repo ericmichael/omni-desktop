@@ -53,9 +53,9 @@ describe('manifest types', () => {
             src: '/home/eric/repos/myapi',
             writable: true,
           },
-          'FLEET.md': {
+          'README.md': {
             type: 'local_file',
-            src: '/home/eric/repos/myapi/FLEET.md',
+            src: '/home/eric/repos/myapi/README.md',
             optional: true,
           },
         },

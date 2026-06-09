@@ -58,7 +58,6 @@ const makeManager = () => ({
   getNextTicket: vi.fn(() => null),
   moveTicketToColumn: vi.fn(),
   resolveTicket: vi.fn(),
-  ensureWorkflowLoaded: vi.fn(async () => {}),
   getPipeline: vi.fn(() => ({ columns: [] })),
   listArtifacts: vi.fn(() => []),
   readArtifact: vi.fn(() => ({ relativePath: '', mimeType: '', textContent: null, size: 0 })),
@@ -145,12 +144,11 @@ describe('registerProjectHandlers', () => {
     expect(mgr.resolveTicket).toHaveBeenCalledWith('t1', 'completed');
   });
 
-  it('project:get-pipeline calls ensureWorkflowLoaded then getPipeline', async () => {
+  it('project:get-pipeline delegates with projectId', async () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
     registerProjectHandlers(ipc, () => mgr as never);
     await ipc.invoke('project:get-pipeline', 'proj-1');
-    expect(mgr.ensureWorkflowLoaded).toHaveBeenCalledWith('proj-1');
     expect(mgr.getPipeline).toHaveBeenCalledWith('proj-1');
   });
 

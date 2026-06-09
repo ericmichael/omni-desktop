@@ -3,13 +3,13 @@
  *
  * Each column has:
  * - `logicalId`: stable per-project string (`backlog`, `spec`, ...) used in
- *   FLEET.md, prompts, and `max_concurrent_by_column` keys.
+ *   prompts and database sync.
  * - `label`: human-readable display name.
  * - `gate`: whether this column requires human review.
  *
  * The actual SQLite `pipeline_columns.id` is computed by `defaultColumnId`
  * as `${projectId}__${logicalId}` so it is globally unique while staying
- * deterministic and reproducible across FLEET.md reloads.
+ * deterministic and reproducible across database syncs.
  */
 export type ColumnDef = {
   logicalId: string;

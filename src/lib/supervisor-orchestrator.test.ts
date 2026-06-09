@@ -1,7 +1,7 @@
 /**
  * Integration tests for `SupervisorOrchestrator`. Constructs a real
  * `ProjectManager` via the shared helper module so the orchestrator runs with
- * its production wiring (host accessors, store adapter, workflow loader),
+ * its production wiring (host accessors, store adapter),
  * while keeping every external dependency (Docker, WebSockets, fs) stubbed.
  *
  * Coverage areas:
@@ -21,7 +21,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { makePm, orch, seedMachine, TEST_PIPELINE, type MockMachine, type PmCtx } from '@/lib/project-manager-test-helpers';
-import type { WorkflowConfig } from '@/lib/workflow';
 import type { ProjectManager } from '@/main/project-manager';
 import type { TicketPhase } from '@/shared/ticket-phase';
 import type { AgentProcessStatus, Pipeline, Ticket, TicketId, WithTimestamp } from '@/shared/types';
@@ -95,14 +94,17 @@ describe('SupervisorOrchestrator integration', () => {
     });
 
     it('canStartSupervisor returns false when per-column limit is reached (Wave 1 fix 4.5)', () => {
-      const ctx = makePm(
-        { tickets: [{ id: 't1', columnId: 'in_progress' }] },
-        {
-          workflowConfig: {
-            supervisor: { max_concurrent_by_column: { in_progress: 1 } },
-          },
-        }
-      );
+      const ctx = makePm({
+        pipeline: {
+          columns: [
+            { id: 'backlog', label: 'Backlog' },
+            { id: 'in_progress', label: 'In Progress', maxConcurrent: 1 },
+            { id: 'review', label: 'Review' },
+            { id: 'done', label: 'Done' },
+          ],
+        },
+        tickets: [{ id: 't1', columnId: 'in_progress' }],
+      });
       const { pm, machines } = ctx;
 
       const mock = seedMachine(ctx, 't1');
@@ -122,22 +124,15 @@ describe('SupervisorOrchestrator integration', () => {
       expect(orch(pm).canStartSupervisor('proj-1', 'in_progress')).toBe(true);
     });
 
-    it('getEffectiveMaxConcurrent clamps FLEET.md override to global limit', () => {
-      const ctx = makePm({ tickets: [] }, { workflowConfig: { supervisor: { max_concurrent: 99 } } });
+    it('getEffectiveMaxConcurrent returns the global supervisor limit', () => {
+      const ctx = makePm({ tickets: [] });
       const { pm } = ctx;
-      // Global MAX_CONCURRENT_SUPERVISORS is 5; override clamped down.
       expect(orch(pm).getEffectiveMaxConcurrent('proj-1')).toBe(5);
     });
 
-    it('isAutoDispatchEnabled reads project flag before FLEET.md override', () => {
+    it('isAutoDispatchEnabled reads the project flag', () => {
       const ctxOn = makePm({ autoDispatch: true });
       expect(orch(ctxOn.pm).isAutoDispatchEnabled('proj-1')).toBe(true);
-
-      const ctxWorkflow = makePm(
-        { autoDispatch: false },
-        { workflowConfig: { supervisor: { auto_dispatch: true } } }
-      );
-      expect(orch(ctxWorkflow.pm).isAutoDispatchEnabled('proj-1')).toBe(true);
 
       const ctxOff = makePm({ autoDispatch: false });
       expect(orch(ctxOff.pm).isAutoDispatchEnabled('proj-1')).toBe(false);
@@ -178,7 +173,7 @@ describe('SupervisorOrchestrator integration', () => {
         tickets: [{ id: 't-ready', columnId: 'backlog' }],
       });
       const { pm, store } = ctx;
-      // startSupervisor throws — e.g., preflight failed, hook failed, etc.
+      // startSupervisor throws — e.g., preflight failed.
       const startSpy = vi.fn(async () => {
         throw new Error('preflight failed');
       });
@@ -241,15 +236,12 @@ describe('SupervisorOrchestrator integration', () => {
   // -------------------------------------------------------------------------
   // T1 — handleMachineRunEnd (run record persistence)
   // Continue / retry / completion decisioning lives in omni-code's ``/goal``
-  // server function; the launcher only persists the run record and fires the
-  // after_run hook at run_end.
+  // server function; the launcher only persists the run record.
   // -------------------------------------------------------------------------
   describe('handleMachineRunEnd', () => {
     /** Build a PM with a single ticket and a streaming machine registered. */
-    const setupStreamingMachine = (
-      opts: { workflowConfig?: Partial<WorkflowConfig> } = {}
-    ): { ctx: PmCtx; mock: MockMachine } => {
-      const ctx = makePm({ tickets: [{ id: 't1' }] }, { workflowConfig: opts.workflowConfig });
+    const setupStreamingMachine = (): { ctx: PmCtx; mock: MockMachine } => {
+      const ctx = makePm({ tickets: [{ id: 't1' }] });
       const mock = seedMachine(ctx, 't1');
       mock.phase = 'running';
       return { ctx, mock };
@@ -506,10 +498,12 @@ describe('SupervisorOrchestrator integration', () => {
         wipLimit: 1,
         tickets: [
           { id: 't1' },
-          { id: 't-active', phase: 'running' }, // isActivePhase → counts toward WIP
+          { id: 't-active' },
         ],
       });
       const { pm } = ctx;
+      const active = seedMachine(ctx, 't-active');
+      active.phase = 'running';
       const err = orch(pm).validateDispatchPreflight('t1');
       expect(err).toBe('WIP_LIMIT:1');
     });

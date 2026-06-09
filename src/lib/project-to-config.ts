@@ -201,9 +201,7 @@ function buildMcpServers(
  *   - `project.sandbox.image`             → `runtime.options.image`
  *   - global `mcp.json` omni-projects entry → `mcp_servers[0]` per-project
  *   - global skills dir                   → `Skills` capability
- *   - `project.pipeline`                  → not in ProjectConfig (stays in DB,
- *                                            sourced from FLEET.md inside
- *                                            the manifest at runtime)
+ *   - `project.pipeline`                  → not in ProjectConfig (stays in DB)
  */
 export function projectToConfig(
   project: Project,

@@ -3,14 +3,12 @@
  *
  * Both `project-manager.test.ts` and `supervisor-orchestrator.test.ts` import
  * from this module so they can construct a real `ProjectManager` (with a
- * mock SupervisorBridge + stub workflow loader) without touching WebSockets
- * or the filesystem.
+ * mock SupervisorBridge) without touching WebSockets or the filesystem.
  */
 
 import { vi } from 'vitest';
 
-import type { IStore, IWorkflowLoader, ProjectManagerDeps } from '@/lib/project-manager-deps';
-import type { WorkflowConfig } from '@/lib/workflow';
+import type { IStore, ProjectManagerDeps } from '@/lib/project-manager-deps';
 import { ProjectManager } from '@/main/project-manager';
 import type { SupervisorBridge } from '@/main/supervisor-bridge';
 import type {
@@ -256,23 +254,6 @@ export const seedMachine = (ctx: { pm: ProjectManager; bridge: MockBridge }, tic
 };
 
 // ---------------------------------------------------------------------------
-// Workflow loader stub
-// ---------------------------------------------------------------------------
-
-export const makeWorkflowLoader = (configOverride: Partial<WorkflowConfig> = {}): IWorkflowLoader => {
-  const config: WorkflowConfig = { ...configOverride };
-  return {
-    load: vi.fn(() => Promise.resolve({})),
-    loadFromRemote: vi.fn(() => Promise.resolve({})),
-    get: vi.fn(() => null),
-    getConfig: vi.fn(() => config),
-    getPromptTemplate: vi.fn(() => 'stub prompt template'),
-    runHook: vi.fn(() => Promise.resolve(true)),
-    dispose: vi.fn(),
-  };
-};
-
-// ---------------------------------------------------------------------------
 // sendToWindow capture
 // ---------------------------------------------------------------------------
 
@@ -361,14 +342,12 @@ export type PmCtx = {
   /** Seeded MockEntry records by ticket id (populated by `seedMachine`). */
   machines: Map<TicketId, MockEntry>;
   send: ReturnType<typeof makeSendToWindow>;
-  workflow: IWorkflowLoader;
   bridge: MockBridge;
 };
 
 export const makePm = (
   storeOrSeed?: IStore | SeedArgs,
   opts: {
-    workflowConfig?: Partial<WorkflowConfig>;
     processManager?: { statusFallback?: unknown };
   } = {}
 ): PmCtx => {
@@ -377,7 +356,6 @@ export const makePm = (
       ? (storeOrSeed as IStore)
       : seedStore((storeOrSeed as SeedArgs) ?? {});
   const send = makeSendToWindow();
-  const workflow = makeWorkflowLoader(opts.workflowConfig ?? {});
   const bridge = makeMockBridge();
   const machines = new Map<TicketId, MockEntry>();
 
@@ -388,12 +366,11 @@ export const makePm = (
       processManager: opts.processManager as ConstructorParameters<typeof ProjectManager>[0]['processManager'],
     },
     {
-      workflowLoader: workflow,
       bridge: bridge.bridge,
     }
   );
 
-  return { pm, store, machines, send, workflow, bridge };
+  return { pm, store, machines, send, bridge };
 };
 
 /**
