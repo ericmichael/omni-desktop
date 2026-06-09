@@ -160,6 +160,7 @@
 
 /* XTerm CSS vars for terminal theming */
 :root {
+  --safe-area-background: #ffffff;
   --xterm-bg: transparent;
   --xterm-fg: #fafafa;
   --xterm-black: #fafafa;
@@ -185,6 +186,18 @@
   --scrollbar-thumb-hover: #52525b;
   --selection-color: rgb(99 102 241 / 0.3);
   --focus-ring-color: rgb(99 102 241 / 0.5);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --safe-area-background: #09090b;
+  }
+}
+
+html,
+body,
+#root {
+  background-color: var(--safe-area-background);
 }
 
 /* Theme CSS vars are now injected at runtime from fluent-themes.ts (single source of truth).

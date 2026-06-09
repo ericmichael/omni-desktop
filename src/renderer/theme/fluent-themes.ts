@@ -500,22 +500,33 @@ function buildFluentTheme(def: ThemeDef): Theme {
  *  This is the core deduplication: colors are defined once in `overrides`
  *  and automatically flow to both Fluent tokens AND CSS vars. */
 function buildCssVars(def: ThemeDef, theme: Theme): Record<string, string> {
-  const t = theme as Record<string, string>;
   const b = def.brand;
   const x = def.xterm;
+  const themeColor = (key: keyof Theme, fallback: string): string => {
+    const value = theme[key];
+    return typeof value === 'string' ? value : fallback;
+  };
+  const background1 = themeColor('colorNeutralBackground1', '#09090b');
+  const background2 = themeColor('colorNeutralBackground2', '#18181b');
+  const background3 = themeColor('colorNeutralBackground3', '#27272a');
+  const stroke1 = themeColor('colorNeutralStroke1', '#3f3f46');
+  const foreground1 = themeColor('colorNeutralForeground1', '#fafafa');
+  const foreground2 = themeColor('colorNeutralForeground2', '#a1a1aa');
+  const foreground3 = themeColor('colorNeutralForeground3', '#71717a');
 
   return {
     // Surface / foreground — derived from Fluent theme tokens
-    '--color-surface': t.colorNeutralBackground1,
-    '--color-surface-raised': t.colorNeutralBackground2,
-    '--color-surface-overlay': t.colorNeutralBackground3,
-    '--color-surface-border': t.colorNeutralStroke1,
-    '--color-fg': t.colorNeutralForeground1,
-    '--color-fg-muted': t.colorNeutralForeground2,
-    '--color-fg-subtle': t.colorNeutralForeground3,
-    '--color-fg-error': t.colorPaletteRedForeground1,
-    '--color-fg-success': t.colorPaletteGreenForeground1,
-    '--color-fg-warning': t.colorPaletteYellowForeground1,
+    '--color-surface': background1,
+    '--safe-area-background': background1,
+    '--color-surface-raised': background2,
+    '--color-surface-overlay': background3,
+    '--color-surface-border': stroke1,
+    '--color-fg': foreground1,
+    '--color-fg-muted': foreground2,
+    '--color-fg-subtle': foreground3,
+    '--color-fg-error': themeColor('colorPaletteRedForeground1', '#f87171'),
+    '--color-fg-success': themeColor('colorPaletteGreenForeground1', '#4ade80'),
+    '--color-fg-warning': themeColor('colorPaletteYellowForeground1', '#fbbf24'),
 
     // Accent ramp — derived from BrandVariants (reversed: 150→50, 100→500, etc.)
     '--color-accent-50': b[150],
@@ -531,9 +542,9 @@ function buildCssVars(def: ThemeDef, theme: Theme): Record<string, string> {
     '--color-accent-950': b[20],
 
     // Header — defaults to surface colors, can be overridden (e.g. UTRGV branded header)
-    '--color-header': def.header?.bg ?? t.colorNeutralBackground1,
-    '--color-header-fg': def.header?.fg ?? t.colorNeutralForeground1,
-    '--color-header-border': def.header?.border ?? t.colorNeutralStroke1,
+    '--color-header': def.header?.bg ?? background1,
+    '--color-header-fg': def.header?.fg ?? foreground1,
+    '--color-header-border': def.header?.border ?? stroke1,
 
     // Terminal (xterm) palette
     '--xterm-fg': x.fg,
@@ -588,6 +599,37 @@ export const fluentThemes: Record<OmniTheme, Theme> = fluentThemesBuilt;
 /** Whether a theme uses dark mode. */
 export function isThemeDark(theme: OmniTheme): boolean {
   return themeDefs[theme].mode === 'dark';
+}
+
+export function getThemeSurfaceColor(theme: OmniTheme): string {
+  return themeCssVarsBuilt[theme]['--color-surface'] ?? '#09090b';
+}
+
+export function applyPwaTheme(theme: OmniTheme): void {
+  const surfaceColor = getThemeSurfaceColor(theme);
+
+  document.documentElement.style.setProperty('--safe-area-background', surfaceColor);
+  document.documentElement.style.backgroundColor = surfaceColor;
+
+  if (document.body) {
+    document.body.style.backgroundColor = surfaceColor;
+  }
+
+  const root = document.getElementById('root');
+  if (root) {
+    root.style.backgroundColor = surfaceColor;
+  }
+
+  for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
+    meta.content = surfaceColor;
+  }
+
+  const statusBarMeta = document.querySelector<HTMLMetaElement>(
+    'meta[name="apple-mobile-web-app-status-bar-style"]',
+  );
+  if (statusBarMeta) {
+    statusBarMeta.content = isThemeDark(theme) ? 'black-translucent' : 'default';
+  }
 }
 
 /** Apply CSS custom properties for the given theme onto :root. */
