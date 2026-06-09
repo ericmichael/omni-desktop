@@ -29,6 +29,8 @@ export type ColumnRow = {
   description: string | null;
   sort_order: number;
   gate: number;
+  max_concurrent: number | null;
+  workflow: string | null;
 };
 
 export type TicketRow = {

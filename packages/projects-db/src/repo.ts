@@ -134,7 +134,7 @@ export class ProjectsRepo {
 
   upsertColumn(row: ColumnRow): void {
     this.stmts.upsertColumn.run(
-      row.id, row.project_id, row.label, row.description, row.sort_order, row.gate,
+      row.id, row.project_id, row.label, row.description, row.sort_order, row.gate, row.max_concurrent, row.workflow,
     );
     this.bumpChangeSeq();
   }
@@ -149,7 +149,7 @@ export class ProjectsRepo {
       this.stmts.deleteColumnsForProject.run(projectId);
       for (const row of rows) {
         this.stmts.upsertColumn.run(
-          row.id, row.project_id, row.label, row.description, row.sort_order, row.gate,
+          row.id, row.project_id, row.label, row.description, row.sort_order, row.gate, row.max_concurrent, row.workflow,
         );
       }
       this.bumpChangeSeq();
@@ -186,6 +186,8 @@ export class ProjectsRepo {
       description: d.description ?? null,
       sort_order: i,
       gate: d.gate ? 1 : 0,
+      max_concurrent: d.maxConcurrent ?? null,
+      workflow: d.workflow == null ? null : JSON.stringify(d.workflow),
     }));
 
     const result: ColumnSyncResult = { inserted: [], removed: [], remappedTickets: [] };
@@ -219,7 +221,7 @@ export class ProjectsRepo {
           result.inserted.push(row.id);
         }
         this.stmts.upsertColumn.run(
-          row.id, row.project_id, row.label, row.description, row.sort_order, row.gate,
+          row.id, row.project_id, row.label, row.description, row.sort_order, row.gate, row.max_concurrent, row.workflow,
         );
       }
 
@@ -637,11 +639,12 @@ function prepareStatements(db: DatabaseSync) {
     // Pipeline columns
     listColumns: db.prepare('SELECT * FROM pipeline_columns WHERE project_id = ? ORDER BY sort_order'),
     upsertColumn: db.prepare(`
-      INSERT INTO pipeline_columns (id, project_id, label, description, sort_order, gate)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO pipeline_columns (id, project_id, label, description, sort_order, gate, max_concurrent, workflow)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         label = excluded.label, description = excluded.description,
-        sort_order = excluded.sort_order, gate = excluded.gate
+        sort_order = excluded.sort_order, gate = excluded.gate,
+        max_concurrent = excluded.max_concurrent, workflow = excluded.workflow
     `),
     deleteColumnsForProject: db.prepare('DELETE FROM pipeline_columns WHERE project_id = ?'),
     deleteColumnById: db.prepare('DELETE FROM pipeline_columns WHERE id = ?'),

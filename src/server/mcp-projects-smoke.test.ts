@@ -75,6 +75,12 @@ describe('omni-projects MCP tools (async IProjectsRepo, SQLite)', () => {
 
   it('creates, moves, and lists a ticket', async () => {
     const pipeline = await call('get_pipeline', { project_id: projectId });
+    const spec = pipeline.columns.find((column: any) => column.label === 'Spec');
+    expect(spec.workflow).toMatchObject({
+      purpose: expect.stringContaining('decision-complete'),
+      definitionOfDone: expect.arrayContaining([expect.stringContaining('plan')]),
+      recommendedSkills: expect.arrayContaining(['software-planning']),
+    });
     const lastCol = pipeline.columns[pipeline.columns.length - 1].label;
 
     const created = await call('create_ticket', { project_id: projectId, title: 'Do the thing', priority: 'high' });

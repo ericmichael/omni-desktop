@@ -64,9 +64,11 @@ export async function seedProject(
     id: defaultColumnId(id, col.logicalId),
     project_id: id,
     label: col.label,
-    description: null,
+    description: col.description ?? null,
     sort_order: i,
     gate: col.gate ? 1 : 0,
+    max_concurrent: col.maxConcurrent ?? null,
+    workflow: col.workflow == null ? null : JSON.stringify(col.workflow),
   }));
   await repo.replaceColumnsForProject(id, columns);
 

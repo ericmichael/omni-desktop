@@ -185,6 +185,15 @@ const ColumnSchema = z.object({
   description: z.string().optional(),
   maxConcurrent: z.number().int().positive().optional(),
   gate: z.boolean().optional(),
+  workflow: z.object({
+    purpose: z.string().optional(),
+    entryCriteria: z.array(z.string()).optional(),
+    definitionOfDone: z.array(z.string()).optional(),
+    agentInstructions: z.string().optional(),
+    recommendedSkills: z.array(z.string()).optional(),
+    allowedTransitions: z.array(z.string()).optional(),
+    autoDispatch: z.boolean().optional(),
+  }).optional(),
 });
 
 const PipelineSchema: z.ZodType<Pipeline> = z.object({

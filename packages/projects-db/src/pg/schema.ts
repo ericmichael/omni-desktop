@@ -466,4 +466,12 @@ CREATE POLICY principal_isolation ON machines
   USING (principal_id = current_setting('app.current_principal', true));
 `,
   },
+  {
+    version: 11,
+    sql: `
+-- DB-backed workflow metadata for pipeline columns.
+ALTER TABLE pipeline_columns ADD COLUMN max_concurrent INTEGER;
+ALTER TABLE pipeline_columns ADD COLUMN workflow JSONB;
+`,
+  },
 ];

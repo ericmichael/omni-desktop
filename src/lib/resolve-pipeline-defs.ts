@@ -27,5 +27,12 @@ export const resolvePipelineDefs = (
     return null;
   }
   const seed = input.hasSource ? DEFAULT_COLUMNS : SIMPLE_COLUMNS;
-  return seed.map((c) => ({ logicalId: c.logicalId, label: c.label, gate: c.gate }));
+  return seed.map((c) => ({
+    logicalId: c.logicalId,
+    label: c.label,
+    description: c.description,
+    gate: c.gate,
+    maxConcurrent: c.maxConcurrent,
+    workflow: c.workflow,
+  }));
 };

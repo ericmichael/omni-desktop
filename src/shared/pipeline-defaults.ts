@@ -6,7 +6,10 @@ const toPipeline = (cols: typeof DEFAULT_COLUMNS): Pipeline => ({
   columns: cols.map((c) => ({
     id: c.logicalId,
     label: c.label,
+    ...(c.description ? { description: c.description } : {}),
+    ...(c.maxConcurrent ? { maxConcurrent: c.maxConcurrent } : {}),
     ...(c.gate ? { gate: true } : {}),
+    ...(c.workflow ? { workflow: c.workflow } : {}),
   })),
 });
 
