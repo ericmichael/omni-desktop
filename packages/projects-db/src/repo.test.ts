@@ -94,6 +94,35 @@ describe('syncColumnsForProject', () => {
     expect(review.gate).toBe(0);
   });
 
+  it('persists workflow metadata and max concurrency on synced columns', () => {
+    repo.syncColumnsForProject(PROJECT_ID, [
+      { logicalId: 'backlog', label: 'Backlog' },
+      {
+        logicalId: 'spec',
+        label: 'Spec',
+        description: 'Plan the work',
+        maxConcurrent: 2,
+        workflow: {
+          purpose: 'Plan the implementation',
+          definitionOfDone: ['Decision-complete plan exists'],
+          agentInstructions: 'Use the software-planning skill.',
+          recommendedSkills: ['software-planning'],
+        },
+      },
+      { logicalId: 'completed', label: 'Completed' },
+    ]);
+
+    const spec = repo.listColumns(PROJECT_ID).find((c) => c.id === defaultColumnId(PROJECT_ID, 'spec'))!;
+    expect(spec.description).toBe('Plan the work');
+    expect(spec.max_concurrent).toBe(2);
+    expect(JSON.parse(spec.workflow!)).toEqual({
+      purpose: 'Plan the implementation',
+      definitionOfDone: ['Decision-complete plan exists'],
+      agentInstructions: 'Use the software-planning skill.',
+      recommendedSkills: ['software-planning'],
+    });
+  });
+
   it('rebinds tickets to new IDs by label match when logical id changes', () => {
     const tid = seedTicket('implementation');
     const renamed: ColumnSyncInput[] = [

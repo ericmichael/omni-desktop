@@ -42,6 +42,7 @@ interface JsonColumn {
   description?: string;
   maxConcurrent?: number;
   gate?: boolean;
+  workflow?: unknown;
 }
 
 interface JsonTicket {
@@ -231,6 +232,8 @@ return 0;
           description: col.description ?? null,
           sort_order: i,
           gate: col.gate ? 1 : 0,
+          max_concurrent: col.maxConcurrent ?? null,
+          workflow: col.workflow == null ? null : JSON.stringify(col.workflow),
         });
       }
     }

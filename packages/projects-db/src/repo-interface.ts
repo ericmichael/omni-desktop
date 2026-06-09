@@ -44,6 +44,8 @@ export interface ColumnSyncInput {
   label: string;
   description?: string | null;
   gate?: boolean;
+  maxConcurrent?: number | null;
+  workflow?: unknown;
 }
 
 /**

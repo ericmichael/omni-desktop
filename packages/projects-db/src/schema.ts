@@ -258,4 +258,13 @@ CREATE TABLE page_content (
 ALTER TABLE tickets ADD COLUMN assignee TEXT;
 `,
   },
+  {
+    version: 10,
+    sql: `
+-- DB-backed workflow metadata for pipeline columns. Existing columns keep
+-- working; runtime mapping supplies safe defaults when these are NULL.
+ALTER TABLE pipeline_columns ADD COLUMN max_concurrent INTEGER;
+ALTER TABLE pipeline_columns ADD COLUMN workflow TEXT;
+`,
+  },
 ];

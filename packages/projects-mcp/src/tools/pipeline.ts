@@ -5,17 +5,31 @@ import { z } from 'zod';
 const json = (data: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data) }] });
 const err = (message: string) => ({ content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }], isError: true as const });
 
+const parseWorkflow = (raw: string | null): unknown | undefined => {
+  if (!raw) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 export function registerPipelineTools(server: McpServer, repo: IProjectsRepo): void {
   server.tool(
     'get_pipeline',
-    'Get the full pipeline definition for a project — columns with labels, descriptions, and gate status.',
+    'Get the full pipeline definition for a project — columns with labels, descriptions, workflow contracts, max concurrency, and gate status.',
     { project_id: z.string().describe('The project ID to get the pipeline for.') },
     async ({ project_id }) => {
       const cols = await repo.listColumns(project_id);
 
       if (cols.length === 0) {
         const exists = await repo.getProject(project_id);
-        if (!exists) return err(`Project not found: ${project_id}`);
+        if (!exists) {
+          return err(`Project not found: ${project_id}`);
+        }
       }
 
       return json({
@@ -24,6 +38,8 @@ export function registerPipelineTools(server: McpServer, repo: IProjectsRepo): v
           label: c.label,
           description: c.description,
           gate: !!c.gate,
+          maxConcurrent: c.max_concurrent ?? undefined,
+          workflow: parseWorkflow(c.workflow),
         })),
       });
     }

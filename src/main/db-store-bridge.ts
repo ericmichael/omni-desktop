@@ -11,22 +11,23 @@
  * by reading project data from SQLite and non-project data from electron-store.
  * This is what gets broadcast via `store:changed` to the renderer.
  */
-import type { ProjectsRepo } from 'omni-projects-db';
-import { fromIso, toIso } from 'omni-projects-db';
 import type {
-  ProjectRow,
   ColumnRow,
-  TicketRow,
   CommentRow,
+  InboxRow,
   MilestoneRow,
   PageRow,
-  InboxRow,
+  ProjectRow,
+  ProjectsRepo,
   TaskRow,
+  TicketRow,
 } from 'omni-projects-db';
+import { fromIso, toIso } from 'omni-projects-db';
 
 import type {
   Column,
   ColumnId,
+  ColumnWorkflowContract,
   InboxItem,
   InboxItemId,
   InboxPromotion,
@@ -66,6 +67,37 @@ function parseJsonOr<T>(s: string | null, fallback: T): T {
 
 function jsonStrOrNull(v: unknown): string | null {
   return v != null ? JSON.stringify(v) : null;
+}
+
+function parseWorkflow(s: string | null): ColumnWorkflowContract | undefined {
+  const parsed = parseJsonOr<unknown>(s, null);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return undefined;
+  }
+  const input = parsed as Record<string, unknown>;
+  const workflow: ColumnWorkflowContract = {};
+  if (typeof input.purpose === 'string' && input.purpose.trim()) {
+    workflow.purpose = input.purpose;
+  }
+  if (Array.isArray(input.entryCriteria)) {
+    workflow.entryCriteria = input.entryCriteria.filter((v): v is string => typeof v === 'string');
+  }
+  if (Array.isArray(input.definitionOfDone)) {
+    workflow.definitionOfDone = input.definitionOfDone.filter((v): v is string => typeof v === 'string');
+  }
+  if (typeof input.agentInstructions === 'string' && input.agentInstructions.trim()) {
+    workflow.agentInstructions = input.agentInstructions;
+  }
+  if (Array.isArray(input.recommendedSkills)) {
+    workflow.recommendedSkills = input.recommendedSkills.filter((v): v is string => typeof v === 'string');
+  }
+  if (Array.isArray(input.allowedTransitions)) {
+    workflow.allowedTransitions = input.allowedTransitions.filter((v): v is ColumnId => typeof v === 'string') as ColumnId[];
+  }
+  if (typeof input.autoDispatch === 'boolean') {
+    workflow.autoDispatch = input.autoDispatch;
+  }
+  return Object.keys(workflow).length > 0 ? workflow : undefined;
 }
 
 function isoOrNull(epochMs: number | undefined): string | null {
@@ -119,7 +151,10 @@ export function rowToColumn(row: ColumnRow): Column {
     label: row.label,
   };
   if (row.description) col.description = row.description;
+  if (row.max_concurrent) col.maxConcurrent = row.max_concurrent;
   if (row.gate) col.gate = true;
+  const workflow = parseWorkflow(row.workflow);
+  if (workflow) col.workflow = workflow;
   return col;
 }
 
@@ -302,6 +337,8 @@ export function columnToRow(col: Column, projectId: string, sortOrder: number): 
     description: col.description ?? null,
     sort_order: sortOrder,
     gate: col.gate ? 1 : 0,
+    max_concurrent: col.maxConcurrent ?? null,
+    workflow: jsonStrOrNull(col.workflow),
   };
 }
 

@@ -24,6 +24,7 @@ import { type ArtifactStore, DockerArtifactStore, HostFsArtifactStore } from '@/
 import { DbChangeWatcher } from '@/main/db-change-watcher';
 import {
   commentToRow,
+  columnToRow,
   inboxItemToRow,
   milestoneToRow,
   pageToRow,
@@ -704,8 +705,18 @@ export class ProjectManager {
     if (patch.sources) {
       validateProjectSources(patch.sources);
     }
-    projects[index] = { ...projects[index]!, ...patch };
+    const { pipeline, ...projectPatch } = patch;
+    projects[index] = { ...projects[index]!, ...projectPatch };
     this.setProjects(projects);
+    if (this.repo && pipeline) {
+      const repo = this.repo;
+      const rows = pipeline.columns.map((col, sortOrder) => columnToRow(col, id, sortOrder));
+      this.cache.columns.set(id, rows);
+      this.enqueuePersist(async () => {
+        await repo.replaceColumnsForProject(id, rows);
+      });
+      this.noteLocalWriteAndBroadcast();
+    }
   };
 
   removeProject = async (id: ProjectId): Promise<void> => {
@@ -935,14 +946,7 @@ export class ProjectManager {
     if (this.repo) {
       const rows = this.cache.columns.get(projectId) ?? [];
       if (rows.length > 0) {
-        return {
-          columns: rows.map((r) => ({
-            id: r.id as ColumnId,
-            label: r.label,
-            ...(r.description ? { description: r.description } : {}),
-            ...(r.gate ? { gate: true } : {}),
-          })),
-        };
+        return rowsToPipeline(rows);
       }
     }
 

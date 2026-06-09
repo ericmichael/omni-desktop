@@ -13,6 +13,7 @@ import {
   IconButton,
   Input,
   Switch,
+  Textarea,
 } from '@/renderer/ds';
 import type { Column, ProjectId } from '@/shared/types';
 
@@ -73,7 +74,23 @@ const useStyles = makeStyles({
   flex1: {
     flex: '1 1 0',
   },
+  fieldColumn: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+  },
 });
+
+const linesToText = (values: string[] | undefined): string => values?.join('\n') ?? '';
+const textToLines = (value: string): string[] | undefined => {
+  const lines = value.split('\n').map((line) => line.trim()).filter(Boolean);
+  return lines.length > 0 ? lines : undefined;
+};
+const skillsToText = (values: string[] | undefined): string => values?.join(', ') ?? '';
+const textToSkills = (value: string): string[] | undefined => {
+  const skills = value.split(',').map((skill) => skill.trim()).filter(Boolean);
+  return skills.length > 0 ? skills : undefined;
+};
 
 const ColumnEditor = memo(
   ({
@@ -83,6 +100,7 @@ const ColumnEditor = memo(
     onMaxConcurrentChange,
     onGateChange,
     onDescriptionChange,
+    onWorkflowChange,
     onRename,
     onMoveUp,
     onMoveDown,
@@ -95,6 +113,7 @@ const ColumnEditor = memo(
     onMaxConcurrentChange: (columnId: string, value: number | undefined) => void;
     onGateChange: (columnId: string, checked: boolean) => void;
     onDescriptionChange: (columnId: string, value: string) => void;
+    onWorkflowChange: (columnId: string, patch: NonNullable<Column['workflow']>) => void;
     onRename: (columnId: string, label: string) => void;
     onMoveUp: (index: number) => void;
     onMoveDown: (index: number) => void;
@@ -140,6 +159,32 @@ const ColumnEditor = memo(
     const handleMoveUp = useCallback(() => onMoveUp(index), [index, onMoveUp]);
     const handleMoveDown = useCallback(() => onMoveDown(index), [index, onMoveDown]);
     const handleRemoveColumn = useCallback(() => onRemoveColumn(column.id), [column.id, onRemoveColumn]);
+    const handleLabelChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => setEditLabel(e.target.value), []);
+    const handleGateCheckedChange = useCallback(
+      (checked: boolean) => onGateChange(column.id, checked),
+      [column.id, onGateChange]
+    );
+    const handleDescriptionInputChange = useCallback(
+      (e: React.ChangeEvent<HTMLInputElement>) => onDescriptionChange(column.id, e.target.value),
+      [column.id, onDescriptionChange]
+    );
+    const handlePurposeChange = useCallback(
+      (e: React.ChangeEvent<HTMLInputElement>) => onWorkflowChange(column.id, { purpose: e.target.value || undefined }),
+      [column.id, onWorkflowChange]
+    );
+    const handleDefinitionOfDoneChange = useCallback(
+      (e: React.ChangeEvent<HTMLTextAreaElement>) => onWorkflowChange(column.id, { definitionOfDone: textToLines(e.target.value) }),
+      [column.id, onWorkflowChange]
+    );
+    const handleAgentInstructionsChange = useCallback(
+      (e: React.ChangeEvent<HTMLTextAreaElement>) =>
+        onWorkflowChange(column.id, { agentInstructions: e.target.value || undefined }),
+      [column.id, onWorkflowChange]
+    );
+    const handleRecommendedSkillsChange = useCallback(
+      (e: React.ChangeEvent<HTMLInputElement>) => onWorkflowChange(column.id, { recommendedSkills: textToSkills(e.target.value) }),
+      [column.id, onWorkflowChange]
+    );
 
     return (
       <div className={styles.columnCard}>
@@ -148,7 +193,7 @@ const ColumnEditor = memo(
             <Input
               size="sm"
               value={editLabel}
-              onChange={(e) => setEditLabel(e.target.value)}
+              onChange={handleLabelChange}
               onBlur={handleFinishRename}
               onKeyDown={handleRenameKeyDown}
               autoFocus
@@ -202,16 +247,52 @@ const ColumnEditor = memo(
         </div>
         <div className={styles.fieldRow}>
           <label className={styles.fieldLabel}>Gate</label>
-          <Switch checked={column.gate ?? false} onCheckedChange={(checked) => onGateChange(column.id, checked)} />
+          <Switch checked={column.gate ?? false} onCheckedChange={handleGateCheckedChange} />
         </div>
         <div className={styles.fieldRow}>
           <label className={styles.fieldLabel}>Description</label>
           <Input
             size="sm"
             value={column.description ?? ''}
-            onChange={(e) => onDescriptionChange(column.id, e.target.value)}
+            onChange={handleDescriptionInputChange}
             placeholder="What does this column mean?"
             className={styles.flex1}
+          />
+        </div>
+        <div className={styles.fieldColumn}>
+          <label className={styles.fieldLabel}>Purpose</label>
+          <Input
+            size="sm"
+            value={column.workflow?.purpose ?? ''}
+            onChange={handlePurposeChange}
+            placeholder="What should happen in this column?"
+          />
+        </div>
+        <div className={styles.fieldColumn}>
+          <label className={styles.fieldLabel}>Definition of done</label>
+          <Textarea
+            value={linesToText(column.workflow?.definitionOfDone)}
+            onChange={handleDefinitionOfDoneChange}
+            placeholder="One checklist item per line"
+            rows={4}
+          />
+        </div>
+        <div className={styles.fieldColumn}>
+          <label className={styles.fieldLabel}>Agent instructions</label>
+          <Textarea
+            value={column.workflow?.agentInstructions ?? ''}
+            onChange={handleAgentInstructionsChange}
+            placeholder="Column-specific instructions for agents"
+            rows={3}
+          />
+        </div>
+        <div className={styles.fieldColumn}>
+          <label className={styles.fieldLabel}>Recommended skills</label>
+          <Input
+            size="sm"
+            value={skillsToText(column.workflow?.recommendedSkills)}
+            onChange={handleRecommendedSkillsChange}
+            placeholder="software-planning, debug"
           />
         </div>
       </div>
@@ -282,6 +363,27 @@ return prev;
       });
     }, []);
 
+    const handleWorkflowChange = useCallback((columnId: string, patch: NonNullable<Column['workflow']>) => {
+      setEditColumns((prev) => {
+        if (!prev) {
+          return prev;
+        }
+        return prev.map((col) => {
+          if (col.id !== columnId) {
+            return col;
+          }
+          const workflow = { ...(col.workflow ?? {}), ...patch };
+          for (const key of Object.keys(workflow) as (keyof typeof workflow)[]) {
+            const value = workflow[key];
+            if (value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) {
+              delete workflow[key];
+            }
+          }
+          return { ...col, workflow: Object.keys(workflow).length > 0 ? workflow : undefined };
+        });
+      });
+    }, []);
+
     const handleRename = useCallback((columnId: string, label: string) => {
       setEditColumns((prev) => {
         if (!prev) {
@@ -323,6 +425,9 @@ return prev;
     }, []);
 
     const [newColumnLabel, setNewColumnLabel] = useState('');
+    const handleNewColumnLabelChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+      setNewColumnLabel(e.target.value);
+    }, []);
 
     const handleAddColumn = useCallback(() => {
       const trimmed = newColumnLabel.trim();
@@ -390,6 +495,7 @@ return prev;
                 onMaxConcurrentChange={handleMaxConcurrentChange}
                 onGateChange={handleGateChange}
                 onDescriptionChange={handleDescriptionChange}
+                onWorkflowChange={handleWorkflowChange}
                 onRename={handleRename}
                 onMoveUp={handleMoveUp}
                 onMoveDown={handleMoveDown}
@@ -401,7 +507,7 @@ return prev;
               <Input
                 size="sm"
                 value={newColumnLabel}
-                onChange={(e) => setNewColumnLabel(e.target.value)}
+                onChange={handleNewColumnLabelChange}
                 placeholder="Add column..."
                 onKeyDown={handleAddColumnKeyDown}
                 className={styles.flex1}

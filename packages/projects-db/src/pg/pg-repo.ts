@@ -136,7 +136,7 @@ export class PgProjectsRepo implements IProjectsRepo {
   // ---- Pipeline columns ----
 
   listColumns(projectId: string): Promise<ColumnRow[]> {
-    return this.rows<ColumnRow>('SELECT * FROM pipeline_columns WHERE project_id = $1 ORDER BY sort_order', [projectId]);
+    return this.rows<ColumnRow>('SELECT tenant_id, id, project_id, label, description, sort_order, gate, max_concurrent, workflow::text AS workflow FROM pipeline_columns WHERE project_id = $1 ORDER BY sort_order', [projectId]);
   }
 
   async upsertColumn(row: ColumnRow): Promise<void> {
@@ -145,12 +145,13 @@ export class PgProjectsRepo implements IProjectsRepo {
 
   private upsertColumnIn(c: PoolClient, row: ColumnRow): Promise<unknown> {
     return c.query(
-      `INSERT INTO pipeline_columns (tenant_id, id, project_id, label, description, sort_order, gate)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
+      `INSERT INTO pipeline_columns (tenant_id, id, project_id, label, description, sort_order, gate, max_concurrent, workflow)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
        ON CONFLICT (id) DO UPDATE SET
          label = EXCLUDED.label, description = EXCLUDED.description,
-         sort_order = EXCLUDED.sort_order, gate = EXCLUDED.gate`,
-      [this.tenantId, row.id, row.project_id, row.label, row.description, row.sort_order, row.gate]
+         sort_order = EXCLUDED.sort_order, gate = EXCLUDED.gate,
+         max_concurrent = EXCLUDED.max_concurrent, workflow = EXCLUDED.workflow`,
+      [this.tenantId, row.id, row.project_id, row.label, row.description, row.sort_order, row.gate, row.max_concurrent, row.workflow]
     );
   }
 
@@ -179,11 +180,13 @@ export class PgProjectsRepo implements IProjectsRepo {
       description: d.description ?? null,
       sort_order: i,
       gate: d.gate ? 1 : 0,
+      max_concurrent: d.maxConcurrent ?? null,
+      workflow: d.workflow == null ? null : JSON.stringify(d.workflow),
     }));
     const result: ColumnSyncResult = { inserted: [], removed: [], remappedTickets: [] };
 
     return this.tx(async (c) => {
-      const oldRows = (await c.query('SELECT * FROM pipeline_columns WHERE project_id = $1 ORDER BY sort_order', [projectId])).rows as ColumnRow[];
+      const oldRows = (await c.query('SELECT tenant_id, id, project_id, label, description, sort_order, gate, max_concurrent, workflow::text AS workflow FROM pipeline_columns WHERE project_id = $1 ORDER BY sort_order', [projectId])).rows as ColumnRow[];
       const oldById = new Map(oldRows.map((r) => [r.id, r]));
       const newById = new Map(newRows.map((r) => [r.id, r]));
       const newByLabelLower = new Map(newRows.map((r) => [r.label.toLowerCase(), r]));

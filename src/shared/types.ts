@@ -1260,6 +1260,18 @@ export type Column = {
   maxConcurrent?: number;
   /** When true, the supervisor is stopped on entry and only a human can move the ticket out. */
   gate?: boolean;
+  /** DB-backed workflow metadata used by humans, agents, and project tools. */
+  workflow?: ColumnWorkflowContract;
+};
+
+export type ColumnWorkflowContract = {
+  purpose?: string;
+  entryCriteria?: string[];
+  definitionOfDone?: string[];
+  agentInstructions?: string;
+  recommendedSkills?: string[];
+  allowedTransitions?: ColumnId[];
+  autoDispatch?: boolean;
 };
 
 /**
