@@ -16,6 +16,10 @@ describe('normalizeAddress', () => {
     expect(normalizeAddress('view-source:https://a.b')).toBe('view-source:https://a.b');
   });
 
+  it('does not treat relative proxy transport paths as navigable browser URLs', () => {
+    expect(normalizeAddress('/proxy/ext-https-github-com/acme/repo/pull/42')).toBe(BROWSER_START_URL);
+  });
+
   it('treats whitespace as a search query', () => {
     expect(normalizeAddress('hello world')).toBe('https://duckduckgo.com/?q=hello%20world');
     expect(normalizeAddress('foo bar.com')).toContain('duckduckgo.com/?q=');

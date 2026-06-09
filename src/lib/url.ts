@@ -15,6 +15,14 @@ const IPV6_BRACKETED_PATTERN = /^\[[0-9a-fA-F:]+\](:\d+)?(\/.*)?$/;
 const HOST_PORT_PATTERN = /^[\w-]+(\.[\w-]+)*:\d+(\/.*)?$/;
 const DOTTED_HOST_PATTERN = /^[\w-]+(\.[\w-]+)+(\/.*)?$/;
 
+export function isProxyTransportPath(input: string): boolean {
+  return input.trim().startsWith('/proxy/');
+}
+
+export function normalizeBrowserStateUrl(input: string): string {
+  return isProxyTransportPath(input) ? BROWSER_START_URL : input;
+}
+
 /**
  * Coerce a typed address into a loadable URL.
  *
@@ -33,34 +41,38 @@ const DOTTED_HOST_PATTERN = /^[\w-]+(\.[\w-]+)+(\/.*)?$/;
 export function normalizeAddress(input: string): string {
   const trimmed = input.trim();
   if (!trimmed) {
-return BROWSER_START_URL;
-}
+    return BROWSER_START_URL;
+  }
+
+  if (isProxyTransportPath(trimmed)) {
+    return BROWSER_START_URL;
+  }
 
   if (SCHEME_PATTERNS.some((re) => re.test(trimmed))) {
-return trimmed;
-}
+    return trimmed;
+  }
 
   // Any whitespace → query. Runs before host heuristics so "foo bar.com" is a
   // search, not an attempt at "bar.com".
   if (/\s/.test(trimmed)) {
-return `${DEFAULT_SEARCH}${encodeURIComponent(trimmed)}`;
-}
+    return `${DEFAULT_SEARCH}${encodeURIComponent(trimmed)}`;
+  }
 
   if (LOCALHOST_PATTERN.test(trimmed)) {
-return `http://${trimmed}`;
-}
+    return `http://${trimmed}`;
+  }
   if (IPV4_PATTERN.test(trimmed)) {
-return `http://${trimmed}`;
-}
+    return `http://${trimmed}`;
+  }
   if (IPV6_BRACKETED_PATTERN.test(trimmed)) {
-return `http://${trimmed}`;
-}
+    return `http://${trimmed}`;
+  }
   if (HOST_PORT_PATTERN.test(trimmed)) {
-return `http://${trimmed}`;
-}
+    return `http://${trimmed}`;
+  }
   if (DOTTED_HOST_PATTERN.test(trimmed)) {
-return `https://${trimmed}`;
-}
+    return `https://${trimmed}`;
+  }
 
   return `${DEFAULT_SEARCH}${encodeURIComponent(trimmed)}`;
 }
@@ -86,7 +98,7 @@ export function parseOrigin(url: string): { scheme: string; host: string; secure
 export function fallbackTitle(url: string): string {
   const origin = parseOrigin(url);
   if (origin) {
-return origin.host || url;
-}
+    return origin.host || url;
+  }
   return url;
 }

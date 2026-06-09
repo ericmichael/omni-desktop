@@ -24,6 +24,11 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fallbackTitle, normalizeAddress, parseOrigin } from '@/lib/url';
 import type { ConsoleMessage, ContextMenuParams, FoundInPageResult, WebviewHandle } from '@/renderer/common/Webview';
 import { Webview } from '@/renderer/common/Webview';
+import {
+  getWebviewFallbackDiagnostics,
+  openInBrowserTab,
+  type WebviewLoadError,
+} from '@/renderer/common/webview-fallback';
 import { BookmarksBar } from '@/renderer/features/Browser/BookmarksBar';
 import { DevtoolsPanel } from '@/renderer/features/Browser/Devtools/DevtoolsPanel';
 import { DownloadsTray } from '@/renderer/features/Browser/DownloadsTray';
@@ -123,9 +128,19 @@ const useStyles = makeStyles({
     textAlign: 'center',
     color: tokens.colorNeutralForeground2,
   },
-  errorTitle: { fontSize: tokens.fontSizeBase400, fontWeight: tokens.fontWeightSemibold, color: tokens.colorNeutralForeground1 },
+  errorTitle: {
+    fontSize: tokens.fontSizeBase400,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
   errorUrl: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, wordBreak: 'break-all' },
-  errorActions: { display: 'flex', gap: tokens.spacingHorizontalS },
+  errorLabel: {
+    fontSize: tokens.fontSizeBase100,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground3,
+  },
+  errorInstructions: { maxWidth: '560px', fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 },
+  errorActions: { display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: tokens.spacingHorizontalS },
   errorButton: {
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
@@ -148,11 +163,21 @@ const useStyles = makeStyles({
     cursor: 'pointer',
     ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
   },
+  errorDetails: {
+    maxWidth: '640px',
+    fontSize: tokens.fontSizeBase100,
+    color: tokens.colorNeutralForeground3,
+    textAlign: 'left',
+  },
+  errorDetailsSummary: {
+    cursor: 'pointer',
+    textAlign: 'center',
+  },
 });
 
 type PreviewState = {
   loading: boolean;
-  error: { code: number; description: string; url: string } | null;
+  error: WebviewLoadError | null;
 };
 
 /** Cmd (⌘) on macOS, Ctrl elsewhere. Used in button tooltips. */
@@ -230,8 +255,8 @@ export const BrowserView = memo(
     // this partition so the tray + prompt banner pick up items from it.
     useEffect(() => {
       if (!partition) {
-return;
-}
+        return;
+      }
       void emitter.invoke('browser:downloads-watch-partition', partition).catch(() => {});
       void emitter.invoke('browser:permissions-watch-partition', partition).catch(() => {});
     }, [partition]);
@@ -254,8 +279,8 @@ return;
     const activeUrl = activeTab?.url;
     useEffect(() => {
       if (activeUrl) {
-onUrlChange?.(activeUrl);
-}
+        onUrlChange?.(activeUrl);
+      }
     }, [activeUrl, onUrlChange]);
 
     // External navigation: if parent passes a new `src`, nav the active tab.
@@ -264,11 +289,11 @@ onUrlChange?.(activeUrl);
     const lastExternalSrcRef = useRef<string | undefined>(undefined);
     useEffect(() => {
       if (!src || !activeTab) {
-return;
-}
+        return;
+      }
       if (src === lastExternalSrcRef.current) {
-return;
-}
+        return;
+      }
       const normalizedSrc = normalizeAddress(src);
       lastExternalSrcRef.current = src;
       if (activeTab.url !== normalizedSrc) {
@@ -281,8 +306,8 @@ return;
     const handleNavigate = useCallback(
       (url: string) => {
         if (!activeTab) {
-return;
-}
+          return;
+        }
         void browserApi.updateTabMeta(tabsetId, activeTab.id, { url });
         void browserApi.recordHistory({
           url,
@@ -296,8 +321,8 @@ return;
     const handleTitle = useCallback(
       (title: string) => {
         if (!activeTab) {
-return;
-}
+          return;
+        }
         void browserApi.updateTabMeta(tabsetId, activeTab.id, { title });
       },
       [activeTab, tabsetId]
@@ -306,8 +331,8 @@ return;
     const handleFavicon = useCallback(
       (favicon: string) => {
         if (!activeTab) {
-return;
-}
+          return;
+        }
         void browserApi.updateTabMeta(tabsetId, activeTab.id, { favicon });
       },
       [activeTab, tabsetId]
@@ -317,7 +342,7 @@ return;
       setPreviewState((s) => ({ ...s, loading, error: loading ? null : s.error }));
     }, []);
 
-    const handleError = useCallback((error: { code: number; description: string; url: string }) => {
+    const handleError = useCallback((error: WebviewLoadError) => {
       setPreviewState({ loading: false, error });
     }, []);
 
@@ -336,8 +361,8 @@ return;
         reload: () => webviewRef.current?.reload(),
         navigate: (url: string) => {
           if (activeTab) {
-void browserApi.navigateTab(tabsetId, activeTab.id, url);
-}
+            void browserApi.navigateTab(tabsetId, activeTab.id, url);
+          }
         },
         openInNewTab: (url: string) => {
           void browserApi.createTab(tabsetId, { url, activate: true, profileId: resolvedProfileId });
@@ -350,8 +375,12 @@ void browserApi.navigateTab(tabsetId, activeTab.id, url);
         },
         viewSource: () => {
           if (activeTab) {
-void browserApi.createTab(tabsetId, { url: `view-source:${activeTab.url}`, activate: true, profileId: resolvedProfileId });
-}
+            void browserApi.createTab(tabsetId, {
+              url: `view-source:${activeTab.url}`,
+              activate: true,
+              profileId: resolvedProfileId,
+            });
+          }
         },
         inspect: (_x: number, _y: number) => {
           webviewRef.current?.openDevTools();
@@ -368,8 +397,8 @@ void browserApi.createTab(tabsetId, { url: `view-source:${activeTab.url}`, activ
     // Close find on tab switch / error — stale results are worse than empty.
     useEffect(() => {
       if (findOpen) {
-closeFind();
-}
+        closeFind();
+      }
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeTabId]);
 
@@ -379,8 +408,8 @@ closeFind();
     const navigateActive = useCallback(
       (url: string) => {
         if (!activeTab) {
-return;
-}
+          return;
+        }
         void browserApi.navigateTab(tabsetId, activeTab.id, url);
       },
       [activeTab, tabsetId]
@@ -389,8 +418,8 @@ return;
     const handleOmniboxSubmit = useCallback(
       (url: string) => {
         if (!activeTab) {
-return;
-}
+          return;
+        }
         void browserApi.navigateTab(tabsetId, activeTab.id, url);
       },
       [activeTab, tabsetId]
@@ -406,9 +435,10 @@ return;
       (next: number) => {
         const clamped = Math.max(0.25, Math.min(5, next));
         setZoom(clamped);
-        const handleId = registryScope === 'column' && registryTabId
-          ? makeAppHandleId('column', 'browser', registryTabId)
-          : makeAppHandleId('global', 'browser');
+        const handleId =
+          registryScope === 'column' && registryTabId
+            ? makeAppHandleId('column', 'browser', registryTabId)
+            : makeAppHandleId('global', 'browser');
         // Tolerate races: if the webview hasn't registered yet we silently
         // skip — zoom will apply on next keystroke once it has.
         void emitter.invoke('app:set-zoom', handleId, clamped).catch(() => {});
@@ -423,8 +453,8 @@ return;
 
     const handleBookmarkToggle = useCallback(() => {
       if (!activeTab) {
-return;
-}
+        return;
+      }
       const existing = state.bookmarks.find((b) => b.url === activeTab.url);
       if (existing) {
         void browserApi.removeBookmark(existing.id);
@@ -439,8 +469,7 @@ return;
       const handler = (event: KeyboardEvent) => {
         const target = event.target as HTMLElement | null;
         const tag = target?.tagName?.toLowerCase();
-        const isEditable =
-          target?.isContentEditable || tag === 'input' || tag === 'textarea' || tag === 'select';
+        const isEditable = target?.isContentEditable || tag === 'input' || tag === 'textarea' || tag === 'select';
         const mod = event.metaKey || event.ctrlKey;
 
         // F12 toggles our devtools panel — no modifier, but we still want
@@ -452,14 +481,14 @@ return;
         }
 
         if (!mod && event.key !== 'Escape') {
-return;
-}
+          return;
+        }
         // Escape is always allowed (to stop a load); other shortcuts skip
         // when focus is in an editable element except for Cmd+L which is
         // specifically about re-focusing the omnibox.
         if (isEditable && event.key !== 'Escape' && event.key.toLowerCase() !== 'l') {
-return;
-}
+          return;
+        }
 
         const key = event.key.toLowerCase();
         if (key === 't') {
@@ -468,8 +497,8 @@ return;
         } else if (key === 'w') {
           event.preventDefault();
           if (activeTabId) {
-void browserApi.closeTab(tabsetId, activeTabId);
-}
+            void browserApi.closeTab(tabsetId, activeTabId);
+          }
         } else if (key === 'l') {
           event.preventDefault();
           omniRef.current?.focus();
@@ -506,8 +535,8 @@ void browserApi.closeTab(tabsetId, activeTabId);
           webviewRef.current?.goForward();
         } else if (event.key === 'Escape') {
           if (previewState.loading) {
-webviewRef.current?.stop();
-}
+            webviewRef.current?.stop();
+          }
         }
       };
       window.addEventListener('keydown', handler);
@@ -518,8 +547,8 @@ webviewRef.current?.stop();
 
     const registryProps = useMemo(() => {
       if (!activeTab) {
-return undefined;
-}
+        return undefined;
+      }
       return {
         handleId: makeAppHandleId(registryScope, 'browser', registryScope === 'column' ? registryTabId : undefined),
         appId: 'browser' as const,
@@ -541,6 +570,9 @@ return undefined;
 
     const bookmarked = state.bookmarks.some((b) => b.url === activeTab.url);
     const origin = parseOrigin(activeTab.url);
+    const fallbackDiagnostics = previewState.error
+      ? getWebviewFallbackDiagnostics(previewState.error, activeTab.url)
+      : null;
 
     return (
       <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
@@ -624,12 +656,16 @@ return undefined;
         <PermissionsBar partition={partition} />
         <div className={styles.body}>
           {previewState.loading && <div className={styles.loadingBar} />}
-          {previewState.error ? (
+          {fallbackDiagnostics ? (
             <div className={styles.errorPane}>
               <Globe20Regular style={{ width: 40, height: 40, opacity: 0.5 }} />
-              <div className={styles.errorTitle}>This page didn’t load</div>
-              <div>{previewState.error.description || 'Something went wrong.'}</div>
-              <div className={styles.errorUrl}>{previewState.error.url || activeTab.url}</div>
+              <div className={styles.errorTitle}>{fallbackDiagnostics.title}</div>
+              <div>{fallbackDiagnostics.reason}</div>
+              <div>
+                <div className={styles.errorLabel}>Canonical URL</div>
+                <div className={styles.errorUrl}>{fallbackDiagnostics.displayUrl}</div>
+              </div>
+              <div className={styles.errorInstructions}>{fallbackDiagnostics.instructions}</div>
               <div className={styles.errorActions}>
                 <button
                   type="button"
@@ -645,12 +681,26 @@ return undefined;
                   type="button"
                   className={styles.errorButtonGhost}
                   onClick={() => {
-                    void navigator.clipboard.writeText(activeTab.url).catch(() => {});
+                    void navigator.clipboard.writeText(fallbackDiagnostics.canonicalUrl).catch(() => {});
                   }}
                 >
                   Copy URL
                 </button>
+                <button
+                  type="button"
+                  className={styles.errorButtonGhost}
+                  onClick={() => openInBrowserTab(fallbackDiagnostics.canonicalUrl)}
+                >
+                  Open in Browser
+                </button>
               </div>
+              {(fallbackDiagnostics.transportUrl || fallbackDiagnostics.debugDescription) && (
+                <details className={styles.errorDetails}>
+                  <summary className={styles.errorDetailsSummary}>Details</summary>
+                  {fallbackDiagnostics.debugDescription && <div>Reason: {fallbackDiagnostics.debugDescription}</div>}
+                  {fallbackDiagnostics.transportUrl && <div>Proxy transport: {fallbackDiagnostics.transportUrl}</div>}
+                </details>
+              )}
             </div>
           ) : (
             <Webview
@@ -684,11 +734,7 @@ return undefined;
             />
           )}
           {isGlobal && historyOpen && (
-            <HistoryPanel
-              profileId={resolvedProfileId}
-              onOpen={navigateActive}
-              onClose={() => setHistoryOpen(false)}
-            />
+            <HistoryPanel profileId={resolvedProfileId} onOpen={navigateActive} onClose={() => setHistoryOpen(false)} />
           )}
           {origin && false /* hidden placeholder; kept for future origin badge */}
         </div>

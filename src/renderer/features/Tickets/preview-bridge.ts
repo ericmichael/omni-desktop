@@ -5,40 +5,14 @@
  * The React side (CodeDeck) subscribes and opens the preview overlay.
  * Unlike the plan bridge, this does NOT block — the tool returns immediately.
  *
- * In browser/server mode, URLs are routed through the proxy so the browser
- * can reach localhost services on the server machine.
+ * Preview requests always carry the canonical URL. Browser/server iframe
+ * transport proxying is handled inside `<Webview>`.
  */
 import { atom } from 'nanostores';
 
-const isElectron = typeof window !== 'undefined' && 'electron' in window;
-
-/** Map from proxy name to upstream origin for reverse-mapping proxy URLs back to original URLs. */
-const proxyToUpstream = new Map<string, string>();
-
-/**
- * Convert a proxy URL (e.g. `/proxy/preview-default/search?q=foo`) back to
- * the original upstream URL (e.g. `https://www.google.com/search?q=foo`).
- * Returns the input unchanged if it's not a recognized proxy path.
- */
+/** Legacy compatibility shim; preview URLs are now canonical before storage. */
 export function reverseProxyUrl(url: string): string {
-  try {
-    const parsed = new URL(url, window.location.origin);
-    const pathMatch = parsed.pathname.match(/^\/proxy\/([^/]+)(\/.*)?$/);
-    if (!pathMatch) {
-return url;
-}
-
-    const proxyName = pathMatch[1] as string;
-    const remainder = pathMatch[2] ?? '/';
-    const upstream = proxyToUpstream.get(proxyName);
-    if (!upstream) {
-return url;
-}
-
-    return upstream + remainder + parsed.search + parsed.hash;
-  } catch {
-    return url;
-  }
+  return url;
 }
 
 export type PreviewRequest = {
@@ -55,35 +29,11 @@ const latestRequestByTab = new Map<string, string>();
 export const $previewRequest = atom<PreviewRequest | null>(null);
 
 /**
- * In browser mode, register the URL with the proxy and return the proxied path.
- * In Electron mode, return the URL as-is (webview can reach localhost directly).
+ * Preview requests stay canonical. Browser/server mode resolves iframe
+ * transport internally in `<Webview>` so tab state and PR badges never receive
+ * `/proxy/...` paths.
  */
-export async function resolvePreviewUrl(url: string, tabId?: string): Promise<string> {
-  if (isElectron) {
-return url;
-}
-
-  try {
-    const proxyName = `preview-${tabId ?? 'default'}`;
-    const res = await fetch('/proxy/_register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: proxyName, upstream: url }),
-    });
-    if (res.ok) {
-      const data = (await res.json()) as { proxyPath?: string };
-      if (data.proxyPath) {
-        // Store the reverse mapping so we can convert proxy URLs back to upstream URLs
-        try {
-          const parsed = new URL(url);
-          proxyToUpstream.set(proxyName, `${parsed.protocol}//${parsed.host}`);
-        } catch { /* ignore */ }
-        return data.proxyPath;
-      }
-    }
-  } catch {
-    // Fall through to raw URL
-  }
+export async function resolvePreviewUrl(url: string, _tabId?: string): Promise<string> {
   return url;
 }
 
@@ -92,7 +42,7 @@ export function requestPreviewOpen(url: string, tabId?: string): void {
   const id = `preview-${++nextId}`;
   const key = tabId ?? 'default';
   latestRequestByTab.set(key, id);
-  // Fire and forget — resolve the proxy URL, then set the atom
+  // Fire and forget — preserve the async shape used by callers.
   void resolvePreviewUrl(url, tabId).then((resolvedUrl) => {
     if (latestRequestByTab.get(key) !== id) {
       return;
