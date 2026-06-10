@@ -26,12 +26,25 @@ import { SyncBar } from '@/renderer/features/WorkspaceSync/SyncBar';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { applyCssVars, applyPwaTheme, fluentThemes, isThemeDark } from '@/renderer/theme/fluent-themes';
 
+import { useAppHeight } from './use-app-height';
 import { usePreloadTerminalFont } from './use-preload-terminal-font';
 
 const useStyles = makeStyles({
   shell: {
     width: '100dvw',
-    height: '100dvh',
+    /* --app-height is set by useAppHeight ONLY while an on-screen keyboard
+       overlays the page (iOS), shrinking the shell above it. At rest the var
+       is absent and 100dvh applies.
+
+       Do NOT size the shell past the layout viewport (e.g. 100vh in
+       standalone). On iOS standalone cold start the layout viewport can be
+       short by the status bar while the window paints full-bleed — and
+       element painting is CLIPPED at the short viewport (verified
+       on-device), so a taller shell just slices the bottom tab bar off.
+       That state is handled instead by useAppHeight zeroing
+       --safe-area-bottom: the nav-colored --safe-area-background backstop
+       band below the viewport doubles as the home-indicator clearance. */
+    height: 'var(--app-height, 100dvh)',
     paddingTop: 'env(safe-area-inset-top, 0px)',
     paddingLeft: 'env(safe-area-inset-left, 0px)',
     paddingRight: 'env(safe-area-inset-right, 0px)',
@@ -57,6 +70,7 @@ const useStyles = makeStyles({
 
 export const App = () => {
   usePreloadTerminalFont();
+  useAppHeight();
   const store = useStore(persistedStoreApi.$atom);
   const styles = useStyles();
 

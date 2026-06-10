@@ -77,7 +77,7 @@ const useStyles = makeStyles({
     flex: '1 1 0',
   },
   bodyOverlay: {
-    paddingBottom: `calc(${tokens.spacingVerticalL} + env(safe-area-inset-bottom, 0px))`,
+    paddingBottom: `calc(${tokens.spacingVerticalL} + var(--safe-area-bottom, env(safe-area-inset-bottom, 0px)))`,
   },
   sectionHeader: {
     display: 'flex',

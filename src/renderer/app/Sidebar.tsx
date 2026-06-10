@@ -37,6 +37,12 @@ const ALL_TABS: {
   { value: 'settings', label: 'Settings', icon: <Settings24Filled />, alwaysVisible: true, pinBottom: true },
 ];
 
+/** Content height of the mobile bottom tab bar (excludes the safe-area
+ *  padding below it): 8px pad + 24px icon + 4px gap + 12px label + 8px pad.
+ *  Fixed-position surfaces that must clear the nav (e.g. SyncBar) offset by
+ *  this plus env(safe-area-inset-bottom). */
+export const BOTTOM_NAV_MOBILE_HEIGHT = 56;
+
 const useStyles = makeStyles({
   /* ── Rail container ── */
   nav: {
@@ -49,7 +55,10 @@ const useStyles = makeStyles({
     borderTopStyle: 'solid',
     borderTopColor: tokens.colorNeutralStroke1,
     boxSizing: 'border-box',
-    paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+    /* --safe-area-bottom is zeroed by use-app-height in the iOS-standalone
+       short-viewport state, where the home indicator lies below the
+       paintable viewport and the backstop band provides the clearance. */
+    paddingBottom: 'var(--safe-area-bottom, env(safe-area-inset-bottom, 0px))',
     '@media (min-width: 640px)': {
       flexDirection: 'column',
       width: '78px',
@@ -171,7 +180,10 @@ const useStyles = makeStyles({
   /* ── Active indicator bar ── */
   indicator: {
     position: 'absolute',
-    bottom: 'env(safe-area-inset-bottom, 0px)',
+    /* The nav reserves the bottom safe area via its own paddingBottom, so the
+       buttons (and this indicator) already sit above the home indicator —
+       don't add the inset again here. */
+    bottom: '0',
     left: '25%',
     right: '25%',
     height: '3px',

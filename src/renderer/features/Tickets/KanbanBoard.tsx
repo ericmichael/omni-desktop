@@ -3,7 +3,8 @@ import {
   type DragEndEvent,
   DragOverlay,
   type DragStartEvent,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
@@ -68,7 +69,12 @@ export const KanbanBoard = memo(({ projectId, visibilityFilter = 'active' }: { p
 
   const [activeTicket, setActiveTicket] = useState<{ ticket: Ticket; column: Column } | null>(null);
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  // Mouse drags on small movement; touch drags on long-press so a swipe on a
+  // card still scrolls the board instead of picking the card up.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } })
+  );
 
   const projectTickets = useMemo(
     () =>

@@ -42,7 +42,7 @@ const useStyles = makeStyles({
     flex: '1 1 0',
     minHeight: 0,
     padding: 0,
-    paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+    paddingBottom: 'var(--safe-area-bottom, env(safe-area-inset-bottom, 0px))',
   },
 });
 

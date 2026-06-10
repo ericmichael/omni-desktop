@@ -156,7 +156,7 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
     opacity: 0.4,
   },
-  safeArea: { height: 'env(safe-area-inset-bottom, 0px)' },
+  safeArea: { height: 'var(--safe-area-bottom, env(safe-area-inset-bottom, 0px))' },
 });
 
 const hotkeyOptions = { enableOnFormTags: true } as const;

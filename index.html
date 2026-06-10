@@ -9,7 +9,12 @@
        EasyAuth an anonymous fetch is redirected to login (blocked by
        manifest-src 'self'). -->
   <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
+  <!-- interactive-widget=resizes-content: Android Chrome 108+ stopped resizing
+       the layout viewport for the on-screen keyboard by default; without this
+       the chat composer and bottom nav stay hidden behind the keyboard.
+       (iOS ignores it — handled by the visualViewport hook in App.) -->
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)" />
   <meta name="theme-color" content="#ffffff" />
@@ -22,13 +27,17 @@
   <style>
     :root {
       color-scheme: light dark;
-      --safe-area-background: #ffffff;
+      /* Pre-React backstop. Must match the bottom nav color (background2 of
+         the default themes — see fluent-themes.ts), not the content surface:
+         this is what paints the bottom safe-area zone, and a surface color
+         here draws a visible seam under the nav on phones. */
+      --safe-area-background: #fafafa;
       background-color: var(--safe-area-background);
     }
 
     @media (prefers-color-scheme: dark) {
       :root {
-        --safe-area-background: #09090b;
+        --safe-area-background: #18181b;
       }
     }
 
@@ -41,6 +50,9 @@
 
     body {
       margin: 0;
+      /* The app shell owns all scrolling; block pull-to-refresh and
+         rubber-band chaining so an overscroll can't reload the app. */
+      overscroll-behavior: none;
     }
   </style>
 </head>

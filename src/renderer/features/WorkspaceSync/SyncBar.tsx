@@ -9,13 +9,18 @@ import {
 import { useStore } from '@nanostores/react';
 import { memo, useMemo } from 'react';
 
+import { BOTTOM_NAV_MOBILE_HEIGHT } from '@/renderer/app/Sidebar';
 import { $syncStatuses } from '@/renderer/features/WorkspaceSync/state';
 import type { WorkspaceSyncStatus } from '@/shared/types';
 
 const useStyles = makeStyles({
   bar: {
     position: 'fixed',
-    bottom: '0',
+    /* Mobile: sit on top of the bottom tab bar (which already covers the
+       safe area) instead of covering it — a long sync must not block tab
+       switching. Desktop (≥640px) has a side rail instead, so the bar can
+       hug the bottom edge and absorb the inset itself. */
+    bottom: `calc(${BOTTOM_NAV_MOBILE_HEIGHT}px + var(--safe-area-bottom, env(safe-area-inset-bottom, 0px)))`,
     left: '0',
     right: '0',
     zIndex: 9999,
@@ -23,7 +28,6 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: '10px',
     height: '32px',
-    paddingBottom: 'env(safe-area-inset-bottom, 0px)',
     paddingLeft: '12px',
     paddingRight: '12px',
     backgroundColor: tokens.colorNeutralBackground1,
@@ -34,13 +38,23 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
     boxSizing: 'content-box',
     '@media (min-width: 640px)': {
+      bottom: '0',
       left: '78px', // sidebar width
+      paddingBottom: 'var(--safe-area-bottom, env(safe-area-inset-bottom, 0px))',
     },
   },
   barError: {
     backgroundColor: tokens.colorPaletteRedBackground1,
     borderTopColor: tokens.colorPaletteRedBorder1,
     color: tokens.colorPaletteRedForeground1,
+  },
+  /* The idle "Workspace synced" state renders permanently once a sync
+     session exists — ambient info that isn't worth a strip floating over
+     the bottom nav on phones. Mobile shows only active/error states. */
+  barIdleHiddenMobile: {
+    '@media (max-width: 639px)': {
+      display: 'none',
+    },
   },
   icon: {
     display: 'flex',
@@ -198,7 +212,13 @@ export const SyncBar = memo(() => {
   const isSpinning = agg.type === 'busy' || (agg.type === 'progress' && !agg.progress);
 
   return (
-    <div className={mergeClasses(styles.bar, agg.type === 'error' && styles.barError)}>
+    <div
+      className={mergeClasses(
+        styles.bar,
+        agg.type === 'error' && styles.barError,
+        agg.type === 'watching' && styles.barIdleHiddenMobile
+      )}
+    >
       <span className={mergeClasses(styles.icon, isSpinning && styles.spinning)}>{icon}</span>
       <span className={styles.label}>{agg.message}</span>
 
@@ -206,7 +226,7 @@ export const SyncBar = memo(() => {
         <>
           <ProgressBar className={styles.progress} value={agg.progress.percent} thickness="medium" shape="rounded" />
           {agg.progress.rate > 0 && <span className={styles.eta}>{formatRate(agg.progress.rate)}</span>}
-          {agg.progress.eta != null && agg.progress.eta > 0 && (
+          {agg.progress.eta !== null && agg.progress.eta > 0 && (
             <span className={styles.eta}>{formatEta(agg.progress.eta)}</span>
           )}
         </>

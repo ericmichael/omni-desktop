@@ -517,7 +517,12 @@ function buildCssVars(def: ThemeDef, theme: Theme): Record<string, string> {
   return {
     // Surface / foreground — derived from Fluent theme tokens
     '--color-surface': background1,
-    '--safe-area-background': background1,
+    /* Backstop painted by html/body wherever the app shell doesn't reach.
+       In practice that's only the bottom safe-area zone (the top inset is
+       painted by the shell itself), so it must match the mobile bottom nav —
+       background2, or the branded header fill when the theme has one —
+       otherwise a visible seam appears at the nav's bottom edge. */
+    '--safe-area-background': def.header?.bg ?? background2,
     '--color-surface-raised': background2,
     '--color-surface-overlay': background3,
     '--color-surface-border': stroke1,
@@ -605,19 +610,27 @@ export function getThemeSurfaceColor(theme: OmniTheme): string {
   return themeCssVarsBuilt[theme]['--color-surface'] ?? '#09090b';
 }
 
+/** The color of the mobile bottom nav for this theme — what the html/body
+ *  backstop must paint so the bottom safe-area zone is seamless with the bar
+ *  (see the `--safe-area-background` comment in buildCssVars). */
+export function getThemeSafeAreaColor(theme: OmniTheme): string {
+  return themeCssVarsBuilt[theme]['--safe-area-background'] ?? '#18181b';
+}
+
 export function applyPwaTheme(theme: OmniTheme): void {
   const surfaceColor = getThemeSurfaceColor(theme);
+  const safeAreaColor = getThemeSafeAreaColor(theme);
 
-  document.documentElement.style.setProperty('--safe-area-background', surfaceColor);
-  document.documentElement.style.backgroundColor = surfaceColor;
+  document.documentElement.style.setProperty('--safe-area-background', safeAreaColor);
+  document.documentElement.style.backgroundColor = safeAreaColor;
 
   if (document.body) {
-    document.body.style.backgroundColor = surfaceColor;
+    document.body.style.backgroundColor = safeAreaColor;
   }
 
   const root = document.getElementById('root');
   if (root) {
-    root.style.backgroundColor = surfaceColor;
+    root.style.backgroundColor = safeAreaColor;
   }
 
   for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {

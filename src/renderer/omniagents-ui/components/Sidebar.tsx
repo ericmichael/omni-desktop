@@ -152,10 +152,22 @@ const useStyles = makeStyles({
     '&:hover [data-reveal="kebab"], &:focus-within [data-reveal="kebab"]': {
       opacity: 1,
     },
+    /* Touch devices have no hover — keep the kebab always visible there,
+       otherwise delete/actions are unreachable. */
+    '@media (hover: none)': {
+      '& [data-reveal="kebab"]': {
+        opacity: 1,
+      },
+    },
   },
   sessionNavItem: {
     flex: '1 1 0',
     minWidth: 0,
+    /* Reserve room for the always-visible kebab on touch so it doesn't
+       overlap the session title/timestamp. */
+    '@media (hover: none)': {
+      paddingRight: '36px',
+    },
   },
   sessionLabel: {
     display: 'flex',
@@ -205,7 +217,7 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalM,
   },
   bodyOverlay: {
-    paddingBottom: `calc(${tokens.spacingVerticalL} + env(safe-area-inset-bottom, 0px))`,
+    paddingBottom: `calc(${tokens.spacingVerticalL} + var(--safe-area-bottom, env(safe-area-inset-bottom, 0px)))`,
   },
 });
 

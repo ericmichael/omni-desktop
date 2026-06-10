@@ -35,8 +35,10 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
     boxShadow: `0 1px 12px rgba(0,0,0,0.10), 0 0 0 1px ${tokens.colorNeutralStroke1}`,
     flexShrink: 0,
+    /* Lift the floating pill above the home indicator instead of growing it:
+       the inset goes in the margin so the dock keeps its shape. */
     '@media (max-width: 639px)': {
-      paddingBottom: `calc(5px + env(safe-area-inset-bottom, 0px))`,
+      marginBottom: `calc(${tokens.spacingVerticalS} + var(--safe-area-bottom, env(safe-area-inset-bottom, 0px)))`,
     },
   },
   dockGlass: {
@@ -63,10 +65,14 @@ const useStyles = makeStyles({
     transitionProperty: 'color, background-color, transform, box-shadow',
     transitionDuration: '180ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
-    ':hover': {
-      backgroundColor: tokens.colorSubtleBackgroundHover,
-      color: tokens.colorNeutralForeground1,
-      transform: 'translateY(-1px) scale(1.06)',
+    /* Hover effects only where hover exists — on touch the emulated :hover
+       sticks after a tap, leaving the last-used icon raised and tinted. */
+    '@media (hover: hover)': {
+      ':hover': {
+        backgroundColor: tokens.colorSubtleBackgroundHover,
+        color: tokens.colorNeutralForeground1,
+        transform: 'translateY(-1px) scale(1.06)',
+      },
     },
     ':active': {
       transform: 'translateY(0) scale(0.97)',

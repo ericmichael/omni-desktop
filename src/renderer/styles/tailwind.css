@@ -160,7 +160,9 @@
 
 /* XTerm CSS vars for terminal theming */
 :root {
-  --safe-area-background: #ffffff;
+  /* Backstop for the bottom safe-area zone — must match the bottom nav
+     (background2), not the content surface; see fluent-themes.ts. */
+  --safe-area-background: #fafafa;
   --xterm-bg: transparent;
   --xterm-fg: #fafafa;
   --xterm-black: #fafafa;
@@ -190,7 +192,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
-    --safe-area-background: #09090b;
+    --safe-area-background: #18181b;
   }
 }
 

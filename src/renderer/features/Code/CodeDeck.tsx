@@ -1,4 +1,4 @@
-import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { DndContext, type DragEndEvent, MouseSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
 import {
   arrayMove,
   horizontalListSortingStrategy,
@@ -395,6 +395,9 @@ const useStyles = makeStyles({
     cursor: 'grab',
     userSelect: 'none',
     WebkitUserSelect: 'none',
+    /* Long-press drag (TouchSensor delay) needs double-tap zoom suppressed on
+       the drag surface or the browser eats the gesture. */
+    touchAction: 'manipulation',
     ':active': { cursor: 'grabbing' },
   },
   flex1MinH0Relative: { flex: '1 1 0', minHeight: 0, position: 'relative' },
@@ -525,7 +528,9 @@ const useStyles = makeStyles({
     ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
     backgroundColor: tokens.colorNeutralBackground2,
     overflowX: 'auto',
-    paddingTop: 'env(safe-area-inset-top, 0px)',
+    /* No safe-area paddingTop here: the app shell already pads
+       env(safe-area-inset-top) (App.tsx), so adding it again doubles the
+       notch inset on mobile. */
     [`@media (min-width: ${SNAP_SCROLL_WIDTH + 1}px)`]: { display: 'none' },
   },
   mobileTabBarInner: {
@@ -1900,7 +1905,12 @@ export const CodeDeck = memo(() => {
     return unsubscribe;
   }, []);
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  // Mouse drags on small movement; touch drags on long-press so swiping a
+  // column header still scrolls the deck instead of starting a reorder.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } })
+  );
 
   const projectMap = useMemo(() => {
     const map = new Map<string, { label: string; workspaceDir: string | undefined }>();

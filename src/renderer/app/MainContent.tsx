@@ -4,7 +4,6 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
 import { Sidebar } from '@/renderer/app/Sidebar';
-import { getGlassVars } from '@/renderer/theme/glass-vars';
 import { Caption1, ListItem, Subtitle2 } from '@/renderer/ds';
 import { $launcherVersion } from '@/renderer/features/Banner/state';
 import { Chat } from '@/renderer/features/Chat/Chat';
@@ -15,6 +14,7 @@ import { OnboardingWizard } from '@/renderer/features/Onboarding/OnboardingWizar
 import { SettingsPage } from '@/renderer/features/SettingsModal/SettingsPage';
 import { Tickets } from '@/renderer/features/Tickets/Tickets';
 import { persistedStoreApi } from '@/renderer/services/store';
+import { getGlassVars } from '@/renderer/theme/glass-vars';
 import type { LayoutMode } from '@/shared/types';
 
 const useStyles = makeStyles({
@@ -87,7 +87,7 @@ const useStyles = makeStyles({
 const MorePage = memo(() => {
   const styles = useStyles();
   const version = useStore($launcherVersion);
-  const isGlass = useStore(persistedStoreApi.$atom).codeDeckBackground != null;
+  const isGlass = !!useStore(persistedStoreApi.$atom).codeDeckBackground;
 
   const openSettings = useCallback(() => {
     persistedStoreApi.setKey('layoutMode', 'settings');
