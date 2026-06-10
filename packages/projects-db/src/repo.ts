@@ -303,7 +303,7 @@ export class ProjectsRepo {
     this.stmts.upsertTicket.run(
       row.id, row.project_id, row.milestone_id, row.column_id,
       row.title, row.description, row.priority, row.branch,
-      row.blocked_by, row.shaping, row.resolution, row.resolved_at,
+      row.blocked_by, row.resolution, row.resolved_at,
       row.archived_at, row.column_changed_at,
       row.use_worktree, row.worktree_path, row.worktree_name,
       row.supervisor_session_id, row.phase, row.phase_changed_at,
@@ -338,7 +338,7 @@ export class ProjectsRepo {
         this.stmts.upsertTicket.run(
           row.id, row.project_id, row.milestone_id, row.column_id,
           row.title, row.description, row.priority, row.branch,
-          row.blocked_by, row.shaping, row.resolution, row.resolved_at,
+          row.blocked_by, row.resolution, row.resolved_at,
           row.archived_at, row.column_changed_at,
           row.use_worktree, row.worktree_path, row.worktree_name,
           row.supervisor_session_id, row.phase, row.phase_changed_at,
@@ -518,7 +518,7 @@ export class ProjectsRepo {
   upsertInboxItem(row: InboxRow): void {
     this.stmts.upsertInboxItem.run(
       row.id, row.title, row.note, row.project_id,
-      row.status, row.shaping, row.later_at, row.promoted_to,
+      row.status, row.later_at, row.promoted_to,
       row.created_at, row.updated_at,
     );
     this.bumpChangeSeq();
@@ -546,7 +546,7 @@ export class ProjectsRepo {
       for (const row of rows) {
         this.stmts.upsertInboxItem.run(
           row.id, row.title, row.note, row.project_id,
-          row.status, row.shaping, row.later_at, row.promoted_to,
+          row.status, row.later_at, row.promoted_to,
           row.created_at, row.updated_at,
         );
       }
@@ -661,17 +661,17 @@ function prepareStatements(db: DatabaseSync) {
     upsertTicket: db.prepare(`
       INSERT INTO tickets (
         id, project_id, milestone_id, column_id, title, description, priority, branch,
-        blocked_by, shaping, resolution, resolved_at, archived_at, column_changed_at,
+        blocked_by, resolution, resolved_at, archived_at, column_changed_at,
         use_worktree, worktree_path, worktree_name, supervisor_session_id,
         phase, phase_changed_at, supervisor_task_id, token_usage, runs,
         pr_review, pr_merged_at, assignee,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         project_id = excluded.project_id, milestone_id = excluded.milestone_id,
         column_id = excluded.column_id, title = excluded.title, description = excluded.description,
         priority = excluded.priority, branch = excluded.branch, blocked_by = excluded.blocked_by,
-        shaping = excluded.shaping, resolution = excluded.resolution, resolved_at = excluded.resolved_at,
+        resolution = excluded.resolution, resolved_at = excluded.resolved_at,
         archived_at = excluded.archived_at, column_changed_at = excluded.column_changed_at,
         use_worktree = excluded.use_worktree, worktree_path = excluded.worktree_path,
         worktree_name = excluded.worktree_name, supervisor_session_id = excluded.supervisor_session_id,
@@ -742,11 +742,11 @@ function prepareStatements(db: DatabaseSync) {
     listAllInboxItems: db.prepare('SELECT * FROM inbox_items ORDER BY created_at DESC'),
     getInboxItem: db.prepare('SELECT * FROM inbox_items WHERE id = ?'),
     upsertInboxItem: db.prepare(`
-      INSERT INTO inbox_items (id, title, note, project_id, status, shaping, later_at, promoted_to, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO inbox_items (id, title, note, project_id, status, later_at, promoted_to, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title, note = excluded.note, project_id = excluded.project_id,
-        status = excluded.status, shaping = excluded.shaping, later_at = excluded.later_at,
+        status = excluded.status, later_at = excluded.later_at,
         promoted_to = excluded.promoted_to, updated_at = excluded.updated_at
     `),
     deleteInboxItem: db.prepare('DELETE FROM inbox_items WHERE id = ?'),

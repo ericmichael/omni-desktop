@@ -13,7 +13,6 @@ import { uuidv4 } from '@/lib/uuid';
 import type {
   ColumnId,
   InboxItem,
-  InboxShaping,
   Milestone,
   StoreData,
   TicketId,
@@ -338,28 +337,18 @@ export function runMigrations(store: IMigrationStore, deps: MigrationDeps): void
         continue;
       }
 
-      const hasOutcome = typeof props.outcome === 'string' && (props.outcome as string).trim().length > 0;
-      const hasShaping = hasOutcome || props.size !== undefined || typeof props.notDoing === 'string';
-      let status: InboxItem['status'] = 'new';
-      if (legacyStatus === 'later') {
-        status = 'later';
-      } else if (legacyStatus === 'ready' || legacyStatus === 'doing' || hasShaping) {
-        status = 'shaped';
-      }
+      const status: InboxItem['status'] = legacyStatus === 'later' ? 'later' : 'new';
 
-      const appetite: InboxShaping['appetite'] =
-        props.size === 'small' || props.size === 'medium' || props.size === 'large' || props.size === 'xl'
-          ? (props.size as InboxShaping['appetite'])
-          : 'medium';
-      const shaping: InboxShaping | undefined = hasShaping
-        ? {
-            outcome: (props.outcome as string | undefined)?.trim() ?? '',
-            appetite,
-            ...(typeof props.notDoing === 'string' && (props.notDoing as string).trim()
-              ? { notDoing: (props.notDoing as string).trim() }
-              : {}),
-          }
-        : undefined;
+      // Legacy scope properties (outcome / notDoing) fold into the note —
+      // the structured shaping system was removed in v25 and these pages
+      // predate it, so they convert straight to the folded form.
+      const foldedLines: string[] = [];
+      if (typeof props.outcome === 'string' && (props.outcome as string).trim()) {
+        foldedLines.push(`**Done when:** ${(props.outcome as string).trim()}`);
+      }
+      if (typeof props.notDoing === 'string' && (props.notDoing as string).trim()) {
+        foldedLines.push(`**Out of scope:** ${(props.notDoing as string).trim()}`);
+      }
 
       const item: InboxItem = {
         id: (pageRaw.id as string) ?? deps.newId(),
@@ -369,8 +358,8 @@ export function runMigrations(store: IMigrationStore, deps: MigrationDeps): void
         createdAt: typeof pageRaw.createdAt === 'number' ? (pageRaw.createdAt as number) : now,
         updatedAt: typeof pageRaw.updatedAt === 'number' ? (pageRaw.updatedAt as number) : now,
       };
-      if (shaping) {
-        item.shaping = shaping;
+      if (foldedLines.length > 0) {
+        item.note = foldedLines.join('\n');
       }
       if (status === 'later') {
         item.laterAt = typeof props.laterAt === 'number' ? (props.laterAt as number) : now;
@@ -621,11 +610,71 @@ export function runMigrations(store: IMigrationStore, deps: MigrationDeps): void
     }
 
     store.set('schemaVersion', 24);
+    // Fall through to v24→v25.
+  }
+
+  // v24 → v25: remove the shaping system. Structured shaping blocks fold into
+  // the free-text channel (ticket description / inbox note) — the one thing
+  // humans, the UI, and the agent all actually read. The 'shaped' inbox
+  // status collapses to 'new'; previously-shaped items get a fresh capture
+  // timestamp so the expiry sweep doesn't instantly defer them.
+  if (version === 24 || (store.get('schemaVersion', 0) as number) === 24) {
+    const foldShaping = (done: unknown, outOfScope: unknown): string => {
+      const lines: string[] = [];
+      if (typeof done === 'string' && done.trim()) {
+        lines.push(`**Done when:** ${done.trim()}`);
+      }
+      if (typeof outOfScope === 'string' && outOfScope.trim()) {
+        lines.push(`**Out of scope:** ${outOfScope.trim()}`);
+      }
+      return lines.join('\n');
+    };
+
+    const tickets = (store.get('tickets', []) as Record<string, unknown>[]) ?? [];
+    const migratedTickets = tickets.map((raw) => {
+      if (!('shaping' in raw)) {
+        return raw;
+      }
+      const { shaping, ...rest } = raw;
+      const s = (shaping ?? {}) as Record<string, unknown>;
+      const folded = foldShaping(s.doneLooksLike, s.outOfScope);
+      if (!folded) {
+        return rest;
+      }
+      const description = typeof rest.description === 'string' ? rest.description : '';
+      return { ...rest, description: [description, folded].filter(Boolean).join('\n\n') };
+    });
+    store.set('tickets', migratedTickets);
+
+    const inboxItems = (store.get('inboxItems', []) as Record<string, unknown>[]) ?? [];
+    const migratedInbox = inboxItems.map((raw) => {
+      const hasShaping = 'shaping' in raw;
+      const wasShaped = raw.status === 'shaped';
+      if (!hasShaping && !wasShaped) {
+        return raw;
+      }
+      const { shaping, ...rest } = raw;
+      const s = (shaping ?? {}) as Record<string, unknown>;
+      const folded = foldShaping(s.outcome, s.notDoing);
+      const next: Record<string, unknown> = { ...rest };
+      if (folded) {
+        const note = typeof next.note === 'string' ? next.note : '';
+        next.note = [note, folded].filter(Boolean).join('\n\n');
+      }
+      if (wasShaped) {
+        next.status = 'new';
+        next.createdAt = deps.now();
+      }
+      return next;
+    });
+    store.set('inboxItems', migratedInbox);
+
+    store.set('schemaVersion', 25);
     deps.repairProjectRoots?.();
     return;
   }
 
-  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 24) {
+  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 25) {
     deps.repairProjectRoots?.();
     return;
   }

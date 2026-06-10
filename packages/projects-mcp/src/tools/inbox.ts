@@ -14,7 +14,6 @@ function serializeItem(item: InboxRow) {
     note: item.note ?? '',
     status: item.status,
     project_id: item.project_id,
-    shaping: item.shaping ? JSON.parse(item.shaping) : null,
     later_at: item.later_at,
     promoted_to: item.promoted_to ? JSON.parse(item.promoted_to) : null,
     created_at: item.created_at,
@@ -25,10 +24,10 @@ function serializeItem(item: InboxRow) {
 export function registerInboxTools(server: McpServer, repo: IProjectsRepo): void {
   server.tool(
     'list_inbox',
-    'List inbox items, optionally filtered by status. Default: active items (new + shaped, excluding promoted).',
+    'List inbox items, optionally filtered by status. Default: active items (new, excluding promoted).',
     {
-      status: z.enum(['new', 'shaped', 'later']).optional().describe(
-        'Filter by status. Omit to list default inbox (new + shaped, excluding promoted).'
+      status: z.enum(['new', 'later']).optional().describe(
+        'Filter by status. Omit to list default inbox (new, excluding promoted).'
       ),
     },
     async ({ status }) => {
@@ -36,7 +35,7 @@ export function registerInboxTools(server: McpServer, repo: IProjectsRepo): void
       const items = all.filter((it) => {
         if (it.promoted_to) return false;
         if (status) return it.status === status;
-        return it.status === 'new' || it.status === 'shaped';
+        return it.status === 'new';
       });
       return json({ items: items.map(serializeItem) });
     }
@@ -59,7 +58,6 @@ export function registerInboxTools(server: McpServer, repo: IProjectsRepo): void
         note: description ?? null,
         project_id: project_id ?? null,
         status: 'new',
-        shaping: null,
         later_at: null,
         promoted_to: null,
         created_at: now,
@@ -72,18 +70,15 @@ export function registerInboxTools(server: McpServer, repo: IProjectsRepo): void
 
   server.tool(
     'update_inbox_item',
-    'Update an inbox item — edit title, description, assign to a project, shape it, or park it.',
+    'Update an inbox item — edit title, description, assign to a project, or park it. Put done-criteria and out-of-scope notes in the description; that text carries into the ticket on promotion.',
     {
       item_id: z.string().describe('The inbox item ID to update'),
       title: z.string().optional().describe('Updated title'),
       description: z.string().optional().describe('Updated description'),
-      status: z.enum(['new', 'shaped', 'later']).optional().describe('New status.'),
+      status: z.enum(['new', 'later']).optional().describe('New status.'),
       project_id: z.string().optional().describe('Assign to a project'),
-      outcome: z.string().optional().describe('What success looks like. Passing this shapes the item.'),
-      appetite: z.enum(['small', 'medium', 'large', 'xl']).optional().describe('Rough effort sizing.'),
-      not_doing: z.string().optional().describe('Explicitly out-of-scope work.'),
     },
-    async ({ item_id, title, description, status, project_id, outcome, appetite, not_doing }) => {
+    async ({ item_id, title, description, status, project_id }) => {
       const item = await repo.getInboxItem(item_id);
       if (!item) return err(`Inbox item not found: ${item_id}`);
 
@@ -91,25 +86,6 @@ export function registerInboxTools(server: McpServer, repo: IProjectsRepo): void
       if (title !== undefined) next.title = title;
       if (description !== undefined) next.note = description;
       if (project_id !== undefined) next.project_id = project_id || null;
-
-      // Shape the item if shaping fields provided.
-      if (outcome !== undefined || appetite !== undefined || not_doing !== undefined) {
-        const existing = item.shaping ? JSON.parse(item.shaping) : {};
-        const shaping = {
-          outcome: outcome ?? existing.outcome ?? '',
-          appetite: appetite ?? existing.appetite ?? 'medium',
-          ...(not_doing !== undefined
-            ? { notDoing: not_doing }
-            : existing.notDoing
-              ? { notDoing: existing.notDoing }
-              : {}),
-        };
-        next.shaping = JSON.stringify(shaping);
-        // Auto-transition to shaped if not already.
-        if (!status && item.status === 'new') {
-          next.status = 'shaped';
-        }
-      }
 
       if (status !== undefined) {
         next.status = status;
@@ -167,7 +143,6 @@ export function registerInboxTools(server: McpServer, repo: IProjectsRepo): void
         priority: 'medium',
         branch: null,
         blocked_by: '[]',
-        shaping: null,
         resolution: null,
         resolved_at: null,
         archived_at: null,

@@ -83,3 +83,60 @@ describe('v10 pages rebuild', () => {
     expect(count.n).toBe(0);
   });
 });
+
+describe('v12 shaping removal', () => {
+  /** Seed a pre-v12 DB with one project/column and return helpers. */
+  const seedPreV12 = (): void => {
+    migrateTo(12);
+    db.prepare("INSERT INTO projects (id, label, slug) VALUES ('proj_1', 'P', 'p')").run();
+    db.prepare("INSERT INTO pipeline_columns (id, project_id, label, sort_order) VALUES ('col_1', 'proj_1', 'Backlog', 0)").run();
+  };
+
+  it('folds ticket shaping into the description and drops the column', () => {
+    seedPreV12();
+    db.prepare(
+      `INSERT INTO tickets (id, project_id, column_id, title, description, shaping)
+       VALUES ('tkt_1', 'proj_1', 'col_1', 'T', 'Existing body.',
+               '{"doneLooksLike":"redirect works","appetite":"medium","outOfScope":"password reset"}')`
+    ).run();
+    db.prepare(
+      `INSERT INTO tickets (id, project_id, column_id, title, description, shaping)
+       VALUES ('tkt_2', 'proj_1', 'col_1', 'T2', '', '{"doneLooksLike":"  ","appetite":"small","outOfScope":""}')`
+    ).run();
+
+    runMigrations(db); // applies v12
+
+    const t1 = db.prepare("SELECT description FROM tickets WHERE id = 'tkt_1'").get() as { description: string };
+    expect(t1.description).toBe(
+      'Existing body.\n\n**Done when:** redirect works\n\n**Out of scope:** password reset'
+    );
+    // Blank shaping fields fold to nothing.
+    const t2 = db.prepare("SELECT description FROM tickets WHERE id = 'tkt_2'").get() as { description: string };
+    expect(t2.description).toBe('');
+    // Column is gone.
+    const cols = db.prepare('PRAGMA table_info(tickets)').all() as Array<{ name: string }>;
+    expect(cols.map((c) => c.name)).not.toContain('shaping');
+  });
+
+  it("folds inbox shaping into the note and collapses 'shaped' to 'new' with a fresh createdAt", () => {
+    seedPreV12();
+    db.prepare(
+      `INSERT INTO inbox_items (id, title, note, status, shaping, created_at)
+       VALUES ('inb_1', 'I', NULL, 'shaped',
+               '{"outcome":"Demo booked","appetite":"small","notDoing":"No counter-offer"}',
+               '2020-01-01 00:00:00.000')`
+    ).run();
+
+    runMigrations(db);
+
+    const row = db
+      .prepare("SELECT note, status, created_at FROM inbox_items WHERE id = 'inb_1'")
+      .get() as { note: string; status: string; created_at: string };
+    expect(row.note).toBe('**Done when:** Demo booked\n\n**Out of scope:** No counter-offer');
+    expect(row.status).toBe('new');
+    // createdAt was refreshed so the expiry sweep doesn't instantly defer it.
+    expect(row.created_at > '2020-01-02').toBe(true);
+    const cols = db.prepare('PRAGMA table_info(inbox_items)').all() as Array<{ name: string }>;
+    expect(cols.map((c) => c.name)).not.toContain('shaping');
+  });
+});

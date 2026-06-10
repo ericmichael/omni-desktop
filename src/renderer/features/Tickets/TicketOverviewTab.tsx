@@ -9,7 +9,7 @@ import { $milestones } from '@/renderer/features/Initiatives/state';
 import type { Ticket, TicketPriority, TicketResolution } from '@/shared/types';
 
 import { $pipeline, $tickets, ticketApi } from './state';
-import { APPETITE_COLORS, APPETITE_DESCRIPTIONS, APPETITE_LABELS, getColumnColors, RESOLUTION_COLORS, RESOLUTION_LABELS } from './ticket-constants';
+import { getColumnColors, PHASE_LABELS, RESOLUTION_COLORS, RESOLUTION_LABELS } from './ticket-constants';
 
 const useStyles = makeStyles({
   root: {
@@ -50,25 +50,6 @@ const useStyles = makeStyles({
     ':hover': {
       color: tokens.colorNeutralForeground2,
     },
-  },
-  scopeCard: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '10px',
-    borderRadius: tokens.borderRadiusXLarge,
-    backgroundColor: 'rgba(var(--colorNeutralBackground2), 0.3)',
-    padding: tokens.spacingVerticalM,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-  },
-  scopeFieldLabel: {
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightMedium,
-    color: tokens.colorNeutralForeground2,
-  },
-  scopeFieldValue: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground1,
-    marginTop: '2px',
   },
   blockerRow: {
     display: 'flex',
@@ -379,31 +360,6 @@ return;
         )}
       </div>
 
-      {/* Scope (from shaping) */}
-      {ticket.shaping && (
-        <div className={styles.section}>
-          <SectionLabel>Scope</SectionLabel>
-          <div className={styles.scopeCard}>
-            <div>
-              <span className={styles.scopeFieldLabel}>Done looks like</span>
-              <p className={styles.scopeFieldValue}>{ticket.shaping.doneLooksLike}</p>
-            </div>
-            <div>
-              <span className={styles.scopeFieldLabel}>Appetite</span>
-              <div style={{ marginTop: '2px' }}>
-                <Badge color={APPETITE_COLORS[ticket.shaping.appetite]}>
-                  {APPETITE_LABELS[ticket.shaping.appetite]} — {APPETITE_DESCRIPTIONS[ticket.shaping.appetite]}
-                </Badge>
-              </div>
-            </div>
-            <div>
-              <span className={styles.scopeFieldLabel}>Out of scope</span>
-              <p className={styles.scopeFieldValue}>{ticket.shaping.outOfScope}</p>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Priority */}
       <div className={styles.section}>
         <SectionLabel>Priority</SectionLabel>
@@ -457,13 +413,16 @@ return;
         )}
       </div>
 
-      {/* Supervisor info */}
-      {(ticket.autopilot || ticket.phase) && (
+      {/* Autopilot status — hidden entirely when idle; raw phase values never
+          render (PHASE_LABELS holds the human wording). */}
+      {(ticket.autopilot || (ticket.phase && ticket.phase !== 'idle')) && (
         <div className={styles.section}>
-          <SectionLabel>Supervisor</SectionLabel>
+          <SectionLabel>Autopilot</SectionLabel>
           <div className={styles.infoText}>
-            {ticket.autopilot && <p>Autopilot: on</p>}
-            {ticket.phase && <p>Phase: {ticket.phase}</p>}
+            {ticket.autopilot && <p>On</p>}
+            {ticket.phase && ticket.phase !== 'idle' && PHASE_LABELS[ticket.phase] && (
+              <p>{PHASE_LABELS[ticket.phase]}</p>
+            )}
           </div>
         </div>
       )}

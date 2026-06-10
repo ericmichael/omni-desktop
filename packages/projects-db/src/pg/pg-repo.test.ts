@@ -100,7 +100,7 @@ describe.skipIf(!URL)('PgProjectsRepo (live Postgres)', () => {
     await repoA.upsertTicket({
       id: 't1', project_id: 'pd', milestone_id: null, column_id: columnId,
       title: 'First', description: '', priority: 'medium', branch: null,
-      blocked_by: '[]', shaping: null, resolution: null, resolved_at: null,
+      blocked_by: '[]', resolution: null, resolved_at: null,
       archived_at: null, column_changed_at: null, use_worktree: 0, worktree_path: null,
       worktree_name: null, supervisor_session_id: null, phase: null, phase_changed_at: null,
       supervisor_task_id: null, token_usage: null, runs: '[]', pr_review: null,

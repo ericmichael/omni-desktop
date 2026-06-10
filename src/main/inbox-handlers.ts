@@ -21,7 +21,6 @@ export function registerInboxHandlers(ipc: IIpcListener, resolve: (event: unknow
   h('inbox:add', (m, input) => m.add(input));
   h('inbox:update', (m, id, patch) => m.update(id, patch));
   h('inbox:remove', (m, id) => m.remove(id));
-  h('inbox:shape', (m, id, shaping) => m.shape(id, shaping));
   h('inbox:defer', (m, id) => m.defer(id));
   h('inbox:reactivate', (m, id) => m.reactivate(id));
   h('inbox:promote-to-ticket', (m, id, opts) => m.promoteToTicket(id, opts));

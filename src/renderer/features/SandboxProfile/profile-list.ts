@@ -16,7 +16,7 @@ const OPEN_SOURCE_PROFILES = ['host', 'devbox'] as const;
 const ENTERPRISE_EXTRA_PROFILES = ['platform'] as const;
 
 const PROFILE_LABELS: Record<string, string> = {
-  host: 'Host (no isolation)',
+  host: 'This computer (no sandbox)',
   devbox: 'Devbox (Docker)',
   platform: 'Cloud (managed)',
   aci: 'Cloud · Fast',
@@ -61,7 +61,7 @@ export const machineIdFromProfile = (name: string): string | null =>
   isLocalProfile(name) ? name.slice('local:'.length) : null;
 
 /**
- * Long-form label used in pickers and settings ("Host (no isolation)"). For
+ * Long-form label used in pickers and settings ("This computer (no sandbox)"). For
  * compact status chips (e.g. "Devbox", "Cloud") use ``buildProfileLabel``
  * from ``@/renderer/omniagents-ui/sandbox-label``.
  *

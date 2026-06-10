@@ -145,10 +145,10 @@ export const SIMPLE_COLUMNS: ColumnDef[] = [
   {
     logicalId: 'review',
     label: 'Review',
-    description: 'Human review, shaping, or approval.',
+    description: 'Human review or approval.',
     gate: true,
     workflow: {
-      purpose: 'Human review, shaping, or approval.',
+      purpose: 'Human review or approval.',
       definitionOfDone: ['Human has decided whether the item is complete, needs more detail, or should become source-backed work.'],
       recommendedSkills: [],
     },

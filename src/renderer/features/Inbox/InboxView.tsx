@@ -1,5 +1,5 @@
 import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { Add20Regular, ArchiveRegular, MailInbox20Regular, TagRegular, TimerRegular } from '@fluentui/react-icons';
+import { Add20Regular, ArchiveRegular, MailInbox20Regular, TimerRegular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -119,10 +119,6 @@ const useStyles = makeStyles({
     padding: '1px 6px',
     borderRadius: tokens.borderRadiusCircular,
     backgroundColor: tokens.colorNeutralBackground3,
-  },
-  shapedBadge: {
-    backgroundColor: tokens.colorBrandBackground2,
-    color: tokens.colorBrandForeground1,
   },
   laterBadge: {
     backgroundColor: tokens.colorPaletteYellowBackground2,
@@ -292,11 +288,6 @@ const InboxRow = memo(({ item, styles, onOpen }: InboxRowProps) => {
         <span className={styles.rowTitle}>{item.title}</span>
         {item.note && <span className={styles.rowNote}>{item.note}</span>}
         <div className={styles.rowMeta}>
-          {item.status === 'shaped' && (
-            <span className={`${styles.badge} ${styles.shapedBadge}`}>
-              <TagRegular style={{ width: 12, height: 12 }} /> Shaped
-            </span>
-          )}
           {item.status === 'later' && (
             <span className={`${styles.badge} ${styles.laterBadge}`}>
               <TimerRegular style={{ width: 12, height: 12 }} /> Later

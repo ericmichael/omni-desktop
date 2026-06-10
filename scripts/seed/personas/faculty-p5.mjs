@@ -103,14 +103,9 @@ export async function seedFacultyP5(store, manifest) {
     {
       suffix: 'regrade-request',
       title: 'Student email: regrade request on PS3',
-      note: 'Student argues their vowel-counter loses a point unfairly. Read their code before replying.',
+      note: 'Student argues their vowel-counter loses a point unfairly. Read their code before replying.\n\n**Done when:** Decision email sent within 48h with rubric citation.\n**Out of scope:** Not opening a precedent for everyone — handle on the merits.',
       scoped: true,
-      status: 'shaped',
-      shaping: {
-        outcome: 'Decision email sent within 48h with rubric citation.',
-        appetite: 'small',
-        notDoing: 'Not opening a precedent for everyone — handle on the merits.',
-      },
+      status: 'new',
       ageDays: 3,
     },
     {
@@ -132,7 +127,6 @@ export async function seedFacultyP5(store, manifest) {
         note: i.note,
         projectId: i.scoped ? project.id : null,
         status: i.status,
-        shaping: i.shaping,
         createdAt: now - i.ageDays * day,
       })
     );

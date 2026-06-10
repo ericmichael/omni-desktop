@@ -84,14 +84,9 @@ export async function seedStudentP3(store, manifest) {
     {
       suffix: 'read-gfs',
       title: 'Read GFS paper before week 8',
-      note: 'Assigned reading. Skim first, then re-read with section summaries.',
+      note: 'Assigned reading. Skim first, then re-read with section summaries.\n\n**Done when:** Can explain the master-chunkserver split and why 64MB chunks.\n**Out of scope:** No implementation — just understand the paper.',
       scoped: true,
-      status: 'shaped',
-      shaping: {
-        outcome: 'Can explain the master-chunkserver split and why 64MB chunks.',
-        appetite: 'small',
-        notDoing: 'No implementation — just understand the paper.',
-      },
+      status: 'new',
       ageDays: 4,
     },
     {
@@ -130,7 +125,6 @@ export async function seedStudentP3(store, manifest) {
         note: i.note,
         projectId: i.scoped ? project.id : null,
         status: i.status,
-        shaping: i.shaping,
         laterAt: i.laterAtAgo !== undefined ? now - i.laterAtAgo : undefined,
         createdAt: now - i.ageDays * day,
       })

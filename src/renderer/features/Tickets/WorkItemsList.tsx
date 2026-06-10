@@ -331,9 +331,14 @@ const TicketRow = memo(({ ticket, selected, hovered, unresolvedBlockers, milesto
           {truncatedBranch}
         </span>
       )}
-      <span className={styles.cellColumn}>
-        <Badge color={columnBadgeColor}>{columnLabel}</Badge>
-      </span>
+      {/* Column badge only while the ticket is open — on resolved rows it
+          repeats "Completed" down the whole list and the dimmed row already
+          says done. */}
+      {!ticket.resolution && (
+        <span className={styles.cellColumn}>
+          <Badge color={columnBadgeColor}>{columnLabel}</Badge>
+        </span>
+      )}
       {milestoneTitle && (
         <span className={styles.cellMilestone}>
           <Badge color="purple" truncate maxWidth={160}>{milestoneTitle}</Badge>
@@ -343,7 +348,7 @@ const TicketRow = memo(({ ticket, selected, hovered, unresolvedBlockers, milesto
         <span className={styles.cellPhase}>
           <Badge color={PHASE_COLORS[phase] ?? 'default'}>
             {isRunning && <ArrowSync20Regular style={{ width: 12, height: 12 }} />}
-            {PHASE_LABELS[phase] ?? phase}
+            {PHASE_LABELS[phase]}
           </Badge>
         </span>
       )}

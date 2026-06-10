@@ -287,16 +287,16 @@ export class PgProjectsRepo implements IProjectsRepo {
     return c.query(
       `INSERT INTO tickets (
          tenant_id, id, project_id, milestone_id, column_id, title, description, priority, branch,
-         blocked_by, shaping, resolution, resolved_at, archived_at, column_changed_at,
+         blocked_by, resolution, resolved_at, archived_at, column_changed_at,
          use_worktree, worktree_path, worktree_name, supervisor_session_id,
          phase, phase_changed_at, supervisor_task_id, token_usage, runs,
          pr_review, pr_merged_at, assignee, created_at, updated_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
        ON CONFLICT (id) DO UPDATE SET
          project_id = EXCLUDED.project_id, milestone_id = EXCLUDED.milestone_id,
          column_id = EXCLUDED.column_id, title = EXCLUDED.title, description = EXCLUDED.description,
          priority = EXCLUDED.priority, branch = EXCLUDED.branch, blocked_by = EXCLUDED.blocked_by,
-         shaping = EXCLUDED.shaping, resolution = EXCLUDED.resolution, resolved_at = EXCLUDED.resolved_at,
+         resolution = EXCLUDED.resolution, resolved_at = EXCLUDED.resolved_at,
          archived_at = EXCLUDED.archived_at, column_changed_at = EXCLUDED.column_changed_at,
          use_worktree = EXCLUDED.use_worktree, worktree_path = EXCLUDED.worktree_path,
          worktree_name = EXCLUDED.worktree_name, supervisor_session_id = EXCLUDED.supervisor_session_id,
@@ -308,7 +308,7 @@ export class PgProjectsRepo implements IProjectsRepo {
       [
         this.tenantId, row.id, row.project_id, row.milestone_id, row.column_id,
         row.title, row.description, row.priority, row.branch,
-        row.blocked_by, row.shaping, row.resolution, row.resolved_at,
+        row.blocked_by, row.resolution, row.resolved_at,
         row.archived_at, row.column_changed_at,
         row.use_worktree, row.worktree_path, row.worktree_name, row.supervisor_session_id,
         row.phase, row.phase_changed_at, row.supervisor_task_id, row.token_usage, row.runs,
@@ -513,15 +513,15 @@ export class PgProjectsRepo implements IProjectsRepo {
 
   private upsertInboxItemIn(c: PoolClient, row: InboxRow): Promise<unknown> {
     return c.query(
-      `INSERT INTO inbox_items (tenant_id, id, title, note, project_id, status, shaping, later_at, promoted_to, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      `INSERT INTO inbox_items (tenant_id, id, title, note, project_id, status, later_at, promoted_to, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        ON CONFLICT (id) DO UPDATE SET
          title = EXCLUDED.title, note = EXCLUDED.note, project_id = EXCLUDED.project_id,
-         status = EXCLUDED.status, shaping = EXCLUDED.shaping, later_at = EXCLUDED.later_at,
+         status = EXCLUDED.status, later_at = EXCLUDED.later_at,
          promoted_to = EXCLUDED.promoted_to, updated_at = EXCLUDED.updated_at`,
       [
         this.tenantId, row.id, row.title, row.note, row.project_id, row.status,
-        row.shaping, row.later_at, row.promoted_to, row.created_at, row.updated_at,
+        row.later_at, row.promoted_to, row.created_at, row.updated_at,
       ]
     );
   }

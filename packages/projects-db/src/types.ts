@@ -43,7 +43,6 @@ export type TicketRow = {
   priority: string;
   branch: string | null;
   blocked_by: string;                    // JSON array
-  shaping: string | null;               // JSON
   resolution: string | null;
   resolved_at: string | null;
   archived_at: string | null;
@@ -110,7 +109,6 @@ export type InboxRow = {
   note: string | null;
   project_id: string | null;
   status: string;
-  shaping: string | null;     // JSON
   later_at: string | null;
   promoted_to: string | null; // JSON
   created_at: string;

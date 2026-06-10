@@ -249,15 +249,6 @@ describe('detectRisks', () => {
       expect(aging?.severity).toBe('medium');
     });
 
-    it('ignores shaped items', () => {
-      const old = NOW - 6.5 * DAY_MS;
-      const inboxItems = [makeInbox({ id: 'i1', status: 'shaped', createdAt: old })];
-      const risks = detectRisks({ tickets: [], milestones: [], inboxItems, ...baseInput });
-      expect(risks.some((r) => r.kind === 'inbox_expiring' || r.kind === 'aging_inbox')).toBe(
-        false
-      );
-    });
-
     it('ignores promoted items', () => {
       const old = NOW - 6.5 * DAY_MS;
       const inboxItems = [

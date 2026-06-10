@@ -28,7 +28,6 @@ import type {
   Project,
   ProjectId,
   ProjectSource,
-  ShapingData,
   Ticket,
   TicketComment,
   TicketId,
@@ -46,7 +45,6 @@ const FRONTMATTER_FENCE = '---';
 const TICKET_PRIORITIES = ['low', 'medium', 'high', 'critical'] as const;
 const TICKET_RESOLUTIONS = ['completed', 'wont_do', 'duplicate', 'cancelled'] as const;
 const MILESTONE_STATUSES = ['active', 'completed', 'archived'] as const;
-const APPETITES = ['small', 'medium', 'large'] as const;
 const TICKET_PHASES = [
   'idle',
   'provisioning',
@@ -173,9 +171,14 @@ const TokenUsageSchema: z.ZodType<TokenUsage> = z.object({
   totalTokens: z.number(),
 });
 
-const ShapingSchema: z.ZodType<ShapingData> = z.object({
+/**
+ * Legacy frontmatter block from the removed shaping system. Still accepted
+ * on read so pre-v25 ticket files don't lose data — `parseTicketFile` folds
+ * it into the description. Never written back.
+ */
+const LegacyShapingSchema = z.object({
   doneLooksLike: z.string(),
-  appetite: z.enum(APPETITES),
+  appetite: z.string(),
   outOfScope: z.string(),
 });
 
@@ -232,7 +235,7 @@ const TicketMetaSchema = z.object({
   resolution: z.enum(TICKET_RESOLUTIONS).optional(),
   autopilot: z.boolean().optional(),
   tokenUsage: TokenUsageSchema.optional(),
-  shaping: ShapingSchema.optional(),
+  shaping: LegacyShapingSchema.optional(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -349,12 +352,28 @@ return fail(yamlResult.error.message);
 return parsed;
 }
   const m = parsed.value;
+  let description = body.replace(/^\n+/, '').replace(/\n+$/, '');
+  // Pre-v25 files carry a structured shaping block; fold it into the
+  // description (the one channel humans and the agent both read) so the
+  // data survives the shaping-system removal.
+  if (m.shaping) {
+    const folded: string[] = [];
+    if (m.shaping.doneLooksLike.trim()) {
+      folded.push(`**Done when:** ${m.shaping.doneLooksLike.trim()}`);
+    }
+    if (m.shaping.outOfScope.trim()) {
+      folded.push(`**Out of scope:** ${m.shaping.outOfScope.trim()}`);
+    }
+    if (folded.length > 0) {
+      description = [description, folded.join('\n')].filter(Boolean).join('\n\n');
+    }
+  }
   return new Ok({
     id,
     projectId,
     milestoneId: m.milestone as MilestoneId | undefined,
     title: m.title,
-    description: body.replace(/^\n+/, '').replace(/\n+$/, ''),
+    description,
     priority: m.priority,
     blockedBy: (m.blockedBy ?? []) as TicketId[],
     columnId: m.column,
@@ -366,7 +385,6 @@ return parsed;
     resolution: m.resolution,
     autopilot: m.autopilot,
     tokenUsage: m.tokenUsage,
-    shaping: m.shaping,
     comments: [],
     runs: [],
     createdAt: m.createdAt,
@@ -539,7 +557,6 @@ export function serializeTicketFile(ticket: Ticket): string {
     resolution: ticket.resolution,
     autopilot: ticket.autopilot,
     tokenUsage: ticket.tokenUsage,
-    shaping: ticket.shaping,
     createdAt: msToIso(ticket.createdAt),
     updatedAt: msToIso(ticket.updatedAt),
   });

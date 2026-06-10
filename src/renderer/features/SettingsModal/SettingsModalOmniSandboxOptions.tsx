@@ -181,7 +181,7 @@ return;
             <option value="utrgv">UTRGV</option>
           </Select>
         </FormField>
-        <FormField label="Code Deck background">
+        <FormField label="Spaces background">
           <span className={styles.textSimple}>{store.codeDeckBackground ? 'Custom image' : 'None'}</span>
           <input
             ref={deckBgInputRef}

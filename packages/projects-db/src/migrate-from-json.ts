@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { DEFAULT_COLUMNS as SHARED_DEFAULT_COLUMNS, defaultColumnId } from './defaults.js';
 import { commentId } from './ids.js';
 import type { ProjectsRepo } from './repo.js';
-import { toIso } from './timestamps.js';
+import { nowTimestamp, toIso } from './timestamps.js';
 import { tx } from './tx.js';
 
 /**
@@ -55,6 +55,7 @@ interface JsonTicket {
   priority: string;
   branch?: string;
   blockedBy: string[];
+  /** Legacy structured shaping (removed system) — folded into description on import. */
   shaping?: { doneLooksLike: string; appetite: string; outOfScope: string };
   resolution?: string;
   resolvedAt?: number;
@@ -115,11 +116,34 @@ interface JsonInboxItem {
   note?: string;
   projectId?: string | null;
   status: string;
+  /** Legacy structured shaping (removed system) — folded into `note` on import. */
   shaping?: unknown;
   laterAt?: number;
   promotedTo?: unknown;
   createdAt: number;
   updatedAt: number;
+}
+
+/**
+ * Fold a legacy shaping block into free text (the shaping system was
+ * removed; description/note is the single channel). Returns '' when there
+ * is nothing meaningful to carry.
+ */
+function foldLegacyShaping(raw: unknown, doneKey: string, scopeKey: string): string {
+  if (!raw || typeof raw !== 'object') {
+    return '';
+  }
+  const s = raw as Record<string, unknown>;
+  const lines: string[] = [];
+  const done = s[doneKey];
+  const scope = s[scopeKey];
+  if (typeof done === 'string' && done.trim()) {
+    lines.push(`**Done when:** ${done.trim()}`);
+  }
+  if (typeof scope === 'string' && scope.trim()) {
+    lines.push(`**Out of scope:** ${scope.trim()}`);
+  }
+  return lines.join('\n');
 }
 
 interface JsonTask {
@@ -266,11 +290,12 @@ return 0;
         milestone_id: t.milestoneId ?? null,
         column_id: resolvedColumnId,
         title: t.title,
-        description: t.description,
+        description: [t.description, foldLegacyShaping(t.shaping, 'doneLooksLike', 'outOfScope')]
+          .filter(Boolean)
+          .join('\n\n'),
         priority: t.priority,
         branch: t.branch ?? null,
         blocked_by: JSON.stringify(t.blockedBy ?? []),
-        shaping: jsonStr(t.shaping),
         resolution: t.resolution ?? null,
         resolved_at: isoOpt(t.resolvedAt),
         archived_at: isoOpt(t.archivedAt),
@@ -327,16 +352,22 @@ return 0;
 
     // 5. Inbox items
     for (const item of inboxItems) {
+      const foldedNote =
+        [item.note ?? '', foldLegacyShaping(item.shaping, 'outcome', 'notDoing')].filter(Boolean).join('\n\n') ||
+        null;
+      const wasShaped = item.status === 'shaped';
       repo.upsertInboxItem({
         id: item.id,
         title: item.title,
-        note: item.note ?? null,
+        note: foldedNote,
         project_id: item.projectId ?? null,
-        status: item.status,
-        shaping: jsonStr(item.shaping),
+        // 'shaped' collapsed to 'new' when the shaping system was removed; a
+        // fresh capture timestamp keeps the expiry sweep from instantly
+        // deferring those items.
+        status: wasShaped ? 'new' : item.status,
         later_at: isoOpt(item.laterAt),
         promoted_to: jsonStr(item.promotedTo),
-        created_at: toIso(item.createdAt),
+        created_at: wasShaped ? nowTimestamp() : toIso(item.createdAt),
         updated_at: toIso(item.updatedAt),
       });
     }

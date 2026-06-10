@@ -14,24 +14,17 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { IconButton, Menu, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { InboxItem, InboxShaping, ProjectId } from '@/shared/types';
+import type { InboxItem, ProjectId } from '@/shared/types';
 
 import { inboxApi } from './state';
 
 /**
  * Detail view for a single inbox item. Opens in place of the list when the
- * user clicks a row. Auto-saves title/note/shaping on blur. Action buttons
+ * user clicks a row. Auto-saves title/note on blur. Action buttons
  * at the bottom cover the rest of the lifecycle (defer, promote, drop).
  *
  * Promoted tombstones render read-only — no edits, just a "this became X" label.
  */
-
-const APPETITE_OPTIONS: Array<{ value: InboxShaping['appetite']; label: string; hint: string }> = [
-  { value: 'small', label: 'Small', hint: '~1 day' },
-  { value: 'medium', label: 'Medium', hint: '2–4 days' },
-  { value: 'large', label: 'Large', hint: '1–2 weeks' },
-  { value: 'xl', label: 'XL', hint: '3+ weeks' },
-];
 
 const useStyles = makeStyles({
   root: {
@@ -81,10 +74,6 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusCircular,
     backgroundColor: tokens.colorNeutralBackground3,
     fontSize: tokens.fontSizeBase100,
-  },
-  shapedBadge: {
-    backgroundColor: tokens.colorBrandBackground2,
-    color: tokens.colorBrandForeground1,
   },
   laterBadge: {
     backgroundColor: tokens.colorPaletteYellowBackground2,
@@ -160,37 +149,6 @@ const useStyles = makeStyles({
   textarea: {
     minHeight: '60px',
     resize: 'vertical',
-  },
-  appetiteRow: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-    gap: tokens.spacingHorizontalS,
-  },
-  appetiteBtn: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-    gap: '2px',
-    padding: '8px 10px',
-    borderRadius: tokens.borderRadiusMedium,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground1,
-    cursor: 'pointer',
-    textAlign: 'left',
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
-  },
-  appetiteBtnActive: {
-    ...shorthands.borderColor(tokens.colorBrandStroke1),
-    backgroundColor: tokens.colorBrandBackground2,
-  },
-  appetiteLabel: {
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-  },
-  appetiteHint: {
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground3,
   },
   projectRow: {
     display: 'flex',
@@ -273,9 +231,6 @@ export const InboxItemDetail = memo(({ item, onBack, hideHeader = false }: Inbox
   // worse than showing slightly stale data.
   const [title, setTitle] = useState(item.title);
   const [note, setNote] = useState(item.note ?? '');
-  const [outcome, setOutcome] = useState(item.shaping?.outcome ?? '');
-  const [appetite, setAppetite] = useState<InboxShaping['appetite']>(item.shaping?.appetite ?? 'medium');
-  const [notDoing, setNotDoing] = useState(item.shaping?.notDoing ?? '');
 
   // -------------------------------------------------------------------------
   // Save handlers (auto-save on blur)
@@ -297,33 +252,6 @@ export const InboxItemDetail = memo(({ item, onBack, hideHeader = false }: Inbox
       ...(noteChanged ? { note: nextNote } : {}),
     });
   }, [isArchived, title, note, item]);
-
-  const saveShaping = useCallback(() => {
-    if (isArchived) {
-      return;
-    }
-    const trimmedOutcome = outcome.trim();
-    // Can't save shaping without an outcome — it's the one required field.
-    // Silently skip; the user can come back and fill it in.
-    if (!trimmedOutcome) {
-      return;
-    }
-    const next: InboxShaping = { outcome: trimmedOutcome, appetite };
-    if (notDoing.trim()) {
-      next.notDoing = notDoing.trim();
-    }
-    // Skip if nothing changed.
-    const existing = item.shaping;
-    if (
-      existing &&
-      existing.outcome === next.outcome &&
-      existing.appetite === next.appetite &&
-      (existing.notDoing ?? '') === (next.notDoing ?? '')
-    ) {
-      return;
-    }
-    void inboxApi.shape(item.id, next);
-  }, [isArchived, outcome, appetite, notDoing, item]);
 
   const setProjectId = useCallback(
     (id: ProjectId | null) => {
@@ -355,7 +283,6 @@ export const InboxItemDetail = memo(({ item, onBack, hideHeader = false }: Inbox
   const flushRef = useRef<() => void>(() => {});
   flushRef.current = () => {
     saveTitleNote();
-    saveShaping();
   };
   useEffect(() => {
     return () => {
@@ -388,22 +315,6 @@ export const InboxItemDetail = memo(({ item, onBack, hideHeader = false }: Inbox
       setProjectId(event.target.value || null);
     },
     [setProjectId]
-  );
-
-  const handleOutcomeChange = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
-    setOutcome(event.target.value);
-  }, []);
-
-  const handleNotDoingChange = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
-    setNotDoing(event.target.value);
-  }, []);
-
-  const handleAppetiteSelect = useCallback(
-    (nextAppetite: InboxShaping['appetite']) => {
-      setAppetite(nextAppetite);
-      queueMicrotask(saveShaping);
-    },
-    [saveShaping]
   );
 
   const handlePromoteToTicket = useCallback(() => {
@@ -449,9 +360,6 @@ export const InboxItemDetail = memo(({ item, onBack, hideHeader = false }: Inbox
           <ArchiveRegular style={{ width: 12, height: 12 }} /> Promoted to {item.promotedTo.kind}
         </span>
       );
-    }
-    if (item.status === 'shaped') {
-      return <span className={`${styles.badge} ${styles.shapedBadge}`}>Shaped</span>;
     }
     if (item.status === 'later') {
       return (
@@ -500,7 +408,7 @@ export const InboxItemDetail = memo(({ item, onBack, hideHeader = false }: Inbox
           value={note}
           onChange={handleNoteChange}
           onBlur={saveTitleNote}
-          placeholder="Add a note…"
+          placeholder="Add a note — what does done look like? Anything out of scope?"
           readOnly={isArchived}
         />
 
@@ -522,56 +430,6 @@ export const InboxItemDetail = memo(({ item, onBack, hideHeader = false }: Inbox
           </select>
         </div>
 
-        {/* Shaping */}
-        <div className={styles.section}>
-          <span className={styles.sectionLabel}>Shape</span>
-
-          <div className={styles.field}>
-            <label className={styles.fieldLabel} htmlFor="detail-outcome">
-              Outcome — what does success look like?
-            </label>
-            <textarea
-              id="detail-outcome"
-              className={`${styles.input} ${styles.textarea}`}
-              value={outcome}
-              onChange={handleOutcomeChange}
-              onBlur={saveShaping}
-              placeholder="Users can log in via SSO."
-              readOnly={isArchived}
-            />
-          </div>
-
-          <div className={styles.field}>
-            <span className={styles.fieldLabel}>Appetite</span>
-            <div className={styles.appetiteRow}>
-              {APPETITE_OPTIONS.map((opt) => (
-                <AppetiteButton
-                  key={opt.value}
-                  option={opt}
-                  selected={appetite === opt.value}
-                  disabled={isArchived}
-                  styles={styles}
-                  onSelect={handleAppetiteSelect}
-                />
-              ))}
-            </div>
-          </div>
-
-          <div className={styles.field}>
-            <label className={styles.fieldLabel} htmlFor="detail-notdoing">
-              Not doing <span style={{ opacity: 0.6 }}>(optional)</span>
-            </label>
-            <textarea
-              id="detail-notdoing"
-              className={`${styles.input} ${styles.textarea}`}
-              value={notDoing}
-              onChange={handleNotDoingChange}
-              onBlur={saveShaping}
-              placeholder="Custom themes, org import."
-              readOnly={isArchived}
-            />
-          </div>
-        </div>
       </div>
 
       {/* Actions */}
@@ -610,28 +468,3 @@ export const InboxItemDetail = memo(({ item, onBack, hideHeader = false }: Inbox
   );
 });
 InboxItemDetail.displayName = 'InboxItemDetail';
-
-type AppetiteButtonProps = {
-  option: (typeof APPETITE_OPTIONS)[number];
-  selected: boolean;
-  disabled: boolean;
-  styles: ReturnType<typeof useStyles>;
-  onSelect: (value: InboxShaping['appetite']) => void;
-};
-
-const AppetiteButton = memo(({ option, selected, disabled, styles, onSelect }: AppetiteButtonProps) => {
-  const handleClick = useCallback(() => onSelect(option.value), [onSelect, option.value]);
-
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      className={`${styles.appetiteBtn} ${selected ? styles.appetiteBtnActive : ''}`}
-      onClick={handleClick}
-    >
-      <span className={styles.appetiteLabel}>{option.label}</span>
-      <span className={styles.appetiteHint}>{option.hint}</span>
-    </button>
-  );
-});
-AppetiteButton.displayName = 'AppetiteButton';

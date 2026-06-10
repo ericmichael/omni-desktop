@@ -159,7 +159,6 @@ describe('ticket file roundtrip', () => {
       resolution: 'completed',
       autopilot: true,
       tokenUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
-      shaping: { doneLooksLike: 'redirect works', appetite: 'medium', outOfScope: 'password reset' },
     });
     const text = serializeTicketFile(t);
     const parsed = parseTicketFile(text, t.id, t.projectId);
@@ -167,6 +166,36 @@ describe('ticket file roundtrip', () => {
     if (parsed.isOk()) {
 expect(parsed.value).toEqual(t);
 }
+  });
+
+  it('folds a legacy shaping frontmatter block into the description', () => {
+    // Pre-v25 files carry structured shaping; the parser folds it into the
+    // description so the data survives the shaping-system removal.
+    const legacy = [
+      '---',
+      'title: Fix the login redirect',
+      'priority: high',
+      'column: in-progress',
+      'shaping:',
+      '  doneLooksLike: redirect works',
+      '  appetite: medium',
+      '  outOfScope: password reset',
+      `createdAt: ${new Date(T1).toISOString()}`,
+      `updatedAt: ${new Date(T2).toISOString()}`,
+      '---',
+      '',
+      'Users land on a blank page after OAuth.',
+      '',
+    ].join('\n');
+    const parsed = parseTicketFile(legacy, 'tkt-1' as TicketId, 'proj-1' as ProjectId);
+    expect(parsed.isOk()).toBe(true);
+    if (parsed.isOk()) {
+      expect(parsed.value.description).toBe(
+        'Users land on a blank page after OAuth.\n\n**Done when:** redirect works\n**Out of scope:** password reset'
+      );
+      // And the fold never round-trips back into frontmatter.
+      expect(serializeTicketFile(parsed.value)).not.toContain('shaping');
+    }
   });
 
   it('uses ISO strings for timestamps in the file', () => {

@@ -31,7 +31,6 @@ import type {
   InboxItem,
   InboxItemId,
   InboxPromotion,
-  InboxShaping,
   Milestone,
   MilestoneId,
   Page,
@@ -41,7 +40,6 @@ import type {
   ProjectId,
   ProjectSource,
   PullRequestLink,
-  ShapingData,
   StoreData,
   Task,
   TaskId,
@@ -176,7 +174,6 @@ export function rowToTicket(row: TicketRow, comments?: CommentRow[]): Ticket {
   };
   if (row.milestone_id) ticket.milestoneId = row.milestone_id as MilestoneId;
   if (row.branch) ticket.branch = row.branch;
-  if (row.shaping) ticket.shaping = JSON.parse(row.shaping) as ShapingData;
   if (row.resolution) ticket.resolution = row.resolution as TicketResolution;
   if (row.resolved_at) ticket.resolvedAt = fromIso(row.resolved_at);
   if (row.archived_at) ticket.archivedAt = fromIso(row.archived_at);
@@ -275,7 +272,6 @@ export function rowToInboxItem(row: InboxRow): InboxItem {
   };
   if (row.note) item.note = row.note;
   if (row.project_id) item.projectId = row.project_id as ProjectId;
-  if (row.shaping) item.shaping = JSON.parse(row.shaping) as InboxShaping;
   if (row.later_at) item.laterAt = fromIso(row.later_at);
   if (row.promoted_to) item.promotedTo = JSON.parse(row.promoted_to) as InboxPromotion;
   return item;
@@ -353,7 +349,6 @@ export function ticketToRow(t: Ticket): TicketRow {
     priority: t.priority,
     branch: t.branch ?? null,
     blocked_by: JSON.stringify(t.blockedBy ?? []),
-    shaping: jsonStrOrNull(t.shaping),
     resolution: t.resolution ?? null,
     resolved_at: isoOrNull(t.resolvedAt),
     archived_at: isoOrNull(t.archivedAt),
@@ -426,7 +421,6 @@ export function inboxItemToRow(i: InboxItem): InboxRow {
     note: i.note ?? null,
     project_id: i.projectId ?? null,
     status: i.status,
-    shaping: jsonStrOrNull(i.shaping),
     later_at: isoOrNull(i.laterAt),
     promoted_to: jsonStrOrNull(i.promotedTo),
     created_at: toIso(i.createdAt),

@@ -5,7 +5,6 @@ import { persistedStoreApi } from '@/renderer/services/store';
 import type {
   InboxItem,
   InboxItemId,
-  InboxShaping,
   MilestoneId,
   ProjectId,
   Ticket,
@@ -26,7 +25,7 @@ out[item.id] = item;
   return out;
 });
 
-/** Active view: still shapeable/actionable (hides later + promoted). */
+/** Active view: still actionable (hides later + promoted). */
 export const $activeInbox = computed($inboxItems, (items) =>
   Object.values(items).filter((i) => i.status !== 'later' && !i.promotedTo)
 );
@@ -63,9 +62,6 @@ export const inboxApi = {
   ): Promise<void> => emitter.invoke('inbox:update', id, patch),
 
   remove: (id: InboxItemId): Promise<void> => emitter.invoke('inbox:remove', id),
-
-  shape: (id: InboxItemId, shaping: InboxShaping): Promise<void> =>
-    emitter.invoke('inbox:shape', id, shaping),
 
   defer: (id: InboxItemId): Promise<void> => emitter.invoke('inbox:defer', id),
 

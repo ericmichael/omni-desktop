@@ -474,4 +474,53 @@ ALTER TABLE pipeline_columns ADD COLUMN max_concurrent INTEGER;
 ALTER TABLE pipeline_columns ADD COLUMN workflow JSONB;
 `,
   },
+  {
+    version: 12,
+    sql: `
+-- Remove the shaping system. Structured shaping blocks fold into the
+-- free-text channel (ticket description / inbox note) so the data survives;
+-- the 'shaped' inbox status collapses to 'new' with a fresh capture
+-- timestamp (so the expiry sweep doesn't instantly defer those items).
+-- RLS is FORCEd on these tables and the migration session has no tenant
+-- GUC, so row security is disabled around the data fixes; DISABLE/ENABLE
+-- does not clear the FORCE flag, so the prior posture is restored exactly.
+ALTER TABLE tickets DISABLE ROW LEVEL SECURITY;
+ALTER TABLE inbox_items DISABLE ROW LEVEL SECURITY;
+
+UPDATE tickets
+SET description = CASE WHEN description = '' THEN '' ELSE description || chr(10) || chr(10) END
+  || '**Done when:** ' || TRIM((shaping::jsonb ->> 'doneLooksLike'))
+WHERE shaping IS NOT NULL
+  AND COALESCE(TRIM((shaping::jsonb ->> 'doneLooksLike')), '') <> '';
+
+UPDATE tickets
+SET description = CASE WHEN description = '' THEN '' ELSE description || chr(10) || chr(10) END
+  || '**Out of scope:** ' || TRIM((shaping::jsonb ->> 'outOfScope'))
+WHERE shaping IS NOT NULL
+  AND COALESCE(TRIM((shaping::jsonb ->> 'outOfScope')), '') <> '';
+
+UPDATE inbox_items
+SET note = CASE WHEN note IS NULL OR note = '' THEN '' ELSE note || chr(10) || chr(10) END
+  || '**Done when:** ' || TRIM((shaping::jsonb ->> 'outcome'))
+WHERE shaping IS NOT NULL
+  AND COALESCE(TRIM((shaping::jsonb ->> 'outcome')), '') <> '';
+
+UPDATE inbox_items
+SET note = CASE WHEN note IS NULL OR note = '' THEN '' ELSE note || chr(10) || chr(10) END
+  || '**Out of scope:** ' || TRIM((shaping::jsonb ->> 'notDoing'))
+WHERE shaping IS NOT NULL
+  AND COALESCE(TRIM((shaping::jsonb ->> 'notDoing')), '') <> '';
+
+UPDATE inbox_items
+SET status = 'new',
+    created_at = ${TS_DEFAULT}
+WHERE status = 'shaped';
+
+ALTER TABLE tickets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE inbox_items ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE tickets DROP COLUMN shaping;
+ALTER TABLE inbox_items DROP COLUMN shaping;
+`,
+  },
 ];

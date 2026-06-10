@@ -79,14 +79,9 @@ export async function seedStaffP7(store, manifest) {
     {
       suffix: 'schedule-relic-demo',
       title: 'Schedule deeper-dive demo with Relic',
-      note: 'Request a price sensitivity demo — what does the cliff at 10TB look like in practice?',
+      note: 'Request a price sensitivity demo — what does the cliff at 10TB look like in practice?\n\n**Done when:** Demo on the calendar for next week with their SE + our finance lead.\n**Out of scope:** Not soliciting a counter-offer at this stage.',
       scoped: true,
-      status: 'shaped',
-      shaping: {
-        outcome: 'Demo on the calendar for next week with their SE + our finance lead.',
-        appetite: 'small',
-        notDoing: 'Not soliciting a counter-offer at this stage.',
-      },
+      status: 'new',
       ageDays: 4,
     },
     {
@@ -117,7 +112,6 @@ export async function seedStaffP7(store, manifest) {
         note: i.note,
         projectId: i.scoped ? project.id : null,
         status: i.status,
-        shaping: i.shaping,
         laterAt: i.laterAtAgo !== undefined ? now - i.laterAtAgo : undefined,
         createdAt: now - i.ageDays * day,
       })

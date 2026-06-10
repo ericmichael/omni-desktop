@@ -10,7 +10,7 @@ import { isActivePhase } from '@/shared/ticket-phase';
 import type { Ticket, TicketPhase } from '@/shared/types';
 
 import { $tickets, ticketApi } from './state';
-import { APPETITE_COLORS, APPETITE_LABELS, PHASE_COLORS, PHASE_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './ticket-constants';
+import { PHASE_COLORS, PHASE_LABELS, TICKET_PRIORITY_COLORS, TICKET_PRIORITY_LABELS } from './ticket-constants';
 
 const canStart = (phase: TicketPhase | undefined) => !phase || !isActivePhase(phase);
 
@@ -171,16 +171,11 @@ export const KanbanCard = memo(
             <Badge color={TICKET_PRIORITY_COLORS[ticket.priority]}>
               {TICKET_PRIORITY_LABELS[ticket.priority]}
             </Badge>
-            {ticket.shaping?.appetite && (
-              <Badge color={APPETITE_COLORS[ticket.shaping.appetite]}>
-                {APPETITE_LABELS[ticket.shaping.appetite]}
-              </Badge>
-            )}
             {/* Resolution badge omitted — column placement already conveys resolved status. */}
             {phase && phase !== 'idle' && !ticket.resolution && (
               <Badge color={PHASE_COLORS[phase] ?? 'default'}>
                 {isActivePhase(phase) && <ArrowSync20Regular style={{ width: 16, height: 16 }} />}
-                {PHASE_LABELS[phase] ?? phase}
+                {PHASE_LABELS[phase]}
               </Badge>
             )}
             {branch && (

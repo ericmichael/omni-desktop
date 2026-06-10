@@ -2,12 +2,10 @@ import type { InboxItem } from '@/shared/types';
 
 /**
  * Inbox expiry policy. Captured items roll over to `later` if they sit
- * unshaped for too long — keeps the inbox from becoming a graveyard.
+ * untouched for too long — keeps the inbox from becoming a graveyard.
  *
- * Only `new` items expire. `shaped` items don't: shaping is a deliberate
- * signal that the user intends to act, so they should stay in the active
- * view until explicitly deferred. `later` and promoted items are already
- * out of the active pool.
+ * Only `new` items expire; `later` and promoted items are already out of
+ * the active pool.
  */
 
 /** Default expiry window: 7 days in milliseconds. */

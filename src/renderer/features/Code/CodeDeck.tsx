@@ -738,7 +738,7 @@ const CodeDeckHeader = memo(
               <MenuList>
                 <MenuItem onClick={onNewSession}>
                   <Chat20Regular style={{ width: 16, height: 16, marginRight: 6, verticalAlign: 'text-bottom' }} />
-                  Agent Session
+                  Session
                 </MenuItem>
                 <MenuItem onClick={onOpenApps}>
                   <Apps20Regular style={{ width: 16, height: 16, marginRight: 6, verticalAlign: 'text-bottom' }} />

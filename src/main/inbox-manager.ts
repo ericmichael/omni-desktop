@@ -1,10 +1,10 @@
 /**
- * InboxManager — GTD-style inbox lifecycle as pure, testable business logic.
+ * InboxManager — inbox capture lifecycle as pure, testable business logic.
  *
- * Owns inbox-item CRUD, status transitions (new → shaped, shape → defer,
- * defer → reactivate), and promotion to tickets/projects. Promotion leaves
- * a tombstone on the inbox item (`promotedTo`) rather than hard-deleting,
- * so the user can undo and the weekly review can show what shipped.
+ * Owns inbox-item CRUD, status transitions (new → defer → reactivate), and
+ * promotion to tickets/projects. Promotion leaves a tombstone on the inbox
+ * item (`promotedTo`) rather than hard-deleting, so the user can undo and
+ * the weekly review can show what shipped.
  *
  * This class deliberately depends on a narrow store-shape interface rather
  * than electron-store directly so it can be tested with an in-memory fake.
@@ -15,13 +15,10 @@ import { DEFAULT_PIPELINE, SIMPLE_PIPELINE } from '@/shared/pipeline-defaults';
 import type {
   InboxItem,
   InboxItemId,
-  InboxItemStatus,
-  InboxShaping,
   MilestoneId,
   Pipeline,
   Project,
   ProjectId,
-  ShapingData,
   Ticket,
   TicketId,
 } from '@/shared/types';
@@ -169,28 +166,6 @@ throw new InboxItemNotFoundError(id);
     this.deps.store.setInboxItems(filtered);
   }
 
-  /**
-   * Attach shaping. If the item is currently `later`, it stays later (the
-   * user can shape a deferred item without auto-reactivating it). Otherwise
-   * it flips to `shaped`.
-   */
-  shape(id: InboxItemId, shaping: InboxShaping): void {
-    this.patchItem(id, (item) => {
-      if (item.promotedTo) {
-        throw new InboxPromotionError(`Cannot shape promoted inbox item ${id}`);
-      }
-      const next: InboxItem = {
-        ...item,
-        shaping: { ...shaping, outcome: shaping.outcome.trim() },
-        updatedAt: this.deps.now(),
-      };
-      if (item.status !== 'later') {
-next.status = 'shaped';
-}
-      return next;
-    });
-  }
-
   /** Move to `later`. No-op if already later. */
   defer(id: InboxItemId): void {
     this.patchItem(id, (item) => {
@@ -202,17 +177,13 @@ throw new InboxPromotionError(`Cannot defer promoted item ${id}`);
     });
   }
 
-  /**
-   * Move out of `later`. Returns to `shaped` if the item has shaping,
-   * otherwise `new`. Clears `laterAt`.
-   */
+  /** Move out of `later` back to `new`. Clears `laterAt`. */
   reactivate(id: InboxItemId): void {
     this.patchItem(id, (item) => {
       if (item.promotedTo) {
 throw new InboxPromotionError(`Cannot reactivate promoted item ${id}`);
 }
-      const nextStatus: InboxItemStatus = item.shaping ? 'shaped' : 'new';
-      const next: InboxItem = { ...item, status: nextStatus, updatedAt: this.deps.now() };
+      const next: InboxItem = { ...item, status: 'new', updatedAt: this.deps.now() };
       delete next.laterAt;
       return next;
     });
@@ -222,9 +193,9 @@ throw new InboxPromotionError(`Cannot reactivate promoted item ${id}`);
    * Promote to a ticket. The inbox item is stamped with `promotedTo` rather
    * than deleted, so it remains visible in the tombstone/archive view.
    *
-   * Requires: the target project exists. Seeds the ticket title/description/
-   * shaping from the inbox item. columnId defaults to 'backlog' if unset,
-   * or the first column in the project's pipeline if 'backlog' is absent.
+   * Requires: the target project exists. Seeds the ticket title/description
+   * from the inbox item. columnId defaults to 'backlog' if unset, or the
+   * first column in the project's pipeline if 'backlog' is absent.
    */
   promoteToTicket(
     id: InboxItemId,
@@ -263,9 +234,6 @@ throw new InboxPromotionError(`Cannot reactivate promoted item ${id}`);
       updatedAt: now,
       columnId,
     };
-    if (item.shaping) {
-      ticket.shaping = toTicketShaping(item.shaping);
-    }
 
     this.deps.store.setTickets([...this.deps.store.getTickets(), ticket]);
     this.stampPromotion(id, { kind: 'ticket', id: ticket.id, at: now });
@@ -382,19 +350,6 @@ throw new InboxItemNotFoundError(id);
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Map `InboxShaping` → `ShapingData` for ticket creation. `xl` (which only
- * exists on the inbox side) collapses to `large` since tickets don't model
- * an extra-large appetite bucket.
- */
-function toTicketShaping(shaping: InboxShaping): ShapingData {
-  return {
-    doneLooksLike: shaping.outcome,
-    appetite: shaping.appetite === 'xl' ? 'large' : shaping.appetite,
-    outOfScope: shaping.notDoing ?? '',
-  };
-}
-
 /** Lowercase + kebab a label for use as a folder-safe slug. */
 function slugify(label: string): string {
   return (
@@ -404,9 +359,6 @@ function slugify(label: string): string {
       .replace(/^-+|-+$/g, '') || 'project'
   );
 }
-
-/** Re-exported for code that needs the raw map without the class. */
-export { toTicketShaping };
 
 // Unused-in-module import guard: TicketId is re-exported via the Ticket type.
 export type { TicketId };

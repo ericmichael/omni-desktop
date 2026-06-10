@@ -591,8 +591,8 @@ export const TicketDetail = memo(
               {ticket.worktreePath
                 ? 'Clean up the active worktree before switching modes.'
                 : editUseWorktree
-                  ? 'Supervisor runs in its own branch + worktree, isolated from the main checkout.'
-                  : 'Supervisor runs directly in the project checkout. Only one direct-mode ticket can run at a time.'}
+                  ? 'Autopilot works in its own branch + worktree, isolated from the main checkout.'
+                  : 'Autopilot works directly in the project checkout. Only one direct-mode ticket can run at a time.'}
             </Caption1>
             <div className={styles.branchGroup}>
               <Button size="sm" onClick={handleSaveBranch}>

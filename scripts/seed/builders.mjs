@@ -239,7 +239,6 @@ export function buildInboxItem({
   note,
   projectId = null,
   status = 'new',
-  shaping,
   laterAt,
   createdAt,
   updatedAt = createdAt,
@@ -255,7 +254,6 @@ export function buildInboxItem({
     updatedAt,
     seedKey,
   };
-  if (shaping) item.shaping = shaping;
   if (laterAt !== undefined) item.laterAt = laterAt;
   manifest.entities.inboxItems.push({ id, seedKey });
   return item;

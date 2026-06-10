@@ -1,4 +1,4 @@
-import type { InboxItem, InboxItemStatus, InboxShaping } from '@/shared/types';
+import type { InboxItem, InboxItemStatus } from '@/shared/types';
 
 /**
  * Pure helpers that upgrade legacy inbox records to the new-model `InboxItem`.
@@ -9,8 +9,8 @@ import type { InboxItem, InboxItemStatus, InboxShaping } from '@/shared/types';
  *     projectId?, linkedMilestoneId?, linkedTicketIds?, createdAt, updatedAt }
  *
  * New shape: see `InboxItem` in shared/types. Key differences:
- *   - status collapses to new|shaped|later (done is dropped, iceboxed→later)
- *   - shaping uses outcome/appetite/notDoing
+ *   - status collapses to new|later (done is dropped, iceboxed→later)
+ *   - legacy shaping blocks are folded into the note as plain text
  *   - laterAt drives expiry
  *   - promotedTo is a tombstone set on ticket/project conversion (not inferred from legacy)
  *
@@ -29,26 +29,25 @@ return 'later';
   return 'new'; // default for 'open' and anything unrecognized
 }
 
-/** Map a legacy shaping block to the new InboxShaping, or undefined if the legacy item was unshaped. */
-export function mapLegacyShaping(rawShaping: unknown): InboxShaping | undefined {
+/**
+ * Render a legacy shaping block as plain note text, or undefined when there
+ * is nothing meaningful to carry forward. Structured shaping no longer
+ * exists — the description/note is the single channel both humans and the
+ * agent read.
+ */
+export function legacyShapingToNoteText(rawShaping: unknown): string | undefined {
   if (!rawShaping || typeof rawShaping !== 'object') {
 return undefined;
 }
   const s = rawShaping as Record<string, unknown>;
-  const outcome = typeof s.doneLooksLike === 'string' ? s.doneLooksLike.trim() : '';
-  const appetite = s.appetite;
-  if (!outcome && appetite !== 'small' && appetite !== 'medium' && appetite !== 'large') {
-    // Nothing meaningful to carry forward.
-    return undefined;
+  const lines: string[] = [];
+  if (typeof s.doneLooksLike === 'string' && s.doneLooksLike.trim()) {
+    lines.push(`**Done when:** ${s.doneLooksLike.trim()}`);
   }
-  const shaping: InboxShaping = {
-    outcome,
-    appetite: appetite === 'small' || appetite === 'medium' || appetite === 'large' ? appetite : 'medium',
-  };
   if (typeof s.outOfScope === 'string' && s.outOfScope.trim()) {
-    shaping.notDoing = s.outOfScope.trim();
+    lines.push(`**Out of scope:** ${s.outOfScope.trim()}`);
   }
-  return shaping;
+  return lines.length > 0 ? lines.join('\n') : undefined;
 }
 
 /**
@@ -67,15 +66,13 @@ export function upgradeLegacyInboxItem(
 return null;
 }
 
-  const shaping = mapLegacyShaping(raw.shaping);
-  // A legacy item with a shaping block and still-open status is "shaped" in the new model.
-  const resolvedStatus: InboxItemStatus = shaping && status === 'new' ? 'shaped' : status;
-
   const title =
     typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : 'Untitled';
-  const note = typeof raw.description === 'string' && raw.description.trim()
+  const description = typeof raw.description === 'string' && raw.description.trim()
     ? raw.description.trim()
     : undefined;
+  const shapingText = legacyShapingToNoteText(raw.shaping);
+  const note = [description, shapingText].filter(Boolean).join('\n\n') || undefined;
   const projectId =
     typeof raw.projectId === 'string' && raw.projectId.length > 0 ? raw.projectId : null;
   const createdAt = typeof raw.createdAt === 'number' ? raw.createdAt : now;
@@ -84,7 +81,7 @@ return null;
   const item: InboxItem = {
     id: typeof raw.id === 'string' && raw.id.length > 0 ? raw.id : idGen(),
     title,
-    status: resolvedStatus,
+    status,
     projectId,
     createdAt,
     updatedAt,
@@ -92,10 +89,7 @@ return null;
   if (note) {
 item.note = note;
 }
-  if (shaping) {
-item.shaping = shaping;
-}
-  if (resolvedStatus === 'later') {
+  if (status === 'later') {
     item.laterAt = updatedAt;
   }
   if (Array.isArray(raw.attachments) && raw.attachments.every((a) => typeof a === 'string')) {

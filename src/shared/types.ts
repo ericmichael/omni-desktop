@@ -675,15 +675,9 @@ export const schema: Schema<StoreData> = {
         note: { type: 'string' },
         attachments: { type: 'array', items: { type: 'string' } },
         projectId: { type: ['string', 'null'] },
+        // 'shaped' stays in the storage enum so pre-v25 data validates at
+        // store construction; the v25 migration remaps it to 'new'.
         status: { type: 'string', enum: ['new', 'shaped', 'later'] },
-        shaping: {
-          type: 'object',
-          properties: {
-            outcome: { type: 'string' },
-            appetite: { type: 'string', enum: ['small', 'medium', 'large', 'xl'] },
-            notDoing: { type: 'string' },
-          },
-        },
         laterAt: { type: 'number' },
         promotedTo: {
           type: 'object',
@@ -737,14 +731,6 @@ export const schema: Schema<StoreData> = {
         description: { type: 'string' },
         priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
         blockedBy: { type: 'array', items: { type: 'string' } },
-        shaping: {
-          type: 'object',
-          properties: {
-            doneLooksLike: { type: 'string' },
-            appetite: { type: 'string', enum: ['small', 'medium', 'large'] },
-            outOfScope: { type: 'string' },
-          },
-        },
         createdAt: { type: 'number' },
         updatedAt: { type: 'number' },
         phaseChangedAt: { type: 'number' },
@@ -1487,26 +1473,19 @@ export type Page = {
 // --- Inbox ---
 
 /**
- * GTD-style inbox lifecycle:
- * - new:    captured, not yet shaped
- * - shaped: has a filled-in `shaping` block, ready to promote
- * - later:  deferred; `laterAt` drives stale-item reminders
+ * Inbox lifecycle:
+ * - new:   captured, waiting to be promoted or deferred
+ * - later: deferred; `laterAt` drives stale-item reminders
  *
  * Terminal transition is promotion: the item is stamped with `promotedTo`
  * pointing at the ticket or project it became, and is filtered out of the
  * active inbox view. Promoted items stay as tombstones for undo + audit
  * (GC'd after 30d by the inbox manager).
+ *
+ * (A legacy 'shaped' status existed before v25 — migrated to 'new' on boot,
+ * with its structured shaping block folded into the item note.)
  */
-export type InboxItemStatus = 'new' | 'shaped' | 'later';
-
-export type InboxShaping = {
-  /** 1-2 sentences — what does success look like? (Shape Up "done looks like"). */
-  outcome: string;
-  /** Rough effort sizing. */
-  appetite: 'small' | 'medium' | 'large' | 'xl';
-  /** Explicit exclusions — what is NOT in scope. */
-  notDoing?: string;
-};
+export type InboxItemStatus = 'new' | 'later';
 
 export type InboxPromotion = {
   kind: 'ticket' | 'project';
@@ -1525,8 +1504,6 @@ export type InboxItem = {
   /** Optional project context at capture time. Null = loose / global. */
   projectId?: ProjectId | null;
   status: InboxItemStatus;
-  /** Present once the item has been shaped. Required for promotion to ticket. */
-  shaping?: InboxShaping;
   /** Stamped when moved to `later`. Drives the stale-items reminder. */
   laterAt?: number;
   /** Stamped on promotion. Presence hides the item from the active view. */
@@ -1580,9 +1557,6 @@ export type Ticket = {
   blockedBy: TicketId[];
   createdAt: number;
   updatedAt: number;
-
-  /** Shaping data carried from inbox — scope, appetite, boundaries. */
-  shaping?: ShapingData;
 
   // Kanban state
   /** Current column in the kanban pipeline. */
@@ -1646,19 +1620,6 @@ export type Ticket = {
   pullRequests?: PullRequestLink[];
   /** Populated by the seed script; tracked in seed-manifest for reset. */
   seedKey?: string;
-};
-
-// --- Shaping ---
-
-export type Appetite = 'small' | 'medium' | 'large';
-
-export type ShapingData = {
-  /** 1-2 sentences: what is true when this is done? */
-  doneLooksLike: string;
-  /** How much time is this worth? small=day, medium=few days, large=week+ */
-  appetite: Appetite;
-  /** What's explicitly excluded from scope. */
-  outOfScope: string;
 };
 
 export type Task = {
@@ -2760,7 +2721,7 @@ type MigrationIpcEvents = Namespaced<
 /**
  * Inbox API. Renderer invokes, main handles. The inbox is a global capture
  * surface (items can be projectless) backed by electron-store. Its lifecycle
- * is GTD: new → shaped → promoted (to ticket/project) or deferred.
+ * is: new → promoted (to ticket/project) or deferred.
  */
 type InboxIpcEvents = Namespaced<
   'inbox',
@@ -2775,20 +2736,15 @@ type InboxIpcEvents = Namespaced<
     update: (id: InboxItemId, patch: Partial<Pick<InboxItem, 'title' | 'note' | 'projectId' | 'attachments'>>) => void;
     /** Hard delete. Use sparingly — prefer defer/promote for audit trail. */
     remove: (id: InboxItemId) => void;
-    /** Attach or overwrite shaping. Sets status to 'shaped' unless item is in 'later'. */
-    shape: (id: InboxItemId, shaping: InboxShaping) => void;
     /** Move to 'later'. Stamps `laterAt`. */
     defer: (id: InboxItemId) => void;
-    /**
-     * Move out of 'later' back to 'new' (or 'shaped' if shaping is present).
-     * Clears `laterAt`.
-     */
+    /** Move out of 'later' back to 'new'. Clears `laterAt`. */
     reactivate: (id: InboxItemId) => void;
     /**
-     * Promote to a ticket. Requires projectId. Seeds the ticket's title,
-     * description, and shaping from the inbox item. Stamps `promotedTo` on
-     * the inbox item so it disappears from active views but stays as a
-     * tombstone for undo/audit.
+     * Promote to a ticket. Requires projectId. Seeds the ticket's title and
+     * description from the inbox item. Stamps `promotedTo` on the inbox item
+     * so it disappears from active views but stays as a tombstone for
+     * undo/audit.
      */
     'promote-to-ticket': (
       id: InboxItemId,

@@ -13,7 +13,6 @@ const EXPECTED_CHANNELS = [
   'inbox:add',
   'inbox:update',
   'inbox:remove',
-  'inbox:shape',
   'inbox:defer',
   'inbox:reactivate',
   'inbox:promote-to-ticket',
@@ -28,7 +27,6 @@ const makeManager = () => ({
   add: vi.fn(() => ({ id: '1' })),
   update: vi.fn(),
   remove: vi.fn(),
-  shape: vi.fn(),
   defer: vi.fn(),
   reactivate: vi.fn(),
   promoteToTicket: vi.fn(() => ({ id: 't1' })),
@@ -69,15 +67,6 @@ describe('registerInboxHandlers', () => {
     registerInboxHandlers(ipc, () => mgr as never);
     ipc.invoke('inbox:update', 'id-1', { title: 'Updated' });
     expect(mgr.update).toHaveBeenCalledWith('id-1', { title: 'Updated' });
-  });
-
-  it('inbox:shape delegates with id and shaping', () => {
-    const ipc = new StubIpc();
-    const mgr = makeManager();
-    registerInboxHandlers(ipc, () => mgr as never);
-    const shaping = { outcome: 'Done', appetite: 'small' as const };
-    ipc.invoke('inbox:shape', 'id-1', shaping);
-    expect(mgr.shape).toHaveBeenCalledWith('id-1', shaping);
   });
 
   it('inbox:promote-to-ticket delegates with id and opts', () => {

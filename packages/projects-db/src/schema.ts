@@ -270,4 +270,46 @@ ALTER TABLE pipeline_columns ADD COLUMN max_concurrent INTEGER;
 ALTER TABLE pipeline_columns ADD COLUMN workflow TEXT;
 `,
   },
+  {
+    version: 12,
+    sql: `
+-- Remove the shaping system. Structured shaping blocks fold into the
+-- free-text channel (ticket description / inbox note) so the data survives;
+-- the 'shaped' inbox status collapses to 'new' with a fresh capture
+-- timestamp (so the expiry sweep doesn't instantly defer those items).
+-- The status CHECK constraint still lists 'shaped' — harmlessly permissive;
+-- nothing writes it anymore.
+UPDATE tickets
+SET description = CASE WHEN description = '' THEN '' ELSE description || char(10) || char(10) END
+  || '**Done when:** ' || TRIM(json_extract(shaping, '$.doneLooksLike'))
+WHERE shaping IS NOT NULL
+  AND COALESCE(TRIM(json_extract(shaping, '$.doneLooksLike')), '') <> '';
+
+UPDATE tickets
+SET description = CASE WHEN description = '' THEN '' ELSE description || char(10) || char(10) END
+  || '**Out of scope:** ' || TRIM(json_extract(shaping, '$.outOfScope'))
+WHERE shaping IS NOT NULL
+  AND COALESCE(TRIM(json_extract(shaping, '$.outOfScope')), '') <> '';
+
+UPDATE inbox_items
+SET note = CASE WHEN note IS NULL OR note = '' THEN '' ELSE note || char(10) || char(10) END
+  || '**Done when:** ' || TRIM(json_extract(shaping, '$.outcome'))
+WHERE shaping IS NOT NULL
+  AND COALESCE(TRIM(json_extract(shaping, '$.outcome')), '') <> '';
+
+UPDATE inbox_items
+SET note = CASE WHEN note IS NULL OR note = '' THEN '' ELSE note || char(10) || char(10) END
+  || '**Out of scope:** ' || TRIM(json_extract(shaping, '$.notDoing'))
+WHERE shaping IS NOT NULL
+  AND COALESCE(TRIM(json_extract(shaping, '$.notDoing')), '') <> '';
+
+UPDATE inbox_items
+SET status = 'new',
+    created_at = strftime('%Y-%m-%d %H:%M:%f', 'now')
+WHERE status = 'shaped';
+
+ALTER TABLE tickets DROP COLUMN shaping;
+ALTER TABLE inbox_items DROP COLUMN shaping;
+`,
+  },
 ];

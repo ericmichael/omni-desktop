@@ -300,10 +300,9 @@ export function Sidebar({
         <NavItem className={styles.sessionNavItem} value={s.id} onClick={() => handleSelect(s.id)}>
           <div className={styles.sessionLabel}>
             <span className={styles.sessionTitle}>{title}</span>
-            <Caption1 className={styles.sessionMeta}>
-              {timestamp}
-              {s.message_count > 0 ? ` · ${s.message_count} ${s.message_count === 1 ? 'message' : 'messages'}` : ''}
-            </Caption1>
+            {/* Date only — message counts read as noise at a glance and say
+                nothing about what the conversation contains. */}
+            <Caption1 className={styles.sessionMeta}>{timestamp}</Caption1>
           </div>
         </NavItem>
         {onDelete ? (

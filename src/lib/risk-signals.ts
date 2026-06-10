@@ -193,15 +193,12 @@ continue;
 
   // --- Inbox signals ---
   for (const item of inboxItems) {
-    if (item.status !== 'new' && item.status !== 'shaped') {
+    if (item.status !== 'new') {
 continue;
 }
     if (item.promotedTo !== undefined) {
 continue;
 }
-    if (item.status === 'shaped') {
-continue;
-} // shaped items don't expire, only unshaped
 
     const daysLeft = inboxDaysRemaining(item.createdAt, now);
     if (daysLeft <= RISK_THRESHOLDS.inboxUrgentDaysLeft) {
@@ -210,7 +207,7 @@ continue;
         kind: 'inbox_expiring',
         severity: 'high',
         title: item.title || 'Untitled',
-        detail: daysLeft <= 0 ? 'Expiring today' : `${daysLeft}d left — shape or defer`,
+        detail: daysLeft <= 0 ? 'Expiring today' : `${daysLeft}d left — promote or defer`,
         action: { kind: 'open_inbox_item', inboxItemId: item.id },
       });
       continue;
@@ -222,7 +219,7 @@ continue;
         kind: 'aging_inbox',
         severity: 'medium',
         title: item.title || 'Untitled',
-        detail: `${daysLeft}d left — needs shaping`,
+        detail: `${daysLeft}d left in inbox`,
         action: { kind: 'open_inbox_item', inboxItemId: item.id },
       });
     }
