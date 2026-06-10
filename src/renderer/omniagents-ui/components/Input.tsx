@@ -17,6 +17,16 @@ function basename(p: string): string {
   return tail || p
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** Human label for the workspace chip. Session workspaces live in UUID-named
+ *  directories; a raw UUID in the composer reads as a bug, so fall back to a
+ *  generic label (the full path stays available via the title attribute). */
+function workspaceLabel(p: string): string {
+  const tail = basename(p)
+  return UUID_RE.test(tail) ? 'Workspace' : tail
+}
+
 export function Input({ disabled, thinking, onStop, onSubmit, onVoiceSubmit, voiceEnabled, workspacePath, workspaceLocked, onWorkspaceClick, sandboxLabel, sandboxLocked, sandboxLoading, sandboxOptions, currentSandboxProfile, onSandboxChange, sessionId, onVoiceSessionCreated, onVoiceClose }:
   { disabled?: boolean; thinking?: boolean; onStop?: () => void; onSubmit: (text: string, files?: File[]) => void; onVoiceSubmit?: (text: string) => void; voiceEnabled?: boolean; workspacePath?: string | null; workspaceLocked?: boolean; onWorkspaceClick?: () => void; sandboxLabel?: string; sandboxLocked?: boolean; sandboxLoading?: boolean; sandboxOptions?: { value: string; label: string }[]; currentSandboxProfile?: string; onSandboxChange?: (value: string) => void; sessionId?: string; onVoiceSessionCreated?: (id: string) => void; onVoiceClose?: () => void }) {
   const [text, setText] = useState('')
@@ -236,7 +246,7 @@ fileInputRef.current.value = ''
           />
 
           <PromptInputActions className="flex items-center justify-between gap-1 sm:gap-2 pt-2 px-2">
-            <div className="flex items-center gap-1 min-w-0">
+            <div className="flex items-center gap-1 min-w-0 overflow-hidden pr-1">
               <label
                 htmlFor="file-upload"
                 onClick={(e) => e.stopPropagation()}
@@ -266,8 +276,8 @@ fileInputRef.current.value = ''
                   title={workspacePath || 'Select workspace'}
                 >
                   <FolderIcon size={14} className={`shrink-0 ${workspaceLocked ? 'text-muted-foreground' : 'text-primary'}`} />
-                  <span className="max-w-[120px] sm:max-w-[200px] truncate">
-                    {workspacePath ? basename(workspacePath) : 'Select workspace'}
+                  <span className="max-w-[96px] sm:max-w-[200px] truncate">
+                    {workspacePath ? workspaceLabel(workspacePath) : 'Select workspace'}
                   </span>
                   {workspaceLocked && (
                     <LockIcon size={10} className="text-muted-foreground flex-shrink-0" />
@@ -292,7 +302,7 @@ fileInputRef.current.value = ''
                       <Loader2Icon size={14} className="text-muted-foreground animate-spin shrink-0" />
                     ) : null}
                     <MonitorIcon size={14} className={`shrink-0 ${sandboxInteractive ? 'text-primary' : 'text-secondary-foreground'}`} />
-                    <span className="max-w-[120px] sm:max-w-[200px] truncate">{sandboxLabel}</span>
+                    <span className="max-w-[96px] sm:max-w-[200px] truncate">{sandboxLabel}</span>
                     {sandboxLocked && (
                       <LockIcon size={10} className="text-muted-foreground flex-shrink-0" />
                     )}

@@ -68,6 +68,15 @@ export const codeApi = {
   },
 
   addTab: async (): Promise<CodeTab> => {
+    // Reuse an existing unconfigured tab instead of stacking up orphan
+    // "New Session" columns: a tab created here but abandoned before a
+    // project was picked is indistinguishable from a fresh one.
+    const existingTabs = persistedStoreApi.getKey('codeTabs') ?? [];
+    const blank = existingTabs.find((t) => !t.projectId && !t.customAppId && !t.ticketId);
+    if (blank) {
+      await persistedStoreApi.setKey('activeCodeTabId', blank.id);
+      return blank;
+    }
     const tab: CodeTab = {
       id: nanoid(),
       projectId: null,
@@ -76,7 +85,7 @@ export const codeApi = {
       profileNameExplicit: false,
       createdAt: Date.now(),
     };
-    const tabs = [...(persistedStoreApi.getKey('codeTabs') ?? []), tab];
+    const tabs = [...existingTabs, tab];
     await persistedStoreApi.setKey('codeTabs', tabs);
     await persistedStoreApi.setKey('activeCodeTabId', tab.id);
     return tab;

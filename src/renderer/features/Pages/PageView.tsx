@@ -362,31 +362,50 @@ const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
   const saveLabel =
     phase === 'dirty' && isSaving ? 'Saving…' : phase === 'dirty' ? 'Unsaved' : justSaved ? 'Saved' : '';
 
+  // Agent-authored documents often open with an H1 that repeats the page
+  // title; rendering the title input above it shows the same heading twice.
+  // Let the document's own H1 be the visible title in that case (the row
+  // reappears as soon as the leading H1 stops matching).
+  const firstLine = (content ?? '').trimStart().split('\n', 1)[0] ?? '';
+  const leadingH1 = /^#\s+(.+?)\s*$/.exec(firstLine)?.[1];
+  const contentLeadsWithTitle = !!leadingH1 && leadingH1.trim().toLowerCase() === page.title.trim().toLowerCase();
+
   return (
     <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)} data-slot="page-view">
       {/* Header: Back + Breadcrumb + Title + save affordance */}
-      <div className={styles.header}>
-        {!page.isRoot && (
-          <div className={styles.backRow}>
-            <IconButton aria-label="Back" icon={<ArrowLeft20Regular />} size="sm" onClick={handleBack} />
-            <PageBreadcrumb projectId={projectId} pageId={pageId} />
-          </div>
-        )}
-        <div className={styles.titleRow}>
-          <input
-            aria-label="Page title"
-            className={page.isRoot ? styles.titleInputLarge : styles.titleInput}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={handleTitleBlur}
-            onKeyDown={handleTitleKeyDown}
-            placeholder="Untitled"
-          />
-          <span className={styles.saveIndicator} aria-live="polite">
-            {saveLabel}
-          </span>
+      {(!page.isRoot || !contentLeadsWithTitle || !!saveLabel) && (
+        <div className={styles.header}>
+          {!page.isRoot && (
+            <div className={styles.backRow}>
+              <IconButton aria-label="Back" icon={<ArrowLeft20Regular />} size="sm" onClick={handleBack} />
+              <PageBreadcrumb projectId={projectId} pageId={pageId} />
+            </div>
+          )}
+          {!contentLeadsWithTitle && (
+            <div className={styles.titleRow}>
+              <input
+                aria-label="Page title"
+                className={page.isRoot ? styles.titleInputLarge : styles.titleInput}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                onBlur={handleTitleBlur}
+                onKeyDown={handleTitleKeyDown}
+                placeholder="Untitled"
+              />
+              <span className={styles.saveIndicator} aria-live="polite">
+                {saveLabel}
+              </span>
+            </div>
+          )}
+          {contentLeadsWithTitle && saveLabel && (
+            <div className={styles.titleRow}>
+              <span className={styles.saveIndicator} aria-live="polite">
+                {saveLabel}
+              </span>
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* External-change banner */}
       {showConflict && (

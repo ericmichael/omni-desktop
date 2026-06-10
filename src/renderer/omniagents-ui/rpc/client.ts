@@ -138,11 +138,17 @@ return
 
     const connectPromise = this.connectImpl()
     this.connectInFlight = connectPromise
-    connectPromise.finally(() => {
-      if (this.connectInFlight === connectPromise) {
-        this.connectInFlight = null
-      }
-    })
+    // Swallow the rejection on this bookkeeping chain — without the catch,
+    // the promise derived by .finally() is unhandled and every benign
+    // "WebSocket replaced" rejection surfaces as a console error even when
+    // the caller of connect() handles it.
+    connectPromise
+      .catch(() => {})
+      .finally(() => {
+        if (this.connectInFlight === connectPromise) {
+          this.connectInFlight = null
+        }
+      })
     return connectPromise
   }
 

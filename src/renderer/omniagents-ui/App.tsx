@@ -266,7 +266,8 @@ export function App({
     if (caps.workspacePath) {
       setWorkspacePath(caps.workspacePath);
     }
-    document.title = caps.agentName;
+    // Note: the host window title (index.html "Omni Code") is left alone —
+    // overwriting it with the agent name made the title flip between tabs.
   }, [bootState.capabilities]);
 
   // React to boot phase → drive the top-level UI mode. In resume mode

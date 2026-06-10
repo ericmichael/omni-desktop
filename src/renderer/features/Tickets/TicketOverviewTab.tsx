@@ -2,6 +2,7 @@ import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import { Dismiss20Regular,Edit20Regular, Warning20Filled } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
+import Markdown from 'react-markdown';
 
 import { Badge, Button, IconButton, SectionLabel, Select, Textarea } from '@/renderer/ds';
 import { $milestones } from '@/renderer/features/Initiatives/state';
@@ -32,10 +33,9 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
-  descriptionText: {
+  descriptionMarkdown: {
     fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground2,
-    whiteSpace: 'pre-wrap',
   },
   tapToAdd: {
     fontSize: tokens.fontSizeBase300,
@@ -322,7 +322,9 @@ return;
               ))}
             </Select>
           )}
-          {ticket.resolution && (
+          {/* Skip the resolution badge when it would just repeat the column
+              dropdown's label (e.g. "Completed" next to "Completed"). */}
+          {ticket.resolution && RESOLUTION_LABELS[ticket.resolution] !== currentColumn?.label && (
             <Badge color={RESOLUTION_COLORS[ticket.resolution]}>{RESOLUTION_LABELS[ticket.resolution]}</Badge>
           )}
           {milestone && (
@@ -365,7 +367,11 @@ return;
             </div>
           </div>
         ) : ticket.description ? (
-          <p className={styles.descriptionText}>{ticket.description}</p>
+          <div
+            className={`prose prose-invert prose-sm max-w-none ${styles.descriptionMarkdown} prose-code:before:content-none prose-code:after:content-none [&_code]:bg-surface-raised [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_pre]:bg-surface-raised [&_pre]:rounded-lg [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:px-0 [&_pre_code]:py-0`}
+          >
+            <Markdown>{ticket.description}</Markdown>
+          </div>
         ) : (
           <button onClick={handleStartEditDescription} className={styles.tapToAdd}>
             Tap to add description

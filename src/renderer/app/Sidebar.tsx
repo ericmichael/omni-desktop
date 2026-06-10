@@ -1,4 +1,4 @@
-import { makeStyles, mergeClasses, tokens, Tooltip } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import {
   Beaker24Regular,
   Chat24Filled,
@@ -321,28 +321,29 @@ export const Sidebar = memo(() => {
     }
   }, []);
 
+  // No Tooltip wrapper: the rail always shows the label under each icon, so a
+  // tooltip is redundant — and it stuck open over content on touch/tap.
   const renderTab = (tab: (typeof ALL_TABS)[number], extraClass?: string) => {
     const isActive = activeTab === tab.value;
     return (
-      <Tooltip key={tab.value} content={tab.label} relationship="label" positioning="after">
-        <button
-          role="tab"
-          aria-selected={isActive}
-          tabIndex={isActive ? 0 : -1}
-          type="button"
-          onClick={setMode(tab.value)}
-          className={mergeClasses(styles.item, isActive && styles.itemActive, extraClass)}
-        >
-          {isActive && <div className={styles.indicator} />}
-          <span className={styles.iconWrap}>
-            {tab.icon}
-            {tab.value === 'projects' && openInboxCount > 0 && (
-              <CounterBadge count={openInboxCount} size="small" color="brand" className={styles.badge} />
-            )}
-          </span>
-          <span className={styles.itemLabel}>{tab.label}</span>
-        </button>
-      </Tooltip>
+      <button
+        key={tab.value}
+        role="tab"
+        aria-selected={isActive}
+        tabIndex={isActive ? 0 : -1}
+        type="button"
+        onClick={setMode(tab.value)}
+        className={mergeClasses(styles.item, isActive && styles.itemActive, extraClass)}
+      >
+        {isActive && <div className={styles.indicator} />}
+        <span className={styles.iconWrap}>
+          {tab.icon}
+          {tab.value === 'projects' && openInboxCount > 0 && (
+            <CounterBadge count={openInboxCount} size="small" color="brand" className={styles.badge} />
+          )}
+        </span>
+        <span className={styles.itemLabel}>{tab.label}</span>
+      </button>
     );
   };
 

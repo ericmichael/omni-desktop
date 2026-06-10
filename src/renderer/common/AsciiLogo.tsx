@@ -71,13 +71,15 @@ export const AsciiLogo = memo(({ text = 'OMNI', className }: { text?: string; cl
     return (
       <div className={cn('flex items-center gap-3 select-none', className)}>
         <img src={utrgvLogo} alt="UTHealth RGV" className="h-8" />
-        <pre className="leading-none text-[8px] font-mono text-white/70 translate-y-px">{lines.join('\n')}</pre>
+        <pre role="img" aria-label={text} className="leading-none text-[8px] font-mono text-white/70 translate-y-px">{lines.join('\n')}</pre>
       </div>
     );
   }
 
   return (
     <pre
+      role="img"
+      aria-label={text}
       className={cn(
         'leading-none text-[8px] font-mono select-none bg-gradient-to-r from-[#bb9af7] to-[#7aa2f7] bg-clip-text text-transparent',
         className
@@ -96,6 +98,8 @@ export const OmniLogo = memo(({ className }: { className?: string }) => {
 
   return (
     <pre
+      role="img"
+      aria-label="Omni"
       className={cn(
         'leading-none text-[6px] font-mono select-none',
         store.theme === 'utrgv'

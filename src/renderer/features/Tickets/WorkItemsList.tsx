@@ -106,6 +106,12 @@ const useStyles = makeStyles({
     ':hover': {
       backgroundColor: tokens.colorSubtleBackgroundHover,
     },
+    ':focus-visible': {
+      outlineWidth: '2px',
+      outlineStyle: 'solid',
+      outlineColor: tokens.colorBrandStroke1,
+      outlineOffset: '-2px',
+    },
   },
   rowSelected: {
     backgroundColor: tokens.colorSubtleBackgroundSelected,
@@ -281,11 +287,25 @@ const TicketRow = memo(({ ticket, selected, hovered, unresolvedBlockers, milesto
 
   const truncatedBranch = ticket.branch && ticket.branch.length > 18 ? `${ticket.branch.slice(0, 17)}…` : ticket.branch;
 
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        onSelect(ticket.id);
+      }
+    },
+    [onSelect, ticket.id]
+  );
+
   return (
-    <button
-      type="button"
+    // div+role rather than <button>: the row hosts real buttons (actions,
+    // overflow menu), and nesting them inside a button is invalid markup.
+    <div
+      role="button"
+      tabIndex={0}
       className={`${styles.row} ${selected ? styles.rowSelected : ''} ${ticket.resolution ? styles.rowResolved : ''}`}
       onClick={handleClick}
+      onKeyDown={handleKeyDown}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
@@ -382,7 +402,7 @@ const TicketRow = memo(({ ticket, selected, hovered, unresolvedBlockers, milesto
           </MenuPopover>
         </Menu>
       </span>
-    </button>
+    </div>
   );
 });
 TicketRow.displayName = 'TicketRow';
