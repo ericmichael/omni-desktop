@@ -51,18 +51,20 @@ import {
   TicketResolutionBadge,
 } from '@/renderer/features/Tickets/TicketControls';
 import { type TicketPanel, TicketPanelOverlay } from '@/renderer/features/Tickets/TicketPanelOverlay';
+import { $columnActivity, activityStatusText } from '@/renderer/services/column-activity';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { $recordingScope } from '@/renderer/services/voice-recording';
 import type { AppHandleScope } from '@/shared/app-control-types';
 import { makeAppHandleId } from '@/shared/app-control-types';
 import type { AppDescriptor, AppId, CustomAppEntry } from '@/shared/app-registry';
 import { buildAppRegistry } from '@/shared/app-registry';
+import type { AutoLaunchPhase } from '@/shared/machines/auto-launch.machine';
 import type { CodeLayoutMode, CodeTab, CodeTabId, TicketId, TicketResolution } from '@/shared/types';
 import { firstSource } from '@/shared/types';
 
 import { AppIcon } from './AppIcon';
 import { CodeTabContent } from './CodeTabContent';
-import { $codeTabStatuses, codeApi } from './state';
+import { $codeTabPhases, $codeTabStatuses, codeApi } from './state';
 import { VoiceGlow } from './VoiceGlow';
 
 /** Sentinel customAppId meaning "show the app launcher picker". */
@@ -210,6 +212,55 @@ const useStyles = makeStyles({
     gap: '6px',
     flexShrink: 0,
     marginLeft: 'auto',
+  },
+  sessionSubLabel: {
+    fontSize: tokens.fontSizeBase100,
+    color: tokens.colorNeutralForeground3,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  /* Live "now doing X" line under the column header. */
+  statusLine: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    minWidth: 0,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: '1px',
+    paddingBottom: tokens.spacingVerticalXS,
+  },
+  statusLineText: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    minWidth: 0,
+  },
+  statusDot: {
+    width: '6px',
+    height: '6px',
+    borderRadius: tokens.borderRadiusCircular,
+    backgroundColor: tokens.colorBrandForeground1,
+    flexShrink: 0,
+    animationName: {
+      '0%': { opacity: 1 },
+      '50%': { opacity: 0.3 },
+      '100%': { opacity: 1 },
+    },
+    animationDuration: '2s',
+    animationIterationCount: 'infinite',
+  },
+  statusDotWaiting: {
+    backgroundColor: tokens.colorPaletteYellowForeground1,
+    animationName: 'none',
+  },
+  focusListItemLive: {
+    color: tokens.colorBrandForeground1,
   },
   deckColumn: {
     display: 'grid',
@@ -792,9 +843,78 @@ const RESOLUTIONS: { value: TicketResolution; label: string }[] = [
   { value: 'cancelled', label: 'Close as Cancelled' },
 ];
 
+/** Boot-phase wording for the status line (pre-chat sandbox lifecycle). */
+const BOOT_PHASE_LABELS: Partial<Record<AutoLaunchPhase, string>> = {
+  checking: 'Checking runtime…',
+  installing: 'Installing runtime…',
+  configChecking: 'Checking configuration…',
+  starting: 'Starting sandbox…',
+};
+
+/** Re-render once a minute so relative "Started …" labels stay fresh. */
+const useNowMinute = (): number => {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+  return now;
+};
+
+/**
+ * Identity stamp for a session column. Relative while fresh, but past 24h it
+ * includes the date + time of day — two columns started "yesterday" must not
+ * collapse into the same label, since this line exists to tell them apart.
+ */
+const startedLabel = (tab: CodeTab): string | null => {
+  if (!tab.createdAt) {
+    return null;
+  }
+  const ageMs = Date.now() - tab.createdAt;
+  const started = new Date(tab.createdAt);
+  if (ageMs < 60_000) {
+    return 'Started just now';
+  }
+  if (ageMs < 60 * 60_000) {
+    return `Started ${Math.floor(ageMs / 60_000)}m ago`;
+  }
+  if (ageMs < 24 * 60 * 60_000) {
+    return `Started ${Math.floor(ageMs / (60 * 60_000))}h ago`;
+  }
+  return `Started ${started.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${started.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+};
+
+/**
+ * Glanceable "now doing X" under a column header: sandbox boot phase while
+ * launching, then the live run state (tool line / waiting-for-approval)
+ * published by the embedded chat. Renders nothing when the column is idle.
+ */
+const ColumnStatusLine = memo(({ tabId }: { tabId: CodeTabId }) => {
+  const styles = useStyles();
+  const activity = useStore($columnActivity, { keys: [tabId] })[tabId];
+  const bootPhase = useStore($codeTabPhases, { keys: [tabId] })[tabId];
+  const bootText = bootPhase ? BOOT_PHASE_LABELS[bootPhase] : undefined;
+  const text = bootText ?? activityStatusText(activity);
+  if (!text) {
+    return null;
+  }
+  const waiting = !bootText && !!activity?.pendingApproval;
+  return (
+    <div className={styles.statusLine}>
+      <span className={mergeClasses(styles.statusDot, waiting && styles.statusDotWaiting)} />
+      <span className={styles.statusLineText} title={text}>
+        {text}
+      </span>
+    </div>
+  );
+});
+ColumnStatusLine.displayName = 'ColumnStatusLine';
+
 const CodeSessionHeader = memo(
   ({
     label,
+    subLabel,
+    statusTabId,
     ticketTitle,
     ticketColumnBadge,
     ticketMetaBadge,
@@ -808,6 +928,10 @@ const CodeSessionHeader = memo(
     isGlass,
   }: {
     label: string;
+    /** Identity context when there is no ticket banner (e.g. "Started 2h ago"). */
+    subLabel?: string | null;
+    /** When set, a live ColumnStatusLine for this tab renders under the header. */
+    statusTabId?: CodeTabId;
     ticketTitle?: string | null;
     ticketColumnBadge?: React.ReactNode;
     ticketMetaBadge?: React.ReactNode;
@@ -841,6 +965,11 @@ const CodeSessionHeader = memo(
             <span className={styles.sessionLabel} title={label}>
               {label}
             </span>
+            {subLabel && (
+              <span className={styles.sessionSubLabel} title={subLabel}>
+                {subLabel}
+              </span>
+            )}
           </div>
           <div className={mergeClasses(styles.flexItemsCenter, styles.gap1)}>
             {actions}
@@ -893,6 +1022,7 @@ const CodeSessionHeader = memo(
             {ticketActions && <div className={styles.ticketActions}>{ticketActions}</div>}
           </div>
         )}
+        {statusTabId && <ColumnStatusLine tabId={statusTabId} />}
       </>
     );
   }
@@ -941,6 +1071,7 @@ const DeckColumn = memo(
     const [activePanel, setActivePanel] = useState<TicketPanel | null>(null);
     const handleClosePanel = useCallback(() => setActivePanel(null), []);
     const recordingScope = useStore($recordingScope);
+    useNowMinute();
 
     return (
       <div
@@ -958,6 +1089,8 @@ const DeckColumn = memo(
           {recordingScope === tab.id && <VoiceGlow />}
           <CodeSessionHeader
             label={label}
+            subLabel={ticketTitle ? null : startedLabel(tab)}
+            statusTabId={tab.id}
             ticketTitle={ticketTitle}
             ticketColumnBadge={ticketColumnBadge}
             ticketMetaBadge={ticketMetaBadge}
@@ -1626,6 +1759,7 @@ const CodeSessionPane = memo(
     const styles = useStyles();
     const [activePanel, setActivePanel] = useState<TicketPanel | null>(null);
     const handleClosePanel = useCallback(() => setActivePanel(null), []);
+    useNowMinute();
 
     return (
       <div
@@ -1637,6 +1771,8 @@ const CodeSessionPane = memo(
       >
         <CodeSessionHeader
           label={label}
+          subLabel={ticketTitle ? null : startedLabel(tab)}
+          statusTabId={tab.id}
           ticketTitle={ticketTitle}
           ticketColumnBadge={ticketColumnBadge}
           ticketMetaBadge={ticketMetaBadge}
@@ -1699,6 +1835,12 @@ const FocusListItem = memo(
     };
 
     const styles = useStyles();
+    useNowMinute();
+    // Live activity wins over static identity: a column that is working
+    // shows what it's doing; an idle one shows what distinguishes it.
+    const activity = useStore($columnActivity, { keys: [tab.id] })[tab.id];
+    const liveText = activityStatusText(activity);
+    const displaySub = liveText ?? subLabel ?? startedLabel(tab);
     return (
       <div
         ref={setNodeRef}
@@ -1725,9 +1867,12 @@ const FocusListItem = memo(
               <span className={styles.focusListItemLabel} title={label}>
                 {label}
               </span>
-              {subLabel && (
-                <span className={styles.focusListItemSub} title={subLabel}>
-                  {subLabel}
+              {displaySub && (
+                <span
+                  className={mergeClasses(styles.focusListItemSub, !!liveText && styles.focusListItemLive)}
+                  title={displaySub}
+                >
+                  {displaySub}
                 </span>
               )}
             </div>
@@ -1942,21 +2087,6 @@ export const CodeDeck = memo(() => {
   );
 
   const resolveTicketTitle = useCallback((tab: CodeTab) => tab.ticketTitle ?? null, []);
-
-  const resolveSubLabel = useCallback(
-    (tab: CodeTab) => {
-      if (!tab.projectId) {
-        return null;
-      }
-      const workspaceDir = projectMap.get(tab.projectId)?.workspaceDir;
-      if (!workspaceDir) {
-        return null;
-      }
-      const segments = workspaceDir.split('/').filter(Boolean);
-      return segments.slice(-2).join('/');
-    },
-    [projectMap]
-  );
 
   const handleLayoutMode = useCallback((mode: CodeLayoutMode) => {
     codeApi.setLayoutMode(mode);
@@ -2380,7 +2510,7 @@ export const CodeDeck = memo(() => {
                       key={tab.id}
                       tab={tab}
                       label={resolveLabel(tab)}
-                      subLabel={resolveTicketTitle(tab) ?? resolveSubLabel(tab)}
+                      subLabel={resolveTicketTitle(tab)}
                       isActive={tab.id === activeTab?.id}
                       onSelect={handleSelect}
                       onClose={handleClose}

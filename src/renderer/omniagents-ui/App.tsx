@@ -1,6 +1,6 @@
 import { useStore } from '@nanostores/react';
 import { AnimatePresence, motion } from 'framer-motion';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { waitFor } from 'xstate';
 
 import {
@@ -10,8 +10,10 @@ import {
   type SessionController,
   transcriptPage,
 } from '@/renderer/services/session-control';
+import { clearColumnActivity, publishColumnActivity } from '@/renderer/services/column-activity';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { forwardEvent, registerColumnActor } from '@/renderer/services/supervisor-bridge';
+import { VoiceScopeContext } from '@/renderer/services/voice-recording';
 import type { TicketId } from '@/shared/types';
 
 import type { PendingMessage } from './ChatShell';
@@ -249,6 +251,32 @@ export function App({
       setSessions(list);
     } catch {}
   }, [client]);
+
+  // Publish this column's live activity (thinking / tool line / pending
+  // approval) so deck chrome can show a glanceable "now doing X" without
+  // reaching into the transcript. Scoped by the same context the voice
+  // system uses (the Code tab id; CHAT_VOICE_SCOPE on the Chat tab).
+  const activityScope = useContext(VoiceScopeContext);
+  const pendingApproval = useMemo(
+    () => items.some((it) => (it as { type?: string }).type === 'approval'),
+    [items]
+  );
+  useEffect(() => {
+    if (!activityScope) {
+      return;
+    }
+    publishColumnActivity(activityScope, {
+      thinking: !!thinking,
+      text: toolStatus || status || null,
+      pendingApproval,
+    });
+  }, [activityScope, thinking, toolStatus, status, pendingApproval]);
+  useEffect(() => {
+    if (!activityScope) {
+      return;
+    }
+    return () => clearColumnActivity(activityScope);
+  }, [activityScope]);
 
   // Sync capabilities from the boot machine into local state. The boot
   // machine is the source of truth; these local useStates exist because
