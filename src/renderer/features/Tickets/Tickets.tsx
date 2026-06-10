@@ -1,14 +1,14 @@
 import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
-import { Add20Regular, Chat20Regular, Navigation20Regular, Play20Filled } from '@fluentui/react-icons';
+import { Add20Regular, Navigation20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 
-import { Button, IconButton, TopAppBar } from '@/renderer/ds';
+import { IconButton, TopAppBar } from '@/renderer/ds';
 import { InboxView } from '@/renderer/features/Inbox/InboxView';
 import { $quickCaptureOpen } from '@/renderer/features/Inbox/QuickCapture';
+import { $milestones } from '@/renderer/features/Initiatives/state';
 import { PageView } from '@/renderer/features/Pages/PageView';
 import { $pages, pageApi } from '@/renderer/features/Pages/state';
-import { openTicketInCode } from '@/renderer/services/navigation';
 import { persistedStoreApi } from '@/renderer/services/store';
 
 import { MilestoneDetail } from './MilestoneDetail';
@@ -101,6 +101,7 @@ export const Tickets = memo(() => {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const pages = useStore($pages);
+  const milestones = useStore($milestones);
   const tickets = persistedStore.tickets;
 
   const activeTicket = useMemo(
@@ -121,7 +122,7 @@ export const Tickets = memo(() => {
     }
   }, [isDesktop]);
 
-  // Context-aware back navigation for mobile
+  // The TopAppBar is the only header on mobile, so it titles the current view.
   const mobileHeaderTitle = useMemo(() => {
     if (view.type === 'dashboard') {
       return 'Home';
@@ -130,24 +131,22 @@ export const Tickets = memo(() => {
       return view.selectedItemId ? 'Inbox Item' : 'Inbox';
     }
     if (view.type === 'ticket') {
-      return activeTicket?.title ?? 'Ticket';
+      return activeTicket?.title || 'Ticket';
     }
     if (view.type === 'page') {
-      const page = pages[view.pageId];
-      if (page?.parentId) {
-        const parent = pages[page.parentId];
-        return parent?.title ?? 'Back';
-      }
-      return 'Project';
+      return pages[view.pageId]?.title || 'Untitled';
     }
     if (view.type === 'milestone') {
-      return 'Project';
+      return milestones[view.milestoneId]?.title || 'Milestone';
     }
     if (view.type === 'board') {
-      return 'Project';
+      return 'Board';
+    }
+    if (view.type === 'project') {
+      return activeProject?.label || 'Project';
     }
     return 'Projects';
-  }, [view, pages, activeTicket?.title]);
+  }, [view, pages, milestones, activeTicket?.title, activeProject?.label]);
 
   const handleBack = useCallback(() => {
     if (view.type === 'page') {
@@ -193,16 +192,6 @@ export const Tickets = memo(() => {
   const handleAddInboxItem = useCallback(() => {
     $quickCaptureOpen.set(true);
   }, []);
-  const handleOpenTicketChat = useCallback(() => {
-    if (view.type === 'ticket') {
-      void openTicketInCode(view.ticketId);
-    }
-  }, [view]);
-  const handleRetryTicketAutopilot = useCallback(() => {
-    if (view.type === 'ticket') {
-      ticketApi.requestStartSupervisor(view.ticketId);
-    }
-  }, [view]);
   const mobileBackHandler =
     view.type === 'dashboard'
       ? undefined
@@ -218,16 +207,6 @@ export const Tickets = memo(() => {
   );
   const mobileAddInboxButton = (
     <IconButton aria-label="Add inbox item" icon={<Add20Regular />} size="sm" onClick={handleAddInboxItem} />
-  );
-  const mobileTicketErrorActions = activeTicket?.phase === 'error' && (
-    <>
-      <Button size="sm" variant="ghost" leftIcon={<Chat20Regular />} onClick={handleOpenTicketChat}>
-        Chat
-      </Button>
-      <Button size="sm" leftIcon={<Play20Filled />} onClick={handleRetryTicketAutopilot}>
-        Retry
-      </Button>
-    </>
   );
 
   // Keyboard shortcut: Cmd/Ctrl+N → new page in current project
@@ -290,8 +269,6 @@ export const Tickets = memo(() => {
                 mobileAddInboxButton
               ) : view.type === 'project' ? (
                 <ProjectActions projectId={view.projectId} />
-              ) : view.type === 'ticket' ? (
-                mobileTicketErrorActions
               ) : undefined
             }
             className={isGlass ? 'omni-glass-mobile-top-app-bar' : 'bg-surface-raised'}
@@ -340,9 +317,9 @@ export const Tickets = memo(() => {
               )}
               {view.type === 'page' && <PageView key={view.pageId} pageId={view.pageId} projectId={view.projectId} />}
               {view.type === 'milestone' && (
-                <MilestoneDetail milestoneId={view.milestoneId} projectId={view.projectId} />
+                <MilestoneDetail milestoneId={view.milestoneId} projectId={view.projectId} hideChrome />
               )}
-              {view.type === 'board' && <WorkItemsList projectId={view.projectId} />}
+              {view.type === 'board' && <WorkItemsList projectId={view.projectId} hideChrome />}
               {view.type === 'project' && <ProjectPage projectId={view.projectId} />}
               {view.type === 'dashboard' && <ProjectsDashboard />}
             </div>

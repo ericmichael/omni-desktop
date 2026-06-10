@@ -43,12 +43,12 @@ import {
   Tab,
   TabList,
 } from '@/renderer/ds';
-import { AssigneePicker } from '@/renderer/features/Tickets/AssigneePicker';
 import { $milestones } from '@/renderer/features/Initiatives/state';
+import { AssigneePicker } from '@/renderer/features/Tickets/AssigneePicker';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { persistedStoreApi } from '@/renderer/services/store';
-import { firstSource } from '@/shared/types';
 import type { GitRepoInfo, MilestoneId, TicketId, TicketPhase, TicketResolution } from '@/shared/types';
+import { firstSource } from '@/shared/types';
 
 import { $pipeline, $tickets, ticketApi } from './state';
 import { RESOLUTION_LABELS } from './ticket-constants';
@@ -107,6 +107,22 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     flexShrink: 0,
+  },
+  /* ── Mobile action bar (replaces the title bar under the TopAppBar) ── */
+  mobileActionBar: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: tokens.spacingHorizontalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    flexShrink: 0,
+  },
+  mobileActionSpacer: {
+    flex: '1 1 0',
   },
   /* ── Row 2: Tabs + overflow ── */
   tabRow: {
@@ -368,6 +384,36 @@ export const TicketDetail = memo(
 
     const phase = ticket.phase;
 
+    const milestoneMenu = (
+      <Menu positioning={{ position: 'below', align: 'end' }}>
+        <MenuTrigger disableButtonEnhancement>
+          <Button size="sm" variant="ghost" leftIcon={<Flag20Regular />} aria-label="Change milestone">
+            {currentMilestone?.title ?? 'No milestone'}
+          </Button>
+        </MenuTrigger>
+        <MenuPopover>
+          <MenuList>
+            <MenuItem
+              icon={!ticket.milestoneId ? <Checkmark16Regular /> : <span style={{ width: 16 }} />}
+              onClick={handleClearMilestone}
+            >
+              No milestone
+            </MenuItem>
+            {projectMilestones.length > 0 && <MenuDivider />}
+            {projectMilestones.map((m) => (
+              <MilestoneMenuItem
+                key={m.id}
+                milestoneId={m.id}
+                title={m.title || 'Untitled milestone'}
+                selected={ticket.milestoneId === m.id}
+                onSelect={handleSelectMilestone}
+              />
+            ))}
+          </MenuList>
+        </MenuPopover>
+      </Menu>
+    );
+
     return (
       <div className={styles.root}>
         {!hideTitleBar && (
@@ -411,33 +457,7 @@ export const TicketDetail = memo(
               </FluentButton>
             )}
 
-            <Menu positioning={{ position: 'below', align: 'end' }}>
-              <MenuTrigger disableButtonEnhancement>
-                <Button size="sm" variant="ghost" leftIcon={<Flag20Regular />} aria-label="Change milestone">
-                  {currentMilestone?.title ?? 'No milestone'}
-                </Button>
-              </MenuTrigger>
-              <MenuPopover>
-                <MenuList>
-                  <MenuItem
-                    icon={!ticket.milestoneId ? <Checkmark16Regular /> : <span style={{ width: 16 }} />}
-                    onClick={handleClearMilestone}
-                  >
-                    No milestone
-                  </MenuItem>
-                  {projectMilestones.length > 0 && <MenuDivider />}
-                  {projectMilestones.map((m) => (
-                    <MilestoneMenuItem
-                      key={m.id}
-                      milestoneId={m.id}
-                      title={m.title || 'Untitled milestone'}
-                      selected={ticket.milestoneId === m.id}
-                      onSelect={handleSelectMilestone}
-                    />
-                  ))}
-                </MenuList>
-              </MenuPopover>
-            </Menu>
+            {milestoneMenu}
 
             <AssigneePicker ticketId={ticketId} assignee={ticket.assignee} />
 
@@ -453,6 +473,33 @@ export const TicketDetail = memo(
             )}
             {onClose && closeBehavior === 'close' && (
               <IconButton aria-label="Close" icon={<Dismiss20Regular />} size="sm" onClick={onClose} />
+            )}
+          </div>
+        )}
+
+        {/* Mobile: the TopAppBar owns back + title, so surface the title bar's
+            remaining affordances (milestone, assignee, chat/autopilot) in a
+            compact row. Rename swaps the row for the title input. */}
+        {hideTitleBar && (
+          <div className={styles.mobileActionBar}>
+            {editingTitle ? (
+              <Input
+                type="text"
+                value={editTitle}
+                onChange={handleEditTitleChange}
+                onBlur={handleSaveTitle}
+                onKeyDown={handleTitleKeyDown}
+                autoFocus
+                size="sm"
+                className={styles.titleInput}
+              />
+            ) : (
+              <>
+                {milestoneMenu}
+                <AssigneePicker ticketId={ticketId} assignee={ticket.assignee} />
+                <div className={styles.mobileActionSpacer} />
+                <PhaseStatus phase={phase} onChat={handleOpenChat} onAutopilot={handleStartAutopilot} />
+              </>
             )}
           </div>
         )}
@@ -474,6 +521,11 @@ export const TicketDetail = memo(
               </MenuTrigger>
               <MenuPopover>
                 <MenuList>
+                  {hideTitleBar && (
+                    <MenuItem icon={<Edit20Regular />} onClick={handleStartEditTitle}>
+                      Rename ticket
+                    </MenuItem>
+                  )}
                   {gitInfo?.isGitRepo && (
                     <MenuItem icon={<BranchFork20Regular />} onClick={handleStartEditBranch}>
                       Edit branch

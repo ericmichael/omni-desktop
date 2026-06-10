@@ -60,9 +60,11 @@ const useStyles = makeStyles({
 type MilestoneDetailProps = {
   milestoneId: MilestoneId;
   projectId: ProjectId;
+  /** Mobile: the TopAppBar already shows back + milestone title. */
+  hideChrome?: boolean;
 };
 
-export const MilestoneDetail = memo(({ milestoneId, projectId }: MilestoneDetailProps) => {
+export const MilestoneDetail = memo(({ milestoneId, projectId, hideChrome }: MilestoneDetailProps) => {
   const styles = useStyles();
   const milestones = useStore($milestones);
   const store = useStore(persistedStoreApi.$atom);
@@ -192,6 +194,7 @@ return null;
         contextLabel={eyebrow}
         onBack={handleBack}
         rightActions={overflowMenu}
+        hideChrome={hideChrome}
       />
 
       <AnimatedDialog open={editOpen} onClose={closeEdit}>

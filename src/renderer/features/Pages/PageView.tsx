@@ -58,10 +58,15 @@ const useStyles = makeStyles({
     width: '100%',
     boxSizing: 'border-box',
   },
+  /* Hidden on mobile — the TopAppBar in Tickets.tsx already provides back
+     navigation there; only desktop needs the in-page back + breadcrumb row. */
   backRow: {
-    display: 'flex',
+    display: 'none',
     alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
+    '@media (min-width: 640px)': {
+      display: 'flex',
+    },
   },
   titleRow: {
     display: 'flex',

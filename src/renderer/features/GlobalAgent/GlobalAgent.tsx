@@ -19,8 +19,8 @@ const useStyles = makeStyles({
     top: 0,
     right: 0,
     bottom: 0,
-    width: `${PANEL_WIDTH}px`,
-    maxWidth: '90vw',
+    // Mobile: full-bleed sheet. Desktop (≥640px) narrows to a side panel.
+    width: '100%',
     zIndex: 1090,
     display: 'flex',
     flexDirection: 'column',
@@ -35,6 +35,18 @@ const useStyles = makeStyles({
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
     // Contain the recording glow at the panel edge (matches the deck column).
     overflow: 'hidden',
+    // Fixed to the viewport, so the app shell's safe-area padding (App.tsx)
+    // doesn't reach this panel — pad the notch / home-indicator bands itself.
+    // Bottom reads the managed var first (use-app-height zeroes it in the
+    // iOS-standalone short-viewport state).
+    paddingTop: 'env(safe-area-inset-top, 0px)',
+    paddingLeft: 'env(safe-area-inset-left, 0px)',
+    paddingRight: 'env(safe-area-inset-right, 0px)',
+    paddingBottom: 'var(--safe-area-bottom, env(safe-area-inset-bottom, 0px))',
+    '@media (min-width: 640px)': {
+      width: `${PANEL_WIDTH}px`,
+      maxWidth: '90vw',
+    },
   },
   panelHidden: { transform: 'translateX(105%)', pointerEvents: 'none' },
   header: {

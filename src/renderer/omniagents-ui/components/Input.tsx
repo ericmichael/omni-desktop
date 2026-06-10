@@ -276,23 +276,23 @@ fileInputRef.current.value = ''
               )}
 
               {sandboxLabel && (
-                <div ref={sandboxMenuRef} className="relative">
+                <div ref={sandboxMenuRef} className="relative min-w-0">
                   <button
                     type="button"
                     onClick={sandboxInteractive ? toggleSandboxMenu : undefined}
                     disabled={!sandboxInteractive}
                     title={sandboxLocked ? `Sandbox: ${sandboxLabel} (locked once a run starts)` : `Sandbox: ${sandboxLabel}`}
-                    className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors ${
+                    className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors min-w-0 ${
                       sandboxInteractive
                         ? 'text-secondary-foreground hover:bg-accent/50 cursor-pointer'
                         : 'text-secondary-foreground cursor-default'
                     }`}
                   >
                     {sandboxLoading ? (
-                      <Loader2Icon size={14} className="text-muted-foreground animate-spin" />
+                      <Loader2Icon size={14} className="text-muted-foreground animate-spin shrink-0" />
                     ) : null}
-                    <MonitorIcon size={14} className={sandboxInteractive ? 'text-primary' : 'text-secondary-foreground'} />
-                    <span>{sandboxLabel}</span>
+                    <MonitorIcon size={14} className={`shrink-0 ${sandboxInteractive ? 'text-primary' : 'text-secondary-foreground'}`} />
+                    <span className="max-w-[120px] sm:max-w-[200px] truncate">{sandboxLabel}</span>
                     {sandboxLocked && (
                       <LockIcon size={10} className="text-muted-foreground flex-shrink-0" />
                     )}

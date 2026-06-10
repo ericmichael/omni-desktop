@@ -21,7 +21,7 @@ import { Badge, Caption1, ConfirmDialog, IconButton, Menu, MenuDivider, MenuItem
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { isActivePhase } from '@/shared/ticket-phase';
-import type { MilestoneId, Milestone, ProjectId, Ticket, TicketId } from '@/shared/types';
+import type { Milestone, MilestoneId, ProjectId, Ticket, TicketId } from '@/shared/types';
 
 import { KanbanBoard } from './KanbanBoard';
 import { $activeMilestoneId, $pipeline, $tickets, ticketApi } from './state';
@@ -397,9 +397,12 @@ type WorkItemsListProps = {
   /** Optional actions rendered at the right edge of the header (before the
    *  view-mode toggle / filter), e.g. a milestone overflow menu. */
   rightActions?: React.ReactNode;
+  /** Mobile: the TopAppBar already shows back + title, so render only the
+   *  count + filter controls in the header row. */
+  hideChrome?: boolean;
 };
 
-export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket, title = 'Items', contextLabel, onBack, rightActions }: WorkItemsListProps) => {
+export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket, title = 'Items', contextLabel, onBack, rightActions, hideChrome }: WorkItemsListProps) => {
   const styles = useStyles();
   const ticketMap = useStore($tickets);
   const pipeline = useStore($pipeline);
@@ -444,14 +447,18 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
     return map;
   }, [pipeline]);
 
+  const scopedTickets = useMemo(
+    () =>
+      Object.values(ticketMap).filter(
+        (t) => t.projectId === projectId && (activeMilestoneId === 'all' || t.milestoneId === activeMilestoneId)
+      ),
+    [ticketMap, projectId, activeMilestoneId]
+  );
+
+  const archivedCount = useMemo(() => scopedTickets.filter((t) => t.archivedAt).length, [scopedTickets]);
+
   const sortedTickets = useMemo(() => {
-    const all = Object.values(ticketMap).filter((t) => {
-      if (t.projectId !== projectId) {
-        return false;
-      }
-      if (activeMilestoneId !== 'all' && t.milestoneId !== activeMilestoneId) {
-        return false;
-      }
+    const all = scopedTickets.filter((t) => {
       if (visibilityFilter === 'active') {
         return !t.archivedAt;
       }
@@ -461,7 +468,7 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
       return true;
     });
     return all.sort((a, b) => a.createdAt - b.createdAt);
-  }, [ticketMap, projectId, activeMilestoneId, visibilityFilter]);
+  }, [scopedTickets, visibilityFilter]);
 
   const handleNewTicket = useCallback(async () => {
     const ticket = await ticketApi.addTicket({
@@ -505,30 +512,38 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
     return 'blue';
   };
 
+  const filterControl = (
+    <SegmentedControl
+      value={visibilityFilter}
+      options={[
+        { value: 'active', label: 'Active', badge: scopedTickets.length - archivedCount },
+        { value: 'archived', label: 'Archived', badge: archivedCount },
+        { value: 'all', label: 'All' },
+      ]}
+      onChange={setVisibilityFilter}
+    />
+  );
+
   return (
     <div className={styles.root}>
       <div className={styles.header}>
-        {onBack ? <IconButton aria-label="Back" icon={<ArrowLeft20Regular />} size="sm" onClick={onBack} /> : null}
-        {contextLabel || title !== 'Items' ? (
-          <div className={styles.headerTitle}>
-            {contextLabel ? <Caption1>{contextLabel}</Caption1> : null}
-            <Subtitle2>{title}</Subtitle2>
-          </div>
-        ) : (
-          <SectionLabel>{title}</SectionLabel>
-        )}
-        <Caption1 style={{ color: tokens.colorNeutralForeground3 }}>({sortedTickets.length})</Caption1>
+        {!hideChrome && onBack ? (
+          <IconButton aria-label="Back" icon={<ArrowLeft20Regular />} size="sm" onClick={onBack} />
+        ) : null}
+        {!hideChrome &&
+          (contextLabel || title !== 'Items' ? (
+            <div className={styles.headerTitle}>
+              {contextLabel ? <Caption1>{contextLabel}</Caption1> : null}
+              <Subtitle2>{title}</Subtitle2>
+            </div>
+          ) : (
+            <SectionLabel>{title}</SectionLabel>
+          ))}
+        {/* Mobile: the filter is the header's main content, so it leads. */}
+        {hideChrome && filterControl}
         <div className={styles.flex1} />
         <div className={styles.controls}>
-          <SegmentedControl
-            value={visibilityFilter}
-            options={[
-              { value: 'active', label: 'Active' },
-              { value: 'archived', label: 'Archived' },
-              { value: 'all', label: 'All' },
-            ]}
-            onChange={setVisibilityFilter}
-          />
+          {!hideChrome && filterControl}
           <IconButton
             aria-label={viewMode === 'list' ? 'Board view' : 'List view'}
             icon={viewMode === 'list' ? <Board20Regular /> : <List20Regular />}
