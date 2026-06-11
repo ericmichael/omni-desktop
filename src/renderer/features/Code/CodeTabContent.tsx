@@ -32,6 +32,7 @@ import { getActivePersona } from '@/shared/voice-personas';
 
 import { CodeEmptyState } from './CodeEmptyState';
 import { CodeWorkspaceLayout } from './CodeWorkspaceLayout';
+import { CHAT_SUGGESTIONS, COLUMN_SUGGESTIONS } from './empty-suggestions';
 import { $codeTabErrors, $codeTabStatuses, codeApi } from './state';
 import { useCodeAutoLaunch } from './use-code-auto-launch';
 
@@ -151,6 +152,7 @@ const CodeRunningView = memo(
     ticketId,
     switching,
     greeting,
+    suggestions,
   }: {
     sandboxUrls: { uiUrl: string; services?: Record<string, string> };
     sessionId?: string;
@@ -179,6 +181,8 @@ const CodeRunningView = memo(
     switching?: boolean;
     /** Chat mode: time-of-day greeting shown on the empty conversation. */
     greeting?: string;
+    /** One-tap example tasks shown on the empty conversation. */
+    suggestions?: ReadonlyArray<{ label: string; prompt: string }>;
   }) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
@@ -233,6 +237,7 @@ const CodeRunningView = memo(
             sidecarMode={sidecarMode}
             ticketId={ticketId}
             greeting={greeting}
+            suggestions={suggestions}
           />
         </div>
         {switching && (
@@ -548,6 +553,7 @@ export const CodeTabContent = memo(
               ticketId={tab.ticketId as TicketId | undefined}
               switching={sandboxStatus?.type === 'running' && !!sandboxStatus.data.switching}
               greeting={chatMode ? greeting : undefined}
+              suggestions={chatMode ? CHAT_SUGGESTIONS : COLUMN_SUGGESTIONS}
             />
           </VoiceScopeContext.Provider>
         ) : chatMode ? (

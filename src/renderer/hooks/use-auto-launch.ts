@@ -256,6 +256,10 @@ return;
 return;
 }
       actor.send({ type: 'RESET' });
+      // Drive the relaunch explicitly: the auto-launch effect's deps don't
+      // change on RESET, so without this a workspace switch (new chat
+      // conversation, session switch) can strand the machine in idle.
+      actor.send({ type: 'LAUNCH' });
     })();
 
     return () => {

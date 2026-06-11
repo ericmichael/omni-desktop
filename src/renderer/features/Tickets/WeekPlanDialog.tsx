@@ -480,11 +480,11 @@ continue;
     // fully derived from the checkbox state, so unchecked rows clear stale pins.
     for (const project of store.projects) {
       const shouldBePinned = pinSet.has(projectKey(project.id));
-      const currentlyPinned = project.pinnedAt !== undefined;
+      const currentlyPinned = project.pinnedAt != null;
       if (shouldBePinned) {
         void ticketApi.updateProject(project.id, { pinnedAt: stamp });
       } else if (currentlyPinned) {
-        void ticketApi.updateProject(project.id, { pinnedAt: undefined });
+        void ticketApi.updateProject(project.id, { pinnedAt: null });
       }
     }
     for (const milestone of Object.values(milestones)) {
@@ -492,11 +492,11 @@ continue;
 continue;
 }
       const shouldBePinned = pinSet.has(milestoneKey(milestone.id));
-      const currentlyPinned = milestone.pinnedAt !== undefined;
+      const currentlyPinned = milestone.pinnedAt != null;
       if (shouldBePinned) {
         void milestoneApi.updateMilestone(milestone.id, { pinnedAt: stamp });
       } else if (currentlyPinned) {
-        void milestoneApi.updateMilestone(milestone.id, { pinnedAt: undefined });
+        void milestoneApi.updateMilestone(milestone.id, { pinnedAt: null });
       }
     }
     persistedStoreApi.setKey('lastWeeklyReviewAt', stamp);

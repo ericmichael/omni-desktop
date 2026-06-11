@@ -54,8 +54,8 @@ export function ArtifactPortalProvider({ target, children }: { target: HTMLEleme
   return <ArtifactPortalContext.Provider value={target}>{children}</ArtifactPortalContext.Provider>
 }
 
-export function MessageList({ items, greeting: greetingProp, statusText, thinking, statusSpinner, preambleText, welcomeText, onApprovalDecision, pendingPlan, onPlanDecision, statusItalic, onReaction, currentRunId, toolStatusText, onSubmitMessage, onStageContext }:
-  { items: MessageItem[]; greeting?: string; statusText?: string; thinking?: boolean; statusSpinner?: boolean; preambleText?: string; welcomeText?: string; onApprovalDecision?: (request_id: string, value: 'yes' | 'always' | 'no', kind?: 'function' | 'mcp') => void; pendingPlan?: PlanItem | null; onPlanDecision?: (approved: boolean) => void; statusItalic?: boolean; onReaction?: (type: 'like' | 'dislike', text?: string) => void; currentRunId?: string; toolStatusText?: string; onSubmitMessage?: (text: string) => void | Promise<void>; onStageContext?: (source: string, text: string) => void }) {
+export function MessageList({ items, greeting: greetingProp, statusText, thinking, statusSpinner, preambleText, welcomeText, suggestions, onApprovalDecision, pendingPlan, onPlanDecision, statusItalic, onReaction, currentRunId, toolStatusText, onSubmitMessage, onStageContext }:
+  { items: MessageItem[]; greeting?: string; statusText?: string; thinking?: boolean; statusSpinner?: boolean; preambleText?: string; welcomeText?: string; suggestions?: ReadonlyArray<{ label: string; prompt: string }>; onApprovalDecision?: (request_id: string, value: 'yes' | 'always' | 'no', kind?: 'function' | 'mcp') => void; pendingPlan?: PlanItem | null; onPlanDecision?: (approved: boolean) => void; statusItalic?: boolean; onReaction?: (type: 'like' | 'dislike', text?: string) => void; currentRunId?: string; toolStatusText?: string; onSubmitMessage?: (text: string) => void | Promise<void>; onStageContext?: (source: string, text: string) => void }) {
   const [fallbackGreeting] = useState(getGreeting)
   const greeting = greetingProp ?? fallbackGreeting
   const [reactions, setReactions] = useState<Record<number, 'like' | 'dislike' | undefined>>({})
@@ -120,6 +120,26 @@ onReaction?.(type)
             >
               <div className="mt-3 text-sm text-textSubtle">{welcomeText}</div>
             </motion.div>
+            {suggestions && suggestions.length > 0 && onSubmitMessage ? (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: 0.5, ease: [0.25, 0.1, 0.25, 1] }}
+                // The empty-state overlay is pointer-events-none; re-enable for the chips.
+                className="mt-6 flex flex-wrap justify-center gap-2 pointer-events-auto"
+              >
+                {suggestions.map((s) => (
+                  <button
+                    key={s.label}
+                    type="button"
+                    onClick={() => void onSubmitMessage(s.prompt)}
+                    className="rounded-full border border-border bg-bgCardAlt px-4 py-2 text-sm text-textPrimary hover:brightness-110 active:opacity-70"
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </motion.div>
+            ) : null}
           </div>
         </div>
       </div>

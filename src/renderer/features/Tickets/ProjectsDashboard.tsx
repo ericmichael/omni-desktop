@@ -9,6 +9,7 @@ import {
   MailInbox20Regular,
   Open16Regular,
   Pin20Filled,
+  Pin20Regular,
   Play20Filled,
 } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
@@ -143,6 +144,48 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     fontStyle: 'italic',
     fontSize: tokens.fontSizeBase200,
+  },
+  /* Empty THIS WEEK: pinnable rows with a visible pin — the action itself,
+     not a description of a hover-only affordance elsewhere. */
+  pinSuggestions: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    paddingLeft: '8px',
+    paddingRight: '8px',
+    paddingBottom: '8px',
+  },
+  pinSuggestionHint: {
+    paddingLeft: '8px',
+    paddingTop: '8px',
+    paddingBottom: '6px',
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+  },
+  pinSuggestionRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    paddingLeft: '8px',
+    paddingRight: '8px',
+    paddingTop: '6px',
+    paddingBottom: '6px',
+    borderRadius: tokens.borderRadiusMedium,
+    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
+  },
+  pinSuggestionLabel: {
+    flex: '1 1 0',
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+  },
+  pinSuggestionMeta: {
+    flexShrink: 0,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
   },
 
   /* Pinned card */
@@ -508,7 +551,7 @@ const MilestoneCard = memo(
     }, [milestone.id, milestone.projectId]);
 
     const handleUnpin = useCallback(() => {
-      void milestoneApi.updateMilestone(milestone.id, { pinnedAt: undefined });
+      void milestoneApi.updateMilestone(milestone.id, { pinnedAt: null });
     }, [milestone.id]);
 
     return (
@@ -610,7 +653,7 @@ const ProjectCard = memo(
     }, [project.id]);
 
     const handleUnpin = useCallback(() => {
-      void ticketApi.updateProject(project.id, { pinnedAt: undefined });
+      void ticketApi.updateProject(project.id, { pinnedAt: null });
     }, [project.id]);
 
     return (
@@ -838,6 +881,21 @@ export const ProjectsDashboard = memo(() => {
 
   const totalPinned = pinnedProjects.length + pinnedMilestones.length;
 
+  // Empty-state candidates: unpinned projects with the most open work first.
+  const pinCandidates = useMemo(() => {
+    const openCount = (p: Project) =>
+      tickets.filter((t) => t.projectId === p.id && !t.resolution).length;
+    return store.projects
+      .filter((p) => !isProjectPinned(p))
+      .map((p) => ({ project: p, open: openCount(p) }))
+      .sort((a, b) => b.open - a.open)
+      .slice(0, 4);
+  }, [store.projects, tickets]);
+
+  const handlePinProject = useCallback((projectId: ProjectId) => {
+    void ticketApi.updateProject(projectId, { pinnedAt: Date.now() });
+  }, []);
+
   const projectCardContext = useCallback(
     (project: Project) => {
       const focus = rankFocusForProject({
@@ -974,9 +1032,35 @@ export const ProjectsDashboard = memo(() => {
             count={totalPinned}
           >
             {totalPinned === 0 ? (
-              <div className={styles.sectionEmpty}>
-                Nothing pinned. Pin a project or milestone in the sidebar to focus on it here.
-              </div>
+              pinCandidates.length > 0 ? (
+                <div className={styles.pinSuggestions}>
+                  <div className={styles.pinSuggestionHint}>
+                    Pin what you&apos;re committing to this week — it shows up here.
+                  </div>
+                  {pinCandidates.map(({ project, open }) => (
+                    <div key={project.id} className={styles.pinSuggestionRow}>
+                      <span className={styles.pinSuggestionLabel}>{project.label}</span>
+                      {open > 0 && (
+                        <span className={styles.pinSuggestionMeta}>
+                          {open} open
+                        </span>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        leftIcon={<Pin20Regular />}
+                        onClick={handlePinProject.bind(null, project.id)}
+                      >
+                        Pin
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className={styles.sectionEmpty}>
+                  Nothing pinned yet. Create a project, then pin it here to focus your week.
+                </div>
+              )
             ) : (
               <>
                 {pinnedProjects.map((project) => {

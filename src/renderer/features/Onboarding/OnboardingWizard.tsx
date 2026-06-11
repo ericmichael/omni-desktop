@@ -138,8 +138,8 @@ return null;
           <Subtitle1>{modelsExist ? 'Welcome back' : 'Welcome to Omni'}</Subtitle1>
           <Caption1>
             {modelsExist
-              ? 'Your model configuration is already set up. Just a couple more things.'
-              : "Let's set up your first model provider to get started."}
+              ? 'Your models are already configured — one last step installs the agent runtime.'
+              : 'Omni runs AI agents in sandboxes on your computer — they chat, write code, browse, and drive a desktop. Connect a model to power them; everything here can be changed later in Settings.'}
           </Caption1>
         </div>
 

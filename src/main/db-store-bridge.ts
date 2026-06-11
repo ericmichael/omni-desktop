@@ -98,7 +98,7 @@ function parseWorkflow(s: string | null): ColumnWorkflowContract | undefined {
   return Object.keys(workflow).length > 0 ? workflow : undefined;
 }
 
-function isoOrNull(epochMs: number | undefined): string | null {
+function isoOrNull(epochMs: number | null | undefined): string | null {
   return epochMs != null ? toIso(epochMs) : null;
 }
 

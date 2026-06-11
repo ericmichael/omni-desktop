@@ -19,6 +19,8 @@ type OmniAgentsAppProps = {
   variables?: Record<string, unknown>;
   voiceVariables?: Record<string, unknown>;
   greeting?: string;
+  /** One-tap example tasks shown on the empty conversation. */
+  suggestions?: ReadonlyArray<{ label: string; prompt: string }>;
   onReady?: () => void;
   headerActionsTargetId?: string;
   headerActionsCompact?: boolean;
@@ -68,6 +70,7 @@ export const OmniAgentsApp = ({
   variables,
   voiceVariables,
   greeting,
+  suggestions,
   onReady,
   headerActionsTargetId,
   headerActionsCompact,
@@ -100,6 +103,7 @@ export const OmniAgentsApp = ({
             variables={variables}
             voiceVariables={voiceVariables}
             greeting={greeting}
+            suggestions={suggestions}
             onReady={onReady}
             headerActionsTargetId={headerActionsTargetId}
             headerActionsCompact={headerActionsCompact}

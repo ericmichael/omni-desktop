@@ -53,6 +53,7 @@ export function App({
   variables: variablesProp,
   voiceVariables,
   greeting,
+  suggestions,
   onReady,
   headerActionsTargetId,
   headerActionsCompact,
@@ -75,6 +76,8 @@ export function App({
   variables?: Record<string, unknown>;
   voiceVariables?: Record<string, unknown>;
   greeting?: string;
+  /** One-tap example tasks shown on the empty conversation. */
+  suggestions?: ReadonlyArray<{ label: string; prompt: string }>;
   onReady?: () => void;
   headerActionsTargetId?: string;
   headerActionsCompact?: boolean;
@@ -1748,6 +1751,7 @@ export function App({
                   <MessageList
                     items={items}
                     greeting={greeting}
+                    suggestions={suggestions}
                     statusText={status}
                     thinking={thinking}
                     statusSpinner={statusSpinner}

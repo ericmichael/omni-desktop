@@ -51,6 +51,8 @@ type CodeWorkspaceLayoutProps = {
   dockTargetId?: string;
   /** Chat mode: time-of-day greeting shown on the empty conversation. */
   greeting?: string;
+  /** One-tap example tasks shown on the empty conversation. */
+  suggestions?: ReadonlyArray<{ label: string; prompt: string }>;
   isGlass?: boolean;
   /**
    * When provided, this layout hosts a column-scoped workspace and all its
@@ -451,6 +453,7 @@ export const CodeWorkspaceLayout = memo(
     onPlanDecision,
     dockTargetId,
     greeting,
+    suggestions,
     isGlass,
     tabId,
     agentWorkspaceDir,
@@ -551,6 +554,7 @@ export const CodeWorkspaceLayout = memo(
             <OmniAgentsApp
               uiUrl={uiSrc}
               greeting={greeting}
+              suggestions={suggestions}
               sessionId={sessionId}
               onSessionChange={onSessionChange}
               variables={variables}

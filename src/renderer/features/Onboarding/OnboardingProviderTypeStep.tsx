@@ -35,7 +35,7 @@ export const OnboardingProviderTypeStep = memo(({ selected, onSelect, onNext }: 
     <div className={styles.root}>
       <div className={styles.header}>
         <Body1Strong>Choose a provider</Body1Strong>
-        <Caption1>Select the AI provider you want to use with Omni.</Caption1>
+        <Caption1>Omni works with any major model API. Pick where your models live — keys stay on this machine.</Caption1>
       </div>
 
       <RadioGroup

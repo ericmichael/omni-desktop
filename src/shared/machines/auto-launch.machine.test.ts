@@ -229,6 +229,12 @@ describe('autoLaunchMachine', () => {
     expect(snap.context.error).toBeNull();
   });
 
+  it('transitions idle → checking on RELAUNCH (pre-launch shell button after a reset)', () => {
+    const snap = next(idleSnap(), { type: 'RELAUNCH' });
+    expect(snap.value).toBe('checking');
+    expect(snap.context.error).toBeNull();
+  });
+
   // -----------------------------------------------------------------------
   // RESET from any state
   // -----------------------------------------------------------------------

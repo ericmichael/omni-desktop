@@ -585,7 +585,7 @@ export const schema: Schema<StoreData> = {
         pipeline: { type: 'object' },
         sandboxProfile: { type: ['string', 'null'] },
         dueDate: { type: 'number' },
-        pinnedAt: { type: 'number' },
+        pinnedAt: { type: ['number', 'null'] },
         seedKey: { type: 'string' },
       },
       required: ['id', 'label', 'slug', 'createdAt'],
@@ -606,7 +606,7 @@ export const schema: Schema<StoreData> = {
         status: { type: 'string', enum: ['active', 'completed', 'archived'] },
         dueDate: { type: 'number' },
         completedAt: { type: 'number' },
-        pinnedAt: { type: 'number' },
+        pinnedAt: { type: ['number', 'null'] },
         createdAt: { type: 'number' },
         updatedAt: { type: 'number' },
         seedKey: { type: 'string' },
@@ -1385,7 +1385,8 @@ export type Project = {
   /** Optional target date (epoch ms). Drives deadline-pressure risk signals. */
   dueDate?: number;
   /** Timestamp of the most recent pin action. Set = pinned to Home; undefined = not pinned. */
-  pinnedAt?: number;
+  /** Pinned to This Week. `null` = explicit unpin (undefined doesn't survive the WS JSON transport). */
+  pinnedAt?: number | null;
   /** Populated by the seed script; tracked in seed-manifest for reset. */
   seedKey?: string;
 };
@@ -1405,7 +1406,8 @@ export type Milestone = {
   /** Stamped when status transitions to 'completed'. */
   completedAt?: number;
   /** Timestamp of the most recent pin action. Set = pinned to Home; undefined = not pinned. */
-  pinnedAt?: number;
+  /** Pinned to This Week. `null` = explicit unpin (undefined doesn't survive the WS JSON transport). */
+  pinnedAt?: number | null;
   createdAt: number;
   updatedAt: number;
   /** Populated by the seed script; tracked in seed-manifest for reset. */

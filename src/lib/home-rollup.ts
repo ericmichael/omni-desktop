@@ -19,12 +19,12 @@ import type {
 
 /** Returns true when the milestone is pinned. */
 export function isMilestonePinned(milestone: Milestone): boolean {
-  return milestone.pinnedAt !== undefined;
+  return milestone.pinnedAt != null;
 }
 
 /** Returns true when the project is pinned. */
 export function isProjectPinned(project: Project): boolean {
-  return project.pinnedAt !== undefined;
+  return project.pinnedAt != null;
 }
 
 /**

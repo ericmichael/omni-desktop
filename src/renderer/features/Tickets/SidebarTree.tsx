@@ -777,11 +777,11 @@ export const SidebarTree = memo(
 
           const projectValue = `project:${project.id}`;
 
-          const projectPinned = project.pinnedAt !== undefined;
+          const projectPinned = project.pinnedAt != null;
           const handleProjectPin = (e: React.MouseEvent) => {
             e.stopPropagation();
             void ticketApi.updateProject(project.id, {
-              pinnedAt: projectPinned ? undefined : Date.now(),
+              pinnedAt: projectPinned ? null : Date.now(),
             });
           };
           const projectPinSlot = projectPinned ? (
@@ -997,11 +997,11 @@ export const SidebarTree = memo(
                           .then((ticket) => ticketApi.goToTicket(ticket.id));
                       };
 
-                      const milestonePinned = milestone.pinnedAt !== undefined;
+                      const milestonePinned = milestone.pinnedAt != null;
                       const handleMilestonePin = (e: React.MouseEvent) => {
                         e.stopPropagation();
                         void milestoneApi.updateMilestone(milestone.id, {
-                          pinnedAt: milestonePinned ? undefined : Date.now(),
+                          pinnedAt: milestonePinned ? null : Date.now(),
                         });
                       };
                       const milestonePinSlot = milestonePinned ? (

@@ -33,7 +33,7 @@ interface JsonProject {
   pipeline?: { columns: JsonColumn[] };
   autoDispatch?: boolean;
   dueDate?: number;
-  pinnedAt?: number;
+  pinnedAt?: number | null;
 }
 
 interface JsonColumn {
@@ -91,7 +91,7 @@ interface JsonMilestone {
   status: string;
   dueDate?: number;
   completedAt?: number;
-  pinnedAt?: number;
+  pinnedAt?: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -190,7 +190,7 @@ function jsonStr(v: unknown): string | null {
   return v != null ? JSON.stringify(v) : null;
 }
 
-function isoOpt(epochMs: number | undefined): string | null {
+function isoOpt(epochMs: number | null | undefined): string | null {
   return epochMs != null ? toIso(epochMs) : null;
 }
 
