@@ -1,64 +1,173 @@
 import type { ChildProcess } from 'node:child_process';
-import { execFile, spawn } from 'node:child_process';
-import { readdir, readFile, stat } from 'node:fs/promises';
-import { createServer } from 'node:net';
-import { homedir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
+import path from 'node:path';
 
 import c from 'ansi-colors';
 import { shellEnvSync } from 'shell-env';
 import { assert } from 'tsafe';
 import { WebSocket as WsWebSocket } from 'ws';
 
-import { OMNI_CODE_VERSION } from '@/lib/omni-version';
 import { DEFAULT_ENV } from '@/lib/pty-utils';
 import { SimpleLogger } from '@/lib/simple-logger';
-import type { PlatformClient } from '@/main/platform-client';
-import { getStore } from '@/main/store';
-import {
-  ensureDirectory,
-  getBundledBinPath,
-  getOmniCliPath,
-  getOmniConfigDir,
-  isDevelopment,
-  isDirectory,
-  isFile,
-  pathExists,
-} from '@/main/util';
-import { downloadWorkspace,uploadWorkspace } from '@/main/workspace-sync';
+import type { IComputeClient } from '@/main/platform-client';
+import { type ResolvedProfile, resolveProfile } from '@/main/profile-resolver';
+import { getSnapshotStore } from '@/main/snapshot-blob-store';
+import { getOmniCliPath, getOmniConfigDir, isDirectory, pathExists } from '@/main/util';
+import { downloadWorkspace } from '@/main/workspace-sync';
 import type {
   AgentProcessData,
   AgentProcessStatus,
   LogEntry,
-  NetworkConfig,
-  SandboxVariant,
+  SandboxPauseResult,
+  SandboxSwitchResult,
   WithTimestamp,
 } from '@/shared/types';
-
-const execFileAsync = promisify(execFile);
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type AgentProcessMode = 'none' | 'local' | 'sandbox' | 'podman' | 'vm' | 'platform';
+/**
+ * Two paths exist after the v22 cut:
+ *
+ *   - ``serve``   — spawn ``omni serve --profile <path>``; the resolved
+ *                   profile drives the SandboxSession (unix_local / docker
+ *                   / e2b / …) and any long-running services in it.
+ *   - ``compute`` — delegate the sandbox lifecycle to an {@link IComputeClient}
+ *                   instead of spawning ``omni serve`` here. Two impls exist:
+ *                   ``PlatformClient`` (omni-platform delegation) and
+ *                   ``RemoteElectronComputeClient`` (computer-as-sandbox: the
+ *                   sandbox runs on a laptop the user owns, driven over the
+ *                   cloud↔laptop reverse-RPC WS). Both connect to a remote
+ *                   ``omni serve`` rather than a local child process.
+ */
+export type AgentProcessMode = 'serve' | 'compute';
+
+/**
+ * How one source for the sandbox workspace should be seeded. Mirrors
+ * the three project source kinds the launcher exposes:
+ *
+ *   - ``local-git`` — host directory under git control. The seed entry
+ *     is ``LocalGitArchive`` (race-free, gitignore-aware).
+ *   - ``local`` — host directory without git. The seed entry is the
+ *     SDK's ``LocalDir`` (rejects symlinks; correct default for
+ *     non-developer workspaces).
+ *   - ``git-remote`` — repo URL the container clones at boot (SDK's
+ *     ``GitRepo`` entry). No host directory is read.
+ *
+ * ``mountName`` is the subdirectory under ``/workspace/`` inside the
+ * container. A multi-source project gets N entries that materialize at
+ * ``/workspace/<mountName>/`` each.
+ */
+/**
+ * ``launcherOwned`` marks a host directory the launcher itself manages (a
+ * per-conversation ``Sessions/<id>`` scratch dir or a managed project dir):
+ * container changes auto-mirror back to it without confirmation, since there
+ * is no foreign user data to clobber. User-attached folders never carry it —
+ * they keep the explicit "Apply to my folder" gate. Launcher-side only; the
+ * ``--source`` descriptor sent to omni serve does not include it.
+ */
+export type AgentProcessSource = { mountName: string } & (
+  | { kind: 'local-git'; workspaceDir: string; ref?: string; launcherOwned?: boolean }
+  | { kind: 'local'; workspaceDir: string; launcherOwned?: boolean }
+  | {
+      kind: 'git-remote';
+      repoUrl: string;
+      ref?: string;
+      /**
+       * Authentication hint for a private remote. Carries the *name* of the env
+       * var holding the token (the value travels in ``gitTokenEnv`` on the start
+       * arg, never on disk or argv) plus the HTTPS basic-auth username. Absent
+       * for public repos. omni serve routes a source with ``auth`` to the
+       * ``AuthenticatedGitRepo`` seed entry, which configures a git credential
+       * helper from the env var so clone + fetch + push all authenticate.
+       */
+      auth?: { tokenEnv: string; username: string };
+    }
+);
 
 export type AgentProcessStartArg = {
-  workspaceDir: string;
-  sandboxVariant?: SandboxVariant;
-  sandboxConfig?: { image?: string; dockerfile?: string } | null;
-  /** Enterprise mode: agent slug for platform policy resolution */
+  /** Profile name to resolve (``host``, ``devbox``, custom user profile, …). */
+  profileName: string;
+  /**
+   * Sources to seed into the sandbox workspace. Each one is passed as a
+   * separate ``--source`` JSON descriptor to ``omni serve`` and ends up
+   * mounted at ``/workspace/<mountName>``. Empty array = no seeding.
+   */
+  sources: AgentProcessSource[];
+  /**
+   * Forwarded to ``omni serve --project`` so the per-project profile
+   * layer applies. (Snapshot keying is driven by ``sessionId``, not this.)
+   */
+  projectId?: string;
+  /**
+   * Stable id for this resumable workspace. Forwarded as ``--session-id``
+   * to ``omni serve`` so the snapshot tar is keyed by it. If absent on
+   * first start, omni serve auto-generates one and emits it in the
+   * readiness payload; the launcher captures it via ``AgentProcessData``
+   * and persists it on the owning record (ticket / chat tab / etc.).
+   */
+  sessionId?: string;
+  /**
+   * Docker container id captured from a previous run. Forwarded as
+   * ``--container-id`` so omni serve can attempt a warm reattach via
+   * ``client.resume(state)`` instead of always creating a fresh container.
+   * Safe to pass a stale id — the SDK falls back to a fresh container +
+   * snapshot rehydrate if the original is gone.
+   */
+  containerId?: string;
+  /**
+   * Used in serve mode as the spawn ``cwd`` for resolving relative
+   * paths in source-path. For git-remote sources, the launcher passes
+   * its own state dir since there's no project workspace on disk.
+   */
+  workspaceDir?: string;
+  /** Compute mode: agent slug for the platform's policy resolution. */
   agentSlug?: string;
-  /** Enterprise mode: domain slug override */
+  /** Compute mode: domain slug override. */
   domain?: string;
-  /** Pre-synced share name from WorkspaceSyncManager (skips one-shot upload). */
+  /** Compute mode: pre-synced share name (skips the one-shot upload). */
   preSyncedShareName?: string;
-  /** Git-remote source: container clones this repo instead of receiving an uploaded workspace. */
-  gitRepo?: {
-    url: string;
-    branch?: string;
+  /** Compute mode: git-remote URL the remote container clones. */
+  gitRepo?: { url: string; branch?: string };
+  /**
+   * Local-compute (computer-as-sandbox) extras forwarded to the
+   * `IComputeClient.startSession` extras param so the laptop's local
+   * `ProcessManager` knows what profile / env / workspace to spawn against.
+   * Ignored by `PlatformClient`.
+   */
+  localComputeExtras?: {
+    sessionId?: string;
+    profileName?: string;
+    workspaceDir?: string;
+    projectId?: string;
+    env?: Record<string, string>;
   };
+  /**
+   * `{ envVarName: token }` for private git remotes, merged into the spawned
+   * `omni serve` process env. The matching env var *name* is referenced by each
+   * git-remote source's `auth.tokenEnv`; the token value lives only here (in
+   * process env), never on disk or in the `--source` argv — mirroring how cloud
+   * model/MCP secrets are injected.
+   */
+  gitTokenEnv?: Record<string, string>;
+  /**
+   * Boot-time credential descriptors for the sandbox: one per linked host the
+   * project's sources reference (git-remote URL *and* each local-git checkout's
+   * own remote). Forwarded as `--credential <json>` to `omni serve`, which
+   * configures git + the host's CLI (`gh` / `az devops`) inside the container so
+   * the agent authenticates for *every* source kind, not just cloned remotes.
+   * Token values ride in `gitTokenEnv` (process env), referenced here by name.
+   */
+  credentials?: Array<{ url: string; username: string; tokenEnv: string }>;
+  /**
+   * Explicit profile file path, bypassing name-based resolution. Set by the
+   * cloud for `local:<machineId>` (computer-as-sandbox) sessions: the launcher
+   * writes a per-session `host_bridge` profile (pointing `omni serve`'s sandbox
+   * at the user's laptop via the relay) and passes its path here. When set,
+   * `profileName` is only used for labelling.
+   */
+  explicitProfilePath?: string;
 };
 
 export type FetchFn = typeof globalThis.fetch;
@@ -67,43 +176,144 @@ export type FetchFn = typeof globalThis.fetch;
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-const PORT_CONFLICT_PATTERNS = [
-  /port is already allocated/i,
-  /address already in use/i,
-  /bind: address already in use/i,
-  /port \d+ is in use/i,
-];
-
-type SandboxJsonPayload = {
+/**
+ * JSON readiness payload printed by ``omni serve`` and consumed here.
+ * Shape pinned by the launcher↔omni-code contract; keep aligned with
+ * ``omni-code/omni_code/serve_cli.py``.
+ */
+type ServeReadyPayload = {
   sandbox_url: string;
   ws_url: string;
-  ui_url: string | null;
-  code_server_url: string | null;
-  novnc_url: string | null;
-  container_id: string | null;
-  container_name: string | null;
-  ports: {
-    sandbox: number;
-    ui: number | null;
-    code_server: number | null;
-    vnc: number | null;
-  };
+  ui_url: string;
+  services: Record<string, string>;
+  ports: { ui: number };
+  container_id?: string | null;
+  container_name?: string | null;
+  /** Which resume tier the SDK ended up taking. See ``AgentProcessData.resume``. */
+  resume?: 'reused' | 'rehydrated' | 'fresh' | null;
+  _debug?: Record<string, unknown>;
 };
 
-const sandboxPayloadToData = (payload: SandboxJsonPayload): AgentProcessData => {
-  assert(payload.ui_url, 'Missing ui_url');
-  assert(payload.ports.ui, 'Missing ui port');
+const servePayloadToData = (payload: ServeReadyPayload): AgentProcessData => {
+  assert(payload.ui_url, 'Missing ui_url in omni serve payload');
+  assert(payload.ports?.ui, 'Missing ports.ui in omni serve payload');
   return {
     uiUrl: payload.ui_url,
     wsUrl: payload.ws_url,
     sandboxUrl: payload.sandbox_url,
-    codeServerUrl: payload.code_server_url ?? undefined,
-    noVncUrl: payload.novnc_url ?? undefined,
+    services: payload.services ?? {},
     containerId: payload.container_id ?? undefined,
     containerName: payload.container_name ?? undefined,
     port: payload.ports.ui,
+    ...(payload.resume ? { resume: payload.resume } : {}),
   };
 };
+
+const SERVER_CALL_TIMEOUT_MS = 8_000;
+
+/**
+ * Open a one-shot JSON-RPC WebSocket to omni serve, send one
+ * ``server_call`` for *fn*, await the result, then close. Used by
+ * lifecycle calls (pause/unpause) that don't need a long-lived control
+ * channel. Auth tokens travel in the wsUrl query string so we don't have
+ * to re-derive them here.
+ */
+async function oneShotServerCall(
+  wsUrl: string,
+  fn: string,
+  args: Record<string, unknown> = {}
+): Promise<SandboxPauseResult> {
+  return new Promise<SandboxPauseResult>((resolve) => {
+    let settled = false;
+    const finish = (result: SandboxPauseResult) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      try {
+        socket.close();
+      } catch {
+        // ignore
+      }
+      resolve(result);
+    };
+
+    const socket = new WsWebSocket(wsUrl);
+    const timer = setTimeout(
+      () => finish({ ok: false, supported: false, reason: `${fn} timed out` }),
+      SERVER_CALL_TIMEOUT_MS
+    );
+
+    socket.once('open', () => {
+      try {
+        socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'server_call',
+            params: { function: fn, args },
+          })
+        );
+      } catch (err) {
+        clearTimeout(timer);
+        finish({
+          ok: false,
+          supported: false,
+          reason: `${fn} send failed: ${(err as Error).message ?? err}`,
+        });
+      }
+    });
+
+    socket.on('message', (raw) => {
+      clearTimeout(timer);
+      let msg: unknown;
+      try {
+        msg = JSON.parse(String(raw));
+      } catch {
+        finish({ ok: false, supported: false, reason: `${fn} returned unparseable payload` });
+        return;
+      }
+      if (typeof msg !== 'object' || msg === null) {
+        finish({ ok: false, supported: false, reason: `${fn} returned non-object payload` });
+        return;
+      }
+      const obj = msg as Record<string, unknown>;
+      if ('error' in obj && obj.error && typeof obj.error === 'object') {
+        const errMsg = String((obj.error as Record<string, unknown>).message ?? `${fn} rpc error`);
+        finish({ ok: false, supported: false, reason: errMsg });
+        return;
+      }
+      const result = obj.result;
+      if (typeof result !== 'object' || result === null) {
+        finish({ ok: false, supported: false, reason: `${fn} returned no result` });
+        return;
+      }
+      const r = result as Record<string, unknown>;
+      finish({
+        ok: r.ok === true,
+        supported: r.supported !== false,
+        data: r,
+        ...(typeof r.paused === 'boolean' ? { paused: r.paused } : {}),
+        ...(typeof r.reason === 'string' ? { reason: r.reason } : {}),
+      });
+    });
+
+    socket.on('error', (err) => {
+      clearTimeout(timer);
+      finish({
+        ok: false,
+        supported: false,
+        reason: `${fn} ws error: ${(err as Error).message ?? err}`,
+      });
+    });
+
+    socket.on('close', () => {
+      // If the socket closes before we got a result, treat as failure.
+      // The settled guard makes this a no-op in the normal path.
+      finish({ ok: false, supported: false, reason: `${fn} ws closed unexpectedly` });
+    });
+  });
+}
 
 // ---------------------------------------------------------------------------
 // AgentProcess
@@ -122,8 +332,18 @@ export class AgentProcess {
   private jsonEmitted = false;
   private lastStartArg: AgentProcessStartArg | null = null;
   private fetchFn: FetchFn;
-  private platformClient: PlatformClient | null = null;
-  private platformSessionId: string | null = null;
+  private computeClient: IComputeClient | null = null;
+  private computeSessionId: string | null = null;
+  private getExtraEnv?: () => Record<string, string> | Promise<Record<string, string>>;
+  /**
+   * Children we deliberately killed via {@link killProcess} (SIGTERM → SIGKILL).
+   * Their late `close` events should NOT flip status to `error("signal SIGKILL")`
+   * — that's what the user asked for. Without this guard the late close from a
+   * killed child can land AFTER a new child has been spawned by `start()` and
+   * hijack the new process's status with a stale SIGKILL message.
+   * WeakSet so the entry GCs with the ChildProcess.
+   */
+  private intentionallyKilled: WeakSet<ChildProcess> = new WeakSet();
 
   constructor(opts: {
     mode: AgentProcessMode;
@@ -131,13 +351,22 @@ export class AgentProcess {
     ipcRawOutput: (data: string) => void;
     onStatusChange: (status: WithTimestamp<AgentProcessStatus>) => void;
     fetchFn?: FetchFn;
-    platformClient?: PlatformClient;
+    computeClient?: IComputeClient;
+    /**
+     * Extra env merged into the spawned `omni serve` (serve mode), evaluated
+     * per start. Cloud uses this to inject a fresh per-tenant
+     * `OMNI_RUNTIME_TOKEN` for the agent's HTTP MCP calls, AND for the
+     * codex-token materialization side effect (writing the per-principal
+     * codex.json to the spawn's config dir before omni-serve starts).
+     */
+    getExtraEnv?: () => Record<string, string> | Promise<Record<string, string>>;
   }) {
     this.mode = opts.mode;
     this.ipcRawOutput = opts.ipcRawOutput;
     this.onStatusChange = opts.onStatusChange;
     this.fetchFn = opts.fetchFn ?? globalThis.fetch;
-    this.platformClient = opts.platformClient ?? null;
+    this.computeClient = opts.computeClient ?? null;
+    this.getExtraEnv = opts.getExtraEnv;
     this.status = { type: 'uninitialized', timestamp: Date.now() };
     this.log = new SimpleLogger((entry) => {
       this.ipcRawOutput(entry.message);
@@ -149,7 +378,7 @@ export class AgentProcess {
 
   getStatus = (): WithTimestamp<AgentProcessStatus> => this.status;
 
-  start = async (arg: AgentProcessStartArg, options?: { rebuild?: boolean }): Promise<void> => {
+  start = async (arg: AgentProcessStartArg): Promise<void> => {
     if (this.status.type === 'starting' || this.status.type === 'connecting' || this.status.type === 'running') {
       return;
     }
@@ -157,139 +386,431 @@ export class AgentProcess {
     this.lastStartArg = arg;
     this.updateStatus({ type: 'starting' });
 
-    // Enterprise mode: delegate to platform
-    if (this.mode === 'platform') {
-      await this.startPlatformSession(arg);
+    if (this.mode === 'compute') {
+      await this.startComputeSession(arg);
       return;
     }
 
-    const env = { ...process.env, ...DEFAULT_ENV, ...shellEnvSync() } as Record<string, string>;
+    await this.startServeSession(arg);
+  };
 
-    // Pre-flight checks
-    if (this.mode === 'sandbox') {
-      const dockerOk = await this.checkDocker(env);
-      if (!dockerOk) {
-return;
-}
-    } else if (this.mode === 'podman') {
-      const podmanOk = await this.checkPodman(env);
-      if (!podmanOk) {
-return;
-}
-    }
+  stop = async (): Promise<void> => {
+    if (this.mode === 'compute') {
+      this.updateStatus({ type: 'stopping' });
+      if (this.computeSessionId && this.computeClient) {
+        const sessionId = this.computeSessionId;
+        try {
+          await this.computeClient.stopSession(sessionId);
+        } catch {
+          // best-effort cleanup
+        }
 
-    // Git-remote projects don't have a local workspace dir — the container clones the repo
-    if (!arg.gitRepo && !(await isDirectory(arg.workspaceDir))) {
-      this.updateStatus({ type: 'error', error: { message: `Workspace directory not found: ${arg.workspaceDir}` } });
-      return;
-    }
+        // Download workspace files back from Azure Files share unless the
+        // sync manager handles it or the source is a git-remote (container
+        // pushes to git).
+        if (
+          this.lastStartArg &&
+          this.lastStartArg.workspaceDir &&
+          !this.lastStartArg.preSyncedShareName &&
+          !this.lastStartArg.gitRepo
+        ) {
+          try {
+            this.ipcRawOutput('Finalizing workspace download...\r\n');
+            const { downloadSasUrl } = await this.computeClient.finalizeWorkspace(sessionId);
+            await downloadWorkspace(this.lastStartArg.workspaceDir, downloadSasUrl, this.fetchFn, (msg) =>
+              this.ipcRawOutput(`${msg}\r\n`)
+            );
+            this.ipcRawOutput('Workspace downloaded successfully\r\n');
+          } catch (error) {
+            this.ipcRawOutput(`Workspace download failed: ${(error as Error).message}\r\n`);
+          }
+        }
 
-    if (this.mode !== 'vm') {
-      if (!(await pathExists(getOmniCliPath()))) {
-        this.updateStatus({ type: 'error', error: { message: 'Omni runtime is not installed' } });
-        return;
+        this.computeSessionId = null;
       }
+      this.updateStatus({ type: 'exited' });
+      return;
+    }
+
+    // Serve mode — omni serve handles its own teardown on SIGTERM, so we
+    // just kill the child and let it run the session.stop()/aclose() and
+    // service cleanup in its own finally block.
+    if (!this.childProcess) {
+      return;
+    }
+    this.updateStatus({ type: 'stopping' });
+    await this.killProcess();
+    this.updateStatus({ type: 'exited' });
+  };
+
+  rebuild = async (fallbackArg: AgentProcessStartArg): Promise<void> => {
+    const arg = this.lastStartArg ?? fallbackArg;
+    await this.stop();
+    await this.start(arg);
+  };
+
+  exit = async (): Promise<void> => {
+    this.updateStatus({ type: 'exiting' });
+    await this.stop();
+  };
+
+  /**
+   * Freeze every process in the sandbox container without releasing it.
+   * Returns the result the omni-code server function emitted: ``ok``,
+   * ``supported``, ``paused``, optional ``reason``. Callers should treat
+   * ``supported: false`` as "this backend doesn't pause — fall back to
+   * stop/shutdown if you want to free resources." A successful pause flips
+   * ``AgentProcessData.paused`` to true for the renderer.
+   */
+  pause = async (): Promise<SandboxPauseResult> => {
+    return this.callSandboxLifecycle('sandbox.pause', true);
+  };
+
+  /**
+   * Thaw a paused sandbox container. Idempotent — calling on an
+   * already-running container is a no-op as far as the user is concerned
+   * (the server function returns supported=true, paused=false).
+   */
+  unpause = async (): Promise<SandboxPauseResult> => {
+    return this.callSandboxLifecycle('sandbox.unpause', false);
+  };
+
+  /**
+   * Switch this running agent's sandbox to *profileName* in place via the
+   * ``sandbox.switch`` server function — no process restart, the WS stays up,
+   * the conversation never drops. On success, patch the running status'
+   * ``services``/``containerId`` so the renderer's in-sandbox panes (code-
+   * server / VNC) reload to the new URLs; ``uiUrl``/``wsUrl`` are unchanged
+   * (same serve process). Returns ``ok:false`` for profiles that can't switch
+   * in place (``host`` / a missing file) so the caller can fall back to a
+   * stop+relaunch.
+   */
+  switchSandbox = async (profileName: string): Promise<SandboxSwitchResult> => {
+    if (this.mode === 'compute') {
+      return { ok: false, fallback: true, reason: 'compute mode does not support in-place sandbox switch' };
+    }
+    if (this.status.type !== 'running' && this.status.type !== 'connecting') {
+      return { ok: false, fallback: true, reason: 'sandbox is not running' };
+    }
+    const resolved = resolveProfile(profileName);
+    if (resolved.kind !== 'file') {
+      // ``host`` (builtin-default) and missing profiles have no --profile path
+      // to switch to; the caller falls back to a full stop+relaunch.
+      return {
+        ok: false,
+        fallback: true,
+        reason: `profile "${profileName}" cannot switch in place (${resolved.kind})`,
+      };
+    }
+    const data = (this.status as Extract<AgentProcessStatus, { type: 'running' | 'connecting' }>).data;
+    const wsUrl = data.wsUrl;
+    if (!wsUrl) {
+      return { ok: false, fallback: true, reason: 'no ws_url available' };
+    }
+    // Flag the transition so the renderer can overlay a scrim over the (still
+    // mounted) conversation. Cleared in `finally` regardless of outcome.
+    this.updateAgentProcessData({ switching: true });
+    try {
+      const res = await oneShotServerCall(wsUrl, 'sandbox.switch', { profile: resolved.path });
+      const raw = res.data ?? {};
+      if (!res.ok) {
+        const recovered = raw.recovered === 'lost' || raw.recovered === 'rolled_back' ? raw.recovered : undefined;
+        // Rolled back → the old session is alive; don't relaunch. Lost (or no
+        // recovery info) → the sandbox is gone; relaunch to recover.
+        return {
+          ok: false,
+          fallback: recovered !== 'rolled_back',
+          ...(recovered ? { recovered } : {}),
+          reason: res.reason ?? 'switch failed',
+        };
+      }
+      const services =
+        raw.services && typeof raw.services === 'object' ? (raw.services as Record<string, string>) : undefined;
+      const containerId = typeof raw.container_id === 'string' ? raw.container_id : undefined;
+      const backend = typeof raw.backend === 'string' ? raw.backend : undefined;
+      const profile = typeof raw.profile === 'string' ? raw.profile : profileName;
+      // uiUrl/wsUrl stay put (same omni serve) — only the service panes reload.
+      this.updateAgentProcessData({ ...(services ? { services } : {}), containerId });
+      // Keep a future cold relaunch aligned with the now-active profile.
+      if (this.lastStartArg) {
+        this.lastStartArg = { ...this.lastStartArg, profileName };
+      }
+      return { ok: true, profile, backend, containerId, services };
+    } finally {
+      this.updateAgentProcessData({ switching: false });
+    }
+  };
+
+  /**
+   * Fire-and-forget presence ping. Resets the sandbox's idle timer so it
+   * doesn't pause while the user is actively interacting with a client
+   * surface. Throttling is the renderer's responsibility — we just relay.
+   */
+  notifyActivity = (): void => {
+    if (this.status.type !== 'running' && this.status.type !== 'connecting') {
+      return;
+    }
+    const data = (this.status as Extract<AgentProcessStatus, { type: 'running' | 'connecting' }>).data;
+    if (!data.wsUrl) {
+      return;
+    }
+    void oneShotServerCall(data.wsUrl, 'sandbox.notify_activity').catch(() => {
+      // Best-effort. A dropped ping costs us ~60s of headroom (the
+      // renderer's throttle window) before the next one tries.
+    });
+  };
+
+  private callSandboxLifecycle = async (
+    fn: 'sandbox.pause' | 'sandbox.unpause',
+    intendedPaused: boolean
+  ): Promise<SandboxPauseResult> => {
+    if (this.mode === 'compute') {
+      return { ok: false, supported: false, reason: 'compute mode does not implement pause yet' };
+    }
+    if (this.status.type !== 'running' && this.status.type !== 'connecting') {
+      return { ok: false, supported: false, reason: 'sandbox is not running' };
+    }
+    const data = (this.status as Extract<AgentProcessStatus, { type: 'running' | 'connecting' }>).data;
+    const wsUrl = data.wsUrl;
+    if (!wsUrl) {
+      return { ok: false, supported: false, reason: 'no ws_url available' };
+    }
+    try {
+      const result = await oneShotServerCall(wsUrl, fn);
+      // Trust the server function's reported paused state when supported.
+      if (result.ok && result.supported) {
+        this.updateAgentProcessData({
+          paused: result.paused ?? intendedPaused,
+        });
+      } else if (!result.supported) {
+        // Backend doesn't support pause — surface that to callers but
+        // don't pretend the local state changed.
+      }
+      return result;
+    } catch (err) {
+      const message = (err as Error).message ?? String(err);
+      return { ok: false, supported: true, reason: message };
+    }
+  };
+
+  resizePty = (_cols: number, _rows: number): void => {};
+
+  // --- Serve mode ---
+
+  private startServeSession = async (arg: AgentProcessStartArg): Promise<void> => {
+    // Every local-* source must exist on disk before we shell out. Last-ditch
+    // mkdir before the existence check — `ProcessManager.ensureWorkspaceDir`
+    // already ran but may have failed silently (in which case it logged a
+    // warning). If THIS mkdir also fails, surface the underlying error in the
+    // status message so the renderer banner is debuggable, instead of the
+    // generic "directory not found".
+    for (const s of arg.sources) {
+      if (s.kind === 'local' || s.kind === 'local-git') {
+        if (!(await isDirectory(s.workspaceDir))) {
+          try {
+            const { mkdir } = await import('node:fs/promises');
+            await mkdir(s.workspaceDir, { recursive: true });
+          } catch (mkErr) {
+            this.updateStatus({
+              type: 'error',
+              error: {
+                message:
+                  `Workspace directory not found: ${s.workspaceDir} (source ${s.mountName}) ` +
+                  `— mkdir failed: ${(mkErr as Error).message}`,
+              },
+            });
+            return;
+          }
+          if (!(await isDirectory(s.workspaceDir))) {
+            this.updateStatus({
+              type: 'error',
+              error: { message: `Workspace directory not found: ${s.workspaceDir} (source ${s.mountName})` },
+            });
+            return;
+          }
+        }
+      }
+    }
+
+    const omniCli = getOmniCliPath();
+    if (!(await pathExists(omniCli))) {
+      this.updateStatus({
+        type: 'error',
+        error: { message: 'Omni runtime is not installed' },
+      });
+      return;
+    }
+
+    // Cloud computer-as-sandbox: a per-session `host_bridge` profile written by
+    // the launcher, used verbatim. Otherwise resolve by name through the chain.
+    const resolved: ResolvedProfile = arg.explicitProfilePath
+      ? { kind: 'file', path: arg.explicitProfilePath }
+      : resolveProfile(arg.profileName);
+    if (resolved.kind === 'missing') {
+      this.updateStatus({
+        type: 'error',
+        error: {
+          message:
+            `Profile "${arg.profileName}" not found. Expected at ${resolved.expected} ` +
+            `or a launcher-bundled assets/profiles/${arg.profileName}.yml.`,
+        },
+      });
+      return;
     }
 
     if (this.childProcess) {
       await this.killProcess();
     }
-
     this.stdoutBuffer = '';
     this.stderrBuffer = '';
     this.jsonEmitted = false;
 
-    let spawnBinary: string;
-    let args: string[];
-
-    if (this.mode === 'sandbox' || this.mode === 'podman') {
-      spawnBinary = getOmniCliPath();
-      args = await this.buildSandboxArgs(arg, options);
-      if (this.mode === 'podman') {
-        env.OMNI_CONTAINER_RUNTIME = 'podman';
+    const extra = (await this.getExtraEnv?.()) ?? {};
+    const env = {
+      ...process.env,
+      ...DEFAULT_ENV,
+      ...shellEnvSync(),
+      ...extra,
+      // Per-launch git tokens for private remotes. Last so a token env name can
+      // never be shadowed by ambient/extra env.
+      ...(arg.gitTokenEnv ?? {}),
+    } as Record<string, string>;
+    const args: string[] = ['serve', '--output', 'json'];
+    // One ``--source <json>`` per source — omni serve's argparse uses
+    // ``action="append"``, so each emits a fresh dict.
+    for (const s of arg.sources) {
+      const desc: Record<string, unknown> = { kind: s.kind, mountName: s.mountName };
+      if (s.kind === 'local' || s.kind === 'local-git') {
+        desc.path = s.workspaceDir;
       }
-    } else if (this.mode === 'vm') {
-      const sandboxBinName = process.platform === 'win32' ? 'omni-sandbox.exe' : 'omni-sandbox';
-      spawnBinary = join(getBundledBinPath(), sandboxBinName);
-
-      if (!(await pathExists(spawnBinary))) {
-        this.updateStatus({
-          type: 'error',
-          error: { message: `Sandbox binary not found: ${spawnBinary}` },
-        });
-        return;
+      if (s.kind === 'git-remote') {
+        desc.repoUrl = s.repoUrl;
+        if (s.auth) {
+          desc.auth = s.auth;
+        }
       }
-
-      args = await this.buildVmArgs(arg);
-    } else if (this.mode === 'local') {
-      // Local mode — wrap in omni-sandbox for process isolation (bwrap + seccomp).
-      const sandboxBinName = process.platform === 'win32' ? 'omni-sandbox.exe' : 'omni-sandbox';
-      spawnBinary = join(getBundledBinPath(), sandboxBinName);
-
-      if (!(await pathExists(spawnBinary))) {
-        this.updateStatus({
-          type: 'error',
-          error: { message: `Sandbox binary not found: ${spawnBinary}` },
-        });
-        return;
+      if (s.kind === 'local-git' || s.kind === 'git-remote') {
+        if (s.ref) {
+          desc.ref = s.ref;
+        }
       }
-
-      args = await this.buildLocalArgs(arg);
-    } else {
-      // None mode — run omni CLI directly, no sandboxing.
-      spawnBinary = getOmniCliPath();
-      args = await this.buildDirectArgs(arg);
+      args.push('--source', JSON.stringify(desc));
     }
-
-    const modeLabels: Record<AgentProcessMode, string> = {
-      none: 'agent',
-      local: 'agent (sandboxed)',
-      sandbox: 'sandbox',
-      podman: 'sandbox (Podman)',
-      vm: 'VM sandbox',
-      platform: 'platform sandbox',
-    };
-    this.log.info(c.cyan(`Starting ${modeLabels[this.mode]}...\r\n`));
-    this.log.info(`> ${spawnBinary} ${args.join(' ')}\r\n`);
-
-    // In none/local mode we know the port upfront — start readiness polling immediately
-    if (this.mode === 'local' || this.mode === 'none') {
-      const portMatch = args.find((a, i) => i > 0 && args[i - 1] === '--port');
-      const port = portMatch ? parseInt(portMatch, 10) : 8000;
-      const uiUrl = `http://127.0.0.1:${port}`;
-      const wsUrl = `ws://127.0.0.1:${port}/ws`;
-      const data: AgentProcessData = { uiUrl, wsUrl, port };
-      this.jsonEmitted = true;
-      this.updateStatus({ type: 'connecting', data });
-      void this.waitForReady(data);
+    // One ``--credential <json>`` per linked host the project uses. Token values
+    // are not here — they ride in ``gitTokenEnv`` (merged into env above) and are
+    // referenced by ``tokenEnv`` name.
+    for (const cred of arg.credentials ?? []) {
+      args.push('--credential', JSON.stringify(cred));
     }
+    if (arg.projectId) {
+      args.push('--project', arg.projectId);
+    }
+    // Snapshot is keyed by sessionId, not projectId. Enabling --snapshot-dir
+    // unconditionally lets omni serve generate a session_id on first start
+    // (we capture it from the readiness payload) and resume from the stored
+    // tar on subsequent starts when the caller passes sessionId back.
+    const snapshotDir = path.join(getOmniConfigDir(), 'snapshots');
+    args.push('--snapshot-dir', snapshotDir);
+    if (arg.sessionId) {
+      args.push('--session-id', arg.sessionId);
+      // Cloud durability: launcher container disk is ephemeral, so pull a
+      // prior snapshot tar from Azure Blob if one exists. No-op when
+      // OMNI_AZURE_SNAPSHOT_CONTAINER isn't set (desktop, self-hosted).
+      try {
+        const pulled = await getSnapshotStore().pull(arg.sessionId, snapshotDir);
+        if (pulled) {
+          this.log.info(c.cyan(`Restored snapshot from blob for session ${arg.sessionId}\r\n`));
+        }
+      } catch (err) {
+        // Best-effort — omni serve will start fresh if the pull fails.
+        console.error('[snapshot-blob] pull failed:', err);
+      }
+    }
+    // ``--container-id`` flips omni serve to ``client.resume(state)`` for a
+    // warm reattach. The SDK silently falls back to a fresh container +
+    // snapshot rehydrate if the id is stale, so it is always safe to pass.
+    if (arg.containerId) {
+      args.push('--container-id', arg.containerId);
+    }
+    if (resolved.kind === 'file') {
+      args.push('--profile', resolved.path);
+    }
+    // `host` profile (kind === 'builtin-default') passes no --profile, so
+    // omni serve uses its bundled default.
+
+    // cwd: prefer the first local source's workspaceDir for resolving
+    // relative paths in shell. With no local source, fall back to the
+    // launcher config dir. Same value is forwarded as --workspace so
+    // omni serve can substitute ${workspace_dir} in the resolved profile.
+    const firstLocal = arg.sources.find((s) => s.kind === 'local' || s.kind === 'local-git');
+    const spawnCwd =
+      firstLocal && (firstLocal.kind === 'local' || firstLocal.kind === 'local-git')
+        ? firstLocal.workspaceDir
+        : getOmniConfigDir();
+    args.push('--workspace', spawnCwd);
+
+    this.log.info(c.cyan(`Starting omni serve (profile: ${arg.profileName})...\r\n`));
+    this.log.info(`> ${omniCli} ${args.join(' ')}\r\n`);
 
     try {
-      const child = spawn(spawnBinary, args, {
-        cwd: arg.workspaceDir,
+      const child = spawn(omniCli, args, {
+        cwd: spawnCwd,
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
-
       this.childProcess = child;
-
       child.stdout.on('data', this.handleStdout);
       child.stderr.on('data', this.handleStderr);
-
       child.on('error', (error: Error) => {
-        if (this.childProcess && this.childProcess !== child) {
-return;
-}
+        // Same guards as the `close` handler — don't hijack a newer spawn
+        // or an intentional kill with a stale spawn-failure status.
+        if (this.childProcess !== null && this.childProcess !== child) {
+          return;
+        }
+        if (this.intentionallyKilled.has(child)) {
+          return;
+        }
         this.childProcess = null;
         this.updateStatus({ type: 'error', error: { message: error.message } });
       });
-
       child.on('close', (exitCode, signal) => {
-        if (this.childProcess && this.childProcess !== child) {
-return;
-}
+        // A killed-child late close event must not blow away the status of a
+        // newer process that `start()` may have spawned in the meantime. Two
+        // independent checks:
+        //   1. If childProcess points elsewhere (a newer spawn took over), the
+        //      close belongs to an OLD child — ignore.
+        //   2. If we intentionally killed this child via killProcess(), the
+        //      next status was the caller's responsibility (`stopping` →
+        //      `exited`), and the SIGTERM/SIGKILL signal lines are noise.
+        if (this.childProcess !== null && this.childProcess !== child) {
+          return;
+        }
+        if (this.intentionallyKilled.has(child)) {
+          this.intentionallyKilled.delete(child);
+          // Only clear childProcess if it still points at THIS child — a
+          // concurrent start may have already assigned a new one.
+          if (this.childProcess === child) {
+            this.childProcess = null;
+          }
+          // Don't touch status: stop()/exit() already set it to 'exited' or
+          // the caller transitioned to 'starting' for the replacement.
+          // Still push snapshot to blob for durability of the killed session.
+          if (arg.sessionId) {
+            void getSnapshotStore()
+              .push(arg.sessionId, snapshotDir)
+              .catch((err) => console.error('[snapshot-blob] push failed:', err));
+          }
+          return;
+        }
         this.childProcess = null;
-
+        // Push the snapshot tar to blob durability before reporting status.
+        // No-op when not configured or when sessionId is unset. Fire-and-
+        // forget — the renderer's exit handling shouldn't wait on Azure I/O.
+        if (arg.sessionId) {
+          void getSnapshotStore()
+            .push(arg.sessionId, snapshotDir)
+            .catch((err) => console.error('[snapshot-blob] push failed:', err));
+        }
         if (this.status.type === 'exiting' || this.status.type === 'stopping') {
           this.updateStatus({ type: 'exited' });
           return;
@@ -298,21 +819,17 @@ return;
           this.updateStatus({ type: 'exited' });
           return;
         }
-        if ((this.mode === 'sandbox' || this.mode === 'podman') && this.detectPortConflict()) {
-          this.updateStatus({
-            type: 'error',
-            error: {
-              message: 'A port required by the sandbox is already in use. Stop conflicting services or containers and try again.',
-            },
-          });
-          return;
-        }
-
         const reason = signal ? `signal ${signal}` : `code ${exitCode}`;
+        // omni serve emits structured launch failures (bad source, seed-size
+        // cap, profile errors) as a ``{"error": "..."}`` line. Surface that
+        // message directly; otherwise fall back to the raw stderr tail.
+        const structured = this.structuredError();
         const tail = this.tailStderr();
-        const message = tail
-          ? `Process exited (${reason})\n\n${tail}`
-          : `Process exited (${reason})`;
+        const message = structured
+          ? structured
+          : tail
+            ? `omni serve exited (${reason})\n\n${tail}`
+            : `omni serve exited (${reason})`;
         this.updateStatus({ type: 'error', error: { message } });
       });
     } catch (error) {
@@ -321,112 +838,51 @@ return;
     }
   };
 
-  stop = async (): Promise<void> => {
-    // Enterprise mode: stop via platform API
-    if (this.mode === 'platform') {
-      this.updateStatus({ type: 'stopping' });
-      if (this.platformSessionId && this.platformClient) {
-        const sessionId = this.platformSessionId;
-        try {
-          await this.platformClient.stopSession(sessionId);
-        } catch {
-          // best-effort cleanup
-        }
+  // --- Compute mode (IComputeClient-backed: PlatformClient or
+  //     RemoteElectronComputeClient; see AgentProcessMode docs) ---
 
-        // Download workspace files back from Azure Files share
-        // Skip if: sync manager handles it, or git-remote (container pushes to git)
-        if (this.lastStartArg && !this.lastStartArg.preSyncedShareName && !this.lastStartArg.gitRepo) {
-          try {
-            this.ipcRawOutput('Finalizing workspace download...\r\n');
-            const { downloadSasUrl } = await this.platformClient.finalizeWorkspace(sessionId);
-            await downloadWorkspace(this.lastStartArg.workspaceDir, downloadSasUrl, this.fetchFn, (msg) =>
-              this.ipcRawOutput(`${msg  }\r\n`)
-            );
-            this.ipcRawOutput('Workspace downloaded successfully\r\n');
-          } catch (error) {
-            this.ipcRawOutput(`Workspace download failed: ${(error as Error).message}\r\n`);
-          }
-        }
-
-        this.platformSessionId = null;
-      }
-      this.updateStatus({ type: 'exited' });
+  private startComputeSession = async (arg: AgentProcessStartArg): Promise<void> => {
+    if (!this.computeClient) {
+      this.updateStatus({ type: 'error', error: { message: 'Compute client not configured' } });
       return;
     }
 
-    if (!this.childProcess) {
-      if (this.mode === 'sandbox' || this.mode === 'podman') {
-        const env = { ...process.env, ...DEFAULT_ENV, ...shellEnvSync() } as Record<string, string>;
-        await this.stopActiveContainer(env);
-      }
-      return;
-    }
-
-    this.updateStatus({ type: 'stopping' });
-    const env = { ...process.env, ...DEFAULT_ENV, ...shellEnvSync() } as Record<string, string>;
-    await this.killProcess();
-    if (this.mode === 'sandbox' || this.mode === 'podman') {
-      await this.stopActiveContainer(env);
-    }
-    this.updateStatus({ type: 'exited' });
-  };
-
-  rebuild = async (fallbackArg: AgentProcessStartArg): Promise<void> => {
-    const arg = this.lastStartArg ?? fallbackArg;
-    await this.stop();
-    await this.start(arg, { rebuild: true });
-  };
-
-  exit = async (): Promise<void> => {
-    this.updateStatus({ type: 'exiting' });
-    await this.stop();
-  };
-
-  resizePty = (_cols: number, _rows: number): void => {};
-
-  // --- Platform mode ---
-
-  private startPlatformSession = async (arg: AgentProcessStartArg): Promise<void> => {
-    if (!this.platformClient) {
-      this.updateStatus({ type: 'error', error: { message: 'Platform client not configured' } });
-      return;
-    }
-
-    const agentSlug = arg.agentSlug ?? 'omni-code';
+    const agentSlug = arg.agentSlug ?? 'omni_code';
 
     try {
-      this.log.info(c.cyan(`Requesting sandbox from platform (agent: ${agentSlug})...\r\n`));
+      this.log.info(c.cyan(`Requesting sandbox from compute backend (agent: ${agentSlug})...\r\n`));
 
-      const session = await this.platformClient.startSession(agentSlug, arg.domain, arg.gitRepo);
-      this.platformSessionId = session.sessionId;
+      const session = await this.computeClient.startSession(agentSlug, arg.domain, arg.gitRepo, arg.localComputeExtras);
+      this.computeSessionId = session.sessionId;
 
       if (arg.gitRepo) {
-        // Git-remote: container will clone the repo — no workspace upload needed
-        this.log.info(c.cyan(`Container will clone ${arg.gitRepo.url}${arg.gitRepo.branch ? ` (${arg.gitRepo.branch})` : ''}\r\n`));
+        this.log.info(
+          c.cyan(
+            `Container will clone ${arg.gitRepo.url}` + `${arg.gitRepo.branch ? ` (${arg.gitRepo.branch})` : ''}\r\n`
+          )
+        );
       } else if (arg.preSyncedShareName) {
-        // Workspace is already synced via WorkspaceSyncManager — skip upload
         this.log.info(c.cyan(`Using pre-synced share: ${arg.preSyncedShareName}\r\n`));
       } else {
-        // One-shot upload for non-synced workspaces
-        this.log.info(c.cyan(`Preparing workspace upload for session ${session.sessionId}...\r\n`));
-        const { uploadSasUrl } = await this.platformClient.prepareWorkspace(session.sessionId);
-        await uploadWorkspace(arg.workspaceDir, uploadSasUrl, this.fetchFn, (msg) =>
-          this.ipcRawOutput(`${msg  }\r\n`)
-        );
-        this.log.info(c.cyan('Workspace uploaded successfully\r\n'));
+        this.log.info(c.yellow('Workspace upload disabled — container starts with an empty workspace\r\n'));
       }
 
       this.log.info(c.cyan(`Session ${session.sessionId} created, waiting for container...\r\n`));
       this.updateStatus({ type: 'connecting', data: { uiUrl: '' } });
 
-      const ready = await this.platformClient.waitForSession(session.sessionId);
+      const ready = await this.computeClient.waitForSession(session.sessionId);
       if (this.isStopping()) {
-return;
-}
+        return;
+      }
 
       const wsUrl = ready.websocketUrl!;
-      let uiUrl = wsUrl.replace(/^wss?:/, 'https:').replace(/\/ws$/, '');
-      // Include auth token so the agent UI can authenticate WebSocket connections
+      // Derive the UI/HTTP origin from the WS URL by mapping the scheme, NOT by
+      // force-rewriting to ``https:``. ``PlatformClient`` returns a TLS gateway
+      // (``wss://`` → ``https://``); ``RemoteElectronComputeClient`` returns the
+      // laptop's plain-HTTP loopback (``ws://`` → ``http://``). Forcing https on
+      // the latter made the readiness HTTP probe fail forever (TLS handshake
+      // against a plain-HTTP server).
+      let uiUrl = wsUrl.replace(/^wss:/i, 'https:').replace(/^ws:/i, 'http:').replace(/\/ws$/, '');
       if (ready.authToken) {
         const sep = uiUrl.includes('?') ? '&' : '?';
         uiUrl = `${uiUrl}${sep}token=${encodeURIComponent(ready.authToken)}`;
@@ -437,18 +893,54 @@ return;
         containerId: ready.containerId,
       };
 
-      // Transition to 'connecting' and wait for the container's HTTP/WS endpoints
-      // to actually accept connections before marking as 'running'. The platform
-      // reports 'active' when the container starts, but services inside may still
-      // be booting.
+      // When the compute backend's ``waitForSession`` already guarantees the
+      // sandbox is serving, skip our own HTTP/WS readiness probe.
+      // ``RemoteElectronComputeClient`` only reports ``active`` once the
+      // laptop's OWN ``AgentProcess`` reached ``running`` (its local readiness
+      // probe passed), and the loopback ``wsUrl`` it returns isn't reachable
+      // from the cloud anyway — re-probing it here is both redundant and wrong
+      // (it's what hung the session at "connecting"). The proxy-rewriter
+      // relabels these URLs to ``/proxy/local/<machineId>/<sessionId>/...`` for
+      // the renderer downstream.
+      if (this.computeClient.confirmsReadiness) {
+        this.updateStatus({ type: 'running', data });
+        this.log.info(c.green.bold('Compute sandbox started\r\n'));
+        return;
+      }
+
       this.updateStatus({ type: 'connecting', data });
-      this.log.info(c.cyan('Waiting for platform container services to accept connections...\r\n'));
+      this.log.info(c.cyan('Waiting for compute backend services to accept connections...\r\n'));
       await this.waitForReady(data);
     } catch (error) {
       if (this.isStopping()) {
-return;
-}
-      this.updateStatus({ type: 'error', error: { message: (error as Error).message } });
+        return;
+      }
+      // Surface structured ComputeError envelopes (host-offline, machine-at-
+      // capacity) so the renderer can show the right banner. ComputeError is
+      // shaped { kind, machineId, machineLabel, extras } — `errorEnvelope`
+      // splats those onto the AgentProcessStatus error field.
+      type ErrorVariant = Extract<AgentProcessStatus, { type: 'error' }>;
+      const errorEnvelope: ErrorVariant['error'] = {
+        message: (error as Error).message,
+      };
+      const ce = error as {
+        kind?: 'host-offline' | 'machine-at-capacity' | 'machine-removed';
+        machineId?: string;
+        machineLabel?: string;
+        extras?: Record<string, unknown>;
+      };
+      if (ce.kind === 'host-offline' || ce.kind === 'machine-at-capacity') {
+        errorEnvelope.kind = ce.kind;
+        if (ce.machineId) errorEnvelope.machineId = ce.machineId;
+        if (ce.machineLabel) errorEnvelope.machineLabel = ce.machineLabel;
+        if (typeof ce.extras?.['maxSessions'] === 'number') {
+          errorEnvelope.maxSessions = ce.extras['maxSessions'] as number;
+        }
+        if (typeof ce.extras?.['currentSessions'] === 'number') {
+          errorEnvelope.currentSessions = ce.extras['currentSessions'] as number;
+        }
+      }
+      this.updateStatus({ type: 'error', error: errorEnvelope });
     }
   };
 
@@ -464,265 +956,21 @@ return;
     this.onStatusChange(this.status);
   };
 
-  // -- Argument builders --
-
-  private buildLocalArgs = async (arg: AgentProcessStartArg): Promise<string[]> => {
-    const port = await this.pickAvailablePort();
-    const omniCliPath = getOmniCliPath();
-
-    const sandboxArgs: string[] = [
-      '--workspace', arg.workspaceDir,
-    ];
-
-    // Read network config — same logic as sandbox mode.
-    const networkHosts = await this.readNetworkAllowlist();
-    if (networkHosts.length > 0) {
-      sandboxArgs.push('--net-allow', networkHosts.join(','));
-    } else {
-      // Agent needs localhost network to serve its HTTP/WS endpoints.
-      sandboxArgs.push('--net');
+  /** Patch fields on the embedded ``AgentProcessData`` without changing the
+   *  status state. No-op unless we're in a state that carries data
+   *  (``running`` or ``connecting``). Used by pause/unpause to flip the
+   *  ``paused`` indicator without redoing the readiness payload. */
+  private updateAgentProcessData = (patch: Partial<AgentProcessData>): void => {
+    if (this.status.type !== 'running' && this.status.type !== 'connecting') {
+      return;
     }
-
-    // The omni CLI and its venv must be readable inside the sandbox.
-    const omniVenvDir = join(omniCliPath, '..', '..');
-    sandboxArgs.push('--ro-bind', omniVenvDir);
-
-    // If packages are editable (dev) installs, their source directories live
-    // outside the venv and must be mounted separately.
-    const editableSourceDirs = await this.findEditableSourceDirs(omniVenvDir);
-    for (const dir of editableSourceDirs) {
-      sandboxArgs.push('--ro-bind', dir);
-    }
-
-    // Omni config dir (contains .env, network.json, model config).
-    const omniConfigDir = getOmniConfigDir();
-    if (await pathExists(omniConfigDir)) {
-      sandboxArgs.push('--ro-bind', omniConfigDir);
-    }
-
-    // OmniAgents home dir (traces, sessions, audit) — needs write access.
-    const home = homedir();
-    const omniagentsHome = process.env['OMNIAGENTS_HOME'] || join(home, '.omniagents');
-    await ensureDirectory(omniagentsHome);
-    sandboxArgs.push('--rw-bind', omniagentsHome);
-
-    // OmniAgents cache dir — needs write access.
-    const cacheBase = process.env['XDG_CACHE_HOME'] || join(home, '.cache');
-    const omniagentsCache = join(cacheBase, 'omniagents');
-    await ensureDirectory(omniagentsCache);
-    sandboxArgs.push('--rw-bind', omniagentsCache);
-
-    // Git worktree support: when the workspace is a worktree, .git is a file
-    // pointing to the parent repo's .git/worktrees/<name>/ directory. Git needs
-    // write access to that directory (and the shared object store) for commits,
-    // ref updates, etc. Without this, all git writes fail inside the sandbox.
-    const parentGitDir = await this.detectWorktreeGitDir(arg.workspaceDir);
-    if (parentGitDir) {
-      sandboxArgs.push('--rw-bind', parentGitDir);
-    }
-
-    // Separator between sandbox args and the wrapped command.
-    sandboxArgs.push('--');
-    sandboxArgs.push(omniCliPath, '--mode', 'server', '--host', '127.0.0.1', '--port', String(port));
-
-    return sandboxArgs;
-  };
-
-  /** Build args for direct (unsandboxed) omni CLI invocation. */
-  private buildDirectArgs = async (_arg: AgentProcessStartArg): Promise<string[]> => {
-    const port = await this.pickAvailablePort();
-    return ['--mode', 'server', '--host', '127.0.0.1', '--port', String(port)];
-  };
-
-  private buildVmArgs = async (arg: AgentProcessStartArg): Promise<string[]> => {
-    const vmArgs: string[] = [
-      'vm', 'run',
-      '--workspace', arg.workspaceDir,
-      '--output', 'json',
-    ];
-
-    const networkHosts = await this.readNetworkAllowlist();
-    if (networkHosts.length > 0) {
-      vmArgs.push('--net-allow', networkHosts.join(','));
-    }
-
-    return vmArgs;
-  };
-
-  /**
-   * Find all editable (dev) installs in a Python root and return their
-   * source directories so they can be mounted into the sandbox.
-   */
-  private findEditableSourceDirs = async (pythonRoot: string): Promise<string[]> => {
-    try {
-      const libDir = join(pythonRoot, 'lib');
-      const libEntries = await readdir(libDir);
-      const pythonDir = libEntries.find((e) => e.startsWith('python'));
-      if (!pythonDir) {
-return [];
-}
-
-      const spDir = join(libDir, pythonDir, 'site-packages');
-      const spEntries = await readdir(spDir);
-      const finderFiles = spEntries.filter((e) => e.startsWith('__editable___') && e.endsWith('_finder.py'));
-
-      const dirs = new Set<string>();
-      for (const f of finderFiles) {
-        const content = await readFile(join(spDir, f), 'utf-8');
-        // Extract all source paths from the MAPPING dict
-        const re = /:\s*'([^']+)'/g;
-        let m: RegExpExecArray | null;
-        while ((m = re.exec(content)) !== null) {
-          const srcPath = m[1]!;
-          if (srcPath.startsWith('/')) {
-            dirs.add(resolve(srcPath, '..'));
-          }
-        }
-      }
-      return [...dirs];
-    } catch {
-      return [];
-    }
-  };
-
-  /**
-   * Detect if a workspace is a git worktree and return the parent repo's .git
-   * directory. In a worktree, `.git` is a file containing `gitdir: <path>` that
-   * points to `<repo>/.git/worktrees/<name>`. We return the parent `.git` dir
-   * so it can be rw-bind mounted, giving git full write access to refs, objects,
-   * and worktree-specific state.
-   */
-  private detectWorktreeGitDir = async (workspaceDir: string): Promise<string | null> => {
-    try {
-      const dotGit = join(workspaceDir, '.git');
-      const st = await stat(dotGit);
-      if (!st.isFile()) {
-return null;
-}
-
-      const content = (await readFile(dotGit, 'utf-8')).trim();
-      if (!content.startsWith('gitdir:')) {
-return null;
-}
-
-      const gitdirValue = content.slice('gitdir:'.length).trim();
-      const gitdirPath = resolve(workspaceDir, gitdirValue);
-
-      // Expect: …/.git/worktrees/<name> — parent must be "worktrees"
-      const parent = resolve(gitdirPath, '..');
-      if (basename(parent) !== 'worktrees') {
-return null;
-}
-
-      const parentGitDir = resolve(parent, '..');
-      if (!(await isDirectory(parentGitDir))) {
-return null;
-}
-
-      return parentGitDir;
-    } catch {
-      return null;
-    }
-  };
-
-  /** Read network allowlist from omni config dir. */
-  private readNetworkAllowlist = async (): Promise<string[]> => {
-    try {
-      const omniConfigDir = getOmniConfigDir();
-      const networkJson = await readFile(join(omniConfigDir, 'network.json'), 'utf-8');
-      const networkConfig = JSON.parse(networkJson) as NetworkConfig;
-      if (networkConfig.enabled) {
-        const hosts = networkConfig.allowlist ?? (networkConfig as Record<string, unknown>)['allowedHosts'] ?? [];
-        return hosts as string[];
-      }
-    } catch {
-      // network.json missing or invalid
-    }
-    return [];
-  };
-
-  /** Pick an available TCP port by briefly binding to port 0. */
-  private pickAvailablePort = (): Promise<number> => {
-    return new Promise((resolve, reject) => {
-      const server = createServer();
-      server.listen(0, '127.0.0.1', () => {
-        const addr = server.address() as import('node:net').AddressInfo;
-        const port = addr.port;
-        server.close(() => resolve(port));
-      });
-      server.on('error', reject);
-    });
-  };
-
-  private buildSandboxArgs = async (
-    arg: AgentProcessStartArg,
-    options?: { rebuild?: boolean }
-  ): Promise<string[]> => {
-    const variant = arg.sandboxVariant ?? 'work';
-    const args: string[] = [
-      'sandbox', '--mode', 'server',
-      '--ui', 'local', '--ui-host', '0.0.0.0', '--ui-port', '0',
-      '--port', '0',
-      '--workspace', arg.workspaceDir,
-      '--output', 'json',
-    ];
-
-    const omniConfigDir = getOmniConfigDir();
-
-    const envFilePath = join(omniConfigDir, '.env');
-    if (await isFile(envFilePath)) {
-      args.push('--env-file', envFilePath);
-    }
-
-    const networkHosts = await this.readNetworkAllowlist();
-    if (networkHosts.length > 0) {
-      args.push('--network-allowlist', networkHosts.join(','));
-    }
-
-    // Gated behind preview features: code-server and VNC desktop are experimental surfaces.
-    // Enterprise policy also opts in via sandboxProfiles (same gate as the sandbox UI).
-    const store = getStore();
-    const previewFeatures = store.get('previewFeatures') ?? false;
-    const hasEnterpriseProfiles = (store.get('sandboxProfiles') ?? null) !== null;
-    if (previewFeatures || hasEnterpriseProfiles) {
-      args.push('--enable-code-server', '--code-server-port', '0');
-      args.push('--enable-vnc', '--vnc-port', '0');
-    }
-
-    if (arg.sandboxConfig?.image) {
-      args.push('--image', arg.sandboxConfig.image);
-    } else if (arg.sandboxConfig?.dockerfile) {
-      args.push('--dockerfile', resolve(arg.workspaceDir, arg.sandboxConfig.dockerfile));
-      args.push('--build-arg', `OMNI_CODE_VERSION=${OMNI_CODE_VERSION}`);
-    } else if (!isDevelopment()) {
-      // Production: use pre-built image from registry
-      const imageSuffix = variant === 'work' ? '-work' : '';
-      args.push('--image', `ghcr.io/ericmichael/omni-code-sandbox${imageSuffix}:latest`);
-    }
-    // Dev mode: omni sandbox resolves its own Dockerfile from omni_code/sandbox/
-
-    args.push('--persist-volume', 'omni-gh:/home/user/.config/gh');
-
-    if (variant === 'work') {
-      args.push('--persist-volume', 'omni-azure:/home/user/.azure');
-      args.push('--persist-volume', 'omni-gitconfig:/home/user/.gitconfig.d');
-      args.push('--persist-volume', 'omni-ssh:/home/user/.ssh');
-      args.push('--persist-volume', 'omni-npm:/home/user/.npmrc');
-    }
-
-    if (options?.rebuild) {
-      args.push('--rebuild');
-    }
-
-    // Git-remote: pass repo info so the container clones instead of expecting a mounted workspace
-    if (arg.gitRepo) {
-      args.push('--env', `OMNI_GIT_REPO_URL=${arg.gitRepo.url}`);
-      if (arg.gitRepo.branch) {
-        args.push('--env', `OMNI_GIT_BRANCH=${arg.gitRepo.branch}`);
-      }
-    }
-
-    return args;
+    const current = this.status as Extract<WithTimestamp<AgentProcessStatus>, { type: 'running' | 'connecting' }>;
+    this.status = {
+      ...current,
+      data: { ...current.data, ...patch },
+      timestamp: Date.now(),
+    };
+    this.onStatusChange(this.status);
   };
 
   // -- Stdout/stderr handling --
@@ -731,11 +979,9 @@ return null;
     const str = data.toString();
     this.ipcRawOutput(str);
     process.stdout.write(str);
-
     if (this.jsonEmitted) {
-return;
-}
-
+      return;
+    }
     this.stdoutBuffer += str;
     const lines = this.stdoutBuffer.split(/\r?\n/);
     this.stdoutBuffer = lines.pop() ?? '';
@@ -753,48 +999,32 @@ return;
 
   private tryParseStdoutLine = (line: string): void => {
     if (this.jsonEmitted) {
-return;
-}
-
-    const trimmed = line.trim();
-
-    // Try JSON first (sandbox mode outputs structured JSON, web mode outputs {"url", "port"})
-    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(trimmed);
-      } catch {
-        return;
-      }
-
-      if (this.mode === 'sandbox' || this.mode === 'podman' || this.mode === 'vm') {
-        if (!('sandbox_url' in parsed) || !('ui_url' in parsed)) {
-return;
-}
-        const data = sandboxPayloadToData(parsed as unknown as SandboxJsonPayload);
-        this.jsonEmitted = true;
-        this.updateStatus({ type: 'connecting', data });
-        this.log.info(c.cyan('Waiting for services to accept connections...\r\n'));
-        void this.waitForReady(data);
-      } else {
-        if (typeof parsed.url !== 'string' || typeof parsed.port !== 'number') {
-return;
-}
-        const data: AgentProcessData = { uiUrl: parsed.url as string, port: parsed.port as number };
-        this.jsonEmitted = true;
-        this.updateStatus({ type: 'connecting', data });
-        this.log.info(c.cyan('Waiting for agent to accept connections...\r\n'));
-        void this.waitForReady(data);
-      }
       return;
     }
+    const trimmed = line.trim();
+    if (!(trimmed.startsWith('{') && trimmed.endsWith('}'))) {
+      return;
+    }
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      return;
+    }
+    if (!('sandbox_url' in parsed) || !('ui_url' in parsed)) {
+      return;
+    }
+    const data = servePayloadToData(parsed as unknown as ServeReadyPayload);
+    this.jsonEmitted = true;
+    this.updateStatus({ type: 'connecting', data });
+    this.log.info(c.cyan('Waiting for services to accept connections...\r\n'));
+    void this.waitForReady(data);
   };
 
   // -- Readiness polling --
 
   private waitForReady = async (data: AgentProcessData): Promise<void> => {
-    const isContainerMode = this.mode === 'sandbox' || this.mode === 'podman' || this.mode === 'vm';
-    const maxAttempts = isContainerMode ? 120 : this.mode === 'platform' ? 120 : 30;
+    const maxAttempts = 120;
 
     const checkHttp = async (url: string): Promise<boolean> => {
       try {
@@ -812,13 +1042,15 @@ return;
           const socket = new WsWebSocket(url);
           const finish = (result: boolean): void => {
             if (settled) {
-return;
-}
+              return;
+            }
             settled = true;
             clearTimeout(timer);
             try {
- socket.close(); 
-} catch {}
+              socket.close();
+            } catch {
+              /* ignore */
+            }
             resolve(result);
           };
           const timer = setTimeout(() => finish(false), 2_000);
@@ -831,10 +1063,10 @@ return;
       }
     };
 
-    // For platform mode, extract the auth token from uiUrl and apply to wsUrl checks
-    // since the container may require token auth on WS connections.
+    // Compute mode (PlatformClient) requires the auth token on WS connections;
+    // carry it through from the uiUrl query.
     let wsCheckUrl = data.wsUrl;
-    if (wsCheckUrl && this.mode === 'platform') {
+    if (wsCheckUrl && this.mode === 'compute') {
       try {
         const uiParsed = new URL(data.uiUrl);
         const token = uiParsed.searchParams.get('token');
@@ -843,38 +1075,31 @@ return;
           wsUrlObj.searchParams.set('token', token);
           wsCheckUrl = wsUrlObj.toString();
         }
-      } catch { /* ignore parse errors */ }
+      } catch {
+        /* ignore parse errors */
+      }
     }
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       if (this.isStopping()) {
-return;
-}
-
+        return;
+      }
       const httpOk = await checkHttp(data.uiUrl);
       const wsOk = wsCheckUrl ? await checkWs(wsCheckUrl) : true;
-
       if (httpOk && wsOk) {
         if (this.isStopping()) {
-return;
-}
+          return;
+        }
         this.updateStatus({ type: 'running', data });
-        const label = this.mode === 'sandbox' ? 'Sandbox' : this.mode === 'podman' ? 'Sandbox (Podman)' : this.mode === 'vm' ? 'VM sandbox' : this.mode === 'platform' ? 'Platform sandbox' : 'Agent';
+        const label = this.mode === 'compute' ? 'Compute sandbox' : 'Sandbox';
         this.log.info(c.green.bold(`${label} started\r\n`));
         return;
       }
-
       await new Promise<void>((r) => setTimeout(r, 1000));
     }
 
     if (this.isStopping()) {
-return;
-}
-
-    // Timeout
-    if (this.mode === 'sandbox' || this.mode === 'podman') {
-      const env = { ...process.env, ...DEFAULT_ENV } as Record<string, string>;
-      void this.stopActiveContainer(env);
+      return;
     }
     this.updateStatus({
       type: 'error',
@@ -884,17 +1109,33 @@ return;
 
   // -- Process management --
 
-  private killProcess = (timeout = 10_000): Promise<void> => {
+  /**
+   * SIGTERM, then SIGKILL after the grace period.
+   *
+   * The grace was 10s; uvicorn under live WS connections regularly needs
+   * 15-20s to drain (closes every client socket gracefully before
+   * shutting down). 30s leaves comfortable headroom without making the
+   * worst case feel unbounded.
+   *
+   * The child is added to {@link intentionallyKilled} so its `close`
+   * event handler skips the `error("signal SIGKILL")` status update —
+   * the caller is responsible for whatever status comes next (either
+   * `exited` from stop()/exit(), or `starting` from a back-to-back
+   * rebuild's start()).
+   */
+  private killProcess = (timeout = 30_000): Promise<void> => {
     const child = this.childProcess;
     if (!child || child.exitCode !== null) {
       this.childProcess = null;
       return Promise.resolve();
     }
-
+    this.intentionallyKilled.add(child);
     return new Promise<void>((resolve) => {
       const onExit = (): void => {
         clearTimeout(timer);
-        this.childProcess = null;
+        if (this.childProcess === child) {
+          this.childProcess = null;
+        }
         resolve();
       };
       child.once('close', onExit);
@@ -902,141 +1143,56 @@ return;
       const timer = setTimeout(() => {
         child.removeListener('close', onExit);
         child.kill('SIGKILL');
-        this.childProcess = null;
+        if (this.childProcess === child) {
+          this.childProcess = null;
+        }
         resolve();
       }, timeout);
     });
   };
 
-  // -- Container helpers (sandbox / podman modes) --
-
-  /** The container CLI binary name for the current mode. */
-  private get containerBin(): string {
-    return this.mode === 'podman' ? 'podman' : 'docker';
-  }
-
-  private checkDocker = async (env: Record<string, string>): Promise<boolean> => {
-    try {
-      await execFileAsync('docker', ['version'], { encoding: 'utf8', timeout: 10_000, env });
-      return true;
-    } catch {
-      this.updateStatus({
-        type: 'error',
-        error: { message: 'Docker is not available. Install Docker Desktop / docker-ce and ensure it is running.' },
-      });
-      return false;
-    }
-  };
-
-  private checkPodman = async (env: Record<string, string>): Promise<boolean> => {
-    try {
-      await execFileAsync('podman', ['version'], { encoding: 'utf8', timeout: 10_000, env });
-      return true;
-    } catch {
-      this.updateStatus({
-        type: 'error',
-        error: { message: 'Podman is not available. Install podman and ensure the podman machine is running.' },
-      });
-      return false;
-    }
-  };
-
-  private getActiveContainerRef = (): string | null => {
-    if (this.status.type !== 'running' && this.status.type !== 'connecting') {
-return null;
-}
-    return this.status.data.containerName ?? this.status.data.containerId ?? null;
-  };
-
-  private stopActiveContainer = async (env: Record<string, string>): Promise<void> => {
-    const containerRef = this.getActiveContainerRef();
-    if (!containerRef) {
-return;
-}
-    try {
-      await execFileAsync(this.containerBin, ['stop', containerRef], { encoding: 'utf8', timeout: 15_000, env });
-    } catch {
-      // ignore cleanup failures
-    }
-  };
-
-  /**
-   * Execute a command inside the running container. Returns true on exit 0.
-   * Uses docker/podman exec for local container modes, platform API for platform mode.
-   */
-  execInContainer = async (command: string, cwd?: string, timeoutMs = 60_000): Promise<boolean> => {
-    // Platform mode — delegate to the platform exec API
-    if (this.mode === 'platform') {
-      if (!this.platformClient || !this.platformSessionId) {
-        this.log.warn('execInContainer: no platform session');
-        return false;
-      }
-      try {
-        const result = await this.platformClient.execInSession(
-          this.platformSessionId,
-          command,
-          cwd,
-          Math.floor(timeoutMs / 1000)
-        );
-        if (result.stderr) {
-this.log.info(`[exec] ${result.stderr.trim()}`);
-}
-        return result.success;
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.log.warn(`execInContainer (platform) failed: ${msg}`);
-        return false;
-      }
-    }
-
-    // Local/none modes have no container to exec into
-    if (this.mode === 'local' || this.mode === 'none') {
-      this.log.warn(`execInContainer not supported for mode: ${  this.mode}`);
-      return true;
-    }
-
-    // Docker/podman — exec directly
-    const containerRef = this.getActiveContainerRef();
-    if (!containerRef) {
-      this.log.warn('execInContainer: no running container');
-      return false;
-    }
-    const args = ['exec'];
-    if (cwd) {
-args.push('-w', cwd);
-}
-    args.push(containerRef, '/bin/sh', '-c', command);
-
-    try {
-      const env = { ...process.env, ...DEFAULT_ENV, ...shellEnvSync() } as Record<string, string>;
-      const { stderr } = await execFileAsync(this.containerBin, args, {
-        encoding: 'utf8',
-        timeout: timeoutMs,
-        env,
-      });
-      if (stderr) {
-this.log.info(`[exec] ${stderr.trim()}`);
-}
-      return true;
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.log.warn(`execInContainer failed: ${msg}`);
-      return false;
-    }
-  };
-
-  private detectPortConflict = (): boolean => {
-    return PORT_CONFLICT_PATTERNS.some((pattern) => pattern.test(this.stderrBuffer));
-  };
-
   // eslint-disable-next-line no-control-regex
   private static readonly ANSI_RE = /\x1b\[[0-9;]*[A-Za-z]/g;
 
+  /**
+   * Extract a structured launch error from stderr. ``omni serve`` prints
+   * launch failures as a single JSON line ``{"error": "source: …"}`` (bad
+   * source, seed-size cap, profile errors). Returns the last such message, or
+   * null if stderr carries only a raw traceback / log noise.
+   */
+  private structuredError = (): string | null => {
+    const cleaned = this.stderrBuffer.replace(AgentProcess.ANSI_RE, '');
+    const lines = cleaned
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith('{') && l.includes('"error"'));
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      if (!line) {
+        continue;
+      }
+      try {
+        const obj = JSON.parse(line) as { error?: unknown };
+        if (typeof obj.error === 'string' && obj.error.trim()) {
+          return obj.error;
+        }
+      } catch {
+        /* not a JSON error line — keep scanning */
+      }
+    }
+    return null;
+  };
+
   private tailStderr = (maxLines = 20, maxChars = 2000): string => {
     const cleaned = this.stderrBuffer.replace(AgentProcess.ANSI_RE, '');
-    const lines = cleaned.split(/\r?\n/).map((l) => l.trimEnd()).filter((l) => l.length > 0);
+    const lines = cleaned
+      .split(/\r?\n/)
+      .map((l) => l.trimEnd())
+      .filter((l) => l.length > 0);
     const tail = lines.slice(-maxLines).join('\n');
-    if (tail.length <= maxChars) return tail;
+    if (tail.length <= maxChars) {
+      return tail;
+    }
     return `…${tail.slice(tail.length - maxChars)}`;
   };
 }

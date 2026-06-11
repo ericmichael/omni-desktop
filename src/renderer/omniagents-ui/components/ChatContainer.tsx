@@ -10,7 +10,7 @@ type ChatContainerScrollAnchorProps = React.HTMLAttributes<HTMLDivElement>
 
 export function ChatContainerRoot({ className, children, ...rest }: ConversationProps) {
   return (
-    <Conversation className={cn('flex w-full min-w-0', className)} {...rest}>
+    <Conversation className={cn('flex w-full min-w-0 overflow-x-hidden', className)} {...rest}>
       {children as React.ReactNode}
       <ConversationScrollButton />
     </Conversation>
@@ -19,7 +19,7 @@ export function ChatContainerRoot({ className, children, ...rest }: Conversation
 
 export function ChatContainerContent({ className, children, ...rest }: ConversationContentProps) {
   return (
-    <ConversationContent className={cn('flex w-full min-w-0 flex-col', className)} {...rest}>
+    <ConversationContent className={cn('flex w-full min-w-0 max-w-full flex-col overflow-x-hidden', className)} {...rest}>
       {children}
     </ConversationContent>
   )

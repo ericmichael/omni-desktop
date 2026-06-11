@@ -1,0 +1,36 @@
+{
+  "name": "omni-projects-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for project management — tickets, milestones, pages, inbox. Backed by SQLite.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./index.d.ts"
+    }
+  },
+  "bin": {
+    "omni-projects-mcp": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "index.d.ts"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "omni-projects-db": "*",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.7.0"
+  }
+}

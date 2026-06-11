@@ -1,14 +1,15 @@
 import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
-import { Dismiss20Regular,Edit20Regular } from '@fluentui/react-icons';
+import { Dismiss20Regular,Edit20Regular, Warning20Filled } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
+import Markdown from 'react-markdown';
 
 import { Badge, Button, IconButton, SectionLabel, Select, Textarea } from '@/renderer/ds';
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import type { Ticket, TicketPriority, TicketResolution } from '@/shared/types';
 
 import { $pipeline, $tickets, ticketApi } from './state';
-import { APPETITE_COLORS, APPETITE_DESCRIPTIONS, APPETITE_LABELS, getColumnColors, RESOLUTION_COLORS, RESOLUTION_LABELS } from './ticket-constants';
+import { getColumnColors, PHASE_LABELS, RESOLUTION_COLORS, RESOLUTION_LABELS } from './ticket-constants';
 
 const useStyles = makeStyles({
   root: {
@@ -32,10 +33,9 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
-  descriptionText: {
+  descriptionMarkdown: {
     fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground2,
-    whiteSpace: 'pre-wrap',
   },
   tapToAdd: {
     fontSize: tokens.fontSizeBase300,
@@ -51,28 +51,38 @@ const useStyles = makeStyles({
       color: tokens.colorNeutralForeground2,
     },
   },
-  scopeCard: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '10px',
-    borderRadius: tokens.borderRadiusXLarge,
-    backgroundColor: 'rgba(var(--colorNeutralBackground2), 0.3)',
-    padding: tokens.spacingVerticalM,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-  },
-  scopeFieldLabel: {
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightMedium,
-    color: tokens.colorNeutralForeground2,
-  },
-  scopeFieldValue: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground1,
-    marginTop: '2px',
-  },
   blockerRow: {
     display: 'flex',
     alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  cleanupBanner: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+    ...shorthands.border('1px', 'solid', tokens.colorPaletteYellowBorder2),
+    backgroundColor: tokens.colorPaletteYellowBackground1,
+    color: tokens.colorPaletteYellowForeground2,
+    borderRadius: tokens.borderRadiusMedium,
+    padding: tokens.spacingVerticalM,
+  },
+  cleanupBannerHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  cleanupBannerBody: {
+    fontSize: tokens.fontSizeBase300,
+  },
+  cleanupBannerPath: {
+    fontFamily: tokens.fontFamilyMonospace,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    wordBreak: 'break-all',
+  },
+  cleanupBannerActions: {
+    display: 'flex',
     gap: tokens.spacingHorizontalS,
   },
   blockerTitle: {
@@ -241,8 +251,47 @@ return;
     setEditingDescription(false);
   }, []);
 
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [cleanupError, setCleanupError] = useState<string | null>(null);
+  const handleFinalizeCleanup = useCallback(async () => {
+    setCleanupBusy(true);
+    setCleanupError(null);
+    try {
+      const ok = await ticketApi.finalizeTicketCleanup(ticket.id);
+      if (!ok) {
+        setCleanupError('Worktree still has uncommitted changes. Commit or discard them first.');
+      }
+    } finally {
+      setCleanupBusy(false);
+    }
+  }, [ticket.id]);
+
   return (
     <div className={styles.root}>
+      {ticket.cleanupPending && ticket.worktreePath && (
+        <div className={styles.cleanupBanner}>
+          <div className={styles.cleanupBannerHeader}>
+            <Warning20Filled />
+            Worktree has uncommitted changes — cleanup deferred
+          </div>
+          <div className={styles.cleanupBannerBody}>
+            This ticket is resolved, but its worktree still has unsaved work. Commit or discard the
+            changes, then click below to remove the worktree.
+          </div>
+          <div className={styles.cleanupBannerPath}>{ticket.worktreePath}</div>
+          {cleanupError && (
+            <div className={styles.cleanupBannerBody} role="alert">
+              {cleanupError}
+            </div>
+          )}
+          <div className={styles.cleanupBannerActions}>
+            <Button size="sm" onClick={handleFinalizeCleanup} isDisabled={cleanupBusy}>
+              {cleanupBusy ? 'Cleaning up…' : 'Clean up worktree'}
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Status metadata */}
       <div className={styles.section}>
         <SectionLabel>Status</SectionLabel>
@@ -254,7 +303,9 @@ return;
               ))}
             </Select>
           )}
-          {ticket.resolution && (
+          {/* Skip the resolution badge when it would just repeat the column
+              dropdown's label (e.g. "Completed" next to "Completed"). */}
+          {ticket.resolution && RESOLUTION_LABELS[ticket.resolution] !== currentColumn?.label && (
             <Badge color={RESOLUTION_COLORS[ticket.resolution]}>{RESOLUTION_LABELS[ticket.resolution]}</Badge>
           )}
           {milestone && (
@@ -297,38 +348,17 @@ return;
             </div>
           </div>
         ) : ticket.description ? (
-          <p className={styles.descriptionText}>{ticket.description}</p>
+          <div
+            className={`prose prose-invert prose-sm max-w-none ${styles.descriptionMarkdown} prose-code:before:content-none prose-code:after:content-none [&_code]:bg-surface-raised [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_pre]:bg-surface-raised [&_pre]:rounded-lg [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:px-0 [&_pre_code]:py-0`}
+          >
+            <Markdown>{ticket.description}</Markdown>
+          </div>
         ) : (
           <button onClick={handleStartEditDescription} className={styles.tapToAdd}>
             Tap to add description
           </button>
         )}
       </div>
-
-      {/* Scope (from shaping) */}
-      {ticket.shaping && (
-        <div className={styles.section}>
-          <SectionLabel>Scope</SectionLabel>
-          <div className={styles.scopeCard}>
-            <div>
-              <span className={styles.scopeFieldLabel}>Done looks like</span>
-              <p className={styles.scopeFieldValue}>{ticket.shaping.doneLooksLike}</p>
-            </div>
-            <div>
-              <span className={styles.scopeFieldLabel}>Appetite</span>
-              <div style={{ marginTop: '2px' }}>
-                <Badge color={APPETITE_COLORS[ticket.shaping.appetite]}>
-                  {APPETITE_LABELS[ticket.shaping.appetite]} — {APPETITE_DESCRIPTIONS[ticket.shaping.appetite]}
-                </Badge>
-              </div>
-            </div>
-            <div>
-              <span className={styles.scopeFieldLabel}>Out of scope</span>
-              <p className={styles.scopeFieldValue}>{ticket.shaping.outOfScope}</p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Priority */}
       <div className={styles.section}>
@@ -383,13 +413,16 @@ return;
         )}
       </div>
 
-      {/* Supervisor info */}
-      {ticket.supervisorSessionId && (
+      {/* Autopilot status — hidden entirely when idle; raw phase values never
+          render (PHASE_LABELS holds the human wording). */}
+      {(ticket.autopilot || (ticket.phase && ticket.phase !== 'idle')) && (
         <div className={styles.section}>
-          <SectionLabel>Supervisor</SectionLabel>
+          <SectionLabel>Autopilot</SectionLabel>
           <div className={styles.infoText}>
-            <p>Session: {ticket.supervisorSessionId}</p>
-            {ticket.phase && <p>Phase: {ticket.phase}</p>}
+            {ticket.autopilot && <p>On</p>}
+            {ticket.phase && ticket.phase !== 'idle' && PHASE_LABELS[ticket.phase] && (
+              <p>{PHASE_LABELS[ticket.phase]}</p>
+            )}
           </div>
         </div>
       )}

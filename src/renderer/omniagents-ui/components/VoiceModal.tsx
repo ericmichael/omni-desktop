@@ -1,8 +1,14 @@
+import { useStore } from '@nanostores/react'
 import React, { useCallback, useEffect, useMemo,useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import { RealtimeRPCClient } from '@/renderer/omniagents-ui/rpc/realtime'
 import { useUiConfig } from '@/renderer/omniagents-ui/ui-config'
+import { persistedStoreApi } from '@/renderer/services/store'
+import { getThemeBuiltinGlassTone } from '@/renderer/theme/fluent-themes'
+import { getGlassVars } from '@/renderer/theme/glass-vars'
+import { $glassEnabled } from '@/renderer/theme/use-glass'
+import type { AudioSettings } from '@/shared/types'
 
 import Orb from './Orb'
 import type { VoiceNotification } from './VoiceNotificationCenter'
@@ -21,6 +27,13 @@ enum OrbState {
 
 export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { isOpen: boolean; onClose: () => void; sessionId?: string; onSessionCreated?: (id: string) => void }) {
   const { debug, wsRealtimeUrl, token } = useUiConfig()
+  const store = useStore(persistedStoreApi.$atom)
+  const isGlass = useStore($glassEnabled)
+  const glassVars = isGlass
+    ? getGlassVars(
+        store.codeDeckBackground ? (store.glassTone ?? 'dark') : getThemeBuiltinGlassTone(store.theme ?? 'omni')
+      )
+    : undefined
   const [isMuted, setIsMuted] = useState(true)
   const [audioLevel, setAudioLevel] = useState(0)
   const [orbState, setOrbState] = useState<OrbState>(OrbState.IDLE)
@@ -49,8 +62,11 @@ export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { i
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [transcripts, setTranscripts] = useState<Array<{ id: string; role: 'user' | 'assistant'; text: string; timestamp: number }>>([])
   const [chatInput, setChatInput] = useState('')
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
   const activeAudioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set())
+  const playbackDestRef = useRef<MediaStreamAudioDestinationNode | null>(null)
+  const audioOutElRef = useRef<HTMLAudioElement | null>(null)
   const playbackCheckIntervalRef = useRef<number | null>(null)
   const toolUseEndTimeRef = useRef<number>(0)  // When the last tool finished
   const toolUseLingerMs = 1800  // How long the effect lingers after tool completes (1.8s)
@@ -175,12 +191,27 @@ return
       return
     }
 
+    // Snapshot persisted audio prefs for this session. Dynamic import keeps
+    // services/store out of VoiceModal's eager graph — the static import
+    // chains through services/ipc → WS transport, which breaks tests that
+    // load this module under jsdom without a full localStorage polyfill.
+    void import('@/renderer/services/store').then(({ persistedStoreApi }) => {
+      if (!mounted) {
+return
+}
+      const audioPrefs: AudioSettings = persistedStoreApi.$atom.get().audioSettings
+      startVoiceSession(audioPrefs)
+    })
+
+    function startVoiceSession(audioPrefs: AudioSettings) {
+
     // Request microphone access
     navigator.mediaDevices.getUserMedia({
       audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
+        deviceId: audioPrefs.inputDeviceId ? { exact: audioPrefs.inputDeviceId } : undefined,
+        echoCancellation: audioPrefs.echoCancellation,
+        noiseSuppression: audioPrefs.noiseSuppression,
+        autoGainControl: audioPrefs.autoGainControl,
         channelCount: 1,
       } as any,
     })
@@ -193,6 +224,33 @@ return
         streamRef.current = stream
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
         audioContextRef.current = audioContext
+
+        // Route TTS playback through a hidden <audio> element so we can pick the
+        // output device via setSinkId(). The capture-pipeline silent sinks
+        // continue to use ctx.destination — they're at gain=0 just to keep the
+        // worklet alive, so it doesn't matter where they go.
+        try {
+          const dest = audioContext.createMediaStreamDestination()
+          playbackDestRef.current = dest
+          const el = audioOutElRef.current
+          if (el) {
+            el.srcObject = dest.stream
+            el.play().catch(() => {})
+            const sinkId = audioPrefs.outputDeviceId
+            const setSink = (el as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }).setSinkId
+            if (sinkId && typeof setSink === 'function') {
+              setSink.call(el, sinkId).catch((err) => {
+                if (debugEnabled) {
+console.warn('[ui] setSinkId failed', err)
+}
+              })
+            }
+          }
+        } catch (e) {
+          if (debugEnabled) {
+console.warn('[ui] playback dest setup failed', e)
+}
+        }
         if (debugEnabled) {
 console.log('[ui] audio ctx', { sampleRate: audioContext.sampleRate })
 }
@@ -426,6 +484,7 @@ return
       .catch(err => {
         console.error('Audio setup error:', err)
       })
+    } // end startVoiceSession
 
     return () => {
       mounted = false
@@ -440,6 +499,13 @@ return
  processorRef.current.disconnect() 
 } catch {}
       }
+      if (audioOutElRef.current) {
+        try {
+ audioOutElRef.current.pause()
+} catch {}
+        audioOutElRef.current.srcObject = null
+      }
+      playbackDestRef.current = null
       if (audioContextRef.current) {
         audioContextRef.current.close()
       }
@@ -479,6 +545,12 @@ console.log('[ui] VoiceModal init', { base: wsRealtimeUrl, token, debug: debugEn
       if (debugEnabled) {
 console.log('[ui] event', t, p)
 }
+
+      if (t === 'realtime_error') {
+        const message = String(p?.error_message || p?.error || 'Voice mode error')
+        setErrorMessage(message)
+        setOrbState(isMutedRef.current ? OrbState.IDLE : OrbState.LISTENING)
+      }
 
       // State machine transitions based on realtime events:
       // IDLE → LISTENING (user unmutes)
@@ -551,26 +623,59 @@ console.log('[ui] event', t, p)
           })
         }
 
-        if (eventType === 'client_request') {
-          const fn = String(data?.function || '')
-          if (fn === 'ui.request_tool_approval') {
-            const args = data?.args || {}
+        // omniagents 0.16+ moved tool approvals off ``client_request``
+        // onto a dedicated ``tool_approval_requested`` event keyed by
+        // ``call_id`` (the model-minted tool-call id). Cross-tab
+        // dismissal rides on ``tool_approval_resolved``. The
+        // VoiceNotification's ``request_id`` field is retained for
+        // backwards compatibility with the notification card UI —
+        // populated from ``call_id`` at the wire boundary.
+        if (eventType === 'tool_approval_requested') {
+          const call_id = String(data?.call_id || '')
+          if (call_id) {
             setNotifications(prev => [{
-              id: `ap_${data.request_id || Date.now()}`,
+              id: `ap_${call_id}`,
               type: 'tool_approval' as const,
-              tool: args.tool || 'tool',
-              input: typeof args.arguments === 'string' ? args.arguments : JSON.stringify(args.arguments),
-              request_id: data.request_id,
-              metadata: args.metadata,
+              tool: String(data?.tool_name || 'tool'),
+              input: typeof data?.arguments === 'string' ? data.arguments : JSON.stringify(data?.arguments ?? ''),
+              request_id: call_id,
+              metadata: data?.metadata,
               timestamp: Date.now(),
             }, ...prev].slice(0, 10))
           }
         }
 
-        if (eventType === 'client_request_resolved') {
-          const reqId = String(data?.request_id || '')
-          if (reqId) {
-            setNotifications(prev => prev.filter(n => n.request_id !== reqId))
+        if (eventType === 'tool_approval_resolved') {
+          const call_id = String(data?.call_id || '')
+          if (call_id) {
+            setNotifications(prev => prev.filter(n => n.request_id !== call_id))
+          }
+        }
+
+        // Hosted-MCP approval flow — keyed by ``request_id`` (the model's
+        // ``McpApprovalRequest.id``) rather than call_id, and identifies
+        // the MCP server via ``server_label``. The notification's
+        // request_id is the MCP request_id; the kind discriminator on the
+        // notification lets handleApprove/handleReject pick the right RPC.
+        if (eventType === 'mcp_approval_requested') {
+          const request_id = String(data?.request_id || '')
+          if (request_id) {
+            setNotifications(prev => [{
+              id: `mcp_ap_${request_id}`,
+              type: 'tool_approval' as const,
+              tool: String(data?.tool_name || 'tool'),
+              input: typeof data?.arguments === 'string' ? data.arguments : JSON.stringify(data?.arguments ?? ''),
+              request_id,
+              metadata: { ...(data?.metadata && typeof data.metadata === 'object' ? data.metadata : {}), kind: 'mcp', server_label: String(data?.server_label || '') },
+              timestamp: Date.now(),
+            }, ...prev].slice(0, 10))
+          }
+        }
+
+        if (eventType === 'mcp_approval_resolved') {
+          const request_id = String(data?.request_id || '')
+          if (request_id) {
+            setNotifications(prev => prev.filter(n => n.request_id !== request_id))
           }
         }
       }
@@ -625,9 +730,9 @@ return
             activeAudioSourcesRef.current.delete(src)
           }
 
-          src.connect(ctx.destination)
+          src.connect(playbackDestRef.current ?? ctx.destination)
           try {
- src.start(startAt) 
+ src.start(startAt)
 } catch {}
           scheduledTimeRef.current = startAt + buffer.duration
           if (debugEnabled) {
@@ -671,6 +776,7 @@ console.log('[ui] play audio', { bytes: bytes.length, samples: samples.length, s
         if (!active) {
 return
 }
+        setErrorMessage(null)
         try {
           const res = await client.startSession(sessionId)
           const newSid = String(res?.session_id || '')
@@ -681,9 +787,17 @@ onSessionCreated(newSid)
           if (debugEnabled) {
 console.log('[ui] session started', res)
 }
-        } catch {}
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e || 'Failed to start voice session')
+          setErrorMessage(message)
+          if (debugEnabled) {
+console.error('[ui] start session failed', e)
+}
+        }
       })
       .catch((e) => {
+        const message = e instanceof Error ? e.message : String(e || 'Failed to connect voice websocket')
+        setErrorMessage(message)
  if (debugEnabled) {
 console.error('[ui] connect failed', e)
 } 
@@ -714,18 +828,39 @@ clientRef.current.stopSession(sid).catch(() => {})
       setNotifications([])
       setTranscripts([])
       setChatInput('')
+      setErrorMessage(null)
     }
-  }, [isOpen])
+  }, [debugEnabled, isOpen, onSessionCreated, sessionId, token, wsRealtimeUrl])
+
+  // Look up the kind of an in-flight approval so handleApprove/Reject
+  // can pick the right RPC. MCP-side notifications stash the
+  // discriminator on ``metadata.kind`` (see the mcp_approval_requested
+  // branch above); anything else is a function-tool approval.
+  const isMcpApproval = useCallback((requestId: string) => {
+    const n = notifications.find((x) => x.request_id === requestId)
+    const meta = (n as any)?.metadata
+    return meta && typeof meta === 'object' && meta.kind === 'mcp'
+  }, [notifications])
 
   const handleApprove = useCallback((requestId: string) => {
-    clientRef.current?.clientResponse(requestId, true, { approved: true })
+    if (isMcpApproval(requestId)) {
+      clientRef.current?.mcpApprovalResponse(requestId, 'approve').catch(() => {})
+    } else {
+      // ``requestId`` for function-tool approvals is the call_id we
+      // stored when ``tool_approval_requested`` arrived.
+      clientRef.current?.toolApprovalResponse(requestId, 'approve').catch(() => {})
+    }
     setNotifications(prev => prev.filter(n => n.request_id !== requestId))
-  }, [])
+  }, [isMcpApproval])
 
   const handleReject = useCallback((requestId: string) => {
-    clientRef.current?.clientResponse(requestId, true, { approved: false })
+    if (isMcpApproval(requestId)) {
+      clientRef.current?.mcpApprovalResponse(requestId, 'reject').catch(() => {})
+    } else {
+      clientRef.current?.toolApprovalResponse(requestId, 'reject').catch(() => {})
+    }
     setNotifications(prev => prev.filter(n => n.request_id !== requestId))
-  }, [])
+  }, [isMcpApproval])
 
   const handleDismissNotification = useCallback((id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id))
@@ -924,32 +1059,37 @@ console.log('[VoiceModal] SPEAKING finished, transition to', effectiveState)
   // creates a new containing block and would otherwise trap a `fixed` child
   // inside the composer's flow, clipping the overlay to the chat input area.
   const modal = (
-    <div className="fixed inset-0 z-[9999] bg-black flex flex-col">
+    <div className="fixed inset-0 z-[9999] bg-background flex flex-col" style={glassVars}>
+      {/* Hidden audio sink for TTS playback. Lets us route output to a chosen
+          device via setSinkId(); fed by a MediaStreamAudioDestinationNode. */}
+      <audio ref={audioOutElRef} autoPlay style={{ display: 'none' }} />
+
       {/* ── Top bar ── */}
       <div
-        className="flex items-center justify-between px-5 py-3 border-b border-white/[0.06]"
+        className="flex items-center justify-between px-5 py-3 border-b border-border"
         style={{
-          background: 'rgba(36, 36, 40, 0.6)',
+          background: 'color-mix(in srgb, var(--color-card) 85%, transparent)',
           backdropFilter: 'blur(40px) saturate(1.4)',
         }}
       >
         <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold text-white/90 tracking-tight">Omni Voice</span>
-          <span className="flex items-center gap-1.5 text-xs text-white/50">
+          <span className="text-sm font-semibold text-foreground tracking-tight">Omni Voice</span>
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-success" />
             </span>
             Live
           </span>
-          <span className="text-xs text-white/30 font-mono tabular-nums">{formattedTime}</span>
+          <span className="text-xs text-muted-foreground/60 font-mono tabular-nums">{formattedTime}</span>
+          {errorMessage && <span className="text-xs text-destructive max-w-[360px] truncate" title={errorMessage}>Voice error: {errorMessage}</span>}
         </div>
         <div className="flex items-center gap-2">
           {/* Toggle sidebar */}
           <button
             type="button"
             onClick={() => setSidebarOpen(o => !o)}
-            className="h-9 w-9 rounded-lg flex items-center justify-center text-white/40 hover:text-white/70 hover:bg-white/[0.06] transition-colors"
+            className="h-9 w-9 rounded-lg flex items-center justify-center text-muted-foreground/80 hover:text-foreground/70 hover:bg-accent transition-colors"
             aria-label={sidebarOpen ? 'Hide activity' : 'Show activity'}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -961,7 +1101,7 @@ console.log('[VoiceModal] SPEAKING finished, transition to', effectiveState)
           <button
             type="button"
             onClick={onClose}
-            className="h-9 w-9 rounded-lg flex items-center justify-center text-white/40 hover:text-white/70 hover:bg-white/[0.06] transition-colors"
+            className="h-9 w-9 rounded-lg flex items-center justify-center text-muted-foreground/80 hover:text-foreground/70 hover:bg-accent transition-colors"
             aria-label="Close voice mode"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -999,40 +1139,40 @@ console.log('[VoiceModal] SPEAKING finished, transition to', effectiveState)
             {/* Debug state indicator */}
             {debugEnabled && (
               <div className="flex flex-col items-center gap-3">
-                <div className="text-white/50 text-sm font-mono">
+                <div className="text-muted-foreground text-sm font-mono">
                   Base: {effectiveState} | Playing: {isActuallyPlayingAudio ? 'YES' : 'NO'} | Audio: {(audioLevel * 100).toFixed(0)}%
-                  {toolOverlayActive && <span className="text-purple-400"> | Tool Overlay: ON</span>}
+                  {toolOverlayActive && <span className="text-accent-foreground"> | Tool Overlay: ON</span>}
                 </div>
                 <div className="flex flex-wrap gap-2 justify-center max-w-xl">
                   <button onClick={() => {
  setOrbState(OrbState.IDLE); setIsActuallyPlayingAudio(false); toolUseEndTimeRef.current = 0 
-}} className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded">→ IDLE</button>
+}} className="px-3 py-1 text-xs bg-secondary hover:bg-secondary/80 text-foreground rounded">→ IDLE</button>
                   <button onClick={() => {
  setOrbState(OrbState.LISTENING); setIsMuted(false); isMutedRef.current = false; setIsActuallyPlayingAudio(false); toolUseEndTimeRef.current = 0 
-}} className="px-3 py-1 text-xs bg-green-700 hover:bg-green-600 text-white rounded">→ LISTENING</button>
+}} className="px-3 py-1 text-xs bg-success hover:bg-success/80 text-foreground rounded">→ LISTENING</button>
                   <button onClick={() => {
  setOrbState(OrbState.THINKING); setIsActuallyPlayingAudio(false); toolUseEndTimeRef.current = 0 
-}} className="px-3 py-1 text-xs bg-blue-700 hover:bg-blue-600 text-white rounded">→ THINKING</button>
+}} className="px-3 py-1 text-xs bg-info hover:bg-info/80 text-foreground rounded">→ THINKING</button>
                   <button onClick={() => {
  setIsActuallyPlayingAudio(true); toolUseEndTimeRef.current = 0 
-}} className="px-3 py-1 text-xs bg-orange-700 hover:bg-orange-600 text-white rounded">→ SPEAKING (start)</button>
+}} className="px-3 py-1 text-xs bg-warning hover:bg-warning/80 text-foreground rounded">→ SPEAKING (start)</button>
                   <button onClick={() => {
  setIsActuallyPlayingAudio(false) 
-}} className="px-3 py-1 text-xs bg-orange-900 hover:bg-orange-800 text-white rounded">SPEAKING (stop)</button>
+}} className="px-3 py-1 text-xs bg-warning/80 hover:bg-warning/70 text-foreground rounded">SPEAKING (stop)</button>
                   <button onClick={() => {
  setIsUsingTool(true); toolUseEndTimeRef.current = 0 
-}} className="px-3 py-1 text-xs bg-purple-700 hover:bg-purple-600 text-white rounded">Tool Overlay ON</button>
+}} className="px-3 py-1 text-xs bg-accent hover:bg-accent/80 text-foreground rounded">Tool Overlay ON</button>
                   <button onClick={() => {
  setIsUsingTool(true); toolUseEndTimeRef.current = Date.now() 
-}} className="px-3 py-1 text-xs bg-purple-900 hover:bg-purple-800 text-white rounded">Tool Overlay (linger)</button>
+}} className="px-3 py-1 text-xs bg-accent/80 hover:bg-accent/70 text-foreground rounded">Tool Overlay (linger)</button>
                   <button onClick={() => {
  setIsUsingTool(false); toolUseEndTimeRef.current = 0 
-}} className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded">Tool Overlay OFF</button>
+}} className="px-3 py-1 text-xs bg-secondary hover:bg-secondary/80 text-foreground rounded">Tool Overlay OFF</button>
                   <button onClick={() => {
  const fluctuate = () => setAudioLevel(Math.random() * 0.8 + 0.2); const iv = setInterval(fluctuate, 100); setTimeout(() => {
  clearInterval(iv); setAudioLevel(0) 
 }, 3000) 
-}} className="px-3 py-1 text-xs bg-yellow-700 hover:bg-yellow-600 text-white rounded">Simulate Audio (3s)</button>
+}} className="px-3 py-1 text-xs bg-warning hover:bg-warning/80 text-foreground rounded">Simulate Audio (3s)</button>
                 </div>
               </div>
             )}
@@ -1056,17 +1196,17 @@ console.log('[VoiceModal] SPEAKING finished, transition to', effectiveState)
 } catch {}
                   }
                 }}
-                className="h-16 w-16 rounded-full bg-tweetBlue hover:brightness-110 flex items-center justify-center shadow-lg"
+                className="h-16 w-16 rounded-full bg-primary hover:brightness-110 flex items-center justify-center shadow-lg"
                 aria-label={isMuted ? 'Unmute' : 'Mute'}
               >
                 {isMuted ? (
-                  <svg width="24" height="24" viewBox="0 0 24 24" className="text-white" aria-hidden="true">
+                  <svg width="24" height="24" viewBox="0 0 24 24" className="text-primary-foreground" aria-hidden="true">
                     <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" fill="currentColor"/>
                     <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none"/>
                     <line x1="2" y1="2" x2="22" y2="22" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
                   </svg>
                 ) : (
-                  <svg width="24" height="24" viewBox="0 0 24 24" className="text-white" aria-hidden="true">
+                  <svg width="24" height="24" viewBox="0 0 24 24" className="text-primary-foreground" aria-hidden="true">
                     <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" fill="currentColor"/>
                     <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none"/>
                   </svg>
@@ -1080,7 +1220,7 @@ console.log('[VoiceModal] SPEAKING finished, transition to', effectiveState)
                 className="h-16 w-16 rounded-full bg-bgCardAlt hover:bg-bgCard flex items-center justify-center shadow-lg"
                 aria-label="Close voice mode"
               >
-                <svg width="24" height="24" viewBox="0 0 24 24" className="text-white" aria-hidden="true">
+                <svg width="24" height="24" viewBox="0 0 24 24" className="text-foreground" aria-hidden="true">
                   <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
                 </svg>
               </button>
@@ -1090,23 +1230,23 @@ console.log('[VoiceModal] SPEAKING finished, transition to', effectiveState)
 
         {/* ── Right sidebar: Chat + Activity ── */}
         <div
-          className="border-l border-white/[0.06] flex flex-col transition-[width,opacity] duration-200 ease-out overflow-hidden"
+          className="border-l border-border flex flex-col transition-[width,opacity] duration-200 ease-out overflow-hidden"
           style={{
             width: sidebarOpen ? 340 : 0,
             opacity: sidebarOpen ? 1 : 0,
-            background: 'rgba(36, 36, 40, 0.4)',
+            background: 'color-mix(in srgb, var(--color-card) 65%, transparent)',
             backdropFilter: 'blur(40px) saturate(1.4)',
           }}
         >
           {/* Sidebar header */}
-          <div className="px-4 py-3 border-b border-white/[0.06] flex-shrink-0">
-            <span className="text-xs font-semibold text-white/60 uppercase tracking-wider">Chat</span>
+          <div className="px-4 py-3 border-b border-border flex-shrink-0">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Chat</span>
           </div>
 
           {/* Interleaved timeline: transcripts + tool activity */}
           <div ref={chatScrollRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
             {sidebarItems.length === 0 ? (
-              <div className="text-xs text-white/25 text-center pt-8">
+              <div className="text-xs text-muted-foreground/50 text-center pt-8">
                 Transcripts and activity will appear here
               </div>
             ) : (
@@ -1135,7 +1275,7 @@ console.log('[VoiceModal] SPEAKING finished, transition to', effectiveState)
           </div>
 
           {/* Text input */}
-          <div className="px-3 pb-3 pt-2 border-t border-white/[0.06] flex-shrink-0">
+          <div className="px-3 pb-3 pt-2 border-t border-border flex-shrink-0">
             <form
               onSubmit={e => {
  e.preventDefault(); handleSendText(chatInput) 
@@ -1147,12 +1287,12 @@ console.log('[VoiceModal] SPEAKING finished, transition to', effectiveState)
                 value={chatInput}
                 onChange={e => setChatInput(e.target.value)}
                 placeholder="Type a message..."
-                className="flex-1 bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-white/90 placeholder-white/25 outline-none focus:border-white/20 transition-colors"
+                className="flex-1 bg-muted/60 border border-border rounded-lg px-3 py-2 text-xs text-foreground placeholder-muted-foreground/50 outline-none focus:border-ring transition-colors"
               />
               <button
                 type="submit"
                 disabled={!chatInput.trim()}
-                className="px-3 py-2 rounded-lg bg-tweetBlue text-white text-xs font-medium disabled:opacity-30 hover:brightness-110 transition-all flex-shrink-0"
+                className="px-3 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-medium disabled:opacity-30 hover:brightness-110 transition-all flex-shrink-0"
               >
                 Send
               </button>
@@ -1175,13 +1315,13 @@ function SidebarTranscriptBubble({ role, text, timestamp }: { role: 'user' | 'as
       <div
         className={`max-w-[85%] rounded-lg px-3 py-2 text-xs leading-relaxed ${
           isUser
-            ? 'bg-tweetBlue/20 text-white/90 rounded-br-sm'
-            : 'bg-white/[0.06] text-white/80 rounded-bl-sm'
+            ? 'bg-primary/20 text-foreground rounded-br-sm'
+            : 'bg-muted/60 text-foreground/80 rounded-bl-sm'
         }`}
       >
         {text}
       </div>
-      <span className="text-xs text-white/20 mt-0.5 px-1">
+      <span className="text-xs text-muted-foreground/40 mt-0.5 px-1">
         {new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
       </span>
     </div>
@@ -1216,37 +1356,37 @@ return `${lines.slice(0, 3).join('\n')  }\n...`
 
   return (
     <div
-      className="rounded-lg border border-white/[0.06] px-3 py-2.5 transition-colors hover:bg-white/[0.03]"
-      style={{ background: 'rgba(255, 255, 255, 0.02)' }}
+      className="rounded-lg border border-border px-3 py-2.5 transition-colors hover:bg-accent/40"
+      style={{ background: 'color-mix(in srgb, var(--color-muted) 35%, transparent)' }}
       onClick={() => n.type !== 'tool_approval' && onDismiss?.(n.id)}
     >
       <div className="flex items-center gap-2 mb-0.5">
         {icon}
-        <span className="text-xs font-medium text-white/80 truncate flex-1">
+        <span className="text-xs font-medium text-foreground/80 truncate flex-1">
           {n.type === 'tool_approval' ? 'Approve tool call?' : n.tool}
         </span>
-        <span className="text-xs text-white/20 tabular-nums flex-shrink-0">
+        <span className="text-xs text-muted-foreground/40 tabular-nums flex-shrink-0">
           {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
         </span>
       </div>
 
       {n.type === 'tool_called' && n.input && (
-        <div className="text-xs text-white/40 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
+        <div className="text-xs text-muted-foreground/80 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
           {truncate(n.input, 120)}
         </div>
       )}
 
       {n.type === 'tool_result' && n.output && (
-        <div className="text-xs text-white/40 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
+        <div className="text-xs text-muted-foreground/80 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
           {truncate(n.output, 120)}
         </div>
       )}
 
       {n.type === 'tool_approval' && (
         <>
-          <div className="text-xs text-white/60 font-medium mt-0.5">{n.tool}</div>
+          <div className="text-xs text-muted-foreground font-medium mt-0.5">{n.tool}</div>
           {n.input && (
-            <div className="text-xs text-white/40 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
+            <div className="text-xs text-muted-foreground/80 font-mono leading-snug mt-1 whitespace-pre-wrap break-all">
               {truncate(n.input, 120)}
             </div>
           )}
@@ -1255,7 +1395,7 @@ return `${lines.slice(0, 3).join('\n')  }\n...`
               onClick={(e) => {
  e.stopPropagation(); onApprove?.(n.request_id!) 
 }}
-              className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-green-500/20 text-green-400 hover:bg-green-500/30 border border-green-500/20 transition-colors"
+              className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-success/20 text-success hover:bg-success/30 border border-success/20 transition-colors"
             >
               Approve
             </button>
@@ -1263,7 +1403,7 @@ return `${lines.slice(0, 3).join('\n')  }\n...`
               onClick={(e) => {
  e.stopPropagation(); onReject?.(n.request_id!) 
 }}
-              className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/20 transition-colors"
+              className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-destructive/20 text-destructive hover:bg-destructive/30 border border-destructive/20 transition-colors"
             >
               Reject
             </button>
@@ -1277,20 +1417,20 @@ return `${lines.slice(0, 3).join('\n')  }\n...`
 function ToolActivityIcon({ type }: { type: 'running' | 'done' | 'approval' }) {
   if (type === 'done') {
     return (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0 text-green-400">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0 text-success">
         <polyline points="20 6 9 17 4 12" />
       </svg>
     )
   }
   if (type === 'approval') {
     return (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0 text-yellow-400">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0 text-warning">
         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
       </svg>
     )
   }
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0 text-white/50">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0 text-muted-foreground">
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>

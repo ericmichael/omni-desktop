@@ -60,20 +60,16 @@ export const ToastContainer = memo(() => {
         <Toast>
           <ToastTitle>{toastData.title}</ToastTitle>
           {toastData.description && <ToastBody>{toastData.description}</ToastBody>}
-          {toastData.copyText && (
-            <ToastFooter>
-              <Button
-                size="small"
-                icon={<Copy20Regular />}
-                onClick={() => void copyToClipboard(toastData.copyText!)}
-              >
+          <ToastFooter>
+            {toastData.copyText && (
+              <Button size="small" icon={<Copy20Regular />} onClick={() => void copyToClipboard(toastData.copyText!)}>
                 Copy error
               </Button>
-              <Button size="small" onClick={() => dismissToast(toastData.id)}>
-                Dismiss
-              </Button>
-            </ToastFooter>
-          )}
+            )}
+            <Button size="small" onClick={() => dismissToast(toastData.id)}>
+              Dismiss
+            </Button>
+          </ToastFooter>
         </Toast>,
         {
           intent: LEVEL_TO_INTENT[toastData.level],

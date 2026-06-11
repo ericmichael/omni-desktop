@@ -6,9 +6,9 @@ import fs from 'fs/promises';
 import path from 'path';
 import { promisify } from 'util';
 
-import { checkOmniVersion } from '@/lib/omni-version';
+import { checkOmniVersion, OMNI_CODE_VERSION } from '@/lib/omni-version';
 import { withResultAsync } from '@/lib/result';
-import type { GpuType, OmniRuntimeInfo, OperatingSystem, WindowProps } from '@/shared/types';
+import type { GpuType, OmniRuntimeInfo, OperatingSystem, RuntimeModelList, WindowProps } from '@/shared/types';
 
 const execAsync = promisify(exec);
 
@@ -46,6 +46,17 @@ export const getUVExecutablePath = (): string => {
   return path.join(getBundledBinPath(), uvName);
 };
 
+/**
+ * Get the path to the vendored MCP-UI sandbox proxy HTML. Served by the
+ * ``mcp-sandbox:`` protocol handler in main/index.ts.
+ */
+export const getMcpSandboxHtmlPath = (): string => {
+  if (isDevelopment() || !app.isPackaged || !process.resourcesPath) {
+    return path.resolve(path.join(__dirname, '..', '..', 'assets', 'mcp-sandbox', 'index.html'));
+  }
+  return path.resolve(path.join(process.resourcesPath, 'mcp-sandbox', 'index.html'));
+};
+
 export const getOmniRuntimeDir = (): string => {
   // On Windows, use %USERPROFILE%\.omni — the shortest stable non-admin path.
   // Deep site-packages paths inside the venv easily exceed 260 chars when
@@ -77,6 +88,13 @@ export const getOmniCliPath = (): string => {
     if (devPath) {
       return devPath;
     }
+  }
+  // Cloud/server: use the stable CLI baked into the Docker image (set by the
+  // Dockerfile's ENV OMNI_CLI_PATH=/usr/local/bin/omni). This bypasses the
+  // ephemeral runtime venv entirely — no install at boot, deterministic version.
+  const cliOverride = process.env.OMNI_CLI_PATH;
+  if (cliOverride) {
+    return cliOverride;
   }
   const venvPath = getOmniVenvPath();
   return path.join(venvPath, process.platform === 'win32' ? 'Scripts/omni.exe' : 'bin/omni');
@@ -207,6 +225,19 @@ export const getProjectDir = (slug: string): string => {
   return path.join(getProjectsDir(), slug);
 };
 
+/**
+ * Absolute filesystem directory holding a project's pages and notebooks.
+ *
+ * Pages now live under `<config>/pages/<projectId>/<pageId>.{md,py}` rather
+ * than `<workspaceDir>/Projects/<slug>/pages/`. Keyed by stable id, not slug,
+ * so rename doesn't break the filesystem. Shared 1:1 with the MCP layout
+ * (`getDefaultPagesDir` in omni-projects-db), so both writers land on the
+ * same files.
+ */
+export const getProjectPagesDir = (projectId: string): string => {
+  return path.join(getOmniConfigDir(), 'pages', projectId);
+};
+
 /** Generate a filesystem-safe slug from a project label. */
 export const slugify = (label: string): string => {
   return (
@@ -318,6 +349,23 @@ const getPackageVersion = async (pythonPath: string, packageName: string): Promi
 };
 
 export const getOmniRuntimeInfo = async (): Promise<OmniRuntimeInfo> => {
+  // Cloud/server: the CLI is baked into the image (OMNI_CLI_PATH). It's the
+  // single, reproducible source of truth — report it installed and never
+  // "outdated" so the renderer skips the runtime-venv install entirely.
+  const cliOverride = process.env.OMNI_CLI_PATH;
+  if (cliOverride) {
+    if (!(await isFile(cliOverride))) {
+      return { isInstalled: false };
+    }
+    return {
+      isInstalled: true,
+      version: OMNI_CODE_VERSION,
+      expectedVersion: OMNI_CODE_VERSION,
+      isOutdated: false,
+      omniPath: cliOverride,
+    };
+  }
+
   const omniPath = getOmniCliPath();
   const pythonPath = getOmniPythonPath();
 
@@ -555,6 +603,29 @@ export const installCliToPath = async (): Promise<
 //#endregion
 
 //#region Omni CLI commands
+
+/**
+ * List the runtime's available models via `omni model list --json`.
+ *
+ * This is the live, merged view (defaults + user config + platform governance +
+ * OAuth-discovered models like Codex), which can include models not present in
+ * the store's `models.json` — used to populate the Settings model pickers.
+ * Returns an empty list if the CLI is unavailable or errors.
+ */
+export const listRuntimeModels = async (): Promise<RuntimeModelList> => {
+  const omniPath = getOmniCliPath();
+  try {
+    const { stdout } = await execAsync(`"${omniPath}" model list --json`, { timeout: 30_000 });
+    const parsed = JSON.parse(stdout) as RuntimeModelList;
+    return {
+      models: Array.isArray(parsed.models) ? parsed.models : [],
+      default: parsed.default ?? null,
+      voice_default: parsed.voice_default ?? null,
+    };
+  } catch {
+    return { models: [], default: null, voice_default: null };
+  }
+};
 
 /**
  * Check if models are configured by running `omni model check`.

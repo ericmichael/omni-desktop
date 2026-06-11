@@ -28,14 +28,13 @@ import type {
   Project,
   ProjectId,
   ProjectSource,
-  SandboxConfig,
-  ShapingData,
   Ticket,
   TicketComment,
   TicketId,
   TicketRun,
   TokenUsage,
 } from '@/shared/types';
+import { firstSource } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
 // Constants shared by parsers and tests
@@ -46,7 +45,6 @@ const FRONTMATTER_FENCE = '---';
 const TICKET_PRIORITIES = ['low', 'medium', 'high', 'critical'] as const;
 const TICKET_RESOLUTIONS = ['completed', 'wont_do', 'duplicate', 'cancelled'] as const;
 const MILESTONE_STATUSES = ['active', 'completed', 'archived'] as const;
-const APPETITES = ['small', 'medium', 'large'] as const;
 const TICKET_PHASES = [
   'idle',
   'provisioning',
@@ -54,9 +52,6 @@ const TICKET_PHASES = [
   'session_creating',
   'ready',
   'running',
-  'continuing',
-  'awaiting_input',
-  'retrying',
   'error',
   'completed',
 ] as const satisfies readonly TicketPhase[];
@@ -176,9 +171,14 @@ const TokenUsageSchema: z.ZodType<TokenUsage> = z.object({
   totalTokens: z.number(),
 });
 
-const ShapingSchema: z.ZodType<ShapingData> = z.object({
+/**
+ * Legacy frontmatter block from the removed shaping system. Still accepted
+ * on read so pre-v25 ticket files don't lose data — `parseTicketFile` folds
+ * it into the description. Never written back.
+ */
+const LegacyShapingSchema = z.object({
   doneLooksLike: z.string(),
-  appetite: z.enum(APPETITES),
+  appetite: z.string(),
   outOfScope: z.string(),
 });
 
@@ -188,30 +188,37 @@ const ColumnSchema = z.object({
   description: z.string().optional(),
   maxConcurrent: z.number().int().positive().optional(),
   gate: z.boolean().optional(),
+  workflow: z.object({
+    purpose: z.string().optional(),
+    entryCriteria: z.array(z.string()).optional(),
+    definitionOfDone: z.array(z.string()).optional(),
+    agentInstructions: z.string().optional(),
+    recommendedSkills: z.array(z.string()).optional(),
+    allowedTransitions: z.array(z.string()).optional(),
+    autoDispatch: z.boolean().optional(),
+  }).optional(),
 });
 
 const PipelineSchema: z.ZodType<Pipeline> = z.object({
   columns: z.array(ColumnSchema),
 });
 
-const SandboxConfigSchema: z.ZodType<SandboxConfig> = z.object({
-  image: z.string().optional(),
-  dockerfile: z.string().optional(),
-});
-
 const ProjectSourceSchema: z.ZodType<ProjectSource> = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('local'),
+    id: z.string(),
+    mountName: z.string(),
     workspaceDir: z.string(),
     gitDetected: z.boolean().optional(),
   }),
   z.object({
     kind: z.literal('git-remote'),
+    id: z.string(),
+    mountName: z.string(),
     repoUrl: z.string(),
     defaultBranch: z.string().optional(),
-    credentials: z.object({ kind: z.literal('platform-managed'), credentialId: z.string() }).optional(),
   }),
-]);
+]) as unknown as z.ZodType<ProjectSource>;
 
 /** Frontmatter schema for a ticket file. Body holds the description. */
 const TicketMetaSchema = z.object({
@@ -226,9 +233,9 @@ const TicketMetaSchema = z.object({
   worktreeName: z.string().optional(),
   phase: z.enum(TICKET_PHASES).optional(),
   resolution: z.enum(TICKET_RESOLUTIONS).optional(),
-  supervisorSessionId: z.string().optional(),
+  autopilot: z.boolean().optional(),
   tokenUsage: TokenUsageSchema.optional(),
-  shaping: ShapingSchema.optional(),
+  shaping: LegacyShapingSchema.optional(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -273,9 +280,9 @@ const ProjectConfigSchema = z.object({
   label: z.string(),
   slug: z.string(),
   isPersonal: z.boolean().optional(),
-  source: ProjectSourceSchema.optional(),
+  sources: z.array(ProjectSourceSchema).optional(),
   pipeline: PipelineSchema.optional(),
-  sandbox: SandboxConfigSchema.nullable().optional(),
+  sandboxProfile: z.string().nullable().optional(),
   autoDispatch: z.boolean().optional(),
   createdAt: Timestamp,
 });
@@ -345,12 +352,28 @@ return fail(yamlResult.error.message);
 return parsed;
 }
   const m = parsed.value;
+  let description = body.replace(/^\n+/, '').replace(/\n+$/, '');
+  // Pre-v25 files carry a structured shaping block; fold it into the
+  // description (the one channel humans and the agent both read) so the
+  // data survives the shaping-system removal.
+  if (m.shaping) {
+    const folded: string[] = [];
+    if (m.shaping.doneLooksLike.trim()) {
+      folded.push(`**Done when:** ${m.shaping.doneLooksLike.trim()}`);
+    }
+    if (m.shaping.outOfScope.trim()) {
+      folded.push(`**Out of scope:** ${m.shaping.outOfScope.trim()}`);
+    }
+    if (folded.length > 0) {
+      description = [description, folded.join('\n')].filter(Boolean).join('\n\n');
+    }
+  }
   return new Ok({
     id,
     projectId,
     milestoneId: m.milestone as MilestoneId | undefined,
     title: m.title,
-    description: body.replace(/^\n+/, '').replace(/\n+$/, ''),
+    description,
     priority: m.priority,
     blockedBy: (m.blockedBy ?? []) as TicketId[],
     columnId: m.column,
@@ -360,9 +383,8 @@ return parsed;
     worktreeName: m.worktreeName,
     phase: m.phase,
     resolution: m.resolution,
-    supervisorSessionId: m.supervisorSessionId,
+    autopilot: m.autopilot,
     tokenUsage: m.tokenUsage,
-    shaping: m.shaping,
     comments: [],
     runs: [],
     createdAt: m.createdAt,
@@ -453,11 +475,13 @@ return parsed;
     id: c.id as ProjectId,
     label: c.label,
     slug: c.slug,
-    isPersonal: c.isPersonal,
-    source: c.source,
-    pipeline: c.pipeline,
-    sandbox: c.sandbox,
-    autoDispatch: c.autoDispatch,
+    ...(c.isPersonal !== undefined ? { isPersonal: c.isPersonal } : {}),
+    ...(c.sources && c.sources.length > 0 ? { sources: c.sources } : {}),
+    ...(c.pipeline !== undefined ? { pipeline: c.pipeline } : {}),
+    ...(c.sandboxProfile !== undefined && c.sandboxProfile !== null
+      ? { sandboxProfile: c.sandboxProfile }
+      : {}),
+    ...(c.autoDispatch !== undefined ? { autoDispatch: c.autoDispatch } : {}),
     createdAt: c.createdAt,
   });
 }
@@ -531,9 +555,8 @@ export function serializeTicketFile(ticket: Ticket): string {
     worktreeName: ticket.worktreeName,
     phase: ticket.phase,
     resolution: ticket.resolution,
-    supervisorSessionId: ticket.supervisorSessionId,
+    autopilot: ticket.autopilot,
     tokenUsage: ticket.tokenUsage,
-    shaping: ticket.shaping,
     createdAt: msToIso(ticket.createdAt),
     updatedAt: msToIso(ticket.updatedAt),
   });
@@ -577,9 +600,9 @@ export function serializeProjectConfig(project: Project): string {
     label: project.label,
     slug: project.slug,
     isPersonal: project.isPersonal,
-    source: project.source,
+    sources: project.sources?.length ? project.sources : undefined,
     pipeline: project.pipeline,
-    sandbox: project.sandbox,
+    sandboxProfile: project.sandboxProfile,
     autoDispatch: project.autoDispatch,
     createdAt: msToIso(project.createdAt),
   });

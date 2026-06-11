@@ -1,304 +1,30 @@
 /**
- * Client tool definitions for agent sessions.
+ * Launcher-only client tool definitions.
  *
- * TICKET tools: scoped to the current ticket (get/move/escalate).
- * READ-ONLY CONTEXT tools: read surrounding project state (list_tickets, read_brief, etc.).
- * PROJECT tools: broader project & ticket management (list/create/update/start/stop).
- *
- * Autopilot runs get TICKET tools + READ-ONLY CONTEXT tools.
- * Human-interactive sessions get everything.
+ * Project / ticket / milestone / page / inbox CRUD lives in the bundled
+ * `omni-projects-mcp` stdio server (`packages/projects-mcp`), which the
+ * agent spawns per `~/.config/omni_code/mcp.json`. This file only carries
+ * tools that coordinate with the launcher's runtime state — escalation /
+ * notification channels, supervisor lifecycle (start/stop), the deck UI
+ * overlays, and the renderer-driven app-control + browser-control suites.
  */
 
 import { getContainerArtifactsDir } from '@/lib/artifacts';
+import type { ProjectSource } from '@/shared/types';
+import { isRepoSource } from '@/shared/types';
 
-export const TICKET_CLIENT_TOOLS = [
-  {
-    name: 'get_ticket',
-    safe: true,
-    description:
-      'Get a ticket\'s state including title, description, priority, current column, and pipeline columns. Pass a ticket_id to look up any ticket, or omit it to get the current ticket.',
-    parameters: {
-      type: 'object',
-      properties: {
-        ticket_id: { type: 'string', description: 'The ticket ID to look up. Omit to get the current ticket.' },
-      },
-    },
-  },
-  {
-    name: 'move_ticket',
-    description: 'Move this ticket to a different pipeline column. Use exact column labels from the pipeline.',
-    parameters: {
-      type: 'object',
-      properties: {
-        column: { type: 'string', description: 'The target column label (e.g. "In Progress", "Done")' },
-      },
-      required: ['column'],
-    },
-  },
-  {
-    name: 'escalate',
-    description:
-      'Pause the current run and notify the human operator. Only use when truly blocked by something outside your control.',
-    parameters: {
-      type: 'object',
-      properties: {
-        message: { type: 'string', description: 'Brief description of what you need help with' },
-      },
-      required: ['message'],
-    },
-  },
-  {
-    name: 'notify',
-    description:
-      'Send a notification to the human operator without stopping the run. Use for heads-up messages like "changed the DB schema" or "found something unexpected". The run continues.',
-    parameters: {
-      type: 'object',
-      properties: {
-        message: { type: 'string', description: 'Brief notification message for the human.' },
-      },
-      required: ['message'],
-    },
-  },
-  {
-    name: 'add_ticket_comment',
-    description:
-      'Add a comment to a ticket. Use this to record decisions, findings, progress, blockers, or anything useful for future runs. Comments persist across sessions and are visible to humans and other agents. Pass a ticket_id to comment on any ticket, or omit it to comment on the current ticket.',
-    parameters: {
-      type: 'object',
-      properties: {
-        ticket_id: { type: 'string', description: 'The ticket ID to comment on. Omit to use the current ticket.' },
-        content: { type: 'string', description: 'The comment content (markdown supported).' },
-      },
-      required: ['content'],
-    },
-  },
-] as const;
+// Ticket-scoped client tools used to live here as launcher stubs
+// (``notify`` / ``escalate``). They're now omniagents builtins (see the
+// ``human`` capability in omni-code's ``agent.yml``) flowing through the
+// ``client_request`` dispatch path with real UI (Notifications panel +
+// EscalationBanner). The launcher no longer declares them.
 
-/** Read-only context tools — available to autopilot agents for surrounding awareness. */
-export const READONLY_CONTEXT_TOOLS = [
-  {
-    name: 'list_tickets',
-    safe: true,
-    description: 'List tickets in a project, optionally filtered by column or priority.',
-    parameters: {
-      type: 'object',
-      properties: {
-        project_id: { type: 'string', description: 'The project ID to list tickets for' },
-        milestone_id: { type: 'string', description: 'Optional milestone ID to filter by' },
-        column: { type: 'string', description: 'Optional column label to filter by' },
-        priority: {
-          type: 'string',
-          enum: ['low', 'medium', 'high', 'critical'],
-          description: 'Optional priority to filter by',
-        },
-      },
-      required: ['project_id'],
-    },
-  },
-  {
-    name: 'list_milestones',
-    safe: true,
-    description: 'List all milestones for a project.',
-    parameters: {
-      type: 'object',
-      properties: {
-        project_id: { type: 'string', description: 'The project ID to list milestones for' },
-      },
-      required: ['project_id'],
-    },
-  },
-  {
-    name: 'read_milestone_brief',
-    safe: true,
-    description: 'Read a milestone brief — the deliverable-focused document describing goals and scope.',
-    parameters: {
-      type: 'object',
-      properties: {
-        milestone_id: { type: 'string', description: 'The milestone ID to read the brief for' },
-      },
-      required: ['milestone_id'],
-    },
-  },
-  {
-    name: 'get_ticket_comments',
-    safe: true,
-    description:
-      'Read comments on a ticket. Returns the comment history — decisions, findings, progress notes, and blockers recorded by agents and humans across runs.',
-    parameters: {
-      type: 'object',
-      properties: {
-        ticket_id: { type: 'string', description: 'The ticket ID to read comments for.' },
-      },
-      required: ['ticket_id'],
-    },
-  },
-  {
-    name: 'search_tickets',
-    safe: true,
-    description:
-      'Search across all tickets by keyword. Matches against title and description. Use to find related work or check for duplicates before creating a ticket.',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'Search query — matched case-insensitively against ticket title and description.' },
-        project_id: { type: 'string', description: 'Optional project ID to limit search scope.' },
-      },
-      required: ['query'],
-    },
-  },
-  {
-    name: 'get_ticket_history',
-    safe: true,
-    description:
-      'Get the run history for a ticket — how many times it has been attempted, what each run ended with, and token usage. Useful for understanding why previous attempts failed.',
-    parameters: {
-      type: 'object',
-      properties: {
-        ticket_id: { type: 'string', description: 'The ticket ID to get run history for.' },
-      },
-      required: ['ticket_id'],
-    },
-  },
-  {
-    name: 'get_pipeline',
-    safe: true,
-    description:
-      'Get the full pipeline definition for a project — columns with labels, descriptions, and gate status. Use to understand the workflow and what each column expects.',
-    parameters: {
-      type: 'object',
-      properties: {
-        project_id: { type: 'string', description: 'The project ID to get the pipeline for.' },
-      },
-      required: ['project_id'],
-    },
-  },
-  {
-    name: 'list_pages',
-    safe: true,
-    description:
-      'List all pages in a project as a flat list with parent/child relationships. Each page has an id, title, icon, parentId, sortOrder, and structured properties (status, size, outcome, etc.).',
-    parameters: {
-      type: 'object',
-      properties: {
-        project_id: { type: 'string', description: 'The project ID to list pages for.' },
-      },
-      required: ['project_id'],
-    },
-  },
-  {
-    name: 'read_page',
-    safe: true,
-    description:
-      'Read a page\'s markdown content and metadata. Returns the title, properties, and full body text.',
-    parameters: {
-      type: 'object',
-      properties: {
-        page_id: { type: 'string', description: 'The page ID to read.' },
-      },
-      required: ['page_id'],
-    },
-  },
-] as const;
-
+/**
+ * Supervisor lifecycle tools — drive the launcher's autopilot orchestrator.
+ * Project / ticket CRUD lives in the MCP server; only run-control sits here
+ * because it touches launcher-side process state, not just the database.
+ */
 export const PROJECT_CLIENT_TOOLS = [
-  {
-    name: 'list_projects',
-    safe: true,
-    description: 'List all projects with their pipeline columns.',
-    parameters: { type: 'object', properties: {} },
-  },
-  {
-    name: 'create_project',
-    description:
-      'Create a new project. Optionally link a local directory as the workspace.',
-    parameters: {
-      type: 'object',
-      properties: {
-        label: { type: 'string', description: 'Human-readable project name' },
-        workspace_dir: {
-          type: 'string',
-          description: 'Local directory to link as the project workspace.',
-        },
-      },
-      required: ['label'],
-    },
-  },
-  {
-    name: 'update_project',
-    description: "Update a project's label or linked workspace directory.",
-    parameters: {
-      type: 'object',
-      properties: {
-        project_id: { type: 'string', description: 'The project ID to update' },
-        label: { type: 'string', description: 'New project name' },
-        workspace_dir: {
-          type: 'string',
-          description: 'Set the linked local directory. Pass an empty string to unlink.',
-        },
-      },
-      required: ['project_id'],
-    },
-  },
-  {
-    name: 'delete_project',
-    description:
-      'Delete a project and all its tickets, pages, and milestones. Cannot delete the Personal project.',
-    parameters: {
-      type: 'object',
-      properties: {
-        project_id: { type: 'string', description: 'The project ID to delete' },
-      },
-      required: ['project_id'],
-    },
-  },
-  {
-    name: 'create_ticket',
-    description: 'Create a new ticket in a project. It will be placed in the first pipeline column.',
-    parameters: {
-      type: 'object',
-      properties: {
-        project_id: { type: 'string', description: 'The project to create the ticket in' },
-        milestone_id: { type: 'string', description: 'Optional milestone ID to group this ticket under.' },
-        title: { type: 'string', description: 'Ticket title' },
-        description: { type: 'string', description: 'Ticket description' },
-        priority: {
-          type: 'string',
-          enum: ['low', 'medium', 'high', 'critical'],
-          description: 'Ticket priority (default: medium)',
-        },
-      },
-      required: ['project_id', 'title'],
-    },
-  },
-  {
-    name: 'update_ticket',
-    description: "Update a ticket's title, description, priority, branch, or dependencies.",
-    parameters: {
-      type: 'object',
-      properties: {
-        ticket_id: { type: 'string', description: 'The ticket ID to update' },
-        title: { type: 'string', description: 'New title' },
-        description: { type: 'string', description: 'New description' },
-        priority: {
-          type: 'string',
-          enum: ['low', 'medium', 'high', 'critical'],
-          description: 'New priority',
-        },
-        branch: { type: 'string', description: 'Git branch for this ticket.' },
-        add_blocked_by: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Ticket IDs to add as blockers (this ticket cannot proceed until those are done).',
-        },
-        remove_blocked_by: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Ticket IDs to remove as blockers.',
-        },
-      },
-      required: ['ticket_id'],
-    },
-  },
   {
     name: 'start_ticket',
     description: 'Dispatch an agent to start working on a ticket.',
@@ -321,236 +47,220 @@ export const PROJECT_CLIENT_TOOLS = [
       required: ['ticket_id'],
     },
   },
-  {
-    name: 'archive_ticket',
-    description: 'Archive a resolved ticket so it drops out of active project views.',
-    parameters: {
-      type: 'object',
-      properties: {
-        ticket_id: { type: 'string', description: 'The ticket ID to archive' },
-      },
-      required: ['ticket_id'],
-    },
-  },
-  {
-    name: 'unarchive_ticket',
-    description: 'Restore an archived ticket back into resolved project views.',
-    parameters: {
-      type: 'object',
-      properties: {
-        ticket_id: { type: 'string', description: 'The ticket ID to unarchive' },
-      },
-      required: ['ticket_id'],
-    },
-  },
-] as const;
-
-export const MILESTONE_CLIENT_TOOLS = [
-  {
-    name: 'create_milestone',
-    description:
-      'Create a new milestone (large feature or deliverable) in a project. Tickets can be grouped under milestones.',
-    parameters: {
-      type: 'object',
-      properties: {
-        project_id: { type: 'string', description: 'The project to create the milestone in' },
-        title: { type: 'string', description: 'Milestone title' },
-        description: { type: 'string', description: 'What this milestone delivers' },
-        branch: { type: 'string', description: 'Optional git branch for this milestone. Tickets inherit it.' },
-        due_date: {
-          type: 'string',
-          description: 'Optional due date in ISO format (for example `2026-04-30` or a full ISO timestamp).',
-        },
-      },
-      required: ['project_id', 'title'],
-    },
-  },
-  {
-    name: 'update_milestone',
-    description: 'Update a milestone — title, description, branch, status, brief, or due date.',
-    parameters: {
-      type: 'object',
-      properties: {
-        milestone_id: { type: 'string', description: 'The milestone ID to update' },
-        title: { type: 'string', description: 'New title' },
-        description: { type: 'string', description: 'New description' },
-        branch: { type: 'string', description: 'New branch' },
-        status: { type: 'string', enum: ['active', 'completed', 'archived'], description: 'New status' },
-        brief: { type: 'string', description: 'Full markdown content of the milestone brief' },
-        due_date: {
-          type: 'string',
-          description: 'Optional due date in ISO format. Pass an empty string to clear it.',
-        },
-      },
-      required: ['milestone_id'],
-    },
-  },
-] as const;
-
-export const PAGE_CLIENT_TOOLS = [
-  {
-    name: 'create_page',
-    description:
-      'Create a new page in a project. Pages are markdown documents organized in a tree. Use for notes, specs, research, meeting notes, or any structured content.',
-    parameters: {
-      type: 'object',
-      properties: {
-        project_id: { type: 'string', description: 'The project to create the page in.' },
-        title: { type: 'string', description: 'Page title.' },
-        parent_id: {
-          type: 'string',
-          description: 'Optional parent page ID. Omit for a root-level page.',
-        },
-        content: { type: 'string', description: 'Optional markdown body content.' },
-        icon: { type: 'string', description: 'Optional emoji icon for sidebar display.' },
-      },
-      required: ['project_id', 'title'],
-    },
-  },
-  {
-    name: 'update_page',
-    description:
-      'Update a page\'s title, content, icon, or structured properties. Only pass the fields you want to change.',
-    parameters: {
-      type: 'object',
-      properties: {
-        page_id: { type: 'string', description: 'The page ID to update.' },
-        title: { type: 'string', description: 'New title.' },
-        content: { type: 'string', description: 'New markdown body content (replaces the full body).' },
-        icon: { type: 'string', description: 'New emoji icon.' },
-        status: {
-          type: 'string',
-          enum: ['new', 'ready', 'doing', 'done', 'later'],
-          description: 'Workflow status.',
-        },
-        size: {
-          type: 'string',
-          enum: ['small', 'medium', 'large', 'xl'],
-          description: 'Effort sizing.',
-        },
-        outcome: { type: 'string', description: 'What does success look like? (1-2 sentences)' },
-        not_doing: { type: 'string', description: 'What is explicitly out of scope.' },
-        project_id: { type: 'string', description: 'Reassign to a different project.' },
-        milestone_id: { type: 'string', description: 'Assign to a milestone.' },
-      },
-      required: ['page_id'],
-    },
-  },
-] as const;
-
-export const INBOX_CLIENT_TOOLS = [
-  {
-    name: 'list_inbox',
-    safe: true,
-    description:
-      'List inbox items, optionally filtered by status. Omit the status parameter to list the default inbox view (active items in "new" or "shaped").',
-    parameters: {
-      type: 'object',
-      properties: {
-        status: {
-          type: 'string',
-          enum: ['new', 'shaped', 'later'],
-          description:
-            'Filter by status. "new" = captured but unshaped, "shaped" = clarified and ready to promote, "later" = parked. Omit to list the default inbox (new + shaped, excluding promoted items).',
-        },
-      },
-    },
-  },
-  {
-    name: 'create_inbox_item',
-    description:
-      'Add a new item to the inbox. Use for capturing raw ideas, requests, emails, or any unstructured input. Item starts with status "new".',
-    parameters: {
-      type: 'object',
-      properties: {
-        title: { type: 'string', description: 'Short title for the inbox item.' },
-        description: { type: 'string', description: 'Optional longer description — brain dump, email paste, meeting note, etc.' },
-        project_id: { type: 'string', description: 'Optional project ID to associate with.' },
-      },
-      required: ['title'],
-    },
-  },
-  {
-    name: 'update_inbox_item',
-    description:
-      'Update an inbox item — edit title, description, assign to a project, shape it, or park/reactivate it. To shape an item, pass shaping fields like outcome/appetite/not_doing. Status only supports "new", "shaped", and "later".',
-    parameters: {
-      type: 'object',
-      properties: {
-        item_id: { type: 'string', description: 'The inbox item ID to update' },
-        title: { type: 'string', description: 'Updated title' },
-        description: { type: 'string', description: 'Updated description (overwrites the full body)' },
-        status: {
-          type: 'string',
-          enum: ['new', 'shaped', 'later'],
-          description:
-            'New status. "new" = captured, "shaped" = active/shaped, "later" = parked. Use shaping fields to attach shaping metadata.',
-        },
-        project_id: { type: 'string', description: 'Assign to a project (or null to unassign)' },
-        outcome: { type: 'string', description: 'What success looks like. Passing this shapes the item.' },
-        appetite: {
-          type: 'string',
-          enum: ['small', 'medium', 'large', 'xl'],
-          description: 'Rough effort sizing used when shaping the item.',
-        },
-        not_doing: { type: 'string', description: 'Explicitly out-of-scope work for the shaped item.' },
-      },
-      required: ['item_id'],
-    },
-  },
-  {
-    name: 'delete_inbox_item',
-    description: 'Remove an inbox item.',
-    parameters: {
-      type: 'object',
-      properties: {
-        item_id: { type: 'string', description: 'The inbox item ID to delete' },
-      },
-      required: ['item_id'],
-    },
-  },
-  {
-    name: 'inbox_to_tickets',
-    description:
-      'Promote an inbox item into a single ticket on a project. The ticket title/description are seeded from the inbox item and the inbox item is marked as promoted.',
-    parameters: {
-      type: 'object',
-      properties: {
-        item_id: { type: 'string', description: 'The inbox item ID to graduate' },
-        project_id: { type: 'string', description: 'The project to create tickets in' },
-        milestone_id: { type: 'string', description: 'Optional milestone to assign the new ticket to.' },
-      },
-      required: ['item_id', 'project_id'],
-    },
-  },
-  {
-    name: 'inbox_to_project',
-    description:
-      'Promote an inbox item into a new project. The new project label comes from `label`, falling back to the inbox item title.',
-    parameters: {
-      type: 'object',
-      properties: {
-        item_id: { type: 'string', description: 'The inbox item ID to promote.' },
-        label: { type: 'string', description: 'Optional label for the new project.' },
-      },
-      required: ['item_id'],
-    },
-  },
 ] as const;
 
 /** Code-deck-only UI tools — require the overlay panel infrastructure. */
 export const CODE_UI_TOOLS = [
   {
-    name: 'open_preview',
+    name: 'browser_open',
     safe: true,
     description:
-      'Open a web preview panel showing the given URL. Use this to show the user a running web app, dev server, or any web page. The preview opens as an overlay panel with a URL bar.',
+      "Mount this session's browser sidecar and point it at `url`. Opens the sidecar if it is not already showing. Use to surface a running web app, dev server, or page to the user; for subsequent navigation use `app_navigate` against the `browser` app id.",
     parameters: {
       type: 'object',
       properties: {
-        url: { type: 'string', description: 'The URL to preview (e.g. "http://localhost:3000")' },
+        url: { type: 'string', description: 'The URL to load (e.g. "http://localhost:3000")' },
       },
       required: ['url'],
+    },
+  },
+  {
+    name: 'launch_app',
+    safe: true,
+    description:
+      'Open (mount) an app in a workspace column so it becomes drivable. Apps mount lazily — an app `list_apps` reports with `running: false` has no live surface until you launch it. For column-scoped apps (`code`, `desktop`/VNC, `terminal`, `browser`) pass the target column via `tab_id`; omit it to use your own column. Returns `{ handle_id }` — pass that as `app_id` to the `app_*` tools. Note: a column shows one non-chat app at a time, so launching one replaces whatever was mounted in that column.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: {
+          type: 'string',
+          description: 'App id from `list_apps` (e.g. "terminal", "code", "desktop", "browser").',
+        },
+        tab_id: {
+          type: 'string',
+          description: 'Target column id (from `list_workspace`). Omit to use your own column.',
+        },
+      },
+      required: ['app_id'],
+    },
+  },
+] as const;
+
+/**
+ * Global-orchestrator-only tools. Registered solely for the headless global
+ * agent (`surface: 'global'`) — the workspace superuser that owns no column but
+ * observes and drives every one. `list_workspace` is its map; `column_*` reach
+ * into another column's agent (send / approve / cancel) via the renderer's
+ * per-column RPC clients; `open_column` / `close_column` manage the deck itself.
+ *
+ * Autopilot start/stop is NOT here — that's the shared `start_ticket` /
+ * `stop_ticket` in {@link PROJECT_CLIENT_TOOLS}.
+ */
+export const WORKSPACE_CLIENT_TOOLS = [
+  {
+    name: 'list_workspace',
+    safe: true,
+    description:
+      'Survey the whole Tile workspace: every open column with its `tab_id`, session id, sandbox profile, bound project/ticket, the app it is currently showing, and its agent run state (idle / running / awaiting-approval). Plus the global dock apps. Call this first — the `tab_id` values it returns are what `launch_app` and the `column_*` tools need.',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'open_column',
+    safe: true,
+    description:
+      'Open a new agent column in the Tile workspace and start its sandbox. Optionally bind it to a project (and a ticket) so the sandbox mounts that project. Returns `{ tab_id }`.',
+    parameters: {
+      type: 'object',
+      properties: {
+        project_id: {
+          type: 'string',
+          description: 'Project to open the column on. Omit for an unbound column the user will configure.',
+        },
+        ticket_id: { type: 'string', description: 'Ticket to bind the column to (implies its project).' },
+      },
+    },
+  },
+  {
+    name: 'close_column',
+    description:
+      'Close a workspace column and stop its sandbox. Destructive — the conversation and any unsaved in-sandbox state go away. Confirm with the user before calling.',
+    parameters: {
+      type: 'object',
+      properties: { tab_id: { type: 'string', description: 'Column id from `list_workspace`.' } },
+      required: ['tab_id'],
+    },
+  },
+  {
+    name: 'column_send',
+    safe: true,
+    description:
+      "Send a message to another column's agent — starts a run there as if the user typed it. Use to delegate or steer work in a specific column. The target runs autonomously; poll its state with `list_workspace`.",
+    parameters: {
+      type: 'object',
+      properties: {
+        tab_id: { type: 'string' },
+        message: { type: 'string', description: "The instruction to send to that column's agent." },
+      },
+      required: ['tab_id', 'message'],
+    },
+  },
+  {
+    name: 'column_decide',
+    safe: true,
+    description:
+      "Approve or reject a tool-call approval that a column's agent is blocked on. Get the `request_id` and which columns are awaiting approval from `list_workspace`.",
+    parameters: {
+      type: 'object',
+      properties: {
+        tab_id: { type: 'string' },
+        request_id: { type: 'string', description: 'Approval request id from `list_workspace`.' },
+        decision: { type: 'string', enum: ['approve', 'reject'] },
+      },
+      required: ['tab_id', 'request_id', 'decision'],
+    },
+  },
+  {
+    name: 'column_cancel',
+    safe: true,
+    description: "Cancel / interrupt the in-flight run of a column's agent.",
+    parameters: {
+      type: 'object',
+      properties: { tab_id: { type: 'string' } },
+      required: ['tab_id'],
+    },
+  },
+  {
+    name: 'column_transcript',
+    safe: true,
+    description:
+      "Read a window of a column's conversation — messages, tool calls/results, pending approvals — to see what that agent is doing. Returns `{ total, latest_cursor, entries, has_more }`; every entry carries a stable `cursor` and entries are chronological. **To poll incrementally**, pass `after: <the cursor you last saw>` (or a prior `latest_cursor`) — you get only what's new; an empty result means nothing changed. Omit `after` for the newest `limit` entries; pass `before: <cursor>` to page backward through history. Long fields cap at 2000 chars with the entry's `truncated` map giving each cut field's FULL length — use `column_read_entry` for the complete text. `list_workspace` returns each column's `latest_cursor` so you can spot which advanced.",
+    parameters: {
+      type: 'object',
+      properties: {
+        tab_id: { type: 'string' },
+        after: {
+          type: 'number',
+          description: 'Return only entries newer than this cursor (incremental polling).',
+        },
+        before: {
+          type: 'number',
+          description: 'Return entries older than this cursor (page backward through history).',
+        },
+        limit: { type: 'number', description: 'Max entries to return (default 20, max 100).' },
+      },
+      required: ['tab_id'],
+    },
+  },
+  {
+    name: 'column_read_entry',
+    safe: true,
+    description:
+      "Read a single transcript entry in full — no truncation. Use after `column_transcript` shows an entry whose `truncated` map flags a long message or tool output you need complete. `cursor` is the entry's stable id from `column_transcript`.",
+    parameters: {
+      type: 'object',
+      properties: {
+        tab_id: { type: 'string' },
+        cursor: { type: 'number', description: 'Stable entry cursor from `column_transcript`.' },
+      },
+      required: ['tab_id', 'cursor'],
+    },
+  },
+  {
+    name: 'terminal_list',
+    safe: true,
+    description:
+      "List a column's open terminals (their `terminal_id`s and which is active). Call before `terminal_send_keys` / `terminal_capture` only if you need a specific terminal; otherwise those default to the column's active terminal.",
+    parameters: {
+      type: 'object',
+      properties: { tab_id: { type: 'string' } },
+      required: ['tab_id'],
+    },
+  },
+  {
+    name: 'terminal_open',
+    safe: true,
+    description:
+      'Open a new terminal in a column and make it active. Use when the user has none, or you want a fresh shell. Returns its `terminal_id`. The terminal is visible to the user.',
+    parameters: {
+      type: 'object',
+      properties: { tab_id: { type: 'string' } },
+      required: ['tab_id'],
+    },
+  },
+  {
+    name: 'terminal_capture',
+    safe: true,
+    description:
+      "Capture the visible contents of a column's terminal — like `tmux capture-pane`. Returns the rendered screen + scrollback as text (exactly what the user sees). Use to read command output, errors, or current state before deciding what to send. This is the terminal's `snapshot`.",
+    parameters: {
+      type: 'object',
+      properties: {
+        tab_id: { type: 'string' },
+        lines: { type: 'number', description: 'Max trailing lines to return (default: full scrollback).' },
+        terminal_id: { type: 'string', description: "Target terminal; omit for the column's active one." },
+      },
+      required: ['tab_id'],
+    },
+  },
+  {
+    name: 'terminal_send_keys',
+    safe: true,
+    description:
+      'Send keys to a column\'s VISIBLE terminal — like `tmux send-keys`. `keys` is an ordered list of tokens; each is resolved as a key name (`C-c`, `Enter`, `Up`, `Down`, `Escape`, `Tab`, `M-b`, `F5`, `BSpace`, …) or, if unrecognized, typed literally. `literal: true` types every token verbatim (tmux `-l`); `count` repeats the whole sequence (tmux `-N`). This drives the SAME terminal the user is watching. Examples: run a command → `["git status", "Enter"]`; interrupt → `["C-c"]`; quit vim → `["Escape", ":q!", "Enter"]`. Tokens are sent back-to-back with no pacing (tmux-faithful): for a guaranteed double Ctrl-C — where the program must handle the first SIGINT before the second arrives — call this twice and check with `terminal_capture` between, rather than `["C-c", "C-c"]` in one call.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tab_id: { type: 'string' },
+        keys: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Ordered tmux-style key tokens.',
+        },
+        literal: { type: 'boolean', description: 'Type every token verbatim (tmux `-l`).' },
+        count: { type: 'number', description: 'Repeat the whole sequence N times (tmux `-N`).' },
+        terminal_id: { type: 'string', description: "Target terminal; omit for the column's active one." },
+      },
+      required: ['tab_id', 'keys'],
     },
   },
 ] as const;
@@ -559,6 +269,16 @@ export const CODE_UI_TOOLS = [
  * App-control tools — drive webviews (built-in browser, code-server, VNC
  * desktop, and user-installed webview apps) via Playwright-flavoured
  * commands. Every action takes an `app_id` from `list_apps`.
+ *
+ * Covers three layers of capability, all keyed by `app_id`:
+ * - Generic (any controllable app): navigate, snapshot, click, fill, type,
+ *   press, screenshot, eval, console, history.
+ * - Page primitives (browser/webview kinds): scroll, find, wait, inject_css,
+ *   pdf, set_viewport / user_agent / zoom.
+ * - WebContents state (browser/webview kinds): cookies, storage, network log.
+ *
+ * For multi-tab management of a browser app (creating/switching tabs in its
+ * tabset) see {@link BROWSER_CLIENT_TOOLS}.
  *
  * Scoping rules (enforced by the handler, not the schema):
  * - Autopilot agents can only reach column-scoped apps in their own tab.
@@ -584,6 +304,17 @@ export const APP_CONTROL_TOOLS = [
       properties: {
         app_id: { type: 'string', description: 'App id from `list_apps` (e.g. "browser").' },
       },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'app_snapshot_diff',
+    safe: true,
+    description:
+      'Capture a fresh snapshot and return only what changed since the previous `app_snapshot_diff` call (first call returns everything as `added`). Use between steps of a long automation to save context — no need to re-send an entire tree when only a toast appeared or a row was removed.',
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' } },
       required: ['app_id'],
     },
   },
@@ -637,7 +368,7 @@ export const APP_CONTROL_TOOLS = [
     name: 'app_type',
     safe: true,
     description:
-      'Type text at the currently focused element — no ref targeting. Use `app_fill` if you want to replace a field\'s value; use `app_type` when the element is already focused (e.g. after a click).',
+      "Type text at the currently focused element — no ref targeting. Use `app_fill` if you want to replace a field's value; use `app_type` when the element is already focused (e.g. after a click).",
     parameters: {
       type: 'object',
       properties: {
@@ -650,8 +381,7 @@ export const APP_CONTROL_TOOLS = [
   {
     name: 'app_press',
     safe: true,
-    description:
-      'Press a single key (e.g. `Enter`, `Escape`, `ArrowLeft`). Goes to the focused element.',
+    description: 'Press a single key (e.g. `Enter`, `Escape`, `ArrowLeft`). Goes to the focused element.',
     parameters: {
       type: 'object',
       properties: {
@@ -665,11 +395,13 @@ export const APP_CONTROL_TOOLS = [
     name: 'app_screenshot',
     safe: true,
     description:
-      'Capture a PNG screenshot of the app\'s visible viewport and write it to the ticket\'s artifacts directory (or a default location). Returns the absolute file path — show the path to the user and/or attach it via `display_artifact`.',
+      "Capture a PNG screenshot of an app and write it to the ticket's artifacts directory. By default captures the visible viewport. Pass `full_page: true` for the entire scrollable page (browser/webview only) or `ref` (from `app_snapshot`) to clip to a specific element. Returns the absolute file path.",
     parameters: {
       type: 'object',
       properties: {
         app_id: { type: 'string' },
+        full_page: { type: 'boolean', description: 'Capture the full scrollable page instead of just the viewport.' },
+        ref: { type: 'string', description: 'Element ref from `app_snapshot` — clip the screenshot to this element.' },
       },
       required: ['app_id'],
     },
@@ -678,7 +410,7 @@ export const APP_CONTROL_TOOLS = [
     name: 'app_eval',
     safe: true,
     description:
-      'Run a JavaScript expression in the app\'s page context and return the result. The expression must be serialisable (primitives, arrays, objects). Use sparingly — `app_snapshot` + `app_click` is usually better.',
+      "Run a JavaScript expression in the app's page context and return the result. The expression must be serialisable (primitives, arrays, objects). Use sparingly — `app_snapshot` + `app_click` is usually better.",
     parameters: {
       type: 'object',
       properties: {
@@ -719,7 +451,7 @@ export const APP_CONTROL_TOOLS = [
   {
     name: 'app_back',
     safe: true,
-    description: 'Navigate back in the app\'s history, if possible.',
+    description: "Navigate back in the app's history, if possible.",
     parameters: {
       type: 'object',
       properties: { app_id: { type: 'string' } },
@@ -729,11 +461,349 @@ export const APP_CONTROL_TOOLS = [
   {
     name: 'app_forward',
     safe: true,
-    description: 'Navigate forward in the app\'s history, if possible.',
+    description: "Navigate forward in the app's history, if possible.",
     parameters: {
       type: 'object',
       properties: { app_id: { type: 'string' } },
       required: ['app_id'],
+    },
+  },
+  {
+    name: 'app_scroll',
+    safe: true,
+    description:
+      "Scroll the app's active page. Pass one of: `to_top`, `to_bottom`, or `dx`/`dy` pixel offsets. Works on any browser- or webview-kind app from `list_apps`.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        dx: { type: 'number' },
+        dy: { type: 'number' },
+        to_top: { type: 'boolean' },
+        to_bottom: { type: 'boolean' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'app_scroll_to_ref',
+    safe: true,
+    description:
+      'Scroll an element identified by a `ref` from `app_snapshot` into view. Use before clicks on far-down elements to avoid off-screen misses.',
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' }, ref: { type: 'string' } },
+      required: ['app_id', 'ref'],
+    },
+  },
+  {
+    name: 'app_inject_css',
+    safe: true,
+    description:
+      "Inject a stylesheet into the app's document. Returns a `key` you can pass to `app_remove_inserted_css` to undo. The stylesheet persists until the page navigates.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        css: { type: 'string', description: 'CSS source to inject.' },
+      },
+      required: ['app_id', 'css'],
+    },
+  },
+  {
+    name: 'app_remove_inserted_css',
+    safe: true,
+    description: 'Remove previously injected CSS by its key.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        key: { type: 'string' },
+      },
+      required: ['app_id', 'key'],
+    },
+  },
+  {
+    name: 'app_find_in_page',
+    safe: true,
+    description:
+      "Search the app's page for `query`. Returns `{ matches, active_ordinal }`. Set `find_next: true` to advance to the next match after a prior call.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        query: { type: 'string' },
+        case_sensitive: { type: 'boolean' },
+        forward: { type: 'boolean' },
+        find_next: { type: 'boolean' },
+      },
+      required: ['app_id', 'query'],
+    },
+  },
+  {
+    name: 'app_wait_for',
+    safe: true,
+    description:
+      "Block until a condition on the app's page is met. Supply one of: `selector` (CSS selector must match something), `url_includes` (substring of current URL), or `network_idle: true` (page finished loading). Times out after `timeout_ms` (default 10000).",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        selector: { type: 'string' },
+        url_includes: { type: 'string' },
+        network_idle: { type: 'boolean' },
+        timeout_ms: { type: 'number' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'app_pdf',
+    safe: true,
+    description:
+      "Print the app's page to PDF and write it into the ticket's artifacts directory. Returns the absolute file path.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        landscape: { type: 'boolean' },
+        print_background: { type: 'boolean' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'app_set_viewport',
+    safe: true,
+    description:
+      "Emulate a specific viewport size and/or device-scale/mobile flag on the app's page. Pass `clear: true` to restore the real viewport. Useful for responsive testing.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        width: { type: 'number' },
+        height: { type: 'number' },
+        device_scale_factor: { type: 'number' },
+        mobile: { type: 'boolean' },
+        clear: { type: 'boolean' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'app_set_user_agent',
+    safe: true,
+    description: 'Override the User-Agent header the app sends. Pass an empty string to restore the default.',
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' }, user_agent: { type: 'string' } },
+      required: ['app_id', 'user_agent'],
+    },
+  },
+  {
+    name: 'app_set_zoom',
+    safe: true,
+    description: "Set the app's zoom factor (1.0 = 100%, range 0.25–5).",
+    parameters: {
+      type: 'object',
+      properties: { app_id: { type: 'string' }, factor: { type: 'number' } },
+      required: ['app_id', 'factor'],
+    },
+  },
+  {
+    name: 'app_cookies_get',
+    safe: true,
+    description:
+      "Read cookies from the app's partition. Optional filter narrows by URL, name, domain, or path. Returns Electron Cookie objects.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        url: { type: 'string' },
+        name: { type: 'string' },
+        domain: { type: 'string' },
+        path: { type: 'string' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'app_cookies_set',
+    safe: true,
+    description:
+      "Write or update a cookie in the app's partition. `url` is required by Electron to locate the cookie's host/scheme.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        url: { type: 'string' },
+        name: { type: 'string' },
+        value: { type: 'string' },
+        domain: { type: 'string' },
+        path: { type: 'string' },
+        secure: { type: 'boolean' },
+        http_only: { type: 'boolean' },
+        expiration_date: { type: 'number', description: 'Unix seconds.' },
+        same_site: { type: 'string', enum: ['unspecified', 'no_restriction', 'lax', 'strict'] },
+      },
+      required: ['app_id', 'url', 'name', 'value'],
+    },
+  },
+  {
+    name: 'app_cookies_clear',
+    safe: true,
+    description: 'Remove cookies matching a filter. Returns the number removed.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        url: { type: 'string' },
+        name: { type: 'string' },
+      },
+      required: ['app_id'],
+    },
+  },
+  {
+    name: 'app_storage_get',
+    safe: true,
+    description: "Read all key/value pairs from localStorage or sessionStorage on the app's page.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        which: { type: 'string', enum: ['local', 'session'] },
+      },
+      required: ['app_id', 'which'],
+    },
+  },
+  {
+    name: 'app_storage_set',
+    safe: true,
+    description: "Write key/value pairs into localStorage or sessionStorage on the app's page.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        which: { type: 'string', enum: ['local', 'session'] },
+        entries: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+        },
+      },
+      required: ['app_id', 'which', 'entries'],
+    },
+  },
+  {
+    name: 'app_storage_clear',
+    safe: true,
+    description: "Clear all keys from localStorage or sessionStorage on the app's page.",
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        which: { type: 'string', enum: ['local', 'session'] },
+      },
+      required: ['app_id', 'which'],
+    },
+  },
+  {
+    name: 'app_network_log',
+    safe: true,
+    description:
+      'Read the last N network requests the app made — method, URL, status, mimeType, timing. Useful for diagnosing failing fetches, authentication errors, or slow requests. Pass `clear: true` to reset the buffer after reading.',
+    parameters: {
+      type: 'object',
+      properties: {
+        app_id: { type: 'string' },
+        limit: { type: 'number', description: 'Max entries to return (default 100, up to 500 buffered).' },
+        since: { type: 'number', description: 'CDP timestamp to filter from.' },
+        url_includes: { type: 'string' },
+        status_min: {
+          type: 'number',
+          description: 'Only entries with status >= this value (e.g. 400 to find failures).',
+        },
+        clear: { type: 'boolean' },
+      },
+      required: ['app_id'],
+    },
+  },
+] as const;
+
+/**
+ * Browser tabset-management tools. Distinct from `app_*` because they operate
+ * on a browser app's *multi-tab structure* rather than a single drivable
+ * surface — each browser app has its own tabset with multiple tabs, and these
+ * tools create/close/activate/navigate individual tabs in it.
+ *
+ * `tabset_id` is an internal identifier:
+ *   - `col:<codeTabId>` — a standalone browser column in the code deck
+ *   - `dock:<codeTabId>` — the per-session dock browser inside a code tab
+ *   - `dock:global` — the shell's global dock browser (if present)
+ *
+ * Callers can fetch the full list with `browser_list_tabsets`.
+ */
+export const BROWSER_CLIENT_TOOLS = [
+  {
+    name: 'browser_list_tabsets',
+    safe: true,
+    description:
+      'List every browser tabset (each code-deck column and per-session dock) with its tabs, active tab, and profile. Use before `browser_tab_*` tools to learn valid `tabset_id` and `tab_id` values.',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'browser_tab_create',
+    safe: true,
+    description:
+      'Open a new tab in the given tabset. Optionally navigate it to `url` and/or leave the active tab unchanged with `activate: false`.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tabset_id: { type: 'string' },
+        url: { type: 'string' },
+        activate: { type: 'boolean' },
+      },
+      required: ['tabset_id'],
+    },
+  },
+  {
+    name: 'browser_tab_close',
+    safe: true,
+    description: 'Close a specific tab. If it was the only tab, the tabset retains one fresh blank tab.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tabset_id: { type: 'string' },
+        tab_id: { type: 'string' },
+      },
+      required: ['tabset_id', 'tab_id'],
+    },
+  },
+  {
+    name: 'browser_tab_activate',
+    safe: true,
+    description: 'Make the given tab the active one in its tabset.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tabset_id: { type: 'string' },
+        tab_id: { type: 'string' },
+      },
+      required: ['tabset_id', 'tab_id'],
+    },
+  },
+  {
+    name: 'browser_tab_navigate',
+    safe: true,
+    description:
+      'Navigate a specific tab (not just the active one) to a URL. Accepts anything `browser_tab_create.url` does — URLs, `localhost:PORT`, etc. Records a history entry.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tabset_id: { type: 'string' },
+        tab_id: { type: 'string' },
+        url: { type: 'string' },
+      },
+      required: ['tabset_id', 'tab_id', 'url'],
     },
   },
 ] as const;
@@ -763,6 +833,30 @@ export const UI_CLIENT_TOOLS = [
         },
       },
       required: ['title', 'steps'],
+    },
+  },
+] as const;
+
+/**
+ * Voice tools — registered only when the local voice runtime is active
+ * (Electron / self-hosted local mode). `speak` is the explicit TTS channel:
+ * the agent calls it to say something out loud, mirroring the ghostty/Jarvis
+ * paradigm. Execution is local (VoiceService) via the client-tool round-trip,
+ * so nothing is spoken unless the agent chooses to speak it. `safe` so it
+ * never triggers an approval prompt.
+ */
+export const VOICE_CLIENT_TOOLS = [
+  {
+    name: 'speak',
+    safe: true,
+    description:
+      'Say a short message to the user out loud via text-to-speech. This is your VOICE — the user hears it. Keep it brief and natural (one or two sentences). Text you return at the end of your turn is NOT spoken; only what you pass to speak() is heard. Speak before long tool work so the user knows what you are doing, and speak the result when done.',
+    parameters: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', description: 'What to say out loud. Short and conversational.' },
+      },
+      required: ['message'],
     },
   },
 ] as const;
@@ -797,7 +891,7 @@ const PROJECT_GUIDANCE = [
   '- `notify` — heads-up, run continues. Use for time-sensitive but non-blocking info.',
   '- `escalate` — **stops the run**. Use only when truly blocked (missing credentials, ambiguous requirements, external action).',
   '',
-  'Before starting a ticket: read `get_ticket_comments` and `get_ticket_history` to see what prior runs learned and why they ended. Before ending work, write a comment summarizing decisions, blockers, and next steps — this is the cross-session memory for the next run.',
+  'Before starting a ticket: read `get_ticket_comments` to see what prior runs learned. Before ending work, write a comment summarizing decisions, blockers, and next steps — this is the cross-session memory for the next run.',
   '',
   '## Pipeline gates',
   '',
@@ -807,7 +901,7 @@ const PROJECT_GUIDANCE = [
   '',
   '- Ticket resolution (`completed` / `wont_do` / `duplicate` / `cancelled`) is UI-only; there is no client tool for it.',
   '- `start_ticket` can fail with `WIP_LIMIT:` if too many tickets are already active. Tell the user and suggest a running ticket to stop.',
-  '- Pipelines come from a linked project\'s `FLEET.md` or the built-in default; not configurable via tools.',
+  "- Pipelines are stored on the Omni project. They are visible through `get_pipeline` but not configurable via tools.",
   '',
   '## Visible to the human',
   '',
@@ -815,8 +909,44 @@ const PROJECT_GUIDANCE = [
   '',
   '## Driving apps (browser, webviews)',
   '',
-  'The dock hosts web apps the user can see — the built-in browser, VS Code, a VNC desktop, and any custom webview apps they installed. You can drive them with `list_apps`, `app_snapshot`, `app_click`, `app_fill`, `app_type`, `app_press`, `app_screenshot`, `app_eval`, and `app_navigate`. Always `list_apps` first to find valid ids, then `app_snapshot` before clicking — refs are per-snapshot and invalidate after any navigation. Prefer `app_fill` for text fields (handles clearing); use `app_type` only when the element is already focused.',
+  'The dock hosts web apps the user can see — the built-in browser, VS Code, a VNC desktop, and any custom webview apps they installed. Drive them through the `app_*` family: `list_apps` (discovery), `app_snapshot` / `app_click` / `app_fill` / `app_type` / `app_press` (interaction), `app_navigate` / `app_reload` / `app_back` / `app_forward` (history), `app_screenshot` / `app_pdf` (capture), `app_eval` / `app_console` / `app_network_log` (diagnostics), `app_scroll` / `app_scroll_to_ref` / `app_find_in_page` / `app_wait_for` (page), `app_inject_css` / `app_remove_inserted_css` / `app_set_viewport` / `app_set_user_agent` / `app_set_zoom` (presentation), `app_cookies_*` / `app_storage_*` (state). Always `list_apps` first to find valid ids, then `app_snapshot` before clicking — refs are per-snapshot and invalidate after any navigation. Prefer `app_fill` for text fields (handles clearing); use `app_type` only when the element is already focused. Browser apps additionally have `browser_*` tools for managing their tabsets (multiple tabs in one app).',
 ].join('\n');
+
+export type ContextIdentifierOpts = {
+  projectId?: string;
+  projectLabel?: string;
+  ticketId?: string;
+  /**
+   * Absolute path to the ticket's artifacts directory as the agent sees it.
+   * Pass the host path when the agent runs on the host (sandboxBackend
+   * 'none' / 'local'); pass the container path otherwise. Omit to default
+   * to the container path.
+   */
+  artifactsDir?: string;
+  /**
+   * Absolute path to the ticket's workspace directory (worktree root). Set
+   * by the orchestrator before the session is opened; surfaced into
+   * ``session.variables`` so omni-code tools/skills can read it via
+   * ``session_variables(ctx)`` without parsing additional_instructions.
+   */
+  workspaceDir?: string;
+  /**
+   * Project sources, when known. Renders a workspace-layout section so the
+   * agent knows which subdirectories of ``/workspace/`` are populated and
+   * what each one represents. Multi-source projects co-mount each here.
+   */
+  sources?: readonly ProjectSource[];
+};
+
+/** One-line label for a source — what to call out so the agent recognizes it. */
+const describeSourceForContext = (s: ProjectSource): string => {
+  if (s.kind === 'git-remote') {
+    const ref = s.defaultBranch ? `@${s.defaultBranch}` : '';
+    return `${s.repoUrl}${ref}`;
+  }
+  const basename = s.workspaceDir.split('/').filter(Boolean).pop() ?? s.workspaceDir;
+  return basename;
+};
 
 /**
  * Build context identifiers for `additional_instructions`. Starts with the
@@ -824,93 +954,205 @@ const PROJECT_GUIDANCE = [
  * agent is operating in (when known) and per-ticket artifact-channel
  * guidance.
  */
-const buildContextIdentifiers = (opts?: {
-  projectId?: string;
-  projectLabel?: string;
-  ticketId?: string;
-}): string => {
+const buildContextIdentifiers = (opts?: ContextIdentifierOpts): string => {
   const lines: string[] = [PROJECT_GUIDANCE];
   if (opts?.projectId) {
     lines.push('');
     lines.push(`Current project: ${opts.projectLabel ?? opts.projectId} (ID: ${opts.projectId})`);
   }
+  if (opts?.sources && opts.sources.length > 0) {
+    const intro =
+      opts.sources.length === 1
+        ? 'This project has one source mounted in your workspace:'
+        : `This project has ${opts.sources.length} sources co-mounted in your workspace. Each lives at a separate subdirectory and may need to be investigated when making changes:`;
+    const sourceLines = opts.sources.map(
+      (s) => `- \`/workspace/${s.mountName}/\` — ${describeSourceForContext(s)} (${s.kind})`
+    );
+    lines.push('');
+    lines.push('## Workspace Layout');
+    lines.push(intro);
+    lines.push(...sourceLines);
+  }
   if (opts?.ticketId) {
     lines.push(`Current ticket: ${opts.ticketId}`);
-    lines.push(
-      [
-        '',
-        '## Where to put output for the user',
-        'You have two distinct channels for surfacing information, and they serve different purposes:',
-        '',
-        `- **Persistent artifacts directory (human-visible): \`${getContainerArtifactsDir(opts.ticketId)}\`**. Files you write here survive across runs and appear in this ticket's **Artifacts** tab in the launcher UI. Use for progress notes, research, generated deliverables, or any work product that should stick around for the user to review later and doesn't belong in the repo or project folder.`,
-        '- **`display_artifact` tool** — renders content inline in the chat stream (markdown, HTML, etc.). Ephemeral, tied to the conversation. Use for "show this to the user now" — previews, summaries, diagrams responding to the current turn.',
-        '',
-        'Both are visible to the user. Choose by lifecycle: artifacts directory = "this should persist"; `display_artifact` = "show this now."',
-      ].join('\n')
-    );
+  }
+  const outputGuidance = buildOutputGuidance(opts);
+  if (outputGuidance) {
+    lines.push(outputGuidance);
   }
   return lines.join('\n');
 };
 
-/** Autopilot sessions: ticket tools + read-only context tools + column-scoped app control. */
-export const buildAutopilotVariables = (opts?: {
-  projectId?: string;
-  projectLabel?: string;
-  ticketId?: string;
-}): Record<string, unknown> => {
-  const allTools = [...TICKET_CLIENT_TOOLS, ...READONLY_CONTEXT_TOOLS, ...APP_CONTROL_TOOLS];
-  return {
-    client_tools: allTools,
-    safe_tool_overrides: { safe_tool_names: extractSafeToolNames(allTools) },
-    additional_instructions: buildContextIdentifiers(opts),
-  };
+/**
+ * Where agent output goes, branched by what the workspace *is*.
+ *
+ * Plain folders have no membership rules — everything the user asked for lands
+ * in the folder itself, next to their files; that is the only output concept an
+ * everyday user needs (the launcher mirrors the folder back to their computer).
+ * Repos are curated trees, so work products that don't belong in version
+ * control go to the ticket's artifacts directory (surfaced as the Artifacts
+ * panel) instead of polluting the diff.
+ *
+ * There is deliberately no file-based PR writeup: when the user wants a pull
+ * request, the agent composes the title and body at creation time.
+ */
+const buildOutputGuidance = (opts?: ContextIdentifierOpts): string => {
+  const sources = opts?.sources ?? [];
+  const repoSources = sources.filter(isRepoSource);
+  const plainSources = sources.filter((s) => !isRepoSource(s));
+  const hasWorkspace = sources.length > 0 || Boolean(opts?.workspaceDir);
+  if (!hasWorkspace) {
+    return '';
+  }
+
+  const out: string[] = ['', '## Where to put output for the user'];
+
+  if (plainSources.length > 0) {
+    const folders =
+      plainSources.length === 1
+        ? `\`/workspace/${plainSources[0]!.mountName}/\``
+        : plainSources.map((s) => `\`/workspace/${s.mountName}/\``).join(', ');
+    out.push(
+      `Save anything the user asked you to produce (documents, decks, spreadsheets, images, …) directly in the project folder — ${folders} — next to their files. That folder is the user's own folder; files you put there reach their computer. Do not invent side directories for deliverables.`
+    );
+  } else if (sources.length === 0) {
+    out.push(
+      "Save anything the user asked you to produce (documents, decks, spreadsheets, images, …) directly in your working folder (your shell's starting directory). That folder syncs to the user's computer; files anywhere else are lost when the session ends."
+    );
+  }
+
+  if (repoSources.length > 0) {
+    if (opts?.ticketId) {
+      const artifactsDir = opts.artifactsDir ?? getContainerArtifactsDir(opts.ticketId);
+      out.push(
+        `The repo is a curated tree: only commit-worthy changes go in it. Work products that don't belong in version control — progress notes, research, generated reports — go to \`${artifactsDir}\`; files there persist across runs and appear in this ticket's **Artifacts** panel in the launcher.`
+      );
+    } else {
+      out.push(
+        'The repo is a curated tree: only commit-worthy changes go in it. Do not scatter notes or generated reports into the repo — share results in your reply (or `display_artifact`) instead.'
+      );
+    }
+    out.push(
+      'If the user asks for a pull request, push the branch and create it with the host CLI (`gh pr create` / `az repos pr create`), composing the title and body then — grounded in the actual diff.'
+    );
+  }
+
+  out.push(
+    'To show something inline in the conversation right now (a preview, summary, or diagram), use the `display_artifact` tool — it renders in the chat stream and is tied to this conversation.'
+  );
+
+  return out.join('\n');
 };
 
-/** Interactive sessions (Chat tab): all tools except code-deck-only tools. */
-export const buildInteractiveVariables = (opts?: {
-  projectId?: string;
-  projectLabel?: string;
-  ticketId?: string;
-}): Record<string, unknown> => {
-  const allTools = [
-    ...TICKET_CLIENT_TOOLS,
-    ...READONLY_CONTEXT_TOOLS,
-    ...PROJECT_CLIENT_TOOLS,
-    ...MILESTONE_CLIENT_TOOLS,
-
-    ...PAGE_CLIENT_TOOLS,
-    ...INBOX_CLIENT_TOOLS,
-    ...UI_CLIENT_TOOLS,
-    ...APP_CONTROL_TOOLS,
-  ];
-  return {
-    client_tools: allTools,
-    safe_tool_overrides: { safe_tool_names: extractSafeToolNames(allTools) },
-    additional_instructions: buildContextIdentifiers(opts),
-  };
+/**
+ * Build the variables bundle attached to a run / session.
+ *
+ * - `surface` picks the tool set. Chat surface gets project/inbox/page tools but
+ *   not code-deck-only tools. Code surface gets everything.
+ * - `autopilot` picks the approval policy. When true, we emit the catch-all
+ *   `safe_tool_patterns: ['.*']` so every tool runs without approval, and the
+ *   caller can supply a `supervisorPrompt` to prepend to additional_instructions.
+ *   When false, only tools marked `safe: true` on the client skip approval.
+ *
+ * One builder, two switches — this replaces the old `buildAutopilotVariables` /
+ * `buildInteractiveVariables` / `buildCodeVariables` trio whose divergent
+ * whitelists were the source of the "tool calls require approval" bug.
+ */
+export type SessionVariablesArgs = {
+  surface: 'chat' | 'code' | 'global';
+  autopilot?: boolean;
+  context?: ContextIdentifierOpts;
+  /** Prepended to additional_instructions when autopilot is true. */
+  supervisorPrompt?: string;
+  /**
+   * Enable local voice mode: registers the `speak` client tool and injects the
+   * speak-first persona guidance. Set by the renderer only when the local
+   * voice runtime is active (Electron / self-hosted local). See VoiceService.
+   */
+  voice?: boolean;
+  /**
+   * Voice persona character (e.g. Jarvis), appended to additional_instructions
+   * in voice mode. Empty for the neutral Default persona. Ignored unless
+   * `voice` is true. See `shared/voice-personas.ts`.
+   */
+  personaInstructions?: string;
 };
 
-/** Code deck sessions: interactive tools + code-deck-only tools (open_preview, etc.). */
-export const buildCodeVariables = (opts?: {
-  projectId?: string;
-  projectLabel?: string;
-  ticketId?: string;
-}): Record<string, unknown> => {
-  const allTools = [
-    ...TICKET_CLIENT_TOOLS,
-    ...READONLY_CONTEXT_TOOLS,
-    ...PROJECT_CLIENT_TOOLS,
-    ...MILESTONE_CLIENT_TOOLS,
+/**
+ * Persona guidance for voice mode, appended to additional_instructions. The
+ * `speak` tool is the spoken channel; the chat (final text) is silent — so the
+ * agent must voice anything it wants heard. Kept short; the tool description
+ * carries the rest.
+ */
+const VOICE_GUIDANCE = [
+  '## Voice mode',
+  '',
+  'The user is talking to you by voice. Reply by **calling the `speak` tool** — that is the only thing the user hears. Text you return at the end of your turn is shown silently in the chat, never spoken.',
+  '',
+  '- Speak in short, natural sentences. If you did not say it with `speak`, the user did not hear it.',
+  '- Speak a brief acknowledgement before any long tool work ("One moment, checking that now."), and speak the outcome when finished.',
+  '- Put long details (paths, commands, code) in your returned text and just tell the user you have done so — do not read them aloud.',
+].join('\n');
 
-    ...PAGE_CLIENT_TOOLS,
-    ...INBOX_CLIENT_TOOLS,
-    ...UI_CLIENT_TOOLS,
-    ...CODE_UI_TOOLS,
-    ...APP_CONTROL_TOOLS,
-  ];
+const CHAT_CLIENT_TOOLS: readonly ClientToolDef[] = [
+  ...PROJECT_CLIENT_TOOLS,
+  ...UI_CLIENT_TOOLS,
+  ...APP_CONTROL_TOOLS,
+  ...BROWSER_CLIENT_TOOLS,
+];
+
+const CODE_CLIENT_TOOLS: readonly ClientToolDef[] = [...CHAT_CLIENT_TOOLS, ...CODE_UI_TOOLS];
+
+/**
+ * The headless workspace orchestrator: everything a code column has, plus the
+ * workspace-superuser tools. App-scope enforcement (this caller may drive every
+ * column's apps, addressed by `handle_id`) lives in the renderer's
+ * `buildClientToolHandler`, not in the tool list.
+ */
+const GLOBAL_CLIENT_TOOLS: readonly ClientToolDef[] = [...CODE_CLIENT_TOOLS, ...WORKSPACE_CLIENT_TOOLS];
+
+/**
+ * Persona/role guidance for the global orchestrator, appended to
+ * additional_instructions when `surface: 'global'`. Explains the superuser
+ * stance and the addressing rule the tool schemas can't convey (the same app
+ * id exists in many columns → address by `handle_id`).
+ */
+const GLOBAL_GUIDANCE = [
+  '## You are the workspace orchestrator',
+  '',
+  'You operate the entire Tile workspace on the user’s behalf — usually by voice. You own no column of your own; instead you observe and drive every column.',
+  '',
+  '- `list_workspace` is your map: open columns, their sessions, sandbox profiles, bound project/ticket, and run state. `list_apps` shows every app across all columns (each with a `handle_id`) plus the global dock apps.',
+  '- Act inside a column with `column_send` (instruct its agent), `column_decide` (approve/reject what it is blocked on), `column_cancel` (stop it), and `start_ticket` / `stop_ticket` (autopilot). Shape the deck with `open_column`, `close_column`, and `launch_app`.',
+  '- Drive any column’s apps with the `app_*` tools using the `handle_id` from `list_apps` — not a bare name, because the same app (e.g. `terminal`) exists in many columns.',
+  '- Narrate what you are doing, and confirm with the user before anything destructive (closing a column, cancelling a run).',
+].join('\n');
+
+export const buildSessionVariables = (args: SessionVariablesArgs): Record<string, unknown> => {
+  const { surface, autopilot = false, context, supervisorPrompt, voice = false, personaInstructions } = args;
+  const baseTools =
+    surface === 'global' ? GLOBAL_CLIENT_TOOLS : surface === 'code' ? CODE_CLIENT_TOOLS : CHAT_CLIENT_TOOLS;
+  const tools: readonly ClientToolDef[] = voice ? [...baseTools, ...VOICE_CLIENT_TOOLS] : baseTools;
+  const baseInstructions = buildContextIdentifiers(context);
+  const parts = [
+    autopilot && supervisorPrompt ? supervisorPrompt : '',
+    surface === 'global' ? GLOBAL_GUIDANCE : '',
+    voice ? VOICE_GUIDANCE : '',
+    voice && personaInstructions ? personaInstructions : '',
+    baseInstructions,
+  ].filter(Boolean);
+  const instructions = parts.join('\n\n');
+
   return {
-    client_tools: allTools,
-    safe_tool_overrides: { safe_tool_names: extractSafeToolNames(allTools) },
-    additional_instructions: buildContextIdentifiers(opts),
+    client_tools: tools,
+    safe_tool_overrides: autopilot ? { safe_tool_patterns: ['.*'] } : { safe_tool_names: extractSafeToolNames(tools) },
+    additional_instructions: instructions,
+    // Structured ticket context — omniagents persists these into
+    // ``session.variables`` so omni-code tools / server functions /
+    // prompts can read them via ``session_variables(ctx)`` without
+    // grepping additional_instructions.
+    ...(context?.ticketId ? { ticket_id: context.ticketId } : {}),
+    ...(context?.projectId ? { project_id: context.projectId } : {}),
+    ...(context?.workspaceDir ? { workspace_dir: context.workspaceDir } : {}),
   };
 };

@@ -9,35 +9,22 @@ import {
   TimerRegular,
 } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import {
-  IconButton,
-  Menu,
-  MenuItem,
-  MenuList,
-  MenuPopover,
-  MenuTrigger,
-} from '@/renderer/ds';
+import { IconButton, Menu, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { InboxItem, InboxShaping, ProjectId } from '@/shared/types';
+import type { InboxItem, ProjectId } from '@/shared/types';
 
 import { inboxApi } from './state';
 
 /**
  * Detail view for a single inbox item. Opens in place of the list when the
- * user clicks a row. Auto-saves title/note/shaping on blur. Action buttons
+ * user clicks a row. Auto-saves title/note on blur. Action buttons
  * at the bottom cover the rest of the lifecycle (defer, promote, drop).
  *
  * Promoted tombstones render read-only — no edits, just a "this became X" label.
  */
-
-const APPETITE_OPTIONS: Array<{ value: InboxShaping['appetite']; label: string; hint: string }> = [
-  { value: 'small', label: 'Small', hint: '~1 day' },
-  { value: 'medium', label: 'Medium', hint: '2–4 days' },
-  { value: 'large', label: 'Large', hint: '1–2 weeks' },
-  { value: 'xl', label: 'XL', hint: '3+ weeks' },
-];
 
 const useStyles = makeStyles({
   root: {
@@ -87,10 +74,6 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusCircular,
     backgroundColor: tokens.colorNeutralBackground3,
     fontSize: tokens.fontSizeBase100,
-  },
-  shapedBadge: {
-    backgroundColor: tokens.colorBrandBackground2,
-    color: tokens.colorBrandForeground1,
   },
   laterBadge: {
     backgroundColor: tokens.colorPaletteYellowBackground2,
@@ -167,37 +150,6 @@ const useStyles = makeStyles({
     minHeight: '60px',
     resize: 'vertical',
   },
-  appetiteRow: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-    gap: tokens.spacingHorizontalS,
-  },
-  appetiteBtn: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-    gap: '2px',
-    padding: '8px 10px',
-    borderRadius: tokens.borderRadiusMedium,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground1,
-    cursor: 'pointer',
-    textAlign: 'left',
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
-  },
-  appetiteBtnActive: {
-    ...shorthands.borderColor(tokens.colorBrandStroke1),
-    backgroundColor: tokens.colorBrandBackground2,
-  },
-  appetiteLabel: {
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-  },
-  appetiteHint: {
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground3,
-  },
   projectRow: {
     display: 'flex',
     alignItems: 'center',
@@ -258,9 +210,10 @@ const useStyles = makeStyles({
 export type InboxItemDetailProps = {
   item: InboxItem;
   onBack: () => void;
+  hideHeader?: boolean;
 };
 
-export const InboxItemDetail = memo(({ item, onBack }: InboxItemDetailProps) => {
+export const InboxItemDetail = memo(({ item, onBack, hideHeader = false }: InboxItemDetailProps) => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
 
@@ -278,11 +231,6 @@ export const InboxItemDetail = memo(({ item, onBack }: InboxItemDetailProps) => 
   // worse than showing slightly stale data.
   const [title, setTitle] = useState(item.title);
   const [note, setNote] = useState(item.note ?? '');
-  const [outcome, setOutcome] = useState(item.shaping?.outcome ?? '');
-  const [appetite, setAppetite] = useState<InboxShaping['appetite']>(
-    item.shaping?.appetite ?? 'medium'
-  );
-  const [notDoing, setNotDoing] = useState(item.shaping?.notDoing ?? '');
 
   // -------------------------------------------------------------------------
   // Save handlers (auto-save on blur)
@@ -290,56 +238,29 @@ export const InboxItemDetail = memo(({ item, onBack }: InboxItemDetailProps) => 
 
   const saveTitleNote = useCallback(() => {
     if (isArchived) {
-return;
-}
+      return;
+    }
     const nextTitle = title.trim() || 'Untitled';
     const nextNote = note.trim();
     const titleChanged = nextTitle !== item.title;
     const noteChanged = nextNote !== (item.note ?? '');
     if (!titleChanged && !noteChanged) {
-return;
-}
+      return;
+    }
     void inboxApi.update(item.id, {
       ...(titleChanged ? { title: nextTitle } : {}),
       ...(noteChanged ? { note: nextNote } : {}),
     });
   }, [isArchived, title, note, item]);
 
-  const saveShaping = useCallback(() => {
-    if (isArchived) {
-return;
-}
-    const trimmedOutcome = outcome.trim();
-    // Can't save shaping without an outcome — it's the one required field.
-    // Silently skip; the user can come back and fill it in.
-    if (!trimmedOutcome) {
-return;
-}
-    const next: InboxShaping = { outcome: trimmedOutcome, appetite };
-    if (notDoing.trim()) {
-next.notDoing = notDoing.trim();
-}
-    // Skip if nothing changed.
-    const existing = item.shaping;
-    if (
-      existing &&
-      existing.outcome === next.outcome &&
-      existing.appetite === next.appetite &&
-      (existing.notDoing ?? '') === (next.notDoing ?? '')
-    ) {
-      return;
-    }
-    void inboxApi.shape(item.id, next);
-  }, [isArchived, outcome, appetite, notDoing, item]);
-
   const setProjectId = useCallback(
     (id: ProjectId | null) => {
       if (isArchived) {
-return;
-}
+        return;
+      }
       if ((item.projectId ?? null) === id) {
-return;
-}
+        return;
+      }
       void inboxApi.update(item.id, { projectId: id });
     },
     [isArchived, item]
@@ -362,7 +283,6 @@ return;
   const flushRef = useRef<() => void>(() => {});
   flushRef.current = () => {
     saveTitleNote();
-    saveShaping();
   };
   useEffect(() => {
     return () => {
@@ -382,10 +302,24 @@ return;
     void inboxApi.reactivate(item.id);
   }, [item.id]);
 
+  const handleTitleChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    setTitle(event.target.value);
+  }, []);
+
+  const handleNoteChange = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
+    setNote(event.target.value);
+  }, []);
+
+  const handleProjectChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      setProjectId(event.target.value || null);
+    },
+    [setProjectId]
+  );
+
   const handlePromoteToTicket = useCallback(() => {
     const projectId = item.projectId ?? store.projects.find((p) => p.isPersonal)?.id ?? store.projects[0]?.id;
     if (!projectId) {
-       
       console.warn('[Inbox] No project available to promote to');
       return;
     }
@@ -427,9 +361,6 @@ return;
         </span>
       );
     }
-    if (item.status === 'shaped') {
-      return <span className={`${styles.badge} ${styles.shapedBadge}`}>Shaped</span>;
-    }
     if (item.status === 'later') {
       return (
         <span className={`${styles.badge} ${styles.laterBadge}`}>
@@ -442,23 +373,23 @@ return;
 
   return (
     <div className={styles.root}>
-      {/* Header */}
-      <div className={styles.header}>
-        <button type="button" className={styles.backBtn} onClick={onBack} aria-label="Back">
-          <ArrowLeft20Regular />
-          Back
-        </button>
-        <div className={styles.spacer} />
-        <div className={styles.meta}>{statusBadge}</div>
-      </div>
+      {!hideHeader && (
+        <div className={styles.header}>
+          <button type="button" className={styles.backBtn} onClick={onBack} aria-label="Back">
+            <ArrowLeft20Regular />
+            Back
+          </button>
+          <div className={styles.spacer} />
+          <div className={styles.meta}>{statusBadge}</div>
+        </div>
+      )}
 
       {/* Body */}
       <div className={styles.body}>
         {isArchived && (
           <div className={styles.readonlyBanner}>
-            This item was promoted to a {item.promotedTo!.kind} on{' '}
-            {new Date(item.promotedTo!.at).toLocaleString()}. It&apos;s kept as a tombstone for
-            undo and audit. Edits are disabled.
+            This item was promoted to a {item.promotedTo!.kind} on {new Date(item.promotedTo!.at).toLocaleString()}.
+            It&apos;s kept as a tombstone for undo and audit. Edits are disabled.
           </div>
         )}
 
@@ -466,7 +397,7 @@ return;
           type="text"
           className={styles.titleInput}
           value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={handleTitleChange}
           onBlur={saveTitleNote}
           placeholder="Untitled"
           readOnly={isArchived}
@@ -475,9 +406,9 @@ return;
         <textarea
           className={styles.noteInput}
           value={note}
-          onChange={(e) => setNote(e.target.value)}
+          onChange={handleNoteChange}
           onBlur={saveTitleNote}
-          placeholder="Add a note…"
+          placeholder="Add a note — what does done look like? Anything out of scope?"
           readOnly={isArchived}
         />
 
@@ -487,7 +418,7 @@ return;
           <select
             className={styles.select}
             value={item.projectId ?? ''}
-            onChange={(e) => setProjectId(e.target.value || null)}
+            onChange={handleProjectChange}
             disabled={isArchived}
           >
             <option value="">No project</option>
@@ -499,73 +430,12 @@ return;
           </select>
         </div>
 
-        {/* Shaping */}
-        <div className={styles.section}>
-          <span className={styles.sectionLabel}>Shape</span>
-
-          <div className={styles.field}>
-            <label className={styles.fieldLabel} htmlFor="detail-outcome">
-              Outcome — what does success look like?
-            </label>
-            <textarea
-              id="detail-outcome"
-              className={`${styles.input} ${styles.textarea}`}
-              value={outcome}
-              onChange={(e) => setOutcome(e.target.value)}
-              onBlur={saveShaping}
-              placeholder="Users can log in via SSO."
-              readOnly={isArchived}
-            />
-          </div>
-
-          <div className={styles.field}>
-            <span className={styles.fieldLabel}>Appetite</span>
-            <div className={styles.appetiteRow}>
-              {APPETITE_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  disabled={isArchived}
-                  className={`${styles.appetiteBtn} ${appetite === opt.value ? styles.appetiteBtnActive : ''}`}
-                  onClick={() => {
-                    setAppetite(opt.value);
-                    // Fire shaping save after state flushes; defer to a microtask
-                    // so `appetite` has the new value when `saveShaping` reads it.
-                    queueMicrotask(saveShaping);
-                  }}
-                >
-                  <span className={styles.appetiteLabel}>{opt.label}</span>
-                  <span className={styles.appetiteHint}>{opt.hint}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className={styles.field}>
-            <label className={styles.fieldLabel} htmlFor="detail-notdoing">
-              Not doing <span style={{ opacity: 0.6 }}>(optional)</span>
-            </label>
-            <textarea
-              id="detail-notdoing"
-              className={`${styles.input} ${styles.textarea}`}
-              value={notDoing}
-              onChange={(e) => setNotDoing(e.target.value)}
-              onBlur={saveShaping}
-              placeholder="Custom themes, org import."
-              readOnly={isArchived}
-            />
-          </div>
-        </div>
       </div>
 
       {/* Actions */}
       {!isArchived && (
         <div className={styles.actionsBar}>
-          <button
-            type="button"
-            className={styles.primaryBtn}
-            onClick={handlePromoteToTicket}
-          >
+          <button type="button" className={styles.primaryBtn} onClick={handlePromoteToTicket}>
             <Rocket20Regular /> Promote to ticket
           </button>
           <Menu positioning={{ position: 'above', align: 'end' }}>
@@ -575,10 +445,7 @@ return;
             <MenuPopover>
               <MenuList>
                 {item.status === 'later' ? (
-                  <MenuItem
-                    icon={<ArrowCounterclockwise20Regular />}
-                    onClick={handleReactivate}
-                  >
+                  <MenuItem icon={<ArrowCounterclockwise20Regular />} onClick={handleReactivate}>
                     Reactivate
                   </MenuItem>
                 ) : (
@@ -589,11 +456,7 @@ return;
                 <MenuItem icon={<Rocket20Regular />} onClick={handlePromoteToProject}>
                   Promote to project
                 </MenuItem>
-                <MenuItem
-                  icon={<Delete20Regular />}
-                  onClick={handleDrop}
-                  className={styles.dangerMenuItem}
-                >
+                <MenuItem icon={<Delete20Regular />} onClick={handleDrop} className={styles.dangerMenuItem}>
                   Drop
                 </MenuItem>
               </MenuList>

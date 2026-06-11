@@ -1,0 +1,293 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+ARG CODE_SERVER_VERSION=4.109.2
+ARG LEAN_VERSION=4.27.0
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    apt-transport-https \
+    git \
+    git-lfs \
+    openssh-client \
+    sudo \
+    python3 \
+    python3-pip \
+    python3-venv \
+    pipx \
+    ripgrep \
+    fd-find \
+    jq \
+    sqlite3 \
+    ffmpeg \
+    pandoc \
+    imagemagick \
+    latexmk \
+    texlive-latex-base \
+    texlive-latex-recommended \
+    texlive-latex-extra \
+    texlive-fonts-recommended \
+    zstd \
+    build-essential \
+    pkg-config \
+    libgit2-dev \
+    gosu \
+    iptables \
+    unzip \
+    gnupg2 \
+    less \
+    vim \
+    wget \
+    postgresql \
+    postgresql-client \
+    redis-server \
+    libpq-dev \
+    libvips42 \
+    poppler-utils \
+    locales \
+    libssl-dev \
+    libreadline-dev \
+    zlib1g-dev \
+    libyaml-dev \
+    libffi-dev \
+    libgdbm-dev \
+    libncurses5-dev \
+    libdb-dev \
+    xz-utils \
+    libbz2-dev \
+    libsqlite3-dev \
+    liblzma-dev \
+    tk-dev \
+    libreoffice-core \
+    libreoffice-writer \
+    libreoffice-impress \
+    # VNC desktop support (activated via OMNI_CODE_VNC=1)
+    xvfb \
+    xfce4 \
+    xfce4-goodies \
+    x11vnc \
+    novnc \
+    websockify \
+    xdotool \
+    dbus-x11 \
+    software-properties-common \
+    && (apt-get install -y postgresql-16-pgvector || apt-get install -y postgresql-pgvector) \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Firefox from Mozilla PPA (Ubuntu 24.04 only has a snap stub)
+RUN add-apt-repository -y ppa:mozillateam/ppa \
+    && echo 'Package: *\nPin: release o=LP-PPA-mozillateam\nPin-Priority: 1001' > /etc/apt/preferences.d/mozilla-firefox \
+    && apt-get update \
+    && apt-get install -y firefox \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN ARCH="$(dpkg --print-architecture)" \
+    && curl -fOL "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/code-server_${CODE_SERVER_VERSION}_${ARCH}.deb" \
+    && apt-get update \
+    && apt-get install -y "./code-server_${CODE_SERVER_VERSION}_${ARCH}.deb" \
+    && rm -f "code-server_${CODE_SERVER_VERSION}_${ARCH}.deb" \
+    && rm -rf /var/lib/apt/lists/*
+
+# Rename the default ubuntu user (uid 1000) to "user" with home /home/user.
+# All mounts, entrypoints, and gosu calls assume /home/user.
+RUN usermod -l user -d /home/user -m ubuntu 2>/dev/null \
+    && groupmod -n user ubuntu 2>/dev/null || true
+
+RUN git lfs install --system
+
+ENV NVM_DIR=/opt/nvm
+ENV NODE_VERSION=22.13.1
+
+RUN mkdir -p "${NVM_DIR}" \
+    && curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash \
+    && bash -lc "source ${NVM_DIR}/nvm.sh && nvm install ${NODE_VERSION} && nvm alias default ${NODE_VERSION} && npm install -g yarn@1.22.19"
+
+ENV PATH="/opt/nvm/versions/node/v${NODE_VERSION}/bin:${PATH}"
+
+ENV RBENV_ROOT=/opt/rbenv
+ENV PATH="${RBENV_ROOT}/bin:${RBENV_ROOT}/shims:${PATH}"
+ENV RUBY_VERSION=3.3.7
+
+RUN git clone --depth 1 https://github.com/rbenv/rbenv.git "${RBENV_ROOT}" \
+    && mkdir -p "${RBENV_ROOT}/plugins" \
+    && git clone --depth 1 https://github.com/rbenv/ruby-build.git "${RBENV_ROOT}/plugins/ruby-build" \
+    && rbenv install "${RUBY_VERSION}" \
+    && rbenv global "${RUBY_VERSION}" \
+    && gem update --system \
+    && gem install bundler -v 2.4.22 \
+    && gem install foreman
+
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
+ENV PYENV_ROOT=/opt/pyenv
+ENV PATH="${PYENV_ROOT}/bin:${PYENV_ROOT}/shims:${PATH}"
+ENV PYTHON_VERSION=3.11.8
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+
+RUN git clone --depth 1 https://github.com/pyenv/pyenv.git "${PYENV_ROOT}" \
+    && bash -lc "pyenv install ${PYTHON_VERSION} && pyenv global ${PYTHON_VERSION}"
+
+RUN bash -lc "python -m pip install --no-cache-dir --upgrade pip \
+    && python -m pip install --no-cache-dir \
+      'pandas>=2.2.3' \
+      'databricks-sql-connector>=4.0.5' \
+      'databricks-sdk>=0.57.0' \
+      'python-dotenv>=1.1.1' \
+      'playwright' \
+      'panel>=1.7.2' \
+      'duckdb>=1.3.1' \
+      'sqlglot>=26.33.0'"
+
+RUN mkdir -p "${PLAYWRIGHT_BROWSERS_PATH}" \
+    && bash -lc "python -m playwright install --with-deps chromium" \
+    && chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}" \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN cat > /usr/local/bin/chrome-binary <<'SH'
+#!/bin/sh
+
+set -eu
+
+if [ -n "${CHROME_BINARY_REAL:-}" ] && [ -x "${CHROME_BINARY_REAL}" ]; then
+  exec "${CHROME_BINARY_REAL}" "$@"
+fi
+
+PLAYWRIGHT_CHROME=""
+if [ -n "${PLAYWRIGHT_BROWSERS_PATH:-}" ]; then
+  PLAYWRIGHT_CHROME=$(ls -1 "${PLAYWRIGHT_BROWSERS_PATH}"/chromium-*/chrome-linux64/chrome 2>/dev/null | tail -n 1 || true)
+fi
+
+if [ -n "${PLAYWRIGHT_CHROME}" ] && [ -x "${PLAYWRIGHT_CHROME}" ]; then
+  exec "${PLAYWRIGHT_CHROME}" "$@"
+fi
+
+if [ -n "${HOME:-}" ]; then
+  PLAYWRIGHT_CHROME=$(ls -1 "${HOME}/.cache/ms-playwright"/chromium-*/chrome-linux64/chrome 2>/dev/null | tail -n 1 || true)
+fi
+
+if [ -n "${PLAYWRIGHT_CHROME}" ] && [ -x "${PLAYWRIGHT_CHROME}" ]; then
+  exec "${PLAYWRIGHT_CHROME}" "$@"
+fi
+
+for candidate in \
+  /usr/bin/google-chrome \
+  /usr/bin/google-chrome-stable \
+  /opt/google/chrome/chrome \
+  /usr/bin/chromium \
+  /usr/bin/chromium-browser \
+  ; do
+  if [ -x "${candidate}" ]; then
+    exec "${candidate}" "$@"
+  fi
+done
+
+echo "No Chrome/Chromium binary found" >&2
+exit 1
+SH
+
+RUN chmod +x /usr/local/bin/chrome-binary
+
+ENV CHROME_BINARY=/usr/local/bin/chrome-binary
+
+ENV PLAYWRIGHT_MCP_BROWSER=chromium
+ENV PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/local/bin/chrome-binary
+ENV PLAYWRIGHT_MCP_SANDBOX=false
+
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/azure-cli/ noble main" > /etc/apt/sources.list.d/azure-cli.list \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft.gpg] https://packages.microsoft.com/ubuntu/24.04/prod noble main" > /etc/apt/sources.list.d/microsoft-prod.list \
+    && apt-get update \
+    && ACCEPT_EULA=Y apt-get install -y azure-cli msodbcsql18 mssql-tools18 unixodbc-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PATH="/opt/mssql-tools18/bin:${PATH}"
+
+# Install the azure-devops extension into a shared, world-readable dir so the
+# agent's run_as user (uid 1000) can use `az devops` — a bare `az extension add`
+# as root lands in /root/.azure and is invisible to uid 1000, which is who the
+# agent/terminal and the boot credential pass actually run as.
+ENV AZURE_EXTENSION_DIR=/usr/lib/azure-cli-extensions
+RUN mkdir -p "$AZURE_EXTENSION_DIR" \
+    && az extension add --name azure-devops \
+    && chmod -R a+rX "$AZURE_EXTENSION_DIR"
+
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+    > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# pipx installs into PIPX_HOME and drops console-script symlinks in PIPX_BIN_DIR.
+# Both are under /opt/pipx (owned by uid 1000 in the chown step below) and on
+# PATH, so the agent can `pipx install` without write access to the root-owned,
+# security-sensitive /usr/local/bin (which holds the root-run entrypoint +
+# apply-network-isolation.sh — chowning it would be a privilege-escalation hole).
+ENV PIPX_HOME=/opt/pipx
+ENV PIPX_BIN_DIR=/opt/pipx/bin
+ENV PATH="/opt/pipx/bin:${PATH}"
+ENV ELAN_HOME=/opt/elan
+ENV PATH="${ELAN_HOME}/bin:${PATH}"
+
+RUN curl -fsSL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+    | sh -s -- -y --default-toolchain "leanprover/lean4:v${LEAN_VERSION}" \
+    && elan --version \
+    && lean --version \
+    && lake --version
+
+RUN npm install -g @playwright/cli@0.1.1
+
+# The pyenv / rbenv / nvm toolchains are installed as root at build time, but the
+# agent runs as uid 1000 (the profile's run_as). Hand the toolchain roots to uid
+# 1000 so the agent can install packages with console scripts without `pyenv`/
+# `rbenv` `rehash` failing on the root-owned shims dir ("isn't writable"), and so
+# global `pip` / `gem` / `npm -g` installs land where it can write. The container
+# is single-user; owning its own toolchains is the normal dev-machine posture,
+# and the sandbox + network boundary is the real fence. Done after the last
+# build-time write into each (the `npm -g` above is the final one). pipx's home
+# is created here too so the agent can `pipx install` (its bin dir is on PATH).
+#
+# elan (Lean) and playwright are handled differently: a recursive chown would
+# copy-up ~3 GB (the 2.5 GB baked Lean toolchain + 0.6 GB browsers) into a new
+# layer. Instead, hand uid 1000 only the specific dirs each writes NEW entries
+# into — `elan toolchain install` creates a new dir under toolchains/ (and touches
+# bin/tmp/settings.toml/env), and `playwright install <browser>` creates a new
+# browser dir plus a link in the tiny .links/ registry. The multi-GB baked
+# contents stay root-owned and read-only (used read-only: the default Lean
+# toolchain + chromium still run). Without this, a Lean project that pins a
+# non-default toolchain, or installing any non-chromium browser, fails with
+# EACCES on the root-owned dirs.
+RUN mkdir -p "${PIPX_HOME}" "${PIPX_BIN_DIR}" \
+    && chown -R 1000:1000 "${PYENV_ROOT}" "${RBENV_ROOT}" "${NVM_DIR}" "${PIPX_HOME}" \
+    && chown 1000:1000 "${ELAN_HOME}" "${ELAN_HOME}/bin" "${ELAN_HOME}/tmp" "${ELAN_HOME}/toolchains" \
+                       "${ELAN_HOME}/settings.toml" "${ELAN_HOME}/env" \
+    && chown 1000:1000 "${PLAYWRIGHT_BROWSERS_PATH}" \
+    && chown -R 1000:1000 "${PLAYWRIGHT_BROWSERS_PATH}/.links"
+
+# Shape B: the agent runs on the host (omni serve), not inside this
+# container. We no longer pipx-install omni-code into the image — the
+# container is purely a dev environment (postgres, redis, code-server,
+# VNC tools, language runtimes) that omni serve drives via
+# SandboxSession.exec / pty_exec_start.
+
+COPY entrypoint.sh /usr/local/bin/omni-sandbox-entrypoint
+RUN chmod +x /usr/local/bin/omni-sandbox-entrypoint
+
+COPY apply-network-isolation.sh /usr/local/bin/apply-network-isolation.sh
+RUN chmod +x /usr/local/bin/apply-network-isolation.sh
+
+COPY start-vnc.sh /usr/local/bin/start-vnc.sh
+RUN chmod +x /usr/local/bin/start-vnc.sh
+
+EXPOSE 8080
+EXPOSE 6080
+
+ENTRYPOINT ["/usr/local/bin/omni-sandbox-entrypoint"]
+# Default command: stay alive so omni serve can `pty_exec_start` services
+# (code-server, VNC, terminals) on demand from the profile's services:
+# block. Profile overrides via the manifest are possible but rarely
+# needed for the devbox image.
+CMD ["sleep", "infinity"]

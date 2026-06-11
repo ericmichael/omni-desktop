@@ -106,6 +106,12 @@ export type AppRegistrationPayload = {
    * in list_apps but can't drive it. Surfaces set this based on their kind.
    */
   controllable: boolean;
+  /**
+   * When set, `setWindowOpenHandler` is installed on the webContents so
+   * `target="_blank"` / `window.open` calls create new tabs in this tabset
+   * instead of spawning a native popup. Only meaningful for `builtin-browser`.
+   */
+  browserTabsetId?: string;
 };
 
 /**
@@ -137,6 +143,13 @@ export type AppClickButton = 'left' | 'right' | 'middle';
 export type AppScopeFilter = {
   tabId?: string;
   allowGlobal: boolean;
+  /**
+   * Superuser scope — the headless global orchestrator. When true, the caller
+   * sees and can drive *every* column's apps (not just `tabId`'s), and apps are
+   * addressed by full `handleId` rather than bare `appId` (the same id exists in
+   * many columns). Implies cross-column visibility regardless of `tabId`.
+   */
+  allColumns?: boolean;
 };
 
 // Re-export so downstream files don't need a second import path.

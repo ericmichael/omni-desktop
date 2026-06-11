@@ -12,7 +12,7 @@ import { CodeBlock } from './code-block'
 export type ToolProps = ComponentProps<typeof Collapsible>
 
 export const Tool = ({ className, ...props }: ToolProps) => (
-  <Collapsible className={cn('group not-prose mb-4 w-full rounded-md border', className)} {...props} />
+  <Collapsible data-slot="tool" className={cn('group not-prose mb-4 w-full min-w-0 max-w-full overflow-hidden rounded-md border bg-muted', className)} {...props} />
 )
 
 export type ToolPart = ToolUIPart | DynamicToolUIPart
@@ -57,15 +57,15 @@ export const ToolHeader = ({ className, title, preview, type, state, toolName, .
   const derivedName = type === 'dynamic-tool' ? toolName : type.split('-').slice(1).join('-')
 
   return (
-    <CollapsibleTrigger className={cn('flex w-full items-center justify-between gap-4 p-3', className)} {...props}>
-      <div className="flex items-center gap-2 min-w-0">
+    <CollapsibleTrigger className={cn('flex w-full min-w-0 items-center gap-4 p-3 text-left', className)} {...props}>
+      <div className="flex items-center gap-2 min-w-0 flex-1">
         <WrenchIcon className="size-4 text-muted-foreground flex-shrink-0" />
         <span className="inline-flex items-center gap-1 min-w-0 text-sm">
           <span className="font-medium text-foreground">{title ?? derivedName}</span>
-          {preview ? <span className="text-muted-foreground truncate">({preview})</span> : null}
+          {preview ? <span className="min-w-0 truncate text-muted-foreground">({preview})</span> : null}
         </span>
-        {getStatusBadge(state)}
       </div>
+      {getStatusBadge(state)}
       <ChevronDownIcon className="size-4 text-muted-foreground transition-transform flex-shrink-0 group-data-[state=open]:rotate-180" />
     </CollapsibleTrigger>
   )
@@ -76,7 +76,7 @@ export type ToolContentProps = ComponentProps<typeof CollapsibleContent>
 export const ToolContent = ({ className, ...props }: ToolContentProps) => (
   <CollapsibleContent
     className={cn(
-      'data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 space-y-4 p-4 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in',
+      'data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 min-w-0 max-w-full space-y-4 overflow-hidden p-4 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in',
       className
     )}
     {...props}
@@ -90,7 +90,7 @@ export type ToolInputProps = ComponentProps<'div'> & {
 export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
   <div className={cn('space-y-2 overflow-hidden', className)} {...props}>
     <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">Parameters</h4>
-    <div className="rounded-md bg-muted/50">
+    <div data-slot="tool-input-panel" className="rounded-md bg-muted/50">
       <CodeBlock code={JSON.stringify(input, null, 2)} language="json" />
     </div>
   </div>
@@ -117,7 +117,7 @@ return null
   return (
     <div className={cn('space-y-2', className)} {...props}>
       <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">{errorText ? 'Error' : 'Result'}</h4>
-      <div className={cn('overflow-x-auto rounded-md text-xs [&_table]:w-full', errorText ? 'bg-destructive/10 text-destructive' : 'bg-muted/50 text-foreground')}>
+      <div data-slot="tool-output-panel" data-error={errorText ? 'true' : undefined} className={cn('overflow-x-auto rounded-md text-xs [&_table]:w-full', errorText ? 'bg-destructive/10 text-destructive' : 'bg-muted/50 text-foreground')}>
         {errorText && <div>{errorText}</div>}
         {Output}
       </div>

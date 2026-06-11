@@ -1,20 +1,38 @@
 import type { ReadableAtom } from 'nanostores';
 import { atom } from 'nanostores';
 
-import { enforceSandboxPolicy, migrateLayoutMode } from '@/lib/store-init';
+import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig } from '@/lib/agent-config';
+import { migrateLayoutMode, migrateThemeForGlass } from '@/lib/store-init';
+import { loadTeams, loadWhoami } from '@/renderer/features/Teams/state';
+import { initComputeBridge } from '@/renderer/services/compute';
 import { emitter, ipc } from '@/renderer/services/ipc';
-import type { ModelsConfig, OperatingSystem, StoreData } from '@/shared/types';
+import { initMachines } from '@/renderer/services/machines';
+import { initTunnelBridge } from '@/renderer/services/tunnel-bridge';
+import type { OperatingSystem, StoreData } from '@/shared/types';
 
 const getDefaults = (): StoreData => ({
-  sandboxBackend: 'none',
-  sandboxProfiles: null,
-  selectedMachineId: null,
+  defaultProfileName: 'host',
   optInToLauncherPrereleases: false,
   previewFeatures: false,
+  notifyOnAgentAttention: false,
+  textScale: 100,
+  voicePersonas: [],
+  activeVoicePersonaId: 'default',
+  voiceToggleHotkey: null,
+  globalVoiceToggleHotkey: null,
+  localVoiceEnabled: false,
+  audioSettings: {
+    inputDeviceId: null,
+    outputDeviceId: null,
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+  },
 
   layoutMode: 'chat',
-  theme: 'teams-light',
+  theme: 'omni',
   onboardingComplete: false,
+  cloudMode: null,
   projects: [],
   milestones: [],
   pages: [],
@@ -22,18 +40,29 @@ const getDefaults = (): StoreData => ({
   tasks: [],
   tickets: [],
   schemaVersion: 0,
-  chatSessionId: null,
-  chatProjectId: null,
   codeTabs: [],
   activeCodeTabId: null,
-  codeLayoutMode: 'deck',
+  codeLayoutMode: 'tile',
   codeDeckBackground: null,
+  glassTone: 'dark',
   activeTicketId: null,
   wipLimit: 3,
   weeklyReviewDay: 5,
   lastWeeklyReviewAt: null,
   enabledExtensions: {},
   skillSources: {},
+  installedBundles: {},
+  customApps: [],
+  gitCredentials: [],
+  pullRequestLinks: [],
+  modelsConfig: emptyModelsConfig(),
+  mcpConfig: emptyMcpConfig(),
+  networkConfig: emptyNetworkConfig(),
+  envVars: '',
+  browserProfiles: [],
+  browserTabsets: {},
+  browserHistory: [],
+  browserBookmarks: [],
 });
 
 /**
@@ -124,16 +153,17 @@ const init = async () => {
   await persistedStoreApi.sync();
   const store = persistedStoreApi.get();
 
-  // GA users (no preview features, no enterprise policy) must not run with any sandbox backend.
-  const sandboxReset = enforceSandboxPolicy(store);
-  if (sandboxReset) {
-    await persistedStoreApi.setKey('sandboxBackend', sandboxReset);
-  }
-
   // Migrate legacy layoutMode values to current valid modes
   const layoutReset = migrateLayoutMode(store.layoutMode as string);
   if (layoutReset) {
     await persistedStoreApi.setKey('layoutMode', layoutReset);
+  }
+
+  // One-knob glass migration: a wallpaper on a flat theme moves the user to
+  // the glass theme (wallpaper and tone preserved).
+  const themeReset = migrateThemeForGlass(store.theme as string, !!store.codeDeckBackground);
+  if (themeReset) {
+    await persistedStoreApi.setKey('theme', themeReset);
   }
 
   // Apply default workspace dir if user has never picked one
@@ -143,21 +173,36 @@ const init = async () => {
     await persistedStoreApi.setKey('workspaceDir', defaultDir);
   }
 
-  // Existing-user migration: if onboardingComplete is not set, check if models.json already has providers
+  // Existing-user migration: if onboardingComplete is not set, mark it done when
+  // model providers are already configured (now sourced from the store, not a file).
   if (!store.onboardingComplete) {
     try {
-      const configDir = await emitter.invoke('config:get-omni-config-dir');
-      const modelsConfig = (await emitter.invoke(
-        'config:read-json-file',
-        `${configDir}/models.json`
-      )) as ModelsConfig | null;
-      if (modelsConfig?.providers && Object.keys(modelsConfig.providers).length > 0) {
+      const modelsConfig = await emitter.invoke('settings:get-models-config');
+      if (Object.keys(modelsConfig.providers).length > 0) {
         await persistedStoreApi.setKey('onboardingComplete', true);
       }
     } catch {
       // If we can't read the config, just leave onboardingComplete as false
     }
   }
+
+  // Teams/cloud: learn our principal + memberships so "my work" filters and the
+  // team switcher work. No-op (null/empty) in single-user/local mode.
+  void loadWhoami();
+  void loadTeams();
+
+  // Computer-as-sandbox: read this Electron's stable identity and (when
+  // cloud-linked) register it with the cloud so it appears in the picker.
+  // No-op in browser/server mode.
+  void initMachines();
+
+  // Bridge the cloud's compute reverse-RPCs through to local Electron main.
+  // No-op outside cloud-linked Electron.
+  initComputeBridge();
+
+  // Pipe local omni-serve tunnel frames from main back up to the cloud.
+  // No-op outside cloud-linked Electron.
+  initTunnelBridge();
 
   $initialized.set(true);
 };

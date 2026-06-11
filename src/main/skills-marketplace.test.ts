@@ -1,17 +1,19 @@
+import archiver from 'archiver';
 import { createWriteStream, mkdtempSync, readFileSync, rmSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import archiver from 'archiver';
-
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { SkillStore } from '@/main/skills';
 import {
+  bundleKey,
+  checkBundleUpdates,
   fetchMarketplace,
   installMarketplacePlugin,
   parseRepoSpec,
+  updateMarketplacePlugin,
 } from '@/main/skills-marketplace';
-import type { SkillStore } from '@/main/skills';
 import type { MarketplaceManifest, StoreData } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
@@ -27,7 +29,7 @@ const REPO_REF = 'main';
 const REPO_SPEC = `${REPO_OWNER}/${REPO_NAME}`;
 
 function createMockStore(initial: Partial<StoreData> = {}): SkillStore {
-  const data: Partial<StoreData> = { skillSources: {}, ...initial };
+  const data: Partial<StoreData> = { skillSources: {}, installedBundles: {}, ...initial };
   return {
     get: <K extends keyof StoreData>(key: K) => data[key] as StoreData[K],
     set: <K extends keyof StoreData>(key: K, value: StoreData[K]) => {
@@ -367,5 +369,291 @@ describe('installMarketplacePlugin', () => {
     await expect(
       installMarketplacePlugin(configDir, REPO_SPEC, 'broken', createMockStore())
     ).rejects.toThrow(/missing or has invalid SKILL\.md/);
+  });
+
+  it('records an InstalledBundle entry with version + skill names', async () => {
+    const zipPath = join(tmpRoot, 'repo.zip');
+    await buildRepoZip(zipPath, {
+      '.claude-plugin/marketplace.json': JSON.stringify(VALID_MARKETPLACE),
+      'skills/pdf/SKILL.md': SKILL_PDF,
+      'skills/docx/SKILL.md': SKILL_DOCX,
+      'skills/canvas-design/SKILL.md': SKILL_CANVAS,
+    });
+    stubFetchToZip(zipPath);
+    const store = createMockStore();
+
+    await installMarketplacePlugin(configDir, REPO_SPEC, 'document-skills', store);
+
+    const bundles = store.get('installedBundles');
+    const key = bundleKey('anthropics/skills', 'document-skills');
+    expect(bundles[key]).toBeDefined();
+    expect(bundles[key]!.repo).toBe('anthropics/skills');
+    expect(bundles[key]!.plugin).toBe('document-skills');
+    expect(bundles[key]!.ref).toBe('main');
+    expect(bundles[key]!.version).toBe('1.0.0');
+    expect(bundles[key]!.skillNames.sort()).toEqual(['docx', 'pdf']);
+    expect(typeof bundles[key]!.installedAt).toBe('number');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// updateMarketplacePlugin
+// ---------------------------------------------------------------------------
+
+describe('updateMarketplacePlugin', () => {
+  async function buildRepo(files: Record<string, string>): Promise<string> {
+    const zipPath = join(tmpRoot, `repo-${Math.random().toString(36).slice(2)}.zip`);
+    await buildRepoZip(zipPath, files);
+    return zipPath;
+  }
+
+  it('removes skills the upstream no longer ships', async () => {
+    // v1: ships pdf + docx
+    const v1Manifest: MarketplaceManifest = {
+      name: 'm',
+      metadata: { version: '1.0.0' },
+      plugins: [
+        { name: 'document-skills', description: 'd', source: './', skills: ['./skills/pdf', './skills/docx'] },
+      ],
+    };
+    const v1Zip = await buildRepo({
+      '.claude-plugin/marketplace.json': JSON.stringify(v1Manifest),
+      'skills/pdf/SKILL.md': SKILL_PDF,
+      'skills/docx/SKILL.md': SKILL_DOCX,
+    });
+    stubFetchToZip(v1Zip);
+    const store = createMockStore();
+    await installMarketplacePlugin(configDir, REPO_SPEC, 'document-skills', store);
+
+    expect(store.get('skillSources')['docx']).toBeDefined();
+
+    // v2: drops docx
+    const v2Manifest: MarketplaceManifest = {
+      name: 'm',
+      metadata: { version: '2.0.0' },
+      plugins: [
+        { name: 'document-skills', description: 'd', source: './', skills: ['./skills/pdf'] },
+      ],
+    };
+    const v2Zip = await buildRepo({
+      '.claude-plugin/marketplace.json': JSON.stringify(v2Manifest),
+      'skills/pdf/SKILL.md': SKILL_PDF,
+    });
+    stubFetchToZip(v2Zip);
+
+    const result = await updateMarketplacePlugin(configDir, REPO_SPEC, 'document-skills', store);
+
+    expect(result.map((s) => s.name)).toEqual(['pdf']);
+    expect(store.get('skillSources')['docx']).toBeUndefined();
+    expect(store.get('skillSources')['pdf']).toBeDefined();
+
+    const docxOnDisk = await readFile(join(configDir, 'skills', 'docx', 'SKILL.md'), 'utf-8').catch(
+      () => null
+    );
+    expect(docxOnDisk).toBeNull();
+
+    const bundle = store.get('installedBundles')[bundleKey('anthropics/skills', 'document-skills')];
+    expect(bundle!.version).toBe('2.0.0');
+    expect(bundle!.skillNames).toEqual(['pdf']);
+  });
+
+  it('installs newly-added skills on update', async () => {
+    const v1Manifest: MarketplaceManifest = {
+      name: 'm',
+      metadata: { version: '1.0.0' },
+      plugins: [
+        { name: 'document-skills', description: 'd', source: './', skills: ['./skills/pdf'] },
+      ],
+    };
+    stubFetchToZip(
+      await buildRepo({
+        '.claude-plugin/marketplace.json': JSON.stringify(v1Manifest),
+        'skills/pdf/SKILL.md': SKILL_PDF,
+      })
+    );
+    const store = createMockStore();
+    await installMarketplacePlugin(configDir, REPO_SPEC, 'document-skills', store);
+
+    const v2Manifest: MarketplaceManifest = {
+      name: 'm',
+      metadata: { version: '2.0.0' },
+      plugins: [
+        {
+          name: 'document-skills',
+          description: 'd',
+          source: './',
+          skills: ['./skills/pdf', './skills/docx'],
+        },
+      ],
+    };
+    stubFetchToZip(
+      await buildRepo({
+        '.claude-plugin/marketplace.json': JSON.stringify(v2Manifest),
+        'skills/pdf/SKILL.md': SKILL_PDF,
+        'skills/docx/SKILL.md': SKILL_DOCX,
+      })
+    );
+
+    const result = await updateMarketplacePlugin(configDir, REPO_SPEC, 'document-skills', store);
+
+    expect(result.map((s) => s.name).sort()).toEqual(['docx', 'pdf']);
+    expect(store.get('skillSources')['docx']?.kind).toBe('marketplace');
+    const docxOnDisk = await readFile(join(configDir, 'skills', 'docx', 'SKILL.md'), 'utf-8');
+    expect(docxOnDisk).toContain('DOCX tools');
+  });
+
+  it('does not reap skills whose source was overridden by another bundle', async () => {
+    // Install bundle A with `pdf`
+    const aManifest: MarketplaceManifest = {
+      name: 'a',
+      plugins: [{ name: 'plug-a', description: 'd', source: './', skills: ['./skills/pdf'] }],
+    };
+    stubFetchToZip(
+      await buildRepo({
+        '.claude-plugin/marketplace.json': JSON.stringify(aManifest),
+        'skills/pdf/SKILL.md': SKILL_PDF,
+      })
+    );
+    const store = createMockStore();
+    await installMarketplacePlugin(configDir, REPO_SPEC, 'plug-a', store);
+
+    // Manually override `pdf` source so it points at a different bundle
+    const sources = store.get('skillSources');
+    store.set('skillSources', {
+      ...sources,
+      pdf: { kind: 'marketplace', repo: 'someone/other', plugin: 'plug-other', ref: 'main' },
+    });
+
+    // Update bundle A — its manifest now drops pdf
+    const aV2: MarketplaceManifest = {
+      name: 'a',
+      plugins: [{ name: 'plug-a', description: 'd', source: './', skills: [] }],
+    };
+    stubFetchToZip(
+      await buildRepo({ '.claude-plugin/marketplace.json': JSON.stringify(aV2) })
+    );
+    await updateMarketplacePlugin(configDir, REPO_SPEC, 'plug-a', store);
+
+    // pdf survived because its source no longer claims plug-a
+    expect(store.get('skillSources')['pdf']?.kind).toBe('marketplace');
+    const stillThere = await readFile(join(configDir, 'skills', 'pdf', 'SKILL.md'), 'utf-8').catch(
+      () => null
+    );
+    expect(stillThere).not.toBeNull();
+  });
+
+  it('falls back to a fresh install when the bundle is not yet tracked', async () => {
+    const manifest: MarketplaceManifest = {
+      name: 'm',
+      metadata: { version: '1.0.0' },
+      plugins: [{ name: 'plug', description: 'd', source: './', skills: ['./skills/canvas-design'] }],
+    };
+    stubFetchToZip(
+      await buildRepo({
+        '.claude-plugin/marketplace.json': JSON.stringify(manifest),
+        'skills/canvas-design/SKILL.md': SKILL_CANVAS,
+      })
+    );
+    const store = createMockStore();
+
+    const result = await updateMarketplacePlugin(configDir, REPO_SPEC, 'plug', store);
+
+    expect(result.map((s) => s.name)).toEqual(['canvas-design']);
+    const bundle = store.get('installedBundles')[bundleKey('anthropics/skills', 'plug')];
+    expect(bundle).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkBundleUpdates
+// ---------------------------------------------------------------------------
+
+describe('checkBundleUpdates', () => {
+  it('returns up-to-date when manifest matches stored skill names + version', async () => {
+    const manifest: MarketplaceManifest = {
+      name: 'm',
+      metadata: { version: '1.0.0' },
+      plugins: [{ name: 'plug', description: 'd', source: './', skills: ['./skills/pdf'] }],
+    };
+    const zipPath = join(tmpRoot, 'repo.zip');
+    await buildRepoZip(zipPath, {
+      '.claude-plugin/marketplace.json': JSON.stringify(manifest),
+      'skills/pdf/SKILL.md': SKILL_PDF,
+    });
+    stubFetchToZip(zipPath);
+    const store = createMockStore();
+    await installMarketplacePlugin(configDir, REPO_SPEC, 'plug', store);
+
+    const reports = await checkBundleUpdates(store);
+    expect(reports).toHaveLength(1);
+    expect(reports[0]!.status).toBe('up-to-date');
+    expect(reports[0]!.addedSkills).toEqual([]);
+    expect(reports[0]!.removedSkills).toEqual([]);
+  });
+
+  it('flags update-available when version bumps or skills change', async () => {
+    // Install v1
+    const v1: MarketplaceManifest = {
+      name: 'm',
+      metadata: { version: '1.0.0' },
+      plugins: [{ name: 'plug', description: 'd', source: './', skills: ['./skills/pdf'] }],
+    };
+    let zipPath = join(tmpRoot, 'v1.zip');
+    await buildRepoZip(zipPath, {
+      '.claude-plugin/marketplace.json': JSON.stringify(v1),
+      'skills/pdf/SKILL.md': SKILL_PDF,
+    });
+    stubFetchToZip(zipPath);
+    const store = createMockStore();
+    await installMarketplacePlugin(configDir, REPO_SPEC, 'plug', store);
+
+    // Switch fetch to v2
+    const v2: MarketplaceManifest = {
+      name: 'm',
+      metadata: { version: '2.0.0' },
+      plugins: [
+        { name: 'plug', description: 'd', source: './', skills: ['./skills/pdf', './skills/docx'] },
+      ],
+    };
+    zipPath = join(tmpRoot, 'v2.zip');
+    await buildRepoZip(zipPath, {
+      '.claude-plugin/marketplace.json': JSON.stringify(v2),
+      'skills/pdf/SKILL.md': SKILL_PDF,
+      'skills/docx/SKILL.md': SKILL_DOCX,
+    });
+    stubFetchToZip(zipPath);
+
+    const reports = await checkBundleUpdates(store);
+    expect(reports[0]!.status).toBe('update-available');
+    expect(reports[0]!.installedVersion).toBe('1.0.0');
+    expect(reports[0]!.liveVersion).toBe('2.0.0');
+    expect(reports[0]!.addedSkills).toEqual(['docx']);
+    expect(reports[0]!.removedSkills).toEqual([]);
+  });
+
+  it('returns unreachable per-bundle on network failure', async () => {
+    const store = createMockStore({
+      installedBundles: {
+        'foo/bar:plug': {
+          repo: 'foo/bar',
+          plugin: 'plug',
+          ref: 'main',
+          skillNames: ['x'],
+          installedAt: 0,
+        },
+      },
+    });
+    stubFetchToError(503);
+
+    const reports = await checkBundleUpdates(store);
+    expect(reports).toHaveLength(1);
+    expect(reports[0]!.status).toBe('unreachable');
+    expect(reports[0]!.error).toMatch(/HTTP 503/);
+  });
+
+  it('returns empty when no bundles are installed', async () => {
+    const store = createMockStore();
+    const reports = await checkBundleUpdates(store);
+    expect(reports).toEqual([]);
   });
 });

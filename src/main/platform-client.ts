@@ -30,6 +30,54 @@ export type PlatformSession = {
   error?: string;
 };
 
+/**
+ * The compute surface `AgentProcess` drives in *platform mode* (a remote agent
+ * the launcher connects to). `PlatformClient` (omni-platform delegation)
+ * implements it. NOTE: the Azure path is NOT platform mode — it's host-runs-
+ * agent, where `omni serve` runs locally and drives a serverless ACI container
+ * via the `aci` sandbox profile (omniagents AzureContainerSandbox).
+ *
+ * `extras` is a generic record of per-call hints that specific
+ * implementations may read. `PlatformClient` ignores it. The
+ * `RemoteElectronComputeClient` (computer-as-sandbox) reads `sessionId`,
+ * `profileName`, `workspaceDir`, `projectId`, and `env` so it can ship
+ * the right launch args to the laptop's local `ProcessManager`.
+ */
+export interface IComputeClient {
+  /**
+   * When true, a `waitForSession` that resolves to `active` already guarantees
+   * the sandbox is reachable and serving — the caller MUST NOT run its own
+   * HTTP/WS readiness probe.
+   *
+   * `RemoteElectronComputeClient` sets this: the laptop confirms readiness
+   * locally (its own `AgentProcess` only reports `running` after probing
+   * `omni serve`), and the loopback URL it returns isn't reachable from the
+   * cloud, so a second probe would hang forever. `PlatformClient` leaves it
+   * falsy — its gateway URL is publicly reachable and worth probing.
+   */
+  readonly confirmsReadiness?: boolean;
+  startSession(
+    agentSlug: string,
+    domain?: string,
+    gitRepo?: { url: string; branch?: string },
+    extras?: ComputeStartExtras
+  ): Promise<PlatformSession>;
+  waitForSession(sessionId: string, maxAttempts?: number): Promise<PlatformSession>;
+  stopSession(sessionId: string): Promise<void>;
+  finalizeWorkspace(sessionId: string): Promise<{ downloadSasUrl: string }>;
+}
+
+export type ComputeStartExtras = {
+  sessionId?: string;
+  /** LOCAL profile name on the laptop (e.g. `'host'`, `'devbox'`) — cloud
+   *  already stripped the `local:<machineId>` prefix. */
+  profileName?: string;
+  workspaceDir?: string;
+  projectId?: string;
+  /** Materialised env the laptop should merge into its `omni serve` spawn. */
+  env?: Record<string, string>;
+};
+
 export type PlatformPolicy = {
   project?: {
     name: string;
@@ -93,7 +141,7 @@ export type AuthTokenResponse = {
 // Client
 // ---------------------------------------------------------------------------
 
-export class PlatformClient {
+export class PlatformClient implements IComputeClient {
   private config: PlatformConfig;
   private log: SimpleLogger;
   private fetchFn: typeof globalThis.fetch;
@@ -174,8 +222,10 @@ throw new Error(`Policy fetch failed: ${res.status}`);
   async startSession(
     agentSlug: string,
     domain?: string,
-    gitRepo?: { url: string; branch?: string }
+    gitRepo?: { url: string; branch?: string },
+    _extras?: ComputeStartExtras
   ): Promise<PlatformSession> {
+    void _extras;
     const body: Record<string, unknown> = { agent: agentSlug };
     if (domain) {
 body.domain = domain;

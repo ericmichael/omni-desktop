@@ -14,10 +14,9 @@ import type { ColumnId, Milestone, Ticket, TicketId, TicketPriority } from '@/sh
  *
  * Ordering rules (applied in order):
  *   1. In-flight first — any ticket whose phase is active (not idle/error/completed).
- *   2. Self-blocked next — phase === 'awaiting_input', 'error', or 'completed'.
- *      The 'completed' phase here means the agent finished its last run and
- *      the user hasn't closed or re-dispatched the ticket — the user is now
- *      the bottleneck, same semantic as awaiting_input.
+ *   2. Self-blocked next — phase === 'error' or 'completed'. The 'completed'
+ *      phase means the agent finished its last run and the user hasn't closed
+ *      or re-dispatched the ticket — the user is now the bottleneck.
  *   3. Next-up candidates — unresolved, no active phase. Ranked by a composite
  *      score built from priority, milestone membership, unblocked status, and
  *      deadline proximity (milestone.dueDate). Tiebreaker: oldest
@@ -81,13 +80,8 @@ continue;
 
     const phase = ticket.phase;
 
-    if (phase === 'awaiting_input' || phase === 'error' || phase === 'completed') {
-      const reason =
-        phase === 'awaiting_input'
-          ? 'Needs your input'
-          : phase === 'error'
-            ? 'Errored — retry or triage'
-            : 'Agent finished — review';
+    if (phase === 'error' || phase === 'completed') {
+      const reason = phase === 'error' ? 'Errored — retry or triage' : 'Agent finished — review';
       selfBlocked.push({
         ticket,
         rank: 'self_blocked',

@@ -322,7 +322,7 @@ return null
                 <span className="ml-1 text-destructive">{errorCount}</span>
               )}
               {level === 'warn' && warnCount > 0 && (
-                <span className="ml-1 text-yellow-600">{warnCount}</span>
+                <span className="ml-1 text-warning">{warnCount}</span>
               )}
             </button>
           ))}
@@ -385,9 +385,9 @@ return null
               className={cn(
                 'group/log flex items-start gap-2 border-b border-border/30 px-3 py-1 text-[11px] leading-relaxed last:border-b-0',
                 log.level === 'error' && 'bg-destructive/5 text-destructive',
-                log.level === 'warn' && 'bg-yellow-500/5 text-yellow-600',
+                log.level === 'warn' && 'bg-warning/5 text-warning',
                 log.level === 'log' && 'text-foreground',
-                log.level === 'result' && 'text-blue-500 italic'
+                log.level === 'result' && 'text-info italic'
               )}
               key={`${i}-${log.timestamp.getTime()}-${log.level}`}
             >

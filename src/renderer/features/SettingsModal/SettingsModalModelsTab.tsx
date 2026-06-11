@@ -1,18 +1,19 @@
 import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
+import { useStore } from '@nanostores/react';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, Button, Card, Checkbox, FormField, FormSkeleton, IconButton, Input, SaveBar, SectionLabel, Select } from '@/renderer/ds';
-import { configApi } from '@/renderer/services/config';
-import type { ModelEntry, ModelsConfig, ProviderEntry } from '@/shared/types';
+import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, Button, Caption1, Card, Checkbox, FormField, FormSkeleton, IconButton, Input, Radio, RadioGroup, SaveBar, SectionLabel, Select, Spinner } from '@/renderer/ds';
+import { SettingsModalVoicePersonas } from '@/renderer/features/SettingsModal/SettingsModalVoicePersonas';
+import { agentConfigApi } from '@/renderer/services/config';
+import { emitter, ipc } from '@/renderer/services/ipc';
+import { persistedStoreApi } from '@/renderer/services/store';
+import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
+import type { CodexDeviceCode, ModelEntry, ModelsConfig, ProviderEntry } from '@/shared/types';
 
-const PROVIDER_TYPES: ProviderEntry['type'][] = ['openai', 'azure', 'openai-compatible', 'litellm'];
-const REASONING_OPTIONS = ['none', 'low', 'medium', 'high'] as const;
-
-function emptyConfig(): ModelsConfig {
-  return { version: 3, default: null, voice_default: null, providers: {} };
-}
+const PROVIDER_TYPES: ProviderEntry['type'][] = ['openai', 'azure', 'openai-compatible', 'litellm', 'openai-oauth'];
+const REASONING_OPTIONS = ['none', 'low', 'medium', 'high', 'xhigh'] as const;
 
 function emptyProvider(): ProviderEntry {
   return { type: 'openai', models: {} };
@@ -43,11 +44,28 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalS,
   },
   flex1: { flex: '1 1 0' },
+  codexCard: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
+  codeBox: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    padding: tokens.spacingVerticalS,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
+  },
+  codeText: {
+    fontFamily: tokens.fontFamilyMonospace,
+    fontSize: tokens.fontSizeBase500,
+    fontWeight: tokens.fontWeightSemibold,
+    letterSpacing: '0.1em',
+  },
+  pendingRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
   headerRow: {
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    flex: '1 1 0',
+    width: '100%',
     minWidth: 0,
   },
   headerContent: { flex: '1 1 0', minWidth: 0 },
@@ -117,7 +135,6 @@ const useStyles = makeStyles({
 
 export const SettingsModalModelsTab = memo(() => {
   const styles = useStyles();
-  const [configDir, setConfigDir] = useState<string | null>(null);
   const [config, setConfig] = useState<ModelsConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [dirty, setDirty] = useState(false);
@@ -127,22 +144,14 @@ export const SettingsModalModelsTab = memo(() => {
   const [editingModel, setEditingModel] = useState<{ provider: string; modelId: string } | null>(null);
   const [newProviderName, setNewProviderName] = useState('');
   const [newModelId, setNewModelId] = useState('');
-
-  const filePath = configDir ? `${configDir}/models.json` : null;
+  // Live merged model list from the runtime (`omni model list --json`), which
+  // includes models not in the store — notably OAuth-discovered Codex models.
+  const [runtimeModelNames, setRuntimeModelNames] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const dir = await configApi.getOmniConfigDir();
-      setConfigDir(dir);
-      const data = await configApi.readJsonFile(`${dir}/models.json`);
-      if (data && typeof data === 'object' && 'version' in data) {
-        setConfig(data as ModelsConfig);
-      } else {
-        const newConfig = emptyConfig();
-        await configApi.writeJsonFile(`${dir}/models.json`, newConfig);
-        setConfig(newConfig);
-      }
+      setConfig(await agentConfigApi.getModels());
       setDirty(false);
       setError(null);
     } catch (e) {
@@ -156,23 +165,74 @@ export const SettingsModalModelsTab = memo(() => {
     load();
   }, [load]);
 
-  const modelKeys = useMemo(() => (config ? collectModelKeys(config) : []), [config]);
+  useEffect(() => {
+    emitter
+      .invoke('util:list-models')
+      .then((res) => setRuntimeModelNames(res.models.map((m) => m.name)))
+      .catch(() => setRuntimeModelNames([]));
+  }, []);
+
+  // Union of store-configured keys and the live runtime list, so discovered
+  // models (e.g. Codex) are selectable as the default/voice model.
+  const modelKeys = useMemo(() => {
+    const storeKeys = config ? collectModelKeys(config) : [];
+    return Array.from(new Set([...storeKeys, ...runtimeModelNames])).sort();
+  }, [config, runtimeModelNames]);
+
+  /**
+   * Called after a successful ChatGPT sign-in. Registers the built-in `codex`
+   * provider in the store (so the user never hand-adds it; models stay empty —
+   * the runtime discovers them). Makes a Codex model the default ONLY when no
+   * other provider is configured; otherwise the existing setup is left alone
+   * and Codex is just available via the picker / `/model`. Returns the model
+   * that became the default, or undefined if the default was left unchanged.
+   */
+  const applyCodexSignIn = useCallback(async (): Promise<string | undefined> => {
+    const current = await agentConfigApi.getModels();
+    const runtime = await emitter.invoke('util:list-models').catch(() => null);
+    // Push the fresh discovery into state so the default picker and the
+    // Codex provider row both reflect sign-in immediately (no modal reopen).
+    setRuntimeModelNames((runtime?.models ?? []).map((m) => m.name));
+    const codexNames = (runtime?.models ?? [])
+      .filter((m) => m.provider === 'openai-oauth' || m.name.startsWith('codex/'))
+      .map((m) => m.name);
+    const preferred = codexNames.find((n) => n.endsWith('/gpt-5.5')) ?? codexNames[0];
+
+    const hasOtherProviders = Object.keys(current.providers).some((name) => name !== 'codex');
+    const next: ModelsConfig = {
+      ...current,
+      providers: {
+        ...current.providers,
+        codex: current.providers.codex ?? { type: 'openai-oauth', models: {} },
+      },
+    };
+
+    let madeDefault: string | undefined;
+    if (!hasOtherProviders && preferred) {
+      next.default = preferred;
+      madeDefault = preferred;
+    }
+
+    await agentConfigApi.setModels(next);
+    await load();
+    return madeDefault;
+  }, [load]);
 
   const save = useCallback(async () => {
-    if (!filePath || !config) {
+    if (!config) {
       return;
     }
     setSaving(true);
     setError(null);
     try {
-      await configApi.writeJsonFile(filePath, config);
+      await agentConfigApi.setModels(config);
       setDirty(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save');
     } finally {
       setSaving(false);
     }
-  }, [filePath, config]);
+  }, [config]);
 
   const updateConfig = useCallback((updater: (prev: ModelsConfig) => ModelsConfig) => {
     setConfig((prev) => {
@@ -196,6 +256,25 @@ export const SettingsModalModelsTab = memo(() => {
       updateConfig((c) => ({ ...c, voice_default: e.target.value || null }));
     },
     [updateConfig]
+  );
+
+  // Voice provider: Hosted is the models.json `voice_default` (cloud realtime);
+  // Local is the launcher-side on-device stack (Parakeet + Pocket), persisted
+  // separately. They're mutually exclusive.
+  const localVoiceEnabled = useStore(persistedStoreApi.$atom).localVoiceEnabled;
+  const localVoiceCapable = isLocalVoiceCapable();
+  const onChangeVoiceProvider = useCallback(
+    (value: string) => {
+      void persistedStoreApi.setKey('localVoiceEnabled', value === 'local');
+      updateConfig((c) => ({
+        ...c,
+        // Hosted needs a non-null model so the row stays selected; seed the
+        // first available one (user refines via the Model dropdown). Off/Local
+        // clear it.
+        voice_default: value === 'hosted' ? (c.voice_default ?? modelKeys[0] ?? null) : null,
+      }));
+    },
+    [updateConfig, modelKeys]
   );
 
   const addProvider = useCallback(() => {
@@ -341,7 +420,10 @@ export const SettingsModalModelsTab = memo(() => {
 
   return (
     <div className={styles.root}>
-      <SectionLabel>Defaults</SectionLabel>
+      <SectionLabel>ChatGPT (Codex)</SectionLabel>
+      <CodexSignInCard onSignedIn={applyCodexSignIn} />
+
+      <SectionLabel className={styles.sectionLabelSpaced}>Defaults</SectionLabel>
       <Card>
         <FormField label="Default model">
           <Select value={config.default ?? ''} onChange={onChangeDefault}>
@@ -353,16 +435,50 @@ export const SettingsModalModelsTab = memo(() => {
             ))}
           </Select>
         </FormField>
-        <FormField label="Voice model">
-          <Select value={config.voice_default ?? ''} onChange={onChangeVoiceDefault}>
-            <option value="">None</option>
-            {modelKeys.map((k) => (
-              <option key={k} value={k}>
-                {k}
-              </option>
-            ))}
-          </Select>
+        <FormField label="Voice">
+          <RadioGroup
+            layout="horizontal"
+            value={localVoiceEnabled ? 'local' : config.voice_default ? 'hosted' : 'off'}
+            onChange={(_, data) => onChangeVoiceProvider(data.value)}
+          >
+            <Radio value="off" label="Off" />
+            <Radio value="hosted" label="Hosted" />
+            <Radio
+              value="local"
+              label="Local"
+              disabled={!localVoiceCapable}
+              title={localVoiceCapable ? undefined : 'Not available in this deployment'}
+            />
+          </RadioGroup>
         </FormField>
+        {!localVoiceEnabled && config.voice_default !== null ? (
+          <FormField label="Model">
+            <Select value={config.voice_default ?? ''} onChange={onChangeVoiceDefault}>
+              <option value="">None</option>
+              {modelKeys.map((k) => (
+                <option key={k} value={k}>
+                  {k}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+        ) : null}
+        {localVoiceEnabled ? (
+          <>
+            <FormField label="Speech-to-text">
+              <Select value="parakeet" disabled>
+                <option value="parakeet">Parakeet 0.6B</option>
+              </Select>
+            </FormField>
+            <FormField label="Text-to-speech">
+              <Select value="pocket" disabled>
+                <option value="pocket">Pocket</option>
+              </Select>
+            </FormField>
+            <Caption1>Runs on this machine · models download on first use.</Caption1>
+            <SettingsModalVoicePersonas />
+          </>
+        ) : null}
       </Card>
 
       <SectionLabel className={styles.sectionLabelSpaced}>Providers</SectionLabel>
@@ -370,22 +486,29 @@ export const SettingsModalModelsTab = memo(() => {
         setExpandedProvider(data.openItems.length > 0 ? String(data.openItems[data.openItems.length - 1]) : null);
         setEditingModel(null);
       }} openItems={expandedProvider ? [expandedProvider] : []}>
-        {Object.entries(config.providers).map(([name, provider]) => (
-          <ProviderRow
-            key={name}
-            name={name}
-            provider={provider}
-            editingModel={editingModel}
-            newModelId={newModelId}
-            onRemove={removeProvider}
-            onUpdateProvider={updateProvider}
-            onAddModel={addModel}
-            onRemoveModel={removeModel}
-            onUpdateModel={updateModel}
-            onToggleEditModel={toggleEditModel}
-            onChangeNewModelId={onChangeNewModelId}
-          />
-        ))}
+        {Object.entries(config.providers).map(([name, provider]) => {
+          const prefix = `${name}/`;
+          const discoveredModels = runtimeModelNames
+            .filter((n) => n.startsWith(prefix))
+            .map((n) => n.slice(prefix.length));
+          return (
+            <ProviderRow
+              key={name}
+              name={name}
+              provider={provider}
+              discoveredModels={discoveredModels}
+              editingModel={editingModel}
+              newModelId={newModelId}
+              onRemove={removeProvider}
+              onUpdateProvider={updateProvider}
+              onAddModel={addModel}
+              onRemoveModel={removeModel}
+              onUpdateModel={updateModel}
+              onToggleEditModel={toggleEditModel}
+              onChangeNewModelId={onChangeNewModelId}
+            />
+          );
+        })}
       </Accordion>
       <div className={styles.addRow}>
         <Input
@@ -408,10 +531,120 @@ export const SettingsModalModelsTab = memo(() => {
 });
 SettingsModalModelsTab.displayName = 'SettingsModalModelsTab';
 
+/**
+ * Sign in to a ChatGPT subscription (Codex). Main runs the browser PKCE flow
+ * and stores tokens in the omni-code config dir; the runtime refreshes them.
+ *
+ * Signing in is all the user should need: on success we make a discovered
+ * Codex model the default (and register the built-in `codex` provider in the
+ * store so it's visible), so the agent uses ChatGPT immediately — no manual
+ * provider setup. `onSignedIn` does that and returns the chosen model ref.
+ */
+const CodexSignInCard = memo(({ onSignedIn }: { onSignedIn: () => Promise<string | undefined> }) => {
+  const styles = useStyles();
+  const [status, setStatus] = useState<{ signedIn: boolean; accountId?: string } | null>(null);
+  const [activeModel, setActiveModel] = useState<string | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Set while the device-flow user_code is live and the user is authorizing.
+  const [deviceCode, setDeviceCode] = useState<CodexDeviceCode | null>(null);
+
+  useEffect(() => {
+    emitter.invoke('codex:status').then(setStatus).catch(() => setStatus({ signedIn: false }));
+  }, []);
+
+  // Main pushes the user code mid-flow; show it while we poll.
+  useEffect(() => ipc.on('codex:device-code', setDeviceCode), []);
+
+  const onSignIn = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    setDeviceCode(null);
+    try {
+      // Device flow works in Electron and server/browser mode alike. PKCE
+      // (codex:login) is still available in Electron for a one-click UX but
+      // the device flow's universality wins for a single code path here.
+      const next = await emitter.invoke('codex:link');
+      setStatus(next);
+      if (next.signedIn) {
+        setActiveModel(await onSignedIn());
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Sign-in failed');
+    } finally {
+      setBusy(false);
+      setDeviceCode(null);
+    }
+  }, [onSignedIn]);
+
+  const onSignOut = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await emitter.invoke('codex:logout');
+      setStatus({ signedIn: false });
+      setActiveModel(undefined);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Sign-out failed');
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  return (
+    <Card>
+      <div className={styles.codexCard}>
+        <div className={styles.rowGap2}>
+          <div className={styles.headerContent}>
+            <div className={styles.headerName}>
+              {status?.signedIn ? 'Signed in to ChatGPT' : 'Use your ChatGPT subscription'}
+            </div>
+            <div className={styles.headerSummary}>
+              {status?.signedIn
+                ? activeModel
+                  ? `Using ${activeModel} — switch models any time below or with /model in chat`
+                  : 'ChatGPT models are available — switch with /model in chat or set a default below'
+                : error ?? 'Drive the agent through ChatGPT Plus/Pro/Team via the Codex Responses API.'}
+            </div>
+          </div>
+          {status?.signedIn ? (
+            <Button size="sm" variant="ghost" onClick={onSignOut} isDisabled={busy}>
+              Sign out
+            </Button>
+          ) : (
+            <Button size="sm" onClick={onSignIn} isDisabled={busy}>
+              {busy ? 'Waiting for authorization…' : 'Sign in with ChatGPT'}
+            </Button>
+          )}
+        </div>
+
+        {busy && deviceCode && (
+          <div className={styles.codeBox}>
+            <Caption1>
+              Open{' '}
+              <a href={deviceCode.verificationUri} target="_blank" rel="noopener noreferrer">
+                {deviceCode.verificationUri}
+              </a>{' '}
+              and enter this code:
+            </Caption1>
+            <span className={styles.codeText}>{deviceCode.userCode}</span>
+            <div className={styles.pendingRow}>
+              <Spinner size="sm" />
+              <Caption1>Waiting for authorization…</Caption1>
+            </div>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+});
+CodexSignInCard.displayName = 'CodexSignInCard';
+
 const ProviderRow = memo(
   ({
     name,
     provider,
+    discoveredModels,
     editingModel,
     newModelId,
     onRemove,
@@ -424,6 +657,7 @@ const ProviderRow = memo(
   }: {
     name: string;
     provider: ProviderEntry;
+    discoveredModels: string[];
     editingModel: { provider: string; modelId: string } | null;
     newModelId: string;
     onRemove: (name: string) => void;
@@ -435,10 +669,17 @@ const ProviderRow = memo(
     onChangeNewModelId: (e: ChangeEvent<HTMLInputElement>) => void;
   }) => {
     const styles = useStyles();
-    const modelCount = Object.keys(provider.models).length;
+    const storedCount = Object.keys(provider.models).length;
+    const isOauth = provider.type === 'openai-oauth';
+    // Show runtime-discovered models for OAuth providers (Codex) where the
+    // store intentionally holds an empty `models: {}` and discovery fills it.
+    const extraDiscovered = isOauth ? discoveredModels.filter((id) => !(id in provider.models)) : [];
+    const modelCount = storedCount + extraDiscovered.length;
     const showBaseUrl =
       provider.type === 'azure' || provider.type === 'openai-compatible' || provider.type === 'litellm';
     const showApiVersion = provider.type === 'azure';
+    // OAuth providers authenticate via the ChatGPT sign-in above, not a key.
+    const showApiKey = !isOauth;
 
     const onClickRemove = useCallback(() => {
       onRemove(name);
@@ -486,16 +727,18 @@ const ProviderRow = memo(
                 ))}
               </Select>
             </FormField>
-            <FormField label="API Key">
-              <Input
-                type="text"
-                value={provider.api_key ?? ''}
-                onChange={onChangeApiKey}
-                placeholder="sk-..."
-                mono
-                className={styles.flex1}
-              />
-            </FormField>
+            {showApiKey && (
+              <FormField label="API Key">
+                <Input
+                  type="text"
+                  value={provider.api_key ?? ''}
+                  onChange={onChangeApiKey}
+                  placeholder="sk-..."
+                  mono
+                  className={styles.flex1}
+                />
+              </FormField>
+            )}
             {showBaseUrl && (
               <FormField label="Base URL">
                 <Input
@@ -538,22 +781,32 @@ const ProviderRow = memo(
                   />
                 );
               })}
+              {extraDiscovered.map((modelId) => (
+                <div key={`discovered-${modelId}`} className={styles.modelCard}>
+                  <div className={styles.modelHeader}>
+                    <div className={styles.modelId}>{modelId}</div>
+                    <div className={styles.modelLabel}>discovered from ChatGPT</div>
+                  </div>
+                </div>
+              ))}
             </div>
 
-            <div className={styles.rowGap2}>
-              <Input
-                type="text"
-                value={newModelId}
-                onChange={onChangeNewModelId}
-                placeholder="Model ID"
-                mono
-                className={styles.flex1}
-              />
-              <Button size="sm" variant="ghost" onClick={onClickAddModel} isDisabled={!newModelId.trim()}>
-                <Add20Regular className={styles.iconMr} />
-                Add model
-              </Button>
-            </div>
+            {!isOauth && (
+              <div className={styles.rowGap2}>
+                <Input
+                  type="text"
+                  value={newModelId}
+                  onChange={onChangeNewModelId}
+                  placeholder="Model ID"
+                  mono
+                  className={styles.flex1}
+                />
+                <Button size="sm" variant="ghost" onClick={onClickAddModel} isDisabled={!newModelId.trim()}>
+                  <Add20Regular className={styles.iconMr} />
+                  Add model
+                </Button>
+              </div>
+            )}
           </div>
         </AccordionPanel>
       </AccordionItem>

@@ -1,20 +1,19 @@
-import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { Info20Regular, Settings20Filled, WindowConsole20Regular } from '@fluentui/react-icons';
+import { makeStyles, mergeClasses } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
-import type { CSSProperties } from 'react';
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 
 import { Sidebar } from '@/renderer/app/Sidebar';
-import { Caption1, ListItem, Subtitle2 } from '@/renderer/ds';
-import { $launcherVersion } from '@/renderer/features/Banner/state';
 import { Chat } from '@/renderer/features/Chat/Chat';
 import { Code } from '@/renderer/features/Code/Code';
-import { $isConsoleOpen } from '@/renderer/features/Console/state';
 import { Dashboards } from '@/renderer/features/Dashboards/Dashboards';
+import { Gallery } from '@/renderer/features/Gallery/Gallery';
 import { OnboardingWizard } from '@/renderer/features/Onboarding/OnboardingWizard';
 import { SettingsPage } from '@/renderer/features/SettingsModal/SettingsPage';
 import { Tickets } from '@/renderer/features/Tickets/Tickets';
 import { persistedStoreApi } from '@/renderer/services/store';
+import { getThemeBackdrop, getThemeBuiltinGlassTone } from '@/renderer/theme/fluent-themes';
+import { getGlassVars } from '@/renderer/theme/glass-vars';
+import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { LayoutMode } from '@/shared/types';
 
 const useStyles = makeStyles({
@@ -38,13 +37,6 @@ const useStyles = makeStyles({
     minHeight: 0,
     position: 'relative',
   },
-  /** Hide the sidebar (bottom tab bar) on mobile when the code tab owns the bottom dock */
-  sidebarHiddenMobile: {
-    display: 'none',
-    '@media (min-width: 640px)': {
-      display: 'contents',
-    },
-  },
   panel: {
     width: '100%',
     height: '100%',
@@ -52,67 +44,7 @@ const useStyles = makeStyles({
   hidden: {
     display: 'none',
   },
-  morePage: {
-    display: 'flex',
-    flexDirection: 'column',
-    width: '100%',
-    height: '100%',
-    backgroundColor: tokens.colorNeutralBackground1,
-  },
-  moreHeader: {
-    paddingLeft: '20px',
-    paddingRight: '20px',
-    paddingTop: '24px',
-    paddingBottom: '16px',
-  },
-  moreFooter: {
-    marginTop: 'auto',
-    paddingLeft: '20px',
-    paddingRight: '20px',
-    paddingTop: '24px',
-    paddingBottom: '24px',
-  },
-  moreVersion: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    color: tokens.colorNeutralForeground3,
-  },
 });
-
-const MorePage = memo(() => {
-  const styles = useStyles();
-  const version = useStore($launcherVersion);
-
-  const openSettings = useCallback(() => {
-    persistedStoreApi.setKey('layoutMode', 'settings');
-  }, []);
-
-  const openConsole = useCallback(() => {
-    $isConsoleOpen.set(true);
-  }, []);
-
-  return (
-    <div className={styles.morePage}>
-      <div className={styles.moreHeader}>
-        <Subtitle2>More</Subtitle2>
-      </div>
-      <div>
-        <ListItem icon={<Settings20Filled />} label="Settings" detail="Theme, models, network, MCP" onClick={openSettings} />
-        <ListItem icon={<WindowConsole20Regular />} label="Dev Console" detail="Terminal session" onClick={openConsole} />
-      </div>
-      {version && (
-        <div className={styles.moreFooter}>
-          <div className={styles.moreVersion}>
-            <Info20Regular style={{ width: 14, height: 14 }} />
-            <Caption1>Omni Code Launcher v{version}</Caption1>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-});
-MorePage.displayName = 'MorePage';
 
 /**
  * Lazy-mount, never-unmount layout.
@@ -125,8 +57,19 @@ export const MainContent = memo(() => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const active: LayoutMode = store.layoutMode;
-  const deckBackground = store.codeDeckBackground ?? null;
-  const showDeckBg = (active === 'code' || active === 'chat' || active === 'settings' || active === 'projects') && !!deckBackground;
+  // Glass follows the THEME (one knob). The user's wallpaper, when set, only
+  // overrides the glass theme's built-in backdrop — it never activates glass.
+  const isGlass = useStore($glassEnabled);
+  const theme = store.theme ?? 'omni';
+  const userBackdrop = store.codeDeckBackground ?? null;
+  const backdropStyle: React.CSSProperties | undefined = isGlass
+    ? userBackdrop
+      ? { backgroundImage: `url(${userBackdrop})` }
+      : { background: getThemeBackdrop(theme) ?? undefined }
+    : undefined;
+  // User wallpapers carry their luminance-detected tone; the built-in
+  // backdrop uses the theme's declared tone.
+  const glassTone = userBackdrop ? (store.glassTone ?? 'dark') : getThemeBuiltinGlassTone(theme);
 
   const [mounted, setMounted] = useState<Set<LayoutMode>>(() => new Set([active]));
 
@@ -147,39 +90,26 @@ return prev;
 
   const panels: { key: LayoutMode; Component: React.ComponentType }[] = [
     { key: 'chat', Component: Chat },
-    { key: 'code', Component: Code },
+    { key: 'spaces', Component: Code },
     { key: 'projects', Component: Tickets },
     { key: 'dashboards', Component: Dashboards },
     { key: 'settings', Component: SettingsPage },
-    { key: 'more', Component: MorePage },
+    ...(import.meta.env.DEV ? [{ key: 'gallery' as const, Component: Gallery }] : []),
   ];
 
   return (
     <div
-      className={mergeClasses(styles.root, showDeckBg && styles.rootWithDeckBg)}
+      className={mergeClasses(styles.root, isGlass && styles.rootWithDeckBg, isGlass && 'omni-glass')}
       style={
-        showDeckBg
-          ? ({
-              backgroundImage: `url(${deckBackground})`,
-              '--colorSubtleBackgroundHover': 'rgba(255, 255, 255, 0.10)',
-              '--colorSubtleBackgroundPressed': 'rgba(255, 255, 255, 0.16)',
-              '--colorSubtleBackgroundSelected': 'rgba(255, 255, 255, 0.14)',
-              '--colorNeutralBackground1Hover': 'rgba(255, 255, 255, 0.10)',
-              '--colorNeutralBackground1Pressed': 'rgba(255, 255, 255, 0.16)',
-              '--colorNeutralBackground1Selected': 'rgba(255, 255, 255, 0.14)',
-              '--colorNeutralBackground2Hover': 'rgba(255, 255, 255, 0.10)',
-              '--colorNeutralBackground2Pressed': 'rgba(255, 255, 255, 0.16)',
-              '--colorNeutralBackground2Selected': 'rgba(255, 255, 255, 0.14)',
-              '--colorNeutralBackground3Hover': 'rgba(255, 255, 255, 0.10)',
-              '--colorNeutralBackground3Pressed': 'rgba(255, 255, 255, 0.16)',
-              '--colorNeutralBackground3Selected': 'rgba(255, 255, 255, 0.14)',
-            } as CSSProperties)
+        isGlass
+          ? {
+              ...backdropStyle,
+              ...getGlassVars(glassTone),
+            }
           : undefined
       }
     >
-      <div className={mergeClasses(active === 'code' && styles.sidebarHiddenMobile)}>
-        <Sidebar />
-      </div>
+      <Sidebar />
       <div className={styles.content}>
         {panels.map(
           ({ key, Component }) =>

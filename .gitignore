@@ -70,6 +70,11 @@ typings/
 .env
 .env.test
 
+# deploy secrets/identifiers (sourced by infra/deploy.sh) — never commit; the
+# committed infra/deploy.env.sample documents the keys + how to fetch values.
+deploy.env
+infra/deploy.env
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 
@@ -119,3 +124,17 @@ assets/bin/omni-sandbox
 assets/bin/omni-sandbox.exe
 assets/bin/bwrap
 assets/bin/vc_redist.x64.exe
+
+# Playwright artifacts
+.playwright-cli/
+.playwright-mcp/
+artifacts/playwright-report/
+artifacts/playwright-results/
+artifacts/playwright-proof-report/
+artifacts/playwright-proof-results/
+
+# Stray screenshots
+*.png
+
+# Workspace package build output (sources are tracked, dist is rebuilt)
+packages/*/dist/

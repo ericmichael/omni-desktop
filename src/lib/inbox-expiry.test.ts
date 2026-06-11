@@ -74,18 +74,6 @@ describe('sweepInbox', () => {
     expect(out[0]).toBe(fresh);
   });
 
-  it('never touches shaped items even when past expiry', () => {
-    const shaped = item({
-      id: 'a',
-      status: 'shaped',
-      createdAt: 0,
-      shaping: { outcome: 'x', appetite: 'small' },
-    });
-    const out = sweepInbox([shaped], INBOX_EXPIRY_MS * 2);
-    expect(out[0]).toBe(shaped);
-    expect(out[0].status).toBe('shaped');
-  });
-
   it('never touches later items', () => {
     const later = item({ id: 'a', status: 'later', laterAt: 10, createdAt: 0 });
     const out = sweepInbox([later], INBOX_EXPIRY_MS * 2);

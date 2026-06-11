@@ -502,6 +502,19 @@ export class OmniInstallManager {
     options: { cwd: string; env: Record<string, string> },
     repair?: boolean
   ): Promise<'success' | 'canceled' | 'error'> => {
+    // Dev mode: install omni-code editable from a local checkout so workspace
+    // edits are picked up live without reinstalling. Set OMNI_CODE_EDITABLE_PATH
+    // to the repo root in .env. Transitive deps (omniagents, etc.) still come
+    // from the index.
+    const editablePath = options.env.OMNI_CODE_EDITABLE_PATH || process.env.OMNI_CODE_EDITABLE_PATH;
+    const target: string[] = editablePath
+      ? ['--editable', editablePath]
+      : [`omni-code==${OMNI_CODE_VERSION}`];
+
+    if (editablePath) {
+      this.log.info(c.yellow(`Dev mode: installing omni-code editable from ${editablePath}\r\n`));
+    }
+
     const installArgs = [
       'pip',
       'install',
@@ -512,7 +525,7 @@ export class OmniInstallManager {
       '--extra-index-url',
       EXTRA_INDEX_URL,
       ...(repair ? ['--force-reinstall'] : []),
-      `omni-code==${OMNI_CODE_VERSION}`,
+      ...target,
     ];
 
     this.log.info(c.cyan('Installing omni-code...\r\n'));
@@ -529,6 +542,65 @@ export class OmniInstallManager {
       type: 'error',
       error: {
         message: `Failed to install omni-code==${OMNI_CODE_VERSION} (uv pip install: ${result.error.message})`,
+        context: serializeError(result.error),
+      },
+    });
+    return 'error';
+  };
+
+  // Optional override step: install `omniagents` editable from a local checkout
+  // so launcher dev work that depends on unreleased omniagents fixes can pick
+  // them up without waiting for a PyPI release. Runs AFTER `installOmniCode`
+  // because omni-code's dep resolution pulls in the pinned PyPI omniagents;
+  // the editable install replaces that. No-op when `OMNIAGENTS_EDITABLE_PATH`
+  // isn't set. Failures here are surfaced as errors — if the user opted in to
+  // an editable install we shouldn't silently fall back to a stale PyPI copy.
+  private installOmniAgentsEditable = async (
+    uvPath: string,
+    options: { cwd: string; env: Record<string, string> }
+  ): Promise<'success' | 'canceled' | 'error' | 'skipped'> => {
+    const editablePath =
+      options.env.OMNIAGENTS_EDITABLE_PATH || process.env.OMNIAGENTS_EDITABLE_PATH;
+    if (!editablePath) {
+      return 'skipped';
+    }
+
+    this.log.info(c.yellow(`Dev mode: installing omniagents editable from ${editablePath}\r\n`));
+
+    // ``--editable <path>`` alone installs the bare package with no
+    // optional-dependency groups. Because this step runs AFTER
+    // installOmniCode (which pulled ``omniagents[all]`` transitively),
+    // a bare editable install would *replace* the all-extras install
+    // with one missing every sandbox-*, session-*, etc. extra —
+    // breaking ``omni serve`` for docker / e2b / cloud profiles.
+    // Request ``[all]`` explicitly so the editable install keeps the
+    // same extras the non-editable install would have given us.
+    const installArgs = [
+      'pip',
+      'install',
+      '--python',
+      PYTHON_VERSION,
+      '--python-preference',
+      'only-managed',
+      '--extra-index-url',
+      EXTRA_INDEX_URL,
+      '--editable',
+      `${editablePath}[all]`,
+    ];
+
+    this.log.info(`> ${uvPath} ${installArgs.join(' ')}\r\n`);
+
+    const result = await withResultAsync(() => this.runCommand(uvPath, installArgs, options));
+
+    if (result.isOk()) {
+      return result.value;
+    }
+
+    this.log.error(c.red(`Failed to install omniagents editable: ${result.error.message}\r\n`));
+    this.updateStatus({
+      type: 'error',
+      error: {
+        message: `Failed to install omniagents editable from ${editablePath} (uv pip install: ${result.error.message})`,
         context: serializeError(result.error),
       },
     });
@@ -552,6 +624,16 @@ export class OmniInstallManager {
   };
 
   private runInstall = async (repair?: boolean) => {
+    // Cloud/server: the CLI is baked into the image (OMNI_CLI_PATH). There is no
+    // runtime venv to build and nothing to reinstall — short-circuit so a stray
+    // install request (e.g. the Settings "reinstall" button) can't try to build
+    // a venv that doesn't belong in this deployment.
+    if (process.env.OMNI_CLI_PATH) {
+      this.log.info(c.gray('OMNI_CLI_PATH set — using the image-baked omni CLI; skipping runtime install\r\n'));
+      this.updateStatus({ type: 'completed' });
+      return;
+    }
+
     this.isCancellationRequested = false;
     this.updateStatus({ type: 'starting' });
 
@@ -719,6 +801,20 @@ export class OmniInstallManager {
       }
 
       if (installResult === 'canceled') {
+        this.log.warn(c.yellow('Installation canceled\r\n'));
+        this.updateStatus({ type: 'canceled' });
+        return;
+      }
+
+      // Optional: install omniagents editable on top of whatever omni-code
+      // pulled in. No-op when OMNIAGENTS_EDITABLE_PATH isn't set.
+      const omniagentsResult = await this.installOmniAgentsEditable(uvPath, runProcessOptions);
+
+      if (omniagentsResult === 'error') {
+        return;
+      }
+
+      if (omniagentsResult === 'canceled') {
         this.log.warn(c.yellow('Installation canceled\r\n'));
         this.updateStatus({ type: 'canceled' });
         return;

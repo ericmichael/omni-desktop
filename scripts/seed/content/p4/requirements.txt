@@ -1,0 +1,6 @@
+torch>=2.3
+transformers>=4.42
+lm-eval>=0.4.3
+marimo>=0.9
+numpy
+pandas

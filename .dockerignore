@@ -1,0 +1,22 @@
+# Keep the build context small and never ship host-built artifacts (the host's
+# node-pty is compiled against Electron's ABI — it gets rebuilt in the image).
+**/node_modules
+out
+dist
+**/dist
+.git
+.env
+.env.*
+*.log
+.claude
+.vscode
+coverage
+
+# The devbox sandbox image is built separately (sandbox-image/) — not part of
+# the server image's context.
+sandbox-image
+
+# Docs / infra that don't affect the server bundle.
+infra
+docs
+*.md

@@ -187,6 +187,24 @@ export const checkGitRepo = async (workspaceDir: string): Promise<GitRepoInfo> =
   }
 };
 
+/**
+ * True when the worktree has uncommitted work (staged, unstaged, or untracked).
+ * Used before ticket-completion cleanup to decide whether to remove the
+ * worktree immediately or defer cleanup so the user/agent can finish.
+ * If the check fails for any reason, returns true (fail-safe — don't delete).
+ */
+export const isWorktreeDirty = async (worktreePath: string): Promise<boolean> => {
+  try {
+    const { stdout } = await execFileAsync('git', ['-C', worktreePath, 'status', '--porcelain'], {
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
+    return stdout.trim().length > 0;
+  } catch {
+    return true;
+  }
+};
+
 export const removeWorktree = async (
   workspaceDir: string,
   worktreePath: string,

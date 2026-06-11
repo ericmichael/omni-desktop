@@ -1,0 +1,254 @@
+/*
+ * Yoopta UI ships with a shadcn-derived theme that doesn't match the
+ * launcher's Fluent UI palette. Yoopta's popups (slash menu, floating
+ * toolbar, block options, action menu) render in portals at the body
+ * level, so they're outside ContextEditor's DOM and can't be targeted
+ * by component-scoped styles. This stylesheet overrides their colors,
+ * borders, and shadows globally, mapping Yoopta's class hooks onto
+ * Fluent's design tokens (exposed as CSS vars by FluentProvider).
+ *
+ * We override the painted properties directly rather than redefining
+ * Yoopta's HSL CSS variables, because Fluent's token values aren't HSL
+ * triplets — they're already-resolved colors.
+ */
+
+/* -- Slash command menu ---------------------------------------------------- */
+
+.yoopta-ui-slash-command-content {
+  background-color: var(--colorNeutralBackground1);
+  color: var(--colorNeutralForeground1);
+  border: 1px solid var(--colorNeutralStroke1);
+  box-shadow: var(--shadow16);
+}
+
+.yoopta-ui-slash-command-input,
+.yoopta-ui-slash-command-input-trigger {
+  background-color: var(--colorNeutralBackground1);
+  color: var(--colorNeutralForeground1);
+  border-color: var(--colorNeutralStroke1);
+}
+
+.yoopta-ui-slash-command-input::placeholder,
+.yoopta-ui-slash-command-input::-moz-placeholder {
+  color: var(--colorNeutralForeground3);
+}
+
+.yoopta-ui-slash-command-group-heading {
+  color: var(--colorNeutralForeground3);
+}
+
+.yoopta-ui-slash-command-item {
+  color: var(--colorNeutralForeground1);
+}
+
+.yoopta-ui-slash-command-item:hover,
+.yoopta-ui-slash-command-item[data-selected='true'] {
+  background-color: var(--colorSubtleBackgroundHover);
+}
+
+.yoopta-ui-slash-command-item:focus-visible {
+  outline-color: var(--colorBrandStroke1);
+}
+
+.yoopta-ui-slash-command-item-title {
+  color: var(--colorNeutralForeground1);
+}
+
+.yoopta-ui-slash-command-item-description {
+  color: var(--colorNeutralForeground3);
+}
+
+.yoopta-ui-slash-command-item-icon {
+  background-color: var(--colorNeutralBackground2);
+  border-color: var(--colorNeutralStroke2);
+  color: var(--colorNeutralForeground2);
+}
+
+.yoopta-ui-slash-command-footer {
+  background-color: var(--colorNeutralBackground2);
+  border-top: 1px solid var(--colorNeutralStroke2);
+  color: var(--colorNeutralForeground3);
+}
+
+.yoopta-ui-slash-command-footer-hint {
+  color: var(--colorNeutralForeground3);
+}
+
+.yoopta-ui-slash-command-kbd {
+  background-color: var(--colorNeutralBackground3);
+  border: 1px solid var(--colorNeutralStroke2);
+  color: var(--colorNeutralForeground2);
+}
+
+.yoopta-ui-slash-command-list::-webkit-scrollbar-thumb {
+  background-color: var(--colorNeutralStroke2);
+}
+
+.yoopta-ui-slash-command-list::-webkit-scrollbar-thumb:hover {
+  background-color: var(--colorNeutralStroke1);
+}
+
+.yoopta-ui-slash-command-separator {
+  background-color: var(--colorNeutralStroke2);
+}
+
+/* -- Floating formatting toolbar ------------------------------------------ */
+
+[class*='yoopta-ui-floating-toolbar-content'],
+[class*='yoopta-ui-floating-toolbar-root'] {
+  background-color: var(--colorNeutralBackground1);
+  color: var(--colorNeutralForeground1);
+  border: 1px solid var(--colorNeutralStroke1);
+  box-shadow: var(--shadow8);
+}
+
+[class*='yoopta-ui-floating-toolbar-button'] {
+  color: var(--colorNeutralForeground1);
+}
+
+[class*='yoopta-ui-floating-toolbar-button']:hover {
+  background-color: var(--colorSubtleBackgroundHover);
+}
+
+[class*='yoopta-ui-floating-toolbar-button'][data-active='true'] {
+  background-color: var(--colorBrandBackground2);
+  color: var(--colorBrandForeground1);
+}
+
+[class*='yoopta-ui-floating-toolbar-separator'] {
+  background-color: var(--colorNeutralStroke2);
+}
+
+/* -- Block options / action menu (turn into) ------------------------------ */
+
+[class*='yoopta-ui-block-options-content'],
+[class*='yoopta-ui-action-menu-list-content'] {
+  background-color: var(--colorNeutralBackground1);
+  color: var(--colorNeutralForeground1);
+  border: 1px solid var(--colorNeutralStroke1);
+  box-shadow: var(--shadow16);
+}
+
+[class*='yoopta-ui-block-options-item'],
+[class*='yoopta-ui-action-menu-list-item'] {
+  color: var(--colorNeutralForeground1);
+}
+
+[class*='yoopta-ui-block-options-item']:hover,
+[class*='yoopta-ui-block-options-item'][data-selected='true'],
+[class*='yoopta-ui-action-menu-list-item']:hover,
+[class*='yoopta-ui-action-menu-list-item'][data-selected='true'] {
+  background-color: var(--colorSubtleBackgroundHover);
+}
+
+[class*='yoopta-ui-block-options-separator'],
+[class*='yoopta-ui-action-menu-list-separator'] {
+  background-color: var(--colorNeutralStroke2);
+}
+
+/* Destructive (Delete) menu item — red text + brand error hover */
+[class*='yoopta-ui-block-options-item'][data-variant='destructive'],
+[class*='yoopta-ui-action-menu-list-item'][data-variant='destructive'] {
+  color: var(--colorPaletteRedForeground1);
+}
+
+/* -- Floating block actions (+ and drag-handle gutter) -------------------- */
+
+.yoopta-ui-floating-block-actions {
+  background-color: var(--colorNeutralBackground1);
+  border: 1px solid var(--colorNeutralStroke1);
+  box-shadow: var(--shadow8);
+}
+
+.yoopta-ui-floating-action-button {
+  color: var(--colorNeutralForeground2);
+  background-color: transparent;
+}
+
+.yoopta-ui-floating-action-button:hover,
+.yoopta-ui-floating-action-button:active {
+  background-color: var(--colorSubtleBackgroundHover);
+  color: var(--colorNeutralForeground1);
+}
+
+.yoopta-ui-floating-action-button:focus-visible {
+  box-shadow: 0 0 0 2px var(--colorNeutralBackground1), 0 0 0 4px var(--colorBrandStroke1);
+}
+
+/* -- Glass mode ------------------------------------------------------------ */
+
+body:has(.omni-glass) {
+  --yoopta-glass-panel: color-mix(in srgb, var(--colorNeutralBackground1) 72%, transparent);
+  --yoopta-glass-panel-soft: color-mix(in srgb, var(--colorNeutralBackground2) 56%, transparent);
+  --yoopta-glass-panel-strong: color-mix(in srgb, var(--colorNeutralBackground1) 86%, transparent);
+  --yoopta-glass-border: color-mix(in srgb, var(--colorNeutralStroke1) 86%, transparent);
+}
+
+.omni-glass .yoopta-editor,
+.omni-glass .yoopta-editor * {
+  border-color: var(--yoopta-glass-border);
+}
+
+.omni-glass .yoopta-callout,
+.omni-glass .yoopta-code,
+.omni-glass .yoopta-table,
+.omni-glass .yoopta-accordion-list,
+.omni-glass .yoopta-accordion-list-item,
+.omni-glass .yoopta-blockquote,
+.omni-glass [class*='yoopta-callout'],
+.omni-glass [class*='yoopta-code'],
+.omni-glass [class*='yoopta-table'],
+.omni-glass [class*='yoopta-accordion'],
+.omni-glass [class*='yoopta-blockquote'] {
+  background-color: var(--yoopta-glass-panel-soft) !important;
+  border-color: var(--yoopta-glass-border) !important;
+  backdrop-filter: var(--glass-blur-light);
+  -webkit-backdrop-filter: var(--glass-blur-light);
+}
+
+.omni-glass .yoopta-divider,
+.omni-glass [class*='yoopta-divider'] {
+  border-color: var(--yoopta-glass-border) !important;
+  background-color: var(--yoopta-glass-border) !important;
+}
+
+body:has(.omni-glass) .yoopta-ui-slash-command-content,
+body:has(.omni-glass) [class*='yoopta-ui-floating-toolbar-content'],
+body:has(.omni-glass) [class*='yoopta-ui-floating-toolbar-root'],
+body:has(.omni-glass) [class*='yoopta-ui-block-options-content'],
+body:has(.omni-glass) [class*='yoopta-ui-action-menu-list-content'],
+body:has(.omni-glass) .yoopta-ui-floating-block-actions {
+  background-color: var(--yoopta-glass-panel) !important;
+  border-color: var(--yoopta-glass-border) !important;
+  box-shadow: 0 1px 0 rgb(255 255 255 / 0.08) inset, var(--shadow16);
+  backdrop-filter: var(--glass-blur-light);
+  -webkit-backdrop-filter: var(--glass-blur-light);
+}
+
+body:has(.omni-glass) .yoopta-ui-slash-command-input,
+body:has(.omni-glass) .yoopta-ui-slash-command-input-trigger,
+body:has(.omni-glass) .yoopta-ui-slash-command-footer,
+body:has(.omni-glass) .yoopta-ui-slash-command-item-icon,
+body:has(.omni-glass) .yoopta-ui-slash-command-kbd {
+  background-color: var(--yoopta-glass-panel-soft) !important;
+  border-color: var(--yoopta-glass-border) !important;
+}
+
+body:has(.omni-glass) .yoopta-ui-slash-command-item:hover,
+body:has(.omni-glass) .yoopta-ui-slash-command-item[data-selected='true'],
+body:has(.omni-glass) [class*='yoopta-ui-floating-toolbar-button']:hover,
+body:has(.omni-glass) [class*='yoopta-ui-block-options-item']:hover,
+body:has(.omni-glass) [class*='yoopta-ui-block-options-item'][data-selected='true'],
+body:has(.omni-glass) [class*='yoopta-ui-action-menu-list-item']:hover,
+body:has(.omni-glass) [class*='yoopta-ui-action-menu-list-item'][data-selected='true'],
+body:has(.omni-glass) .yoopta-ui-floating-action-button:hover,
+body:has(.omni-glass) .yoopta-ui-floating-action-button:active {
+  background-color: var(--yoopta-glass-panel-soft) !important;
+}
+
+body:has(.omni-glass) .yoopta-ui-slash-command-separator,
+body:has(.omni-glass) [class*='yoopta-ui-floating-toolbar-separator'],
+body:has(.omni-glass) [class*='yoopta-ui-block-options-separator'],
+body:has(.omni-glass) [class*='yoopta-ui-action-menu-list-separator'] {
+  background-color: var(--yoopta-glass-border) !important;
+}

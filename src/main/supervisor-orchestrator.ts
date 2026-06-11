@@ -1,94 +1,69 @@
 /**
- * SupervisorOrchestrator — owns the supervisor lifecycle for fleet tickets.
+ * SupervisorOrchestrator — owns autopilot orchestration for tickets.
  *
- * Extracted from `ProjectManager` (Sprint C2c of the 6.3 decomposition). Mirrors
- * the narrow-adapter pattern established by `PageManager`, `InboxManager`, and
- * `MilestoneManager`: the orchestrator takes a typed `store` surface and a
- * `host` surface, so tests can construct it directly with plain in-memory fakes
- * instead of reaching into `ProjectManager` privates through a cast.
+ * The Code column owns the session id, the sandbox WebSocket, and every tool /
+ * approval call. This orchestrator issues a narrow set of commands to the
+ * column via `SupervisorBridge` (ensure column, start a ``/goal`` loop,
+ * stop the loop, reset, dispose) and reacts to forwarded events
+ * (run_started, run_end, token_usage, goal-update, disconnected).
  *
- * The extraction is landing incrementally — each commit moves a slice of
- * behavior out of `project-manager.ts` with matching test migrations. The dep
- * contract grows and shrinks as logic moves: callbacks like `ensureSupervisorInfra`
- * and `startMachineRun` are temporary while PM still owns those methods and
- * will disappear once they migrate in.
+ * What lives here:
+ *   - Phase records mirrored from ``ui.goal.update`` snapshots
+ *   - Workspace / worktree provisioning
+ *   - Concurrency + WIP / dispatch-preflight validation
+ *   - Auto-dispatch poll
+ *   - Initial supervisor prompt assembly (`buildFullSupervisorPrompt`) —
+ *     passed once at startGoal time as the loop's goal text. Continuation
+ *     prompts are owned by the agent-side ``/goal`` server function (see
+ *     omni-code's ``server_functions/goal.py``).
+ *   - Task persistence for the UI task list
  *
- * Currently owns:
- *   - Effective-config accessors (stall timeout, concurrency, retry, turns)
- *   - `canStartSupervisor` — global + per-column concurrency check
- *   - `getActiveWipTickets` — cross-project active-phase roll-up
- *   - `isAutoDispatchEnabled` — project flag + FLEET.md override
- *   - Retry queue (`scheduleRetry`, `handleRetryFired`, `cancelRetry`, `cancelAllRetries`)
- *   - Stall detection (`startStallDetection`, `stopStallDetection`, `checkForStalledSupervisors`)
- *   - `machines` / `runStartedAt` / `ticketLocks` state + `createMachine` + `withTicketLock`
- *   - `handleMachineRunEnd`
- *   - Infra provisioning (`ensureSupervisorInfra`, `resolveTicketWorkspace`, `ensureSession`)
- *   - Lifecycle entry points (`startSupervisor`, `stopSupervisor`, `sendSupervisorMessage`,
- *     `resetSupervisorSession`, `startMachineRun`, `cleanupTicketWorkspace`)
- *   - `tasks` map + persisted task list, `restorePersistedTasks`,
- *     `startupTerminalCleanup`, `resetStaleTicketStates`,
- *     `removeAllTasksForProject`, `exitAllTasks`, `listTasks`
- *   - `validateDispatchPreflight` + auto-dispatch loop
- *     (`autoDispatchTick`, `setAutoDispatch`, `startAutoDispatch`,
- *     `stopAutoDispatch`)
- *   - Tool dispatch (`handleClientToolCall`) + supervisor prompt assembly
- *     (`buildFullSupervisorPrompt`, `buildRunVariables`,
- *     `buildContinuationPromptForTicket`)
+ * What does NOT live here anymore:
+ *   - Session id minting / tracking
+ *   - Tool-call dispatch — the renderer's `buildClientToolHandler` handles
+ *     everything
+ *   - Variable building — the column builds its own via `buildSessionVariables`
+ *   - Continuation, retry-on-error, and stall detection — all owned by
+ *     omni-code's ``/goal`` loop
  */
 
-import { randomUUID } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
 import fs from 'fs/promises';
 import { nanoid } from 'nanoid';
 import path from 'path';
 
-import { buildAutopilotVariables, buildInteractiveVariables } from '@/lib/client-tools';
-import { buildContinuationPrompt } from '@/lib/continuation-prompt';
+import type { IWindowSender } from '@/lib/project-manager-deps';
+import { claimsCollide, decideWorktreeAction, resolveWorkspaceClaim } from '@/lib/worktree';
 import type { AppControlManager } from '@/main/app-control-manager';
-import type { AppClickButton, AppConsoleLevel } from '@/shared/app-control-types';
-import { makeAppHandleId } from '@/shared/app-control-types';
-import type {
-  IMachineFactory,
-  ISandbox,
-  ISandboxFactory,
-  ITicketMachine,
-  IWindowSender,
-  IWorkflowLoader,
-  MachineCallbacks,
-} from '@/lib/project-manager-deps';
-import { decideRunEndAction, type FailureClass } from '@/lib/run-end';
-import { hasTemplateExpressions, renderTemplate, type TemplateVariables } from '@/lib/template';
-import { decideWorktreeAction } from '@/lib/worktree';
-import type { AgentProcessMode } from '@/main/agent-process';
-import { createPlatformClient } from '@/main/platform-mode';
 import type { ProcessManager } from '@/main/process-manager';
-import { buildSupervisorPrompt, type SupervisorContext } from '@/main/supervisor-prompt';
-import { type ClientFunctionResponder, TicketMachine } from '@/main/ticket-machine';
-import { createWorktree, generateWorktreeName, removeWorktree } from '@/main/worktree-ops';
-import { getLocalWorkspaceDir, requireLocalWorkspaceDir } from '@/shared/project-source';
+import type { SupervisorBridge } from '@/main/supervisor-bridge';
+import {
+  buildAutopilotAdditionalInstructions,
+  buildAutopilotGoalText,
+  type SupervisorContext,
+} from '@/main/supervisor-prompt';
+import { SupervisorState } from '@/main/supervisor-state';
+import { getProjectPagesDir } from '@/main/util';
+import { createWorktree, generateWorktreeName, isWorktreeDirty, removeWorktree } from '@/main/worktree-ops';
+import { requireLocalWorkspaceDir } from '@/shared/project-source';
 import { isActivePhase, type TicketPhase } from '@/shared/ticket-phase';
 import type {
-  AgentProcessStatus,
   CodeTabId,
   ColumnId,
-  Milestone,
-  MilestoneId,
   Page,
-  PageId,
   Pipeline,
   PlatformCredentials,
   Project,
   ProjectId,
-  SandboxBackend,
   SessionMessage,
+  SupervisorBridgeEvent,
   Task,
   TaskId,
   Ticket,
   TicketId,
-  TicketPriority,
-  TokenUsage,
-  WithTimestamp,
 } from '@/shared/types';
+import { firstSource } from '@/shared/types';
+import type { ProjectSource } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
 // Operational constants — referenced by SupervisorOrchestrator and eventually
@@ -98,31 +73,12 @@ import type {
 /** Maximum number of supervisors that can run concurrently across all projects. */
 export const MAX_CONCURRENT_SUPERVISORS = 5;
 
-/** If no supervisor message is received within this window, the run is considered stalled. */
-export const STALL_TIMEOUT_MS = 5 * 60 * 1000;
-
 /**
- * Safety-net timeout for streaming phases (running/continuing). Normally the
- * primary stall check skips streaming phases because legitimate long tool
- * calls can silence the message stream for minutes. But if the supervisor
- * crashes silently — no exit event, no run_end, no error — a streaming machine
- * would hang forever. This backstop fires only after a very long silence.
+ * Maximum continuation turns. Used as the default ``max_turns`` arg
+ * passed to omni-code's ``/goal`` server function when neither the
+   * agent-side loop is what enforces this budget — the launcher just forwards
+   * the value at startGoal time.
  */
-export const STREAMING_STALL_TIMEOUT_MS = 30 * 60 * 1000;
-
-/** How often to check for stalled supervisors. */
-export const STALL_CHECK_INTERVAL_MS = 30_000;
-
-/** Base delay for exponential backoff on failure-driven retries. */
-export const RETRY_BASE_DELAY_MS = 10_000;
-
-/** Maximum backoff delay for failure retries. */
-export const MAX_RETRY_BACKOFF_MS = 5 * 60 * 1000;
-
-/** Maximum retry attempts before giving up. */
-export const MAX_RETRY_ATTEMPTS = 5;
-
-/** Maximum continuation turns (successful run → re-check → continue). */
 export const MAX_CONTINUATION_TURNS = 10;
 
 /** Auto-dispatch poll interval — check every 30s for eligible tickets. */
@@ -132,15 +88,11 @@ export const AUTO_DISPATCH_INTERVAL_MS = 30_000;
 // Shared types
 // ---------------------------------------------------------------------------
 
-export interface MachineEntry {
-  machine: ITicketMachine;
-  sandbox: ISandbox | null;
-}
-
-export interface RetryOpts {
-  attempt?: number;
-  continuationTurn?: number;
-  error?: string;
+export interface SupervisorEntry {
+  /** Phase record. Holds no session id — the Code column is authoritative. */
+  state: SupervisorState;
+  /** The Code tab driving this supervisor. Resolved from `store.getCodeTabs()`. */
+  tabId: CodeTabId;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,11 +105,26 @@ export interface SupervisorOrchestratorStore {
   setTickets(tickets: Ticket[]): void;
   getProjects(): Project[];
   getWipLimit(): number;
-  getSandboxBackend(): SandboxBackend | undefined;
+  /**
+   * The principal whose WIP this is (teams/cloud). When set, WIP enforcement +
+   * the "Right Now" rollup count only tickets assigned to this user. Undefined
+   * in single-user/local mode → counts every active ticket (legacy behavior).
+   */
+  getCurrentPrincipal?(): string | undefined;
   getPlatformCredentials(): PlatformCredentials | undefined;
   getCodeTabs(): Array<{ id: string; ticketId?: string }>;
   getPersistedTasks(): Task[];
   setPersistedTasks(tasks: Task[]): void;
+  /**
+   * Per-row task write. Used by the high-frequency `persistTask` and
+   * `removePersistedTask` paths to avoid the read-all/mutate/write-all
+   * cycle. Optional for backward compatibility with stores that only
+   * implement the bulk `setPersistedTasks` path (e.g. older test fakes).
+   */
+  upsertPersistedTask?(task: Task): void;
+  deletePersistedTask?(taskId: TaskId): void;
+  /** Host-side omni-code config directory (e.g. ~/.config/omni_code on macOS/Linux). */
+  getOmniConfigDir(): string;
 }
 
 // ---------------------------------------------------------------------------
@@ -172,7 +139,6 @@ export interface SupervisorOrchestratorHost {
   // Ticket lookups + CRUD — PM retains the storage layer long-term.
   getTicketById(ticketId: TicketId): Ticket | undefined;
   getTicketsByProject(projectId: ProjectId): Ticket[];
-  addTicket(input: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'columnId'> & { milestoneId?: MilestoneId }): Ticket;
   updateTicket(ticketId: TicketId, patch: Partial<Ticket>): void;
 
   // Pipeline / column semantics
@@ -187,15 +153,16 @@ export interface SupervisorOrchestratorHost {
   moveTicketToColumn(ticketId: TicketId, columnId: ColumnId): void;
   updateProject(projectId: ProjectId, patch: { autoDispatch?: boolean }): void;
 
-  // Read-side accessors used by the tool-dispatch + supervisor-prompt path
-  // (C2c.8). PM still owns Milestone/Page storage via its delegate managers.
-  getMilestonesByProject(projectId: ProjectId): Milestone[];
-  getMilestoneById(milestoneId: MilestoneId): Milestone | undefined;
+  // Used by buildFullSupervisorPrompt to read the project's root page
+  // (the brief) before issuing a run. The file path itself is resolved
+  // off `ticket.projectId` via `getProjectPagesDir` — the host no longer
+  // needs to expose a directory resolver for this.
   getPagesByProject(projectId: ProjectId): Page[];
-  getPageById(pageId: PageId): Page | undefined;
-  readPageContent(pageId: PageId): Promise<string>;
-  /** Resolves the on-disk project directory (Personal vs slug). */
-  getProjectDirPath(project: Project): string;
+
+  /** Agent-facing artifacts dir for a ticket, resolved per profile (host dir vs
+   *  container `/workspace/.omni-artifacts/<id>`). Surfaced in the supervisor
+   *  prompt; must match where the launcher's ArtifactStore reads. */
+  getAgentArtifactsDir(ticketId: TicketId): string;
 }
 
 // ---------------------------------------------------------------------------
@@ -205,12 +172,15 @@ export interface SupervisorOrchestratorHost {
 export interface SupervisorOrchestratorDeps {
   store: SupervisorOrchestratorStore;
   host: SupervisorOrchestratorHost;
-  workflowLoader: IWorkflowLoader;
   sendToWindow: IWindowSender;
-  sandboxFactory: ISandboxFactory;
-  /** Optional machine factory for tests. Defaults to real TicketMachine. */
-  machineFactory?: IMachineFactory;
-  /** Optional ProcessManager — enables Code-tab sandbox reuse. */
+  /**
+   * Bridge to the renderer's column registry. The renderer owns every sandbox
+   * WebSocket — SUBMIT / stop / send-message / session.ensure all go through
+   * the live RPCClient inside a Code tab via this bridge. Main's orchestration
+   * only reacts to forwarded events.
+   */
+  bridge: SupervisorBridge;
+  /** ProcessManager — used to stop Code tab sandboxes during cleanup. */
   processManager?: ProcessManager;
   /**
    * Optional AppControlManager — when present, autopilot agents gain the
@@ -225,15 +195,13 @@ export interface SupervisorOrchestratorDeps {
 // ---------------------------------------------------------------------------
 
 export class SupervisorOrchestrator {
-  private stallCheckTimer: ReturnType<typeof setInterval> | null = null;
   private autoDispatchTimer: ReturnType<typeof setInterval> | null = null;
 
   /**
-   * Live supervisor machines keyed by ticket. Public so ProjectManager
-   * (which still owns several lifecycle entry points) and tests can
-   * reach in without a cast. Becomes fully encapsulated after C2c.5.
+   * Live supervisor state records keyed by ticket. Public so ProjectManager
+   * and tests can reach in without a cast.
    */
-  readonly machines = new Map<TicketId, MachineEntry>();
+  readonly machines = new Map<TicketId, SupervisorEntry>();
 
   /**
    * Wall-clock time each active run started, keyed by ticketId. Read in
@@ -243,19 +211,23 @@ export class SupervisorOrchestrator {
    */
   readonly runStartedAt = new Map<TicketId, number>();
 
-  /** Per-ticket async mutex chain. Public for the same reason as `machines`. */
+  /** Per-ticket async mutex chain. */
   readonly ticketLocks = new Map<TicketId, Promise<void>>();
 
   /**
-   * In-memory sandbox tasks keyed by taskId. Each entry pairs a `Task` record
-   * (also persisted in the store) with the live `ISandbox` that owns the
-   * underlying container/process. Public so ProjectManager's
-   * `getFilesChanged` / `getTasks` / `removeProject` / `exit` paths can
-   * iterate without a cast — same pattern as `machines`.
+   * Persisted task metadata, keyed by taskId. Each entry shadows a persisted
+   * `Task` record in the store. Sandbox lifecycle is owned by `ProcessManager`
+   * (keyed by Code tab id); these entries are purely for UI listing and boot
+   * recovery.
    */
-  readonly tasks = new Map<TaskId, { task: Task; sandbox: ISandbox }>();
+  readonly tasks = new Map<TaskId, { task: Task }>();
 
-  constructor(private readonly deps: SupervisorOrchestratorDeps) {}
+  /** Unsubscribe from bridge events on dispose. */
+  private offBridge: (() => void) | null = null;
+
+  constructor(private readonly deps: SupervisorOrchestratorDeps) {
+    this.offBridge = this.deps.bridge.onEvent((event) => this.handleBridgeEvent(event));
+  }
 
   // -------------------------------------------------------------------------
   // Task persistence (in-memory + store)
@@ -263,6 +235,12 @@ export class SupervisorOrchestrator {
 
   /** Insert or update a persisted task record. */
   private persistTask(task: Task): void {
+    // Prefer per-row write when the store provides it — one SQL upsert
+    // instead of read-all → mutate → write-all on every task transition.
+    if (this.deps.store.upsertPersistedTask) {
+      this.deps.store.upsertPersistedTask(task);
+      return;
+    }
     const tasks = this.deps.store.getPersistedTasks();
     const index = tasks.findIndex((t) => t.id === task.id);
     if (index === -1) {
@@ -275,6 +253,10 @@ export class SupervisorOrchestrator {
 
   /** Drop a persisted task by id. No-op if absent. */
   private removePersistedTask(taskId: TaskId): void {
+    if (this.deps.store.deletePersistedTask) {
+      this.deps.store.deletePersistedTask(taskId);
+      return;
+    }
     const tasks = this.deps.store.getPersistedTasks().filter((t) => t.id !== taskId);
     this.deps.store.setPersistedTasks(tasks);
   }
@@ -285,63 +267,93 @@ export class SupervisorOrchestrator {
   }
 
   // -------------------------------------------------------------------------
-  // Machine factory
+  // State factory
   // -------------------------------------------------------------------------
 
   /**
-   * Build a ticket machine wired to this orchestrator's callbacks. Uses the
-   * injected factory if provided (tests), otherwise constructs a real
-   * `TicketMachine`. The returned machine is NOT added to `this.machines`
-   * — callers (`ensureSupervisorInfra` in PM for now) place the entry when
-   * sandbox provisioning has started.
+   * Build a `SupervisorState` wired to this orchestrator's phase callback.
+   * The state record is NOT added to `this.machines`; callers register the
+   * full `SupervisorEntry` once a Code tab is bound.
    */
-  createMachine(ticketId: TicketId): ITicketMachine {
-    const callbacks: MachineCallbacks = {
+  private createState(ticketId: TicketId): SupervisorState {
+    return new SupervisorState(ticketId, {
       onPhaseChange: (tid, phase) => {
         this.deps.host.updateTicket(tid, { phase, phaseChangedAt: Date.now() });
         this.deps.sendToWindow('project:phase', tid, phase);
       },
-      onMessage: (tid, msg: SessionMessage) => {
-        this.deps.sendToWindow('project:supervisor-message', tid, msg);
-      },
-      onRunEnd: (tid, reason) => {
-        void this.handleMachineRunEnd(tid, reason);
-      },
-      onTokenUsage: (tid, usage: TokenUsage) => {
-        const ticket = this.deps.host.getTicketById(tid);
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Bridge event handler — dispatches forwarded sandbox events to orchestration
+  // -------------------------------------------------------------------------
+
+  private handleBridgeEvent(event: SupervisorBridgeEvent): void {
+    const entry = this.machines.get(event.ticketId);
+    if (!entry) {
+      return;
+    }
+    const { state } = entry;
+
+    switch (event.kind) {
+      case 'run-started': {
+        state.setRunId(event.runId);
+        state.recordActivity();
+        if (!state.isStreaming()) {
+          state.transition('running');
+        }
+        this.runStartedAt.set(event.ticketId, Date.now());
+        return;
+      }
+      case 'run-end': {
+        state.setRunId(null);
+        void this.handleMachineRunEnd(event.ticketId, event.reason);
+        return;
+      }
+      case 'message': {
+        state.recordActivity();
+        const msg: SessionMessage = {
+          id: Date.now(),
+          role: event.toolName ? 'tool_call' : event.role === 'user' ? 'user' : 'assistant',
+          content: event.content,
+          toolName: event.toolName,
+          createdAt: new Date().toISOString(),
+        };
+        this.deps.sendToWindow('project:supervisor-message', event.ticketId, msg);
+        return;
+      }
+      case 'token-usage': {
+        const ticket = this.deps.host.getTicketById(event.ticketId);
         if (!ticket) {
           return;
         }
         const prev = ticket.tokenUsage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
         const updated = {
-          inputTokens: prev.inputTokens + usage.inputTokens,
-          outputTokens: prev.outputTokens + usage.outputTokens,
-          totalTokens: prev.totalTokens + usage.totalTokens,
+          inputTokens: prev.inputTokens + event.usage.inputTokens,
+          outputTokens: prev.outputTokens + event.usage.outputTokens,
+          totalTokens: prev.totalTokens + event.usage.totalTokens,
         };
         if (updated.totalTokens !== prev.totalTokens) {
-          this.deps.host.updateTicket(tid, { tokenUsage: updated });
-          this.deps.sendToWindow('project:token-usage', tid, updated);
+          this.deps.host.updateTicket(event.ticketId, { tokenUsage: updated });
+          this.deps.sendToWindow('project:token-usage', event.ticketId, updated);
         }
-      },
-      onClientRequest: (
-        tid: TicketId,
-        functionName: string,
-        args: Record<string, unknown>,
-        respond: ClientFunctionResponder
-      ) => {
-        // Auto-approve tool approval requests (project agents run unattended)
-        if (functionName === 'ui.request_tool_approval') {
-          respond(true, { approved: true, always_approve: true });
-          return;
+        return;
+      }
+      case 'disconnected': {
+        // Column went away. Drop run identity; a future run will rehydrate on
+        // the tab's next mount. Don't tear down the state — the user may
+        // reopen the tab.
+        state.setRunId(null);
+        if (state.isStreaming()) {
+          state.forcePhase('idle' as TicketPhase);
         }
-        this.handleClientToolCall(tid, functionName, args, respond);
-      },
-    };
-
-    if (this.deps.machineFactory) {
-      return this.deps.machineFactory.create(ticketId, callbacks);
+        return;
+      }
+      case 'goal-update': {
+        this.handleGoalUpdate(event.ticketId, event.snapshot);
+        return;
+      }
     }
-    return new TicketMachine(ticketId, callbacks) as unknown as ITicketMachine;
   }
 
   // -------------------------------------------------------------------------
@@ -370,8 +382,15 @@ export class SupervisorOrchestrator {
   // -------------------------------------------------------------------------
 
   /**
-   * Handle a run_end notification from a machine. Decides whether to continue,
-   * retry, or stop based on the run end reason and ticket state.
+   * Handle a ``run_end`` notification from a column. Continue / retry /
+   * completion decisioning lives in omni-code's ``/goal`` server function;
+   * the orchestrator's job here is narrow:
+   *
+   *   - Persist the run record for the ticket's run history.
+   *
+   * Phase transitions come from ``handleGoalUpdate`` (the agent-side loop's
+   * ``ui.goal.update`` broadcast), NOT from here — a single run ending
+   * mid-loop doesn't mean the work is done.
    */
   handleMachineRunEnd = (ticketId: TicketId, reason: string): Promise<void> => {
     return this.withTicketLock(ticketId, async () => {
@@ -381,45 +400,13 @@ export class SupervisorOrchestrator {
       if (!entry) {
         return;
       }
-      const { machine } = entry;
 
-      // Guard: ignore if machine was already stopped/transitioned (e.g., user clicked Stop)
-      if (!machine.isStreaming()) {
-        console.log(
-          `[SupervisorOrchestrator] Ignoring run_end for ${ticketId} — machine in phase ${machine.getPhase()}`
-        );
-        return;
-      }
-
-      // Run after_run hook (best-effort)
       const ticket = this.deps.host.getTicketById(ticketId);
       if (ticket) {
-        const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId);
-        if (project?.source?.kind === 'local') {
-          void this.deps.workflowLoader.runHook(ticket.projectId, 'after_run', project.source.workspaceDir);
-        } else if (project?.source?.kind === 'git-remote') {
-          const hookScript = this.deps.workflowLoader.getConfig(ticket.projectId).hooks?.after_run;
-          if (hookScript) {
-            const currentEntry = this.machines.get(ticketId);
-            if (currentEntry?.sandbox) {
-              void currentEntry.sandbox.execInContainer(hookScript, '/home/user/workspace');
-            }
-          }
-        }
-      }
-
-      const maxTurns = ticket ? this.getEffectiveMaxContinuationTurns(ticket.projectId) : MAX_CONTINUATION_TURNS;
-
-      const action = decideRunEndAction({
-        reason,
-        continuationTurn: machine.continuationTurn,
-        maxContinuationTurns: maxTurns,
-      });
-
-      // Persist run record. startedAt comes from runStartedAt — falling back
-      // to updatedAt is a last-resort approximation, since token-usage updates
-      // bump updatedAt and would otherwise collapse startedAt onto endedAt.
-      if (ticket) {
+        // Persist run record. startedAt comes from runStartedAt — falling
+        // back to updatedAt is a last-resort approximation, since
+        // token-usage updates bump updatedAt and would otherwise collapse
+        // startedAt onto endedAt.
         const endedAt = Date.now();
         const runStartedAt = this.runStartedAt.get(ticketId) ?? ticket.updatedAt;
         const run = {
@@ -433,72 +420,60 @@ export class SupervisorOrchestrator {
         this.deps.host.updateTicket(ticketId, { runs: [...existingRuns, run] });
         this.runStartedAt.delete(ticketId);
       }
-
-      switch (action.type) {
-        case 'stopped':
-          machine.transition('idle' as TicketPhase);
-          return;
-
-        case 'complete':
-          console.log(`[SupervisorOrchestrator] Ticket ${ticketId} work complete.`);
-          machine.transition('completed' as TicketPhase);
-          return;
-
-        case 'continue': {
-          // Re-read ticket — the agent may have moved it during the run
-          const freshTicket = this.deps.host.getTicketById(ticketId);
-          if (freshTicket) {
-            if (this.deps.host.isTerminalColumn(freshTicket.projectId, freshTicket.columnId)) {
-              console.log(`[SupervisorOrchestrator] Ticket ${ticketId} is in terminal column — not continuing.`);
-              machine.transition('completed' as TicketPhase);
-              return;
-            }
-            const col = this.deps.host.getColumn(freshTicket.projectId, freshTicket.columnId);
-            if (col?.gate) {
-              console.log(
-                `[SupervisorOrchestrator] Ticket ${ticketId} is in gated column "${freshTicket.columnId}" — not continuing.`
-              );
-              machine.transition('idle' as TicketPhase);
-              return;
-            }
-          }
-
-          machine.continuationTurn = action.nextTurn;
-          machine.transition('continuing' as TicketPhase);
-          machine.recordActivity();
-
-          console.log(`[SupervisorOrchestrator] Continuing ticket ${ticketId} (turn ${action.nextTurn}/${maxTurns}).`);
-
-          const sessionId = machine.getSessionId() ?? undefined;
-          const continuationPrompt = this.buildContinuationPromptForTicket(ticketId, action.nextTurn + 1, maxTurns);
-          // Brief delay to let the server's worker task finish cleanup (clear current_task)
-          // before we send the next start_run, avoiding "Run already active" race.
-          await new Promise<void>((r) => {
-            setTimeout(r, 500);
-          });
-          this.startMachineRun(ticketId, continuationPrompt, { sessionId });
-          return;
-        }
-
-        case 'retry':
-          this.scheduleRetry(ticketId, action.failureClass, {
-            attempt: machine.retryAttempt + 1,
-            continuationTurn: machine.continuationTurn,
-            error: reason,
-          });
-          return;
-      }
     });
   };
 
-  // -------------------------------------------------------------------------
-  // Effective-config accessors — resolve workflow (FLEET.md) overrides against
-  // the hard-coded defaults above.
-  // -------------------------------------------------------------------------
+  /**
+   * Map a ``ui.goal.update`` snapshot from the agent-side ``/goal`` loop
+   * onto the ticket's phase. Snapshot is null when the loop has fully
+   * torn down (no goal set on the session); status ``active`` means a
+   * turn is in flight or the tick is waiting; ``completed`` / ``cancelled``
+   * are terminal.
+   */
+  handleGoalUpdate = (ticketId: TicketId, snapshot: import('@/shared/types').GoalSnapshotPayload | null): void => {
+    const entry = this.machines.get(ticketId);
+    if (!entry) {
+      return;
+    }
+    const { state } = entry;
 
-  getEffectiveStallTimeout(projectId: ProjectId): number {
-    return this.deps.workflowLoader.getConfig(projectId).supervisor?.stall_timeout_ms ?? STALL_TIMEOUT_MS;
-  }
+    if (!snapshot) {
+      // Loop torn down — drop to idle unless the user explicitly stopped
+      // us (state already idle in that path).
+      if (state.getPhase() !== 'idle' && state.getPhase() !== 'completed') {
+        state.forcePhase('idle' as TicketPhase);
+      }
+      return;
+    }
+
+    if (snapshot.status === 'completed') {
+      console.log(
+        `[SupervisorOrchestrator] /goal completed for ${ticketId}: ${snapshot.completion_reason ?? 'achieved'}`
+      );
+      if (state.getPhase() !== 'completed') {
+        state.transition('completed' as TicketPhase);
+      }
+      return;
+    }
+
+    if (snapshot.status === 'cancelled') {
+      console.log(`[SupervisorOrchestrator] /goal cancelled for ${ticketId}`);
+      if (state.getPhase() !== 'idle' && state.getPhase() !== 'error') {
+        state.forcePhase('idle' as TicketPhase);
+      }
+      return;
+    }
+
+    // status === 'active'
+    state.recordActivity();
+    if (!state.isStreaming() && state.isActive()) {
+      state.transition('running' as TicketPhase);
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // Effective-config accessors.
+  // -------------------------------------------------------------------------
 
   /**
    * Effective max concurrent supervisors. Uses the minimum of the global limit
@@ -509,33 +484,21 @@ export class SupervisorOrchestrator {
     if (!projectId) {
       return MAX_CONCURRENT_SUPERVISORS;
     }
-    const projectLimit = this.deps.workflowLoader.getConfig(projectId).supervisor?.max_concurrent;
-    if (projectLimit !== undefined) {
-      return Math.min(projectLimit, MAX_CONCURRENT_SUPERVISORS);
-    }
     return MAX_CONCURRENT_SUPERVISORS;
   }
 
-  getEffectiveMaxRetries(projectId: ProjectId): number {
-    return this.deps.workflowLoader.getConfig(projectId).supervisor?.max_retry_attempts ?? MAX_RETRY_ATTEMPTS;
+  getEffectiveMaxContinuationTurns(_projectId: ProjectId): number {
+    return MAX_CONTINUATION_TURNS;
   }
 
-  getEffectiveMaxContinuationTurns(projectId: ProjectId): number {
-    return this.deps.workflowLoader.getConfig(projectId).supervisor?.max_continuation_turns ?? MAX_CONTINUATION_TURNS;
-  }
-
-  /** Per-column concurrency limit from FLEET.md, or undefined if not set. */
   getColumnMaxConcurrent(projectId: ProjectId, columnId: ColumnId): number | undefined {
-    return this.deps.workflowLoader.getConfig(projectId).supervisor?.max_concurrent_by_column?.[columnId];
+    return this.deps.host.getColumn(projectId, columnId)?.maxConcurrent;
   }
 
-  /** Whether a project opts into auto-dispatch (project flag OR FLEET.md override). */
+  /** Whether a project opts into auto-dispatch. */
   isAutoDispatchEnabled(projectId: ProjectId): boolean {
     const project = this.deps.store.getProjects().find((p) => p.id === projectId);
-    if (project?.autoDispatch) {
-      return true;
-    }
-    return this.deps.workflowLoader.getConfig(projectId).supervisor?.auto_dispatch ?? false;
+    return project?.autoDispatch ?? false;
   }
 
   // -------------------------------------------------------------------------
@@ -550,7 +513,7 @@ export class SupervisorOrchestrator {
     let total = 0;
     let columnCount = 0;
     for (const [ticketId, entry] of this.machines) {
-      if (!entry.machine.isActive()) {
+      if (!entry.state.isActive()) {
         continue;
       }
       total++;
@@ -579,272 +542,66 @@ export class SupervisorOrchestrator {
    * `validateDispatchPreflight`.
    */
   getActiveWipTickets(): Ticket[] {
-    return this.deps.store.getTickets().filter((t) => t.phase !== undefined && isActivePhase(t.phase));
+    const principal = this.deps.store.getCurrentPrincipal?.();
+    return this.deps.store.getTickets().filter((t) => {
+      if (t.phase === undefined || !isActivePhase(t.phase)) {
+        return false;
+      }
+      // Teams: WIP is personal — count only tickets assigned to this user.
+      // Single-user/local (no principal): count all active (legacy behavior).
+      return principal ? t.assignee === principal : true;
+    });
   }
 
-  // -------------------------------------------------------------------------
-  // Retry queue (Symphony-inspired exponential backoff)
-  // -------------------------------------------------------------------------
-
   /**
-   * Schedule a retry for a ticket's supervisor after a failed run.
+   * Detect a workspace collision with another actively-running supervisor.
    *
-   * Uses exponential backoff. `decideRunEndAction` only emits the retry action
-   * for `error` and `stalled` reasons — `completed` / `max_turns` are handled
-   * by the `continue` branch in `handleMachineRunEnd`, which dispatches the
-   * next run directly without going through this queue.
+   * Two supervisors collide when they'd write to the same filesystem path:
+   *   - direct-mode ticket on the same local project (both mount workspaceDir)
+   *   - same persisted worktree path (defensive; reuse is keyed per-ticket)
+   *
+   * Worktree vs. worktree off the same base doesn't collide — each gets its
+   * own `~/Omni/Worktrees/<name>` checkout and `ticket/<name>` branch. Remote
+   * projects don't collide either; the container clones fresh.
    */
-  scheduleRetry(ticketId: TicketId, failureClass: FailureClass, opts: RetryOpts): void {
-    const entry = this.machines.get(ticketId);
-    if (!entry) {
-      return;
-    }
-    const { machine } = entry;
-
-    const attempt = opts.attempt ?? 0;
-    const continuationTurn = opts.continuationTurn ?? 0;
-
-    machine.retryAttempt = attempt;
-    machine.continuationTurn = continuationTurn;
-
+  findWorkspaceCollision(ticketId: TicketId): Ticket | null {
     const ticket = this.deps.host.getTicketById(ticketId);
-    const maxRetryAttempts = ticket ? this.getEffectiveMaxRetries(ticket.projectId) : MAX_RETRY_ATTEMPTS;
-
-    if (attempt >= maxRetryAttempts) {
-      console.log(
-        `[SupervisorOrchestrator] Ticket ${ticketId} reached max retry attempts (${maxRetryAttempts}). Giving up.`
-      );
-      machine.transition('error');
-      return;
+    if (!ticket) {
+      return null;
     }
-
-    const delayMs = Math.min(RETRY_BASE_DELAY_MS * Math.pow(2, attempt), MAX_RETRY_BACKOFF_MS);
-
-    console.log(
-      `[SupervisorOrchestrator] Scheduling retry for ${ticketId} (attempt=${attempt}, turn=${continuationTurn}) ` +
-        `in ${Math.round(delayMs / 1000)}s${opts.error ? ` (reason: ${opts.error})` : ''}`
+    const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId);
+    if (!project || firstSource(project)?.kind !== 'local') {
+      return null;
+    }
+    const claim = resolveWorkspaceClaim(
+      ticket,
+      (firstSource(project) as Extract<ProjectSource, { kind: 'local' }> | undefined)?.workspaceDir
     );
-
-    machine.scheduleRetryTimer(delayMs, () => {
-      void this.handleRetryFired(ticketId, failureClass, attempt, continuationTurn);
-    });
-  }
-
-  /**
-   * Handle a retry timer firing. Re-check ticket state and re-dispatch if
-   * still eligible.
-   */
-  handleRetryFired(
-    ticketId: TicketId,
-    failureClass: FailureClass,
-    attempt: number,
-    continuationTurn: number
-  ): Promise<void> {
-    return this.withTicketLock(ticketId, async () => {
-      const ticket = this.deps.host.getTicketById(ticketId);
-      const entry = this.machines.get(ticketId);
-      if (!ticket || !entry) {
-        console.log(
-          `[SupervisorOrchestrator] Retry fired for ${ticketId} but ticket/machine no longer exists. Releasing.`
-        );
-        return;
+    if (!claim) {
+      return null;
+    }
+    for (const [otherId, entry] of this.machines) {
+      if (otherId === ticketId || !entry.state.isActive()) {
+        continue;
       }
-      const { machine } = entry;
-
-      // Don't retry if ticket is now in a terminal column
-      if (this.deps.host.isTerminalColumn(ticket.projectId, ticket.columnId)) {
-        console.log(
-          `[SupervisorOrchestrator] Retry fired for ${ticketId} but ticket is in terminal column. Releasing.`
-        );
-        machine.transition('idle');
-        return;
+      const other = this.deps.host.getTicketById(otherId);
+      if (!other || other.projectId !== ticket.projectId) {
+        continue;
       }
-
-      // Check concurrency (including per-column limits)
-      if (!this.canStartSupervisor(ticket.projectId, ticket.columnId)) {
-        console.log(`[SupervisorOrchestrator] No slots available for retry of ${ticketId}. Requeuing.`);
-        this.scheduleRetry(ticketId, failureClass, {
-          attempt: attempt + 1,
-          continuationTurn,
-          error: 'no available supervisor slots',
-        });
-        return;
-      }
-
-      // Re-dispatch
-      console.log(
-        `[SupervisorOrchestrator] Retry firing for ${ticketId} (${failureClass}, attempt=${attempt}, turn=${continuationTurn}). Re-dispatching.`
+      const otherClaim = resolveWorkspaceClaim(
+        other,
+        (firstSource(project) as Extract<ProjectSource, { kind: 'local' }> | undefined)?.workspaceDir
       );
-
-      try {
-        const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId);
-        if (!project) {
-          return;
-        }
-
-        let hookOk = true;
-        if (project.source?.kind === 'local') {
-          hookOk = await this.deps.workflowLoader.runHook(ticket.projectId, 'before_run', project.source?.workspaceDir);
-        } else {
-          const hookScript = this.deps.workflowLoader.getConfig(ticket.projectId).hooks?.before_run;
-          if (hookScript) {
-            const currentEntry = this.machines.get(ticketId);
-            if (currentEntry?.sandbox) {
-              hookOk = await currentEntry.sandbox.execInContainer(hookScript, '/home/user/workspace');
-            }
-          }
-        }
-        if (!hookOk) {
-          console.warn(
-            `[SupervisorOrchestrator] before_run hook failed during retry for ${ticketId}. Scheduling another retry.`
-          );
-          this.scheduleRetry(ticketId, 'error', {
-            attempt: attempt + 1,
-            continuationTurn,
-            error: 'before_run hook failed',
-          });
-          return;
-        }
-
-        const sessionId = ticket.supervisorSessionId ?? undefined;
-        const prompt = 'The previous run failed. Please review the current state and continue working on this ticket.';
-        const variables = this.buildRunVariables(ticketId);
-
-        machine.recordActivity();
-        await this.ensureSupervisorInfra(ticketId);
-        this.startMachineRun(ticketId, prompt, { sessionId, variables });
-      } catch (error) {
-        console.error(`[SupervisorOrchestrator] Retry dispatch failed for ${ticketId}:`, error);
-        this.scheduleRetry(ticketId, 'error', {
-          attempt: attempt + 1,
-          continuationTurn,
-          error: (error as Error).message,
-        });
-      }
-    });
-  }
-
-  /** Cancel any pending retry timer for a single ticket. */
-  cancelRetry(ticketId: TicketId): void {
-    const entry = this.machines.get(ticketId);
-    if (entry) {
-      entry.machine.cancelRetryTimer();
-    }
-  }
-
-  /** Cancel all pending retry timers — called from PM.exit(). */
-  cancelAllRetries(): void {
-    for (const [, entry] of this.machines) {
-      entry.machine.cancelRetryTimer();
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  // Stall detection
-  // -------------------------------------------------------------------------
-
-  /** Start the periodic stall-check timer. Idempotent. */
-  startStallDetection(): void {
-    if (this.stallCheckTimer) {
-      return;
-    }
-    this.stallCheckTimer = setInterval(() => this.checkForStalledSupervisors(), STALL_CHECK_INTERVAL_MS);
-  }
-
-  /** Stop the stall-check timer. Idempotent. */
-  stopStallDetection(): void {
-    if (this.stallCheckTimer) {
-      clearInterval(this.stallCheckTimer);
-      this.stallCheckTimer = null;
-    }
-  }
-
-  /**
-   * One stall-check tick. Any active machine that hasn't recorded activity
-   * within its effective timeout is stopped and handed to the retry queue.
-   * Streaming phases get a much longer safety-net timeout because legitimate
-   * long tool calls can silence the message stream for many minutes.
-   */
-  checkForStalledSupervisors(): void {
-    const now = Date.now();
-
-    for (const [ticketId, entry] of this.machines) {
-      const { machine } = entry;
-      const phase = machine.getPhase();
-
-      if (!machine.isActive()) {
-        continue;
-      }
-      // Skip phases that have their own timeouts or are waiting intentionally.
-      // 'ready' means the session exists but no autonomous run was started — the user
-      // may be using the workspace manually, so don't treat it as stalled.
-      if (phase === 'retrying' || phase === 'awaiting_input' || phase === 'ready') {
-        continue;
-      }
-
-      const ticket = this.deps.host.getTicketById(ticketId);
-      const stallTimeout = machine.isStreaming()
-        ? STREAMING_STALL_TIMEOUT_MS
-        : ticket
-          ? this.getEffectiveStallTimeout(ticket.projectId)
-          : STALL_TIMEOUT_MS;
-
-      const elapsed = now - machine.getLastActivity();
-      if (elapsed > stallTimeout) {
-        void this.withTicketLock(ticketId, async () => {
-          // Re-check under lock
-          if (!machine.isActive()) {
-            return;
-          }
-          if (machine.getPhase() === 'retrying' || machine.getPhase() === 'awaiting_input') {
-            return;
-          }
-          const elapsedNow = Date.now() - machine.getLastActivity();
-          if (elapsedNow <= stallTimeout) {
-            return;
-          }
-
-          console.warn(
-            `[SupervisorOrchestrator] Supervisor stalled for ticket ${ticketId} in phase "${machine.getPhase()}" (${Math.round(elapsedNow / 1000)}s since last activity). Stopping and scheduling retry.`
-          );
-          await machine.stop();
-
-          this.scheduleRetry(ticketId, 'stalled', {
-            attempt: machine.retryAttempt + 1,
-            continuationTurn: machine.continuationTurn,
-            error: `stalled in phase ${machine.getPhase()} for ${Math.round(elapsedNow / 1000)}s`,
-          });
-        });
+      if (otherClaim && claimsCollide(claim, otherClaim)) {
+        return other;
       }
     }
+    return null;
   }
 
   // -------------------------------------------------------------------------
   // Infra provisioning (C2c.4) — ensure sandbox + machine + session for a ticket
   // -------------------------------------------------------------------------
-
-  /** Check if a Code tab has a running sandbox for this ticket. */
-  getCodeTabWsUrl(ticketId: TicketId): string | null {
-    if (!this.deps.processManager) {
-      return null;
-    }
-    const codeTabs = this.deps.store.getCodeTabs();
-    return this.deps.processManager.getRunningWsUrlForTicket(ticketId, codeTabs);
-  }
-
-  /** Return the supervisor sandbox status for a Code tab linked to a ticket. */
-  getSupervisorStatusForCodeTab(tabId: CodeTabId): WithTimestamp<AgentProcessStatus> | null {
-    const codeTabs = this.deps.store.getCodeTabs();
-    const tab = codeTabs.find((t) => t.id === tabId);
-    if (!tab?.ticketId) {
-      return null;
-    }
-    const entry = this.machines.get(tab.ticketId as TicketId);
-    if (!entry?.sandbox) {
-      return null;
-    }
-    return entry.sandbox.getStatus();
-  }
 
   /**
    * Decide which workspace directory to mount for a ticket. Resolves or
@@ -872,19 +629,20 @@ export class SupervisorOrchestrator {
     }
 
     // Git-remote projects: container clones the repo — no local workspace or worktrees
-    if (project.source?.kind === 'git-remote') {
-      const effectiveBranch = this.deps.host.resolveTicketBranch(ticket) ?? project.source?.defaultBranch;
+    const projectSource = firstSource(project);
+    if (projectSource?.kind === 'git-remote') {
+      const effectiveBranch = this.deps.host.resolveTicketBranch(ticket) ?? projectSource.defaultBranch;
       return {
         workspaceDir: '/home/user/workspace', // container-side path (not local)
         action: 'none',
         gitRepo: {
-          url: project.source?.repoUrl,
+          url: projectSource.repoUrl,
           branch: effectiveBranch,
         },
       };
     }
 
-    let workspaceDir = requireLocalWorkspaceDir(project.source);
+    let workspaceDir = requireLocalWorkspaceDir(firstSource(project));
     let worktreePath: string | undefined;
     let worktreeName: string | undefined;
     const effectiveBranch = this.deps.host.resolveTicketBranch(ticket);
@@ -907,7 +665,11 @@ export class SupervisorOrchestrator {
       console.log(`[SupervisorOrchestrator] Reusing existing worktree "${worktreeName}" for ticket ${ticketId}`);
     } else if (wtAction.action === 'create') {
       worktreeName = generateWorktreeName();
-      worktreePath = await createWorktree(requireLocalWorkspaceDir(project.source), effectiveBranch!, worktreeName);
+      worktreePath = await createWorktree(
+        requireLocalWorkspaceDir(firstSource(project)),
+        effectiveBranch!,
+        worktreeName
+      );
       workspaceDir = worktreePath;
       this.deps.host.updateTicket(ticketId, { worktreePath, worktreeName });
     }
@@ -921,59 +683,18 @@ export class SupervisorOrchestrator {
   };
 
   /**
-   * Ensure a session exists for the ticket. Generates the session ID upfront
-   * and persists it on the ticket BEFORE the RPC completes, so the renderer
-   * can include ?session= in the embedded UI URL immediately (progressive load).
+   * Ensure a Code column exists for this ticket and we have a SupervisorEntry
+   * tracking its phase.
+   *
+   *   1. Resolve workspace (create / reuse git worktree for local projects).
+   *   2. Ask the bridge to ensure the Code tab is mounted + the actor is
+   *      registered. The column boots its own session id via the normal
+   *      chat-boot flow; main never touches it.
+   *   3. Register the SupervisorEntry so forwarded events drive phase/retry.
+   *
+   * Idempotent.
    */
-  private ensureSession = async (ticketId: TicketId): Promise<void> => {
-    const ticket = this.deps.host.getTicketById(ticketId);
-    if (!ticket) {
-      return;
-    }
-
-    // If the machine is already in 'ready' state with a session, nothing to do
-    const existingEntry = this.machines.get(ticketId);
-    if (existingEntry?.machine.getPhase() === 'ready' && existingEntry.machine.getSessionId()) {
-      return;
-    }
-
-    const entry = this.machines.get(ticketId);
-    if (!entry) {
-      return;
-    }
-
-    const variables = this.buildRunVariables(ticketId, 'interactive');
-
-    const sessionId = randomUUID();
-
-    try {
-      console.log(`[SupervisorOrchestrator] Creating session ${sessionId} for ticket ${ticketId}`);
-      await entry.machine.createSession(variables, sessionId);
-      console.log(`[SupervisorOrchestrator] Session created: ${sessionId} for ticket ${ticketId}`);
-      // Only publish the session ID after it actually exists in the server,
-      // so the renderer's getSessionHistory call won't fail on a non-existent session.
-      this.deps.host.updateTicket(ticketId, { supervisorSessionId: sessionId });
-    } catch (error) {
-      console.error(`[SupervisorOrchestrator] Failed to create session for ${ticketId}:`, error);
-      // Clear the optimistic session ID since creation failed
-      this.deps.host.updateTicket(ticketId, { supervisorSessionId: undefined });
-      // Recover from stuck connecting/session_creating phase so the UI doesn't show
-      // "Connecting…" indefinitely. Reset to idle so the user can retry.
-      const phase = entry.machine.getPhase();
-      if (phase === 'connecting' || phase === 'session_creating') {
-        entry.machine.forcePhase('idle' as TicketPhase);
-      }
-    }
-  };
-
-  /**
-   * Ensure sandbox + machine infrastructure exists for a ticket.
-   * Idempotent — if a machine is already provisioned with a running sandbox, returns immediately.
-   * Returns only after the sandbox is running and a session is established.
-   */
-  ensureSupervisorInfra = async (
-    ticketId: TicketId
-  ): Promise<{ machine: ITicketMachine; sandbox: ISandbox | null }> => {
+  ensureColumn = async (ticketId: TicketId, profileName?: string): Promise<SupervisorEntry> => {
     const ticket = this.deps.host.getTicketById(ticketId);
     if (!ticket) {
       throw new Error(`Ticket not found: ${ticketId}`);
@@ -984,196 +705,31 @@ export class SupervisorOrchestrator {
       throw new Error(`Project not found: ${ticket.projectId}`);
     }
 
-    // Idempotent: if machine already exists with a running sandbox, ensure session and return
-    const existing = this.machines.get(ticketId);
-    if (existing) {
-      const sbStatus = existing.sandbox?.getStatus();
-      // Machine is using a Code tab sandbox (sandbox === null) — check if still viable
-      const isRunning = existing.sandbox ? sbStatus?.type === 'running' : this.getCodeTabWsUrl(ticketId) !== null;
-
-      if (isRunning) {
-        const phase = existing.machine.getPhase();
-
-        // Already streaming — don't interfere
-        if (existing.machine.isStreaming()) {
-          console.log(
-            `[SupervisorOrchestrator] ensureSupervisorInfra: machine ${ticketId} already streaming (${phase}), returning.`
-          );
-          return existing;
-        }
-
-        // Machine has a session and is ready — reuse as-is
-        if (phase === 'ready' && existing.machine.getSessionId()) {
-          console.log(
-            `[SupervisorOrchestrator] ensureSupervisorInfra: machine ${ticketId} already ready with session, returning.`
-          );
-          return existing;
-        }
-
-        // Machine is in a non-streaming state without a session — re-provision
-        const wsUrl =
-          existing.sandbox && sbStatus?.type === 'running' ? sbStatus.data.wsUrl! : this.getCodeTabWsUrl(ticketId)!;
-        console.log(
-          `[SupervisorOrchestrator] ensureSupervisorInfra: re-provisioning ${ticketId} from phase "${phase}".`
-        );
-        existing.machine.forcePhase('provisioning' as TicketPhase);
-        existing.machine.setWsUrl(wsUrl);
-        await this.ensureSession(ticketId);
-        return existing;
-      }
-      // Existing sandbox not running — clean up stale machine and create fresh
-      console.log(
-        `[SupervisorOrchestrator] ensureSupervisorInfra: stale machine for ${ticketId} (sandbox status: ${sbStatus?.type ?? 'unknown'}, phase: ${existing.machine.getPhase()}). Cleaning up.`
-      );
-      await existing.machine.dispose();
-      this.machines.delete(ticketId);
-    }
-
-    // Check if a Code tab already has a running sandbox for this ticket.
-    // If so, reuse it instead of spinning up a second container.
-    const codeTabWsUrl = this.getCodeTabWsUrl(ticketId);
-    if (codeTabWsUrl) {
-      console.log(
-        `[SupervisorOrchestrator] ensureSupervisorInfra: reusing Code tab sandbox for ${ticketId} (ws: ${codeTabWsUrl})`
-      );
-      const machine = this.createMachine(ticketId);
-      machine.transition('provisioning' as TicketPhase);
-
-      // We don't own the sandbox — the Code tab's ProcessManager entry owns the lifecycle.
-      this.machines.set(ticketId, { machine, sandbox: null });
-
-      machine.setWsUrl(codeTabWsUrl);
-      await this.ensureSession(ticketId);
-
-      return { machine, sandbox: null };
-    }
-
-    // No Code tab sandbox available — create a dedicated supervisor sandbox.
-    const machine = this.createMachine(ticketId);
-    machine.transition('provisioning' as TicketPhase);
-
-    // Deferred: resolves when sandbox becomes 'running'
-    let resolveReady!: (wsUrl: string) => void;
-    let rejectReady!: (err: Error) => void;
-    const sandboxReady = new Promise<string>((resolve, reject) => {
-      resolveReady = resolve;
-      rejectReady = reject;
-    });
-
-    const startTimeout = setTimeout(() => {
-      rejectReady(new Error('Sandbox start timeout (120s)'));
-    }, 120_000);
-
     const resolvedWorkspace = await this.resolveTicketWorkspace(ticketId);
-    const workspaceDir = resolvedWorkspace.workspaceDir;
-    const taskId = nanoid();
-    const { worktreePath, worktreeName, action } = resolvedWorkspace;
+    const { workspaceDir } = resolvedWorkspace;
 
-    // Run after_create hook only when a new worktree was created (not on reuse)
-    if (action === 'create') {
-      const afterCreateOk = await this.deps.workflowLoader.runHook(ticket.projectId, 'after_create', workspaceDir);
-      if (!afterCreateOk) {
-        clearTimeout(startTimeout);
-        if (worktreePath && worktreeName) {
-          await removeWorktree(requireLocalWorkspaceDir(project.source), worktreePath, worktreeName);
-        }
-        machine.transition('error' as TicketPhase);
-        throw new Error('after_create hook failed');
-      }
+    const existing = this.machines.get(ticketId);
+    const state = existing?.state ?? this.createState(ticketId);
+    if (!existing) {
+      state.forcePhase('provisioning' as TicketPhase);
     }
 
-    const task: Task = {
-      id: taskId,
-      projectId: ticket.projectId,
-      taskDescription: `Supervisor for: ${ticket.title}`,
-      status: { type: 'starting', timestamp: Date.now() },
-      createdAt: Date.now(),
-      ticketId,
-      branch: this.deps.host.resolveTicketBranch(ticket),
-      worktreePath,
-      worktreeName,
-    };
-
-    const sandboxBackend = this.deps.store.getSandboxBackend();
-    const platformClient = createPlatformClient(this.deps.store.getPlatformCredentials());
-    const mode: AgentProcessMode =
-      sandboxBackend === 'platform'
-        ? 'platform'
-        : sandboxBackend === 'docker'
-          ? 'sandbox'
-          : sandboxBackend === 'podman'
-            ? 'podman'
-            : sandboxBackend === 'vm'
-              ? 'vm'
-              : sandboxBackend === 'local'
-                ? 'local'
-                : 'none';
-    const sandbox = this.deps.sandboxFactory.create({
-      mode,
-      platformClient: platformClient ?? undefined,
-      ipcRawOutput: () => {},
-      onStatusChange: (status) => {
-        const taskEntry = this.tasks.get(taskId);
-        if (taskEntry) {
-          const patch: Partial<Task> = { status };
-          if (status.type === 'running') {
-            patch.lastUrls = {
-              uiUrl: status.data.uiUrl,
-              codeServerUrl: status.data.codeServerUrl,
-              noVncUrl: status.data.noVncUrl,
-            };
-          }
-          taskEntry.task = { ...taskEntry.task, ...patch };
-          this.persistTask(taskEntry.task);
-        }
-        this.deps.sendToWindow('project:task-status', taskId, status);
-
-        // Forward to linked Code tab so the UI connects to the supervisor's sandbox
-        // instead of launching a separate one.
-        const codeTabs = this.deps.store.getCodeTabs();
-        const codeTab = codeTabs.find((t) => t.ticketId === ticketId);
-        if (codeTab) {
-          this.deps.sendToWindow('agent-process:status', codeTab.id as CodeTabId, status);
-        }
-
-        // Resolve/reject the startup promise (only effective on first call)
-        if (status.type === 'running') {
-          resolveReady(status.data.wsUrl!);
-        } else if (status.type === 'error') {
-          rejectReady(new Error('Sandbox failed to start'));
-        }
-      },
-    });
-
-    this.tasks.set(taskId, { task, sandbox });
-    this.persistTask(task);
-    this.deps.host.updateTicket(ticketId, { supervisorTaskId: taskId });
-
-    this.machines.set(ticketId, { machine, sandbox });
-
-    sandbox.start({
-      workspaceDir,
-      sandboxVariant: 'work',
-      sandboxConfig: project.sandbox,
-      gitRepo: resolvedWorkspace.gitRepo,
-    });
-
-    // Await sandbox readiness
-    let wsUrl: string;
     try {
-      wsUrl = await sandboxReady;
-    } catch (error) {
-      clearTimeout(startTimeout);
-      machine.transition('error' as TicketPhase);
-      throw error;
+      await this.deps.bridge.ensureColumn({ ticketId, workspaceDir, profileName });
+    } catch (err) {
+      state.forcePhase('error' as TicketPhase);
+      throw err;
     }
-    clearTimeout(startTimeout);
 
-    // Set WS URL and ensure session
-    machine.setWsUrl(wsUrl);
-    await this.ensureSession(ticketId);
+    const tab = this.deps.store.getCodeTabs().find((t) => t.ticketId === ticketId);
+    const tabId = (tab?.id ?? '') as CodeTabId;
 
-    return { machine, sandbox };
+    const entry: SupervisorEntry = { state, tabId };
+    this.machines.set(ticketId, entry);
+    if (state.getPhase() === 'provisioning') {
+      state.forcePhase('ready' as TicketPhase);
+    }
+    return entry;
   };
 
   // -------------------------------------------------------------------------
@@ -1181,47 +737,64 @@ export class SupervisorOrchestrator {
   // -------------------------------------------------------------------------
 
   /**
-   * Send a start_run RPC to the machine. Stamps the wall-clock start time so
-   * the eventual TicketRun record reflects the real run start, not whichever
-   * `updateTicket` call most recently bumped `updatedAt`.
+   * Dispatch the autopilot loop through the column. Phase flips to
+   * ``running`` synchronously — the agent-side ``/goal`` server function
+   * (omni-code) owns the loop from here: it installs the periodic tick,
+   * enqueues the initial framing prompt, classifies run-ends, and
+   * broadcasts ``ui.goal.update`` snapshots which the orchestrator
+   * mirrors back onto the ticket via ``handleGoalUpdate``. The launcher
+   * no longer drives continuation, retry, or stall detection — those
+   * concerns live in ``/goal``.
    */
-  startMachineRun = (
-    ticketId: TicketId,
-    prompt: string,
-    opts?: { sessionId?: string; variables?: Record<string, unknown> }
-  ): void => {
+  startMachineRun = (ticketId: TicketId): void => {
     const entry = this.machines.get(ticketId);
     if (!entry) {
-      console.warn(`[SupervisorOrchestrator] startMachineRun: no machine entry for ${ticketId}`);
+      console.warn(`[SupervisorOrchestrator] startMachineRun: no entry for ${ticketId}`);
       return;
     }
+    const { state } = entry;
 
     this.runStartedAt.set(ticketId, Date.now());
+    state.recordActivity();
 
-    console.log(
-      `[SupervisorOrchestrator] startMachineRun: starting run for ${ticketId} (phase: ${entry.machine.getPhase()})`
-    );
-    void entry.machine.startRun(prompt, { sessionId: opts?.sessionId, variables: opts?.variables }).then(
-      (result) => {
-        this.deps.host.updateTicket(ticketId, { supervisorSessionId: result.sessionId });
-      },
-      (error) => {
-        console.error(`[SupervisorOrchestrator] Machine start failed for ${ticketId}:`, error);
-        if (entry.machine.isActive() && entry.machine.getPhase() !== 'error') {
-          entry.machine.transition('error');
+    const ticket = this.deps.host.getTicketById(ticketId);
+    const maxTurns = ticket ? this.getEffectiveMaxContinuationTurns(ticket.projectId) : MAX_CONTINUATION_TURNS;
+
+    // Compose the supervisor framing as the goal text. The column's
+    // session.ensure path also sees ticket_id / project_id / workspace_dir
+    // in session.variables (set via buildSessionVariables), so omni-code
+    // tools can read structured ticket context without parsing this
+    // prompt.
+    const { goalText, additionalInstructions } = this.buildAutopilotPrompts(ticketId);
+
+    console.log(`[SupervisorOrchestrator] startMachineRun: bridge.startGoal for ${ticketId}`);
+    state.transition('running' as TicketPhase);
+    void this.deps.bridge
+      .startGoal({
+        ticketId,
+        prompt: goalText,
+        maxTurns,
+        runOverrides: {
+          additionalInstructions,
+          safeToolOverrides: { safe_tool_patterns: ['.*'] },
+        },
+      })
+      .catch((error) => {
+        console.error(`[SupervisorOrchestrator] bridge.startGoal failed for ${ticketId}:`, error);
+        if (state.isActive() && state.getPhase() !== 'error') {
+          state.forcePhase('error' as TicketPhase);
         }
-      }
-    );
+      });
   };
 
   /**
-   * IPC entry point: ensure supervisor infrastructure exists for a ticket.
-   * Wraps `ensureSupervisorInfra` in the per-ticket lock so concurrent IPC
-   * calls don't race against the lifecycle methods.
+   * IPC entry point: ensure the Code column for a ticket exists (create tab
+   * if missing, register SupervisorEntry). Idempotent; wraps `ensureColumn`
+   * in the per-ticket lock.
    */
   ensureSupervisorInfraLocked = (ticketId: TicketId): Promise<void> => {
     return this.withTicketLock(ticketId, async () => {
-      await this.ensureSupervisorInfra(ticketId);
+      await this.ensureColumn(ticketId);
     });
   };
 
@@ -1237,10 +810,13 @@ export class SupervisorOrchestrator {
   };
 
   /**
-   * Start the autonomous supervisor — sends the full supervisor prompt as the user turn.
-   * Triggered by the Play button.
+   * Flip a ticket into autopilot. Ensures a Code column exists, sets
+   * `ticket.autopilot = true` (the column re-renders with catch-all
+   * safe_tool_overrides and the supervisor prompt is passed alongside), then
+   * submits the initial run prompt through the same `handleSubmit` path the
+   * user's keyboard uses.
    */
-  startSupervisor = (ticketId: TicketId): Promise<void> => {
+  startSupervisor = (ticketId: TicketId, profileName?: string): Promise<void> => {
     return this.withTicketLock(ticketId, async () => {
       const preflightError = this.validateDispatchPreflight(ticketId);
       if (preflightError) {
@@ -1248,70 +824,56 @@ export class SupervisorOrchestrator {
         throw new Error(preflightError);
       }
 
-      const ticket = this.deps.host.getTicketById(ticketId)!;
-      const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId)!;
+      console.log(`[SupervisorOrchestrator] startSupervisor: ensureColumn for ${ticketId}...`);
+      const entry = await this.ensureColumn(ticketId, profileName);
 
-      // Load FLEET.md workflow (from local dir or git remote)
-      if (project.source?.kind === 'local') {
-        await this.deps.workflowLoader.load(ticket.projectId, project.source.workspaceDir);
-
-        const hookOk = await this.deps.workflowLoader.runHook(
-          ticket.projectId,
-          'before_run',
-          project.source.workspaceDir
-        );
-        if (!hookOk) {
-          console.warn(`[SupervisorOrchestrator] before_run hook failed for ${ticketId}. Aborting start.`);
-          throw new Error('before_run hook failed');
-        }
-      } else if (project.source?.kind === 'git-remote') {
-        const effectiveBranch = this.deps.host.resolveTicketBranch(ticket) ?? project.source.defaultBranch;
-        await this.deps.workflowLoader.loadFromRemote(ticket.projectId, project.source.repoUrl, effectiveBranch);
+      const phase = entry.state.getPhase();
+      if (phase === 'idle' || phase === 'error' || phase === 'completed') {
+        entry.state.forcePhase('ready' as TicketPhase);
       }
 
-      console.log(`[SupervisorOrchestrator] startSupervisor: ensureSupervisorInfra for ${ticketId}...`);
-      const { machine, sandbox } = await this.ensureSupervisorInfra(ticketId);
-      console.log(
-        `[SupervisorOrchestrator] startSupervisor: ensureSupervisorInfra done. Phase: ${machine.getPhase()}, sessionId: ${machine.getSessionId()}`
-      );
+      // Flip the autopilot flag so the column boots its next submit with
+      // catch-all safe_tool_overrides. Setting it before startMachineRun
+      // ensures the supervisorPrompt we send is paired with the right
+      // approval policy at the column.
+      this.deps.host.updateTicket(ticketId, { autopilot: true });
 
-      // For git-remote projects, run before_run hook inside the container via sandbox exec
-      if (project.source?.kind === 'git-remote') {
-        const hookScript = this.deps.workflowLoader.getConfig(ticket.projectId).hooks?.before_run;
-        if (hookScript && sandbox) {
-          const hookOk = await sandbox.execInContainer(hookScript, '/home/user/workspace');
-          if (!hookOk) {
-            console.warn(
-              `[SupervisorOrchestrator] before_run hook failed in container for ${ticketId}. Aborting start.`
-            );
-            throw new Error('before_run hook failed');
-          }
-        }
-      }
-
-      const sessionId = machine.getSessionId() ?? undefined;
-      const variables = this.buildRunVariables(ticketId);
-      console.log(
-        `[SupervisorOrchestrator] startSupervisor: calling startMachineRun for ${ticketId} (sessionId: ${sessionId})`
-      );
-      this.startMachineRun(ticketId, 'Begin working on this ticket.', { sessionId, variables });
+      console.log(`[SupervisorOrchestrator] startSupervisor: startMachineRun for ${ticketId}`);
+      this.startMachineRun(ticketId);
     });
   };
 
   stopSupervisor = (ticketId: TicketId): Promise<void> => {
     return this.withTicketLock(ticketId, async () => {
       const entry = this.machines.get(ticketId);
+      // Always flip autopilot off — even if the state record is gone, the
+      // persisted flag needs to be cleared.
+      if (this.deps.host.getTicketById(ticketId)?.autopilot) {
+        this.deps.host.updateTicket(ticketId, { autopilot: false });
+      }
       if (!entry) {
         return;
       }
-      await entry.machine.stop();
+      try {
+        await this.deps.bridge.stopGoal(ticketId);
+      } catch (err) {
+        console.warn(`[SupervisorOrchestrator] bridge.stopGoal failed for ${ticketId}:`, err);
+      }
+      entry.state.setRunId(null);
+      if (entry.state.getPhase() !== 'idle') {
+        entry.state.forcePhase('idle' as TicketPhase);
+      }
     });
   };
 
   /**
-   * Clean up a ticket's workspace: stop and remove its container, delete its
-   * worktree, and run the before_remove hook. Called when a ticket reaches a
-   * terminal column.
+   * Clean up a ticket's workspace: stop and remove its container and delete
+   * its worktree. Called when a ticket reaches a terminal column.
+   *
+   * If the worktree has uncommitted changes, cleanup is deferred — the ticket
+   * is marked `cleanupPending` and the worktree + sandbox stay alive so the
+   * user or agent can commit/discard. Call `finalizeTicketCleanup` once the
+   * worktree is clean to finish the teardown.
    */
   cleanupTicketWorkspace = async (ticketId: TicketId): Promise<void> => {
     const ticket = this.deps.host.getTicketById(ticketId);
@@ -1320,143 +882,157 @@ export class SupervisorOrchestrator {
     }
 
     const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId);
-    const taskId = ticket.supervisorTaskId;
 
-    // Run before_remove hook
-    if (project?.source?.kind === 'local') {
-      const workspaceDir = ticket.worktreePath ?? project.source.workspaceDir;
-      await this.deps.workflowLoader.runHook(ticket.projectId, 'before_remove', workspaceDir);
-    } else if (project?.source?.kind === 'git-remote') {
-      const hookScript = this.deps.workflowLoader.getConfig(ticket.projectId).hooks?.before_remove;
-      if (hookScript) {
-        const machineEntry = this.machines.get(ticketId);
-        if (machineEntry?.sandbox) {
-          await machineEntry.sandbox.execInContainer(hookScript, '/home/user/workspace');
+    // Defer cleanup when the worktree has unsaved work. The sandbox + supervisor
+    // stay alive so the user or agent can drive the worktree to a clean state.
+    if (ticket.worktreePath && firstSource(project)?.kind === 'local') {
+      const dirty = await isWorktreeDirty(ticket.worktreePath);
+      if (dirty) {
+        console.log(
+          `[SupervisorOrchestrator] Worktree for ticket ${ticketId} has uncommitted changes — deferring cleanup.`
+        );
+        if (!ticket.cleanupPending) {
+          this.deps.host.updateTicket(ticketId, { cleanupPending: true });
         }
+        return;
       }
     }
 
-    // Dispose machine if still registered
+    const taskId = ticket.supervisorTaskId;
+
+    // Dispose state + tell renderer to drop the column binding.
     const machineEntry = this.machines.get(ticketId);
     if (machineEntry) {
-      await machineEntry.machine.dispose();
+      try {
+        await this.deps.bridge.dispose(ticketId);
+      } catch (err) {
+        console.warn(`[SupervisorOrchestrator] bridge.dispose failed for ${ticketId}:`, err);
+      }
+      machineEntry.state.dispose();
       this.machines.delete(ticketId);
     }
 
-    // Stop and exit the container
-    if (taskId) {
-      const taskEntry = this.tasks.get(taskId);
-      if (taskEntry) {
-        await taskEntry.sandbox.exit();
+    // Stop the sandbox process owned by the Code tab (if still running).
+    if (machineEntry?.tabId && this.deps.processManager) {
+      try {
+        await this.deps.processManager.stop(machineEntry.tabId);
+      } catch (err) {
+        console.warn(`[SupervisorOrchestrator] processManager.stop failed for ${ticketId}:`, err);
       }
+    }
+
+    // Clear any persisted task record.
+    if (taskId) {
       this.tasks.delete(taskId);
       this.removePersistedTask(taskId);
     }
 
     // Remove worktree (source of truth is the ticket, not the task)
-    if (ticket.worktreePath && ticket.worktreeName && project && project.source?.kind === 'local') {
-      await removeWorktree(requireLocalWorkspaceDir(project.source), ticket.worktreePath, ticket.worktreeName);
-      this.deps.host.updateTicket(ticketId, { worktreePath: undefined, worktreeName: undefined });
+    if (ticket.worktreePath && ticket.worktreeName && project && firstSource(project)?.kind === 'local') {
+      await removeWorktree(requireLocalWorkspaceDir(firstSource(project)), ticket.worktreePath, ticket.worktreeName);
+      this.deps.host.updateTicket(ticketId, {
+        worktreePath: undefined,
+        worktreeName: undefined,
+        cleanupPending: undefined,
+        autopilot: false,
+      });
+    } else if (ticket.cleanupPending) {
+      this.deps.host.updateTicket(ticketId, { cleanupPending: undefined, autopilot: false });
+    } else if (ticket.autopilot) {
+      this.deps.host.updateTicket(ticketId, { autopilot: false });
     }
 
     console.log(`[SupervisorOrchestrator] Cleaned up workspace for ticket ${ticketId}.`);
   };
 
-  resetSupervisorSession = (ticketId: TicketId): Promise<void> => {
+  /**
+   * Retry deferred cleanup for a ticket whose worktree was dirty when it was
+   * first resolved. Re-checks dirtiness; if still dirty, returns false and
+   * leaves `cleanupPending` set. Otherwise runs full teardown and returns true.
+   */
+  finalizeTicketCleanup = (ticketId: TicketId): Promise<boolean> => {
     return this.withTicketLock(ticketId, async () => {
-      const entry = this.machines.get(ticketId);
-      if (!entry) {
-        return;
+      const ticket = this.deps.host.getTicketById(ticketId);
+      if (!ticket) {
+        return false;
       }
-
-      await entry.machine.stop();
-
-      // Build fresh variables (includes FLEET.md custom prompt + client tools)
-      const variables = this.buildRunVariables(ticketId, 'interactive');
-
-      // Ensure WS URL is set
-      if (entry.sandbox) {
-        const sbStatus = entry.sandbox.getStatus();
-        if (sbStatus?.type === 'running' && sbStatus.data.wsUrl) {
-          entry.machine.setWsUrl(sbStatus.data.wsUrl);
-        }
-      } else {
-        const wsUrl = this.getCodeTabWsUrl(ticketId);
-        if (wsUrl) {
-          entry.machine.setWsUrl(wsUrl);
-        }
-      }
-
-      // Create a new session, then update the ticket so the renderer
-      // only switches to the new session URL after it actually exists.
-      const newSessionId = randomUUID();
-      await entry.machine.createSession(variables, newSessionId);
-      this.deps.host.updateTicket(ticketId, { supervisorSessionId: newSessionId });
+      await this.cleanupTicketWorkspace(ticketId);
+      const after = this.deps.host.getTicketById(ticketId);
+      return !after?.cleanupPending;
     });
   };
 
+  /**
+   * Reset the ticket's chat session: stop any in-flight run and tell the
+   * column to mint a fresh session id. Orthogonal to autopilot — resetting
+   * does not flip `ticket.autopilot`.
+   */
+  resetSupervisorSession = (ticketId: TicketId): Promise<void> => {
+    return this.withTicketLock(ticketId, async () => {
+      try {
+        await this.deps.bridge.stop(ticketId);
+      } catch (err) {
+        console.warn(`[SupervisorOrchestrator] bridge.stop failed for reset ${ticketId}:`, err);
+      }
+      const entry = this.machines.get(ticketId);
+      if (entry) {
+        entry.state.setRunId(null);
+        if (entry.state.getPhase() !== 'idle') {
+          entry.state.forcePhase('idle' as TicketPhase);
+        }
+      }
+      try {
+        await this.deps.bridge.reset(ticketId);
+      } catch (err) {
+        console.warn(`[SupervisorOrchestrator] bridge.reset failed for ${ticketId}:`, err);
+      }
+    });
+  };
+
+  /**
+   * Forward a user-typed message to the ticket's Code column. If nothing is
+   * streaming, send it as a fresh run. If a run is streaming, piggyback on
+   * the existing run's input channel.
+   */
   sendSupervisorMessage = (ticketId: TicketId, message: string): Promise<void> => {
     return this.withTicketLock(ticketId, async () => {
+      const ticket = this.deps.host.getTicketById(ticketId);
+      if (!ticket) {
+        throw new Error(`Ticket not found: ${ticketId}`);
+      }
       const entry = this.machines.get(ticketId);
+
       if (!entry) {
-        // No active machine — check concurrency before spinning up
-        const ticket = this.deps.host.getTicketById(ticketId);
-        if (!ticket) {
-          throw new Error(`Ticket not found: ${ticketId}`);
-        }
         if (!this.canStartSupervisor(ticket.projectId, ticket.columnId)) {
           throw new Error('Concurrency limit reached');
         }
+        const collision = this.findWorkspaceCollision(ticketId);
+        if (collision) {
+          const hint = ticket.useWorktree === false ? ' Enable worktrees on this ticket to run them in parallel.' : '';
+          throw new Error(`"${collision.title}" is already running in this workspace — stop it first.${hint}`);
+        }
+        await this.ensureColumn(ticketId);
+      }
 
-        await this.ensureSupervisorInfra(ticketId);
-        await this.sendUserRunMessage(ticketId, message);
+      const current = this.machines.get(ticketId);
+      if (current?.state.isStreaming()) {
+        try {
+          await this.deps.bridge.send(ticketId, message);
+        } catch (error) {
+          console.error(`[SupervisorOrchestrator] bridge.send failed for ${ticketId}:`, error);
+        }
         return;
       }
 
-      const phase = entry.machine.getPhase();
-
-      if (phase === 'idle' || phase === 'error' || phase === 'ready' || phase === 'awaiting_input') {
-        await this.sendUserRunMessage(ticketId, message);
-      } else if (entry.machine.isStreaming()) {
-        try {
-          await entry.machine.sendMessage(message);
-        } catch (error) {
-          console.error(`[SupervisorOrchestrator] Machine send_user_message failed for ${ticketId}:`, error);
-        }
+      // No run in flight — start one with the user's message as the prompt.
+      // autopilot stays as-is (user-initiated messages should preserve mode).
+      try {
+        current?.state.recordActivity();
+        await this.deps.bridge.run({ ticketId, prompt: message });
+      } catch (error) {
+        console.error(`[SupervisorOrchestrator] bridge.run failed for ${ticketId}:`, error);
       }
     });
-  };
-
-  /** Start a run with the user's message as the prompt. */
-  private sendUserRunMessage = async (ticketId: TicketId, message: string): Promise<void> => {
-    const entry = this.machines.get(ticketId);
-    if (!entry) {
-      return;
-    }
-
-    if (entry.sandbox) {
-      const sbStatus = entry.sandbox.getStatus();
-      if (sbStatus?.type === 'running' && sbStatus.data.wsUrl) {
-        entry.machine.setWsUrl(sbStatus.data.wsUrl);
-      }
-    } else {
-      const wsUrl = this.getCodeTabWsUrl(ticketId);
-      if (wsUrl) {
-        entry.machine.setWsUrl(wsUrl);
-      }
-    }
-
-    const sessionId = entry.machine.getSessionId() ?? undefined;
-
-    const ticket = this.deps.host.getTicketById(ticketId);
-    const variables = ticket ? this.buildRunVariables(ticketId, 'interactive') : undefined;
-
-    try {
-      const result = await entry.machine.startRun(message, { sessionId, variables });
-      this.deps.host.updateTicket(ticketId, { supervisorSessionId: result.sessionId });
-    } catch (error) {
-      console.error(`[SupervisorOrchestrator] Machine message failed for ${ticketId}:`, error);
-    }
   };
 
   // -------------------------------------------------------------------------
@@ -1504,8 +1080,12 @@ export class SupervisorOrchestrator {
       // Clean up worktree from the ticket
       if (ticket.worktreePath && ticket.worktreeName) {
         const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId);
-        if (project?.source?.kind === 'local') {
-          await removeWorktree(requireLocalWorkspaceDir(project.source), ticket.worktreePath, ticket.worktreeName);
+        if (firstSource(project)?.kind === 'local') {
+          await removeWorktree(
+            requireLocalWorkspaceDir(firstSource(project)),
+            ticket.worktreePath,
+            ticket.worktreeName
+          );
         }
         this.deps.host.updateTicket(ticket.id, { worktreePath: undefined, worktreeName: undefined });
         cleaned++;
@@ -1524,8 +1104,8 @@ export class SupervisorOrchestrator {
       if (task.ticketId && !ticketIds.has(task.ticketId)) {
         if (task.worktreePath && task.worktreeName) {
           const project = this.deps.store.getProjects().find((p) => p.id === task.projectId);
-          if (project?.source?.kind === 'local') {
-            await removeWorktree(requireLocalWorkspaceDir(project.source), task.worktreePath, task.worktreeName);
+          if (firstSource(project)?.kind === 'local') {
+            await removeWorktree(requireLocalWorkspaceDir(firstSource(project)), task.worktreePath, task.worktreeName);
           }
         }
         this.removePersistedTask(task.id);
@@ -1569,9 +1149,23 @@ export class SupervisorOrchestrator {
    * `ProjectManager.removeProject`.
    */
   removeAllTasksForProject = async (projectId: ProjectId): Promise<void> => {
+    // Stop every Code tab sandbox tied to this project via the shared ProcessManager.
+    const pm = this.deps.processManager;
+    if (pm) {
+      const codeTabs = this.deps.store.getCodeTabs() as Array<{ id: string; ticketId?: string }>;
+      const tickets = this.deps.host.getTicketsByProject(projectId);
+      const ticketIds = new Set(tickets.map((t) => t.id));
+      const stops: Promise<void>[] = [];
+      for (const tab of codeTabs) {
+        if (tab.ticketId && ticketIds.has(tab.ticketId as TicketId)) {
+          stops.push(pm.stop(tab.id).catch(() => {}));
+        }
+      }
+      await Promise.allSettled(stops);
+    }
+    // Drop any in-memory task records for the project and persist.
     for (const [taskId, entry] of this.tasks) {
       if (entry.task.projectId === projectId) {
-        await entry.sandbox.exit();
         this.tasks.delete(taskId);
       }
     }
@@ -1579,11 +1173,10 @@ export class SupervisorOrchestrator {
     this.deps.store.setPersistedTasks(remaining);
   };
 
-  /** Exit every in-memory sandbox and clear the map. Called from PM.exit(). */
-  exitAllTasks = async (): Promise<void> => {
-    const exits = [...this.tasks.values()].map((entry) => entry.sandbox.exit());
-    await Promise.allSettled(exits);
+  /** Clear the task metadata map. Sandboxes are owned by ProcessManager, which is cleaned up separately. */
+  exitAllTasks = (): Promise<void> => {
     this.tasks.clear();
+    return Promise.resolve();
   };
 
   // -------------------------------------------------------------------------
@@ -1594,7 +1187,7 @@ export class SupervisorOrchestrator {
   private getRunningSupervisorCount(): number {
     let count = 0;
     for (const [, entry] of this.machines) {
-      if (entry.machine.isActive()) {
+      if (entry.state.isActive()) {
         count++;
       }
     }
@@ -1605,7 +1198,7 @@ export class SupervisorOrchestrator {
   private getRunningSupervisorCountByColumn(projectId: ProjectId, columnId: ColumnId): number {
     let count = 0;
     for (const [ticketId, entry] of this.machines) {
-      if (!entry.machine.isActive()) {
+      if (!entry.state.isActive()) {
         continue;
       }
       const ticket = this.deps.host.getTicketById(ticketId);
@@ -1632,15 +1225,21 @@ export class SupervisorOrchestrator {
     }
 
     // Personal / context-only projects have no source and cannot run supervisors:
-    // there's no workspace to mount and no workflow to execute. Reject explicitly
+    // there's no workspace to mount. Reject explicitly
     // so the user sees a clear message instead of a downstream mount failure.
-    if (!project.source) {
+    if (project.sources.length === 0) {
       return `Project "${project.label}" has no repository — supervisors require a workspace or git remote`;
     }
-    if (project.source.kind === 'local' && !project.source.workspaceDir) {
+    if (
+      firstSource(project)?.kind === 'local' &&
+      !(firstSource(project) as Extract<ProjectSource, { kind: 'local' }> | undefined)?.workspaceDir
+    ) {
       return `Project "${project.label}" has no workspace directory configured`;
     }
-    if (project.source.kind === 'git-remote' && !project.source.repoUrl) {
+    if (
+      firstSource(project)?.kind === 'git-remote' &&
+      !(firstSource(project) as Extract<ProjectSource, { kind: 'git-remote' }> | undefined)?.repoUrl
+    ) {
       return `Project "${project.label}" has no repository URL configured`;
     }
 
@@ -1651,7 +1250,7 @@ export class SupervisorOrchestrator {
     // Check machine to prevent duplicate dispatch — allow starting from 'ready' (manual session)
     const machineEntry = this.machines.get(ticketId);
     if (machineEntry) {
-      const phase = machineEntry.machine.getPhase();
+      const phase = machineEntry.state.getPhase();
       if (phase !== 'idle' && phase !== 'ready' && phase !== 'error' && phase !== 'completed') {
         return `Ticket ${ticketId} is already active (phase: ${phase})`;
       }
@@ -1666,6 +1265,12 @@ export class SupervisorOrchestrator {
         }
       }
       return `Concurrency limit reached (${MAX_CONCURRENT_SUPERVISORS} supervisors running). Stop another supervisor first.`;
+    }
+
+    const collision = this.findWorkspaceCollision(ticketId);
+    if (collision) {
+      const hint = ticket.useWorktree === false ? ' Enable worktrees on this ticket to run them in parallel.' : '';
+      return `"${collision.title}" is already running in this workspace — stop it first.${hint}`;
     }
 
     // WIP limit check (cognitive limit, cross-project)
@@ -1730,20 +1335,20 @@ export class SupervisorOrchestrator {
 
       // Skip if already active
       const machineEntry = this.machines.get(nextTicket.id);
-      if (machineEntry && machineEntry.machine.isActive()) {
+      if (machineEntry && machineEntry.state.isActive()) {
         continue;
       }
 
-      // Check global + per-column WIP limits
-      if (!this.canStartSupervisor(project.id, nextTicket.columnId)) {
-        continue;
-      }
-
-      // Move from first column to second column (first active column) to start work
       const pipeline = this.deps.host.getPipeline(project.id);
       const firstColumnId = pipeline.columns[0]?.id;
       const terminalColumnId = pipeline.columns[pipeline.columns.length - 1]?.id;
       const firstActiveColumn = pipeline.columns.find((c) => c.id !== firstColumnId && c.id !== terminalColumnId);
+      const dispatchColumnId = firstActiveColumn?.id ?? nextTicket.columnId;
+
+      if (!this.canStartSupervisor(project.id, dispatchColumnId)) {
+        continue;
+      }
+
       const originalColumnId = nextTicket.columnId;
       if (firstActiveColumn) {
         this.deps.host.moveTicketToColumn(nextTicket.id, firstActiveColumn.id);
@@ -1765,657 +1370,25 @@ export class SupervisorOrchestrator {
     }
   };
 
-  // -------------------------------------------------------------------------
-  // Tool dispatch + supervisor prompt assembly (C2c.8)
-  // -------------------------------------------------------------------------
-
-  /**
-   * Handle a client tool call from the agent. The agent calls tools like
-   * get_ticket / move_ticket / escalate via the existing WebSocket RPC
-   * (client_request with function="tool.call") instead of a separate MCP server.
-   */
-  handleClientToolCall(
-    ticketId: TicketId,
-    functionName: string,
-    args: Record<string, unknown>,
-    respond: ClientFunctionResponder
-  ): void {
-    console.log(
-      `[SupervisorOrchestrator] handleClientToolCall: ticketId=${ticketId}, function=${functionName}, args=${JSON.stringify(args)}`
-    );
-
-    if (functionName !== 'tool.call') {
-      // Not a tool call — ignore (other client_request functions handled elsewhere)
-      return;
-    }
-
-    const toolName = args.tool as string | undefined;
-    const toolArgs = (args.arguments ?? {}) as Record<string, unknown>;
-
-    if (!toolName) {
-      respond(false, { error: { message: 'Missing tool name' } });
-      return;
-    }
-
-    const ticket = this.deps.host.getTicketById(ticketId);
-    if (!ticket) {
-      respond(false, { error: { message: 'Ticket not found' } });
-      return;
-    }
-
-    const pipeline = this.deps.host.getPipeline(ticket.projectId);
-
-    switch (toolName) {
-      case 'get_ticket': {
-        const lookupId = (toolArgs.ticket_id as string) || ticketId;
-        const target = this.deps.host.getTicketById(lookupId);
-        if (!target) {
-          respond(false, { error: { message: `Ticket not found: ${lookupId}` } });
-          return;
-        }
-        const targetPipeline = this.deps.host.getPipeline(target.projectId);
-        const column = targetPipeline.columns.find((c) => c.id === target.columnId);
-        const comments = (target.comments ?? []).map((c) => ({
-          id: c.id,
-          author: c.author,
-          content: c.content,
-          created_at: new Date(c.createdAt).toISOString(),
-        }));
-        const runs = (target.runs ?? []).map((r) => ({
-          id: r.id,
-          started_at: new Date(r.startedAt).toISOString(),
-          ended_at: new Date(r.endedAt).toISOString(),
-          end_reason: r.endReason,
-          token_usage: r.tokenUsage ?? null,
-        }));
-        respond(true, {
-          id: target.id,
-          title: target.title,
-          description: target.description || '',
-          priority: target.priority,
-          column: column?.label ?? target.columnId,
-          pipeline: targetPipeline.columns.map((c) => c.label),
-          blocked_by: target.blockedBy ?? [],
-          branch: target.branch || null,
-          use_worktree: target.useWorktree ?? false,
-          worktree_path: target.worktreePath || null,
-          phase: target.phase ?? null,
-          run_count: runs.length,
-          created_at: new Date(target.createdAt).toISOString(),
-          updated_at: new Date(target.updatedAt).toISOString(),
-          comments,
-          runs,
-        });
-        break;
-      }
-      case 'move_ticket': {
-        const columnLabel = (toolArgs.column as string) ?? '';
-        const col = pipeline.columns.find((c) => c.label.toLowerCase() === columnLabel.toLowerCase());
-        if (!col) {
-          const valid = pipeline.columns.map((c) => c.label).join(', ');
-          respond(false, { error: { message: `Unknown column: "${columnLabel}". Valid columns: ${valid}` } });
-          return;
-        }
-        this.deps.host.moveTicketToColumn(ticketId, col.id);
-        respond(true, { ok: true, column: col.label });
-        break;
-      }
-      case 'escalate': {
-        const message = (toolArgs.message as string) ?? '';
-        if (!message) {
-          respond(false, { error: { message: 'Empty escalation message' } });
-          return;
-        }
-        this.deps.sendToWindow('toast:show', {
-          level: 'warning',
-          title: `Agent needs help: ${ticket.title}`,
-          description: message,
-        });
-        const entry = this.machines.get(ticketId);
-        if (entry?.machine.isStreaming()) {
-          void entry.machine.stop().then(() => {
-            entry.machine.forcePhase('awaiting_input');
-            respond(true, { ok: true, message: 'Escalated to human operator' });
-          });
-        } else {
-          respond(true, { ok: true, message: 'Escalated to human operator' });
-        }
-        break;
-      }
-      case 'notify': {
-        const notifyMessage = (toolArgs.message as string) ?? '';
-        if (!notifyMessage) {
-          respond(false, { error: { message: 'Empty notification message' } });
-          return;
-        }
-        this.deps.sendToWindow('toast:show', {
-          level: 'info',
-          title: `Agent note: ${ticket.title}`,
-          description: notifyMessage,
-        });
-        respond(true, { ok: true, message: 'Notification sent' });
-        break;
-      }
-      case 'add_ticket_comment': {
-        const commentTicketId = (toolArgs.ticket_id as string) || ticketId;
-        const content = (toolArgs.content as string) ?? '';
-        if (!content) {
-          respond(false, { error: { message: 'Missing content' } });
-          return;
-        }
-        const commentTarget = this.deps.host.getTicketById(commentTicketId);
-        if (!commentTarget) {
-          respond(false, { error: { message: `Ticket not found: ${commentTicketId}` } });
-          return;
-        }
-        const comment = { id: nanoid(), author: 'agent' as const, content, createdAt: Date.now() };
-        const existingComments = commentTarget.comments ?? [];
-        this.deps.host.updateTicket(commentTicketId, { comments: [...existingComments, comment] });
-        respond(true, { ok: true, comment_id: comment.id });
-        break;
-      }
-      // --- Read-only context tools (available to all sessions including autopilot) ---
-      case 'get_ticket_comments': {
-        const commentsTicketId = (toolArgs.ticket_id as string) ?? '';
-        if (!commentsTicketId) {
-          respond(false, { error: { message: 'Missing ticket_id' } });
-          return;
-        }
-        const commentsTarget = this.deps.host.getTicketById(commentsTicketId);
-        if (!commentsTarget) {
-          respond(false, { error: { message: `Ticket not found: ${commentsTicketId}` } });
-          return;
-        }
-        respond(true, {
-          comments: (commentsTarget.comments ?? []).map((c) => ({
-            id: c.id,
-            author: c.author,
-            content: c.content,
-            created_at: new Date(c.createdAt).toISOString(),
-          })),
-        });
-        break;
-      }
-      // --- Project-scoped tools (available in interactive sessions) ---
-      case 'list_projects': {
-        const projects = this.deps.store.getProjects().map((p) => {
-          const pl = this.deps.host.getPipeline(p.id);
-          return {
-            id: p.id,
-            label: p.label,
-            workspaceDir: getLocalWorkspaceDir(p.source),
-            columns: pl.columns.map((c) => c.label),
-          };
-        });
-        respond(true, { projects });
-        break;
-      }
-      case 'list_tickets': {
-        const projectId = (toolArgs.project_id as string) ?? '';
-        if (!projectId) {
-          respond(false, { error: { message: 'Missing project_id' } });
-          return;
-        }
-        const pl = this.deps.host.getPipeline(projectId);
-        let tickets = this.deps.host.getTicketsByProject(projectId);
-        const columnFilter = toolArgs.column as string | undefined;
-        if (columnFilter) {
-          const col = pl.columns.find((c) => c.label.toLowerCase() === columnFilter.toLowerCase());
-          if (col) {
-            tickets = tickets.filter((t) => t.columnId === col.id);
-          }
-        }
-        const priorityFilter = toolArgs.priority as string | undefined;
-        if (priorityFilter) {
-          tickets = tickets.filter((t) => t.priority === priorityFilter);
-        }
-        const result = tickets.map((t) => ({
-          id: t.id,
-          title: t.title,
-          description: t.description || '',
-          priority: t.priority,
-          column: pl.columns.find((c) => c.id === t.columnId)?.label ?? t.columnId,
-          phase: t.phase,
-          blocked_by: t.blockedBy ?? [],
-          created_at: new Date(t.createdAt).toISOString(),
-          updated_at: new Date(t.updatedAt).toISOString(),
-        }));
-        respond(true, { tickets: result });
-        break;
-      }
-      case 'create_ticket': {
-        const projectId = (toolArgs.project_id as string) ?? '';
-        const title = (toolArgs.title as string) ?? '';
-        if (!projectId || !title) {
-          respond(false, { error: { message: 'Missing project_id or title' } });
-          return;
-        }
-        const proj = this.deps.store.getProjects().find((p) => p.id === projectId);
-        if (!proj) {
-          respond(false, { error: { message: `Project not found: ${projectId}` } });
-          return;
-        }
-        const newTicket = this.deps.host.addTicket({
-          projectId,
-          milestoneId: (toolArgs.milestone_id as string) || undefined,
-          title,
-          description: (toolArgs.description as string) ?? '',
-          priority: (toolArgs.priority as TicketPriority) ?? 'medium',
-          blockedBy: [],
-        });
-        respond(true, {
-          id: newTicket.id,
-          title: newTicket.title,
-          column: this.deps.host.getPipeline(projectId).columns[0]?.label,
-        });
-        break;
-      }
-      case 'update_ticket': {
-        const targetId = (toolArgs.ticket_id as string) ?? '';
-        if (!targetId) {
-          respond(false, { error: { message: 'Missing ticket_id' } });
-          return;
-        }
-        const target = this.deps.host.getTicketById(targetId);
-        if (!target) {
-          respond(false, { error: { message: `Ticket not found: ${targetId}` } });
-          return;
-        }
-        const patch: Record<string, unknown> = {};
-        if (toolArgs.title) {
-          patch.title = toolArgs.title;
-        }
-        if (toolArgs.description !== undefined) {
-          patch.description = toolArgs.description;
-        }
-        if (toolArgs.priority) {
-          patch.priority = toolArgs.priority;
-        }
-        if (toolArgs.branch !== undefined) {
-          patch.branch = toolArgs.branch;
-        }
-        // Dependency management
-        if (toolArgs.add_blocked_by || toolArgs.remove_blocked_by) {
-          const current = new Set(target.blockedBy ?? []);
-          for (const id of (toolArgs.add_blocked_by as string[]) ?? []) {
-            current.add(id);
-          }
-          for (const id of (toolArgs.remove_blocked_by as string[]) ?? []) {
-            current.delete(id);
-          }
-          patch.blockedBy = [...current];
-        }
-        this.deps.host.updateTicket(targetId, patch);
-        respond(true, { ok: true });
-        break;
-      }
-      case 'start_ticket': {
-        const targetId = (toolArgs.ticket_id as string) ?? '';
-        if (!targetId) {
-          respond(false, { error: { message: 'Missing ticket_id' } });
-          return;
-        }
-        void this.startSupervisor(targetId).then(
-          () => respond(true, { ok: true }),
-          (err) => respond(false, { error: { message: String(err) } })
-        );
-        break;
-      }
-      case 'stop_ticket': {
-        const targetId = (toolArgs.ticket_id as string) ?? '';
-        if (!targetId) {
-          respond(false, { error: { message: 'Missing ticket_id' } });
-          return;
-        }
-        void this.stopSupervisor(targetId).then(
-          () => respond(true, { ok: true }),
-          (err) => respond(false, { error: { message: String(err) } })
-        );
-        break;
-      }
-      // --- Read-only context tools (available to all sessions including autopilot) ---
-      case 'list_milestones': {
-        const projectId = (toolArgs.project_id as string) ?? '';
-        if (!projectId) {
-          respond(false, { error: { message: 'Missing project_id' } });
-          return;
-        }
-        const items = this.deps.host.getMilestonesByProject(projectId);
-        respond(true, {
-          milestones: items.map((i) => ({
-            id: i.id,
-            title: i.title,
-            description: i.description || '',
-            branch: i.branch || null,
-            status: i.status,
-            created_at: new Date(i.createdAt).toISOString(),
-            updated_at: new Date(i.updatedAt).toISOString(),
-          })),
-        });
-        break;
-      }
-      case 'list_pages': {
-        const projectId = (toolArgs.project_id as string) ?? '';
-        if (!projectId) {
-          respond(false, { error: { message: 'Missing project_id' } });
-          return;
-        }
-        if (!this.deps.store.getProjects().find((p) => p.id === projectId)) {
-          respond(false, { error: { message: `Project not found: ${projectId}` } });
-          return;
-        }
-        const pages = this.deps.host.getPagesByProject(projectId);
-        respond(true, {
-          pages: pages.map((p) => ({
-            id: p.id,
-            title: p.title,
-            icon: p.icon ?? null,
-            parent_id: p.parentId,
-            sort_order: p.sortOrder,
-            is_root: p.isRoot ?? false,
-            created_at: new Date(p.createdAt).toISOString(),
-            updated_at: new Date(p.updatedAt).toISOString(),
-          })),
-        });
-        break;
-      }
-      case 'read_page': {
-        const pageId = (toolArgs.page_id as string) ?? '';
-        if (!pageId) {
-          respond(false, { error: { message: 'Missing page_id' } });
-          return;
-        }
-        const page = this.deps.host.getPageById(pageId);
-        if (!page) {
-          respond(false, { error: { message: `Page not found: ${pageId}` } });
-          return;
-        }
-        void this.deps.host.readPageContent(pageId).then(
-          (content) =>
-            respond(true, {
-              id: page.id,
-              title: page.title,
-              icon: page.icon ?? null,
-              parent_id: page.parentId,
-              is_root: page.isRoot ?? false,
-              content,
-            }),
-          () => respond(false, { error: { message: `Failed to read page content: ${pageId}` } })
-        );
-        break;
-      }
-      case 'read_milestone_brief': {
-        const milestoneId = (toolArgs.milestone_id as string) ?? '';
-        if (!milestoneId) {
-          respond(false, { error: { message: 'Missing milestone_id' } });
-          return;
-        }
-        const ms = this.deps.host.getMilestoneById(milestoneId);
-        if (!ms) {
-          respond(false, { error: { message: `Milestone not found: ${milestoneId}` } });
-          return;
-        }
-        respond(true, { brief: ms.brief ?? '' });
-        break;
-      }
-      case 'search_tickets': {
-        const query = (toolArgs.query as string) ?? '';
-        if (!query) {
-          respond(false, { error: { message: 'Missing query' } });
-          return;
-        }
-        const q = query.toLowerCase();
-        const projectFilter = toolArgs.project_id as string | undefined;
-        const allTickets = projectFilter
-          ? this.deps.host.getTicketsByProject(projectFilter)
-          : this.deps.store.getProjects().flatMap((p) => this.deps.host.getTicketsByProject(p.id));
-        const matches = allTickets.filter(
-          (t) => t.title.toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q)
-        );
-        const searchResult = matches.map((t) => {
-          const pl = this.deps.host.getPipeline(t.projectId);
-          return {
-            id: t.id,
-            project_id: t.projectId,
-            title: t.title,
-            description: t.description || '',
-            priority: t.priority,
-            column: pl.columns.find((c) => c.id === t.columnId)?.label ?? t.columnId,
-            phase: t.phase,
-            created_at: new Date(t.createdAt).toISOString(),
-            updated_at: new Date(t.updatedAt).toISOString(),
-          };
-        });
-        respond(true, { tickets: searchResult });
-        break;
-      }
-      case 'get_ticket_history': {
-        const historyTicketId = (toolArgs.ticket_id as string) ?? '';
-        if (!historyTicketId) {
-          respond(false, { error: { message: 'Missing ticket_id' } });
-          return;
-        }
-        const historyTarget = this.deps.host.getTicketById(historyTicketId);
-        if (!historyTarget) {
-          respond(false, { error: { message: `Ticket not found: ${historyTicketId}` } });
-          return;
-        }
-        const historyRuns = (historyTarget.runs ?? []).map((r) => ({
-          id: r.id,
-          started_at: new Date(r.startedAt).toISOString(),
-          ended_at: new Date(r.endedAt).toISOString(),
-          end_reason: r.endReason,
-          token_usage: r.tokenUsage ?? null,
-        }));
-        respond(true, {
-          ticket_id: historyTarget.id,
-          phase: historyTarget.phase ?? null,
-          run_count: historyRuns.length,
-          total_token_usage: historyTarget.tokenUsage ?? null,
-          runs: historyRuns,
-        });
-        break;
-      }
-      case 'get_pipeline': {
-        const pipelineProjectId = (toolArgs.project_id as string) ?? '';
-        if (!pipelineProjectId) {
-          respond(false, { error: { message: 'Missing project_id' } });
-          return;
-        }
-        const pl = this.deps.host.getPipeline(pipelineProjectId);
-        respond(true, {
-          columns: pl.columns.map((c) => ({
-            id: c.id,
-            label: c.label,
-            description: c.description || null,
-            gate: c.gate ?? false,
-          })),
-        });
-        break;
-      }
-      default:
-        if (toolName === 'list_apps' || toolName.startsWith('app_')) {
-          this.dispatchAppControlCall(ticketId, toolName, toolArgs, respond);
-          return;
-        }
-        respond(false, { error: { message: `Unknown tool: ${toolName}` } });
-    }
-  }
-
-  /**
-   * Dispatch an `app_*` / `list_apps` call from an autopilot agent. Resolves
-   * the caller's ticket → code tab, then column-scopes every lookup (autopilot
-   * never reaches global dock apps). Returns an error result for out-of-scope
-   * or non-controllable apps.
-   */
-  private dispatchAppControlCall(
-    ticketId: TicketId,
-    toolName: string,
-    toolArgs: Record<string, unknown>,
-    respond: ClientFunctionResponder
-  ): void {
-    const manager = this.deps.appControlManager;
-    if (!manager) {
-      respond(false, { error: { message: 'App control is not available in this session.' } });
-      return;
-    }
-
-    // Resolve the code tab bound to this ticket. Autopilot is strictly
-    // column-scoped — no global dock apps.
-    const tab = this.deps.store.getCodeTabs().find((t) => t.ticketId === ticketId);
-    if (!tab) {
-      respond(false, {
-        error: {
-          message: 'No code tab is associated with this ticket — open the ticket in the Code deck first.',
-        },
-      });
-      return;
-    }
-    const tabId = tab.id;
-
-    if (toolName === 'list_apps') {
-      const apps = manager
-        .list()
-        .filter((a) => a.scope === 'column' && a.tabId === tabId)
-        .map((a) => ({
-          id: a.appId,
-          kind: a.kind,
-          scope: a.scope,
-          url: a.url ?? null,
-          title: a.title ?? null,
-          label: a.label,
-          controllable: a.controllable,
-        }));
-      respond(true, { apps });
-      return;
-    }
-
-    const appId = (toolArgs.app_id as string | undefined) ?? '';
-    if (!appId) {
-      respond(false, { error: { message: 'Missing app_id — call list_apps first.' } });
-      return;
-    }
-    const handleId = makeAppHandleId('column', appId, tabId);
-    const snapshot = manager.list().find((a) => a.handleId === handleId);
-    if (!snapshot) {
-      respond(false, {
-        error: { message: `Unknown or out-of-scope app: "${appId}". Call list_apps to see what's available.` },
-      });
-      return;
-    }
-    if (!snapshot.controllable) {
-      respond(false, {
-        error: {
-          message: `App "${appId}" (${snapshot.kind}) is not a web surface. Only browser/code/desktop/webview apps can be driven.`,
-        },
-      });
-      return;
-    }
-
-    const run = async (): Promise<Record<string, unknown>> => {
-      switch (toolName) {
-        case 'app_navigate': {
-          const url = (toolArgs.url as string) ?? '';
-          if (!url) {
-            throw new Error('Missing url');
-          }
-          await manager.navigate(handleId, url);
-          return { ok: true };
-        }
-        case 'app_reload':
-          await manager.reload(handleId);
-          return { ok: true };
-        case 'app_back':
-          await manager.back(handleId);
-          return { ok: true };
-        case 'app_forward':
-          await manager.forward(handleId);
-          return { ok: true };
-        case 'app_eval': {
-          const code = (toolArgs.code as string) ?? '';
-          if (!code) {
-            throw new Error('Missing code');
-          }
-          const value = await manager.eval(handleId, code);
-          return { value: value ?? null };
-        }
-        case 'app_screenshot': {
-          const filepath = await manager.screenshot(handleId, { artifactsSubdir: ticketId });
-          return { path: filepath };
-        }
-        case 'app_console': {
-          const level = toolArgs.min_level as AppConsoleLevel | undefined;
-          const entries = await manager.console(handleId, level ? { minLevel: level } : {});
-          return { entries };
-        }
-        case 'app_snapshot': {
-          const tree = await manager.snapshot(handleId);
-          return { snapshot: tree };
-        }
-        case 'app_click': {
-          const ref = (toolArgs.ref as string) ?? '';
-          if (!ref) {
-            throw new Error('Missing ref — get one from app_snapshot.');
-          }
-          const button = toolArgs.button as AppClickButton | undefined;
-          await manager.click(handleId, ref, button ? { button } : {});
-          return { ok: true };
-        }
-        case 'app_fill': {
-          const ref = (toolArgs.ref as string) ?? '';
-          const text = (toolArgs.text as string) ?? '';
-          if (!ref) {
-            throw new Error('Missing ref');
-          }
-          await manager.fill(handleId, ref, text);
-          return { ok: true };
-        }
-        case 'app_type': {
-          const text = (toolArgs.text as string) ?? '';
-          if (!text) {
-            throw new Error('Missing text');
-          }
-          await manager.type(handleId, text);
-          return { ok: true };
-        }
-        case 'app_press': {
-          const key = (toolArgs.key as string) ?? '';
-          if (!key) {
-            throw new Error('Missing key');
-          }
-          await manager.press(handleId, key);
-          return { ok: true };
-        }
-        default:
-          throw new Error(`Unhandled app tool: ${toolName}`);
-      }
-    };
-
-    run().then(
-      (result) => respond(true, result),
-      (e) => respond(false, { error: { message: e instanceof Error ? e.message : String(e) } })
-    );
-  }
-
-  /**
-   * Build the full supervisor prompt, incorporating FLEET.md custom prompt if present.
-   */
-  private buildFullSupervisorPrompt(ticketId: TicketId, attempt: number | null = null): string {
+  private buildAutopilotPrompts(ticketId: TicketId): { goalText: string; additionalInstructions: string } {
     const ticket = this.deps.host.getTicketById(ticketId)!;
     const project = this.deps.store.getProjects().find((p) => p.id === ticket.projectId)!;
     const pipeline = this.deps.host.getPipeline(ticket.projectId);
 
     // Gather context for the supervisor prompt
-    const context: SupervisorContext = {};
+    const context: SupervisorContext = { artifactsDir: this.deps.host.getAgentArtifactsDir(ticketId) };
 
-    // Project brief: read the root page's context.md (sync-safe since we pre-load it)
+    // Project brief: read the root page's body. Routed through PageManager
+    // so the lookup follows the same projectId-keyed layout the rest of the
+    // app uses; the host promise is awaited synchronously via .then because
+    // buildFullSupervisorPrompt itself is sync — we set the field on the
+    // context object that hasn't been frozen yet.
     const rootPage = this.deps.host.getPagesByProject(ticket.projectId).find((p) => p.isRoot);
     if (rootPage) {
+      const filePath = path.join(getProjectPagesDir(ticket.projectId), `${rootPage.id}.md`);
       try {
-        const dir = this.deps.host.getProjectDirPath(project);
-        const contextPath = path.join(dir, 'context.md');
-        if (existsSync(contextPath)) {
-          const brief = readFileSync(contextPath, 'utf-8');
+        if (existsSync(filePath)) {
+          const brief = readFileSync(filePath, 'utf-8');
           if (brief.trim()) {
             context.projectBrief = brief.length > 500 ? `${brief.slice(0, 500)}\n…(truncated)` : brief;
           }
@@ -2453,85 +1426,17 @@ export class SupervisorOrchestrator {
       }
     }
 
-    const basePrompt = buildSupervisorPrompt(ticket, project, pipeline, context);
-    const customPrompt = this.deps.workflowLoader.getPromptTemplate(ticket.projectId);
-
-    if (customPrompt) {
-      let rendered = customPrompt;
-
-      // Render template variables if the prompt contains {{ }} expressions
-      if (hasTemplateExpressions(customPrompt)) {
-        const vars: TemplateVariables = {
-          ticket: {
-            id: ticket.id,
-            title: ticket.title,
-            description: ticket.description || '(no description)',
-            priority: ticket.priority,
-            columnId: ticket.columnId,
-            branch: this.deps.host.resolveTicketBranch(ticket),
-          },
-          pipeline: {
-            columns: pipeline.columns.map((c) => c.label).join(' → '),
-          },
-          project: {
-            label: project.label,
-            workspaceDir:
-              (project.source?.kind === 'local' ? project.source?.workspaceDir : project.source?.repoUrl) ?? '',
-          },
-          attempt,
-        };
-
-        try {
-          rendered = renderTemplate(customPrompt, vars);
-        } catch (err) {
-          console.warn(
-            `[SupervisorOrchestrator] Template render failed for ${ticketId}: ${(err as Error).message}. Using raw prompt.`
-          );
-          rendered = customPrompt;
-        }
-      }
-
-      return `${basePrompt}\n\n## Project-Specific Instructions (from FLEET.md)\n\n${rendered}`;
-    }
-
-    return basePrompt;
-  }
-
-  /**
-   * Build the full variables object for a session or run RPC call.
-   * Includes the supervisor prompt and client tool definitions so the agent
-   * can call project tools via the existing WebSocket connection.
-   *
-   * - 'autopilot': ticket tools only (automated runs, retries, continuations)
-   * - 'interactive': broader project-management tools for human-driven ticket sessions
-   */
-  buildRunVariables(ticketId: TicketId, mode: 'autopilot' | 'interactive' = 'autopilot'): Record<string, unknown> {
-    const ticket = this.deps.host.getTicketById(ticketId);
-    const opts = {
-      projectId: ticket?.projectId,
-      projectLabel: ticket ? this.deps.store.getProjects().find((p) => p.id === ticket.projectId)?.label : undefined,
-      ticketId,
-    };
-    const vars = mode === 'autopilot' ? buildAutopilotVariables(opts) : buildInteractiveVariables(opts);
-    const supervisorPrompt = this.buildFullSupervisorPrompt(ticketId);
-    const toolInstructions = (vars.additional_instructions as string) ?? '';
     return {
-      ...vars,
-      additional_instructions: toolInstructions ? `${supervisorPrompt}\n\n${toolInstructions}` : supervisorPrompt,
+      goalText: buildAutopilotGoalText(ticket, project, pipeline, context),
+      additionalInstructions: buildAutopilotAdditionalInstructions(ticket, project, pipeline, context),
     };
   }
 
-  /**
-   * Wrapper around the pure `buildContinuationPrompt` helper that resolves the
-   * ticket, pipeline, and FLEET.md continuation override from this instance's
-   * state.
-   */
-  buildContinuationPromptForTicket(ticketId: TicketId, turn: number, maxTurns: number): string {
-    const ticket = this.deps.host.getTicketById(ticketId);
-    const customContinuation = ticket
-      ? this.deps.workflowLoader.getConfig(ticket.projectId).supervisor?.continuation_prompt
-      : undefined;
-    const pipeline = ticket ? this.deps.host.getPipeline(ticket.projectId) : null;
-    return buildContinuationPrompt({ ticket, pipeline, customContinuation, turn, maxTurns });
+  /** Release bridge subscription on shutdown. */
+  dispose(): void {
+    if (this.offBridge) {
+      this.offBridge();
+      this.offBridge = null;
+    }
   }
 }

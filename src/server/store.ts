@@ -2,19 +2,33 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { homedir } from 'os';
 import { dirname, join } from 'path';
 
+import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig } from '@/lib/agent-config';
 import type { StoreData } from '@/shared/types';
 
 const STORE_PATH = join(homedir(), '.config', 'Omni Code', 'config.json');
 
-const DEFAULTS: StoreData = {
-  sandboxBackend: 'none',
-  sandboxProfiles: null,
-  selectedMachineId: null,
+export const DEFAULTS: StoreData = {
+  defaultProfileName: 'host',
   optInToLauncherPrereleases: false,
   previewFeatures: false,
+  notifyOnAgentAttention: false,
+  textScale: 100,
+  voicePersonas: [],
+  activeVoicePersonaId: 'default',
+  voiceToggleHotkey: null,
+  globalVoiceToggleHotkey: null,
+  localVoiceEnabled: false,
+  audioSettings: {
+    inputDeviceId: null,
+    outputDeviceId: null,
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+  },
   layoutMode: 'chat',
-  theme: 'tokyo-night',
+  theme: 'omni',
   onboardingComplete: false,
+  cloudMode: null,
   projects: [],
   milestones: [],
   pages: [],
@@ -22,18 +36,29 @@ const DEFAULTS: StoreData = {
   tasks: [],
   tickets: [],
   schemaVersion: 0,
-  chatSessionId: null,
-  chatProjectId: null,
   codeTabs: [],
   activeCodeTabId: null,
-  codeLayoutMode: 'deck',
+  codeLayoutMode: 'tile',
   codeDeckBackground: null,
+  glassTone: 'dark',
   activeTicketId: null,
   wipLimit: 3,
   weeklyReviewDay: 5,
   lastWeeklyReviewAt: null,
   enabledExtensions: {},
   skillSources: {},
+  installedBundles: {},
+  customApps: [],
+  gitCredentials: [],
+  pullRequestLinks: [],
+  modelsConfig: emptyModelsConfig(),
+  mcpConfig: emptyMcpConfig(),
+  networkConfig: emptyNetworkConfig(),
+  envVars: '',
+  browserProfiles: [],
+  browserTabsets: {},
+  browserHistory: [],
+  browserBookmarks: [],
 };
 
 type ChangeCallback = (data: StoreData | undefined) => void;

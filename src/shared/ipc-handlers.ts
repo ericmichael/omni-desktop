@@ -5,13 +5,21 @@
  * config:*, util:*, and skills:* handlers. Electron-specific handlers
  * (dialog, shell, window references) remain in `src/main/index.ts`.
  */
+import { randomUUID } from 'node:crypto';
+
 import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';
 import { WebSocket as WsWebSocket } from 'ws';
 
-import { installSkillFromFile, listSkills, setSkillEnabled, uninstallSkill } from '@/main/skills';
+import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig } from '@/lib/agent-config';
 import type { SkillStore } from '@/main/skills';
-import { fetchMarketplace, installMarketplacePlugin } from '@/main/skills-marketplace';
+import { installSkillFromFile, listSkills, setSkillEnabled, uninstallSkill } from '@/main/skills';
+import {
+  checkBundleUpdates,
+  fetchMarketplace,
+  installMarketplacePlugin,
+  updateMarketplacePlugin,
+} from '@/main/skills-marketplace';
 import {
   checkModelsConfigured,
   ensureDirectory,
@@ -25,12 +33,23 @@ import {
   isCliInstalledInPath,
   isDirectory,
   isFile,
+  listRuntimeModels,
   pathExists,
   testModelConnection,
   validateConfigPath,
   validateUserPath,
 } from '@/main/util';
+import { tokenLast4 } from '@/shared/git-credentials';
 import type { IIpcListener } from '@/shared/ipc-listener';
+import type { SecretStore } from '@/shared/secret-store';
+import type {
+  GitCredential,
+  GitCredentialInput,
+  McpConfig,
+  ModelsConfig,
+  NetworkConfig,
+  StoreData,
+} from '@/shared/types';
 
 export interface UtilHandlerOptions {
   /**
@@ -87,6 +106,131 @@ export function registerConfigHandlers(ipc: IIpcListener, configDir: string): vo
 }
 
 /**
+ * Minimal store surface the settings-config handlers need. Satisfied by
+ * electron-store, the server `ServerStore`, and the per-tenant `PgSettingsStore`.
+ */
+export interface SettingsConfigStore {
+  get<K extends keyof StoreData>(key: K): StoreData[K] | undefined;
+  set<K extends keyof StoreData>(key: K, value: StoreData[K]): void;
+}
+
+/**
+ * Register the typed `settings:*` agent-config channels. These replace the
+ * path-based `config:*` file I/O for the four configs whose source of truth is
+ * the store: model providers, MCP servers, network policy, and `.env`. The
+ * store backend (electron-store / ServerStore / per-tenant PgSettingsStore) is
+ * resolved per-invoke; `afterWrite` is the transport's hook to broadcast
+ * `store:changed` and re-materialize the agent's on-disk config.
+ */
+/**
+ * Optional secret-masking hooks (cloud/teams). `maskModels`/`maskMcp` blank out
+ * shared secret values before a config reaches the renderer; `restoreModels`
+ * re-applies the stored value on save so a sentinel round-trip never clobbers
+ * the real secret. Omitted in Electron/local (a user's own keys, no masking).
+ */
+export interface SettingsSecretMask {
+  maskModels?: (c: ModelsConfig) => ModelsConfig;
+  maskMcp?: (c: McpConfig) => McpConfig;
+  restoreModels?: (incoming: ModelsConfig, stored: ModelsConfig) => ModelsConfig;
+}
+
+export function registerSettingsConfigHandlers(
+  ipc: IIpcListener,
+  resolveStore: (event: unknown) => SettingsConfigStore,
+  afterWrite: (event: unknown) => void,
+  mask: SettingsSecretMask = {}
+): void {
+  ipc.handle('settings:get-models-config', (e: unknown) => {
+    const c = resolveStore(e).get('modelsConfig') ?? emptyModelsConfig();
+    return mask.maskModels ? mask.maskModels(c) : c;
+  });
+  ipc.handle('settings:set-models-config', (e: unknown, config: ModelsConfig) => {
+    const store = resolveStore(e);
+    const next = mask.restoreModels ? mask.restoreModels(config, store.get('modelsConfig') ?? emptyModelsConfig()) : config;
+    store.set('modelsConfig', next);
+    afterWrite(e);
+  });
+  ipc.handle('settings:get-mcp-config', (e: unknown) => {
+    const c = resolveStore(e).get('mcpConfig') ?? emptyMcpConfig();
+    return mask.maskMcp ? mask.maskMcp(c) : c;
+  });
+  ipc.handle('settings:set-mcp-config', (e: unknown, config: McpConfig) => {
+    resolveStore(e).set('mcpConfig', config);
+    afterWrite(e);
+  });
+  ipc.handle(
+    'settings:get-network-config',
+    (e: unknown) => resolveStore(e).get('networkConfig') ?? emptyNetworkConfig()
+  );
+  ipc.handle('settings:set-network-config', (e: unknown, config: NetworkConfig) => {
+    resolveStore(e).set('networkConfig', config);
+    afterWrite(e);
+  });
+  ipc.handle('settings:get-env', (e: unknown) => resolveStore(e).get('envVars') ?? '');
+  ipc.handle('settings:set-env', (e: unknown, content: string) => {
+    resolveStore(e).set('envVars', content);
+    afterWrite(e);
+  });
+}
+
+/**
+ * Register the write-only `git-cred:*` channels. Metadata (the `GitCredential[]`
+ * list) lives in the store and is safe to broadcast; the token bytes go to the
+ * injected `SecretStore` and never round-trip to the renderer. `set` upserts by
+ * host — host-scoped means one credential per host, reused across projects.
+ * `afterWrite` broadcasts `store:changed` (the secret store has no snapshot).
+ */
+export function registerGitCredentialHandlers(
+  ipc: IIpcListener,
+  resolveStore: (event: unknown) => SettingsConfigStore,
+  resolveSecretStore: (event: unknown) => SecretStore,
+  afterWrite: (event: unknown) => void
+): void {
+  const list = (e: unknown): GitCredential[] => resolveStore(e).get('gitCredentials') ?? [];
+
+  ipc.handle('git-cred:list', (e: unknown) => list(e));
+
+  ipc.handle('git-cred:set', async (e: unknown, input: GitCredentialInput) => {
+    const host = input.host.trim().toLowerCase();
+    const username = input.username.trim();
+    const token = input.token;
+    if (!host || !token) {
+      throw new Error('git-cred:set requires a host and a token');
+    }
+    const store = resolveStore(e);
+    const secrets = resolveSecretStore(e);
+    const existing = list(e);
+    // Upsert by host: replace the existing host entry (reusing its id so the
+    // secret slot is overwritten) or mint a fresh one.
+    const prior = existing.find((c) => c.host === host);
+    const id = prior?.id ?? randomUUID();
+    await secrets.setGitToken(id, token);
+    const next: GitCredential = {
+      id,
+      host,
+      username: username || 'git',
+      last4: tokenLast4(token),
+      createdAt: prior?.createdAt ?? Date.now(),
+      ...(input.label?.trim() ? { label: input.label.trim() } : {}),
+    };
+    store.set('gitCredentials', [...existing.filter((c) => c.id !== id), next]);
+    afterWrite(e);
+    return store.get('gitCredentials') ?? [];
+  });
+
+  ipc.handle('git-cred:delete', async (e: unknown, id: string) => {
+    const store = resolveStore(e);
+    await resolveSecretStore(e).deleteGitToken(id);
+    store.set(
+      'gitCredentials',
+      (store.get('gitCredentials') ?? []).filter((c) => c.id !== id)
+    );
+    afterWrite(e);
+    return store.get('gitCredentials') ?? [];
+  });
+}
+
+/**
  * Register the portable subset of `util:*` handlers. Electron-only handlers
  * (`util:select-directory`, `util:select-file`, `util:open-directory`) are
  * NOT registered here and must be wired separately by each transport.
@@ -104,6 +248,15 @@ export function registerUtilHandlers(ipc: IIpcListener, opts: UtilHandlerOptions
     // null bytes and depth, no path-prefix restriction.
     validateUserPath(dirPath, { checkDepth: true });
     return ensureDirectory(dirPath);
+  });
+  ipc.handle('util:session-workspace-dir', async (_: unknown, baseDir: string, sessionId: string) => {
+    // Sanitize the id to a single safe path segment (defense-in-depth — ids are
+    // uuids, but never let a session id traverse out of Sessions/).
+    const safeId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '') || 'default';
+    const dir = join(baseDir, 'Sessions', safeId);
+    validateUserPath(dir, { checkDepth: true });
+    await ensureDirectory(dir);
+    return dir;
   });
   ipc.handle('util:list-directory', async (_: unknown, dirPath: string) => {
     validateUserPath(dirPath);
@@ -141,6 +294,7 @@ export function registerUtilHandlers(ipc: IIpcListener, opts: UtilHandlerOptions
   });
   ipc.handle('util:check-models-configured', () => checkModelsConfigured());
   ipc.handle('util:test-model-connection', (_: unknown, modelRef?: string) => testModelConnection(modelRef));
+  ipc.handle('util:list-models', () => listRuntimeModels());
 
   ipc.handle('util:rebuild-sandbox-image', async () => {
     // Sandbox Dockerfiles now live in omni-code. Trigger rebuild via the CLI.
@@ -202,17 +356,33 @@ export function registerUtilHandlers(ipc: IIpcListener, opts: UtilHandlerOptions
 }
 
 /**
- * Register `skills:*` handlers. Skills live under the config dir.
+ * Register `skills:*` handlers. Skills live under a config dir (the
+ * `<dir>/skills` + `<dir>/skills-disabled` folders) with source/bundle metadata
+ * in the store. Both are resolved per-invoke from the event: `() => x` for the
+ * single-tenant Electron app, or per-tenant on the server (each tenant gets its
+ * own skills directory + settings store).
  */
-export function registerSkillsHandlers(ipc: IIpcListener, configDir: string, store: SkillStore): void {
-  ipc.handle('skills:list', () => listSkills(configDir, store));
-  ipc.handle('skills:install', (_: unknown, filePath: string) => installSkillFromFile(configDir, filePath, store));
-  ipc.handle('skills:uninstall', (_: unknown, name: string) => uninstallSkill(configDir, name, store));
-  ipc.handle('skills:set-enabled', (_: unknown, name: string, enabled: boolean) =>
-    setSkillEnabled(configDir, name, enabled)
+export function registerSkillsHandlers(
+  ipc: IIpcListener,
+  resolveConfigDir: (event: unknown) => string,
+  resolveStore: (event: unknown) => SkillStore
+): void {
+  ipc.handle('skills:list', (e: unknown) => listSkills(resolveConfigDir(e), resolveStore(e)));
+  ipc.handle('skills:install', (e: unknown, filePath: string) =>
+    installSkillFromFile(resolveConfigDir(e), filePath, resolveStore(e))
+  );
+  ipc.handle('skills:uninstall', (e: unknown, name: string) =>
+    uninstallSkill(resolveConfigDir(e), name, resolveStore(e))
+  );
+  ipc.handle('skills:set-enabled', (e: unknown, name: string, enabled: boolean) =>
+    setSkillEnabled(resolveConfigDir(e), name, enabled)
   );
   ipc.handle('skills:fetch-marketplace', (_: unknown, repo: string) => fetchMarketplace(repo));
-  ipc.handle('skills:install-marketplace-plugin', (_: unknown, repo: string, name: string) =>
-    installMarketplacePlugin(configDir, repo, name, store)
+  ipc.handle('skills:install-marketplace-plugin', (e: unknown, repo: string, name: string) =>
+    installMarketplacePlugin(resolveConfigDir(e), repo, name, resolveStore(e))
   );
+  ipc.handle('skills:update-marketplace-plugin', (e: unknown, repo: string, name: string) =>
+    updateMarketplacePlugin(resolveConfigDir(e), repo, name, resolveStore(e))
+  );
+  ipc.handle('skills:check-bundle-updates', (e: unknown) => checkBundleUpdates(resolveStore(e)));
 }

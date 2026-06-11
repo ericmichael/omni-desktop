@@ -1,664 +1,20 @@
 /**
- * Tests for the "client tools" architecture — project tools (get_ticket, move_ticket, escalate)
- * proxied through the existing WebSocket RPC instead of a separate MCP server.
+ * Tests for the launcher-only client-tool definitions and `buildSessionVariables`.
  *
- * 1. handleClientToolCall dispatcher (unit)
- * 2. buildRunVariables shape (unit)
- * 3. WebSocket round-trip: client_request → onClientRequest → client_response (integration)
+ * Project / ticket / milestone / page / inbox CRUD has moved to the in-process
+ * MCP server (`packages/projects-mcp`). ``escalate`` / ``notify`` used to live
+ * here as stubs but are now omniagents builtins (see the ``human`` capability
+ * and the ``client_request`` dispatch path in ``omniagents-ui/App.tsx``).
+ * Only supervisor lifecycle, UI overlays, and app/browser control remain.
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { WebSocketServer } from 'ws';
+import { describe, expect, it } from 'vitest';
 
-import {
-  buildAutopilotVariables,
-  buildCodeVariables,
-  buildInteractiveVariables,
-  extractSafeToolNames,
-  INBOX_CLIENT_TOOLS,
-  PAGE_CLIENT_TOOLS,
-  PROJECT_CLIENT_TOOLS,
-  READONLY_CONTEXT_TOOLS,
-  TICKET_CLIENT_TOOLS,
-} from '@/lib/client-tools';
-import type { ClientFunctionResponder,TicketMachineCallbacks } from '@/main/ticket-machine';
-import { TicketMachine } from '@/main/ticket-machine';
-import type { TicketPhase } from '@/shared/ticket-phase';
-import type { TicketId } from '@/shared/types';
-
-// ---------------------------------------------------------------------------
-// #region 1 — handleClientToolCall (extracted logic, tested directly)
-// ---------------------------------------------------------------------------
-
-/**
- * Minimal reproduction of ProjectManager.handleClientToolCall so we can
- * test the dispatching logic without instantiating a full ProjectManager.
- */
-type MockTicket = {
-  id: string;
-  title: string;
-  description: string;
-  priority: string;
-  columnId: string;
-  projectId: string;
-  phase?: string;
-};
-
-type MockProject = {
-  id: string;
-  label: string;
-  source: { kind: 'local'; workspaceDir: string } | { kind: 'git-remote'; repoUrl: string };
-};
-
-type ToolCallCtx = {
-  getTicketById: (id: TicketId) => MockTicket | null;
-  getPipeline: (pid: string) => { columns: { id: string; label: string }[] };
-  moveTicketToColumn: (tid: TicketId, colId: string) => void;
-  sendToWindow: (...a: unknown[]) => void;
-  machines: Map<TicketId, { machine: { isStreaming: () => boolean; stop: () => Promise<void>; forcePhase: (p: string) => void } }>;
-  // Project-scoped tool support
-  getProjects?: () => MockProject[];
-  getTicketsByProject?: (projectId: string) => MockTicket[];
-  addTicket?: (input: Record<string, unknown>) => MockTicket;
-  updateTicket?: (id: TicketId, patch: Record<string, unknown>) => void;
-  startSupervisor?: (id: TicketId) => Promise<void>;
-  stopSupervisor?: (id: TicketId) => Promise<void>;
-};
-
-function handleClientToolCall(
-  ticketId: TicketId,
-  functionName: string,
-  args: Record<string, unknown>,
-  respond: (ok: boolean, result?: Record<string, unknown>) => void,
-  ctx: ToolCallCtx
-): void {
-  if (functionName !== 'tool.call') {
-return;
-}
-
-  const toolName = args.tool as string | undefined;
-  const toolArgs = (args.arguments ?? {}) as Record<string, unknown>;
-
-  if (!toolName) {
-    respond(false, { error: { message: 'Missing tool name' } });
-    return;
-  }
-
-  const ticket = ctx.getTicketById(ticketId);
-  if (!ticket) {
-    respond(true, { error: 'Ticket not found' });
-    return;
-  }
-
-  const pipeline = ctx.getPipeline(ticket.projectId);
-
-  switch (toolName) {
-    case 'get_ticket': {
-      const lookupId = (toolArgs.ticket_id as string) || ticketId;
-      const target = ctx.getTicketById(lookupId);
-      if (!target) {
-        respond(true, { error: `Ticket not found: ${lookupId}` });
-        return;
-      }
-      const targetPipeline = ctx.getPipeline(target.projectId);
-      const column = targetPipeline.columns.find((c) => c.id === target.columnId);
-      respond(true, {
-        id: target.id,
-        title: target.title,
-        description: target.description || '',
-        priority: target.priority,
-        column: column?.label ?? target.columnId,
-        pipeline: targetPipeline.columns.map((c) => c.label),
-      });
-      break;
-    }
-    case 'move_ticket': {
-      const columnLabel = (toolArgs.column as string) ?? '';
-      const col = pipeline.columns.find((c) => c.label.toLowerCase() === columnLabel.toLowerCase());
-      if (!col) {
-        const valid = pipeline.columns.map((c) => c.label).join(', ');
-        respond(true, { error: `Unknown column: "${columnLabel}". Valid columns: ${valid}` });
-        return;
-      }
-      ctx.moveTicketToColumn(ticketId, col.id);
-      respond(true, { ok: true, column: col.label });
-      break;
-    }
-    case 'escalate': {
-      const message = (toolArgs.message as string) ?? '';
-      if (!message) {
-        respond(true, { error: 'Empty escalation message' });
-        return;
-      }
-      ctx.sendToWindow('toast:show', {
-        level: 'warning',
-        title: `Agent needs help: ${ticket.title}`,
-        description: message,
-      });
-      const entry = ctx.machines.get(ticketId);
-      if (entry?.machine.isStreaming()) {
-        void entry.machine.stop().then(() => {
-          entry.machine.forcePhase('awaiting_input');
-          respond(true, { ok: true, message: 'Escalated to human operator' });
-        });
-      } else {
-        respond(true, { ok: true, message: 'Escalated to human operator' });
-      }
-      break;
-    }
-    case 'list_projects': {
-      const projects = (ctx.getProjects?.() ?? []).map((p) => {
-        const pl = ctx.getPipeline(p.id);
-        return { id: p.id, label: p.label, workspaceDir: p.source.kind === 'local' ? p.source.workspaceDir : p.source.repoUrl, columns: pl.columns.map((c) => c.label) };
-      });
-      respond(true, { projects });
-      break;
-    }
-    case 'list_tickets': {
-      const projectId = (toolArgs.project_id as string) ?? '';
-      if (!projectId) {
- respond(true, { error: 'Missing project_id' }); return; 
-}
-      const pl = ctx.getPipeline(projectId);
-      let tickets = ctx.getTicketsByProject?.(projectId) ?? [];
-      const columnFilter = toolArgs.column as string | undefined;
-      if (columnFilter) {
-        const col = pl.columns.find((c) => c.label.toLowerCase() === columnFilter.toLowerCase());
-        if (col) {
-tickets = tickets.filter((t) => t.columnId === col.id);
-}
-      }
-      const priorityFilter = toolArgs.priority as string | undefined;
-      if (priorityFilter) {
-tickets = tickets.filter((t) => t.priority === priorityFilter);
-}
-      const result = tickets.map((t) => ({
-        id: t.id, title: t.title, description: t.description || '', priority: t.priority,
-        column: pl.columns.find((c) => c.id === t.columnId)?.label ?? t.columnId, phase: t.phase,
-      }));
-      respond(true, { tickets: result });
-      break;
-    }
-    case 'create_ticket': {
-      const projectId = (toolArgs.project_id as string) ?? '';
-      const title = (toolArgs.title as string) ?? '';
-      if (!projectId || !title) {
- respond(true, { error: 'Missing project_id or title' }); return; 
-}
-      const proj = (ctx.getProjects?.() ?? []).find((p) => p.id === projectId);
-      if (!proj) {
- respond(true, { error: `Project not found: ${projectId}` }); return; 
-}
-      const newTicket = ctx.addTicket?.({
-        projectId, title,
-        description: (toolArgs.description as string) ?? '',
-        priority: (toolArgs.priority as string) ?? 'medium',
-        blockedBy: [],
-      });
-      if (newTicket) {
-        respond(true, { id: newTicket.id, title: newTicket.title, column: ctx.getPipeline(projectId).columns[0]?.label });
-      }
-      break;
-    }
-    case 'update_ticket': {
-      const targetId = (toolArgs.ticket_id as string) ?? '';
-      if (!targetId) {
- respond(true, { error: 'Missing ticket_id' }); return; 
-}
-      const target = ctx.getTicketById(targetId);
-      if (!target) {
- respond(true, { error: `Ticket not found: ${targetId}` }); return; 
-}
-      const patch: Record<string, unknown> = {};
-      if (toolArgs.title) {
-patch.title = toolArgs.title;
-}
-      if (toolArgs.description !== undefined) {
-patch.description = toolArgs.description;
-}
-      if (toolArgs.priority) {
-patch.priority = toolArgs.priority;
-}
-      ctx.updateTicket?.(targetId, patch);
-      respond(true, { ok: true });
-      break;
-    }
-    case 'start_ticket': {
-      const targetId = (toolArgs.ticket_id as string) ?? '';
-      if (!targetId) {
- respond(true, { error: 'Missing ticket_id' }); return; 
-}
-      void ctx.startSupervisor?.(targetId).then(
-        () => respond(true, { ok: true }),
-        (err) => respond(true, { error: String(err) })
-      );
-      break;
-    }
-    case 'stop_ticket': {
-      const targetId = (toolArgs.ticket_id as string) ?? '';
-      if (!targetId) {
- respond(true, { error: 'Missing ticket_id' }); return; 
-}
-      void ctx.stopSupervisor?.(targetId).then(
-        () => respond(true, { ok: true }),
-        (err) => respond(true, { error: String(err) })
-      );
-      break;
-    }
-    case 'notify': {
-      const message = (toolArgs.message as string) ?? '';
-      if (!message) {
- respond(true, { error: 'Empty notification message' }); return; 
-}
-      ctx.sendToWindow('toast:show', { level: 'info', title: `Agent note: ${ticket.title}`, description: message });
-      respond(true, { ok: true, message: 'Notification sent' });
-      break;
-    }
-    case 'add_ticket_comment': {
-      const commentTicketId = (toolArgs.ticket_id as string) || ticketId;
-      const content = (toolArgs.content as string) ?? '';
-      if (!content) {
- respond(true, { error: 'Missing content' }); return; 
-}
-      const target = ctx.getTicketById(commentTicketId);
-      if (!target) {
- respond(true, { error: `Ticket not found: ${commentTicketId}` }); return; 
-}
-      const comment = { id: 'comment-1', author: 'agent' as const, content, createdAt: Date.now() };
-      const existing = (target as MockTicket & { comments?: unknown[] }).comments ?? [];
-      ctx.updateTicket?.(commentTicketId, { comments: [...existing, comment] });
-      respond(true, { ok: true, comment_id: comment.id });
-      break;
-    }
-    case 'get_ticket_comments': {
-      const commentsTicketId = (toolArgs.ticket_id as string) ?? '';
-      if (!commentsTicketId) {
- respond(true, { error: 'Missing ticket_id' }); return; 
-}
-      const target = ctx.getTicketById(commentsTicketId);
-      if (!target) {
- respond(true, { error: `Ticket not found: ${commentsTicketId}` }); return; 
-}
-      respond(true, { comments: (target as MockTicket & { comments?: { id: string; author: string; content: string; createdAt: number }[] }).comments ?? [] });
-      break;
-    }
-    case 'search_tickets': {
-      const query = (toolArgs.query as string) ?? '';
-      if (!query) {
- respond(true, { error: 'Missing query' }); return; 
-}
-      const q = query.toLowerCase();
-      const allTickets = ctx.getTicketsByProject?.(ticket.projectId) ?? [];
-      const matches = allTickets.filter((t) => t.title.toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q));
-      respond(true, { tickets: matches.map((t) => ({ id: t.id, title: t.title })) });
-      break;
-    }
-    case 'get_ticket_history': {
-      const historyId = (toolArgs.ticket_id as string) ?? '';
-      if (!historyId) {
- respond(true, { error: 'Missing ticket_id' }); return; 
-}
-      const target = ctx.getTicketById(historyId);
-      if (!target) {
- respond(true, { error: `Ticket not found: ${historyId}` }); return; 
-}
-      respond(true, { ticket_id: target.id, run_count: 0, runs: [] });
-      break;
-    }
-    case 'get_pipeline': {
-      const pipelineProjectId = (toolArgs.project_id as string) ?? '';
-      if (!pipelineProjectId) {
- respond(true, { error: 'Missing project_id' }); return; 
-}
-      const pl = ctx.getPipeline(pipelineProjectId);
-      respond(true, { columns: pl.columns.map((c) => ({ id: c.id, label: c.label, gate: false })) });
-      break;
-    }
-    default:
-      respond(true, { error: `Unknown tool: ${toolName}` });
-  }
-}
-
-// Shared mock context
-const MOCK_TICKET = {
-  id: 'ticket-1',
-  title: 'Fix the widget',
-  description: 'The widget is broken',
-  priority: 'high',
-  columnId: 'col-2',
-  projectId: 'proj-1',
-};
-
-const MOCK_PIPELINE = {
-  columns: [
-    { id: 'col-1', label: 'Backlog' },
-    { id: 'col-2', label: 'In Progress' },
-    { id: 'col-3', label: 'Done' },
-  ],
-};
-
-const MOCK_PROJECT: MockProject = {
-  id: 'proj-1',
-  label: 'My Project',
-  source: { kind: 'local', workspaceDir: '/workspace/my-project' },
-};
-
-const MOCK_TICKET_2: MockTicket = {
-  id: 'ticket-2',
-  title: 'Add logging',
-  description: 'Add structured logging',
-  priority: 'low',
-  columnId: 'col-1',
-  projectId: 'proj-1',
-  phase: 'idle',
-};
-
-const makeCtx = (overrides?: Partial<ToolCallCtx>) => ({
-  getTicketById: vi.fn().mockReturnValue(MOCK_TICKET),
-  getPipeline: vi.fn().mockReturnValue(MOCK_PIPELINE),
-  moveTicketToColumn: vi.fn(),
-  sendToWindow: vi.fn(),
-  machines: new Map() as Map<TicketId, { machine: { isStreaming: () => boolean; stop: () => Promise<void>; forcePhase: (p: string) => void } }>,
-  getProjects: vi.fn().mockReturnValue([MOCK_PROJECT]),
-  getTicketsByProject: vi.fn().mockReturnValue([MOCK_TICKET, MOCK_TICKET_2]),
-  addTicket: vi.fn().mockImplementation((input: Record<string, unknown>) => ({
-    id: 'ticket-new',
-    title: input.title,
-    description: input.description ?? '',
-    priority: input.priority ?? 'medium',
-    columnId: 'col-1',
-    projectId: input.projectId,
-  })),
-  updateTicket: vi.fn(),
-  startSupervisor: vi.fn().mockResolvedValue(undefined),
-  stopSupervisor: vi.fn().mockResolvedValue(undefined),
-  ...overrides,
-});
-
-describe('handleClientToolCall', () => {
-  it('ignores non-tool.call function names', () => {
-    const respond = vi.fn();
-    const ctx = makeCtx();
-    handleClientToolCall('ticket-1', 'other_function', {}, respond, ctx);
-    expect(respond).not.toHaveBeenCalled();
-  });
-
-  it('returns error when tool name is missing', () => {
-    const respond = vi.fn();
-    const ctx = makeCtx();
-    handleClientToolCall('ticket-1', 'tool.call', {}, respond, ctx);
-    expect(respond).toHaveBeenCalledWith(false, { error: { message: 'Missing tool name' } });
-  });
-
-  it('returns error when ticket is not found', () => {
-    const respond = vi.fn();
-    const ctx = makeCtx({ getTicketById: vi.fn().mockReturnValue(null) });
-    handleClientToolCall('ticket-1', 'tool.call', { tool: 'get_ticket' }, respond, ctx);
-    expect(respond).toHaveBeenCalledWith(true, { error: 'Ticket not found' });
-  });
-
-  describe('get_ticket', () => {
-    it('returns ticket data with column label and pipeline', () => {
-      const respond = vi.fn();
-      const ctx = makeCtx();
-      handleClientToolCall('ticket-1', 'tool.call', { tool: 'get_ticket' }, respond, ctx);
-      expect(respond).toHaveBeenCalledWith(true, {
-        id: 'ticket-1',
-        title: 'Fix the widget',
-        description: 'The widget is broken',
-        priority: 'high',
-        column: 'In Progress',
-        pipeline: ['Backlog', 'In Progress', 'Done'],
-      });
-    });
-
-    it('falls back to columnId when column not found in pipeline', () => {
-      const respond = vi.fn();
-      const ctx = makeCtx({
-        getTicketById: vi.fn().mockReturnValue({ ...MOCK_TICKET, columnId: 'unknown-col' }),
-      });
-      handleClientToolCall('ticket-1', 'tool.call', { tool: 'get_ticket' }, respond, ctx);
-      expect(respond).toHaveBeenCalledWith(true, expect.objectContaining({ column: 'unknown-col' }));
-    });
-  });
-
-  describe('move_ticket', () => {
-    it('moves ticket to valid column (case-insensitive)', () => {
-      const respond = vi.fn();
-      const ctx = makeCtx();
-      handleClientToolCall('ticket-1', 'tool.call', { tool: 'move_ticket', arguments: { column: 'done' } }, respond, ctx);
-      expect(ctx.moveTicketToColumn).toHaveBeenCalledWith('ticket-1', 'col-3');
-      expect(respond).toHaveBeenCalledWith(true, { ok: true, column: 'Done' });
-    });
-
-    it('returns error for unknown column with valid options', () => {
-      const respond = vi.fn();
-      const ctx = makeCtx();
-      handleClientToolCall('ticket-1', 'tool.call', { tool: 'move_ticket', arguments: { column: 'Nonexistent' } }, respond, ctx);
-      expect(respond).toHaveBeenCalledWith(true, {
-        error: 'Unknown column: "Nonexistent". Valid columns: Backlog, In Progress, Done',
-      });
-      expect(ctx.moveTicketToColumn).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('escalate', () => {
-    it('sends toast and responds when machine is not streaming', () => {
-      const respond = vi.fn();
-      const ctx = makeCtx();
-      handleClientToolCall('ticket-1', 'tool.call', { tool: 'escalate', arguments: { message: 'I am stuck' } }, respond, ctx);
-      expect(ctx.sendToWindow).toHaveBeenCalledWith('toast:show', expect.objectContaining({
-        level: 'warning',
-        description: 'I am stuck',
-      }));
-      expect(respond).toHaveBeenCalledWith(true, { ok: true, message: 'Escalated to human operator' });
-    });
-
-    it('returns error when message is empty', () => {
-      const respond = vi.fn();
-      const ctx = makeCtx();
-      handleClientToolCall('ticket-1', 'tool.call', { tool: 'escalate', arguments: { message: '' } }, respond, ctx);
-      expect(respond).toHaveBeenCalledWith(true, { error: 'Empty escalation message' });
-    });
-
-    it('stops streaming machine and sets awaiting_input', async () => {
-      const respond = vi.fn();
-      const mockMachine = {
-        isStreaming: () => true,
-        stop: vi.fn().mockResolvedValue(undefined),
-        forcePhase: vi.fn(),
-      };
-      const machines = new Map<TicketId, { machine: typeof mockMachine }>([
-        ['ticket-1', { machine: mockMachine }],
-      ]);
-      const ctx = makeCtx({ machines: machines as never });
-
-      handleClientToolCall('ticket-1', 'tool.call', { tool: 'escalate', arguments: { message: 'Need help' } }, respond, ctx);
-
-      // Wait for the async stop().then() chain
-      await vi.waitFor(() => expect(respond).toHaveBeenCalled());
-
-      expect(mockMachine.stop).toHaveBeenCalled();
-      expect(mockMachine.forcePhase).toHaveBeenCalledWith('awaiting_input');
-      expect(respond).toHaveBeenCalledWith(true, { ok: true, message: 'Escalated to human operator' });
-    });
-  });
-
-  // --- Project-scoped tools ---
-
-  describe('list_projects', () => {
-    it('returns all projects with pipeline columns', () => {
-      const respond = vi.fn();
-      const ctx = makeCtx();
-      handleClientToolCall('ticket-1', 'tool.call', { tool: 'list_projects' }, respond, ctx);
-      expect(respond).toHaveBeenCalledWith(true, {
-        projects: [{ id: 'proj-1', label: 'My Project', workspaceDir: '/workspace/my-project', columns: ['Backlog', 'In Progress', 'Done'] }],
-      });
-    });
-  });
-
-  describe('list_tickets', () => {
-    it('returns all tickets for a project', () => {
-      const respond = vi.fn();
-      const ctx = makeCtx();
-      handleClientToolCall('ticket-1', 'tool.call', { tool: 'list_tickets', arguments: { project_id: 'proj-1' } }, respond, ctx);
-      const result = respond.mock.calls[0]![1] as { tickets: unknown[] };
-      expect(result.tickets).toHaveLength(2);
-    });
-
-    it('filters by column label', () => {
-      const respond = vi.fn();
-      const ctx = makeCtx();
-      handleClientToolCall('ticket-1', 'tool.call', { tool: 'list_tickets', arguments: { project_id: 'proj-1', column: 'Backlog' } }, respond, ctx);
-      const result = respond.mock.calls[0]![1] as { tickets: { id: string }[] };
-      expect(result.tickets).toHaveLength(1);
-      expect(result.tickets[0]!.id).toBe('ticket-2');
-    });
-
-    it('filters by priority', () => {
-      const respond = vi.fn();
-      const ctx = makeCtx();
-      handleClientToolCall('ticket-1', 'tool.call', { tool: 'list_tickets', arguments: { project_id: 'proj-1', priority: 'high' } }, respond, ctx);
-      const result = respond.mock.calls[0]![1] as { tickets: { id: string }[] };
-      expect(result.tickets).toHaveLength(1);
-      expect(result.tickets[0]!.id).toBe('ticket-1');
-    });
-
-    it('returns error when project_id is missing', () => {
-      const respond = vi.fn();
-      const ctx = makeCtx();
-      handleClientToolCall('ticket-1', 'tool.call', { tool: 'list_tickets', arguments: {} }, respond, ctx);
-      expect(respond).toHaveBeenCalledWith(true, { error: 'Missing project_id' });
-    });
-  });
-
-  describe('create_ticket', () => {
-    it('creates a ticket and returns its id', () => {
-      const respond = vi.fn();
-      const ctx = makeCtx();
-      handleClientToolCall('ticket-1', 'tool.call', {
-        tool: 'create_ticket',
-        arguments: { project_id: 'proj-1', title: 'New task', description: 'Do the thing', priority: 'high' },
-      }, respond, ctx);
-      expect(ctx.addTicket).toHaveBeenCalledWith({
-        projectId: 'proj-1',
-        title: 'New task',
-        description: 'Do the thing',
-        priority: 'high',
-        blockedBy: [],
-      });
-      expect(respond).toHaveBeenCalledWith(true, { id: 'ticket-new', title: 'New task', column: 'Backlog' });
-    });
-
-    it('returns error for unknown project', () => {
-      const respond = vi.fn();
-      const ctx = makeCtx({ getProjects: vi.fn().mockReturnValue([]) });
-      handleClientToolCall('ticket-1', 'tool.call', {
-        tool: 'create_ticket',
-        arguments: { project_id: 'nonexistent', title: 'Oops' },
-      }, respond, ctx);
-      expect(respond).toHaveBeenCalledWith(true, { error: 'Project not found: nonexistent' });
-    });
-
-    it('returns error when title is missing', () => {
-      const respond = vi.fn();
-      const ctx = makeCtx();
-      handleClientToolCall('ticket-1', 'tool.call', {
-        tool: 'create_ticket',
-        arguments: { project_id: 'proj-1' },
-      }, respond, ctx);
-      expect(respond).toHaveBeenCalledWith(true, { error: 'Missing project_id or title' });
-    });
-  });
-
-  describe('update_ticket', () => {
-    it('updates ticket fields', () => {
-      const respond = vi.fn();
-      const ctx = makeCtx();
-      handleClientToolCall('ticket-1', 'tool.call', {
-        tool: 'update_ticket',
-        arguments: { ticket_id: 'ticket-1', title: 'Updated title', priority: 'critical' },
-      }, respond, ctx);
-      expect(ctx.updateTicket).toHaveBeenCalledWith('ticket-1', { title: 'Updated title', priority: 'critical' });
-      expect(respond).toHaveBeenCalledWith(true, { ok: true });
-    });
-
-    it('returns error for missing ticket_id', () => {
-      const respond = vi.fn();
-      const ctx = makeCtx();
-      handleClientToolCall('ticket-1', 'tool.call', {
-        tool: 'update_ticket',
-        arguments: {},
-      }, respond, ctx);
-      expect(respond).toHaveBeenCalledWith(true, { error: 'Missing ticket_id' });
-    });
-
-    it('returns error for unknown ticket', () => {
-      const respond = vi.fn();
-      const ctx = makeCtx({ getTicketById: vi.fn().mockImplementation((id: string) => id === 'ticket-1' ? MOCK_TICKET : null) });
-      handleClientToolCall('ticket-1', 'tool.call', {
-        tool: 'update_ticket',
-        arguments: { ticket_id: 'nonexistent' },
-      }, respond, ctx);
-      expect(respond).toHaveBeenCalledWith(true, { error: 'Ticket not found: nonexistent' });
-    });
-  });
-
-  describe('start_ticket', () => {
-    it('calls startSupervisor and responds ok', async () => {
-      const respond = vi.fn();
-      const ctx = makeCtx();
-      handleClientToolCall('ticket-1', 'tool.call', {
-        tool: 'start_ticket',
-        arguments: { ticket_id: 'ticket-2' },
-      }, respond, ctx);
-      await vi.waitFor(() => expect(respond).toHaveBeenCalled());
-      expect(ctx.startSupervisor).toHaveBeenCalledWith('ticket-2');
-      expect(respond).toHaveBeenCalledWith(true, { ok: true });
-    });
-
-    it('returns error on failure', async () => {
-      const respond = vi.fn();
-      const ctx = makeCtx({ startSupervisor: vi.fn().mockRejectedValue(new Error('No sandbox')) });
-      handleClientToolCall('ticket-1', 'tool.call', {
-        tool: 'start_ticket',
-        arguments: { ticket_id: 'ticket-2' },
-      }, respond, ctx);
-      await vi.waitFor(() => expect(respond).toHaveBeenCalled());
-      expect(respond).toHaveBeenCalledWith(true, { error: 'Error: No sandbox' });
-    });
-  });
-
-  describe('stop_ticket', () => {
-    it('calls stopSupervisor and responds ok', async () => {
-      const respond = vi.fn();
-      const ctx = makeCtx();
-      handleClientToolCall('ticket-1', 'tool.call', {
-        tool: 'stop_ticket',
-        arguments: { ticket_id: 'ticket-2' },
-      }, respond, ctx);
-      await vi.waitFor(() => expect(respond).toHaveBeenCalled());
-      expect(ctx.stopSupervisor).toHaveBeenCalledWith('ticket-2');
-      expect(respond).toHaveBeenCalledWith(true, { ok: true });
-    });
-  });
-
-  it('returns error for unknown tool name', () => {
-    const respond = vi.fn();
-    const ctx = makeCtx();
-    handleClientToolCall('ticket-1', 'tool.call', { tool: 'nonexistent_tool' }, respond, ctx);
-    expect(respond).toHaveBeenCalledWith(true, { error: 'Unknown tool: nonexistent_tool' });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// #region 2 — buildRunVariables shape
-// ---------------------------------------------------------------------------
+import { buildSessionVariables, extractSafeToolNames, PROJECT_CLIENT_TOOLS } from '@/lib/client-tools';
 
 describe('client_tools shape', () => {
-
   it('every tool has name, description, and parameters', () => {
-    for (const tool of [...TICKET_CLIENT_TOOLS, ...READONLY_CONTEXT_TOOLS, ...PROJECT_CLIENT_TOOLS, ...PAGE_CLIENT_TOOLS]) {
+    for (const tool of PROJECT_CLIENT_TOOLS) {
       expect(tool.name).toBeTypeOf('string');
       expect(tool.description).toBeTypeOf('string');
       expect(tool.parameters).toBeDefined();
@@ -667,160 +23,249 @@ describe('client_tools shape', () => {
     }
   });
 
-  it('autopilot variables contain ticket tools + read-only context tools', () => {
-    const vars = buildAutopilotVariables() as { client_tools: { name: string }[]; additional_instructions: string };
-    const names = vars.client_tools.map((t) => t.name);
-    // Ticket tools
-    expect(names).toContain('get_ticket');
-    expect(names).toContain('move_ticket');
-    expect(names).toContain('escalate');
-    expect(names).toContain('notify');
-    expect(names).toContain('add_ticket_comment');
-    // Read-only context tools
-    expect(names).toContain('list_tickets');
-    expect(names).toContain('list_milestones');
-    expect(names).toContain('read_milestone_brief');
-    expect(names).toContain('get_ticket_comments');
-    expect(names).toContain('search_tickets');
-    expect(names).toContain('get_ticket_history');
-    expect(names).toContain('get_pipeline');
-    // Read-only page tools
-    expect(names).toContain('list_pages');
-    expect(names).toContain('read_page');
-    // Should NOT contain write tools
-    expect(names).not.toContain('create_ticket');
-    expect(names).not.toContain('update_ticket');
-    expect(names).not.toContain('start_ticket');
-    expect(names).not.toContain('stop_ticket');
-    expect(names).not.toContain('create_milestone');
-    expect(names).not.toContain('create_page');
-    expect(names).not.toContain('update_page');
-    expect(names).toHaveLength(27);
-    // additional_instructions inlines behavioral guidance — not tool schemas
-    expect(vars.additional_instructions).toContain('Working with projects and tickets');
-    expect(vars.additional_instructions).toContain('escalate');
-    expect(vars.additional_instructions).toContain('Pipeline gates');
-  });
-
-  it('interactive variables contain all tools', () => {
-    const vars = buildInteractiveVariables() as { client_tools: { name: string }[]; additional_instructions: string };
-    const names = vars.client_tools.map((t) => t.name);
-    // Ticket tools
-    expect(names).toContain('get_ticket');
-    expect(names).toContain('move_ticket');
-    expect(names).toContain('escalate');
-    expect(names).toContain('notify');
-    expect(names).toContain('add_ticket_comment');
-    // Read-only context tools
-    expect(names).toContain('list_tickets');
-    expect(names).toContain('list_milestones');
-    expect(names).toContain('read_milestone_brief');
-    expect(names).toContain('get_ticket_comments');
-    expect(names).toContain('search_tickets');
-    expect(names).toContain('get_ticket_history');
-    expect(names).toContain('get_pipeline');
-    // Project tools
-    expect(names).toContain('list_projects');
-    expect(names).toContain('create_ticket');
-    expect(names).toContain('update_ticket');
-    expect(names).toContain('start_ticket');
-    expect(names).toContain('stop_ticket');
-    expect(names).toContain('archive_ticket');
-    expect(names).toContain('unarchive_ticket');
-    // Inbox tools
-    expect(names).toContain('list_inbox');
-    expect(names).toContain('create_inbox_item');
-    expect(names).toContain('update_inbox_item');
-    expect(names).toContain('delete_inbox_item');
-    expect(names).toContain('inbox_to_tickets');
-    expect(names).toContain('inbox_to_project');
-    // Milestone tools
-    expect(names).toContain('create_milestone');
-    expect(names).toContain('update_milestone');
-    // UI tools
-    expect(names).toContain('display_plan');
-    // Project tools
-    expect(names).toContain('create_project');
-    expect(names).toContain('update_project');
-    expect(names).toContain('delete_project');
-    // Page tools
-    expect(names).toContain('list_pages');
-    expect(names).toContain('read_page');
-    expect(names).toContain('create_page');
-    expect(names).toContain('update_page');
-    // Code-only tools should NOT be in interactive
-    expect(names).not.toContain('open_preview');
-    expect(names).toHaveLength(48);
-    // Behavioral guidance inlined — no tool schemas restated
-    expect(vars.additional_instructions).toContain('Working with projects and tickets');
-    expect(vars.additional_instructions).toContain('escalate');
-  });
-
-  it('code variables include code-deck-only tools', () => {
-    const vars = buildCodeVariables() as { client_tools: { name: string }[] };
-    const names = vars.client_tools.map((t) => t.name);
-    expect(names).toContain('open_preview');
-    expect(names).toContain('display_plan');
-    expect(names).toHaveLength(49);
-  });
-
-  it('interactive variables include safe_tool_overrides for read-only tools', () => {
-    const vars = buildInteractiveVariables() as { safe_tool_overrides: { safe_tool_names: string[] } };
-    const safeNames = vars.safe_tool_overrides.safe_tool_names;
-    // Read-only tools should be safe
-    expect(safeNames).toContain('get_ticket');
-    expect(safeNames).toContain('list_tickets');
-    expect(safeNames).toContain('list_milestones');
-    expect(safeNames).toContain('read_milestone_brief');
-    expect(safeNames).toContain('get_ticket_comments');
-    expect(safeNames).toContain('search_tickets');
-    expect(safeNames).toContain('get_ticket_history');
-    expect(safeNames).toContain('get_pipeline');
-    expect(safeNames).toContain('list_projects');
-    expect(safeNames).toContain('list_pages');
-    expect(safeNames).toContain('read_page');
-    expect(safeNames).toContain('list_inbox');
-    expect(safeNames).toContain('display_plan');
-    // Code-only tools not present
-    expect(safeNames).not.toContain('open_preview');
-    // Write tools should NOT be safe
-    expect(safeNames).not.toContain('move_ticket');
-    expect(safeNames).not.toContain('escalate');
-    expect(safeNames).not.toContain('create_project');
-    expect(safeNames).not.toContain('update_project');
-    expect(safeNames).not.toContain('delete_project');
-    expect(safeNames).not.toContain('create_ticket');
-    expect(safeNames).not.toContain('update_ticket');
-    expect(safeNames).not.toContain('start_ticket');
-    expect(safeNames).not.toContain('stop_ticket');
-    expect(safeNames).not.toContain('archive_ticket');
-    expect(safeNames).not.toContain('unarchive_ticket');
-    expect(safeNames).not.toContain('create_page');
-    expect(safeNames).not.toContain('update_page');
-    expect(safeNames).not.toContain('create_inbox_item');
-    expect(safeNames).not.toContain('delete_inbox_item');
-  });
-
-  it('code variables include open_preview in safe_tool_overrides', () => {
-    const vars = buildCodeVariables() as { safe_tool_overrides: { safe_tool_names: string[] } };
-    const safeNames = vars.safe_tool_overrides.safe_tool_names;
-    expect(safeNames).toContain('open_preview');
-    expect(safeNames).toContain('display_plan');
-  });
-
-  it('variables include context identifiers when provided', () => {
-    const vars = buildInteractiveVariables({ projectId: 'proj-1', projectLabel: 'My Project', ticketId: 'tkt-1' }) as {
+  it('chat surface contains the launcher-only tools, no code-deck-only tools', () => {
+    const vars = buildSessionVariables({ surface: 'chat' }) as {
+      client_tools: { name: string }[];
       additional_instructions: string;
     };
+    const names = vars.client_tools.map((t) => t.name);
+    expect(names).toContain('start_ticket');
+    expect(names).toContain('stop_ticket');
+    expect(names).toContain('display_plan');
+    expect(names).toContain('browser_list_tabsets');
+    // Tools served by MCP must NOT live here
+    expect(names).not.toContain('get_ticket');
+    expect(names).not.toContain('move_ticket');
+    expect(names).not.toContain('list_tickets');
+    expect(names).not.toContain('create_ticket');
+    expect(names).not.toContain('list_inbox');
+    expect(names).not.toContain('create_milestone');
+    // Code-only tools should NOT be in chat surface
+    expect(names).not.toContain('browser_open');
+    expect(vars.additional_instructions).toContain('Working with projects and tickets');
+  });
+
+  it('code surface includes code-deck-only tools', () => {
+    const vars = buildSessionVariables({ surface: 'code' }) as {
+      client_tools: { name: string }[];
+    };
+    const names = vars.client_tools.map((t) => t.name);
+    expect(names).toContain('browser_open');
+    expect(names).toContain('display_plan');
+    expect(names).toContain('browser_list_tabsets');
+  });
+
+  it('global surface includes the workspace-orchestrator tools plus everything code has', () => {
+    const vars = buildSessionVariables({ surface: 'global' }) as {
+      client_tools: { name: string }[];
+      additional_instructions: string;
+    };
+    const names = vars.client_tools.map((t) => t.name);
+    // workspace-superuser tools
+    expect(names).toContain('list_workspace');
+    expect(names).toContain('open_column');
+    expect(names).toContain('close_column');
+    expect(names).toContain('column_send');
+    expect(names).toContain('column_decide');
+    expect(names).toContain('column_cancel');
+    expect(names).toContain('column_transcript');
+    expect(names).toContain('column_read_entry');
+    expect(names).toContain('terminal_send_keys');
+    expect(names).toContain('terminal_capture');
+    expect(names).toContain('terminal_list');
+    expect(names).toContain('terminal_open');
+    expect(names).toContain('launch_app');
+    // inherits code + chat tools
+    expect(names).toContain('browser_open');
+    expect(names).toContain('list_apps');
+    expect(names).toContain('start_ticket');
+    // role guidance present
+    expect(vars.additional_instructions).toContain('workspace orchestrator');
+  });
+
+  it('launch_app is available on the code surface, not chat', () => {
+    const code = buildSessionVariables({ surface: 'code' }) as { client_tools: { name: string }[] };
+    const chat = buildSessionVariables({ surface: 'chat' }) as { client_tools: { name: string }[] };
+    expect(code.client_tools.map((t) => t.name)).toContain('launch_app');
+    expect(chat.client_tools.map((t) => t.name)).not.toContain('launch_app');
+  });
+
+  it('workspace tools are absent from chat and code surfaces', () => {
+    for (const surface of ['chat', 'code'] as const) {
+      const names = (buildSessionVariables({ surface }) as { client_tools: { name: string }[] }).client_tools.map(
+        (t) => t.name
+      );
+      expect(names).not.toContain('list_workspace');
+      expect(names).not.toContain('column_send');
+    }
+  });
+
+  it('global surface keeps close_column behind approval but column_* + launch_app safe', () => {
+    const vars = buildSessionVariables({ surface: 'global' }) as {
+      safe_tool_overrides: { safe_tool_names?: string[] };
+    };
+    const safe = vars.safe_tool_overrides.safe_tool_names!;
+    expect(safe).toContain('list_workspace');
+    expect(safe).toContain('launch_app');
+    expect(safe).toContain('column_send');
+    expect(safe).toContain('column_cancel');
+    // destructive workspace mutation must require approval
+    expect(safe).not.toContain('close_column');
+  });
+
+  it('interactive mode uses safe_tool_names (allowlist of read-only tools)', () => {
+    const vars = buildSessionVariables({ surface: 'chat' }) as {
+      safe_tool_overrides: { safe_tool_names?: string[]; safe_tool_patterns?: string[] };
+    };
+    const overrides = vars.safe_tool_overrides;
+    expect(overrides.safe_tool_names).toBeDefined();
+    expect(overrides.safe_tool_patterns).toBeUndefined();
+    const safeNames = overrides.safe_tool_names!;
+    // App-control snapshot/list tools are read-only and stay safe
+    expect(safeNames).toContain('list_apps');
+    expect(safeNames).toContain('app_snapshot');
+    // Mutating launcher tools must require approval
+    expect(safeNames).not.toContain('escalate');
+    expect(safeNames).not.toContain('start_ticket');
+    expect(safeNames).not.toContain('stop_ticket');
+  });
+
+  it('autopilot mode uses safe_tool_patterns catch-all', () => {
+    const vars = buildSessionVariables({ surface: 'code', autopilot: true }) as {
+      safe_tool_overrides: { safe_tool_names?: string[]; safe_tool_patterns?: string[] };
+    };
+    expect(vars.safe_tool_overrides.safe_tool_patterns).toEqual(['.*']);
+    expect(vars.safe_tool_overrides.safe_tool_names).toBeUndefined();
+  });
+
+  it('autopilot supervisorPrompt is prepended to additional_instructions', () => {
+    const vars = buildSessionVariables({
+      surface: 'code',
+      autopilot: true,
+      supervisorPrompt: 'SUPERVISOR_PROMPT_TEXT',
+    }) as { additional_instructions: string };
+    expect(vars.additional_instructions.startsWith('SUPERVISOR_PROMPT_TEXT\n\n')).toBe(true);
+    expect(vars.additional_instructions).toContain('Working with projects and tickets');
+  });
+
+  it('supervisorPrompt is ignored when autopilot is false', () => {
+    const vars = buildSessionVariables({
+      surface: 'code',
+      autopilot: false,
+      supervisorPrompt: 'SHOULD_NOT_APPEAR',
+    }) as { additional_instructions: string };
+    expect(vars.additional_instructions).not.toContain('SHOULD_NOT_APPEAR');
+  });
+
+  it('context identifiers are present when provided', () => {
+    const vars = buildSessionVariables({
+      surface: 'chat',
+      context: { projectId: 'proj-1', projectLabel: 'My Project', ticketId: 'tkt-1' },
+    }) as { additional_instructions: string };
     expect(vars.additional_instructions).toContain('My Project');
     expect(vars.additional_instructions).toContain('proj-1');
     expect(vars.additional_instructions).toContain('tkt-1');
+  });
 
-    const autopilotVars = buildAutopilotVariables({ projectId: 'proj-1', projectLabel: 'My Project', ticketId: 'tkt-1' }) as {
-      additional_instructions: string;
-    };
-    expect(autopilotVars.additional_instructions).toContain('My Project');
-    expect(autopilotVars.additional_instructions).toContain('tkt-1');
+  it('plain-folder sources get deliverables-in-the-folder guidance, no artifacts channel', () => {
+    const vars = buildSessionVariables({
+      surface: 'code',
+      context: {
+        projectId: 'proj-1',
+        ticketId: 'tkt-1',
+        sources: [{ id: 's1', mountName: 'notes', kind: 'local', workspaceDir: '/home/u/notes' }],
+      },
+    }) as { additional_instructions: string };
+    expect(vars.additional_instructions).toContain('## Where to put output for the user');
+    expect(vars.additional_instructions).toContain('`/workspace/notes/`');
+    expect(vars.additional_instructions).not.toContain('.omni-artifacts');
+    expect(vars.additional_instructions).not.toContain('PR_TITLE');
+  });
+
+  it('repo sources get the artifacts channel using the provided artifactsDir (host mode)', () => {
+    const vars = buildSessionVariables({
+      surface: 'code',
+      context: {
+        ticketId: 'tkt-1',
+        artifactsDir: '/Users/alice/.config/omni_code/tickets/tkt-1/artifacts',
+        sources: [{ id: 's1', mountName: 'repo', kind: 'local', workspaceDir: '/home/u/repo', gitDetected: true }],
+      },
+    }) as { additional_instructions: string };
+    expect(vars.additional_instructions).toContain('/Users/alice/.config/omni_code/tickets/tkt-1/artifacts');
+    expect(vars.additional_instructions).toContain('gh pr create');
+    expect(vars.additional_instructions).not.toContain('PR_TITLE');
+  });
+
+  it('repo artifacts guidance falls back to the uniform container artifacts mount when artifactsDir is omitted', () => {
+    const vars = buildSessionVariables({
+      surface: 'code',
+      context: {
+        ticketId: 'tkt-1',
+        sources: [
+          { id: 's1', mountName: 'lib', kind: 'git-remote', repoUrl: 'https://github.com/acme/lib' },
+        ],
+      },
+    }) as { additional_instructions: string };
+    expect(vars.additional_instructions).toContain('/workspace/.omni-artifacts/tkt-1');
+    expect(vars.additional_instructions).not.toContain('PR_TITLE');
+  });
+
+  it('repo sources without a ticket get keep-the-repo-clean guidance instead of an artifacts dir', () => {
+    const vars = buildSessionVariables({
+      surface: 'code',
+      context: {
+        projectId: 'proj-1',
+        sources: [
+          { id: 's1', mountName: 'lib', kind: 'git-remote', repoUrl: 'https://github.com/acme/lib' },
+        ],
+      },
+    }) as { additional_instructions: string };
+    expect(vars.additional_instructions).toContain('share results in your reply');
+    expect(vars.additional_instructions).not.toContain('.omni-artifacts');
+  });
+
+  it('a bare workspaceDir (chat scratch) gets working-folder guidance', () => {
+    const vars = buildSessionVariables({
+      surface: 'chat',
+      context: { workspaceDir: '/home/u/Omni/Workspace/Sessions/abc' },
+    }) as { additional_instructions: string };
+    expect(vars.additional_instructions).toContain('## Where to put output for the user');
+    expect(vars.additional_instructions).toContain('working folder');
+    expect(vars.additional_instructions).not.toContain('.omni-artifacts');
+  });
+
+  it('renders the workspace layout when sources are present', () => {
+    const vars = buildSessionVariables({
+      surface: 'code',
+      context: {
+        projectId: 'proj-1',
+        sources: [
+          { id: 's1', mountName: 'launcher', kind: 'local', workspaceDir: '/home/emm/Omni/Workspace/launcher' },
+          { id: 's2', mountName: 'omni-code', kind: 'local', workspaceDir: '/home/emm/Omni/Workspace/omni-code' },
+          {
+            id: 's3',
+            mountName: 'omniagents',
+            kind: 'git-remote',
+            repoUrl: 'https://github.com/anthropic/omniagents',
+            defaultBranch: 'main',
+          },
+        ],
+      },
+    }) as { additional_instructions: string };
+    expect(vars.additional_instructions).toContain('## Workspace Layout');
+    expect(vars.additional_instructions).toContain('3 sources co-mounted');
+    expect(vars.additional_instructions).toContain('`/workspace/launcher/`');
+    expect(vars.additional_instructions).toContain(
+      '`/workspace/omniagents/` — https://github.com/anthropic/omniagents@main (git-remote)'
+    );
+  });
+
+  it('omits the workspace layout when sources is empty', () => {
+    const vars = buildSessionVariables({
+      surface: 'code',
+      context: { projectId: 'proj-1', sources: [] },
+    }) as { additional_instructions: string };
+    expect(vars.additional_instructions).not.toContain('## Workspace Layout');
   });
 
   it('extractSafeToolNames returns only tools with safe: true', () => {
@@ -832,284 +277,10 @@ describe('client_tools shape', () => {
     expect(extractSafeToolNames(tools)).toEqual(['read_thing', 'list_thing']);
   });
 
-  it('get_ticket has optional ticket_id parameter', () => {
-    const tool = TICKET_CLIENT_TOOLS.find((t) => t.name === 'get_ticket')!;
-    expect(tool.parameters.properties).toHaveProperty('ticket_id');
-    // ticket_id is optional — no required array
-    expect((tool.parameters as Record<string, unknown>).required).toBeUndefined();
-  });
-
-  it('move_ticket requires column parameter', () => {
-    const tool = TICKET_CLIENT_TOOLS.find((t) => t.name === 'move_ticket')!;
-    expect(tool.parameters.properties).toHaveProperty('column');
-    expect(tool.parameters.required).toEqual(['column']);
-  });
-
-  it('escalate requires message parameter', () => {
-    const tool = TICKET_CLIENT_TOOLS.find((t) => t.name === 'escalate')!;
-    expect(tool.parameters.properties).toHaveProperty('message');
-    expect(tool.parameters.required).toEqual(['message']);
-  });
-
-  it('list_tickets requires project_id', () => {
-    const tool = READONLY_CONTEXT_TOOLS.find((t) => t.name === 'list_tickets')!;
-    expect(tool.parameters.required).toEqual(['project_id']);
-  });
-
-  it('create_ticket requires project_id and title', () => {
-    const tool = PROJECT_CLIENT_TOOLS.find((t) => t.name === 'create_ticket')!;
-    expect(tool.parameters.required).toEqual(['project_id', 'title']);
-  });
-
-  it('inbox tools match the current inbox lifecycle', () => {
-    const listTool = INBOX_CLIENT_TOOLS.find((t) => t.name === 'list_inbox')!;
-    expect(listTool.parameters.properties.status.enum).toEqual(['new', 'shaped', 'later']);
-
-    const updateTool = INBOX_CLIENT_TOOLS.find((t) => t.name === 'update_inbox_item')!;
-    expect(updateTool.parameters.properties.status.enum).toEqual(['new', 'shaped', 'later']);
-    expect(updateTool.parameters.properties).toHaveProperty('outcome');
-    expect(updateTool.parameters.properties).toHaveProperty('appetite');
-    expect(updateTool.parameters.properties).toHaveProperty('not_doing');
-
-    const promoteTool = INBOX_CLIENT_TOOLS.find((t) => t.name === 'inbox_to_tickets')!;
-    expect(promoteTool.parameters.required).toEqual(['item_id', 'project_id']);
-    expect(promoteTool.parameters.properties).not.toHaveProperty('tickets');
-
-    const projectTool = INBOX_CLIENT_TOOLS.find((t) => t.name === 'inbox_to_project')!;
-    expect(projectTool).toBeTruthy();
-    expect(projectTool?.parameters.required).toEqual(['item_id']);
-  });
-
-  it('milestone tools expose due_date', () => {
-    const createTool = buildInteractiveVariables() as { client_tools: Array<{ name: string; parameters: { properties: Record<string, unknown> } }> };
-    const createMilestone = createTool.client_tools.find((t) => t.name === 'create_milestone');
-    const updateMilestone = createTool.client_tools.find((t) => t.name === 'update_milestone');
-
-    expect(createMilestone?.parameters.properties).toHaveProperty('due_date');
-    expect(updateMilestone?.parameters.properties).toHaveProperty('due_date');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// #region 3 — WebSocket round-trip integration test
-// ---------------------------------------------------------------------------
-
-// Helpers — same pattern as ticket-machine.test.ts
-let wss: WebSocketServer | null = null;
-
-type ServerSocket = import('ws').WebSocket;
-let serverSockets: ServerSocket[] = [];
-
-const startServer = (handler: (method: string, params: Record<string, unknown>, id: string) => unknown): Promise<string> =>
-  new Promise((resolve) => {
-    wss = new WebSocketServer({ port: 0 });
-    wss.on('listening', () => {
-      const addr = wss!.address();
-      const port = typeof addr === 'object' && addr !== null ? addr.port : 0;
-      resolve(`ws://127.0.0.1:${port}`);
-    });
-    wss.on('connection', (ws) => {
-      serverSockets.push(ws);
-      ws.on('message', (raw) => {
-        const msg = JSON.parse(String(raw)) as { id?: string; method?: string; params?: Record<string, unknown> };
-        if (msg.id && msg.method) {
-          const result = handler(msg.method, msg.params ?? {}, msg.id);
-          ws.send(JSON.stringify({ id: msg.id, result }));
-        }
-      });
-    });
-  });
-
-const stopServer = (): Promise<void> =>
-  new Promise((resolve) => {
-    serverSockets = [];
-    if (wss) {
-      for (const client of wss.clients) {
-client.terminate();
-}
-      wss.close(() => resolve());
-      wss = null;
-    } else {
-      resolve();
-    }
-  });
-
-/** Send a JSON-RPC notification from server to all connected clients. */
-const broadcastNotification = (method: string, params: Record<string, unknown>): void => {
-  if (!wss) {
-return;
-}
-  const msg = JSON.stringify({ method, params });
-  for (const client of wss.clients) {
-client.send(msg);
-}
-};
-
-const makeCallbacks = (): TicketMachineCallbacks & {
-  phases: TicketPhase[];
-  clientRequests: { fn: string; args: Record<string, unknown>; respond: ClientFunctionResponder }[];
-} => {
-  const phases: TicketPhase[] = [];
-  const clientRequests: { fn: string; args: Record<string, unknown>; respond: ClientFunctionResponder }[] = [];
-  return {
-    phases,
-    clientRequests,
-    onPhaseChange: (_id, phase) => phases.push(phase),
-    onMessage: vi.fn(),
-    onRunEnd: vi.fn(),
-    onTokenUsage: vi.fn(),
-    onClientRequest: (_id, fn, args, respond) => {
-      clientRequests.push({ fn, args, respond });
-    },
-  };
-};
-
-describe('WebSocket client_request → client_response round-trip', () => {
-  afterEach(async () => {
-    await stopServer();
-    vi.restoreAllMocks();
-  });
-
-  it('delivers client_request to onClientRequest callback', async () => {
-    const wsUrl = await startServer((method) => {
-      if (method === 'server_call') {
-return { session_id: 'sess-1' };
-}
-      if (method === 'start_run') {
-return { session_id: 'sess-1', run_id: 'run-1' };
-}
-      return {};
-    });
-    const cb = makeCallbacks();
-    const m = new TicketMachine('t1', cb);
-    m.transition('provisioning');
-    m.setWsUrl(wsUrl);
-    await m.createSession();
-    await m.startRun('go');
-
-    // Simulate agent sending a client_request
-    broadcastNotification('client_request', {
-      function: 'tool.call',
-      request_id: 'req-42',
-      args: { tool: 'get_ticket', arguments: {} },
-    });
-
-    await vi.waitFor(() => expect(cb.clientRequests).toHaveLength(1));
-
-    expect(cb.clientRequests[0]!.fn).toBe('tool.call');
-    expect(cb.clientRequests[0]!.args).toEqual({ tool: 'get_ticket', arguments: {} });
-  });
-
-  it('sends client_response back over WebSocket when respond() is called', async () => {
-    const serverReceived: { method: string; params: Record<string, unknown> }[] = [];
-
-    const wsUrl = await startServer((method, params) => {
-      if (method === 'server_call') {
-return { session_id: 'sess-1' };
-}
-      if (method === 'start_run') {
-return { session_id: 'sess-1', run_id: 'run-1' };
-}
-      // Capture client_response calls
-      if (method === 'client_response') {
-        serverReceived.push({ method, params });
-        return {};
-      }
-      return {};
-    });
-    const cb = makeCallbacks();
-    const m = new TicketMachine('t1', cb);
-    m.transition('provisioning');
-    m.setWsUrl(wsUrl);
-    await m.createSession();
-    await m.startRun('go');
-
-    // Simulate agent sending a client_request
-    broadcastNotification('client_request', {
-      function: 'tool.call',
-      request_id: 'req-99',
-      args: { tool: 'get_ticket' },
-    });
-
-    // Wait for callback
-    await vi.waitFor(() => expect(cb.clientRequests).toHaveLength(1));
-
-    // Call respond() — this should send client_response back over WS
-    cb.clientRequests[0]!.respond(true, { id: 'ticket-1', title: 'Test' });
-
-    // The client_response is sent as an RPC call via sendRpc.
-    // Wait for the server to receive it.
-    await vi.waitFor(() => expect(serverReceived).toHaveLength(1), { timeout: 2000 });
-
-    expect(serverReceived[0]!.params).toEqual(
-      expect.objectContaining({
-        request_id: 'req-99',
-        ok: true,
-        result: { id: 'ticket-1', title: 'Test' },
-      })
-    );
-  });
-
-  it('handles multiple concurrent client_requests independently', async () => {
-    const wsUrl = await startServer((method) => {
-      if (method === 'server_call') {
-return { session_id: 'sess-1' };
-}
-      if (method === 'start_run') {
-return { session_id: 'sess-1', run_id: 'run-1' };
-}
-      return {};
-    });
-    const cb = makeCallbacks();
-    const m = new TicketMachine('t1', cb);
-    m.transition('provisioning');
-    m.setWsUrl(wsUrl);
-    await m.createSession();
-    await m.startRun('go');
-
-    // Send two client_requests
-    broadcastNotification('client_request', {
-      function: 'tool.call',
-      request_id: 'req-a',
-      args: { tool: 'get_ticket' },
-    });
-    broadcastNotification('client_request', {
-      function: 'tool.call',
-      request_id: 'req-b',
-      args: { tool: 'move_ticket', arguments: { column: 'Done' } },
-    });
-
-    await vi.waitFor(() => expect(cb.clientRequests).toHaveLength(2));
-
-    // Both arrived with correct request data
-    expect(cb.clientRequests.map((r) => r.args.tool)).toEqual(['get_ticket', 'move_ticket']);
-  });
-
-  it('ignores client_request with missing function or request_id', async () => {
-    const wsUrl = await startServer((method) => {
-      if (method === 'server_call') {
-return { session_id: 'sess-1' };
-}
-      if (method === 'start_run') {
-return { session_id: 'sess-1', run_id: 'run-1' };
-}
-      return {};
-    });
-    const cb = makeCallbacks();
-    const m = new TicketMachine('t1', cb);
-    m.transition('provisioning');
-    m.setWsUrl(wsUrl);
-    await m.createSession();
-    await m.startRun('go');
-
-    // Missing request_id
-    broadcastNotification('client_request', { function: 'tool.call', args: {} });
-    // Missing function
-    broadcastNotification('client_request', { request_id: 'req-1', args: {} });
-
-    // Give time for processing
-    await new Promise((r) => setTimeout(r, 100));
-
-    expect(cb.clientRequests).toHaveLength(0);
+  it('start_ticket and stop_ticket each require ticket_id', () => {
+    const start = PROJECT_CLIENT_TOOLS.find((t) => t.name === 'start_ticket')!;
+    const stop = PROJECT_CLIENT_TOOLS.find((t) => t.name === 'stop_ticket')!;
+    expect(start.parameters.required).toEqual(['ticket_id']);
+    expect(stop.parameters.required).toEqual(['ticket_id']);
   });
 });

@@ -245,12 +245,12 @@ export const DirectoryBrowserDialog = memo(({ open, onClose, onSelect, initialPa
             )}
           </div>
         </DialogBody>
-        <DialogFooter className="flex-col sm:flex-row gap-2 sm:justify-end">
-          <Button onClick={handleConfirm} isDisabled={!currentPath} className="w-full sm:w-auto justify-center">
-            Select
-          </Button>
-          <Button variant="ghost" onClick={onClose} className="w-full sm:w-auto justify-center">
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>
             Cancel
+          </Button>
+          <Button onClick={handleConfirm} isDisabled={!currentPath}>
+            Select
           </Button>
         </DialogFooter>
       </DialogContent>

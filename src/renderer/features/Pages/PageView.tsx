@@ -1,4 +1,4 @@
-import { makeStyles, shorthands,Skeleton, SkeletonItem, tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, shorthands, Skeleton, SkeletonItem, tokens } from '@fluentui/react-components';
 import { ArrowLeft20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { useSelector } from '@xstate/react';
@@ -8,6 +8,7 @@ import { IconButton } from '@/renderer/ds';
 import { NotebookView } from '@/renderer/features/Notebooks/NotebookView';
 import { acquirePageEditor, releasePageEditor } from '@/renderer/features/Pages/page-editor-registry';
 import { ticketApi } from '@/renderer/features/Tickets/state';
+import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { PageId, ProjectId } from '@/shared/types';
 
 import { PageBreadcrumb } from './Breadcrumb';
@@ -41,8 +42,14 @@ const useStyles = makeStyles({
     height: '100%',
     width: '100%',
   },
+  rootGlass: {
+    backgroundColor: 'transparent',
+  },
   header: {
     flexShrink: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalL,
     paddingLeft: tokens.spacingHorizontalXXL,
     paddingRight: tokens.spacingHorizontalXXL,
     paddingTop: tokens.spacingVerticalXXL,
@@ -51,10 +58,15 @@ const useStyles = makeStyles({
     width: '100%',
     boxSizing: 'border-box',
   },
+  /* Hidden on mobile — the TopAppBar in Tickets.tsx already provides back
+     navigation there; only desktop needs the in-page back + breadcrumb row. */
   backRow: {
-    display: 'flex',
+    display: 'none',
     alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
+    '@media (min-width: 640px)': {
+      display: 'flex',
+    },
   },
   titleRow: {
     display: 'flex',
@@ -111,6 +123,12 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalM,
     flexWrap: 'wrap',
+  },
+  bannerGlass: {
+    backgroundColor: tokens.colorNeutralBackground3,
+    backdropFilter: 'var(--glass-blur-light)',
+    WebkitBackdropFilter: 'var(--glass-blur-light)',
+    boxShadow: tokens.shadow8,
   },
   bannerText: {
     flex: '1 1 auto',
@@ -169,39 +187,6 @@ const useStyles = makeStyles({
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
   },
-  childPages: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-    paddingLeft: tokens.spacingHorizontalXXL,
-    paddingRight: tokens.spacingHorizontalXXL,
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalM,
-    maxWidth: '900px',
-    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke1),
-  },
-  childPageLink: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    padding: '6px 8px',
-    borderRadius: '6px',
-    border: 'none',
-    backgroundColor: 'transparent',
-    cursor: 'pointer',
-    color: tokens.colorNeutralForeground1,
-    fontSize: tokens.fontSizeBase300,
-    textAlign: 'left',
-    width: '100%',
-    ':hover': {
-      backgroundColor: tokens.colorSubtleBackgroundHover,
-    },
-  },
-  childPageIcon: {
-    fontSize: '16px',
-    flexShrink: 0,
-  },
-
   // Skeleton shown while the editor chunk downloads (cold start) or while the
   // initial page content is being read from disk. The horizontal padding here
   // (spacingHorizontalM) combines with the bodyInner wrapper's same padding
@@ -254,6 +239,7 @@ const navigateUpPageHierarchy = (pageId: PageId, projectId: ProjectId, pages: Re
 const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
   const styles = useStyles();
   const pages = useStore($pages);
+  const isGlass = useStore($glassEnabled);
   const page = pages[pageId];
 
   const handleBack = useCallback(() => {
@@ -293,7 +279,7 @@ const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
     (md: string) => {
       actor.send({ type: 'LOCAL_EDIT', content: md });
     },
-    [actor],
+    [actor]
   );
 
   // -------------------------------------------------------------------------
@@ -330,8 +316,8 @@ const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
   const [title, setTitle] = useState(page?.title ?? '');
   useEffect(() => {
     if (page) {
-setTitle(page.title);
-}
+      setTitle(page.title);
+    }
   }, [page]);
 
   // -------------------------------------------------------------------------
@@ -368,69 +354,62 @@ setTitle(page.title);
     actor.send({ type: 'RESOLVE_KEEP_LOCAL' });
   }, [actor]);
 
-  // -------------------------------------------------------------------------
-  // Child pages
-  // -------------------------------------------------------------------------
-  const childPages = useMemo(() => {
-    return Object.values(pages)
-      .filter((p) => p.parentId === pageId)
-      .sort((a, b) => a.sortOrder - b.sortOrder);
-  }, [pages, pageId]);
-
-  const handleChildClick = useCallback(
-    (childId: PageId) => {
-      ticketApi.goToPage(childId, projectId);
-    },
-    [projectId]
-  );
-
   if (!page) {
-return null;
-}
+    return null;
+  }
 
   const showConflict = phase === 'conflict';
   const saveLabel =
-    phase === 'dirty' && isSaving
-      ? 'Saving…'
-      : phase === 'dirty'
-        ? 'Unsaved'
-        : justSaved
-          ? 'Saved'
-          : '';
+    phase === 'dirty' && isSaving ? 'Saving…' : phase === 'dirty' ? 'Unsaved' : justSaved ? 'Saved' : '';
+
+  // Agent-authored documents often open with an H1 that repeats the page
+  // title; rendering the title input above it shows the same heading twice.
+  // Let the document's own H1 be the visible title in that case (the row
+  // reappears as soon as the leading H1 stops matching).
+  const firstLine = (content ?? '').trimStart().split('\n', 1)[0] ?? '';
+  const leadingH1 = /^#\s+(.+?)\s*$/.exec(firstLine)?.[1];
+  const contentLeadsWithTitle = !!leadingH1 && leadingH1.trim().toLowerCase() === page.title.trim().toLowerCase();
 
   return (
-    <div className={styles.root}>
+    <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)} data-slot="page-view">
       {/* Header: Back + Breadcrumb + Title + save affordance */}
-      <div className={styles.header}>
-        {!page.isRoot && (
-          <div className={styles.backRow}>
-            <IconButton
-              aria-label="Back"
-              icon={<ArrowLeft20Regular />}
-              size="sm"
-              onClick={handleBack}
-            />
-            <PageBreadcrumb projectId={projectId} pageId={pageId} />
-          </div>
-        )}
-        <div className={styles.titleRow}>
-          <input
-            className={page.isRoot ? styles.titleInputLarge : styles.titleInput}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={handleTitleBlur}
-            onKeyDown={handleTitleKeyDown}
-            placeholder="Untitled"
-          />
-          <span className={styles.saveIndicator} aria-live="polite">
-            {saveLabel}
-          </span>
+      {(!page.isRoot || !contentLeadsWithTitle || !!saveLabel) && (
+        <div className={styles.header}>
+          {!page.isRoot && (
+            <div className={styles.backRow}>
+              <IconButton aria-label="Back" icon={<ArrowLeft20Regular />} size="sm" onClick={handleBack} />
+              <PageBreadcrumb projectId={projectId} pageId={pageId} />
+            </div>
+          )}
+          {!contentLeadsWithTitle && (
+            <div className={styles.titleRow}>
+              <input
+                aria-label="Page title"
+                className={page.isRoot ? styles.titleInputLarge : styles.titleInput}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                onBlur={handleTitleBlur}
+                onKeyDown={handleTitleKeyDown}
+                placeholder="Untitled"
+              />
+              <span className={styles.saveIndicator} aria-live="polite">
+                {saveLabel}
+              </span>
+            </div>
+          )}
+          {contentLeadsWithTitle && saveLabel && (
+            <div className={styles.titleRow}>
+              <span className={styles.saveIndicator} aria-live="polite">
+                {saveLabel}
+              </span>
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* External-change banner */}
       {showConflict && (
-        <div className={styles.banner} role="status">
+        <div className={mergeClasses(styles.banner, isGlass && styles.bannerGlass)} role="status" data-slot="page-conflict-banner">
           <span className={styles.bannerText}>
             This page was updated somewhere else. Your changes haven’t been saved over it yet.
           </span>
@@ -470,23 +449,6 @@ return null;
             </Suspense>
           )}
         </div>
-
-        {/* Child pages list */}
-        {childPages.length > 0 && (
-          <div className={styles.childPages}>
-            {childPages.map((child) => (
-              <button
-                key={child.id}
-                type="button"
-                className={styles.childPageLink}
-                onClick={() => handleChildClick(child.id)}
-              >
-                <span className={styles.childPageIcon}>{child.icon ?? '📄'}</span>
-                {child.title}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -544,6 +506,7 @@ const NotebookPageView = memo(({ pageId, projectId }: PageViewProps) => {
         )}
         <div className={styles.titleRow}>
           <input
+            aria-label="Page title"
             className={page.isRoot ? styles.titleInputLarge : styles.titleInput}
             value={title}
             onChange={(e) => setTitle(e.target.value)}

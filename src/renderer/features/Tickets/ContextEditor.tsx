@@ -37,6 +37,8 @@ import {
 } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import './yoopta-fluent.css';
+
 // ---------------------------------------------------------------------------
 // Plugins & Marks
 // ---------------------------------------------------------------------------
@@ -369,6 +371,38 @@ const useStyles = makeStyles({
 const EDITOR_STYLE = { width: '100%', paddingBottom: 40 };
 
 // ---------------------------------------------------------------------------
+// Deserialization workarounds
+// ---------------------------------------------------------------------------
+
+/**
+ * Yoopta's markdown.deserialize emits stray `{ text: '\n' }` nodes inside the
+ * Slate children of any list block that has a nested sub-list. Those newline
+ * text nodes render as blank lines INSIDE the bullet, opening up huge
+ * vertical gaps between a parent bullet and its nested children.
+ *
+ * Reproduces with both tight and loose markdown lists — it's a deserializer
+ * bug independent of source formatting. Strip those nodes here before the
+ * editor mounts the value, while leaving normal text intact.
+ */
+function scrubListLinebreakNodes(content: YooptaContentValue): void {
+  for (const block of Object.values(content)) {
+    const isListBlock =
+      block.type === 'BulletedList' || block.type === 'NumberedList' || block.type === 'TodoList';
+    if (!isListBlock) {
+      continue;
+    }
+    for (const element of block.value) {
+      const children = (element as { children?: { text?: string }[] }).children;
+      if (!Array.isArray(children)) {
+        continue;
+      }
+      const cleaned = children.filter((c) => !(typeof c.text === 'string' && /^\n+$/.test(c.text)));
+      (element as { children?: unknown[] }).children = cleaned.length > 0 ? cleaned : [{ text: '' }];
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // ContextEditor
 // ---------------------------------------------------------------------------
 
@@ -399,6 +433,7 @@ return;
     if (initialMarkdown.trim()) {
       try {
         const content = markdown.deserialize(editor, initialMarkdown);
+        scrubListLinebreakNodes(content);
         editor.withoutSavingHistory(() => {
           editor.setEditorValue(content);
         });
@@ -420,13 +455,26 @@ return;
     [editor, onChangeMarkdown]
   );
 
-  const renderBlock = useCallback(({ children, blockId }: RenderBlockProps) => {
-    return (
-      <SortableBlock id={blockId} useDragHandle>
-        {children}
-      </SortableBlock>
-    );
-  }, []);
+  const renderBlock = useCallback(
+    ({ children, blockId }: RenderBlockProps) => {
+      // Yoopta's BulletedList/NumberedList/TodoList plugins parse `depth` out
+      // of nested markdown lists correctly, but their in-editor render
+      // ignores it (depth only feeds the HTML export path). Wrap children with
+      // a depth-based left padding so nested items appear visually indented.
+      // Pairs with scrubListLinebreakNodes() — without that scrub, the wrapper
+      // exposes huge vertical gaps from spurious `\n` text nodes.
+      const block = Blocks.getBlock(editor, { id: blockId });
+      const depth = block?.meta?.depth ?? 0;
+      const wrapped =
+        depth > 0 ? <div style={{ paddingLeft: `${depth * 24}px` }}>{children}</div> : children;
+      return (
+        <SortableBlock id={blockId} useDragHandle>
+          {wrapped}
+        </SortableBlock>
+      );
+    },
+    [editor],
+  );
 
   return (
     <div ref={containerRef} className={styles.root}>

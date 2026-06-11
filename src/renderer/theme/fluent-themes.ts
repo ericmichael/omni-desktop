@@ -5,6 +5,30 @@ import type { OmniTheme } from '@/shared/types';
 
 // ── Brand palettes ──────────────────────────────────────────────────────────
 
+/**
+ * Omni – azure ramp anchored on the aura/voice glow cyan (#5ac8fa at 100).
+ * The signature "living glow" visuals (ColumnAura, VoiceGlow) already speak
+ * this color; the omni theme makes it the accent so they're one voice.
+ */
+const omniBrand: BrandVariants = {
+  10: '#04141c',
+  20: '#082636',
+  30: '#0b3a52',
+  40: '#0d4e6e',
+  50: '#0f628b',
+  60: '#1076a8',
+  70: '#118ac5',
+  80: '#2b9fd9',
+  90: '#45b4e9',
+  100: '#5ac8fa',
+  110: '#7dd3fb',
+  120: '#9eddfc',
+  130: '#bce7fd',
+  140: '#d6f0fe',
+  150: '#e9f7fe',
+  160: '#f4fbff',
+};
+
 /** Microsoft Teams / M365 – official brand ramp based on #0078d4 */
 const teamsBrand: BrandVariants = {
   10: '#001b3d',
@@ -154,6 +178,17 @@ interface XtermColors {
 interface ThemeDef {
   brand: BrandVariants;
   mode: 'light' | 'dark';
+  /**
+   * Surface material. Glass themes render translucent surfaces (glass-vars)
+   * over a backdrop; the `overrides` neutrals double as the opaque base and
+   * the flat fallback under `prefers-reduced-transparency`. Defaults to flat.
+   */
+  material?: 'flat' | 'glass';
+  /** Built-in backdrop for glass themes — any CSS `background` value. */
+  backdrop?: string;
+  /** Glass tone when rendering over the built-in backdrop (user wallpapers
+   *  carry their own luminance-detected tone in the store). */
+  builtinGlassTone?: 'dark' | 'light';
   /** Fluent token overrides applied after createLightTheme/createDarkTheme. */
   overrides: Partial<Theme>;
   /** Terminal color palette. */
@@ -170,6 +205,63 @@ interface ThemeDef {
 // ── Theme definitions ────────────────────────────────────────────────────────
 
 const themeDefs: Record<OmniTheme, ThemeDef> = {
+  omni: {
+    brand: omniBrand,
+    mode: 'dark',
+    material: 'glass',
+    builtinGlassTone: 'dark',
+    // The "quiet glass" backdrop: deep neutral base, one azure bloom top-right,
+    // a faint indigo counter-bloom bottom-left. Static gradients — no asset,
+    // no decode cost, cheap to blur over.
+    backdrop: [
+      'radial-gradient(1200px 800px at 80% -10%, rgba(90, 200, 250, 0.16), transparent 60%)',
+      'radial-gradient(1000px 700px at -10% 110%, rgba(94, 92, 230, 0.12), transparent 55%)',
+      'linear-gradient(160deg, #0b1016 0%, #0d1117 45%, #0a0c10 100%)',
+    ].join(', '),
+    overrides: {
+      colorNeutralBackground1: '#09090b',
+      colorNeutralBackground2: '#18181b',
+      colorNeutralBackground3: '#27272a',
+      colorNeutralBackground4: '#111113',
+      colorNeutralBackground4Hover: '#1e1e21',
+      colorNeutralBackground4Pressed: '#18181b',
+      colorNeutralStroke1: '#3f3f46',
+      colorNeutralForeground1: '#fafafa',
+      colorNeutralForeground2: '#a1a1aa',
+      colorNeutralForeground3: '#71717a',
+      colorPaletteRedForeground1: '#f87171',
+      colorPaletteGreenForeground1: '#4ade80',
+      colorPaletteYellowForeground1: '#fbbf24',
+      colorSubtleBackground: 'transparent',
+      colorSubtleBackgroundHover: '#1a1a1f',
+      colorSubtleBackgroundPressed: '#151518',
+      colorSubtleBackgroundSelected: '#1f1f24',
+      colorNeutralForeground4: '#52525b',
+      colorNeutralStrokeAccessible: '#63636b',
+      colorNeutralStrokeAccessibleHover: '#71717a',
+      colorNeutralStrokeAccessiblePressed: '#6a6a73',
+      colorNeutralForegroundDisabled: '#52525b',
+      colorNeutralBackgroundDisabled: '#18181b',
+      colorNeutralStrokeDisabled: '#27272a',
+      fontFamilyBase: "'Inter Variable', ui-sans-serif, system-ui, sans-serif",
+      fontFamilyMonospace: 'JetBrainsMonoNerdFont, ui-monospace, monospace',
+    },
+    xterm: {
+      fg: '#fafafa', black: '#fafafa', brightBlack: '#fafafa',
+      white: '#09090b', brightWhite: '#09090b',
+      cursor: '#5ac8fa', cursorAccent: '#09090b',
+      blue: '#45b4e9', brightBlue: '#7dd3fb',
+      cyan: '#2dd4bf', brightCyan: '#2dd4bf',
+      green: '#4ade80', brightGreen: '#4ade80',
+      yellow: '#facc15', brightYellow: '#facc15',
+      red: '#f87171', brightRed: '#f87171',
+      magenta: '#c084fc', brightMagenta: '#c084fc',
+    },
+    scrollbar: { thumb: '#3f3f46', thumbHover: '#52525b' },
+    selectionColor: 'rgb(90 200 250 / 0.25)',
+    focusRingColor: 'rgb(90 200 250 / 0.5)',
+  },
+
   'teams-light': {
     brand: teamsBrand,
     mode: 'light',
@@ -448,8 +540,10 @@ const themeDefs: Record<OmniTheme, ThemeDef> = {
     brand: utrgvBrand,
     mode: 'light',
     overrides: {
-      colorNeutralBackground1: '#ffffff',
-      colorNeutralBackground2: '#f7f7f8',
+      /* Shell bg aligned with --omni-bgMain so the chat body, nav rail (bg2),
+         and Gallery (bg-background) all sit on a single plane (#F7F7F8). */
+      colorNeutralBackground1: '#f7f7f8',
+      colorNeutralBackground2: '#f1f1f3',
       colorNeutralBackground3: '#efefef',
       colorNeutralBackground4: '#f0f0f1',
       colorNeutralBackground4Hover: '#e8e8e9',
@@ -498,22 +592,38 @@ function buildFluentTheme(def: ThemeDef): Theme {
  *  This is the core deduplication: colors are defined once in `overrides`
  *  and automatically flow to both Fluent tokens AND CSS vars. */
 function buildCssVars(def: ThemeDef, theme: Theme): Record<string, string> {
-  const t = theme as Record<string, string>;
   const b = def.brand;
   const x = def.xterm;
+  const themeColor = (key: keyof Theme, fallback: string): string => {
+    const value = theme[key];
+    return typeof value === 'string' ? value : fallback;
+  };
+  const background1 = themeColor('colorNeutralBackground1', '#09090b');
+  const background2 = themeColor('colorNeutralBackground2', '#18181b');
+  const background3 = themeColor('colorNeutralBackground3', '#27272a');
+  const stroke1 = themeColor('colorNeutralStroke1', '#3f3f46');
+  const foreground1 = themeColor('colorNeutralForeground1', '#fafafa');
+  const foreground2 = themeColor('colorNeutralForeground2', '#a1a1aa');
+  const foreground3 = themeColor('colorNeutralForeground3', '#71717a');
 
   return {
     // Surface / foreground — derived from Fluent theme tokens
-    '--color-surface': t.colorNeutralBackground1,
-    '--color-surface-raised': t.colorNeutralBackground2,
-    '--color-surface-overlay': t.colorNeutralBackground3,
-    '--color-surface-border': t.colorNeutralStroke1,
-    '--color-fg': t.colorNeutralForeground1,
-    '--color-fg-muted': t.colorNeutralForeground2,
-    '--color-fg-subtle': t.colorNeutralForeground3,
-    '--color-fg-error': t.colorPaletteRedForeground1,
-    '--color-fg-success': t.colorPaletteGreenForeground1,
-    '--color-fg-warning': t.colorPaletteYellowForeground1,
+    '--color-surface': background1,
+    /* Backstop painted by html/body wherever the app shell doesn't reach.
+       In practice that's only the bottom safe-area zone (the top inset is
+       painted by the shell itself), so it must match the mobile bottom nav —
+       background2, or the branded header fill when the theme has one —
+       otherwise a visible seam appears at the nav's bottom edge. */
+    '--safe-area-background': def.header?.bg ?? background2,
+    '--color-surface-raised': background2,
+    '--color-surface-overlay': background3,
+    '--color-surface-border': stroke1,
+    '--color-fg': foreground1,
+    '--color-fg-muted': foreground2,
+    '--color-fg-subtle': foreground3,
+    '--color-fg-error': themeColor('colorPaletteRedForeground1', '#f87171'),
+    '--color-fg-success': themeColor('colorPaletteGreenForeground1', '#4ade80'),
+    '--color-fg-warning': themeColor('colorPaletteYellowForeground1', '#fbbf24'),
 
     // Accent ramp — derived from BrandVariants (reversed: 150→50, 100→500, etc.)
     '--color-accent-50': b[150],
@@ -529,9 +639,9 @@ function buildCssVars(def: ThemeDef, theme: Theme): Record<string, string> {
     '--color-accent-950': b[20],
 
     // Header — defaults to surface colors, can be overridden (e.g. UTRGV branded header)
-    '--color-header': def.header?.bg ?? t.colorNeutralBackground1,
-    '--color-header-fg': def.header?.fg ?? t.colorNeutralForeground1,
-    '--color-header-border': def.header?.border ?? t.colorNeutralStroke1,
+    '--color-header': def.header?.bg ?? background1,
+    '--color-header-fg': def.header?.fg ?? foreground1,
+    '--color-header-border': def.header?.border ?? stroke1,
 
     // Terminal (xterm) palette
     '--xterm-fg': x.fg,
@@ -561,6 +671,10 @@ function buildCssVars(def: ThemeDef, theme: Theme): Record<string, string> {
     // Selection / focus
     '--selection-color': def.selectionColor,
     '--focus-ring-color': def.focusRingColor,
+
+    // Display typeface — identity face for headings/empty states/onboarding.
+    // Same for every theme; body text stays on fontFamilyBase.
+    '--font-display': "'Space Grotesk Variable', 'Inter Variable', ui-sans-serif, system-ui, sans-serif",
   };
 }
 
@@ -581,11 +695,114 @@ function buildAll() {
 
 const { themes: fluentThemesBuilt, cssVars: themeCssVarsBuilt } = buildAll();
 
-export const fluentThemes: Record<OmniTheme, Theme> = fluentThemesBuilt;
+// ── Text scaling ─────────────────────────────────────────────────────────────
+
+/** Supported "Text size" steps (percent). */
+export const TEXT_SCALES = [90, 100, 110, 125] as const;
+export type TextScale = (typeof TEXT_SCALES)[number];
+
+const FONT_TOKEN_RE = /^(fontSizeBase|fontSizeHero|lineHeightBase|lineHeightHero)/;
+
+/**
+ * Scale a theme's type ramp (font sizes + line heights) by `scale` percent.
+ * Pure — exported for tests. Non-font tokens pass through untouched.
+ */
+export function scaleThemeFonts(theme: Theme, scale: number): Theme {
+  if (scale === 100) {
+    return theme;
+  }
+  const factor = scale / 100;
+  const out: Record<string, unknown> = { ...theme };
+  for (const [key, value] of Object.entries(theme)) {
+    if (FONT_TOKEN_RE.test(key) && typeof value === 'string' && value.endsWith('px')) {
+      const px = Number.parseFloat(value);
+      if (!Number.isNaN(px)) {
+        out[key] = `${Math.round(px * factor)}px`;
+      }
+    }
+  }
+  return out as unknown as Theme;
+}
+
+const scaledThemeCache = new Map<string, Theme>();
+
+/** Resolve the Fluent theme for a theme name at a text scale (cached). */
+export function getFluentTheme(theme: OmniTheme, scale: number = 100): Theme {
+  const base = fluentThemesBuilt[theme];
+  if (scale === 100) {
+    return base;
+  }
+  const key = `${theme}:${scale}`;
+  let scaled = scaledThemeCache.get(key);
+  if (!scaled) {
+    scaled = scaleThemeFonts(base, scale);
+    scaledThemeCache.set(key, scaled);
+  }
+  return scaled;
+}
+
+// ── Material / backdrop helpers ──────────────────────────────────────────────
+
+/** Whether the theme's surfaces are glass (translucent over a backdrop). */
+export function isGlassTheme(theme: OmniTheme): boolean {
+  return themeDefs[theme].material === 'glass';
+}
+
+/** The theme's built-in backdrop (CSS `background` value), if it has one. */
+export function getThemeBackdrop(theme: OmniTheme): string | null {
+  return themeDefs[theme].backdrop ?? null;
+}
+
+/** Glass tone to use over the theme's built-in backdrop. */
+export function getThemeBuiltinGlassTone(theme: OmniTheme): 'dark' | 'light' {
+  return themeDefs[theme].builtinGlassTone ?? 'dark';
+}
+
+/** Theme-def names — exported so tests can assert parity with the store schema enum. */
+export const themeDefNames = Object.keys(themeDefs) as OmniTheme[];
 
 /** Whether a theme uses dark mode. */
 export function isThemeDark(theme: OmniTheme): boolean {
   return themeDefs[theme].mode === 'dark';
+}
+
+export function getThemeSurfaceColor(theme: OmniTheme): string {
+  return themeCssVarsBuilt[theme]['--color-surface'] ?? '#09090b';
+}
+
+/** The color of the mobile bottom nav for this theme — what the html/body
+ *  backstop must paint so the bottom safe-area zone is seamless with the bar
+ *  (see the `--safe-area-background` comment in buildCssVars). */
+export function getThemeSafeAreaColor(theme: OmniTheme): string {
+  return themeCssVarsBuilt[theme]['--safe-area-background'] ?? '#18181b';
+}
+
+export function applyPwaTheme(theme: OmniTheme): void {
+  const surfaceColor = getThemeSurfaceColor(theme);
+  const safeAreaColor = getThemeSafeAreaColor(theme);
+
+  document.documentElement.style.setProperty('--safe-area-background', safeAreaColor);
+  document.documentElement.style.backgroundColor = safeAreaColor;
+
+  if (document.body) {
+    document.body.style.backgroundColor = safeAreaColor;
+  }
+
+  const root = document.getElementById('root');
+  if (root) {
+    root.style.backgroundColor = safeAreaColor;
+  }
+
+  for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
+    meta.content = surfaceColor;
+  }
+
+  const statusBarMeta = document.querySelector<HTMLMetaElement>(
+    'meta[name="apple-mobile-web-app-status-bar-style"]',
+  );
+  if (statusBarMeta) {
+    statusBarMeta.content = isThemeDark(theme) ? 'black-translucent' : 'default';
+  }
 }
 
 /** Apply CSS custom properties for the given theme onto :root. */

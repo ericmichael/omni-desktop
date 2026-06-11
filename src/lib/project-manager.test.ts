@@ -89,6 +89,49 @@ describe('ProjectManager', () => {
     });
   });
 
+  describe('updateProject source validation', () => {
+    it('rejects duplicate mount names before persisting sources', () => {
+      const { pm, store } = makePm();
+
+      expect(() =>
+        pm.updateProject('proj-1', {
+          sources: [
+            { id: 's1', mountName: 'repo', kind: 'local', workspaceDir: '/tmp/repo-a' },
+            { id: 's2', mountName: 'repo', kind: 'local', workspaceDir: '/tmp/repo-b' },
+          ],
+        })
+      ).toThrow('Duplicate mount name');
+      expect(store.get('projects', [])[0]?.sources).toEqual([]);
+    });
+
+    it('rejects duplicate source identities before persisting sources', () => {
+      const { pm, store } = makePm();
+
+      expect(() =>
+        pm.updateProject('proj-1', {
+          sources: [
+            { id: 's1', mountName: 'repo', kind: 'git-remote', repoUrl: 'https://github.com/owner/repo.git' },
+            { id: 's2', mountName: 'repo-copy', kind: 'git-remote', repoUrl: 'git@github.com:owner/repo.git' },
+          ],
+        })
+      ).toThrow('already includes that repository');
+      expect(store.get('projects', [])[0]?.sources).toEqual([]);
+    });
+
+    it('persists different sources with unique mount names and identities', () => {
+      const { pm, store } = makePm();
+
+      pm.updateProject('proj-1', {
+        sources: [
+          { id: 's1', mountName: 'repo', kind: 'git-remote', repoUrl: 'https://github.com/owner/repo.git' },
+          { id: 's2', mountName: 'repo-2', kind: 'git-remote', repoUrl: 'https://github.com/owner/repo-2.git' },
+        ],
+      });
+
+      expect(store.get('projects', [])[0]?.sources).toHaveLength(2);
+    });
+  });
+
   // -------------------------------------------------------------------------
   // T9 — Milestone CRUD (in-memory only, no fs)
   // -------------------------------------------------------------------------
@@ -221,7 +264,7 @@ describe('ProjectManager', () => {
       const project = pm.addProject({
         label: 'New Project',
         slug: 'new-project',
-        source: { kind: 'local', workspaceDir: join(homeDir, 'work') },
+        sources: [{ id: 's1', mountName: 'work', kind: 'local', workspaceDir: join(homeDir, 'work') }],
       } as unknown as Parameters<typeof pm.addProject>[0]);
 
       const pages = store.get('pages', []);
@@ -319,13 +362,13 @@ describe('ProjectManager', () => {
 
     const makePmForRepo = (): PmCtx =>
       makePm({
-        source: { kind: 'local', workspaceDir: repoDir },
+        sources: [{ id: 's1', mountName: 'work', kind: 'local', workspaceDir: repoDir }],
         tickets: [{ id: 't1' }],
       });
 
     it('returns empty result for a fresh repo with no files', async () => {
       const { pm } = makePmForRepo();
-      const result = await pm.getFilesChanged('t1');
+      const result = await pm.getFilesChanged('t1', 's1');
       expect(result.hasChanges).toBe(false);
       expect(result.files).toEqual([]);
     });
@@ -334,7 +377,7 @@ describe('ProjectManager', () => {
       const { pm } = makePmForRepo();
       writeFileSync(join(repoDir, 'new.txt'), 'hello\nworld\n');
 
-      const result = await pm.getFilesChanged('t1');
+      const result = await pm.getFilesChanged('t1', 's1');
 
       expect(result.hasChanges).toBe(true);
       expect(result.files).toHaveLength(1);
@@ -356,7 +399,7 @@ describe('ProjectManager', () => {
       writeFileSync(join(repoDir, 'a.txt'), 'modified\n');
 
       const { pm } = makePmForRepo();
-      const result = await pm.getFilesChanged('t1');
+      const result = await pm.getFilesChanged('t1', 's1');
 
       expect(result.hasChanges).toBe(true);
       const file = result.files.find((f) => f.path === 'a.txt')!;
@@ -374,7 +417,7 @@ describe('ProjectManager', () => {
       git('add', 'b.txt');
 
       const { pm } = makePmForRepo();
-      const result = await pm.getFilesChanged('t1');
+      const result = await pm.getFilesChanged('t1', 's1');
 
       const b = result.files.find((f) => f.path === 'b.txt')!;
       expect(b.status).toBe('added');
@@ -387,7 +430,7 @@ describe('ProjectManager', () => {
       git('rm', '-q', 'a.txt');
 
       const { pm } = makePmForRepo();
-      const result = await pm.getFilesChanged('t1');
+      const result = await pm.getFilesChanged('t1', 's1');
 
       const a = result.files.find((f) => f.path === 'a.txt')!;
       expect(a.status).toBe('deleted');
@@ -401,7 +444,7 @@ describe('ProjectManager', () => {
       writeFileSync(join(repoDir, 'bin.dat'), buf);
 
       const { pm } = makePmForRepo();
-      const result = await pm.getFilesChanged('t1');
+      const result = await pm.getFilesChanged('t1', 's1');
 
       const bin = result.files.find((f) => f.path === 'bin.dat')!;
       expect(bin.isBinary).toBe(true);
@@ -410,15 +453,44 @@ describe('ProjectManager', () => {
 
     it('returns empty when the ticket does not exist', async () => {
       const { pm } = makePmForRepo();
-      const result = await pm.getFilesChanged('nope' as TicketId);
+      const result = await pm.getFilesChanged('nope' as TicketId, 's1');
       expect(result.hasChanges).toBe(false);
     });
 
     it('returns empty when the project workspaceDir no longer exists on disk', async () => {
       const { pm } = makePmForRepo();
       rmSync(repoDir, { recursive: true, force: true });
-      const result = await pm.getFilesChanged('t1');
+      const result = await pm.getFilesChanged('t1', 's1');
       expect(result.hasChanges).toBe(false);
+    });
+
+    it('shows committed diff for a ticket on a feature branch with no worktree', async () => {
+      // Reproduces the bug: ticket has a branch but no worktree, workspace
+      // is checked out on that branch. Old code resolved against @{upstream}
+      // and showed nothing; new code diffs against trunk (main) and surfaces
+      // the actual ticket diff.
+      writeFileSync(join(repoDir, 'a.txt'), 'a\n');
+      git('add', 'a.txt');
+      git('commit', '-q', '-m', 'init on main');
+      git('checkout', '-q', '-b', 'feat/foo');
+      writeFileSync(join(repoDir, 'b.txt'), 'b\n');
+      git('add', 'b.txt');
+      git('commit', '-q', '-m', 'add b on feat/foo');
+
+      const { pm, store } = makePm({
+        sources: [{ id: 's1', mountName: 'work', kind: 'local', workspaceDir: repoDir }],
+        tickets: [{ id: 't1' }],
+      });
+      // Record the ticket's branch — mirrors how the supervisor sets it.
+      const tickets = store.get('tickets', []);
+      tickets[0]!.branch = 'feat/foo';
+      store.set('tickets', tickets);
+
+      const result = await pm.getFilesChanged('t1', 's1');
+
+      expect(result.hasChanges).toBe(true);
+      const committed = result.files.filter((f) => f.group === 'committed');
+      expect(committed.map((f) => f.path)).toEqual(['b.txt']);
     });
   });
 
@@ -469,7 +541,7 @@ describe('ProjectManager', () => {
   // T-new — getPipeline cascade
   // -------------------------------------------------------------------------
   describe('getPipeline', () => {
-    it('returns project.pipeline when no FLEET.md workflow is loaded', () => {
+    it('returns project.pipeline when present', () => {
       const { pm } = makePm({
         pipeline: {
           columns: [
@@ -483,24 +555,6 @@ describe('ProjectManager', () => {
       expect(pipeline.columns.map((c) => c.id)).toEqual(['todo', 'done']);
     });
 
-    it('returns FLEET.md pipeline when workflow has one', () => {
-      const { pm } = makePm(
-        { tickets: [] },
-        {
-          workflowConfig: {
-            pipeline: {
-              columns: [
-                { id: 'inbox', label: 'Inbox' },
-                { id: 'shipped', label: 'Shipped' },
-              ],
-            },
-          },
-        }
-      );
-      const pipeline = pm.getPipeline('proj-1');
-      expect(pipeline.columns.map((c) => c.id)).toEqual(['inbox', 'shipped']);
-    });
-
     it('falls back to SIMPLE_PIPELINE for projects without a source', () => {
       const { pm, store } = makePm({ tickets: [] });
       // Remove source from the project to simulate a "no source" project
@@ -511,16 +565,18 @@ describe('ProjectManager', () => {
       store.set('projects', projects);
 
       const pipeline = pm.getPipeline('proj-1');
-      // SIMPLE_PIPELINE has 3 columns: backlog, in_progress, done
+      // SIMPLE_PIPELINE has 3 columns: backlog, review, completed
       expect(pipeline.columns).toHaveLength(3);
       expect(pipeline.columns[0]!.id).toBe('backlog');
-      expect(pipeline.columns[2]!.id).toBe('done');
+      expect(pipeline.columns[1]!.id).toBe('review');
+      expect(pipeline.columns[1]!.gate).toBe(true);
+      expect(pipeline.columns[2]!.id).toBe('completed');
     });
 
     it('falls back to DEFAULT_PIPELINE for projects with a source but no pipeline', () => {
       const { pm, store } = makePm({
         tickets: [],
-        source: { kind: 'local', workspaceDir: '/tmp/work' },
+        sources: [{ id: 's1', mountName: 'work', kind: 'local', workspaceDir: '/tmp/work' }],
       });
       // Remove pipeline from the project
       const projects = store.get('projects', []);
@@ -657,50 +713,8 @@ describe('ProjectManager', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // T-new — migrateOrphanedTickets (via ensureWorkflowLoaded)
-  // -------------------------------------------------------------------------
-  describe('migrateOrphanedTickets', () => {
-    it('moves tickets with stale columnIds to the first column', () => {
-      const { pm, store } = makePm({
-        tickets: [
-          { id: 't1', columnId: 'stale-column' },
-          { id: 't2', columnId: 'backlog' },
-        ],
-      });
-
-      // Trigger migration by calling ensureWorkflowLoaded, which calls migrateOrphanedTickets
-      // Since migrateOrphanedTickets is private, we trigger it through the public interface
-      // Directly manipulate: set a ticket's columnId to something not in the pipeline
-      const tickets = store.get('tickets', []);
-      tickets[0]!.columnId = 'deleted-column' as never;
-      store.set('tickets', tickets);
-
-      // Force pipeline re-evaluation — calling getPipeline + manually invoking the method
-      // through a column move that triggers the pipeline check won't work directly.
-      // Instead, call ensureWorkflowLoaded which calls migrateOrphanedTickets.
-      void pm.ensureWorkflowLoaded('proj-1');
-
-      const updatedTickets = store.get('tickets', []);
-      expect(updatedTickets.find((t: Ticket) => t.id === 't1')!.columnId).toBe('backlog');
-      expect(updatedTickets.find((t: Ticket) => t.id === 't2')!.columnId).toBe('backlog');
-    });
-
-    it('does not touch tickets whose columnId is still valid', () => {
-      const { pm, store } = makePm({
-        tickets: [
-          { id: 't1', columnId: 'in_progress' },
-          { id: 't2', columnId: 'review' },
-        ],
-      });
-
-      void pm.ensureWorkflowLoaded('proj-1');
-
-      const updatedTickets = store.get('tickets', []);
-      expect(updatedTickets.find((t: Ticket) => t.id === 't1')!.columnId).toBe('in_progress');
-      expect(updatedTickets.find((t: Ticket) => t.id === 't2')!.columnId).toBe('review');
-    });
-  });
+  // migrateOrphanedTickets was removed — its replacement (repo.syncColumnsForProject)
+  // is exercised by packages/projects-db/src/repo.test.ts.
 
   // -------------------------------------------------------------------------
   // T-new — removeTicket
@@ -725,12 +739,9 @@ describe('ProjectManager', () => {
   // processManager wiring
   // -------------------------------------------------------------------------
   describe('processManager integration', () => {
-    it('sets processManager.statusFallback when a processManager is provided', () => {
-      const processManager: { statusFallback?: unknown } = {};
-      makePm({ tickets: [{ id: 't1' }] }, { processManager });
-      expect(typeof processManager.statusFallback).toBe('function');
-    });
-
+    // `statusFallback` was removed along with the main-process WS client —
+    // the Code tab's ProcessManager entry is now authoritative for sandbox
+    // status, so the orchestrator has nothing to inject.
     it('does not fail when no processManager is provided', () => {
       expect(() => makePm({ tickets: [{ id: 't1' }] })).not.toThrow();
     });

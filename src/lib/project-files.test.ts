@@ -157,9 +157,8 @@ describe('ticket file roundtrip', () => {
       worktreeName: 'login-fix',
       phase: 'running',
       resolution: 'completed',
-      supervisorSessionId: 'sess-xyz',
+      autopilot: true,
       tokenUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
-      shaping: { doneLooksLike: 'redirect works', appetite: 'medium', outOfScope: 'password reset' },
     });
     const text = serializeTicketFile(t);
     const parsed = parseTicketFile(text, t.id, t.projectId);
@@ -167,6 +166,36 @@ describe('ticket file roundtrip', () => {
     if (parsed.isOk()) {
 expect(parsed.value).toEqual(t);
 }
+  });
+
+  it('folds a legacy shaping frontmatter block into the description', () => {
+    // Pre-v25 files carry structured shaping; the parser folds it into the
+    // description so the data survives the shaping-system removal.
+    const legacy = [
+      '---',
+      'title: Fix the login redirect',
+      'priority: high',
+      'column: in-progress',
+      'shaping:',
+      '  doneLooksLike: redirect works',
+      '  appetite: medium',
+      '  outOfScope: password reset',
+      `createdAt: ${new Date(T1).toISOString()}`,
+      `updatedAt: ${new Date(T2).toISOString()}`,
+      '---',
+      '',
+      'Users land on a blank page after OAuth.',
+      '',
+    ].join('\n');
+    const parsed = parseTicketFile(legacy, 'tkt-1' as TicketId, 'proj-1' as ProjectId);
+    expect(parsed.isOk()).toBe(true);
+    if (parsed.isOk()) {
+      expect(parsed.value.description).toBe(
+        'Users land on a blank page after OAuth.\n\n**Done when:** redirect works\n**Out of scope:** password reset'
+      );
+      // And the fold never round-trips back into frontmatter.
+      expect(serializeTicketFile(parsed.value)).not.toContain('shaping');
+    }
   });
 
   it('uses ISO strings for timestamps in the file', () => {
@@ -356,7 +385,7 @@ expect(parsed.value).toEqual(p);
 
   it('roundtrips a project with local source and pipeline', () => {
     const p = makeProject({
-      source: { kind: 'local', workspaceDir: '/home/user/code', gitDetected: true },
+      sources: [{ id: 'src-1', mountName: 'code', kind: 'local', workspaceDir: '/home/user/code', gitDetected: true }],
       pipeline: {
         columns: [
           { id: 'backlog', label: 'Backlog' },
@@ -377,7 +406,7 @@ expect(parsed.value).toEqual(p);
 
   it('roundtrips a project with git-remote source', () => {
     const p = makeProject({
-      source: { kind: 'git-remote', repoUrl: 'git@github.com:user/repo.git', defaultBranch: 'main' },
+      sources: [{ id: 'src-1', mountName: 'repo', kind: 'git-remote', repoUrl: 'git@github.com:user/repo.git', defaultBranch: 'main' }],
     });
     const text = serializeProjectConfig(p);
     const parsed = parseProjectConfig(text);
@@ -388,7 +417,7 @@ expect(parsed.value).toEqual(p);
   });
 
   it('rejects an unknown source kind', () => {
-    const text = 'id: p1\nlabel: X\nslug: x\ncreatedAt: 2026-04-12T00:00:00Z\nsource:\n  kind: carrier-pigeon\n  address: home\n';
+    const text = 'id: p1\nlabel: X\nslug: x\ncreatedAt: 2026-04-12T00:00:00Z\nsources:\n  - kind: carrier-pigeon\n    address: home\n';
     const parsed = parseProjectConfig(text);
     expect(parsed.isErr()).toBe(true);
   });

@@ -1,4 +1,11 @@
-import { Button as FluentButton, makeStyles, mergeClasses, shorthands, Subtitle2, tokens } from '@fluentui/react-components';
+import {
+  Button as FluentButton,
+  makeStyles,
+  mergeClasses,
+  shorthands,
+  Subtitle2,
+  tokens,
+} from '@fluentui/react-components';
 import {
   ArrowLeft20Regular,
   ArrowMaximize20Regular,
@@ -18,11 +25,30 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { SelectTabData } from '@/renderer/ds';
-import { Badge, Body1, Button, Caption1, IconButton, Input, Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger, Select, Tab, TabList } from '@/renderer/ds';
+import {
+  Badge,
+  Body1,
+  Button,
+  Caption1,
+  IconButton,
+  Input,
+  Menu,
+  MenuDivider,
+  MenuItem,
+  MenuList,
+  MenuPopover,
+  MenuTrigger,
+  Select,
+  Switch,
+  Tab,
+  TabList,
+} from '@/renderer/ds';
 import { $milestones } from '@/renderer/features/Initiatives/state';
+import { AssigneePicker } from '@/renderer/features/Tickets/AssigneePicker';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { GitRepoInfo, MilestoneId, TicketId, TicketPhase, TicketResolution } from '@/shared/types';
+import { firstSource } from '@/shared/types';
 
 import { $pipeline, $tickets, ticketApi } from './state';
 import { RESOLUTION_LABELS } from './ticket-constants';
@@ -81,6 +107,22 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     flexShrink: 0,
+  },
+  /* ── Mobile action bar (replaces the title bar under the TopAppBar) ── */
+  mobileActionBar: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: tokens.spacingHorizontalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    flexShrink: 0,
+  },
+  mobileActionSpacer: {
+    flex: '1 1 0',
   },
   /* ── Row 2: Tabs + overflow ── */
   tabRow: {
@@ -141,6 +183,7 @@ type DragHandleProps = {
 type TicketDetailProps = {
   ticketId: TicketId;
   compact?: boolean;
+  hideTitleBar?: boolean;
   onClose?: () => void;
   closeBehavior?: 'close' | 'back';
   dragHandleProps?: DragHandleProps;
@@ -148,391 +191,476 @@ type TicketDetailProps = {
   onToggleExpand?: () => void;
 };
 
-export const TicketDetail = memo(({ ticketId, compact, onClose, closeBehavior = 'close', dragHandleProps, isExpanded, onToggleExpand }: TicketDetailProps) => {
-  const styles = useStyles();
-  const tickets = useStore($tickets);
-  const pipeline = useStore($pipeline);
-  const milestones = useStore($milestones);
-  const store = useStore(persistedStoreApi.$atom);
-  const ticket = tickets[ticketId];
-  const projectMilestones = useMemo(
-    () => Object.values(milestones).filter((m) => m.projectId === ticket?.projectId),
-    [milestones, ticket?.projectId]
-  );
-  const currentMilestone = ticket?.milestoneId ? milestones[ticket.milestoneId] : undefined;
-  const project = useMemo(
-    () => store.projects.find((p) => p.id === ticket?.projectId) ?? null,
-    [store.projects, ticket?.projectId]
-  );
-  const [activeTab, setActiveTab] = useState<TicketTab>('Overview');
-  const [editingTitle, setEditingTitle] = useState(false);
-  const [editTitle, setEditTitle] = useState('');
-  const [gitInfo, setGitInfo] = useState<GitRepoInfo | null>(null);
-  const [editingBranch, setEditingBranch] = useState(false);
-  const [editBranch, setEditBranch] = useState('');
+export const TicketDetail = memo(
+  ({
+    ticketId,
+    compact,
+    hideTitleBar = false,
+    onClose,
+    closeBehavior = 'close',
+    dragHandleProps,
+    isExpanded,
+    onToggleExpand,
+  }: TicketDetailProps) => {
+    const styles = useStyles();
+    const tickets = useStore($tickets);
+    const pipeline = useStore($pipeline);
+    const milestones = useStore($milestones);
+    const store = useStore(persistedStoreApi.$atom);
+    const ticket = tickets[ticketId];
+    const projectMilestones = useMemo(
+      () => Object.values(milestones).filter((m) => m.projectId === ticket?.projectId),
+      [milestones, ticket?.projectId]
+    );
+    const currentMilestone = ticket?.milestoneId ? milestones[ticket.milestoneId] : undefined;
+    const project = useMemo(
+      () => store.projects.find((p) => p.id === ticket?.projectId) ?? null,
+      [store.projects, ticket?.projectId]
+    );
+    const [activeTab, setCurrentTab] = useState<TicketTab>('Overview');
+    const [editingTitle, setEditingTitle] = useState(false);
+    const [editTitle, setEditTitle] = useState('');
+    const [gitInfo, setGitInfo] = useState<GitRepoInfo | null>(null);
+    const [editingBranch, setEditingBranch] = useState(false);
+    const [editBranch, setEditBranch] = useState('');
+    const [editUseWorktree, setEditUseWorktree] = useState(true);
 
-  useEffect(() => {
-    if (project?.source?.kind !== 'local') {
-      setGitInfo(null);
-      return;
-    }
-    ticketApi.checkGitRepo(project.source.workspaceDir).then((info) => {
-      setGitInfo(info);
-    });
-  }, [project?.source]);
-
-  const handleStartEditTitle = useCallback(() => {
-    if (ticket) {
-      setEditTitle(ticket.title);
-      setEditingTitle(true);
-    }
-  }, [ticket]);
-
-  const handleEditTitleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setEditTitle(e.target.value);
-  }, []);
-
-  const handleSaveTitle = useCallback(() => {
-    const trimmed = editTitle.trim();
-    if (trimmed && ticket && trimmed !== ticket.title) {
-      void ticketApi.updateTicket(ticketId, { title: trimmed });
-    }
-    setEditingTitle(false);
-  }, [editTitle, ticket, ticketId]);
-
-  const handleStartEditBranch = useCallback(() => {
-    if (!ticket) {
-      return;
-    }
-    setEditBranch(ticket.branch ?? '');
-    setEditingBranch(true);
-  }, [ticket]);
-
-  const handleCancelEditBranch = useCallback(() => {
-    setEditingBranch(false);
-  }, []);
-
-  const handleSaveBranch = useCallback(() => {
-    if (!ticket) {
-      return;
-    }
-    void ticketApi.updateTicket(ticketId, {
-      branch: editBranch || undefined,
-    });
-    setEditingBranch(false);
-  }, [editBranch, ticket, ticketId]);
-
-  const handleTitleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter') {
-        handleSaveTitle();
-      } else if (e.key === 'Escape') {
-        setEditingTitle(false);
+    useEffect(() => {
+      const s = firstSource(project);
+      if (s?.kind !== 'local') {
+        setGitInfo(null);
+        return;
       }
-    },
-    [handleSaveTitle]
-  );
+      ticketApi.checkGitRepo(s.workspaceDir).then((info) => {
+        setGitInfo(info);
+      });
+    }, [project]);
 
-  const handleOpenChat = useCallback(() => {
-    void openTicketInCode(ticketId);
-  }, [ticketId]);
+    const handleStartEditTitle = useCallback(() => {
+      if (ticket) {
+        setEditTitle(ticket.title);
+        setEditingTitle(true);
+      }
+    }, [ticket]);
 
-  const handleStartAutopilot = useCallback(() => {
-    void openTicketInCode(ticketId);
-    void ticketApi.startSupervisor(ticketId);
-  }, [ticketId]);
+    const handleEditTitleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+      setEditTitle(e.target.value);
+    }, []);
 
-  const handleDelete = useCallback(() => {
-    ticketApi.removeTicket(ticketId);
-  }, [ticketId]);
+    const handleSaveTitle = useCallback(() => {
+      const trimmed = editTitle.trim();
+      if (trimmed && ticket && trimmed !== ticket.title) {
+        void ticketApi.updateTicket(ticketId, { title: trimmed });
+      }
+      setEditingTitle(false);
+    }, [editTitle, ticket, ticketId]);
 
-  const isTerminalColumn = useMemo(() => {
-    if (!pipeline || !ticket) {
-      return false;
-    }
-    const terminalId = pipeline.columns[pipeline.columns.length - 1]?.id;
-    return ticket.columnId === terminalId;
-  }, [pipeline, ticket]);
+    const handleStartEditBranch = useCallback(() => {
+      if (!ticket) {
+        return;
+      }
+      setEditBranch(ticket.branch ?? '');
+      setEditUseWorktree(ticket.useWorktree ?? false);
+      setEditingBranch(true);
+    }, [ticket]);
 
-  const handleResolve = useCallback(
-    (resolution: TicketResolution) => {
-      ticketApi.resolveTicket(ticketId, resolution);
-    },
-    [ticketId]
-  );
+    const handleCancelEditBranch = useCallback(() => {
+      setEditingBranch(false);
+    }, []);
 
-  const handleArchive = useCallback(() => {
-    void ticketApi.updateTicket(ticketId, { archivedAt: Date.now() });
-  }, [ticketId]);
+    const handleSaveBranch = useCallback(() => {
+      if (!ticket) {
+        return;
+      }
+      // Direct mode: clear the branch too — a ticket running against the
+      // project's working tree doesn't own one, and leaving a stale value
+      // would make the UI claim a branch the supervisor isn't using.
+      void ticketApi.updateTicket(ticketId, {
+        useWorktree: editUseWorktree,
+        branch: editUseWorktree ? editBranch || undefined : undefined,
+      });
+      setEditingBranch(false);
+    }, [editBranch, editUseWorktree, ticket, ticketId]);
 
-  const handleUnarchive = useCallback(() => {
-    void ticketApi.updateTicket(ticketId, { archivedAt: undefined });
-  }, [ticketId]);
+    const handleTitleKeyDown = useCallback(
+      (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+          handleSaveTitle();
+        } else if (e.key === 'Escape') {
+          setEditingTitle(false);
+        }
+      },
+      [handleSaveTitle]
+    );
 
-  const handleSelectMilestone = useCallback(
-    (milestoneId: MilestoneId | undefined) => {
-      void ticketApi.moveTicketToMilestone(ticketId, milestoneId);
-    },
-    [ticketId]
-  );
+    const handleOpenChat = useCallback(() => {
+      void openTicketInCode(ticketId);
+    }, [ticketId]);
 
-  const handleTabSelect = useCallback((_e: unknown, data: SelectTabData) => {
-    setActiveTab(data.value as TicketTab);
-  }, []);
+    const handleStartAutopilot = useCallback(() => {
+      ticketApi.requestStartSupervisor(ticketId);
+    }, [ticketId]);
 
-  // -------------------------------------------------------------------------
-  // Flush-on-unmount.
-  //
-  // The parent keys this component on `ticketId`, so navigating to a
-  // different ticket fully remounts us — edit buffers (`editTitle`,
-  // `editBranch`) can never cross ticket boundaries. But a mid-edit user
-  // who navigates away without pressing Enter or blurring the input would
-  // otherwise lose that edit. On unmount we call the latest save closures,
-  // which close over the current buffers AND the current `ticketId`, so
-  // any pending title/branch change lands on the right ticket.
-  //
-  // The save handlers are already idempotent: `handleSaveTitle` no-ops when
-  // trimmed/unchanged, and `handleSaveBranch` only fires when we're
-  // actively in edit mode (guarded below). Safe to call unconditionally.
-  // -------------------------------------------------------------------------
-  const flushRef = useRef<() => void>(() => {});
-  flushRef.current = () => {
-    if (editingTitle) {
-      handleSaveTitle();
-    }
-    if (editingBranch) {
-      handleSaveBranch();
-    }
-  };
-  useEffect(() => {
-    return () => {
-      flushRef.current();
+    const handleDelete = useCallback(() => {
+      ticketApi.removeTicket(ticketId);
+    }, [ticketId]);
+
+    const isTerminalColumn = useMemo(() => {
+      if (!pipeline || !ticket) {
+        return false;
+      }
+      const terminalId = pipeline.columns[pipeline.columns.length - 1]?.id;
+      return ticket.columnId === terminalId;
+    }, [pipeline, ticket]);
+
+    const handleResolve = useCallback(
+      (resolution: TicketResolution) => {
+        ticketApi.resolveTicket(ticketId, resolution);
+      },
+      [ticketId]
+    );
+
+    const handleArchive = useCallback(() => {
+      void ticketApi.updateTicket(ticketId, { archivedAt: Date.now() });
+    }, [ticketId]);
+
+    const handleUnarchive = useCallback(() => {
+      void ticketApi.updateTicket(ticketId, { archivedAt: undefined });
+    }, [ticketId]);
+
+    const handleSelectMilestone = useCallback(
+      (milestoneId: MilestoneId | undefined) => {
+        void ticketApi.moveTicketToMilestone(ticketId, milestoneId);
+      },
+      [ticketId]
+    );
+
+    const handleTabSelect = useCallback((_e: unknown, data: SelectTabData) => {
+      setCurrentTab(data.value as TicketTab);
+    }, []);
+
+    const handleClearMilestone = useCallback(() => handleSelectMilestone(undefined), [handleSelectMilestone]);
+    const handleBranchChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
+      setEditBranch(event.target.value);
+    }, []);
+
+    // -------------------------------------------------------------------------
+    // Flush-on-unmount.
+    //
+    // The parent keys this component on `ticketId`, so navigating to a
+    // different ticket fully remounts us — edit buffers (`editTitle`,
+    // `editBranch`) can never cross ticket boundaries. But a mid-edit user
+    // who navigates away without pressing Enter or blurring the input would
+    // otherwise lose that edit. On unmount we call the latest save closures,
+    // which close over the current buffers AND the current `ticketId`, so
+    // any pending title/branch change lands on the right ticket.
+    //
+    // The save handlers are already idempotent: `handleSaveTitle` no-ops when
+    // trimmed/unchanged, and `handleSaveBranch` only fires when we're
+    // actively in edit mode (guarded below). Safe to call unconditionally.
+    // -------------------------------------------------------------------------
+    const flushRef = useRef<() => void>(() => {});
+    flushRef.current = () => {
+      if (editingTitle) {
+        handleSaveTitle();
+      }
+      if (editingBranch) {
+        handleSaveBranch();
+      }
     };
-  }, []);
+    useEffect(() => {
+      return () => {
+        flushRef.current();
+      };
+    }, []);
 
-  if (!ticket) {
+    if (!ticket) {
+      return (
+        <div className={styles.notFound}>
+          <Body1>Ticket not found</Body1>
+        </div>
+      );
+    }
+
+    const phase = ticket.phase;
+
+    const milestoneMenu = (
+      <Menu positioning={{ position: 'below', align: 'end' }}>
+        <MenuTrigger disableButtonEnhancement>
+          <Button size="sm" variant="ghost" leftIcon={<Flag20Regular />} aria-label="Change milestone">
+            {currentMilestone?.title ?? 'No milestone'}
+          </Button>
+        </MenuTrigger>
+        <MenuPopover>
+          <MenuList>
+            <MenuItem
+              icon={!ticket.milestoneId ? <Checkmark16Regular /> : <span style={{ width: 16 }} />}
+              onClick={handleClearMilestone}
+            >
+              No milestone
+            </MenuItem>
+            {projectMilestones.length > 0 && <MenuDivider />}
+            {projectMilestones.map((m) => (
+              <MilestoneMenuItem
+                key={m.id}
+                milestoneId={m.id}
+                title={m.title || 'Untitled milestone'}
+                selected={ticket.milestoneId === m.id}
+                onSelect={handleSelectMilestone}
+              />
+            ))}
+          </MenuList>
+        </MenuPopover>
+      </Menu>
+    );
+
     return (
-      <div className={styles.notFound}>
-        <Body1>Ticket not found</Body1>
+      <div className={styles.root}>
+        {!hideTitleBar && (
+          <div className={styles.titleBar}>
+            {onClose && closeBehavior === 'back' && (
+              <IconButton aria-label="Back" icon={<ArrowLeft20Regular />} size="sm" onClick={onClose} />
+            )}
+            {dragHandleProps && (
+              <FluentButton
+                appearance="subtle"
+                shape="circular"
+                size="small"
+                icon={<ReOrderDotsVertical20Regular />}
+                aria-label="Reorder"
+                className={styles.dragHandle}
+                {...dragHandleProps.attributes}
+                {...dragHandleProps.listeners}
+              />
+            )}
+
+            {editingTitle ? (
+              <Input
+                type="text"
+                value={editTitle}
+                onChange={handleEditTitleChange}
+                onBlur={handleSaveTitle}
+                onKeyDown={handleTitleKeyDown}
+                autoFocus
+                size="sm"
+                className={styles.titleInput}
+              />
+            ) : (
+              <FluentButton
+                appearance="transparent"
+                size="small"
+                onClick={handleStartEditTitle}
+                className={styles.titleBtn}
+              >
+                <Subtitle2 className={styles.titleText}>{ticket.title}</Subtitle2>
+                <Edit20Regular className={mergeClasses(styles.editIcon, 'editIcon')} />
+              </FluentButton>
+            )}
+
+            {milestoneMenu}
+
+            <AssigneePicker ticketId={ticketId} assignee={ticket.assignee} />
+
+            <PhaseStatus phase={phase} onChat={handleOpenChat} onAutopilot={handleStartAutopilot} />
+
+            {onToggleExpand && (
+              <IconButton
+                aria-label={isExpanded ? 'Collapse' : 'Expand'}
+                icon={isExpanded ? <ArrowMinimize20Regular /> : <ArrowMaximize20Regular />}
+                size="sm"
+                onClick={onToggleExpand}
+              />
+            )}
+            {onClose && closeBehavior === 'close' && (
+              <IconButton aria-label="Close" icon={<Dismiss20Regular />} size="sm" onClick={onClose} />
+            )}
+          </div>
+        )}
+
+        {/* Mobile: the TopAppBar owns back + title, so surface the title bar's
+            remaining affordances (milestone, assignee, chat/autopilot) in a
+            compact row. Rename swaps the row for the title input. */}
+        {hideTitleBar && (
+          <div className={styles.mobileActionBar}>
+            {editingTitle ? (
+              <Input
+                type="text"
+                value={editTitle}
+                onChange={handleEditTitleChange}
+                onBlur={handleSaveTitle}
+                onKeyDown={handleTitleKeyDown}
+                autoFocus
+                size="sm"
+                className={styles.titleInput}
+              />
+            ) : (
+              <>
+                {milestoneMenu}
+                <AssigneePicker ticketId={ticketId} assignee={ticket.assignee} />
+                <div className={styles.mobileActionSpacer} />
+                <PhaseStatus phase={phase} onChat={handleOpenChat} onAutopilot={handleStartAutopilot} />
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── Row 2: Tabs + overflow menu ── */}
+        <div className={styles.tabRow}>
+          <TabList size="small" selectedValue={activeTab} onTabSelect={handleTabSelect} className={styles.tabList}>
+            {TABS.map((tab) => (
+              <Tab key={tab} value={tab}>
+                {tab}
+              </Tab>
+            ))}
+          </TabList>
+
+          {!compact && (
+            <Menu positioning={{ position: 'below', align: 'end', fallbackPositions: ['above-end'] }}>
+              <MenuTrigger>
+                <IconButton aria-label="Ticket menu" icon={<MoreHorizontal20Filled />} size="sm" />
+              </MenuTrigger>
+              <MenuPopover>
+                <MenuList>
+                  {hideTitleBar && (
+                    <MenuItem icon={<Edit20Regular />} onClick={handleStartEditTitle}>
+                      Rename ticket
+                    </MenuItem>
+                  )}
+                  {gitInfo?.isGitRepo && (
+                    <MenuItem icon={<BranchFork20Regular />} onClick={handleStartEditBranch}>
+                      Edit branch
+                    </MenuItem>
+                  )}
+                  {!ticket.resolution && !isTerminalColumn && (
+                    <>
+                      <MenuDivider />
+                      {(['completed', 'wont_do', 'duplicate', 'cancelled'] as TicketResolution[]).map((res) => (
+                        <ResolutionMenuItem key={res} resolution={res} onResolve={handleResolve} />
+                      ))}
+                    </>
+                  )}
+                  {ticket.resolution && (
+                    <>
+                      <MenuDivider />
+                      {ticket.archivedAt ? (
+                        <MenuItem onClick={handleUnarchive}>Unarchive ticket</MenuItem>
+                      ) : (
+                        <MenuItem onClick={handleArchive}>Archive ticket</MenuItem>
+                      )}
+                    </>
+                  )}
+                  <MenuDivider />
+                  <MenuItem icon={<Delete20Regular />} onClick={handleDelete}>
+                    Delete ticket
+                  </MenuItem>
+                </MenuList>
+              </MenuPopover>
+            </Menu>
+          )}
+        </div>
+
+        {/* Branch edit (conditional) */}
+        {editingBranch && gitInfo?.isGitRepo && (
+          <div className={styles.branchEditBar}>
+            <div className={styles.branchGroup}>
+              <Caption1 style={{ color: tokens.colorNeutralForeground3, fontWeight: tokens.fontWeightMedium }}>
+                Isolated worktree
+              </Caption1>
+              <Switch
+                checked={editUseWorktree}
+                onCheckedChange={setEditUseWorktree}
+                disabled={Boolean(ticket.worktreePath)}
+              />
+            </div>
+            {editUseWorktree && (
+              <div className={styles.branchGroup}>
+                <Caption1 style={{ color: tokens.colorNeutralForeground3, fontWeight: tokens.fontWeightMedium }}>
+                  Branch
+                </Caption1>
+                <Select value={editBranch} onChange={handleBranchChange} size="sm">
+                  <option value="">None</option>
+                  {gitInfo.branches.map((branch) => (
+                    <option key={branch} value={branch}>
+                      {branch}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            )}
+            <Caption1 style={{ color: tokens.colorNeutralForeground2 }}>
+              {ticket.worktreePath
+                ? 'Clean up the active worktree before switching modes.'
+                : editUseWorktree
+                  ? 'Autopilot works in its own branch + worktree, isolated from the main checkout.'
+                  : 'Autopilot works directly in the project checkout. Only one direct-mode ticket can run at a time.'}
+            </Caption1>
+            <div className={styles.branchGroup}>
+              <Button size="sm" onClick={handleSaveBranch}>
+                Save
+              </Button>
+              <Button size="sm" variant="ghost" onClick={handleCancelEditBranch}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Tab content */}
+        {activeTab === 'Overview' && (
+          <div className={styles.overviewScroll}>
+            <TicketOverviewTab ticket={ticket} />
+          </div>
+        )}
+        {activeTab === 'Discussion' && (
+          <div className={styles.tabPane}>
+            <TicketDiscussionTab ticket={ticket} />
+          </div>
+        )}
+        {activeTab === 'PR' && (
+          <div className={styles.tabPane}>
+            <TicketPRTab ticketId={ticketId} />
+          </div>
+        )}
+        {activeTab === 'Artifacts' && (
+          <div className={styles.tabPane}>
+            <TicketArtifactsTab ticketId={ticketId} />
+          </div>
+        )}
       </div>
     );
   }
+);
+TicketDetail.displayName = 'TicketDetail';
 
-  const phase = ticket.phase;
-  const showTabs = true;
+type MilestoneMenuItemProps = {
+  milestoneId: MilestoneId;
+  title: string;
+  selected: boolean;
+  onSelect: (milestoneId: MilestoneId) => void;
+};
+
+const MilestoneMenuItem = memo(({ milestoneId, title, selected, onSelect }: MilestoneMenuItemProps) => {
+  const handleSelect = useCallback(() => onSelect(milestoneId), [milestoneId, onSelect]);
 
   return (
-    <div className={styles.root}>
-      {/* ── Row 1: Title ── */}
-      <div className={styles.titleBar}>
-        {onClose && closeBehavior === 'back' && (
-          <IconButton
-            aria-label="Back"
-            icon={<ArrowLeft20Regular />}
-            size="sm"
-            onClick={onClose}
-          />
-        )}
-        {dragHandleProps && (
-          <FluentButton
-            appearance="subtle"
-            shape="circular"
-            size="small"
-            icon={<ReOrderDotsVertical20Regular />}
-            aria-label="Reorder"
-            className={styles.dragHandle}
-            {...dragHandleProps.attributes}
-            {...dragHandleProps.listeners}
-          />
-        )}
-
-        {editingTitle ? (
-          <Input
-            type="text"
-            value={editTitle}
-            onChange={handleEditTitleChange}
-            onBlur={handleSaveTitle}
-            onKeyDown={handleTitleKeyDown}
-            autoFocus
-            size="sm"
-            className={styles.titleInput}
-          />
-        ) : (
-          <FluentButton
-            appearance="transparent"
-            size="small"
-            onClick={handleStartEditTitle}
-            className={styles.titleBtn}
-          >
-            <Subtitle2 className={styles.titleText}>{ticket.title}</Subtitle2>
-            <Edit20Regular className={mergeClasses(styles.editIcon, 'editIcon')} />
-          </FluentButton>
-        )}
-
-        <Menu positioning={{ position: 'below', align: 'end' }}>
-          <MenuTrigger disableButtonEnhancement>
-            <Button
-              size="sm"
-              variant="ghost"
-              leftIcon={<Flag20Regular />}
-              aria-label="Change milestone"
-            >
-              {currentMilestone?.title ?? 'No milestone'}
-            </Button>
-          </MenuTrigger>
-          <MenuPopover>
-            <MenuList>
-              <MenuItem
-                icon={!ticket.milestoneId ? <Checkmark16Regular /> : <span style={{ width: 16 }} />}
-                onClick={() => handleSelectMilestone(undefined)}
-              >
-                No milestone
-              </MenuItem>
-              {projectMilestones.length > 0 && <MenuDivider />}
-              {projectMilestones.map((m) => (
-                <MenuItem
-                  key={m.id}
-                  icon={ticket.milestoneId === m.id ? <Checkmark16Regular /> : <span style={{ width: 16 }} />}
-                  onClick={() => handleSelectMilestone(m.id)}
-                >
-                  {m.title || 'Untitled milestone'}
-                </MenuItem>
-              ))}
-            </MenuList>
-          </MenuPopover>
-        </Menu>
-
-        <PhaseStatus phase={phase} onChat={handleOpenChat} onAutopilot={handleStartAutopilot} />
-
-        {onToggleExpand && (
-          <IconButton
-            aria-label={isExpanded ? 'Collapse' : 'Expand'}
-            icon={isExpanded ? <ArrowMinimize20Regular /> : <ArrowMaximize20Regular />}
-            size="sm"
-            onClick={onToggleExpand}
-          />
-        )}
-        {onClose && closeBehavior === 'close' && (
-          <IconButton
-            aria-label="Close"
-            icon={<Dismiss20Regular />}
-            size="sm"
-            onClick={onClose}
-          />
-        )}
-      </div>
-
-      {/* ── Row 2: Tabs + overflow menu ── */}
-      <div className={styles.tabRow}>
-        <TabList size="small" selectedValue={activeTab} onTabSelect={handleTabSelect} className={styles.tabList}>
-          {TABS.map((tab) => (
-            <Tab key={tab} value={tab}>{tab}</Tab>
-          ))}
-        </TabList>
-
-        {!compact && (
-          <Menu positioning={{ position: 'below', align: 'end', fallbackPositions: ['above-end'] }}>
-            <MenuTrigger>
-              <IconButton
-                aria-label="Ticket menu"
-                icon={<MoreHorizontal20Filled />}
-                size="sm"
-              />
-            </MenuTrigger>
-            <MenuPopover>
-              <MenuList>
-                {gitInfo?.isGitRepo && (
-                  <MenuItem icon={<BranchFork20Regular />} onClick={handleStartEditBranch}>
-                    Edit branch
-                  </MenuItem>
-                )}
-                {!ticket.resolution && !isTerminalColumn && (
-                  <>
-                    <MenuDivider />
-                    {(['completed', 'wont_do', 'duplicate', 'cancelled'] as TicketResolution[]).map((res) => (
-                      <MenuItem key={res} onClick={() => handleResolve(res)}>
-                        {RESOLUTION_LABELS[res]}
-                      </MenuItem>
-                    ))}
-                  </>
-                )}
-                {ticket.resolution && (
-                  <>
-                    <MenuDivider />
-                    {ticket.archivedAt ? (
-                      <MenuItem onClick={handleUnarchive}>Unarchive ticket</MenuItem>
-                    ) : (
-                      <MenuItem onClick={handleArchive}>Archive ticket</MenuItem>
-                    )}
-                  </>
-                )}
-                <MenuDivider />
-                <MenuItem icon={<Delete20Regular />} onClick={handleDelete}>
-                  Delete ticket
-                </MenuItem>
-              </MenuList>
-            </MenuPopover>
-          </Menu>
-        )}
-      </div>
-
-      {/* Branch edit (conditional) */}
-      {editingBranch && gitInfo?.isGitRepo && (
-        <div className={styles.branchEditBar}>
-          <div className={styles.branchGroup}>
-            <Caption1 style={{ color: tokens.colorNeutralForeground3, fontWeight: tokens.fontWeightMedium }}>Branch</Caption1>
-            <Select
-              value={editBranch}
-              onChange={(e) => setEditBranch(e.target.value)}
-              size="sm"
-            >
-              <option value="">None</option>
-              {gitInfo.branches.map((branch) => (
-                <option key={branch} value={branch}>
-                  {branch}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <Caption1 style={{ color: tokens.colorNeutralForeground2 }}>
-            Tickets with a branch open in an isolated workspace.
-          </Caption1>
-          <div className={styles.branchGroup}>
-            <Button size="sm" onClick={handleSaveBranch}>
-              Save
-            </Button>
-            <Button size="sm" variant="ghost" onClick={handleCancelEditBranch}>
-              Cancel
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Tab content */}
-      {activeTab === 'Overview' && (
-        <div className={styles.overviewScroll}>
-          <TicketOverviewTab ticket={ticket} />
-        </div>
-      )}
-      {activeTab === 'Discussion' && (
-        <div className={styles.tabPane}>
-          <TicketDiscussionTab ticket={ticket} />
-        </div>
-      )}
-      {activeTab === 'PR' && (
-        <div className={styles.tabPane}>
-          <TicketPRTab ticketId={ticketId} />
-        </div>
-      )}
-      {activeTab === 'Artifacts' && (
-        <div className={styles.tabPane}>
-          <TicketArtifactsTab ticketId={ticketId} />
-        </div>
-      )}
-    </div>
+    <MenuItem icon={selected ? <Checkmark16Regular /> : <span style={{ width: 16 }} />} onClick={handleSelect}>
+      {title}
+    </MenuItem>
   );
 });
-TicketDetail.displayName = 'TicketDetail';
+MilestoneMenuItem.displayName = 'MilestoneMenuItem';
+
+type ResolutionMenuItemProps = {
+  resolution: TicketResolution;
+  onResolve: (resolution: TicketResolution) => void;
+};
+
+const ResolutionMenuItem = memo(({ resolution, onResolve }: ResolutionMenuItemProps) => {
+  const handleResolve = useCallback(() => onResolve(resolution), [onResolve, resolution]);
+
+  return <MenuItem onClick={handleResolve}>{RESOLUTION_LABELS[resolution]}</MenuItem>;
+});
+ResolutionMenuItem.displayName = 'ResolutionMenuItem';
 
 // --- Phase status (read-only badge + action buttons) ---
 
@@ -553,6 +681,19 @@ const PhaseStatus = memo(
     const styles = useStyles();
 
     const badge = phase ? PHASE_BADGE[phase] : undefined;
+    if (phase === 'error') {
+      return (
+        <div className={styles.actionGroup}>
+          <Badge color="red">Error</Badge>
+          <Button size="sm" variant="ghost" leftIcon={<Chat20Regular />} onClick={onChat}>
+            Chat
+          </Button>
+          <Button size="sm" leftIcon={<Play20Filled />} onClick={onAutopilot}>
+            Retry
+          </Button>
+        </div>
+      );
+    }
     if (badge) {
       return (
         <div className={styles.actionGroup}>

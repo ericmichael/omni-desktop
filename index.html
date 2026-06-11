@@ -3,14 +3,56 @@
 
 <head>
   <meta charset="UTF-8" />
-  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src <%- cspScriptSrc %>; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ws: wss: http: https:; frame-src 'self' http: https:;" />
+  <link rel="icon" type="image/png" href="/icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="/icons/icon-180.png" />
+  <!-- use-credentials so the manifest fetch sends the auth cookie; behind
+       EasyAuth an anonymous fetch is redirected to login (blocked by
+       manifest-src 'self'). -->
+  <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+  <!-- interactive-widget=resizes-content: Android Chrome 108+ stopped resizing
+       the layout viewport for the on-screen keyboard by default; without this
+       the chat composer and bottom nav stay hidden behind the keyboard.
+       (iOS ignores it — handled by the visualViewport hook in App.) -->
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#ffffff" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Omni" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src <%- cspScriptSrc %>; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ws: wss: http: https:; frame-src 'self' http: https:; manifest-src 'self';" />
   <title>Omni Code</title>
   <style>
+    :root {
+      color-scheme: light dark;
+      /* Pre-React backstop. Must match the bottom nav color (background2 of
+         the default themes — see fluent-themes.ts), not the content surface:
+         this is what paints the bottom safe-area zone, and a surface color
+         here draws a visible seam under the nav on phones. */
+      --safe-area-background: #fafafa;
+      background-color: var(--safe-area-background);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --safe-area-background: #18181b;
+      }
+    }
+
+    html,
+    body,
+    #root {
+      min-height: 100%;
+      background-color: var(--safe-area-background);
+    }
+
     body {
-      background-color: #09090b !important;
       margin: 0;
+      /* The app shell owns all scrolling; block pull-to-refresh and
+         rubber-band chaining so an overscroll can't reload the app. */
+      overscroll-behavior: none;
     }
   </style>
 </head>

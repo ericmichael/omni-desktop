@@ -27,15 +27,22 @@ beforeEach(async () => {
   await new Promise<void>((resolve) => wss.once('listening', () => resolve()));
   port = (wss.address() as AddressInfo).port;
   wss.on('connection', (ws, req) => {
-    // Parse sid=... from the request URL
+    // Parse sid=... and tenant=... from the request URL
     let sessionId: string | undefined;
+    let tenantId: string | undefined;
     try {
       const url = new URL(req.url ?? '/', 'http://localhost');
       sessionId = url.searchParams.get('sid') ?? undefined;
+      tenantId = url.searchParams.get('tenant') ?? undefined;
     } catch {
       sessionId = undefined;
     }
-    handler.addClient(ws as unknown as Parameters<WsHandler['addClient']>[0], onConnectImpl as Parameters<WsHandler['addClient']>[1], sessionId);
+    handler.addClient(
+      ws as unknown as Parameters<WsHandler['addClient']>[0],
+      onConnectImpl as Parameters<WsHandler['addClient']>[1],
+      sessionId,
+      tenantId
+    );
   });
 });
 
@@ -62,8 +69,16 @@ afterEach(async () => {
   await new Promise<void>((resolve) => wss.close(() => resolve()));
 });
 
-const connectClient = async (sessionId?: string): Promise<WebSocket> => {
-  const url = `ws://127.0.0.1:${port}${sessionId ? `?sid=${sessionId}` : ''}`;
+const connectClient = async (sessionId?: string, tenantId?: string): Promise<WebSocket> => {
+  const params = new URLSearchParams();
+  if (sessionId) {
+    params.set('sid', sessionId);
+  }
+  if (tenantId) {
+    params.set('tenant', tenantId);
+  }
+  const qs = params.toString();
+  const url = `ws://127.0.0.1:${port}${qs ? `?${qs}` : ''}`;
   const ws = new WebSocket(url);
   openClients.push(ws);
   await new Promise<void>((resolve, reject) => {
@@ -85,8 +100,8 @@ const connectClient = async (sessionId?: string): Promise<WebSocket> => {
 
 const closeClient = async (ws: WebSocket): Promise<void> => {
   if (ws.readyState === WebSocket.CLOSED) {
-return;
-}
+    return;
+  }
   await new Promise<void>((resolve) => {
     ws.once('close', () => resolve());
     ws.close();
@@ -224,6 +239,73 @@ describe('WsHandler - session persistence', () => {
   });
 });
 
+describe('WsHandler - tenant isolation', () => {
+  it('sendToTenant reaches only same-tenant connections', async () => {
+    const wsA = await connectClient('a-sess', 'tenant-A');
+    const wsB = await connectClient('b-sess', 'tenant-B');
+
+    const aGot = waitForEvent(wsA, 'scoped:event');
+    // wsB must NOT receive it — assert by racing against a short timeout.
+    let bReceived = false;
+    const bListener = (raw: Buffer): void => {
+      try {
+        const msg = JSON.parse(String(raw)) as { type?: string; channel?: string };
+        if (msg.type === 'event' && msg.channel === 'scoped:event') {
+          bReceived = true;
+        }
+      } catch {
+        // ignore
+      }
+    };
+    wsB.on('message', bListener);
+
+    (handler.sendToTenant as unknown as (t: string, channel: string, ...args: unknown[]) => void)(
+      'tenant-A',
+      'scoped:event',
+      { secret: 1 }
+    );
+
+    const args = await aGot;
+    expect(args).toEqual([{ secret: 1 }]);
+    await new Promise((r) => setTimeout(r, 30));
+    wsB.off('message', bListener);
+    expect(bReceived).toBe(false);
+  });
+
+  it('same sessionId under a different tenant does not hijack the session', async () => {
+    let onConnectCalls = 0;
+    onConnectImpl = (session) => {
+      const mine = `handler-${onConnectCalls++}`;
+      session.handle('whoami', () => mine);
+    };
+    // Same client sessionId "shared", two different tenants.
+    const wsA = await connectClient('shared', 'tenant-A');
+    const resA = await invoke(wsA, 1, 'whoami');
+    const wsB = await connectClient('shared', 'tenant-B');
+    const resB = await invoke(wsB, 2, 'whoami');
+
+    // Each tenant got its OWN onConnect/session — no reattach across tenants.
+    expect(onConnectCalls).toBe(2);
+    expect(resA.result).toBe('handler-0');
+    expect(resB.result).toBe('handler-1');
+  });
+
+  it('same tenant + sessionId still reattaches (cross-device sync preserved)', async () => {
+    let onConnectCalls = 0;
+    onConnectImpl = (session) => {
+      onConnectCalls++;
+      session.handle('whoami', () => 'shared-handler');
+    };
+    const ws1 = await connectClient('dev', 'tenant-A');
+    await invoke(ws1, 1, 'whoami');
+    await closeClient(ws1);
+    const ws2 = await connectClient('dev', 'tenant-A');
+    const res = await invoke(ws2, 2, 'whoami');
+    expect(onConnectCalls).toBe(1);
+    expect(res.result).toBe('shared-handler');
+  });
+});
+
 describe('WsHandler - event interceptors', () => {
   it('fires interceptor with cloned args on sendToAll', async () => {
     const interceptor = vi.fn();
@@ -294,7 +376,7 @@ describe('WsHandler - cleanupAllSessions', () => {
     let onConnectCalls = 0;
     onConnectImpl = (session) => {
       onConnectCalls += 1;
-      session.handle('test:ping', () => `v${  onConnectCalls}`);
+      session.handle('test:ping', () => `v${onConnectCalls}`);
     };
     await connectClient('reuse-me');
     await handler.cleanupAllSessions();

@@ -54,12 +54,16 @@ export const PageBreadcrumb = memo(({ projectId, pageId }: BreadcrumbProps) => {
 
   const project = useMemo(() => store.projects.find((p) => p.id === projectId), [store.projects, projectId]);
 
-  // Walk parentId chain to build breadcrumb trail
+  // Walk parentId chain to build breadcrumb trail. Skip root pages — the
+  // project crumb already represents them (root page title is kept in sync
+  // with project.label, so including it would render the project name twice).
   const trail = useMemo(() => {
     const crumbs: { id: PageId; title: string }[] = [];
     let current = pages[pageId];
     while (current) {
-      crumbs.unshift({ id: current.id, title: current.title });
+      if (!current.isRoot) {
+        crumbs.unshift({ id: current.id, title: current.title });
+      }
       current = current.parentId ? pages[current.parentId] : undefined;
     }
     return crumbs;

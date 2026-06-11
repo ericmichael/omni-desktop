@@ -15,7 +15,12 @@ import { join, sep } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { getGitFilesChanged, resolveWorkspaceMergeBase, resolveWorktreeMergeBase } from '@/lib/git-files-changed';
+import {
+  getGitFilesChanged,
+  resolveTicketDiffBase,
+  resolveWorkspaceMergeBase,
+  resolveWorktreeMergeBase,
+} from '@/lib/git-files-changed';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -61,10 +66,11 @@ describe('getGitFilesChanged', () => {
       expect(result.hasChanges).toBe(true);
       expect(result.totalFiles).toBe(1);
       expect(result.files[0]!.status).toBe('untracked');
+      expect(result.files[0]!.group).toBe('untracked');
       expect(result.files[0]!.path).toBe('hello.txt');
     });
 
-    it('reports staged files as added', async () => {
+    it('reports staged files as added in the staged group', async () => {
       writeFileSync(join(repoDir, 'staged.txt'), 'content');
       git('add', 'staged.txt');
       const result = await getGitFilesChanged({ gitDir: repoDir, mergeBase: 'HEAD' });
@@ -73,12 +79,59 @@ describe('getGitFilesChanged', () => {
       const staged = result.files.find((f) => f.path === 'staged.txt');
       expect(staged).toBeDefined();
       expect(staged!.status).toBe('added');
+      expect(staged!.group).toBe('staged');
     });
 
     it('returns empty for a completely empty repo (no files)', async () => {
       const result = await getGitFilesChanged({ gitDir: repoDir, mergeBase: 'HEAD' });
       expect(result.hasChanges).toBe(false);
       expect(result.files).toHaveLength(0);
+    });
+  });
+
+  // ── Grouping (committed / staged / unstaged / untracked) ───────────────
+
+  describe('group split', () => {
+    it('reports each source of change under its own group, including the same path in multiple groups', async () => {
+      // Start on main with a committed file.
+      commitFile('initial.txt', 'v1');
+      const baseSha = git('rev-parse', 'HEAD');
+
+      // Feature branch adds a committed change (base..HEAD).
+      git('checkout', '-b', 'feature');
+      commitFile('committed.txt', 'landed');
+
+      // Stage a new file (HEAD vs index).
+      writeFileSync(join(repoDir, 'staged.txt'), 'ready to commit');
+      git('add', 'staged.txt');
+
+      // Modify a tracked file without staging (index vs worktree).
+      writeFileSync(join(repoDir, 'initial.txt'), 'v1 modified in worktree');
+
+      // Stage + then modify on top — same path in both staged and unstaged.
+      writeFileSync(join(repoDir, 'both.txt'), 'staged body');
+      git('add', 'both.txt');
+      writeFileSync(join(repoDir, 'both.txt'), 'staged body plus more');
+
+      // An untracked file.
+      writeFileSync(join(repoDir, 'new-untracked.txt'), 'fresh');
+
+      const result = await getGitFilesChanged({ gitDir: repoDir, mergeBase: baseSha });
+
+      const byGroup = (g: string) => result.files.filter((f) => f.group === g).map((f) => f.path);
+      expect(byGroup('committed')).toContain('committed.txt');
+      expect(byGroup('staged')).toEqual(expect.arrayContaining(['staged.txt', 'both.txt']));
+      expect(byGroup('unstaged')).toEqual(expect.arrayContaining(['initial.txt', 'both.txt']));
+      expect(byGroup('untracked')).toContain('new-untracked.txt');
+    });
+
+    it('omits the committed group when mergeBase is HEAD', async () => {
+      commitFile('initial.txt', 'v1');
+      writeFileSync(join(repoDir, 'new-untracked.txt'), 'fresh');
+
+      const result = await getGitFilesChanged({ gitDir: repoDir, mergeBase: 'HEAD' });
+      expect(result.files.some((f) => f.group === 'committed')).toBe(false);
+      expect(result.files.some((f) => f.group === 'untracked')).toBe(true);
     });
   });
 
@@ -472,5 +525,94 @@ describe('resolveWorktreeMergeBase', () => {
     commitFile('file.txt', 'v1');
     const result = await resolveWorktreeMergeBase(repoDir, 'nonexistent-branch');
     expect(result).toBe('nonexistent-branch');
+  });
+
+  it("returns 'HEAD' when the branch points at the same commit as HEAD", async () => {
+    // Worktree is on the same branch we're diffing against — merge-base equals HEAD,
+    // so a diff would be empty and hide uncommitted work. Callers need the 'HEAD'
+    // sentinel to fall back to the working-tree diff path.
+    commitFile('file.txt', 'v1');
+    const result = await resolveWorktreeMergeBase(repoDir, 'main');
+    expect(result).toBe('HEAD');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveTicketDiffBase
+// ---------------------------------------------------------------------------
+
+describe('resolveTicketDiffBase', () => {
+  beforeEach(() => initRepo());
+  afterEach(() => rmSync(repoDir, { recursive: true, force: true }));
+
+  it('uses the preferred branch when it exists', async () => {
+    commitFile('file.txt', 'v1');
+    const baseCommit = git('rev-parse', 'HEAD');
+    git('checkout', '-b', 'milestone-x');
+    commitFile('milestone.txt', 'milestone work');
+    const milestoneCommit = git('rev-parse', 'HEAD');
+    git('checkout', '-b', 'feature');
+    commitFile('feature.txt', 'feature work');
+
+    const result = await resolveTicketDiffBase(repoDir, 'milestone-x');
+    expect(result).toBe(milestoneCommit);
+    expect(result).not.toBe(baseCommit);
+  });
+
+  it('falls back to main when the preferred branch does not exist', async () => {
+    commitFile('file.txt', 'v1');
+    const mainCommit = git('rev-parse', 'HEAD');
+    git('checkout', '-b', 'feature');
+    commitFile('feature.txt', 'feature work');
+
+    const result = await resolveTicketDiffBase(repoDir, 'nonexistent');
+    expect(result).toBe(mainCommit);
+  });
+
+  it('falls back to main when no preferred branch is given (the no-worktree case)', async () => {
+    // This is the bug fix: a ticket with a branch but no worktree should
+    // still get a real merge-base against trunk, not @{upstream} (which is
+    // typically the same branch and produces an empty committed group).
+    commitFile('file.txt', 'v1');
+    const mainCommit = git('rev-parse', 'HEAD');
+    git('checkout', '-b', 'feat/foo');
+    commitFile('foo.txt', 'foo work');
+
+    const result = await resolveTicketDiffBase(repoDir);
+    expect(result).toBe(mainCommit);
+  });
+
+  it('falls back to master when main is absent', async () => {
+    rmSync(repoDir, { recursive: true, force: true });
+    repoDir = mkdtempSync(join(tmpdir(), 'git-test-'));
+    git('init', '-b', 'master');
+    git('config', 'user.email', 'test@test.com');
+    git('config', 'user.name', 'Test');
+
+    commitFile('file.txt', 'v1');
+    const masterCommit = git('rev-parse', 'HEAD');
+    git('checkout', '-b', 'feature');
+    commitFile('feature.txt', 'feature work');
+
+    const result = await resolveTicketDiffBase(repoDir);
+    expect(result).toBe(masterCommit);
+  });
+
+  it("returns 'HEAD' when the trunk equals HEAD (no committed diff to show)", async () => {
+    commitFile('file.txt', 'v1');
+    const result = await resolveTicketDiffBase(repoDir);
+    expect(result).toBe('HEAD');
+  });
+
+  it("returns 'HEAD' when no candidate exists and there is no upstream", async () => {
+    rmSync(repoDir, { recursive: true, force: true });
+    repoDir = mkdtempSync(join(tmpdir(), 'git-test-'));
+    git('init', '-b', 'develop');
+    git('config', 'user.email', 'test@test.com');
+    git('config', 'user.name', 'Test');
+    commitFile('file.txt', 'v1');
+
+    const result = await resolveTicketDiffBase(repoDir);
+    expect(result).toBe('HEAD');
   });
 });

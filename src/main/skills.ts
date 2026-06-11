@@ -1,7 +1,7 @@
-import { mkdtemp, mkdir, readdir, readFile, rename, rm, writeFile as writeFileAsync } from 'fs/promises';
+import extract from 'extract-zip';
+import { mkdir, mkdtemp, readdir, readFile, rename, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import extract from 'extract-zip';
 import { parse as parseYaml } from 'yaml';
 
 import type { SkillEntry, SkillSource, StoreData } from '@/shared/types';
@@ -28,7 +28,7 @@ export function getSkillsDir(configDir: string): string {
 }
 
 /** Disabled skills are parked here — invisible to the runtime. */
-function getDisabledSkillsDir(configDir: string): string {
+export function getDisabledSkillsDir(configDir: string): string {
   return join(configDir, 'skills-disabled');
 }
 

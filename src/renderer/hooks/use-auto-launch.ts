@@ -9,6 +9,8 @@ import {
   type OmniRuntimeReadiness,
   retryRuntimeCheck,
 } from '@/renderer/features/Omni/state';
+import { getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
+import { toast } from '@/renderer/features/Toast/state';
 import { $agentStatuses, agentProcessApi } from '@/renderer/services/agent-process';
 import { emitter } from '@/renderer/services/ipc';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
@@ -22,11 +24,29 @@ type UseAutoLaunchOptions = {
   processId: string;
   /** Workspace directory. When null the machine won't launch. */
   workspaceDir: string | null;
+  /** Project id, forwarded to ProcessManager for per-project profile lookup. */
+  projectId?: string;
   /**
-   * When true, check `project:get-supervisor-sandbox-status` before starting
-   * to avoid launching a duplicate sandbox when a supervisor already owns one.
+   * Per-launch sandbox profile override. Wins over project + default
+   * resolution in ProcessManager. Set by the pre-launch SandboxPicker.
    */
-  supervisorAware?: boolean;
+  profileNameOverride?: string;
+  /**
+   * Conversation session id — used both as the snapshot key (per-session
+   * workspace persistence) and the agent server's session id (chat history,
+   * WS ``serverCall`` scoping). Caller is responsible for ensuring this is
+   * non-null when launching (pre-mint upstream).
+   */
+  sessionId?: string;
+  /**
+   * Docker container id from a previous launch. Forwarded to ``omni serve``
+   * so the SDK can warm-reattach via ``client.resume(state)``. Stale ids
+   * are safe — the SDK falls back to a fresh container + snapshot
+   * rehydrate. The renderer reads back the resolved id from the readiness
+   * payload (which may differ in the rehydrate / fresh tiers) and persists
+   * it for the next launch.
+   */
+  containerId?: string;
   /** Logger tag. */
   logLabel?: string;
 };
@@ -37,10 +57,9 @@ type UseAutoLaunchOptions = {
  * Side effects are driven by XState invoke actors — no phase-gated useEffects.
  */
 export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
-  const { processId, supervisorAware = false, logLabel } = opts;
+  const { processId, logLabel } = opts;
   const initialized = useStore($initialized);
   const store = useStore(persistedStoreApi.$atom);
-  const sandboxEnabled = store.sandboxBackend !== 'none';
 
   // Refs so actor callbacks always see current values without recreating the actors object
   const processIdRef = useRef(processId);
@@ -48,10 +67,16 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
   const workspaceDirRef = useRef(opts.workspaceDir);
   workspaceDirRef.current = opts.workspaceDir;
   const previousWorkspaceDirRef = useRef(opts.workspaceDir);
+  const projectIdRef = useRef(opts.projectId);
+  projectIdRef.current = opts.projectId;
+  const profileNameOverrideRef = useRef(opts.profileNameOverride);
+  profileNameOverrideRef.current = opts.profileNameOverride;
+  const sessionIdRef = useRef(opts.sessionId);
+  sessionIdRef.current = opts.sessionId;
+  const containerIdRef = useRef(opts.containerId);
+  containerIdRef.current = opts.containerId;
   const storeRef = useRef(store);
   storeRef.current = store;
-  const supervisorAwareRef = useRef(supervisorAware);
-  supervisorAwareRef.current = supervisorAware;
 
   const actors = useMemo(() => ({
     checkRuntime: fromCallback<AutoLaunchEvent>(({ sendBack }) => {
@@ -104,11 +129,8 @@ sendBack({ type: 'INSTALL_CANCELLED' });
       let cancelled = false;
       (async () => {
         try {
-          const configDir = await emitter.invoke('config:get-omni-config-dir');
-          const modelsConfig = (await emitter.invoke('config:read-json-file', `${configDir}/models.json`)) as {
-            providers?: Record<string, unknown>;
-          } | null;
-          const hasProviders = modelsConfig?.providers && Object.keys(modelsConfig.providers).length > 0;
+          const modelsConfig = await emitter.invoke('settings:get-models-config');
+          const hasProviders = Object.keys(modelsConfig.providers).length > 0;
           if (cancelled) {
 return;
 }
@@ -126,27 +148,21 @@ return;
 return;
 }
 
-        // If supervisor-aware, check for an existing supervisor sandbox first
-        if (supervisorAwareRef.current) {
-          const existing = $agentStatuses.get()[processIdRef.current];
-          if (existing && (existing.type === 'running' || existing.type === 'connecting' || existing.type === 'starting')) {
-            sendBack({ type: 'CONFIG_OK' });
-            return;
-          }
-          try {
-            const supervisorStatus = await emitter.invoke('project:get-supervisor-sandbox-status', processIdRef.current);
-            if (!cancelled && supervisorStatus && (supervisorStatus.type === 'running' || supervisorStatus.type === 'connecting' || supervisorStatus.type === 'starting')) {
-              $agentStatuses.setKey(processIdRef.current, supervisorStatus);
-              sendBack({ type: 'CONFIG_OK' });
-              return;
-            }
-          } catch { /* no supervisor sandbox */ }
-          if (cancelled) {
-return;
-}
+        const existing = $agentStatuses.get()[processIdRef.current];
+        if (existing && (existing.type === 'running' || existing.type === 'connecting' || existing.type === 'starting')) {
+          sendBack({ type: 'CONFIG_OK' });
+          return;
         }
 
-        agentProcessApi.start(processIdRef.current, { workspaceDir: wd });
+        agentProcessApi.start(processIdRef.current, {
+          workspaceDir: wd,
+          ...(projectIdRef.current ? { projectId: projectIdRef.current } : {}),
+          ...(profileNameOverrideRef.current
+            ? { profileNameOverride: profileNameOverrideRef.current }
+            : {}),
+          ...(sessionIdRef.current ? { sessionId: sessionIdRef.current } : {}),
+          ...(containerIdRef.current ? { containerId: containerIdRef.current } : {}),
+        });
         sendBack({ type: 'CONFIG_OK' });
       })();
       return () => {
@@ -165,19 +181,6 @@ return;
 }
         $agentStatuses.setKey(processIdRef.current, status);
       }).catch(() => {});
-
-      // Also check supervisor sandbox if applicable
-      if (supervisorAwareRef.current) {
-        emitter.invoke('project:get-supervisor-sandbox-status', processIdRef.current).then((status) => {
-          if (cancelled || !status || status.type === 'uninitialized') {
-return;
-}
-          const current = $agentStatuses.get()[processIdRef.current];
-          if (!current || current.type === 'uninitialized') {
-            $agentStatuses.setKey(processIdRef.current, status);
-          }
-        }).catch(() => {});
-      }
 
       const unsub = $agentStatuses.subscribe((allStatuses) => {
         const status = allStatuses[processIdRef.current];
@@ -203,8 +206,8 @@ sendBack({ type: 'SANDBOX_EXITED' });
   }), []);  
 
   const inspect = useMemo(() => createMachineLogger(logLabel ?? `autoLaunch:${processId}`, {
-    tags: { sandbox: store.sandboxBackend ?? 'none' },
-  }), [processId, logLabel, store.sandboxBackend]);
+    tags: { sandbox: store.defaultProfileName ?? 'none' },
+  }), [processId, logLabel, store.defaultProfileName]);
 
   const machine = useMemo(() => autoLaunchMachine.provide({ actors }), [actors]);
   const actor = useActorRef(machine, { inspect });
@@ -212,16 +215,16 @@ sendBack({ type: 'SANDBOX_EXITED' });
   const error = useSelector(actor, (snap) => snap.context.error);
 
   // Reset when sandbox backend changes
-  const lastSandboxBackend = useRef(store.sandboxBackend);
+  const lastSandboxBackend = useRef(store.defaultProfileName);
   useEffect(() => {
-    if (lastSandboxBackend.current !== store.sandboxBackend) {
-      lastSandboxBackend.current = store.sandboxBackend;
+    if (lastSandboxBackend.current !== store.defaultProfileName) {
+      lastSandboxBackend.current = store.defaultProfileName;
       actor.send({ type: 'RESET' });
       if (initialized) {
         actor.send({ type: 'LAUNCH' });
       }
     }
-  }, [store.sandboxBackend, initialized, actor]);
+  }, [store.defaultProfileName, initialized, actor]);
 
   // Trigger: send LAUNCH when initialized + workspace available
   useEffect(() => {
@@ -245,15 +248,6 @@ return;
 
     let cancelled = false;
     void (async () => {
-      if (supervisorAwareRef.current) {
-        try {
-          const supervisorStatus = await emitter.invoke('project:get-supervisor-sandbox-status', processIdRef.current);
-          if (!cancelled && supervisorStatus && (supervisorStatus.type === 'running' || supervisorStatus.type === 'connecting' || supervisorStatus.type === 'starting')) {
-            return;
-          }
-        } catch {}
-      }
-
       if (cancelled) {
 return;
 }
@@ -262,12 +256,85 @@ return;
 return;
 }
       actor.send({ type: 'RESET' });
+      // Drive the relaunch explicitly: the auto-launch effect's deps don't
+      // change on RESET, so without this a workspace switch (new chat
+      // conversation, session switch) can strand the machine in idle.
+      actor.send({ type: 'LAUNCH' });
     })();
 
     return () => {
- cancelled = true; 
+ cancelled = true;
 };
   }, [initialized, opts.workspaceDir, actor]);
+
+  // React to a per-launch sandbox profile override change (written by the
+  // SandboxPicker). Prefer an **in-place switch** over the live `omni serve`:
+  // `sandbox.switch` snapshots the workspace, brings up the new backend, and
+  // re-attaches it without restarting the process — so the WebSocket and the
+  // conversation stay up; only the in-sandbox service panes reload. Fall back
+  // to the old stop → RESET → LAUNCH only when an in-place switch isn't
+  // possible (no live session yet, or `host`/missing profile, or the switch
+  // failed). The general auto-launch effect above won't re-trigger on its own
+  // (no dep changes on RESET), so we drive the relaunch from here.
+  const previousProfileOverrideRef = useRef(opts.profileNameOverride);
+  useEffect(() => {
+    const previous = previousProfileOverrideRef.current;
+    previousProfileOverrideRef.current = opts.profileNameOverride;
+    if (!initialized || previous === opts.profileNameOverride) {
+      return;
+    }
+    const nextProfile = opts.profileNameOverride;
+    const status = $agentStatuses.get()[processIdRef.current];
+    const isLiveSession = status?.type === 'running' || status?.type === 'connecting';
+
+    if (!isLiveSession) {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      if (nextProfile) {
+        const res = await agentProcessApi.switchSandbox(processIdRef.current, nextProfile);
+        if (cancelled) {
+          return;
+        }
+        const label = getProfileMenuLabel(nextProfile);
+        if (res.ok) {
+          // Switched in place; the new services/containerId arrived via the
+          // AgentProcessData status update — no relaunch, conversation intact.
+          toast.success(`Now running on ${label}`);
+          return;
+        }
+        if (!res.fallback) {
+          // omni-code rolled back — the previous sandbox is still live, so
+          // don't relaunch; just tell the user the switch didn't take.
+          toast.error(
+            `Couldn't switch to ${label}`,
+            res.recovered === 'rolled_back' ? 'Restored the previous sandbox.' : res.reason
+          );
+          return;
+        }
+        if (res.recovered === 'lost') {
+          toast.warning(`Sandbox was lost during the switch — restarting on ${label}…`);
+        }
+        // else: an unsupported in-place target (host/missing) — a normal
+        // stop+relaunch, no toast needed.
+      }
+      // Fallback: tear down + relaunch on the new profile (idle/pre-launch,
+      // host/missing profile, or a lost sandbox).
+      await agentProcessApi.stop(processIdRef.current);
+      if (cancelled) {
+        return;
+      }
+      actor.send({ type: 'RESET' });
+      if (workspaceDirRef.current) {
+        actor.send({ type: 'LAUNCH' });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialized, opts.profileNameOverride, actor]);
 
   const retry = useCallback(() => {
     actor.send({ type: 'RETRY' });

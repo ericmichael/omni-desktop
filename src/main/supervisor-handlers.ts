@@ -2,36 +2,34 @@
  * IPC handler registration for the supervisor surface — lifecycle, infra,
  * tasks, auto-dispatch, and WIP rollups.
  *
- * Extracted from `createProjectManager` (Sprint C4). Returns the list of
- * channel names registered so the caller can clean them up at shutdown.
+ * Takes a `resolve(event)` callback (see registerMilestoneHandlers) so the same
+ * registration serves the single-manager Electron app and the per-tenant
+ * server. Returns the channel names registered for cleanup.
  */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import type { SupervisorOrchestrator } from '@/main/supervisor-orchestrator';
 import type { IIpcListener } from '@/shared/ipc-listener';
 
-export function registerSupervisorHandlers(ipc: IIpcListener, supervisors: SupervisorOrchestrator): string[] {
-  ipc.handle('project:ensure-supervisor-infra', (_, ticketId) => supervisors.ensureSupervisorInfraLocked(ticketId));
-  ipc.handle('project:start-supervisor', (_, ticketId) => supervisors.startSupervisor(ticketId));
-  ipc.handle('project:stop-supervisor', (_, ticketId) => supervisors.stopSupervisor(ticketId));
-  ipc.handle('project:send-supervisor-message', (_, ticketId, message) =>
-    supervisors.sendSupervisorMessage(ticketId, message)
-  );
-  ipc.handle('project:reset-supervisor-session', (_, ticketId) => supervisors.resetSupervisorSession(ticketId));
-  ipc.handle('project:set-auto-dispatch', (_, projectId, enabled) => supervisors.setAutoDispatch(projectId, enabled));
-  ipc.handle('project:get-supervisor-sandbox-status', (_, tabId) => supervisors.getSupervisorStatusForCodeTab(tabId));
-  ipc.handle('project:get-active-wip-tickets', () => supervisors.getActiveWipTickets());
-  ipc.handle('project:get-ticket-workspace', (_, ticketId) => supervisors.getTicketWorkspaceLocked(ticketId));
-  ipc.handle('project:get-tasks', () => supervisors.listTasks());
+export function registerSupervisorHandlers(
+  ipc: IIpcListener,
+  resolve: (event: unknown) => SupervisorOrchestrator
+): string[] {
+  const channels: string[] = [];
+  const h = (ch: string, fn: (s: SupervisorOrchestrator, ...args: any[]) => unknown): void => {
+    ipc.handle(ch, (event: unknown, ...args: any[]) => fn(resolve(event), ...args));
+    channels.push(ch);
+  };
 
-  return [
-    'project:ensure-supervisor-infra',
-    'project:start-supervisor',
-    'project:stop-supervisor',
-    'project:send-supervisor-message',
-    'project:reset-supervisor-session',
-    'project:set-auto-dispatch',
-    'project:get-supervisor-sandbox-status',
-    'project:get-active-wip-tickets',
-    'project:get-ticket-workspace',
-    'project:get-tasks',
-  ];
+  h('project:ensure-supervisor-infra', (s, ticketId) => s.ensureSupervisorInfraLocked(ticketId));
+  h('project:start-supervisor', (s, ticketId, profileName) => s.startSupervisor(ticketId, profileName));
+  h('project:stop-supervisor', (s, ticketId) => s.stopSupervisor(ticketId));
+  h('project:send-supervisor-message', (s, ticketId, message) => s.sendSupervisorMessage(ticketId, message));
+  h('project:reset-supervisor-session', (s, ticketId) => s.resetSupervisorSession(ticketId));
+  h('project:set-auto-dispatch', (s, projectId, enabled) => s.setAutoDispatch(projectId, enabled));
+  h('project:get-active-wip-tickets', (s) => s.getActiveWipTickets());
+  h('project:get-ticket-workspace', (s, ticketId) => s.getTicketWorkspaceLocked(ticketId));
+  h('project:get-tasks', (s) => s.listTasks());
+  h('project:finalize-ticket-cleanup', (s, ticketId) => s.finalizeTicketCleanup(ticketId));
+
+  return channels;
 }

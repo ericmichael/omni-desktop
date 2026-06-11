@@ -1,22 +1,27 @@
 import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
-import { ArrowClockwise20Regular, ArrowLeft20Regular, ArrowRight20Regular, DismissCircle20Regular, Globe20Regular, WindowDevTools20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import type { ConsoleMessage, WebviewHandle, WebviewRegistryProps } from '@/renderer/common/Webview';
+import { customAppPartition } from '@/lib/app-partition';
+import type { WebviewRegistryProps } from '@/renderer/common/Webview';
 import { Webview } from '@/renderer/common/Webview';
+import { BrowserView } from '@/renderer/features/Browser/BrowserView';
 import { ConsoleStarted } from '@/renderer/features/Console/ConsoleRunning';
-import { $terminals, createTerminal } from '@/renderer/features/Console/state';
-import { resolvePreviewUrl, reverseProxyUrl } from '@/renderer/features/Tickets/preview-bridge';
 import { OmniAgentsApp } from '@/renderer/omniagents-ui';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
-import { useWebPreviewContext, WebPreview, WebPreviewConsole, WebPreviewUrl } from '@/renderer/omniagents-ui/components/ai/web-preview';
+import {
+  emitColumnRunEnd,
+  emitColumnRunStarted,
+  registerSessionController,
+  type SessionController,
+} from '@/renderer/services/session-control';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { makeAppHandleId } from '@/shared/app-control-types';
 import type { AppDescriptor, AppId } from '@/shared/app-registry';
 import { buildAppRegistry } from '@/shared/app-registry';
+import type { TicketId } from '@/shared/types';
 
 import { AppIcon } from './AppIcon';
 import { EnvironmentDock } from './EnvironmentDock';
@@ -26,6 +31,7 @@ type CodeWorkspaceLayoutProps = {
   sessionId?: string;
   onSessionChange?: (sessionId: string | undefined) => void;
   variables?: Record<string, unknown>;
+  voiceVariables?: Record<string, unknown>;
   codeServerSrc?: string;
   vncSrc?: string;
   previewUrl?: string;
@@ -36,16 +42,44 @@ type CodeWorkspaceLayoutProps = {
   headerActionsTargetId?: string;
   headerActionsCompact?: boolean;
   sandboxLabel?: string;
+  sandboxOptions?: { value: string; label: string }[];
+  currentSandboxProfile?: string;
+  onSandboxChange?: (value: string) => void;
   onClientToolCall?: ClientToolCallHandler;
   pendingPlan?: import('@/shared/chat-types').PlanItem | null;
   onPlanDecision?: (approved: boolean) => void;
   dockTargetId?: string;
+  /** Chat mode: time-of-day greeting shown on the empty conversation. */
+  greeting?: string;
+  /** One-tap example tasks shown on the empty conversation. */
+  suggestions?: ReadonlyArray<{ label: string; prompt: string }>;
   isGlass?: boolean;
   /**
    * When provided, this layout hosts a column-scoped workspace and all its
    * webviews register under `tab-<tabId>:*`. Omit for the global dock.
    */
   tabId?: string;
+  /**
+   * What the in-sandbox agent should treat as its workspace root.
+   * For host profiles this is the host path; for containerized
+   * profiles it's the in-container path (``/workspace/<mountName>``).
+   * Plumbed to ``OmniAgentsApp.workspaceDir`` so
+   * ``session.variables.workspace_root`` is valid inside whatever
+   * environment the agent's tools execute in.
+   *
+   * Terminals do NOT use this — they route through `omni serve`'s
+   * `SessionPtyBackend` and land at the sandbox profile's
+   * `terminal.cwd`. The renderer has no business choosing a terminal
+   * cwd.
+   */
+  agentWorkspaceDir?: string;
+  /**
+   * When true, the active dock app renders OUTSIDE this layout (as an adjacent
+   * deck column). Chat stays visible and no in-column overlay is drawn.
+   */
+  sidecarMode?: boolean;
+  /** Ticket bound to this column — enables the supervisor bridge actor. */
+  ticketId?: TicketId;
 };
 
 /** Build a `WebviewRegistryProps` entry from an AppDescriptor + layout scope. */
@@ -68,13 +102,13 @@ const useStyles = makeStyles({
     zIndex: 40,
     overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground1,
-    boxShadow: `0 1px 0 rgba(255,255,255,0.04) inset`,
+    boxShadow: tokens.shadow4,
   },
   surfaceCardGlass: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 18%, transparent)`,
-    backdropFilter: 'blur(36px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(36px) saturate(160%)',
-    boxShadow: `0 1px 0 rgba(255,255,255,0.10) inset, 0 -1px 0 rgba(255,255,255,0.04) inset`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
+    boxShadow: tokens.shadow8,
   },
   surfaceInner: { display: 'flex', height: '100%', flexDirection: 'column', backgroundColor: 'inherit' },
   surfaceHeader: {
@@ -91,10 +125,9 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalM,
   },
   surfaceHeaderGlass: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground2} 14%, transparent)`,
-    backdropFilter: 'blur(24px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(24px) saturate(160%)',
-    borderBottomColor: 'rgba(255, 255, 255, 0.14)',
+    backgroundColor: tokens.colorNeutralBackground2,
+    backdropFilter: 'var(--glass-blur-light)',
+    WebkitBackdropFilter: 'var(--glass-blur-light)',
   },
   surfaceHeaderLeft: {
     display: 'flex',
@@ -149,21 +182,37 @@ const useStyles = makeStyles({
     position: 'absolute',
     top: 0,
     left: 0,
+    right: 0,
     height: '2px',
-    backgroundColor: tokens.colorBrandBackground,
+    overflow: 'hidden',
     zIndex: 1,
-    animationName: {
-      '0%': { width: '0%' },
-      '50%': { width: '70%' },
-      '100%': { width: '95%' },
+    backgroundColor: 'transparent',
+    '::before': {
+      content: '""',
+      position: 'absolute',
+      top: 0,
+      bottom: 0,
+      width: '40%',
+      backgroundImage: `linear-gradient(90deg, transparent, ${tokens.colorBrandBackground}, transparent)`,
+      animationName: {
+        '0%': { transform: 'translateX(-100%)' },
+        '100%': { transform: 'translateX(250%)' },
+      },
+      animationDuration: '1.4s',
+      animationTimingFunction: 'linear',
+      animationIterationCount: 'infinite',
     },
-    animationDuration: '8s',
-    animationTimingFunction: 'ease-out',
-    animationFillMode: 'forwards',
   },
-  surfaceBody: { minHeight: 0, flex: '1 1 0', position: 'relative', display: 'flex', flexDirection: 'column', backgroundColor: tokens.colorNeutralBackground1 },
+  surfaceBody: {
+    minHeight: 0,
+    flex: '1 1 0',
+    position: 'relative',
+    display: 'flex',
+    flexDirection: 'column',
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
   surfaceBodyGlass: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 10%, transparent)`,
+    backgroundColor: tokens.colorNeutralBackground1,
   },
   surfaceContentFill: { flex: '1 1 0', minHeight: 0, minWidth: 0 },
   browserUrlWrap: { minWidth: '240px', flex: '1 1 360px' },
@@ -189,23 +238,15 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground4,
     fontSize: tokens.fontSizeBase300,
   },
+  // Inner Tailwind/shadcn surface colors come from --color-bgCard, --color-background,
+  // --color-secondary, etc. set as glass scrim on the deck-bg root in MainContent.
+  // This class only adds the brand-tinted treatment for primary CTAs.
   glassChatSurfaces: {
-    '& .bg-surface, & .bg-card, & .bg-background, & .bg-bgColumn, & .bg-bgCard, & .bg-bgCardAlt, & .bg-bgMain': {
-      backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
-      backdropFilter: 'blur(28px) saturate(160%)',
-      WebkitBackdropFilter: 'blur(28px) saturate(160%)',
-    },
-    '& .bg-secondary': {
-      backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 22%, transparent)`,
-      backdropFilter: 'blur(20px) saturate(160%)',
-      WebkitBackdropFilter: 'blur(20px) saturate(160%)',
-      boxShadow: `0 1px 0 0 rgba(255,255,255,0.12) inset, 0 2px 8px -2px rgba(0,0,0,0.15)`,
-    },
     '& .bg-primary': {
       backgroundColor: `color-mix(in srgb, ${tokens.colorBrandBackground} 70%, transparent)`,
-      backdropFilter: 'blur(20px) saturate(160%)',
-      WebkitBackdropFilter: 'blur(20px) saturate(160%)',
-      boxShadow: `0 1px 0 0 rgba(255,255,255,0.14) inset, 0 2px 8px -2px rgba(0,0,0,0.15)`,
+      backdropFilter: 'var(--glass-blur-light)',
+      WebkitBackdropFilter: 'var(--glass-blur-light)',
+      boxShadow: tokens.shadow8,
     },
     '& .chat-input-footer': {
       position: 'relative',
@@ -213,7 +254,7 @@ const useStyles = makeStyles({
       backgroundColor: 'transparent',
       backdropFilter: 'none',
       WebkitBackdropFilter: 'none',
-      borderTop: `1px solid rgba(255, 255, 255, 0.14)`,
+      borderTop: `1px solid ${tokens.colorNeutralStroke1}`,
     },
     '& .chat-input-footer::before': {
       content: '""',
@@ -223,7 +264,7 @@ const useStyles = makeStyles({
       bottom: '12px',
       left: '12px',
       borderRadius: '24px',
-      boxShadow: '0 0 0 9999px rgba(255, 255, 255, 0.06)',
+      boxShadow: `0 0 0 9999px color-mix(in srgb, ${tokens.colorNeutralBackground1} 30%, transparent)`,
       pointerEvents: 'none',
       zIndex: 0,
     },
@@ -241,163 +282,6 @@ const useStyles = makeStyles({
 
 const transition = { type: 'spring' as const, duration: 0.28, bounce: 0.08 };
 
-type ConsoleLog = { level: 'log' | 'warn' | 'error' | 'result'; message: string; timestamp: Date };
-const MAX_CONSOLE_LOGS = 500;
-
-type PreviewState = {
-  loading: boolean;
-  title: string;
-  error: { code: number; description: string; url: string } | null;
-};
-
-const PreviewWebview = memo(({ webviewRef: externalRef, onStateChange, registry }: { webviewRef?: React.Ref<WebviewHandle>; onStateChange?: (state: PreviewState) => void; registry?: WebviewRegistryProps }) => {
-  const { url, setUrl } = useWebPreviewContext();
-  const [resolvedUrl, setResolvedUrl] = useState<string | undefined>(undefined);
-  const [webviewKey, setWebviewKey] = useState(0);
-  const [logs, setLogs] = useState<ConsoleLog[]>([]);
-  const [, setPreviewState] = useState<PreviewState>({ loading: false, title: '', error: null });
-  const internalRef = useRef<WebviewHandle>(null);
-  const navigatedUrlRef = useRef<string | null>(null);
-  const onStateRef = useRef(onStateChange);
-  useEffect(() => {
- onStateRef.current = onStateChange; 
-}, [onStateChange]);
-
-  useEffect(() => {
-    if (!externalRef) {
-return;
-}
-    if (typeof externalRef === 'function') {
-      externalRef(internalRef.current);
-    } else {
-      (externalRef as React.MutableRefObject<WebviewHandle | null>).current = internalRef.current;
-    }
-  });
-
-  const updateState = useCallback((patch: Partial<PreviewState>) => {
-    setPreviewState((prev) => {
-      const next = { ...prev, ...patch };
-      onStateRef.current?.(next);
-      return next;
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!url) {
-      setResolvedUrl(undefined);
-      return;
-    }
-    if (navigatedUrlRef.current === url) {
-      navigatedUrlRef.current = null;
-      return;
-    }
-    let cancelled = false;
-    void resolvePreviewUrl(url).then((resolved) => {
-      if (!cancelled) {
-        setResolvedUrl(resolved);
-        setWebviewKey((current) => current + 1);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [url]);
-
-  const prevUrlRef = useRef(url);
-  useEffect(() => {
-    if (url !== prevUrlRef.current) {
-      if (navigatedUrlRef.current !== url) {
-        setLogs([]);
-      }
-      prevUrlRef.current = url;
-    }
-  }, [url]);
-
-  const handleNavigate = useCallback((navigatedUrl: string) => {
-    const displayUrl = reverseProxyUrl(navigatedUrl);
-    navigatedUrlRef.current = displayUrl;
-    setUrl(displayUrl);
-  }, [setUrl]);
-
-  const appendLog = useCallback((entry: ConsoleLog) => {
-    setLogs((prev) => {
-      const next = [...prev, entry];
-      return next.length > MAX_CONSOLE_LOGS ? next.slice(-MAX_CONSOLE_LOGS) : next;
-    });
-  }, []);
-
-  const handleConsoleMessage = useCallback((msg: ConsoleMessage) => {
-    appendLog({ ...msg, timestamp: new Date() });
-  }, [appendLog]);
-
-  const handleLoadingChange = useCallback((loading: boolean) => {
-    updateState({ loading, ...(loading ? { error: null } : {}) });
-  }, [updateState]);
-
-  const handleTitleChange = useCallback((title: string) => {
-    updateState({ title });
-  }, [updateState]);
-
-  const handleError = useCallback((error: { code: number; description: string; url: string }) => {
-    updateState({ error });
-  }, [updateState]);
-
-  const handleClear = useCallback(() => {
-    setLogs([]);
-  }, []);
-
-  const handleExecute = useCallback((code: string) => {
-    appendLog({ level: 'log', message: `> ${code}`, timestamp: new Date() });
-    const handle = internalRef.current;
-    if (!handle) {
-return;
-}
-    void handle.executeScript(code).then(
-      (result) => {
-        const display = result === undefined ? 'undefined' : typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-        appendLog({ level: 'result', message: String(display), timestamp: new Date() });
-      },
-      (err) => {
-        appendLog({ level: 'error', message: String(err), timestamp: new Date() });
-      }
-    );
-  }, [appendLog]);
-
-  return (
-    <>
-      <div style={{ flex: '1 1 0', minHeight: 0 }}>
-        {resolvedUrl ? (
-          <Webview key={webviewKey} ref={internalRef} src={resolvedUrl} showUnavailable={false} onConsoleMessage={handleConsoleMessage} onNavigate={handleNavigate} onLoadingChange={handleLoadingChange} onTitleChange={handleTitleChange} onError={handleError} registry={registry} />
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12, color: tokens.colorNeutralForeground4 }}>
-            <Globe20Regular style={{ width: 40, height: 40, opacity: 0.4 }} />
-            <span style={{ fontSize: tokens.fontSizeBase300 }}>Enter a URL to get started</span>
-            <span style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground4 }}>Preview web apps, inspect console output, and debug</span>
-          </div>
-        )}
-      </div>
-      <WebPreviewConsole logs={logs} onClear={handleClear} onExecute={handleExecute} />
-    </>
-  );
-});
-PreviewWebview.displayName = 'PreviewWebview';
-
-const ConsoleToggleButton = memo(({ className }: { className?: string }) => {
-  const { consoleOpen, setConsoleOpen } = useWebPreviewContext();
-  return (
-    <button
-      type="button"
-      onClick={() => setConsoleOpen(!consoleOpen)}
-      className={className}
-      aria-label={consoleOpen ? 'Hide console' : 'Show console'}
-      title={consoleOpen ? 'Hide console' : 'Show console'}
-    >
-      <WindowDevTools20Regular style={{ width: 14, height: 14, opacity: consoleOpen ? 1 : 0.6 }} />
-    </button>
-  );
-});
-ConsoleToggleButton.displayName = 'ConsoleToggleButton';
-
 const BUILTIN_TITLES: Record<string, string> = {
   code: 'VS Code',
   desktop: "Omni's PC",
@@ -405,232 +289,324 @@ const BUILTIN_TITLES: Record<string, string> = {
   terminal: 'Terminal',
 };
 
-const SurfaceFrame = memo(({ app, isGlass, children }: { app: AppDescriptor; isGlass?: boolean; children: React.ReactNode }) => {
-  const styles = useStyles();
-  const title = BUILTIN_TITLES[app.id] ?? app.label;
+const SurfaceFrame = memo(
+  ({ app, isGlass, children }: { app: AppDescriptor; isGlass?: boolean; children: React.ReactNode }) => {
+    const styles = useStyles();
+    const title = BUILTIN_TITLES[app.id] ?? app.label;
 
-  return (
-    <div className={mergeClasses(styles.surfaceInner)}>
-      <div className={mergeClasses(styles.surfaceHeader, isGlass && styles.surfaceHeaderGlass)}>
-        <div className={styles.surfaceHeaderTitle}>
-          <AppIcon icon={app.icon} size={14} />
-          <span className={styles.surfaceTitleText}>{title}</span>
+    return (
+      <div className={mergeClasses(styles.surfaceInner)}>
+        <div className={mergeClasses(styles.surfaceHeader, isGlass && styles.surfaceHeaderGlass)}>
+          <div className={styles.surfaceHeaderTitle}>
+            <AppIcon icon={app.icon} size={14} />
+            <span className={styles.surfaceTitleText}>{title}</span>
+          </div>
+          <div className={styles.surfaceHeaderActions} />
         </div>
-        <div className={styles.surfaceHeaderActions} />
+        <div className={mergeClasses(styles.surfaceBody, isGlass && styles.surfaceBodyGlass)}>
+          <div className={styles.surfaceContentFill}>{children}</div>
+        </div>
       </div>
-      <div className={mergeClasses(styles.surfaceBody, isGlass && styles.surfaceBodyGlass)}>
-        <div className={styles.surfaceContentFill}>{children}</div>
-      </div>
-    </div>
-  );
-});
+    );
+  }
+);
 SurfaceFrame.displayName = 'SurfaceFrame';
 
-const BrowserSurface = memo(({ src, onUrlChange, isGlass, registry }: { src?: string; onUrlChange?: (url: string) => void; isGlass?: boolean; registry?: WebviewRegistryProps }) => {
-  const styles = useStyles();
-  const webviewRef = useRef<WebviewHandle>(null);
-  const [previewState, setPreviewState] = useState<PreviewState>({ loading: false, title: '', error: null });
-  const urlBarRef = useRef<HTMLInputElement>(null);
+const AppSurfaceView = memo(
+  ({
+    app,
+    src,
+    onUrlChange,
+    isGlass,
+    tabId,
+  }: {
+    app: AppDescriptor;
+    src?: string;
+    onUrlChange?: (url: string) => void;
+    isGlass?: boolean;
+    tabId?: string;
+  }) => {
+    const styles = useStyles();
+    const registryProps = useMemo(() => makeRegistryProps(app, tabId), [app, tabId]);
 
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      const mod = event.metaKey || event.ctrlKey;
-      if (mod && event.key.toLowerCase() === 'r') {
-        event.preventDefault();
-        webviewRef.current?.reload();
-      } else if (mod && event.key.toLowerCase() === 'l') {
-        event.preventDefault();
-        urlBarRef.current?.focus();
-        urlBarRef.current?.select();
-      } else if (event.key === 'Escape') {
-        if (previewState.loading) {
-          webviewRef.current?.stop();
-        }
-      } else if (mod && event.key === '[') {
-        event.preventDefault();
-        webviewRef.current?.goBack();
-      } else if (mod && event.key === ']') {
-        event.preventDefault();
-        webviewRef.current?.goForward();
+    if (app.kind === 'builtin-browser') {
+      return (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={transition}
+          className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}
+        >
+          <BrowserView
+            tabsetId={tabId ? `dock:${tabId}` : 'dock:global'}
+            isGlass={isGlass}
+            registryScope={tabId ? 'column' : 'global'}
+            registryTabId={tabId}
+            src={src}
+            onUrlChange={onUrlChange}
+          />
+        </motion.div>
+      );
+    }
+
+    if (app.kind === 'builtin-terminal') {
+      if (!tabId) {
+        return (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={transition}
+            className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}
+          >
+            <SurfaceFrame app={app} isGlass={isGlass}>
+              <div className={styles.unavailableState}>Terminal requires a workspace column.</div>
+            </SurfaceFrame>
+          </motion.div>
+        );
       }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [previewState.loading]);
+      return (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={transition}
+          className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}
+        >
+          <SurfaceFrame app={app} isGlass={isGlass}>
+            <ConsoleStarted tabId={tabId} />
+          </SurfaceFrame>
+        </motion.div>
+      );
+    }
 
-  return (
-    <WebPreview defaultUrl={src ?? ''} onUrlChange={onUrlChange} className="size-full rounded-none border-0">
-      <div className={mergeClasses(styles.surfaceHeader, isGlass && styles.surfaceHeaderGlass)} style={{ position: 'relative' }}>
-        {previewState.loading && <div className={styles.loadingBar} />}
-        <div className={styles.surfaceHeaderLeft}>
-          <div className={styles.surfaceHeaderTitle}>
-            <Globe20Regular style={{ width: 14, height: 14 }} />
-            <span className={styles.surfaceTitleText}>Browser</span>
-          </div>
-          <div className={styles.surfaceHeaderToolbar}>
-            <button type="button" onClick={() => webviewRef.current?.goBack()} className={styles.surfaceNavBtn} aria-label="Go back" title="Back (Ctrl+[)">
-              <ArrowLeft20Regular style={{ width: 14, height: 14 }} />
-            </button>
-            <button type="button" onClick={() => webviewRef.current?.goForward()} className={styles.surfaceNavBtn} aria-label="Go forward" title="Forward (Ctrl+])">
-              <ArrowRight20Regular style={{ width: 14, height: 14 }} />
-            </button>
-            {previewState.loading ? (
-              <button type="button" onClick={() => webviewRef.current?.stop()} className={styles.surfaceNavBtn} aria-label="Stop" title="Stop (Esc)">
-                <DismissCircle20Regular style={{ width: 14, height: 14 }} />
-              </button>
+    if (app.kind === 'webview') {
+      return (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={transition}
+          className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}
+        >
+          <SurfaceFrame app={app} isGlass={isGlass}>
+            {app.url ? (
+              <Webview
+                src={app.url}
+                partition={customAppPartition(app.id)}
+                showUnavailable={false}
+                registry={registryProps}
+              />
             ) : (
-              <button type="button" onClick={() => webviewRef.current?.reload()} className={styles.surfaceNavBtn} aria-label="Reload" title="Reload (Ctrl+R)">
-                <ArrowClockwise20Regular style={{ width: 14, height: 14 }} />
-              </button>
+              <div className={styles.unavailableState}>No URL configured.</div>
             )}
-            <div className={styles.browserUrlWrap}>
-              <WebPreviewUrl ref={urlBarRef} />
-            </div>
-          </div>
-        </div>
-        <div className={styles.surfaceHeaderActions}>
-          <ConsoleToggleButton className={styles.surfaceNavBtn} />
-        </div>
-      </div>
-      <div className={mergeClasses(styles.surfaceBody, isGlass && styles.surfaceBodyGlass)}>
-        <PreviewWebview webviewRef={webviewRef} onStateChange={setPreviewState} registry={registry} />
-      </div>
-    </WebPreview>
-  );
-});
-BrowserSurface.displayName = 'BrowserSurface';
+          </SurfaceFrame>
+        </motion.div>
+      );
+    }
 
-const AppSurfaceView = memo(({ app, src, onUrlChange, isGlass, tabId }: { app: AppDescriptor; src?: string; onUrlChange?: (url: string) => void; isGlass?: boolean; tabId?: string }) => {
-  const styles = useStyles();
-  const registryProps = useMemo(() => makeRegistryProps(app, tabId), [app, tabId]);
-
-  if (app.kind === 'builtin-browser') {
+    // builtin-code, builtin-desktop
     return (
-      <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
-        <BrowserSurface src={src} onUrlChange={onUrlChange} isGlass={isGlass} registry={registryProps} />
-      </motion.div>
-    );
-  }
-
-  if (app.kind === 'builtin-terminal') {
-    return (
-      <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={transition}
+        className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}
+      >
         <SurfaceFrame app={app} isGlass={isGlass}>
-          <ConsoleStarted />
+          {src ? (
+            <Webview src={src} showUnavailable={false} registry={registryProps} />
+          ) : (
+            <div className={styles.unavailableState}>{app.label} is unavailable for this workspace.</div>
+          )}
         </SurfaceFrame>
       </motion.div>
     );
   }
-
-  if (app.kind === 'webview') {
-    return (
-      <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
-        <SurfaceFrame app={app} isGlass={isGlass}>
-          {app.url ? <Webview src={app.url} showUnavailable={false} registry={registryProps} /> : <div className={styles.unavailableState}>No URL configured.</div>}
-        </SurfaceFrame>
-      </motion.div>
-    );
-  }
-
-  // builtin-code, builtin-desktop
-  return (
-    <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} transition={transition} className={mergeClasses(styles.surfaceCard, isGlass && styles.surfaceCardGlass)}>
-      <SurfaceFrame app={app} isGlass={isGlass}>
-        {src ? <Webview src={src} showUnavailable={false} registry={registryProps} /> : <div className={styles.unavailableState}>{app.label} is unavailable for this workspace.</div>}
-      </SurfaceFrame>
-    </motion.div>
-  );
-});
+);
 AppSurfaceView.displayName = 'AppSurfaceView';
 
-export const CodeWorkspaceLayout = memo(({ uiSrc, sessionId, onSessionChange, variables, codeServerSrc, vncSrc, previewUrl, onPreviewUrlChange, activeApp = 'chat', onActiveAppChange, onReady, headerActionsTargetId, headerActionsCompact, sandboxLabel, onClientToolCall, pendingPlan, onPlanDecision, dockTargetId, isGlass, tabId }: CodeWorkspaceLayoutProps) => {
-  const styles = useStyles();
-  const store = useStore(persistedStoreApi.$atom);
-  const registry = useMemo(() => buildAppRegistry(store.customApps ?? []), [store.customApps]);
-  // The dock only surfaces apps marked column-scoped. Global-only custom
-  // apps are opened via the app launcher as their own deck column instead.
-  const dockApps = useMemo(() => registry.filter((a) => a.columnScoped), [registry]);
-  const activeDescriptor = useMemo(() => registry.find((a) => a.id === activeApp) ?? null, [registry, activeApp]);
+export const CodeWorkspaceLayout = memo(
+  ({
+    uiSrc,
+    sessionId,
+    onSessionChange,
+    variables,
+    voiceVariables,
+    codeServerSrc,
+    vncSrc,
+    previewUrl,
+    onPreviewUrlChange,
+    activeApp = 'chat',
+    onActiveAppChange,
+    onReady,
+    headerActionsTargetId,
+    headerActionsCompact,
+    sandboxLabel,
+    sandboxOptions,
+    currentSandboxProfile,
+    onSandboxChange,
+    onClientToolCall,
+    pendingPlan,
+    onPlanDecision,
+    dockTargetId,
+    greeting,
+    suggestions,
+    isGlass,
+    tabId,
+    agentWorkspaceDir,
+    sidecarMode,
+    ticketId,
+  }: CodeWorkspaceLayoutProps) => {
+    const styles = useStyles();
+    const store = useStore(persistedStoreApi.$atom);
+    const registry = useMemo(() => buildAppRegistry(store.customApps ?? []), [store.customApps]);
+    // The dock only surfaces apps marked column-scoped. Global-only custom
+    // apps are opened via the app launcher as their own deck column instead.
+    const dockApps = useMemo(() => registry.filter((a) => a.columnScoped), [registry]);
+    const activeDescriptor = useMemo(() => registry.find((a) => a.id === activeApp) ?? null, [registry, activeApp]);
 
-  const sandboxUrls = useMemo(
-    () => ({ codeServerUrl: codeServerSrc, noVncUrl: vncSrc }),
-    [codeServerSrc, vncSrc]
-  );
-
-  const surfaceSrc = activeDescriptor
-    ? activeDescriptor.kind === 'builtin-code'
-      ? codeServerSrc
-      : activeDescriptor.kind === 'builtin-desktop'
-        ? vncSrc
-        : activeDescriptor.kind === 'builtin-browser'
-          ? previewUrl
-          : undefined
-    : undefined;
-
-  useEffect(() => {
-    if ((activeApp === 'code' && !codeServerSrc) || (activeApp === 'desktop' && !vncSrc)) {
-      onActiveAppChange?.('chat');
-    }
-  }, [activeApp, codeServerSrc, vncSrc, onActiveAppChange]);
-
-  const [dockTarget, setDockTarget] = useState<HTMLElement | null>(null);
-  useLayoutEffect(() => {
-    if (!dockTargetId) {
-      setDockTarget(null);
-      return;
-    }
-    setDockTarget(document.getElementById(dockTargetId));
-  }, [dockTargetId]);
-
-  const handleUiReady = useCallback(() => {
-    onReady?.();
-  }, [onReady]);
-
-  const handleDockSelect = useCallback(
-    (id: AppId) => {
-      if (id === 'terminal' && $terminals.get().length === 0) {
-        const cwd = persistedStoreApi.$atom.get().workspaceDir ?? undefined;
-        createTerminal(cwd);
-      }
-      onActiveAppChange?.(id);
-    },
-    [onActiveAppChange]
-  );
-
-  return (
-    <div className={mergeClasses(styles.root, isGlass && styles.rootGlass, isGlass && styles.glassChatSurfaces)}>
-      <div className={styles.mainArea}>
-        <div className={mergeClasses(styles.mainContent, activeApp !== 'chat' && styles.mainContentHidden)}>
-          <OmniAgentsApp uiUrl={uiSrc} sessionId={sessionId} onSessionChange={onSessionChange} variables={variables} onReady={handleUiReady} headerActionsTargetId={headerActionsTargetId} headerActionsCompact={headerActionsCompact} sandboxLabel={sandboxLabel} onClientToolCall={onClientToolCall} pendingPlan={pendingPlan} onPlanDecision={onPlanDecision} />
-        </div>
-        <AnimatePresence>
-          {activeApp !== 'chat' && activeDescriptor && (
-            <AppSurfaceView
-              app={activeDescriptor}
-              src={surfaceSrc}
-              onUrlChange={activeDescriptor.kind === 'builtin-browser' ? onPreviewUrlChange : undefined}
-              isGlass={isGlass}
-              tabId={tabId}
-            />
-          )}
-        </AnimatePresence>
-      </div>
-      {(() => {
-        const dock = (
-          <EnvironmentDock
-            apps={dockApps}
-            activeAppId={activeApp}
-            onSelect={handleDockSelect}
-            sandboxUrls={sandboxUrls}
-            isGlass={isGlass}
-          />
-        );
-        if (dockTargetId && dockTarget) {
-          return createPortal(dock, dockTarget);
+    // Register this column's agent controller (by tabId) so the global
+    // orchestrator can drive it via the `column_*` tools. The App hands the
+    // controller up through `onController`; we (re)register on each change and
+    // unregister on unmount.
+    const unregisterControllerRef = useRef<(() => void) | null>(null);
+    const handleController = useCallback(
+      (controller: SessionController | null) => {
+        unregisterControllerRef.current?.();
+        unregisterControllerRef.current = controller && tabId ? registerSessionController(tabId, controller) : null;
+      },
+      [tabId]
+    );
+    useEffect(
+      () => () => {
+        unregisterControllerRef.current?.();
+        unregisterControllerRef.current = null;
+      },
+      []
+    );
+    const handleRunEnd = useCallback(
+      (info: { runId?: string; reason?: string }) => {
+        if (tabId) {
+          emitColumnRunEnd(tabId, info);
         }
-        return dock;
-      })()}
-    </div>
-  );
-});
+      },
+      [tabId]
+    );
+    const handleRunStarted = useCallback(
+      (runId: string) => {
+        if (tabId) {
+          emitColumnRunStarted(tabId, runId);
+        }
+      },
+      [tabId]
+    );
+
+    const sandboxUrls = useMemo(() => ({ codeServerUrl: codeServerSrc, noVncUrl: vncSrc }), [codeServerSrc, vncSrc]);
+
+    const surfaceSrc = activeDescriptor
+      ? activeDescriptor.kind === 'builtin-code'
+        ? codeServerSrc
+        : activeDescriptor.kind === 'builtin-desktop'
+          ? vncSrc
+          : activeDescriptor.kind === 'builtin-browser'
+            ? previewUrl
+            : undefined
+      : undefined;
+
+    useEffect(() => {
+      if ((activeApp === 'code' && !codeServerSrc) || (activeApp === 'desktop' && !vncSrc)) {
+        onActiveAppChange?.('chat');
+      }
+    }, [activeApp, codeServerSrc, vncSrc, onActiveAppChange]);
+
+    const [dockTarget, setDockTarget] = useState<HTMLElement | null>(null);
+    useLayoutEffect(() => {
+      if (!dockTargetId) {
+        setDockTarget(null);
+        return;
+      }
+      setDockTarget(document.getElementById(dockTargetId));
+    }, [dockTargetId]);
+
+    const handleUiReady = useCallback(() => {
+      onReady?.();
+    }, [onReady]);
+
+    const handleDockSelect = useCallback(
+      (id: AppId) => {
+        onActiveAppChange?.(id);
+      },
+      [onActiveAppChange]
+    );
+
+    return (
+      <div className={mergeClasses(styles.root, isGlass && styles.rootGlass, isGlass && styles.glassChatSurfaces)}>
+        <div className={styles.mainArea}>
+          <div
+            className={mergeClasses(
+              styles.mainContent,
+              !sidecarMode && activeApp !== 'chat' && styles.mainContentHidden
+            )}
+          >
+            <OmniAgentsApp
+              uiUrl={uiSrc}
+              greeting={greeting}
+              suggestions={suggestions}
+              sessionId={sessionId}
+              onSessionChange={onSessionChange}
+              variables={variables}
+              voiceVariables={voiceVariables}
+              onReady={handleUiReady}
+              headerActionsTargetId={headerActionsTargetId}
+              headerActionsCompact={headerActionsCompact}
+              sandboxLabel={sandboxLabel}
+              sandboxOptions={sandboxOptions}
+              currentSandboxProfile={currentSandboxProfile}
+              onSandboxChange={onSandboxChange}
+              onClientToolCall={onClientToolCall}
+              onController={handleController}
+              onRunEnd={handleRunEnd}
+              onRunStarted={handleRunStarted}
+              pendingPlan={pendingPlan}
+              onPlanDecision={onPlanDecision}
+              ticketId={ticketId}
+              workspaceDir={agentWorkspaceDir}
+            />
+          </div>
+          {!sidecarMode && (
+            <AnimatePresence>
+              {activeApp !== 'chat' && activeDescriptor && (
+                <AppSurfaceView
+                  app={activeDescriptor}
+                  src={surfaceSrc}
+                  onUrlChange={activeDescriptor.kind === 'builtin-browser' ? onPreviewUrlChange : undefined}
+                  isGlass={isGlass}
+                  tabId={tabId}
+                />
+              )}
+            </AnimatePresence>
+          )}
+        </div>
+        {(() => {
+          const dock = (
+            <EnvironmentDock
+              apps={dockApps}
+              activeAppId={activeApp}
+              onSelect={handleDockSelect}
+              sandboxUrls={sandboxUrls}
+              isGlass={isGlass}
+            />
+          );
+          if (dockTargetId && dockTarget) {
+            return createPortal(dock, dockTarget);
+          }
+          return dock;
+        })()}
+      </div>
+    );
+  }
+);
 CodeWorkspaceLayout.displayName = 'CodeWorkspaceLayout';

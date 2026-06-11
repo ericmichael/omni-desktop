@@ -24,7 +24,7 @@ const makeManager = () => ({
 describe('registerMilestoneHandlers', () => {
   it('registers all expected channels', () => {
     const ipc = new StubIpc();
-    const channels = registerMilestoneHandlers(ipc, makeManager() as never);
+    const channels = registerMilestoneHandlers(ipc, () => makeManager() as never);
     expect(channels).toEqual(EXPECTED_CHANNELS);
     for (const ch of EXPECTED_CHANNELS) {
       expect(ipc.handlers.has(ch), `missing handler for ${ch}`).toBe(true);
@@ -34,7 +34,7 @@ describe('registerMilestoneHandlers', () => {
   it('milestone:get-items delegates with projectId', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerMilestoneHandlers(ipc, mgr as never);
+    registerMilestoneHandlers(ipc, () => mgr as never);
     ipc.invoke('milestone:get-items', 'proj-1');
     expect(mgr.getByProject).toHaveBeenCalledWith('proj-1');
   });
@@ -42,7 +42,7 @@ describe('registerMilestoneHandlers', () => {
   it('milestone:add-item delegates with item', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerMilestoneHandlers(ipc, mgr as never);
+    registerMilestoneHandlers(ipc, () => mgr as never);
     const item = { projectId: 'p1', title: 'M1', description: '' };
     ipc.invoke('milestone:add-item', item);
     expect(mgr.add).toHaveBeenCalledWith(item);
@@ -51,7 +51,7 @@ describe('registerMilestoneHandlers', () => {
   it('milestone:update-item delegates with id and patch', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerMilestoneHandlers(ipc, mgr as never);
+    registerMilestoneHandlers(ipc, () => mgr as never);
     ipc.invoke('milestone:update-item', 'ms-1', { title: 'Updated' });
     expect(mgr.update).toHaveBeenCalledWith('ms-1', { title: 'Updated' });
   });
@@ -59,7 +59,7 @@ describe('registerMilestoneHandlers', () => {
   it('milestone:remove-item delegates with id', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerMilestoneHandlers(ipc, mgr as never);
+    registerMilestoneHandlers(ipc, () => mgr as never);
     ipc.invoke('milestone:remove-item', 'ms-1');
     expect(mgr.remove).toHaveBeenCalledWith('ms-1');
   });

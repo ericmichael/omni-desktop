@@ -1,17 +1,11 @@
-import {
-  makeStyles,
-  mergeClasses,
-  Subtitle2,
-  tokens,
-  Toolbar,
-  ToolbarButton,
-} from '@fluentui/react-components';
+import { makeStyles, mergeClasses, Subtitle2, tokens, Toolbar, ToolbarButton } from '@fluentui/react-components';
 import { ArrowLeft20Regular } from '@fluentui/react-icons';
 import type { ReactNode } from 'react';
 
 type TopAppBarProps = {
   title: ReactNode;
   onBack?: () => void;
+  leading?: ReactNode;
   actions?: ReactNode;
   className?: string;
 };
@@ -44,18 +38,12 @@ const useStyles = makeStyles({
   },
 });
 
-export const TopAppBar = ({ title, onBack, actions, className }: TopAppBarProps) => {
+export const TopAppBar = ({ title, onBack, leading, actions, className }: TopAppBarProps) => {
   const styles = useStyles();
   return (
     <Toolbar className={mergeClasses(styles.root, className)}>
-      {onBack && (
-        <ToolbarButton
-          aria-label="Back"
-          icon={<ArrowLeft20Regular />}
-          appearance="subtle"
-          onClick={onBack}
-        />
-      )}
+      {onBack && <ToolbarButton aria-label="Back" icon={<ArrowLeft20Regular />} appearance="subtle" onClick={onBack} />}
+      {!onBack && leading}
       <Subtitle2 className={styles.title}>{title}</Subtitle2>
       {actions && <div className={styles.actions}>{actions}</div>}
     </Toolbar>

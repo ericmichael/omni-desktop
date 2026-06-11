@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "namePrefix": { "value": "omni" },
+    "location": { "value": "southcentralus" },
+    "launcherImageRepoTag": { "value": "omni-launcher:latest" },
+    "agentImageRepoTag": { "value": "omni-launcher-devbox-min:latest" },
+    "authMode": { "value": "none" },
+    "postgresAdminLogin": { "value": "omniadmin" },
+    "postgresAdminPassword": { "value": "" },
+    "runtimeTokenSecret": { "value": "" },
+    "launcherPlanSku": { "value": "P0v3" },
+    "agentCpu": { "value": "2.0" },
+    "agentMemory": { "value": "4Gi" }
+  }
+}

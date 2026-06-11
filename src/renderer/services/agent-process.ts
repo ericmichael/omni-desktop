@@ -2,9 +2,9 @@ import { objectEquals } from '@observ33r/object-equals';
 import { Terminal } from '@xterm/xterm';
 import { map } from 'nanostores';
 
-import { DEFAULT_XTERM_OPTIONS, STATUS_POLL_INTERVAL_MS } from '@/renderer/constants';
+import { DEFAULT_XTERM_OPTIONS } from '@/renderer/constants';
 import { emitter, ipc } from '@/renderer/services/ipc';
-import type { AgentProcessStartOptions, AgentProcessStatus, WithTimestamp } from '@/shared/types';
+import type { AgentProcessStartOptions, AgentProcessStatus, SandboxPauseResult, SandboxSwitchResult, WithTimestamp } from '@/shared/types';
 
 /** Statuses for all agent processes, keyed by processId. */
 export const $agentStatuses = map<Record<string, WithTimestamp<AgentProcessStatus>>>({});
@@ -78,6 +78,22 @@ export const agentProcessApi = {
     emitter.invoke('agent-process:rebuild', processId, arg);
   },
 
+  pause: (processId: string): Promise<SandboxPauseResult> => {
+    return emitter.invoke('agent-process:pause', processId);
+  },
+
+  unpause: (processId: string): Promise<SandboxPauseResult> => {
+    return emitter.invoke('agent-process:unpause', processId);
+  },
+
+  switchSandbox: (processId: string, profileName: string): Promise<SandboxSwitchResult> => {
+    return emitter.invoke('agent-process:switch-sandbox', processId, profileName);
+  },
+
+  notifyActivity: (processId: string): void => {
+    void emitter.invoke('agent-process:notify-activity', processId);
+  },
+
   getStatus: (processId: string): WithTimestamp<AgentProcessStatus> => {
     return $agentStatuses.get()[processId] ?? { type: 'uninitialized', timestamp: Date.now() };
   },
@@ -109,30 +125,8 @@ const listen = () => {
     }
   });
 
-  // Polling as fallback
-  const poll = async (processId: string) => {
-    const current = $agentStatuses.get()[processId];
-    if (current?.type === 'running') {
-return;
-}
-    try {
-      const status = await emitter.invoke('agent-process:get-status', processId);
-      if (!status || status.type === 'uninitialized') {
-return;
-}
-      const old = $agentStatuses.get()[processId];
-      if (!objectEquals(old, status)) {
-        $agentStatuses.setKey(processId, status);
-      }
-    } catch {
-      // ignore — server may not be ready
-    }
-  };
-
-  // Poll the chat process
-  setInterval(() => poll('chat'), STATUS_POLL_INTERVAL_MS);
-
-  // Code tab polling is handled by Code/state.ts since it knows the tab list
+  // Polling fallback is handled by Code/state.ts, which iterates the
+  // ``codeTabs`` list — the reserved chat record included (chat unification).
 };
 
 listen();

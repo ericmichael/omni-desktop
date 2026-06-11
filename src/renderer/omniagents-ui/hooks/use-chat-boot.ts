@@ -53,9 +53,11 @@ async function runBootstrap(opts: UseChatBootOptions): Promise<ChatBootCapabilit
   const { client, wsRealtimeUrl, token } = opts;
 
   // 1. Register client-callable functions the server can invoke.
+  // ``ui.request_tool_approval`` is gone: omniagents 0.16 moved
+  // approvals onto the dedicated ``tool_approval_requested`` event +
+  // ``tool_approval_response`` RPC, no client_request hop.
   try {
     await client.clientFunctions(1, [
-      { name: 'ui.request_tool_approval' },
       { name: 'ui.set_status' },
       { name: 'ui.add_artifact' },
     ]);
@@ -87,7 +89,11 @@ welcomeText = String(info.welcome_text);
     if (names.has('fs_list_dir') && names.has('fs_get_workspace_root')) {
       workspaceSupported = true;
       try {
-        const res = (await client.serverCall('fs_get_cwd')) as any;
+        // Use fs_get_workspace_root, not fs_get_cwd: for sandboxed agents
+        // the manifest root (what the agent's tools actually see) may
+        // differ from omni serve's host cwd, and the prompt must match
+        // tool reality.
+        const res = (await client.serverCall('fs_get_workspace_root')) as any;
         if (res?.path) {
 workspacePath = String(res.path);
 }
@@ -99,7 +105,7 @@ workspacePath = String(res.path);
     /* ignore */
   }
 
-  // 4. Realtime probe for voice enablement. Best-effort; failure disables voice.
+  // Probe via capabilities() not startSession(): the latter creates an empty trace per boot.
   let voiceEnabled = false;
   if (wsRealtimeUrl) {
     try {
@@ -107,16 +113,8 @@ workspacePath = String(res.path);
       const rtc = new RealtimeRPCClient(wsRealtimeUrl, token);
       await rtc.connect();
       try {
-        const res = (await rtc.startSession()) as any;
-        const sid = String(res?.session_id || '');
-        if (sid) {
-          voiceEnabled = true;
-          try {
-            await rtc.stopSession(sid);
-          } catch {
-            /* ignore */
-          }
-        }
+        const caps = await rtc.capabilities();
+        voiceEnabled = !!caps?.enabled;
       } finally {
         rtc.disconnect();
       }

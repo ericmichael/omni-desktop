@@ -10,9 +10,6 @@ const ALL_PHASES: TicketPhase[] = [
   'session_creating',
   'ready',
   'running',
-  'continuing',
-  'awaiting_input',
-  'retrying',
   'error',
   'completed',
 ];
@@ -26,24 +23,12 @@ describe('isValidTransition', () => {
     expect(isValidTransition('idle', 'running')).toBe(false);
   });
 
-  it('allows running → continuing', () => {
-    expect(isValidTransition('running', 'continuing')).toBe(true);
-  });
-
   it('allows running → completed', () => {
     expect(isValidTransition('running', 'completed')).toBe(true);
   });
 
   it('allows running → error', () => {
     expect(isValidTransition('running', 'error')).toBe(true);
-  });
-
-  it('allows continuing → running', () => {
-    expect(isValidTransition('continuing', 'running')).toBe(true);
-  });
-
-  it('allows retrying → completed (work finished during retry wait)', () => {
-    expect(isValidTransition('retrying', 'completed')).toBe(true);
   });
 
   it('allows error → provisioning (retry)', () => {
@@ -69,8 +54,8 @@ describe('isValidTransition', () => {
   it('every phase can reach idle (directly or transitively)', () => {
     for (const phase of ALL_PHASES) {
       if (phase === 'idle') {
-continue;
-}
+        continue;
+      }
       expect(isValidTransition(phase, 'idle')).toBe(true);
     }
   });
@@ -98,9 +83,6 @@ describe('isActivePhase', () => {
       'session_creating',
       'ready',
       'running',
-      'continuing',
-      'awaiting_input',
-      'retrying',
     ];
     for (const phase of active) {
       expect(isActivePhase(phase)).toBe(true);
@@ -109,9 +91,8 @@ describe('isActivePhase', () => {
 });
 
 describe('isStreamingPhase', () => {
-  it('returns true only for running and continuing', () => {
+  it('returns true only for running', () => {
     expect(isStreamingPhase('running')).toBe(true);
-    expect(isStreamingPhase('continuing')).toBe(true);
   });
 
   it('returns false for other phases', () => {
@@ -121,8 +102,6 @@ describe('isStreamingPhase', () => {
       'connecting',
       'session_creating',
       'ready',
-      'awaiting_input',
-      'retrying',
       'error',
       'completed',
     ];

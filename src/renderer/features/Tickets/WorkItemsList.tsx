@@ -9,6 +9,7 @@ import {
   Checkmark16Regular,
   Delete20Regular,
   List20Regular,
+  LockClosed16Regular,
   MoreHorizontal20Regular,
   Open20Regular,
   Play20Filled,
@@ -20,18 +21,19 @@ import { Badge, Caption1, ConfirmDialog, IconButton, Menu, MenuDivider, MenuItem
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { isActivePhase } from '@/shared/ticket-phase';
-import type { MilestoneId, Milestone, ProjectId, Ticket, TicketId } from '@/shared/types';
+import type { Milestone, MilestoneId, ProjectId, Ticket, TicketId } from '@/shared/types';
 
 import { KanbanBoard } from './KanbanBoard';
 import { $activeMilestoneId, $pipeline, $tickets, ticketApi } from './state';
 import { PHASE_COLORS, PHASE_LABELS, TICKET_PRIORITY_LABELS } from './ticket-constants';
 
 type ViewMode = 'list' | 'board';
-type VisibilityFilter = 'active' | 'resolved' | 'archived' | 'all';
+type VisibilityFilter = 'active' | 'archived' | 'all';
 type TicketRowProps = {
   ticket: Ticket;
   selected: boolean;
   hovered: boolean;
+  unresolvedBlockers: number;
   milestoneTitle?: string;
   projectMilestones: Milestone[];
   columnLabel: string;
@@ -103,6 +105,12 @@ const useStyles = makeStyles({
     transitionDuration: tokens.durationFaster,
     ':hover': {
       backgroundColor: tokens.colorSubtleBackgroundHover,
+    },
+    ':focus-visible': {
+      outlineWidth: '2px',
+      outlineStyle: 'solid',
+      outlineColor: tokens.colorBrandStroke1,
+      outlineOffset: '-2px',
     },
   },
   rowSelected: {
@@ -180,6 +188,14 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
     textOverflow: 'ellipsis',
   },
+  blockedBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '3px',
+    flexShrink: 0,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorPaletteRedForeground1,
+  },
   dangerMenuItem: {
     color: tokens.colorPaletteRedForeground1,
   },
@@ -221,7 +237,7 @@ const useStyles = makeStyles({
   },
 });
 
-const TicketRow = memo(({ ticket, selected, hovered, milestoneTitle, projectMilestones, columnLabel, columnBadgeColor, onSelect, onHoverChange, onRequestDelete }: TicketRowProps) => {
+const TicketRow = memo(({ ticket, selected, hovered, unresolvedBlockers, milestoneTitle, projectMilestones, columnLabel, columnBadgeColor, onSelect, onHoverChange, onRequestDelete }: TicketRowProps) => {
   const styles = useStyles();
   const phase = ticket.phase;
   const isRunning = phase !== undefined && phase !== null && isActivePhase(phase);
@@ -243,8 +259,7 @@ const TicketRow = memo(({ ticket, selected, hovered, milestoneTitle, projectMile
   }, [ticket.id]);
 
   const handleAutopilot = useCallback(() => {
-    void openTicketInCode(ticket.id);
-    void ticketApi.startSupervisor(ticket.id);
+    ticketApi.requestStartSupervisor(ticket.id);
   }, [ticket.id]);
 
   const handleStopPropagation = useCallback((e: React.MouseEvent) => {
@@ -272,11 +287,25 @@ const TicketRow = memo(({ ticket, selected, hovered, milestoneTitle, projectMile
 
   const truncatedBranch = ticket.branch && ticket.branch.length > 18 ? `${ticket.branch.slice(0, 17)}…` : ticket.branch;
 
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        onSelect(ticket.id);
+      }
+    },
+    [onSelect, ticket.id]
+  );
+
   return (
-    <button
-      type="button"
+    // div+role rather than <button>: the row hosts real buttons (actions,
+    // overflow menu), and nesting them inside a button is invalid markup.
+    <div
+      role="button"
+      tabIndex={0}
       className={`${styles.row} ${selected ? styles.rowSelected : ''} ${ticket.resolution ? styles.rowResolved : ''}`}
       onClick={handleClick}
+      onKeyDown={handleKeyDown}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
@@ -286,15 +315,30 @@ const TicketRow = memo(({ ticket, selected, hovered, milestoneTitle, projectMile
         title={TICKET_PRIORITY_LABELS[ticket.priority]}
       />
       <span className={styles.title}>{ticket.title}</span>
+      {unresolvedBlockers > 0 && (
+        <span
+          className={styles.blockedBadge}
+          title={`Blocked by ${unresolvedBlockers} ticket${unresolvedBlockers === 1 ? '' : 's'}`}
+          aria-label={`Blocked by ${unresolvedBlockers}`}
+        >
+          <LockClosed16Regular />
+          {unresolvedBlockers}
+        </span>
+      )}
       {ticket.branch && (
         <span className={styles.branchBadge} title={ticket.branch}>
           <BranchFork16Regular />
           {truncatedBranch}
         </span>
       )}
-      <span className={styles.cellColumn}>
-        <Badge color={columnBadgeColor}>{columnLabel}</Badge>
-      </span>
+      {/* Column badge only while the ticket is open — on resolved rows it
+          repeats "Completed" down the whole list and the dimmed row already
+          says done. */}
+      {!ticket.resolution && (
+        <span className={styles.cellColumn}>
+          <Badge color={columnBadgeColor}>{columnLabel}</Badge>
+        </span>
+      )}
       {milestoneTitle && (
         <span className={styles.cellMilestone}>
           <Badge color="purple" truncate maxWidth={160}>{milestoneTitle}</Badge>
@@ -304,7 +348,7 @@ const TicketRow = memo(({ ticket, selected, hovered, milestoneTitle, projectMile
         <span className={styles.cellPhase}>
           <Badge color={PHASE_COLORS[phase] ?? 'default'}>
             {isRunning && <ArrowSync20Regular style={{ width: 12, height: 12 }} />}
-            {PHASE_LABELS[phase] ?? phase}
+            {PHASE_LABELS[phase]}
           </Badge>
         </span>
       )}
@@ -363,7 +407,7 @@ const TicketRow = memo(({ ticket, selected, hovered, milestoneTitle, projectMile
           </MenuPopover>
         </Menu>
       </span>
-    </button>
+    </div>
   );
 });
 TicketRow.displayName = 'TicketRow';
@@ -373,11 +417,17 @@ type WorkItemsListProps = {
   selectedTicketId?: TicketId | null;
   onSelectTicket?: (ticketId: TicketId) => void;
   title?: string;
-  contextLabel?: string;
+  contextLabel?: React.ReactNode;
   onBack?: () => void;
+  /** Optional actions rendered at the right edge of the header (before the
+   *  view-mode toggle / filter), e.g. a milestone overflow menu. */
+  rightActions?: React.ReactNode;
+  /** Mobile: the TopAppBar already shows back + title, so render only the
+   *  count + filter controls in the header row. */
+  hideChrome?: boolean;
 };
 
-export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket, title = 'Items', contextLabel, onBack }: WorkItemsListProps) => {
+export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket, title = 'Items', contextLabel, onBack, rightActions, hideChrome }: WorkItemsListProps) => {
   const styles = useStyles();
   const ticketMap = useStore($tickets);
   const pipeline = useStore($pipeline);
@@ -422,19 +472,20 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
     return map;
   }, [pipeline]);
 
+  const scopedTickets = useMemo(
+    () =>
+      Object.values(ticketMap).filter(
+        (t) => t.projectId === projectId && (activeMilestoneId === 'all' || t.milestoneId === activeMilestoneId)
+      ),
+    [ticketMap, projectId, activeMilestoneId]
+  );
+
+  const archivedCount = useMemo(() => scopedTickets.filter((t) => t.archivedAt).length, [scopedTickets]);
+
   const sortedTickets = useMemo(() => {
-    const all = Object.values(ticketMap).filter((t) => {
-      if (t.projectId !== projectId) {
-        return false;
-      }
-      if (activeMilestoneId !== 'all' && t.milestoneId !== activeMilestoneId) {
-        return false;
-      }
+    const all = scopedTickets.filter((t) => {
       if (visibilityFilter === 'active') {
-        return !t.resolution && !t.archivedAt;
-      }
-      if (visibilityFilter === 'resolved') {
-        return !!t.resolution && !t.archivedAt;
+        return !t.archivedAt;
       }
       if (visibilityFilter === 'archived') {
         return !!t.archivedAt;
@@ -442,7 +493,7 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
       return true;
     });
     return all.sort((a, b) => a.createdAt - b.createdAt);
-  }, [ticketMap, projectId, activeMilestoneId, visibilityFilter]);
+  }, [scopedTickets, visibilityFilter]);
 
   const handleNewTicket = useCallback(async () => {
     const ticket = await ticketApi.addTicket({
@@ -486,37 +537,45 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
     return 'blue';
   };
 
+  const filterControl = (
+    <SegmentedControl
+      value={visibilityFilter}
+      options={[
+        { value: 'active', label: 'Active', badge: scopedTickets.length - archivedCount },
+        { value: 'archived', label: 'Archived', badge: archivedCount },
+        { value: 'all', label: 'All' },
+      ]}
+      onChange={setVisibilityFilter}
+    />
+  );
+
   return (
     <div className={styles.root}>
       <div className={styles.header}>
-        {onBack ? <IconButton aria-label="Back" icon={<ArrowLeft20Regular />} size="sm" onClick={onBack} /> : null}
-        {contextLabel || title !== 'Items' ? (
-          <div className={styles.headerTitle}>
-            {contextLabel ? <Caption1>{contextLabel}</Caption1> : null}
-            <Subtitle2>{title}</Subtitle2>
-          </div>
-        ) : (
-          <SectionLabel>{title}</SectionLabel>
-        )}
-        <Caption1 style={{ color: tokens.colorNeutralForeground3 }}>({sortedTickets.length})</Caption1>
+        {!hideChrome && onBack ? (
+          <IconButton aria-label="Back" icon={<ArrowLeft20Regular />} size="sm" onClick={onBack} />
+        ) : null}
+        {!hideChrome &&
+          (contextLabel || title !== 'Items' ? (
+            <div className={styles.headerTitle}>
+              {contextLabel ? <Caption1>{contextLabel}</Caption1> : null}
+              <Subtitle2>{title}</Subtitle2>
+            </div>
+          ) : (
+            <SectionLabel>{title}</SectionLabel>
+          ))}
+        {/* Mobile: the filter is the header's main content, so it leads. */}
+        {hideChrome && filterControl}
         <div className={styles.flex1} />
         <div className={styles.controls}>
-          <SegmentedControl
-            value={visibilityFilter}
-            options={[
-              { value: 'active', label: 'Active' },
-              { value: 'resolved', label: 'Resolved' },
-              { value: 'archived', label: 'Archived' },
-              { value: 'all', label: 'All' },
-            ]}
-            onChange={setVisibilityFilter}
-          />
+          {!hideChrome && filterControl}
           <IconButton
             aria-label={viewMode === 'list' ? 'Board view' : 'List view'}
             icon={viewMode === 'list' ? <Board20Regular /> : <List20Regular />}
             size="sm"
             onClick={toggleView}
           />
+          {rightActions}
         </div>
       </div>
 
@@ -528,6 +587,10 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
           {sortedTickets.map((ticket) => {
             const isHovered = hoveredId === ticket.id;
             const milestone = ticket.milestoneId ? milestones[ticket.milestoneId] : undefined;
+            const unresolvedBlockers = ticket.blockedBy.filter((id) => {
+              const b = ticketMap[id];
+              return b && !b.resolution;
+            }).length;
 
             return (
               <TicketRow
@@ -535,6 +598,7 @@ export const WorkItemsList = memo(({ projectId, selectedTicketId, onSelectTicket
                 ticket={ticket}
                 selected={selectedTicketId === ticket.id}
                 hovered={isHovered}
+                unresolvedBlockers={unresolvedBlockers}
                 milestoneTitle={milestone?.title}
                 projectMilestones={projectMilestones}
                 columnLabel={columnLabels[ticket.columnId] ?? 'Backlog'}

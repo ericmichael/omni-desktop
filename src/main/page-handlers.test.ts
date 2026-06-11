@@ -55,12 +55,12 @@ const makeManager = () => ({
   getById: vi.fn(() => null),
 });
 
-const makeGetProjectDir = () => vi.fn((_projectId: string) => '/tmp/project');
+const makeGetProjectDir = () => vi.fn((_event: unknown, _projectId: string) => '/tmp/project');
 
 describe('registerPageHandlers', () => {
   it('registers all expected channels', () => {
     const ipc = new StubIpc();
-    const channels = registerPageHandlers(ipc, makeManager() as never, makeGetProjectDir());
+    const channels = registerPageHandlers(ipc, () => makeManager() as never, makeGetProjectDir());
     expect(channels).toEqual(EXPECTED_CHANNELS);
     for (const ch of EXPECTED_CHANNELS) {
       expect(ipc.handlers.has(ch), `missing handler for ${ch}`).toBe(true);
@@ -70,7 +70,7 @@ describe('registerPageHandlers', () => {
   it('page:get-items delegates with projectId', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerPageHandlers(ipc, mgr as never, makeGetProjectDir());
+    registerPageHandlers(ipc, () => mgr as never, makeGetProjectDir());
     ipc.invoke('page:get-items', 'proj-1');
     expect(mgr.getByProject).toHaveBeenCalledWith('proj-1');
   });
@@ -78,7 +78,7 @@ describe('registerPageHandlers', () => {
   it('page:get-all delegates with no args', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerPageHandlers(ipc, mgr as never, makeGetProjectDir());
+    registerPageHandlers(ipc, () => mgr as never, makeGetProjectDir());
     ipc.invoke('page:get-all');
     expect(mgr.getAll).toHaveBeenCalledOnce();
   });
@@ -86,7 +86,7 @@ describe('registerPageHandlers', () => {
   it('page:add-item delegates with item and template', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerPageHandlers(ipc, mgr as never, makeGetProjectDir());
+    registerPageHandlers(ipc, () => mgr as never, makeGetProjectDir());
     const item = { projectId: 'p1', parentId: null, title: 'Test', sortOrder: 0 };
     ipc.invoke('page:add-item', item, 'inbox-item');
     expect(mgr.add).toHaveBeenCalledWith(item, 'inbox-item');
@@ -95,7 +95,7 @@ describe('registerPageHandlers', () => {
   it('page:write-content delegates with pageId and content', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerPageHandlers(ipc, mgr as never, makeGetProjectDir());
+    registerPageHandlers(ipc, () => mgr as never, makeGetProjectDir());
     ipc.invoke('page:write-content', 'pg-1', '# Hello');
     expect(mgr.writeContent).toHaveBeenCalledWith('pg-1', '# Hello');
   });
@@ -103,7 +103,7 @@ describe('registerPageHandlers', () => {
   it('page:reorder delegates with pageId, newParentId, newSortOrder', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerPageHandlers(ipc, mgr as never, makeGetProjectDir());
+    registerPageHandlers(ipc, () => mgr as never, makeGetProjectDir());
     ipc.invoke('page:reorder', 'pg-1', 'parent-1', 3);
     expect(mgr.reorder).toHaveBeenCalledWith('pg-1', 'parent-1', 3);
   });
@@ -111,7 +111,7 @@ describe('registerPageHandlers', () => {
   it('page:get-notebook-paths returns null when notebook file path is null', () => {
     const ipc = new StubIpc();
     const mgr = makeManager();
-    registerPageHandlers(ipc, mgr as never, makeGetProjectDir());
+    registerPageHandlers(ipc, () => mgr as never, makeGetProjectDir());
     const result = ipc.invoke('page:get-notebook-paths', 'pg-1');
     expect(result).toBeNull();
   });
@@ -122,7 +122,7 @@ describe('registerPageHandlers', () => {
     mgr.getNotebookFilePath.mockReturnValue('/tmp/project/pages/nb.py' as never);
     mgr.getById.mockReturnValue({ id: 'pg-1', projectId: 'proj-1' } as never);
     const getDir = vi.fn(() => '/tmp/project');
-    registerPageHandlers(ipc, mgr as never, getDir);
+    registerPageHandlers(ipc, () => mgr as never, getDir);
     const result = ipc.invoke('page:get-notebook-paths', 'pg-1');
     expect(result).toEqual({ filePath: '/tmp/project/pages/nb.py', projectDir: '/tmp/project' });
   });

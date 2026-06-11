@@ -1,15 +1,15 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
-import { atom, computed, onMount, task } from 'nanostores';
+import { atom, computed } from 'nanostores';
 
 import { DEFAULT_XTERM_OPTIONS } from '@/renderer/constants';
 import { emitter, ipc } from '@/renderer/services/ipc';
 
 type BaseXtermState = {
   id: string;
+  tabId: string;
   xterm: Terminal;
   fitAddon: FitAddon;
-  hasNewOutput: boolean;
 };
 
 export type TerminalState =
@@ -21,65 +21,142 @@ export type TerminalState =
       exitCode: number;
     });
 
-export const $isConsoleOpen = atom(false);
-export const $terminals = atom<TerminalState[]>([]);
-export const $activeTerminalId = atom<string | null>(null);
+export type TerminalCreateError =
+  | { kind: 'process_not_ready' }
+  | { kind: 'backend_unavailable'; message: string };
 
-export const $activeTerminal = computed([$terminals, $activeTerminalId], (terminals, activeId) => {
-  return terminals.find((t) => t.id === activeId) ?? null;
-});
+export const $terminalsByTab = atom<Record<string, TerminalState[]>>({});
+export const $activeTerminalIdByTab = atom<Record<string, string | null>>({});
+/**
+ * Per-tab transient error after a failed `createTerminal`. Cleared on the
+ * next successful create. The Terminal panel reads this to show an
+ * actionable empty-state when the agent process isn't running.
+ */
+export const $terminalCreateErrorByTab = atom<Record<string, TerminalCreateError | null>>({});
 
-export const $terminalHasNewOutput = computed([$terminals], (terminals) => {
-  return terminals.some((t) => t.hasNewOutput);
-});
+export const terminalsForTab = (tabId: string) => computed($terminalsByTab, (map) => map[tabId] ?? []);
+export const activeTerminalIdForTab = (tabId: string) =>
+  computed($activeTerminalIdByTab, (map) => map[tabId] ?? null);
 
-// Legacy compat — alias for components that read a single terminal
-export const $terminal = $activeTerminal;
+// Track hydration per tab so we don't double-fetch if multiple components
+// mount for the same column.
+const hydratedTabs = new Set<string>();
+const pendingHydrations = new Map<string, Promise<void>>();
 
-$isConsoleOpen.listen((isConsoleOpen) => {
-  if (isConsoleOpen) {
-    // Clear new-output flags and fit all terminals
-    const terminals = $terminals.get();
-    const updated = terminals.map((t) => (t.hasNewOutput ? { ...t, hasNewOutput: false } : t));
-    if (updated.some((t, i) => t !== terminals[i])) {
-      $terminals.set(updated);
-    }
-    const active = $activeTerminal.get();
-    if (active) {
-      active.fitAddon.fit();
-    }
-  }
-});
-
-onMount($terminals, () => {
-  task(async () => {
-    const terminalIds = await emitter.invoke('terminal:list');
-    if (terminalIds.length === 0) {
+/**
+ * Pull the list of terminals owned by `tabId` from the main process and build
+ * xterm instances for any that don't already exist in renderer state.
+ *
+ * Non-destructive: terminals that the renderer already tracks (because the user
+ * just created them via `createTerminal`) are kept as-is — we never replace an
+ * already-open xterm instance with a fresh one.
+ *
+ * Idempotent: safe to call multiple times; later callers await the in-flight
+ * fetch or return immediately if the tab has already been hydrated.
+ */
+export const hydrateTerminalsForTab = async (tabId: string): Promise<void> => {
+  if (hydratedTabs.has(tabId)) {
 return;
 }
+  const pending = pendingHydrations.get(tabId);
+  if (pending) {
+return pending;
+}
 
-    const terminals = terminalIds.map((id) => buildTerminalState(id));
-    $terminals.set(terminals);
-    $activeTerminalId.set(terminals[0]!.id);
-  });
-});
-
-export const createTerminal = async (cwd?: string) => {
-  const id = await emitter.invoke('terminal:create', cwd);
-  const terminal = buildTerminalState(id);
-  $terminals.set([...$terminals.get(), terminal]);
-  $activeTerminalId.set(id);
-  return id;
+  const promise = (async () => {
+    const ids = await emitter.invoke('terminal:list', tabId);
+    const existing = $terminalsByTab.get()[tabId] ?? [];
+    const existingIds = new Set(existing.map((t) => t.id));
+    const missing = ids.filter((id) => !existingIds.has(id));
+    if (missing.length > 0) {
+      const added = missing.map((id) => buildTerminalState(tabId, id));
+      setTerminalsForTab(tabId, [...existing, ...added]);
+      if (($activeTerminalIdByTab.get()[tabId] ?? null) === null) {
+        setActiveTerminal(tabId, added[0]!.id);
+      }
+    }
+    hydratedTabs.add(tabId);
+  })();
+  pendingHydrations.set(tabId, promise);
+  try {
+    await promise;
+  } finally {
+    pendingHydrations.delete(tabId);
+  }
 };
 
-export const destroyTerminal = async (id?: string) => {
-  const targetId = id ?? $activeTerminalId.get();
+/**
+ * On first visit to a tab's terminal surface, hydrate from the backend and —
+ * if nothing came back — create one fresh terminal so the user lands in a
+ * working shell instead of an empty panel. On subsequent visits (already
+ * hydrated), do nothing: if the user destroyed everything on purpose, leave
+ * the panel empty until they click `+`.
+ *
+ * The renderer no longer chooses a cwd — terminals route through omni
+ * serve's :class:`SessionPtyBackend` (sandbox profiles) or
+ * :class:`HostPtyBackend` (host profile), and the cwd is the backend's
+ * decision. The renderer's old host-path cwd would land sandbox shells
+ * in a directory that doesn't exist inside the container.
+ */
+export const ensureTerminalForTab = async (tabId: string): Promise<void> => {
+  const firstVisit = !hydratedTabs.has(tabId) && !pendingHydrations.has(tabId);
+  await hydrateTerminalsForTab(tabId);
+  if (!firstVisit) {
+return;
+}
+  const list = $terminalsByTab.get()[tabId] ?? [];
+  if (list.length === 0) {
+    try {
+      await createTerminal(tabId);
+    } catch {
+      // createTerminal already populated $terminalCreateErrorByTab; the
+      // panel renders an actionable empty-state from that atom.
+    }
+  }
+};
+
+export const createTerminal = async (tabId: string): Promise<string> => {
+  try {
+    const id = await emitter.invoke('terminal:create', tabId);
+    clearTerminalCreateError(tabId);
+    const terminal = buildTerminalState(tabId, id);
+    const existing = $terminalsByTab.get()[tabId] ?? [];
+    setTerminalsForTab(tabId, [...existing, terminal]);
+    setActiveTerminal(tabId, id);
+    return id;
+  } catch (err) {
+    setTerminalCreateError(tabId, classifyCreateError(err));
+    throw err;
+  }
+};
+
+const classifyCreateError = (err: unknown): TerminalCreateError => {
+  const message = err instanceof Error ? err.message : String(err);
+  // Main process tags errors as `[<kind>] <message>` — see console-manager.ts.
+  if (message.includes('[process_not_ready]')) return { kind: 'process_not_ready' };
+  return { kind: 'backend_unavailable', message };
+};
+
+const setTerminalCreateError = (tabId: string, error: TerminalCreateError): void => {
+  $terminalCreateErrorByTab.set({ ...$terminalCreateErrorByTab.get(), [tabId]: error });
+};
+
+const clearTerminalCreateError = (tabId: string): void => {
+  const current = $terminalCreateErrorByTab.get();
+  if (!(tabId in current)) return;
+  const next = { ...current };
+  delete next[tabId];
+  $terminalCreateErrorByTab.set(next);
+};
+
+export const destroyTerminal = async (tabId: string, id?: string): Promise<void> => {
+  const targetId = id ?? $activeTerminalIdByTab.get()[tabId] ?? null;
   if (!targetId) {
 return;
 }
 
-  const terminals = $terminals.get();
-  const target = terminals.find((t) => t.id === targetId);
+  const list = $terminalsByTab.get()[tabId] ?? [];
+  const target = list.find((t) => t.id === targetId);
   if (!target) {
 return;
 }
@@ -87,41 +164,50 @@ return;
   await emitter.invoke('terminal:dispose', targetId);
   target.xterm.dispose();
 
-  const remaining = terminals.filter((t) => t.id !== targetId);
-  $terminals.set(remaining);
+  const remaining = list.filter((t) => t.id !== targetId);
+  setTerminalsForTab(tabId, remaining);
 
-  if ($activeTerminalId.get() === targetId) {
-    $activeTerminalId.set(remaining.length > 0 ? remaining[remaining.length - 1]!.id : null);
-  }
-
-  if (remaining.length === 0) {
-    $isConsoleOpen.set(false);
+  if ($activeTerminalIdByTab.get()[tabId] === targetId) {
+    setActiveTerminal(tabId, remaining.length > 0 ? remaining[remaining.length - 1]!.id : null);
   }
 };
 
-export const destroyAllTerminals = async () => {
-  const terminals = $terminals.get();
-  await Promise.allSettled(
-    terminals.map(async (t) => {
-      await emitter.invoke('terminal:dispose', t.id);
-      t.xterm.dispose();
-    })
-  );
-  $terminals.set([]);
-  $activeTerminalId.set(null);
-  $isConsoleOpen.set(false);
+export const destroyAllTerminalsForTab = async (tabId: string): Promise<void> => {
+  const list = $terminalsByTab.get()[tabId] ?? [];
+  if (list.length === 0) {
+    hydratedTabs.delete(tabId);
+    return;
+  }
+
+  await emitter.invoke('terminal:dispose-all-for-tab', tabId);
+  for (const t of list) {
+    t.xterm.dispose();
+  }
+
+  const nextTerminals = { ...$terminalsByTab.get() };
+  delete nextTerminals[tabId];
+  $terminalsByTab.set(nextTerminals);
+
+  const nextActive = { ...$activeTerminalIdByTab.get() };
+  delete nextActive[tabId];
+  $activeTerminalIdByTab.set(nextActive);
+
+  hydratedTabs.delete(tabId);
 };
 
-export const setActiveTerminal = (id: string) => {
-  $activeTerminalId.set(id);
+export const setActiveTerminal = (tabId: string, id: string | null): void => {
+  const current = $activeTerminalIdByTab.get();
+  if (current[tabId] === id) {
+return;
+}
+  $activeTerminalIdByTab.set({ ...current, [tabId]: id });
 };
 
-/** @deprecated Use createTerminal instead */
-export const initializeTerminal = async (cwd?: string) => {
-  await createTerminal(cwd);
+const setTerminalsForTab = (tabId: string, terminals: TerminalState[]): void => {
+  $terminalsByTab.set({ ...$terminalsByTab.get(), [tabId]: terminals });
 };
 
-const buildTerminalState = (id: string): TerminalState => {
+const buildTerminalState = (tabId: string, id: string): TerminalState => {
   const xterm = new Terminal({ ...DEFAULT_XTERM_OPTIONS, cursorBlink: true });
   xterm.onData((data) => {
     emitter.invoke('terminal:write', id, data);
@@ -135,40 +221,41 @@ const buildTerminalState = (id: string): TerminalState => {
 
   return {
     id,
+    tabId,
     isRunning: true,
-    hasNewOutput: false,
     xterm,
     fitAddon,
   };
 };
 
-const doWithTerminal = (id: string, fn: (terminal: TerminalState) => void) => {
-  const terminals = $terminals.get();
-  const terminal = terminals.find((t) => t.id === id);
+const findTerminal = (tabId: string, id: string): TerminalState | null => {
+  const list = $terminalsByTab.get()[tabId] ?? [];
+  return list.find((t) => t.id === id) ?? null;
+};
+
+const updateTerminal = (
+  tabId: string,
+  id: string,
+  patch: Partial<BaseXtermState> & { isRunning?: boolean; exitCode?: number }
+): void => {
+  const list = $terminalsByTab.get()[tabId] ?? [];
+  const next = list.map((t) => (t.id === id ? ({ ...t, ...patch } as TerminalState) : t));
+  setTerminalsForTab(tabId, next);
+};
+
+ipc.on('terminal:exited', (tabId, id, exitCode) => {
+  const terminal = findTerminal(tabId, id);
   if (!terminal) {
-    console.warn(`Terminal ${id} not found`);
-    return;
-  }
-  fn(terminal);
-};
-
-const updateTerminal = (id: string, patch: Partial<BaseXtermState> & { isRunning?: boolean; exitCode?: number }) => {
-  const terminals = $terminals.get();
-  $terminals.set(terminals.map((t) => (t.id === id ? { ...t, ...patch } as TerminalState : t)));
-};
-
-ipc.on('terminal:exited', (id, exitCode) => {
-  doWithTerminal(id, (terminal) => {
-    terminal.xterm.options.disableStdin = true;
-    updateTerminal(id, { isRunning: false, exitCode, hasNewOutput: !$isConsoleOpen.get() });
-  });
+return;
+}
+  terminal.xterm.options.disableStdin = true;
+  updateTerminal(tabId, id, { isRunning: false, exitCode });
 });
 
-ipc.on('terminal:output', (id, data) => {
-  doWithTerminal(id, (terminal) => {
-    terminal.xterm.write(data);
-    if (!$isConsoleOpen.get()) {
-      updateTerminal(id, { hasNewOutput: true });
-    }
-  });
+ipc.on('terminal:output', (tabId, id, data) => {
+  const terminal = findTerminal(tabId, id);
+  if (!terminal) {
+return;
+}
+  terminal.xterm.write(data);
 });

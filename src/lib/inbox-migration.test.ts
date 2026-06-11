@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  mapLegacyShaping,
+  legacyShapingToNoteText,
   mapLegacyStatus,
   upgradeLegacyInbox,
   upgradeLegacyInboxItem,
@@ -33,34 +33,27 @@ describe('mapLegacyStatus', () => {
   });
 });
 
-describe('mapLegacyShaping', () => {
+describe('legacyShapingToNoteText', () => {
   it('returns undefined for missing or empty shaping', () => {
-    expect(mapLegacyShaping(undefined)).toBeUndefined();
-    expect(mapLegacyShaping({})).toBeUndefined();
+    expect(legacyShapingToNoteText(undefined)).toBeUndefined();
+    expect(legacyShapingToNoteText({})).toBeUndefined();
   });
 
-  it('maps doneLooksLike → outcome and outOfScope → notDoing', () => {
-    const result = mapLegacyShaping({
+  it('renders doneLooksLike and outOfScope as labeled lines', () => {
+    const result = legacyShapingToNoteText({
       doneLooksLike: 'SSO works.',
       appetite: 'small',
       outOfScope: 'Custom themes.',
     });
-    expect(result).toEqual({ outcome: 'SSO works.', appetite: 'small', notDoing: 'Custom themes.' });
+    expect(result).toBe('**Done when:** SSO works.\n**Out of scope:** Custom themes.');
   });
 
-  it('defaults appetite to medium when invalid but outcome is present', () => {
-    const result = mapLegacyShaping({ doneLooksLike: 'Do it.', appetite: 'xl' });
-    expect(result).toEqual({ outcome: 'Do it.', appetite: 'medium' });
-  });
-
-  it('omits notDoing when blank', () => {
-    const result = mapLegacyShaping({ doneLooksLike: 'x', outOfScope: '   ' });
-    expect(result?.notDoing).toBeUndefined();
+  it('omits blank fields', () => {
+    expect(legacyShapingToNoteText({ doneLooksLike: 'x', outOfScope: '   ' })).toBe('**Done when:** x');
   });
 
   it('is defensive about non-string fields', () => {
-    const result = mapLegacyShaping({ doneLooksLike: 123, outOfScope: null, appetite: 'small' });
-    expect(result).toEqual({ outcome: '', appetite: 'small' });
+    expect(legacyShapingToNoteText({ doneLooksLike: 123, outOfScope: null, appetite: 'small' })).toBeUndefined();
   });
 });
 
@@ -87,13 +80,14 @@ describe('upgradeLegacyInboxItem', () => {
     });
   });
 
-  it('upgrades an open shaped item to status=shaped', () => {
+  it('folds legacy shaping into the note and keeps status=new', () => {
     resetIds();
     const item = upgradeLegacyInboxItem(
       {
         id: 'a1',
         title: 'Do thing',
         status: 'open',
+        description: 'Context here.',
         shaping: { doneLooksLike: 'Ship it.', appetite: 'small' },
         createdAt: 1,
         updatedAt: 2,
@@ -101,8 +95,8 @@ describe('upgradeLegacyInboxItem', () => {
       NOW,
       idGen
     );
-    expect(item?.status).toBe('shaped');
-    expect(item?.shaping).toEqual({ outcome: 'Ship it.', appetite: 'small' });
+    expect(item?.status).toBe('new');
+    expect(item?.note).toBe('Context here.\n\n**Done when:** Ship it.');
   });
 
   it('upgrades iceboxed to later and stamps laterAt from updatedAt', () => {

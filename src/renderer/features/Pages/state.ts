@@ -1,13 +1,30 @@
+import { objectEquals } from '@observ33r/object-equals';
 import { map } from 'nanostores';
 
 import type { TemplateKey } from '@/lib/page-templates';
 import { emitter, ipc } from '@/renderer/services/ipc';
+import { persistedStoreApi } from '@/renderer/services/store';
 import type { Page, PageId, ProjectId } from '@/shared/types';
 
 /**
  * All pages for the currently viewed project, keyed by page ID.
  */
 export const $pages = map<Record<PageId, Page>>({});
+
+export const pagesRecordFromStorePages = (pages: readonly Page[] | undefined): Record<PageId, Page> => {
+  const next: Record<PageId, Page> = {};
+  for (const page of pages ?? []) {
+    next[page.id] = page;
+  }
+  return next;
+};
+
+persistedStoreApi.$atom.subscribe((store) => {
+  const next = pagesRecordFromStorePages(store.pages);
+  if (!objectEquals($pages.get(), next)) {
+    $pages.set(next);
+  }
+});
 
 export const pageApi = {
   fetchPages: async (projectId: ProjectId): Promise<void> => {
@@ -19,8 +36,8 @@ export const pageApi = {
     const next: Record<PageId, Page> = {};
     for (const [id, page] of Object.entries(current)) {
       if (page.projectId !== projectId) {
-next[id] = page;
-}
+        next[id] = page;
+      }
     }
     for (const item of items) {
       next[item.id] = item;
@@ -104,16 +121,16 @@ next[id] = page;
   onExternalChange: (pageId: PageId, handler: (content: string) => void): (() => void) => {
     return ipc.on('page:content-changed', (id, content) => {
       if (id === pageId) {
-handler(content);
-}
+        handler(content);
+      }
     });
   },
 
   onExternalDelete: (pageId: PageId, handler: () => void): (() => void) => {
     return ipc.on('page:content-deleted', (id) => {
       if (id === pageId) {
-handler();
-}
+        handler();
+      }
     });
   },
 };

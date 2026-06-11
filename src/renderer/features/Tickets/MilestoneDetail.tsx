@@ -1,20 +1,33 @@
-import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, tokens } from '@fluentui/react-components';
 import {
   ArchiveRegular,
-  ArrowLeft20Regular,
-  BranchFork20Regular,
-  Calendar20Regular,
   Checkmark12Regular,
   Delete20Regular,
+  Edit20Regular,
+  MoreHorizontal20Filled,
+  PlayCircle20Regular,
 } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
-import { memo, useCallback, useMemo } from 'react';
+import React, { memo, useCallback, useMemo, useState } from 'react';
 
-import { Badge, Button, Caption1, IconButton, Subtitle2 } from '@/renderer/ds';
+import {
+  AnimatedDialog,
+  DialogBody,
+  DialogContent,
+  DialogHeader,
+  IconButton,
+  Menu,
+  MenuDivider,
+  MenuItem,
+  MenuList,
+  MenuPopover,
+  MenuTrigger,
+} from '@/renderer/ds';
 import { $milestones, milestoneApi } from '@/renderer/features/Initiatives/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { MilestoneId, ProjectId } from '@/shared/types';
 
+import { MilestoneForm } from './MilestoneForm';
 import { $activeMilestoneId, ticketApi } from './state';
 import { WorkItemsList } from './WorkItemsList';
 
@@ -25,135 +38,42 @@ const useStyles = makeStyles({
     height: '100%',
     width: '100%',
   },
-  header: {
-    display: 'flex',
+  /**
+   * Eyebrow content passed into WorkItemsList's `contextLabel` slot. Renders
+   * the project label + milestone metadata (status / branch / due) inline
+   * with bullet separators, so the milestone detail page reuses the Board's
+   * 2-line title block (eyebrow Caption1 + Subtitle2 title) instead of
+   * stacking a separate header above it.
+   */
+  eyebrow: {
+    display: 'inline-flex',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    flexShrink: 0,
-    // Allow the title child to shrink and ellipsize instead of pushing the
-    // branch/due badges off-screen.
-    minWidth: 0,
+    gap: tokens.spacingHorizontalXS,
   },
-  titleBlock: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-    minWidth: 0,
-    flex: '1 1 auto',
+  eyebrowSep: {
+    color: tokens.colorNeutralForeground4,
   },
-  backBtn: {
-    '@media (max-width: 639px)': {
-      display: 'none',
-    },
-  },
-  title: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  meta: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalM,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    flexShrink: 0,
-  },
-  description: {
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground2,
-    whiteSpace: 'pre-wrap',
-  },
-  progressRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-  },
-  progressBar: {
-    flex: '1 1 0',
-  },
-  actions: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  branchBadge: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '3px',
-    borderRadius: '9999px',
-    backgroundColor: tokens.colorPalettePurpleBackground2,
-    paddingLeft: '6px',
-    paddingRight: '6px',
-    paddingTop: '2px',
-    paddingBottom: '2px',
-    fontSize: tokens.fontSizeBase100,
-    fontWeight: tokens.fontWeightMedium,
-    color: tokens.colorPalettePurpleForeground2,
-    flexShrink: 0,
-    maxWidth: '180px',
-    minWidth: 0,
-    overflow: 'hidden',
-  },
-  branchText: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    minWidth: 0,
-  },
-  dueBadge: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '3px',
-    borderRadius: '9999px',
-    paddingLeft: '6px',
-    paddingRight: '6px',
-    paddingTop: '2px',
-    paddingBottom: '2px',
-    fontSize: tokens.fontSizeBase100,
-    fontWeight: tokens.fontWeightMedium,
-    flexShrink: 0,
-    whiteSpace: 'nowrap',
-  },
-  dueOk: {
-    backgroundColor: tokens.colorNeutralBackground3,
-    color: tokens.colorNeutralForeground2,
-  },
-  dueSoon: {
-    backgroundColor: tokens.colorPaletteYellowBackground2,
-    color: tokens.colorPaletteYellowForeground2,
-  },
-  dueOverdue: {
-    backgroundColor: tokens.colorPaletteRedBackground2,
-    color: tokens.colorPaletteRedForeground2,
-  },
-  body: {
-    flex: '1 1 0',
-    minHeight: 0,
-    display: 'flex',
-    flexDirection: 'column',
-  },
+  dueSoon: { color: tokens.colorPaletteYellowForeground1 },
+  dueOverdue: { color: tokens.colorPaletteRedForeground1 },
 });
 
 type MilestoneDetailProps = {
   milestoneId: MilestoneId;
   projectId: ProjectId;
+  /** Mobile: the TopAppBar already shows back + milestone title. */
+  hideChrome?: boolean;
 };
 
-export const MilestoneDetail = memo(({ milestoneId, projectId }: MilestoneDetailProps) => {
+export const MilestoneDetail = memo(({ milestoneId, projectId, hideChrome }: MilestoneDetailProps) => {
   const styles = useStyles();
   const milestones = useStore($milestones);
   const store = useStore(persistedStoreApi.$atom);
   const milestone = milestones[milestoneId];
   const project = useMemo(() => store.projects.find((entry) => entry.id === projectId) ?? null, [store.projects, projectId]);
+
+  const [editOpen, setEditOpen] = useState(false);
+  const openEdit = useCallback(() => setEditOpen(true), []);
+  const closeEdit = useCallback(() => setEditOpen(false), []);
 
   // Force filter to this milestone
   useMemo(() => {
@@ -185,73 +105,106 @@ export const MilestoneDetail = memo(({ milestoneId, projectId }: MilestoneDetail
 return null;
 }
 
+  const dueLabel = (() => {
+    if (milestone.dueDate === undefined) {
+      return null;
+    }
+    const days = Math.ceil((milestone.dueDate - Date.now()) / (24 * 60 * 60 * 1000));
+    const text =
+      days < 0
+        ? `Overdue by ${Math.abs(days)}d`
+        : days === 0
+          ? 'Due today'
+          : days === 1
+            ? 'Due tomorrow'
+            : `Due in ${days}d`;
+    const cls = days < 0 ? styles.dueOverdue : days <= 7 ? styles.dueSoon : undefined;
+    return { text, cls };
+  })();
+
+  const eyebrowParts: React.ReactNode[] = [];
+  if (project) {
+    eyebrowParts.push(<span key="project">{project.label}</span>);
+  }
+  if (milestone.status !== 'active') {
+    eyebrowParts.push(<span key="status">{milestone.status}</span>);
+  }
+  if (milestone.branch) {
+    eyebrowParts.push(<span key="branch">{milestone.branch}</span>);
+  }
+  if (dueLabel) {
+    eyebrowParts.push(
+      <span key="due" className={dueLabel.cls}>
+        {dueLabel.text}
+      </span>
+    );
+  }
+
+  const eyebrow =
+    eyebrowParts.length > 0 ? (
+      <span className={styles.eyebrow}>
+        {eyebrowParts.map((part, i) => (
+          <React.Fragment key={i}>
+            {i > 0 && <span className={styles.eyebrowSep}>·</span>}
+            {part}
+          </React.Fragment>
+        ))}
+      </span>
+    ) : undefined;
+
+  const overflowMenu = (
+    <Menu positioning={{ position: 'below', align: 'end' }}>
+      <MenuTrigger disableButtonEnhancement>
+        <IconButton aria-label="Milestone actions" icon={<MoreHorizontal20Filled />} size="sm" />
+      </MenuTrigger>
+      <MenuPopover>
+        <MenuList>
+          <MenuItem icon={<Edit20Regular />} onClick={openEdit}>
+            Edit milestone
+          </MenuItem>
+          <MenuDivider />
+          {milestone.status === 'active' ? (
+            <>
+              <MenuItem icon={<Checkmark12Regular />} onClick={handleComplete}>
+                Complete
+              </MenuItem>
+              <MenuItem icon={<ArchiveRegular />} onClick={handleArchive}>
+                Archive
+              </MenuItem>
+            </>
+          ) : (
+            <MenuItem icon={<PlayCircle20Regular />} onClick={handleReactivate}>
+              Reactivate
+            </MenuItem>
+          )}
+          <MenuDivider />
+          <MenuItem icon={<Delete20Regular />} onClick={handleDelete}>
+            Delete milestone
+          </MenuItem>
+        </MenuList>
+      </MenuPopover>
+    </Menu>
+  );
+
   return (
     <div className={styles.root}>
-      {/* Header */}
-      <div className={styles.header}>
-        <IconButton aria-label="Back" icon={<ArrowLeft20Regular />} size="sm" onClick={handleBack} className={styles.backBtn} />
-        <div className={styles.titleBlock}>
-          {project && <Caption1>{project.label}</Caption1>}
-          <Subtitle2 className={styles.title}>{milestone.title}</Subtitle2>
-        </div>
-        {milestone.status !== 'active' && (
-          <Badge color={milestone.status === 'completed' ? 'green' : 'default'}>{milestone.status}</Badge>
-        )}
-        {milestone.branch && (
-          <span className={styles.branchBadge}>
-            <BranchFork20Regular style={{ width: 12, height: 12, flexShrink: 0 }} />
-            <span className={styles.branchText}>{milestone.branch}</span>
-          </span>
-        )}
-        {milestone.dueDate !== undefined && (() => {
-          const days = Math.ceil((milestone.dueDate - Date.now()) / (24 * 60 * 60 * 1000));
-          const cls =
-            days < 0 ? styles.dueOverdue : days <= 7 ? styles.dueSoon : styles.dueOk;
-          const label =
-            days < 0 ? `Overdue by ${Math.abs(days)}d` :
-            days === 0 ? 'Due today' :
-            days === 1 ? 'Due tomorrow' :
-            `Due in ${days}d`;
-          return (
-            <span className={`${styles.dueBadge} ${cls}`}>
-              <Calendar20Regular style={{ width: 12, height: 12, flexShrink: 0 }} />
-              {label}
-            </span>
-          );
-        })()}
-      </div>
+      <WorkItemsList
+        projectId={projectId}
+        title={milestone.title}
+        contextLabel={eyebrow}
+        onBack={handleBack}
+        rightActions={overflowMenu}
+        hideChrome={hideChrome}
+      />
 
-      {/* Meta */}
-      {(milestone.description || milestone.status === 'active') && (
-        <div className={styles.meta}>
-          {milestone.description && <p className={styles.description}>{milestone.description}</p>}
-          <div className={styles.actions}>
-            {milestone.status === 'active' && (
-              <>
-                <Button size="sm" variant="ghost" leftIcon={<Checkmark12Regular />} onClick={handleComplete}>
-                  Complete
-                </Button>
-                <Button size="sm" variant="ghost" leftIcon={<ArchiveRegular />} onClick={handleArchive}>
-                  Archive
-                </Button>
-              </>
-            )}
-            {milestone.status !== 'active' && (
-              <Button size="sm" variant="ghost" onClick={handleReactivate}>
-                Reactivate
-              </Button>
-            )}
-            <Button size="sm" variant="ghost" leftIcon={<Delete20Regular />} onClick={handleDelete}>
-              Delete
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Tickets filtered to this milestone */}
-      <div className={styles.body}>
-        <WorkItemsList projectId={projectId} />
-      </div>
+      <AnimatedDialog open={editOpen} onClose={closeEdit}>
+        <DialogContent>
+          <DialogHeader>Edit Milestone</DialogHeader>
+          <DialogBody>
+            <MilestoneForm projectId={projectId} editMilestone={milestone} onClose={closeEdit} />
+          </DialogBody>
+        </DialogContent>
+      </AnimatedDialog>
     </div>
   );
 });

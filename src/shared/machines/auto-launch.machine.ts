@@ -95,6 +95,10 @@ export const autoLaunchMachine = setup({
     idle: {
       on: {
         LAUNCH: { target: 'checking', actions: 'clearError' },
+        // The pre-launch shell's button sends RELAUNCH regardless of state —
+        // from idle it must behave like LAUNCH (it used to be silently
+        // dropped here, making the button a no-op after a reset).
+        RELAUNCH: { target: 'checking', actions: 'clearError' },
         RESET: { actions: ['clearError', 'clearLaunched'] },
       },
     },

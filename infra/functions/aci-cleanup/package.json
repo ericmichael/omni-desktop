@@ -1,0 +1,20 @@
+{
+  "name": "aci-cleanup-function",
+  "version": "1.0.0",
+  "description": "Timer-triggered Azure Function that deletes stale ACI sandboxes (by tag + age) so the launcher's quota doesn't pile up across orphaned sessions.",
+  "main": "dist/src/functions/cleanup.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.5.0",
+    "@azure/identity": "^4.5.0",
+    "@azure/arm-containerinstance": "^9.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vitest": "^3.2.4",
+    "@types/node": "^22.0.0"
+  }
+}

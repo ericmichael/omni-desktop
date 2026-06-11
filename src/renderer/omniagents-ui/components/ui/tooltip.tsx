@@ -15,12 +15,20 @@ function TooltipTrigger({ ...props }: React.ComponentProps<typeof TooltipPrimiti
   return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />
 }
 
+/** Touch-only devices get no tooltips: Radix opens them on tap-focus and they
+ *  stick over content until something else takes focus. Pointer capability is
+ *  fixed for the life of the page, so a one-time check is enough. */
+const canHover = typeof window !== 'undefined' && window.matchMedia('(hover: hover)').matches
+
 function TooltipContent({
   className,
   sideOffset = 0,
   children,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Content>) {
+  if (!canHover) {
+    return null
+  }
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Content

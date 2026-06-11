@@ -149,7 +149,7 @@ describe('supervisor lifecycle races', () => {
     }
 
     isStreaming(): boolean {
-      return this.phase === 'running' || this.phase === 'continuing';
+      return this.phase === 'running';
     }
 
     async start(): Promise<void> {
@@ -203,7 +203,7 @@ return;
       });
     }
 
-    handleRunEnd(ticketId: string, action: 'continue' | 'complete' | 'retry'): Promise<void> {
+    handleRunEnd(ticketId: string, action: 'complete' | 'error'): Promise<void> {
       return this.lock.withLock(ticketId, async () => {
         const machine = this.machines.get(ticketId);
         if (!machine) {
@@ -215,15 +215,7 @@ return;
 return;
 }
 
-        if (action === 'complete') {
-          machine.phase = 'completed';
-        } else if (action === 'continue') {
-          machine.phase = 'continuing';
-          await delay(5);
-          await machine.start();
-        } else {
-          machine.phase = 'retrying';
-        }
+        machine.phase = action === 'complete' ? 'completed' : 'error';
       });
     }
   }
@@ -269,7 +261,7 @@ return;
     expect(machine.phase).toBe('running');
 
     // Fire run_end (continue) and stop concurrently
-    const pEnd = fm.handleRunEnd('t1', 'continue');
+    const pEnd = fm.handleRunEnd('t1', 'complete');
     const pStop = fm.stopSupervisor('t1');
 
     await Promise.all([pEnd, pStop]);
@@ -290,7 +282,7 @@ return;
     expect(machine.phase).toBe('idle');
 
     // run_end arrives late — machine is idle, guard should skip it
-    await fm.handleRunEnd('t1', 'continue');
+    await fm.handleRunEnd('t1', 'complete');
     expect(machine.phase).toBe('idle'); // unchanged
     expect(machine.startCount).toBe(1); // no extra start
   });
@@ -321,25 +313,25 @@ return;
     expect(fm.machines.get('t2')!.phase).toBe('running');
   });
 
-  it('stall detection + retry race: stall check re-validates under lock', async () => {
+  it('stop racing a concurrent locked op: the locked op re-validates under lock', async () => {
     const fm = new FakeProjectManager();
     fm.sandboxStartDelay = 5;
 
     await fm.startSupervisor('t1');
     const machine = fm.machines.get('t1')!;
 
-    // Simulate: stop fires first, then stall check runs
+    // Simulate: stop fires first, then another locked operation runs
     const pStop = fm.stopSupervisor('t1');
-    const pStall = fm.lock.withLock('t1', async () => {
-      // Re-check under lock (mirrors checkForStalledSupervisors fix)
+    const pOther = fm.lock.withLock('t1', async () => {
+      // Re-check under lock — if stop already idled the machine, bail out.
       if (!machine.isStreaming()) {
 return;
 }
-      machine.phase = 'retrying';
+      machine.phase = 'error';
     });
 
-    await Promise.all([pStop, pStall]);
-    // Stop won → machine is idle; stall check's re-check skipped it
+    await Promise.all([pStop, pOther]);
+    // Stop won → machine is idle; the other op's re-check skipped it
     expect(machine.phase).toBe('idle');
   });
 });
@@ -361,20 +353,8 @@ describe('lifecycle transition paths', () => {
     validPath(['idle', 'provisioning', 'connecting', 'session_creating', 'ready', 'running', 'completed', 'idle']);
   });
 
-  it('continuation: running → continuing → running → completed', () => {
-    validPath(['running', 'continuing', 'running', 'completed']);
-  });
-
   it('retry from error: running → error → provisioning → connecting → session_creating → ready → running', () => {
     validPath(['running', 'error', 'provisioning', 'connecting', 'session_creating', 'ready', 'running']);
-  });
-
-  it('retry with backoff: running → retrying → running', () => {
-    validPath(['running', 'retrying', 'running']);
-  });
-
-  it('user input flow: running → awaiting_input → running → completed', () => {
-    validPath(['running', 'awaiting_input', 'running', 'completed']);
   });
 
   it('stop from any active phase goes to idle', () => {
@@ -384,21 +364,10 @@ describe('lifecycle transition paths', () => {
       'session_creating',
       'ready',
       'running',
-      'continuing',
-      'awaiting_input',
-      'retrying',
     ];
     for (const phase of activePhases) {
       expect(isValidTransition(phase, 'idle'), `${phase} → idle`).toBe(true);
     }
-  });
-
-  it('retrying → completed (work finished during retry wait)', () => {
-    expect(isValidTransition('retrying', 'completed')).toBe(true);
-  });
-
-  it('max continuation turns: running → continuing → completed', () => {
-    validPath(['running', 'continuing', 'completed']);
   });
 
   it('error recovery: error → idle (manual reset)', () => {

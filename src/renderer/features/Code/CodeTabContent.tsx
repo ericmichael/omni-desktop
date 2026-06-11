@@ -3,20 +3,36 @@ import { useStore } from '@nanostores/react';
 import { motion } from 'framer-motion';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { buildCodeVariables } from '@/lib/client-tools';
-import { SessionStartupShell } from '@/renderer/common/SessionStartupShell';
-import { Button } from '@/renderer/ds';
+import { getArtifactsDir, getContainerArtifactsDir, profileRunsOnHost } from '@/lib/artifacts';
+import { buildSessionVariables } from '@/lib/client-tools';
+import { uuidv4 } from '@/lib/uuid';
+import { Button, Spinner } from '@/renderer/ds';
+import { SessionStatusBanner } from '@/renderer/features/Banner/SessionStatusBanner';
+import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
+import { SandboxPicker } from '@/renderer/features/SandboxProfile/SandboxPicker';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
+import { PullRequestBanner } from '@/renderer/features/Tickets/PullRequestBanner';
+import { useSandboxActivityPing } from '@/renderer/hooks/use-sandbox-activity-ping';
+import { useSessionWorkspaceDir } from '@/renderer/hooks/use-session-workspace-dir';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
-import { buildSandboxLabel, isCustomSandbox } from '@/renderer/omniagents-ui/sandbox-label';
-import { emitter } from '@/renderer/services/ipc';
+import { ChatShell } from '@/renderer/omniagents-ui/ChatShell';
+import { getGreeting } from '@/renderer/omniagents-ui/greeting';
+import { buildProfileLabel } from '@/renderer/omniagents-ui/sandbox-label';
+import { configApi } from '@/renderer/services/config';
+import { emitter, serverOrigin } from '@/renderer/services/ipc';
+import { $machines } from '@/renderer/services/machines';
 import { persistedStoreApi } from '@/renderer/services/store';
+import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
+import { $hoveredVoiceScope, VoiceScopeContext } from '@/renderer/services/voice-recording';
 import type { AppId } from '@/shared/app-registry';
 import type { CodeTab, CodeTabId, TicketId } from '@/shared/types';
+import { firstSource, isChatTab } from '@/shared/types';
+import { getActivePersona } from '@/shared/voice-personas';
 
 import { CodeEmptyState } from './CodeEmptyState';
 import { CodeWorkspaceLayout } from './CodeWorkspaceLayout';
+import { CHAT_SUGGESTIONS, COLUMN_SUGGESTIONS } from './empty-suggestions';
 import { $codeTabErrors, $codeTabStatuses, codeApi } from './state';
 import { useCodeAutoLaunch } from './use-code-auto-launch';
 
@@ -25,11 +41,57 @@ const useStyles = makeStyles({
   fullSizeRelative: { width: '100%', height: '100%', position: 'relative' },
   hidden: { display: 'none' },
   flexCenter: { width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  errorWrap: { maxWidth: '448px', textAlign: 'center', paddingLeft: tokens.spacingHorizontalL, paddingRight: tokens.spacingHorizontalL },
-  errorText: { fontSize: tokens.fontSizeBase400, fontWeight: tokens.fontWeightMedium, color: tokens.colorNeutralForeground1 },
+  errorWrap: {
+    maxWidth: '448px',
+    textAlign: 'center',
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+  },
+  errorText: {
+    fontSize: tokens.fontSizeBase400,
+    fontWeight: tokens.fontWeightMedium,
+    color: tokens.colorNeutralForeground1,
+  },
   errorRetry: { marginTop: tokens.spacingVerticalL },
-  flexColFullRelative: { display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative' },
+  flexColFullRelative: {
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    height: '100%',
+    position: 'relative',
+  },
   flex1Relative: { flex: '1 1 0', minHeight: 0, position: 'relative' },
+  // In-place sandbox-switch scrim — dims the still-mounted agent column while
+  // the sandbox is rebuilt; the conversation reappears intact when it clears.
+  switchScrim: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 20,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    backdropFilter: 'blur(1px)',
+    WebkitBackdropFilter: 'blur(1px)',
+  },
+  switchCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: tokens.spacingVerticalS,
+    padding: `${tokens.spacingVerticalXL} ${tokens.spacingHorizontalXXL}`,
+    borderRadius: tokens.borderRadiusXLarge,
+    backgroundColor: tokens.colorNeutralBackground1,
+    boxShadow: tokens.shadow28,
+    maxWidth: '320px',
+    textAlign: 'center',
+  },
+  switchTitle: {
+    fontSize: tokens.fontSizeBase400,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
+  switchHint: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 },
   spinnerPill: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -68,6 +130,7 @@ const CodeRunningView = memo(
     sessionId,
     onSessionChange,
     variables,
+    voiceVariables,
     activeApp,
     onActiveAppChange,
     onReady,
@@ -75,17 +138,27 @@ const CodeRunningView = memo(
     headerActionsTargetId,
     headerActionsCompact,
     sandboxLabel,
+    sandboxOptions,
+    currentSandboxProfile,
+    onSandboxChange,
     onClientToolCall,
     previewUrl,
     onPreviewUrlChange,
     dockTargetId,
     isGlass,
     tabId,
+    agentWorkspaceDir,
+    sidecarMode,
+    ticketId,
+    switching,
+    greeting,
+    suggestions,
   }: {
-    sandboxUrls: { uiUrl: string; codeServerUrl?: string; noVncUrl?: string };
+    sandboxUrls: { uiUrl: string; services?: Record<string, string> };
     sessionId?: string;
     onSessionChange?: (sessionId: string | undefined) => void;
     variables?: Record<string, unknown>;
+    voiceVariables?: Record<string, unknown>;
     activeApp: AppId;
     onActiveAppChange?: (app: AppId) => void;
     onReady: () => void;
@@ -93,12 +166,23 @@ const CodeRunningView = memo(
     headerActionsTargetId?: string;
     headerActionsCompact?: boolean;
     sandboxLabel?: string;
+    sandboxOptions?: { value: string; label: string }[];
+    currentSandboxProfile?: string;
+    onSandboxChange?: (value: string) => void;
     onClientToolCall?: ClientToolCallHandler;
     previewUrl?: string;
     onPreviewUrlChange?: (url: string) => void;
     dockTargetId?: string;
     isGlass?: boolean;
     tabId?: string;
+    agentWorkspaceDir?: string;
+    sidecarMode?: boolean;
+    ticketId?: TicketId;
+    switching?: boolean;
+    /** Chat mode: time-of-day greeting shown on the empty conversation. */
+    greeting?: string;
+    /** One-tap example tasks shown on the empty conversation. */
+    suggestions?: ReadonlyArray<{ label: string; prompt: string }>;
   }) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
@@ -106,7 +190,10 @@ const CodeRunningView = memo(
     const pendingPlan = useStore($pendingPlan);
 
     const uiSrc = useMemo(() => {
-      const url = new URL(sandboxUrls.uiUrl, window.location.origin);
+      // serverOrigin() returns the cloud baseUrl in cloud-linked Electron;
+      // resolving the agent's relative /proxy/... against window.location
+      // would (wrongly) anchor to localhost:5173 / file:// in that mode.
+      const url = new URL(sandboxUrls.uiUrl, serverOrigin());
       if (theme !== 'default') {
         url.searchParams.set('theme', theme);
       }
@@ -115,8 +202,8 @@ const CodeRunningView = memo(
       }
       return url.toString();
     }, [sandboxUrls.uiUrl, theme, uiMinimal]);
-    const codeServerSrc = sandboxUrls.codeServerUrl;
-    const vncSrc = sandboxUrls.noVncUrl;
+    const codeServerSrc = sandboxUrls.services?.['code_server'];
+    const vncSrc = sandboxUrls.services?.['vnc'];
 
     return (
       <div className={styles.flexColFullRelative}>
@@ -126,6 +213,7 @@ const CodeRunningView = memo(
             sessionId={sessionId}
             onSessionChange={onSessionChange}
             variables={variables}
+            voiceVariables={voiceVariables}
             codeServerSrc={codeServerSrc}
             vncSrc={vncSrc}
             previewUrl={previewUrl}
@@ -136,14 +224,33 @@ const CodeRunningView = memo(
             headerActionsTargetId={headerActionsTargetId}
             headerActionsCompact={headerActionsCompact}
             sandboxLabel={sandboxLabel}
+            sandboxOptions={sandboxOptions}
+            currentSandboxProfile={currentSandboxProfile}
+            onSandboxChange={onSandboxChange}
             onClientToolCall={onClientToolCall}
             pendingPlan={pendingPlan}
             onPlanDecision={resolvePlanApproval}
             dockTargetId={dockTargetId}
             isGlass={isGlass}
             tabId={tabId}
+            agentWorkspaceDir={agentWorkspaceDir}
+            sidecarMode={sidecarMode}
+            ticketId={ticketId}
+            greeting={greeting}
+            suggestions={suggestions}
           />
         </div>
+        {switching && (
+          <div className={styles.switchScrim}>
+            <div className={styles.switchCard}>
+              <Spinner size="md" />
+              <span className={styles.switchTitle}>
+                Switching to {getProfileMenuLabel(currentSandboxProfile ?? 'host')}…
+              </span>
+              <span className={styles.switchHint}>Your conversation and files are preserved.</span>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -162,12 +269,29 @@ type CodeTabContentProps = {
   onPreviewUrlChange?: (url: string) => void;
   dockTargetId?: string;
   isGlass?: boolean;
+  sidecarMode?: boolean;
 };
 
 export const CodeTabContent = memo(
-  ({ tab, isVisible, activeApp = 'chat', onActiveAppChange, uiMinimal, headerActionsTargetId, headerActionsCompact, previewUrl, onPreviewUrlChange, dockTargetId, isGlass }: CodeTabContentProps) => {
+  ({
+    tab,
+    isVisible,
+    activeApp = 'chat',
+    onActiveAppChange,
+    uiMinimal,
+    headerActionsTargetId,
+    headerActionsCompact,
+    previewUrl,
+    onPreviewUrlChange,
+    dockTargetId,
+    isGlass,
+    sidecarMode,
+  }: CodeTabContentProps) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
+    // Reserved chat record (CHAT_TAB_ID): projectless full-screen surface with
+    // a per-conversation scratch workspace instead of a project workspace.
+    const chatMode = isChatTab(tab);
     const project = useMemo(
       () => store.projects.find((p) => p.id === tab.projectId) ?? null,
       [store.projects, tab.projectId]
@@ -176,7 +300,9 @@ export const CodeTabContent = memo(
     // disk (`Projects/<slug>/` or `~/Omni/Workspace/` for Personal). Resolve it
     // lazily so the sandbox can start even when the user hasn't picked a
     // workspace.
-    const linkedWorkspaceDir = tab.workspaceDir ?? (project?.source?.kind === 'local' ? project.source.workspaceDir : null) ?? null;
+    const projectSource = firstSource(project);
+    const linkedWorkspaceDir =
+      tab.workspaceDir ?? (projectSource?.kind === 'local' ? projectSource.workspaceDir : null) ?? null;
     const [resolvedProjectDir, setResolvedProjectDir] = useState<string | null>(null);
     useEffect(() => {
       if (linkedWorkspaceDir || !tab.projectId) {
@@ -193,20 +319,111 @@ export const CodeTabContent = memo(
         cancelled = true;
       };
     }, [tab.projectId, linkedWorkspaceDir]);
-    const workspaceDir = linkedWorkspaceDir ?? resolvedProjectDir;
-    const sandboxBackend = store.sandboxBackend ?? 'none';
-    const sandboxLabel = useMemo(
-      () => (sandboxBackend !== 'none' ? buildSandboxLabel(sandboxBackend, { custom: isCustomSandbox(project?.sandbox) }) : undefined),
-      [sandboxBackend, project?.sandbox]
+    // Chat: mint the conversation/session id on the record if absent (it is
+    // the snapshot key AND the scratch-dir key). Normal columns get theirs
+    // from addTab/addTabForTicket.
+    useEffect(() => {
+      if (chatMode && !tab.sessionId) {
+        void codeApi.setTabSessionId(tab.id, uuidv4());
+      }
+    }, [chatMode, tab.sessionId, tab.id]);
+
+    // Chat is an ambient surface, not a project — each conversation gets an
+    // isolated `<workspaceDir>/Sessions/<sessionId>` scratch dir. Switching
+    // conversations changes the workspace, which useAutoLaunch's reset effect
+    // turns into a sandbox restart. Hook is called unconditionally (null base
+    // for non-chat tabs) to keep hook order static.
+    const chatScratchDir = useSessionWorkspaceDir(
+      chatMode && tab.sessionId ? (store.workspaceDir ?? null) : null,
+      tab.sessionId ?? ''
     );
 
-    const { phase, retry } = useCodeAutoLaunch(tab.id, workspaceDir);
+    const workspaceDir = chatMode ? chatScratchDir : (linkedWorkspaceDir ?? resolvedProjectDir);
+
+    // Sticky profile binding persisted on the tab. The migration backfills
+    // existing installs; ``codeApi.addTab*`` seeds new tabs from the same
+    // resolution chain (per-project ``sandboxProfile`` → user default) so we
+    // don't drift if the user changes defaults later. The picker writes
+    // through ``codeApi.setTabProfile`` and the new value flows back via
+    // ``useStore``. The ``project?.sandboxProfile`` / ``store.defaultProfileName``
+    // fallbacks below only kick in for tabs predating the migration that
+    // somehow got loaded without a stored profileName (defensive).
+    const profileName = tab.profileName ?? project?.sandboxProfile ?? store.defaultProfileName ?? 'host';
+    const handleProfileChange = useCallback(
+      (value: string) => {
+        void codeApi.setTabProfile(tab.id, value);
+      },
+      [tab.id]
+    );
+    const machines = useStore($machines);
+    const localVoice = store.localVoiceEnabled && isLocalVoiceCapable();
+    const sandboxLabel = useMemo(() => buildProfileLabel(profileName, machines), [profileName, machines]);
+
+    const [isEnterprise, setIsEnterprise] = useState(false);
+    useEffect(() => {
+      emitter.invoke('platform:is-enterprise').then(setIsEnterprise);
+    }, []);
+    const sandboxOptions = useMemo(
+      () =>
+        getAvailableProfileNames({ isEnterprise, available: store.availableSandboxProfiles }).map((name) => ({
+          value: name,
+          label: getProfileMenuLabel(name, machines),
+        })),
+      [isEnterprise, store.availableSandboxProfiles, machines]
+    );
+
+    // What the agent should treat as its workspace root. For host profiles
+    // the agent runs on the host, so the host path is correct. For
+    // containerized profiles (docker, e2b, …) the agent's filesystem root is
+    // ``/workspace/<mountName>`` (or just ``/workspace`` when no source has
+    // been attached) — passing a host path here would land in
+    // ``session.variables.workspace_root`` and make every ``execute_bash``
+    // try to ``cd`` to a path that doesn't exist inside the container.
+    const agentWorkspaceDir = useMemo(() => {
+      if (profileRunsOnHost(profileName)) {
+        return workspaceDir ?? undefined;
+      }
+      const mountName = projectSource?.mountName;
+      return mountName ? `/workspace/${mountName}` : '/workspace';
+    }, [profileName, workspaceDir, projectSource]);
+
+    const [greeting] = useState(getGreeting);
+    const allLaunchErrors = useStore($codeTabErrors);
+
+    const { phase, retry, launch } = useCodeAutoLaunch(tab.id, workspaceDir, {
+      ...(tab.projectId ? { projectId: tab.projectId } : {}),
+      profileNameOverride: profileName,
+      ...(tab.sessionId ? { sessionId: tab.sessionId } : {}),
+      ...(tab.containerId ? { containerId: tab.containerId } : {}),
+    });
+    useSandboxActivityPing(tab.id);
 
     const allStatuses = useStore($codeTabStatuses);
     const sandboxStatus = allStatuses[tab.id];
 
+    // Capture the readiness payload's container_id whenever this tab's omni
+    // serve reports running. May differ from what we sent on this launch if
+    // the SDK ended up creating a fresh container (rehydrate / fresh tiers),
+    // which is exactly what we want to persist for the next start.
+    useEffect(() => {
+      if (sandboxStatus?.type !== 'running') {
+        return;
+      }
+      const next = sandboxStatus.data.containerId;
+      if ((tab.containerId ?? undefined) === next) {
+        return;
+      }
+      void codeApi.setTabContainerId(tab.id, next);
+    }, [sandboxStatus, tab.id, tab.containerId]);
+
+    // Only mount the iframe on ``running``. ``connecting`` arrives the
+    // moment omni-serve emits its JSON readiness line — that's before
+    // uvicorn has actually bound the port, so loading the iframe there
+    // briefly shows ERR_CONNECTION_REFUSED / a uvicorn error before the
+    // real UI loads. ``agent-process.ts`` already gates ``running`` on
+    // an HTTP+WS health probe, so by then the port is truly serving.
     const sandboxUrls = useMemo(() => {
-      if (!sandboxStatus || (sandboxStatus.type !== 'running' && sandboxStatus.type !== 'connecting')) {
+      if (!sandboxStatus || sandboxStatus.type !== 'running') {
         return null;
       }
       return sandboxStatus.data;
@@ -222,72 +439,158 @@ export const CodeTabContent = memo(
     const handleClientToolCall = useMemo(
       () =>
         buildClientToolHandler({
-          ...(tab.ticketId && tab.projectId
-            ? { ticketId: tab.ticketId as TicketId, projectId: tab.projectId }
-            : {}),
+          ...(tab.ticketId && tab.projectId ? { ticketId: tab.ticketId as TicketId, projectId: tab.projectId } : {}),
           tabId: tab.id,
         }),
       [tab.id, tab.ticketId, tab.projectId]
     );
 
-    const clientToolVariables = useMemo(
-      () =>
-        buildCodeVariables({
-          ...(project ? { projectId: project.id, projectLabel: project.label } : {}),
+    // Resolve the host omni config dir once — we need it to tell the agent
+    // where to write PR artifacts when it runs on the host (no sandbox).
+    const [hostConfigDir, setHostConfigDir] = useState<string | null>(null);
+    useEffect(() => {
+      let cancelled = false;
+      void configApi.getOmniConfigDir().then((dir) => {
+        if (!cancelled) {
+          setHostConfigDir(dir);
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, []);
+
+    // Look up the ticket's autopilot flag so the column builds its variables
+    // with catch-all safe_tool_overrides when autopilot is driving it.
+    const ticketAutopilot = useMemo(() => {
+      if (!tab.ticketId) {
+        return false;
+      }
+      return store.tickets.some((t) => t.id === tab.ticketId && t.autopilot === true);
+    }, [tab.ticketId, store.tickets]);
+
+    const baseSessionArgs = useMemo(() => {
+      if (chatMode) {
+        // Chat is projectless but never folder-less: the per-conversation
+        // scratch dir is its workspace, and passing it makes the output
+        // guidance ("save deliverables in your working folder") apply.
+        return {
+          surface: 'chat' as const,
+          ...(workspaceDir ? { context: { workspaceDir } } : {}),
+        };
+      }
+      const artifactsDir = tab.ticketId
+        ? profileRunsOnHost(profileName)
+          ? hostConfigDir
+            ? getArtifactsDir(hostConfigDir, tab.ticketId)
+            : undefined
+          : getContainerArtifactsDir(tab.ticketId)
+        : undefined;
+      return {
+        surface: 'code' as const,
+        autopilot: ticketAutopilot,
+        context: {
+          ...(project ? { projectId: project.id, projectLabel: project.label, sources: project.sources } : {}),
           ...(tab.ticketId ? { ticketId: tab.ticketId } : {}),
-        }),
-      [tab.ticketId, project]
+          ...(artifactsDir ? { artifactsDir } : {}),
+          ...(tab.workspaceDir ? { workspaceDir: tab.workspaceDir } : {}),
+        },
+      };
+    }, [chatMode, workspaceDir, tab.ticketId, tab.workspaceDir, project, profileName, hostConfigDir, ticketAutopilot]);
+
+    // Base runs are speak-free; the mic button arms the voice variant per-run.
+    const clientToolVariables = useMemo(() => buildSessionVariables(baseSessionArgs), [baseSessionArgs]);
+    const personaInstructions = getActivePersona(store).instructions;
+    // Track pointer hover per column so the voice-toggle hotkey targets it.
+    const onColumnMouseEnter = useCallback(() => $hoveredVoiceScope.set(tab.id), [tab.id]);
+    const onColumnMouseLeave = useCallback(() => {
+      if ($hoveredVoiceScope.get() === tab.id) {
+        $hoveredVoiceScope.set(null);
+      }
+    }, [tab.id]);
+    const voiceVariables = useMemo(
+      () => (localVoice ? buildSessionVariables({ ...baseSessionArgs, voice: true, personaInstructions }) : undefined),
+      [baseSessionArgs, localVoice, personaInstructions]
     );
 
-    // No project selected — show project picker
-    if (!tab.projectId) {
+    // No project selected — show project picker (chat is projectless by design)
+    if (!chatMode && !tab.projectId) {
       return (
         <div className={mergeClasses(styles.fullSize, !isVisible && styles.hidden)}>
-          <SessionStartupShell
-            eyebrow="Workspace Setup"
-            title="Choose a project"
-            description="Open an existing project in this session or create a new one to start working."
-          >
-            <CodeEmptyState tabId={tab.id} embedded />
-          </SessionStartupShell>
+          <CodeEmptyState tabId={tab.id} embedded />
         </div>
       );
     }
 
     return (
-      <div className={mergeClasses(styles.fullSizeRelative, !isVisible && styles.hidden)}>
+      <div
+        className={mergeClasses(styles.fullSizeRelative, !isVisible && styles.hidden)}
+        onMouseEnter={onColumnMouseEnter}
+        onMouseLeave={onColumnMouseLeave}
+      >
+        <SessionStatusBanner status={sandboxStatus} />
+        {chatMode && <PullRequestBanner scope={{ kind: 'chat' }} floating />}
         {sandboxUrls ? (
-          <CodeRunningView
-            sandboxUrls={sandboxUrls}
-            sessionId={tab.sessionId}
-            onSessionChange={handleSessionChange}
-            variables={clientToolVariables}
-            activeApp={activeApp}
-            onActiveAppChange={onActiveAppChange}
-            onReady={() => {}}
-            uiMinimal={uiMinimal}
-            headerActionsTargetId={headerActionsTargetId}
-            headerActionsCompact={headerActionsCompact}
-            sandboxLabel={sandboxLabel}
-            onClientToolCall={handleClientToolCall}
-            previewUrl={previewUrl}
-            onPreviewUrlChange={onPreviewUrlChange}
-            dockTargetId={dockTargetId}
-            isGlass={isGlass}
-            tabId={tab.id}
+          <VoiceScopeContext.Provider value={tab.id}>
+            <CodeRunningView
+              sandboxUrls={sandboxUrls}
+              sessionId={tab.sessionId}
+              onSessionChange={handleSessionChange}
+              variables={clientToolVariables}
+              voiceVariables={voiceVariables}
+              activeApp={activeApp}
+              onActiveAppChange={onActiveAppChange}
+              onReady={() => {}}
+              uiMinimal={uiMinimal}
+              headerActionsTargetId={headerActionsTargetId}
+              headerActionsCompact={headerActionsCompact}
+              sandboxLabel={sandboxLabel}
+              sandboxOptions={sandboxOptions}
+              currentSandboxProfile={profileName}
+              onSandboxChange={handleProfileChange}
+              onClientToolCall={handleClientToolCall}
+              previewUrl={previewUrl}
+              onPreviewUrlChange={onPreviewUrlChange}
+              dockTargetId={dockTargetId}
+              isGlass={isGlass}
+              tabId={tab.id}
+              agentWorkspaceDir={agentWorkspaceDir}
+              sidecarMode={sidecarMode}
+              ticketId={tab.ticketId as TicketId | undefined}
+              switching={sandboxStatus?.type === 'running' && !!sandboxStatus.data.switching}
+              greeting={chatMode ? greeting : undefined}
+              suggestions={chatMode ? CHAT_SUGGESTIONS : COLUMN_SUGGESTIONS}
+            />
+          </VoiceScopeContext.Provider>
+        ) : chatMode ? (
+          /* Chat pre-launch / launching / error — the greeting shell. The
+             Launch button only appears pre-first-run (idle requires a missing
+             workspaceDir; once one exists auto-launch drives to running). */
+          <ChatShell
+            greeting={greeting}
+            phase={phase === 'error' ? 'error' : phase === 'idle' ? 'idle' : 'loading'}
+            error={phase === 'error' ? (allLaunchErrors[tab.id] ?? undefined) : undefined}
+            onRetry={phase === 'error' ? retry : undefined}
+            onLaunch={phase === 'idle' ? launch : undefined}
+            launchDisabled={phase === 'idle' ? !store.workspaceDir : undefined}
+            prelaunchExtras={
+              phase === 'idle' ? (
+                <SandboxPicker
+                  value={profileName}
+                  onChange={handleProfileChange}
+                  context={{ isEnterprise, available: store.availableSandboxProfiles }}
+                />
+              ) : undefined
+            }
           />
         ) : phase === 'error' ? (
           <CodeErrorView tabId={tab.id} retry={retry} />
-        ) : phase === 'idle' ? (
-          <SessionStartupShell
-            eyebrow="Workspace Setup"
-            title="Choose a project"
-            description="Open an existing project in this session or create a new one to start working."
-          >
-            <CodeEmptyState tabId={tab.id} embedded />
-          </SessionStartupShell>
         ) : (
-          /* Connecting — show a subtle centered indicator */
+          /* idle / checking / installing / ready / starting / connecting —
+             at this point we already have tab.projectId (we passed the
+             early return above), so auto-launch will drive the machine to
+             ``running`` shortly. The in-composer sandbox picker handles
+             profile changes; no pre-launch picker needed here. */
           <div className={styles.flexCenter}>
             <motion.div
               className={styles.spinnerPill}
@@ -308,7 +611,7 @@ export const CodeTabContent = memo(
                   d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                 />
               </svg>
-              <span className={styles.spinnerText}>Connecting…</span>
+              <span className={styles.spinnerText}>{phase === 'idle' ? 'Restarting sandbox…' : 'Connecting…'}</span>
             </motion.div>
           </div>
         )}

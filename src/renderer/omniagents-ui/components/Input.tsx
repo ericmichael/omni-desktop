@@ -1,8 +1,13 @@
-import { ArrowUpIcon, FolderIcon, Loader2Icon, LockIcon,MicIcon, MonitorIcon, PaperclipIcon, SquareIcon, XIcon } from 'lucide-react'
-import React, { useCallback, useMemo, useRef, useState } from 'react'
+import { ArrowUpIcon, CheckIcon, FolderIcon, Loader2Icon, LockIcon,MicIcon, MonitorIcon, PaperclipIcon, SquareIcon, XIcon } from 'lucide-react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { PromptInput, PromptInputActions,PromptInputTextarea } from './promptkit/PromptInput'
+import { useStore } from '@nanostores/react'
+
 import { VoiceModal } from './VoiceModal'
+import { LocalVoiceButton } from './LocalVoiceButton'
+import { isLocalVoiceCapable } from '@/renderer/services/voice-client'
+import { persistedStoreApi } from '@/renderer/services/store'
 
 /** Trailing path segment, tolerant of both `/` and `\` separators and trailing slashes. Falls back to the input when nothing would be left. */
 function basename(p: string): string {
@@ -12,16 +17,60 @@ function basename(p: string): string {
   return tail || p
 }
 
-export function Input({ disabled, thinking, onStop, onSubmit, voiceEnabled, workspacePath, workspaceLocked, onWorkspaceClick, sandboxLabel, sandboxLoading, sessionId, onVoiceSessionCreated, onVoiceClose }:
-  { disabled?: boolean; thinking?: boolean; onStop?: () => void; onSubmit: (text: string, files?: File[]) => void; voiceEnabled?: boolean; workspacePath?: string | null; workspaceLocked?: boolean; onWorkspaceClick?: () => void; sandboxLabel?: string; sandboxLoading?: boolean; sessionId?: string; onVoiceSessionCreated?: (id: string) => void; onVoiceClose?: () => void }) {
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** Human label for the workspace chip. Session workspaces live in UUID-named
+ *  directories; a raw UUID in the composer reads as a bug, so fall back to a
+ *  generic label (the full path stays available via the title attribute). */
+function workspaceLabel(p: string): string {
+  const tail = basename(p)
+  return UUID_RE.test(tail) ? 'Workspace' : tail
+}
+
+export function Input({ disabled, thinking, onStop, onSubmit, onVoiceSubmit, voiceEnabled, workspacePath, workspaceLocked, onWorkspaceClick, sandboxLabel, sandboxLocked, sandboxLoading, sandboxOptions, currentSandboxProfile, onSandboxChange, sessionId, onVoiceSessionCreated, onVoiceClose }:
+  { disabled?: boolean; thinking?: boolean; onStop?: () => void; onSubmit: (text: string, files?: File[]) => void; onVoiceSubmit?: (text: string) => void; voiceEnabled?: boolean; workspacePath?: string | null; workspaceLocked?: boolean; onWorkspaceClick?: () => void; sandboxLabel?: string; sandboxLocked?: boolean; sandboxLoading?: boolean; sandboxOptions?: { value: string; label: string }[]; currentSandboxProfile?: string; onSandboxChange?: (value: string) => void; sessionId?: string; onVoiceSessionCreated?: (id: string) => void; onVoiceClose?: () => void }) {
   const [text, setText] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const [history, setHistory] = useState<string[]>([])
   const [historyIndex, setHistoryIndex] = useState(0)
   const [historyDraft, setHistoryDraft] = useState('')
   const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false)
+  // Local voice (Option A): shown when the user picked it in Settings → Models
+  // → Voice and the deployment can run it. Takes precedence over the realtime
+  // VoiceModal mic button.
+  const localVoiceEnabled = useStore(persistedStoreApi.$atom).localVoiceEnabled
+  const localVoiceSupported = localVoiceEnabled && isLocalVoiceCapable()
+  const [sandboxMenuOpen, setSandboxMenuOpen] = useState(false)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const sandboxMenuRef = useRef<HTMLDivElement | null>(null)
+
+  // Close the sandbox dropdown when the user clicks anywhere outside it.
+  useEffect(() => {
+    if (!sandboxMenuOpen) {
+      return
+    }
+    const onDown = (e: MouseEvent) => {
+      if (sandboxMenuRef.current && !sandboxMenuRef.current.contains(e.target as Node)) {
+        setSandboxMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [sandboxMenuOpen])
+
+  const sandboxInteractive = !!sandboxOptions && sandboxOptions.length > 0 && !!onSandboxChange && !sandboxLocked
+
+  const toggleSandboxMenu = useCallback(() => {
+    setSandboxMenuOpen((v) => !v)
+  }, [])
+
+  const handleSandboxSelect = useCallback((value: string) => {
+    setSandboxMenuOpen(false)
+    if (value !== currentSandboxProfile) {
+      onSandboxChange?.(value)
+    }
+  }, [currentSandboxProfile, onSandboxChange])
 
   const canSend = useMemo(() => !disabled && (text.trim().length > 0 || files.length > 0), [disabled, text, files])
 
@@ -197,7 +246,7 @@ fileInputRef.current.value = ''
           />
 
           <PromptInputActions className="flex items-center justify-between gap-1 sm:gap-2 pt-2 px-2">
-            <div className="flex items-center gap-1 min-w-0">
+            <div className="flex items-center gap-1 min-w-0 overflow-hidden pr-1">
               <label
                 htmlFor="file-upload"
                 onClick={(e) => e.stopPropagation()}
@@ -227,8 +276,8 @@ fileInputRef.current.value = ''
                   title={workspacePath || 'Select workspace'}
                 >
                   <FolderIcon size={14} className={`shrink-0 ${workspaceLocked ? 'text-muted-foreground' : 'text-primary'}`} />
-                  <span className="max-w-[120px] sm:max-w-[200px] truncate">
-                    {workspacePath ? basename(workspacePath) : 'Select workspace'}
+                  <span className="max-w-[96px] sm:max-w-[200px] truncate">
+                    {workspacePath ? workspaceLabel(workspacePath) : 'Select workspace'}
                   </span>
                   {workspaceLocked && (
                     <LockIcon size={10} className="text-muted-foreground flex-shrink-0" />
@@ -237,21 +286,62 @@ fileInputRef.current.value = ''
               )}
 
               {sandboxLabel && (
-                <div
-                  className="hidden sm:flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-secondary-foreground hover:bg-accent/50 transition-colors"
-                  title={`Sandbox: ${sandboxLabel}`}
-                >
-                  {sandboxLoading ? (
-                    <Loader2Icon size={14} className="text-muted-foreground animate-spin" />
-                  ) : null}
-                  <MonitorIcon size={14} className="text-secondary-foreground" />
-                  <span>{sandboxLabel}</span>
+                <div ref={sandboxMenuRef} className="relative min-w-0">
+                  <button
+                    type="button"
+                    onClick={sandboxInteractive ? toggleSandboxMenu : undefined}
+                    disabled={!sandboxInteractive}
+                    title={sandboxLocked ? `Sandbox: ${sandboxLabel} (locked once a run starts)` : `Sandbox: ${sandboxLabel}`}
+                    className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors min-w-0 ${
+                      sandboxInteractive
+                        ? 'text-secondary-foreground hover:bg-accent/50 cursor-pointer'
+                        : 'text-secondary-foreground cursor-default'
+                    }`}
+                  >
+                    {sandboxLoading ? (
+                      <Loader2Icon size={14} className="text-muted-foreground animate-spin shrink-0" />
+                    ) : null}
+                    <MonitorIcon size={14} className={`shrink-0 ${sandboxInteractive ? 'text-primary' : 'text-secondary-foreground'}`} />
+                    <span className="max-w-[96px] sm:max-w-[200px] truncate">{sandboxLabel}</span>
+                    {sandboxLocked && (
+                      <LockIcon size={10} className="text-muted-foreground flex-shrink-0" />
+                    )}
+                  </button>
+                  {sandboxMenuOpen && sandboxOptions && (
+                    <div
+                      role="menu"
+                      className="absolute bottom-full left-0 mb-1 z-50 min-w-[180px] rounded-md border border-border bg-card p-1 shadow-md"
+                    >
+                      {sandboxOptions.map((opt) => {
+                        const selected = opt.value === currentSandboxProfile
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={selected}
+                            onClick={handleSandboxSelect.bind(null, opt.value)}
+                            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs text-foreground hover:bg-accent/50"
+                          >
+                            <span className="inline-flex h-3 w-3 items-center justify-center text-primary">
+                              {selected ? <CheckIcon size={12} /> : null}
+                            </span>
+                            <span className="flex-1 truncate">{opt.label}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
 
             <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-              {voiceEnabled ? (
+              {localVoiceSupported ? (
+                // Local models active → push-to-talk replaces the realtime
+                // VoiceModal mic button entirely.
+                <LocalVoiceButton onSubmit={(t) => (onVoiceSubmit ?? onSubmit)(t)} />
+              ) : voiceEnabled ? (
                 <button
                   type="button"
                   onClick={() => setIsVoiceModalOpen(true)}

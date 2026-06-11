@@ -3,31 +3,81 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 import { app, dialog, net, protocol, shell } from 'electron';
-import { resolve } from 'path';
+import { existsSync, writeFileSync } from 'fs';
+import { migrateFromJson } from 'omni-projects-db';
+import { join, resolve } from 'path';
 import { assert } from 'tsafe';
 import { pathToFileURL } from 'url';
 
+import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig, parseEnvVars } from '@/lib/agent-config';
 import { getArtifactsDir } from '@/lib/artifacts';
 import { createAppControlManager } from '@/main/app-control-manager';
+import { listRepos as azureListRepos } from '@/main/azure-repos';
+import { createBrowserManager } from '@/main/browser-manager';
+import { getVoiceService } from '@/main/voice-service';
+import {
+  getStatus as codexStatus,
+  loginWithBrowser,
+  loginWithDeviceFlow,
+  logout as codexLogout,
+} from '@/main/codex-auth';
+import {
+  ensureFreshAccessToken as ensureFreshEntraToken,
+  getStatus as entraStatus,
+  loginWithDeviceFlow as entraLoginWithDeviceFlow,
+  logout as entraLogout,
+} from '@/main/entra-auth';
+import { getOrCreateMachineIdentity, renameMachine } from '@/main/machine-identity';
+import { wireComputeReverseHandlers } from '@/main/compute-reverse-handlers';
+import { wireReverseRpcRouter } from '@/main/reverse-rpc-bridge';
+import { wireTunnelReverseHandlers } from '@/main/tunnel-handler';
+import { migrateAgentConfigFromFiles } from '@/main/config-files-migration';
+import { materializeAgentConfig } from '@/main/config-materializer';
 import { createConsoleManager } from '@/main/console-manager';
+import { rowToProject } from '@/main/db-store-bridge';
+import { createDownloadsManager } from '@/main/downloads-manager';
 import { createExtensionManager } from '@/main/extension-manager';
+import {
+  linkWithDeviceFlow as githubLink,
+  listOrgs as githubListOrgs,
+  searchRepos as githubSearchRepos,
+} from '@/main/github-auth';
 import { MainProcessManager } from '@/main/main-process-manager';
+import { getMcpBinPath } from '@/main/mcp-config-manager';
+import { registerMigrationHandlers } from '@/main/migration-handlers';
+import { registerTeamHandlers } from '@/server/team-handlers';
 import { createOmniInstallManager } from '@/main/omni-install-manager';
+import { migrateLegacyPagesToConfigDir } from '@/main/pages-relocation-migration';
+import { createPermissionsManager } from '@/main/permissions-manager';
 import { registerPlatformIpc } from '@/main/platform-ipc';
 import { createPlatformClient } from '@/main/platform-mode';
 import { createProcessManager } from '@/main/process-manager';
+import { backfillProjectConfigs } from '@/main/project-config-backfill';
+import { closeProjectDb, getDb, openProjectDb } from '@/main/project-db';
 import { createProjectManager } from '@/main/project-manager';
+import { LocalSecretStore } from '@/main/secret-store';
+import { DEFAULT_CHAT_SNAPSHOT_TTL_MS, gcStaleSnapshots, registerSnapshotHandlers } from '@/main/snapshot-manager';
 import { getStore } from '@/main/store';
 import {
   ensureDirectory,
   getDefaultWorkspaceDir,
+  getMcpSandboxHtmlPath,
   getOmniConfigDir,
   getProjectsDir,
   isDirectory,
   isFile,
 } from '@/main/util';
 import { WorkspaceSyncManager } from '@/main/workspace-sync-manager';
-import { registerConfigHandlers, registerSkillsHandlers, registerUtilHandlers } from '@/shared/ipc-handlers';
+import { tokenLast4 } from '@/shared/git-credentials';
+import {
+  registerConfigHandlers,
+  registerGitCredentialHandlers,
+  registerSettingsConfigHandlers,
+  registerSkillsHandlers,
+  registerUtilHandlers,
+} from '@/shared/ipc-handlers';
+import { buildStdioMcpEntry } from '@/shared/mcp-entry';
+import type { GitCredential, GithubOwner, GithubRepoQuery, GithubStatus, RemoteRepo, TicketId } from '@/shared/types';
 
 // Process-level crash visibility. Log only — do not exit. Killing the
 // Electron main process from an unhandled rejection would take the whole
@@ -57,6 +107,19 @@ protocol.registerSchemesAsPrivileged([
       supportFetchAPI: true,
     },
   },
+  // MCP Apps sandbox proxy origin. Registered as a separate, opaque
+  // origin so the AppFrame iframe (mcp-ui) is cross-origin isolated from
+  // the renderer. ``bypassCSP`` is intentionally not set — the handler
+  // sets a strict CSP that lets the proxy script run but blocks anything
+  // it loads (apart from the inner iframe written via document.write).
+  {
+    scheme: 'mcp-sandbox',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+    },
+  },
 ]);
 
 // Configure Chrome/Electron flags for better memory management
@@ -74,18 +137,140 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding');
 // windows open at a time so this should have no effect. But just in case, we disable the limit.
 app.commandLine.appendSwitch('disable-backing-store-limit');
 
+// Expose a Chrome DevTools Protocol endpoint in development so external tools
+// (chrome://inspect, puppeteer, `curl http://localhost:9222/json`) can attach
+// to the running renderer without restarting. Opt-in via OMNI_DEBUG_PORT.
+if (process.env.NODE_ENV === 'development' || process.env.OMNI_DEBUG_PORT) {
+  const port = process.env.OMNI_DEBUG_PORT ?? '9222';
+  app.commandLine.appendSwitch('remote-debugging-port', port);
+  // Chromium 111+ requires this to allow non-browser clients to connect.
+  app.commandLine.appendSwitch('remote-allow-origins', '*');
+  console.log(`[debug] Chrome DevTools Protocol listening on http://localhost:${port}`);
+}
+
 const OMNI_CONFIG_DIR = getOmniConfigDir();
 const store = getStore();
+const secretStore = new LocalSecretStore();
+const { repo, asyncRepo } = openProjectDb();
+
+// One-time migration: move project data from electron-store JSON to SQLite.
+// This is idempotent — it skips if the DB already has projects.
+try {
+  const migrated = migrateFromJson(repo, getDb(), {
+    projects: store.get('projects', []) as import('@/shared/types').Project[],
+    tickets: store.get('tickets', []) as import('@/shared/types').Ticket[],
+    milestones: store.get('milestones', []) as import('@/shared/types').Milestone[],
+    pages: store.get('pages', []) as import('@/shared/types').Page[],
+    inboxItems: store.get('inboxItems', []) as import('@/shared/types').InboxItem[],
+    tasks: store.get('tasks', []) as import('@/shared/types').Task[],
+  });
+  if (migrated > 0) {
+    console.log(`[ProjectDb] Migrated ${migrated} projects from electron-store to SQLite`);
+  }
+} catch (err) {
+  console.error('[ProjectDb] Failed to migrate from electron-store:', err);
+}
+
+// Backfill any project rows whose `config` column is NULL — added in
+// schema v3. Idempotent; only touches rows without an existing config.
+try {
+  const backfilled = backfillProjectConfigs(repo);
+  if (backfilled > 0) {
+    console.log(`[ProjectDb] Backfilled config for ${backfilled} projects`);
+  }
+} catch (err) {
+  console.error('[ProjectDb] Failed to backfill project configs:', err);
+}
+
+// Task #18: copy legacy on-disk pages (`<workspaceDir>/Projects/<slug>/pages`,
+// per-project `context.md`, and MCP's `<config>/projects/<slug>/pages`) into
+// the new `<config>/pages/<projectId>/` layout. Idempotent; never deletes
+// originals so a bad migration can be recovered by hand.
+//
+// Records a one-shot notice in the store when legacy paths still exist so
+// the renderer can show a dismissible cleanup banner. The notice is left
+// in place across reboots until the user acknowledges or runs cleanup.
+try {
+  const summary = migrateLegacyPagesToConfigDir(repo);
+  const total = summary.perProjectPagesCopied + summary.rootPagesFromContextMd + summary.mcpPagesCopied;
+  if (total > 0) {
+    console.log(
+      `[ProjectDb] Pages migration copied ${total} files ` +
+        `(per-project: ${summary.perProjectPagesCopied}, ` +
+        `context.md → root: ${summary.rootPagesFromContextMd}, ` +
+        `MCP: ${summary.mcpPagesCopied}, ` +
+        `skipped existing: ${summary.skippedAlreadyMigrated})`
+    );
+  }
+  // Only seed the notice on the first boot where we found something
+  // worth telling the user about. Subsequent boots leave the existing
+  // state alone (so a user mid-decision doesn't get re-prompted).
+  const existing = store.get('pagesMigration');
+  if (!existing && summary.legacyPaths.length > 0) {
+    store.set('pagesMigration', {
+      summary: {
+        perProjectPagesCopied: summary.perProjectPagesCopied,
+        rootPagesFromContextMd: summary.rootPagesFromContextMd,
+        mcpPagesCopied: summary.mcpPagesCopied,
+        skippedAlreadyMigrated: summary.skippedAlreadyMigrated,
+      },
+      legacyPaths: summary.legacyPaths,
+      acknowledged: false,
+    });
+  }
+} catch (err) {
+  console.error('[ProjectDb] Failed to migrate legacy pages:', err);
+}
+
+/**
+ * Materialize the agent's on-disk config from the store (desktop = single user,
+ * plaintext). The store is the source of truth; these files are a derived copy
+ * `omni serve` reads. Merges the managed `omni-projects` stdio MCP entry and
+ * writes a real `.env`. Runs at startup and after every `settings:*` write.
+ */
+function materializeDesktopConfig(): void {
+  try {
+    materializeAgentConfig({
+      configDir: OMNI_CONFIG_DIR,
+      models: store.get('modelsConfig') ?? emptyModelsConfig(),
+      mcp: store.get('mcpConfig') ?? emptyMcpConfig(),
+      network: store.get('networkConfig') ?? emptyNetworkConfig(),
+      mode: 'plaintext',
+      managedMcpEntry: buildStdioMcpEntry(getMcpBinPath()),
+    });
+    writeFileSync(join(OMNI_CONFIG_DIR, '.env'), store.get('envVars') ?? '', 'utf-8');
+  } catch (err) {
+    console.error('[config-materializer] desktop materialize failed:', err);
+  }
+}
+
+// Import any pre-v23 on-disk config files into the store once, then make the
+// store the source of truth that materialize writes back out.
+migrateAgentConfigFromFiles(store, OMNI_CONFIG_DIR);
+materializeDesktopConfig();
+
 const main = new MainProcessManager({ store });
 let isShuttingDown = false;
 
-// Create ConsoleManager for terminal functionality
-const [, cleanupConsole] = createConsoleManager({
-  ipc: main.ipc,
-  sendToWindow: main.sendToWindow,
-});
+// Forward-reference for the BrowserManager — created further down, but
+// AppControlManager needs its popup callback at construction time so
+// `setWindowOpenHandler` can route `window.open` into `BrowserManager.createTab`.
+let browserManagerRef: ReturnType<typeof createBrowserManager>[0] | null = null;
 const [appControlManager, cleanupAppControl] = createAppControlManager({
   ipc: main.ipc,
+  onBrowserPopup: (tabsetId, url, disposition) => {
+    if (!browserManagerRef) {
+      return;
+    }
+    // `background-tab` maps to Cmd/Ctrl+click: open without stealing focus.
+    // Everything else (`foreground-tab`, `new-window`, `default`) activates.
+    const activate = disposition !== 'background-tab';
+    try {
+      browserManagerRef.createTab(tabsetId, { url, activate });
+    } catch {
+      // Tabset may not exist yet (race on first mount) — ignore.
+    }
+  },
 });
 const [omniInstall, cleanupOmniInstall] = createOmniInstallManager({
   ipc: main.ipc,
@@ -96,21 +281,80 @@ const [processManager, cleanupProcessManager] = createProcessManager({
   sendToWindow: main.sendToWindow,
   fetchFn: (input, init) => net.fetch(input as string, init),
   getStoreData: () => ({
-    sandboxBackend: store.get('sandboxBackend') ?? 'none',
-    sandboxProfiles: store.get('sandboxProfiles') ?? null,
-    selectedMachineId: store.get('selectedMachineId') ?? null,
+    defaultProfileName: store.get('defaultProfileName') ?? 'host',
+    projects: repo.listProjects().map(rowToProject),
+    gitCredentials: store.get('gitCredentials') ?? [],
   }),
+  resolveGitToken: (id) => secretStore.getGitToken(id),
+  // Inject the user's Settings → Environment vars into the `omni serve` process
+  // (the agent/model loop), mirroring server mode's getExtraEnv. The sandbox
+  // *container* gets these separately via the materialized `<config>/.env`,
+  // which omni serve folds into manifest.environment (`_inject_user_env`).
+  getExtraEnv: () => parseEnvVars(store.get('envVars') ?? ''),
 });
-const [, cleanupProject] = createProjectManager({
+
+// Create ConsoleManager — proxies terminal:* IPC into omni serve's
+// WebSocket. Constructed after ProcessManager because it needs the
+// agent process status to find the right WS URL per tab.
+const [, cleanupConsole] = createConsoleManager({
+  ipc: main.ipc,
+  sendToWindow: main.sendToWindow,
+  processManager,
+});
+
+registerSnapshotHandlers(main.ipc);
+
+// Startup snapshot GC. Code tabs cascade-delete on remove; this sweep
+// catches stale conversation snapshots older than 14 days (and any tar
+// orphaned by a crashed cascade). Protected set = every code tab's
+// sessionId — the reserved chat record included, so the active chat
+// conversation is covered with no special case. Best-effort; failures
+// don't block boot.
+void (async () => {
+  try {
+    const keep = new Set<string>();
+    for (const tab of store.get('codeTabs') ?? []) {
+      if (tab.sessionId) {
+        keep.add(tab.sessionId);
+      }
+    }
+    const deleted = await gcStaleSnapshots({ keep, ttlMs: DEFAULT_CHAT_SNAPSHOT_TTL_MS });
+    if (deleted.length > 0) {
+      console.log(`[snapshot-gc] deleted ${deleted.length} stale snapshot(s)`);
+    }
+  } catch (err) {
+    console.error('[snapshot-gc] failed:', err);
+  }
+})();
+const [projectManager, cleanupProject] = createProjectManager({
   ipc: main.ipc,
   sendToWindow: main.sendToWindow,
   store,
   processManager,
   appControlManager,
+  // Async repo backs the cached projection; sync repo drives the change-watcher.
+  repo: asyncRepo,
+  changeSeqRepo: repo,
 });
+// Wire up the store snapshot provider so MainProcessManager serves project data from SQLite
+main.getStoreSnapshot = () => projectManager.getStoreSnapshot();
 const [, cleanupExtensions] = createExtensionManager({
   ipc: main.ipc,
   store,
+  sendToWindow: main.sendToWindow,
+});
+const [browserManager, cleanupBrowser] = createBrowserManager({
+  ipc: main.ipc,
+  sendToWindow: main.sendToWindow,
+  store,
+});
+browserManagerRef = browserManager;
+const [, cleanupDownloads] = createDownloadsManager({
+  ipc: main.ipc,
+  sendToWindow: main.sendToWindow,
+});
+const [, cleanupPermissions] = createPermissionsManager({
+  ipc: main.ipc,
   sendToWindow: main.sendToWindow,
 });
 const { cleanup: cleanupPlatform, refreshPolicy: refreshPlatformPolicy } = registerPlatformIpc({
@@ -181,6 +425,28 @@ main.ipc.handle('workspace-sync:get-share-name', (_, projectId) => {
 });
 main.ipc.handle('omni-install-process:get-status', () => omniInstall.getStatus());
 
+// Local voice (Option A): launcher-side STT/TTS via the ONNX sidecar. Works in
+// every Electron mode (compute runs wherever, but the mic + STT/TTS + the
+// `speak` client tool all execute here on the user's machine).
+const voice = getVoiceService();
+main.ipc.handle('voice:get-status', () => voice.getStatus());
+main.ipc.handle('voice:start', async () => {
+  await voice.start();
+  return voice.getStatus();
+});
+main.ipc.handle('voice:transcribe', (_e, pcmBase64, sampleRate) => voice.transcribe(pcmBase64, sampleRate));
+main.ipc.handle('voice:speak', async (_e, streamId, text, voiceName) => {
+  await voice.speak(
+    text,
+    (pcm, sampleRate) => main.sendToWindow('voice:audio', { streamId, pcm, sampleRate }),
+    voiceName,
+  );
+  main.sendToWindow('voice:audio-end', { streamId });
+});
+main.ipc.handle('voice:import-sample', (_e, personaId, filename, dataBase64) =>
+  voice.importSample(personaId, filename, dataBase64),
+);
+
 //#region App lifecycle
 
 /**
@@ -193,6 +459,9 @@ async function cleanup() {
   isShuttingDown = true;
 
   cleanupPlatform();
+  cleanupReverseRpc();
+  cleanupComputeReverse();
+  cleanupTunnelReverse();
   await syncManager.dispose();
   const results = await Promise.allSettled([
     cleanupConsole(),
@@ -201,6 +470,9 @@ async function cleanup() {
     cleanupProcessManager(),
     cleanupProject(),
     cleanupExtensions(),
+    cleanupBrowser(),
+    cleanupDownloads(),
+    cleanupPermissions(),
   ]);
   const errors = results
     .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
@@ -211,6 +483,7 @@ async function cleanup() {
   } else {
     console.debug('Successfully cleaned up all processes');
   }
+  closeProjectDb();
   main.cleanup();
 }
 
@@ -223,6 +496,55 @@ app.on('ready', () => {
   // URL format: artifact://file/{ticketId}/{relativePath}
   // We use a dummy hostname ("file") because URL spec lowercases hostnames,
   // which corrupts case-sensitive ticket IDs like nanoid.
+  // MCP Apps sandbox proxy. Serves the vendored mcp-ui ``index.html``
+  // (assets/mcp-sandbox/) at ``mcp-sandbox://app/index.html``. The
+  // AppFrame iframe loads this URL to host a cross-origin sandbox for
+  // MCP-Apps tool UIs. CSP allows inline script (the proxy itself is a
+  // small inline script) but blocks network loads — guest HTML is
+  // delivered to the proxy via postMessage and written into a nested
+  // iframe via document.write, where it runs without script privileges
+  // unless the inner iframe's sandbox attribute permits it.
+  protocol.handle('mcp-sandbox', async (request) => {
+    try {
+      const url = new URL(request.url);
+      // Only one resource is served — any path returns the same HTML.
+      // The query string is preserved by the browser and read by the
+      // proxy script (contentType=rawhtml or ?url=...).
+      void url;
+      const htmlPath = getMcpSandboxHtmlPath();
+      const upstream = await net.fetch(pathToFileURL(htmlPath).toString());
+      const headers = new Headers(upstream.headers);
+      headers.set('Content-Type', 'text/html; charset=utf-8');
+      headers.set(
+        'Content-Security-Policy',
+        // ``script-src 'unsafe-inline' https:`` lets renderer-HTML import
+        // its component runtime from a CDN (Prefab's renderer loads from
+        // ``cdn.jsdelivr.net``, generative-ui-style apps may pull from
+        // other origins). ``style-src`` mirrors so stylesheets load.
+        // ``font-src`` + ``img-src`` permit referenced assets;
+        // ``connect-src`` permits any fetch/XHR/WebSocket the renderer
+        // makes back to its own backend. ``frame-src https: http:`` keeps
+        // MCP-Apps ``externalUrl`` (text/uri-list) embedding working.
+        [
+          "default-src 'none'",
+          "script-src 'unsafe-inline' https:",
+          "style-src 'unsafe-inline' https:",
+          'font-src https: data:',
+          'img-src https: data: blob:',
+          'connect-src https: wss: ws: data: blob:',
+          'frame-src about: data: blob: https: http:',
+        ].join('; ')
+      );
+      return new Response(upstream.body, {
+        status: upstream.status,
+        statusText: upstream.statusText,
+        headers,
+      });
+    } catch {
+      return new Response('Not found', { status: 404 });
+    }
+  });
+
   protocol.handle('artifact', async (request) => {
     try {
       const url = new URL(request.url);
@@ -240,6 +562,13 @@ app.on('ready', () => {
       // Path traversal protection
       if (!fullPath.startsWith(artifactsRoot)) {
         return new Response('Forbidden', { status: 403 });
+      }
+      // Container substrates write artifacts inside the sandbox, not to the
+      // host dir — materialize (docker cp into this exact layout) before
+      // serving so image/HTML previews work there too. Host profile: the
+      // file already exists and this resolves to it directly.
+      if (!existsSync(fullPath)) {
+        await projectManager.materializeArtifact(ticketId as TicketId, relativePath);
       }
       const upstream = await net.fetch(pathToFileURL(fullPath).toString());
       // Strict CSP: artifacts are agent-generated content, never trusted to
@@ -348,7 +677,54 @@ registerUtilHandlers(main.ipc, {
   fetchFn: ((input, init) => net.fetch(input as string, init)) as typeof globalThis.fetch,
   launcherVersion: app.getVersion(),
 });
-registerSkillsHandlers(main.ipc, OMNI_CONFIG_DIR, store);
+registerSkillsHandlers(
+  main.ipc,
+  () => OMNI_CONFIG_DIR,
+  () => store
+);
+registerSettingsConfigHandlers(
+  main.ipc,
+  () => store,
+  () => {
+    materializeDesktopConfig();
+    main.sendToWindow('store:changed', main.getStoreSnapshot ? main.getStoreSnapshot() : store.store);
+  }
+);
+registerGitCredentialHandlers(
+  main.ipc,
+  () => store,
+  () => secretStore,
+  () => {
+    main.sendToWindow('store:changed', main.getStoreSnapshot ? main.getStoreSnapshot() : store.store);
+  }
+);
+// Desktop has no teams — register the channels as no-ops (controlPlane undefined)
+// so the shared renderer's Teams UI resolves cleanly to "just you".
+registerTeamHandlers(main.ipc, undefined);
+const noTeamDefaults = { hasModels: false, hasMcp: false, hasEnv: false, hasNetwork: false };
+main.ipc.handle('team-settings:status', () => noTeamDefaults);
+main.ipc.handle('team-settings:publish-from-mine', () => noTeamDefaults);
+main.ipc.handle('team-settings:clear', () => noTeamDefaults);
+// Desktop has no teams — these resolve to "just you".
+main.ipc.handle('team:whoami', () => null);
+main.ipc.handle('team:leave', () => []);
+main.ipc.handle('team:rename', () => []);
+main.ipc.handle('team:delete', () => []);
+main.ipc.handle('team:transfer-ownership', () => []);
+registerMigrationHandlers(main.ipc, () => ({
+  get: () => store.get('pagesMigration') ?? null,
+  set: (value) => {
+    if (value === null) {
+      store.delete('pagesMigration');
+    } else {
+      store.set('pagesMigration', value);
+    }
+    // Renderer mirrors electron-store via `store:changed`; pushing the
+    // full snapshot keeps the migration banner reactive without a
+    // dedicated event channel.
+    main.getWindow()?.webContents.send('store:changed', store.store);
+  },
+}));
 
 //#endregion
 
@@ -382,5 +758,254 @@ main.ipc.handle('util:select-file', async (_, path, filters) => {
   return result.filePaths[0] ?? null;
 });
 main.ipc.handle('util:open-directory', (_, path) => shell.openPath(path));
+main.ipc.handle('util:open-external', (_, url) => shell.openExternal(url));
+
+//#endregion
+
+//#region Codex (ChatGPT OAuth) handlers
+
+main.ipc.handle('codex:login', () => loginWithBrowser((url) => void shell.openExternal(url)));
+main.ipc.handle('codex:link', () =>
+  loginWithDeviceFlow({ onCode: (code) => main.sendToWindow('codex:device-code', code) })
+);
+main.ipc.handle('codex:logout', () => codexLogout());
+main.ipc.handle('codex:status', () => codexStatus());
+
+//#endregion
+
+//#region Cloud link (Electron ↔ deployed launcher via AAD device flow)
+
+// Hoisted from the GitHub block below so both regions can fan store changes
+// out to the renderer.
+const broadcastStore = (): void =>
+  main.sendToWindow('store:changed', main.getStoreSnapshot ? main.getStoreSnapshot() : store.store);
+
+const cloudStatusFromStore = (): import('@/shared/types').CloudStatus => {
+  const cm = store.get('cloudMode');
+  if (!cm) return { connected: false };
+  const live = entraStatus();
+  // Belt + suspenders: if the secret store has been cleared out (e.g. user
+  // wiped userData) treat the cloudMode flag as stale and report disconnected
+  // so the renderer drops back to local mode after a restart.
+  if (!live.signedIn) return { connected: false };
+  return {
+    connected: true,
+    url: cm.url,
+    tenantId: cm.tenantId,
+    clientId: cm.clientId,
+    account: cm.account,
+  };
+};
+
+main.ipc.handle('cloud:status', () => cloudStatusFromStore());
+
+/** Restart the Electron app on a short delay so the IPC reply (the new
+ *  ``CloudStatus``) flushes to the renderer first. The transport choice is
+ *  baked into the BrowserWindow at creation via ``additionalArguments``, so
+ *  flipping cloud mode requires a fresh process — not just a webContents
+ *  reload. 200ms is enough for the response handshake without making the UI
+ *  feel laggy. */
+const restartAfterCloudModeChange = (): void => {
+  setTimeout(() => {
+    app.relaunch();
+    app.exit(0);
+  }, 200);
+};
+
+main.ipc.handle('cloud:link', async (_, urlInput) => {
+  const url = String(urlInput ?? '')
+    .trim()
+    .replace(/\/+$/, '');
+  if (!url) {
+    throw new Error('Cloud URL is required');
+  }
+  // 1. Discover the cloud's AAD configuration. Public endpoint, no auth.
+  const discoverRes = await net.fetch(`${url}/.well-known/omni-cloud`);
+  if (!discoverRes.ok) {
+    throw new Error(`Cloud discovery failed (${discoverRes.status}). Is this a launcher URL?`);
+  }
+  const discovered = (await discoverRes.json()) as { tenantId?: string; clientId?: string };
+  if (!discovered.tenantId || !discovered.clientId) {
+    throw new Error('Cloud discovery returned no tenant/client id');
+  }
+  // 2. Drive the AAD device-code flow against the discovered tenant + client.
+  const result = await entraLoginWithDeviceFlow({
+    tenantId: discovered.tenantId,
+    clientId: discovered.clientId,
+    onCode: (code) => main.sendToWindow('cloud:device-code', code),
+  });
+  if (!result.signedIn) {
+    throw new Error('Cloud sign-in did not produce an account');
+  }
+  // 3. Persist the cloud-mode flag, then restart so the renderer picks up
+  //    the cloud transport on its next boot.
+  store.set('cloudMode', {
+    url,
+    tenantId: discovered.tenantId,
+    clientId: discovered.clientId,
+    account: result.account,
+  });
+  broadcastStore();
+  const status = cloudStatusFromStore();
+  restartAfterCloudModeChange();
+  return status;
+});
+
+main.ipc.handle('cloud:unlink', () => {
+  entraLogout();
+  store.set('cloudMode', null);
+  broadcastStore();
+  // The live renderer is still configured to use the (now broken) cloud
+  // transport — restart so it falls back to local Electron IPC.
+  restartAfterCloudModeChange();
+});
+
+main.ipc.handle('cloud:get-access-token', async () => {
+  const cm = store.get('cloudMode');
+  if (!cm) throw new Error('Not connected to a cloud');
+  return ensureFreshEntraToken(cm.tenantId, cm.clientId);
+});
+
+// Stable per-install machine identity used by the cloud's "computer-as-
+// sandbox" registry. Lives in `<configDir>/machine.json` so it survives
+// upgrades + electron-store resets. Renderer reads this once at boot to
+// invoke `machine:register` over the WS to the cloud.
+main.ipc.handle('cloud:get-machine-identity', () => {
+  return getOrCreateMachineIdentity(OMNI_CONFIG_DIR);
+});
+
+main.ipc.handle('cloud:set-machine-label', (_, label) => {
+  const next = String(label ?? '').trim() || 'Unnamed machine';
+  return renameMachine(OMNI_CONFIG_DIR, next);
+});
+
+// Wire the renderer → main reverse-RPC dispatcher (Phase 2). The cloud's
+// reverse-invoke frames hit the renderer's WS first; the renderer-side
+// shim (`renderer/services/compute.ts`) forwards them here so main-side
+// compute handlers can resolve them.
+const cleanupReverseRpc = wireReverseRpcRouter(main.ipc);
+
+// Computer-as-sandbox — main handles the cloud's compute:* reverse-RPCs by
+// standing up an `omni sandbox-host` exec server (the agent stays in the
+// cloud; only the sandbox backend runs here).
+const cleanupComputeReverse = wireComputeReverseHandlers();
+
+// Tunnel relay (Phase 3). Inbound WS frames from local omni-serve are
+// pushed to the renderer via this Electron IPC event; the renderer's
+// tunnel bridge re-emits them on the cloud WS via `tunnel:incoming`.
+const cleanupTunnelReverse = wireTunnelReverseHandlers((event) => {
+  main.sendToWindow('tunnel:emit-incoming', event);
+});
+
+// Fetch a WS auth token from the linked cloud's /api/ws-token. The renderer
+// can't do this directly: setting Authorization on a cross-origin GET trips
+// CORS preflight, and EasyAuth's 302 redirect for unauthenticated OPTIONS
+// requests fails the CORS check. Running the fetch in main bypasses CORS
+// entirely (Node's fetch is unrestricted) and returns the opaque WS token.
+main.ipc.handle('cloud:get-ws-token', async () => {
+  const cm = store.get('cloudMode');
+  if (!cm) throw new Error('Not connected to a cloud');
+  const accessToken = await ensureFreshEntraToken(cm.tenantId, cm.clientId);
+  const res = await net.fetch(`${cm.url}/api/ws-token`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Cloud ws-token fetch failed: ${res.status} ${res.statusText}`);
+  }
+  const data = (await res.json()) as { token?: string };
+  if (!data.token) {
+    throw new Error('Cloud ws-token response missing "token" field');
+  }
+  return data.token;
+});
+
+//#endregion
+
+//#region GitHub account linking (OAuth device flow → github.com credential)
+
+// Stable credential id for the OAuth-linked github.com token, so link / unlink /
+// clone-time injection all reference the same SecretStore slot.
+const GITHUB_CRED_ID = 'github-oauth';
+const githubFetch = ((input, init) => net.fetch(input as string, init)) as typeof globalThis.fetch;
+
+const githubStatus = (): GithubStatus => {
+  const account = store.get('githubAccount');
+  return account ? { connected: true, account } : { connected: false };
+};
+
+main.ipc.handle('github:status', () => githubStatus());
+
+main.ipc.handle('github:link', async () => {
+  const { token, account } = await githubLink({
+    fetchFn: githubFetch,
+    openUrl: (url) => void shell.openExternal(url),
+    onCode: (code) => main.sendToWindow('github:device-code', code),
+  });
+  // The token becomes the host's git credential (replacing any prior entry for
+  // that host), so private clone/push works through the same injection path.
+  await secretStore.setGitToken(GITHUB_CRED_ID, token);
+  const creds = (store.get('gitCredentials') ?? []).filter((c) => c.id !== GITHUB_CRED_ID && c.host !== account.host);
+  const cred: GitCredential = {
+    id: GITHUB_CRED_ID,
+    host: account.host,
+    username: 'x-access-token',
+    last4: tokenLast4(token),
+    label: `@${account.login} (GitHub)`,
+    createdAt: Date.now(),
+  };
+  store.set('gitCredentials', [...creds, cred]);
+  store.set('githubAccount', account);
+  broadcastStore();
+  return githubStatus();
+});
+
+main.ipc.handle('github:unlink', async () => {
+  await secretStore.deleteGitToken(GITHUB_CRED_ID);
+  store.set(
+    'gitCredentials',
+    (store.get('gitCredentials') ?? []).filter((c) => c.id !== GITHUB_CRED_ID)
+  );
+  store.delete('githubAccount');
+  broadcastStore();
+});
+
+const requireGithubToken = async (): Promise<string> => {
+  const token = await secretStore.getGitToken(GITHUB_CRED_ID);
+  if (!token) {
+    throw new Error('No GitHub account linked');
+  }
+  return token;
+};
+
+main.ipc.handle('github:list-owners', async (): Promise<GithubOwner[]> => {
+  const token = await requireGithubToken();
+  const account = store.get('githubAccount');
+  // The linked user is always the first owner; their orgs follow.
+  const self: GithubOwner[] = account
+    ? [{ login: account.login, kind: 'user', ...(account.avatarUrl ? { avatarUrl: account.avatarUrl } : {}) }]
+    : [];
+  return [...self, ...(await githubListOrgs(githubFetch, token))];
+});
+
+main.ipc.handle('github:search-repos', async (_, query: GithubRepoQuery): Promise<RemoteRepo[]> => {
+  return githubSearchRepos(githubFetch, await requireGithubToken(), query);
+});
+
+//#endregion
+
+//#region Azure DevOps discovery (authenticated by the stored dev.azure.com PAT)
+
+const requireAzureToken = async (): Promise<string> => {
+  const cred = (store.get('gitCredentials') ?? []).find((c) => c.host === 'dev.azure.com');
+  const token = cred ? await secretStore.getGitToken(cred.id) : undefined;
+  if (!token) {
+    throw new Error('No Azure DevOps token — add a dev.azure.com credential first');
+  }
+  return token;
+};
+
+main.ipc.handle('azure:list-repos', async (_, input: { org: string; query: string }): Promise<RemoteRepo[]> => {
+  return azureListRepos(githubFetch, await requireAzureToken(), input.org, input.query);
+});
 
 //#endregion

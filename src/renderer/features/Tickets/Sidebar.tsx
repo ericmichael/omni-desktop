@@ -1,19 +1,44 @@
 import {
   makeStyles,
+  mergeClasses,
   NavDrawer,
   NavDrawerBody,
+  type NavDrawerProps,
   Subtitle2,
   tokens,
 } from '@fluentui/react-components';
-import { Add20Regular, ChevronDown12Regular, ChevronRight12Regular, Home16Regular, MailInbox16Regular } from '@fluentui/react-icons';
+import {
+  Add20Regular,
+  ChevronDown12Regular,
+  ChevronRight12Regular,
+  Dismiss20Regular,
+  Home16Regular,
+  MailInbox16Regular,
+} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import type { KeyboardEvent } from 'react';
 import { memo, useCallback, useMemo, useState } from 'react';
 
-import { AnimatedDialog, Caption1, DialogBody, DialogContent, DialogHeader, IconButton, Tree, TreeItem, TreeItemLayout } from '@/renderer/ds';
+import {
+  AnimatedDialog,
+  Caption1,
+  DialogBody,
+  DialogContent,
+  DialogHeader,
+  IconButton,
+  Tree,
+  TreeItem,
+  TreeItemLayout,
+} from '@/renderer/ds';
 import { $activeInbox } from '@/renderer/features/Inbox/state';
 import { $milestones, milestoneApi } from '@/renderer/features/Initiatives/state';
 import { $pages, pageApi } from '@/renderer/features/Pages/state';
+import { AddSourceDialog } from '@/renderer/features/Projects/AddSourceDialog';
+import { EditSourceDialog } from '@/renderer/features/Projects/EditSourceDialog';
+import { SourceDetailDialog } from '@/renderer/features/Projects/SourceDetailDialog';
+import { TeamSwitcher } from '@/renderer/features/Teams/TeamSwitcher';
 import { persistedStoreApi } from '@/renderer/services/store';
+import type { Milestone } from '@/shared/types';
 
 import { MilestoneForm } from './MilestoneForm';
 import { ProjectForm } from './ProjectForm';
@@ -24,20 +49,35 @@ const useStyles = makeStyles({
   drawer: {
     width: '260px',
     height: '100%',
+    /* Fluent's NavDrawer root defaults to colorNeutralBackground4 (#EBEBEB on
+       vscode-light — noticeably darker than the rest of the app). Force bg1
+       to match the Settings sidebar and the rest of the app's page plane. */
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  drawerOverlay: {
+    boxSizing: 'border-box',
+    paddingLeft: 'env(safe-area-inset-left, 0px)',
+    paddingRight: 'env(safe-area-inset-right, 0px)',
   },
   header: {
     display: 'flex',
     alignItems: 'center',
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalXS,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalXS,
+    paddingTop: tokens.spacingVerticalXXL,
+    paddingBottom: tokens.spacingVerticalL,
+  },
+  headerOverlay: {
+    paddingTop: `calc(${tokens.spacingVerticalXXL} + env(safe-area-inset-top, 0px))`,
   },
   headerTitle: {
     flex: '1 1 0',
   },
   body: {
     flex: '1 1 0',
+  },
+  bodyOverlay: {
+    paddingBottom: `calc(${tokens.spacingVerticalL} + var(--safe-area-bottom, env(safe-area-inset-bottom, 0px)))`,
   },
   sectionHeader: {
     display: 'flex',
@@ -66,11 +106,14 @@ const useStyles = makeStyles({
   /**
    * Wrapper for the Home/Inbox mini-tree. Keeps it visually identical to
    * the projects tree below so Fluent's TreeItem geometry — icon column,
-   * row height, hover/selection — lines up pixel-for-pixel.
+   * row height, hover/selection — lines up pixel-for-pixel. Override
+   * `--spacingHorizontalXXL` to match SidebarTree's tightened per-level
+   * indent (Fluent's TreeItemLayout multiplies it by aria-level).
    */
   pinnedTree: {
     paddingTop: '2px',
     paddingBottom: '2px',
+    '--spacingHorizontalXXL': '12px',
   },
   pinnedLabelRow: {
     display: 'flex',
@@ -95,46 +138,60 @@ const useStyles = makeStyles({
 /** Build a unique selectedValue from the current view state. */
 function viewToNavValue(view: ReturnType<typeof $ticketsView.get>): string | undefined {
   if (view.type === 'dashboard') {
-return 'home';
-}
+    return 'home';
+  }
   if (view.type === 'inbox') {
-return view.selectedItemId ? `inbox:${view.selectedItemId}` : 'inbox';
-}
+    return view.selectedItemId ? `inbox:${view.selectedItemId}` : 'inbox';
+  }
   if (view.type === 'project') {
-return `project:${view.projectId}`;
-}
+    return `project:${view.projectId}`;
+  }
   if (view.type === 'ticket') {
-return `ticket:${view.ticketId}`;
-}
+    return `ticket:${view.ticketId}`;
+  }
   if (view.type === 'page') {
-return `page:${view.pageId}:${view.projectId}`;
-}
+    return `page:${view.pageId}:${view.projectId}`;
+  }
   if (view.type === 'milestone') {
-return `milestone:${view.milestoneId}:${view.projectId}`;
-}
+    return `milestone:${view.milestoneId}:${view.projectId}`;
+  }
   if (view.type === 'board') {
-return `board:${view.projectId}`;
-}
+    return `board:${view.projectId}`;
+  }
   return undefined;
 }
 
 /** Lightweight collapsible section header — small gray text + chevron, like Teams. */
 const SectionHeader = memo(({ label, open, onToggle }: { label: string; open: boolean; onToggle: () => void }) => {
   const styles = useStyles();
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (event.key === 'Enter') {
+        onToggle();
+      }
+    },
+    [onToggle]
+  );
+
   return (
-    <div className={styles.sectionHeader} onClick={onToggle} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onToggle()}>
-      <span className={styles.chevron}>
-        {open ? <ChevronDown12Regular /> : <ChevronRight12Regular />}
-      </span>
+    <div className={styles.sectionHeader} onClick={onToggle} role="button" tabIndex={0} onKeyDown={handleKeyDown}>
+      <span className={styles.chevron}>{open ? <ChevronDown12Regular /> : <ChevronRight12Regular />}</span>
       <span className={styles.sectionLabel}>{label}</span>
     </div>
   );
 });
 SectionHeader.displayName = 'SectionHeader';
 
+type TicketsSidebarProps = {
+  onNavigate?: () => void;
+  type?: NavDrawerProps['type'];
+  open?: boolean;
+  onClose?: () => void;
+};
+
 /* ── Main sidebar ── */
 
-export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void }) => {
+export const TicketsSidebar = memo(({ onNavigate, type = 'inline', open = true, onClose }: TicketsSidebarProps) => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const view = useStore($ticketsView);
@@ -143,16 +200,73 @@ export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void })
   const tickets = useStore($tickets);
   const [formOpen, setFormOpen] = useState(false);
   const [milestoneFormProjectId, setMilestoneFormProjectId] = useState<string | null>(null);
+  const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null);
+  const [addSourceProjectId, setAddSourceProjectId] = useState<string | null>(null);
+  const [editSource, setEditSource] = useState<{ projectId: string; sourceId: string } | null>(null);
+  const [sourceDetail, setSourceDetail] = useState<{ projectId: string; sourceId: string } | null>(null);
   const [projectsOpen, setProjectsOpen] = useState(true);
 
   const projects = store.projects;
   const selectedValue = viewToNavValue(view);
+  const addSourceProject = projects.find((p) => p.id === addSourceProjectId);
+  const editSourceProject = editSource ? projects.find((p) => p.id === editSource.projectId) : undefined;
+  const editSourceSource = editSourceProject?.sources.find((s) => s.id === editSource?.sourceId);
+  const sourceDetailProject = sourceDetail ? projects.find((p) => p.id === sourceDetail.projectId) : undefined;
+  const sourceDetailSource = sourceDetailProject?.sources.find((s) => s.id === sourceDetail?.sourceId);
 
   const handleOpenForm = useCallback(() => setFormOpen(true), []);
   const handleCloseForm = useCallback(() => setFormOpen(false), []);
   const handleCreateMilestone = useCallback((projectId: string) => setMilestoneFormProjectId(projectId), []);
-  const handleCloseMilestoneForm = useCallback(() => setMilestoneFormProjectId(null), []);
+  const handleEditMilestone = useCallback((milestone: Milestone) => setEditingMilestone(milestone), []);
+  const handleCloseMilestoneForm = useCallback(() => {
+    setMilestoneFormProjectId(null);
+    setEditingMilestone(null);
+  }, []);
+  const handleAddSource = useCallback((projectId: string) => setAddSourceProjectId(projectId), []);
+  const handleCloseAddSource = useCallback(() => setAddSourceProjectId(null), []);
+  const handleOpenSource = useCallback(
+    (projectId: string, sourceId: string) => setSourceDetail({ projectId, sourceId }),
+    []
+  );
+  const handleCloseSource = useCallback(() => setSourceDetail(null), []);
+  const handleEditSource = useCallback(
+    (projectId: string, sourceId: string) => setEditSource({ projectId, sourceId }),
+    []
+  );
+  const handleCloseEditSource = useCallback(() => setEditSource(null), []);
+  const handleRemoveSource = useCallback(
+    (projectId: string, sourceId: string) => {
+      const project = projects.find((p) => p.id === projectId);
+      if (!project) {
+        return;
+      }
+      void ticketApi.updateProject(projectId, { sources: project.sources.filter((s) => s.id !== sourceId) });
+    },
+    [projects]
+  );
+  const handleEditSourceFromDetail = useCallback(() => {
+    if (!sourceDetail) {
+      return;
+    }
+    setEditSource(sourceDetail);
+    setSourceDetail(null);
+  }, [sourceDetail]);
+  const handleRemoveSourceFromDetail = useCallback(() => {
+    if (!sourceDetail) {
+      return;
+    }
+    handleRemoveSource(sourceDetail.projectId, sourceDetail.sourceId);
+    setSourceDetail(null);
+  }, [handleRemoveSource, sourceDetail]);
   const toggleProjects = useCallback(() => setProjectsOpen((v) => !v), []);
+  const handleOpenChange = useCallback(
+    (_event: unknown, data: { open: boolean }) => {
+      if (!data.open) {
+        onClose?.();
+      }
+    },
+    [onClose]
+  );
 
   // Fetch project data when expanding in the tree (without navigating)
   const handleExpandProject = useCallback((projectId: string) => {
@@ -190,33 +304,40 @@ export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void })
         ticketApi.goToMilestone(milestoneId, projectId);
       } else if (val.startsWith('ticket:')) {
         ticketApi.goToTicket(val.slice(7));
+      } else if (val.startsWith('source:')) {
+        const [, projectId, sourceId] = val.split(':');
+        if (projectId && sourceId) {
+          handleOpenSource(projectId, sourceId);
+        }
       }
       onNavigate?.();
     },
-    [onNavigate]
+    [handleOpenSource, onNavigate]
   );
 
   const activeInbox = useStore($activeInbox);
-  const openInboxItems = useMemo(
-    () => [...activeInbox].sort((a, b) => b.createdAt - a.createdAt),
-    [activeInbox]
-  );
+  const openInboxItems = useMemo(() => [...activeInbox].sort((a, b) => b.createdAt - a.createdAt), [activeInbox]);
 
   return (
     <NavDrawer
-      type="inline"
-      open
+      type={type}
+      open={open}
+      onOpenChange={handleOpenChange}
       selectedValue={selectedValue}
-      className={styles.drawer}
+      className={mergeClasses(styles.drawer, type === 'overlay' && styles.drawerOverlay)}
       size="small"
     >
       {/* ── Header ── */}
-      <div className={styles.header}>
+      <div className={mergeClasses(styles.header, type === 'overlay' && styles.headerOverlay)}>
         <Subtitle2 className={styles.headerTitle}>Projects</Subtitle2>
+        <TeamSwitcher />
         <IconButton aria-label="New project" icon={<Add20Regular />} size="sm" onClick={handleOpenForm} />
+        {type === 'overlay' && (
+          <IconButton aria-label="Close navigation" icon={<Dismiss20Regular />} size="sm" onClick={onClose} />
+        )}
       </div>
 
-      <NavDrawerBody className={styles.body}>
+      <NavDrawerBody className={mergeClasses(styles.body, type === 'overlay' && styles.bodyOverlay)}>
         {/* ── Pinned: Home + Inbox as tree leaves so they share exact
               geometry with the projects tree below. ── */}
         <Tree aria-label="Pinned" className={styles.pinnedTree}>
@@ -235,8 +356,8 @@ export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void })
 
         {/* ── Projects Tree ── */}
         <SectionHeader label="Projects" open={projectsOpen} onToggle={toggleProjects} />
-        {projectsOpen && (
-          projects.length === 0 ? (
+        {projectsOpen &&
+          (projects.length === 0 ? (
             <Caption1 className={styles.emptyHint}>No projects yet</Caption1>
           ) : (
             <SidebarTree
@@ -248,19 +369,47 @@ export const TicketsSidebar = memo(({ onNavigate }: { onNavigate?: () => void })
               onSelect={handleTreeSelect}
               onExpandProject={handleExpandProject}
               onCreateMilestone={handleCreateMilestone}
+              onEditMilestone={handleEditMilestone}
+              onAddSource={handleAddSource}
+              onOpenSource={handleOpenSource}
+              onEditSource={handleEditSource}
+              onRemoveSource={handleRemoveSource}
             />
-          )
-        )}
+          ))}
       </NavDrawerBody>
 
       <ProjectForm open={formOpen} onClose={handleCloseForm} />
-      <AnimatedDialog open={milestoneFormProjectId != null} onClose={handleCloseMilestoneForm}>
+      {addSourceProject && <AddSourceDialog open onClose={handleCloseAddSource} project={addSourceProject} />}
+      {sourceDetailProject && sourceDetailSource && (
+        <SourceDetailDialog
+          open
+          onClose={handleCloseSource}
+          project={sourceDetailProject}
+          source={sourceDetailSource}
+          tickets={Object.values(tickets)}
+          onEdit={handleEditSourceFromDetail}
+          onRemove={handleRemoveSourceFromDetail}
+        />
+      )}
+      {editSourceProject && editSourceSource && (
+        <EditSourceDialog open onClose={handleCloseEditSource} project={editSourceProject} source={editSourceSource} />
+      )}
+      <AnimatedDialog
+        open={milestoneFormProjectId !== null || editingMilestone !== null}
+        onClose={handleCloseMilestoneForm}
+      >
         <DialogContent>
-          <DialogHeader>New Milestone</DialogHeader>
+          <DialogHeader>{editingMilestone ? 'Edit Milestone' : 'New Milestone'}</DialogHeader>
           <DialogBody>
-            {milestoneFormProjectId && (
+            {editingMilestone ? (
+              <MilestoneForm
+                projectId={editingMilestone.projectId}
+                editMilestone={editingMilestone}
+                onClose={handleCloseMilestoneForm}
+              />
+            ) : milestoneFormProjectId ? (
               <MilestoneForm projectId={milestoneFormProjectId} onClose={handleCloseMilestoneForm} />
-            )}
+            ) : null}
           </DialogBody>
         </DialogContent>
       </AnimatedDialog>

@@ -20,6 +20,17 @@ export default mergeConfig(
     test: {
       globals: true,
       environment: 'jsdom',
+      // Playwright owns tests/e2e (npm run test:e2e); vitest must not try to
+      // collect those specs — @playwright/test throws under a foreign runner.
+      exclude: ['**/node_modules/**', '**/dist/**', '**/out/**', 'tests/e2e/**'],
+      // Node >= 25 enables --experimental-webstorage by default; without
+      // --localstorage-file the global localStorage is a non-functional stub
+      // that SHADOWS jsdom's (getItem === undefined). Disable it so the
+      // jsdom environment provides the real Storage.
+      poolOptions: {
+        forks: { execArgv: ['--no-experimental-webstorage'] },
+        threads: { execArgv: ['--no-experimental-webstorage'] },
+      },
       typecheck: {
         enabled: true,
         ignoreSourceErrors: true,

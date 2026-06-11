@@ -103,12 +103,12 @@ describe('rankFocus', () => {
   it('puts self-blocked tickets ahead of next-up candidates', () => {
     const tickets = [
       makeTicket({ id: 'fresh', priority: 'critical' }),
-      makeTicket({ id: 'stuck', phase: 'awaiting_input', priority: 'low' }),
+      makeTicket({ id: 'stuck', phase: 'error', priority: 'low' }),
     ];
     const result = rankFocus({ tickets, milestones: {}, now: NOW });
     expect(result[0]?.ticket.id).toBe('stuck');
     expect(result[0]?.rank).toBe('self_blocked');
-    expect(result[0]?.reason).toBe('Needs your input');
+    expect(result[0]?.reason).toBe('Errored — retry or triage');
     expect(result[1]?.ticket.id).toBe('fresh');
   });
 
@@ -200,7 +200,7 @@ describe('rankFocus', () => {
   it('sorts all three tiers together in the expected order', () => {
     const tickets = [
       makeTicket({ id: 'next', priority: 'critical' }),
-      makeTicket({ id: 'blocked', phase: 'awaiting_input', priority: 'low' }),
+      makeTicket({ id: 'blocked', phase: 'error', priority: 'low' }),
       makeTicket({ id: 'live', phase: 'running', priority: 'low' }),
     ];
     const result = rankFocus({ tickets, milestones: {}, now: NOW });

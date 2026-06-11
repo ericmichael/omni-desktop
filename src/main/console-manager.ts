@@ -1,201 +1,84 @@
 import { ipcMain } from 'electron';
-import { nanoid } from 'nanoid';
 
-import type { PtyCallbacks, PtyEntry } from '@/lib/pty-utils';
-import { createPtyBuffer, createPtyProcess, killPtyProcessAsync, setupPtyCallbacks } from '@/lib/pty-utils';
-import { getActivateVenvCommand, getBundledBinPath, getHomeDirectory, getShell, isDirectory } from '@/main/util';
+import type { ProcessManager } from '@/main/process-manager';
+import { ConsoleError, TerminalProxy } from '@/main/terminal-proxy';
 import type { IIpcListener } from '@/shared/ipc-listener';
 import type { IpcRendererEvents } from '@/shared/types';
 
-// ---------------------------------------------------------------------------
-// Injectable deps
-// ---------------------------------------------------------------------------
-
-export interface ConsoleManagerDeps {
-  createPty: typeof createPtyProcess;
-  createBuffer: typeof createPtyBuffer;
-  setupCallbacks: typeof setupPtyCallbacks;
-  killPty: typeof killPtyProcessAsync;
-  getShell: typeof getShell;
-  getHomeDir: typeof getHomeDirectory;
-  getBinPath: typeof getBundledBinPath;
-  getActivateCmd: typeof getActivateVenvCommand;
-  isDir: typeof isDirectory;
-  newId: () => string;
-}
-
-const defaultDeps = (): ConsoleManagerDeps => ({
-  createPty: createPtyProcess,
-  createBuffer: createPtyBuffer,
-  setupCallbacks: setupPtyCallbacks,
-  killPty: killPtyProcessAsync,
-  getShell,
-  getHomeDir: getHomeDirectory,
-  getBinPath: getBundledBinPath,
-  getActivateCmd: getActivateVenvCommand,
-  isDir: isDirectory,
-  newId: nanoid,
-});
-
 /**
- * ConsoleManager manages multiple interactive shell PTYs for the terminal/console.
+ * Routes the renderer's `terminal:*` IPC into `omni serve`'s WebSocket
+ * protocol via :class:`TerminalProxy`. The shell runs inside the
+ * sandbox session (same user/cwd/network as the agent's bash tool); the
+ * launcher no longer owns a host node-pty path.
+ *
+ * When a tab has no running omni serve process, `terminal:create` throws
+ * a :class:`ConsoleError` with `kind='process_not_ready'`; the renderer
+ * surfaces a toast.
  */
 export class ConsoleManager {
-  private entries = new Map<string, PtyEntry>();
-  private deps: ConsoleManagerDeps;
+  constructor(private readonly proxy: TerminalProxy) {}
 
-  constructor(deps?: Partial<ConsoleManagerDeps>) {
-    this.deps = { ...defaultDeps(), ...deps };
+  createConsole(tabId: string): Promise<string> {
+    return this.proxy.create(tabId);
   }
 
-  /**
-   * Create a new console PTY.
-   * Returns the console ID.
-   */
-  async createConsole(
-    callbacks: {
-      onData: (id: string, data: string) => void;
-      onExit: (id: string, exitCode: number, signal?: number) => void;
-    },
-    initialCwd?: string
-  ): Promise<string> {
-    const id = this.deps.newId();
-    const shell = this.deps.getShell();
-    const ansiBuffer = this.deps.createBuffer();
-
-    const process = this.deps.createPty({
-      command: shell,
-      args: [],
-      cwd: this.deps.getHomeDir(),
-    });
-
-    const ptyCallbacks: PtyCallbacks = {
-      onData: (data) => {
-        callbacks.onData(id, data);
-      },
-      onExit: (exitCode, signal) => {
-        this.entries.delete(id);
-        callbacks.onData(id, `Process exited with code ${exitCode}${signal ? `, signal: ${signal}` : ''}`);
-        callbacks.onExit(id, exitCode, signal);
-      },
-    };
-
-    this.deps.setupCallbacks(process, ptyCallbacks, ansiBuffer);
-
-    this.entries.set(id, { id, process, ansiSequenceBuffer: ansiBuffer });
-
-    // Initialize the console environment
-    await this.initializeConsole(id, initialCwd);
-
-    return id;
-  }
-
-  /**
-   * Initialize the console with PATH and optional venv activation
-   */
-  private async initializeConsole(id: string, cwd?: string): Promise<void> {
-    const entry = this.entries.get(id);
-    if (!entry) {
-return;
-}
-
-    // Add the bundled bin dir to the PATH env var
-    const binPath = this.deps.getBinPath();
-    if (process.platform === 'win32') {
-      entry.process.write(`$env:Path='${binPath};'+$env:Path\r`);
-    } else {
-      entry.process.write(`export PATH="${binPath}:$PATH"\r`);
-    }
-
-    if (cwd && (await this.deps.isDir(cwd))) {
-      entry.process.write(`cd ${cwd}\r`);
-
-      // If the cwd contains a .venv, activate it
-      const venvPath = `${cwd}/.venv`;
-      if (await this.deps.isDir(venvPath)) {
-        const activateVenvCmd = this.deps.getActivateCmd(cwd);
-        entry.process.write(`${activateVenvCmd}\r`);
-      }
-    }
-  }
-
-  /**
-   * Write data to a console
-   */
   write(id: string, data: string): void {
-    this.entries.get(id)?.process.write(data);
+    this.proxy.write(id, data);
   }
 
-  /**
-   * Resize a console PTY
-   */
   resize(id: string, cols: number, rows: number): void {
-    this.entries.get(id)?.process.resize(cols, rows);
+    this.proxy.resize(id, cols, rows);
   }
 
-  /**
-   * Dispose of a single console PTY
-   */
-  async disposeOne(id: string): Promise<void> {
-    const entry = this.entries.get(id);
-    if (!entry) {
-return;
-}
-    this.entries.delete(id);
-    await this.deps.killPty(entry.process);
-    entry.ansiSequenceBuffer.clear();
+  disposeOne(id: string): Promise<void> {
+    return this.proxy.dispose(id);
   }
 
-  /**
-   * Dispose of all console PTYs
-   */
-  async disposeAll(): Promise<void> {
-    const ids = [...this.entries.keys()];
-    await Promise.allSettled(ids.map((id) => this.disposeOne(id)));
+  disposeAll(): Promise<void> {
+    return this.proxy.disposeAll();
   }
 
-  /**
-   * List all active console IDs
-   */
-  listIds(): string[] {
-    return [...this.entries.keys()];
+  disposeAllForTab(tabId: string): Promise<void> {
+    return this.proxy.disposeAllForTab(tabId);
   }
 
-  /**
-   * Check if any console is currently active
-   */
-  isActive(): boolean {
-    return this.entries.size > 0;
+  listIdsForTab(tabId: string): string[] {
+    return this.proxy.listIdsForTab(tabId);
   }
 }
 
-/**
- * Create a ConsoleManager instance and set up IPC handlers
- * Returns the manager instance and a cleanup function
- */
 export const createConsoleManager = (arg: {
   ipc: IIpcListener;
   sendToWindow: <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
-}): [ConsoleManager, () => void] => {
-  const { ipc, sendToWindow } = arg;
+  processManager: ProcessManager;
+}): [ConsoleManager, () => Promise<void>] => {
+  const { ipc, sendToWindow, processManager } = arg;
 
-  const consoleManager = new ConsoleManager();
+  const proxy = new TerminalProxy({ processManager, sendToWindow });
+  const consoleManager = new ConsoleManager(proxy);
 
-  const onData = (id: string, data: string) => {
-    sendToWindow('terminal:output', id, data);
-  };
-
-  const onExit = (id: string, exitCode: number) => {
-    sendToWindow('terminal:exited', id, exitCode);
-  };
-
-  // IPC handlers
-  ipc.handle('terminal:create', (_, cwd) => {
-    return consoleManager.createConsole({ onData, onExit }, cwd);
+  ipc.handle('terminal:create', async (_, tabId) => {
+    try {
+      return await consoleManager.createConsole(tabId);
+    } catch (err) {
+      if (err instanceof ConsoleError) {
+        // Throwing across IPC produces an Error in the renderer; tag the
+        // message so the renderer can distinguish `process_not_ready`
+        // from generic failures.
+        const e = new Error(`[${err.kind}] ${err.message}`);
+        (e as Error & { kind?: string }).kind = err.kind;
+        throw e;
+      }
+      throw err;
+    }
   });
 
   ipc.handle('terminal:dispose', async (_, id) => {
     await consoleManager.disposeOne(id);
+  });
+
+  ipc.handle('terminal:dispose-all-for-tab', async (_, tabId) => {
+    await consoleManager.disposeAllForTab(tabId);
   });
 
   ipc.handle('terminal:resize', (_, id, cols, rows) => {
@@ -206,14 +89,15 @@ export const createConsoleManager = (arg: {
     consoleManager.write(id, data);
   });
 
-  ipc.handle('terminal:list', (_) => {
-    return consoleManager.listIds();
+  ipc.handle('terminal:list', (_, tabId) => {
+    return consoleManager.listIdsForTab(tabId);
   });
 
   const cleanup = async () => {
     await consoleManager.disposeAll();
     ipcMain.removeHandler('terminal:create');
     ipcMain.removeHandler('terminal:dispose');
+    ipcMain.removeHandler('terminal:dispose-all-for-tab');
     ipcMain.removeHandler('terminal:resize');
     ipcMain.removeHandler('terminal:write');
     ipcMain.removeHandler('terminal:list');

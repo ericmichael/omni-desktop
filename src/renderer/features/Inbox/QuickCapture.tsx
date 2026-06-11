@@ -1,9 +1,9 @@
-import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
 import { ArrowUp20Regular, MailInbox20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { atom } from 'nanostores';
-import { memo, useCallback, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 
 import { inboxApi } from '@/renderer/features/Inbox/state';
@@ -34,7 +34,10 @@ const useStyles = makeStyles({
     transitionProperty: 'border-color, background-color',
     transitionDuration: '200ms',
   },
-  desktopCardDefault: { ...shorthands.borderColor(tokens.colorNeutralStroke1), backgroundColor: tokens.colorNeutralBackground2 },
+  desktopCardDefault: {
+    ...shorthands.borderColor(tokens.colorNeutralStroke1),
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
   desktopCardFlash: { ...shorthands.borderColor('rgba(34, 197, 94, 0.5)'), backgroundColor: 'rgba(6, 78, 59, 0.3)' },
   desktopHeader: {
     display: 'flex',
@@ -47,7 +50,11 @@ const useStyles = makeStyles({
     ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
   },
   captureIcon: { color: tokens.colorBrandForeground1, flexShrink: 0 },
-  captureTitle: { fontSize: tokens.fontSizeBase300, fontWeight: tokens.fontWeightMedium, color: tokens.colorNeutralForeground1 },
+  captureTitle: {
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightMedium,
+    color: tokens.colorNeutralForeground1,
+  },
   headerSpacer: { flex: '1 1 0' },
   escKbd: {
     fontSize: tokens.fontSizeBase200,
@@ -89,7 +96,13 @@ const useStyles = makeStyles({
     '@media (min-width: 640px)': { display: 'none' },
   },
   dragHandle: { display: 'flex', justifyContent: 'center', paddingTop: '10px', paddingBottom: '4px' },
-  dragHandleBar: { width: '32px', height: '4px', borderRadius: '9999px', backgroundColor: tokens.colorNeutralForeground2, opacity: 0.3 },
+  dragHandleBar: {
+    width: '32px',
+    height: '4px',
+    borderRadius: '9999px',
+    backgroundColor: tokens.colorNeutralForeground2,
+    opacity: 0.3,
+  },
   mobileHeader: {
     display: 'flex',
     alignItems: 'center',
@@ -138,8 +151,12 @@ const useStyles = makeStyles({
     cursor: 'pointer',
   },
   submitActive: { backgroundColor: tokens.colorBrandBackground, color: tokens.colorNeutralForegroundOnBrand },
-  submitDisabled: { backgroundColor: tokens.colorNeutralBackground3, color: tokens.colorNeutralForeground2, opacity: 0.4 },
-  safeArea: { height: 'env(safe-area-inset-bottom, 0px)' },
+  submitDisabled: {
+    backgroundColor: tokens.colorNeutralBackground3,
+    color: tokens.colorNeutralForeground2,
+    opacity: 0.4,
+  },
+  safeArea: { height: 'var(--safe-area-bottom, env(safe-area-inset-bottom, 0px))' },
 });
 
 const hotkeyOptions = { enableOnFormTags: true } as const;
@@ -153,7 +170,16 @@ export const QuickCapture = memo(() => {
   const open = useStore($quickCaptureOpen);
   const [value, setValue] = useState('');
   const [flash, setFlash] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia('(min-width: 640px)').matches);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const media = window.matchMedia('(min-width: 640px)');
+    const update = () => setIsDesktop(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
 
   const toggle = useCallback(() => {
     const willOpen = !$quickCaptureOpen.get();
@@ -173,8 +199,8 @@ export const QuickCapture = memo(() => {
   const submit = useCallback(async () => {
     const trimmed = value.trim();
     if (!trimmed) {
-return;
-}
+      return;
+    }
 
     // Capture lands as a global inbox item with no project context. Shaping
     // and promotion happen later from the Inbox view.
@@ -216,87 +242,84 @@ return;
           className={styles.overlay}
           onClick={(e) => {
             if (e.target === e.currentTarget) {
-close();
-}
+              close();
+            }
           }}
         >
           {/* Backdrop */}
           <div className={styles.backdrop} onClick={close} />
 
-          {/* Desktop: centered floating card */}
-          <div className={styles.desktopCenter}>
+          {isDesktop ? (
+            <div className={styles.desktopCenter}>
+              <motion.div
+                initial={{ opacity: 0, y: -12, scale: 0.97 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -8, scale: 0.97 }}
+                transition={{ type: 'spring', duration: 0.25, bounce: 0.1 }}
+                className={mergeClasses(
+                  styles.desktopCard,
+                  flash ? styles.desktopCardFlash : styles.desktopCardDefault
+                )}
+              >
+                <div className={styles.desktopHeader}>
+                  <MailInbox20Regular className={styles.captureIcon} style={{ width: 16, height: 16 }} />
+                  <span className={styles.captureTitle}>Quick Capture</span>
+                  <div className={styles.headerSpacer} />
+                  <kbd className={styles.escKbd}>Esc</kbd>
+                </div>
+                <div className={styles.inputWrap}>
+                  <input
+                    ref={inputRef}
+                    value={value}
+                    onChange={(e) => setValue(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    autoFocus
+                    placeholder="What needs capturing?"
+                    className={styles.desktopInput}
+                  />
+                </div>
+              </motion.div>
+            </div>
+          ) : (
             <motion.div
-              initial={{ opacity: 0, y: -12, scale: 0.97 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -8, scale: 0.97 }}
-              transition={{ type: 'spring', duration: 0.25, bounce: 0.1 }}
-              className={mergeClasses(styles.desktopCard, flash ? styles.desktopCardFlash : styles.desktopCardDefault)}
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', duration: 0.35, bounce: 0.05 }}
+              className={mergeClasses(styles.mobileSheet, flash ? styles.desktopCardFlash : styles.desktopCardDefault)}
             >
-              <div className={styles.desktopHeader}>
+              <div className={styles.dragHandle}>
+                <div className={styles.dragHandleBar} />
+              </div>
+
+              <div className={styles.mobileHeader}>
                 <MailInbox20Regular className={styles.captureIcon} style={{ width: 16, height: 16 }} />
                 <span className={styles.captureTitle}>Quick Capture</span>
-                <div className={styles.headerSpacer} />
-                <kbd className={styles.escKbd}>
-                  Esc
-                </kbd>
               </div>
-              <div className={styles.inputWrap}>
+
+              <div className={styles.mobileInputRow}>
                 <input
-                  ref={inputRef}
                   value={value}
                   onChange={(e) => setValue(e.target.value)}
                   onKeyDown={handleKeyDown}
                   autoFocus
                   placeholder="What needs capturing?"
-                  className={styles.desktopInput}
+                  className={styles.mobileInput}
                 />
+                <button
+                  type="button"
+                  onClick={() => void submit()}
+                  disabled={!value.trim()}
+                  className={mergeClasses(styles.submitBtn, value.trim() ? styles.submitActive : styles.submitDisabled)}
+                  aria-label="Submit"
+                >
+                  <ArrowUp20Regular style={{ width: 18, height: 18 }} />
+                </button>
               </div>
+
+              <div className={styles.safeArea} />
             </motion.div>
-          </div>
-
-          {/* Mobile: bottom sheet */}
-          <motion.div
-            initial={{ y: '100%' }}
-            animate={{ y: 0 }}
-            exit={{ y: '100%' }}
-            transition={{ type: 'spring', duration: 0.35, bounce: 0.05 }}
-            className={mergeClasses(styles.mobileSheet, flash ? styles.desktopCardFlash : styles.desktopCardDefault)}
-          >
-            {/* Drag handle */}
-            <div className={styles.dragHandle}>
-              <div className={styles.dragHandleBar} />
-            </div>
-
-            {/* Header */}
-            <div className={styles.mobileHeader}>
-              <MailInbox20Regular className={styles.captureIcon} style={{ width: 16, height: 16 }} />
-              <span className={styles.captureTitle}>Quick Capture</span>
-            </div>
-
-            {/* Input row */}
-            <div className={styles.mobileInputRow}>
-              <input
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                onKeyDown={handleKeyDown}
-                autoFocus
-                placeholder="What needs capturing?"
-                className={styles.mobileInput}
-              />
-              <button
-                type="button"
-                onClick={() => void submit()}
-                disabled={!value.trim()}
-                className={mergeClasses(styles.submitBtn, value.trim() ? styles.submitActive : styles.submitDisabled)}
-                aria-label="Submit"
-              >
-                <ArrowUp20Regular style={{ width: 18, height: 18 }} />
-              </button>
-            </div>
-
-            {/* Safe area spacer for phones with home indicator */}
-            <div className={styles.safeArea} />
-          </motion.div>
+          )}
         </motion.div>
       )}
     </AnimatePresence>

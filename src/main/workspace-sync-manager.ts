@@ -124,6 +124,14 @@ export class WorkspaceSyncManager {
   // --- Public API ---
 
   async startSync(projectId: string, workspaceDir: string): Promise<void> {
+    // Workspace upload is opt-in. Set OMNI_ENABLE_WORKSPACE_UPLOAD=1 to enable
+    // background sync (and the one-shot tar upload in agent-process.ts).
+    // Default off because initial uploads are slow on large workspaces.
+    if (process.env['OMNI_ENABLE_WORKSPACE_UPLOAD'] !== '1') {
+      console.log(`[WorkspaceSync] OMNI_ENABLE_WORKSPACE_UPLOAD!=1 — skipping startSync for ${projectId}`);
+      return;
+    }
+
     // Bump ref count — if already syncing, just increment and return
     const currentRefs = this.refCounts.get(projectId) ?? 0;
     this.refCounts.set(projectId, currentRefs + 1);

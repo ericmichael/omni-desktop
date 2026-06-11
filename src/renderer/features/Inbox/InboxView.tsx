@@ -1,15 +1,9 @@
 import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import {
-  Add20Regular,
-  ArchiveRegular,
-  MailInbox20Regular,
-  TagRegular,
-  TimerRegular,
-} from '@fluentui/react-icons';
+import { Add20Regular, ArchiveRegular, MailInbox20Regular, TimerRegular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { IconButton } from '@/renderer/ds';
+import { IconButton, type SelectTabData, Tab, TabList } from '@/renderer/ds';
 import { $quickCaptureOpen } from '@/renderer/features/Inbox/QuickCapture';
 import { ticketApi } from '@/renderer/features/Tickets/state';
 import type { InboxItem, InboxItemId } from '@/shared/types';
@@ -46,23 +40,19 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
   },
   spacer: { flex: '1 1 0' },
-  tabs: { display: 'flex', gap: '4px' },
-  tab: {
-    padding: '6px 12px',
-    borderRadius: tokens.borderRadiusCircular,
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightMedium,
-    backgroundColor: 'transparent',
-    color: tokens.colorNeutralForeground2,
-    border: 'none',
-    cursor: 'pointer',
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
+  tabs: { flexShrink: 0 },
+  mobileFilters: {
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke2),
   },
-  tabActive: {
-    backgroundColor: tokens.colorBrandBackground2,
-    color: tokens.colorBrandForeground1,
+  mobileTabs: {
+    width: '100%',
   },
-  tabCount: { marginLeft: '4px', opacity: 0.7 },
+  filterTab: {
+    flex: '1 1 0',
+    justifyContent: 'center',
+  },
   body: {
     flex: '1 1 0',
     minHeight: 0,
@@ -130,10 +120,6 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusCircular,
     backgroundColor: tokens.colorNeutralBackground3,
   },
-  shapedBadge: {
-    backgroundColor: tokens.colorBrandBackground2,
-    color: tokens.colorBrandForeground1,
-  },
   laterBadge: {
     backgroundColor: tokens.colorPaletteYellowBackground2,
     color: tokens.colorPaletteYellowForeground2,
@@ -146,127 +132,141 @@ const useStyles = makeStyles({
 
 type InboxTab = 'active' | 'later' | 'archive';
 
-export const InboxView = memo(({ selectedItemId }: { selectedItemId?: InboxItemId }) => {
-  const styles = useStyles();
-  const active = useStore($activeInbox);
-  const later = useStore($laterInbox);
-  const promoted = useStore($promotedInbox);
-  const itemsById = useStore($inboxItems);
+export const InboxView = memo(
+  ({ selectedItemId, hideChrome = false }: { selectedItemId?: InboxItemId; hideChrome?: boolean }) => {
+    const styles = useStyles();
+    const active = useStore($activeInbox);
+    const later = useStore($laterInbox);
+    const promoted = useStore($promotedInbox);
+    const itemsById = useStore($inboxItems);
 
-  const [tab, setTab] = useState<InboxTab>('active');
-  const [selectedId, setSelectedId] = useState<InboxItemId | null>(null);
+    const [tab, setTab] = useState<InboxTab>('active');
+    const [selectedId, setSelectedId] = useState<InboxItemId | null>(null);
 
-  // Resolve the selected item every render so edits made through IPC flow
-  // back in via store:changed without having to reset local state.
-  const selectedItem = useMemo(
-    () => (selectedId ? itemsById[selectedId] ?? null : null),
-    [selectedId, itemsById]
-  );
+    // Resolve the selected item every render so edits made through IPC flow
+    // back in via store:changed without having to reset local state.
+    const selectedItem = useMemo(() => (selectedId ? (itemsById[selectedId] ?? null) : null), [selectedId, itemsById]);
 
-  const visible = tab === 'active' ? active : tab === 'later' ? later : promoted;
+    const visible = tab === 'active' ? active : tab === 'later' ? later : promoted;
 
-  useEffect(() => {
-    if (!selectedItemId) {
+    useEffect(() => {
+      if (selectedItemId === undefined) {
+        return;
+      }
+
+      const item = itemsById[selectedItemId] ?? null;
+      setSelectedId(item?.id ?? null);
+      if (!item) {
+        return;
+      }
+      if (item.promotedTo) {
+        setTab('archive');
+        return;
+      }
+      if (item.status === 'later') {
+        setTab('later');
+        return;
+      }
+      setTab('active');
+    }, [selectedItemId, itemsById]);
+
+    useEffect(() => {
+      if (!selectedItem || selectedItemId !== undefined) {
+        return;
+      }
+      if (selectedItem.promotedTo) {
+        setTab('archive');
+      } else if (selectedItem.status === 'later') {
+        setTab('later');
+      } else {
+        setTab('active');
+      }
+    }, [selectedItem, selectedItemId]);
+
+    const handleBack = useCallback(() => {
+      if (selectedItemId) {
+        ticketApi.goToInbox();
+        return;
+      }
       setSelectedId(null);
-      return;
+    }, [selectedItemId]);
+
+    const handleAdd = useCallback(() => {
+      $quickCaptureOpen.set(true);
+    }, []);
+    const handleTabSelect = useCallback((_event: unknown, data: SelectTabData) => {
+      setTab(data.value as InboxTab);
+    }, []);
+    const handleOpenItem = useCallback((id: InboxItemId) => setSelectedId(id), []);
+
+    // Detail view takes over the panel when an item is selected.
+    //
+    // Keying on `selectedItem.id` forces a full remount when the user navigates
+    // to a different item. Without the key, InboxItemDetail held per-item edit
+    // buffers in component-local state tied to a prop, so switching items
+    // either (a) silently dropped unsaved edits, or (b) wrote the previous
+    // item's draft onto the newly-selected item via a stale `onBlur` closure.
+    // Remount gives every item a fresh component lifecycle and makes the
+    // buffers structurally incapable of crossing item boundaries.
+    if (selectedItem) {
+      return <InboxItemDetail key={selectedItem.id} item={selectedItem} onBack={handleBack} hideHeader={hideChrome} />;
     }
 
-    const item = itemsById[selectedItemId] ?? null;
-    setSelectedId(item?.id ?? null);
-    if (!item) {
-      return;
-    }
-    if (item.promotedTo) {
-      setTab('archive');
-      return;
-    }
-    if (item.status === 'later') {
-      setTab('later');
-      return;
-    }
-    setTab('active');
-  }, [selectedItemId, itemsById]);
+    return (
+      <div className={styles.root}>
+        {!hideChrome && (
+          <div className={styles.header}>
+            <MailInbox20Regular className={styles.headerIcon} />
+            <span className={styles.title}>Inbox</span>
+            <div className={styles.spacer} />
+            <IconButton aria-label="Add item" icon={<Add20Regular />} size="sm" onClick={handleAdd} />
+            <TabList selectedValue={tab} onTabSelect={handleTabSelect} size="small" className={styles.tabs}>
+              <Tab value="active">Inbox {active.length}</Tab>
+              <Tab value="later">Later {later.length}</Tab>
+              <Tab value="archive">Archive {promoted.length}</Tab>
+            </TabList>
+          </div>
+        )}
 
-  const handleBack = useCallback(() => {
-    if (selectedItemId) {
-      ticketApi.goToInbox();
-      return;
-    }
-    setSelectedId(null);
-  }, [selectedItemId]);
+        {hideChrome && (
+          <div className={styles.mobileFilters}>
+            <TabList
+              selectedValue={tab}
+              onTabSelect={handleTabSelect}
+              size="small"
+              appearance="subtle"
+              className={styles.mobileTabs}
+            >
+              <Tab value="active" className={styles.filterTab}>
+                Inbox {active.length}
+              </Tab>
+              <Tab value="later" className={styles.filterTab}>
+                Later {later.length}
+              </Tab>
+              <Tab value="archive" className={styles.filterTab}>
+                Archive {promoted.length}
+              </Tab>
+            </TabList>
+          </div>
+        )}
 
-  const handleAdd = useCallback(() => {
-    $quickCaptureOpen.set(true);
-  }, []);
-
-  // Detail view takes over the panel when an item is selected.
-  //
-  // Keying on `selectedItem.id` forces a full remount when the user navigates
-  // to a different item. Without the key, InboxItemDetail held per-item edit
-  // buffers in component-local state tied to a prop, so switching items
-  // either (a) silently dropped unsaved edits, or (b) wrote the previous
-  // item's draft onto the newly-selected item via a stale `onBlur` closure.
-  // Remount gives every item a fresh component lifecycle and makes the
-  // buffers structurally incapable of crossing item boundaries.
-  if (selectedItem) {
-    return <InboxItemDetail key={selectedItem.id} item={selectedItem} onBack={handleBack} />;
-  }
-
-  return (
-    <div className={styles.root}>
-      <div className={styles.header}>
-        <MailInbox20Regular className={styles.headerIcon} />
-        <span className={styles.title}>Inbox</span>
-        <div className={styles.spacer} />
-        <IconButton aria-label="Add item" icon={<Add20Regular />} size="sm" onClick={handleAdd} />
-        <div className={styles.tabs}>
-          <TabBtn
-            label="Inbox"
-            count={active.length}
-            active={tab === 'active'}
-            onClick={() => setTab('active')}
-            styles={styles}
-          />
-          <TabBtn
-            label="Later"
-            count={later.length}
-            active={tab === 'later'}
-            onClick={() => setTab('later')}
-            styles={styles}
-          />
-          <TabBtn
-            label="Archive"
-            count={promoted.length}
-            active={tab === 'archive'}
-            onClick={() => setTab('archive')}
-            styles={styles}
-          />
+        <div className={styles.body}>
+          {visible.length === 0 ? (
+            <div className={styles.empty}>
+              {tab === 'active'
+                ? 'Your inbox is empty. Nice work.'
+                : tab === 'later'
+                  ? 'Nothing parked for later.'
+                  : 'No promoted items yet.'}
+            </div>
+          ) : (
+            visible.map((item) => <InboxRow key={item.id} item={item} styles={styles} onOpen={handleOpenItem} />)
+          )}
         </div>
       </div>
-
-      <div className={styles.body}>
-        {visible.length === 0 ? (
-          <div className={styles.empty}>
-            {tab === 'active'
-              ? 'Your inbox is empty. Nice work.'
-              : tab === 'later'
-                ? 'Nothing parked for later.'
-                : 'No promoted items yet.'}
-          </div>
-        ) : (
-          visible.map((item) => (
-            <InboxRow
-              key={item.id}
-              item={item}
-              styles={styles}
-              onOpen={() => setSelectedId(item.id)}
-            />
-          ))
-        )}
-      </div>
-    </div>
-  );
-});
+    );
+  }
+);
 InboxView.displayName = 'InboxView';
 
 // ---------------------------------------------------------------------------
@@ -276,56 +276,31 @@ InboxView.displayName = 'InboxView';
 type InboxRowProps = {
   item: InboxItem;
   styles: ReturnType<typeof useStyles>;
-  onOpen: () => void;
+  onOpen: (id: InboxItemId) => void;
 };
 
-const InboxRow = memo(({ item, styles, onOpen }: InboxRowProps) => (
-  <button type="button" className={styles.row} onClick={onOpen}>
-    <div className={styles.rowMain}>
-      <span className={styles.rowTitle}>{item.title}</span>
-      {item.note && <span className={styles.rowNote}>{item.note}</span>}
-      <div className={styles.rowMeta}>
-        {item.status === 'shaped' && (
-          <span className={`${styles.badge} ${styles.shapedBadge}`}>
-            <TagRegular style={{ width: 12, height: 12 }} /> Shaped
-          </span>
-        )}
-        {item.status === 'later' && (
-          <span className={`${styles.badge} ${styles.laterBadge}`}>
-            <TimerRegular style={{ width: 12, height: 12 }} /> Later
-          </span>
-        )}
-        {item.promotedTo && (
-          <span className={styles.badge}>
-            <ArchiveRegular style={{ width: 12, height: 12 }} /> Promoted to {item.promotedTo.kind}
-          </span>
-        )}
+const InboxRow = memo(({ item, styles, onOpen }: InboxRowProps) => {
+  const handleOpen = useCallback(() => onOpen(item.id), [item.id, onOpen]);
+
+  return (
+    <button type="button" className={styles.row} onClick={handleOpen}>
+      <div className={styles.rowMain}>
+        <span className={styles.rowTitle}>{item.title}</span>
+        {item.note && <span className={styles.rowNote}>{item.note}</span>}
+        <div className={styles.rowMeta}>
+          {item.status === 'later' && (
+            <span className={`${styles.badge} ${styles.laterBadge}`}>
+              <TimerRegular style={{ width: 12, height: 12 }} /> Later
+            </span>
+          )}
+          {item.promotedTo && (
+            <span className={styles.badge}>
+              <ArchiveRegular style={{ width: 12, height: 12 }} /> Promoted to {item.promotedTo.kind}
+            </span>
+          )}
+        </div>
       </div>
-    </div>
-  </button>
-));
+    </button>
+  );
+});
 InboxRow.displayName = 'InboxRow';
-
-// ---------------------------------------------------------------------------
-// Tab button
-// ---------------------------------------------------------------------------
-
-type TabBtnProps = {
-  label: string;
-  count: number;
-  active: boolean;
-  onClick: () => void;
-  styles: ReturnType<typeof useStyles>;
-};
-
-const TabBtn = memo(({ label, count, active, onClick, styles }: TabBtnProps) => (
-  <button
-    type="button"
-    className={`${styles.tab} ${active ? styles.tabActive : ''}`}
-    onClick={onClick}
-  >
-    {label}
-    <span className={styles.tabCount}>{count}</span>
-  </button>
-));
-TabBtn.displayName = 'TabBtn';

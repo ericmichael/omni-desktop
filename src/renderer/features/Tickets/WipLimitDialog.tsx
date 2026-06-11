@@ -7,7 +7,7 @@ import { persistedStoreApi } from '@/renderer/services/store';
 import type { Ticket, TicketId } from '@/shared/types';
 
 import { ticketApi } from './state';
-import { APPETITE_COLORS, APPETITE_LABELS, PHASE_COLORS, PHASE_LABELS } from './ticket-constants';
+import { PHASE_COLORS, PHASE_LABELS } from './ticket-constants';
 
 const useStyles = makeStyles({
   description: {
@@ -98,14 +98,9 @@ export const WipLimitDialog = memo(
                   <div className={styles.ticketInfo}>
                     <span className={styles.ticketTitle}>{ticket.title}</span>
                     <div className={styles.badgeRow}>
-                      {ticket.phase && (
+                      {ticket.phase && ticket.phase !== 'idle' && PHASE_LABELS[ticket.phase] && (
                         <Badge color={PHASE_COLORS[ticket.phase] ?? 'default'}>
-                          {PHASE_LABELS[ticket.phase] ?? ticket.phase}
-                        </Badge>
-                      )}
-                      {ticket.shaping?.appetite && (
-                        <Badge color={APPETITE_COLORS[ticket.shaping.appetite]}>
-                          {APPETITE_LABELS[ticket.shaping.appetite]}
+                          {PHASE_LABELS[ticket.phase]}
                         </Badge>
                       )}
                     </div>

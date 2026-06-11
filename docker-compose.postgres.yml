@@ -1,0 +1,36 @@
+# Local Postgres for multi-tenant server mode.
+#
+# Mirrors Azure Database for PostgreSQL Flexible Server (standard Postgres), so
+# the schema + RLS that run here run unchanged in the cloud.
+#
+#   docker compose -f docker-compose.postgres.yml up -d
+#   export OMNI_DATABASE_URL=postgres://omni_app:omni@localhost:5432/omni
+#   npm run dev:server
+#
+# The app runs its own migrations on boot (packages/projects-db/src/pg), so the
+# only thing this provides is an empty database + roles.
+#
+# IMPORTANT: connect as `omni_app`, NOT the bootstrap `omni` superuser —
+# superusers bypass row-level security, which would defeat tenant isolation.
+# `omni_app` is created NOSUPERUSER/NOBYPASSRLS by docker/postgres-init.sql.
+services:
+  postgres:
+    image: postgres:16
+    container_name: omni-postgres
+    environment:
+      POSTGRES_USER: omni
+      POSTGRES_PASSWORD: omni
+      POSTGRES_DB: omni
+    ports:
+      - '5432:5432'
+    volumes:
+      - omni-pgdata:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/01-app-role.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U omni -d omni']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  omni-pgdata:

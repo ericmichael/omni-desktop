@@ -138,11 +138,17 @@ return
 
     const connectPromise = this.connectImpl()
     this.connectInFlight = connectPromise
-    connectPromise.finally(() => {
-      if (this.connectInFlight === connectPromise) {
-        this.connectInFlight = null
-      }
-    })
+    // Swallow the rejection on this bookkeeping chain — without the catch,
+    // the promise derived by .finally() is unhandled and every benign
+    // "WebSocket replaced" rejection surfaces as a console error even when
+    // the caller of connect() handles it.
+    connectPromise
+      .catch(() => {})
+      .finally(() => {
+        if (this.connectInFlight === connectPromise) {
+          this.connectInFlight = null
+        }
+      })
     return connectPromise
   }
 
@@ -470,6 +476,47 @@ params.error = error
     await this.call('client_response', params)
   }
 
+  /**
+   * Respond to a ``tool_approval_requested`` event (omniagents 0.16+
+   * function-tool interruption flow). The wire format moved off the
+   * generic ``client_request``/``client_response`` pair onto a dedicated
+   * RPC method so the server can distinguish approvals from other
+   * server-initiated requests without sniffing the ``function`` field.
+   */
+  async toolApprovalResponse(
+    callId: string,
+    decision: 'approve' | 'reject',
+    alwaysApprove: boolean = false,
+    rejectionMessage?: string,
+  ): Promise<boolean> {
+    const params: Record<string, unknown> = { call_id: callId, decision }
+    if (alwaysApprove) {
+params.always_approve = true
+}
+    if (rejectionMessage) {
+params.rejection_message = rejectionMessage
+}
+    return this.call<boolean>('tool_approval_response', params)
+  }
+
+  /**
+   * Respond to an ``mcp_approval_requested`` event (omniagents 0.16+
+   * hosted-MCP interruption flow). Parallel to ``toolApprovalResponse``
+   * but keyed by ``request_id`` (the model's ``McpApprovalRequest.id``)
+   * — intentionally no ``always_approve`` flag on this path.
+   */
+  async mcpApprovalResponse(
+    requestId: string,
+    decision: 'approve' | 'reject',
+    rejectionMessage?: string,
+  ): Promise<boolean> {
+    const params: Record<string, unknown> = { request_id: requestId, decision }
+    if (rejectionMessage) {
+params.rejection_message = rejectionMessage
+}
+    return this.call<boolean>('mcp_approval_response', params)
+  }
+
   async listServerFunctions(): Promise<Array<{ name: string; description?: string; params_schema?: Record<string, unknown>; result_schema?: Record<string, unknown> }>> {
     return this.call('list_server_functions', {})
   }
@@ -485,6 +532,48 @@ params.session_id = sessionId
     return this.call('server_call', params)
   }
 
+  // MCP Apps host helpers. These hit omniagents' ``mcp.*`` server
+  // functions and are used by the MCP-UI ``AppRenderer`` integration
+  // (see MessageList.tsx) to fetch tool metadata, read UI resources,
+  // and route postMessage actions back to the originating server.
+
+  async mcpListTools(serverName: string, sessionId?: string): Promise<{
+    server_name: string;
+    tools: Array<Record<string, unknown>>;
+    next_cursor?: string;
+  }> {
+    const res = await this.serverCall('mcp.list_tools', { server_name: serverName }, sessionId);
+    return res as { server_name: string; tools: Array<Record<string, unknown>>; next_cursor?: string };
+  }
+
+  async mcpReadResource(serverName: string, uri: string, sessionId?: string): Promise<{
+    server_name: string;
+    uri: string;
+    contents: Array<Record<string, unknown>>;
+  }> {
+    const res = await this.serverCall('mcp.read_resource', { server_name: serverName, uri }, sessionId);
+    return res as { server_name: string; uri: string; contents: Array<Record<string, unknown>> };
+  }
+
+  /**
+   * Invoke a tool on an MCP server out-of-band — the agent does not see
+   * this call. Used to route postMessage ``tools/call`` requests from a
+   * rendered MCP-Apps UI back to the originating server.
+   */
+  async mcpCallTool(
+    serverName: string,
+    toolName: string,
+    args?: Record<string, unknown>,
+    sessionId?: string,
+  ): Promise<{ server_name: string; tool_name: string; result: Record<string, unknown> }> {
+    const res = await this.serverCall(
+      'mcp.call_tool',
+      { server_name: serverName, tool_name: toolName, arguments: args ?? {} },
+      sessionId,
+    );
+    return res as { server_name: string; tool_name: string; result: Record<string, unknown> };
+  }
+
   async clientFunctions(version: number, functions: Array<{ name: string; description?: string }>): Promise<void> {
     await this.call('client_functions', { version, functions })
   }
@@ -492,4 +581,79 @@ params.session_id = sessionId
   async getAgentInfo(): Promise<{ name?: string; header_title?: string; page_title?: string; welcome_text?: string; page_title_suffix?: string; theme_color?: string }> {
     return this.call('get_agent_info', {})
   }
+
+  // ---------------------------------------------------------------------
+  // Queue — background-injected messages serialized against current_task.
+  // See omniagents/core/agents/service.py::enqueue_message and friends.
+  // ---------------------------------------------------------------------
+
+  /**
+   * Enqueue a message on the session. With ``trigger_run=true`` the drainer
+   * calls ``start_run`` with this content once the current run finishes;
+   * with ``trigger_run=false`` it lands directly in history.
+   */
+  async enqueueMessage(
+    sessionId: string,
+    content: string,
+    opts?: {
+      role?: string
+      triggerRun?: boolean
+      variables?: Record<string, unknown>
+      safeToolOverrides?: Record<string, unknown>
+      source?: string
+    },
+  ): Promise<{ ok: boolean; id?: string; depth?: number; reason?: string; session_id?: string; enqueued_at?: number }> {
+    const params: Record<string, unknown> = { session_id: sessionId, content }
+    if (opts?.role) {
+params.role = opts.role
+}
+    if (opts?.triggerRun) {
+params.trigger_run = true
+}
+    if (opts?.variables) {
+params.variables = opts.variables
+}
+    if (opts?.safeToolOverrides) {
+params.safe_tool_overrides = opts.safeToolOverrides
+}
+    if (opts?.source) {
+params.source = opts.source
+}
+    return this.call('enqueue_message', params)
+  }
+
+  /** Snapshot of the queue. Used to seed local state on session-switch / reconnect. */
+  async listQueue(sessionId: string): Promise<{ session_id: string; depth: number; items: QueuedMessage[] }> {
+    return this.call('list_queue', { session_id: sessionId })
+  }
+
+  /** Remove an item by id. Returns ``not_found`` if it has already been popped. */
+  async cancelQueuedMessage(
+    sessionId: string,
+    itemId: string,
+  ): Promise<{ ok: boolean; id?: string; depth?: number; reason?: string }> {
+    return this.call('cancel_queued_message', { session_id: sessionId, item_id: itemId })
+  }
+}
+
+/**
+ * Wire shape returned by ``list_queue`` and inside the ``queue_changed``
+ * notification — matches ``QueuedItem.to_dict()`` on the server.
+ */
+export type QueuedMessage = {
+  id: string
+  content: string
+  role: string
+  trigger_run: boolean
+  variables: Record<string, unknown> | null
+  safe_tool_overrides: Record<string, unknown> | null
+  source: string | null
+  enqueued_at: number
+}
+
+/** Payload of the ``queue_changed`` server notification. */
+export type QueueChangedPayload = {
+  session_id: string
+  depth: number
+  items: QueuedMessage[]
 }

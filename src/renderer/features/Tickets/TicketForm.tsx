@@ -1,10 +1,11 @@
-import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Button, Input, Select, Textarea } from '@/renderer/ds';
+import { Button, Input, Select, Switch, Textarea } from '@/renderer/ds';
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import { persistedStoreApi } from '@/renderer/services/store';
+import { firstSource } from '@/shared/types';
 import type { GitRepoInfo, MilestoneId, ProjectId, TicketPriority } from '@/shared/types';
 
 import { $activeMilestoneId, $tickets, ticketApi } from './state';
@@ -51,10 +52,11 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [gitInfo, setGitInfo] = useState<GitRepoInfo | null>(null);
   const [branch, setBranch] = useState('');
+  const [useWorktree, setUseWorktree] = useState(false);
 
   const store = useStore(persistedStoreApi.$atom);
   const project = useMemo(() => store.projects.find((p) => p.id === projectId), [store.projects, projectId]);
-  const projectHasRepo = project?.source != null;
+  const projectHasRepo = firstSource(project) != null;
 
   const milestones = useStore($milestones);
   const activeMilestoneId = useStore($activeMilestoneId);
@@ -63,7 +65,7 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
     [milestones, projectId]
   );
   const defaultMilestoneId = useMemo(
-    () => (activeMilestoneId !== 'all' ? activeMilestoneId : projectMilestones[0]?.id ?? ''),
+    () => (activeMilestoneId !== 'all' ? activeMilestoneId : (projectMilestones[0]?.id ?? '')),
     [activeMilestoneId, projectMilestones]
   );
   const [milestoneId, setMilestoneId] = useState<MilestoneId>(defaultMilestoneId);
@@ -77,12 +79,13 @@ export const TicketForm = memo(({ projectId, onClose }: { projectId: ProjectId; 
   // Only fetch git info when project has a local repo
   useEffect(() => {
     if (!project) {
-return;
-}
-    if (project.source?.kind !== 'local') {
-return;
-}
-    ticketApi.checkGitRepo(project.source.workspaceDir).then((info) => {
+      return;
+    }
+    const projectSource = firstSource(project);
+    if (projectSource?.kind !== 'local') {
+      return;
+    }
+    ticketApi.checkGitRepo(projectSource.workspaceDir).then((info) => {
       setGitInfo(info);
       if (info.isGitRepo) {
         setBranch(info.currentBranch);
@@ -120,7 +123,7 @@ return;
         description: description.trim(),
         priority,
         blockedBy,
-        ...(gitInfo?.isGitRepo && { branch }),
+        ...(gitInfo?.isGitRepo && { useWorktree, ...(useWorktree && { branch }) }),
       });
       setTitle('');
       setDescription('');
@@ -130,17 +133,31 @@ return;
     } finally {
       setIsSubmitting(false);
     }
-  }, [title, description, priority, blockedBy, branch, gitInfo, isSubmitting, projectId, milestoneId, onClose]);
+  }, [
+    title,
+    description,
+    priority,
+    blockedBy,
+    branch,
+    useWorktree,
+    gitInfo,
+    isSubmitting,
+    projectId,
+    milestoneId,
+    onClose,
+  ]);
 
   return (
     <div className={styles.root}>
       <Input
+        aria-label="Ticket title"
         value={title}
         onChange={handleTitleChange}
         placeholder="Ticket title..."
         className="w-full"
       />
       <Textarea
+        aria-label="Ticket description"
         value={description}
         onChange={handleDescriptionChange}
         placeholder="Description (optional)..."
@@ -150,11 +167,7 @@ return;
         {projectMilestones.length > 1 && (
           <div className={styles.fieldGroup}>
             <label className={styles.fieldLabel}>Milestone</label>
-            <Select
-              value={milestoneId}
-              onChange={(e) => setMilestoneId(e.target.value)}
-              size="sm"
-            >
+            <Select value={milestoneId} onChange={(e) => setMilestoneId(e.target.value)} size="sm">
               {projectMilestones.map((i) => (
                 <option key={i.id} value={i.id}>
                   {i.title}
@@ -165,11 +178,7 @@ return;
         )}
         <div className={styles.fieldGroup}>
           <label className={styles.fieldLabel}>Priority</label>
-          <Select
-            value={priority}
-            onChange={handlePriorityChange}
-            size="sm"
-          >
+          <Select value={priority} onChange={handlePriorityChange} size="sm">
             <option value="low">Low</option>
             <option value="medium">Medium</option>
             <option value="high">High</option>
@@ -179,13 +188,7 @@ return;
         {projectTickets.length > 0 && (
           <div className={styles.fieldGroup}>
             <label className={styles.fieldLabel}>Blocked by</label>
-            <Select
-              multiple
-              value={blockedBy}
-              onChange={handleBlockedByChange}
-              size="sm"
-              className="max-h-20"
-            >
+            <Select multiple value={blockedBy} onChange={handleBlockedByChange} size="sm" className="max-h-20">
               {projectTickets.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.title}
@@ -198,19 +201,21 @@ return;
       {projectHasRepo && gitInfo?.isGitRepo && (
         <div className={styles.fieldRow}>
           <div className={styles.fieldGroup}>
-            <label className={styles.fieldLabel}>Branch</label>
-            <Select
-              value={branch}
-              onChange={(e) => setBranch(e.target.value)}
-              size="sm"
-            >
-              {gitInfo.branches.map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </Select>
+            <label className={styles.fieldLabel}>Isolated worktree</label>
+            <Switch checked={useWorktree} onCheckedChange={setUseWorktree} />
           </div>
+          {useWorktree && (
+            <div className={styles.fieldGroup}>
+              <label className={styles.fieldLabel}>Branch</label>
+              <Select value={branch} onChange={(e) => setBranch(e.target.value)} size="sm">
+                {gitInfo.branches.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
         </div>
       )}
       <div className={styles.actions}>

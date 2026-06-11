@@ -1,10 +1,4 @@
-import {
-  Drawer,
-  DrawerBody,
-  makeStyles,
-  mergeClasses,
-  tokens,
-} from '@fluentui/react-components';
+import { Drawer, DrawerBody, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import type { PropsWithChildren } from 'react';
 import { useCallback } from 'react';
 
@@ -48,6 +42,7 @@ const useStyles = makeStyles({
     flex: '1 1 0',
     minHeight: 0,
     padding: 0,
+    paddingBottom: 'var(--safe-area-bottom, env(safe-area-inset-bottom, 0px))',
   },
 });
 
@@ -57,8 +52,8 @@ export const BottomSheet = ({ open, onClose, className, children }: PropsWithChi
   const handleOpenChange = useCallback(
     (_event: unknown, data: { open: boolean }) => {
       if (!data.open) {
-onClose();
-}
+        onClose();
+      }
     },
     [onClose]
   );

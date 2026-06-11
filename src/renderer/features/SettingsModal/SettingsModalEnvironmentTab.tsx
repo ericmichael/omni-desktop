@@ -4,7 +4,8 @@ import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
 import { Button, Card, IconButton, Input, SaveBar, SectionLabel } from '@/renderer/ds';
-import { configApi } from '@/renderer/services/config';
+import { agentConfigApi, configApi } from '@/renderer/services/config';
+import { isElectron } from '@/renderer/services/ipc';
 
 type EnvLine = { kind: 'entry'; key: string; value: string } | { kind: 'comment'; text: string } | { kind: 'blank' };
 
@@ -89,15 +90,8 @@ export const SettingsModalEnvironmentTab = memo(() => {
 
     const init = async () => {
       try {
-        const filePath = await configApi.getEnvFilePath();
-        setEnvFilePath(filePath);
-        const content = await configApi.readTextFile(filePath);
-        if (content === null) {
-          await configApi.writeTextFile(filePath, '');
-          setLines([]);
-        } else {
-          setLines(parseEnvContent(content));
-        }
+        setEnvFilePath(await configApi.getEnvFilePath());
+        setLines(parseEnvContent(await agentConfigApi.getEnv()));
         setError(null);
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to load environment file');
@@ -130,27 +124,30 @@ export const SettingsModalEnvironmentTab = memo(() => {
   }, []);
 
   const save = useCallback(async () => {
-    if (!envFilePath) {
-      return;
-    }
     setSaving(true);
     setError(null);
     try {
-      await configApi.writeTextFile(envFilePath, serializeEnvLines(lines));
+      await agentConfigApi.setEnv(serializeEnvLines(lines));
       setDirty(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save file');
     } finally {
       setSaving(false);
     }
-  }, [envFilePath, lines]);
+  }, [lines]);
 
   return (
     <div className={styles.root}>
-      <SectionLabel>Environment File</SectionLabel>
-      <Card>
-        <span className={styles.filePath}>{envFilePath ?? 'Loading\u2026'}</span>
-      </Card>
+      {/* The on-disk path is meaningful only on desktop; in hosted mode `.env`
+          is injected straight into the agent env (no file). */}
+      {isElectron && (
+        <>
+          <SectionLabel>Environment File</SectionLabel>
+          <Card>
+            <span className={styles.filePath}>{envFilePath ?? 'Loading\u2026'}</span>
+          </Card>
+        </>
+      )}
 
       <SectionLabel className={styles.sectionLabelSpaced}>Variables</SectionLabel>
       <Card className={styles.root}>

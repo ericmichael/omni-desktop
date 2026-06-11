@@ -16,7 +16,15 @@ export default defineConfig(({ mode }) => {
     __PLATFORM_URL__: JSON.stringify(process.env.OMNI_PLATFORM_URL || ''),
   };
 
-  const cspScriptSrc = mode === 'development' ? "'self' 'unsafe-eval' 'wasm-unsafe-eval'" : "'self'";
+  // The ContextEditor's WASM runtime uses both WebAssembly instantiation
+  // (needs 'wasm-unsafe-eval') and JS string evaluation / new Function (needs
+  // 'unsafe-eval'), so prod requires both. Dev additionally needs unsafe-inline
+  // for the Vite client. (script-src is the app's own trusted bundle; the app
+  // is behind EasyAuth, and the strict artifact: CSP is unaffected.)
+  const cspScriptSrc =
+    mode === 'development'
+      ? "'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'"
+      : "'self' 'unsafe-eval' 'wasm-unsafe-eval'";
 
   return {
     server: {
@@ -38,6 +46,15 @@ export default defineConfig(({ mode }) => {
       },
     },
     define: platformDefines,
+    // Pre-bundle streamdown + its plugins at server start. They lazy-load
+    // inner chunks (e.g. streamdown's `highlighted-body`), so if Vite
+    // discovers them on first markdown render it re-optimizes mid-session,
+    // changing chunk hashes and 404-ing any already-open page with "Failed to
+    // fetch dynamically imported module". Forcing them into the initial
+    // optimize pass keeps the hashes stable.
+    optimizeDeps: {
+      include: ['streamdown', '@streamdown/code', '@streamdown/math', '@streamdown/mermaid', '@streamdown/cjk'],
+    },
     plugins: [
       tailwindcss(),
       react(),

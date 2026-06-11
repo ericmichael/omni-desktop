@@ -7,7 +7,7 @@ import {
   InboxPromotionError,
   PROMOTED_TOMBSTONE_TTL_MS,
 } from '@/main/inbox-manager';
-import type { InboxItem, InboxShaping, Project, Ticket } from '@/shared/types';
+import type { InboxItem, Project, Ticket } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
 // Fake store
@@ -36,6 +36,10 @@ class FakeStore implements InboxManagerStore {
   setProjects(projects: Project[]) {
     this.projects = projects;
   }
+  // Tests don't exercise SQLite — fall back to project.pipeline / defaults.
+  getPipeline() {
+    return null;
+  }
 }
 
 const NOW = 1_700_000_000_000;
@@ -57,12 +61,6 @@ function makeManager() {
   };
   return { manager, store, tick, setClock };
 }
-
-const SMALL_SHAPING: InboxShaping = {
-  outcome: 'Users can log in via SSO.',
-  appetite: 'small',
-  notDoing: 'Custom themes.',
-};
 
 // ---------------------------------------------------------------------------
 // Queries & basic CRUD
@@ -148,43 +146,8 @@ describe('InboxManager: update + remove', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Shape / defer / reactivate
+// Defer / reactivate
 // ---------------------------------------------------------------------------
-
-describe('InboxManager: shape', () => {
-  it('sets status=shaped on a new item', () => {
-    const { manager, store } = makeManager();
-    const item = manager.add({ title: 't' });
-    manager.shape(item.id, SMALL_SHAPING);
-    const after = store.inboxItems[0];
-    expect(after.status).toBe('shaped');
-    expect(after.shaping).toEqual(SMALL_SHAPING);
-  });
-
-  it('preserves later status when shaping a deferred item', () => {
-    const { manager, store } = makeManager();
-    const item = manager.add({ title: 't' });
-    manager.defer(item.id);
-    manager.shape(item.id, SMALL_SHAPING);
-    expect(store.inboxItems[0].status).toBe('later');
-    expect(store.inboxItems[0].shaping).toBeDefined();
-  });
-
-  it('trims outcome', () => {
-    const { manager, store } = makeManager();
-    const item = manager.add({ title: 't' });
-    manager.shape(item.id, { outcome: '  ship it.  ', appetite: 'small' });
-    expect(store.inboxItems[0].shaping?.outcome).toBe('ship it.');
-  });
-
-  it('refuses to shape a promoted item', () => {
-    const { manager, store } = makeManager();
-    store.projects = [{ id: 'p1', label: 'P', slug: 'p', createdAt: NOW }];
-    const item = manager.add({ title: 't' });
-    manager.promoteToTicket(item.id, { projectId: 'p1' });
-    expect(() => manager.shape(item.id, SMALL_SHAPING)).toThrow(InboxPromotionError);
-  });
-});
 
 describe('InboxManager: defer + reactivate', () => {
   it('defer stamps laterAt and updatedAt', () => {
@@ -198,23 +161,14 @@ describe('InboxManager: defer + reactivate', () => {
     expect(after.updatedAt).toBe(NOW + 500);
   });
 
-  it('reactivate returns shaped item to shaped status', () => {
+  it('reactivate returns a deferred item to new status', () => {
     const { manager, store } = makeManager();
     const item = manager.add({ title: 't' });
-    manager.shape(item.id, SMALL_SHAPING);
     manager.defer(item.id);
     manager.reactivate(item.id);
     const after = store.inboxItems[0];
-    expect(after.status).toBe('shaped');
+    expect(after.status).toBe('new');
     expect(after.laterAt).toBeUndefined();
-  });
-
-  it('reactivate returns unshaped item to new status', () => {
-    const { manager, store } = makeManager();
-    const item = manager.add({ title: 't' });
-    manager.defer(item.id);
-    manager.reactivate(item.id);
-    expect(store.inboxItems[0].status).toBe('new');
   });
 
   it('refuses to defer/reactivate a promoted item', () => {
@@ -248,7 +202,6 @@ describe('InboxManager: promoteToTicket', () => {
     const { manager, store, tick } = makeManager();
     seedProject(store);
     const item = manager.add({ title: 'Fix login', note: 'Auth flake' });
-    manager.shape(item.id, SMALL_SHAPING);
     tick(5000);
     const ticket = manager.promoteToTicket(item.id, { projectId: 'p1' });
 
@@ -256,23 +209,9 @@ describe('InboxManager: promoteToTicket', () => {
     expect(ticket.title).toBe('Fix login');
     expect(ticket.description).toBe('Auth flake');
     expect(ticket.columnId).toBe('backlog');
-    expect(ticket.shaping).toEqual({
-      doneLooksLike: 'Users can log in via SSO.',
-      appetite: 'small',
-      outOfScope: 'Custom themes.',
-    });
 
     const stamped = store.inboxItems[0];
     expect(stamped.promotedTo).toEqual({ kind: 'ticket', id: ticket.id, at: NOW + 5000 });
-  });
-
-  it('collapses xl appetite to large on the ticket side', () => {
-    const { manager, store } = makeManager();
-    seedProject(store);
-    const item = manager.add({ title: 'Big' });
-    manager.shape(item.id, { outcome: 'big thing', appetite: 'xl' });
-    const ticket = manager.promoteToTicket(item.id, { projectId: 'p1' });
-    expect(ticket.shaping?.appetite).toBe('large');
   });
 
   it('uses the simple pipeline first column when project has no source', () => {
@@ -332,6 +271,40 @@ describe('InboxManager: promoteToProject', () => {
     const project = manager.promoteToProject(item.id, { label: '   ' });
     expect(project.label).toBe('Build X');
     expect(project.slug).toBe('build-x');
+  });
+
+  it('delegates to createProject when wired (so caller gets pipeline + root page)', () => {
+    const { store } = makeManager();
+    const createCalls: Array<{ label: string; slug: string }> = [];
+    const sentinel: Project = {
+      id: 'sentinel-id',
+      label: 'Sentinel',
+      slug: 'sentinel',
+      createdAt: NOW,
+    };
+    const manager = new InboxManager({
+      store: store as unknown as InboxManagerStore,
+      newId: () => 'unused-id',
+      now: () => NOW,
+      createProject: (input) => {
+        createCalls.push({ label: input.label, slug: input.slug });
+        return sentinel;
+      },
+    });
+    const item = manager.add({ title: 'Promote me' });
+    const project = manager.promoteToProject(item.id, { label: 'Promote me!' });
+
+    // Direct setProjects-insert path should NOT have run. Only the host's
+    // createProject callback decides what gets persisted.
+    expect(store.projects).toHaveLength(0);
+    expect(createCalls).toEqual([{ label: 'Promote me!', slug: 'promote-me' }]);
+    expect(project).toBe(sentinel);
+    // Promotion tombstone still gets stamped using whatever id the host returned.
+    expect(store.inboxItems[0].promotedTo).toEqual({
+      kind: 'project',
+      id: 'sentinel-id',
+      at: NOW,
+    });
   });
 });
 

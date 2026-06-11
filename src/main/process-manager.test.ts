@@ -1,5 +1,5 @@
 /**
- * Tests for ProcessManager — mode resolution, status fallback,
+ * Tests for ProcessManager — profile-name resolution, status fallback,
  * getRunningWsUrlForTicket, and lifecycle operations.
  *
  * Mocks AgentProcess to avoid real process spawning.
@@ -44,31 +44,52 @@ vi.mock('@/main/store', () => ({
   getStore: vi.fn(() => ({ get: vi.fn(() => undefined), set: vi.fn() })),
 }));
 
+// node:child_process is touched by resolveGitRemote — stub to no remote.
+vi.mock('node:child_process', async () => {
+  const actual = (await vi.importActual('node:child_process')) as typeof import('node:child_process');
+  return {
+    ...actual,
+    execFileSync: vi.fn(() => {
+      throw new Error('no git remote in test');
+    }),
+  };
+});
+
 // ---------------------------------------------------------------------------
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
 
-import { ProcessManager, type ProcessManagerStoreData } from '@/main/process-manager';
-import type { AgentProcessStatus, WithTimestamp } from '@/shared/types';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+import { isLauncherOwnedDir, ProcessManager, type ProcessManagerStoreData } from '@/main/process-manager';
+import { getDefaultWorkspaceDir } from '@/main/util';
+import { gitTokenEnvName } from '@/shared/git-credentials';
+import type { AgentProcessStatus, GitCredential, Project, WithTimestamp } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makePm(opts?: { storeData?: Partial<ProcessManagerStoreData> }) {
+function makePm(opts?: {
+  storeData?: Partial<ProcessManagerStoreData>;
+  resolveGitToken?: (credentialId: string) => Promise<string | undefined>;
+}) {
   hoisted.agentProcessInstances = [];
   const sendCalls: Array<{ channel: string; args: unknown[] }> = [];
   const storeData: ProcessManagerStoreData = {
-    sandboxBackend: 'none',
-    sandboxProfiles: null,
-    selectedMachineId: null,
+    defaultProfileName: 'host',
+    projects: [],
     ...opts?.storeData,
   };
   const pm = new ProcessManager({
     sendToWindow: ((channel: string, ...args: unknown[]) => {
       sendCalls.push({ channel, args });
-    }) as ProcessManager['start'] extends (...args: infer _A) => unknown ? never : never as never,
+    }) as never,
     getStoreData: () => storeData,
+    resolveGitToken: opts?.resolveGitToken,
   });
   return { pm, sendCalls };
 }
@@ -76,6 +97,21 @@ function makePm(opts?: { storeData?: Partial<ProcessManagerStoreData> }) {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+describe('isLauncherOwnedDir', () => {
+  it('classifies per-conversation Sessions scratch dirs as launcher-owned', () => {
+    expect(isLauncherOwnedDir('/custom/root/Sessions/abc-123')).toBe(true);
+  });
+
+  it('classifies dirs under the default workspace tree as launcher-owned', () => {
+    expect(isLauncherOwnedDir(`${getDefaultWorkspaceDir()}/Projects/my-project`)).toBe(true);
+    expect(isLauncherOwnedDir(getDefaultWorkspaceDir())).toBe(true);
+  });
+
+  it('classifies arbitrary user folders as user-linked', () => {
+    expect(isLauncherOwnedDir('/home/someone/Documents/my-folder')).toBe(false);
+  });
+});
 
 describe('ProcessManager', () => {
   beforeEach(() => {
@@ -88,18 +124,46 @@ describe('ProcessManager', () => {
 
   describe('mode resolution', () => {
     it.each([
-      ['docker', 'sandbox'],
-      ['podman', 'podman'],
-      ['vm', 'vm'],
-      ['local', 'local'],
-      ['platform', 'platform'],
-      ['none', 'none'],
-    ] as const)('sandboxBackend=%s resolves to mode=%s', (backend, expectedMode) => {
-      const { pm } = makePm({ storeData: { sandboxBackend: backend } });
-      pm.start('test-1', { workspaceDir: '/tmp/ws' });
+      ['host', 'serve'],
+      ['devbox', 'serve'],
+      ['custom-profile', 'serve'],
+      ['platform', 'compute'],
+    ] as const)('defaultProfileName=%s resolves to mode=%s', async (profileName, expectedMode) => {
+      const { pm } = makePm({ storeData: { defaultProfileName: profileName } });
+      await pm.start('test-1', { workspaceDir: '/tmp/ws' });
 
       expect(hoisted.agentProcessInstances).toHaveLength(1);
       expect(hoisted.agentProcessInstances[0]!.mode).toBe(expectedMode);
+    });
+
+    it('per-project sandboxProfile overrides defaultProfileName', async () => {
+      const project: Project = {
+        id: 'proj_1',
+        label: 'Proj',
+        slug: 'proj',
+        sources: [],
+        createdAt: 0,
+        sandboxProfile: 'platform',
+      };
+      const { pm } = makePm({
+        storeData: { defaultProfileName: 'host', projects: [project] },
+      });
+      await pm.start('tab-1', { workspaceDir: '/tmp/ws', projectId: 'proj_1' });
+
+      expect(hoisted.agentProcessInstances[0]!.mode).toBe('compute');
+    });
+
+    it('forwards profileName + projectId in the start arg', async () => {
+      const { pm } = makePm({ storeData: { defaultProfileName: 'devbox' } });
+      await pm.start('tab-1', { workspaceDir: '/tmp', projectId: 'proj_x' });
+
+      expect(hoisted.agentProcessInstances[0]!.start).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspaceDir: '/tmp',
+          profileName: 'devbox',
+          projectId: 'proj_x',
+        })
+      );
     });
   });
 
@@ -110,9 +174,9 @@ describe('ProcessManager', () => {
       expect(status.type).toBe('uninitialized');
     });
 
-    it('returns status from AgentProcess when process exists', () => {
+    it('returns status from AgentProcess when process exists', async () => {
       const { pm } = makePm();
-      pm.start('proc-1', { workspaceDir: '/tmp' });
+      await pm.start('proc-1', { workspaceDir: '/tmp' });
 
       const mockStatus: WithTimestamp<AgentProcessStatus> = {
         type: 'running',
@@ -123,28 +187,12 @@ describe('ProcessManager', () => {
 
       expect(pm.getStatus('proc-1')).toBe(mockStatus);
     });
-
-    it('uses statusFallback when process does not exist', () => {
-      const { pm } = makePm();
-      const fallbackStatus: WithTimestamp<AgentProcessStatus> = {
-        type: 'running',
-        timestamp: 2000,
-        data: { wsUrl: 'ws://fallback:9000/ws', uiUrl: 'http://fallback:9000' },
-      };
-      pm.statusFallback = (id) => (id === 'supervisor-1' ? fallbackStatus : null);
-
-      expect(pm.getStatus('supervisor-1')).toBe(fallbackStatus);
-      expect(pm.getStatus('other')).toEqual(expect.objectContaining({ type: 'uninitialized' }));
-    });
   });
 
   describe('getRunningWsUrlForTicket', () => {
     it('returns null when no code tabs match the ticketId', () => {
       const { pm } = makePm();
-      const result = pm.getRunningWsUrlForTicket('ticket-1', [
-        { id: 'tab-1', ticketId: 'ticket-2' },
-        { id: 'tab-2' },
-      ]);
+      const result = pm.getRunningWsUrlForTicket('ticket-1', [{ id: 'tab-1', ticketId: 'ticket-2' }, { id: 'tab-2' }]);
       expect(result).toBeNull();
     });
 
@@ -154,9 +202,9 @@ describe('ProcessManager', () => {
       expect(result).toBeNull();
     });
 
-    it('returns wsUrl when matching tab has a running process', () => {
+    it('returns wsUrl when matching tab has a running process', async () => {
       const { pm } = makePm();
-      pm.start('tab-1', { workspaceDir: '/tmp' });
+      await pm.start('tab-1', { workspaceDir: '/tmp' });
 
       hoisted.agentProcessInstances[0]!.getStatus.mockReturnValue({
         type: 'running',
@@ -168,9 +216,9 @@ describe('ProcessManager', () => {
       expect(result).toBe('ws://localhost:9000/ws');
     });
 
-    it('returns null when matching tab process is not running', () => {
+    it('returns null when matching tab process is not running', async () => {
       const { pm } = makePm();
-      pm.start('tab-1', { workspaceDir: '/tmp' });
+      await pm.start('tab-1', { workspaceDir: '/tmp' });
 
       hoisted.agentProcessInstances[0]!.getStatus.mockReturnValue({
         type: 'starting',
@@ -183,9 +231,9 @@ describe('ProcessManager', () => {
   });
 
   describe('lifecycle', () => {
-    it('start creates an AgentProcess and calls start', () => {
+    it('start creates an AgentProcess and calls start', async () => {
       const { pm } = makePm();
-      pm.start('proc-1', { workspaceDir: '/tmp/ws' });
+      await pm.start('proc-1', { workspaceDir: '/tmp/ws' });
 
       expect(hoisted.agentProcessInstances).toHaveLength(1);
       expect(hoisted.agentProcessInstances[0]!.start).toHaveBeenCalledWith(
@@ -193,61 +241,52 @@ describe('ProcessManager', () => {
       );
     });
 
-    it('start reuses existing process on same mode', () => {
+    it('start reuses existing process on same mode', async () => {
       const { pm } = makePm();
-      pm.start('proc-1', { workspaceDir: '/tmp/ws' });
-      pm.start('proc-1', { workspaceDir: '/tmp/ws2' });
+      await pm.start('proc-1', { workspaceDir: '/tmp/ws' });
+      await pm.start('proc-1', { workspaceDir: '/tmp/ws2' });
 
-      // Should reuse — only 1 instance created
       expect(hoisted.agentProcessInstances).toHaveLength(1);
       expect(hoisted.agentProcessInstances[0]!.start).toHaveBeenCalledTimes(2);
     });
 
-    it('start creates new process when mode changes', () => {
+    it('start creates new process when mode changes', async () => {
       const storeData: ProcessManagerStoreData = {
-        sandboxBackend: 'docker',
-        sandboxProfiles: null,
-        selectedMachineId: null,
+        defaultProfileName: 'host',
+        projects: [],
       };
       const pm = new ProcessManager({
         sendToWindow: (() => {}) as never,
         getStoreData: () => storeData,
       });
 
-      pm.start('proc-1', { workspaceDir: '/tmp' });
+      await pm.start('proc-1', { workspaceDir: '/tmp' });
       expect(hoisted.agentProcessInstances).toHaveLength(1);
-      expect(hoisted.agentProcessInstances[0]!.mode).toBe('sandbox');
+      expect(hoisted.agentProcessInstances[0]!.mode).toBe('serve');
 
-      // Change mode
-      storeData.sandboxBackend = 'podman';
-      pm.start('proc-1', { workspaceDir: '/tmp' });
+      // Flip to platform profile — different mode (compute) → new instance
+      storeData.defaultProfileName = 'platform';
+      await pm.start('proc-1', { workspaceDir: '/tmp' });
 
       expect(hoisted.agentProcessInstances).toHaveLength(2);
-      expect(hoisted.agentProcessInstances[1]!.mode).toBe('podman');
-      // Old process should have been exited
+      expect(hoisted.agentProcessInstances[1]!.mode).toBe('compute');
       expect(hoisted.agentProcessInstances[0]!.exit).toHaveBeenCalled();
     });
 
     it('stop removes process from map', async () => {
       const { pm } = makePm();
-      pm.start('proc-1', { workspaceDir: '/tmp' });
+      await pm.start('proc-1', { workspaceDir: '/tmp' });
 
       await pm.stop('proc-1');
 
       expect(hoisted.agentProcessInstances[0]!.stop).toHaveBeenCalled();
-      // Subsequent getStatus should return uninitialized
       expect(pm.getStatus('proc-1').type).toBe('uninitialized');
-    });
-
-    it('stop is a no-op for unknown processId', async () => {
-      const { pm } = makePm();
-      await pm.stop('unknown'); // should not throw
     });
 
     it('cleanup exits all processes', async () => {
       const { pm } = makePm();
-      pm.start('a', { workspaceDir: '/tmp/a' });
-      pm.start('b', { workspaceDir: '/tmp/b' });
+      await pm.start('a', { workspaceDir: '/tmp/a' });
+      await pm.start('b', { workspaceDir: '/tmp/b' });
 
       await pm.cleanup();
 
@@ -258,32 +297,98 @@ describe('ProcessManager', () => {
     });
   });
 
-  describe('sandbox profile', () => {
-    it('uses variant from selected profile', () => {
-      const { pm } = makePm({
-        storeData: {
-          sandboxBackend: 'platform',
-          sandboxProfiles: [
-            { resource_id: 42, name: 'GPU', backend: 'platform', variant: 'standard' },
-          ],
-          selectedMachineId: 42,
-        },
-      });
+  describe('git-remote auth', () => {
+    const gitProject = (): Project => ({
+      id: 'proj_git',
+      label: 'Git',
+      slug: 'git',
+      createdAt: 0,
+      sources: [{ id: 'src1', mountName: 'svc', kind: 'git-remote', repoUrl: 'https://github.com/acme/private.git' }],
+    });
+    const cred: GitCredential = {
+      id: 'cred-123',
+      host: 'github.com',
+      username: 'x-access-token',
+      last4: 'beef',
+      createdAt: 0,
+    };
 
-      pm.start('proc-1', { workspaceDir: '/tmp' });
-
-      expect(hoisted.agentProcessInstances[0]!.start).toHaveBeenCalledWith(
-        expect.objectContaining({ sandboxVariant: 'standard' })
-      );
+    afterEach(() => {
+      // Reset the stubbed git-remote lookup so it doesn't leak between tests.
+      vi.mocked(execFileSync).mockReset();
     });
 
-    it('defaults to work variant when no profile selected', () => {
-      const { pm } = makePm({ storeData: { sandboxBackend: 'docker' } });
-      pm.start('proc-1', { workspaceDir: '/tmp' });
+    it('attaches auth + injects the token env when a host credential matches', async () => {
+      const { pm } = makePm({
+        storeData: { projects: [gitProject()], gitCredentials: [cred] },
+        resolveGitToken: async (id) => (id === 'cred-123' ? 'ghp_thetoken' : undefined),
+      });
+      await pm.start('proc-1', { workspaceDir: '/tmp', projectId: 'proj_git' });
 
-      expect(hoisted.agentProcessInstances[0]!.start).toHaveBeenCalledWith(
-        expect.objectContaining({ sandboxVariant: 'work' })
-      );
+      const startArg = hoisted.agentProcessInstances[0]!.start.mock.calls[0]![0] as {
+        sources: Array<{ kind: string; auth?: { tokenEnv: string; username: string } }>;
+        gitTokenEnv?: Record<string, string>;
+        credentials?: Array<{ url: string; username: string; tokenEnv: string }>;
+      };
+      const envName = gitTokenEnvName('cred-123');
+      expect(startArg.sources[0]!.auth).toEqual({ tokenEnv: envName, username: 'x-access-token' });
+      expect(startArg.gitTokenEnv).toEqual({ [envName]: 'ghp_thetoken' });
+      // Boot-time bundle: one descriptor for the git-remote host (no token value).
+      expect(startArg.credentials).toEqual([
+        { url: 'https://github.com/acme/private.git', username: 'x-access-token', tokenEnv: envName },
+      ]);
+    });
+
+    it('builds a credential for a local-git checkout from its own remote (no clone auth hint)', async () => {
+      // Real temp git repo with a real origin remote so directoryHasGit() and
+      // resolveGitRemote() (both real, via uninstrumented fs/git) resolve without
+      // relying on module-mock propagation into the source under test.
+      const checkout = mkdtempSync(path.join(tmpdir(), 'omni-localgit-'));
+      const cp = (await vi.importActual('node:child_process')) as typeof import('node:child_process');
+      cp.execFileSync('git', ['init', '-q'], { cwd: checkout });
+      cp.execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/private.git'], { cwd: checkout });
+      const localProject: Project = {
+        id: 'proj_local',
+        label: 'Local',
+        slug: 'local',
+        createdAt: 0,
+        sources: [{ id: 'src1', mountName: 'svc', kind: 'local', workspaceDir: checkout }],
+      };
+      const { pm } = makePm({
+        storeData: { projects: [localProject], gitCredentials: [cred] },
+        resolveGitToken: async (id) => (id === 'cred-123' ? 'ghp_thetoken' : undefined),
+      });
+      await pm.start('proc-1', { workspaceDir: checkout, projectId: 'proj_local' });
+
+      const startArg = hoisted.agentProcessInstances[0]!.start.mock.calls[0]![0] as {
+        sources: Array<{ kind: string; auth?: unknown }>;
+        gitTokenEnv?: Record<string, string>;
+        credentials?: Array<{ url: string; username: string; tokenEnv: string }>;
+      };
+      const envName = gitTokenEnvName('cred-123');
+      expect(startArg.sources[0]!.kind).toBe('local-git');
+      // local-git is seeded by archive, not cloned → no clone-time auth hint…
+      expect(startArg.sources[0]!.auth).toBeUndefined();
+      // …but the token + boot-time credential are still injected for git/gh/az.
+      expect(startArg.gitTokenEnv).toEqual({ [envName]: 'ghp_thetoken' });
+      expect(startArg.credentials).toEqual([
+        { url: 'https://github.com/acme/private.git', username: 'x-access-token', tokenEnv: envName },
+      ]);
+    });
+
+    it('leaves the source unauthenticated when no credential matches the host', async () => {
+      const { pm } = makePm({
+        storeData: { projects: [gitProject()], gitCredentials: [{ ...cred, host: 'gitlab.com' }] },
+        resolveGitToken: async () => 'unused',
+      });
+      await pm.start('proc-1', { workspaceDir: '/tmp', projectId: 'proj_git' });
+
+      const startArg = hoisted.agentProcessInstances[0]!.start.mock.calls[0]![0] as {
+        sources: Array<{ auth?: unknown }>;
+        gitTokenEnv?: Record<string, string>;
+      };
+      expect(startArg.sources[0]!.auth).toBeUndefined();
+      expect(startArg.gitTokenEnv).toBeUndefined();
     });
   });
 });

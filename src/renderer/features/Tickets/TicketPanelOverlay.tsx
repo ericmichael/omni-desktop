@@ -4,18 +4,18 @@ import { useStore } from '@nanostores/react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { memo } from 'react';
 
-import type { TicketId } from '@/shared/types';
+import type { CodeTabId, TicketId } from '@/shared/types';
 
 import { $tickets } from './state';
 import { TicketArtifactsTab } from './TicketArtifactsTab';
 import { TicketOverviewTab } from './TicketOverviewTab';
-import { TicketPRTab } from './TicketPRTab';
+import { ChangesTab, TicketPRTab } from './TicketPRTab';
 
 export type TicketPanel = 'overview' | 'pr' | 'artifacts';
 
 const PANEL_META: Record<TicketPanel, { label: string; icon: typeof Info20Regular }> = {
   overview: { label: 'Overview', icon: Info20Regular },
-  pr: { label: 'PR', icon: BranchRequest20Regular },
+  pr: { label: 'Changes', icon: BranchRequest20Regular },
   artifacts: { label: 'Artifacts', icon: DocumentMultiple20Regular },
 };
 
@@ -90,10 +90,10 @@ const useStyles = makeStyles({
   },
 });
 
-const PanelContent = memo(({ panel, ticketId }: { panel: TicketPanel; ticketId: TicketId }) => {
+const PanelContent = memo(({ panel, ticketId, tabId }: { panel: TicketPanel; ticketId?: TicketId; tabId: CodeTabId }) => {
   const styles = useStyles();
   const tickets = useStore($tickets);
-  const ticket = tickets[ticketId];
+  const ticket = ticketId ? tickets[ticketId] : undefined;
 
   if (panel === 'overview') {
     if (!ticket) {
@@ -106,14 +106,14 @@ return null;
     );
   }
   if (panel === 'pr') {
-    return <TicketPRTab ticketId={ticketId} />;
+    return ticketId ? <TicketPRTab ticketId={ticketId} /> : <ChangesTab tabId={tabId} />;
   }
-  return <TicketArtifactsTab ticketId={ticketId} />;
+  return ticketId ? <TicketArtifactsTab ticketId={ticketId} /> : null;
 });
 PanelContent.displayName = 'PanelContent';
 
 export const TicketPanelOverlay = memo(
-  ({ panel, ticketId, onClose }: { panel: TicketPanel | null; ticketId: TicketId; onClose: () => void }) => {
+  ({ panel, ticketId, tabId, onClose }: { panel: TicketPanel | null; ticketId?: TicketId; tabId: CodeTabId; onClose: () => void }) => {
     const styles = useStyles();
     return (
       <AnimatePresence>
@@ -155,7 +155,7 @@ export const TicketPanelOverlay = memo(
                   </button>
                 </div>
                 <div className={styles.panelBody}>
-                  <PanelContent panel={panel} ticketId={ticketId} />
+                  <PanelContent panel={panel} ticketId={ticketId} tabId={tabId} />
                 </div>
               </div>
             </motion.div>

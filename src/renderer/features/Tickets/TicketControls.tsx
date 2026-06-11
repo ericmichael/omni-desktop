@@ -41,25 +41,6 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteGreenForeground1,
     fontWeight: tokens.fontWeightMedium,
   },
-  yellowIcon: {
-    color: tokens.colorPaletteYellowForeground1,
-  },
-  yellowText: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorPaletteYellowForeground1,
-    fontWeight: tokens.fontWeightMedium,
-  },
-  blueText: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorBrandForeground1,
-    fontWeight: tokens.fontWeightMedium,
-  },
-  blueDot: {
-    width: '6px',
-    height: '6px',
-    borderRadius: '50%',
-    backgroundColor: tokens.colorBrandForeground1,
-  },
   redIcon: {
     color: tokens.colorPaletteRedForeground1,
   },
@@ -89,7 +70,7 @@ const useTicketAutomation = (ticketId: TicketId) => {
     supervisorTask?.status.type === 'connecting' ||
     supervisorTask?.status.type === 'starting';
 
-  const handleStart = useCallback(() => ticketApi.startSupervisor(ticketId), [ticketId]);
+  const handleStart = useCallback(() => ticketApi.requestStartSupervisor(ticketId), [ticketId]);
   const handleStop = useCallback(() => ticketApi.stopSupervisor(ticketId), [ticketId]);
   const handleReset = useCallback(() => ticketApi.resetSupervisorSession(ticketId), [ticketId]);
 
@@ -155,10 +136,8 @@ export const TicketBannerActions = memo(({ ticketId }: { ticketId: TicketId }) =
 return null;
 }
 
-  const isAutonomous = phase === 'running' || phase === 'continuing';
+  const isAutonomous = phase === 'running';
   const isProvisioning = phase === 'provisioning' || phase === 'connecting' || phase === 'session_creating';
-  const isRetrying = phase === 'retrying';
-  const isAwaitingInput = phase === 'awaiting_input';
   const isError = phase === 'error';
   const isCompleted = phase === 'completed';
 
@@ -173,24 +152,6 @@ return null;
   }
   if (isProvisioning) {
     return <Spinner size="sm" />;
-  }
-  if (isAwaitingInput) {
-    return (
-      <>
-        <span className={`${styles.blueDot} animate-pulse`} />
-        <span className={styles.blueText}>Needs input</span>
-        <IconButton aria-label="Stop" icon={<Stop20Filled style={{ width: 10, height: 10 }} />} size="sm" onClick={handleStop} />
-      </>
-    );
-  }
-  if (isRetrying) {
-    return (
-      <>
-        <ArrowSync20Regular style={{ width: 10, height: 10 }} className={`${styles.yellowIcon} animate-spin`} />
-        <span className={styles.yellowText}>Retrying</span>
-        <IconButton aria-label="Stop" icon={<Stop20Filled style={{ width: 10, height: 10 }} />} size="sm" onClick={handleStop} />
-      </>
-    );
   }
   if (isError) {
     return (

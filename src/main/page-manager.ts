@@ -2,9 +2,10 @@
  * PageManager — owns the lifecycle of user-authored pages (markdown + marimo
  * notebooks) for each project.
  *
- * Extracted from `ProjectManager` (Sprint A of the project-manager decomposition).
- * Mirrors the narrow-store-adapter pattern already established by `InboxManager`
- * so tests can drop in an in-memory fake without bringing up electron-store.
+ * Pages live under `<config>/pages/<projectId>/<pageId>.{md,py}`. Keyed by
+ * stable id, not slug, so project renames are pure DB ops. Shared 1:1 with
+ * the MCP server (omni-projects-db `getDefaultPagesDir`), so both writers
+ * converge on the same files.
  *
  * Owns:
  *   - The `pages` store slice (get/set/getByProject/add/update/remove/reorder)
@@ -16,12 +17,13 @@
  *
  * Does NOT own:
  *   - Project CRUD (ProjectManager)
- *   - The authoritative `getProjectDirPath` resolver — injected via
- *     `resolveProjectDir` so this module doesn't duplicate the
- *     personal-vs-slug directory layout.
+ *   - The project's working directory (agents' workspace) — that's still
+ *     resolved separately via `ProjectManager.getProjectDir`. Pages
+ *     deliberately no longer live in the working dir.
  */
 import fs from 'fs/promises';
 import { nanoid } from 'nanoid';
+import { normalizeMarkdown } from 'omni-projects-db';
 import path from 'path';
 
 import { computePagesToDelete } from '@/lib/page-cascade';
@@ -29,7 +31,7 @@ import { getTemplate, type TemplateKey } from '@/lib/page-templates';
 import { PageWatcherManager } from '@/lib/page-watcher';
 import { MARIMO_NOTEBOOK_TEMPLATE } from '@/main/extensions/marimo';
 import { writeGlassCss } from '@/main/extensions/marimo-glass';
-import { ensureDirectory } from '@/main/util';
+import { ensureDirectory, getProjectPagesDir } from '@/main/util';
 import type { IpcRendererEvents, Page, PageId, Project, ProjectId } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
@@ -39,11 +41,20 @@ import type { IpcRendererEvents, Page, PageId, Project, ProjectId } from '@/shar
 /**
  * Minimal store surface PageManager needs. Kept narrow so tests can fake it
  * with a plain object (same pattern as InboxManagerStore).
+ *
+ * Pages are now resolved purely by `page.projectId` — PageManager no longer
+ * needs to read the projects slice to know where files live.
  */
 export interface PageManagerStore {
   getPages(): Page[];
   setPages(pages: Page[]): void;
-  getProjects(): Project[];
+  /**
+   * Optional DB-backed content store for markdown docs. When present, doc
+   * bodies are read/written here (the source of truth) instead of disk files;
+   * notebooks always stay on disk. Absent → legacy filesystem mode.
+   */
+  getContent?(pageId: PageId): Promise<string | null>;
+  setContent?(pageId: PageId, body: string): Promise<void>;
 }
 
 export type PageManagerWindowSender = <T extends keyof IpcRendererEvents>(
@@ -56,10 +67,10 @@ export interface PageManagerDeps {
   /** Emits `page:content-changed` / `page:content-deleted` to the renderer. */
   sendToWindow: PageManagerWindowSender;
   /**
-   * Authoritative project-directory resolver. Injected because
-   * ProjectManager owns the personal-vs-slug layout decision.
+   * Resolve the absolute pages dir for a project id. Injected so tests can
+   * point at a tmp dir without monkey-patching the global util.
    */
-  resolveProjectDir: (project: Project) => string;
+  resolvePagesDir?: (projectId: ProjectId) => string;
   /** Mint a page id. Injected for deterministic tests. */
   newId?: () => string;
   /** Current wall-clock time. Injected for deterministic tests. */
@@ -73,15 +84,17 @@ export interface PageManagerDeps {
 export class PageManager {
   private store: PageManagerStore;
   private sendToWindow: PageManagerWindowSender;
-  private resolveProjectDir: (project: Project) => string;
+  private resolvePagesDir: (projectId: ProjectId) => string;
   private newId: () => string;
   private now: () => number;
   private watcher: PageWatcherManager;
+  /** DB-backed (doc) pages currently watched by an editor — no FS watch exists for them. */
+  private dbWatched = new Set<PageId>();
 
   constructor(deps: PageManagerDeps) {
     this.store = deps.store;
     this.sendToWindow = deps.sendToWindow;
-    this.resolveProjectDir = deps.resolveProjectDir;
+    this.resolvePagesDir = deps.resolvePagesDir ?? getProjectPagesDir;
     this.newId = deps.newId ?? (() => nanoid());
     this.now = deps.now ?? (() => Date.now());
     this.watcher = new PageWatcherManager(
@@ -130,22 +143,28 @@ export class PageManager {
     pages.push(page);
     this.writeAll(pages);
 
-    // Seed the .md / .py file on disk. Pending-write markers keep the watcher's
-    // echo-suppression from firing a spurious page:content-changed on this first write.
-    const project = this.store.getProjects().find((p) => p.id === page.projectId);
-    if (project) {
-      const filePath = this.getPageFilePath(project, page);
-      const initialContent = page.kind === 'notebook' ? MARIMO_NOTEBOOK_TEMPLATE : getTemplate(template);
+    const filePath = this.getPageFilePath(page);
+    const rawInitial = page.kind === 'notebook' ? MARIMO_NOTEBOOK_TEMPLATE : getTemplate(template);
+    // Normalize markdown so content is canonical CommonMark and downstream
+    // readers (Yoopta, agents, grep) get a parseable body. Skip notebooks —
+    // those are .py source, not markdown.
+    const initialContent = page.kind === 'notebook' ? rawInitial : normalizeMarkdown(rawInitial);
+    if (this.isDbBacked(page)) {
+      // Markdown doc → DB source of truth.
+      void this.store.setContent!(page.id, initialContent).catch(() => {});
+    } else {
+      // Seed the .md / .py file on disk. Pending-write markers keep the
+      // watcher's echo-suppression from firing a spurious content-changed.
       this.watcher.notePendingWrite(filePath, initialContent);
       void ensureDirectory(path.dirname(filePath)).then(() =>
         fs.writeFile(filePath, initialContent, 'utf-8').catch(() => {})
       );
-      // Notebook pages need the glass CSS sidecar so marimo's css_file= reference
-      // resolves on first open. Default to glass-off; the renderer rewrites it
-      // immediately before launching the marimo webview.
-      if (page.kind === 'notebook') {
-        void writeGlassCss(path.dirname(filePath), false).catch(() => {});
-      }
+    }
+    // Notebook pages need the glass CSS sidecar so marimo's css_file= reference
+    // resolves on first open. Default to glass-off; the renderer rewrites it
+    // immediately before launching the marimo webview.
+    if (page.kind === 'notebook') {
+      void writeGlassCss(path.dirname(filePath), false).catch(() => {});
     }
     return page;
   };
@@ -173,15 +192,12 @@ export class PageManager {
 
     // Unsubscribe BEFORE deleting the file so chokidar's unlink event doesn't
     // reach the watcher and emit a phantom page:content-deleted to any subscriber.
-    const project = this.store.getProjects().find((p) => p.id === target.projectId);
-    if (project) {
-      for (const pageId of toDelete) {
-        const page = pages.find((p) => p.id === pageId);
-        if (page) {
-          const filePath = this.getPageFilePath(project, page);
-          this.watcher.unsubscribe(filePath);
-          void fs.rm(filePath, { force: true }).catch(() => {});
-        }
+    for (const pageId of toDelete) {
+      const page = pages.find((p) => p.id === pageId);
+      if (page) {
+        const filePath = this.getPageFilePath(page);
+        this.watcher.unsubscribe(filePath);
+        void fs.rm(filePath, { force: true }).catch(() => {});
       }
     }
 
@@ -205,21 +221,39 @@ export class PageManager {
 
   // ---------- File I/O ----------
 
+  /** Whether this page's body is DB-backed (markdown docs when a content store is wired). */
+  private isDbBacked(page: Page): boolean {
+    return page.kind !== 'notebook' && !!this.store.getContent;
+  }
+
+  private async readFileSafe(filePath: string): Promise<string | null> {
+    try {
+      return await fs.readFile(filePath, 'utf-8');
+    } catch {
+      return null;
+    }
+  }
+
   readContent = async (pageId: PageId): Promise<string> => {
     const page = this.getById(pageId);
     if (!page) {
       return '';
     }
-    const project = this.store.getProjects().find((p) => p.id === page.projectId);
-    if (!project) {
+    if (this.isDbBacked(page)) {
+      const stored = await this.store.getContent!(pageId);
+      if (stored != null) {
+        return stored;
+      }
+      // Migrate-on-read: import legacy on-disk content into the DB once, then
+      // serve from the DB henceforth.
+      const legacy = await this.readFileSafe(this.getPageFilePath(page));
+      if (legacy != null && this.store.setContent) {
+        await this.store.setContent(pageId, legacy);
+        return legacy;
+      }
       return '';
     }
-    const filePath = this.getPageFilePath(project, page);
-    try {
-      return await fs.readFile(filePath, 'utf-8');
-    } catch {
-      return '';
-    }
+    return (await this.readFileSafe(this.getPageFilePath(page))) ?? '';
   };
 
   writeContent = async (pageId: PageId, content: string): Promise<void> => {
@@ -227,16 +261,18 @@ export class PageManager {
     if (!page) {
       return;
     }
-    const project = this.store.getProjects().find((p) => p.id === page.projectId);
-    if (!project) {
+    // Canonicalize markdown; notebook pages stay raw (.py, not markdown).
+    const normalized = page.kind === 'notebook' ? content : normalizeMarkdown(content);
+    if (this.isDbBacked(page)) {
+      await this.store.setContent!(pageId, normalized);
       return;
     }
-    const filePath = this.getPageFilePath(project, page);
+    const filePath = this.getPageFilePath(page);
     await ensureDirectory(path.dirname(filePath));
-    // Record the pending write BEFORE touching disk so the resulting chokidar
-    // event is recognized as our own echo and suppressed.
-    this.watcher.notePendingWrite(filePath, content);
-    await fs.writeFile(filePath, content, 'utf-8');
+    // The pending-write echo suppression must see the exact bytes that hit
+    // disk, so normalize first, then note, then write.
+    this.watcher.notePendingWrite(filePath, normalized);
+    await fs.writeFile(filePath, normalized, 'utf-8');
   };
 
   /** Renderer-facing: start watching a page's file for external edits. */
@@ -245,11 +281,13 @@ export class PageManager {
     if (!page) {
       return null;
     }
-    const project = this.store.getProjects().find((p) => p.id === page.projectId);
-    if (!project) {
-      return null;
+    // DB-backed docs have no file to watch — record interest so an external
+    // write (other replica / agent) can be pushed via reemitWatchedContent.
+    if (this.isDbBacked(page)) {
+      this.dbWatched.add(pageId);
+      return { content: await this.readContent(pageId) };
     }
-    const filePath = this.getPageFilePath(project, page);
+    const filePath = this.getPageFilePath(page);
     await this.watcher.subscribe(filePath);
     let content = '';
     try {
@@ -265,12 +303,28 @@ export class PageManager {
     if (!page) {
       return;
     }
-    const project = this.store.getProjects().find((p) => p.id === page.projectId);
-    if (!project) {
+    if (this.isDbBacked(page)) {
+      this.dbWatched.delete(pageId);
       return;
     }
-    const filePath = this.getPageFilePath(project, page);
+    const filePath = this.getPageFilePath(page);
     this.watcher.unsubscribe(filePath);
+  };
+
+  /**
+   * Re-read and re-emit content for every DB-backed page an editor is watching.
+   * Called when an external change is detected (the SQLite change-watcher, which
+   * is page-agnostic). The renderer drops bodies identical to its buffer, so
+   * re-emitting unchanged pages is harmless.
+   */
+  reemitWatchedContent = async (): Promise<void> => {
+    for (const pageId of this.dbWatched) {
+      try {
+        this.sendToWindow('page:content-changed', pageId, await this.readContent(pageId));
+      } catch {
+        // page may have been deleted; ignore
+      }
+    }
   };
 
   /** Absolute filesystem path for a notebook page (null for non-notebook or unknown pages). */
@@ -279,11 +333,7 @@ export class PageManager {
     if (!page || page.kind !== 'notebook') {
       return null;
     }
-    const project = this.store.getProjects().find((p) => p.id === page.projectId);
-    if (!project) {
-      return null;
-    }
-    return this.getPageFilePath(project, page);
+    return this.getPageFilePath(page);
   };
 
   // ---------- Project-lifecycle helpers (called by ProjectManager) ----------
@@ -307,35 +357,48 @@ export class PageManager {
     return rootPage;
   };
 
-  /** Called from ProjectManager.removeProject to cascade-delete the project's pages. */
+  /**
+   * Called from ProjectManager.removeProject to cascade-delete the project's
+   * pages — both the DB rows and the on-disk `.md` / `.py` files. Without
+   * the filesystem cleanup, deleting a project leaves orphaned page files
+   * under `<projectDir>/pages/` forever.
+   */
   removeAllForProject = (projectId: ProjectId): void => {
-    const remaining = this.getAll().filter((p) => p.projectId !== projectId);
-    this.writeAll(remaining);
+    const pages = this.getAll();
+    const projectPages = pages.filter((p) => p.projectId === projectId);
+
+    // Unsubscribe watchers + remove files BEFORE dropping DB rows.
+    for (const page of projectPages) {
+      const filePath = this.getPageFilePath(page);
+      this.watcher.unsubscribe(filePath);
+      void fs.rm(filePath, { force: true }).catch(() => {});
+    }
+
+    // Also drop the project's pages dir wholesale so the parent dir is
+    // cleaned up alongside the individual files.
+    void fs.rm(this.resolvePagesDir(projectId), { recursive: true, force: true }).catch(() => {});
+
+    this.writeAll(pages.filter((p) => p.projectId !== projectId));
   };
 
   // ---------- Internal ----------
 
-  /** Page file path resolver — root pages use <projectDir>/context.md,
-   *  doc pages use <projectDir>/pages/<id>.md, notebooks use .py. */
-  private getPageFilePath = (project: Project, page: Page): string => {
-    const dir = this.resolveProjectDir(project);
-    if (page.isRoot) {
-      return path.join(dir, 'context.md');
-    }
+  /**
+   * Page file path resolver. All pages — root and non-root, markdown and
+   * notebook — live at `<pagesDir>/<projectId>/<pageId>.{md,py}`. There is
+   * no `context.md` special case; root pages are just rows with `is_root=1`.
+   */
+  private getPageFilePath = (page: Page): string => {
+    const dir = this.resolvePagesDir(page.projectId);
     const ext = page.kind === 'notebook' ? '.py' : '.md';
-    return path.join(dir, 'pages', `${page.id}${ext}`);
+    return path.join(dir, `${page.id}${ext}`);
   };
 
   /** Reverse-lookup a pageId from its on-disk file path (for watcher events). */
   private pageIdForFilePath = (filePath: string): PageId | null => {
     const pages = this.getAll();
-    const projects = this.store.getProjects();
     for (const page of pages) {
-      const project = projects.find((p) => p.id === page.projectId);
-      if (!project) {
-        continue;
-      }
-      if (this.getPageFilePath(project, page) === filePath) {
+      if (this.getPageFilePath(page) === filePath) {
         return page.id;
       }
     }

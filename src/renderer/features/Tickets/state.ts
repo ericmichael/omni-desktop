@@ -34,8 +34,27 @@ export const $tasks = map<Record<TaskId, Task>>({});
 /**
  * Tickets keyed by ID. Accumulates across projects — the sidebar tree and
  * the dashboard both need to render multiple projects' tickets at once.
+ *
+ * Hydrated from `store.tickets` on every `store:changed` broadcast so the
+ * kanban view doesn't need a per-project `fetchTickets` round-trip to
+ * render on initial boot. `fetchTickets` and per-row optimistic updates
+ * still work — the main process re-broadcasts after every write, so any
+ * optimistic state converges with the snapshot on the next tick.
  */
 export const $tickets = map<Record<TicketId, Ticket>>({});
+
+persistedStoreApi.$atom.subscribe((store) => {
+  const next: Record<TicketId, Ticket> = {};
+  for (const ticket of store.tickets) {
+    next[ticket.id] = ticket;
+  }
+  // Only set when the shape actually changed — `subscribe` fires on every
+  // store snapshot (theme toggles, sandbox state, etc.) but most won't
+  // touch tickets. Skipping the write avoids spurious re-renders.
+  if (!objectEquals($tickets.get(), next)) {
+    $tickets.set(next);
+  }
+});
 
 /**
  * Cached pipeline for the current project.
@@ -46,6 +65,13 @@ export const $pipeline = atom<Pipeline | null>(null);
  * Which milestone is selected for kanban filtering. 'all' shows all milestones.
  */
 export const $activeMilestoneId = atom<MilestoneId | 'all'>('all');
+
+/**
+ * Board assignee filter (teams). `'all'` = everyone, `'me'` = assigned to the
+ * current principal, `'unassigned'` = no assignee, or a specific member's
+ * principal id. Always `'all'` effectively in single-user mode.
+ */
+export const $assigneeFilter = atom<'all' | 'me' | 'unassigned' | string>('all');
 
 /**
  * Which tickets view is active: dashboard, project detail, inbox, or ticket detail.
@@ -155,6 +181,8 @@ export const $activeWipTickets = atom<Ticket[]>([]);
  * Set by startSupervisor when the WIP limit is hit. Cleared by dialog actions.
  */
 export const $wipDialogPendingTicket = atom<Ticket | null>(null);
+export const $wipDialogPendingProfileName = atom<string | undefined>(undefined);
+export const $autopilotLaunchTicketId = atom<TicketId | null>(null);
 
 export const ticketApi = {
   // Projects (delegated to shared Projects module)
@@ -255,6 +283,14 @@ export const ticketApi = {
   moveTicketToColumn: (ticketId: TicketId, columnId: ColumnId): Promise<void> => {
     return emitter.invoke('project:move-ticket-to-column', ticketId, columnId);
   },
+  /** Assign (principal id) or unassign (null) — team ownership is unchanged; any member may call. */
+  assignTicket: async (ticketId: TicketId, assignee: string | null): Promise<void> => {
+    await emitter.invoke('project:assign-ticket', ticketId, assignee);
+    const existing = $tickets.get()[ticketId];
+    if (existing) {
+      $tickets.setKey(ticketId, { ...existing, assignee: assignee || undefined, updatedAt: Date.now() });
+    }
+  },
   resolveTicket: async (ticketId: TicketId, resolution: import('@/shared/types').TicketResolution): Promise<void> => {
     await emitter.invoke('project:resolve-ticket', ticketId, resolution);
     const existing = $tickets.get()[ticketId];
@@ -275,11 +311,14 @@ export const ticketApi = {
     }
     void ticketApi.fetchTasks();
   },
-  startSupervisor: async (ticketId: TicketId): Promise<void> => {
+  requestStartSupervisor: (ticketId: TicketId): void => {
+    $autopilotLaunchTicketId.set(ticketId);
+  },
+  startSupervisor: async (ticketId: TicketId, opts?: { profileName?: string }): Promise<void> => {
     // Clear old messages when starting a fresh supervisor session
     $supervisorMessages.setKey(ticketId, []);
     try {
-      await emitter.invoke('project:start-supervisor', ticketId);
+      await emitter.invoke('project:start-supervisor', ticketId, opts?.profileName);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.startsWith('WIP_LIMIT:')) {
@@ -288,6 +327,7 @@ export const ticketApi = {
         const ticket = $tickets.get()[ticketId] ?? persistedStoreApi.$atom.get().tickets.find((t) => t.id === ticketId);
         if (ticket) {
           $wipDialogPendingTicket.set(ticket);
+          $wipDialogPendingProfileName.set(opts?.profileName);
         }
         return;
       }
@@ -296,6 +336,25 @@ export const ticketApi = {
   },
   stopSupervisor: (ticketId: TicketId): Promise<void> => {
     return emitter.invoke('project:stop-supervisor', ticketId);
+  },
+  finalizeTicketCleanup: async (ticketId: TicketId): Promise<boolean> => {
+    const ok = await emitter.invoke('project:finalize-ticket-cleanup', ticketId);
+    void ticketApi.fetchTasks();
+    return ok;
+  },
+  mergeTicket: async (
+    ticketId: TicketId,
+    sourceId: string
+  ): Promise<import('@/shared/types').PrMergeResult> => {
+    const result = await emitter.invoke('project:merge-ticket', ticketId, sourceId);
+    void ticketApi.fetchTasks();
+    return result;
+  },
+  detectPullRequest: (
+    ticketId: TicketId,
+    sourceId: string
+  ): Promise<import('@/shared/types').ContainerPullRequest | null> => {
+    return emitter.invoke('project:detect-pull-request', ticketId, sourceId);
   },
   sendSupervisorMessage: (ticketId: TicketId, message: string): Promise<void> => {
     // Optimistically add the user's message to the chat so it appears immediately
@@ -323,11 +382,6 @@ export const ticketApi = {
     return tickets;
   },
 
-  // Session history
-  getSessionHistory: (sessionId: string): Promise<SessionMessage[]> => {
-    return emitter.invoke('project:get-session-history', sessionId);
-  },
-
   // Artifacts
   listArtifacts: (ticketId: TicketId, dirPath?: string): Promise<ArtifactFileEntry[]> => {
     return emitter.invoke('project:list-artifacts', ticketId, dirPath);
@@ -338,8 +392,20 @@ export const ticketApi = {
   openArtifactExternal: (ticketId: TicketId, relativePath: string): Promise<void> => {
     return emitter.invoke('project:open-artifact-external', ticketId, relativePath);
   },
-  getFilesChanged: (ticketId: TicketId): Promise<DiffResponse> => {
-    return emitter.invoke('project:get-files-changed', ticketId);
+  getFilesChanged: (ticketId: TicketId, sourceId: string): Promise<DiffResponse> => {
+    return emitter.invoke('project:get-files-changed', ticketId, sourceId);
+  },
+  getCodeTabFilesChanged: (tabId: string, sourceId: string): Promise<DiffResponse> => {
+    return emitter.invoke('project:get-code-tab-files-changed', tabId, sourceId);
+  },
+  applyCodeTabSourceChanges: (tabId: string, sourceId: string): Promise<import('@/shared/types').PrMergeResult> => {
+    return emitter.invoke('project:apply-code-tab-source-changes', tabId, sourceId);
+  },
+  detectCodeTabPullRequest: (
+    tabId: string,
+    sourceId: string
+  ): Promise<import('@/shared/types').ContainerPullRequest | null> => {
+    return emitter.invoke('project:detect-code-tab-pull-request', tabId, sourceId);
   },
 
   // Context files (replaces project.brief)
@@ -402,6 +468,21 @@ export const ticketApi = {
     $previousTicketsView.set($ticketsView.get());
     $ticketsView.set({ type: 'ticket', ticketId });
     persistedStoreApi.setKey('activeTicketId', ticketId);
+    // Hydrate `$tickets` so TicketDetail can find the ticket even when entering
+    // from a path that didn't run fetchTickets (e.g. dashboard click). Use the
+    // broadcast snapshot for the synchronous initial render, then refresh
+    // from the source of truth.
+    const inMemory = $tickets.get()[ticketId];
+    if (!inMemory) {
+      const persisted = persistedStoreApi.$atom.get().tickets.find((t) => t.id === ticketId);
+      if (persisted) {
+        $tickets.setKey(ticketId, persisted);
+      }
+    }
+    const projectId = ($tickets.get()[ticketId] ?? persistedStoreApi.$atom.get().tickets.find((t) => t.id === ticketId))?.projectId;
+    if (projectId) {
+      void ticketApi.fetchTickets(projectId);
+    }
   },
   setActiveTicket: (ticketId: TicketId): void => {
     persistedStoreApi.setKey('activeTicketId', ticketId);
@@ -466,10 +547,6 @@ const listen = () => {
     if (existing) {
       $tickets.setKey(ticketId, { ...existing, tokenUsage: usage });
     }
-  });
-
-  ipc.on('project:pipeline', (_projectId, pipeline: Pipeline) => {
-    $pipeline.set(pipeline);
   });
 
   // Hydrate tasks on init so the renderer has current task state immediately

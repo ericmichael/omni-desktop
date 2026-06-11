@@ -21,19 +21,22 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: '2px',
-    marginLeft: '10px',
-    marginRight: '10px',
-    marginBottom: '8px',
-    marginTop: '6px',
-    paddingLeft: '6px',
-    paddingRight: '6px',
+    gap: tokens.spacingHorizontalXXS,
+    marginLeft: tokens.spacingHorizontalMNudge,
+    marginRight: tokens.spacingHorizontalMNudge,
+    marginBottom: tokens.spacingVerticalS,
+    marginTop: tokens.spacingVerticalSNudge,
+    paddingLeft: tokens.spacingHorizontalSNudge,
+    paddingRight: tokens.spacingHorizontalSNudge,
     paddingTop: '5px',
     paddingBottom: '5px',
-    borderRadius: '14px',
+    // Match the code deck column border: same stroke token + radius.
+    borderRadius: tokens.borderRadiusXLarge,
     backgroundColor: tokens.colorNeutralBackground1,
-    boxShadow: `0 1px 12px rgba(0,0,0,0.10), 0 0 0 1px ${tokens.colorNeutralStroke2}`,
+    boxShadow: `0 1px 12px rgba(0,0,0,0.10), 0 0 0 1px ${tokens.colorNeutralStroke1}`,
     flexShrink: 0,
+    /* No safe-area margin here anymore: the app tab bar now stays below the
+       dock on mobile and owns the home-indicator clearance. */
   },
   dockGlass: {
     backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 18%, transparent)`,
@@ -46,11 +49,11 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    gap: '2px',
-    paddingLeft: '12px',
-    paddingRight: '12px',
+    gap: tokens.spacingVerticalXXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
     paddingTop: '5px',
-    paddingBottom: '6px',
+    paddingBottom: tokens.spacingVerticalSNudge,
     borderRadius: '10px',
     border: 'none',
     backgroundColor: 'transparent',
@@ -59,14 +62,23 @@ const useStyles = makeStyles({
     transitionProperty: 'color, background-color, transform, box-shadow',
     transitionDuration: '180ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
-    ':hover': {
-      backgroundColor: tokens.colorSubtleBackgroundHover,
-      color: tokens.colorNeutralForeground1,
-      transform: 'translateY(-1px) scale(1.06)',
+    /* Hover effects only where hover exists — on touch the emulated :hover
+       sticks after a tap, leaving the last-used icon raised and tinted. */
+    '@media (hover: hover)': {
+      ':hover': {
+        backgroundColor: tokens.colorSubtleBackgroundHover,
+        color: tokens.colorNeutralForeground1,
+        transform: 'translateY(-1px) scale(1.06)',
+      },
     },
     ':active': {
       transform: 'translateY(0) scale(0.97)',
     },
+    '@media (prefers-reduced-motion: reduce)': {
+      ':hover': { transform: 'none' },
+      ':active': { transform: 'none' },
+    },
+    ':focus-visible': { outline: `2px solid ${tokens.colorStrokeFocus2}`, outlineOffset: '1px' },
   },
   itemActive: {
     color: tokens.colorBrandForeground1,
@@ -75,7 +87,7 @@ const useStyles = makeStyles({
     },
   },
   label: {
-    fontSize: '10px',
+    fontSize: '0.625rem',
     fontWeight: tokens.fontWeightMedium,
     lineHeight: 1,
     letterSpacing: '0.01em',
@@ -118,8 +130,7 @@ export const EnvironmentDock = memo(({ apps, activeAppId, onSelect, sandboxUrls,
     <div className={mergeClasses(styles.dock, isGlass && styles.dockGlass)}>
       {apps.map((app) => {
         const isActive = activeAppId === app.id;
-        const isAvailable =
-          app.scope === 'sandbox' ? !!sandboxUrls?.[app.sandboxUrlKey!] : true;
+        const isAvailable = app.scope === 'sandbox' ? !!sandboxUrls?.[app.sandboxUrlKey!] : true;
 
         if (app.scope === 'sandbox' && !isAvailable) {
           return null;

@@ -1,38 +1,32 @@
 /**
  * IPC handler registration for the inbox surface.
  *
- * Extracted from `createProjectManager` (Sprint C4). Returns the list of
- * channel names registered so the caller can clean them up at shutdown.
+ * Takes a `resolve(event)` callback (see registerMilestoneHandlers) so the same
+ * registration serves the single-manager Electron app and the per-tenant
+ * server. Returns the channel names registered for cleanup.
  */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import type { InboxManager } from '@/main/inbox-manager';
 import type { IIpcListener } from '@/shared/ipc-listener';
 
-export function registerInboxHandlers(ipc: IIpcListener, inbox: InboxManager): string[] {
-  ipc.handle('inbox:get-all', () => inbox.getAll());
-  ipc.handle('inbox:get-active', () => inbox.getActive());
-  ipc.handle('inbox:add', (_, input) => inbox.add(input));
-  ipc.handle('inbox:update', (_, id, patch) => inbox.update(id, patch));
-  ipc.handle('inbox:remove', (_, id) => inbox.remove(id));
-  ipc.handle('inbox:shape', (_, id, shaping) => inbox.shape(id, shaping));
-  ipc.handle('inbox:defer', (_, id) => inbox.defer(id));
-  ipc.handle('inbox:reactivate', (_, id) => inbox.reactivate(id));
-  ipc.handle('inbox:promote-to-ticket', (_, id, opts) => inbox.promoteToTicket(id, opts));
-  ipc.handle('inbox:promote-to-project', (_, id, opts) => inbox.promoteToProject(id, opts));
-  ipc.handle('inbox:sweep', () => inbox.sweepExpired());
-  ipc.handle('inbox:gc-promoted', () => inbox.gcPromoted());
+export function registerInboxHandlers(ipc: IIpcListener, resolve: (event: unknown) => InboxManager): string[] {
+  const channels: string[] = [];
+  const h = (ch: string, fn: (m: InboxManager, ...args: any[]) => unknown): void => {
+    ipc.handle(ch, (event: unknown, ...args: any[]) => fn(resolve(event), ...args));
+    channels.push(ch);
+  };
 
-  return [
-    'inbox:get-all',
-    'inbox:get-active',
-    'inbox:add',
-    'inbox:update',
-    'inbox:remove',
-    'inbox:shape',
-    'inbox:defer',
-    'inbox:reactivate',
-    'inbox:promote-to-ticket',
-    'inbox:promote-to-project',
-    'inbox:sweep',
-    'inbox:gc-promoted',
-  ];
+  h('inbox:get-all', (m) => m.getAll());
+  h('inbox:get-active', (m) => m.getActive());
+  h('inbox:add', (m, input) => m.add(input));
+  h('inbox:update', (m, id, patch) => m.update(id, patch));
+  h('inbox:remove', (m, id) => m.remove(id));
+  h('inbox:defer', (m, id) => m.defer(id));
+  h('inbox:reactivate', (m, id) => m.reactivate(id));
+  h('inbox:promote-to-ticket', (m, id, opts) => m.promoteToTicket(id, opts));
+  h('inbox:promote-to-project', (m, id, opts) => m.promoteToProject(id, opts));
+  h('inbox:sweep', (m) => m.sweepExpired());
+  h('inbox:gc-promoted', (m) => m.gcPromoted());
+
+  return channels;
 }

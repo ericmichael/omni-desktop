@@ -1,4 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
+import type { ReactNode } from 'react';
 import { memo, useCallback, useState } from 'react';
 
 import { Input } from './components/Input';
@@ -16,6 +17,12 @@ type ChatShellProps = {
   onRetry?: () => void;
   onLaunch?: () => void;
   launchDisabled?: boolean;
+  /**
+   * Optional slot rendered alongside the Launch button while idle. Used
+   * by Chat.tsx to mount the pre-launch SandboxPicker so the user can
+   * pick which sandbox profile this session boots against.
+   */
+  prelaunchExtras?: ReactNode;
   onSubmit?: (msg: PendingMessage) => void;
   pendingMessages?: PendingMessage[];
 };
@@ -26,7 +33,7 @@ const headerActions = {
 };
 
 export const ChatShell = memo(
-  ({ greeting: greetingProp, phase, error, onRetry, onLaunch, launchDisabled, onSubmit, pendingMessages }: ChatShellProps) => {
+  ({ greeting: greetingProp, phase, error, onRetry, onLaunch, launchDisabled, prelaunchExtras, onSubmit, pendingMessages }: ChatShellProps) => {
     const handleSubmit = useCallback(
       (text: string, files?: File[]) => {
         onSubmit?.({ text, files });
@@ -58,7 +65,7 @@ export const ChatShell = memo(
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ duration: 0.3, ease: 'easeOut' }}
                         >
-                          <div className="max-w-[80%] rounded-2xl bg-tweetBlue/10 px-4 py-2.5 text-sm text-textHeading">
+                          <div className="max-w-[80%] rounded-2xl bg-primary/10 px-4 py-2.5 text-sm text-textHeading">
                             {m.text}
                             {m.files && m.files.length > 0 && (
                               <div className="mt-1 text-xs text-textSubtle">
@@ -101,7 +108,7 @@ export const ChatShell = memo(
                                 <button
                                   type="button"
                                   onClick={onRetry}
-                                  className="h-8 rounded-md bg-tweetBlue px-4 text-sm font-medium text-white hover:brightness-110"
+                                  className="h-8 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:brightness-110"
                                 >
                                   Retry
                                 </button>
@@ -111,7 +118,7 @@ export const ChatShell = memo(
                           <AnimatePresence>
                             {phase === 'idle' && onLaunch && (
                               <motion.div
-                                className="mt-5"
+                                className="mt-5 flex items-center gap-2"
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
                                 exit={{ opacity: 0 }}
@@ -121,10 +128,11 @@ export const ChatShell = memo(
                                   type="button"
                                   onClick={onLaunch}
                                   disabled={launchDisabled}
-                                  className="h-9 rounded-full bg-tweetBlue px-5 text-sm font-medium text-white hover:brightness-110 disabled:opacity-50"
+                                  className="h-9 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground hover:brightness-110 disabled:opacity-50"
                                 >
                                   Launch workspace
                                 </button>
+                                {prelaunchExtras}
                               </motion.div>
                             )}
                           </AnimatePresence>

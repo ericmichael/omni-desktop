@@ -22,7 +22,22 @@ export default {
   directories: {
     output: 'dist',
   },
-  files: ['package.json', 'out/**/*', 'node_modules/node-pty/**/*'],
+  files: [
+    'package.json',
+    'out/**/*',
+    'node_modules/node-pty/**/*',
+    'packages/projects-db/dist/**/*',
+    'packages/projects-db/package.json',
+    'packages/projects-mcp/dist/**/*',
+    'packages/projects-mcp/package.json',
+    'packages/projects-mcp/index.d.ts',
+  ],
+  // The omni-projects-mcp cli.js is spawned by `node` at runtime (both by
+  // launcher-managed agents and by omni-code standalone reading the same
+  // mcp.json). Files inside app.asar aren't readable by raw fs/node, so the
+  // mcp packages must be extracted to app.asar.unpacked/. omni-projects-db
+  // is a CommonJS dep of cli.js — unpack it too so require() resolves.
+  asarUnpack: ['packages/projects-mcp/**/*', 'packages/projects-db/**/*'],
   extraResources: [
     {
       from: 'assets/bin',
@@ -38,6 +53,23 @@ export default {
       from: 'assets/bin',
       to: './bin',
       filter: 'bwrap',
+    },
+    {
+      // Vendored MCP-UI sandbox proxy HTML. Served by the
+      // ``mcp-sandbox:`` custom protocol (see src/main/index.ts).
+      from: 'assets/mcp-sandbox',
+      to: './mcp-sandbox',
+      filter: '*.html',
+    },
+    {
+      // Local voice sidecar (Option A). Python ONNX deps are provisioned at
+      // runtime into a dedicated uv venv by VoiceService; only the script
+      // (+ requirements) ships. Built-in persona embeddings (voices/*.emb.npy)
+      // ship too — embedding-only, no source audio. Resolved via
+      // process.resourcesPath in voice-service.ts.
+      from: 'voice-sidecar',
+      to: './voice-sidecar',
+      filter: ['*.py', '*.txt', 'voices/**'],
     },
   ],
   mac: {

@@ -1,27 +1,27 @@
 import { makeStyles, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import type { ChangeEvent } from 'react';
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Button, Card, FormField, MessageBar, MessageBarBody, SectionLabel, Select } from '@/renderer/ds';
 import { $launcherVersion } from '@/renderer/features/Banner/state';
-import { $chatProcessStatus } from '@/renderer/features/Chat/state';
 import {
   $omniInstallProcessStatus,
   $omniRuntimeInfo,
   omniInstallApi,
 } from '@/renderer/features/Omni/state';
-import { emitter } from '@/renderer/services/ipc';
+import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
+import { emitter, isElectron } from '@/renderer/services/ipc';
 import { persistedStoreApi, selectWorkspaceDir } from '@/renderer/services/store';
-import type { OmniTheme, SandboxBackend } from '@/shared/types';
+import { isGlassTheme, TEXT_SCALES, type TextScale } from '@/renderer/theme/fluent-themes';
+import { detectGlassTone } from '@/renderer/theme/glass-vars';
+import type { OmniTheme } from '@/shared/types';
 
-const BACKEND_LABELS: Record<SandboxBackend, string> = {
-  platform: 'Cloud (managed)',
-  docker: 'Docker',
-  podman: 'Podman',
-  vm: 'VM (QEMU)',
-  local: 'Local (bwrap)',
-  none: 'No sandbox',
+const TEXT_SCALE_LABELS: Record<TextScale, string> = {
+  90: 'Small',
+  100: 'Default',
+  110: 'Large',
+  125: 'Extra large',
 };
 
 const useStyles = makeStyles({
@@ -43,15 +43,11 @@ const useStyles = makeStyles({
   },
 });
 
-/** All backends available in open-source mode (no platform policy). */
-const OPEN_SOURCE_BACKENDS: SandboxBackend[] = ['docker', 'podman', 'vm', 'local', 'none'];
-
 export const SettingsModalOmniSandboxOptions = memo(() => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const runtimeInfo = useStore($omniRuntimeInfo);
   const installStatus = useStore($omniInstallProcessStatus);
-  const sandboxStatus = useStore($chatProcessStatus);
   const launcherVersion = useStore($launcherVersion);
   const [isEnterprise, setIsEnterprise] = useState(false);
 
@@ -60,8 +56,6 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
   }, []);
 
   const isInstalling = installStatus.type === 'starting' || installStatus.type === 'installing';
-  const [imageRebuilding, setIsRebuilding] = useState(false);
-  const isRebuilding = imageRebuilding || sandboxStatus.type === 'starting' || sandboxStatus.type === 'stopping';
 
   const [cliInPath, setCliInPath] = useState<{ installed: boolean; symlinkPath: string } | null>(null);
   const [cliInstalling, setCliInstalling] = useState(false);
@@ -90,33 +84,13 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
     }
   }, [checkCliStatus]);
 
-  // Derive available backends from policy or fall back to open-source defaults
-  const profiles = store.sandboxProfiles;
-  const availableBackends: SandboxBackend[] = profiles
-    ? [...new Set(profiles.map((p) => p.backend)), 'none' as const]
-    : OPEN_SOURCE_BACKENDS;
+  const availableProfiles = useMemo<string[]>(
+    () => getAvailableProfileNames({ isEnterprise, available: store.availableSandboxProfiles }),
+    [isEnterprise, store.availableSandboxProfiles]
+  );
 
-  const onChangeSandboxBackend = useCallback((e: ChangeEvent<HTMLSelectElement>) => {
-    const backend = e.target.value as SandboxBackend;
-    persistedStoreApi.setKey('sandboxBackend', backend);
-
-    // Auto-select the first matching machine profile
-    if (profiles) {
-      const match = profiles.find((p) => p.backend === backend);
-      persistedStoreApi.setKey('selectedMachineId', match?.resource_id ?? null);
-    }
-  }, [profiles]);
-
-  const rebuildDockerImage = useCallback(async () => {
-    setIsRebuilding(true);
-    try {
-      const result = await emitter.invoke('util:rebuild-sandbox-image');
-      if (result && !result.success) {
-        console.error('Sandbox image rebuild failed:', result.error);
-      }
-    } finally {
-      setIsRebuilding(false);
-    }
+  const onChangeProfile = useCallback((e: ChangeEvent<HTMLSelectElement>) => {
+    persistedStoreApi.setKey('defaultProfileName', e.target.value);
   }, []);
 
   const reinstallRuntime = useCallback(() => {
@@ -125,6 +99,10 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
 
   const onChangeTheme = useCallback((e: ChangeEvent<HTMLSelectElement>) => {
     persistedStoreApi.setKey('theme', e.target.value as OmniTheme);
+  }, []);
+
+  const onChangeTextScale = useCallback((e: ChangeEvent<HTMLSelectElement>) => {
+    persistedStoreApi.setKey('textScale', Number(e.target.value));
   }, []);
 
   const deckBgInputRef = useRef<HTMLInputElement>(null);
@@ -150,49 +128,54 @@ return;
       return;
     }
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const result = reader.result;
-      if (typeof result === 'string') {
-        persistedStoreApi.setKey('codeDeckBackground', result);
+      if (typeof result !== 'string') {
+        return;
       }
+      // Pick a glass tone from wallpaper luminance so the frosted material stays
+      // readable: dark photo → black scrim + light text; bright photo → white
+      // scrim + dark text. Independent of the active theme.
+      const tone = await detectGlassTone(result);
+      persistedStoreApi.setKey('codeDeckBackground', result);
+      persistedStoreApi.setKey('glassTone', tone);
     };
     reader.readAsDataURL(file);
   }, []);
 
-  const currentBackend = store.sandboxBackend ?? 'none';
+  const currentProfile = store.defaultProfileName ?? 'host';
   const showSandboxSection = isEnterprise || store.previewFeatures || import.meta.env.MODE === 'development';
-  const showRebuild = showSandboxSection && (currentBackend === 'docker' || currentBackend === 'podman');
 
   return (
     <div className={styles.root}>
-      <SectionLabel>Workspace</SectionLabel>
-      <Card>
-        <FormField label="Workspace directory">
-          <span className={styles.text}>{store.workspaceDir ?? 'Default'}</span>
-          <Button size="sm" variant="ghost" onClick={selectWorkspaceDir}>
-            Change
-          </Button>
-        </FormField>
-      </Card>
+      {/* Host-filesystem concept; hosted mode mounts a workspace via Azure Files. */}
+      {isElectron && (
+        <>
+          <SectionLabel>Workspace</SectionLabel>
+          <Card>
+            <FormField label="Workspace directory">
+              <span className={styles.text}>{store.workspaceDir ?? 'Default'}</span>
+              <Button size="sm" variant="ghost" onClick={selectWorkspaceDir}>
+                Change
+              </Button>
+            </FormField>
+          </Card>
+        </>
+      )}
 
       {showSandboxSection && (
         <>
           <SectionLabel className={styles.sectionLabelSpaced}>Sandbox</SectionLabel>
           <Card>
-            <FormField label="Sandbox backend">
-              <Select value={currentBackend} onChange={onChangeSandboxBackend}>
-                {availableBackends.map((b) => (
-                  <option key={b} value={b}>{BACKEND_LABELS[b]}</option>
+            <FormField label="Default sandbox profile">
+              <Select value={currentProfile} onChange={onChangeProfile}>
+                {availableProfiles.map((name) => (
+                  <option key={name} value={name}>
+                    {getProfileMenuLabel(name)}
+                  </option>
                 ))}
               </Select>
             </FormField>
-            {showRebuild && (
-              <FormField label={`Rebuild ${currentBackend === 'podman' ? 'Podman' : 'Docker'} image`}>
-                <Button size="sm" variant="ghost" onClick={rebuildDockerImage} isDisabled={isRebuilding}>
-                  {isRebuilding ? 'Rebuilding\u2026' : 'Rebuild'}
-                </Button>
-              </FormField>
-            )}
           </Card>
         </>
       )}
@@ -200,7 +183,8 @@ return;
       <SectionLabel className={styles.sectionLabelSpaced}>Display</SectionLabel>
       <Card>
         <FormField label="Theme">
-          <Select value={store.theme ?? 'teams-light'} onChange={onChangeTheme}>
+          <Select value={store.theme ?? 'omni'} onChange={onChangeTheme}>
+            <option value="omni">Omni (Glass)</option>
             <option value="teams-light">Teams Light</option>
             <option value="teams-dark">Teams Dark</option>
             <option value="default">Indigo Dark</option>
@@ -210,27 +194,43 @@ return;
             <option value="utrgv">UTRGV</option>
           </Select>
         </FormField>
-        <FormField label="Code Deck background">
-          <span className={styles.textSimple}>{store.codeDeckBackground ? 'Custom image' : 'None'}</span>
-          <input
-            ref={deckBgInputRef}
-            type="file"
-            accept="image/*"
-            style={{ display: 'none' }}
-            onChange={onDeckBackgroundFile}
-          />
-          <Button size="sm" variant="ghost" onClick={pickDeckBackground}>
-            {store.codeDeckBackground ? 'Change' : 'Upload'}
-          </Button>
-          {store.codeDeckBackground && (
-            <Button size="sm" variant="ghost" onClick={clearDeckBackground}>
-              Remove
-            </Button>
-          )}
+        <FormField label="Text size">
+          <Select value={String(store.textScale ?? 100)} onChange={onChangeTextScale}>
+            {TEXT_SCALES.map((scale) => (
+              <option key={scale} value={String(scale)}>
+                {TEXT_SCALE_LABELS[scale]}
+              </option>
+            ))}
+          </Select>
         </FormField>
+        {/* The Background only exists on glass themes: it's the backdrop the
+            translucent surfaces sit over. Flat themes have no backdrop. */}
+        {isGlassTheme(store.theme ?? 'omni') && (
+          <FormField label="Background">
+            <span className={styles.textSimple}>
+              {store.codeDeckBackground ? 'Custom image' : 'Built-in'}
+            </span>
+            <input
+              ref={deckBgInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={onDeckBackgroundFile}
+            />
+            <Button size="sm" variant="ghost" onClick={pickDeckBackground}>
+              {store.codeDeckBackground ? 'Change' : 'Upload image'}
+            </Button>
+            {store.codeDeckBackground && (
+              <Button size="sm" variant="ghost" onClick={clearDeckBackground}>
+                Use built-in
+              </Button>
+            )}
+          </FormField>
+        )}
       </Card>
 
-      {!isEnterprise && (
+      {/* Runtime install + CLI-in-PATH are host operations; in cloud the runtime is image-baked. */}
+      {!isEnterprise && isElectron && (
         <>
           <SectionLabel className={styles.sectionLabelSpaced}>Runtime</SectionLabel>
           <Card>
@@ -273,7 +273,7 @@ return;
         </FormField>
         <FormField label="Compute">
           <span className={styles.textSimple}>
-            {currentBackend === 'platform' ? 'Managed' : currentBackend === 'none' ? 'None' : 'Local'}
+            {currentProfile === 'platform' ? 'Managed' : currentProfile === 'host' ? 'None' : 'Local'}
           </span>
         </FormField>
       </Card>

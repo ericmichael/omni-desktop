@@ -1,13 +1,16 @@
 import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
-import { ArrowSync20Regular, BranchCompare20Regular } from '@fluentui/react-icons';
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { ArrowSync20Regular, BranchCompare20Regular, Document24Regular } from '@fluentui/react-icons';
+import { useStore } from '@nanostores/react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { getMimeType } from '@/lib/mime-types';
 import type { SelectTabData } from '@/renderer/ds';
-import { IconButton, ListSkeleton, Tab, TabList } from '@/renderer/ds';
-import type { DiffResponse, FileDiff, TicketId } from '@/shared/types';
+import { Button, IconButton, ListSkeleton, Tab, TabList } from '@/renderer/ds';
+import { persistedStoreApi } from '@/renderer/services/store';
+import type { CodeTabId, ContainerPullRequest, DiffGroup,DiffResponse, FileDiff, ProjectSource, TicketId } from '@/shared/types';
 
-import { ticketApi } from './state';
-import { TicketPROverview } from './TicketPROverview';
+import { PullRequestBadge } from './PullRequestBadge';
+import { $tickets, ticketApi } from './state';
 
 const POLL_INTERVAL_MS = 5_000;
 const MIN_LIST_PERCENT = 20;
@@ -40,6 +43,17 @@ const STATUS_LABELS: Record<FileDiff['status'], string> = {
   copied: 'C',
   untracked: 'U',
 };
+
+const GROUP_ORDER: DiffGroup[] = ['committed', 'staged', 'unstaged', 'untracked'];
+
+const GROUP_LABELS: Record<DiffGroup, string> = {
+  committed: 'Committed',
+  staged: 'Staged',
+  unstaged: 'Unstaged',
+  untracked: 'Untracked',
+};
+
+const fileKey = (file: FileDiff): string => `${file.group}:${file.path}`;
 
 type PatchRow =
   | { type: 'hunk'; text: string }
@@ -270,6 +284,40 @@ const useStyles = makeStyles({
     overflowY: 'auto',
     ...shorthands.borderRight('1px', 'solid', tokens.colorNeutralStroke1),
   },
+  groupHeader: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: '6px',
+    padding: '6px 10px 4px',
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    color: tokens.colorNeutralForeground2,
+    backgroundColor: tokens.colorNeutralBackground2,
+    position: 'sticky',
+    top: 0,
+    zIndex: 1,
+    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke1),
+  },
+  groupHeaderFirst: {
+    borderTopWidth: 0,
+  },
+  groupHeaderCount: {
+    fontWeight: tokens.fontWeightRegular,
+    color: tokens.colorNeutralForeground3,
+    textTransform: 'none',
+    letterSpacing: 'normal',
+  },
+  groupHeaderStats: {
+    marginLeft: 'auto',
+    fontWeight: tokens.fontWeightRegular,
+    textTransform: 'none',
+    letterSpacing: 'normal',
+    fontSize: tokens.fontSizeBase200,
+    display: 'flex',
+    gap: '6px',
+  },
   divider: {
     width: '4px',
     flexShrink: 0,
@@ -301,17 +349,70 @@ const useStyles = makeStyles({
   redText: {
     color: tokens.colorPaletteRedForeground1,
   },
+  binaryCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
+    gap: tokens.spacingVerticalS,
+  },
+  binaryCardIcon: {
+    width: '32px',
+    height: '32px',
+    color: tokens.colorNeutralForeground3,
+  },
+  binaryCardName: {
+    fontSize: tokens.fontSizeBase400,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+    wordBreak: 'break-all',
+    textAlign: 'center',
+    paddingLeft: tokens.spacingHorizontalXXL,
+    paddingRight: tokens.spacingHorizontalXXL,
+  },
+  binaryCardMeta: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+  },
 });
+
+const FILE_CARD_STATUS_TEXT: Record<FileDiff['status'], string> = {
+  added: 'New file',
+  untracked: 'New file',
+  modified: 'Modified',
+  deleted: 'Deleted',
+  renamed: 'Renamed',
+  copied: 'Copied',
+};
+
+/**
+ * Card rendering for documents and other binaries — a patch view is meaningless
+ * for a PPTX/XLSX/image, for developers and everyday users alike. Shows what
+ * happened to the file in plain language instead of pretending there's a diff.
+ */
+const BinaryFileCard = memo(({ file }: { file: FileDiff }) => {
+  const styles = useStyles();
+  const fileName = file.path.split('/').pop() ?? file.path;
+  const mime = getMimeType(fileName);
+  return (
+    <div className={styles.binaryCard}>
+      <Document24Regular className={styles.binaryCardIcon} />
+      <span className={styles.binaryCardName}>{fileName}</span>
+      <span className={styles.binaryCardMeta}>
+        {FILE_CARD_STATUS_TEXT[file.status]}
+        {mime !== 'application/octet-stream' ? ` · ${mime}` : ''}
+      </span>
+    </div>
+  );
+});
+BinaryFileCard.displayName = 'BinaryFileCard';
 
 const DiffViewer = memo(({ file }: { file: FileDiff }) => {
   const styles = useStyles();
 
   if (file.isBinary) {
-    return (
-      <div className={styles.centerMessage}>
-        Binary file — no diff available
-      </div>
-    );
+    return <BinaryFileCard file={file} />;
   }
 
   if (!file.patch) {
@@ -361,14 +462,14 @@ const DiffViewer = memo(({ file }: { file: FileDiff }) => {
 DiffViewer.displayName = 'DiffViewer';
 
 const FileListItem = memo(
-  ({ file, isSelected, onSelect }: { file: FileDiff; isSelected: boolean; onSelect: (path: string) => void }) => {
+  ({ file, isSelected, onSelect }: { file: FileDiff; isSelected: boolean; onSelect: (key: string) => void }) => {
     const styles = useStyles();
     const fileName = file.path.split('/').pop() ?? file.path;
     const dirPath = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : '';
 
     const handleClick = useCallback(() => {
-      onSelect(file.path);
-    }, [onSelect, file.path]);
+      onSelect(fileKey(file));
+    }, [onSelect, file]);
 
     return (
       <button
@@ -404,29 +505,64 @@ const FileListItem = memo(
 );
 FileListItem.displayName = 'FileListItem';
 
-const FilesChangedContent = memo(({ ticketId }: { ticketId: TicketId }) => {
+/**
+ * Per-source files-changed view. Diffs one ProjectSource's container
+ * subdir against its ``omni/seed`` baseline. The parent component
+ * (FilesChangedPane) picks which source is active.
+ */
+const FilesChangedContent = memo(
+  ({ scope, sourceId }: { scope: ChangesScope; sourceId: string }) => {
   const styles = useStyles();
   const [data, setData] = useState<DiffResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  // Selection is keyed by `<group>:<path>` so the same path can be selected
+  // independently across groups (staged vs. unstaged vs. committed).
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [listWidthPercent, setListWidthPercent] = useState(DEFAULT_LIST_PERCENT);
   const [isDragging, setIsDragging] = useState(false);
+  const [applyBusy, setApplyBusy] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
+  const [pullRequest, setPullRequest] = useState<ContainerPullRequest | null>(null);
   const splitRef = useRef<HTMLDivElement>(null);
+
+  // Reset file selection + PR badge when the active source switches.
+  useEffect(() => {
+    setSelectedKey(null);
+    setData(null);
+    setPullRequest(null);
+    setLoading(true);
+  }, [sourceId]);
 
   const fetchData = useCallback(async () => {
     try {
-      const resp = await ticketApi.getFilesChanged(ticketId);
+      const [resp, pr] = await Promise.all([
+        scope.kind === 'ticket'
+          ? ticketApi.getFilesChanged(scope.ticketId, sourceId)
+          : ticketApi.getCodeTabFilesChanged(scope.tabId, sourceId),
+        (scope.kind === 'ticket'
+          ? ticketApi.detectPullRequest(scope.ticketId, sourceId)
+          : ticketApi.detectCodeTabPullRequest(scope.tabId, sourceId)
+        ).catch(() => null),
+      ]);
       setData(resp);
-      // Auto-select first file if none selected
-      if (resp.files.length > 0 && !selectedPath) {
-        setSelectedPath(resp.files[0]!.path);
+      // Main gated `pr` against the persisted PullRequestLinks (ticket links
+      // or the scoped store), so anything non-null is display-worthy — a
+      // MERGED result is a watched merge. A null keeps a merged badge sticky
+      // (acknowledgement) but clears a stale open one (closed unmerged).
+      if (pr !== null) {
+        setPullRequest(pr);
+      } else {
+        setPullRequest((prev) => (prev?.state === 'MERGED' ? prev : null));
+      }
+      if (resp.files.length > 0 && !selectedKey) {
+        setSelectedKey(fileKey(resp.files[0]!));
       }
     } catch {
       // Silently fail on poll errors
     } finally {
       setLoading(false);
     }
-  }, [ticketId, selectedPath]);
+  }, [scope, sourceId, selectedKey]);
 
   // Fetch on mount + poll
   useEffect(() => {
@@ -439,8 +575,26 @@ const FilesChangedContent = memo(({ ticketId }: { ticketId: TicketId }) => {
     void fetchData();
   }, [fetchData]);
 
-  const handleSelectFile = useCallback((filePath: string) => {
-    setSelectedPath(filePath);
+  const handleApply = useCallback(async () => {
+    setApplyBusy(true);
+    setApplyError(null);
+    try {
+      const result =
+        scope.kind === 'code-tab'
+          ? await ticketApi.applyCodeTabSourceChanges(scope.tabId, sourceId)
+          : await ticketApi.mergeTicket(scope.ticketId, sourceId);
+      if (!result.ok) {
+        setApplyError(result.error ?? 'Apply failed');
+        return;
+      }
+      await fetchData();
+    } finally {
+      setApplyBusy(false);
+    }
+  }, [fetchData, scope, sourceId]);
+
+  const handleSelectFile = useCallback((key: string) => {
+    setSelectedKey(key);
   }, []);
 
   const handleDividerMouseDown = useCallback((e: React.MouseEvent) => {
@@ -466,7 +620,7 @@ const FilesChangedContent = memo(({ ticketId }: { ticketId: TicketId }) => {
     document.addEventListener('mouseup', handleMouseUp);
   }, []);
 
-  const selectedFile = data?.files.find((f) => f.path === selectedPath) ?? null;
+  const selectedFile = data?.files.find((f) => fileKey(f) === selectedKey) ?? null;
 
   if (loading && !data) {
     return (
@@ -480,6 +634,7 @@ const FilesChangedContent = memo(({ ticketId }: { ticketId: TicketId }) => {
         <BranchCompare20Regular style={{ width: 32, height: 32 }} className={styles.emptyIcon} />
         <p className={styles.emptyText}>No changes detected</p>
         <p className={styles.emptySubText}>File changes will appear here when the agent modifies files</p>
+        {pullRequest && <PullRequestBadge pr={pullRequest} />}
         <IconButton aria-label="Refresh" icon={<ArrowSync20Regular />} size="sm" onClick={handleRefresh} />
       </div>
     );
@@ -495,6 +650,11 @@ const FilesChangedContent = memo(({ ticketId }: { ticketId: TicketId }) => {
         {data.totalAdditions > 0 && <span className={styles.greenText}>+{data.totalAdditions}</span>}
         {data.totalDeletions > 0 && <span className={styles.redText}>-{data.totalDeletions}</span>}
         <div className={styles.flex1} />
+        {pullRequest && <PullRequestBadge pr={pullRequest} />}
+        {applyError && <span className={styles.emptySubText}>{applyError}</span>}
+        <Button size="sm" onClick={handleApply} isDisabled={applyBusy}>
+          {applyBusy ? 'Applying…' : 'Apply to my folder'}
+        </Button>
         <IconButton aria-label="Refresh" icon={<ArrowSync20Regular />} size="sm" onClick={handleRefresh} />
       </div>
 
@@ -502,19 +662,46 @@ const FilesChangedContent = memo(({ ticketId }: { ticketId: TicketId }) => {
       <div ref={splitRef} className={mergeClasses(styles.splitPane, isDragging && styles.selectNonePane)}>
         {isDragging && <div className={styles.dragOverlay} />}
 
-        {/* File list */}
+        {/* File list, grouped by source */}
         <div
           className={styles.fileListPane}
           style={{ width: `${listWidthPercent}%` }}
         >
-          {data.files.map((file) => (
-            <FileListItem
-              key={file.path}
-              file={file}
-              isSelected={file.path === selectedPath}
-              onSelect={handleSelectFile}
-            />
-          ))}
+          {GROUP_ORDER.map((group, groupIdx) => {
+            const groupFiles = data.files.filter((f) => f.group === group);
+            if (groupFiles.length === 0) {
+              return null;
+            }
+            const adds = groupFiles.reduce((n, f) => n + f.additions, 0);
+            const dels = groupFiles.reduce((n, f) => n + f.deletions, 0);
+            return (
+              <div key={group}>
+                <div
+                  className={mergeClasses(styles.groupHeader, groupIdx === 0 && styles.groupHeaderFirst)}
+                >
+                  <span>{GROUP_LABELS[group]}</span>
+                  <span className={styles.groupHeaderCount}>{groupFiles.length}</span>
+                  {(adds > 0 || dels > 0) && (
+                    <span className={styles.groupHeaderStats}>
+                      {adds > 0 && <span className={styles.greenText}>+{adds}</span>}
+                      {dels > 0 && <span className={styles.redText}>-{dels}</span>}
+                    </span>
+                  )}
+                </div>
+                {groupFiles.map((file) => {
+                  const key = fileKey(file);
+                  return (
+                    <FileListItem
+                      key={key}
+                      file={file}
+                      isSelected={key === selectedKey}
+                      onSelect={handleSelectFile}
+                    />
+                  );
+                })}
+              </div>
+            );
+          })}
         </div>
 
         {/* Draggable divider */}
@@ -539,34 +726,90 @@ const FilesChangedContent = memo(({ ticketId }: { ticketId: TicketId }) => {
 });
 FilesChangedContent.displayName = 'FilesChangedContent';
 
-type PRSubTab = 'Overview' | 'Files Changed';
-const PR_SUB_TABS: PRSubTab[] = ['Overview', 'Files Changed'];
+type ChangesScope = { kind: 'ticket'; ticketId: TicketId } | { kind: 'code-tab'; tabId: CodeTabId };
 
-export const TicketPRTab = memo(({ ticketId }: { ticketId: TicketId }) => {
+const useSourcesForChanges = (scope: ChangesScope): ProjectSource[] => {
+  const tickets = useStore($tickets);
+  const store = useStore(persistedStoreApi.$atom);
+  return useMemo(() => {
+    if (scope.kind === 'ticket') {
+      const ticket = tickets[scope.ticketId];
+      if (!ticket) return [];
+      const project = store.projects.find((p) => p.id === ticket.projectId);
+      return project?.sources ?? [];
+    }
+    const tab = store.codeTabs.find((t) => t.id === scope.tabId);
+    const project = tab?.projectId ? store.projects.find((p) => p.id === tab.projectId) : undefined;
+    return project?.sources ?? [];
+  }, [scope, store.codeTabs, store.projects, tickets]);
+};
+
+/**
+ * Source-picker shell for the Files Changed sub-tab. Renders one
+ * TabList row across project.sources and shows the active source's
+ * file-diff pane below. Single-source projects skip the picker.
+ */
+const FilesChangedPane = memo(({ scope }: { scope: ChangesScope }) => {
   const styles = useStyles();
-  const [activeSubTab, setActiveSubTab] = useState<PRSubTab>('Overview');
+  const sources = useSourcesForChanges(scope);
 
-  const handleTabSelect = useCallback((_e: unknown, data: SelectTabData) => {
-    setActiveSubTab(data.value as PRSubTab);
+  const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
+  // Track the previous sources signature so we can reset the active id
+  // when sources are added/removed but keep it stable otherwise.
+  const sig = sources.map((s) => s.id).join('|');
+  useEffect(() => {
+    if (sources.length === 0) {
+      setActiveSourceId(null);
+      return;
+    }
+    if (!activeSourceId || !sources.some((s) => s.id === activeSourceId)) {
+      setActiveSourceId(sources[0]!.id);
+    }
+  // activeSourceId intentionally omitted: we only want to flip it when
+  // the sources set itself changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig]);
+
+  const handleSourceTabSelect = useCallback((_e: unknown, data: SelectTabData) => {
+    setActiveSourceId(data.value as string);
   }, []);
+
+  if (sources.length === 0 || !activeSourceId) {
+    // No user-attached sources means the workspace is a launcher-managed
+    // folder (chat scratch / managed project dir): container changes mirror
+    // back to it automatically, so there is nothing to review-and-apply here.
+    return (
+      <div className={styles.centerMessage}>
+        Files the agent creates or edits land in this project&apos;s folder automatically.
+      </div>
+    );
+  }
 
   return (
     <div className={styles.columnLayout}>
-      {/* Sub-tab bar */}
-      <div className={styles.tabBar}>
-        <TabList size="small" selectedValue={activeSubTab} onTabSelect={handleTabSelect}>
-          {PR_SUB_TABS.map((tab) => (
-            <Tab key={tab} value={tab}>{tab}</Tab>
-          ))}
-        </TabList>
-      </div>
-
-      {/* Sub-tab content */}
+      {sources.length > 1 && (
+        <div className={styles.tabBar}>
+          <TabList size="small" selectedValue={activeSourceId} onTabSelect={handleSourceTabSelect}>
+            {sources.map((s) => (
+              <Tab key={s.id} value={s.id}>{s.mountName}</Tab>
+            ))}
+          </TabList>
+        </div>
+      )}
       <div className={styles.tabContent}>
-        {activeSubTab === 'Overview' && <TicketPROverview ticketId={ticketId} />}
-        {activeSubTab === 'Files Changed' && <FilesChangedContent ticketId={ticketId} />}
+        <FilesChangedContent scope={scope} sourceId={activeSourceId} />
       </div>
     </div>
   );
 });
+FilesChangedPane.displayName = 'FilesChangedPane';
+
+export const TicketPRTab = memo(({ ticketId }: { ticketId: TicketId }) => (
+  <FilesChangedPane scope={{ kind: 'ticket', ticketId }} />
+));
 TicketPRTab.displayName = 'TicketPRTab';
+
+export const ChangesTab = memo(({ tabId }: { tabId: CodeTabId }) => (
+  <FilesChangedPane scope={{ kind: 'code-tab', tabId }} />
+));
+ChangesTab.displayName = 'ChangesTab';

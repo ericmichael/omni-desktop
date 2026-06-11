@@ -1,9 +1,11 @@
 @import 'tailwindcss';
 @plugin '@tailwindcss/typography';
 
-/* Scan yoopta theme/UI packages so Tailwind generates their utility classes */
+/* Scan third-party packages that ship with Tailwind class strings, so the
+ * JIT generates their utilities. */
 @source "../../../node_modules/@yoopta/themes-shadcn/dist";
 @source "../../../node_modules/@yoopta/ui/dist";
+@source "../../../node_modules/streamdown/dist";
 
 /* dark: variant uses .dark class on <html> (toggled in App.tsx based on theme mode) */
 @custom-variant dark (&:is(.dark *));
@@ -31,7 +33,7 @@
   --color-fg-warning: #fbbf24;
 
   /* Omniagents web UI palette (legacy names) */
-  --color-tweetBlue: rgb(var(--omni-tweetBlue));
+  --color-brand: rgb(var(--omni-brand));
   --color-bgMain: rgb(var(--omni-bgMain));
   --color-bgColumn: rgb(var(--omni-bgColumn));
   --color-bgCard: rgb(var(--omni-bgCard));
@@ -44,33 +46,39 @@
   --color-textHeading: rgb(var(--omni-textHeading));
   --color-textSecondary: rgb(var(--omni-textSecondary));
 
-  /* shadcn / ai-elements semantic tokens
-     These reference the --omni-* vars (source of truth) so they
-     automatically adapt when [data-theme] changes. */
-  --color-background: rgb(var(--omni-bgMain));
-  --color-foreground: rgb(var(--omni-textPrimary));
-  --color-card: rgb(var(--omni-bgCard));
-  --color-card-foreground: rgb(var(--omni-textPrimary));
-  --color-popover: rgb(var(--omni-bgCard));
-  --color-popover-foreground: rgb(var(--omni-textPrimary));
-  --color-primary: rgb(var(--omni-tweetBlue));
-  --color-primary-foreground: #ffffff;
-  --color-secondary: rgb(var(--omni-bgCardAlt));
-  --color-secondary-foreground: rgb(var(--omni-textHeading));
-  --color-muted: rgb(var(--omni-bgColumn));
-  --color-muted-foreground: rgb(var(--omni-textSubtle));
-  --color-accent: rgb(var(--omni-bgCardAlt));
-  --color-accent-foreground: rgb(var(--omni-textHeading));
-  --color-destructive: rgb(var(--omni-errorRed));
-  --color-destructive-foreground: #ffffff;
-  --color-border: rgb(var(--omni-bgCardAlt));
-  --color-input: rgb(var(--omni-bgCardAlt));
-  --color-ring: rgb(var(--omni-tweetBlue));
+  /* shadcn / ai-elements semantic tokens.
+     Wired through `hsl(var(--X))` so both our Tailwind utilities AND
+     yoopta's injected `.bg-primary { background-color: hsl(var(--primary)) }`
+     style block read from the same HSL triplet definitions in
+     omniagents-ui/styles/index.css. This is the standard shadcn contract. */
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  /* Status tokens not in the shadcn spec — kept on the --omni-* ramp. */
   --color-warning: rgb(var(--omni-warningOrange));
   --color-warning-foreground: rgb(var(--omni-textHeading));
   --color-success: rgb(var(--omni-successGreen));
   --color-success-foreground: #ffffff;
-  --color-info: rgb(var(--omni-tweetBlue));
+  --color-info: rgb(var(--omni-brand));
   --color-info-foreground: #ffffff;
 
   /* Accent (indigo) palette */
@@ -146,56 +154,15 @@
   }
 }
 
-/* Bare shadcn CSS vars required by @yoopta/themes-shadcn.
-   Yoopta references these as hsl(var(--foreground)) etc.
-   Light defaults, overridden by .dark below. */
-:root {
-  --background: 0 0% 100%;
-  --foreground: 0 0% 3.9%;
-  --card: 0 0% 100%;
-  --card-foreground: 0 0% 3.9%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 0 0% 3.9%;
-  --primary: 0 0% 9%;
-  --primary-foreground: 0 0% 98%;
-  --secondary: 0 0% 96.1%;
-  --secondary-foreground: 0 0% 9%;
-  --muted: 0 0% 96.1%;
-  --muted-foreground: 0 0% 45.1%;
-  --accent: 0 0% 96.1%;
-  --accent-foreground: 0 0% 9%;
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 0 0% 89.8%;
-  --input: 0 0% 89.8%;
-  --ring: 0 0% 3.9%;
-  --radius: 0.5rem;
-}
-
-.dark {
-  --background: 0 0% 3.9%;
-  --foreground: 0 0% 98%;
-  --card: 0 0% 3.9%;
-  --card-foreground: 0 0% 98%;
-  --popover: 0 0% 3.9%;
-  --popover-foreground: 0 0% 98%;
-  --primary: 0 0% 98%;
-  --primary-foreground: 0 0% 9%;
-  --secondary: 0 0% 14.9%;
-  --secondary-foreground: 0 0% 98%;
-  --muted: 0 0% 14.9%;
-  --muted-foreground: 0 0% 63.9%;
-  --accent: 0 0% 14.9%;
-  --accent-foreground: 0 0% 98%;
-  --destructive: 0 62.8% 30.6%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 0 0% 14.9%;
-  --input: 0 0% 14.9%;
-  --ring: 0 0% 83.1%;
-}
+/* Shadcn semantic HSL-triplet vars (--primary, --secondary, …) are defined
+   per-theme in `omniagents-ui/styles/index.css`, keyed on [data-theme="…"].
+   That's the single source of truth; no generic fallback block here. */
 
 /* XTerm CSS vars for terminal theming */
 :root {
+  /* Backstop for the bottom safe-area zone — must match the bottom nav
+     (background2), not the content surface; see fluent-themes.ts. */
+  --safe-area-background: #fafafa;
   --xterm-bg: transparent;
   --xterm-fg: #fafafa;
   --xterm-black: #fafafa;
@@ -223,6 +190,18 @@
   --focus-ring-color: rgb(99 102 241 / 0.5);
 }
 
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --safe-area-background: #18181b;
+  }
+}
+
+html,
+body,
+#root {
+  background-color: var(--safe-area-background);
+}
+
 /* Theme CSS vars are now injected at runtime from fluent-themes.ts (single source of truth).
    The [data-theme] blocks that were here have been removed.
    data-theme attribute is still set for omniagents-ui backward compat. */
@@ -236,6 +215,97 @@
   --color-surface-border: rgb(255 255 255 / 0.2);
   --color-header-border: rgb(255 255 255 / 0.15);
   --color-accent-600: #a82e21;
+}
+
+.omni-glass {
+  --glass-panel: color-mix(in srgb, var(--color-card) 72%, transparent);
+  --glass-panel-soft: color-mix(in srgb, var(--color-muted) 58%, transparent);
+  --glass-panel-strong: color-mix(in srgb, var(--color-card) 86%, transparent);
+  --glass-panel-border: color-mix(in srgb, var(--color-border) 85%, transparent);
+  --glass-code-bg: color-mix(in srgb, var(--color-background) 78%, transparent);
+}
+
+.omni-glass [data-slot='card'],
+.omni-glass [data-slot='plan'],
+.omni-glass [data-slot='tool'],
+.omni-glass [data-slot='artifact'],
+.omni-glass [data-slot='alert'],
+.omni-glass [data-slot='activity-group-trigger'] {
+  background: var(--glass-panel);
+  border-color: var(--glass-panel-border);
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 0.08) inset,
+    0 18px 48px rgb(0 0 0 / 0.16);
+  backdrop-filter: var(--glass-blur-light);
+  -webkit-backdrop-filter: var(--glass-blur-light);
+}
+
+.omni-glass [data-slot='card-header'],
+.omni-glass [data-slot='card-footer'],
+.omni-glass [data-slot='plan-header'],
+.omni-glass [data-slot='plan-content'],
+.omni-glass [data-slot='plan-footer'],
+.omni-glass [data-slot='artifact-header'],
+.omni-glass [data-slot='tool-input-panel'],
+.omni-glass [data-slot='tool-output-panel']:not([data-error='true']),
+.omni-glass [data-slot='code-block'],
+.omni-glass [data-streamdown='code-block'],
+.omni-glass [data-slot='markdown'] pre {
+  background: var(--glass-panel-soft);
+  border-color: var(--glass-panel-border);
+  backdrop-filter: var(--glass-blur-light);
+  -webkit-backdrop-filter: var(--glass-blur-light);
+}
+
+.omni-glass [data-slot='code-block'] pre,
+.omni-glass [data-streamdown='code-block-body'],
+.omni-glass [data-slot='markdown'] pre {
+  background-color: var(--glass-code-bg) !important;
+}
+
+.omni-glass [data-slot='code-block'] [data-slot='code-block-header'],
+.omni-glass [data-streamdown='code-block-header'] {
+  background: var(--glass-panel-strong);
+}
+
+.omni-glass [data-slot='activity-group-trigger']:hover {
+  background: var(--glass-panel-strong);
+}
+
+.omni-glass [data-slot='activity-group-content'] {
+  border-color: var(--glass-panel-border);
+}
+
+.omni-glass [data-slot='markdown'] {
+  color: var(--color-foreground);
+  --tw-prose-body: var(--color-foreground);
+  --tw-prose-headings: var(--color-foreground);
+  --tw-prose-lead: var(--color-muted-foreground);
+  --tw-prose-links: var(--color-primary);
+  --tw-prose-bold: var(--color-foreground);
+  --tw-prose-counters: var(--color-muted-foreground);
+  --tw-prose-bullets: var(--color-muted-foreground);
+  --tw-prose-hr: var(--glass-panel-border);
+  --tw-prose-quotes: var(--color-foreground);
+  --tw-prose-quote-borders: var(--glass-panel-border);
+  --tw-prose-captions: var(--color-muted-foreground);
+  --tw-prose-code: var(--color-foreground);
+  --tw-prose-pre-code: var(--color-foreground);
+  --tw-prose-pre-bg: var(--glass-code-bg);
+  --tw-prose-th-borders: var(--glass-panel-border);
+  --tw-prose-td-borders: var(--glass-panel-border);
+}
+
+.omni-glass [data-slot='markdown'] :where(code):not(:where(pre code)) {
+  background: var(--glass-panel-soft);
+  border: 1px solid var(--glass-panel-border);
+}
+
+.omni-glass-mobile-top-app-bar {
+  background: var(--glass-panel);
+  border-color: var(--glass-panel-border);
+  backdrop-filter: var(--glass-blur-light);
+  -webkit-backdrop-filter: var(--glass-blur-light);
 }
 
 /* Base styles */
@@ -285,4 +355,20 @@
 button,
 [role='button'] {
   user-select: none;
+}
+
+/*
+ * Native HTML5 date inputs draw their calendar-picker icon via the user
+ * agent's default color scheme. On dark Fluent themes the icon defaults to
+ * black-on-dark and is nearly invisible. `color-scheme: dark` tells the
+ * browser to render native form controls (including the picker indicator)
+ * with light foregrounds suited to a dark background. The launcher toggles
+ * `.dark` on <html> based on the active theme (see fluent-themes.ts).
+ */
+.dark input[type='date'],
+.dark input[type='time'],
+.dark input[type='datetime-local'],
+.dark input[type='month'],
+.dark input[type='week'] {
+  color-scheme: dark;
 }
