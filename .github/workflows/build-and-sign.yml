@@ -24,6 +24,12 @@ on:
 
 env:
   NODE_VERSION: '22'
+  # electron-builder downloads the Electron zip and its tooling (NSIS, etc.)
+  # into OS-specific cache dirs (~/.electron is a legacy path it no longer
+  # uses). Pin both caches inside the workspace so actions/cache captures
+  # them and a GitHub CDN blip can't fail the build.
+  ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+  ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
 
 permissions:
   contents: write
@@ -66,9 +72,10 @@ jobs:
         with:
           path: |
             node_modules
-            ~/.electron
             ~/.electron-gyp
-          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-modules-${{ steps.lockfile-hash.outputs.hash }}
+            .cache/electron
+            .cache/electron-builder
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-modules-v2-${{ steps.lockfile-hash.outputs.hash }}
 
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
@@ -147,9 +154,10 @@ jobs:
         with:
           path: |
             node_modules
-            ~/.electron
             ~/.electron-gyp
-          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-modules-${{ steps.lockfile-hash.outputs.hash }}
+            .cache/electron
+            .cache/electron-builder
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-modules-v2-${{ steps.lockfile-hash.outputs.hash }}
 
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
@@ -236,9 +244,10 @@ jobs:
         with:
           path: |
             node_modules
-            ~/.electron
             ~/.electron-gyp
-          key: ${{ runner.os }}-x64-node-${{ env.NODE_VERSION }}-modules-${{ steps.lockfile-hash.outputs.hash }}
+            .cache/electron
+            .cache/electron-builder
+          key: ${{ runner.os }}-x64-node-${{ env.NODE_VERSION }}-modules-v2-${{ steps.lockfile-hash.outputs.hash }}
 
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
@@ -326,9 +335,10 @@ jobs:
         with:
           path: |
             node_modules
-            ~/.electron
             ~/.electron-gyp
-          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-modules-${{ steps.lockfile-hash.outputs.hash }}
+            .cache/electron
+            .cache/electron-builder
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-modules-v2-${{ steps.lockfile-hash.outputs.hash }}
 
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
