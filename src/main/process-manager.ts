@@ -772,6 +772,23 @@ export class ProcessManager {
   }
 
   /**
+   * Container ids of every live agent process (``connecting`` or
+   * ``running``). Feeds the startup orphan sweep's protected set so it
+   * never removes a container a session of this launcher instance is
+   * already attached to.
+   */
+  getAllContainerIds(): string[] {
+    const ids: string[] = [];
+    for (const proc of this.processes.values()) {
+      const status = proc.getStatus();
+      if ((status.type === 'running' || status.type === 'connecting') && status.data.containerId) {
+        ids.push(status.data.containerId);
+      }
+    }
+    return ids;
+  }
+
+  /**
    * The host workspace dir the given process was last started against (e.g.
    * the chat session's per-conversation scratch dir). Authoritative for
    * mount-name derivation — the store's `workspaceDir` is the workspace

@@ -22,11 +22,22 @@ type ExecFileFn = (
 export type DockerCleanupDeps = {
   execFileFn: ExecFileFn;
   getEnv: () => Record<string, string>;
+  /**
+   * Container ids this launcher instance still has a claim on: warm-reattach
+   * targets persisted on `codeTabs[].containerId` plus containers of live
+   * agent processes. These are never swept — auto-launched sessions resume
+   * them concurrently with the startup sweep, and removing one mid-resume
+   * surfaces as a Docker 409 (`marked for removal` / `is not running`).
+   * Called right before removal so sessions that come up mid-sweep are
+   * still protected.
+   */
+  getProtectedContainerIds: () => string[];
 };
 
 const defaultDeps = (): DockerCleanupDeps => ({
   execFileFn: execFileAsync as unknown as ExecFileFn,
   getEnv: () => ({ ...process.env, ...DEFAULT_ENV, ...shellEnvSync() }) as Record<string, string>,
+  getProtectedContainerIds: () => [],
 });
 
 // ---------------------------------------------------------------------------
@@ -40,10 +51,13 @@ const defaultDeps = (): DockerCleanupDeps => ({
  * On startup we check for any still-running containers with that label and stop/remove them,
  * since the managing process (the previous launcher instance) is gone.
  *
+ * Containers reported by `getProtectedContainerIds` are NOT orphans — they are
+ * resume targets or live sessions of this launcher instance — and are skipped.
+ *
  * Returns the number of containers cleaned up, or -1 if Docker is unavailable.
  */
 export const cleanupOrphanedContainers = async (deps?: Partial<DockerCleanupDeps>): Promise<number> => {
-  const { execFileFn, getEnv } = { ...defaultDeps(), ...deps };
+  const { execFileFn, getEnv, getProtectedContainerIds } = { ...defaultDeps(), ...deps };
   const env = getEnv();
   const opts = { encoding: 'utf8' as const, timeout: 15_000, env };
 
@@ -86,9 +100,18 @@ export const cleanupOrphanedContainers = async (deps?: Partial<DockerCleanupDeps
     return 0;
   }
 
+  // `docker ps --format {{.ID}}` yields short (12-char) ids while the store
+  // and omni serve payloads carry full 64-char ids — match by prefix in
+  // either direction.
+  const protectedIds = getProtectedContainerIds().filter(Boolean);
+  const isProtected = (id: string): boolean => protectedIds.some((p) => p.startsWith(id) || id.startsWith(p));
+
   // Force-remove each orphaned container (stop + rm)
   let cleaned = 0;
   for (const id of containerIds) {
+    if (isProtected(id)) {
+      continue;
+    }
     try {
       await execFileFn('docker', ['rm', '-f', id], opts);
       cleaned++;
@@ -105,6 +128,9 @@ export const cleanupOrphanedContainers = async (deps?: Partial<DockerCleanupDeps
  * Prune unused Docker resources (stopped containers, dangling images, unused networks, build cache).
  *
  * Runs `docker system prune -f` which only removes resources not associated with any running container.
+ * Omni Code containers are excluded via `label!=` — stopped ones are warm-reattach targets that
+ * `omni serve --container-id` restarts on the next launch; pruning one mid-resume is the same
+ * 409 race as the orphan sweep. True omni orphans are handled by `cleanupOrphanedContainers`.
  * Returns the reclaimed space string (e.g. "1.2GB"), or null if Docker is unavailable or prune fails.
  */
 export const pruneDockerResources = async (deps?: Partial<DockerCleanupDeps>): Promise<string | null> => {
@@ -113,7 +139,7 @@ export const pruneDockerResources = async (deps?: Partial<DockerCleanupDeps>): P
   const opts = { encoding: 'utf8' as const, timeout: 60_000, env };
 
   try {
-    const { stdout } = await execFileFn('docker', ['system', 'prune', '-f'], opts);
+    const { stdout } = await execFileFn('docker', ['system', 'prune', '-f', '--filter', `label!=${LABEL_KEY}`], opts);
     const match = stdout.match(/Total reclaimed space:\s*(.+)/);
     const reclaimed = match?.[1]?.trim() ?? null;
     if (reclaimed) {

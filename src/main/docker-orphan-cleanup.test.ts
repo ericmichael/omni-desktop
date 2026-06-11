@@ -36,7 +36,7 @@ function makeDeps(responses: Map<string, { stdout: string } | Error> = new Map()
   }) as unknown as DockerCleanupDeps['execFileFn'];
 
   return {
-    deps: { execFileFn, getEnv: () => ({ PATH: '/usr/bin' }) },
+    deps: { execFileFn, getEnv: () => ({ PATH: '/usr/bin' }), getProtectedContainerIds: () => [] },
     calls,
   };
 }
@@ -59,11 +59,7 @@ describe('cleanupOrphanedContainers', () => {
   });
 
   it('removes containers found by label', async () => {
-    const { deps, calls } = makeDeps(
-      new Map([
-        ['label=com.omni.omni-code', { stdout: 'abc123\ndef456\n' }],
-      ])
-    );
+    const { deps, calls } = makeDeps(new Map([['label=com.omni.omni-code', { stdout: 'abc123\ndef456\n' }]]));
     const result = await cleanupOrphanedContainers(deps);
     expect(result).toBe(2);
     // Should have called docker rm -f for each
@@ -74,11 +70,7 @@ describe('cleanupOrphanedContainers', () => {
   });
 
   it('removes containers found by name prefix', async () => {
-    const { deps } = makeDeps(
-      new Map([
-        ['name=omni-sandbox-', { stdout: 'xyz789\n' }],
-      ])
-    );
+    const { deps } = makeDeps(new Map([['name=omni-sandbox-', { stdout: 'xyz789\n' }]]));
     const result = await cleanupOrphanedContainers(deps);
     expect(result).toBe(1);
   });
@@ -96,11 +88,7 @@ describe('cleanupOrphanedContainers', () => {
 
   it('returns partial count when some removals fail', async () => {
     let rmCount = 0;
-    const { deps } = makeDeps(
-      new Map([
-        ['label=com.omni.omni-code', { stdout: 'a1\nb2\nc3\n' }],
-      ])
-    );
+    const { deps } = makeDeps(new Map([['label=com.omni.omni-code', { stdout: 'a1\nb2\nc3\n' }]]));
     // Override execFileFn to fail on the second rm
     const original = deps.execFileFn;
     deps.execFileFn = (async (cmd: string, args: string[], opts: unknown) => {
@@ -115,6 +103,30 @@ describe('cleanupOrphanedContainers', () => {
 
     const result = await cleanupOrphanedContainers(deps);
     expect(result).toBe(2); // 3 containers, 1 failed = 2 cleaned
+  });
+
+  it('skips protected containers, matching short listed ids against full stored ids', async () => {
+    const { deps, calls } = makeDeps(
+      new Map([['label=com.omni.omni-code', { stdout: '0af06484b591\n0bda09d477b1\ndef456\n' }]])
+    );
+    deps.getProtectedContainerIds = () => [
+      // full 64-char id as persisted on codeTabs / reported by omni serve
+      '0af06484b5914160461f03ec01229261586be2c4c2988ca63addf134136ea4ca',
+      // short id, e.g. from a live process status
+      '0bda09d477b1',
+    ];
+    const result = await cleanupOrphanedContainers(deps);
+    expect(result).toBe(1);
+    const rmCalls = calls.filter((c) => c.args.includes('rm'));
+    expect(rmCalls).toHaveLength(1);
+    expect(rmCalls[0]!.args).toEqual(['rm', '-f', 'def456']);
+  });
+
+  it('ignores empty strings in the protected set', async () => {
+    const { deps } = makeDeps(new Map([['label=com.omni.omni-code', { stdout: 'abc123\n' }]]));
+    deps.getProtectedContainerIds = () => [''];
+    const result = await cleanupOrphanedContainers(deps);
+    expect(result).toBe(1);
   });
 
   it('returns 0 when listing fails', async () => {
@@ -135,25 +147,24 @@ describe('cleanupOrphanedContainers', () => {
 
 describe('pruneDockerResources', () => {
   it('returns reclaimed space string on success', async () => {
-    const { deps } = makeDeps(
+    const { deps, calls } = makeDeps(
       new Map([['system prune', { stdout: 'Deleted Images:\nfoo\nTotal reclaimed space: 1.2GB\n' }]])
     );
     const result = await pruneDockerResources(deps);
     expect(result).toBe('1.2GB');
+    // Omni containers must be excluded — stopped ones are warm-reattach targets
+    const pruneCall = calls.find((c) => c.args.includes('prune'));
+    expect(pruneCall!.args).toContain('label!=com.omni.omni-code');
   });
 
   it('returns null when prune output has no space line', async () => {
-    const { deps } = makeDeps(
-      new Map([['system prune', { stdout: 'Nothing to prune\n' }]])
-    );
+    const { deps } = makeDeps(new Map([['system prune', { stdout: 'Nothing to prune\n' }]]));
     const result = await pruneDockerResources(deps);
     expect(result).toBeNull();
   });
 
   it('returns null when Docker is unavailable', async () => {
-    const { deps } = makeDeps(
-      new Map([['system prune', new Error('docker not found')]])
-    );
+    const { deps } = makeDeps(new Map([['system prune', new Error('docker not found')]]));
     const result = await pruneDockerResources(deps);
     expect(result).toBeNull();
   });

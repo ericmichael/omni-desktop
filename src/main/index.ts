@@ -439,12 +439,12 @@ main.ipc.handle('voice:speak', async (_e, streamId, text, voiceName) => {
   await voice.speak(
     text,
     (pcm, sampleRate) => main.sendToWindow('voice:audio', { streamId, pcm, sampleRate }),
-    voiceName,
+    voiceName
   );
   main.sendToWindow('voice:audio-end', { streamId });
 });
 main.ipc.handle('voice:import-sample', (_e, personaId, filename, dataBase64) =>
-  voice.importSample(personaId, filename, dataBase64),
+  voice.importSample(personaId, filename, dataBase64)
 );
 
 //#region App lifecycle
@@ -613,7 +613,16 @@ app.on('ready', () => {
 
   void (async () => {
     const { cleanupOrphanedContainers, pruneDockerResources } = await import('@/main/docker-orphan-cleanup');
-    const cleaned = await cleanupOrphanedContainers();
+    const cleaned = await cleanupOrphanedContainers({
+      // Warm-reattach targets persisted per tab, plus containers of agent
+      // processes already started this session — auto-launch resumes these
+      // concurrently with this sweep, so they must never be treated as
+      // orphans.
+      getProtectedContainerIds: () => [
+        ...store.get('codeTabs').map((tab) => tab.containerId ?? ''),
+        ...processManager.getAllContainerIds(),
+      ],
+    });
     if (cleaned > 0) {
       main.sendToWindow('toast:show', {
         level: 'info',
