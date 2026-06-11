@@ -23,6 +23,7 @@ import {
 import { useStore } from '@nanostores/react';
 import { LayoutGroup, motion } from 'framer-motion';
 import { forwardRef, Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { customAppPartition } from '@/lib/app-partition';
 import { uuidv4 } from '@/lib/uuid';
@@ -1661,13 +1662,7 @@ const CodeSessionPane = memo(
     actions,
     onClose,
     isVisible,
-    activeApp,
-    onActiveAppChange,
-    uiMinimal,
-    headerActionsTargetId,
-    headerActionsCompact,
-    previewUrl,
-    onPreviewUrlChange,
+    content,
     isGlass,
   }: {
     tab: CodeTab;
@@ -1679,13 +1674,8 @@ const CodeSessionPane = memo(
     actions?: React.ReactNode;
     onClose: (id: CodeTabId) => void;
     isVisible: boolean;
-    activeApp: AppId;
-    onActiveAppChange?: (app: AppId) => void;
-    uiMinimal?: boolean;
-    headerActionsTargetId?: string;
-    headerActionsCompact?: boolean;
-    previewUrl?: string;
-    onPreviewUrlChange?: (url: string) => void;
+    /** The tab's content slot — CodeDeck portals the persistent CodeTabContent here. */
+    content: React.ReactNode;
     isGlass?: boolean;
   }) => {
     const styles = useStyles();
@@ -1725,18 +1715,7 @@ const CodeSessionPane = memo(
         />
         {tab.projectId && <PullRequestBanner scope={{ kind: 'code-tab', tabId: tab.id }} />}
         <div className={styles.flex1MinH0Relative}>
-          <CodeTabContent
-            tab={tab}
-            isVisible={isVisible}
-            activeApp={activeApp}
-            onActiveAppChange={onActiveAppChange}
-            uiMinimal={uiMinimal}
-            headerActionsTargetId={headerActionsTargetId}
-            headerActionsCompact={headerActionsCompact}
-            previewUrl={previewUrl}
-            onPreviewUrlChange={onPreviewUrlChange}
-            isGlass={isGlass}
-          />
+          {content}
           {(tab.ticketId || tab.projectId) && (
             <TicketPanelOverlay
               panel={activePanel}
@@ -1751,6 +1730,29 @@ const CodeSessionPane = memo(
   }
 );
 CodeSessionPane.displayName = 'CodeSessionPane';
+
+/**
+ * Layout-transparent adopter for a column's persistent content. CodeDeck
+ * portals each session tab's SINGLE long-lived CodeTabContent into a STABLE
+ * detached <div> (the host); Tile and Focus each render one TabContentSlot
+ * that imperatively appends that host into its own DOM. Switching layout
+ * modes therefore MOVES the rendered session instead of remounting it — no
+ * agent reconnect, no transcript reload, composer drafts survive. The portal
+ * container must stay identity-stable: React reconciles createPortal by
+ * container, so portaling into per-mode slot elements would remount.
+ */
+const TabContentSlot = memo(({ host }: { host: HTMLDivElement }) => {
+  const ref = useCallback(
+    (el: HTMLDivElement | null) => {
+      if (el) {
+        el.appendChild(host);
+      }
+    },
+    [host]
+  );
+  return <div ref={ref} style={{ display: 'contents' }} />;
+});
+TabContentSlot.displayName = 'TabContentSlot';
 
 const FocusListItem = memo(
   ({
@@ -1847,6 +1849,27 @@ export const CodeDeck = memo(() => {
   // The reserved chat record renders full-screen behind the Chat tab, not as
   // a deck column. (codeApi.reorderTabs preserves filtered-out records.)
   const tabs = (store.codeTabs ?? []).filter((t) => !isChatTab(t));
+  // One persistent CodeTabContent per session tab, portaled into a stable
+  // detached host that the live layout mode's TabContentSlot adopts.
+  const sessionTabs = useMemo(() => tabs.filter((t) => !t.customAppId), [tabs]);
+  const contentHostsRef = useRef<Map<CodeTabId, HTMLDivElement>>(new Map());
+  const getContentHost = useCallback((tabId: CodeTabId): HTMLDivElement => {
+    let host = contentHostsRef.current.get(tabId);
+    if (!host) {
+      host = document.createElement('div');
+      host.style.display = 'contents';
+      contentHostsRef.current.set(tabId, host);
+    }
+    return host;
+  }, []);
+  useEffect(() => {
+    const live = new Set<string>(sessionTabs.map((t) => t.id));
+    for (const id of [...contentHostsRef.current.keys()]) {
+      if (!live.has(id)) {
+        contentHostsRef.current.delete(id);
+      }
+    }
+  }, [sessionTabs]);
   const activeTabId = store.activeCodeTabId ?? tabs[0]?.id ?? null;
   const deckBackground = store.codeDeckBackground ?? null;
   const [activeApps, setActiveApps] = useState<Record<CodeTabId, AppId>>({});
@@ -2347,20 +2370,7 @@ export const CodeDeck = memo(() => {
                             isGlass={!!deckBackground}
                             hasSidecar={!!sidecarApp}
                           >
-                            <CodeTabContent
-                              tab={tab}
-                              isVisible
-                              activeApp={activeAppId}
-                              onActiveAppChange={(app) => handleActiveAppChange(tab.id, app)}
-                              uiMinimal
-                              headerActionsTargetId={`code-deck-header-actions-${tab.id}`}
-                              headerActionsCompact
-                              previewUrl={previewUrls[tab.id]}
-                              onPreviewUrlChange={(url) => handlePreviewUrlChange(tab.id, url)}
-                              dockTargetId={`code-deck-dock-target-${tab.id}`}
-                              isGlass={!!deckBackground}
-                              sidecarMode
-                            />
+                            <TabContentSlot host={getContentHost(tab.id)} />
                           </DeckColumn>
                         )}
                       </div>
@@ -2502,13 +2512,7 @@ export const CodeDeck = memo(() => {
                       actions={renderSessionActions(tab)}
                       onClose={handleClose}
                       isVisible={tab.id === activeTab?.id}
-                      activeApp={activeApps[tab.id] ?? 'chat'}
-                      onActiveAppChange={(app) => handleActiveAppChange(tab.id, app)}
-                      uiMinimal
-                      headerActionsTargetId={undefined}
-                      headerActionsCompact
-                      previewUrl={previewUrls[tab.id]}
-                      onPreviewUrlChange={(url) => handlePreviewUrlChange(tab.id, url)}
+                      content={<TabContentSlot host={getContentHost(tab.id)} />}
                       isGlass={!!deckBackground}
                     />
                   );
@@ -2518,6 +2522,27 @@ export const CodeDeck = memo(() => {
           </SortableContext>
         </DndContext>
       )}
+      {sessionTabs.map((tab) => {
+        const tile = layoutMode === 'tile';
+        return createPortal(
+          <CodeTabContent
+            tab={tab}
+            isVisible={tile || tab.id === activeTab?.id}
+            activeApp={activeApps[tab.id] ?? 'chat'}
+            onActiveAppChange={(app) => handleActiveAppChange(tab.id, app)}
+            uiMinimal
+            headerActionsTargetId={tile ? `code-deck-header-actions-${tab.id}` : undefined}
+            headerActionsCompact
+            previewUrl={previewUrls[tab.id]}
+            onPreviewUrlChange={(url) => handlePreviewUrlChange(tab.id, url)}
+            dockTargetId={tile ? `code-deck-dock-target-${tab.id}` : undefined}
+            isGlass={!!deckBackground}
+            sidecarMode={tile}
+          />,
+          getContentHost(tab.id),
+          `tab-content-${tab.id}`
+        );
+      })}
     </div>
     </LayoutGroup>
   );
