@@ -339,7 +339,11 @@ export function Sidebar({
             onClose();
           }
         }}
-        selectedValue={selectedId}
+        // Always-defined so the drawer stays controlled: sessionId is
+        // undefined until the boot machine resolves, and undefined→string
+        // flips Fluent's useControllableState into the uncontrolled→
+        // controlled console error. '' selects nothing.
+        selectedValue={selectedId ?? ''}
         density="small"
         separator
       >
