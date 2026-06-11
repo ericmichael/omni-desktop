@@ -280,7 +280,7 @@ const ProjectConfigSchema = z.object({
   label: z.string(),
   slug: z.string(),
   isPersonal: z.boolean().optional(),
-  sources: z.array(ProjectSourceSchema).default([]),
+  sources: z.array(ProjectSourceSchema).optional(),
   pipeline: PipelineSchema.optional(),
   sandboxProfile: z.string().nullable().optional(),
   autoDispatch: z.boolean().optional(),
@@ -476,7 +476,7 @@ return parsed;
     label: c.label,
     slug: c.slug,
     ...(c.isPersonal !== undefined ? { isPersonal: c.isPersonal } : {}),
-    sources: c.sources,
+    ...(c.sources && c.sources.length > 0 ? { sources: c.sources } : {}),
     ...(c.pipeline !== undefined ? { pipeline: c.pipeline } : {}),
     ...(c.sandboxProfile !== undefined && c.sandboxProfile !== null
       ? { sandboxProfile: c.sandboxProfile }
@@ -600,7 +600,7 @@ export function serializeProjectConfig(project: Project): string {
     label: project.label,
     slug: project.slug,
     isPersonal: project.isPersonal,
-    sources: project.sources,
+    sources: project.sources?.length ? project.sources : undefined,
     pipeline: project.pipeline,
     sandboxProfile: project.sandboxProfile,
     autoDispatch: project.autoDispatch,

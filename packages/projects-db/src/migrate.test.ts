@@ -63,14 +63,17 @@ describe('v10 pages rebuild', () => {
     expect(fk.foreign_keys).toBe(1);
   });
 
-  it("allows inserting kind='drawing' after migration", () => {
+  it("keeps the kind CHECK: notebook allowed, unknown kinds rejected", () => {
+    // 'drawing' was a planned kind that never shipped — PageKind is
+    // 'doc' | 'notebook' and the schema CHECK must match it.
     runMigrations(db);
     db.prepare("INSERT INTO projects (id, label, slug) VALUES ('proj_1', 'P', 'p')").run();
     expect(() =>
-      db.prepare("INSERT INTO pages (id, project_id, title, kind) VALUES ('pg_d', 'proj_1', 'Sketch', 'drawing')").run()
+      db.prepare("INSERT INTO pages (id, project_id, title, kind) VALUES ('pg_n', 'proj_1', 'NB', 'notebook')").run()
     ).not.toThrow();
-    const row = db.prepare("SELECT kind FROM pages WHERE id = 'pg_d'").get() as { kind: string };
-    expect(row.kind).toBe('drawing');
+    expect(() =>
+      db.prepare("INSERT INTO pages (id, project_id, title, kind) VALUES ('pg_d', 'proj_1', 'Sketch', 'drawing')").run()
+    ).toThrow(/CHECK constraint/);
   });
 
   it('cascade-deletes page_content when its page is removed (FK intact)', () => {

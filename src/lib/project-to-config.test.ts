@@ -85,7 +85,7 @@ describe('projectToConfig', () => {
 
   it('local-workspace project — local_dir entry at "."', () => {
     const project = baseProject({
-      source: { kind: 'local', workspaceDir: '/home/eric/repos/myapi', gitDetected: true },
+      sources: [{ id: 'src-1', mountName: 'myapi', kind: 'local', workspaceDir: '/home/eric/repos/myapi', gitDetected: true }],
     });
     const config = projectToConfig(project, DEFAULTS);
 
@@ -98,11 +98,15 @@ describe('projectToConfig', () => {
 
   it('git-remote project — git_repo entry with parsed host/repo and ref', () => {
     const project = baseProject({
-      source: {
-        kind: 'git-remote',
-        repoUrl: 'https://github.com/anthropics/launcher.git',
-        defaultBranch: 'main',
-      },
+      sources: [
+        {
+          id: 'src-1',
+          mountName: 'launcher',
+          kind: 'git-remote',
+          repoUrl: 'https://github.com/anthropics/launcher.git',
+          defaultBranch: 'main',
+        },
+      ],
     });
     const config = projectToConfig(project, DEFAULTS);
 
@@ -116,7 +120,7 @@ describe('projectToConfig', () => {
 
   it('git-remote project without defaultBranch — omits ref', () => {
     const project = baseProject({
-      source: { kind: 'git-remote', repoUrl: 'https://github.com/a/b' },
+      sources: [{ id: 'src-1', mountName: 'b', kind: 'git-remote', repoUrl: 'https://github.com/a/b' }],
     });
     const config = projectToConfig(project, DEFAULTS);
 
@@ -127,7 +131,7 @@ describe('projectToConfig', () => {
 
   it('git-remote project with unparseable URL — falls back to empty entries', () => {
     const project = baseProject({
-      source: { kind: 'git-remote', repoUrl: 'not-actually-a-url' },
+      sources: [{ id: 'src-1', mountName: 'x', kind: 'git-remote', repoUrl: 'not-actually-a-url' }],
     });
     const config = projectToConfig(project, DEFAULTS);
 
@@ -215,11 +219,15 @@ describe('projectToConfig', () => {
       label: 'API Refactor',
       slug: 'api-refactor',
       isPersonal: false,
-      source: {
-        kind: 'local',
-        workspaceDir: '/home/eric/repos/myapi',
-        gitDetected: true,
-      },
+      sources: [
+        {
+          id: 'src-1',
+          mountName: 'myapi',
+          kind: 'local',
+          workspaceDir: '/home/eric/repos/myapi',
+          gitDetected: true,
+        },
+      ],
       autoDispatch: true,
       pipeline: { columns: [{ id: 'backlog', label: 'Backlog' }] },
     });

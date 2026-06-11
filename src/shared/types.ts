@@ -1357,8 +1357,8 @@ export type ProjectSource = (
  * Multi-source-aware callers (PR UI, container seeding, per-source merge)
  * iterate ``project.sources`` directly.
  */
-export const firstSource = (project: { sources: ProjectSource[] } | undefined | null): ProjectSource | undefined =>
-  project?.sources[0];
+export const firstSource = (project: { sources?: ProjectSource[] } | undefined | null): ProjectSource | undefined =>
+  project?.sources?.[0];
 
 export type Project = {
   id: ProjectId;

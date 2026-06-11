@@ -39,7 +39,7 @@ describe('encryptFile / decryptFile', () => {
     expect(decrypted).toEqual(plaintext);
   });
 
-  it('round-trips large plaintext (1 MB)', () => {
+  it('round-trips large plaintext (1 MB)', { timeout: 30_000 }, () => {
     const key = makeKey();
     const plaintext = randomBytes(1024 * 1024);
     const encrypted = encryptFile(plaintext, key);

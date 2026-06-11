@@ -385,7 +385,7 @@ expect(parsed.value).toEqual(p);
 
   it('roundtrips a project with local source and pipeline', () => {
     const p = makeProject({
-      source: { kind: 'local', workspaceDir: '/home/user/code', gitDetected: true },
+      sources: [{ id: 'src-1', mountName: 'code', kind: 'local', workspaceDir: '/home/user/code', gitDetected: true }],
       pipeline: {
         columns: [
           { id: 'backlog', label: 'Backlog' },
@@ -406,7 +406,7 @@ expect(parsed.value).toEqual(p);
 
   it('roundtrips a project with git-remote source', () => {
     const p = makeProject({
-      source: { kind: 'git-remote', repoUrl: 'git@github.com:user/repo.git', defaultBranch: 'main' },
+      sources: [{ id: 'src-1', mountName: 'repo', kind: 'git-remote', repoUrl: 'git@github.com:user/repo.git', defaultBranch: 'main' }],
     });
     const text = serializeProjectConfig(p);
     const parsed = parseProjectConfig(text);
@@ -417,7 +417,7 @@ expect(parsed.value).toEqual(p);
   });
 
   it('rejects an unknown source kind', () => {
-    const text = 'id: p1\nlabel: X\nslug: x\ncreatedAt: 2026-04-12T00:00:00Z\nsource:\n  kind: carrier-pigeon\n  address: home\n';
+    const text = 'id: p1\nlabel: X\nslug: x\ncreatedAt: 2026-04-12T00:00:00Z\nsources:\n  - kind: carrier-pigeon\n    address: home\n';
     const parsed = parseProjectConfig(text);
     expect(parsed.isErr()).toBe(true);
   });
