@@ -384,6 +384,27 @@ describe('Phase 5 runtime compatibility shims', () => {
     );
   });
 
+  it('rewrites absolute launcher-host ws:// URLs despite the scheme-bearing origin mismatch', () => {
+    // noVNC builds ws://<location.hostname>:<location.port>/websockify — the
+    // launcher's host with a ws: scheme. WHATWG origins include the scheme, so
+    // an origin equality check alone would miss it and the RFB socket would
+    // bypass the proxy.
+    expect(
+      rewriteProxyRuntimeUrl('ws://launcher.test/websockify', currentHref, upstream, 'chat-svc-vnc', 'websocket')
+    ).toBe('ws://launcher.test/proxy/chat-svc-vnc/websockify');
+    // Already-proxied ws:// URLs on the launcher host must pass through, not
+    // get double-prefixed.
+    expect(
+      rewriteProxyRuntimeUrl(
+        'ws://launcher.test/proxy/chat-svc-vnc/websockify',
+        currentHref,
+        upstream,
+        'chat-svc-vnc',
+        'websocket'
+      )
+    ).toBe('ws://launcher.test/proxy/chat-svc-vnc/websockify');
+  });
+
   it('generates a versioned shim with URL hooks and service worker policy controls', () => {
     const shim = buildProxyRuntimeShim({
       proxyName: 'dyn-abc',
