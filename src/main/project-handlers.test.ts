@@ -36,7 +36,6 @@ const EXPECTED_CHANNELS = [
   'project:detect-code-tab-pull-request',
   'project:detect-code-tab-pull-requests',
   'project:detect-chat-pull-requests',
-  'project:check-merge',
   'project:merge-ticket',
   'project:detect-pull-request',
   'project:read-context',
@@ -73,7 +72,6 @@ const makeManager = () => ({
   listProjectFiles: vi.fn(() => []),
   getContextPreview: vi.fn(() => ''),
   openProjectFile: vi.fn(),
-  checkPrMerge: vi.fn(async () => ({ ready: false, reason: 'stub' })),
   mergePrTicket: vi.fn(async () => ({ ok: true, mergeCommitSha: 'deadbeef' })),
   detectPullRequest: vi.fn(async () => null),
 });
@@ -198,14 +196,6 @@ describe('registerProjectHandlers', () => {
     registerProjectHandlers(ipc, () => mgr as never);
     ipc.invoke('project:apply-code-tab-source-changes', 'tab1', 'src1');
     expect(mgr.applyCodeTabSourceChanges).toHaveBeenCalledWith('tab1', 'src1');
-  });
-
-  it('project:check-merge delegates with ticketId + sourceId', () => {
-    const ipc = new StubIpc();
-    const mgr = makeManager();
-    registerProjectHandlers(ipc, () => mgr as never);
-    ipc.invoke('project:check-merge', 't1', 'src1');
-    expect(mgr.checkPrMerge).toHaveBeenCalledWith('t1', 'src1');
   });
 
   it('project:merge-ticket delegates with ticketId + sourceId', () => {

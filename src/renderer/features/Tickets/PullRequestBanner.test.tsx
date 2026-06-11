@@ -6,7 +6,7 @@ import { emitter } from '@/renderer/services/ipc';
 import type { ContainerPullRequest } from '@/shared/types';
 
 import { requestPreviewOpen } from './preview-bridge';
-import { PullRequestBanner } from './PullRequestBanner';
+import { mergePollResult, PullRequestBanner } from './PullRequestBanner';
 
 vi.mock('@fluentui/react-components', () => ({
   makeStyles: () => () => ({
@@ -26,6 +26,7 @@ vi.mock('@fluentui/react-components', () => ({
 
 vi.mock('@fluentui/react-icons', () => ({
   Open16Regular: () => <span data-testid="open-icon" />,
+  CheckmarkCircle16Regular: () => <span data-testid="merged-icon" />,
 }));
 
 vi.mock('@/renderer/services/ipc', () => ({
@@ -106,5 +107,30 @@ describe('PullRequestBanner PR links', () => {
 
     expect(invokeMock).toHaveBeenCalledWith('project:detect-chat-pull-requests');
     expect(requestPreviewOpenMock).toHaveBeenCalledWith(pullRequest.url);
+  });
+});
+
+describe('mergePollResult (display stickiness — gating happens in main)', () => {
+  const open = (n: number): ContainerPullRequest => ({ number: n, url: `https://x/pull/${n}`, state: 'OPEN' });
+  const merged = (n: number): ContainerPullRequest => ({ number: n, url: `https://x/pull/${n}`, state: 'MERGED' });
+
+  it('shows whatever the (main-gated) poll returns', () => {
+    expect(mergePollResult([], [open(1), merged(2)])).toEqual([open(1), merged(2)]);
+  });
+
+  it('flips a displayed open PR to the merged badge when the poll reports it merged', () => {
+    expect(mergePollResult([open(1)], [merged(1)])).toEqual([merged(1)]);
+  });
+
+  it('keeps a merged badge sticky after the PR drops out of detection', () => {
+    expect(mergePollResult([merged(1)], [])).toEqual([merged(1)]);
+  });
+
+  it('drops a displayed open PR that disappears without merging (closed unmerged)', () => {
+    expect(mergePollResult([open(1)], [])).toEqual([]);
+  });
+
+  it('does not duplicate a sticky merged badge the poll still returns', () => {
+    expect(mergePollResult([merged(1)], [merged(1), open(2)])).toEqual([merged(1), open(2)]);
   });
 });

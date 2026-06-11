@@ -471,7 +471,13 @@ export const CodeTabContent = memo(
 
     const baseSessionArgs = useMemo(() => {
       if (chatMode) {
-        return { surface: 'chat' as const };
+        // Chat is projectless but never folder-less: the per-conversation
+        // scratch dir is its workspace, and passing it makes the output
+        // guidance ("save deliverables in your working folder") apply.
+        return {
+          surface: 'chat' as const,
+          ...(workspaceDir ? { context: { workspaceDir } } : {}),
+        };
       }
       const artifactsDir = tab.ticketId
         ? profileRunsOnHost(profileName)
@@ -490,7 +496,7 @@ export const CodeTabContent = memo(
           ...(tab.workspaceDir ? { workspaceDir: tab.workspaceDir } : {}),
         },
       };
-    }, [chatMode, tab.ticketId, tab.workspaceDir, project, profileName, hostConfigDir, ticketAutopilot]);
+    }, [chatMode, workspaceDir, tab.ticketId, tab.workspaceDir, project, profileName, hostConfigDir, ticketAutopilot]);
 
     // Base runs are speak-free; the mic button arms the voice variant per-run.
     const clientToolVariables = useMemo(() => buildSessionVariables(baseSessionArgs), [baseSessionArgs]);

@@ -64,7 +64,8 @@ import { mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { ProcessManager, type ProcessManagerStoreData } from '@/main/process-manager';
+import { isLauncherOwnedDir, ProcessManager, type ProcessManagerStoreData } from '@/main/process-manager';
+import { getDefaultWorkspaceDir } from '@/main/util';
 import { gitTokenEnvName } from '@/shared/git-credentials';
 import type { AgentProcessStatus, GitCredential, Project, WithTimestamp } from '@/shared/types';
 
@@ -96,6 +97,21 @@ function makePm(opts?: {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+describe('isLauncherOwnedDir', () => {
+  it('classifies per-conversation Sessions scratch dirs as launcher-owned', () => {
+    expect(isLauncherOwnedDir('/custom/root/Sessions/abc-123')).toBe(true);
+  });
+
+  it('classifies dirs under the default workspace tree as launcher-owned', () => {
+    expect(isLauncherOwnedDir(`${getDefaultWorkspaceDir()}/Projects/my-project`)).toBe(true);
+    expect(isLauncherOwnedDir(getDefaultWorkspaceDir())).toBe(true);
+  });
+
+  it('classifies arbitrary user folders as user-linked', () => {
+    expect(isLauncherOwnedDir('/home/someone/Documents/my-folder')).toBe(false);
+  });
+});
 
 describe('ProcessManager', () => {
   beforeEach(() => {

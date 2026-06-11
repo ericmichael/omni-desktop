@@ -8,10 +8,9 @@ import { commentId } from 'omni-projects-db';
 import path from 'path';
 
 import { getArtifactsDir, getContainerArtifactsDir } from '@/lib/artifacts';
-import { resolveArtifactPath } from '@/lib/artifacts-fs';
 import { getContainerFilesChanged } from '@/lib/container-files-changed';
 import { detectContainerPullRequest, detectContainerPullRequests } from '@/lib/container-pull-request';
-import { getContainerChangeSet, mirrorContainerChangesToHost } from '@/lib/container-sync';
+import { mirrorContainerChangesToHost } from '@/lib/container-sync';
 import { getGitFilesChanged, resolveTicketDiffBase } from '@/lib/git-files-changed';
 import { INBOX_SWEEP_INTERVAL_MS } from '@/lib/inbox-expiry';
 import type { ProjectManagerDeps } from '@/lib/project-manager-deps';
@@ -69,7 +68,6 @@ import type {
   MilestoneId,
   Page,
   Pipeline,
-  PrMergeCheck,
   PrMergeResult,
   Project,
   ProjectId,
@@ -81,7 +79,7 @@ import type {
   TicketId,
   TicketPriority,
 } from '@/shared/types';
-import { firstSource } from '@/shared/types';
+import { CHAT_TAB_ID, firstSource } from '@/shared/types';
 
 const DEFAULT_BRIEF_TEMPLATE = `## Problem
 
@@ -1202,10 +1200,6 @@ export class ProjectManager {
 
   // #region Artifacts
 
-  private getArtifactsRoot = (ticketId: TicketId): string => {
-    return getArtifactsDir(getOmniConfigDir(), ticketId);
-  };
-
   /**
    * The artifacts dir *as the agent should write it*, resolved by the same
    * substrate check the reader (`resolveArtifactStore`) uses, so the agent
@@ -1232,7 +1226,9 @@ export class ProjectManager {
     }
     const ticket = this.getTicketById(ticketId);
     const containerId = ticket ? (this.processManager?.getProjectContainerId(ticket.projectId) ?? null) : null;
-    return containerId ? new DockerArtifactStore(containerId) : new HostFsArtifactStore(getOmniConfigDir());
+    return containerId
+      ? new DockerArtifactStore(containerId, getOmniConfigDir())
+      : new HostFsArtifactStore(getOmniConfigDir());
   };
 
   listArtifacts = (ticketId: TicketId, dirPath?: string): Promise<ArtifactFileEntry[]> =>
@@ -1244,11 +1240,21 @@ export class ProjectManager {
   writeArtifact = (ticketId: TicketId, relativePath: string, data: Buffer): Promise<void> =>
     this.resolveArtifactStore(ticketId).write(ticketId, relativePath, data);
 
+  /**
+   * Make an artifact exist as a real host file and return its path (null when
+   * unavailable). Substrate-dispatched: host store returns the file itself,
+   * the docker store `docker cp`s it out of the live container into the host
+   * artifacts layout. Used by `openArtifactExternal` and the `artifact://`
+   * protocol's container fallback.
+   */
+  materializeArtifact = (ticketId: TicketId, relativePath: string): Promise<string | null> =>
+    this.resolveArtifactStore(ticketId).materialize(ticketId, relativePath);
+
   openArtifactExternal = async (ticketId: TicketId, relativePath: string): Promise<void> => {
-    // Host-fs only: opening in an external app needs a real host path. For
-    // container substrates this is a no-op until artifact materialization lands.
-    const fullPath = resolveArtifactPath(this.getArtifactsRoot(ticketId), relativePath);
-    await shell.openPath(fullPath);
+    const hostPath = await this.materializeArtifact(ticketId, relativePath);
+    if (hostPath) {
+      await shell.openPath(hostPath);
+    }
   };
 
   // #endregion
@@ -1423,22 +1429,50 @@ export class ProjectManager {
     ...context,
   });
 
-  private persistTicketPullRequests = (ticketId: TicketId | undefined, prs: ContainerPullRequest[]): void => {
-    if (!ticketId || prs.length === 0) {
-      return;
+  /**
+   * Gate detected PRs against the ticket's persisted ``PullRequestLink``s and
+   * persist the survivors, returning the display-worthy subset. Detection is
+   * stateless — every poll re-runs ``gh pr list --state all`` in the
+   * container, so the branch re-reports every PR *ever* merged from it. The
+   * persisted links are the memory that separates "we watched this PR while
+   * it was open" from "historical merge nobody here ever saw":
+   *
+   * - OPEN PRs always display and are upserted (first sight stamps createdAt).
+   * - MERGED PRs display only when a link for ``sourceId:url`` already exists;
+   *   the open→merged transition is persisted (state flips), so the ✓ badge
+   *   survives app restarts.
+   * - MERGED PRs with no link are dropped — never watched here.
+   *
+   * Surfaces with no ticket (chat, un-ticketed code tabs) have no persistent
+   * home: everything passes through and the renderer's session memory does
+   * the same gating in-memory (see ``mergePollResult`` / the Changes badge).
+   */
+  private gateAndPersistPullRequests = (
+    ticketId: TicketId | undefined,
+    prs: ContainerPullRequest[]
+  ): ContainerPullRequest[] => {
+    if (prs.length === 0) {
+      return prs;
     }
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket) {
-      return;
+    const ticket = ticketId ? this.getTicketById(ticketId) : undefined;
+    if (!ticketId || !ticket) {
+      return prs;
     }
     const now = Date.now();
     const byKey = new Map((ticket.pullRequests ?? []).map((link) => [`${link.sourceId}:${link.url}`, link]));
+    const display: ContainerPullRequest[] = [];
+    let changed = false;
     for (const pr of prs) {
       if (!pr.projectId || !pr.sourceId || !pr.sourceMountName) {
+        display.push(pr);
         continue;
       }
       const key = `${pr.sourceId}:${pr.url}`;
       const existing = byKey.get(key);
+      if (pr.state === 'MERGED' && !existing) {
+        continue; // historical merge — never seen open here, never shown
+      }
+      display.push(pr);
       const link: PullRequestLink = {
         ...(existing ?? { createdAt: now }),
         url: pr.url,
@@ -1457,8 +1491,73 @@ export class ProjectManager {
         lastSeenAt: now,
       };
       byKey.set(key, link);
+      changed = true;
     }
-    this.updateTicket(ticketId, { pullRequests: [...byKey.values()] });
+    if (changed) {
+      this.updateTicket(ticketId, { pullRequests: [...byKey.values()] });
+    }
+    return display;
+  };
+
+  /** Bound length for the global `pullRequestLinks` store list (pruned by `lastSeenAt`). */
+  private static readonly MAX_SCOPED_PR_LINKS = 500;
+
+  /**
+   * Ticket-less twin of {@link gateAndPersistPullRequests}: links live in the
+   * global ``pullRequestLinks`` store key, scoped by the conversation/tab the
+   * PR was watched from (``sessionId`` preferred — a new conversation or
+   * re-seeded tab workspace is a new scope — falling back to ``codeTabId``).
+   * Same rules: OPEN displays and upserts; MERGED displays only with an
+   * existing link (the transition persists, so the ✓ badge survives
+   * restarts); unknown MERGED drops. No stable scope → only OPEN displays.
+   */
+  private gateAndPersistScopedPullRequests = (
+    scopeKey: string | undefined,
+    prs: ContainerPullRequest[]
+  ): ContainerPullRequest[] => {
+    if (prs.length === 0) {
+      return prs;
+    }
+    if (!scopeKey) {
+      return prs.filter((pr) => pr.state === 'OPEN');
+    }
+    const linkScope = (link: PullRequestLink): string | undefined => link.sessionId ?? link.codeTabId;
+    const all = this.store.get('pullRequestLinks') ?? [];
+    const byUrl = new Map(all.filter((link) => linkScope(link) === scopeKey).map((link) => [link.url, link]));
+    const now = Date.now();
+    const display: ContainerPullRequest[] = [];
+    let changed = false;
+    for (const pr of prs) {
+      const existing = byUrl.get(pr.url);
+      if (pr.state === 'MERGED' && !existing) {
+        continue; // historical merge — never seen open here, never shown
+      }
+      display.push(pr);
+      byUrl.set(pr.url, {
+        ...(existing ?? { createdAt: now }),
+        url: pr.url,
+        number: pr.number,
+        state: pr.state,
+        ...(pr.projectId ? { projectId: pr.projectId } : {}),
+        ...(pr.sourceId ? { sourceId: pr.sourceId } : {}),
+        ...(pr.sourceMountName ? { sourceMountName: pr.sourceMountName } : {}),
+        ...(pr.provider ? { provider: pr.provider } : {}),
+        ...(pr.branch ? { branch: pr.branch } : {}),
+        ...(pr.title ? { title: pr.title } : {}),
+        ...(pr.codeTabId ? { codeTabId: pr.codeTabId } : {}),
+        ...(pr.sessionId ? { sessionId: pr.sessionId } : {}),
+        ...(pr.workspaceDir ? { workspaceDir: pr.workspaceDir } : {}),
+        lastSeenAt: now,
+      });
+      changed = true;
+    }
+    if (changed) {
+      const merged = [...all.filter((link) => linkScope(link) !== scopeKey), ...byUrl.values()]
+        .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
+        .slice(0, ProjectManager.MAX_SCOPED_PR_LINKS);
+      this.store.set('pullRequestLinks', merged);
+    }
+    return display;
   };
 
   /**
@@ -1485,8 +1584,10 @@ export class ProjectManager {
       sessionId: ctx.tab.sessionId,
       workspaceDir: ctx.tab.workspaceDir,
     });
-    this.persistTicketPullRequests(ctx.tab.ticketId, [enriched]);
-    return enriched;
+    const gated = ctx.tab.ticketId
+      ? this.gateAndPersistPullRequests(ctx.tab.ticketId, [enriched])
+      : this.gateAndPersistScopedPullRequests(ctx.tab.sessionId ?? tabId, [enriched]);
+    return gated[0] ?? null;
   };
 
   /**
@@ -1511,8 +1612,9 @@ export class ProjectManager {
       );
       found.push(...prs);
     }
-    this.persistTicketPullRequests(ctx.tab.ticketId, found);
-    return found;
+    return ctx.tab.ticketId
+      ? this.gateAndPersistPullRequests(ctx.tab.ticketId, found)
+      : this.gateAndPersistScopedPullRequests(ctx.tab.sessionId ?? tabId, found);
   };
 
   /**
@@ -1526,58 +1628,34 @@ export class ProjectManager {
     if (!containerId) {
       return [];
     }
-    const workspaceDir = this.store.get('workspaceDir') as string | undefined;
+    // The live process's workspace dir, not the store's workspace *root*: the
+    // chat session runs against a per-conversation scratch dir whose basename
+    // is the actual mount name inside the container.
+    const workspaceDir =
+      this.processManager?.getProcessWorkspaceDir('chat') ?? (this.store.get('workspaceDir') as string | undefined);
     if (!workspaceDir) {
       return [];
     }
     const mountName = path.basename(workspaceDir) || 'workspace';
-    return detectContainerPullRequests(containerId, mountName);
+    const prs = await detectContainerPullRequests(containerId, mountName);
+    // Scope key = the conversation's sessionId (lives on the reserved chat
+    // record in codeTabs) — a new conversation is a new scope, so a merge
+    // watched in one conversation never badges another.
+    const chatTab = ((this.store.get('codeTabs') ?? []) as Array<{ id: string; sessionId?: string }>).find(
+      (t) => t.id === CHAT_TAB_ID
+    );
+    const enriched = prs.map((pr) => ({
+      ...pr,
+      sourceMountName: mountName,
+      ...(chatTab?.sessionId ? { sessionId: chatTab.sessionId } : {}),
+      workspaceDir,
+    }));
+    return this.gateAndPersistScopedPullRequests(chatTab?.sessionId, enriched);
   };
 
   // #endregion
 
   // #region Sync to host
-
-  /**
-   * Report whether one source has container changes to sync to its host. The
-   * container is authoritative, so there's no conflict concept — ``ready`` just
-   * means "there's something to mirror." Requires a running container.
-   */
-  checkPrMerge = async (ticketId: TicketId, sourceId: string): Promise<PrMergeCheck> => {
-    const ticket = this.getTicketById(ticketId);
-    if (!ticket) {
-      return { ready: false, reason: 'Ticket not found' };
-    }
-    const project = this.getProjects().find((p) => p.id === ticket.projectId);
-    if (!project) {
-      return { ready: false, reason: 'Project not found' };
-    }
-    const source = project.sources.find((s) => s.id === sourceId);
-    if (!source) {
-      return { ready: false, reason: `Source not found: ${sourceId}` };
-    }
-    if (source.kind !== 'local') {
-      return { ready: false, reason: 'Sync to host is only supported for local sources' };
-    }
-
-    const containerId = this.processManager?.getProjectContainerId(project.id) ?? null;
-    if (!containerId) {
-      return { ready: false, reason: 'No running session for this project' };
-    }
-    const { copy, remove } = await getContainerChangeSet(containerId, source.mountName);
-    const changed = copy.length + remove.length;
-    if (changed === 0) {
-      return { ready: false, reason: 'No changes to sync' };
-    }
-    return {
-      ready: true,
-      base: 'host workspace',
-      feature: `container/${source.mountName}`,
-      hasConflicts: false,
-      conflictingFiles: [],
-      ahead: changed,
-    };
-  };
 
   /**
    * Mirror one source's changed-vs-seed container files onto its host workspace
@@ -1651,8 +1729,7 @@ export class ProjectManager {
       return null;
     }
     const enriched = this.attachPrContext(pr, project, source, { ticketId });
-    this.persistTicketPullRequests(ticketId, [enriched]);
-    return enriched;
+    return this.gateAndPersistPullRequests(ticketId, [enriched])[0] ?? null;
   };
 
   // #endregion

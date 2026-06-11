@@ -11,6 +11,7 @@
 
 import { getContainerArtifactsDir } from '@/lib/artifacts';
 import type { ProjectSource } from '@/shared/types';
+import { isRepoSource } from '@/shared/types';
 
 // Ticket-scoped client tools used to live here as launcher stubs
 // (``notify`` / ``escalate``). They're now omniagents builtins (see the
@@ -974,31 +975,73 @@ const buildContextIdentifiers = (opts?: ContextIdentifierOpts): string => {
   }
   if (opts?.ticketId) {
     lines.push(`Current ticket: ${opts.ticketId}`);
-    const artifactsDir = opts.artifactsDir ?? getContainerArtifactsDir(opts.ticketId);
-    lines.push(
-      [
-        '',
-        '## Where to put output for the user',
-        'You have two distinct channels for surfacing information, and they serve different purposes:',
-        '',
-        `- **Persistent artifacts directory (human-visible): \`${artifactsDir}\`**. Files you write here survive across runs and appear in this ticket's **Artifacts** tab in the launcher UI. Use for progress notes, research, generated deliverables, or any work product that should stick around for the user to review later and doesn't belong in the repo or project folder.`,
-        '- **`display_artifact` tool** — renders content inline in the chat stream (markdown, HTML, etc.). Ephemeral, tied to the conversation. Use for "show this to the user now" — previews, summaries, diagrams responding to the current turn.',
-        '',
-        'Both are visible to the user. Choose by lifecycle: artifacts directory = "this should persist"; `display_artifact` = "show this now."',
-        '',
-        '## Keep the PR writeup current',
-        '',
-        "Maintain an accurate PR title and body reflecting the changes you've made so far. The launcher's **PR** tab reads these files (polled, so updates are picked up automatically):",
-        '',
-        `- \`${artifactsDir}/pr/PR_TITLE.md\` — one short line (≤70 chars) describing the ticket's change. No markdown, no trailing punctuation.`,
-        `- \`${artifactsDir}/pr/PR_BODY.md\` — markdown with a **Summary** section (what and why) and a **Test plan** section (how to verify). Keep it grounded in the diff.`,
-        `- \`${artifactsDir}/pr/CI_STATUS.md\` — optional. Latest CI/test status, if you've produced any.`,
-        '',
-        'Refresh these whenever the scope or nature of your work shifts — don\'t wait for a column change or for the work to be "done." If nothing material has changed, leave them alone.',
-      ].join('\n')
-    );
+  }
+  const outputGuidance = buildOutputGuidance(opts);
+  if (outputGuidance) {
+    lines.push(outputGuidance);
   }
   return lines.join('\n');
+};
+
+/**
+ * Where agent output goes, branched by what the workspace *is*.
+ *
+ * Plain folders have no membership rules — everything the user asked for lands
+ * in the folder itself, next to their files; that is the only output concept an
+ * everyday user needs (the launcher mirrors the folder back to their computer).
+ * Repos are curated trees, so work products that don't belong in version
+ * control go to the ticket's artifacts directory (surfaced as the Artifacts
+ * panel) instead of polluting the diff.
+ *
+ * There is deliberately no file-based PR writeup: when the user wants a pull
+ * request, the agent composes the title and body at creation time.
+ */
+const buildOutputGuidance = (opts?: ContextIdentifierOpts): string => {
+  const sources = opts?.sources ?? [];
+  const repoSources = sources.filter(isRepoSource);
+  const plainSources = sources.filter((s) => !isRepoSource(s));
+  const hasWorkspace = sources.length > 0 || Boolean(opts?.workspaceDir);
+  if (!hasWorkspace) {
+    return '';
+  }
+
+  const out: string[] = ['', '## Where to put output for the user'];
+
+  if (plainSources.length > 0) {
+    const folders =
+      plainSources.length === 1
+        ? `\`/workspace/${plainSources[0]!.mountName}/\``
+        : plainSources.map((s) => `\`/workspace/${s.mountName}/\``).join(', ');
+    out.push(
+      `Save anything the user asked you to produce (documents, decks, spreadsheets, images, …) directly in the project folder — ${folders} — next to their files. That folder is the user's own folder; files you put there reach their computer. Do not invent side directories for deliverables.`
+    );
+  } else if (sources.length === 0) {
+    out.push(
+      "Save anything the user asked you to produce (documents, decks, spreadsheets, images, …) directly in your working folder (your shell's starting directory). That folder syncs to the user's computer; files anywhere else are lost when the session ends."
+    );
+  }
+
+  if (repoSources.length > 0) {
+    if (opts?.ticketId) {
+      const artifactsDir = opts.artifactsDir ?? getContainerArtifactsDir(opts.ticketId);
+      out.push(
+        `The repo is a curated tree: only commit-worthy changes go in it. Work products that don't belong in version control — progress notes, research, generated reports — go to \`${artifactsDir}\`; files there persist across runs and appear in this ticket's **Artifacts** panel in the launcher.`
+      );
+    } else {
+      out.push(
+        'The repo is a curated tree: only commit-worthy changes go in it. Do not scatter notes or generated reports into the repo — share results in your reply (or `display_artifact`) instead.'
+      );
+    }
+    out.push(
+      'If the user asks for a pull request, push the branch and create it with the host CLI (`gh pr create` / `az repos pr create`), composing the title and body then — grounded in the actual diff.'
+    );
+  }
+
+  out.push(
+    'To show something inline in the conversation right now (a preview, summary, or diagram), use the `display_artifact` tool — it renders in the chat stream and is tied to this conversation.'
+  );
+
+  return out.join('\n');
 };
 
 /**

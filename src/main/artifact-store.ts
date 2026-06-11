@@ -16,9 +16,10 @@
  * implements the same interface and is wired separately for the server build.
  */
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { getArtifactsDir, getContainerArtifactsDir } from '@/lib/artifacts';
@@ -39,6 +40,15 @@ export interface ArtifactStore {
   read(ticketId: string, relativePath: string): Promise<ArtifactFileContent>;
   /** Write bytes to `relativePath` under the ticket's artifacts root. */
   write(ticketId: string, relativePath: string, data: Buffer): Promise<void>;
+  /**
+   * Make the artifact exist as a real file on the local filesystem and return
+   * its absolute path, or null when it can't be produced (missing file,
+   * container down). Host store: the file itself. Container/cloud stores: a
+   * copy under the host artifacts dir — the same layout `openArtifactExternal`
+   * and the `artifact://` protocol resolve, so previews and external opens
+   * work for every substrate, not just the host profile.
+   */
+  materialize(ticketId: string, relativePath: string): Promise<string | null>;
 }
 
 // ─── Host filesystem (host profile / local server) ──────────────────────────
@@ -60,9 +70,13 @@ export class HostFsArtifactStore implements ArtifactStore {
 
   async write(ticketId: string, relativePath: string, data: Buffer): Promise<void> {
     const full = resolveArtifactPath(this.root(ticketId), relativePath);
-    const { mkdir } = await import('node:fs/promises');
     await mkdir(join(full, '..'), { recursive: true });
     await writeFile(full, data);
+  }
+
+  materialize(ticketId: string, relativePath: string): Promise<string | null> {
+    const full = resolveArtifactPath(this.root(ticketId), relativePath);
+    return Promise.resolve(existsSync(full) ? full : null);
   }
 }
 
@@ -78,6 +92,9 @@ export class HostFsArtifactStore implements ArtifactStore {
 export class DockerArtifactStore implements ArtifactStore {
   constructor(
     private readonly containerId: string,
+    /** Host config dir — `materialize` copies container artifacts into the
+     *  host artifacts layout under it (the dir `artifact://` serves from). */
+    private readonly configDir: string,
     private readonly user = '1000'
   ) {}
 
@@ -133,6 +150,20 @@ export class DockerArtifactStore implements ArtifactStore {
       await execFileAsync('docker', ['cp', tmpFile, `${this.containerId}:${full}`]);
     } finally {
       await rm(tmp, { recursive: true, force: true });
+    }
+  }
+
+  async materialize(ticketId: string, relativePath: string): Promise<string | null> {
+    const containerPath = `${this.ticketRoot(ticketId)}/${relativePath}`;
+    // resolveArtifactPath gives the traversal-checked host destination in the
+    // same layout the host store uses, so artifact:// and shell-open find it.
+    const hostPath = resolveArtifactPath(getArtifactsDir(this.configDir, ticketId), relativePath);
+    try {
+      await mkdir(dirname(hostPath), { recursive: true });
+      await execFileAsync('docker', ['cp', `${this.containerId}:${containerPath}`, hostPath]);
+      return hostPath;
+    } catch {
+      return null; // missing file / container down — caller shows nothing to open
     }
   }
 }

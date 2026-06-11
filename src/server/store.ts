@@ -50,6 +50,7 @@ export const DEFAULTS: StoreData = {
   installedBundles: {},
   customApps: [],
   gitCredentials: [],
+  pullRequestLinks: [],
   modelsConfig: emptyModelsConfig(),
   mcpConfig: emptyMcpConfig(),
   networkConfig: emptyNetworkConfig(),

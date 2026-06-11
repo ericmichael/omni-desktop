@@ -1,4 +1,5 @@
 import type { Column, Pipeline, Project, Ticket } from '@/shared/types';
+import { isRepoSource } from '@/shared/types';
 
 export type SupervisorContext = {
   /** First ~500 chars of the project's root page content. */
@@ -16,33 +17,56 @@ export type SupervisorContext = {
   artifactsDir?: string;
 };
 
-/** Render optional context sections (project brief, comments, blockers). */
-const buildContextSection = (ctx?: SupervisorContext): string => {
-  if (!ctx) {
-    return '';
-  }
+/**
+ * Output guidance, branched by what the project's workspace *is*. Plain
+ * folders: everything the user asked for lands in the folder itself (it's the
+ * user's own folder; the launcher mirrors it back). Repos: non-commit-worthy
+ * work products go to the ticket's artifacts dir (the Artifacts panel)
+ * instead of polluting the diff. No file-based PR writeup — a real PR's title
+ * and body are composed at `gh pr create` time.
+ */
+const buildOutputSection = (project: Project, ctx?: SupervisorContext): string => {
+  const repoSources = project.sources.filter(isRepoSource);
+  const plainSources = project.sources.filter((s) => !isRepoSource(s));
   const parts: string[] = [];
 
-  if (ctx.projectBrief) {
+  if (plainSources.length > 0) {
+    const folders = plainSources.map((s) => `\`/workspace/${s.mountName}/\``).join(', ');
+    parts.push(
+      `Save anything this ticket asks you to produce (documents, decks, spreadsheets, images, …) directly in the project folder — ${folders} — next to the user's files. Files you put there reach the user's computer; do not invent side directories for deliverables.`
+    );
+  }
+  if (repoSources.length > 0 && ctx?.artifactsDir) {
+    parts.push(
+      `The repo is a curated tree: only commit-worthy changes go in it. Work products that don't belong in version control — progress notes, research, generated reports — go to \`${ctx.artifactsDir}\`; files there persist across runs and appear in this ticket's **Artifacts** panel in the launcher.`
+    );
+  }
+  if (parts.length === 0) {
+    return '';
+  }
+  return `\n\n## Output for the user\n${parts.join('\n')}`;
+};
+
+/** Render optional context sections (project brief, comments, blockers, output). */
+const buildContextSection = (project: Project, ctx?: SupervisorContext): string => {
+  const parts: string[] = [];
+
+  if (ctx?.projectBrief) {
     parts.push(`\n\n## Project Brief (preview)\n${ctx.projectBrief}`);
   }
 
-  if (ctx.blockerTitles && ctx.blockerTitles.length > 0) {
+  if (ctx?.blockerTitles && ctx.blockerTitles.length > 0) {
     parts.push(
       `\n\n## Blockers\nThis ticket is blocked by:\n${ctx.blockerTitles.map((t) => `- ${t}`).join('\n')}\nCheck whether these are resolved before starting work. If still blocked, escalate.`
     );
   }
 
-  if (ctx.recentComments && ctx.recentComments.length > 0) {
+  if (ctx?.recentComments && ctx.recentComments.length > 0) {
     const formatted = ctx.recentComments.map((c) => `[${c.author}]: ${c.content}`).join('\n\n');
     parts.push(`\n\n## Recent Comments\n${formatted}`);
   }
 
-  if (ctx.artifactsDir) {
-    parts.push(
-      `\n\n## Output for the user\nWrite progress notes, research, and any deliverables that should persist to \`${ctx.artifactsDir}\` — files there appear in this ticket's **Artifacts** tab in the launcher. Keep an accurate PR writeup current as you work (the **PR** tab reads these):\n- \`${ctx.artifactsDir}/pr/PR_TITLE.md\` — one short line (≤70 chars), no markdown.\n- \`${ctx.artifactsDir}/pr/PR_BODY.md\` — markdown with **Summary** and **Test plan** sections.\nRefresh these whenever the scope of your work shifts.`
-    );
-  }
+  parts.push(buildOutputSection(project, ctx));
 
   return parts.join('');
 };
@@ -148,18 +172,16 @@ Do not edit YAML files or configuration files to manage ticket state — use you
 2. **Plan** — Create a concrete plan with testable steps.
 3. **Execute** — Use \`spawn_worker\` to delegate implementation tasks. Give each worker a clear goal, scope, context, boundaries, and acceptance criteria.
 4. **Verify** — Run tests, check linting, review changes.
-5. **Advance** — When work for the current column is complete, use \`move_ticket\` to advance the ticket.${buildContextSection(context)}`;
+5. **Advance** — When work for the current column is complete, use \`move_ticket\` to advance the ticket.${buildContextSection(project, context)}`;
 };
 
 export const buildAutopilotAdditionalInstructions = (
   _ticket: Ticket,
-  _project: Project,
+  project: Project,
   _pipeline: Pipeline,
   context?: SupervisorContext
 ): string => {
-  const artifactText = context?.artifactsDir
-    ? `\n\n## Output for the user\nWrite persistent progress notes, research, and deliverables to \`${context.artifactsDir}\`. Keep the PR writeup current:\n- \`${context.artifactsDir}/pr/PR_TITLE.md\` — one short line (≤70 chars), no markdown.\n- \`${context.artifactsDir}/pr/PR_BODY.md\` — markdown with **Summary** and **Test plan** sections.`
-    : '';
+  const artifactText = buildOutputSection(project, context);
 
   return `You are working on an Omni project ticket.
 

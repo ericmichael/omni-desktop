@@ -167,27 +167,71 @@ describe('client_tools shape', () => {
     expect(vars.additional_instructions).toContain('tkt-1');
   });
 
-  it('PR writeup guidance uses provided artifactsDir when passed (host mode)', () => {
+  it('plain-folder sources get deliverables-in-the-folder guidance, no artifacts channel', () => {
+    const vars = buildSessionVariables({
+      surface: 'code',
+      context: {
+        projectId: 'proj-1',
+        ticketId: 'tkt-1',
+        sources: [{ id: 's1', mountName: 'notes', kind: 'local', workspaceDir: '/home/u/notes' }],
+      },
+    }) as { additional_instructions: string };
+    expect(vars.additional_instructions).toContain('## Where to put output for the user');
+    expect(vars.additional_instructions).toContain('`/workspace/notes/`');
+    expect(vars.additional_instructions).not.toContain('.omni-artifacts');
+    expect(vars.additional_instructions).not.toContain('PR_TITLE');
+  });
+
+  it('repo sources get the artifacts channel using the provided artifactsDir (host mode)', () => {
     const vars = buildSessionVariables({
       surface: 'code',
       context: {
         ticketId: 'tkt-1',
         artifactsDir: '/Users/alice/.config/omni_code/tickets/tkt-1/artifacts',
+        sources: [{ id: 's1', mountName: 'repo', kind: 'local', workspaceDir: '/home/u/repo', gitDetected: true }],
       },
     }) as { additional_instructions: string };
-    expect(vars.additional_instructions).toContain(
-      '/Users/alice/.config/omni_code/tickets/tkt-1/artifacts/pr/PR_TITLE.md'
-    );
-    expect(vars.additional_instructions).not.toContain('/home/user/');
+    expect(vars.additional_instructions).toContain('/Users/alice/.config/omni_code/tickets/tkt-1/artifacts');
+    expect(vars.additional_instructions).toContain('gh pr create');
+    expect(vars.additional_instructions).not.toContain('PR_TITLE');
   });
 
-  it('PR writeup guidance falls back to the uniform container artifacts mount when artifactsDir is omitted', () => {
+  it('repo artifacts guidance falls back to the uniform container artifacts mount when artifactsDir is omitted', () => {
     const vars = buildSessionVariables({
       surface: 'code',
-      context: { ticketId: 'tkt-1' },
+      context: {
+        ticketId: 'tkt-1',
+        sources: [
+          { id: 's1', mountName: 'lib', kind: 'git-remote', repoUrl: 'https://github.com/acme/lib' },
+        ],
+      },
     }) as { additional_instructions: string };
-    expect(vars.additional_instructions).toContain('/workspace/.omni-artifacts/tkt-1/pr/PR_TITLE.md');
-    expect(vars.additional_instructions).not.toContain('/home/user/');
+    expect(vars.additional_instructions).toContain('/workspace/.omni-artifacts/tkt-1');
+    expect(vars.additional_instructions).not.toContain('PR_TITLE');
+  });
+
+  it('repo sources without a ticket get keep-the-repo-clean guidance instead of an artifacts dir', () => {
+    const vars = buildSessionVariables({
+      surface: 'code',
+      context: {
+        projectId: 'proj-1',
+        sources: [
+          { id: 's1', mountName: 'lib', kind: 'git-remote', repoUrl: 'https://github.com/acme/lib' },
+        ],
+      },
+    }) as { additional_instructions: string };
+    expect(vars.additional_instructions).toContain('share results in your reply');
+    expect(vars.additional_instructions).not.toContain('.omni-artifacts');
+  });
+
+  it('a bare workspaceDir (chat scratch) gets working-folder guidance', () => {
+    const vars = buildSessionVariables({
+      surface: 'chat',
+      context: { workspaceDir: '/home/u/Omni/Workspace/Sessions/abc' },
+    }) as { additional_instructions: string };
+    expect(vars.additional_instructions).toContain('## Where to put output for the user');
+    expect(vars.additional_instructions).toContain('working folder');
+    expect(vars.additional_instructions).not.toContain('.omni-artifacts');
   });
 
   it('renders the workspace layout when sources are present', () => {

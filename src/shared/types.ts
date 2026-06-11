@@ -257,6 +257,15 @@ export type StoreData = {
   gitCredentials: GitCredential[];
 
   /**
+   * Pull requests detected for ticket-less scopes (chat conversations,
+   * un-ticketed code tabs), scoped by `sessionId`/`codeTabId`. This is the
+   * memory that lets a merged PR render the ✓ badge only when this launcher
+   * watched it while open — restart-proof, mirroring `Ticket.pullRequests`
+   * for tickets. Pruned by `lastSeenAt` to a bounded length on write.
+   */
+  pullRequestLinks: PullRequestLink[];
+
+  /**
    * Linked GitHub account (display metadata only — the OAuth token lives in the
    * `SecretStore` as the `github.com` credential). Drives the "Connect GitHub"
    * state and repo discovery. Undefined when no account is linked.
@@ -803,6 +812,31 @@ export const schema: Schema<StoreData> = {
         createdAt: { type: 'number' },
       },
       required: ['id', 'host', 'username', 'last4', 'createdAt'],
+    },
+  },
+  pullRequestLinks: {
+    type: 'array',
+    default: [],
+    items: {
+      type: 'object',
+      properties: {
+        url: { type: 'string' },
+        number: { type: 'number' },
+        state: { type: 'string' },
+        projectId: { type: 'string' },
+        sourceId: { type: 'string' },
+        sourceMountName: { type: 'string' },
+        provider: { type: 'string' },
+        branch: { type: 'string' },
+        title: { type: 'string' },
+        ticketId: { type: 'string' },
+        codeTabId: { type: 'string' },
+        sessionId: { type: 'string' },
+        workspaceDir: { type: 'string' },
+        createdAt: { type: 'number' },
+        lastSeenAt: { type: 'number' },
+      },
+      required: ['url', 'number', 'state', 'createdAt', 'lastSeenAt'],
     },
   },
   glassTone: { type: 'string', default: 'dark' },
@@ -1380,6 +1414,22 @@ export type ProjectSource = (
 export const firstSource = (project: { sources?: ProjectSource[] } | undefined | null): ProjectSource | undefined =>
   project?.sources?.[0];
 
+/**
+ * True when a source is a curated version-controlled tree — membership rules
+ * apply (not every file belongs in it), so agent output that isn't part of the
+ * change routes to the artifacts channel instead of the tree.
+ */
+export const isRepoSource = (s: ProjectSource): boolean =>
+  s.kind === 'git-remote' || (s.kind === 'local' && s.gitDetected === true);
+
+/**
+ * True when any of the project's sources is version-controlled. Gates the
+ * developer-only output surfaces (Artifacts panel, PR affordances) — plain
+ * folder projects have exactly one output concept: the folder itself.
+ */
+export const projectHasRepoSource = (project: { sources?: ProjectSource[] } | undefined | null): boolean =>
+  (project?.sources ?? []).some(isRepoSource);
+
 export type Project = {
   id: ProjectId;
   label: string;
@@ -1536,13 +1586,22 @@ export type TicketRun = {
   tokenUsage?: TokenUsage;
 };
 
+/**
+ * One detected pull request, remembered so the UI can tell "we watched this PR
+ * while it was open" from "historical PR detection re-reports forever". Two
+ * homes: ticket-backed links live on `Ticket.pullRequests` (DB `pr_review`
+ * column); links for ticket-less scopes (chat conversations, un-ticketed code
+ * tabs) live in the global `StoreData.pullRequestLinks` list, scoped by
+ * `sessionId`/`codeTabId`. Project/source fields are absent for chat-scratch
+ * links — a chat conversation has no project or `ProjectSource`.
+ */
 export type PullRequestLink = {
   url: string;
   number: number;
   state: string;
-  projectId: ProjectId;
-  sourceId: string;
-  sourceMountName: string;
+  projectId?: ProjectId;
+  sourceId?: string;
+  sourceMountName?: string;
   provider?: 'github' | 'azure';
   branch?: string;
   title?: string;
@@ -1702,23 +1761,6 @@ export type SessionMessage = {
 
 export type GitRepoInfo = { isGitRepo: true; branches: string[]; currentBranch: string } | { isGitRepo: false };
 
-/**
- * Result of a dry-run merge check for a ticket's feature branch → base.
- * `ready` is false when the ticket has no worktree / base / feature branch;
- * conflict info is surfaced in `conflictingFiles` when `ready` is true.
- */
-export type PrMergeCheck =
-  | { ready: false; reason: string }
-  | {
-      ready: true;
-      base: string;
-      feature: string;
-      hasConflicts: boolean;
-      conflictingFiles: string[];
-      /** Commits on the feature branch not present on base. Zero means nothing to merge. */
-      ahead: number;
-    };
-
 export type PrMergeResult = { ok: true; mergeCommitSha: string } | { ok: false; error: string };
 
 /**
@@ -1731,7 +1773,8 @@ export type PrMergeResult = { ok: true; mergeCommitSha: string } | { ok: false; 
 export interface ContainerPullRequest {
   number: number;
   url: string;
-  state: string;
+  /** Normalized across providers: Azure `active` → OPEN, `completed` → MERGED. */
+  state: 'OPEN' | 'MERGED';
   title?: string;
   sourceId?: string;
   sourceMountName?: string;
@@ -2473,8 +2516,6 @@ type ProjectIpcEvents = Namespaced<
      * still has uncommitted changes (cleanupPending stays set).
      */
     'finalize-ticket-cleanup': (ticketId: TicketId) => boolean;
-    /** Dry-run apply one source's container patch onto its host repo; reports conflicts. */
-    'check-merge': (ticketId: TicketId, sourceId: string) => PrMergeCheck;
     /** Apply one source's container patch onto its host repo ("sync to host"). */
     'merge-ticket': (ticketId: TicketId, sourceId: string) => PrMergeResult;
     /**

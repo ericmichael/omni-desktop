@@ -113,4 +113,24 @@ export class AzureFilesArtifactStore implements ArtifactStore {
     }
     await dir.getFileClient(name).uploadData(data);
   }
+
+  async materialize(ticketId: string, relativePath: string): Promise<string | null> {
+    // Control-plane-local copy (this is the server's filesystem, not the
+    // user's machine — browser clients download over HTTP from here).
+    const { mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const slash = relativePath.lastIndexOf('/');
+    const dir = `${this.root(ticketId)}${slash >= 0 ? `/${relativePath.slice(0, slash)}` : ''}`;
+    const name = slash >= 0 ? relativePath.slice(slash + 1) : relativePath;
+    try {
+      const buf = await (await this.share()).getDirectoryClient(dir).getFileClient(name).downloadToBuffer();
+      const tmp = await mkdtemp(join(tmpdir(), 'omni-artifact-'));
+      const out = join(tmp, name);
+      await writeFile(out, buf);
+      return out;
+    } catch {
+      return null;
+    }
+  }
 }

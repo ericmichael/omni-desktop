@@ -59,10 +59,35 @@ const detect = (scope: PullRequestBannerScope): Promise<ContainerPullRequest[]> 
     : emitter.invoke('project:detect-code-tab-pull-requests', scope.tabId);
 
 /**
- * Thin top-of-view banner that surfaces open pull requests (GitHub or Azure
- * DevOps) for the chat or deck surface as clickable badges (one per PR — a
+ * Merge a poll result into the displayed PR list. The main process already
+ * gates every result against the persisted `PullRequestLink`s (ticket links or
+ * the global `pullRequestLinks` store for chat / un-ticketed tabs), so a
+ * MERGED PR arriving here is by definition one this launcher watched while
+ * open — display it. This merge only adds presentation stickiness:
+ *
+ * - Everything in the poll displays.
+ * - A displayed MERGED badge that drops out of detection stays (sticky ✓
+ *   acknowledgement for the rest of the session).
+ * - A displayed OPEN badge that drops out without merging (closed unmerged)
+ *   is removed.
+ *
+ * Pure — exported for tests.
+ */
+export const mergePollResult = (
+  prev: ContainerPullRequest[],
+  next: ContainerPullRequest[]
+): ContainerPullRequest[] => {
+  const nextUrls = new Set(next.map((pr) => pr.url));
+  const stickyMerged = prev.filter((pr) => pr.state === 'MERGED' && !nextUrls.has(pr.url));
+  return [...next, ...stickyMerged];
+};
+
+/**
+ * Thin top-of-view banner that surfaces pull requests (GitHub or Azure DevOps)
+ * for the chat or deck surface as clickable badges (one per PR — a
  * multi-source project can have a PR per repo). Each badge opens its PR in the
- * built-in browser. Renders nothing until a PR is detected.
+ * built-in browser. Renders nothing until a PR is detected. Merged PRs render
+ * as ✓ badges and persist for the session.
  *
  * ``floating`` overlays the banner at the top edge (for the Chat view, whose
  * content fills its container absolutely); the default takes a row in flow (for
@@ -76,13 +101,19 @@ export const PullRequestBanner = memo(
     const key = scope.kind === 'chat' ? 'chat' : scope.tabId;
     const poll = useCallback(() => {
       detect(scope)
-        .then(setPrs)
-        .catch(() => setPrs([]));
+        .then((next) => setPrs((prev) => mergePollResult(prev, next)))
+        .catch(() => {
+          // Transient detection failure (container restarting, CLI hiccup):
+          // keep the current badges rather than blanking the banner.
+        });
       // scope is reconstructed each render; key captures its identity.
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [key]);
 
     useEffect(() => {
+      // Scope changed (different tab/conversation): drop the previous scope's
+      // badges — sticky merged state is per-surface, not global.
+      setPrs([]);
       poll();
       const interval = setInterval(poll, POLL_INTERVAL_MS);
       return () => clearInterval(interval);

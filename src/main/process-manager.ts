@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { ipcMain } from 'electron';
 
+import { mirrorContainerChangesToHost } from '@/lib/container-sync';
 import {
   AgentProcess,
   type AgentProcessMode,
@@ -12,6 +13,7 @@ import {
   type FetchFn,
 } from '@/main/agent-process';
 import type { IComputeClient } from '@/main/platform-client';
+import { getDefaultWorkspaceDir } from '@/main/util';
 import { gitTokenEnvName, resolveCredentialForUrl } from '@/shared/git-credentials';
 import type { IIpcListener } from '@/shared/ipc-listener';
 import type {
@@ -32,6 +34,29 @@ export type ProcessManagerStoreData = {
    *  `resolveGitToken`; this list only drives host matching. */
   gitCredentials?: GitCredential[];
 };
+
+/**
+ * True for host directories the launcher itself manages: a per-conversation
+ * scratch dir (`<workspace root>/Sessions/<sessionId>` — the root is
+ * user-configurable, so the convention is the `Sessions` parent) or anything
+ * under the default workspace tree (`~/Omni/Workspace`, which holds the
+ * Personal root and managed `Projects/<slug>/` dirs). Container changes
+ * auto-mirror into these without confirmation — the launcher created them, so
+ * there is no foreign user data to clobber. This is only consulted for
+ * synthesized sources; user-attached project sources never auto-mirror
+ * regardless of where they live.
+ */
+export const isLauncherOwnedDir = (dir: string): boolean => {
+  const resolved = path.resolve(dir);
+  if (path.basename(path.dirname(resolved)) === 'Sessions') {
+    return true;
+  }
+  const defaultRoot = path.resolve(getDefaultWorkspaceDir());
+  return resolved === defaultRoot || resolved.startsWith(defaultRoot + path.sep);
+};
+
+/** How often the auto-mirror sweep checks running launcher-owned sandboxes. */
+const AUTO_MIRROR_INTERVAL_MS = 15_000;
 
 /**
  * Detect the `local:<machineId>` profile-name shape and pull out the
@@ -120,6 +145,12 @@ export class ProcessManager {
   /** processId → machineId for live `local:<machineId>` sessions, so stop()
    *  can tell the laptop to tear down its `omni sandbox-host`. */
   private localSandboxKeys = new Map<string, string>();
+
+  /** processId → launcher-owned local mounts whose container changes
+   *  auto-mirror back to the host (chat scratch dirs, managed project dirs). */
+  private mirrorSources = new Map<string, Array<{ mountName: string; workspaceDir: string }>>();
+  private mirrorTimer: ReturnType<typeof setInterval> | null = null;
+  private mirrorSweepRunning = false;
 
   constructor(arg: {
     sendToWindow: ProcessManager['sendToWindow'];
@@ -400,7 +431,10 @@ export class ProcessManager {
     if (projectId) {
       const { projects } = this.getStoreData();
       const project = projects.find((p) => p.id === projectId);
-      if (project) {
+      // A project with no attached sources (context-only / managed-dir
+      // project) falls through to the synthesized-source path below so its
+      // managed directory still seeds the workspace and mirrors back.
+      if (project && project.sources.length > 0) {
         return project.sources.map((source): AgentProcessSource => {
           if (source.kind === 'git-remote') {
             const result: AgentProcessSource = {
@@ -414,6 +448,8 @@ export class ProcessManager {
             return result;
           }
           this.ensureWorkspaceDir(source.workspaceDir);
+          // User-attached folders are never launcherOwned — applying
+          // container changes to them stays an explicit user action.
           return {
             mountName: source.mountName,
             kind: this.directoryHasGit(source.workspaceDir) ? 'local-git' : 'local',
@@ -422,8 +458,8 @@ export class ProcessManager {
         });
       }
     }
-    // No project on file (Personal/scratch tab with raw workspaceDir):
-    // synthesize one source from the workspaceDir we were given,
+    // No attached sources (chat scratch dir / managed project dir / Personal
+    // root): synthesize one source from the workspaceDir we were given,
     // defaulting mountName to the basename.
     if (!workspaceDir) {
       return [];
@@ -435,6 +471,7 @@ export class ProcessManager {
         mountName,
         kind: this.directoryHasGit(workspaceDir) ? 'local-git' : 'local',
         workspaceDir,
+        ...(isLauncherOwnedDir(workspaceDir) ? { launcherOwned: true } : {}),
       },
     ];
   }
@@ -507,6 +544,7 @@ export class ProcessManager {
     const mode = this.resolveMode(startArg.profileName);
     const client = this.resolveComputeClient(startArg.profileName);
     const proc = this.getOrCreate(processId, mode, client);
+    this.trackMirrorSources(processId, startArg.sources);
     proc.start(startArg);
   };
 
@@ -515,6 +553,7 @@ export class ProcessManager {
     if (!proc) {
       return;
     }
+    this.mirrorSources.delete(processId);
     await proc.stop();
     this.processes.delete(processId);
     const machineId = this.localSandboxKeys.get(processId);
@@ -549,6 +588,7 @@ export class ProcessManager {
     const mode = this.resolveMode(startArg.profileName);
     const client = this.resolveComputeClient(startArg.profileName);
     const proc = this.getOrCreate(processId, mode, client);
+    this.trackMirrorSources(processId, startArg.sources);
     await proc.rebuild(startArg);
   };
 
@@ -731,7 +771,80 @@ export class ProcessManager {
     return null;
   }
 
+  /**
+   * The host workspace dir the given process was last started against (e.g.
+   * the chat session's per-conversation scratch dir). Authoritative for
+   * mount-name derivation — the store's `workspaceDir` is the workspace
+   * *root*, not the live session's mount source.
+   */
+  getProcessWorkspaceDir(processId: string): string | null {
+    return this.lastStartArgs.get(processId)?.workspaceDir || null;
+  }
+
+  /**
+   * Remember which of a launch's mounts auto-mirror, and make sure the sweep
+   * timer is running when at least one process has any. Only docker-backed
+   * sessions ever mirror — the sweep keys off `getProcessContainerId`, which
+   * is null for host/ACI/host_bridge backends.
+   */
+  private trackMirrorSources(processId: string, sources: AgentProcessSource[]): void {
+    const owned = sources
+      .filter(
+        (s): s is Extract<AgentProcessSource, { workspaceDir: string }> =>
+          (s.kind === 'local' || s.kind === 'local-git') && s.launcherOwned === true
+      )
+      .map((s) => ({ mountName: s.mountName, workspaceDir: s.workspaceDir }));
+    if (owned.length === 0) {
+      this.mirrorSources.delete(processId);
+      return;
+    }
+    this.mirrorSources.set(processId, owned);
+    if (!this.mirrorTimer) {
+      this.mirrorTimer = setInterval(() => {
+        void this.sweepMirrors();
+      }, AUTO_MIRROR_INTERVAL_MS);
+      // Mirroring must never keep the process alive on its own.
+      this.mirrorTimer.unref?.();
+    }
+  }
+
+  /**
+   * One auto-mirror pass: for every running launcher-owned mount, mirror the
+   * container's changed-vs-seed set onto the host dir. The mirror is
+   * idempotent (it copies current files, not patches), so a no-change sweep
+   * is a cheap git-diff inside the container. Re-entrancy guarded — slow
+   * docker execs must not stack sweeps.
+   */
+  private sweepMirrors = async (): Promise<void> => {
+    if (this.mirrorSweepRunning) {
+      return;
+    }
+    this.mirrorSweepRunning = true;
+    try {
+      for (const [processId, mounts] of this.mirrorSources.entries()) {
+        const containerId = this.getProcessContainerId(processId);
+        if (!containerId) {
+          continue;
+        }
+        for (const mount of mounts) {
+          try {
+            await mirrorContainerChangesToHost(containerId, mount.mountName, mount.workspaceDir);
+          } catch {
+            // Transient (container mid-restart, docker hiccup) — next sweep retries.
+          }
+        }
+      }
+    } finally {
+      this.mirrorSweepRunning = false;
+    }
+  };
+
   cleanup = async (): Promise<void> => {
+    if (this.mirrorTimer) {
+      clearInterval(this.mirrorTimer);
+      this.mirrorTimer = null;
+    }
+    this.mirrorSources.clear();
     const exits = Array.from(this.processes.values()).map((p) => p.exit());
     await Promise.allSettled(exits);
     this.processes.clear();

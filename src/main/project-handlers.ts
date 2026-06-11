@@ -51,7 +51,6 @@ export function registerProjectHandlers(ipc: IIpcListener, resolve: (event: unkn
   h('project:detect-chat-pull-requests', (pm) => pm.detectChatPullRequests());
 
   // Sync to host + PR detection (per-source — sourceId is one of the project's ProjectSource ids)
-  h('project:check-merge', (pm, ticketId, sourceId) => pm.checkPrMerge(ticketId, sourceId));
   h('project:merge-ticket', (pm, ticketId, sourceId) => pm.mergePrTicket(ticketId, sourceId));
   h('project:detect-pull-request', (pm, ticketId, sourceId) => pm.detectPullRequest(ticketId, sourceId));
 

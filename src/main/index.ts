@@ -3,7 +3,7 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 import { app, dialog, net, protocol, shell } from 'electron';
-import { writeFileSync } from 'fs';
+import { existsSync, writeFileSync } from 'fs';
 import { migrateFromJson } from 'omni-projects-db';
 import { join, resolve } from 'path';
 import { assert } from 'tsafe';
@@ -77,7 +77,7 @@ import {
   registerUtilHandlers,
 } from '@/shared/ipc-handlers';
 import { buildStdioMcpEntry } from '@/shared/mcp-entry';
-import type { GitCredential, GithubOwner, GithubRepoQuery, GithubStatus, RemoteRepo } from '@/shared/types';
+import type { GitCredential, GithubOwner, GithubRepoQuery, GithubStatus, RemoteRepo, TicketId } from '@/shared/types';
 
 // Process-level crash visibility. Log only — do not exit. Killing the
 // Electron main process from an unhandled rejection would take the whole
@@ -562,6 +562,13 @@ app.on('ready', () => {
       // Path traversal protection
       if (!fullPath.startsWith(artifactsRoot)) {
         return new Response('Forbidden', { status: 403 });
+      }
+      // Container substrates write artifacts inside the sandbox, not to the
+      // host dir — materialize (docker cp into this exact layout) before
+      // serving so image/HTML previews work there too. Host profile: the
+      // file already exists and this resolves to it directly.
+      if (!existsSync(fullPath)) {
+        await projectManager.materializeArtifact(ticketId as TicketId, relativePath);
       }
       const upstream = await net.fetch(pathToFileURL(fullPath).toString());
       // Strict CSP: artifacts are agent-generated content, never trusted to

@@ -1,8 +1,9 @@
 import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
-import { ArrowSync20Regular, BranchCompare20Regular } from '@fluentui/react-icons';
+import { ArrowSync20Regular, BranchCompare20Regular, Document24Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { getMimeType } from '@/lib/mime-types';
 import type { SelectTabData } from '@/renderer/ds';
 import { Button, IconButton, ListSkeleton, Tab, TabList } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
@@ -10,7 +11,6 @@ import type { CodeTabId, ContainerPullRequest, DiffGroup,DiffResponse, FileDiff,
 
 import { PullRequestBadge } from './PullRequestBadge';
 import { $tickets, ticketApi } from './state';
-import { TicketPROverview } from './TicketPROverview';
 
 const POLL_INTERVAL_MS = 5_000;
 const MIN_LIST_PERCENT = 20;
@@ -349,17 +349,70 @@ const useStyles = makeStyles({
   redText: {
     color: tokens.colorPaletteRedForeground1,
   },
+  binaryCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
+    gap: tokens.spacingVerticalS,
+  },
+  binaryCardIcon: {
+    width: '32px',
+    height: '32px',
+    color: tokens.colorNeutralForeground3,
+  },
+  binaryCardName: {
+    fontSize: tokens.fontSizeBase400,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+    wordBreak: 'break-all',
+    textAlign: 'center',
+    paddingLeft: tokens.spacingHorizontalXXL,
+    paddingRight: tokens.spacingHorizontalXXL,
+  },
+  binaryCardMeta: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+  },
 });
+
+const FILE_CARD_STATUS_TEXT: Record<FileDiff['status'], string> = {
+  added: 'New file',
+  untracked: 'New file',
+  modified: 'Modified',
+  deleted: 'Deleted',
+  renamed: 'Renamed',
+  copied: 'Copied',
+};
+
+/**
+ * Card rendering for documents and other binaries — a patch view is meaningless
+ * for a PPTX/XLSX/image, for developers and everyday users alike. Shows what
+ * happened to the file in plain language instead of pretending there's a diff.
+ */
+const BinaryFileCard = memo(({ file }: { file: FileDiff }) => {
+  const styles = useStyles();
+  const fileName = file.path.split('/').pop() ?? file.path;
+  const mime = getMimeType(fileName);
+  return (
+    <div className={styles.binaryCard}>
+      <Document24Regular className={styles.binaryCardIcon} />
+      <span className={styles.binaryCardName}>{fileName}</span>
+      <span className={styles.binaryCardMeta}>
+        {FILE_CARD_STATUS_TEXT[file.status]}
+        {mime !== 'application/octet-stream' ? ` · ${mime}` : ''}
+      </span>
+    </div>
+  );
+});
+BinaryFileCard.displayName = 'BinaryFileCard';
 
 const DiffViewer = memo(({ file }: { file: FileDiff }) => {
   const styles = useStyles();
 
   if (file.isBinary) {
-    return (
-      <div className={styles.centerMessage}>
-        Binary file — no diff available
-      </div>
-    );
+    return <BinaryFileCard file={file} />;
   }
 
   if (!file.patch) {
@@ -492,7 +545,15 @@ const FilesChangedContent = memo(
         ).catch(() => null),
       ]);
       setData(resp);
-      setPullRequest(pr);
+      // Main gated `pr` against the persisted PullRequestLinks (ticket links
+      // or the scoped store), so anything non-null is display-worthy — a
+      // MERGED result is a watched merge. A null keeps a merged badge sticky
+      // (acknowledgement) but clears a stale open one (closed unmerged).
+      if (pr !== null) {
+        setPullRequest(pr);
+      } else {
+        setPullRequest((prev) => (prev?.state === 'MERGED' ? prev : null));
+      }
       if (resp.files.length > 0 && !selectedKey) {
         setSelectedKey(fileKey(resp.files[0]!));
       }
@@ -515,13 +576,15 @@ const FilesChangedContent = memo(
   }, [fetchData]);
 
   const handleApply = useCallback(async () => {
-    if (scope.kind !== 'code-tab') return;
     setApplyBusy(true);
     setApplyError(null);
     try {
-      const result = await ticketApi.applyCodeTabSourceChanges(scope.tabId, sourceId);
+      const result =
+        scope.kind === 'code-tab'
+          ? await ticketApi.applyCodeTabSourceChanges(scope.tabId, sourceId)
+          : await ticketApi.mergeTicket(scope.ticketId, sourceId);
       if (!result.ok) {
-        setApplyError(result.error);
+        setApplyError(result.error ?? 'Apply failed');
         return;
       }
       await fetchData();
@@ -589,11 +652,9 @@ const FilesChangedContent = memo(
         <div className={styles.flex1} />
         {pullRequest && <PullRequestBadge pr={pullRequest} />}
         {applyError && <span className={styles.emptySubText}>{applyError}</span>}
-        {scope.kind === 'code-tab' && (
-          <Button size="sm" onClick={handleApply} isDisabled={applyBusy}>
-            {applyBusy ? 'Applying…' : 'Apply to host'}
-          </Button>
-        )}
+        <Button size="sm" onClick={handleApply} isDisabled={applyBusy}>
+          {applyBusy ? 'Applying…' : 'Apply to my folder'}
+        </Button>
         <IconButton aria-label="Refresh" icon={<ArrowSync20Regular />} size="sm" onClick={handleRefresh} />
       </div>
 
@@ -714,9 +775,12 @@ const FilesChangedPane = memo(({ scope }: { scope: ChangesScope }) => {
   }, []);
 
   if (sources.length === 0 || !activeSourceId) {
+    // No user-attached sources means the workspace is a launcher-managed
+    // folder (chat scratch / managed project dir): container changes mirror
+    // back to it automatically, so there is nothing to review-and-apply here.
     return (
       <div className={styles.centerMessage}>
-        This project has no sources attached.
+        Files the agent creates or edits land in this project&apos;s folder automatically.
       </div>
     );
   }
@@ -740,36 +804,9 @@ const FilesChangedPane = memo(({ scope }: { scope: ChangesScope }) => {
 });
 FilesChangedPane.displayName = 'FilesChangedPane';
 
-type PRSubTab = 'Overview' | 'Files Changed';
-const PR_SUB_TABS: PRSubTab[] = ['Overview', 'Files Changed'];
-
-export const TicketPRTab = memo(({ ticketId }: { ticketId: TicketId }) => {
-  const styles = useStyles();
-  const [activeSubTab, setActiveSubTab] = useState<PRSubTab>('Overview');
-
-  const handleTabSelect = useCallback((_e: unknown, data: SelectTabData) => {
-    setActiveSubTab(data.value as PRSubTab);
-  }, []);
-
-  return (
-    <div className={styles.columnLayout}>
-      {/* Sub-tab bar */}
-      <div className={styles.tabBar}>
-        <TabList size="small" selectedValue={activeSubTab} onTabSelect={handleTabSelect}>
-          {PR_SUB_TABS.map((tab) => (
-            <Tab key={tab} value={tab}>{tab}</Tab>
-          ))}
-        </TabList>
-      </div>
-
-      {/* Sub-tab content */}
-      <div className={styles.tabContent}>
-        {activeSubTab === 'Overview' && <TicketPROverview ticketId={ticketId} />}
-        {activeSubTab === 'Files Changed' && <FilesChangedPane scope={{ kind: 'ticket', ticketId }} />}
-      </div>
-    </div>
-  );
-});
+export const TicketPRTab = memo(({ ticketId }: { ticketId: TicketId }) => (
+  <FilesChangedPane scope={{ kind: 'ticket', ticketId }} />
+));
 TicketPRTab.displayName = 'TicketPRTab';
 
 export const ChangesTab = memo(({ tabId }: { tabId: CodeTabId }) => (

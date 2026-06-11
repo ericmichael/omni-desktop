@@ -1,5 +1,5 @@
 import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { Open16Regular } from '@fluentui/react-icons';
+import { CheckmarkCircle16Regular, Open16Regular } from '@fluentui/react-icons';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { memo, useCallback } from 'react';
 
@@ -22,16 +22,24 @@ const useStyles = makeStyles({
     cursor: 'pointer',
     ':hover': { textDecoration: 'underline' },
   },
+  prBadgeMerged: {
+    ...shorthands.border('1px', 'solid', tokens.colorPaletteGreenBorderActive),
+    backgroundColor: tokens.colorPaletteGreenBackground2,
+    color: tokens.colorPaletteGreenForeground2,
+  },
 });
 
 /**
  * Clickable "PR #N" badge that opens the pull request in the built-in browser
- * (same bridge the agent's ``browser_open`` tool uses). Shared by the ticket PR
- * overview and the per-source Files Changed view (ticket + code-tab scopes).
+ * (same bridge the agent's ``browser_open`` tool uses). Shared by the Changes
+ * panel and the per-source Files Changed view (ticket + code-tab scopes).
+ * Merged PRs render as a green ✓ "Merged #N" badge instead of vanishing.
  */
 export const PullRequestBadge = memo(({ pr, tabId }: { pr: ContainerPullRequest; tabId?: string }) => {
   const styles = useStyles();
-  const label = pr.sourceMountName ? `${pr.sourceMountName} · PR #${pr.number}` : `PR #${pr.number}`;
+  const merged = pr.state === 'MERGED';
+  const numberLabel = merged ? `Merged #${pr.number}` : `PR #${pr.number}`;
+  const label = pr.sourceMountName ? `${pr.sourceMountName} · ${numberLabel}` : numberLabel;
   const title = [pr.title, pr.sourceMountName, pr.branch, pr.url].filter(Boolean).join(' · ');
   const handleOpen = useCallback(
     () => (tabId === undefined ? requestPreviewOpen(pr.url) : requestPreviewOpen(pr.url, tabId)),
@@ -50,12 +58,12 @@ export const PullRequestBadge = memo(({ pr, tabId }: { pr: ContainerPullRequest;
     <span
       role="button"
       tabIndex={0}
-      className={styles.prBadge}
+      className={merged ? `${styles.prBadge} ${styles.prBadgeMerged}` : styles.prBadge}
       title={title || pr.url}
       onClick={handleOpen}
       onKeyDown={handleKeyDown}
     >
-      <Open16Regular />
+      {merged ? <CheckmarkCircle16Regular /> : <Open16Regular />}
       {label}
     </span>
   );

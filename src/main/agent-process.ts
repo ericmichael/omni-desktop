@@ -59,9 +59,17 @@ export type AgentProcessMode = 'serve' | 'compute';
  * container. A multi-source project gets N entries that materialize at
  * ``/workspace/<mountName>/`` each.
  */
+/**
+ * ``launcherOwned`` marks a host directory the launcher itself manages (a
+ * per-conversation ``Sessions/<id>`` scratch dir or a managed project dir):
+ * container changes auto-mirror back to it without confirmation, since there
+ * is no foreign user data to clobber. User-attached folders never carry it —
+ * they keep the explicit "Apply to my folder" gate. Launcher-side only; the
+ * ``--source`` descriptor sent to omni serve does not include it.
+ */
 export type AgentProcessSource = { mountName: string } & (
-  | { kind: 'local-git'; workspaceDir: string; ref?: string }
-  | { kind: 'local'; workspaceDir: string }
+  | { kind: 'local-git'; workspaceDir: string; ref?: string; launcherOwned?: boolean }
+  | { kind: 'local'; workspaceDir: string; launcherOwned?: boolean }
   | {
       kind: 'git-remote';
       repoUrl: string;

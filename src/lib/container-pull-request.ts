@@ -100,10 +100,19 @@ interface GhPrView {
   title?: string;
 }
 
+/** Map a GitHub PR state to the normalized badge state. CLOSED (unmerged) → null. */
+function normalizeGitHubState(state: unknown): 'OPEN' | 'MERGED' | null {
+  if (state === 'OPEN' || state === 'MERGED') {
+    return state;
+  }
+  return null;
+}
+
 /**
  * Parse the stdout of ``gh pr view --json number,url,state`` into a
  * {@link ContainerPullRequest}, or ``null`` when the output is unparseable,
- * missing required fields, or describes a PR that isn't open. Pure — no I/O.
+ * missing required fields, or describes a closed-unmerged PR. Open and merged
+ * PRs both surface (merged renders as a ✓ badge). Pure — no I/O.
  */
 export function parsePullRequestJson(stdout: string): ContainerPullRequest | null {
   let parsed: GhPrView;
@@ -113,18 +122,18 @@ export function parsePullRequestJson(stdout: string): ContainerPullRequest | nul
     return null;
   }
 
-  // Only surface open PRs with the fields we need to render + link a badge.
-  if (typeof parsed.number !== 'number' || typeof parsed.url !== 'string' || parsed.state !== 'OPEN') {
+  const state = normalizeGitHubState(parsed.state);
+  if (typeof parsed.number !== 'number' || typeof parsed.url !== 'string' || state === null) {
     return null;
   }
 
-  return { number: parsed.number, url: parsed.url, state: parsed.state, ...(parsed.title ? { title: parsed.title } : {}) };
+  return { number: parsed.number, url: parsed.url, state, ...(parsed.title ? { title: parsed.title } : {}) };
 }
 
 /**
  * Parse the stdout of ``gh pr list --json number,url,state`` (a JSON array) into
- * every open PR. Used to surface multiple PRs from a single branch (e.g. open to
- * more than one base). Pure — no I/O.
+ * every open or merged PR. Used to surface multiple PRs from a single branch
+ * (e.g. open to more than one base). Closed-unmerged PRs are dropped. Pure — no I/O.
  */
 export function parsePullRequestListJson(stdout: string): ContainerPullRequest[] {
   let arr: unknown;
@@ -138,8 +147,9 @@ export function parsePullRequestListJson(stdout: string): ContainerPullRequest[]
   }
   const out: ContainerPullRequest[] = [];
   for (const item of arr as GhPrView[]) {
-    if (typeof item?.number === 'number' && typeof item.url === 'string' && item.state === 'OPEN') {
-      out.push({ number: item.number, url: item.url, state: item.state, ...(item.title ? { title: item.title } : {}) });
+    const state = normalizeGitHubState(item?.state);
+    if (typeof item?.number === 'number' && typeof item.url === 'string' && state !== null) {
+      out.push({ number: item.number, url: item.url, state, ...(item.title ? { title: item.title } : {}) });
     }
   }
   return out;
@@ -157,10 +167,12 @@ interface AzurePrListItem {
 }
 
 /**
- * Parse the stdout of ``az repos pr list --status active --output json`` into
- * every active PR. Azure returns a REST ``url`` (an API endpoint) which isn't
- * browser-openable, so each badge URL is composed from ``repository.webUrl`` +
- * ``/pullrequest/<id>``. Pure — no I/O.
+ * Parse the stdout of ``az repos pr list --status all --output json`` into
+ * every active or completed PR. Azure returns a REST ``url`` (an API endpoint)
+ * which isn't browser-openable, so each badge URL is composed from
+ * ``repository.webUrl`` + ``/pullrequest/<id>``. States normalize to the
+ * GitHub vocabulary (``active`` → OPEN, ``completed`` → MERGED) so the UI
+ * treats both providers uniformly; ``abandoned`` PRs are dropped. Pure — no I/O.
  */
 export function parseAzurePullRequestListAll(stdout: string): ContainerPullRequest[] {
   let arr: unknown;
@@ -174,7 +186,8 @@ export function parseAzurePullRequestListAll(stdout: string): ContainerPullReque
   }
   const out: ContainerPullRequest[] = [];
   for (const item of arr as AzurePrListItem[]) {
-    if (item?.status !== 'active') {
+    const state = item?.status === 'active' ? ('OPEN' as const) : item?.status === 'completed' ? ('MERGED' as const) : null;
+    if (state === null) {
       continue;
     }
     const id = item.pullRequestId;
@@ -182,13 +195,12 @@ export function parseAzurePullRequestListAll(stdout: string): ContainerPullReque
     if (typeof id !== 'number' || typeof webUrl !== 'string') {
       continue;
     }
-    // Normalize state to 'OPEN' so the UI treats GitHub + Azure PRs uniformly.
-    out.push({ number: id, url: `${webUrl}/pullrequest/${id}`, state: 'OPEN' });
+    out.push({ number: id, url: `${webUrl}/pullrequest/${id}`, state });
   }
   return out;
 }
 
-/** First active Azure PR (the primary PR for the branch), or ``null``. Pure. */
+/** First surviving Azure PR (the primary PR for the branch), or ``null``. Pure. */
 export function parseAzurePullRequestList(stdout: string): ContainerPullRequest | null {
   return parseAzurePullRequestListAll(stdout)[0] ?? null;
 }
@@ -254,7 +266,11 @@ async function detectGitHubPullRequest(containerId: string, mountName: string): 
   }
 }
 
-/** GitHub: ``gh pr list --head <branch>`` enumerates every open PR for the branch. */
+/**
+ * GitHub: ``gh pr list --head <branch>`` enumerates every PR for the branch.
+ * ``--state all`` so merged PRs surface (as ✓ badges); the parser drops
+ * closed-unmerged ones.
+ */
 async function detectGitHubPullRequests(containerId: string, mountName: string): Promise<ContainerPullRequest[]> {
   const branch = await containerCurrentBranch(containerId, mountName);
   if (!branch) {
@@ -271,7 +287,7 @@ async function detectGitHubPullRequests(containerId: string, mountName: string):
       '--head',
       branch,
       '--state',
-      'open',
+      'all',
       '--json',
       'number,url,state,title',
     ]);
@@ -283,7 +299,8 @@ async function detectGitHubPullRequests(containerId: string, mountName: string):
 
 /**
  * Azure DevOps: ``az repos pr list`` with ``--detect`` infers org/project/repo
- * from the origin remote, filtered to active PRs on the current branch.
+ * from the origin remote. ``--status all`` so completed (merged) PRs surface;
+ * the parser drops abandoned ones.
  */
 async function detectAzurePullRequestList(containerId: string, mountName: string): Promise<ContainerPullRequest[]> {
   const branch = await containerCurrentBranch(containerId, mountName);
@@ -294,7 +311,7 @@ async function detectAzurePullRequestList(containerId: string, mountName: string
       'pr',
       'list',
       '--status',
-      'active',
+      'all',
       '--detect',
       'true',
       '--output',
@@ -308,11 +325,12 @@ async function detectAzurePullRequestList(containerId: string, mountName: string
 }
 
 /**
- * Detect the primary open pull request for the branch currently checked out in
- * ``/workspace/<mountName>``. Picks the provider from the origin remote host.
- * Returns ``null`` when there is no PR, the remote isn't a supported host (plain
- * directory / no remote / unsupported provider), or anything goes wrong. Used by
- * the per-source surfaces (ticket card, Files Changed) that show one badge.
+ * Detect the primary open-or-merged pull request for the branch currently
+ * checked out in ``/workspace/<mountName>``. Picks the provider from the origin
+ * remote host. Returns ``null`` when there is no PR, the remote isn't a
+ * supported host (plain directory / no remote / unsupported provider), or
+ * anything goes wrong. Used by the per-source surfaces (ticket card, Files
+ * Changed) that show one badge.
  */
 export async function detectContainerPullRequest(
   containerId: string,
@@ -332,9 +350,10 @@ export async function detectContainerPullRequest(
 }
 
 /**
- * Detect *all* open pull requests for the branch currently checked out in
- * ``/workspace/<mountName>`` (a branch can be open to more than one base).
- * Empty array when none / unsupported / error. Used by the deck + chat banner.
+ * Detect *all* open-or-merged pull requests for the branch currently checked
+ * out in ``/workspace/<mountName>`` (a branch can be open to more than one
+ * base). Empty array when none / unsupported / error. Used by the deck + chat
+ * banner.
  */
 export async function detectContainerPullRequests(
   containerId: string,

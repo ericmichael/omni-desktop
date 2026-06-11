@@ -33,15 +33,15 @@ describe('HostFsArtifactStore', () => {
 
   it('write → list → read round-trips a text artifact', async () => {
     const store = new HostFsArtifactStore(dir);
-    await store.write('t1', 'pr/PR_TITLE.md', Buffer.from('Add widget\n', 'utf-8'));
+    await store.write('t1', 'notes/RESEARCH.md', Buffer.from('Add widget\n', 'utf-8'));
 
     const top = await store.list('t1');
-    expect(top.map((e) => e.name)).toContain('pr');
+    expect(top.map((e) => e.name)).toContain('notes');
 
-    const inPr = await store.list('t1', 'pr');
-    expect(inPr.map((e) => e.name)).toEqual(['PR_TITLE.md']);
+    const inNotes = await store.list('t1', 'notes');
+    expect(inNotes.map((e) => e.name)).toEqual(['RESEARCH.md']);
 
-    const content = await store.read('t1', 'pr/PR_TITLE.md');
+    const content = await store.read('t1', 'notes/RESEARCH.md');
     expect(content.textContent).toBe('Add widget\n');
     expect(content.mimeType).toMatch(/markdown|text/);
   });

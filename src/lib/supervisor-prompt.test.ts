@@ -162,17 +162,34 @@ describe('buildSupervisorPrompt', () => {
     expect(prompt).not.toContain('## Workspace Layout');
   });
 
-  it('surfaces the artifacts dir + PR writeup paths when provided', () => {
+  it('plain-folder projects get deliverables-in-the-folder guidance, never an artifacts dir or PR writeup', () => {
     const prompt = buildSupervisorPrompt(makeTicket(), makeProject(), PIPELINE, {
       artifactsDir: '/workspace/.omni-artifacts/t1',
     });
     expect(prompt).toContain('## Output for the user');
-    expect(prompt).toContain('/workspace/.omni-artifacts/t1/pr/PR_TITLE.md');
-    expect(prompt).toContain('/workspace/.omni-artifacts/t1/pr/PR_BODY.md');
+    expect(prompt).toContain('`/workspace/project/`');
+    expect(prompt).not.toContain('.omni-artifacts');
+    expect(prompt).not.toContain('PR_TITLE');
   });
 
-  it('omits the artifacts section when no artifactsDir is provided', () => {
-    expect(buildSupervisorPrompt(makeTicket(), makeProject(), PIPELINE)).not.toContain('## Output for the user');
+  it('repo projects surface the artifacts dir for non-commit-worthy output, without PR writeup paths', () => {
+    const repoProject = makeProject({
+      sources: [{ id: 'src-1', mountName: 'repo', kind: 'local', workspaceDir: '/home/user/repo', gitDetected: true }],
+    });
+    const prompt = buildSupervisorPrompt(makeTicket(), repoProject, PIPELINE, {
+      artifactsDir: '/workspace/.omni-artifacts/t1',
+    });
+    expect(prompt).toContain('## Output for the user');
+    expect(prompt).toContain('/workspace/.omni-artifacts/t1');
+    expect(prompt).not.toContain('PR_TITLE');
+    expect(prompt).not.toContain('PR_BODY');
+  });
+
+  it('omits the output section for repo projects when no artifactsDir is provided', () => {
+    const repoProject = makeProject({
+      sources: [{ id: 'src-1', mountName: 'repo', kind: 'git-remote', repoUrl: 'https://github.com/a/r' }],
+    });
+    expect(buildSupervisorPrompt(makeTicket(), repoProject, PIPELINE)).not.toContain('## Output for the user');
   });
 });
 
@@ -208,16 +225,19 @@ describe('buildAutopilotGoalText', () => {
 });
 
 describe('buildAutopilotAdditionalInstructions', () => {
-  it('contains durable tool, artifact, and gate rules', () => {
-    const additionalInstructions = buildAutopilotAdditionalInstructions(makeTicket(), makeProject(), WORKFLOW_PIPELINE, {
+  it('contains durable tool, output, and gate rules', () => {
+    const repoProject = makeProject({
+      sources: [{ id: 'src-1', mountName: 'repo', kind: 'local', workspaceDir: '/home/user/repo', gitDetected: true }],
+    });
+    const additionalInstructions = buildAutopilotAdditionalInstructions(makeTicket(), repoProject, WORKFLOW_PIPELINE, {
       artifactsDir: '/workspace/.omni-artifacts/ticket-42',
     });
 
     expect(additionalInstructions).toContain('move_ticket');
     expect(additionalInstructions).toContain('spawn_worker');
     expect(additionalInstructions).toContain('/workspace/.omni-artifacts/ticket-42');
-    expect(additionalInstructions).toContain('/workspace/.omni-artifacts/ticket-42/pr/PR_TITLE.md');
-    expect(additionalInstructions).toContain('/workspace/.omni-artifacts/ticket-42/pr/PR_BODY.md');
+    expect(additionalInstructions).not.toContain('PR_TITLE');
+    expect(additionalInstructions).not.toContain('PR_BODY');
     expect(additionalInstructions).toMatch(/gate/i);
   });
 

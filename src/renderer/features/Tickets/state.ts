@@ -342,12 +342,6 @@ export const ticketApi = {
     void ticketApi.fetchTasks();
     return ok;
   },
-  checkMerge: (
-    ticketId: TicketId,
-    sourceId: string
-  ): Promise<import('@/shared/types').PrMergeCheck> => {
-    return emitter.invoke('project:check-merge', ticketId, sourceId);
-  },
   mergeTicket: async (
     ticketId: TicketId,
     sourceId: string

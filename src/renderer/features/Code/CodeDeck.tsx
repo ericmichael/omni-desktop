@@ -69,8 +69,8 @@ import { makeAppHandleId } from '@/shared/app-control-types';
 import type { AppDescriptor, AppId, CustomAppEntry } from '@/shared/app-registry';
 import { buildAppRegistry } from '@/shared/app-registry';
 import type { AutoLaunchPhase } from '@/shared/machines/auto-launch.machine';
-import type { CodeLayoutMode, CodeTab, CodeTabId, TicketId, TicketResolution } from '@/shared/types';
-import { firstSource, isChatTab } from '@/shared/types';
+import type { CodeLayoutMode, CodeTab, CodeTabId, ProjectId, TicketId, TicketResolution } from '@/shared/types';
+import { firstSource, isChatTab, projectHasRepoSource } from '@/shared/types';
 
 import { AppIcon } from './AppIcon';
 import { CodeTabContent } from './CodeTabContent';
@@ -1150,6 +1150,7 @@ const CodeSessionHeader = memo(
     dragHandle,
     dragSurfaceProps,
     ticketId,
+    projectId,
     onOpenPanel,
     isGlass,
   }: {
@@ -1167,6 +1168,7 @@ const CodeSessionHeader = memo(
     dragHandle?: React.ReactNode;
     dragSurfaceProps?: React.HTMLAttributes<HTMLDivElement>;
     ticketId?: TicketId;
+    projectId?: ProjectId | null;
     onOpenPanel?: (panel: TicketPanel) => void;
     isGlass?: boolean;
   }) => {
@@ -1178,6 +1180,12 @@ const CodeSessionHeader = memo(
       },
       [ticketId]
     );
+    // Artifacts is a developer surface: it only exists for ticket runs on
+    // repo-source projects. Plain-folder projects have one output concept —
+    // the folder itself — so the menu item never appears for them.
+    const store = useStore(persistedStoreApi.$atom);
+    const showArtifacts =
+      Boolean(ticketId) && projectHasRepoSource(store.projects.find((p) => p.id === projectId));
 
     const styles = useStyles();
     return (
@@ -1213,7 +1221,7 @@ const CodeSessionHeader = memo(
                       <>
                         {ticketId && <MenuItem onClick={() => onOpenPanel('overview')}>Overview</MenuItem>}
                         <MenuItem onClick={() => onOpenPanel('pr')}>Changes</MenuItem>
-                        {ticketId && <MenuItem onClick={() => onOpenPanel('artifacts')}>Artifacts</MenuItem>}
+                        {showArtifacts && <MenuItem onClick={() => onOpenPanel('artifacts')}>Artifacts</MenuItem>}
                         <MenuDivider />
                       </>
                     )}
@@ -1352,6 +1360,7 @@ const DeckColumn = memo(
             }
             onClose={() => onClose(tab.id)}
             ticketId={tab.ticketId as TicketId | undefined}
+            projectId={tab.projectId}
             onOpenPanel={tab.ticketId || tab.projectId ? setActivePanel : undefined}
             dragSurfaceProps={listeners}
             dragHandle={
@@ -2008,6 +2017,7 @@ const CodeSessionPane = memo(
           actions={actions}
           onClose={() => onClose(tab.id)}
           ticketId={tab.ticketId as TicketId | undefined}
+          projectId={tab.projectId}
           onOpenPanel={tab.ticketId || tab.projectId ? setActivePanel : undefined}
           isGlass={isGlass}
         />

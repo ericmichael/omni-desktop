@@ -54,6 +54,7 @@ const getDefaults = (): StoreData => ({
   installedBundles: {},
   customApps: [],
   gitCredentials: [],
+  pullRequestLinks: [],
   modelsConfig: emptyModelsConfig(),
   mcpConfig: emptyMcpConfig(),
   networkConfig: emptyNetworkConfig(),

@@ -26,14 +26,14 @@ describe('parsePullRequestJson', () => {
     });
   });
 
-  it('returns null for a closed PR', () => {
+  it('returns null for a closed (unmerged) PR', () => {
     const out = JSON.stringify({ number: 7, url: 'https://x/pull/7', state: 'CLOSED' });
     expect(parsePullRequestJson(out)).toBeNull();
   });
 
-  it('returns null for a merged PR', () => {
+  it('passes a merged PR through (renders as the ✓ badge)', () => {
     const out = JSON.stringify({ number: 7, url: 'https://x/pull/7', state: 'MERGED' });
-    expect(parsePullRequestJson(out)).toBeNull();
+    expect(parsePullRequestJson(out)).toEqual({ number: 7, url: 'https://x/pull/7', state: 'MERGED' });
   });
 
   it('returns null when the number is missing', () => {
@@ -104,12 +104,16 @@ describe('parseAzurePullRequestList', () => {
     });
   });
 
-  it('skips non-active PRs', () => {
+  it('maps completed → MERGED and skips abandoned PRs', () => {
     const out = JSON.stringify([
       { pullRequestId: 9, status: 'completed', repository: { webUrl: 'https://x/_git/r' } },
       { pullRequestId: 10, status: 'abandoned', repository: { webUrl: 'https://x/_git/r' } },
     ]);
-    expect(parseAzurePullRequestList(out)).toBeNull();
+    expect(parseAzurePullRequestList(out)).toEqual({
+      number: 9,
+      url: 'https://x/_git/r/pullrequest/9',
+      state: 'MERGED',
+    });
   });
 
   it('returns null when repository.webUrl is missing', () => {
@@ -123,16 +127,16 @@ describe('parseAzurePullRequestList', () => {
   });
 });
 
-describe('parsePullRequestListJson (GitHub, all open PRs)', () => {
-  it('returns every open PR in the array', () => {
+describe('parsePullRequestListJson (GitHub, open + merged PRs)', () => {
+  it('returns open and merged PRs, dropping closed-unmerged ones', () => {
     const out = JSON.stringify([
       { number: 1, url: 'https://x/pull/1', state: 'OPEN', title: 'One' },
       { number: 2, url: 'https://x/pull/2', state: 'CLOSED' },
-      { number: 3, url: 'https://x/pull/3', state: 'OPEN' },
+      { number: 3, url: 'https://x/pull/3', state: 'MERGED' },
     ]);
     expect(parsePullRequestListJson(out)).toEqual([
       { number: 1, url: 'https://x/pull/1', state: 'OPEN', title: 'One' },
-      { number: 3, url: 'https://x/pull/3', state: 'OPEN' },
+      { number: 3, url: 'https://x/pull/3', state: 'MERGED' },
     ]);
   });
 
@@ -142,16 +146,16 @@ describe('parsePullRequestListJson (GitHub, all open PRs)', () => {
   });
 });
 
-describe('parseAzurePullRequestListAll (all active PRs)', () => {
-  it('returns a badge per active PR (e.g. one branch → two targets)', () => {
+describe('parseAzurePullRequestListAll (active + completed PRs)', () => {
+  it('returns a badge per surviving PR, normalizing completed → MERGED', () => {
     const out = JSON.stringify([
       { pullRequestId: 11, status: 'active', repository: { webUrl: 'https://dev.azure.com/o/p/_git/r' } },
       { pullRequestId: 12, status: 'completed', repository: { webUrl: 'https://dev.azure.com/o/p/_git/r' } },
-      { pullRequestId: 13, status: 'active', repository: { webUrl: 'https://dev.azure.com/o/p/_git/r' } },
+      { pullRequestId: 13, status: 'abandoned', repository: { webUrl: 'https://dev.azure.com/o/p/_git/r' } },
     ]);
     expect(parseAzurePullRequestListAll(out)).toEqual([
       { number: 11, url: 'https://dev.azure.com/o/p/_git/r/pullrequest/11', state: 'OPEN' },
-      { number: 13, url: 'https://dev.azure.com/o/p/_git/r/pullrequest/13', state: 'OPEN' },
+      { number: 12, url: 'https://dev.azure.com/o/p/_git/r/pullrequest/12', state: 'MERGED' },
     ]);
   });
 
