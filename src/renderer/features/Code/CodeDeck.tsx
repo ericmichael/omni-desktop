@@ -21,6 +21,7 @@ import {
   Subtract20Regular,
 } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
+import { LayoutGroup, motion } from 'framer-motion';
 import { forwardRef, Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { customAppPartition } from '@/lib/app-partition';
@@ -51,7 +52,7 @@ import {
 import { type TicketPanel, TicketPanelOverlay } from '@/renderer/features/Tickets/TicketPanelOverlay';
 import { $columnActivity, activityStatusText } from '@/renderer/services/column-activity';
 import { persistedStoreApi } from '@/renderer/services/store';
-import { $recordingScope } from '@/renderer/services/voice-recording';
+import { ENTER_ANIMATE, ENTER_INITIAL, SPRING_GENTLE, SPRING_STANDARD } from '@/renderer/theme/motion';
 import type { AppHandleScope } from '@/shared/app-control-types';
 import { makeAppHandleId } from '@/shared/app-control-types';
 import type { AppDescriptor, AppId, CustomAppEntry } from '@/shared/app-registry';
@@ -62,8 +63,8 @@ import { firstSource, isChatTab } from '@/shared/types';
 
 import { AppIcon } from './AppIcon';
 import { CodeTabContent } from './CodeTabContent';
+import { ColumnAura } from './ColumnAura';
 import { $codeTabPhases, $codeTabStatuses, codeApi } from './state';
-import { VoiceGlow } from './VoiceGlow';
 
 /** Sentinel customAppId meaning "show the app launcher picker". */
 const APP_LAUNCHER_ID = '__launcher__';
@@ -248,6 +249,7 @@ const useStyles = makeStyles({
     },
     animationDuration: '2s',
     animationIterationCount: 'infinite',
+    '@media (prefers-reduced-motion: reduce)': { animationName: 'none' },
   },
   statusDotWaiting: {
     backgroundColor: tokens.colorPaletteYellowForeground1,
@@ -339,7 +341,12 @@ const useStyles = makeStyles({
     borderRadius: '28px',
     boxShadow: `0 1px 0 0 rgba(255, 255, 255, 0.22) inset, 0 0 0 1px rgba(255, 255, 255, 0.06) inset, 0 30px 80px -24px rgba(0, 0, 0, 0.45), 0 12px 32px -12px rgba(0, 0, 0, 0.3)`,
   },
-  deckColumnDragging: { opacity: 0.7 },
+  deckColumnDragging: { opacity: 0.85 },
+  /* Lift while dragging — the shadow says "picked up"; dnd-kit owns the
+     transform, so depth comes from elevation only. */
+  deckCardLifted: {
+    boxShadow: tokens.shadow28,
+  },
   browserToolbar: {
     display: 'flex',
     alignItems: 'center',
@@ -436,6 +443,7 @@ const useStyles = makeStyles({
     height: '100%',
     display: 'flex',
     flexDirection: 'column',
+    position: 'relative',
     backgroundColor: tokens.colorNeutralBackground2,
   },
   sessionPaneHidden: { display: 'none' },
@@ -973,16 +981,20 @@ const DeckColumn = memo(
     isGlass?: boolean;
     hasSidecar?: boolean;
   }) => {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
+    // dnd-kit moves only the actively dragged column (transition: null) — the
+    // displaced columns settle via the card's framer layout animation below,
+    // so there's exactly one animator per element.
+    const { attributes, listeners, setNodeRef, transform, isDragging } = useSortable({
+      id: tab.id,
+      transition: null,
+    });
     const style = {
       transform: CSS.Transform.toString(transform),
-      transition,
     };
 
     const styles = useStyles();
     const [activePanel, setActivePanel] = useState<TicketPanel | null>(null);
     const handleClosePanel = useCallback(() => setActivePanel(null), []);
-    const recordingScope = useStore($recordingScope);
     useNowMinute();
 
     return (
@@ -991,14 +1003,20 @@ const DeckColumn = memo(
         style={style}
         className={mergeClasses(styles.deckColumn, isDragging && styles.deckColumnDragging)}
       >
-        <div
+        <motion.div
+          layoutId={`colcard-${tab.id}`}
+          layout
+          transition={SPRING_STANDARD}
+          initial={ENTER_INITIAL}
+          animate={ENTER_ANIMATE}
           className={mergeClasses(
             styles.deckColumnBordered,
             isGlass && styles.glassCard,
-            hasSidecar && styles.cardNoRightMargin
+            hasSidecar && styles.cardNoRightMargin,
+            isDragging && styles.deckCardLifted
           )}
         >
-          {recordingScope === tab.id && <VoiceGlow />}
+          <ColumnAura tabId={tab.id} />
           <CodeSessionHeader
             label={label}
             subLabel={ticketTitle ? null : startedLabel(tab)}
@@ -1055,7 +1073,7 @@ const DeckColumn = memo(
               />
             )}
           </div>
-        </div>
+        </motion.div>
         <div id={`code-deck-dock-target-${tab.id}`} className={styles.deckDockSlot} />
       </div>
     );
@@ -1674,13 +1692,21 @@ const CodeSessionPane = memo(
     useNowMinute();
 
     return (
-      <div
+      // Shared-element target for Focus-as-zoom: only the visible pane claims
+      // the card's layoutId (hidden panes are display:none and would report
+      // zero bounds). Switching Tile <-> Focus morphs the active column
+      // between its tile card and this full pane.
+      <motion.div
+        layoutId={isVisible ? `colcard-${tab.id}` : undefined}
+        layout={isVisible}
+        transition={SPRING_GENTLE}
         className={mergeClasses(
           styles.sessionPane,
           isGlass && styles.glassSessionPane,
           !isVisible && styles.sessionPaneHidden
         )}
       >
+        <ColumnAura tabId={tab.id} />
         <CodeSessionHeader
           label={label}
           subLabel={ticketTitle ? null : startedLabel(tab)}
@@ -1718,7 +1744,7 @@ const CodeSessionPane = memo(
             />
           )}
         </div>
-      </div>
+      </motion.div>
     );
   }
 );
@@ -1740,7 +1766,10 @@ const FocusListItem = memo(
     onSelect: (id: CodeTabId) => void;
     onClose: (id: CodeTabId) => void;
   }) => {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+      id: tab.id,
+      transition: { duration: 220, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
+    });
     const style = {
       transform: CSS.Transform.toString(transform),
       transition,
@@ -2233,6 +2262,7 @@ export const CodeDeck = memo(() => {
   );
 
   return (
+    <LayoutGroup>
     <div className={styles.root}>
       <CodeDeckHeader
         layoutMode={layoutMode}
@@ -2487,6 +2517,7 @@ export const CodeDeck = memo(() => {
         </DndContext>
       )}
     </div>
+    </LayoutGroup>
   );
 });
 CodeDeck.displayName = 'CodeDeck';

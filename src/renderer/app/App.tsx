@@ -8,6 +8,7 @@ import '@/renderer/features/WorkspaceSync/state'; // side-effect: registers IPC 
 
 import { FluentProvider, makeStyles, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
+import { MotionConfig } from 'framer-motion';
 import { useEffect, useMemo } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 
@@ -94,6 +95,9 @@ export const App = () => {
 
   return (
     <FluentProvider theme={fluentTheme}>
+      {/* All framer-motion animations respect the OS reduce-motion setting.
+          Hand-written CSS animations carry their own media-query overrides. */}
+      <MotionConfig reducedMotion="user">
       <SystemInfoProvider>
         <div className={styles.shell}>
           <ErrorBoundary FallbackComponent={ErrorBoundaryFallback}>
@@ -114,6 +118,7 @@ export const App = () => {
           </ErrorBoundary>
         </div>
       </SystemInfoProvider>
+      </MotionConfig>
     </FluentProvider>
   );
 };
