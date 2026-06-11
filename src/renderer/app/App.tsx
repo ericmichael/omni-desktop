@@ -17,6 +17,7 @@ import { MainContent } from '@/renderer/app/MainContent';
 import { syncTheme } from '@/renderer/constants';
 import { SystemInfoLoadingGate, SystemInfoProvider } from '@/renderer/contexts/SystemInfoContext';
 import { AuthGate } from '@/renderer/features/Auth/AuthGate';
+import { CommandPalette } from '@/renderer/features/CommandPalette/CommandPalette';
 import { GlobalAgent } from '@/renderer/features/GlobalAgent/GlobalAgent';
 import { GlobalAgentAmbientGlow } from '@/renderer/features/GlobalAgent/GlobalAgentAmbientGlow';
 import { QuickCapture } from '@/renderer/features/Inbox/QuickCapture';
@@ -111,6 +112,7 @@ export const App = () => {
                 <GlobalAgent />
                 <GlobalAgentAmbientGlow />
                 <VoiceHotkeys />
+                <CommandPalette />
                 <SyncBar />
               </AuthGate>
             </SystemInfoLoadingGate>

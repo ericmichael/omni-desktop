@@ -820,8 +820,10 @@ const ColumnStatusLine = memo(({ tabId }: { tabId: CodeTabId }) => {
   }
   const waiting = !bootText && !!activity?.pendingApproval;
   return (
-    <div className={styles.statusLine}>
-      <span className={mergeClasses(styles.statusDot, waiting && styles.statusDotWaiting)} />
+    // role="status" = polite live region: screen readers announce activity
+    // transitions ("Working…", "Waiting for approval") without stealing focus.
+    <div className={styles.statusLine} role="status">
+      <span className={mergeClasses(styles.statusDot, waiting && styles.statusDotWaiting)} aria-hidden="true" />
       <span className={styles.statusLineText} title={text}>
         {text}
       </span>
