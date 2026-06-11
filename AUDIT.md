@@ -8,6 +8,14 @@
 > Framing: a consultant's pass holding the app to the bar Apple Design Award judges apply —
 > one obsessively-polished signature interaction, native-feeling mechanics, motion as
 > communication, ruthless editorial omission, and inclusivity as table stakes.
+>
+> **Execution status (2026-06-11):** the full gameplan has been executed on
+> `feat/merge-seed-data` — Phase 0 polish (9840b1b), Batch 1 language + shaping removal
+> (ce2eb93), Batch 2 column identity/status (921f216), Batch 3 mobile structure (746b3de),
+> chat unification (06f3ae7, plan at docs/chat-unification-plan.md), Phase 2 motion system
+> (19a246e), Phase 3 teaching empty states + onboarding (294af50), Phase 4 ⌘K palette /
+> keyboard map / live regions (7e8c64d). Dock-icon live indicators were cut by decision;
+> chat-in-deck is deferred (one-line filter change when wanted).
 
 ## The one-paragraph verdict
 
