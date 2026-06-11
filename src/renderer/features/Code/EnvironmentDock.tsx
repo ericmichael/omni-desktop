@@ -35,11 +35,8 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
     boxShadow: `0 1px 12px rgba(0,0,0,0.10), 0 0 0 1px ${tokens.colorNeutralStroke1}`,
     flexShrink: 0,
-    /* Lift the floating pill above the home indicator instead of growing it:
-       the inset goes in the margin so the dock keeps its shape. */
-    '@media (max-width: 639px)': {
-      marginBottom: `calc(${tokens.spacingVerticalS} + var(--safe-area-bottom, env(safe-area-inset-bottom, 0px)))`,
-    },
+    /* No safe-area margin here anymore: the app tab bar now stays below the
+       dock on mobile and owns the home-indicator clearance. */
   },
   dockGlass: {
     backgroundColor: `color-mix(in srgb, ${tokens.colorNeutralBackground1} 18%, transparent)`,

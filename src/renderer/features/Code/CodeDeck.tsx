@@ -11,14 +11,12 @@ import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-co
 import {
   Add20Regular,
   Apps20Regular,
-  ArrowLeft20Regular,
   ArrowMaximize20Regular,
   ArrowMinimize20Regular,
   BranchFork20Regular,
   Chat20Regular,
   Globe20Regular,
   MoreHorizontal20Regular,
-  Navigation20Regular,
   ReOrderDotsVertical20Regular,
   Subtract20Regular,
 } from '@fluentui/react-icons';
@@ -111,18 +109,14 @@ const useStyles = makeStyles({
     ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
     backgroundColor: tokens.colorNeutralBackground2,
   },
-  deckHeaderNav: {
-    display: 'flex',
-    alignItems: 'center',
-    [`@media (min-width: ${SNAP_SCROLL_WIDTH + 1}px)`]: { display: 'none' },
+  layoutToggleWrap: {
+    display: 'none',
+    [`@media (min-width: ${SNAP_SCROLL_WIDTH + 1}px)`]: { display: 'flex' },
   },
   deckHeaderActions: {
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    // Pin to the right edge even when `deckHeaderNav` is hidden on wide screens
-    // (where `space-between` would otherwise leave the lone actions group at the
-    // start).
     marginLeft: 'auto',
   },
   flexItemsCenter: { display: 'flex', alignItems: 'center' },
@@ -333,25 +327,10 @@ const useStyles = makeStyles({
     WebkitBackdropFilter: 'var(--glass-blur)',
   },
   glassFocusSidebarHeader: {},
-  glassMobileTabBar: {
-    backgroundColor: tokens.colorNeutralBackground1,
-    backdropFilter: 'var(--glass-blur)',
-    WebkitBackdropFilter: 'var(--glass-blur)',
-  },
   glassSessionPane: {
     backgroundColor: tokens.colorNeutralBackground1,
     backdropFilter: 'var(--glass-blur)',
     WebkitBackdropFilter: 'var(--glass-blur)',
-  },
-  glassMobileTabChipInactive: {
-    backgroundColor: tokens.colorNeutralBackground3,
-    backdropFilter: 'var(--glass-blur-light)',
-    WebkitBackdropFilter: 'var(--glass-blur-light)',
-  },
-  glassMobileTabChipActive: {
-    backgroundColor: `color-mix(in srgb, ${tokens.colorBrandBackground} 60%, transparent)`,
-    backdropFilter: 'var(--glass-blur-light)',
-    WebkitBackdropFilter: 'var(--glass-blur-light)',
   },
   glassCard: {
     backgroundColor: tokens.colorNeutralBackground3,
@@ -573,70 +552,6 @@ const useStyles = makeStyles({
   focusSidebarCount: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 },
   focusSidebarList: { flex: '1 1 0', minHeight: 0, overflowY: 'auto', paddingTop: '4px', paddingBottom: '4px' },
   focusContent: { flex: '1 1 0', minWidth: 0, minHeight: 0 },
-  mobileTabBar: {
-    display: 'flex',
-    alignItems: 'center',
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground2,
-    overflowX: 'auto',
-    /* No safe-area paddingTop here: the app shell already pads
-       env(safe-area-inset-top) (App.tsx), so adding it again doubles the
-       notch inset on mobile. */
-    [`@media (min-width: ${SNAP_SCROLL_WIDTH + 1}px)`]: { display: 'none' },
-  },
-  mobileTabBarInner: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px',
-    paddingLeft: tokens.spacingHorizontalS,
-    paddingTop: '6px',
-    paddingBottom: '6px',
-  },
-  mobileTabChip: {
-    flexShrink: 0,
-    paddingLeft: '14px',
-    paddingRight: '14px',
-    paddingTop: '6px',
-    paddingBottom: '6px',
-    borderRadius: '9999px',
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightMedium,
-    transitionProperty: 'background-color, color',
-    transitionDuration: '150ms',
-    border: 'none',
-    cursor: 'pointer',
-  },
-  mobileTabChipActive: { backgroundColor: tokens.colorBrandBackground2, color: tokens.colorBrandForeground1 },
-  mobileTabChipInactive: { backgroundColor: tokens.colorNeutralBackground3, color: tokens.colorNeutralForeground2 },
-  mobileNewBtn: {
-    flexShrink: 0,
-    width: '36px',
-    height: '36px',
-    borderRadius: '9999px',
-    backgroundColor: tokens.colorNeutralBackground3,
-    color: tokens.colorNeutralForeground2,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    transitionProperty: 'background-color',
-    transitionDuration: '150ms',
-    border: 'none',
-    cursor: 'pointer',
-  },
-  mobileNavBtn: {
-    flexShrink: 0,
-    width: '36px',
-    height: '36px',
-    borderRadius: '9999px',
-    color: tokens.colorNeutralForeground2,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    border: 'none',
-    backgroundColor: 'transparent',
-    cursor: 'pointer',
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover, color: tokens.colorNeutralForeground1 },
-  },
   metaBadge: {
     display: 'flex',
     alignItems: 'center',
@@ -760,25 +675,22 @@ const CodeDeckHeader = memo(
     isGlass?: boolean;
   }) => {
     const styles = useStyles();
-    const handleBack = useCallback(() => persistedStoreApi.setKey('layoutMode', 'chat'), []);
 
     return (
       <div className={mergeClasses(styles.deckHeader, isGlass && styles.glassDeckHeader)}>
-        <div className={styles.deckHeaderNav}>
-          <button type="button" className={styles.mobileNavBtn} aria-label="Back to Chat" onClick={handleBack}>
-            <ArrowLeft20Regular style={{ width: 18, height: 18 }} />
-          </button>
-        </div>
         <div className={styles.deckHeaderActions}>
-          <SegmentedControl
-            value={layoutMode}
-            options={[
-              { value: 'tile', label: 'Tile' },
-              { value: 'focus', label: 'Focus' },
-            ]}
-            onChange={onLayoutMode}
-            layoutId="code-layout-toggle"
-          />
+          {/* Desktop-only: phones always use the pager layout. */}
+          <span className={styles.layoutToggleWrap}>
+            <SegmentedControl
+              value={layoutMode}
+              options={[
+                { value: 'tile', label: 'Tile' },
+                { value: 'focus', label: 'Focus' },
+              ]}
+              onChange={onLayoutMode}
+              layoutId="code-layout-toggle"
+            />
+          </span>
           <Menu positioning={{ position: 'below', align: 'end' }}>
             <MenuTrigger>
               <Button size="sm" variant="ghost" leftIcon={<Add20Regular style={{ width: 13, height: 13 }} />}>
@@ -1902,7 +1814,6 @@ export const CodeDeck = memo(() => {
   const store = useStore(persistedStoreApi.$atom);
   const statuses = useStore($codeTabStatuses);
   const tabs = store.codeTabs ?? [];
-  const layoutMode = store.codeLayoutMode ?? 'tile';
   const activeTabId = store.activeCodeTabId ?? tabs[0]?.id ?? null;
   const deckBackground = store.codeDeckBackground ?? null;
   const [activeApps, setActiveApps] = useState<Record<CodeTabId, AppId>>({});
@@ -1913,6 +1824,11 @@ export const CodeDeck = memo(() => {
   const [previewUrls, setPreviewUrls] = useState<Record<CodeTabId, string>>({});
   const [expandedTabIds, setExpandedTabIds] = useState<ReadonlySet<CodeTabId>>(() => new Set());
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  // Below the snap breakpoint the deck is always a pager (full-width
+  // snap-scrolled tile columns) — Focus is a desktop layout, and offering a
+  // layout toggle at phone width only added a second way to be lost.
+  const storedLayoutMode = store.codeLayoutMode ?? 'tile';
+  const layoutMode = viewportWidth <= SNAP_SCROLL_WIDTH ? 'tile' : storedLayoutMode;
   const [deckViewportWidth, setDeckViewportWidth] = useState(() => window.innerWidth);
 
   useEffect(() => {
@@ -2447,53 +2363,6 @@ export const CodeDeck = memo(() => {
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
           <SortableContext items={tabs.map((t) => t.id)} strategy={verticalListSortingStrategy}>
             <div className={styles.focusLayout}>
-              {/* Mobile chip bar for focus mode — replaces sidebar on small screens */}
-              <div className={mergeClasses(styles.mobileTabBar, !!deckBackground && styles.glassMobileTabBar)}>
-                <div className={styles.mobileTabBarInner}>
-                  <Menu positioning={{ position: 'below', align: 'start' }}>
-                    <MenuTrigger>
-                      <button type="button" className={styles.mobileNavBtn} aria-label="Navigate">
-                        <Navigation20Regular style={{ width: 18, height: 18 }} />
-                      </button>
-                    </MenuTrigger>
-                    <MenuPopover>
-                      <MenuList>
-                        <MenuItem onClick={() => handleLayoutMode('tile')}>Switch to Tile</MenuItem>
-                        <MenuDivider />
-                        <MenuItem onClick={() => persistedStoreApi.setKey('layoutMode', 'chat')}>Chat</MenuItem>
-                        <MenuItem onClick={() => persistedStoreApi.setKey('layoutMode', 'projects')}>Projects</MenuItem>
-                        <MenuDivider />
-                        <MenuItem onClick={() => persistedStoreApi.setKey('layoutMode', 'settings')}>Settings</MenuItem>
-                      </MenuList>
-                    </MenuPopover>
-                  </Menu>
-                  {tabs.map((tab) => (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      onClick={() => handleSelect(tab.id)}
-                      className={mergeClasses(
-                        styles.mobileTabChip,
-                        tab.id === activeTab?.id ? styles.mobileTabChipActive : styles.mobileTabChipInactive,
-                        !!deckBackground &&
-                          (tab.id === activeTab?.id
-                            ? styles.glassMobileTabChipActive
-                            : styles.glassMobileTabChipInactive)
-                      )}
-                    >
-                      {resolveLabel(tab)}
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={handleNewSession}
-                    className={styles.mobileNewBtn}
-                    aria-label="New session"
-                  >
-                    <Add20Regular style={{ width: 13, height: 13 }} />
-                  </button>
-                </div>
-              </div>
               <div className={mergeClasses(styles.focusSidebar, !!deckBackground && styles.glassFocusSidebar)}>
                 <div
                   className={mergeClasses(

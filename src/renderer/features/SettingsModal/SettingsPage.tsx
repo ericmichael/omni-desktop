@@ -1,6 +1,7 @@
 import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
 import {
   Apps20Regular,
+  ArrowLeft20Regular,
   Branch20Regular,
   Cube20Regular,
   Globe20Regular,
@@ -16,7 +17,7 @@ import {
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useState } from 'react';
 
-import { Subtitle2 } from '@/renderer/ds';
+import { IconButton, ListItem, Subtitle2 } from '@/renderer/ds';
 import { SettingsModalAccountTab } from '@/renderer/features/SettingsModal/SettingsModalAccountTab';
 import { SettingsModalAppsTab } from '@/renderer/features/SettingsModal/SettingsModalAppsTab';
 import { SettingsModalAudioTab } from '@/renderer/features/SettingsModal/SettingsModalAudioTab';
@@ -78,7 +79,7 @@ const useStyles = makeStyles({
     backdropFilter: 'var(--glass-blur)',
     WebkitBackdropFilter: 'var(--glass-blur)',
   },
-  mobileTabsGlass: {
+  mobileHeaderGlass: {
     backgroundColor: tokens.colorNeutralBackground1,
     backdropFilter: 'var(--glass-blur)',
     WebkitBackdropFilter: 'var(--glass-blur)',
@@ -160,15 +161,29 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: '24px',
   },
-  /* ── Mobile: tabs at top instead of side nav ── */
-  mobileTabs: {
+  /* ── Mobile: grouped list + drill-in panel instead of side nav ── */
+  mobileList: {
     display: 'flex',
-    gap: '4px',
-    paddingLeft: '16px',
-    paddingRight: '16px',
-    paddingTop: '12px',
+    flexDirection: 'column',
+    paddingBottom: tokens.spacingVerticalL,
+    '@media (min-width: 640px)': {
+      display: 'none',
+    },
+  },
+  mobileListHeader: {
+    paddingLeft: '20px',
+    paddingRight: '20px',
+    paddingTop: '24px',
     paddingBottom: '12px',
-    overflowX: 'auto',
+  },
+  mobilePanelHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    paddingLeft: '8px',
+    paddingRight: '16px',
+    paddingTop: '8px',
+    paddingBottom: '8px',
     flexShrink: 0,
     position: 'sticky',
     top: 0,
@@ -179,28 +194,11 @@ const useStyles = makeStyles({
       display: 'none',
     },
   },
-  mobileTab: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '6px',
-    paddingLeft: '12px',
-    paddingRight: '12px',
-    paddingTop: '10px',
-    paddingBottom: '10px',
-    minHeight: '40px',
-    borderRadius: tokens.borderRadiusMedium,
-    border: 'none',
-    backgroundColor: 'transparent',
-    color: tokens.colorNeutralForeground2,
-    cursor: 'pointer',
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightSemibold,
-    whiteSpace: 'nowrap',
-    flexShrink: 0,
-  },
-  mobileTabActive: {
-    backgroundColor: tokens.colorSubtleBackgroundSelected,
-    color: tokens.colorNeutralForeground1,
+  /* The selected panel only renders on mobile after a drill-in. */
+  contentHiddenMobile: {
+    '@media (max-width: 639px)': {
+      display: 'none',
+    },
   },
   footer: {
     paddingTop: '16px',
@@ -212,9 +210,15 @@ export const SettingsPage = memo(() => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const isGlass = !!store.codeDeckBackground;
-  const [activeTab, setActiveTab] = useState<SettingsTab>('General');
+  // null = no drill-in yet. Desktop always shows a panel (defaults to
+  // General); mobile shows the grouped list until a row is tapped.
+  const [activeTab, setActiveSettingsTab] = useState<SettingsTab | null>(null);
+  const shownTab: SettingsTab = activeTab ?? 'General';
 
-  const handleNav = useCallback((tab: SettingsTab) => () => setActiveTab(tab), []);
+  const handleNav = useCallback((tab: SettingsTab) => () => setActiveSettingsTab(tab), []);
+  const handleBack = useCallback(() => setActiveSettingsTab(null), []);
+
+  const shownTabLabel = TABS.find((t) => t.value === shownTab)?.label ?? shownTab;
 
   return (
     <div className={mergeClasses(styles.root, isGlass && styles.rootGlass)}>
@@ -228,7 +232,7 @@ export const SettingsPage = memo(() => {
             <button
               key={tab.value}
               onClick={handleNav(tab.value)}
-              className={mergeClasses(styles.navItem, activeTab === tab.value && styles.navItemActive)}
+              className={mergeClasses(styles.navItem, shownTab === tab.value && styles.navItemActive)}
             >
               {tab.icon}
               {tab.label}
@@ -237,37 +241,49 @@ export const SettingsPage = memo(() => {
         </div>
       </nav>
 
-      {/* Mobile: horizontal tabs */}
-      <div className={mergeClasses(styles.mobileTabs, isGlass && styles.mobileTabsGlass)}>
-        {TABS.map((tab) => (
-          <button
-            key={tab.value}
-            onClick={handleNav(tab.value)}
-            className={mergeClasses(styles.mobileTab, activeTab === tab.value && styles.mobileTabActive)}
-          >
-            {tab.icon}
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      {/* Mobile: grouped list (drill-in root) */}
+      {activeTab === null && (
+        <div className={styles.mobileList}>
+          <div className={styles.mobileListHeader}>
+            <Subtitle2>Settings</Subtitle2>
+          </div>
+          {TABS.map((tab) => (
+            <ListItem key={tab.value} icon={tab.icon} label={tab.label} onClick={handleNav(tab.value)} />
+          ))}
+        </div>
+      )}
+
+      {/* Mobile: drill-in panel header */}
+      {activeTab !== null && (
+        <div className={mergeClasses(styles.mobilePanelHeader, isGlass && styles.mobileHeaderGlass)}>
+          <IconButton aria-label="Back to settings" icon={<ArrowLeft20Regular />} size="sm" onClick={handleBack} />
+          <Subtitle2>{shownTabLabel}</Subtitle2>
+        </div>
+      )}
 
       {/* Content */}
-      <div className={mergeClasses(styles.content, isGlass && styles.contentGlass)}>
+      <div
+        className={mergeClasses(
+          styles.content,
+          isGlass && styles.contentGlass,
+          activeTab === null && styles.contentHiddenMobile
+        )}
+      >
         <div className={styles.contentInner}>
-          {activeTab === 'General' && <SettingsModalGeneralTab />}
-          {activeTab === 'Environment' && <SettingsModalEnvironmentTab />}
-          {activeTab === 'Models' && <SettingsModalModelsTab />}
-          {activeTab === 'MCP' && <SettingsModalMcpTab />}
-          {activeTab === 'Git' && <SettingsModalGitTab />}
-          {activeTab === 'Apps' && <SettingsModalAppsTab />}
-          {activeTab === 'Skills' && <SettingsModalSkillsTab />}
-          {activeTab === 'Audio' && <SettingsModalAudioTab />}
-          {activeTab === 'Hotkeys' && <SettingsModalHotkeysTab />}
-          {activeTab === 'Network' && <SettingsModalNetworkTab />}
-          {activeTab === 'Extensions' && <SettingsModalExtensionsTab />}
-          {activeTab === 'Account' && <SettingsModalAccountTab />}
-          {activeTab === 'Teams' && <SettingsModalTeamsTab />}
-          {activeTab === 'General' && (
+          {shownTab === 'General' && <SettingsModalGeneralTab />}
+          {shownTab === 'Environment' && <SettingsModalEnvironmentTab />}
+          {shownTab === 'Models' && <SettingsModalModelsTab />}
+          {shownTab === 'MCP' && <SettingsModalMcpTab />}
+          {shownTab === 'Git' && <SettingsModalGitTab />}
+          {shownTab === 'Apps' && <SettingsModalAppsTab />}
+          {shownTab === 'Skills' && <SettingsModalSkillsTab />}
+          {shownTab === 'Audio' && <SettingsModalAudioTab />}
+          {shownTab === 'Hotkeys' && <SettingsModalHotkeysTab />}
+          {shownTab === 'Network' && <SettingsModalNetworkTab />}
+          {shownTab === 'Extensions' && <SettingsModalExtensionsTab />}
+          {shownTab === 'Account' && <SettingsModalAccountTab />}
+          {shownTab === 'Teams' && <SettingsModalTeamsTab />}
+          {shownTab === 'General' && (
             <div className={styles.footer}>
               <SettingsModalResetButton />
             </div>
