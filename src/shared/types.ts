@@ -196,26 +196,9 @@ export type StoreData = {
   /** Timestamp (ms) of last completed weekly review. Null if never done. */
   lastWeeklyReviewAt: number | null;
   schemaVersion: number;
-  chatSessionId: string | null;
-  /**
-   * Sticky profile binding for the singleton chat process. Snapshotted from
-   * the user's default the first time the chat is launched (or set by the
-   * sandbox picker), then persisted so a later change to ``defaultProfileName``
-   * doesn't silently move the chat — and its workspace snapshot tar — to a
-   * different sandbox. ``null`` only on fresh installs: the chat auto-launch
-   * hook mints it from ``defaultProfileName`` on first start.
-   */
-  chatProfileName: string | null;
-  /**
-   * Docker container id captured from the last successful chat launch, used
-   * on the next start to call ``client.resume(state)`` for warm reattach
-   * (preserves running processes / installed packages / shell sessions). The
-   * SDK falls back silently to a fresh container + snapshot rehydrate if the
-   * container is gone, so a stale id here is never load-bearing. Cleared
-   * whenever ``chatProfileName`` changes (a different profile = a different
-   * image = a meaningless id).
-   */
-  chatContainerId: string | null;
+  // Chat session identity lives on the reserved ``codeTabs`` entry
+  // (``CHAT_TAB_ID``) since v26; the legacy ``chatSessionId`` /
+  // ``chatProfileName`` / ``chatContainerId`` keys are folded in on boot.
   codeTabs: CodeTab[];
   activeCodeTabId: CodeTabId | null;
   codeLayoutMode: CodeLayoutMode;
@@ -548,18 +531,6 @@ export const schema: Schema<StoreData> = {
   schemaVersion: {
     type: 'number',
     default: 0,
-  },
-  chatSessionId: {
-    type: ['string', 'null'],
-    default: null,
-  },
-  chatProfileName: {
-    type: ['string', 'null'],
-    default: null,
-  },
-  chatContainerId: {
-    type: ['string', 'null'],
-    default: null,
   },
   codeTabs: {
     type: 'array',
@@ -1112,8 +1083,8 @@ export type AgentProcessStartOptions = {
    * the snapshot key, so each conversation gets its own workspace state.
    *
    * Caller eagerly generates this when starting a fresh conversation
-   * (uuid) and persists on the owning record (``StoreData.chatSessionId``
-   * or ``CodeTab.sessionId``), then passes it both here AND as the
+   * (uuid) and persists on the owning ``CodeTab.sessionId`` (the Chat tab
+   * uses the reserved ``CHAT_TAB_ID`` record), then passes it both here AND as the
    * ``sessionId`` prop to OmniAgentsApp so the agent server uses the
    * same id for its session.
    */
@@ -1192,6 +1163,20 @@ export type CodeTab = {
   containerId?: string;
   createdAt: number;
 };
+
+/**
+ * Reserved id for the Chat tab's session record in ``codeTabs``. The value
+ * intentionally equals the chat process id and ``CHAT_VOICE_SCOPE`` so process
+ * keying, voice scoping, activity publishing, status polling, and snapshot GC
+ * all treat chat as just another column with no special-casing.
+ *
+ * The chat record is a normal projectless ``CodeTab``; the Spaces deck filters
+ * it out (chat renders full-screen behind the Chat nav tab) and ``codeApi``
+ * guards it against removal/reuse.
+ */
+export const CHAT_TAB_ID = 'chat';
+
+export const isChatTab = (tab: Pick<CodeTab, 'id'>): boolean => tab.id === CHAT_TAB_ID;
 
 // #endregion
 

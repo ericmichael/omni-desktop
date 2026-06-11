@@ -16,6 +16,7 @@ import {
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { CodeLayoutMode, CodeTab, CodeTabId, ProjectId, TicketId } from '@/shared/types';
+import { CHAT_TAB_ID, isChatTab } from '@/shared/types';
 
 /**
  * Resolve the profile a fresh tab should be bound to. Mirrors the chain in
@@ -72,7 +73,9 @@ export const codeApi = {
     // "New Session" columns: a tab created here but abandoned before a
     // project was picked is indistinguishable from a fresh one.
     const existingTabs = persistedStoreApi.getKey('codeTabs') ?? [];
-    const blank = existingTabs.find((t) => !t.projectId && !t.customAppId && !t.ticketId);
+    // The reserved chat record is also projectless — never hand it out as a
+    // blank "New Session" tab.
+    const blank = existingTabs.find((t) => !isChatTab(t) && !t.projectId && !t.customAppId && !t.ticketId);
     if (blank) {
       await persistedStoreApi.setKey('activeCodeTabId', blank.id);
       return blank;
@@ -92,6 +95,11 @@ export const codeApi = {
   },
 
   removeTab: async (tabId: CodeTabId) => {
+    // The reserved chat record is permanent — no UI offers closing it; guard
+    // against programmatic removal too.
+    if (tabId === CHAT_TAB_ID) {
+      return;
+    }
     const tab = (persistedStoreApi.getKey('codeTabs') ?? []).find((t) => t.id === tabId);
     await codeApi.stopSandbox(tabId);
     await destroyAllTerminalsForTab(tabId);
@@ -131,7 +139,13 @@ export const codeApi = {
   },
 
   reorderTabs: async (nextTabs: CodeTab[]) => {
-    await persistedStoreApi.setKey('codeTabs', nextTabs);
+    // Callers (the deck) pass their FILTERED tab list — the reserved chat
+    // record is not rendered there and must not be dropped by a wholesale
+    // overwrite. Preserve any stored tab missing from the input, at the front.
+    const stored = persistedStoreApi.getKey('codeTabs') ?? [];
+    const incoming = new Set(nextTabs.map((t) => t.id));
+    const preserved = stored.filter((t) => !incoming.has(t.id));
+    await persistedStoreApi.setKey('codeTabs', [...preserved, ...nextTabs]);
   },
 
   setTabProject: async (tabId: CodeTabId, projectId: ProjectId) => {

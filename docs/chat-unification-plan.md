@@ -1,6 +1,6 @@
 # Chat Unification — Chat as a Special Case of the Column Implementation
 
-> Status: decision-complete plan, not yet implemented.
+> Status: IMPLEMENTED (2026-06-11). Kept as the architectural record.
 > Origin: UI/UX audit (AUDIT.md §1.1 "Three front doors to the same room") — the structural
 > item from the gameplan. Decisions below were confirmed with Eric on 2026-06-11.
 

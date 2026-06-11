@@ -58,7 +58,7 @@ import type { AppDescriptor, AppId, CustomAppEntry } from '@/shared/app-registry
 import { buildAppRegistry } from '@/shared/app-registry';
 import type { AutoLaunchPhase } from '@/shared/machines/auto-launch.machine';
 import type { CodeLayoutMode, CodeTab, CodeTabId, TicketId, TicketResolution } from '@/shared/types';
-import { firstSource } from '@/shared/types';
+import { firstSource, isChatTab } from '@/shared/types';
 
 import { AppIcon } from './AppIcon';
 import { CodeTabContent } from './CodeTabContent';
@@ -1813,7 +1813,9 @@ export const CodeDeck = memo(() => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const statuses = useStore($codeTabStatuses);
-  const tabs = store.codeTabs ?? [];
+  // The reserved chat record renders full-screen behind the Chat tab, not as
+  // a deck column. (codeApi.reorderTabs preserves filtered-out records.)
+  const tabs = (store.codeTabs ?? []).filter((t) => !isChatTab(t));
   const activeTabId = store.activeCodeTabId ?? tabs[0]?.id ?? null;
   const deckBackground = store.codeDeckBackground ?? null;
   const [activeApps, setActiveApps] = useState<Record<CodeTabId, AppId>>({});

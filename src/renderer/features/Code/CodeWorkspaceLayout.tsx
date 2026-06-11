@@ -49,6 +49,8 @@ type CodeWorkspaceLayoutProps = {
   pendingPlan?: import('@/shared/chat-types').PlanItem | null;
   onPlanDecision?: (approved: boolean) => void;
   dockTargetId?: string;
+  /** Chat mode: time-of-day greeting shown on the empty conversation. */
+  greeting?: string;
   isGlass?: boolean;
   /**
    * When provided, this layout hosts a column-scoped workspace and all its
@@ -448,6 +450,7 @@ export const CodeWorkspaceLayout = memo(
     pendingPlan,
     onPlanDecision,
     dockTargetId,
+    greeting,
     isGlass,
     tabId,
     agentWorkspaceDir,
@@ -547,6 +550,7 @@ export const CodeWorkspaceLayout = memo(
           >
             <OmniAgentsApp
               uiUrl={uiSrc}
+              greeting={greeting}
               sessionId={sessionId}
               onSessionChange={onSessionChange}
               variables={variables}

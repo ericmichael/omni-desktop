@@ -73,13 +73,11 @@ export const SETTINGS_LAYERS: Partial<Record<StoreKey, KeyClass>> = {
   browserBookmarks: { layer: 'user', scope: 'global' },
 
   // ---- user, per-(user, team) workspace state ----
+  // (chat session identity rides the reserved ``codeTabs`` entry since v26)
   codeTabs: { layer: 'user', scope: 'team' },
   activeCodeTabId: { layer: 'user', scope: 'team' },
   activeTicketId: { layer: 'user', scope: 'team' },
   wipLimit: { layer: 'user', scope: 'team' },
-  chatSessionId: { layer: 'user', scope: 'team' },
-  chatProfileName: { layer: 'user', scope: 'team' },
-  chatContainerId: { layer: 'user', scope: 'team' },
   browserTabsets: { layer: 'user', scope: 'team' },
   lastWeeklyReviewAt: { layer: 'user', scope: 'team' },
   onboardingComplete: { layer: 'user', scope: 'team' },

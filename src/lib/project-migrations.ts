@@ -18,6 +18,7 @@ import type {
   TicketId,
   TicketPriority,
 } from '@/shared/types';
+import { CHAT_TAB_ID } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
 // Narrow store interface — anything that implements this can be migrated.
@@ -670,11 +671,51 @@ export function runMigrations(store: IMigrationStore, deps: MigrationDeps): void
     store.set('inboxItems', migratedInbox);
 
     store.set('schemaVersion', 25);
+    // Fall through to v25→v26.
+  }
+
+  // v25 → v26: chat unification. The Chat tab's session identity moves onto a
+  // reserved ``codeTabs`` entry (CHAT_TAB_ID) so chat renders through the
+  // same column implementation as the Spaces deck. The legacy chatSessionId /
+  // chatProfileName / chatContainerId keys fold into the record and are
+  // deleted. Existing conversation + container reattach carry over via the
+  // copied values.
+  if (version === 25 || (store.get('schemaVersion', 0) as number) === 25) {
+    const newSessionId = deps.newSessionId ?? uuidv4;
+    const codeTabs = (store.get('codeTabs', []) as Array<Record<string, unknown>>) ?? [];
+    if (!codeTabs.some((t) => t.id === CHAT_TAB_ID)) {
+      const chatSessionId = store.get('chatSessionId') as string | null | undefined;
+      const chatProfileName = store.get('chatProfileName') as string | null | undefined;
+      const chatContainerId = store.get('chatContainerId') as string | null | undefined;
+      const chatTab: Record<string, unknown> = {
+        id: CHAT_TAB_ID,
+        projectId: null,
+        sessionId: chatSessionId ?? newSessionId(),
+        profileName: chatProfileName ?? (store.get('defaultProfileName') as string | undefined) ?? 'host',
+        profileNameExplicit: false,
+        createdAt: deps.now(),
+      };
+      if (chatContainerId) {
+        chatTab.containerId = chatContainerId;
+      }
+      store.set('codeTabs', [chatTab, ...codeTabs] as never);
+    }
+    store.delete('chatSessionId');
+    store.delete('chatProfileName');
+    store.delete('chatContainerId');
+
+    store.set('schemaVersion', 26);
     deps.repairProjectRoots?.();
     return;
   }
 
-  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 25) {
+  if (((store.get('schemaVersion', 0) as number) ?? 0) >= 26) {
+    // Stale pre-v26 clients (an old PWA tab against a migrated server) can
+    // re-mint the legacy chat keys after the fold ran. They're dead weight —
+    // sweep them on every boot of the migrated store.
+    store.delete('chatSessionId');
+    store.delete('chatProfileName');
+    store.delete('chatContainerId');
     deps.repairProjectRoots?.();
     return;
   }

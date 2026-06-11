@@ -67,7 +67,7 @@ describe('runMigrations', () => {
         expect(t.phase).toBe('idle');
       }
       // Fall-through means schemaVersion ends up at the current version.
-      expect(store.get('schemaVersion')).toBe(25);
+      expect(store.get('schemaVersion')).toBe(26);
     });
   });
 
@@ -428,7 +428,7 @@ describe('runMigrations', () => {
         projects: [{ id: 'p1', label: 'A', workspaceDir: '/tmp/w' }],
       });
       expect(() => runMigrations(store, makeDeps())).not.toThrow();
-      expect(store.get('schemaVersion')).toBe(25);
+      expect(store.get('schemaVersion')).toBe(26);
     });
 
     it('v21 → v22 maps docker→devbox, drops legacy sandbox keys, strips Project.sandbox', () => {
@@ -445,7 +445,7 @@ describe('runMigrations', () => {
       });
       runMigrations(store, makeDeps());
       // v21→v22 → falls through to v22→v23 (sticky profile seeding).
-      expect(store.get('schemaVersion')).toBe(25);
+      expect(store.get('schemaVersion')).toBe(26);
       expect(store.get('defaultProfileName')).toBe('devbox');
       expect(store.get('sandboxBackend')).toBeUndefined();
       expect(store.get('sandboxProfiles')).toBeUndefined();
@@ -491,7 +491,7 @@ describe('runMigrations', () => {
       const deps = makeDeps();
       runMigrations(store, deps);
 
-      expect(store.get('schemaVersion')).toBe(25);
+      expect(store.get('schemaVersion')).toBe(26);
       expect(deps.writeProjectContextBrief).not.toHaveBeenCalled();
     });
 
@@ -512,7 +512,7 @@ describe('runMigrations', () => {
         expect(t).not.toHaveProperty('supervisorSessionId');
       }
       // Falls through to v23, the current head.
-      expect(store.get('schemaVersion')).toBe(25);
+      expect(store.get('schemaVersion')).toBe(26);
     });
 
     it('v18 → v19 backfills installedBundles from existing skillSources', () => {
@@ -535,7 +535,7 @@ describe('runMigrations', () => {
       });
       runMigrations(store, makeDeps());
 
-      expect(store.get('schemaVersion')).toBe(25);
+      expect(store.get('schemaVersion')).toBe(26);
       const bundles = store.get('installedBundles') as Record<string, { skillNames: string[] }>;
       expect(Object.keys(bundles).sort()).toEqual([
         'anthropics/skills:creative-skills',
@@ -567,8 +567,10 @@ describe('runMigrations', () => {
         codeTabs: [],
       });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(25);
-      expect(store.get('chatProfileName')).toBe('devbox');
+      expect(store.get('schemaVersion')).toBe(26);
+      // v23 seeds chatProfileName; v26 folds it onto the reserved chat tab.
+      const chatTab = (store.get('codeTabs', []) as Array<Record<string, unknown>>).find((t) => t.id === 'chat')!;
+      expect(chatTab.profileName).toBe('devbox');
     });
 
     it('v22 → v23 falls back to "host" when defaultProfileName is missing', () => {
@@ -579,7 +581,8 @@ describe('runMigrations', () => {
         codeTabs: [],
       });
       runMigrations(store, makeDeps());
-      expect(store.get('chatProfileName')).toBe('host');
+      const chatTab = (store.get('codeTabs', []) as Array<Record<string, unknown>>).find((t) => t.id === 'chat')!;
+      expect(chatTab.profileName).toBe('host');
     });
 
     it('v22 → v23 leaves existing chatProfileName untouched', () => {
@@ -592,7 +595,8 @@ describe('runMigrations', () => {
         codeTabs: [],
       });
       runMigrations(store, makeDeps());
-      expect(store.get('chatProfileName')).toBe('devbox');
+      const chatTab = (store.get('codeTabs', []) as Array<Record<string, unknown>>).find((t) => t.id === 'chat')!;
+      expect(chatTab.profileName).toBe('devbox');
     });
 
     it('v22 → v23 seeds codeTab.profileName from project.sandboxProfile when set', () => {
@@ -614,10 +618,11 @@ describe('runMigrations', () => {
       });
       runMigrations(store, makeDeps());
       const tabs = store.get('codeTabs', []) as Array<Record<string, unknown>>;
-      expect(tabs[0]!.profileName).toBe('devbox'); // inherited
-      expect(tabs[1]!.profileName).toBe('host');   // project's profile is null → default
-      expect(tabs[2]!.profileName).toBe('host');   // no project profile → default
-      expect(tabs[3]!.profileName).toBe('host');   // no project at all → default
+      const byId = (id: string) => tabs.find((t) => t.id === id)!;
+      expect(byId('t1').profileName).toBe('devbox'); // inherited
+      expect(byId('t2').profileName).toBe('host');   // project's profile is null → default
+      expect(byId('t3').profileName).toBe('host');   // no project profile → default
+      expect(byId('t4').profileName).toBe('host');   // no project at all → default
     });
 
     it('v22 → v23 leaves an already-set codeTab.profileName untouched', () => {
@@ -632,7 +637,7 @@ describe('runMigrations', () => {
       });
       runMigrations(store, makeDeps());
       const tabs = store.get('codeTabs', []) as Array<Record<string, unknown>>;
-      expect(tabs[0]!.profileName).toBe('platform');
+      expect(tabs.find((t) => t.id === 't1')!.profileName).toBe('platform');
     });
 
     it('v23 → v24 re-mints nanoid session ids as UUIDs', () => {
@@ -648,11 +653,14 @@ describe('runMigrations', () => {
       });
       runMigrations(store, makeDeps({ newSessionId: () => '11111111-2222-4333-8444-555555555555' }));
 
-      expect(store.get('schemaVersion')).toBe(25);
-      expect(store.get('chatSessionId')).toBe('11111111-2222-4333-8444-555555555555');
+      expect(store.get('schemaVersion')).toBe(26);
+      // The reminted chat session id lands on the reserved chat tab (v26).
       const tabs = store.get('codeTabs', []) as Array<Record<string, unknown>>;
-      expect(tabs[0]!.sessionId).toBe('11111111-2222-4333-8444-555555555555');
-      expect(tabs[1]!.sessionId).toBe('11111111-2222-4333-8444-555555555555');
+      const byId = (id: string) => tabs.find((t) => t.id === id)!;
+      expect(byId('chat').sessionId).toBe('11111111-2222-4333-8444-555555555555');
+      expect(store.get('chatSessionId')).toBeUndefined();
+      expect(byId('t1').sessionId).toBe('11111111-2222-4333-8444-555555555555');
+      expect(byId('t2').sessionId).toBe('11111111-2222-4333-8444-555555555555');
     });
 
     it('v23 → v24 leaves session ids that are already UUIDs untouched', () => {
@@ -667,16 +675,19 @@ describe('runMigrations', () => {
       });
       runMigrations(store, makeDeps({ newSessionId: () => 'SHOULD-NOT-BE-USED' }));
 
-      expect(store.get('chatSessionId')).toBe('aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
       const tabs = store.get('codeTabs', []) as Array<Record<string, unknown>>;
-      expect(tabs[0]!.sessionId).toBe('ffffffff-0000-4111-8222-333333333333');
+      expect(tabs.find((t) => t.id === 'chat')!.sessionId).toBe('aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
+      expect(tabs.find((t) => t.id === 't1')!.sessionId).toBe('ffffffff-0000-4111-8222-333333333333');
     });
 
     it('v23 → v24 is a no-op when there are no sessions to migrate', () => {
       const store = makeStore({ schemaVersion: 23, tickets: [], projects: [] });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(25);
+      expect(store.get('schemaVersion')).toBe(26);
       expect(store.get('chatSessionId')).toBeUndefined();
+      // v26 still synthesizes the reserved chat record with a minted session.
+      const chatTab = (store.get('codeTabs', []) as Array<Record<string, unknown>>).find((t) => t.id === 'chat')!;
+      expect(typeof chatTab.sessionId).toBe('string');
     });
 
     it('v19 → v20 renames legacy "code" to "spaces" and "deck" to "tile"', () => {
@@ -688,7 +699,7 @@ describe('runMigrations', () => {
         codeLayoutMode: 'deck',
       });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(25);
+      expect(store.get('schemaVersion')).toBe(26);
       expect(store.get('layoutMode')).toBe('spaces');
       expect(store.get('codeLayoutMode')).toBe('tile');
     });
@@ -702,7 +713,7 @@ describe('runMigrations', () => {
         codeLayoutMode: 'spaces',
       });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(25);
+      expect(store.get('schemaVersion')).toBe(26);
       expect(store.get('layoutMode')).toBe('spaces');
       expect(store.get('codeLayoutMode')).toBe('tile');
     });
@@ -716,7 +727,7 @@ describe('runMigrations', () => {
         codeLayoutMode: 'focus',
       });
       runMigrations(store, makeDeps());
-      expect(store.get('schemaVersion')).toBe(25);
+      expect(store.get('schemaVersion')).toBe(26);
       expect(store.get('layoutMode')).toBe('projects');
       expect(store.get('codeLayoutMode')).toBe('focus');
     });
@@ -762,7 +773,7 @@ describe('runMigrations', () => {
       );
       expect('shaping' in t1).toBe(false);
       expect(tickets.find((t) => t.id === 't2')!.description).toBe('Untouched.');
-      expect(store.get('schemaVersion')).toBe(25);
+      expect(store.get('schemaVersion')).toBe(26);
     });
 
     it("folds inbox shaping into the note and collapses 'shaped' to 'new' with a fresh createdAt", () => {
@@ -792,6 +803,67 @@ describe('runMigrations', () => {
       const i2 = inbox.find((i) => i.id === 'i2')!;
       expect(i2.status).toBe('later');
       expect(i2.createdAt).toBe(100);
+    });
+  });
+
+  describe('v25 → v26: chat unification', () => {
+    it('folds the legacy chat keys into a reserved codeTabs entry and deletes them', () => {
+      const store = makeStore({
+        schemaVersion: 25,
+        codeTabs: [{ id: 'tab-1', projectId: 'p1', createdAt: 50 }],
+        chatSessionId: 'sess-chat',
+        chatProfileName: 'devbox',
+        chatContainerId: 'cont-1',
+      });
+      runMigrations(store, makeDeps());
+
+      const tabs = store.get('codeTabs') as Array<Record<string, unknown>>;
+      expect(tabs).toHaveLength(2);
+      const chat = tabs[0]!;
+      expect(chat.id).toBe('chat');
+      expect(chat.projectId).toBeNull();
+      expect(chat.sessionId).toBe('sess-chat');
+      expect(chat.profileName).toBe('devbox');
+      expect(chat.profileNameExplicit).toBe(false);
+      expect(chat.containerId).toBe('cont-1');
+      // Other tabs untouched, order preserved after the chat record.
+      expect(tabs[1]!.id).toBe('tab-1');
+
+      expect(store.get('chatSessionId')).toBeUndefined();
+      expect(store.get('chatProfileName')).toBeUndefined();
+      expect(store.get('chatContainerId')).toBeUndefined();
+      expect(store.get('schemaVersion')).toBe(26);
+    });
+
+    it('mints a session id and seeds the profile from the default when the keys are absent', () => {
+      const store = makeStore({
+        schemaVersion: 25,
+        codeTabs: [],
+        defaultProfileName: 'devbox',
+      });
+      runMigrations(store, makeDeps({ newSessionId: () => 'minted-uuid' }));
+
+      const tabs = store.get('codeTabs') as Array<Record<string, unknown>>;
+      expect(tabs).toHaveLength(1);
+      expect(tabs[0]!.id).toBe('chat');
+      expect(tabs[0]!.sessionId).toBe('minted-uuid');
+      expect(tabs[0]!.profileName).toBe('devbox');
+      expect('containerId' in tabs[0]!).toBe(false);
+    });
+
+    it('is idempotent when the chat record already exists', () => {
+      const store = makeStore({
+        schemaVersion: 25,
+        codeTabs: [{ id: 'chat', projectId: null, sessionId: 'keep-me', createdAt: 1 }],
+        chatSessionId: 'stale-legacy',
+      });
+      runMigrations(store, makeDeps());
+
+      const tabs = store.get('codeTabs') as Array<Record<string, unknown>>;
+      expect(tabs).toHaveLength(1);
+      expect(tabs[0]!.sessionId).toBe('keep-me');
+      expect(store.get('chatSessionId')).toBeUndefined();
+      expect(store.get('schemaVersion')).toBe(26);
     });
   });
 });

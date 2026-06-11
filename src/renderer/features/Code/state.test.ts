@@ -188,3 +188,44 @@ describe('code tab sandbox profile resolution', () => {
     });
   });
 });
+
+describe('reserved chat record guards', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    resetStore();
+  });
+
+  const chatTab = (): CodeTab => tab({ id: 'chat', projectId: null, sessionId: 'chat-sess' });
+
+  it('addTab does not reuse the chat record as a blank tab', async () => {
+    resetStore({ codeTabs: [chatTab()] });
+    const { codeApi } = await import('./state');
+
+    const created = await codeApi.addTab();
+
+    expect(created.id).not.toBe('chat');
+    expect(store.codeTabs).toHaveLength(2);
+    expect(store.codeTabs.some((t) => t.id === 'chat')).toBe(true);
+  });
+
+  it('removeTab is a no-op for the chat record', async () => {
+    resetStore({ codeTabs: [chatTab(), tab({ id: 'tab-1' })] });
+    const { codeApi } = await import('./state');
+
+    await codeApi.removeTab('chat');
+
+    expect(store.codeTabs.map((t) => t.id)).toEqual(['chat', 'tab-1']);
+  });
+
+  it('reorderTabs preserves the chat record when given the deck-filtered list', async () => {
+    const a = tab({ id: 'tab-a' });
+    const b = tab({ id: 'tab-b' });
+    resetStore({ codeTabs: [chatTab(), a, b] });
+    const { codeApi } = await import('./state');
+
+    // The deck reorders its filtered view (no chat record).
+    await codeApi.reorderTabs([b, a]);
+
+    expect(store.codeTabs.map((t) => t.id)).toEqual(['chat', 'tab-b', 'tab-a']);
+  });
+});

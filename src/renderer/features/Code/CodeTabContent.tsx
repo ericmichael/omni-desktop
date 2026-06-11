@@ -5,13 +5,19 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { getArtifactsDir, getContainerArtifactsDir, profileRunsOnHost } from '@/lib/artifacts';
 import { buildSessionVariables } from '@/lib/client-tools';
+import { uuidv4 } from '@/lib/uuid';
 import { Button, Spinner } from '@/renderer/ds';
 import { SessionStatusBanner } from '@/renderer/features/Banner/SessionStatusBanner';
 import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
+import { SandboxPicker } from '@/renderer/features/SandboxProfile/SandboxPicker';
 import { buildClientToolHandler } from '@/renderer/features/Tickets/client-tool-handler';
 import { $pendingPlan, resolvePlanApproval } from '@/renderer/features/Tickets/plan-approval-bridge';
+import { PullRequestBanner } from '@/renderer/features/Tickets/PullRequestBanner';
 import { useSandboxActivityPing } from '@/renderer/hooks/use-sandbox-activity-ping';
+import { useSessionWorkspaceDir } from '@/renderer/hooks/use-session-workspace-dir';
 import type { ClientToolCallHandler } from '@/renderer/omniagents-ui/App';
+import { ChatShell } from '@/renderer/omniagents-ui/ChatShell';
+import { getGreeting } from '@/renderer/omniagents-ui/greeting';
 import { buildProfileLabel } from '@/renderer/omniagents-ui/sandbox-label';
 import { configApi } from '@/renderer/services/config';
 import { emitter, serverOrigin } from '@/renderer/services/ipc';
@@ -21,7 +27,7 @@ import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
 import { $hoveredVoiceScope, VoiceScopeContext } from '@/renderer/services/voice-recording';
 import type { AppId } from '@/shared/app-registry';
 import type { CodeTab, CodeTabId, TicketId } from '@/shared/types';
-import { firstSource } from '@/shared/types';
+import { firstSource, isChatTab } from '@/shared/types';
 import { getActivePersona } from '@/shared/voice-personas';
 
 import { CodeEmptyState } from './CodeEmptyState';
@@ -144,6 +150,7 @@ const CodeRunningView = memo(
     sidecarMode,
     ticketId,
     switching,
+    greeting,
   }: {
     sandboxUrls: { uiUrl: string; services?: Record<string, string> };
     sessionId?: string;
@@ -170,6 +177,8 @@ const CodeRunningView = memo(
     sidecarMode?: boolean;
     ticketId?: TicketId;
     switching?: boolean;
+    /** Chat mode: time-of-day greeting shown on the empty conversation. */
+    greeting?: string;
   }) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
@@ -223,6 +232,7 @@ const CodeRunningView = memo(
             agentWorkspaceDir={agentWorkspaceDir}
             sidecarMode={sidecarMode}
             ticketId={ticketId}
+            greeting={greeting}
           />
         </div>
         {switching && (
@@ -274,6 +284,9 @@ export const CodeTabContent = memo(
   }: CodeTabContentProps) => {
     const styles = useStyles();
     const store = useStore(persistedStoreApi.$atom);
+    // Reserved chat record (CHAT_TAB_ID): projectless full-screen surface with
+    // a per-conversation scratch workspace instead of a project workspace.
+    const chatMode = isChatTab(tab);
     const project = useMemo(
       () => store.projects.find((p) => p.id === tab.projectId) ?? null,
       [store.projects, tab.projectId]
@@ -301,7 +314,26 @@ export const CodeTabContent = memo(
         cancelled = true;
       };
     }, [tab.projectId, linkedWorkspaceDir]);
-    const workspaceDir = linkedWorkspaceDir ?? resolvedProjectDir;
+    // Chat: mint the conversation/session id on the record if absent (it is
+    // the snapshot key AND the scratch-dir key). Normal columns get theirs
+    // from addTab/addTabForTicket.
+    useEffect(() => {
+      if (chatMode && !tab.sessionId) {
+        void codeApi.setTabSessionId(tab.id, uuidv4());
+      }
+    }, [chatMode, tab.sessionId, tab.id]);
+
+    // Chat is an ambient surface, not a project — each conversation gets an
+    // isolated `<workspaceDir>/Sessions/<sessionId>` scratch dir. Switching
+    // conversations changes the workspace, which useAutoLaunch's reset effect
+    // turns into a sandbox restart. Hook is called unconditionally (null base
+    // for non-chat tabs) to keep hook order static.
+    const chatScratchDir = useSessionWorkspaceDir(
+      chatMode && tab.sessionId ? (store.workspaceDir ?? null) : null,
+      tab.sessionId ?? ''
+    );
+
+    const workspaceDir = chatMode ? chatScratchDir : (linkedWorkspaceDir ?? resolvedProjectDir);
 
     // Sticky profile binding persisted on the tab. The migration backfills
     // existing installs; ``codeApi.addTab*`` seeds new tabs from the same
@@ -350,7 +382,10 @@ export const CodeTabContent = memo(
       return mountName ? `/workspace/${mountName}` : '/workspace';
     }, [profileName, workspaceDir, projectSource]);
 
-    const { phase, retry } = useCodeAutoLaunch(tab.id, workspaceDir, {
+    const [greeting] = useState(getGreeting);
+    const allLaunchErrors = useStore($codeTabErrors);
+
+    const { phase, retry, launch } = useCodeAutoLaunch(tab.id, workspaceDir, {
       ...(tab.projectId ? { projectId: tab.projectId } : {}),
       profileNameOverride: profileName,
       ...(tab.sessionId ? { sessionId: tab.sessionId } : {}),
@@ -430,6 +465,9 @@ export const CodeTabContent = memo(
     }, [tab.ticketId, store.tickets]);
 
     const baseSessionArgs = useMemo(() => {
+      if (chatMode) {
+        return { surface: 'chat' as const };
+      }
       const artifactsDir = tab.ticketId
         ? profileRunsOnHost(profileName)
           ? hostConfigDir
@@ -447,7 +485,7 @@ export const CodeTabContent = memo(
           ...(tab.workspaceDir ? { workspaceDir: tab.workspaceDir } : {}),
         },
       };
-    }, [tab.ticketId, tab.workspaceDir, project, profileName, hostConfigDir, ticketAutopilot]);
+    }, [chatMode, tab.ticketId, tab.workspaceDir, project, profileName, hostConfigDir, ticketAutopilot]);
 
     // Base runs are speak-free; the mic button arms the voice variant per-run.
     const clientToolVariables = useMemo(() => buildSessionVariables(baseSessionArgs), [baseSessionArgs]);
@@ -464,8 +502,8 @@ export const CodeTabContent = memo(
       [baseSessionArgs, localVoice, personaInstructions]
     );
 
-    // No project selected — show project picker
-    if (!tab.projectId) {
+    // No project selected — show project picker (chat is projectless by design)
+    if (!chatMode && !tab.projectId) {
       return (
         <div className={mergeClasses(styles.fullSize, !isVisible && styles.hidden)}>
           <CodeEmptyState tabId={tab.id} embedded />
@@ -480,6 +518,7 @@ export const CodeTabContent = memo(
         onMouseLeave={onColumnMouseLeave}
       >
         <SessionStatusBanner status={sandboxStatus} />
+        {chatMode && <PullRequestBanner scope={{ kind: 'chat' }} floating />}
         {sandboxUrls ? (
           <VoiceScopeContext.Provider value={tab.id}>
             <CodeRunningView
@@ -508,8 +547,30 @@ export const CodeTabContent = memo(
               sidecarMode={sidecarMode}
               ticketId={tab.ticketId as TicketId | undefined}
               switching={sandboxStatus?.type === 'running' && !!sandboxStatus.data.switching}
+              greeting={chatMode ? greeting : undefined}
             />
           </VoiceScopeContext.Provider>
+        ) : chatMode ? (
+          /* Chat pre-launch / launching / error — the greeting shell. The
+             Launch button only appears pre-first-run (idle requires a missing
+             workspaceDir; once one exists auto-launch drives to running). */
+          <ChatShell
+            greeting={greeting}
+            phase={phase === 'error' ? 'error' : phase === 'idle' ? 'idle' : 'loading'}
+            error={phase === 'error' ? (allLaunchErrors[tab.id] ?? undefined) : undefined}
+            onRetry={phase === 'error' ? retry : undefined}
+            onLaunch={phase === 'idle' ? launch : undefined}
+            launchDisabled={phase === 'idle' ? !store.workspaceDir : undefined}
+            prelaunchExtras={
+              phase === 'idle' ? (
+                <SandboxPicker
+                  value={profileName}
+                  onChange={handleProfileChange}
+                  context={{ isEnterprise, available: store.availableSandboxProfiles }}
+                />
+              ) : undefined
+            }
+          />
         ) : phase === 'error' ? (
           <CodeErrorView tabId={tab.id} retry={retry} />
         ) : (

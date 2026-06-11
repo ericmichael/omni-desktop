@@ -305,16 +305,14 @@ const [, cleanupConsole] = createConsoleManager({
 registerSnapshotHandlers(main.ipc);
 
 // Startup snapshot GC. Code tabs cascade-delete on remove; this sweep
-// catches chat snapshots older than 14 days (and any code-tab tar
-// orphaned by a crashed cascade). Protected set = active chatSessionId
-// + every code tab's sessionId. Best-effort; failures don't block boot.
+// catches stale conversation snapshots older than 14 days (and any tar
+// orphaned by a crashed cascade). Protected set = every code tab's
+// sessionId — the reserved chat record included, so the active chat
+// conversation is covered with no special case. Best-effort; failures
+// don't block boot.
 void (async () => {
   try {
     const keep = new Set<string>();
-    const chatSessionId = store.get('chatSessionId');
-    if (chatSessionId) {
-      keep.add(chatSessionId);
-    }
     for (const tab of store.get('codeTabs') ?? []) {
       if (tab.sessionId) {
         keep.add(tab.sessionId);
