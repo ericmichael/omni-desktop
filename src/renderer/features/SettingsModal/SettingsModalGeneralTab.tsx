@@ -3,6 +3,8 @@ import { memo } from 'react';
 
 import { ConnectCloudCard } from '@/renderer/features/SettingsModal/ConnectCloudCard';
 import { MachinesCard } from '@/renderer/features/SettingsModal/MachinesCard';
+import { SettingsModalInstallApp } from '@/renderer/features/SettingsModal/SettingsModalInstallApp';
+import { SettingsModalNotifications } from '@/renderer/features/SettingsModal/SettingsModalNotifications';
 import { SettingsModalOmniSandboxOptions } from '@/renderer/features/SettingsModal/SettingsModalOmniSandboxOptions';
 import { SettingsModalOptInToLauncherPrereleases } from '@/renderer/features/SettingsModal/SettingsModalOptInToLauncherPrereleases';
 import { SettingsModalPreviewFeatures } from '@/renderer/features/SettingsModal/SettingsModalPreviewFeatures';
@@ -41,7 +43,11 @@ export const SettingsModalGeneralTab = memo(() => {
       <div className={styles.divider} />
       <SettingsModalOmniSandboxOptions />
       <div className={styles.divider} />
+      <SettingsModalNotifications />
+      <div className={styles.divider} />
       <SettingsModalPreviewFeatures />
+      {/* Renders nothing (and no divider) unless the browser reports installability. */}
+      <SettingsModalInstallApp />
       {/* Launcher auto-update is Electron-only; cloud updates via the container image. */}
       {isElectron && (
         <>

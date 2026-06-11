@@ -1,11 +1,8 @@
-import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { Info20Regular, Settings20Filled } from '@fluentui/react-icons';
+import { makeStyles, mergeClasses } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 
 import { Sidebar } from '@/renderer/app/Sidebar';
-import { Caption1, ListItem, Subtitle2 } from '@/renderer/ds';
-import { $launcherVersion } from '@/renderer/features/Banner/state';
 import { Chat } from '@/renderer/features/Chat/Chat';
 import { Code } from '@/renderer/features/Code/Code';
 import { Dashboards } from '@/renderer/features/Dashboards/Dashboards';
@@ -14,7 +11,9 @@ import { OnboardingWizard } from '@/renderer/features/Onboarding/OnboardingWizar
 import { SettingsPage } from '@/renderer/features/SettingsModal/SettingsPage';
 import { Tickets } from '@/renderer/features/Tickets/Tickets';
 import { persistedStoreApi } from '@/renderer/services/store';
+import { getThemeBackdrop, getThemeBuiltinGlassTone } from '@/renderer/theme/fluent-themes';
 import { getGlassVars } from '@/renderer/theme/glass-vars';
+import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { LayoutMode } from '@/shared/types';
 
 const useStyles = makeStyles({
@@ -45,67 +44,7 @@ const useStyles = makeStyles({
   hidden: {
     display: 'none',
   },
-  morePage: {
-    display: 'flex',
-    flexDirection: 'column',
-    width: '100%',
-    height: '100%',
-    backgroundColor: tokens.colorNeutralBackground1,
-  },
-  morePageGlass: {
-    backdropFilter: 'var(--glass-blur)',
-    WebkitBackdropFilter: 'var(--glass-blur)',
-  },
-  moreHeader: {
-    paddingLeft: '20px',
-    paddingRight: '20px',
-    paddingTop: '24px',
-    paddingBottom: '16px',
-  },
-  moreFooter: {
-    marginTop: 'auto',
-    paddingLeft: '20px',
-    paddingRight: '20px',
-    paddingTop: '24px',
-    paddingBottom: '24px',
-  },
-  moreVersion: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    color: tokens.colorNeutralForeground3,
-  },
 });
-
-const MorePage = memo(() => {
-  const styles = useStyles();
-  const version = useStore($launcherVersion);
-  const isGlass = !!useStore(persistedStoreApi.$atom).codeDeckBackground;
-
-  const openSettings = useCallback(() => {
-    persistedStoreApi.setKey('layoutMode', 'settings');
-  }, []);
-
-  return (
-    <div className={mergeClasses(styles.morePage, isGlass && styles.morePageGlass)}>
-      <div className={styles.moreHeader}>
-        <Subtitle2>More</Subtitle2>
-      </div>
-      <div>
-        <ListItem icon={<Settings20Filled />} label="Settings" detail="Theme, models, network, MCP" onClick={openSettings} />
-      </div>
-      {version && (
-        <div className={styles.moreFooter}>
-          <div className={styles.moreVersion}>
-            <Info20Regular style={{ width: 14, height: 14 }} />
-            <Caption1>Omni Code Launcher v{version}</Caption1>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-});
-MorePage.displayName = 'MorePage';
 
 /**
  * Lazy-mount, never-unmount layout.
@@ -118,8 +57,19 @@ export const MainContent = memo(() => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const active: LayoutMode = store.layoutMode;
-  const deckBackground = store.codeDeckBackground ?? null;
-  const showDeckBg = !!deckBackground;
+  // Glass follows the THEME (one knob). The user's wallpaper, when set, only
+  // overrides the glass theme's built-in backdrop — it never activates glass.
+  const isGlass = useStore($glassEnabled);
+  const theme = store.theme ?? 'omni';
+  const userBackdrop = store.codeDeckBackground ?? null;
+  const backdropStyle: React.CSSProperties | undefined = isGlass
+    ? userBackdrop
+      ? { backgroundImage: `url(${userBackdrop})` }
+      : { background: getThemeBackdrop(theme) ?? undefined }
+    : undefined;
+  // User wallpapers carry their luminance-detected tone; the built-in
+  // backdrop uses the theme's declared tone.
+  const glassTone = userBackdrop ? (store.glassTone ?? 'dark') : getThemeBuiltinGlassTone(theme);
 
   const [mounted, setMounted] = useState<Set<LayoutMode>>(() => new Set([active]));
 
@@ -144,18 +94,17 @@ return prev;
     { key: 'projects', Component: Tickets },
     { key: 'dashboards', Component: Dashboards },
     { key: 'settings', Component: SettingsPage },
-    { key: 'more', Component: MorePage },
     ...(import.meta.env.DEV ? [{ key: 'gallery' as const, Component: Gallery }] : []),
   ];
 
   return (
     <div
-      className={mergeClasses(styles.root, showDeckBg && styles.rootWithDeckBg, showDeckBg && 'omni-glass')}
+      className={mergeClasses(styles.root, isGlass && styles.rootWithDeckBg, isGlass && 'omni-glass')}
       style={
-        showDeckBg
+        isGlass
           ? {
-              backgroundImage: `url(${deckBackground})`,
-              ...getGlassVars(store.glassTone ?? 'dark'),
+              ...backdropStyle,
+              ...getGlassVars(glassTone),
             }
           : undefined
       }

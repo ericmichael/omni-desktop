@@ -10,6 +10,9 @@ import { $globalAgentOpen, toggleGlobalAgent } from './state';
  * Header button that opens/closes the global workspace agent panel. Lives in the
  * Tile deck header (`CodeDeckHeader`); reflects open state via the primary
  * (filled) vs ghost variant.
+ *
+ * Labeled "Assistant", not "Agent" — in a deck where every column is an agent
+ * session, "Agent" collided with the columns' own vocabulary.
  */
 export const GlobalAgentToggle = memo(() => {
   const open = useStore($globalAgentOpen);
@@ -20,7 +23,7 @@ export const GlobalAgentToggle = memo(() => {
       leftIcon={<Sparkle20Regular style={{ width: 13, height: 13 }} />}
       onClick={toggleGlobalAgent}
     >
-      Agent
+      Assistant
     </Button>
   );
 });

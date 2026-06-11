@@ -92,6 +92,7 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightMedium,
   },
   launchTitle: {
+    fontFamily: 'var(--font-display)',
     fontSize: tokens.fontSizeBase400,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
@@ -103,6 +104,7 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalS,
   },
   kicker: {
+    fontFamily: 'var(--font-display)',
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorBrandForeground1,

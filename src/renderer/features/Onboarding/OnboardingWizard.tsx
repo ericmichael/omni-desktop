@@ -1,7 +1,7 @@
 import { makeStyles, tokens } from '@fluentui/react-components';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Caption1, Card, ProgressBar, Subtitle1 } from '@/renderer/ds';
+import { Caption1, Card, Heading, ProgressBar } from '@/renderer/ds';
 import { OnboardingCliStep } from '@/renderer/features/Onboarding/OnboardingCliStep';
 import { OnboardingCredentialsStep } from '@/renderer/features/Onboarding/OnboardingCredentialsStep';
 import { OnboardingModelStep } from '@/renderer/features/Onboarding/OnboardingModelStep';
@@ -135,7 +135,9 @@ return null;
     <div className={styles.root}>
       <Card className={styles.card}>
         <div className={styles.header}>
-          <Subtitle1>{modelsExist ? 'Welcome back' : 'Welcome to Omni'}</Subtitle1>
+          <Heading as="h1" size="sm">
+            {modelsExist ? 'Welcome back' : 'Welcome to Omni'}
+          </Heading>
           <Caption1>
             {modelsExist
               ? 'Your models are already configured — one last step installs the agent runtime.'

@@ -5,6 +5,30 @@ import type { OmniTheme } from '@/shared/types';
 
 // ── Brand palettes ──────────────────────────────────────────────────────────
 
+/**
+ * Omni – azure ramp anchored on the aura/voice glow cyan (#5ac8fa at 100).
+ * The signature "living glow" visuals (ColumnAura, VoiceGlow) already speak
+ * this color; the omni theme makes it the accent so they're one voice.
+ */
+const omniBrand: BrandVariants = {
+  10: '#04141c',
+  20: '#082636',
+  30: '#0b3a52',
+  40: '#0d4e6e',
+  50: '#0f628b',
+  60: '#1076a8',
+  70: '#118ac5',
+  80: '#2b9fd9',
+  90: '#45b4e9',
+  100: '#5ac8fa',
+  110: '#7dd3fb',
+  120: '#9eddfc',
+  130: '#bce7fd',
+  140: '#d6f0fe',
+  150: '#e9f7fe',
+  160: '#f4fbff',
+};
+
 /** Microsoft Teams / M365 – official brand ramp based on #0078d4 */
 const teamsBrand: BrandVariants = {
   10: '#001b3d',
@@ -154,6 +178,17 @@ interface XtermColors {
 interface ThemeDef {
   brand: BrandVariants;
   mode: 'light' | 'dark';
+  /**
+   * Surface material. Glass themes render translucent surfaces (glass-vars)
+   * over a backdrop; the `overrides` neutrals double as the opaque base and
+   * the flat fallback under `prefers-reduced-transparency`. Defaults to flat.
+   */
+  material?: 'flat' | 'glass';
+  /** Built-in backdrop for glass themes — any CSS `background` value. */
+  backdrop?: string;
+  /** Glass tone when rendering over the built-in backdrop (user wallpapers
+   *  carry their own luminance-detected tone in the store). */
+  builtinGlassTone?: 'dark' | 'light';
   /** Fluent token overrides applied after createLightTheme/createDarkTheme. */
   overrides: Partial<Theme>;
   /** Terminal color palette. */
@@ -170,6 +205,63 @@ interface ThemeDef {
 // ── Theme definitions ────────────────────────────────────────────────────────
 
 const themeDefs: Record<OmniTheme, ThemeDef> = {
+  omni: {
+    brand: omniBrand,
+    mode: 'dark',
+    material: 'glass',
+    builtinGlassTone: 'dark',
+    // The "quiet glass" backdrop: deep neutral base, one azure bloom top-right,
+    // a faint indigo counter-bloom bottom-left. Static gradients — no asset,
+    // no decode cost, cheap to blur over.
+    backdrop: [
+      'radial-gradient(1200px 800px at 80% -10%, rgba(90, 200, 250, 0.16), transparent 60%)',
+      'radial-gradient(1000px 700px at -10% 110%, rgba(94, 92, 230, 0.12), transparent 55%)',
+      'linear-gradient(160deg, #0b1016 0%, #0d1117 45%, #0a0c10 100%)',
+    ].join(', '),
+    overrides: {
+      colorNeutralBackground1: '#09090b',
+      colorNeutralBackground2: '#18181b',
+      colorNeutralBackground3: '#27272a',
+      colorNeutralBackground4: '#111113',
+      colorNeutralBackground4Hover: '#1e1e21',
+      colorNeutralBackground4Pressed: '#18181b',
+      colorNeutralStroke1: '#3f3f46',
+      colorNeutralForeground1: '#fafafa',
+      colorNeutralForeground2: '#a1a1aa',
+      colorNeutralForeground3: '#71717a',
+      colorPaletteRedForeground1: '#f87171',
+      colorPaletteGreenForeground1: '#4ade80',
+      colorPaletteYellowForeground1: '#fbbf24',
+      colorSubtleBackground: 'transparent',
+      colorSubtleBackgroundHover: '#1a1a1f',
+      colorSubtleBackgroundPressed: '#151518',
+      colorSubtleBackgroundSelected: '#1f1f24',
+      colorNeutralForeground4: '#52525b',
+      colorNeutralStrokeAccessible: '#63636b',
+      colorNeutralStrokeAccessibleHover: '#71717a',
+      colorNeutralStrokeAccessiblePressed: '#6a6a73',
+      colorNeutralForegroundDisabled: '#52525b',
+      colorNeutralBackgroundDisabled: '#18181b',
+      colorNeutralStrokeDisabled: '#27272a',
+      fontFamilyBase: "'Inter Variable', ui-sans-serif, system-ui, sans-serif",
+      fontFamilyMonospace: 'JetBrainsMonoNerdFont, ui-monospace, monospace',
+    },
+    xterm: {
+      fg: '#fafafa', black: '#fafafa', brightBlack: '#fafafa',
+      white: '#09090b', brightWhite: '#09090b',
+      cursor: '#5ac8fa', cursorAccent: '#09090b',
+      blue: '#45b4e9', brightBlue: '#7dd3fb',
+      cyan: '#2dd4bf', brightCyan: '#2dd4bf',
+      green: '#4ade80', brightGreen: '#4ade80',
+      yellow: '#facc15', brightYellow: '#facc15',
+      red: '#f87171', brightRed: '#f87171',
+      magenta: '#c084fc', brightMagenta: '#c084fc',
+    },
+    scrollbar: { thumb: '#3f3f46', thumbHover: '#52525b' },
+    selectionColor: 'rgb(90 200 250 / 0.25)',
+    focusRingColor: 'rgb(90 200 250 / 0.5)',
+  },
+
   'teams-light': {
     brand: teamsBrand,
     mode: 'light',
@@ -579,6 +671,10 @@ function buildCssVars(def: ThemeDef, theme: Theme): Record<string, string> {
     // Selection / focus
     '--selection-color': def.selectionColor,
     '--focus-ring-color': def.focusRingColor,
+
+    // Display typeface — identity face for headings/empty states/onboarding.
+    // Same for every theme; body text stays on fontFamilyBase.
+    '--font-display': "'Space Grotesk Variable', 'Inter Variable', ui-sans-serif, system-ui, sans-serif",
   };
 }
 
@@ -599,7 +695,71 @@ function buildAll() {
 
 const { themes: fluentThemesBuilt, cssVars: themeCssVarsBuilt } = buildAll();
 
-export const fluentThemes: Record<OmniTheme, Theme> = fluentThemesBuilt;
+// ── Text scaling ─────────────────────────────────────────────────────────────
+
+/** Supported "Text size" steps (percent). */
+export const TEXT_SCALES = [90, 100, 110, 125] as const;
+export type TextScale = (typeof TEXT_SCALES)[number];
+
+const FONT_TOKEN_RE = /^(fontSizeBase|fontSizeHero|lineHeightBase|lineHeightHero)/;
+
+/**
+ * Scale a theme's type ramp (font sizes + line heights) by `scale` percent.
+ * Pure — exported for tests. Non-font tokens pass through untouched.
+ */
+export function scaleThemeFonts(theme: Theme, scale: number): Theme {
+  if (scale === 100) {
+    return theme;
+  }
+  const factor = scale / 100;
+  const out: Record<string, unknown> = { ...theme };
+  for (const [key, value] of Object.entries(theme)) {
+    if (FONT_TOKEN_RE.test(key) && typeof value === 'string' && value.endsWith('px')) {
+      const px = Number.parseFloat(value);
+      if (!Number.isNaN(px)) {
+        out[key] = `${Math.round(px * factor)}px`;
+      }
+    }
+  }
+  return out as unknown as Theme;
+}
+
+const scaledThemeCache = new Map<string, Theme>();
+
+/** Resolve the Fluent theme for a theme name at a text scale (cached). */
+export function getFluentTheme(theme: OmniTheme, scale: number = 100): Theme {
+  const base = fluentThemesBuilt[theme];
+  if (scale === 100) {
+    return base;
+  }
+  const key = `${theme}:${scale}`;
+  let scaled = scaledThemeCache.get(key);
+  if (!scaled) {
+    scaled = scaleThemeFonts(base, scale);
+    scaledThemeCache.set(key, scaled);
+  }
+  return scaled;
+}
+
+// ── Material / backdrop helpers ──────────────────────────────────────────────
+
+/** Whether the theme's surfaces are glass (translucent over a backdrop). */
+export function isGlassTheme(theme: OmniTheme): boolean {
+  return themeDefs[theme].material === 'glass';
+}
+
+/** The theme's built-in backdrop (CSS `background` value), if it has one. */
+export function getThemeBackdrop(theme: OmniTheme): string | null {
+  return themeDefs[theme].backdrop ?? null;
+}
+
+/** Glass tone to use over the theme's built-in backdrop. */
+export function getThemeBuiltinGlassTone(theme: OmniTheme): 'dark' | 'light' {
+  return themeDefs[theme].builtinGlassTone ?? 'dark';
+}
+
+/** Theme-def names — exported so tests can assert parity with the store schema enum. */
+export const themeDefNames = Object.keys(themeDefs) as OmniTheme[];
 
 /** Whether a theme uses dark mode. */
 export function isThemeDark(theme: OmniTheme): boolean {

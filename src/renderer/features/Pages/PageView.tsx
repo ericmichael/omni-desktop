@@ -8,7 +8,7 @@ import { IconButton } from '@/renderer/ds';
 import { NotebookView } from '@/renderer/features/Notebooks/NotebookView';
 import { acquirePageEditor, releasePageEditor } from '@/renderer/features/Pages/page-editor-registry';
 import { ticketApi } from '@/renderer/features/Tickets/state';
-import { persistedStoreApi } from '@/renderer/services/store';
+import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { PageId, ProjectId } from '@/shared/types';
 
 import { PageBreadcrumb } from './Breadcrumb';
@@ -239,7 +239,7 @@ const navigateUpPageHierarchy = (pageId: PageId, projectId: ProjectId, pages: Re
 const DocPageView = memo(({ pageId, projectId }: PageViewProps) => {
   const styles = useStyles();
   const pages = useStore($pages);
-  const isGlass = useStore(persistedStoreApi.$atom).codeDeckBackground != null;
+  const isGlass = useStore($glassEnabled);
   const page = pages[pageId];
 
   const handleBack = useCallback(() => {

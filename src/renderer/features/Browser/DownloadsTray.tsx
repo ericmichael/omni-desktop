@@ -56,7 +56,7 @@ const useStyles = makeStyles({
     borderRadius: '7px',
     backgroundColor: tokens.colorBrandBackground,
     color: tokens.colorNeutralForegroundOnBrand,
-    fontSize: '9px',
+    fontSize: '0.5625rem',
     fontWeight: tokens.fontWeightSemibold,
     display: 'flex',
     alignItems: 'center',

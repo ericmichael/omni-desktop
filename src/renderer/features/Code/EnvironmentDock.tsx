@@ -74,6 +74,10 @@ const useStyles = makeStyles({
     ':active': {
       transform: 'translateY(0) scale(0.97)',
     },
+    '@media (prefers-reduced-motion: reduce)': {
+      ':hover': { transform: 'none' },
+      ':active': { transform: 'none' },
+    },
     ':focus-visible': { outline: `2px solid ${tokens.colorStrokeFocus2}`, outlineOffset: '1px' },
   },
   itemActive: {
@@ -83,7 +87,7 @@ const useStyles = makeStyles({
     },
   },
   label: {
-    fontSize: '10px',
+    fontSize: '0.625rem',
     fontWeight: tokens.fontWeightMedium,
     lineHeight: 1,
     letterSpacing: '0.01em',

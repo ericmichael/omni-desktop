@@ -155,6 +155,7 @@
     "@fastify/websocket": "^11.0.2",
     "@fluentui/react-components": "^9.73.7",
     "@fluentui/react-icons": "^2.0.323",
+    "@fontsource-variable/space-grotesk": "^5.2.10",
     "@mcp-ui/client": "^7.1.1",
     "@modelcontextprotocol/sdk": "^1.28.0",
     "@radix-ui/react-collapsible": "^1.1.12",

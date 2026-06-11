@@ -5,6 +5,11 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     width: '100%',
+    // Fluent's Skeleton wave shimmer doesn't carry its own reduced-motion
+    // handling — hold the items static.
+    '@media (prefers-reduced-motion: reduce)': {
+      '& *': { animationName: 'none' },
+    },
   },
   row: {
     display: 'flex',

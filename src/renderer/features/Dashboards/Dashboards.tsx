@@ -4,7 +4,7 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
 import { emitter } from '@/renderer/services/ipc';
-import { persistedStoreApi } from '@/renderer/services/store';
+import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { PlatformDashboard } from '@/shared/types';
 
 const useStyles = makeStyles({
@@ -116,7 +116,7 @@ export const Dashboards = memo(() => {
   const [dashboards, setDashboards] = useState<PlatformDashboard[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeDashboard, setActiveDashboard] = useState<PlatformDashboard | null>(null);
-  const isGlass = useStore(persistedStoreApi.$atom).codeDeckBackground != null;
+  const isGlass = useStore($glassEnabled);
 
   useEffect(() => {
     emitter

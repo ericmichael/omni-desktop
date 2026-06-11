@@ -99,7 +99,7 @@ const useStyles = makeStyles({
     justifyContent: 'center',
     width: '16px',
     height: '16px',
-    fontSize: '13px',
+    fontSize: '0.8125rem',
     lineHeight: 1,
     flexShrink: 0,
   },

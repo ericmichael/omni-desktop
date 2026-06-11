@@ -19,6 +19,9 @@ const sizeToComponent = {
 
 const useStyles = makeStyles({
   root: {
+    // Display face (Space Grotesk) — the identity typeface for headings;
+    // body text stays on the theme's fontFamilyBase.
+    fontFamily: 'var(--font-display)',
     letterSpacing: '-0.01em',
   },
 });

@@ -1,6 +1,7 @@
 import '@/renderer/styles/tailwind.css';
 import '@/renderer/omniagents-ui/styles/index.css';
 import '@fontsource-variable/inter';
+import '@fontsource-variable/space-grotesk';
 import '@xterm/xterm/css/xterm.css';
 import '@/renderer/features/Toast/ipc-toast-listener';
 import '@/renderer/features/Toast/status-toast-listener';
@@ -14,6 +15,7 @@ import { ErrorBoundary } from 'react-error-boundary';
 
 import { ErrorBoundaryFallback } from '@/renderer/app/ErrorBoundaryFallback';
 import { MainContent } from '@/renderer/app/MainContent';
+import { StatusAnnouncer } from '@/renderer/app/StatusAnnouncer';
 import { syncTheme } from '@/renderer/constants';
 import { SystemInfoLoadingGate, SystemInfoProvider } from '@/renderer/contexts/SystemInfoContext';
 import { AuthGate } from '@/renderer/features/Auth/AuthGate';
@@ -25,8 +27,11 @@ import { MigrationNotice } from '@/renderer/features/MigrationNotice/MigrationNo
 import { ToastContainer } from '@/renderer/features/Toast/ToastContainer';
 import { VoiceHotkeys } from '@/renderer/features/Voice/VoiceHotkeys';
 import { SyncBar } from '@/renderer/features/WorkspaceSync/SyncBar';
+import { initAgentAttention } from '@/renderer/services/agent-attention';
+import { initAppHistory } from '@/renderer/services/app-history';
+import { initPwaInstall } from '@/renderer/services/pwa-install';
 import { persistedStoreApi } from '@/renderer/services/store';
-import { applyCssVars, applyPwaTheme, fluentThemes, isThemeDark } from '@/renderer/theme/fluent-themes';
+import { applyCssVars, applyPwaTheme, getFluentTheme, isThemeDark } from '@/renderer/theme/fluent-themes';
 
 import { useAppHeight } from './use-app-height';
 import { usePreloadTerminalFont } from './use-preload-terminal-font';
@@ -76,8 +81,23 @@ export const App = () => {
   const store = useStore(persistedStoreApi.$atom);
   const styles = useStyles();
 
-  const themeName = store.theme ?? 'teams-light';
-  const fluentTheme = useMemo(() => fluentThemes[themeName], [themeName]);
+  // Platform shell (Phase 8): history/back + document.title, app badge +
+  // notifications, PWA install capture. All idempotent.
+  useEffect(() => {
+    initAppHistory();
+    initAgentAttention();
+    initPwaInstall();
+  }, []);
+
+  const themeName = store.theme ?? 'omni';
+  const textScale = store.textScale ?? 100;
+  const fluentTheme = useMemo(() => getFluentTheme(themeName, textScale), [themeName, textScale]);
+
+  // "Text size": the Fluent ramp is scaled in getFluentTheme; the root
+  // font-size scales every rem-based surface (Tailwind / omniagents-ui).
+  useEffect(() => {
+    document.documentElement.style.fontSize = textScale === 100 ? '' : `${textScale}%`;
+  }, [textScale]);
 
   useEffect(() => {
     // CSS vars are now injected from fluent-themes.ts (single source of truth).
@@ -114,6 +134,7 @@ export const App = () => {
                 <VoiceHotkeys />
                 <CommandPalette />
                 <SyncBar />
+                <StatusAnnouncer />
               </AuthGate>
             </SystemInfoLoadingGate>
             <ToastContainer />

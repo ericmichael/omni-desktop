@@ -2,6 +2,7 @@ import { useStore } from '@nanostores/react';
 import { memo, useMemo } from 'react';
 
 import utrgvLogo from '@/renderer/assets/logo-uthealthrgv.jpg';
+import { OmniMark } from '@/renderer/common/OmniMark';
 import { cn } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
 
@@ -96,20 +97,25 @@ const OMNI_LINES = createASCIIArt('OMNI');
 export const OmniLogo = memo(({ className }: { className?: string }) => {
   const store = useStore(persistedStoreApi.$atom);
 
-  return (
-    <pre
-      role="img"
-      aria-label="Omni"
-      className={cn(
-        'leading-none text-[6px] font-mono select-none',
-        store.theme === 'utrgv'
-          ? 'text-white/80'
-          : 'bg-gradient-to-r from-[#bb9af7] to-[#7aa2f7] bg-clip-text text-transparent',
-        className
-      )}
-    >
-      {OMNI_LINES.join('\n')}
-    </pre>
-  );
+  // Branded (UTRGV) rail keeps the white wordmark against the brand fill.
+  if (store.theme === 'utrgv') {
+    return (
+      <pre
+        role="img"
+        aria-label="Omni"
+        className={cn('leading-none text-[6px] font-mono select-none text-white/80', className)}
+      >
+        {OMNI_LINES.join('\n')}
+      </pre>
+    );
+  }
+
+  return <OmniMark className={cn('select-none', className)} />;
 });
 OmniLogo.displayName = 'OmniLogo';
+
+/** Boot-time console easter egg — the old ASCII wordmark's retirement home. */
+export function logAsciiWordmark(): void {
+   
+  console.log(`%c${OMNI_LINES.join('\n')}`, 'color:#5ac8fa; font-family:monospace; line-height:1.2');
+}

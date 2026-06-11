@@ -85,12 +85,13 @@ const useStyles = makeStyles({
   /* WIP gauge */
   wipRow: { display: 'flex', alignItems: 'baseline', gap: '8px' },
   wipCount: {
-    fontSize: '30px',
+    fontFamily: 'var(--font-display)',
+    fontSize: '1.875rem',
     fontWeight: tokens.fontWeightBold,
     color: tokens.colorNeutralForeground1,
     fontVariantNumeric: 'tabular-nums',
   },
-  wipLimit: { fontSize: '18px', color: tokens.colorNeutralForeground3 },
+  wipLimit: { fontFamily: 'var(--font-display)', fontSize: '1.125rem', color: tokens.colorNeutralForeground3 },
   wipBar: { display: 'flex', gap: '6px', marginTop: '8px' },
   wipSlot: {
     height: '8px',
@@ -403,8 +404,8 @@ const WipGauge = memo(({ used, limit }: { used: number; limit: number }) => {
     <div>
       <div className={styles.wipRow}>
         <span className={styles.wipCount}>{used}</span>
-        <span className={styles.wipLimit}>/ {limit}</span>
-        <Caption1>WIP slots used</Caption1>
+        <span className={styles.wipLimit}>of {limit}</span>
+        <Caption1>tickets in progress</Caption1>
       </div>
       <div className={styles.wipBar}>
         {slots.map((filled, i) => (

@@ -13,8 +13,16 @@ import {
 import { getAvailableProfileNames, getProfileMenuLabel } from '@/renderer/features/SandboxProfile/profile-list';
 import { emitter, isElectron } from '@/renderer/services/ipc';
 import { persistedStoreApi, selectWorkspaceDir } from '@/renderer/services/store';
+import { isGlassTheme, TEXT_SCALES, type TextScale } from '@/renderer/theme/fluent-themes';
 import { detectGlassTone } from '@/renderer/theme/glass-vars';
 import type { OmniTheme } from '@/shared/types';
+
+const TEXT_SCALE_LABELS: Record<TextScale, string> = {
+  90: 'Small',
+  100: 'Default',
+  110: 'Large',
+  125: 'Extra large',
+};
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
@@ -91,6 +99,10 @@ export const SettingsModalOmniSandboxOptions = memo(() => {
 
   const onChangeTheme = useCallback((e: ChangeEvent<HTMLSelectElement>) => {
     persistedStoreApi.setKey('theme', e.target.value as OmniTheme);
+  }, []);
+
+  const onChangeTextScale = useCallback((e: ChangeEvent<HTMLSelectElement>) => {
+    persistedStoreApi.setKey('textScale', Number(e.target.value));
   }, []);
 
   const deckBgInputRef = useRef<HTMLInputElement>(null);
@@ -171,7 +183,8 @@ return;
       <SectionLabel className={styles.sectionLabelSpaced}>Display</SectionLabel>
       <Card>
         <FormField label="Theme">
-          <Select value={store.theme ?? 'teams-light'} onChange={onChangeTheme}>
+          <Select value={store.theme ?? 'omni'} onChange={onChangeTheme}>
+            <option value="omni">Omni (Glass)</option>
             <option value="teams-light">Teams Light</option>
             <option value="teams-dark">Teams Dark</option>
             <option value="default">Indigo Dark</option>
@@ -181,24 +194,39 @@ return;
             <option value="utrgv">UTRGV</option>
           </Select>
         </FormField>
-        <FormField label="Spaces background">
-          <span className={styles.textSimple}>{store.codeDeckBackground ? 'Custom image' : 'None'}</span>
-          <input
-            ref={deckBgInputRef}
-            type="file"
-            accept="image/*"
-            style={{ display: 'none' }}
-            onChange={onDeckBackgroundFile}
-          />
-          <Button size="sm" variant="ghost" onClick={pickDeckBackground}>
-            {store.codeDeckBackground ? 'Change' : 'Upload'}
-          </Button>
-          {store.codeDeckBackground && (
-            <Button size="sm" variant="ghost" onClick={clearDeckBackground}>
-              Remove
-            </Button>
-          )}
+        <FormField label="Text size">
+          <Select value={String(store.textScale ?? 100)} onChange={onChangeTextScale}>
+            {TEXT_SCALES.map((scale) => (
+              <option key={scale} value={String(scale)}>
+                {TEXT_SCALE_LABELS[scale]}
+              </option>
+            ))}
+          </Select>
         </FormField>
+        {/* The Background only exists on glass themes: it's the backdrop the
+            translucent surfaces sit over. Flat themes have no backdrop. */}
+        {isGlassTheme(store.theme ?? 'omni') && (
+          <FormField label="Background">
+            <span className={styles.textSimple}>
+              {store.codeDeckBackground ? 'Custom image' : 'Built-in'}
+            </span>
+            <input
+              ref={deckBgInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={onDeckBackgroundFile}
+            />
+            <Button size="sm" variant="ghost" onClick={pickDeckBackground}>
+              {store.codeDeckBackground ? 'Change' : 'Upload image'}
+            </Button>
+            {store.codeDeckBackground && (
+              <Button size="sm" variant="ghost" onClick={clearDeckBackground}>
+                Use built-in
+              </Button>
+            )}
+          </FormField>
+        )}
       </Card>
 
       {/* Runtime install + CLI-in-PATH are host operations; in cloud the runtime is image-baked. */}

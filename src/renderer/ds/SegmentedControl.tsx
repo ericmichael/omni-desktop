@@ -2,8 +2,10 @@ import { CounterBadge, makeStyles, Tab, TabList, tokens } from '@fluentui/react-
 
 type SegmentedControlProps<T extends string> = {
   value: T;
-  /** `badge` renders a small counter inside the segment (hidden when 0). */
-  options: { value: T; label: string; badge?: number }[];
+  /** `badge` renders a small counter inside the segment (hidden when 0).
+   *  `title` teaches what the segment means (native tooltip + SR description)
+   *  — useful when the label is product vocabulary ("Tile", "Focus"). */
+  options: { value: T; label: string; badge?: number; title?: string }[];
   onChange: (value: T) => void;
   layoutId?: string;
   className?: string;
@@ -35,7 +37,7 @@ export const SegmentedControl = <T extends string>({
       className={className}
     >
       {options.map((opt) => (
-        <Tab key={opt.value} value={opt.value}>
+        <Tab key={opt.value} value={opt.value} title={opt.title} aria-description={opt.title}>
           {opt.label}
           {opt.badge !== undefined && opt.badge > 0 && (
             <>

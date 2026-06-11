@@ -9,9 +9,9 @@ import { createPortal } from 'react-dom'
 import { getGreeting } from '@/renderer/omniagents-ui/greeting'
 import { useRPCClient } from '@/renderer/omniagents-ui/rpc-context'
 
-import { ActivityGroup as ActivityGroupComponent } from './ActivityGroup'
 import type { ActivityGroupData } from './activity-group'
 import { groupItems } from './activity-group'
+import { ActivityGroup as ActivityGroupComponent } from './ActivityGroup'
 import {
   Artifact,
   ArtifactAction,
@@ -268,8 +268,9 @@ function MessageBubble({ index, role, content, attachments, stagedContext, react
     )
   }
   // assistant
+  const hasReaction = !!(reactions && reactions[index])
   return (
-    <div className="flex justify-start">
+    <div className="group flex justify-start">
       <div className="flex w-full min-w-0 max-w-full flex-col items-start">
         {attachments && attachments.length > 0 ? (
           <div className="mb-1 flex flex-wrap gap-2 w-full">
@@ -282,28 +283,34 @@ function MessageBubble({ index, role, content, attachments, stagedContext, react
           <div className="min-w-0 max-w-full overflow-hidden text-sm text-foreground">
             <MessageResponse>{content}</MessageResponse>
           </div>
-          <div className="mt-1 flex items-center gap-1">
+          {/* Reveal on hover / keyboard focus (iOS taps apply :hover) so the
+              transcript stays quiet at rest. A chosen reaction stays visible —
+              it's state, not chrome. The strip keeps its height when hidden so
+              nothing shifts on reveal. */}
+          <div
+            className={`mt-1 flex items-center gap-1 transition-opacity duration-150 focus-within:pointer-events-auto focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 ${hasReaction ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'}`}
+          >
             <button
               onClick={() => {
  try {
- navigator.clipboard.writeText(content) 
-} catch {} 
+ navigator.clipboard.writeText(content)
+} catch {}
 }}
-              className="hover:bg-accent rounded p-1 text-muted-foreground hover:text-foreground active:opacity-50"
+              className="hover:bg-accent rounded p-1 text-muted-foreground hover:text-foreground active:opacity-50 pointer-coarse:p-3"
               aria-label="Copy"
             >
               <CopyIcon size={16} />
             </button>
             <button
               onClick={() => onReact && onReact(index, 'like')}
-              className={`hover:bg-accent rounded p-1 hover:text-foreground ${reactions && reactions[index] === 'like' ? 'text-successGreen' : 'text-muted-foreground'}`}
+              className={`hover:bg-accent rounded p-1 hover:text-foreground pointer-coarse:p-3 ${reactions && reactions[index] === 'like' ? 'text-successGreen' : 'text-muted-foreground'}`}
               aria-label="Like"
             >
               <ThumbsUpIcon size={16} />
             </button>
             <button
               onClick={() => onReact && onReact(index, 'dislike')}
-              className={`hover:bg-accent rounded p-1 hover:text-foreground ${reactions && reactions[index] === 'dislike' ? 'text-errorRed' : 'text-muted-foreground'}`}
+              className={`hover:bg-accent rounded p-1 hover:text-foreground pointer-coarse:p-3 ${reactions && reactions[index] === 'dislike' ? 'text-errorRed' : 'text-muted-foreground'}`}
               aria-label="Dislike"
             >
               <ThumbsDownIcon size={16} />

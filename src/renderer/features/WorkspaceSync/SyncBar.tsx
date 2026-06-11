@@ -34,7 +34,7 @@ const useStyles = makeStyles({
     borderTopWidth: '1px',
     borderTopStyle: 'solid',
     borderTopColor: tokens.colorNeutralStroke2,
-    fontSize: '12px',
+    fontSize: '0.75rem',
     color: tokens.colorNeutralForeground2,
     boxSizing: 'content-box',
     '@media (min-width: 640px)': {

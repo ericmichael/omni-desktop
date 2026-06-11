@@ -1,11 +1,13 @@
+import { useStore } from '@nanostores/react'
 import React, { useCallback, useEffect, useMemo,useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useStore } from '@nanostores/react'
 
 import { RealtimeRPCClient } from '@/renderer/omniagents-ui/rpc/realtime'
 import { useUiConfig } from '@/renderer/omniagents-ui/ui-config'
 import { persistedStoreApi } from '@/renderer/services/store'
+import { getThemeBuiltinGlassTone } from '@/renderer/theme/fluent-themes'
 import { getGlassVars } from '@/renderer/theme/glass-vars'
+import { $glassEnabled } from '@/renderer/theme/use-glass'
 import type { AudioSettings } from '@/shared/types'
 
 import Orb from './Orb'
@@ -26,7 +28,12 @@ enum OrbState {
 export function VoiceModal({ isOpen, onClose, sessionId, onSessionCreated }: { isOpen: boolean; onClose: () => void; sessionId?: string; onSessionCreated?: (id: string) => void }) {
   const { debug, wsRealtimeUrl, token } = useUiConfig()
   const store = useStore(persistedStoreApi.$atom)
-  const glassVars = store.codeDeckBackground ? getGlassVars(store.glassTone ?? 'dark') : undefined
+  const isGlass = useStore($glassEnabled)
+  const glassVars = isGlass
+    ? getGlassVars(
+        store.codeDeckBackground ? (store.glassTone ?? 'dark') : getThemeBuiltinGlassTone(store.theme ?? 'omni')
+      )
+    : undefined
   const [isMuted, setIsMuted] = useState(true)
   const [audioLevel, setAudioLevel] = useState(0)
   const [orbState, setOrbState] = useState<OrbState>(OrbState.IDLE)

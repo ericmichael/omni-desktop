@@ -6,7 +6,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Webview, type WebviewHandle } from '@/renderer/common/Webview';
 import { Button } from '@/renderer/ds';
 import { emitter, ipc } from '@/renderer/services/ipc';
-import { persistedStoreApi } from '@/renderer/services/store';
+import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { ExtensionInstanceState } from '@/shared/extensions';
 import type { PageId } from '@/shared/types';
 
@@ -63,8 +63,7 @@ export const NotebookView = memo(({ pageId }: { pageId: PageId }) => {
   // (a sidecar file the main process writes/rewrites), not runtime DOM
   // injection — that path doesn't work for iframes (browser/server mode) and
   // marimo's HTML pipeline is more reliable anyway.
-  const persisted = useStore(persistedStoreApi.$atom);
-  const isGlass = !!persisted.codeDeckBackground;
+  const isGlass = useStore($glassEnabled);
   // Mirror isGlass into a ref so the ensure-instance effect can read the
   // current value without listing isGlass as a dep (which would unnecessarily
   // tear down marimo on every glass toggle).

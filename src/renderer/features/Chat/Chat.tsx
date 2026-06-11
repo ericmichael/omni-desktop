@@ -4,6 +4,7 @@ import { memo, useMemo, useState } from 'react';
 
 import { CodeTabContent } from '@/renderer/features/Code/CodeTabContent';
 import { $initialized, persistedStoreApi } from '@/renderer/services/store';
+import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { AppId } from '@/shared/app-registry';
 import { isChatTab } from '@/shared/types';
 
@@ -72,7 +73,7 @@ export const Chat = memo(() => {
   const styles = useStyles();
   const initialized = useStore($initialized);
   const store = useStore(persistedStoreApi.$atom);
-  const isGlass = !!store.codeDeckBackground;
+  const isGlass = useStore($glassEnabled);
   // Created by the v26 store migration on boot; null only in the brief window
   // before the migrated store snapshot reaches the renderer.
   const chatTab = useMemo(() => (store.codeTabs ?? []).find(isChatTab) ?? null, [store.codeTabs]);

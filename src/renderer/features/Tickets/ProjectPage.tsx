@@ -26,6 +26,7 @@ import { PageView } from '@/renderer/features/Pages/PageView';
 import { $pages } from '@/renderer/features/Pages/state';
 import { AddSourceDialog } from '@/renderer/features/Projects/AddSourceDialog';
 import { persistedStoreApi } from '@/renderer/services/store';
+import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { ProjectId } from '@/shared/types';
 
 import { PipelineSettingsDialog } from './PipelineSettingsDialog';
@@ -75,7 +76,7 @@ export const ProjectPage = memo(({ projectId }: { projectId: ProjectId }) => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const pages = useStore($pages);
-  const isGlass = !!store.codeDeckBackground;
+  const isGlass = useStore($glassEnabled);
 
   const project = useMemo(() => store.projects.find((p) => p.id === projectId), [store.projects, projectId]);
   const rootPage = useMemo(

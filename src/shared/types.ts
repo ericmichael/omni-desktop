@@ -49,8 +49,9 @@ export type WindowProps = {
 /**
  * Data stored in the electron store.
  */
-export type LayoutMode = 'chat' | 'spaces' | 'projects' | 'dashboards' | 'settings' | 'more' | 'gallery';
+export type LayoutMode = 'chat' | 'spaces' | 'projects' | 'dashboards' | 'settings' | 'gallery';
 export type OmniTheme =
+  | 'omni'
   | 'teams-light'
   | 'teams-dark'
   | 'default'
@@ -143,6 +144,11 @@ export type StoreData = {
   appWindowProps?: WindowProps;
   optInToLauncherPrereleases: boolean;
   previewFeatures: boolean;
+  /** System notifications when a backgrounded agent finishes or needs approval. */
+  notifyOnAgentAttention: boolean;
+  /** "Text size" in percent (90 | 100 | 110 | 125) — scales the Fluent type
+   *  ramp and the root font-size (rem surfaces). */
+  textScale: number;
   /** Local voice (Option A): use on-device Parakeet STT + Pocket TTS instead of a hosted voice model. */
   localVoiceEnabled: boolean;
   /**
@@ -449,6 +455,15 @@ export const schema: Schema<StoreData> = {
     type: 'boolean',
     default: false,
   },
+  notifyOnAgentAttention: {
+    type: 'boolean',
+    default: false,
+  },
+  textScale: {
+    type: 'number',
+    enum: [90, 100, 110, 125],
+    default: 100,
+  },
   localVoiceEnabled: {
     type: 'boolean',
     default: false,
@@ -483,15 +498,20 @@ export const schema: Schema<StoreData> = {
 
   layoutMode: {
     type: 'string',
-    // 'code' and 'os' are pre-v20 names for 'spaces'; kept so existing stores
-    // load before the v19→v20 migration runs. Migration converts them.
+    // 'code' and 'os' are pre-v20 names for 'spaces'; 'more' is the retired
+    // mobile overflow page. Kept so existing stores load before the renderer's
+    // migrateLayoutMode pass converts them.
     enum: ['chat', 'spaces', 'os', 'code', 'projects', 'dashboards', 'settings', 'more', 'gallery'],
     default: 'chat',
   },
   theme: {
     type: 'string',
-    enum: ['default', 'tokyo-night', 'vscode-dark', 'vscode-light', 'utrgv'],
-    default: 'tokyo-night',
+    // Must list every OmniTheme: the store is created with
+    // `clearInvalidConfig: true`, so a member missing here silently WIPES the
+    // config of anyone persisted on that theme (teams-light/teams-dark were
+    // missing until Phase 10). A parity test guards this against themeDefs.
+    enum: ['omni', 'teams-light', 'teams-dark', 'default', 'tokyo-night', 'vscode-dark', 'vscode-light', 'utrgv'],
+    default: 'omni',
   },
   onboardingComplete: {
     type: 'boolean',

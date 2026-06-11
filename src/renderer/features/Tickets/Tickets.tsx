@@ -10,6 +10,7 @@ import { $milestones } from '@/renderer/features/Initiatives/state';
 import { PageView } from '@/renderer/features/Pages/PageView';
 import { $pages, pageApi } from '@/renderer/features/Pages/state';
 import { persistedStoreApi } from '@/renderer/services/store';
+import { $glassEnabled } from '@/renderer/theme/use-glass';
 
 import { MilestoneDetail } from './MilestoneDetail';
 import { ProjectActions, ProjectPage } from './ProjectPage';
@@ -95,7 +96,7 @@ function useIsDesktop() {
 export const Tickets = memo(() => {
   const styles = useStyles();
   const persistedStore = useStore(persistedStoreApi.$atom);
-  const isGlass = !!persistedStore.codeDeckBackground;
+  const isGlass = useStore($glassEnabled);
   const view = useStore($ticketsView);
   const isDesktop = useIsDesktop();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);

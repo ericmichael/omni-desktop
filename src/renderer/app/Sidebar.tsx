@@ -1,16 +1,21 @@
 import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import {
+  Beaker24Filled,
   Beaker24Regular,
   Chat24Filled,
+  Chat24Regular,
+  ColumnTriple24Filled,
   ColumnTriple24Regular,
+  DataBarVertical24Filled,
   DataBarVertical24Regular,
-  MoreHorizontal24Filled,
   Rocket24Filled,
+  Rocket24Regular,
   Settings24Filled,
+  Settings24Regular,
 } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import type { KeyboardEvent } from 'react';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { OmniLogo } from '@/renderer/common/AsciiLogo';
 import { CounterBadge } from '@/renderer/ds';
@@ -18,24 +23,64 @@ import { $activeInboxCount } from '@/renderer/features/Inbox/state';
 import { ticketApi } from '@/renderer/features/Tickets/state';
 import { emitter } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
+import { $glassEnabled } from '@/renderer/theme/use-glass';
 import type { LayoutMode } from '@/shared/types';
 
+/* Fluent rail idiom: Regular icon at rest, Filled only while selected. */
 const ALL_TABS: {
   value: LayoutMode;
   label: string;
   icon: React.ReactNode;
+  iconActive: React.ReactNode;
   enterprise?: boolean;
   alwaysVisible?: boolean;
   pinBottom?: boolean;
   devOnly?: boolean;
 }[] = [
-  { value: 'chat', label: 'Chat', icon: <Chat24Filled />, alwaysVisible: true },
-  { value: 'spaces', label: 'Spaces', icon: <ColumnTriple24Regular />, alwaysVisible: true },
-  { value: 'projects', label: 'Projects', icon: <Rocket24Filled />, alwaysVisible: true },
-  { value: 'dashboards', label: 'Dashboards', icon: <DataBarVertical24Regular />, enterprise: true },
-  { value: 'gallery', label: 'Gallery', icon: <Beaker24Regular />, devOnly: true },
-  { value: 'settings', label: 'Settings', icon: <Settings24Filled />, alwaysVisible: true, pinBottom: true },
+  { value: 'chat', label: 'Chat', icon: <Chat24Regular />, iconActive: <Chat24Filled />, alwaysVisible: true },
+  {
+    value: 'spaces',
+    label: 'Spaces',
+    icon: <ColumnTriple24Regular />,
+    iconActive: <ColumnTriple24Filled />,
+    alwaysVisible: true,
+  },
+  {
+    value: 'projects',
+    label: 'Projects',
+    icon: <Rocket24Regular />,
+    iconActive: <Rocket24Filled />,
+    alwaysVisible: true,
+  },
+  {
+    value: 'dashboards',
+    label: 'Dashboards',
+    icon: <DataBarVertical24Regular />,
+    iconActive: <DataBarVertical24Filled />,
+    enterprise: true,
+  },
+  { value: 'gallery', label: 'Gallery', icon: <Beaker24Regular />, iconActive: <Beaker24Filled />, devOnly: true },
+  {
+    value: 'settings',
+    label: 'Settings',
+    icon: <Settings24Regular />,
+    iconActive: <Settings24Filled />,
+    alwaysVisible: true,
+    // Desktop pins Settings at the rail's bottom; the mobile bar shows it inline
+    // as the fourth tab (the one-row "More" page is gone).
+    pinBottom: true,
+  },
 ];
+
+/* Same 640px breakpoint the styles below use (and Tickets' DESKTOP_MQ). */
+const DESKTOP_MQ = '(min-width: 640px)';
+const subscribeDesktopMQ = (cb: () => void) => {
+  const mql = window.matchMedia(DESKTOP_MQ);
+  mql.addEventListener('change', cb);
+  return () => mql.removeEventListener('change', cb);
+};
+const getIsDesktop = () => window.matchMedia(DESKTOP_MQ).matches;
+const getIsDesktopServer = () => true;
 
 /** Content height of the mobile bottom tab bar (excludes the safe-area
  *  padding below it): 8px pad + 24px icon + 4px gap + 12px label + 8px pad.
@@ -204,7 +249,7 @@ const useStyles = makeStyles({
   },
 
   itemLabel: {
-    fontSize: '12px',
+    fontSize: '0.75rem',
     fontWeight: tokens.fontWeightSemibold,
     lineHeight: '1',
   },
@@ -224,8 +269,8 @@ const useStyles = makeStyles({
     right: '-10px',
   },
 
-  /* ── More button (mobile only) ── */
-  moreItem: {
+  /* ── Inline rendering of bottom-pinned tabs (mobile bar only) ── */
+  mobileOnlyItem: {
     '@media (min-width: 640px)': {
       display: 'none',
     },
@@ -253,7 +298,7 @@ export const Sidebar = memo(() => {
   const styles = useStyles();
   const store = useStore(persistedStoreApi.$atom);
   const openInboxCount = useStore($activeInboxCount);
-  const isGlass = !!store.codeDeckBackground;
+  const isGlass = useStore($glassEnabled);
   const isBrandedRail = store.theme === 'utrgv' && !isGlass;
 
   const setMode = useCallback(
@@ -291,14 +336,18 @@ export const Sidebar = memo(() => {
 
   const activeTab = store.layoutMode;
 
-  // Arrow-key navigation within the tab rail
+  // Arrow-key navigation within the tab rail. Only visible tabs participate —
+  // Settings renders twice (inline for the mobile bar, pinned for the desktop
+  // rail) with one of the two always display:none.
   const navRef = useRef<HTMLElement>(null);
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLElement>) => {
     const nav = navRef.current;
     if (!nav) {
       return;
     }
-    const buttons = Array.from(nav.querySelectorAll<HTMLButtonElement>('button[role="tab"]'));
+    const buttons = Array.from(nav.querySelectorAll<HTMLButtonElement>('button[role="tab"]')).filter(
+      (b) => b.offsetParent !== null
+    );
     const current = buttons.indexOf(e.target as HTMLButtonElement);
     if (current === -1) {
       return;
@@ -321,6 +370,10 @@ export const Sidebar = memo(() => {
     }
   }, []);
 
+  // The rail is a column on desktop and a bottom bar on mobile — keep the
+  // announced orientation in sync with the rendered one.
+  const isDesktop = useSyncExternalStore(subscribeDesktopMQ, getIsDesktop, getIsDesktopServer);
+
   // No Tooltip wrapper: the rail always shows the label under each icon, so a
   // tooltip is redundant — and it stuck open over content on touch/tap.
   const renderTab = (tab: (typeof ALL_TABS)[number], extraClass?: string) => {
@@ -337,7 +390,7 @@ export const Sidebar = memo(() => {
       >
         {isActive && <div className={styles.indicator} />}
         <span className={styles.iconWrap}>
-          {tab.icon}
+          {isActive ? tab.iconActive : tab.icon}
           {tab.value === 'projects' && openInboxCount > 0 && (
             <CounterBadge count={openInboxCount} size="small" color="brand" className={styles.badge} />
           )}
@@ -353,7 +406,7 @@ export const Sidebar = memo(() => {
       className={mergeClasses(styles.nav, isGlass && styles.navGlass, isBrandedRail && styles.navBranded)}
       role="tablist"
       aria-label="Main navigation"
-      aria-orientation="vertical"
+      aria-orientation={isDesktop ? 'vertical' : 'horizontal'}
       onKeyDown={handleKeyDown}
     >
       <div className={styles.logo}>
@@ -363,16 +416,13 @@ export const Sidebar = memo(() => {
       <div className={styles.items}>
         {topTabs.map((tab) => renderTab(tab))}
 
-        {/* More — mobile only */}
-        {renderTab(
-          { value: 'more', label: 'More', icon: <MoreHorizontal24Filled />, alwaysVisible: true },
-          styles.moreItem
-        )}
+        {/* Bottom-pinned tabs render inline in the mobile bar… */}
+        {bottomTabs.map((tab) => renderTab(tab, styles.mobileOnlyItem))}
       </div>
 
       <div className={styles.spacer} />
 
-      {/* Bottom-pinned tabs (Settings) — desktop only */}
+      {/* …and pinned to the rail's bottom on desktop. */}
       <div className={styles.settingsWrap}>{bottomTabs.map((tab) => renderTab(tab))}</div>
     </nav>
   );

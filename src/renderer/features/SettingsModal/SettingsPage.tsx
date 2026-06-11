@@ -32,7 +32,7 @@ import { SettingsModalNetworkTab } from '@/renderer/features/SettingsModal/Setti
 import { SettingsModalResetButton } from '@/renderer/features/SettingsModal/SettingsModalResetButton';
 import { SettingsModalSkillsTab } from '@/renderer/features/SettingsModal/SettingsModalSkillsTab';
 import { SettingsModalTeamsTab } from '@/renderer/features/SettingsModal/SettingsModalTeamsTab';
-import { persistedStoreApi } from '@/renderer/services/store';
+import { $glassEnabled } from '@/renderer/theme/use-glass';
 
 const TABS = [
   { value: 'General', label: 'General', icon: <Settings20Regular style={{ width: 18, height: 18 }} /> },
@@ -208,8 +208,7 @@ const useStyles = makeStyles({
 
 export const SettingsPage = memo(() => {
   const styles = useStyles();
-  const store = useStore(persistedStoreApi.$atom);
-  const isGlass = !!store.codeDeckBackground;
+  const isGlass = useStore($glassEnabled);
   // null = no drill-in yet. Desktop always shows a panel (defaults to
   // General); mobile shows the grouped list until a row is tapped.
   const [activeTab, setActiveSettingsTab] = useState<SettingsTab | null>(null);

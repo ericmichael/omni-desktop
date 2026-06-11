@@ -3,8 +3,7 @@ import { useStore } from '@nanostores/react';
 import { BookmarkIcon, CodeIcon, FileTextIcon, GlobeIcon, SendHorizontalIcon } from 'lucide-react';
 import { memo, useState } from 'react';
 
-import { persistedStoreApi } from '@/renderer/services/store';
-
+import type { ToolState } from '@/renderer/omniagents-ui/ai-types';
 import {
   Artifact,
   ArtifactAction,
@@ -57,15 +56,15 @@ import {
   ToolInput,
   ToolOutput,
 } from '@/renderer/omniagents-ui/components/ai';
-import type { ToolState } from '@/renderer/omniagents-ui/ai-types';
-import { Button } from '@/renderer/omniagents-ui/components/ui/button';
-import { TooltipProvider } from '@/renderer/omniagents-ui/components/ui/tooltip';
+import { Markdown } from '@/renderer/omniagents-ui/components/promptkit/markdown';
 import {
   PromptInput,
   PromptInputActions,
   PromptInputTextarea,
 } from '@/renderer/omniagents-ui/components/promptkit/PromptInput';
-import { Markdown } from '@/renderer/omniagents-ui/components/promptkit/markdown';
+import { Button } from '@/renderer/omniagents-ui/components/ui/button';
+import { TooltipProvider } from '@/renderer/omniagents-ui/components/ui/tooltip';
+import { $glassEnabled } from '@/renderer/theme/use-glass';
 
 const useStyles = makeStyles({
   // Inner shadcn surface colors (--color-card, --color-muted, --color-secondary, etc.)
@@ -120,7 +119,7 @@ const TOOL_STATES: { state: ToolState; label: string }[] = [
 export const Gallery = memo(() => {
   const [promptValue, setPromptValue] = useState('');
   const styles = useStyles();
-  const isGlass = useStore(persistedStoreApi.$atom).codeDeckBackground != null;
+  const isGlass = useStore($glassEnabled);
 
   return (
     <TooltipProvider>
@@ -174,7 +173,7 @@ export const Gallery = memo(() => {
             <Reasoning duration={4} defaultOpen>
               <ReasoningTrigger />
               <ReasoningContent>
-                {`I chose option B because it removes the dual-write path and simplifies the compliance story.`}
+                I chose option B because it removes the dual-write path and simplifies the compliance story.
               </ReasoningContent>
             </Reasoning>
           </Variant>
@@ -246,10 +245,10 @@ export const Gallery = memo(() => {
                 <ToolContent>
                   <ToolInput input={{ path: 'src/main/auth.ts', offset: 0, limit: 100 }} />
                   {state === 'output-available' && (
-                    <ToolOutput output={'export const legacyAuth = () => { ... }'} errorText={undefined} />
+                    <ToolOutput output="export const legacyAuth = () => { ... }" errorText={undefined} />
                   )}
                   {state === 'output-error' && (
-                    <ToolOutput output={undefined} errorText={'ENOENT: no such file or directory'} />
+                    <ToolOutput output={undefined} errorText="ENOENT: no such file or directory" />
                   )}
                 </ToolContent>
               </Tool>
