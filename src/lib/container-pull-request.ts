@@ -163,16 +163,57 @@ export function parsePullRequestListJson(stdout: string): ContainerPullRequest[]
 interface AzurePrListItem {
   pullRequestId?: number;
   status?: string;
-  repository?: { webUrl?: string };
+  title?: string;
+  repository?: {
+    name?: string;
+    url?: string;
+    webUrl?: string | null;
+    project?: { name?: string };
+  };
+}
+
+const GUID_SEGMENT_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Compose the browser URL for an Azure PR from a ``pr list`` repository
+ * reference. The *list* REST endpoint returns a slim repository (``id``,
+ * ``name``, ``url``, ``project`` — ``webUrl`` is null; only create/show
+ * responses carry it), so the URL is built from the org base of the REST
+ * ``url`` — ``{base}/{org}[/{projectGuid}]/_apis/git/repositories/{id}`` —
+ * plus the project and repo *names*: GUID-based ``_git`` web URLs 404.
+ * ``webUrl`` is still preferred when the server does send it. Returns null
+ * when neither shape is usable.
+ */
+function azurePullRequestWebUrl(repo: AzurePrListItem['repository'], id: number): string | null {
+  if (typeof repo?.webUrl === 'string' && repo.webUrl) {
+    return `${repo.webUrl}/pullrequest/${id}`;
+  }
+  const restUrl = repo?.url;
+  const project = repo?.project?.name;
+  const name = repo?.name;
+  if (typeof restUrl !== 'string' || !project || !name) {
+    return null;
+  }
+  const apisIdx = restUrl.indexOf('/_apis/');
+  if (apisIdx < 0) {
+    return null;
+  }
+  // dev.azure.com REST urls carry the project GUID between org and /_apis/;
+  // legacy {org}.visualstudio.com ones may not. Strip it when present.
+  const segments = restUrl.slice(0, apisIdx).split('/');
+  if (GUID_SEGMENT_RE.test(segments[segments.length - 1] ?? '')) {
+    segments.pop();
+  }
+  return `${segments.join('/')}/${encodeURIComponent(project)}/_git/${encodeURIComponent(name)}/pullrequest/${id}`;
 }
 
 /**
  * Parse the stdout of ``az repos pr list --status all --output json`` into
  * every active or completed PR. Azure returns a REST ``url`` (an API endpoint)
- * which isn't browser-openable, so each badge URL is composed from
- * ``repository.webUrl`` + ``/pullrequest/<id>``. States normalize to the
- * GitHub vocabulary (``active`` → OPEN, ``completed`` → MERGED) so the UI
- * treats both providers uniformly; ``abandoned`` PRs are dropped. Pure — no I/O.
+ * which isn't browser-openable, so each badge URL is composed by
+ * {@link azurePullRequestWebUrl}. States normalize to the GitHub vocabulary
+ * (``active`` → OPEN, ``completed`` → MERGED) so the UI treats both providers
+ * uniformly; ``abandoned`` PRs are dropped. Pure — no I/O.
  */
 export function parseAzurePullRequestListAll(stdout: string): ContainerPullRequest[] {
   let arr: unknown;
@@ -191,11 +232,14 @@ export function parseAzurePullRequestListAll(stdout: string): ContainerPullReque
       continue;
     }
     const id = item.pullRequestId;
-    const webUrl = item.repository?.webUrl;
-    if (typeof id !== 'number' || typeof webUrl !== 'string') {
+    if (typeof id !== 'number') {
       continue;
     }
-    out.push({ number: id, url: `${webUrl}/pullrequest/${id}`, state });
+    const url = azurePullRequestWebUrl(item.repository, id);
+    if (!url) {
+      continue;
+    }
+    out.push({ number: id, url, state, ...(item.title ? { title: item.title } : {}) });
   }
   return out;
 }

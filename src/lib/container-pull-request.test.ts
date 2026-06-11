@@ -116,9 +116,62 @@ describe('parseAzurePullRequestList', () => {
     });
   });
 
-  it('returns null when repository.webUrl is missing', () => {
+  it('composes the URL from REST url + names when webUrl is null (the `pr list` shape)', () => {
+    // `az repos pr list` returns a slim repository reference: webUrl is null,
+    // and the REST url carries the project GUID between org and /_apis/.
+    // Mirrors a real dev.azure.com response.
+    const out = JSON.stringify([
+      {
+        pullRequestId: 823,
+        status: 'active',
+        title: 'Update SOM strategic planning landing copy',
+        repository: {
+          id: '403c51fc-72e9-46c1-aed6-784b7228f2e2',
+          name: 'SOM-FacultyPortal',
+          url: 'https://dev.azure.com/UTRGVSom/9833695e-5020-4b48-9da8-5e0fa0f76fb1/_apis/git/repositories/403c51fc-72e9-46c1-aed6-784b7228f2e2',
+          webUrl: null,
+          project: { name: 'SOM-FacultyPortal' },
+        },
+      },
+    ]);
+    expect(parseAzurePullRequestList(out)).toEqual({
+      number: 823,
+      url: 'https://dev.azure.com/UTRGVSom/SOM-FacultyPortal/_git/SOM-FacultyPortal/pullrequest/823',
+      state: 'OPEN',
+      title: 'Update SOM strategic planning landing copy',
+    });
+  });
+
+  it('composes the URL for legacy visualstudio.com REST urls (no project GUID segment)', () => {
+    const out = JSON.stringify([
+      {
+        pullRequestId: 7,
+        status: 'active',
+        repository: {
+          name: 'repo',
+          url: 'https://acme.visualstudio.com/_apis/git/repositories/403c51fc-72e9-46c1-aed6-784b7228f2e2',
+          project: { name: 'My Project' },
+        },
+      },
+    ]);
+    expect(parseAzurePullRequestList(out)).toEqual({
+      number: 7,
+      url: 'https://acme.visualstudio.com/My%20Project/_git/repo/pullrequest/7',
+      state: 'OPEN',
+    });
+  });
+
+  it('returns null when neither webUrl nor REST url + names are usable', () => {
     const out = JSON.stringify([{ pullRequestId: 9, status: 'active' }]);
     expect(parseAzurePullRequestList(out)).toBeNull();
+    const noNames = JSON.stringify([
+      {
+        pullRequestId: 9,
+        status: 'active',
+        repository: { url: 'https://dev.azure.com/o/_apis/git/repositories/x' },
+      },
+    ]);
+    expect(parseAzurePullRequestList(noNames)).toBeNull();
   });
 
   it('returns null on an empty list or non-JSON', () => {
