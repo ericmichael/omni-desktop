@@ -16,9 +16,11 @@
  */
 import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { Warning20Filled } from '@fluentui/react-icons';
-import { memo } from 'react';
+import { memo, useCallback } from 'react';
 
-import { Caption1 } from '@/renderer/ds';
+import { classifyAgentError } from '@/lib/provider-config';
+import { Button, Caption1 } from '@/renderer/ds';
+import { openSettingsTab } from '@/renderer/features/SettingsModal/settings-nav';
 import type { AgentProcessStatus, WithTimestamp } from '@/shared/types';
 
 const useStyles = makeStyles({
@@ -56,6 +58,7 @@ export type SessionStatusBannerProps = {
 
 export const SessionStatusBanner = memo(({ status }: SessionStatusBannerProps) => {
   const styles = useStyles();
+  const handleOpenAiSettings = useCallback(() => openSettingsTab('AI'), []);
   if (!status) return null;
   // Computer-as-sandbox: the laptop hosting a `local:<machineId>` session is
   // offline, but the agent keeps RUNNING in the cloud (chat + history stay up).
@@ -103,8 +106,23 @@ export const SessionStatusBanner = memo(({ status }: SessionStatusBannerProps) =
       </div>
     );
   }
+  // Auth failures get a fix-it path: the user's key/subscription is the
+  // problem, and the AI tab's connection cards can diagnose and repair it.
+  if (message && classifyAgentError(message) === 'auth') {
+    return (
+      <div className={`${styles.root} ${styles.capacity}`} role="status">
+        <Warning20Filled />
+        <div className={styles.body}>
+          <strong>Your AI provider rejected the request.</strong>{' '}
+          <Caption1 as="span">The key may have expired or been revoked.</Caption1>
+        </div>
+        <Button size="sm" variant="ghost" onClick={handleOpenAiSettings}>
+          Check AI settings
+        </Button>
+      </div>
+    );
+  }
   // No `kind` set — host-level error UI owns the surface, nothing here.
-  void message;
   return null;
 });
 

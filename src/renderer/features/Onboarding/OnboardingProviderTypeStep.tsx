@@ -20,15 +20,17 @@ type Props = {
   selected: ProviderEntry['type'] | null;
   onSelect: (type: ProviderEntry['type']) => void;
   onNext: () => void;
+  onBack?: (() => void) | undefined;
 };
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', gap: '24px' },
   header: { display: 'flex', flexDirection: 'column', gap: '4px' },
-  actions: { display: 'flex', justifyContent: 'flex-end' },
+  actions: { display: 'flex', justifyContent: 'space-between' },
+  actionsEnd: { display: 'flex', justifyContent: 'flex-end' },
 });
 
-export const OnboardingProviderTypeStep = memo(({ selected, onSelect, onNext }: Props) => {
+export const OnboardingProviderTypeStep = memo(({ selected, onSelect, onNext, onBack }: Props) => {
   const styles = useStyles();
 
   return (
@@ -56,7 +58,12 @@ export const OnboardingProviderTypeStep = memo(({ selected, onSelect, onNext }: 
         ))}
       </RadioGroup>
 
-      <div className={styles.actions}>
+      <div className={onBack ? styles.actions : styles.actionsEnd}>
+        {onBack && (
+          <Button variant="ghost" size="sm" onClick={onBack}>
+            Back
+          </Button>
+        )}
         <Button variant="primary" size="sm" onClick={onNext} isDisabled={!selected}>
           Continue
         </Button>

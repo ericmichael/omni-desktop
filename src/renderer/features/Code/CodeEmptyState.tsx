@@ -13,6 +13,7 @@ import { persistedStoreApi } from '@/renderer/services/store';
 import type { CodeTab, CodeTabId, Project } from '@/shared/types';
 import { firstSource } from '@/shared/types';
 
+import { CliInstallCard } from './CliInstallCard';
 import { codeApi, resolveCodeTabProfileName } from './state';
 
 const useStyles = makeStyles({
@@ -300,6 +301,8 @@ export const CodeEmptyState = memo(({ tabId, embedded = false }: CodeEmptyStateP
         </div>
         <div className={styles.sideColumn} />
       </div>
+
+      {!embedded && <CliInstallCard />}
 
       <ProjectForm
         open={showNewProject}

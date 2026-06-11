@@ -172,6 +172,8 @@ export type StoreData = {
   layoutMode: LayoutMode;
   theme: OmniTheme;
   onboardingComplete: boolean;
+  /** User dismissed the "Use Omni from your terminal" card in Spaces. */
+  cliCardDismissed: boolean;
   /**
    * Set when the Electron app is connected to a deployed cloud launcher.
    * When non-null the renderer routes its transport to ``url`` over WebSocket
@@ -523,6 +525,10 @@ export const schema: Schema<StoreData> = {
     default: 'omni',
   },
   onboardingComplete: {
+    type: 'boolean',
+    default: false,
+  },
+  cliCardDismissed: {
     type: 'boolean',
     default: false,
   },
@@ -1982,6 +1988,11 @@ type UtilIpcEvents = Namespaced<
     'get-cli-in-path-status': () => { installed: boolean; symlinkPath: string };
     'check-models-configured': () => boolean;
     'test-model-connection': (modelRef?: string) => { success: boolean; output: string };
+    /** Validate provider credentials with a free GET against the provider's
+     *  model-listing endpoint. Runtime-independent (works before the omni
+     *  runtime is installed) — the single validation chokepoint for
+     *  onboarding and the AI settings connection cards. */
+    'validate-provider': (probe: ProviderProbe) => ProviderProbeResult;
     /** Live merged model list from `omni model list --json` (includes discovered models). */
     'list-models': () => RuntimeModelList;
     'list-directory': (path: string) => { name: string; path: string; isDirectory: boolean }[];
@@ -3410,6 +3421,24 @@ export type ModelsConfig = {
   voice_default: string | null;
   providers: Record<string, ProviderEntry>;
 };
+
+/**
+ * Credential probe for `util:validate-provider`. `kind` is the user-facing
+ * provider identity (what onboarding asked), not the runtime provider type —
+ * `anthropic` maps to a `litellm` ProviderEntry, `ollama` to
+ * `openai-compatible`. Probes are free GETs against the provider's model
+ * listing endpoint; they never spend tokens.
+ */
+export type ProviderProbe = {
+  kind: 'openai' | 'anthropic' | 'openai-compatible' | 'ollama';
+  apiKey?: string;
+  /** Required for `openai-compatible` and `ollama`. */
+  baseUrl?: string;
+};
+
+export type ProviderProbeResult =
+  | { ok: true; models: string[] }
+  | { ok: false; code: 'unauthorized' | 'network' | 'not-found' | 'unknown'; detail: string };
 
 export type McpServerEntry = {
   type?: 'stdio' | 'sse' | 'http' | 'streamable_http';

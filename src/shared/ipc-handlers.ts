@@ -12,6 +12,7 @@ import { dirname, join } from 'path';
 import { WebSocket as WsWebSocket } from 'ws';
 
 import { emptyMcpConfig, emptyModelsConfig, emptyNetworkConfig } from '@/lib/agent-config';
+import { normalizeCompatibleBaseUrl } from '@/lib/provider-config';
 import type { SkillStore } from '@/main/skills';
 import { installSkillFromFile, listSkills, setSkillEnabled, uninstallSkill } from '@/main/skills';
 import {
@@ -48,6 +49,8 @@ import type {
   McpConfig,
   ModelsConfig,
   NetworkConfig,
+  ProviderProbe,
+  ProviderProbeResult,
   StoreData,
 } from '@/shared/types';
 
@@ -235,6 +238,78 @@ export function registerGitCredentialHandlers(
  * (`util:select-directory`, `util:select-file`, `util:open-directory`) are
  * NOT registered here and must be wired separately by each transport.
  */
+const PROBE_TIMEOUT_MS = 8000;
+
+/**
+ * Validate provider credentials with a free GET against the provider's
+ * model-listing endpoint. No tokens are spent, and nothing here touches the
+ * omni runtime — onboarding can validate before the runtime install
+ * finishes. Exported for tests.
+ */
+export async function validateProvider(
+  fetchFn: typeof globalThis.fetch,
+  probe: ProviderProbe
+): Promise<ProviderProbeResult> {
+  let url: string;
+  const headers: Record<string, string> = {};
+
+  switch (probe.kind) {
+    case 'openai':
+      url = 'https://api.openai.com/v1/models';
+      headers['Authorization'] = `Bearer ${probe.apiKey ?? ''}`;
+      break;
+    case 'anthropic':
+      url = 'https://api.anthropic.com/v1/models';
+      headers['x-api-key'] = probe.apiKey ?? '';
+      headers['anthropic-version'] = '2023-06-01';
+      break;
+    case 'ollama':
+      url = `${(probe.baseUrl ?? 'http://localhost:11434').trim().replace(/\/+$/, '')}/api/tags`;
+      break;
+    case 'openai-compatible': {
+      if (!probe.baseUrl?.trim()) {
+        return { ok: false, code: 'unknown', detail: 'Base URL is required' };
+      }
+      url = `${normalizeCompatibleBaseUrl(probe.baseUrl)}/models`;
+      if (probe.apiKey?.trim()) {
+        headers['Authorization'] = `Bearer ${probe.apiKey.trim()}`;
+      }
+      break;
+    }
+  }
+
+  let response: Response;
+  try {
+    response = await fetchFn(url, { method: 'GET', headers, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+  } catch (e) {
+    return { ok: false, code: 'network', detail: e instanceof Error ? e.message : String(e) };
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    return { ok: false, code: 'unauthorized', detail: `HTTP ${response.status}` };
+  }
+  if (response.status === 404) {
+    return { ok: false, code: 'not-found', detail: 'HTTP 404' };
+  }
+  if (!response.ok) {
+    return { ok: false, code: 'unknown', detail: `HTTP ${response.status}` };
+  }
+
+  try {
+    const body = (await response.json()) as {
+      data?: Array<{ id?: string }>;
+      models?: Array<{ name?: string }>;
+    };
+    const models =
+      probe.kind === 'ollama'
+        ? (body.models ?? []).map((m) => m.name).filter((n): n is string => typeof n === 'string')
+        : (body.data ?? []).map((m) => m.id).filter((id): id is string => typeof id === 'string');
+    return { ok: true, models };
+  } catch {
+    return { ok: false, code: 'unknown', detail: 'Unexpected response from provider' };
+  }
+}
+
 export function registerUtilHandlers(ipc: IIpcListener, opts: UtilHandlerOptions): void {
   const { fetchFn, launcherVersion } = opts;
 
@@ -295,6 +370,7 @@ export function registerUtilHandlers(ipc: IIpcListener, opts: UtilHandlerOptions
   ipc.handle('util:check-models-configured', () => checkModelsConfigured());
   ipc.handle('util:test-model-connection', (_: unknown, modelRef?: string) => testModelConnection(modelRef));
   ipc.handle('util:list-models', () => listRuntimeModels());
+  ipc.handle('util:validate-provider', (_: unknown, probe: ProviderProbe) => validateProvider(fetchFn, probe));
 
   ipc.handle('util:rebuild-sandbox-image', async () => {
     // Sandbox Dockerfiles now live in omni-code. Trigger rebuild via the CLI.

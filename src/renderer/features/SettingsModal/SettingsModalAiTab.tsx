@@ -4,13 +4,14 @@ import { useStore } from '@nanostores/react';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
+import { buildCodexConfig, probeForProvider } from '@/lib/provider-config';
 import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, Button, Caption1, Card, Checkbox, FormField, FormSkeleton, IconButton, Input, Radio, RadioGroup, SaveBar, SectionLabel, Select, Spinner } from '@/renderer/ds';
-import { SettingsModalVoicePersonas } from '@/renderer/features/SettingsModal/SettingsModalVoicePersonas';
+import { SettingsModalConnectionCards } from '@/renderer/features/SettingsModal/SettingsModalConnectionCards';
 import { agentConfigApi } from '@/renderer/services/config';
 import { emitter, ipc } from '@/renderer/services/ipc';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
-import type { CodexDeviceCode, ModelEntry, ModelsConfig, ProviderEntry } from '@/shared/types';
+import type { CodexDeviceCode, ModelEntry, ModelsConfig, ProviderEntry, ProviderProbeResult } from '@/shared/types';
 
 const PROVIDER_TYPES: ProviderEntry['type'][] = ['openai', 'azure', 'openai-compatible', 'litellm', 'openai-oauth'];
 const REASONING_OPTIONS = ['none', 'low', 'medium', 'high', 'xhigh'] as const;
@@ -133,7 +134,7 @@ const useStyles = makeStyles({
   },
 });
 
-export const SettingsModalModelsTab = memo(() => {
+export const SettingsModalAiTab = memo(() => {
   const styles = useStyles();
   const [config, setConfig] = useState<ModelsConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -193,30 +194,41 @@ export const SettingsModalModelsTab = memo(() => {
     // Push the fresh discovery into state so the default picker and the
     // Codex provider row both reflect sign-in immediately (no modal reopen).
     setRuntimeModelNames((runtime?.models ?? []).map((m) => m.name));
-    const codexNames = (runtime?.models ?? [])
-      .filter((m) => m.provider === 'openai-oauth' || m.name.startsWith('codex/'))
-      .map((m) => m.name);
-    const preferred = codexNames.find((n) => n.endsWith('/gpt-5.5')) ?? codexNames[0];
-
-    const hasOtherProviders = Object.keys(current.providers).some((name) => name !== 'codex');
-    const next: ModelsConfig = {
-      ...current,
-      providers: {
-        ...current.providers,
-        codex: current.providers.codex ?? { type: 'openai-oauth', models: {} },
-      },
-    };
-
-    let madeDefault: string | undefined;
-    if (!hasOtherProviders && preferred) {
-      next.default = preferred;
-      madeDefault = preferred;
-    }
-
+    const { config: next, madeDefault } = buildCodexConfig(current, runtime);
     await agentConfigApi.setModels(next);
     await load();
     return madeDefault;
   }, [load]);
+
+  /**
+   * Connection-card fix path: validate the replacement key first, persist it
+   * only when it works, then reload so the cards re-derive from saved state.
+   */
+  const applyKeyFix = useCallback(
+    async (providerName: string, apiKey: string): Promise<ProviderProbeResult> => {
+      const current = await agentConfigApi.getModels();
+      const prov = current.providers[providerName];
+      if (!prov) {
+        return { ok: false, code: 'unknown', detail: 'Provider no longer exists' };
+      }
+      const candidate: ProviderEntry = { ...prov, api_key: apiKey };
+      const probe = probeForProvider(providerName, candidate);
+      if (!probe) {
+        return { ok: false, code: 'unknown', detail: 'This provider cannot be checked automatically' };
+      }
+      const result = await emitter.invoke('util:validate-provider', probe);
+      if (!result.ok) {
+        return result;
+      }
+      await agentConfigApi.setModels({
+        ...current,
+        providers: { ...current.providers, [providerName]: candidate },
+      });
+      await load();
+      return result;
+    },
+    [load]
+  );
 
   const save = useCallback(async () => {
     if (!config) {
@@ -420,8 +432,9 @@ export const SettingsModalModelsTab = memo(() => {
 
   return (
     <div className={styles.root}>
-      <SectionLabel>ChatGPT (Codex)</SectionLabel>
+      <SectionLabel>Connections</SectionLabel>
       <CodexSignInCard onSignedIn={applyCodexSignIn} />
+      <SettingsModalConnectionCards config={config} onFixKey={applyKeyFix} />
 
       <SectionLabel className={styles.sectionLabelSpaced}>Defaults</SectionLabel>
       <Card>
@@ -476,60 +489,73 @@ export const SettingsModalModelsTab = memo(() => {
               </Select>
             </FormField>
             <Caption1>Runs on this machine · models download on first use.</Caption1>
-            <SettingsModalVoicePersonas />
           </>
         ) : null}
       </Card>
 
-      <SectionLabel className={styles.sectionLabelSpaced}>Providers</SectionLabel>
-      <Accordion collapsible onToggle={(_e, data) => {
-        setExpandedProvider(data.openItems.length > 0 ? String(data.openItems[data.openItems.length - 1]) : null);
-        setEditingModel(null);
-      }} openItems={expandedProvider ? [expandedProvider] : []}>
-        {Object.entries(config.providers).map(([name, provider]) => {
-          const prefix = `${name}/`;
-          const discoveredModels = runtimeModelNames
-            .filter((n) => n.startsWith(prefix))
-            .map((n) => n.slice(prefix.length));
-          return (
-            <ProviderRow
-              key={name}
-              name={name}
-              provider={provider}
-              discoveredModels={discoveredModels}
-              editingModel={editingModel}
-              newModelId={newModelId}
-              onRemove={removeProvider}
-              onUpdateProvider={updateProvider}
-              onAddModel={addModel}
-              onRemoveModel={removeModel}
-              onUpdateModel={updateModel}
-              onToggleEditModel={toggleEditModel}
-              onChangeNewModelId={onChangeNewModelId}
-            />
-          );
-        })}
+      <SectionLabel className={styles.sectionLabelSpaced}>Advanced</SectionLabel>
+      <Accordion collapsible>
+        <AccordionItem value="advanced-editor">
+          <AccordionHeader>
+            <div className={styles.headerContent}>
+              <div className={styles.headerName}>Providers and models</div>
+              <div className={styles.headerSummary}>
+                Raw configuration — endpoints, token limits, reasoning effort
+              </div>
+            </div>
+          </AccordionHeader>
+          <AccordionPanel>
+            <Accordion collapsible onToggle={(_e, data) => {
+              setExpandedProvider(data.openItems.length > 0 ? String(data.openItems[data.openItems.length - 1]) : null);
+              setEditingModel(null);
+            }} openItems={expandedProvider ? [expandedProvider] : []}>
+              {Object.entries(config.providers).map(([name, provider]) => {
+                const prefix = `${name}/`;
+                const discoveredModels = runtimeModelNames
+                  .filter((n) => n.startsWith(prefix))
+                  .map((n) => n.slice(prefix.length));
+                return (
+                  <ProviderRow
+                    key={name}
+                    name={name}
+                    provider={provider}
+                    discoveredModels={discoveredModels}
+                    editingModel={editingModel}
+                    newModelId={newModelId}
+                    onRemove={removeProvider}
+                    onUpdateProvider={updateProvider}
+                    onAddModel={addModel}
+                    onRemoveModel={removeModel}
+                    onUpdateModel={updateModel}
+                    onToggleEditModel={toggleEditModel}
+                    onChangeNewModelId={onChangeNewModelId}
+                  />
+                );
+              })}
+            </Accordion>
+            <div className={styles.addRow}>
+              <Input
+                type="text"
+                value={newProviderName}
+                onChange={onChangeNewProviderName}
+                placeholder="Provider name"
+                mono
+                className={styles.flex1}
+              />
+              <Button size="sm" variant="ghost" onClick={addProvider} isDisabled={!newProviderName.trim()}>
+                <Add20Regular className={styles.iconMr} />
+                Add provider
+              </Button>
+            </div>
+          </AccordionPanel>
+        </AccordionItem>
       </Accordion>
-      <div className={styles.addRow}>
-        <Input
-          type="text"
-          value={newProviderName}
-          onChange={onChangeNewProviderName}
-          placeholder="Provider name"
-          mono
-          className={styles.flex1}
-        />
-        <Button size="sm" variant="ghost" onClick={addProvider} isDisabled={!newProviderName.trim()}>
-          <Add20Regular className={styles.iconMr} />
-          Add provider
-        </Button>
-      </div>
 
       <SaveBar onSave={save} dirty={dirty} saving={saving} error={error} />
     </div>
   );
 });
-SettingsModalModelsTab.displayName = 'SettingsModalModelsTab';
+SettingsModalAiTab.displayName = 'SettingsModalAiTab';
 
 /**
  * Sign in to a ChatGPT subscription (Codex). Main runs the browser PKCE flow

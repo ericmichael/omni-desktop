@@ -4,6 +4,7 @@ import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
 import { Button, Card, FormField, SectionLabel, Select, Switch } from '@/renderer/ds';
+import { SettingsModalVoicePersonas } from '@/renderer/features/SettingsModal/SettingsModalVoicePersonas';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { AudioSettings } from '@/shared/types';
 
@@ -241,6 +242,17 @@ export const SettingsModalAudioTab = memo(() => {
           DSP (e.g. a hardware mixer or system-level noise suppression).
         </p>
       </Card>
+
+      {/* Personas shape the local voice's personality — only meaningful when
+          local voice is on (AI tab → Voice → Local). */}
+      {store.localVoiceEnabled && (
+        <>
+          <SectionLabel className={styles.sectionLabelSpaced}>Personas</SectionLabel>
+          <Card>
+            <SettingsModalVoicePersonas />
+          </Card>
+        </>
+      )}
 
       {error && <p className={styles.description}>{error}</p>}
     </div>

@@ -37,10 +37,8 @@ export const OnboardingValidationStep = memo(({ onBack, onFinish }: Props) => {
   return (
     <div className={styles.root}>
       <div className={styles.header}>
-        <Body1 weight="semibold">Configuration saved</Body1>
-        <Caption1>
-          Your model configuration has been written. You can optionally test the connection before continuing.
-        </Caption1>
+        <Body1 weight="semibold">Almost there</Body1>
+        <Caption1>Your setup is saved. You can give it a quick test before you start.</Caption1>
       </div>
 
       <div className={styles.body}>
@@ -67,7 +65,7 @@ export const OnboardingValidationStep = memo(({ onBack, onFinish }: Props) => {
           Back
         </Button>
         <Button variant="primary" size="sm" onClick={onFinish}>
-          {testResult?.success === false ? 'Continue anyway' : 'Finish setup'}
+          {testResult?.success === false ? 'Continue anyway' : 'Continue'}
         </Button>
       </div>
     </div>

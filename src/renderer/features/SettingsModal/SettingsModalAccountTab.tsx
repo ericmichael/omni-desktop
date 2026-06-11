@@ -2,7 +2,9 @@ import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
 import { memo, useCallback, useEffect, useState } from 'react';
 
 import { Button, Card, FormField, FormSkeleton, MessageBar, MessageBarBody, SectionLabel, Spinner } from '@/renderer/ds';
-import { emitter, ipc } from '@/renderer/services/ipc';
+import { ConnectCloudCard } from '@/renderer/features/SettingsModal/ConnectCloudCard';
+import { MachinesCard } from '@/renderer/features/SettingsModal/MachinesCard';
+import { emitter, ipc, isCloudLinked, isElectron } from '@/renderer/services/ipc';
 import type { PlatformCredentials } from '@/shared/types';
 
 type AuthFlowState =
@@ -126,15 +128,24 @@ return;
     return <FormSkeleton fields={3} />;
   }
 
+  // Cloud link + linked machines moved here from General: they're identity,
+  // not app behavior.
+  const cloudCards = (
+    <>
+      {isElectron && <ConnectCloudCard />}
+      {isCloudLinked && <MachinesCard />}
+    </>
+  );
+
   if (!isEnterprise) {
     return (
       <div className={styles.root}>
-        <SectionLabel>Account</SectionLabel>
-        <Card>
-          <p className={styles.text}>
-            This is an open-source build. Enterprise authentication is not available.
-          </p>
-        </Card>
+        {cloudCards}
+        {!isElectron && !isCloudLinked && (
+          <Card>
+            <p className={styles.text}>Your account is managed by this deployment.</p>
+          </Card>
+        )}
       </div>
     );
   }
@@ -142,6 +153,7 @@ return;
   if (auth) {
     return (
       <div className={styles.root}>
+        {cloudCards}
         <SectionLabel>Account</SectionLabel>
         <Card>
           <FormField label="Signed in as">
@@ -174,6 +186,7 @@ return;
 
   return (
     <div className={styles.root}>
+      {cloudCards}
       <SectionLabel>Account</SectionLabel>
       <Card>
         {flow.step === 'idle' && (
