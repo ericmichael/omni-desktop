@@ -25,6 +25,7 @@ import { ArtifactPortalProvider, type Attachment, MessageList } from './componen
 import { QueuedMessages } from './components/QueuedMessages';
 import { GoalPanel, type GoalSnapshot } from './components/GoalPanel';
 import { WakeupPanel, type WakeupSnapshot } from './components/WakeupPanel';
+import { LoopPanel, type LoopTaskSnapshot } from './components/LoopPanel';
 import { WorkersPanel, type WorkerSummary, type WorkersKillResult } from './components/WorkersPanel';
 import { ResizableDivider } from './components/ResizableDivider';
 import { type SessionItem, SessionList } from './components/SessionList';
@@ -166,6 +167,7 @@ export function App({
   const [liveBashJobs, setLiveBashJobs] = useState<BashJobSummary[] | null>(null);
   const [goalSnapshot, setGoalSnapshot] = useState<GoalSnapshot | null>(null);
   const [wakeupSnapshot, setWakeupSnapshot] = useState<WakeupSnapshot | null>(null);
+  const [loopTasks, setLoopTasks] = useState<LoopTaskSnapshot[]>([]);
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
   // Dismissed IDs for each docked panel. Snapshotted on user submit:
   // every item currently in a terminal state gets added so it disappears
@@ -260,10 +262,7 @@ export function App({
   // reaching into the transcript. Scoped by the same context the voice
   // system uses (the Code tab id; CHAT_VOICE_SCOPE on the Chat tab).
   const activityScope = useContext(VoiceScopeContext);
-  const pendingApproval = useMemo(
-    () => items.some((it) => (it as { type?: string }).type === 'approval'),
-    [items]
-  );
+  const pendingApproval = useMemo(() => items.some((it) => (it as { type?: string }).type === 'approval'), [items]);
   useEffect(() => {
     if (!activityScope) {
       return;
@@ -590,6 +589,26 @@ export function App({
         }
         return;
       }
+      if (fn === 'ui.loop.update') {
+        const request_id = String(p?.request_id ?? '');
+        const eventSessionId = typeof p?.session_id === 'string' ? p.session_id : undefined;
+        const currentSessionId = actor.getSnapshot().context.sessionId;
+        if (eventSessionId && currentSessionId && currentSessionId !== eventSessionId) {
+          if (request_id) {
+            client.clientResponse(request_id, true, { ack: true }).catch(() => {});
+          }
+          return;
+        }
+        const args = p?.args || {};
+        const snap = args?.snapshot;
+        if (Array.isArray(snap)) {
+          setLoopTasks(snap as LoopTaskSnapshot[]);
+        }
+        if (request_id) {
+          client.clientResponse(request_id, true, { ack: true }).catch(() => {});
+        }
+        return;
+      }
       if (fn === 'escalate') {
         // Agent ``escalate`` builtin — blocking. Surface the banner and
         // intentionally do NOT call clientResponse here; the next user
@@ -763,6 +782,7 @@ export function App({
 
   const handleGoalDismiss = useCallback(() => setGoalSnapshot(null), []);
   const handleWakeupDismiss = useCallback(() => setWakeupSnapshot(null), []);
+  const handleLoopDismiss = useCallback(() => setLoopTasks([]), []);
 
   useEffect(() => {
     const handler = () => setIsLargeScreen(window.innerWidth >= 1024);
@@ -1552,6 +1572,17 @@ export function App({
       } else {
         setWakeupSnapshot(null);
       }
+      if (resolvedId) {
+        try {
+          const res = (await client.serverCall('loop.status', {}, resolvedId)) as { snapshot?: unknown } | undefined;
+          const snap = res?.snapshot;
+          setLoopTasks(Array.isArray(snap) ? (snap as LoopTaskSnapshot[]) : []);
+        } catch {
+          setLoopTasks([]);
+        }
+      } else {
+        setLoopTasks([]);
+      }
       // Seed the workers panel from server state. Same rationale as goal:
       // catches the case where workers were spawned earlier and are still
       // running when we attach.
@@ -1798,6 +1829,7 @@ export function App({
               </div>
               <GoalPanel snapshot={goalSnapshot} onDismiss={handleGoalDismiss} />
               <WakeupPanel snapshot={wakeupSnapshot} onDismiss={handleWakeupDismiss} />
+              <LoopPanel tasks={loopTasks} onDismiss={handleLoopDismiss} />
               <Tasks tasks={tasks} />
               <WorkersPanel workers={visibleWorkers} onKill={handleWorkerKill} onDismiss={handleWorkerDismiss} />
               <BashJobs
