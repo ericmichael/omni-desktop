@@ -13,6 +13,7 @@ import type { FastifyInstance } from 'fastify';
 import { getVoiceService } from '@/main/voice-service';
 
 export const VOICE_HTTP_PREFIX = '/api/voice';
+const VOICE_TRANSCRIBE_BODY_LIMIT = 32 * 1024 * 1024;
 
 export function registerVoiceRoutes(fastify: FastifyInstance): void {
   const voice = getVoiceService();
@@ -24,11 +25,11 @@ export function registerVoiceRoutes(fastify: FastifyInstance): void {
     return voice.getStatus();
   });
 
-  fastify.post(`${VOICE_HTTP_PREFIX}/transcribe`, async (request) => {
+  fastify.post(`${VOICE_HTTP_PREFIX}/transcribe`, { bodyLimit: VOICE_TRANSCRIBE_BODY_LIMIT }, async (request) => {
     const { pcm, sampleRate } = (request.body ?? {}) as { pcm?: string; sampleRate?: number };
     if (!pcm) {
-return { text: '' };
-}
+      return { text: '' };
+    }
     const text = await voice.transcribe(pcm, sampleRate ?? 24000);
     return { text };
   });
@@ -37,8 +38,8 @@ return { text: '' };
   fastify.post(`${VOICE_HTTP_PREFIX}/speak`, async (request) => {
     const { text, voice: voiceName } = (request.body ?? {}) as { text?: string; voice?: string };
     if (!text) {
-return { pcm: '', sampleRate: 24000 };
-}
+      return { pcm: '', sampleRate: 24000 };
+    }
     const chunks: Buffer[] = [];
     let sampleRate = 24000;
     await voice.speak(
@@ -47,7 +48,7 @@ return { pcm: '', sampleRate: 24000 };
         sampleRate = sr;
         chunks.push(Buffer.from(pcmBase64, 'base64'));
       },
-      voiceName,
+      voiceName
     );
     return { pcm: Buffer.concat(chunks).toString('base64'), sampleRate };
   });
@@ -59,8 +60,8 @@ return { pcm: '', sampleRate: 24000 };
       data?: string;
     };
     if (!personaId || !data) {
-return { file: '', embeddingFile: '' };
-}
+      return { file: '', embeddingFile: '' };
+    }
     return await voice.importSample(personaId, filename ?? 'sample.wav', data);
   });
 }
