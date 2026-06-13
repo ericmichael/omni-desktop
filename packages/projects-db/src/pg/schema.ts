@@ -523,4 +523,34 @@ ALTER TABLE tickets DROP COLUMN shaping;
 ALTER TABLE inbox_items DROP COLUMN shaping;
 `,
   },
+  {
+    version: 13,
+    sql: `
+-- Hard cutover to projects.sources as the only project source model.
+ALTER TABLE projects DISABLE ROW LEVEL SECURITY;
+
+UPDATE projects
+SET sources = jsonb_build_array(jsonb_build_object(
+  'kind', 'local',
+  'id', substr(md5(random()::text || clock_timestamp()::text), 1, 16),
+  'mountName', slug,
+  'workspaceDir', workspace_dir
+))::text
+WHERE workspace_dir IS NOT NULL
+  AND workspace_dir <> ''
+  AND (sources IS NULL OR sources = '[]');
+
+ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE projects DROP COLUMN workspace_dir;
+`,
+  },
+  {
+    version: 14,
+    sql: `
+-- Tighten inbox status now that shaping is gone.
+ALTER TABLE inbox_items DROP CONSTRAINT inbox_items_status_check;
+ALTER TABLE inbox_items ADD CONSTRAINT inbox_items_status_check CHECK (status IN ('new','later'));
+`,
+  },
 ];

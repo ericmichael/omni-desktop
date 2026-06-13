@@ -19,6 +19,8 @@ function ticketPayload(t: TicketRow, cols: ColumnRow[], comments: CommentRow[]) 
     pipeline: cols.map((c) => c.label),
     blocked_by: JSON.parse(t.blocked_by),
     branch: t.branch,
+    use_worktree: !!t.use_worktree,
+    assignee: t.assignee,
     resolution: t.resolution,
     archived_at: t.archived_at,
     created_at: t.created_at,
@@ -57,8 +59,11 @@ export function registerTicketTools(server: McpServer, repo: IProjectsRepo): voi
       description: z.string().optional().describe('Ticket description'),
       priority: z.enum(['low', 'medium', 'high', 'critical']).optional().describe('Ticket priority (default: medium)'),
       milestone_id: z.string().optional().describe('Optional milestone ID to group this ticket under.'),
+      branch: z.string().optional().describe('Git branch for this ticket.'),
+      use_worktree: z.boolean().optional().describe('Whether to create/use an isolated git worktree for this ticket.'),
+      assignee: z.string().optional().describe('Assigned principal/user ID.'),
     },
-    async ({ project_id, title, description, priority, milestone_id }) => {
+    async ({ project_id, title, description, priority, milestone_id, branch, use_worktree, assignee }) => {
       const cols = await repo.listColumns(project_id);
       const firstCol = cols[0];
       if (!firstCol) return err(`Project not found or has no pipeline: ${project_id}`);
@@ -73,13 +78,13 @@ export function registerTicketTools(server: McpServer, repo: IProjectsRepo): voi
         title,
         description: description ?? '',
         priority: priority ?? 'medium',
-        branch: null,
+        branch: branch || null,
         blocked_by: '[]',
         resolution: null,
         resolved_at: null,
         archived_at: null,
         column_changed_at: null,
-        use_worktree: 0,
+        use_worktree: use_worktree ? 1 : 0,
         worktree_path: null,
         worktree_name: null,
         supervisor_session_id: null,
@@ -90,7 +95,7 @@ export function registerTicketTools(server: McpServer, repo: IProjectsRepo): voi
         runs: '[]',
         pr_review: null,
         pr_merged_at: null,
-        assignee: null,
+        assignee: assignee || null,
         created_at: now,
         updated_at: now,
       });
@@ -108,10 +113,12 @@ export function registerTicketTools(server: McpServer, repo: IProjectsRepo): voi
       description: z.string().optional().describe('New description'),
       priority: z.enum(['low', 'medium', 'high', 'critical']).optional().describe('New priority'),
       branch: z.string().optional().describe('Git branch for this ticket.'),
+      use_worktree: z.boolean().optional().describe('Whether to create/use an isolated git worktree for this ticket.'),
+      assignee: z.string().optional().describe('Assigned principal/user ID. Pass empty string to clear.'),
       add_blocked_by: z.array(z.string()).optional().describe('Ticket IDs to add as blockers.'),
       remove_blocked_by: z.array(z.string()).optional().describe('Ticket IDs to remove as blockers.'),
     },
-    async ({ ticket_id, title, description, priority, branch, add_blocked_by, remove_blocked_by }) => {
+    async ({ ticket_id, title, description, priority, branch, use_worktree, assignee, add_blocked_by, remove_blocked_by }) => {
       const ticket = await repo.getTicket(ticket_id);
       if (!ticket) return err(`Ticket not found: ${ticket_id}`);
 
@@ -120,6 +127,8 @@ export function registerTicketTools(server: McpServer, repo: IProjectsRepo): voi
       if (description !== undefined) next.description = description;
       if (priority !== undefined) next.priority = priority;
       if (branch !== undefined) next.branch = branch || null;
+      if (use_worktree !== undefined) next.use_worktree = use_worktree ? 1 : 0;
+      if (assignee !== undefined) next.assignee = assignee || null;
 
       if (add_blocked_by || remove_blocked_by) {
         const current = new Set<string>(JSON.parse(ticket.blocked_by));
@@ -226,6 +235,9 @@ export function registerTicketTools(server: McpServer, repo: IProjectsRepo): voi
             column: col?.label ?? t.column_id,
             milestone_id: t.milestone_id,
             blocked_by: JSON.parse(t.blocked_by),
+            branch: t.branch,
+            use_worktree: !!t.use_worktree,
+            assignee: t.assignee,
             created_at: t.created_at,
             updated_at: t.updated_at,
           };
@@ -269,6 +281,9 @@ export function registerTicketTools(server: McpServer, repo: IProjectsRepo): voi
           description: t.description,
           priority: t.priority,
           column: await labelFor(t),
+          branch: t.branch,
+          use_worktree: !!t.use_worktree,
+          assignee: t.assignee,
           created_at: t.created_at,
           updated_at: t.updated_at,
         }))

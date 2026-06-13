@@ -291,7 +291,6 @@ describe('replaceAll* preserves child data', () => {
         id: 'proj_b',
         label: 'B',
         slug: 'b',
-        workspace_dir: null,
         is_personal: 0,
         auto_dispatch: 0,
         sources: '[]',

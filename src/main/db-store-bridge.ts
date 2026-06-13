@@ -113,20 +113,6 @@ export function rowToProject(row: ProjectRow): Project {
     // Malformed JSON — treat as no sources rather than crash.
   }
 
-  // ``workspace_dir`` column is the authoritative single-source store for
-  // MCP ``update_project workspace_dir`` writes (callers don't know about
-  // the multi-source model yet). When set + the project has at least one
-  // local source, override the first local source's workspaceDir.
-  if (row.workspace_dir) {
-    const idx = sources.findIndex((s) => s.kind === 'local');
-    if (idx >= 0) {
-      const existing = sources[idx]!;
-      if (existing.kind === 'local') {
-        sources[idx] = { ...existing, workspaceDir: row.workspace_dir };
-      }
-    }
-  }
-
   const project: Project = {
     id: row.id as ProjectId,
     label: row.label,
@@ -298,19 +284,10 @@ export function rowToTask(row: TaskRow): Task {
 
 export function projectToRow(p: Project): ProjectRow {
   const now = toIso(Date.now());
-  // ``workspace_dir`` column mirrors the first local source's path so the
-  // launcher and the MCP server (which reads/writes the column directly)
-  // agree on the project's linked directory for the single-source
-  // ergonomic case. Multi-source projects: still mirror the first local
-  // source, since MCP's update_project workspace_dir API doesn't know
-  // about the array model.
-  const firstLocal = p.sources.find((s) => s.kind === 'local');
-  const workspaceDir = firstLocal?.kind === 'local' ? firstLocal.workspaceDir : null;
   return {
     id: p.id,
     label: p.label,
     slug: p.slug,
-    workspace_dir: workspaceDir,
     is_personal: p.isPersonal ? 1 : 0,
     auto_dispatch: p.autoDispatch ? 1 : 0,
     sources: JSON.stringify(p.sources),

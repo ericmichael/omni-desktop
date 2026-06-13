@@ -25,7 +25,6 @@ const projectRow = (id: string, slug: string): ProjectRow => ({
   id,
   label: `Project ${id}`,
   slug,
-  workspace_dir: null,
   is_personal: 0,
   auto_dispatch: 0,
   sources: '[]',

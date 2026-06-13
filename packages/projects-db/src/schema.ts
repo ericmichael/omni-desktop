@@ -191,11 +191,9 @@ ALTER TABLE projects ADD COLUMN sandbox_profile TEXT;
   {
     version: 6,
     sql: `
--- PR review state on tickets. Used by the local-PR UI flow:
---   pr_review:    JSON {"status":"approved|changes_requested","at":<epoch ms>}
---                 NULL = no review yet (Approve/Request changes buttons enabled).
---   pr_merged_at: epoch ms (stringified). Set when the user merges the agent's
---                 container changes into the host repo. NULL = not merged.
+-- PR state on tickets. Used by the per-source PR UI flow:
+--   pr_review:    JSON array of linked pull requests (Ticket.pullRequests).
+--   pr_merged_at: JSON map of source id -> epoch ms (Ticket.prMergedAt).
 -- Pre-existing rows get NULL; the Ticket model already treats both fields as
 -- optional so no backfill is needed.
 ALTER TABLE tickets ADD COLUMN pr_review TEXT;
@@ -277,8 +275,7 @@ ALTER TABLE pipeline_columns ADD COLUMN workflow TEXT;
 -- free-text channel (ticket description / inbox note) so the data survives;
 -- the 'shaped' inbox status collapses to 'new' with a fresh capture
 -- timestamp (so the expiry sweep doesn't instantly defer those items).
--- The status CHECK constraint still lists 'shaped' — harmlessly permissive;
--- nothing writes it anymore.
+-- The v13 rebuild below tightens the CHECK constraint to new/later only.
 UPDATE tickets
 SET description = CASE WHEN description = '' THEN '' ELSE description || char(10) || char(10) END
   || '**Done when:** ' || TRIM(json_extract(shaping, '$.doneLooksLike'))
@@ -310,6 +307,58 @@ WHERE status = 'shaped';
 
 ALTER TABLE tickets DROP COLUMN shaping;
 ALTER TABLE inbox_items DROP COLUMN shaping;
+`,
+  },
+  {
+    version: 13,
+    sql: `
+-- Hard cutover to projects.sources as the only project source model.
+-- Preserve old workspace_dir values once, then remove the column so runtime
+-- code cannot keep treating it as a second source of truth.
+UPDATE projects
+SET sources = json_array(
+  json_object(
+    'kind', 'local',
+    'id', lower(hex(randomblob(8))),
+    'mountName', slug,
+    'workspaceDir', workspace_dir
+  )
+)
+WHERE workspace_dir IS NOT NULL
+  AND workspace_dir <> ''
+  AND (sources IS NULL OR sources = '[]' OR json_array_length(sources) = 0);
+
+ALTER TABLE projects DROP COLUMN workspace_dir;
+`,
+  },
+  {
+    version: 14,
+    sql: `
+-- Tighten inbox status now that shaping is gone. Rebuild is required because
+-- SQLite cannot alter CHECK constraints in place.
+PRAGMA foreign_keys = OFF;
+
+CREATE TABLE inbox_items_new (
+  id          TEXT PRIMARY KEY,
+  title       TEXT NOT NULL,
+  note        TEXT,
+  project_id  TEXT REFERENCES projects(id) ON DELETE SET NULL,
+  status      TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new','later')),
+  later_at    TEXT,
+  promoted_to TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+INSERT INTO inbox_items_new (id, title, note, project_id, status, later_at, promoted_to, created_at, updated_at)
+SELECT id, title, note, project_id, CASE WHEN status = 'later' THEN 'later' ELSE 'new' END, later_at, promoted_to, created_at, updated_at
+FROM inbox_items;
+
+DROP TABLE inbox_items;
+ALTER TABLE inbox_items_new RENAME TO inbox_items;
+CREATE INDEX idx_inbox_status ON inbox_items(status);
+
+PRAGMA foreign_keys = ON;
 `,
   },
 ];

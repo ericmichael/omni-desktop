@@ -31,13 +31,25 @@ export interface SeededProject {
   columns: string[];
 }
 
+export type ProjectSource = (
+  | { kind: 'local'; workspaceDir: string; gitDetected?: boolean }
+  | { kind: 'git-remote'; repoUrl: string; defaultBranch?: string }
+) & { id: string; mountName: string };
+
 /**
  * Create a project row, its default pipeline columns, and a root page (with
  * `# <label>` content). Caller must have already checked slug uniqueness.
  */
 export async function seedProject(
   repo: IProjectsRepo,
-  opts: { label: string; workspaceDir?: string | null; dueDate?: string | null; pinned?: boolean }
+  opts: {
+    label: string;
+    sources?: ProjectSource[];
+    autoDispatch?: boolean;
+    sandboxProfile?: string | null;
+    dueDate?: string | null;
+    pinned?: boolean;
+  }
 ): Promise<SeededProject> {
   const id = projectId();
   const slug = slugify(opts.label);
@@ -47,11 +59,10 @@ export async function seedProject(
     id,
     label: opts.label,
     slug,
-    workspace_dir: opts.workspaceDir ?? null,
     is_personal: 0,
-    auto_dispatch: 0,
-    sources: '[]',
-    sandbox_profile: null,
+    auto_dispatch: opts.autoDispatch ? 1 : 0,
+    sources: JSON.stringify(opts.sources ?? []),
+    sandbox_profile: opts.sandboxProfile ?? null,
     config: null,
     due_date: opts.dueDate ?? null,
     pinned_at: opts.pinned ? now : null,

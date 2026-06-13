@@ -698,6 +698,42 @@ export const wireGlobalHandlers = async (arg: {
     }
     return snapshot;
   };
+
+  const sandboxProfileLabel = (name: string): string => {
+    if (name === 'host') return 'This computer (no sandbox)';
+    if (name === 'devbox') return 'Devbox (Docker)';
+    if (name === 'platform') return 'Cloud (managed)';
+    if (name === ACI_PROFILE_NAME) return 'Cloud · Fast';
+    if (name === ACI_DESKTOP_PROFILE_NAME) return 'Cloud · Desktop (IDE + VNC)';
+    if (name.startsWith('local:')) return `Local · ${name.slice('local:'.length, 'local:'.length + 8)}`;
+    return name.length > 0 ? name[0]!.toUpperCase() + name.slice(1) : name;
+  };
+
+  const getMcpContext = (tenantId: string, principalId: string = tenantId) => ({
+    listSandboxProfiles: async () => {
+      const snapshot = getStoreSnapshot(tenantId, principalId);
+      const names = snapshot.availableSandboxProfiles && snapshot.availableSandboxProfiles.length > 0
+        ? snapshot.availableSandboxProfiles
+        : ['host', 'devbox'];
+      return names.map((name) => ({
+        name,
+        label: sandboxProfileLabel(name),
+        available: true,
+        source: name.startsWith('local:') ? 'local-machine' : name.startsWith('aci') ? 'cloud' : 'builtin',
+      }));
+    },
+    listTeamMembers: async () => {
+      if (!teamsEnabled || !controlPlane) return [];
+      const rows = await controlPlane.listMembers(tenantId);
+      return rows.map((m) => ({
+        user_id: m.user_id,
+        display_name: m.display_name,
+        email: m.email,
+        role: m.role,
+      }));
+    },
+    getCurrentPrincipal: async () => (teamsEnabled ? principalId : null),
+  });
   /**
    * Broadcast a (team, principal) store snapshot. Cloud: to ONLY that principal's
    * sessions (the snapshot carries user-scoped keys that must not leak to other
@@ -1550,6 +1586,7 @@ export const wireGlobalHandlers = async (arg: {
     getProcessManager,
     ensureTenantReady,
     getTenantRepo,
+    getMcpContext,
     runtimeTokenSecret,
     teamsEnabled,
     controlPlane,

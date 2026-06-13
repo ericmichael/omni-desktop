@@ -87,16 +87,16 @@ export class PgProjectsRepo implements IProjectsRepo {
 
   private upsertProjectIn(c: PoolClient, row: ProjectRow): Promise<unknown> {
     return c.query(
-      `INSERT INTO projects (tenant_id, id, label, slug, workspace_dir, is_personal, auto_dispatch, sources, sandbox_profile, due_date, pinned_at, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      `INSERT INTO projects (tenant_id, id, label, slug, is_personal, auto_dispatch, sources, sandbox_profile, due_date, pinned_at, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        ON CONFLICT (id) DO UPDATE SET
-         label = EXCLUDED.label, slug = EXCLUDED.slug, workspace_dir = EXCLUDED.workspace_dir,
+         label = EXCLUDED.label, slug = EXCLUDED.slug,
          is_personal = EXCLUDED.is_personal, auto_dispatch = EXCLUDED.auto_dispatch,
          sources = EXCLUDED.sources, sandbox_profile = EXCLUDED.sandbox_profile,
          due_date = EXCLUDED.due_date, pinned_at = EXCLUDED.pinned_at,
          updated_at = EXCLUDED.updated_at`,
       [
-        this.tenantId, row.id, row.label, row.slug, row.workspace_dir,
+        this.tenantId, row.id, row.label, row.slug,
         row.is_personal, row.auto_dispatch, row.sources, row.sandbox_profile,
         row.due_date, row.pinned_at, row.created_at, row.updated_at,
       ]
