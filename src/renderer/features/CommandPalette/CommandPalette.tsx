@@ -14,6 +14,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 
 import { codeApi } from '@/renderer/features/Code/state';
+import { $quickCaptureOpen } from '@/renderer/features/Inbox/QuickCapture';
+import { ticketApi } from '@/renderer/features/Tickets/state';
 import { persistedStoreApi } from '@/renderer/services/store';
 import type { CodeTab, LayoutMode } from '@/shared/types';
 
@@ -117,6 +119,32 @@ export const CommandPalette = memo(() => {
     persistedStoreApi.setKey('layoutMode', 'spaces');
   }, []);
 
+  const goToInbox = useCallback(() => {
+    persistedStoreApi.setKey('layoutMode', 'projects');
+    ticketApi.goToInbox();
+  }, []);
+
+  const addInboxItem = useCallback(() => {
+    $quickCaptureOpen.set(true);
+  }, []);
+
+  const createProject = useCallback(() => {
+    const name = window.prompt('Project name');
+    const label = name?.trim();
+    if (!label) {
+      return;
+    }
+    const slug =
+      label
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '') || 'project';
+    void ticketApi.addProject({ label, slug, sources: [] }).then((project) => {
+      persistedStoreApi.setKey('layoutMode', 'projects');
+      ticketApi.goToProject(project.id);
+    });
+  }, []);
+
   const resolveTabLabel = useCallback(
     (tab: CodeTab) => {
       const project = store.projects.find((p) => p.id === tab.projectId);
@@ -136,6 +164,9 @@ export const CommandPalette = memo(() => {
         resolveTabLabel,
         navigate,
         activateColumn,
+        goToInbox,
+        addInboxItem,
+        createProject,
         newSession: () => {
           void codeApi.addTab();
           persistedStoreApi.setKey('layoutMode', 'spaces');
@@ -145,7 +176,16 @@ export const CommandPalette = memo(() => {
           persistedStoreApi.setKey('layoutMode', 'spaces');
         },
       }),
-    [store.codeTabs, store.codeLayoutMode, resolveTabLabel, navigate, activateColumn]
+    [
+      store.codeTabs,
+      store.codeLayoutMode,
+      resolveTabLabel,
+      navigate,
+      activateColumn,
+      goToInbox,
+      addInboxItem,
+      createProject,
+    ]
   );
 
   const filtered = useMemo(() => filterCommands(commands, query), [commands, query]);
