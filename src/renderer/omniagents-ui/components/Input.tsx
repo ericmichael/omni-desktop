@@ -1,4 +1,4 @@
-import { ArrowUpIcon, CheckIcon, FolderIcon, Loader2Icon, LockIcon,MicIcon, MonitorIcon, PaperclipIcon, SquareIcon, XIcon } from 'lucide-react'
+import { ArrowUpIcon, CheckIcon, FolderIcon, Loader2Icon, LockIcon, MicIcon, MonitorIcon, PaperclipIcon, SquareIcon, Volume2Icon, VolumeXIcon, XIcon } from 'lucide-react'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { PromptInput, PromptInputActions,PromptInputTextarea } from './promptkit/PromptInput'
@@ -27,8 +27,8 @@ function workspaceLabel(p: string): string {
   return UUID_RE.test(tail) ? 'Workspace' : tail
 }
 
-export function Input({ disabled, thinking, onStop, onSubmit, onVoiceSubmit, voiceEnabled, workspacePath, workspaceLocked, onWorkspaceClick, sandboxLabel, sandboxLocked, sandboxLoading, sandboxOptions, currentSandboxProfile, onSandboxChange, sessionId, onVoiceSessionCreated, onVoiceClose }:
-  { disabled?: boolean; thinking?: boolean; onStop?: () => void; onSubmit: (text: string, files?: File[]) => void; onVoiceSubmit?: (text: string) => void; voiceEnabled?: boolean; workspacePath?: string | null; workspaceLocked?: boolean; onWorkspaceClick?: () => void; sandboxLabel?: string; sandboxLocked?: boolean; sandboxLoading?: boolean; sandboxOptions?: { value: string; label: string }[]; currentSandboxProfile?: string; onSandboxChange?: (value: string) => void; sessionId?: string; onVoiceSessionCreated?: (id: string) => void; onVoiceClose?: () => void }) {
+export function Input({ disabled, thinking, onStop, onSubmit, onVoiceSubmit, voiceEnabled, speakRepliesEnabled, onSpeakRepliesChange, workspacePath, workspaceLocked, onWorkspaceClick, sandboxLabel, sandboxLocked, sandboxLoading, sandboxOptions, currentSandboxProfile, onSandboxChange, sessionId, onVoiceSessionCreated, onVoiceClose }:
+  { disabled?: boolean; thinking?: boolean; onStop?: () => void; onSubmit: (text: string, files?: File[]) => void; onVoiceSubmit?: (text: string) => void; voiceEnabled?: boolean; speakRepliesEnabled?: boolean; onSpeakRepliesChange?: (enabled: boolean) => void; workspacePath?: string | null; workspaceLocked?: boolean; onWorkspaceClick?: () => void; sandboxLabel?: string; sandboxLocked?: boolean; sandboxLoading?: boolean; sandboxOptions?: { value: string; label: string }[]; currentSandboxProfile?: string; onSandboxChange?: (value: string) => void; sessionId?: string; onVoiceSessionCreated?: (id: string) => void; onVoiceClose?: () => void }) {
   const [text, setText] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const [history, setHistory] = useState<string[]>([])
@@ -40,6 +40,7 @@ export function Input({ disabled, thinking, onStop, onSubmit, onVoiceSubmit, voi
   // VoiceModal mic button.
   const localVoiceEnabled = useStore(persistedStoreApi.$atom).localVoiceEnabled
   const localVoiceSupported = localVoiceEnabled && isLocalVoiceCapable()
+  const speakerToggleLabel = speakRepliesEnabled ? 'Spoken replies on' : 'Spoken replies off'
   const [sandboxMenuOpen, setSandboxMenuOpen] = useState(false)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -338,9 +339,21 @@ fileInputRef.current.value = ''
 
             <div className="flex items-center gap-1 sm:gap-2 shrink-0">
               {localVoiceSupported ? (
-                // Local models active → push-to-talk replaces the realtime
-                // VoiceModal mic button entirely.
-                <LocalVoiceButton onSubmit={(t) => (onVoiceSubmit ?? onSubmit)(t)} />
+                <>
+                  <button
+                    type="button"
+                    onClick={() => onSpeakRepliesChange?.(!speakRepliesEnabled)}
+                    className={`flex h-8 w-8 items-center justify-center rounded-2xl transition-colors ${
+                      speakRepliesEnabled ? 'bg-primary/15 text-primary hover:bg-primary/20' : 'hover:bg-accent/50 text-muted-foreground hover:text-foreground'
+                    }`}
+                    aria-label={speakerToggleLabel}
+                    aria-pressed={!!speakRepliesEnabled}
+                    title={speakerToggleLabel}
+                  >
+                    {speakRepliesEnabled ? <Volume2Icon size={20} /> : <VolumeXIcon size={20} />}
+                  </button>
+                  <LocalVoiceButton onSubmit={(t) => (onVoiceSubmit ?? onSubmit)(t)} />
+                </>
               ) : voiceEnabled ? (
                 <button
                   type="button"

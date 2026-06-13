@@ -190,9 +190,9 @@ export function App({
   const [runActive, setRunActive] = useState(false);
   const [initialSessionParam] = useState<string | undefined>(() => uiConfig.session);
   const [queuedMessages, setQueuedMessages] = useState<import('./rpc/client').QueuedMessage[]>([]);
+  const [speakRepliesEnabled, setSpeakRepliesEnabled] = useState(false);
   const readyRef = useRef(false);
   const onClientToolCallRef = useRef(onClientToolCall);
-  // Armed by the mic button so the next run (and only that run) gets the speak tool.
   const voiceRunRef = useRef(false);
   useEffect(() => {
     onClientToolCallRef.current = onClientToolCall;
@@ -1021,13 +1021,9 @@ export function App({
         const liveWorkspaceSupported = caps?.workspaceSupported ?? workspaceSupported;
         const workspaceVars: Record<string, unknown> | undefined =
           liveWorkspacePath && liveWorkspaceSupported ? { workspace_root: liveWorkspacePath } : undefined;
-        // One-shot voice arming: a submission from the mic button uses the
-        // voice-enabled variables (speak tool + persona) for *this run only*;
-        // every other run (typed, or another column) stays speak-free. The ref
-        // is per-App-instance, so columns don't race.
         const useVoiceRun = voiceRunRef.current;
         voiceRunRef.current = false;
-        const variablesSource = useVoiceRun && voiceVariables ? voiceVariables : variablesProp;
+        const variablesSource = (speakRepliesEnabled || useVoiceRun) && voiceVariables ? voiceVariables : variablesProp;
         const baseVariables: Record<string, unknown> | undefined =
           variablesSource || workspaceVars ? { ...variablesSource, ...workspaceVars } : undefined;
         // Merge per-dispatch overrides (from the orchestrator's bridge.run call)
@@ -1102,6 +1098,7 @@ export function App({
       bootState.actor,
       variablesProp,
       voiceVariables,
+      speakRepliesEnabled,
       submit,
       submitError,
       workspacePath,
@@ -1118,9 +1115,9 @@ export function App({
     ]
   );
 
-  // Submit from the mic button: arm the speak tool for just this run.
   const handleVoiceSubmit = useCallback(
     (text: string) => {
+      setSpeakRepliesEnabled(true);
       voiceRunRef.current = true;
       void handleSubmit(text);
     },
@@ -1867,6 +1864,8 @@ export function App({
                 }}
                 onVoiceSubmit={handleVoiceSubmit}
                 voiceEnabled={voiceEnabled}
+                speakRepliesEnabled={!!voiceVariables && speakRepliesEnabled}
+                onSpeakRepliesChange={setSpeakRepliesEnabled}
                 workspacePath={workspaceSupported ? workspacePath : undefined}
                 workspaceLocked={workspaceLocked}
                 onWorkspaceClick={() => setWorkspacePickerOpen(true)}
