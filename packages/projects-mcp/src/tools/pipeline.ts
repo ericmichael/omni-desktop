@@ -17,6 +17,35 @@ const parseWorkflow = (raw: string | null): unknown | undefined => {
   }
 };
 
+const workflowSchema = z
+  .object({
+    purpose: z.string().optional(),
+    entryCriteria: z.array(z.string()).optional(),
+    definitionOfDone: z.array(z.string()).optional(),
+    agentInstructions: z.string().optional(),
+    recommendedSkills: z.array(z.string()).optional(),
+    allowedTransitions: z.array(z.string()).optional(),
+    autoDispatch: z.boolean().optional(),
+  })
+  .passthrough();
+
+const columnSchema = z.object({
+  id: z.string().optional().describe('Stable logical column ID. If omitted, derived from the label.'),
+  label: z.string().describe('Column label.'),
+  description: z.string().optional().describe('Column description.'),
+  gate: z.boolean().optional().describe('Whether this column is a human-review gate.'),
+  maxConcurrent: z.number().int().positive().optional().describe('Maximum concurrent work items for this column.'),
+  workflow: workflowSchema.optional().describe('Workflow contract for agents and humans.'),
+});
+
+function logicalIdFor(label: string): string {
+  const slug = label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+  return slug || 'column';
+}
+
 export function registerPipelineTools(server: McpServer, repo: IProjectsRepo): void {
   server.tool(
     'get_pipeline',
@@ -42,6 +71,44 @@ export function registerPipelineTools(server: McpServer, repo: IProjectsRepo): v
           workflow: parseWorkflow(c.workflow),
         })),
       });
+    }
+  );
+
+  server.tool(
+    'update_pipeline',
+    'Replace the pipeline definition for a project. Remaps tickets safely when columns are removed.',
+    {
+      project_id: z.string().describe('The project ID to update the pipeline for.'),
+      columns: z.array(columnSchema).min(1).describe('Ordered pipeline column definitions.'),
+    },
+    async ({ project_id, columns }) => {
+      const exists = await repo.getProject(project_id);
+      if (!exists) return err(`Project not found: ${project_id}`);
+
+      const labels = new Set<string>();
+      const logicalIds = new Set<string>();
+      for (const column of columns) {
+        const labelKey = column.label.toLowerCase();
+        if (labels.has(labelKey)) return err(`Duplicate column label: ${column.label}`);
+        labels.add(labelKey);
+        const logicalId = column.id ?? logicalIdFor(column.label);
+        if (logicalIds.has(logicalId)) return err(`Duplicate column id: ${logicalId}`);
+        logicalIds.add(logicalId);
+      }
+
+      const result = await repo.syncColumnsForProject(
+        project_id,
+        columns.map((column) => ({
+          logicalId: column.id ?? logicalIdFor(column.label),
+          label: column.label,
+          description: column.description ?? null,
+          gate: column.gate ?? false,
+          maxConcurrent: column.maxConcurrent ?? null,
+          workflow: column.workflow,
+        }))
+      );
+
+      return json({ ok: true, ...result });
     }
   );
 }

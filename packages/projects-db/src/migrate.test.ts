@@ -143,3 +143,32 @@ describe('v12 shaping removal', () => {
     expect(cols.map((c) => c.name)).not.toContain('shaping');
   });
 });
+
+describe('v13 source cutover', () => {
+  it('moves workspace_dir into sources and drops workspace_dir', () => {
+    migrateTo(13);
+    db.prepare("INSERT INTO projects (id, label, slug, workspace_dir) VALUES ('proj_1', 'P', 'p', '/tmp/project')").run();
+
+    runMigrations(db);
+
+    const row = db.prepare("SELECT sources FROM projects WHERE id = 'proj_1'").get() as { sources: string };
+    expect(JSON.parse(row.sources)).toEqual([
+      expect.objectContaining({ kind: 'local', mountName: 'p', workspaceDir: '/tmp/project' }),
+    ]);
+    const cols = db.prepare('PRAGMA table_info(projects)').all() as Array<{ name: string }>;
+    expect(cols.map((c) => c.name)).not.toContain('workspace_dir');
+  });
+});
+
+describe('v14 inbox status tightening', () => {
+  it('removes shaped from the inbox status check', () => {
+    migrateTo(14);
+    db.prepare("INSERT INTO inbox_items (id, title, status) VALUES ('inb_1', 'I', 'shaped')").run();
+
+    runMigrations(db);
+
+    const row = db.prepare("SELECT status FROM inbox_items WHERE id = 'inb_1'").get() as { status: string };
+    expect(row.status).toBe('new');
+    expect(() => db.prepare("INSERT INTO inbox_items (id, title, status) VALUES ('inb_2', 'I2', 'shaped')").run()).toThrow(/CHECK constraint/);
+  });
+});

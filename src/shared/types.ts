@@ -681,9 +681,7 @@ export const schema: Schema<StoreData> = {
         note: { type: 'string' },
         attachments: { type: 'array', items: { type: 'string' } },
         projectId: { type: ['string', 'null'] },
-        // 'shaped' stays in the storage enum so pre-v25 data validates at
-        // store construction; the v25 migration remaps it to 'new'.
-        status: { type: 'string', enum: ['new', 'shaped', 'later'] },
+        status: { type: 'string', enum: ['new', 'later'] },
         laterAt: { type: 'number' },
         promotedTo: {
           type: 'object',

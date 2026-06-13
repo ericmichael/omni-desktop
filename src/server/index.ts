@@ -234,6 +234,7 @@ const main = async () => {
     getProcessManager,
     ensureTenantReady,
     getTenantRepo,
+    getMcpContext,
     teamsEnabled,
     ensureUserBootstrapped,
     resolveActiveTeam,
@@ -256,7 +257,11 @@ const main = async () => {
   // HTTP MCP route — remote agent sandboxes reach their tenant's project data
   // here (authenticated by the signed runtime token). Local Electron/stdio
   // doesn't use it; it's harmless when no sandbox calls it.
-  registerMcpHttpRoute(fastify, { runtimeTokenSecret, getTenantRepo });
+  registerMcpHttpRoute(fastify, {
+    runtimeTokenSecret,
+    getTenantRepo,
+    getContext: (claims) => getMcpContext(claims.tenantId, claims.principalId ?? claims.tenantId),
+  });
   console.log(`[mcp-http] omni-projects MCP available at ${MCP_PROJECTS_PATH}`);
 
   // Local voice (Option A) — self-hosted only. STT/TTS run on this host, so it

@@ -228,7 +228,6 @@ return 0;
         id: p.id,
         label: p.label,
         slug: p.slug,
-        workspace_dir: null,
         is_personal: p.isPersonal ? 1 : 0,
         auto_dispatch: p.autoDispatch ? 1 : 0,
         sources: JSON.stringify(_legacyToSources(p)),

@@ -35,7 +35,16 @@ beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'omni-mcp-'));
   db = openDatabase(join(dir, 'projects.db'));
   repo = new SqliteProjectsRepo(new ProjectsRepo(db));
-  const server = createServer(repo);
+  const server = createServer(repo, {
+    listSandboxProfiles: async () => [
+      { name: 'host', label: 'This computer (no sandbox)', available: true, source: 'builtin' },
+      { name: 'devbox', label: 'Devbox (Docker)', available: true, source: 'builtin' },
+    ],
+    listTeamMembers: async () => [
+      { user_id: 'principal-1', display_name: 'Ada Lovelace', email: 'ada@example.com', role: 'member' },
+    ],
+    getCurrentPrincipal: async () => 'principal-1',
+  });
 
   const [clientT, serverT] = InMemoryTransport.createLinkedPair();
   client = new Client({ name: 'test', version: '0.0.0' });
@@ -52,16 +61,49 @@ describe('omni-projects MCP tools (async IProjectsRepo, SQLite)', () => {
   let projectId: string;
   let ticketId: string;
 
+  it('lists valid option values for sandbox profiles and assignees', async () => {
+    const profiles = await call('list_sandbox_profiles');
+    expect(profiles.profiles.map((profile: any) => profile.name)).toContain('devbox');
+
+    const members = await call('list_team_members');
+    expect(members.members).toEqual([
+      expect.objectContaining({ user_id: 'principal-1', display_name: 'Ada Lovelace' }),
+    ]);
+
+    const principal = await call('get_current_principal');
+    expect(principal.principal).toBe('principal-1');
+  });
+
   it('creates and lists a project with seeded pipeline + root page', async () => {
-    const created = await call('create_project', { label: 'Test Project' });
+    const sources = [
+      { kind: 'local', mountName: 'local-app', workspaceDir: '/tmp/local-app', gitDetected: true },
+      { kind: 'git-remote', mountName: 'remote-app', repoUrl: 'https://github.com/acme/remote-app.git', defaultBranch: 'main' },
+    ];
+    const created = await call('create_project', {
+      label: 'Test Project',
+      sources,
+      auto_dispatch: true,
+      sandbox_profile: 'devbox',
+    });
     expect(created._isError).toBe(false);
     expect(created.id).toMatch(/^proj_/);
+    expect(created.sources).toEqual([
+      expect.objectContaining(sources[0]),
+      expect.objectContaining(sources[1]),
+    ]);
+    expect(created.sources[0].id).toBeTruthy();
+    expect(created.auto_dispatch).toBe(true);
+    expect(created.sandbox_profile).toBe('devbox');
     expect(created.pipeline.length).toBeGreaterThan(0);
     expect(created.root_page_id).toMatch(/^pg_/);
     projectId = created.id;
 
     const listed = await call('list_projects');
-    expect(listed.projects.find((p: any) => p.id === projectId)?.label).toBe('Test Project');
+    const listedProject = listed.projects.find((p: any) => p.id === projectId);
+    expect(listedProject?.label).toBe('Test Project');
+    expect(listedProject?.sources).toEqual(created.sources);
+    expect(listedProject?.auto_dispatch).toBe(true);
+    expect(listedProject?.sandbox_profile).toBe('devbox');
 
     // Root page content was written to the DB (not the filesystem).
     const page = await call('read_page', { page_id: created.root_page_id });
@@ -74,17 +116,64 @@ describe('omni-projects MCP tools (async IProjectsRepo, SQLite)', () => {
     expect(dup.error).toMatch(/already exists/);
   });
 
+  it('updates project sources and rejects duplicates', async () => {
+    const duplicateSources = [
+      { kind: 'git-remote', mountName: 'repo', repoUrl: 'https://github.com/acme/repo.git' },
+      { kind: 'git-remote', mountName: 'repo-copy', repoUrl: 'git@github.com:acme/repo.git' },
+    ];
+    const duplicate = await call('update_project', { project_id: projectId, sources: duplicateSources });
+    expect(duplicate._isError).toBe(true);
+    expect(duplicate.error).toMatch(/repository/);
+
+    const sources = [{ kind: 'local', mountName: 'replacement', workspaceDir: '/tmp/replacement' }];
+    const updated = await call('update_project', {
+      project_id: projectId,
+      sources,
+      auto_dispatch: false,
+      sandbox_profile: '',
+    });
+    expect(updated.ok).toBe(true);
+
+    const listed = await call('list_projects');
+    expect(listed.projects.find((p: any) => p.id === projectId)?.sources).toEqual([
+      expect.objectContaining(sources[0]),
+    ]);
+    expect(listed.projects.find((p: any) => p.id === projectId)?.auto_dispatch).toBe(false);
+    expect(listed.projects.find((p: any) => p.id === projectId)?.sandbox_profile).toBeNull();
+  });
+
+  it('updates pipeline definitions', async () => {
+    const updated = await call('update_pipeline', {
+      project_id: projectId,
+      columns: [
+        { id: 'backlog', label: 'Backlog', workflow: { purpose: 'Collect work' } },
+        { id: 'implementation', label: 'Implementation', maxConcurrent: 2, workflow: { definitionOfDone: ['changed'] } },
+        { id: 'review', label: 'Review', gate: true },
+        { id: 'completed', label: 'Completed' },
+      ],
+    });
+    expect(updated.ok).toBe(true);
+
+    const pipeline = await call('get_pipeline', { project_id: projectId });
+    const implementation = pipeline.columns.find((column: any) => column.label === 'Implementation');
+    expect(implementation.maxConcurrent).toBe(2);
+    expect(implementation.workflow.definitionOfDone).toEqual(['changed']);
+  });
+
   it('creates, moves, and lists a ticket', async () => {
     const pipeline = await call('get_pipeline', { project_id: projectId });
-    const spec = pipeline.columns.find((column: any) => column.label === 'Spec');
-    expect(spec.workflow).toMatchObject({
-      purpose: expect.stringContaining('decision-complete'),
-      definitionOfDone: expect.arrayContaining([expect.stringContaining('plan')]),
-      recommendedSkills: expect.arrayContaining(['software-planning']),
-    });
+    const implementation = pipeline.columns.find((column: any) => column.label === 'Implementation');
+    expect(implementation.workflow.definitionOfDone).toEqual(['changed']);
     const lastCol = pipeline.columns[pipeline.columns.length - 1].label;
 
-    const created = await call('create_ticket', { project_id: projectId, title: 'Do the thing', priority: 'high' });
+    const created = await call('create_ticket', {
+      project_id: projectId,
+      title: 'Do the thing',
+      priority: 'high',
+      branch: 'main',
+      use_worktree: true,
+      assignee: 'principal-1',
+    });
     expect(created._isError).toBe(false);
     ticketId = created.id;
 
@@ -122,12 +211,16 @@ describe('omni-projects MCP tools (async IProjectsRepo, SQLite)', () => {
     const upd = await call('update_ticket', {
       ticket_id: ticketId,
       description: 'now described',
+      use_worktree: false,
+      assignee: '',
       add_blocked_by: ['tkt_other'],
     });
     expect(upd.ok).toBe(true);
 
     const got = await call('get_ticket', { ticket_id: ticketId });
     expect(got.description).toBe('now described');
+    expect(got.use_worktree).toBe(false);
+    expect(got.assignee).toBeNull();
     expect(got.blocked_by).toEqual(['tkt_other']);
   });
 

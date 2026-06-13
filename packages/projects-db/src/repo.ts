@@ -59,7 +59,7 @@ export class ProjectsRepo {
 
   upsertProject(row: ProjectRow): void {
     this.stmts.upsertProject.run(
-      row.id, row.label, row.slug, row.workspace_dir,
+      row.id, row.label, row.slug,
       row.is_personal, row.auto_dispatch, row.sources, row.sandbox_profile,
       row.due_date, row.pinned_at,
       row.created_at, row.updated_at,
@@ -116,7 +116,7 @@ export class ProjectsRepo {
       }
       for (const row of rows) {
         this.stmts.upsertProject.run(
-          row.id, row.label, row.slug, row.workspace_dir,
+          row.id, row.label, row.slug,
           row.is_personal, row.auto_dispatch, row.sources, row.sandbox_profile,
           row.due_date, row.pinned_at,
           row.created_at, row.updated_at,
@@ -621,10 +621,10 @@ function prepareStatements(db: DatabaseSync) {
     getProject: db.prepare('SELECT * FROM projects WHERE id = ?'),
     getProjectBySlug: db.prepare('SELECT * FROM projects WHERE slug = ?'),
     upsertProject: db.prepare(`
-      INSERT INTO projects (id, label, slug, workspace_dir, is_personal, auto_dispatch, sources, sandbox_profile, due_date, pinned_at, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO projects (id, label, slug, is_personal, auto_dispatch, sources, sandbox_profile, due_date, pinned_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
-        label = excluded.label, slug = excluded.slug, workspace_dir = excluded.workspace_dir,
+        label = excluded.label, slug = excluded.slug,
         is_personal = excluded.is_personal, auto_dispatch = excluded.auto_dispatch,
         sources = excluded.sources, sandbox_profile = excluded.sandbox_profile,
         due_date = excluded.due_date, pinned_at = excluded.pinned_at,

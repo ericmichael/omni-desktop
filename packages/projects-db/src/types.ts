@@ -4,7 +4,6 @@ export type ProjectRow = {
   id: string;
   label: string;
   slug: string;
-  workspace_dir: string | null;
   is_personal: number;
   auto_dispatch: number;
   sources: string;             // JSON array of ProjectSource; defaults to '[]'
@@ -57,9 +56,9 @@ export type TicketRow = {
   supervisor_task_id: string | null;
   token_usage: string | null;           // JSON
   runs: string;                          // JSON array
-  // Launcher-specific (v6) — PR review state
-  pr_review: string | null;             // JSON { status, at } or null
-  pr_merged_at: string | null;          // epoch ms, stringified
+  // Launcher-specific PR state
+  pr_review: string | null;             // JSON array of PullRequestLink
+  pr_merged_at: string | null;          // JSON map source id -> epoch ms
   // Teams (SQLite v9 / PG v6) — assigned member's principal id, or null
   assignee: string | null;
   created_at: string;

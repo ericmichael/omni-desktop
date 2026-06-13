@@ -24,7 +24,7 @@
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { FastifyInstance } from 'fastify';
 import type { IProjectsRepo } from 'omni-projects-db';
-import { createServer } from 'omni-projects-mcp';
+import { createServer, type ProjectsMcpContext } from 'omni-projects-mcp';
 
 import { verifyRuntimeToken } from '@/server/runtime-token';
 
@@ -33,6 +33,8 @@ export interface McpHttpDeps {
   runtimeTokenSecret: string;
   /** Resolve a tenant-scoped repo from the verified token's tenant. */
   getTenantRepo: (tenantId: string) => IProjectsRepo;
+  /** Resolve option-discovery providers from the verified token claims. */
+  getContext?: (claims: { tenantId: string; principalId?: string }) => ProjectsMcpContext;
 }
 
 export const MCP_PROJECTS_PATH = '/mcp/projects';
@@ -70,7 +72,7 @@ export function registerMcpHttpRoute(fastify: FastifyInstance, deps: McpHttpDeps
     }
 
     const repo = deps.getTenantRepo(claims.tenantId);
-    const server = createServer(repo);
+    const server = createServer(repo, deps.getContext?.(claims) ?? {});
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 
     // Hand the raw Node req/res to the transport; Fastify must not also try to
