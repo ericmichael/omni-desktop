@@ -17,6 +17,9 @@ const ctx = (codeTabs: CodeTab[] = []) => ({
   resolveTabLabel: (t: CodeTab) => `label:${t.id}`,
   navigate: vi.fn(),
   activateColumn: vi.fn(),
+  goToInbox: vi.fn(),
+  addInboxItem: vi.fn(),
+  createProject: vi.fn(),
   newSession: vi.fn(),
   setDeckLayout: vi.fn(),
 });
@@ -39,13 +42,27 @@ describe('buildCommands', () => {
     const commands = buildCommands(c);
     const ids = commands.map((cmd) => cmd.id);
     expect(ids).toEqual(
-      expect.arrayContaining(['nav-chat', 'nav-spaces', 'nav-projects', 'nav-settings', 'new-session', 'toggle-layout', 'column-a'])
+      expect.arrayContaining([
+        'nav-chat',
+        'nav-spaces',
+        'nav-projects',
+        'nav-inbox',
+        'nav-settings',
+        'add-inbox-item',
+        'create-project',
+        'new-session',
+        'toggle-layout',
+        'column-a',
+      ])
     );
     expect(ids).not.toContain('column-chat');
   });
 
   it('labels the layout toggle by the current mode and numbers column hints', () => {
-    const c = { ...ctx([tab({ id: 'a', projectId: 'p1' }), tab({ id: 'b', projectId: 'p2' })]), codeLayoutMode: 'focus' as const };
+    const c = {
+      ...ctx([tab({ id: 'a', projectId: 'p1' }), tab({ id: 'b', projectId: 'p2' })]),
+      codeLayoutMode: 'focus' as const,
+    };
     const commands = buildCommands(c);
     expect(commands.find((cmd) => cmd.id === 'toggle-layout')!.label).toContain('Tile');
     expect(commands.find((cmd) => cmd.id === 'column-b')!.hint).toBe('⌘2');
@@ -56,6 +73,12 @@ describe('buildCommands', () => {
     const commands = buildCommands(c);
     commands.find((cmd) => cmd.id === 'nav-projects')!.run();
     expect(c.navigate).toHaveBeenCalledWith('projects');
+    commands.find((cmd) => cmd.id === 'nav-inbox')!.run();
+    expect(c.goToInbox).toHaveBeenCalled();
+    commands.find((cmd) => cmd.id === 'add-inbox-item')!.run();
+    expect(c.addInboxItem).toHaveBeenCalled();
+    commands.find((cmd) => cmd.id === 'create-project')!.run();
+    expect(c.createProject).toHaveBeenCalled();
     commands.find((cmd) => cmd.id === 'column-a')!.run();
     expect(c.activateColumn).toHaveBeenCalledWith('a');
   });

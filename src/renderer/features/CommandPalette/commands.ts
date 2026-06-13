@@ -22,7 +22,10 @@ export type PaletteContext = {
   /** Resolve a session tab's display label (project name etc.). */
   resolveTabLabel: (tab: CodeTab) => string;
   navigate: (mode: LayoutMode) => void;
+  goToInbox: () => void;
   activateColumn: (tabId: string) => void;
+  addInboxItem: () => void;
+  createProject: () => void;
   newSession: () => void;
   setDeckLayout: (mode: CodeLayoutMode) => void;
 };
@@ -35,8 +38,21 @@ export function buildCommands(ctx: PaletteContext): PaletteCommand[] {
   const commands: PaletteCommand[] = [
     { id: 'nav-chat', label: 'Go to Chat', keywords: 'conversation talk', run: () => ctx.navigate('chat') },
     { id: 'nav-spaces', label: 'Go to Spaces', keywords: 'deck columns code', run: () => ctx.navigate('spaces') },
-    { id: 'nav-projects', label: 'Go to Projects', keywords: 'tickets board home inbox', run: () => ctx.navigate('projects') },
-    { id: 'nav-settings', label: 'Go to Settings', keywords: 'preferences models mcp git', run: () => ctx.navigate('settings') },
+    {
+      id: 'nav-projects',
+      label: 'Go to Projects',
+      keywords: 'tickets board home inbox',
+      run: () => ctx.navigate('projects'),
+    },
+    { id: 'nav-inbox', label: 'Go to Inbox', keywords: 'capture ideas todo triage', run: ctx.goToInbox },
+    {
+      id: 'nav-settings',
+      label: 'Go to Settings',
+      keywords: 'preferences models mcp git',
+      run: () => ctx.navigate('settings'),
+    },
+    { id: 'add-inbox-item', label: 'Add inbox item', keywords: 'capture idea todo quick', run: ctx.addInboxItem },
+    { id: 'create-project', label: 'Create project', keywords: 'new workspace initiative', run: ctx.createProject },
     { id: 'new-session', label: 'New session', keywords: 'create column agent', run: ctx.newSession },
     {
       id: 'toggle-layout',
@@ -65,7 +81,5 @@ export function filterCommands(commands: PaletteCommand[], query: string): Palet
   if (!q) {
     return commands;
   }
-  return commands.filter(
-    (c) => c.label.toLowerCase().includes(q) || (c.keywords ?? '').toLowerCase().includes(q)
-  );
+  return commands.filter((c) => c.label.toLowerCase().includes(q) || (c.keywords ?? '').toLowerCase().includes(q));
 }
