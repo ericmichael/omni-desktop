@@ -1,5 +1,10 @@
 import { emitter } from '@/renderer/services/ipc';
-import type { ScheduledTask, ScheduledTaskAllowedMcpTool, ScheduledTaskInput, ScheduledTaskUpdate } from '@/shared/types';
+import type {
+  ScheduledTask,
+  ScheduledTaskAllowedMcpTool,
+  ScheduledTaskInput,
+  ScheduledTaskUpdate,
+} from '@/shared/types';
 
 export const scheduledTaskApi = {
   list: (): Promise<ScheduledTask[]> => emitter.invoke('scheduled-task:list'),

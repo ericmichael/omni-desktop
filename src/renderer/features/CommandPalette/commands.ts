@@ -51,7 +51,12 @@ export function buildCommands(ctx: PaletteContext): PaletteCommand[] {
       keywords: 'preferences models mcp git',
       run: () => ctx.navigate('settings'),
     },
-    { id: 'nav-routines', label: 'Go to Routines', keywords: 'scheduled tasks automation recurring', run: () => ctx.navigate('routines') },
+    {
+      id: 'nav-routines',
+      label: 'Go to Routines',
+      keywords: 'scheduled tasks automation recurring',
+      run: () => ctx.navigate('routines'),
+    },
     { id: 'add-inbox-item', label: 'Add inbox item', keywords: 'capture idea todo quick', run: ctx.addInboxItem },
     { id: 'create-project', label: 'Create project', keywords: 'new workspace initiative', run: ctx.createProject },
     { id: 'new-session', label: 'New session', keywords: 'create column agent', run: ctx.newSession },

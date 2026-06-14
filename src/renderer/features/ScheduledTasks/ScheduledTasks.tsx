@@ -517,8 +517,8 @@ const RoutineForm = ({
         </Select>
       </Field>
       <div className={styles.helperText}>
-        Uses the agent's built-in safe tools. Function tools can be always allowed by tool name; MCP tools can be always
-        allowed only for a specific server and tool pair.
+        Uses the agent&apos;s built-in safe tools. Function tools can be always allowed by tool name; MCP tools can be
+        always allowed only for a specific server and tool pair.
       </div>
       <Field label="Schedule">
         <Select

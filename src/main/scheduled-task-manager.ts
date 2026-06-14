@@ -64,7 +64,10 @@ type ManagerDeps = {
   now?: () => number;
 };
 
-type NotifiableRunStatus = Extract<ScheduledTaskRun['status'], 'running' | 'waiting_for_approval' | 'completed' | 'failed'>;
+type NotifiableRunStatus = Extract<
+  ScheduledTaskRun['status'],
+  'running' | 'waiting_for_approval' | 'completed' | 'failed'
+>;
 
 export class ScheduledTaskManager {
   private store: ScheduledTaskStore;
@@ -770,7 +773,8 @@ function parseRunEventIdentity(params: unknown): RunEndResult {
 function parseApprovalRequest(method: string, params: unknown): ApprovalRequest {
   const data = isRecord(params) ? params : {};
   const toolName = typeof data.tool_name === 'string' && data.tool_name.trim() ? data.tool_name.trim() : undefined;
-  const serverLabel = typeof data.server_label === 'string' && data.server_label.trim() ? data.server_label.trim() : undefined;
+  const serverLabel =
+    typeof data.server_label === 'string' && data.server_label.trim() ? data.server_label.trim() : undefined;
   return {
     kind: method === 'mcp_approval_requested' ? 'mcp' : 'function',
     ...(toolName ? { toolName } : {}),
@@ -796,7 +800,11 @@ function runEndStatus(reason: string | undefined): 'completed' | 'failed' {
   return reason && ['failed', 'error', 'cancelled', 'canceled'].includes(reason) ? 'failed' : 'completed';
 }
 
-function buildRunToast(taskName: string, status: NotifiableRunStatus, reason?: string): IpcRendererEvents['toast:show'][0] {
+function buildRunToast(
+  taskName: string,
+  status: NotifiableRunStatus,
+  reason?: string
+): IpcRendererEvents['toast:show'][0] {
   if (status === 'waiting_for_approval') {
     return {
       level: 'warning',
