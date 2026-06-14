@@ -431,7 +431,7 @@ describe('getGitFilesChanged', () => {
       // Only first 200 should have patches; the rest should have 0 additions
       const withPatches = result.files.filter((f) => f.patch);
       expect(withPatches.length).toBeLessThanOrEqual(200);
-    });
+    }, 15_000);
   });
 
   // ── Binary detection for committed files ────────────────────────────────

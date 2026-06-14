@@ -21,11 +21,12 @@ const MAX_TEXT_PREVIEW_BYTES = 512_000;
  * on any attempt to escape via `..` / absolute paths / symlink traversal.
  */
 export function resolveArtifactPath(rootDir: string, relativePath: string): string {
-  const fullPath = path.resolve(rootDir, relativePath);
+  const resolvedRoot = path.resolve(rootDir);
+  const fullPath = path.resolve(resolvedRoot, relativePath);
   // Ensure path separator boundary — without it, /tmp/artifacts-evil would
   // pass a startsWith check against /tmp/artifacts.
-  const normalizedRoot = rootDir.endsWith(path.sep) ? rootDir : rootDir + path.sep;
-  if (!fullPath.startsWith(normalizedRoot) && fullPath !== rootDir) {
+  const normalizedRoot = resolvedRoot.endsWith(path.sep) ? resolvedRoot : resolvedRoot + path.sep;
+  if (!fullPath.startsWith(normalizedRoot) && fullPath !== resolvedRoot) {
     throw new Error('Path traversal detected');
   }
   return fullPath;

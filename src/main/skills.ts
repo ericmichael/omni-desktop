@@ -1,7 +1,7 @@
 import extract from 'extract-zip';
 import { mkdir, mkdtemp, readdir, readFile, rename, rm } from 'fs/promises';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { basename, join } from 'path';
 import { parse as parseYaml } from 'yaml';
 
 import type { SkillEntry, SkillSource, StoreData } from '@/shared/types';
@@ -170,7 +170,7 @@ export async function installSkillFromFile(
   }
 
   // Persist source metadata
-  const filename = filePath.split('/').pop() ?? filePath;
+  const filename = basename(filePath);
   const source: SkillSource = { kind: 'file', filename };
   const sources = store.get('skillSources') ?? {};
   store.set('skillSources', { ...sources, [meta.name]: source });
