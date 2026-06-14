@@ -570,6 +570,7 @@ export const wireGlobalHandlers = async (arg: {
     const scheduledTaskManager = new ScheduledTaskManager({
       store: settings as any,
       processManager,
+      getProjects: () => getStoreSnapshot(teamId, principalId).projects,
       sendToWindow: (channel, ...args) => {
         if (channel === 'store:changed') {
           tenantSend('store:changed', getStoreSnapshot(teamId, principalId));

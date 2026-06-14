@@ -8,6 +8,8 @@ test.describe('routines', () => {
     await openRoutines(app.page);
 
     await test.step('create routine', async () => {
+      await expect(app.page.getByText('Routine index')).toBeVisible();
+      await expect(app.page.getByText('Create routine').first()).toBeVisible();
       await app.page.getByRole('textbox', { name: 'Name' }).fill('E2E morning review');
       await app.page.getByRole('textbox', { name: 'Instructions' }).fill('Summarize the workspace status.');
       await expect(app.page.getByRole('combobox', { name: 'Project' })).toBeVisible();
@@ -20,8 +22,8 @@ test.describe('routines', () => {
       await app.page.getByRole('combobox', { name: 'Project' }).selectOption({ label: 'Seeded Project' });
       await expect(app.page.getByRole('button', { name: /This computer/ })).toBeVisible();
       await app.page.getByRole('button', { name: 'Create routine' }).click();
-      await expect(app.page.getByText('E2E morning review')).toBeVisible();
-      await expect(app.page.getByText(/Daily at 09:00/)).toBeVisible();
+      await expect(app.page.getByText('E2E morning review').first()).toBeVisible();
+      await expect(app.page.getByText(/Daily at 09:00/).first()).toBeVisible();
       await expect(app.page.getByLabel('E2E morning review always allowed function tools')).toBeVisible();
       await expect(app.page.getByText('Always allowed function tools')).toBeVisible();
       await expect(app.page.getByText('No function tools are always allowed for this routine.')).toBeVisible();
@@ -52,17 +54,16 @@ test.describe('routines', () => {
       await editPanel.getByLabel('Time').fill('10:30');
       await editPanel.getByRole('combobox', { name: 'Day' }).selectOption('2');
       await editPanel.getByRole('button', { name: 'Save changes' }).click();
-      await expect(app.page.getByText('E2E edited review')).toBeVisible();
-      await expect(app.page.getByText(/Weekly on Tuesday at 10:30/)).toBeVisible();
+      await expect(app.page.getByText('E2E edited review').first()).toBeVisible();
+      await expect(app.page.getByText(/Weekly on Tuesday at 10:30/).first()).toBeVisible();
       await expect(editPanel).toHaveCount(0);
     });
 
     await test.step('pause and resume routine', async () => {
-      const routineCard = app.page.getByRole('group').filter({ hasText: 'E2E edited review' });
-      await routineCard.getByRole('switch', { name: 'Active' }).click();
-      await expect(routineCard.getByRole('switch', { name: 'Paused' })).toBeVisible();
-      await routineCard.getByRole('switch', { name: 'Paused' }).click();
-      await expect(routineCard.getByRole('switch', { name: 'Active' })).toBeVisible();
+      await app.page.getByRole('switch', { name: 'Active' }).click();
+      await expect(app.page.getByRole('switch', { name: 'Paused' })).toBeVisible();
+      await app.page.getByRole('switch', { name: 'Paused' }).click();
+      await expect(app.page.getByRole('switch', { name: 'Active' })).toBeVisible();
     });
 
     await test.step('run manually records launch attempt', async () => {
@@ -79,6 +80,9 @@ test.describe('routines', () => {
     await test.step('open run session for review', async () => {
       await app.page.getByRole('button', { name: 'Open session' }).click();
       await expect(app.page.getByRole('tab', { name: 'Spaces' })).toHaveAttribute('aria-selected', 'true');
+      await expect(app.page.getByText('Routine', { exact: true })).toBeVisible();
+      await expect(app.page.getByText('E2E edited review').first()).toBeVisible();
+      await expect(app.page.getByText('Weekly on Tuesday at 10:30').first()).toBeVisible();
       await openRoutines(app.page);
     });
 

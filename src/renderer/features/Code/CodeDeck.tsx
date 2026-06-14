@@ -22,6 +22,7 @@ import {
   Apps20Regular,
   ArrowMaximize20Regular,
   ArrowMinimize20Regular,
+  ArrowSync20Regular,
   BranchFork20Regular,
   Chat20Regular,
   Globe20Regular,
@@ -208,6 +209,55 @@ const useStyles = makeStyles({
     paddingTop: '2px',
     paddingBottom: tokens.spacingVerticalXS,
     backgroundColor: 'transparent',
+  },
+  routineBanner: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalS,
+    rowGap: '2px',
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: '2px',
+    paddingBottom: tokens.spacingVerticalXS,
+    backgroundColor: 'color-mix(in srgb, #7c3aed 8%, transparent)',
+    borderTop: '1px solid color-mix(in srgb, #7c3aed 22%, transparent)',
+    borderBottom: '1px solid color-mix(in srgb, #7c3aed 14%, transparent)',
+  },
+  glassRoutineBanner: {
+    backgroundColor: 'color-mix(in srgb, #7c3aed 14%, transparent)',
+    borderTop: '1px solid color-mix(in srgb, #c4b5fd 28%, transparent)',
+    borderBottom: '1px solid color-mix(in srgb, #c4b5fd 18%, transparent)',
+  },
+  routinePill: {
+    alignItems: 'center',
+    backgroundColor: 'color-mix(in srgb, #7c3aed 18%, transparent)',
+    border: '1px solid color-mix(in srgb, #7c3aed 38%, transparent)',
+    borderRadius: tokens.borderRadiusCircular,
+    color: '#6d28d9',
+    display: 'inline-flex',
+    flexShrink: 0,
+    fontSize: tokens.fontSizeBase100,
+    fontWeight: tokens.fontWeightSemibold,
+    gap: '4px',
+    padding: '1px 8px',
+  },
+  routineTitle: {
+    color: tokens.colorNeutralForeground2,
+    flex: '1 1 160px',
+    fontSize: tokens.fontSizeBase200,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  routineSchedule: {
+    color: tokens.colorNeutralForeground3,
+    flexShrink: 0,
+    fontSize: tokens.fontSizeBase100,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   ticketTitle: {
     flex: '1 1 100%',
@@ -938,6 +988,8 @@ const startedLabel = (tab: CodeTab): string | null => {
   return `Started ${started.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${started.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
 };
 
+const shortRoutineSchedule = (schedule: string): string => schedule.replace(/ · next .+$/, '');
+
 /**
  * Glanceable "now doing X" under a column header: sandbox boot phase while
  * launching, then the live run state (tool line / waiting-for-approval)
@@ -1142,6 +1194,8 @@ const CodeSessionHeader = memo(
     subLabel,
     statusTabId,
     ticketTitle,
+    routineName,
+    routineSchedule,
     ticketColumnBadge,
     ticketMetaBadge,
     ticketActions,
@@ -1160,6 +1214,8 @@ const CodeSessionHeader = memo(
     /** When set, a live ColumnStatusLine for this tab renders under the header. */
     statusTabId?: CodeTabId;
     ticketTitle?: string | null;
+    routineName?: string | null;
+    routineSchedule?: string | null;
     ticketColumnBadge?: React.ReactNode;
     ticketMetaBadge?: React.ReactNode;
     ticketActions?: React.ReactNode;
@@ -1255,6 +1311,22 @@ const CodeSessionHeader = memo(
             {ticketActions && <div className={styles.ticketActions}>{ticketActions}</div>}
           </div>
         )}
+        {!ticketTitle && routineName && (
+          <div className={mergeClasses(styles.routineBanner, isGlass && styles.glassRoutineBanner)}>
+            <span className={styles.routinePill}>
+              <ArrowSync20Regular style={{ width: 12, height: 12 }} />
+              Routine
+            </span>
+            <span className={styles.routineTitle} title={routineName}>
+              {routineName}
+            </span>
+            {routineSchedule && (
+              <span className={styles.routineSchedule} title={routineSchedule}>
+                {shortRoutineSchedule(routineSchedule)}
+              </span>
+            )}
+          </div>
+        )}
         {statusTabId && <ColumnStatusLine tabId={statusTabId} />}
       </>
     );
@@ -1267,6 +1339,8 @@ const DeckColumn = memo(
     tab,
     label,
     ticketTitle,
+    routineName,
+    routineSchedule,
     ticketColumnBadge,
     ticketMetaBadge,
     ticketActions,
@@ -1282,6 +1356,8 @@ const DeckColumn = memo(
     tab: CodeTab;
     label: string;
     ticketTitle?: string | null;
+    routineName?: string | null;
+    routineSchedule?: string | null;
     ticketColumnBadge?: React.ReactNode;
     ticketMetaBadge?: React.ReactNode;
     ticketActions?: React.ReactNode;
@@ -1332,9 +1408,11 @@ const DeckColumn = memo(
           <ColumnAura tabId={tab.id} />
           <CodeSessionHeader
             label={label}
-            subLabel={ticketTitle ? null : startedLabel(tab)}
+            subLabel={ticketTitle || routineName ? null : startedLabel(tab)}
             statusTabId={tab.id}
             ticketTitle={ticketTitle}
+            routineName={routineName}
+            routineSchedule={routineSchedule}
             ticketColumnBadge={ticketColumnBadge}
             ticketMetaBadge={ticketMetaBadge}
             ticketActions={ticketActions}
@@ -1962,6 +2040,8 @@ const CodeSessionPane = memo(
     tab,
     label,
     ticketTitle,
+    routineName,
+    routineSchedule,
     ticketColumnBadge,
     ticketMetaBadge,
     ticketActions,
@@ -1974,6 +2054,8 @@ const CodeSessionPane = memo(
     tab: CodeTab;
     label: string;
     ticketTitle?: string | null;
+    routineName?: string | null;
+    routineSchedule?: string | null;
     ticketColumnBadge?: React.ReactNode;
     ticketMetaBadge?: React.ReactNode;
     ticketActions?: React.ReactNode;
@@ -2007,9 +2089,11 @@ const CodeSessionPane = memo(
         <ColumnAura tabId={tab.id} />
         <CodeSessionHeader
           label={label}
-          subLabel={ticketTitle ? null : startedLabel(tab)}
+          subLabel={ticketTitle || routineName ? null : startedLabel(tab)}
           statusTabId={tab.id}
           ticketTitle={ticketTitle}
+          routineName={routineName}
+          routineSchedule={routineSchedule}
           ticketColumnBadge={ticketColumnBadge}
           ticketMetaBadge={ticketMetaBadge}
           ticketActions={ticketActions}
@@ -2423,6 +2507,8 @@ export const CodeDeck = memo(() => {
   );
 
   const resolveTicketTitle = useCallback((tab: CodeTab) => tab.ticketTitle ?? null, []);
+  const resolveRoutineName = useCallback((tab: CodeTab) => tab.routineName ?? null, []);
+  const resolveRoutineSchedule = useCallback((tab: CodeTab) => tab.routineSchedule ?? null, []);
 
   const handleLayoutMode = useCallback((mode: CodeLayoutMode) => {
     codeApi.setLayoutMode(mode);
@@ -2761,6 +2847,8 @@ export const CodeDeck = memo(() => {
                               tab={tab}
                               label={resolveLabel(tab)}
                               ticketTitle={resolveTicketTitle(tab)}
+                              routineName={resolveRoutineName(tab)}
+                              routineSchedule={resolveRoutineSchedule(tab)}
                               ticketColumnBadge={renderTicketColumnBadge(tab)}
                               ticketMetaBadge={renderTicketMetaBadge(tab)}
                               ticketActions={renderTicketBannerActions(tab)}
@@ -2831,7 +2919,7 @@ export const CodeDeck = memo(() => {
                         key={tab.id}
                         tab={tab}
                         label={resolveLabel(tab)}
-                        subLabel={resolveTicketTitle(tab)}
+                        subLabel={resolveTicketTitle(tab) ?? resolveRoutineName(tab)}
                         isActive={tab.id === activeTab?.id}
                         onSelect={handleSelect}
                         onClose={handleClose}
@@ -2916,6 +3004,8 @@ export const CodeDeck = memo(() => {
                         tab={tab}
                         label={resolveLabel(tab)}
                         ticketTitle={resolveTicketTitle(tab)}
+                        routineName={resolveRoutineName(tab)}
+                        routineSchedule={resolveRoutineSchedule(tab)}
                         ticketColumnBadge={renderTicketColumnBadge(tab)}
                         ticketMetaBadge={renderTicketMetaBadge(tab)}
                         ticketActions={renderTicketBannerActions(tab)}

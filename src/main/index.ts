@@ -296,6 +296,7 @@ const [processManager, cleanupProcessManager] = createProcessManager({
 const scheduledTaskManager = new ScheduledTaskManager({
   store,
   processManager,
+  getProjects: () => repo.listProjects().map(rowToProject),
   sendToWindow: main.sendToWindow,
 });
 const scheduledTaskChannels = registerScheduledTaskHandlers(main.ipc, () => scheduledTaskManager);
