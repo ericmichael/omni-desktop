@@ -292,6 +292,7 @@ export const CodeTabContent = memo(
     // Reserved chat record (CHAT_TAB_ID): projectless full-screen surface with
     // a per-conversation scratch workspace instead of a project workspace.
     const chatMode = isChatTab(tab);
+    const routineMode = Boolean(tab.routineId);
     const project = useMemo(
       () => store.projects.find((p) => p.id === tab.projectId) ?? null,
       [store.projects, tab.projectId]
@@ -513,8 +514,9 @@ export const CodeTabContent = memo(
       [baseSessionArgs, localVoice, personaInstructions]
     );
 
-    // No project selected — show project picker (chat is projectless by design)
-    if (!chatMode && !tab.projectId) {
+    // No project selected — show project picker. Chat and Routines can be
+    // projectless when they already carry a session workspace.
+    if (!chatMode && !routineMode && !tab.projectId) {
       return (
         <div className={mergeClasses(styles.fullSize, !isVisible && styles.hidden)}>
           <CodeEmptyState tabId={tab.id} embedded />
@@ -587,10 +589,10 @@ export const CodeTabContent = memo(
           <CodeErrorView tabId={tab.id} retry={retry} />
         ) : (
           /* idle / checking / installing / ready / starting / connecting —
-             at this point we already have tab.projectId (we passed the
-             early return above), so auto-launch will drive the machine to
-             ``running`` shortly. The in-composer sandbox picker handles
-             profile changes; no pre-launch picker needed here. */
+             at this point we already have a project or Routine session
+             workspace (we passed the early return above), so auto-launch will
+             drive the machine to ``running`` shortly. The in-composer sandbox
+             picker handles profile changes; no pre-launch picker needed here. */
           <div className={styles.flexCenter}>
             <motion.div
               className={styles.spinnerPill}

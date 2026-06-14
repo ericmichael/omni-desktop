@@ -83,6 +83,7 @@ test.describe('routines', () => {
       await expect(app.page.getByText('Routine', { exact: true })).toBeVisible();
       await expect(app.page.getByText('E2E edited review').first()).toBeVisible();
       await expect(app.page.getByText('Weekly on Tuesday at 10:30').first()).toBeVisible();
+      await expect(app.page.getByText('Select a project')).toHaveCount(0);
       await openRoutines(app.page);
     });
 
