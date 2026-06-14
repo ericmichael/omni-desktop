@@ -36,10 +36,7 @@ export type CleanupOptions = {
   now?: Date;
 };
 
-export function selectVictims(
-  groups: GroupSummary[],
-  opts: CleanupOptions,
-): CleanupResult {
+export function selectVictims(groups: GroupSummary[], opts: CleanupOptions): CleanupResult {
   const now = (opts.now ?? new Date()).getTime();
   const cutoff = now - opts.maxAgeHours * 3600 * 1000;
   const deleted: string[] = [];

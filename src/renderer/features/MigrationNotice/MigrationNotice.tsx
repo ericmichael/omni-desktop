@@ -11,13 +11,15 @@
  *     Idempotent + scoped strictly to paths the migration recorded.
  *   - Dismiss: clears the notice without touching anything on disk.
  */
-import { Button, MessageBar, MessageBarActions, MessageBarBody, MessageBarTitle, tokens } from '@fluentui/react-components';
 import {
-  ChevronDown16Regular,
-  ChevronUp16Regular,
-  Delete16Regular,
-  Dismiss16Regular,
-} from '@fluentui/react-icons';
+  Button,
+  MessageBar,
+  MessageBarActions,
+  MessageBarBody,
+  MessageBarTitle,
+  tokens,
+} from '@fluentui/react-components';
+import { ChevronDown16Regular, ChevronUp16Regular, Delete16Regular, Dismiss16Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useState } from 'react';
 
@@ -50,9 +52,7 @@ export const MigrationNotice = memo(() => {
   }
 
   const total =
-    state.summary.perProjectPagesCopied +
-    state.summary.rootPagesFromContextMd +
-    state.summary.mcpPagesCopied;
+    state.summary.perProjectPagesCopied + state.summary.rootPagesFromContextMd + state.summary.mcpPagesCopied;
   const moved = total > 0 ? `${formatCount(total, 'page')} moved.` : 'Layout updated.';
   const legacy = state.legacyPaths.length;
 
@@ -67,9 +67,8 @@ export const MigrationNotice = memo(() => {
       <MessageBar intent="info" layout="multiline">
         <MessageBarBody>
           <MessageBarTitle>Pages moved to a shared location</MessageBarTitle>
-          {moved} Your pages now live in a single tree so the launcher and
-          external tools (Claude Desktop, Cursor, MCP) read and write the same
-          files. The originals on your old paths weren&apos;t touched —{' '}
+          {moved} Your pages now live in a single tree so the launcher and external tools (Claude Desktop, Cursor, MCP)
+          read and write the same files. The originals on your old paths weren&apos;t touched —{' '}
           {formatCount(legacy, 'legacy location')} can be removed when you&apos;re ready.
           {expanded && (
             <ul
@@ -104,13 +103,7 @@ export const MigrationNotice = memo(() => {
           >
             Clean up legacy files
           </Button>
-          <Button
-            size="small"
-            appearance="subtle"
-            icon={<Dismiss16Regular />}
-            disabled={busy}
-            onClick={onDismiss}
-          >
+          <Button size="small" appearance="subtle" icon={<Dismiss16Regular />} disabled={busy} onClick={onDismiss}>
             Dismiss
           </Button>
         </MessageBarActions>

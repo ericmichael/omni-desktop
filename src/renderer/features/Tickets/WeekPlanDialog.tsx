@@ -145,7 +145,13 @@ const STEP_TITLES: Record<Step, string> = {
 /* ---------- Step: Recently shipped ---------- */
 
 const RecapStep = memo(
-  ({ items, ticketCount, milestoneCount, inboxCount, onOpenInbox }: {
+  ({
+    items,
+    ticketCount,
+    milestoneCount,
+    inboxCount,
+    onOpenInbox,
+  }: {
     items: ShippedItem[];
     ticketCount: number;
     milestoneCount: number;
@@ -168,9 +174,7 @@ const RecapStep = memo(
           {ticketCount + milestoneCount === 0
             ? 'Nothing shipped recently.'
             : `${ticketCount} ticket${ticketCount === 1 ? '' : 's'}${
-                milestoneCount > 0
-                  ? ` · ${milestoneCount} milestone${milestoneCount === 1 ? '' : 's'}`
-                  : ''
+                milestoneCount > 0 ? ` · ${milestoneCount} milestone${milestoneCount === 1 ? '' : 's'}` : ''
               } shipped recently.`}
         </Body1>
 
@@ -183,16 +187,12 @@ const RecapStep = memo(
           <div className={styles.list}>
             {items.map((item) => {
               const title = item.kind === 'ticket' ? item.ticket.title : item.milestone.title;
-              const projectId =
-                item.kind === 'ticket' ? item.ticket.projectId : item.milestone.projectId;
+              const projectId = item.kind === 'ticket' ? item.ticket.projectId : item.milestone.projectId;
               const sub = item.kind === 'ticket' ? 'Ticket shipped' : 'Milestone completed';
               const key = item.kind === 'ticket' ? `t:${item.ticket.id}` : `m:${item.milestone.id}`;
               return (
                 <div key={key} className={styles.row}>
-                  <CheckmarkCircle20Filled
-                    style={{ width: 16, height: 16 }}
-                    className={styles.checkIcon}
-                  />
+                  <CheckmarkCircle20Filled style={{ width: 16, height: 16 }} className={styles.checkIcon} />
                   <div className={styles.rowMain}>
                     <span className={styles.rowTitle}>{title}</span>
                     <span className={styles.rowSub}>
@@ -225,18 +225,9 @@ RecapStep.displayName = 'RecapStep';
 /* ---------- Step: This week ---------- */
 
 const PinRow = memo(
-  ({
-    target,
-    checked,
-    onToggle,
-  }: {
-    target: PinTarget;
-    checked: boolean;
-    onToggle: (key: PinKey) => void;
-  }) => {
+  ({ target, checked, onToggle }: { target: PinTarget; checked: boolean; onToggle: (key: PinKey) => void }) => {
     const styles = useStyles();
-    const key: PinKey =
-      target.kind === 'project' ? projectKey(target.project.id) : milestoneKey(target.milestone.id);
+    const key: PinKey = target.kind === 'project' ? projectKey(target.project.id) : milestoneKey(target.milestone.id);
     const handleChange = useCallback(() => onToggle(key), [key, onToggle]);
 
     if (target.kind === 'project') {
@@ -252,9 +243,7 @@ const PinRow = memo(
                 {openCount} open ticket{openCount === 1 ? '' : 's'}
               </Caption1>
               {dueDays !== null && (
-                <Caption1>
-                  {dueDays <= 0 ? `${Math.abs(dueDays)}d overdue` : `due in ${dueDays}d`}
-                </Caption1>
+                <Caption1>{dueDays <= 0 ? `${Math.abs(dueDays)}d overdue` : `due in ${dueDays}d`}</Caption1>
               )}
             </div>
           </div>
@@ -274,9 +263,7 @@ const PinRow = memo(
               {resolved}/{total}
             </Badge>
             {dueDays !== null && (
-              <Caption1>
-                {dueDays <= 0 ? `${Math.abs(dueDays)}d overdue` : `due in ${dueDays}d`}
-              </Caption1>
+              <Caption1>{dueDays <= 0 ? `${Math.abs(dueDays)}d overdue` : `due in ${dueDays}d`}</Caption1>
             )}
           </div>
         </div>
@@ -287,15 +274,7 @@ const PinRow = memo(
 PinRow.displayName = 'PinRow';
 
 const PlanStep = memo(
-  ({
-    targets,
-    pinSet,
-    onToggle,
-  }: {
-    targets: PinTarget[];
-    pinSet: Set<PinKey>;
-    onToggle: (key: PinKey) => void;
-  }) => {
+  ({ targets, pinSet, onToggle }: { targets: PinTarget[]; pinSet: Set<PinKey>; onToggle: (key: PinKey) => void }) => {
     const styles = useStyles();
 
     if (targets.length === 0) {
@@ -313,17 +292,8 @@ const PlanStep = memo(
         <div className={styles.list}>
           {targets.map((target) => {
             const key: PinKey =
-              target.kind === 'project'
-                ? projectKey(target.project.id)
-                : milestoneKey(target.milestone.id);
-            return (
-              <PinRow
-                key={key}
-                target={target}
-                checked={pinSet.has(key)}
-                onToggle={onToggle}
-              />
-            );
+              target.kind === 'project' ? projectKey(target.project.id) : milestoneKey(target.milestone.id);
+            return <PinRow key={key} target={target} checked={pinSet.has(key)} onToggle={onToggle} />;
           })}
         </div>
         {pinSet.size > 3 && (
@@ -386,20 +356,19 @@ export const WeekPlanDialog = memo(({ open, onClose }: WeekPlanDialogProps) => {
         let openCount = 0;
         for (const ticket of Object.values(tickets)) {
           if (ticket.projectId !== project.id) {
-continue;
-}
+            continue;
+          }
           if (ticket.resolution !== undefined) {
-continue;
-}
+            continue;
+          }
           // Teams: a weekly review is personal — count only my assigned work.
           // Single-user (no principal): count all open tickets (legacy).
           if (reviewPrincipal && ticket.assignee !== reviewPrincipal) {
-continue;
-}
+            continue;
+          }
           openCount++;
         }
-        const dueDays =
-          project.dueDate !== undefined ? Math.ceil((project.dueDate - now) / DAY_MS) : null;
+        const dueDays = project.dueDate !== undefined ? Math.ceil((project.dueDate - now) / DAY_MS) : null;
         return { kind: 'project', project, openCount, dueDays } as PinTarget;
       });
 
@@ -407,15 +376,10 @@ continue;
       .filter((m) => m.status === 'active')
       .sort((a, b) => a.createdAt - b.createdAt)
       .map((milestone) => {
-        const milestoneTickets = Object.values(tickets).filter(
-          (t) => t.milestoneId === milestone.id
-        );
+        const milestoneTickets = Object.values(tickets).filter((t) => t.milestoneId === milestone.id);
         const resolved = milestoneTickets.filter((t) => t.resolution !== undefined).length;
         const total = milestoneTickets.length;
-        const dueDays =
-          milestone.dueDate !== undefined
-            ? Math.ceil((milestone.dueDate - now) / DAY_MS)
-            : null;
+        const dueDays = milestone.dueDate !== undefined ? Math.ceil((milestone.dueDate - now) / DAY_MS) : null;
         return {
           kind: 'milestone',
           milestone,
@@ -489,8 +453,8 @@ continue;
     }
     for (const milestone of Object.values(milestones)) {
       if (milestone.status !== 'active') {
-continue;
-}
+        continue;
+      }
       const shouldBePinned = pinSet.has(milestoneKey(milestone.id));
       const currentlyPinned = milestone.pinnedAt != null;
       if (shouldBePinned) {
@@ -515,10 +479,7 @@ continue;
             {STEPS.map((s, i) => (
               <div
                 key={s}
-                className={mergeClasses(
-                  styles.stepBar,
-                  i <= stepIndex ? styles.stepBarActive : styles.stepBarInactive
-                )}
+                className={mergeClasses(styles.stepBar, i <= stepIndex ? styles.stepBarActive : styles.stepBarInactive)}
               />
             ))}
           </div>
@@ -533,9 +494,7 @@ continue;
               onOpenInbox={handleOpenInbox}
             />
           )}
-          {step === 'plan' && (
-            <PlanStep targets={targets} pinSet={pinSet} onToggle={handleToggle} />
-          )}
+          {step === 'plan' && <PlanStep targets={targets} pinSet={pinSet} onToggle={handleToggle} />}
         </DialogBody>
         <DialogFooter className={styles.footerBetween}>
           <div>

@@ -29,11 +29,7 @@ describe('machine-identity', () => {
 
   it('preserves a pre-existing machineId if the file is partially-written', () => {
     const dir = mktmp();
-    writeFileSync(
-      join(dir, 'machine.json'),
-      JSON.stringify({ machineId: 'pre-existing-id' }) + '\n',
-      'utf-8'
-    );
+    writeFileSync(join(dir, 'machine.json'), `${JSON.stringify({ machineId: 'pre-existing-id' })}\n`, 'utf-8');
     const identity = getOrCreateMachineIdentity(dir);
     expect(identity.machineId).toBe('pre-existing-id');
     expect(identity.label).toBeTruthy();

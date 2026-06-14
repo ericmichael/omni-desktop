@@ -11,7 +11,9 @@ import { registerTicketTools } from './tools/tickets.js';
 
 export interface ProjectsMcpContext {
   listSandboxProfiles?: () => Promise<Array<{ name: string; label?: string; available?: boolean; source?: string }>>;
-  listTeamMembers?: () => Promise<Array<{ user_id: string; display_name?: string | null; email?: string | null; role?: string | null }>>;
+  listTeamMembers?: () => Promise<
+    Array<{ user_id: string; display_name?: string | null; email?: string | null; role?: string | null }>
+  >;
   getCurrentPrincipal?: () => Promise<string | null>;
 }
 

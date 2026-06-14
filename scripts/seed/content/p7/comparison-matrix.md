@@ -4,23 +4,23 @@ As of week 3 of POC. Updated weekly.
 
 ## Features
 
-| Capability           | Relic     | Foresight | Quasar    |
-|----------------------|-----------|-----------|-----------|
-| Log ingest           | ✅        | ✅        | ✅        |
-| Metrics              | ✅        | ✅        | ⚠️ (beta) |
-| Traces               | ✅        | ⚠️        | ❌        |
-| Alerts               | ✅        | ✅        | ✅        |
-| Dashboards as code   | ✅        | ✅        | ❌        |
-| SSO (SAML)           | ✅        | ✅ (ent)  | ✅        |
-| Data residency       | US, EU    | self-host | US only   |
+| Capability         | Relic  | Foresight | Quasar    |
+| ------------------ | ------ | --------- | --------- |
+| Log ingest         | ✅     | ✅        | ✅        |
+| Metrics            | ✅     | ✅        | ⚠️ (beta) |
+| Traces             | ✅     | ⚠️        | ❌        |
+| Alerts             | ✅     | ✅        | ✅        |
+| Dashboards as code | ✅     | ✅        | ❌        |
+| SSO (SAML)         | ✅     | ✅ (ent)  | ✅        |
+| Data residency     | US, EU | self-host | US only   |
 
 ## Pricing (estimate for our scale)
 
-| Vendor    | Annual     | Notes |
-|-----------|------------|-------|
+| Vendor    | Annual     | Notes                                 |
+| --------- | ---------- | ------------------------------------- |
 | Relic     | $380k      | Price ladder has a cliff at 10TB/day. |
-| Foresight | $95k + ops | Self-host ~ 2 SRE days/month. |
-| Quasar    | $60k       | Net-new startup risk. |
+| Foresight | $95k + ops | Self-host ~ 2 SRE days/month.         |
+| Quasar    | $60k       | Net-new startup risk.                 |
 
 ## Key gaps
 

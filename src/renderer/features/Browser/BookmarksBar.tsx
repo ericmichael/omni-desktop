@@ -71,7 +71,7 @@ export const BookmarksBar = memo(
     }
 
     return (
-      <div className={`${styles.root}${isGlass ? ` ${  styles.rootGlass}` : ''}`}>
+      <div className={`${styles.root}${isGlass ? ` ${styles.rootGlass}` : ''}`}>
         {bookmarks.map((b) => {
           const label = b.title || fallbackTitle(b.url);
           return (

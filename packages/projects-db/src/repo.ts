@@ -59,10 +59,17 @@ export class ProjectsRepo {
 
   upsertProject(row: ProjectRow): void {
     this.stmts.upsertProject.run(
-      row.id, row.label, row.slug,
-      row.is_personal, row.auto_dispatch, row.sources, row.sandbox_profile,
-      row.due_date, row.pinned_at,
-      row.created_at, row.updated_at,
+      row.id,
+      row.label,
+      row.slug,
+      row.is_personal,
+      row.auto_dispatch,
+      row.sources,
+      row.sandbox_profile,
+      row.due_date,
+      row.pinned_at,
+      row.created_at,
+      row.updated_at
     );
     this.bumpChangeSeq();
   }
@@ -116,10 +123,17 @@ export class ProjectsRepo {
       }
       for (const row of rows) {
         this.stmts.upsertProject.run(
-          row.id, row.label, row.slug,
-          row.is_personal, row.auto_dispatch, row.sources, row.sandbox_profile,
-          row.due_date, row.pinned_at,
-          row.created_at, row.updated_at,
+          row.id,
+          row.label,
+          row.slug,
+          row.is_personal,
+          row.auto_dispatch,
+          row.sources,
+          row.sandbox_profile,
+          row.due_date,
+          row.pinned_at,
+          row.created_at,
+          row.updated_at
         );
       }
       this.bumpChangeSeq();
@@ -134,7 +148,14 @@ export class ProjectsRepo {
 
   upsertColumn(row: ColumnRow): void {
     this.stmts.upsertColumn.run(
-      row.id, row.project_id, row.label, row.description, row.sort_order, row.gate, row.max_concurrent, row.workflow,
+      row.id,
+      row.project_id,
+      row.label,
+      row.description,
+      row.sort_order,
+      row.gate,
+      row.max_concurrent,
+      row.workflow
     );
     this.bumpChangeSeq();
   }
@@ -149,7 +170,14 @@ export class ProjectsRepo {
       this.stmts.deleteColumnsForProject.run(projectId);
       for (const row of rows) {
         this.stmts.upsertColumn.run(
-          row.id, row.project_id, row.label, row.description, row.sort_order, row.gate, row.max_concurrent, row.workflow,
+          row.id,
+          row.project_id,
+          row.label,
+          row.description,
+          row.sort_order,
+          row.gate,
+          row.max_concurrent,
+          row.workflow
         );
       }
       this.bumpChangeSeq();
@@ -221,7 +249,14 @@ export class ProjectsRepo {
           result.inserted.push(row.id);
         }
         this.stmts.upsertColumn.run(
-          row.id, row.project_id, row.label, row.description, row.sort_order, row.gate, row.max_concurrent, row.workflow,
+          row.id,
+          row.project_id,
+          row.label,
+          row.description,
+          row.sort_order,
+          row.gate,
+          row.max_concurrent,
+          row.workflow
         );
       }
 
@@ -301,15 +336,33 @@ export class ProjectsRepo {
 
   upsertTicket(row: TicketRow): void {
     this.stmts.upsertTicket.run(
-      row.id, row.project_id, row.milestone_id, row.column_id,
-      row.title, row.description, row.priority, row.branch,
-      row.blocked_by, row.resolution, row.resolved_at,
-      row.archived_at, row.column_changed_at,
-      row.use_worktree, row.worktree_path, row.worktree_name,
-      row.supervisor_session_id, row.phase, row.phase_changed_at,
-      row.supervisor_task_id, row.token_usage, row.runs,
-      row.pr_review, row.pr_merged_at, row.assignee,
-      row.created_at, row.updated_at,
+      row.id,
+      row.project_id,
+      row.milestone_id,
+      row.column_id,
+      row.title,
+      row.description,
+      row.priority,
+      row.branch,
+      row.blocked_by,
+      row.resolution,
+      row.resolved_at,
+      row.archived_at,
+      row.column_changed_at,
+      row.use_worktree,
+      row.worktree_path,
+      row.worktree_name,
+      row.supervisor_session_id,
+      row.phase,
+      row.phase_changed_at,
+      row.supervisor_task_id,
+      row.token_usage,
+      row.runs,
+      row.pr_review,
+      row.pr_merged_at,
+      row.assignee,
+      row.created_at,
+      row.updated_at
     );
     this.bumpChangeSeq();
   }
@@ -336,15 +389,33 @@ export class ProjectsRepo {
       }
       for (const row of rows) {
         this.stmts.upsertTicket.run(
-          row.id, row.project_id, row.milestone_id, row.column_id,
-          row.title, row.description, row.priority, row.branch,
-          row.blocked_by, row.resolution, row.resolved_at,
-          row.archived_at, row.column_changed_at,
-          row.use_worktree, row.worktree_path, row.worktree_name,
-          row.supervisor_session_id, row.phase, row.phase_changed_at,
-          row.supervisor_task_id, row.token_usage, row.runs,
-          row.pr_review, row.pr_merged_at, row.assignee,
-          row.created_at, row.updated_at,
+          row.id,
+          row.project_id,
+          row.milestone_id,
+          row.column_id,
+          row.title,
+          row.description,
+          row.priority,
+          row.branch,
+          row.blocked_by,
+          row.resolution,
+          row.resolved_at,
+          row.archived_at,
+          row.column_changed_at,
+          row.use_worktree,
+          row.worktree_path,
+          row.worktree_name,
+          row.supervisor_session_id,
+          row.phase,
+          row.phase_changed_at,
+          row.supervisor_task_id,
+          row.token_usage,
+          row.runs,
+          row.pr_review,
+          row.pr_merged_at,
+          row.assignee,
+          row.created_at,
+          row.updated_at
         );
       }
       this.bumpChangeSeq();
@@ -398,10 +469,18 @@ export class ProjectsRepo {
 
   upsertMilestone(row: MilestoneRow): void {
     this.stmts.upsertMilestone.run(
-      row.id, row.project_id, row.title, row.description,
-      row.branch, row.brief, row.status, row.due_date,
-      row.completed_at, row.pinned_at,
-      row.created_at, row.updated_at,
+      row.id,
+      row.project_id,
+      row.title,
+      row.description,
+      row.branch,
+      row.brief,
+      row.status,
+      row.due_date,
+      row.completed_at,
+      row.pinned_at,
+      row.created_at,
+      row.updated_at
     );
     this.bumpChangeSeq();
   }
@@ -429,10 +508,18 @@ export class ProjectsRepo {
       }
       for (const row of rows) {
         this.stmts.upsertMilestone.run(
-          row.id, row.project_id, row.title, row.description,
-          row.branch, row.brief, row.status, row.due_date,
-          row.completed_at, row.pinned_at,
-          row.created_at, row.updated_at,
+          row.id,
+          row.project_id,
+          row.title,
+          row.description,
+          row.branch,
+          row.brief,
+          row.status,
+          row.due_date,
+          row.completed_at,
+          row.pinned_at,
+          row.created_at,
+          row.updated_at
         );
       }
       this.bumpChangeSeq();
@@ -455,9 +542,17 @@ export class ProjectsRepo {
 
   upsertPage(row: PageRow): void {
     this.stmts.upsertPage.run(
-      row.id, row.project_id, row.parent_id, row.title,
-      row.icon, row.sort_order, row.is_root, row.kind,
-      row.properties, row.created_at, row.updated_at,
+      row.id,
+      row.project_id,
+      row.parent_id,
+      row.title,
+      row.icon,
+      row.sort_order,
+      row.is_root,
+      row.kind,
+      row.properties,
+      row.created_at,
+      row.updated_at
     );
     this.bumpChangeSeq();
   }
@@ -484,9 +579,17 @@ export class ProjectsRepo {
       }
       for (const row of rows) {
         this.stmts.upsertPage.run(
-          row.id, row.project_id, row.parent_id, row.title,
-          row.icon, row.sort_order, row.is_root, row.kind,
-          row.properties, row.created_at, row.updated_at,
+          row.id,
+          row.project_id,
+          row.parent_id,
+          row.title,
+          row.icon,
+          row.sort_order,
+          row.is_root,
+          row.kind,
+          row.properties,
+          row.created_at,
+          row.updated_at
         );
       }
       this.bumpChangeSeq();
@@ -517,9 +620,15 @@ export class ProjectsRepo {
 
   upsertInboxItem(row: InboxRow): void {
     this.stmts.upsertInboxItem.run(
-      row.id, row.title, row.note, row.project_id,
-      row.status, row.later_at, row.promoted_to,
-      row.created_at, row.updated_at,
+      row.id,
+      row.title,
+      row.note,
+      row.project_id,
+      row.status,
+      row.later_at,
+      row.promoted_to,
+      row.created_at,
+      row.updated_at
     );
     this.bumpChangeSeq();
   }
@@ -545,9 +654,15 @@ export class ProjectsRepo {
       }
       for (const row of rows) {
         this.stmts.upsertInboxItem.run(
-          row.id, row.title, row.note, row.project_id,
-          row.status, row.later_at, row.promoted_to,
-          row.created_at, row.updated_at,
+          row.id,
+          row.title,
+          row.note,
+          row.project_id,
+          row.status,
+          row.later_at,
+          row.promoted_to,
+          row.created_at,
+          row.updated_at
         );
       }
       this.bumpChangeSeq();
@@ -570,9 +685,17 @@ export class ProjectsRepo {
 
   upsertTask(row: TaskRow): void {
     this.stmts.upsertTask.run(
-      row.id, row.project_id, row.task_description, row.status,
-      row.created_at, row.branch, row.worktree_path, row.worktree_name,
-      row.session_id, row.ticket_id, row.last_urls,
+      row.id,
+      row.project_id,
+      row.task_description,
+      row.status,
+      row.created_at,
+      row.branch,
+      row.worktree_path,
+      row.worktree_name,
+      row.session_id,
+      row.ticket_id,
+      row.last_urls
     );
     this.bumpChangeSeq();
   }
@@ -598,9 +721,17 @@ export class ProjectsRepo {
       }
       for (const row of rows) {
         this.stmts.upsertTask.run(
-          row.id, row.project_id, row.task_description, row.status,
-          row.created_at, row.branch, row.worktree_path, row.worktree_name,
-          row.session_id, row.ticket_id, row.last_urls,
+          row.id,
+          row.project_id,
+          row.task_description,
+          row.status,
+          row.created_at,
+          row.branch,
+          row.worktree_path,
+          row.worktree_name,
+          row.session_id,
+          row.ticket_id,
+          row.last_urls
         );
       }
       this.bumpChangeSeq();
@@ -614,7 +745,7 @@ function prepareStatements(db: DatabaseSync) {
   return {
     // Change tracking
     getChangeSeq: db.prepare('SELECT seq FROM _change_seq WHERE id = 1'),
-    bumpChangeSeq: db.prepare('UPDATE _change_seq SET seq = seq + 1, updated_at = datetime(\'now\') WHERE id = 1'),
+    bumpChangeSeq: db.prepare("UPDATE _change_seq SET seq = seq + 1, updated_at = datetime('now') WHERE id = 1"),
 
     // Projects
     listProjects: db.prepare('SELECT * FROM projects ORDER BY created_at'),
@@ -634,7 +765,7 @@ function prepareStatements(db: DatabaseSync) {
     deleteAllProjects: db.prepare('DELETE FROM projects'),
     listAllProjectIds: db.prepare('SELECT id FROM projects'),
     getProjectConfig: db.prepare('SELECT config FROM projects WHERE id = ?'),
-    setProjectConfig: db.prepare('UPDATE projects SET config = ?, updated_at = datetime(\'now\') WHERE id = ?'),
+    setProjectConfig: db.prepare("UPDATE projects SET config = ?, updated_at = datetime('now') WHERE id = ?"),
 
     // Pipeline columns
     listColumns: db.prepare('SELECT * FROM pipeline_columns WHERE project_id = ? ORDER BY sort_order'),

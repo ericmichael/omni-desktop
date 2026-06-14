@@ -13,15 +13,16 @@ process.env.NODE_ENV = process.env.NODE_ENV || 'development';
 
 import type { IncomingHttpHeaders } from 'node:http';
 
-import { wireClientManagers, wireGlobalHandlers } from '@/server/managers';
+import { uuidv4 } from '@/lib/uuid';
+import { isEnterpriseBuild } from '@/main/platform-mode';
 import { CODEX_REFRESH_PATH, registerCodexRefreshRoute } from '@/server/codex-refresh-http';
 import { setupLocalTunnelProxy } from '@/server/local-tunnel-proxy';
+import { wireClientManagers, wireGlobalHandlers } from '@/server/managers';
 import { MCP_PROJECTS_PATH, registerMcpHttpRoute } from '@/server/mcp-http';
-import { registerVoiceRoutes, VOICE_HTTP_PREFIX } from '@/server/voice-http';
-import { isEnterpriseBuild } from '@/main/platform-mode';
 import { setupProxyRewriter } from '@/server/proxy-rewriter';
 import { resolveRuntimeTokenSecret, signRuntimeToken, verifyRuntimeToken } from '@/server/runtime-token';
 import { ServerStore } from '@/server/store';
+import { registerVoiceRoutes, VOICE_HTTP_PREFIX } from '@/server/voice-http';
 import { DEFAULT_TENANT, WsHandler } from '@/server/ws-handler';
 
 // Process-level crash visibility. Log only — do not exit. The server
@@ -178,7 +179,7 @@ const main = async () => {
       process.env['OMNI_AAD_TENANT_ID'] ??
       // Fall back to parsing it out of the EasyAuth-injected issuer URL
       // (``https://login.microsoftonline.com/<tenant>/v2.0``) if set.
-      (process.env['OMNI_AAD_ISSUER']?.match(/microsoftonline\.com\/([^/]+)/)?.[1]) ??
+      process.env['OMNI_AAD_ISSUER']?.match(/microsoftonline\.com\/([^/]+)/)?.[1] ??
       '';
     const clientId = process.env['OMNI_AAD_CLIENT_ID'] ?? '';
     if (!tenantId || !clientId) {
@@ -212,11 +213,7 @@ const main = async () => {
     // Short TTL (5 min) — the renderer fetches a fresh one on each connect/
     // reconnect, so we don't need long-lived tokens floating around.
     reply.send({
-      token: signRuntimeToken(
-        runtimeTokenSecret,
-        { tenantId: principalId, principalId, sessionId: crypto.randomUUID() },
-        5 * 60,
-      ),
+      token: signRuntimeToken(runtimeTokenSecret, { tenantId: principalId, principalId, sessionId: uuidv4() }, 5 * 60),
     });
   });
 
@@ -370,7 +367,9 @@ const main = async () => {
             principal
           );
           // Replay frames that arrived during async resolution.
-          for (const raw of buffered) socket.emit('message', raw);
+          for (const raw of buffered) {
+            socket.emit('message', raw);
+          }
         } catch (err) {
           console.error('[ws] team resolution failed:', err);
           socket.close(4500, 'Server error during team resolution');

@@ -7,7 +7,10 @@ import { z } from 'zod';
 import { type ProjectSource, seedProject, slugify } from '../seed.js';
 
 const json = (data: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data) }] });
-const err = (message: string) => ({ content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }], isError: true as const });
+const err = (message: string) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }],
+  isError: true as const,
+});
 
 const sourceSchema = z.discriminatedUnion('kind', [
   z.object({
@@ -45,7 +48,9 @@ function normalizeGitRemoteUrl(repoUrl: string): string {
   try {
     const parsed = new URL(parseTarget);
     const host = parsed.hostname.toLowerCase();
-    const pathname = trimTrailingSlashes(decodeURIComponent(parsed.pathname)).replace(/^\/+/, '').replace(/\.git$/i, '');
+    const pathname = trimTrailingSlashes(decodeURIComponent(parsed.pathname))
+      .replace(/^\/+/, '')
+      .replace(/\.git$/i, '');
     return `${host}/${pathname.toLowerCase()}`;
   } catch {
     return trimmed.toLowerCase();
@@ -62,11 +67,15 @@ function validateSources(sources: ProjectSource[]): string | null {
   const mountNames = new Set<string>();
   const identities = new Set<string>();
   for (const source of sources) {
-    if (mountNames.has(source.mountName)) return `Duplicate mount name: "${source.mountName}". Each source needs a unique name.`;
+    if (mountNames.has(source.mountName)) {
+      return `Duplicate mount name: "${source.mountName}". Each source needs a unique name.`;
+    }
     mountNames.add(source.mountName);
     const identity = sourceIdentityKey(source);
     if (identities.has(identity)) {
-      return source.kind === 'local' ? 'This project already includes that local folder.' : 'This project already includes that repository.';
+      return source.kind === 'local'
+        ? 'This project already includes that local folder.'
+        : 'This project already includes that repository.';
     }
     identities.add(identity);
   }
@@ -79,33 +88,28 @@ function parseSources(raw: string): ProjectSource[] {
 }
 
 export function registerProjectTools(server: McpServer, repo: IProjectsRepo): void {
-  server.tool(
-    'list_projects',
-    'List all projects with their pipeline columns.',
-    {},
-    async () => {
-      const projects = await repo.listProjects();
-      const result = await Promise.all(
-        projects.map(async (p) => {
-          const cols = await repo.listColumns(p.id);
-          return {
-            id: p.id,
-            label: p.label,
-            slug: p.slug,
-            sources: parseSources(p.sources),
-            is_personal: !!p.is_personal,
-            auto_dispatch: !!p.auto_dispatch,
-            sandbox_profile: p.sandbox_profile,
-            due_date: p.due_date,
-            pinned_at: p.pinned_at,
-            columns: cols.map((c) => c.label),
-            created_at: p.created_at,
-          };
-        })
-      );
-      return json({ projects: result });
-    }
-  );
+  server.tool('list_projects', 'List all projects with their pipeline columns.', {}, async () => {
+    const projects = await repo.listProjects();
+    const result = await Promise.all(
+      projects.map(async (p) => {
+        const cols = await repo.listColumns(p.id);
+        return {
+          id: p.id,
+          label: p.label,
+          slug: p.slug,
+          sources: parseSources(p.sources),
+          is_personal: !!p.is_personal,
+          auto_dispatch: !!p.auto_dispatch,
+          sandbox_profile: p.sandbox_profile,
+          due_date: p.due_date,
+          pinned_at: p.pinned_at,
+          columns: cols.map((c) => c.label),
+          created_at: p.created_at,
+        };
+      })
+    );
+    return json({ projects: result });
+  });
 
   server.tool(
     'create_project',
@@ -114,23 +118,32 @@ export function registerProjectTools(server: McpServer, repo: IProjectsRepo): vo
       label: z.string().describe('Human-readable project name'),
       sources: z.array(sourceSchema).optional().describe('Sources to attach to the project.'),
       auto_dispatch: z.boolean().optional().describe('Enable automatic dispatch for ready tickets.'),
-      sandbox_profile: z.string().optional().describe('Per-project sandbox profile name. Omit or pass empty string to inherit the default.'),
+      sandbox_profile: z
+        .string()
+        .optional()
+        .describe('Per-project sandbox profile name. Omit or pass empty string to inherit the default.'),
       due_date: z.string().optional().describe('Optional due date in ISO format (e.g. 2026-04-30).'),
       pinned: z.boolean().optional().describe('Pin the project to Home on creation.'),
     },
     async ({ label, sources, auto_dispatch, sandbox_profile, due_date, pinned }) => {
       if (due_date) {
         const parsed = Date.parse(due_date);
-        if (Number.isNaN(parsed)) return err('Invalid due_date. Use an ISO date like 2026-04-30.');
+        if (Number.isNaN(parsed)) {
+          return err('Invalid due_date. Use an ISO date like 2026-04-30.');
+        }
       }
 
       const slug = slugify(label);
       const existing = await repo.getProjectBySlug(slug);
-      if (existing) return err(`A project with slug "${slug}" already exists.`);
+      if (existing) {
+        return err(`A project with slug "${slug}" already exists.`);
+      }
 
       const normalizedSources = normalizeSources(sources);
       const sourceError = validateSources(normalizedSources);
-      if (sourceError) return err(sourceError);
+      if (sourceError) {
+        return err(sourceError);
+      }
 
       const seeded = await seedProject(repo, {
         label,
@@ -162,13 +175,18 @@ export function registerProjectTools(server: McpServer, repo: IProjectsRepo): vo
       label: z.string().optional().describe('New project name'),
       sources: z.array(sourceSchema).optional().describe('Replace the project source list.'),
       auto_dispatch: z.boolean().optional().describe('Enable or disable automatic dispatch for ready tickets.'),
-      sandbox_profile: z.string().optional().describe('Per-project sandbox profile name. Pass empty string to inherit the default.'),
+      sandbox_profile: z
+        .string()
+        .optional()
+        .describe('Per-project sandbox profile name. Pass empty string to inherit the default.'),
       due_date: z.string().optional().describe('Due date in ISO format. Pass empty string to clear.'),
       pinned: z.boolean().optional().describe('true pins the project to Home, false unpins it.'),
     },
     async ({ project_id, label, sources, auto_dispatch, sandbox_profile, due_date, pinned }) => {
       const project = await repo.getProject(project_id);
-      if (!project) return err(`Project not found: ${project_id}`);
+      if (!project) {
+        return err(`Project not found: ${project_id}`);
+      }
 
       const next = { ...project };
 
@@ -186,7 +204,9 @@ export function registerProjectTools(server: McpServer, repo: IProjectsRepo): vo
       if (sources !== undefined) {
         const normalizedSources = normalizeSources(sources);
         const sourceError = validateSources(normalizedSources);
-        if (sourceError) return err(sourceError);
+        if (sourceError) {
+          return err(sourceError);
+        }
         next.sources = JSON.stringify(normalizedSources);
       }
       if (auto_dispatch !== undefined) {
@@ -200,7 +220,9 @@ export function registerProjectTools(server: McpServer, repo: IProjectsRepo): vo
           next.due_date = null;
         } else {
           const parsed = Date.parse(due_date);
-          if (Number.isNaN(parsed)) return err('Invalid due_date. Use an ISO date like 2026-04-30.');
+          if (Number.isNaN(parsed)) {
+            return err('Invalid due_date. Use an ISO date like 2026-04-30.');
+          }
           next.due_date = due_date;
         }
       }
@@ -221,8 +243,12 @@ export function registerProjectTools(server: McpServer, repo: IProjectsRepo): vo
     { project_id: z.string().describe('The project ID to delete') },
     async ({ project_id }) => {
       const project = await repo.getProject(project_id);
-      if (!project) return err(`Project not found: ${project_id}`);
-      if (project.is_personal) return err('Cannot delete the Personal project');
+      if (!project) {
+        return err(`Project not found: ${project_id}`);
+      }
+      if (project.is_personal) {
+        return err('Cannot delete the Personal project');
+      }
 
       // Pages, columns, tickets, and page content all cascade in both backends.
       await repo.deleteProject(project_id);

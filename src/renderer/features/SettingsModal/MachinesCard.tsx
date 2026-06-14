@@ -13,6 +13,7 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
 import { Body1, Button, Caption1, Card, Input } from '@/renderer/ds';
+import { isCloudLinked, isElectron } from '@/renderer/services/ipc';
 import {
   $machineIdentity,
   $machines,
@@ -20,7 +21,6 @@ import {
   renameMachineRemote,
   setMachineLabel,
 } from '@/renderer/services/machines';
-import { isCloudLinked, isElectron } from '@/renderer/services/ipc';
 import type { MachineSummary } from '@/shared/types';
 
 const useStyles = makeStyles({
@@ -160,12 +160,7 @@ const MachineRow = memo(
                 Rename
               </Button>
               {onRemove && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => void onRemove()}
-                  leftIcon={<Delete16Regular />}
-                >
+                <Button size="sm" variant="ghost" onClick={() => void onRemove()} leftIcon={<Delete16Regular />}>
                   Remove
                 </Button>
               )}
@@ -210,8 +205,8 @@ export const MachinesCard = memo(() => {
           <div>
             <Body1>My computers</Body1>
             <Caption1 className={styles.summary}>
-              Electrons signed in as you. The cloud can dispatch sandbox sessions to any of these
-              when you pick them in the sandbox picker.
+              Electrons signed in as you. The cloud can dispatch sandbox sessions to any of these when you pick them in
+              the sandbox picker.
             </Caption1>
           </div>
         </div>

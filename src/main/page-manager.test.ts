@@ -7,7 +7,7 @@
  * we test mostly the store-level logic; the watcher is covered in
  * page-watcher.test.ts.
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 

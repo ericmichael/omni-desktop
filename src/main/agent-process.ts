@@ -931,8 +931,12 @@ export class AgentProcess {
       };
       if (ce.kind === 'host-offline' || ce.kind === 'machine-at-capacity') {
         errorEnvelope.kind = ce.kind;
-        if (ce.machineId) errorEnvelope.machineId = ce.machineId;
-        if (ce.machineLabel) errorEnvelope.machineLabel = ce.machineLabel;
+        if (ce.machineId) {
+          errorEnvelope.machineId = ce.machineId;
+        }
+        if (ce.machineLabel) {
+          errorEnvelope.machineLabel = ce.machineLabel;
+        }
         if (typeof ce.extras?.['maxSessions'] === 'number') {
           errorEnvelope.maxSessions = ce.extras['maxSessions'] as number;
         }
@@ -1095,7 +1099,9 @@ export class AgentProcess {
         this.log.info(c.green.bold(`${label} started\r\n`));
         return;
       }
-      await new Promise<void>((r) => setTimeout(r, 1000));
+      await new Promise<void>((r) => {
+        setTimeout(r, 1000);
+      });
     }
 
     if (this.isStopping()) {

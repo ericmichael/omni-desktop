@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { mergeById, mergeEnvVars, mergeMcpConfig, mergeModelsConfig, mergeNetworkConfig, mergeRecord } from '@/main/config-merge';
+import {
+  mergeById,
+  mergeEnvVars,
+  mergeMcpConfig,
+  mergeModelsConfig,
+  mergeNetworkConfig,
+  mergeRecord,
+} from '@/main/config-merge';
 import type { McpConfig, ModelsConfig, NetworkConfig } from '@/shared/types';
 
 const models = (providers: ModelsConfig['providers'], def: string | null = null): ModelsConfig => ({
@@ -85,8 +92,14 @@ describe('mergeRecord / mergeById', () => {
     expect(mergeRecord({ a: 1, b: 2 }, { b: 3, c: 4 })).toEqual({ a: 1, b: 3, c: 4 });
   });
   it('array union by id, user shadows', () => {
-    const team = [{ id: 'x', v: 1 }, { id: 'y', v: 2 }];
-    const user = [{ id: 'y', v: 9 }, { id: 'z', v: 3 }];
+    const team = [
+      { id: 'x', v: 1 },
+      { id: 'y', v: 2 },
+    ];
+    const user = [
+      { id: 'y', v: 9 },
+      { id: 'z', v: 3 },
+    ];
     const m = mergeById(team, user);
     expect(m.find((i) => i.id === 'y')!.v).toBe(9);
     expect(m.map((i) => i.id).sort()).toEqual(['x', 'y', 'z']);

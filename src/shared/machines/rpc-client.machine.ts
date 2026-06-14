@@ -34,20 +34,6 @@ export type PendingCall = {
   timer: ReturnType<typeof setTimeout>;
 };
 
-type JSONRPCRequest = {
-  jsonrpc: '2.0';
-  id: RPCCallId;
-  method: string;
-  params?: Record<string, unknown>;
-};
-
-type JSONRPCResponse = {
-  jsonrpc: '2.0';
-  id: RPCCallId;
-  result?: unknown;
-  error?: { code?: number; message: string; data?: unknown };
-};
-
 type JSONRPCNotification = {
   jsonrpc: '2.0';
   method: string;
@@ -110,8 +96,7 @@ export const rpcClientMachine = setup({
   actions: {
     incrementReconnect: assign({
       reconnectAttempt: ({ context }) => context.reconnectAttempt + 1,
-      reconnectDelay: ({ context }) =>
-        Math.min(MAX_RECONNECT_DELAY_MS, Math.round(context.reconnectDelay * 1.5)),
+      reconnectDelay: ({ context }) => Math.min(MAX_RECONNECT_DELAY_MS, Math.round(context.reconnectDelay * 1.5)),
     }),
     resetReconnect: assign({
       reconnectAttempt: 0,

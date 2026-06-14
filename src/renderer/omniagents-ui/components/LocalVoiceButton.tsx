@@ -26,8 +26,8 @@ export function LocalVoiceButton({ onSubmit }: { onSubmit: (text: string) => voi
   // Escape cancels recording — discards the audio, sends nothing.
   useEffect(() => {
     if (!cap.recording) {
-return;
-}
+      return;
+    }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -43,13 +43,15 @@ return;
   const pendingStopRef = useRef(false);
   const startRec = async () => {
     if (cap.busy || cap.recording) {
-return;
-}
+      return;
+    }
     pendingStopRef.current = false;
     // Warm up the sidecar (provisioning happens on first use) while the user
     // talks. The speak tool is already registered via the localVoiceEnabled
     // setting, so nothing else to toggle here.
-    void getVoiceClient().start().catch(() => {});
+    void getVoiceClient()
+      .start()
+      .catch(() => {});
     await cap.start().catch(() => {});
     if (pendingStopRef.current) {
       pendingStopRef.current = false;
@@ -63,18 +65,18 @@ return;
     }
     const text = (await cap.stop()).trim();
     if (text) {
-onSubmit(text);
-}
+      onSubmit(text);
+    }
   };
   const onClick = () => {
     if (cap.busy) {
-return;
-}
+      return;
+    }
     if (cap.recording) {
-void stopAndSend();
-} else {
-void startRec();
-}
+      void stopAndSend();
+    } else {
+      void startRec();
+    }
   };
 
   // Register this mic so the global voice hotkey can drive it. The ref keeps the
@@ -83,8 +85,8 @@ void startRec();
   ctlRef.current = { toggle: onClick, start: startRec, stop: stopAndSend, recording: cap.recording };
   useEffect(() => {
     if (!scope) {
-return;
-}
+      return;
+    }
     return registerVoiceMic(scope, {
       toggle: () => ctlRef.current.toggle(),
       start: () => void ctlRef.current.start(),

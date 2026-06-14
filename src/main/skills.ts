@@ -1,7 +1,7 @@
 import extract from 'extract-zip';
 import { mkdir, mkdtemp, readdir, readFile, rename, rm } from 'fs/promises';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { basename, join } from 'path';
 import { parse as parseYaml } from 'yaml';
 
 import type { SkillEntry, SkillSource, StoreData } from '@/shared/types';
@@ -63,14 +63,23 @@ export function parseFrontmatter(content: string): SkillFrontmatter | null {
   return {
     name,
     description,
-    version: typeof values.version === 'string' ? values.version : typeof values.version === 'number' ? String(values.version) : undefined,
+    version:
+      typeof values.version === 'string'
+        ? values.version
+        : typeof values.version === 'number'
+          ? String(values.version)
+          : undefined,
     author: typeof values.author === 'string' ? values.author : undefined,
     license: typeof values.license === 'string' ? values.license : undefined,
     compatibility: typeof values.compatibility === 'string' ? values.compatibility : undefined,
   };
 }
 
-async function scanSkillsIn(dir: string, enabled: boolean, sourceMap: Record<string, SkillSource>): Promise<SkillEntry[]> {
+async function scanSkillsIn(
+  dir: string,
+  enabled: boolean,
+  sourceMap: Record<string, SkillSource>
+): Promise<SkillEntry[]> {
   let dirs: string[];
   try {
     dirs = await readdir(dir);
@@ -161,7 +170,7 @@ export async function installSkillFromFile(
   }
 
   // Persist source metadata
-  const filename = filePath.split('/').pop() ?? filePath;
+  const filename = basename(filePath);
   const source: SkillSource = { kind: 'file', filename };
   const sources = store.get('skillSources') ?? {};
   store.set('skillSources', { ...sources, [meta.name]: source });

@@ -1,11 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createActor, fromCallback, getNextSnapshot } from 'xstate';
 
-import {
-  type ChatBootContext,
-  type ChatBootEvent,
-  chatBootMachine,
-} from './chat-boot.machine';
+import { type ChatBootContext, type ChatBootEvent, chatBootMachine } from './chat-boot.machine';
 
 // ---------------------------------------------------------------------------
 // Test helpers — the machine's invokers are stubs in the pure definition.

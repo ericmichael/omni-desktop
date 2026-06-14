@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Milestone, Ticket } from '@/shared/types';
 
-import { focusHeader, type FocusItem,rankFocus } from './focus-ranker';
+import { focusHeader, type FocusItem, rankFocus } from './focus-ranker';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const NOW = 1_700_000_000_000;
@@ -40,9 +40,7 @@ describe('rankFocus', () => {
   });
 
   it('skips resolved tickets', () => {
-    const tickets = [
-      makeTicket({ id: 't1', resolution: 'completed', resolvedAt: NOW - DAY_MS }),
-    ];
+    const tickets = [makeTicket({ id: 't1', resolution: 'completed', resolvedAt: NOW - DAY_MS })];
     expect(rankFocus({ tickets, milestones: {}, now: NOW })).toEqual([]);
   });
 
@@ -114,16 +112,11 @@ describe('rankFocus', () => {
 
   it('labels errored tickets distinctly', () => {
     const tickets = [makeTicket({ id: 't1', phase: 'error' })];
-    expect(rankFocus({ tickets, milestones: {}, now: NOW })[0]?.reason).toBe(
-      'Errored — retry or triage'
-    );
+    expect(rankFocus({ tickets, milestones: {}, now: NOW })[0]?.reason).toBe('Errored — retry or triage');
   });
 
   it('ranks higher priority ahead of lower priority', () => {
-    const tickets = [
-      makeTicket({ id: 'low', priority: 'low' }),
-      makeTicket({ id: 'high', priority: 'high' }),
-    ];
+    const tickets = [makeTicket({ id: 'low', priority: 'low' }), makeTicket({ id: 'high', priority: 'high' })];
     const result = rankFocus({ tickets, milestones: {}, now: NOW });
     expect(result.map((r) => r.ticket.id)).toEqual(['high', 'low']);
   });
@@ -190,9 +183,7 @@ describe('rankFocus', () => {
   });
 
   it('caps results at the requested limit', () => {
-    const tickets = Array.from({ length: 10 }, (_, i) =>
-      makeTicket({ id: `t${i}`, priority: 'medium' })
-    );
+    const tickets = Array.from({ length: 10 }, (_, i) => makeTicket({ id: `t${i}`, priority: 'medium' }));
     const result = rankFocus({ tickets, milestones: {}, now: NOW, limit: 3 });
     expect(result).toHaveLength(3);
   });

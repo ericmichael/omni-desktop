@@ -197,8 +197,8 @@ describe('supervisor lifecycle races', () => {
       return this.lock.withLock(ticketId, async () => {
         const machine = this.machines.get(ticketId);
         if (!machine) {
-return;
-}
+          return;
+        }
         await machine.stop();
       });
     }
@@ -207,13 +207,13 @@ return;
       return this.lock.withLock(ticketId, async () => {
         const machine = this.machines.get(ticketId);
         if (!machine) {
-return;
-}
+          return;
+        }
 
         // Guard: ignore if no longer streaming
         if (!machine.isStreaming()) {
-return;
-}
+          return;
+        }
 
         machine.phase = action === 'complete' ? 'completed' : 'error';
       });
@@ -325,8 +325,8 @@ return;
     const pOther = fm.lock.withLock('t1', async () => {
       // Re-check under lock — if stop already idled the machine, bail out.
       if (!machine.isStreaming()) {
-return;
-}
+        return;
+      }
       machine.phase = 'error';
     });
 
@@ -358,13 +358,7 @@ describe('lifecycle transition paths', () => {
   });
 
   it('stop from any active phase goes to idle', () => {
-    const activePhases: TicketPhase[] = [
-      'provisioning',
-      'connecting',
-      'session_creating',
-      'ready',
-      'running',
-    ];
+    const activePhases: TicketPhase[] = ['provisioning', 'connecting', 'session_creating', 'ready', 'running'];
     for (const phase of activePhases) {
       expect(isValidTransition(phase, 'idle'), `${phase} → idle`).toBe(true);
     }

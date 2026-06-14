@@ -1,16 +1,16 @@
-import React from 'react'
+import React from 'react';
 
 export type NotificationInfo = {
-  id: string
-  message: string
-  timestamp: number
-}
+  id: string;
+  message: string;
+  timestamp: number;
+};
 
 type Props = {
-  notifications: NotificationInfo[]
-  onDismiss: (id: string) => void
-  onDismissAll: () => void
-}
+  notifications: NotificationInfo[];
+  onDismiss: (id: string) => void;
+  onDismissAll: () => void;
+};
 
 // Docked notifications panel. Accumulates ``notify`` calls from the
 // agent and persists them until the user explicitly dismisses them —
@@ -19,10 +19,10 @@ type Props = {
 // (same bgCardAlt card, brand-color accents).
 export function Notifications({ notifications, onDismiss, onDismissAll }: Props) {
   if (!notifications || notifications.length === 0) {
-    return null
+    return null;
   }
 
-  const noun = notifications.length === 1 ? 'notification' : 'notifications'
+  const noun = notifications.length === 1 ? 'notification' : 'notifications';
 
   return (
     <div className="px-3 pt-2">
@@ -44,17 +44,9 @@ export function Notifications({ notifications, onDismiss, onDismissAll }: Props)
         </div>
         <ul className="mt-1.5 space-y-1">
           {notifications.map((n) => (
-            <li
-              key={n.id}
-              className="flex items-start gap-2 text-xs leading-5"
-            >
-              <span
-                className="inline-block w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0 mt-1.5"
-                aria-hidden
-              />
-              <span className="min-w-0 flex-1 text-textPrimary">
-                {n.message}
-              </span>
+            <li key={n.id} className="flex items-start gap-2 text-xs leading-5">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0 mt-1.5" aria-hidden />
+              <span className="min-w-0 flex-1 text-textPrimary">{n.message}</span>
               <button
                 type="button"
                 onClick={() => onDismiss(n.id)}
@@ -69,5 +61,5 @@ export function Notifications({ notifications, onDismiss, onDismissAll }: Props)
         </ul>
       </div>
     </div>
-  )
+  );
 }

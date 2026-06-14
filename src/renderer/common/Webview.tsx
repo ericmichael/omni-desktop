@@ -183,6 +183,14 @@ export const Webview = forwardRef<
     // `X-Frame-Options` don't block embedding. No-op in Electron `<webview>`.
     const [iframeSrc, setIframeSrc] = useState<string | undefined>(isElectron ? src : undefined);
 
+    const emitError = useCallback((error: WebviewLoadError) => {
+      if (onErrorRef.current) {
+        onErrorRef.current(error);
+      } else {
+        setInternalError(error);
+      }
+    }, []);
+
     useEffect(() => {
       onReadyRef.current = onReady;
     }, [onReady]);
@@ -247,7 +255,7 @@ export const Webview = forwardRef<
       return () => {
         cancelled = true;
       };
-    }, [src]);
+    }, [emitError, src]);
     useEffect(() => {
       registryRef.current = registry;
     }, [registry]);
@@ -427,7 +435,9 @@ export const Webview = forwardRef<
         },
         openDevTools: () => {
           const el = elementRef.current;
-          if (!el || !isElectron) return;
+          if (!el || !isElectron) {
+            return;
+          }
           try {
             (el as unknown as Electron.WebviewTag).openDevTools();
           } catch {
@@ -444,14 +454,6 @@ export const Webview = forwardRef<
       }
       clearTimeout(retryTimerRef.current);
       retryTimerRef.current = null;
-    }, []);
-
-    const emitError = useCallback((error: WebviewLoadError) => {
-      if (onErrorRef.current) {
-        onErrorRef.current(error);
-      } else {
-        setInternalError(error);
-      }
     }, []);
 
     const scheduleRetry = useCallback(() => {
@@ -551,12 +553,14 @@ export const Webview = forwardRef<
             }
 
             // Read page title
-            el.getTitle?.()
-              ? onTitleRef.current?.(el.getTitle())
-              : void el
-                  .executeJavaScript?.('document.title')
-                  .then((t: string) => onTitleRef.current?.(t))
-                  .catch(() => {});
+            if (el.getTitle?.()) {
+              onTitleRef.current?.(el.getTitle());
+            } else {
+              void el
+                .executeJavaScript?.('document.title')
+                .then((t: string) => onTitleRef.current?.(t))
+                .catch(() => {});
+            }
           };
 
           const onFailLoad = (event: unknown) => {
@@ -865,7 +869,7 @@ export const Webview = forwardRef<
           key={`${partition ?? 'default'}:${reloadNonce}`}
           ref={callbackRef}
           src={src}
-          useragent={embeddedUserAgent}
+          {...{ useragent: embeddedUserAgent }}
           {...(partition ? { partition } : {})}
           style={{ width: '100%', height: '100%' }}
         />

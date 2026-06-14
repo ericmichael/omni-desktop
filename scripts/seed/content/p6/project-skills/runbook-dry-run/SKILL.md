@@ -22,6 +22,7 @@ Help the user rehearse a runbook without actually firing any destructive command
 ## Scope
 
 Specific to `platform-oncall-runbooks`. Knows:
+
 - Runbooks live in `runbooks/*.md`.
 - Scripts that mutate state live in `scripts/`.
 - The convention is that any runbook that calls a `scripts/` command is destructive.

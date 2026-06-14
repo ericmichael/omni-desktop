@@ -18,17 +18,14 @@ import { unified } from 'unified';
  * fenced-code style that the existing pages already use, so normalization
  * doesn't show up as a noisy diff on first contact.
  */
-const processor = unified()
-  .use(remarkParse)
-  .use(remarkGfm)
-  .use(remarkStringify, {
-    bullet: '-',
-    listItemIndent: 'one',
-    fences: true,
-    rule: '-',
-    emphasis: '*',
-    strong: '*',
-  });
+const processor = unified().use(remarkParse).use(remarkGfm).use(remarkStringify, {
+  bullet: '-',
+  listItemIndent: 'one',
+  fences: true,
+  rule: '-',
+  emphasis: '*',
+  strong: '*',
+});
 
 export function normalizeMarkdown(content: string): string {
   if (!content) {

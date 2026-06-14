@@ -56,7 +56,9 @@ export const MilestoneForm = memo(
         return;
       }
       const s = firstSource(project);
-      if (s?.kind !== 'local') return;
+      if (s?.kind !== 'local') {
+        return;
+      }
       ticketApi.checkGitRepo(s.workspaceDir).then((info) => {
         setGitInfo(info);
       });

@@ -30,16 +30,24 @@ const hoisted = vi.hoisted(() => ({
 vi.mock('electron', () => ({
   app: {
     getPath: vi.fn((name: string) => {
-      if (name === 'userData') return '/tmp/test-userdata';
-      if (name === 'home') return '/tmp/test-home';
-      if (name === 'appData') return '/tmp/test-appdata';
+      if (name === 'userData') {
+        return '/tmp/test-userdata';
+      }
+      if (name === 'home') {
+        return '/tmp/test-home';
+      }
+      if (name === 'appData') {
+        return '/tmp/test-appdata';
+      }
       return '/tmp';
     }),
   },
   ipcMain: { removeHandler: vi.fn(), handle: vi.fn() },
   net: {
     fetch: vi.fn(async () => {
-      if (!hoisted.networkReachable) throw new Error('ECONNREFUSED');
+      if (!hoisted.networkReachable) {
+        throw new Error('ECONNREFUSED');
+      }
       return { status: 200 };
     }),
   },
@@ -69,12 +77,7 @@ vi.mock('@/lib/pty-utils', () => ({
 vi.mock('@/lib/command-runner', () => ({
   CommandRunner: class MockCommandRunner {
     private running = false;
-    async runCommand(
-      _cmd: string,
-      _args: string[],
-      _opts?: unknown,
-      callbacks?: { onData?: (data: string) => void }
-    ) {
+    async runCommand(_cmd: string, _args: string[], _opts?: unknown, callbacks?: { onData?: (data: string) => void }) {
       this.running = true;
       const result = hoisted.commandRunnerResults[hoisted.commandRunnerCallIndex] ?? { exitCode: 0 };
       hoisted.commandRunnerCallIndex++;
@@ -101,11 +104,15 @@ vi.mock('@/main/util', () => ({
   getOmniVenvPath: () => '/tmp/test-runtime/.venv',
   getOmniLogsDir: () => '/tmp/test-logs',
   isFile: vi.fn(async (p: string) => {
-    if (p === '/app/bin/uv') return hoisted.uvExists;
+    if (p === '/app/bin/uv') {
+      return hoisted.uvExists;
+    }
     return hoisted.fsFiles.has(p);
   }),
   pathExists: vi.fn(async (p: string) => {
-    if (p.includes('.venv')) return hoisted.venvExists;
+    if (p.includes('.venv')) {
+      return hoisted.venvExists;
+    }
     return hoisted.fsFiles.has(p);
   }),
 }));
@@ -115,7 +122,9 @@ vi.mock('fs/promises', async (importOriginal) => {
   const mock = {
     mkdir: vi.fn(async () => {}),
     access: vi.fn(async (p: string) => {
-      if (p === '/app/bin/uv' && !hoisted.uvExists) throw new Error('ENOENT');
+      if (p === '/app/bin/uv' && !hoisted.uvExists) {
+        throw new Error('ENOENT');
+      }
     }),
     readdir: vi.fn(async () => []),
     rm: vi.fn(async () => {}),
@@ -163,10 +172,18 @@ vi.mock('@/lib/omni-version', () => ({
 vi.mock('@/lib/simple-logger', () => ({
   SimpleLogger: class {
     constructor(private handler: (entry: { level: string; message: string }) => void) {}
-    info(msg: string) { this.handler({ level: 'info', message: msg }); }
-    warn(msg: string) { this.handler({ level: 'warn', message: msg }); }
-    error(msg: string) { this.handler({ level: 'error', message: msg }); }
-    debug(msg: string) { this.handler({ level: 'debug', message: msg }); }
+    info(msg: string) {
+      this.handler({ level: 'info', message: msg });
+    }
+    warn(msg: string) {
+      this.handler({ level: 'warn', message: msg });
+    }
+    error(msg: string) {
+      this.handler({ level: 'error', message: msg });
+    }
+    debug(msg: string) {
+      this.handler({ level: 'debug', message: msg });
+    }
   },
 }));
 

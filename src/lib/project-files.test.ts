@@ -164,8 +164,8 @@ describe('ticket file roundtrip', () => {
     const parsed = parseTicketFile(text, t.id, t.projectId);
     expect(parsed.isOk()).toBe(true);
     if (parsed.isOk()) {
-expect(parsed.value).toEqual(t);
-}
+      expect(parsed.value).toEqual(t);
+    }
   });
 
   it('folds a legacy shaping frontmatter block into the description', () => {
@@ -272,8 +272,8 @@ describe('milestone file roundtrip', () => {
     const parsed = parseMilestoneFile(text, m.id, m.projectId);
     expect(parsed.isOk()).toBe(true);
     if (parsed.isOk()) {
-expect(parsed.value).toEqual(m);
-}
+      expect(parsed.value).toEqual(m);
+    }
   });
 
   it('roundtrips a milestone with a brief body', () => {
@@ -282,8 +282,8 @@ expect(parsed.value).toEqual(m);
     const parsed = parseMilestoneFile(text, m.id, m.projectId);
     expect(parsed.isOk()).toBe(true);
     if (parsed.isOk()) {
-expect(parsed.value).toEqual(m);
-}
+      expect(parsed.value).toEqual(m);
+    }
   });
 
   it('rejects invalid status', () => {
@@ -369,6 +369,7 @@ const makeProject = (overrides: Partial<Project> = {}): Project => ({
   label: 'Launcher',
   slug: 'launcher',
   createdAt: T1,
+  sources: [],
   ...overrides,
 });
 
@@ -379,8 +380,8 @@ describe('project config roundtrip', () => {
     const parsed = parseProjectConfig(text);
     expect(parsed.isOk()).toBe(true);
     if (parsed.isOk()) {
-expect(parsed.value).toEqual(p);
-}
+      expect(parsed.value).toEqual(p);
+    }
   });
 
   it('roundtrips a project with local source and pipeline', () => {
@@ -400,24 +401,33 @@ expect(parsed.value).toEqual(p);
     const parsed = parseProjectConfig(text);
     expect(parsed.isOk()).toBe(true);
     if (parsed.isOk()) {
-expect(parsed.value).toEqual(p);
-}
+      expect(parsed.value).toEqual(p);
+    }
   });
 
   it('roundtrips a project with git-remote source', () => {
     const p = makeProject({
-      sources: [{ id: 'src-1', mountName: 'repo', kind: 'git-remote', repoUrl: 'git@github.com:user/repo.git', defaultBranch: 'main' }],
+      sources: [
+        {
+          id: 'src-1',
+          mountName: 'repo',
+          kind: 'git-remote',
+          repoUrl: 'git@github.com:user/repo.git',
+          defaultBranch: 'main',
+        },
+      ],
     });
     const text = serializeProjectConfig(p);
     const parsed = parseProjectConfig(text);
     expect(parsed.isOk()).toBe(true);
     if (parsed.isOk()) {
-expect(parsed.value).toEqual(p);
-}
+      expect(parsed.value).toEqual(p);
+    }
   });
 
   it('rejects an unknown source kind', () => {
-    const text = 'id: p1\nlabel: X\nslug: x\ncreatedAt: 2026-04-12T00:00:00Z\nsources:\n  - kind: carrier-pigeon\n    address: home\n';
+    const text =
+      'id: p1\nlabel: X\nslug: x\ncreatedAt: 2026-04-12T00:00:00Z\nsources:\n  - kind: carrier-pigeon\n    address: home\n';
     const parsed = parseProjectConfig(text);
     expect(parsed.isErr()).toBe(true);
   });
@@ -450,7 +460,7 @@ describe('ticket comments JSONL', () => {
   });
 
   it('collects errors for bad lines without dropping good ones', () => {
-    const text = `${serializeTicketComment(comment)  }not-json\n${  serializeTicketComment({ ...comment, id: 'c2' })}`;
+    const text = `${serializeTicketComment(comment)}not-json\n${serializeTicketComment({ ...comment, id: 'c2' })}`;
     const { items, errors } = parseTicketComments(text);
     expect(items).toHaveLength(2);
     expect(errors).toHaveLength(1);
@@ -458,7 +468,7 @@ describe('ticket comments JSONL', () => {
   });
 
   it('tolerates trailing blank lines', () => {
-    const text = `${serializeTicketComment(comment)  }\n\n`;
+    const text = `${serializeTicketComment(comment)}\n\n`;
     const { items, errors } = parseTicketComments(text);
     expect(items).toHaveLength(1);
     expect(errors).toEqual([]);

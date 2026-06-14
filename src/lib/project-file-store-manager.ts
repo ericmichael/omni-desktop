@@ -102,25 +102,25 @@ export class ProjectFileStoreManager {
     const store = this.stores.get(projectId);
     const dir = this.dirs.get(projectId);
     if (store) {
-await store.close();
-}
+      await store.close();
+    }
     this.stores.delete(projectId);
     this.dirs.delete(projectId);
     for (const [tid, pid] of [...this.ticketIndex]) {
-if (pid === projectId) {
-this.ticketIndex.delete(tid);
-}
-}
+      if (pid === projectId) {
+        this.ticketIndex.delete(tid);
+      }
+    }
     for (const [mid, pid] of [...this.milestoneIndex]) {
-if (pid === projectId) {
-this.milestoneIndex.delete(mid);
-}
-}
+      if (pid === projectId) {
+        this.milestoneIndex.delete(mid);
+      }
+    }
     for (const [pgid, pid] of [...this.pageIndex]) {
-if (pid === projectId) {
-this.pageIndex.delete(pgid);
-}
-}
+      if (pid === projectId) {
+        this.pageIndex.delete(pgid);
+      }
+    }
     if (options.deleteFiles && dir) {
       await rm(dir, { recursive: true, force: true });
     }
@@ -141,8 +141,8 @@ this.pageIndex.delete(pgid);
     for (const store of this.stores.values()) {
       const p = store.getProject();
       if (p) {
-out.push(p);
-}
+        out.push(p);
+      }
     }
     return out;
   }
@@ -157,20 +157,20 @@ out.push(p);
 
   listTickets(projectId?: ProjectId): Ticket[] {
     if (projectId) {
-return this.stores.get(projectId)?.listTickets() ?? [];
-}
+      return this.stores.get(projectId)?.listTickets() ?? [];
+    }
     const out: Ticket[] = [];
     for (const store of this.stores.values()) {
-out.push(...store.listTickets());
-}
+      out.push(...store.listTickets());
+    }
     return out;
   }
 
   getTicket(id: TicketId): Ticket | null {
     const pid = this.ticketIndex.get(id);
     if (!pid) {
-return null;
-}
+      return null;
+    }
     return this.stores.get(pid)?.getTicket(id) ?? null;
   }
 
@@ -181,62 +181,62 @@ return null;
   getTicketComments(id: TicketId): TicketComment[] {
     const pid = this.ticketIndex.get(id);
     if (!pid) {
-return [];
-}
+      return [];
+    }
     return this.stores.get(pid)?.getTicketComments(id) ?? [];
   }
 
   getTicketRuns(id: TicketId): TicketRun[] {
     const pid = this.ticketIndex.get(id);
     if (!pid) {
-return [];
-}
+      return [];
+    }
     return this.stores.get(pid)?.getTicketRuns(id) ?? [];
   }
 
   listMilestones(projectId?: ProjectId): Milestone[] {
     if (projectId) {
-return this.stores.get(projectId)?.listMilestones() ?? [];
-}
+      return this.stores.get(projectId)?.listMilestones() ?? [];
+    }
     const out: Milestone[] = [];
     for (const store of this.stores.values()) {
-out.push(...store.listMilestones());
-}
+      out.push(...store.listMilestones());
+    }
     return out;
   }
 
   getMilestone(id: MilestoneId): Milestone | null {
     const pid = this.milestoneIndex.get(id);
     if (!pid) {
-return null;
-}
+      return null;
+    }
     return this.stores.get(pid)?.getMilestone(id) ?? null;
   }
 
   listPages(projectId?: ProjectId): Page[] {
     if (projectId) {
-return this.stores.get(projectId)?.listPages() ?? [];
-}
+      return this.stores.get(projectId)?.listPages() ?? [];
+    }
     const out: Page[] = [];
     for (const store of this.stores.values()) {
-out.push(...store.listPages());
-}
+      out.push(...store.listPages());
+    }
     return out;
   }
 
   getPage(id: PageId): Page | null {
     const pid = this.pageIndex.get(id);
     if (!pid) {
-return null;
-}
+      return null;
+    }
     return this.stores.get(pid)?.getPage(id) ?? null;
   }
 
   getPageBody(id: PageId): string | null {
     const pid = this.pageIndex.get(id);
     if (!pid) {
-return null;
-}
+      return null;
+    }
     return this.stores.get(pid)?.getPageBody(id) ?? null;
   }
 
@@ -277,24 +277,24 @@ return null;
   async appendTicketComment(ticketId: TicketId, comment: TicketComment): Promise<void> {
     const pid = this.ticketIndex.get(ticketId);
     if (!pid) {
-throw new Error(`unknown ticket: ${ticketId}`);
-}
+      throw new Error(`unknown ticket: ${ticketId}`);
+    }
     await this.stores.get(pid)!.appendTicketComment(ticketId, comment);
   }
 
   async appendTicketRun(ticketId: TicketId, run: TicketRun): Promise<void> {
     const pid = this.ticketIndex.get(ticketId);
     if (!pid) {
-throw new Error(`unknown ticket: ${ticketId}`);
-}
+      throw new Error(`unknown ticket: ${ticketId}`);
+    }
     await this.stores.get(pid)!.appendTicketRun(ticketId, run);
   }
 
   async deleteTicket(id: TicketId): Promise<void> {
     const pid = this.ticketIndex.get(id);
     if (!pid) {
-return;
-}
+      return;
+    }
     await this.stores.get(pid)!.deleteTicket(id);
     this.ticketIndex.delete(id);
   }
@@ -302,8 +302,8 @@ return;
   async deleteMilestone(id: MilestoneId): Promise<void> {
     const pid = this.milestoneIndex.get(id);
     if (!pid) {
-return;
-}
+      return;
+    }
     await this.stores.get(pid)!.deleteMilestone(id);
     this.milestoneIndex.delete(id);
   }
@@ -311,8 +311,8 @@ return;
   async deletePage(id: PageId): Promise<void> {
     const pid = this.pageIndex.get(id);
     if (!pid) {
-return;
-}
+      return;
+    }
     await this.stores.get(pid)!.deletePage(id);
     this.pageIndex.delete(id);
   }
@@ -322,29 +322,29 @@ return;
   private async openOne(ref: ManagedProjectRef): Promise<ProjectFileStore> {
     const existing = this.stores.get(ref.id);
     if (existing) {
-return existing;
-}
+      return existing;
+    }
     const store = new ProjectFileStore(ref.dir, ref.id, this.wrapEvents(ref.id), this.options);
     this.stores.set(ref.id, store);
     this.dirs.set(ref.id, path.resolve(ref.dir));
     await store.open();
     for (const t of store.listTickets()) {
-this.ticketIndex.set(t.id, ref.id);
-}
+      this.ticketIndex.set(t.id, ref.id);
+    }
     for (const m of store.listMilestones()) {
-this.milestoneIndex.set(m.id, ref.id);
-}
+      this.milestoneIndex.set(m.id, ref.id);
+    }
     for (const p of store.listPages()) {
-this.pageIndex.set(p.id, ref.id);
-}
+      this.pageIndex.set(p.id, ref.id);
+    }
     return store;
   }
 
   private requireStore(projectId: ProjectId): ProjectFileStore {
     const s = this.stores.get(projectId);
     if (!s) {
-throw new Error(`unknown project: ${projectId}`);
-}
+      throw new Error(`unknown project: ${projectId}`);
+    }
     return s;
   }
 

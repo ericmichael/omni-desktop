@@ -201,9 +201,7 @@ describe('client_tools shape', () => {
       surface: 'code',
       context: {
         ticketId: 'tkt-1',
-        sources: [
-          { id: 's1', mountName: 'lib', kind: 'git-remote', repoUrl: 'https://github.com/acme/lib' },
-        ],
+        sources: [{ id: 's1', mountName: 'lib', kind: 'git-remote', repoUrl: 'https://github.com/acme/lib' }],
       },
     }) as { additional_instructions: string };
     expect(vars.additional_instructions).toContain('/workspace/.omni-artifacts/tkt-1');
@@ -215,9 +213,7 @@ describe('client_tools shape', () => {
       surface: 'code',
       context: {
         projectId: 'proj-1',
-        sources: [
-          { id: 's1', mountName: 'lib', kind: 'git-remote', repoUrl: 'https://github.com/acme/lib' },
-        ],
+        sources: [{ id: 's1', mountName: 'lib', kind: 'git-remote', repoUrl: 'https://github.com/acme/lib' }],
       },
     }) as { additional_instructions: string };
     expect(vars.additional_instructions).toContain('share results in your reply');

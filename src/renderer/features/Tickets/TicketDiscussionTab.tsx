@@ -1,5 +1,5 @@
 import { makeStyles, tokens } from '@fluentui/react-components';
-import { Bot20Regular, Person20Regular,Send20Regular } from '@fluentui/react-icons';
+import { Bot20Regular, Person20Regular, Send20Regular } from '@fluentui/react-icons';
 import { nanoid } from 'nanoid';
 import { memo, useCallback, useRef, useState } from 'react';
 
@@ -103,8 +103,8 @@ function formatTime(ts: number): string {
   const isToday = d.toDateString() === now.toDateString();
   const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
   if (isToday) {
-return time;
-}
+    return time;
+  }
   return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${time}`;
 }
 
@@ -115,7 +115,11 @@ const CommentRow = memo(({ comment }: { comment: TicketComment }) => {
   return (
     <div className={styles.comment}>
       <div className={`${styles.avatar} ${isAgent ? styles.avatarAgent : styles.avatarHuman}`}>
-        {isAgent ? <Bot20Regular style={{ width: 16, height: 16 }} /> : <Person20Regular style={{ width: 16, height: 16 }} />}
+        {isAgent ? (
+          <Bot20Regular style={{ width: 16, height: 16 }} />
+        ) : (
+          <Person20Regular style={{ width: 16, height: 16 }} />
+        )}
       </div>
       <div className={styles.commentBody}>
         <div className={styles.commentMeta}>
@@ -143,8 +147,8 @@ export const TicketDiscussionTab = memo(({ ticket }: { ticket: Ticket }) => {
   const handleSend = useCallback(async () => {
     const content = draft.trim();
     if (!content || sending) {
-return;
-}
+      return;
+    }
 
     const comment: TicketComment = {
       id: nanoid(),

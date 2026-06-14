@@ -42,7 +42,10 @@ export function buildProviderConfig(
   const existing = current.providers[providerName];
   const provider: ProviderEntry = existing
     ? { ...existing, models: { ...existing.models } }
-    : { type: answers.kind === 'openai' ? 'openai' : answers.kind === 'anthropic' ? 'litellm' : 'openai-compatible', models: {} };
+    : {
+        type: answers.kind === 'openai' ? 'openai' : answers.kind === 'anthropic' ? 'litellm' : 'openai-compatible',
+        models: {},
+      };
 
   if (answers.kind === 'openai') {
     provider.type = 'openai';

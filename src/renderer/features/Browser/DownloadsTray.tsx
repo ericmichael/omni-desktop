@@ -8,7 +8,13 @@
  * the tray.
  */
 import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
-import { ArrowDownload20Regular, CheckmarkCircle16Regular, Delete16Regular, ErrorCircle16Regular, FolderOpen16Regular } from '@fluentui/react-icons';
+import {
+  ArrowDownload20Regular,
+  CheckmarkCircle16Regular,
+  Delete16Regular,
+  ErrorCircle16Regular,
+  FolderOpen16Regular,
+} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { atom } from 'nanostores';
 import { memo, useCallback, useState } from 'react';
@@ -146,26 +152,25 @@ const useStyles = makeStyles({
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) {
-return `${bytes} B`;
-}
+    return `${bytes} B`;
+  }
   if (bytes < 1024 * 1024) {
-return `${(bytes / 1024).toFixed(0)} KB`;
-}
+    return `${(bytes / 1024).toFixed(0)} KB`;
+  }
   if (bytes < 1024 * 1024 * 1024) {
-return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 const DownloadRow = memo(({ entry }: { entry: BrowserDownloadEntry }) => {
   const styles = useStyles();
-  const pct =
-    entry.totalBytes > 0 ? Math.min(100, Math.round((entry.receivedBytes / entry.totalBytes) * 100)) : 0;
+  const pct = entry.totalBytes > 0 ? Math.min(100, Math.round((entry.receivedBytes / entry.totalBytes) * 100)) : 0;
 
   const handleOpen = useCallback(() => {
     if (entry.state !== 'completed') {
-return;
-}
+      return;
+    }
     void emitter.invoke('browser:downloads-open-file', entry.id).catch(() => {});
   }, [entry.id, entry.state]);
 
@@ -245,12 +250,7 @@ export const DownloadsTray = memo(() => {
   return (
     <Menu open={open} onOpenChange={(_, data) => setOpen(data.open)} positioning={{ position: 'below', align: 'end' }}>
       <MenuTrigger>
-        <button
-          type="button"
-          className={styles.btn}
-          aria-label="Downloads"
-          title={`Downloads (${items.length})`}
-        >
+        <button type="button" className={styles.btn} aria-label="Downloads" title={`Downloads (${items.length})`}>
           <ArrowDownload20Regular style={{ width: 14, height: 14 }} />
           {activeCount > 0 && <span className={styles.badge}>{activeCount}</span>}
         </button>

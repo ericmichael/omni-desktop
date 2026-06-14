@@ -78,8 +78,7 @@ export const marimoManifest: ExtensionManifest = {
   surface: {
     type: 'webview',
     buildBaseUrl: ({ port }) => `http://127.0.0.1:${port}`,
-    buildContentUrl: ({ port }, contentPath) =>
-      `http://127.0.0.1:${port}/?file=${encodeURIComponent(contentPath)}`,
+    buildContentUrl: ({ port }, contentPath) => `http://127.0.0.1:${port}/?file=${encodeURIComponent(contentPath)}`,
   },
   contentTypes: [
     {

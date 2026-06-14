@@ -27,7 +27,9 @@ export const APP_ROLE = 'omni_app';
 /** node-postgres rejects managed-CA certs under `sslmode=require`; drive TLS via ssl config instead. */
 function adminClientConfig(url: string): { connectionString: string; ssl?: { rejectUnauthorized: boolean } } {
   const wantsTls = /[?&](sslmode=(require|verify-ca|verify-full|prefer)|ssl=true)/.test(url);
-  if (!wantsTls) return { connectionString: url };
+  if (!wantsTls) {
+    return { connectionString: url };
+  }
   try {
     const u = new URL(url);
     u.searchParams.delete('sslmode');
@@ -85,9 +87,7 @@ export async function ensureAppRole(adminUrl: string, appUrl: string): Promise<v
     await client.query(
       `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${APP_ROLE}`
     );
-    await client.query(
-      `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO ${APP_ROLE}`
-    );
+    await client.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO ${APP_ROLE}`);
   } finally {
     await client.end();
   }

@@ -46,17 +46,14 @@ export function SettingsModalVoicePersonas(): React.ReactElement {
   const patchActive = useCallback(
     (patch: Partial<VoicePersona>) => {
       if (active.builtin) {
-return;
-}
+        return;
+      }
       setPersonas((store.voicePersonas ?? []).map((p) => (p.id === active.id ? { ...p, ...patch } : p)));
     },
-    [active, store.voicePersonas, setPersonas],
+    [active, store.voicePersonas, setPersonas]
   );
 
-  const onSelect = useCallback(
-    (e: ChangeEvent<HTMLSelectElement>) => selectPersona(e.target.value),
-    [selectPersona],
-  );
+  const onSelect = useCallback((e: ChangeEvent<HTMLSelectElement>) => selectPersona(e.target.value), [selectPersona]);
 
   const onCreate = useCallback(() => {
     const id = newPersonaId();
@@ -81,8 +78,8 @@ return;
 
   const onDelete = useCallback(() => {
     if (active.builtin) {
-return;
-}
+      return;
+    }
     setPersonas((store.voicePersonas ?? []).filter((p) => p.id !== active.id));
     selectPersona('default');
   }, [active, store.voicePersonas, setPersonas, selectPersona]);
@@ -90,32 +87,32 @@ return;
   const onChangeVoiceKind = useCallback(
     (kind: string) => {
       if (kind === 'predefined') {
-patchActive({ voice: { kind: 'predefined', name: 'alba' } });
-} else {
-fileInput.current?.click();
-} // 'clone' has no value until a file is picked
+        patchActive({ voice: { kind: 'predefined', name: 'alba' } });
+      } else {
+        fileInput.current?.click();
+      } // 'clone' has no value until a file is picked
     },
-    [patchActive],
+    [patchActive]
   );
 
   const onChangePredefined = useCallback(
     (e: ChangeEvent<HTMLSelectElement>) => patchActive({ voice: { kind: 'predefined', name: e.target.value } }),
-    [patchActive],
+    [patchActive]
   );
 
   const onChangeName = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => patchActive({ name: e.target.value }),
-    [patchActive],
+    [patchActive]
   );
 
   const onChangeInstructions = useCallback(
     (e: ChangeEvent<HTMLTextAreaElement>) => patchActive({ instructions: e.target.value }),
-    [patchActive],
+    [patchActive]
   );
 
   const onChangeVoiceKindRadio = useCallback(
     (_: unknown, data: { value: string }) => onChangeVoiceKind(data.value),
-    [onChangeVoiceKind],
+    [onChangeVoiceKind]
   );
 
   const onUpload = useCallback(
@@ -123,8 +120,8 @@ fileInput.current?.click();
       const file = e.target.files?.[0];
       e.target.value = '';
       if (!file || active.builtin) {
-return;
-}
+        return;
+      }
       setBusy('Encoding voice sample…');
       try {
         const { file: stored, embeddingFile } = await getVoiceClient().importSample(active.id, file);
@@ -136,14 +133,15 @@ return;
       }
       setBusy(null);
     },
-    [active, patchActive],
+    [active, patchActive]
   );
 
   const onPreview = useCallback(async () => {
     setBusy('Speaking…');
     try {
       await getVoiceClient().start();
-      const line = active.id === 'jarvis' ? 'Good evening, sir. Jarvis at your service.' : `Hello, this is ${active.name}.`;
+      const line =
+        active.id === 'jarvis' ? 'Good evening, sir. Jarvis at your service.' : `Hello, this is ${active.name}.`;
       await getVoiceClient().speak(line, resolveVoiceArg(active));
     } finally {
       setBusy(null);
@@ -153,11 +151,11 @@ return;
   const voiceKind = active.voice.kind;
   const cloneLabel = useMemo(() => {
     if (active.voice.kind !== 'clone') {
-return null;
-}
+      return null;
+    }
     if (active.voice.embeddingFile.startsWith('builtin:')) {
-return 'Bundled voice';
-}
+      return 'Bundled voice';
+    }
     return active.voice.file ? active.voice.file.split('/').pop() : 'Cloned voice';
   }, [active.voice]);
 
@@ -210,7 +208,11 @@ return 'Bundled voice';
       </FormField>
       {voiceKind === 'predefined' ? (
         <FormField label="Predefined voice">
-          <Select value={active.voice.kind === 'predefined' ? active.voice.name : 'alba'} onChange={onChangePredefined} disabled={active.builtin}>
+          <Select
+            value={active.voice.kind === 'predefined' ? active.voice.name : 'alba'}
+            onChange={onChangePredefined}
+            disabled={active.builtin}
+          >
             {PREDEFINED_VOICES.map((v) => (
               <option key={v} value={v}>
                 {v}

@@ -112,8 +112,8 @@ export const PermissionsBar = memo(({ partition }: { partition?: string }) => {
   }, []);
 
   if (!next) {
-return null;
-}
+    return null;
+  }
 
   return (
     <div className={styles.root} role="alertdialog" aria-label="Permission request">

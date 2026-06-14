@@ -55,6 +55,7 @@ import type {
   PlatformCredentials,
   Project,
   ProjectId,
+  ProjectSource,
   SessionMessage,
   SupervisorBridgeEvent,
   Task,
@@ -63,7 +64,6 @@ import type {
   TicketId,
 } from '@/shared/types';
 import { firstSource } from '@/shared/types';
-import type { ProjectSource } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
 // Operational constants — referenced by SupervisorOrchestrator and eventually
@@ -76,8 +76,8 @@ export const MAX_CONCURRENT_SUPERVISORS = 5;
 /**
  * Maximum continuation turns. Used as the default ``max_turns`` arg
  * passed to omni-code's ``/goal`` server function when neither the
-   * agent-side loop is what enforces this budget — the launcher just forwards
-   * the value at startGoal time.
+ * agent-side loop is what enforces this budget — the launcher just forwards
+ * the value at startGoal time.
  */
 export const MAX_CONTINUATION_TURNS = 10;
 

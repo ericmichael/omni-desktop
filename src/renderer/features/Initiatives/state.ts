@@ -18,8 +18,8 @@ export const milestoneApi = {
     const next: Record<MilestoneId, Milestone> = {};
     for (const [id, milestone] of Object.entries(current)) {
       if (milestone.projectId !== projectId) {
-next[id] = milestone;
-}
+        next[id] = milestone;
+      }
     }
     for (const item of items) {
       next[item.id] = item;
@@ -27,9 +27,7 @@ next[id] = milestone;
     $milestones.set(next);
   },
 
-  addMilestone: async (
-    input: Omit<Milestone, 'id' | 'createdAt' | 'updatedAt'>
-  ): Promise<Milestone> => {
+  addMilestone: async (input: Omit<Milestone, 'id' | 'createdAt' | 'updatedAt'>): Promise<Milestone> => {
     const created = await emitter.invoke('milestone:add-item', input);
     $milestones.setKey(created.id, created);
     return created;

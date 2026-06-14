@@ -26,10 +26,7 @@ export interface MigrationStoreAdapter {
  * the migration is best-effort — a path that disappears between record
  * and cleanup is just one fewer thing to delete.
  */
-export function registerMigrationHandlers(
-  ipc: IIpcListener,
-  resolve: (event: unknown) => MigrationStoreAdapter
-): void {
+export function registerMigrationHandlers(ipc: IIpcListener, resolve: (event: unknown) => MigrationStoreAdapter): void {
   ipc.handle('migration:get-pages-state', (e: unknown) => resolve(e).get());
 
   ipc.handle('migration:acknowledge-pages', (e: unknown) => {

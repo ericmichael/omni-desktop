@@ -1,3 +1,5 @@
+import './yoopta-fluent.css';
+
 import { makeStyles, tokens } from '@fluentui/react-components';
 import Accordion from '@yoopta/accordion';
 import Blockquote from '@yoopta/blockquote';
@@ -7,15 +9,15 @@ import Divider from '@yoopta/divider';
 import type { RenderBlockProps, SlateElement, YooptaContentValue, YooptaPlugin } from '@yoopta/editor';
 import YooptaEditor, { Blocks, createYooptaEditor, Marks, useYooptaEditor } from '@yoopta/editor';
 import { markdown } from '@yoopta/exports';
-import { HeadingOne, HeadingThree,HeadingTwo } from '@yoopta/headings';
+import { HeadingOne, HeadingThree, HeadingTwo } from '@yoopta/headings';
 import Link from '@yoopta/link';
 import { BulletedList, NumberedList, TodoList } from '@yoopta/lists';
-import { Bold, CodeMark, Highlight,Italic, Strike, Underline } from '@yoopta/marks';
+import { Bold, CodeMark, Highlight, Italic, Strike, Underline } from '@yoopta/marks';
 import Paragraph from '@yoopta/paragraph';
 import Table from '@yoopta/table';
 import { applyTheme } from '@yoopta/themes-shadcn';
 import { ActionMenuList } from '@yoopta/ui/action-menu-list';
-import { BlockDndContext, DragHandle,SortableBlock } from '@yoopta/ui/block-dnd';
+import { BlockDndContext, DragHandle, SortableBlock } from '@yoopta/ui/block-dnd';
 import { BlockOptions, useBlockActions } from '@yoopta/ui/block-options';
 import { FloatingBlockActions } from '@yoopta/ui/floating-block-actions';
 // UI components
@@ -36,8 +38,6 @@ import {
   Underline as UnderlineIcon,
 } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-
-import './yoopta-fluent.css';
 
 // ---------------------------------------------------------------------------
 // Plugins & Marks
@@ -72,9 +72,10 @@ const EditorToolbar = () => {
   const turnIntoRef = useRef<HTMLButtonElement>(null);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
 
-  const highlightValue = Marks.getValue(editor, { type: 'highlight' }) as
-    | { color?: string; backgroundColor?: string }
-    | null;
+  const highlightValue = Marks.getValue(editor, { type: 'highlight' }) as {
+    color?: string;
+    backgroundColor?: string;
+  } | null;
 
   return (
     <>
@@ -192,12 +193,7 @@ const EditorSlashCommand = () => (
         <SlashCommandMenu.List>
           <SlashCommandMenu.Empty>No blocks found</SlashCommandMenu.Empty>
           {props.items.map((item) => (
-            <SlashCommandMenu.Item
-              key={item.id}
-              value={item.id}
-              title={item.title}
-              description={item.description}
-            />
+            <SlashCommandMenu.Item key={item.id} value={item.id} title={item.title} description={item.description} />
           ))}
         </SlashCommandMenu.List>
         <SlashCommandMenu.Footer />
@@ -225,8 +221,8 @@ const EditorBlockOptions = ({ open, onOpenChange, blockId, anchor }: BlockOption
   const onActionMenuClose = (menuOpen: boolean) => {
     setActionMenuOpen(menuOpen);
     if (!menuOpen) {
-onOpenChange(false);
-}
+      onOpenChange(false);
+    }
   };
 
   return (
@@ -243,8 +239,8 @@ onOpenChange(false);
             <BlockOptions.Item
               onSelect={() => {
                 if (blockId) {
-duplicateBlock(blockId);
-}
+                  duplicateBlock(blockId);
+                }
                 onOpenChange(false);
               }}
             >
@@ -253,8 +249,8 @@ duplicateBlock(blockId);
             <BlockOptions.Item
               onSelect={() => {
                 if (blockId) {
-copyBlockLink(blockId);
-}
+                  copyBlockLink(blockId);
+                }
                 onOpenChange(false);
               }}
             >
@@ -264,8 +260,8 @@ copyBlockLink(blockId);
               variant="destructive"
               onSelect={() => {
                 if (blockId) {
-deleteBlock(blockId);
-}
+                  deleteBlock(blockId);
+                }
                 onOpenChange(false);
               }}
             >
@@ -297,23 +293,23 @@ const EditorFloatingBlockActions = () => {
 
   const onPlusClick = (blockId: string | null) => {
     if (!blockId) {
-return;
-}
+      return;
+    }
     const block = Blocks.getBlock(editor, { id: blockId });
     if (!block) {
-return;
-}
+      return;
+    }
     editor.insertBlock('Paragraph', { at: block.meta.order + 1, focus: true });
   };
 
   const onDragClick = (blockId: string | null) => {
     if (!blockId) {
-return;
-}
+      return;
+    }
     const block = Blocks.getBlock(editor, { id: blockId });
     if (!block) {
-return;
-}
+      return;
+    }
     editor.setPath({ current: block.meta.order });
     setBlockOptionsOpen(true);
   };
@@ -386,8 +382,7 @@ const EDITOR_STYLE = { width: '100%', paddingBottom: 40 };
  */
 function scrubListLinebreakNodes(content: YooptaContentValue): void {
   for (const block of Object.values(content)) {
-    const isListBlock =
-      block.type === 'BulletedList' || block.type === 'NumberedList' || block.type === 'TodoList';
+    const isListBlock = block.type === 'BulletedList' || block.type === 'NumberedList' || block.type === 'TodoList';
     if (!isListBlock) {
       continue;
     }
@@ -418,16 +413,13 @@ export const ContextEditor = memo(({ initialMarkdown, onChangeMarkdown }: Contex
   const initializedRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const editor = useMemo(
-    () => createYooptaEditor({ plugins, marks }),
-    []  
-  );
+  const editor = useMemo(() => createYooptaEditor({ plugins, marks }), []);
 
   // Load initial markdown content
   useEffect(() => {
     if (initializedRef.current) {
-return;
-}
+      return;
+    }
     initializedRef.current = true;
 
     if (initialMarkdown.trim()) {
@@ -465,15 +457,14 @@ return;
       // exposes huge vertical gaps from spurious `\n` text nodes.
       const block = Blocks.getBlock(editor, { id: blockId });
       const depth = block?.meta?.depth ?? 0;
-      const wrapped =
-        depth > 0 ? <div style={{ paddingLeft: `${depth * 24}px` }}>{children}</div> : children;
+      const wrapped = depth > 0 ? <div style={{ paddingLeft: `${depth * 24}px` }}>{children}</div> : children;
       return (
         <SortableBlock id={blockId} useDragHandle>
           {wrapped}
         </SortableBlock>
       );
     },
-    [editor],
+    [editor]
   );
 
   return (

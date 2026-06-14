@@ -30,7 +30,9 @@ afterEach(() => {
 
 /** Apply every migration strictly below `version`, simulating an older DB. */
 const migrateTo = (version: number): void => {
-  db.exec(`CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')))`);
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')))`
+  );
   for (const m of migrations) {
     if (m.version < version) {
       db.exec(m.sql);
@@ -43,8 +45,12 @@ describe('v10 pages rebuild', () => {
   it('preserves page_content rows across the rebuild', () => {
     migrateTo(10);
     db.prepare("INSERT INTO projects (id, label, slug) VALUES ('proj_1', 'P', 'p')").run();
-    db.prepare("INSERT INTO pages (id, project_id, parent_id, title, kind) VALUES ('pg_1', 'proj_1', NULL, 'Root', 'doc')").run();
-    db.prepare("INSERT INTO pages (id, project_id, parent_id, title, kind) VALUES ('pg_2', 'proj_1', 'pg_1', 'Child', 'doc')").run();
+    db.prepare(
+      "INSERT INTO pages (id, project_id, parent_id, title, kind) VALUES ('pg_1', 'proj_1', NULL, 'Root', 'doc')"
+    ).run();
+    db.prepare(
+      "INSERT INTO pages (id, project_id, parent_id, title, kind) VALUES ('pg_2', 'proj_1', 'pg_1', 'Child', 'doc')"
+    ).run();
     db.prepare("INSERT INTO page_content (page_id, body) VALUES ('pg_1', '# hello')").run();
     db.prepare("INSERT INTO page_content (page_id, body) VALUES ('pg_2', '# child')").run();
 
@@ -63,7 +69,7 @@ describe('v10 pages rebuild', () => {
     expect(fk.foreign_keys).toBe(1);
   });
 
-  it("keeps the kind CHECK: notebook allowed, unknown kinds rejected", () => {
+  it('keeps the kind CHECK: notebook allowed, unknown kinds rejected', () => {
     // 'drawing' was a planned kind that never shipped — PageKind is
     // 'doc' | 'notebook' and the schema CHECK must match it.
     runMigrations(db);
@@ -92,7 +98,9 @@ describe('v12 shaping removal', () => {
   const seedPreV12 = (): void => {
     migrateTo(12);
     db.prepare("INSERT INTO projects (id, label, slug) VALUES ('proj_1', 'P', 'p')").run();
-    db.prepare("INSERT INTO pipeline_columns (id, project_id, label, sort_order) VALUES ('col_1', 'proj_1', 'Backlog', 0)").run();
+    db.prepare(
+      "INSERT INTO pipeline_columns (id, project_id, label, sort_order) VALUES ('col_1', 'proj_1', 'Backlog', 0)"
+    ).run();
   };
 
   it('folds ticket shaping into the description and drops the column', () => {
@@ -110,9 +118,7 @@ describe('v12 shaping removal', () => {
     runMigrations(db); // applies v12
 
     const t1 = db.prepare("SELECT description FROM tickets WHERE id = 'tkt_1'").get() as { description: string };
-    expect(t1.description).toBe(
-      'Existing body.\n\n**Done when:** redirect works\n\n**Out of scope:** password reset'
-    );
+    expect(t1.description).toBe('Existing body.\n\n**Done when:** redirect works\n\n**Out of scope:** password reset');
     // Blank shaping fields fold to nothing.
     const t2 = db.prepare("SELECT description FROM tickets WHERE id = 'tkt_2'").get() as { description: string };
     expect(t2.description).toBe('');
@@ -132,9 +138,11 @@ describe('v12 shaping removal', () => {
 
     runMigrations(db);
 
-    const row = db
-      .prepare("SELECT note, status, created_at FROM inbox_items WHERE id = 'inb_1'")
-      .get() as { note: string; status: string; created_at: string };
+    const row = db.prepare("SELECT note, status, created_at FROM inbox_items WHERE id = 'inb_1'").get() as {
+      note: string;
+      status: string;
+      created_at: string;
+    };
     expect(row.note).toBe('**Done when:** Demo booked\n\n**Out of scope:** No counter-offer');
     expect(row.status).toBe('new');
     // createdAt was refreshed so the expiry sweep doesn't instantly defer it.
@@ -147,7 +155,9 @@ describe('v12 shaping removal', () => {
 describe('v13 source cutover', () => {
   it('moves workspace_dir into sources and drops workspace_dir', () => {
     migrateTo(13);
-    db.prepare("INSERT INTO projects (id, label, slug, workspace_dir) VALUES ('proj_1', 'P', 'p', '/tmp/project')").run();
+    db.prepare(
+      "INSERT INTO projects (id, label, slug, workspace_dir) VALUES ('proj_1', 'P', 'p', '/tmp/project')"
+    ).run();
 
     runMigrations(db);
 
@@ -169,6 +179,8 @@ describe('v14 inbox status tightening', () => {
 
     const row = db.prepare("SELECT status FROM inbox_items WHERE id = 'inb_1'").get() as { status: string };
     expect(row.status).toBe('new');
-    expect(() => db.prepare("INSERT INTO inbox_items (id, title, status) VALUES ('inb_2', 'I2', 'shaped')").run()).toThrow(/CHECK constraint/);
+    expect(() =>
+      db.prepare("INSERT INTO inbox_items (id, title, status) VALUES ('inb_2', 'I2', 'shaped')").run()
+    ).toThrow(/CHECK constraint/);
   });
 });

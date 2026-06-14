@@ -45,13 +45,10 @@ export const getAvailableProfileNames = (ctx: ProfileListContext): string[] => {
   if (ctx.available && ctx.available.length > 0) {
     return [...ctx.available];
   }
-  return ctx.isEnterprise
-    ? [...OPEN_SOURCE_PROFILES, ...ENTERPRISE_EXTRA_PROFILES]
-    : [...OPEN_SOURCE_PROFILES];
+  return ctx.isEnterprise ? [...OPEN_SOURCE_PROFILES, ...ENTERPRISE_EXTRA_PROFILES] : [...OPEN_SOURCE_PROFILES];
 };
 
-const titleCase = (s: string): string =>
-  s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
+const titleCase = (s: string): string => (s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1));
 
 /** True for `local:<machineId>` profile names. */
 export const isLocalProfile = (name: string): boolean => name.startsWith('local:');
@@ -72,11 +69,10 @@ export const machineIdFromProfile = (name: string): string | null =>
  * Pass an explicit `machines` from a `useStore($machines)` subscription where
  * the label must re-render as the list loads / online status flips.
  */
-export const getProfileMenuLabel = (
-  name: string,
-  machines: MachineSummary[] = $machines.get()
-): string => {
-  if (PROFILE_LABELS[name]) return PROFILE_LABELS[name];
+export const getProfileMenuLabel = (name: string, machines: MachineSummary[] = $machines.get()): string => {
+  if (PROFILE_LABELS[name]) {
+    return PROFILE_LABELS[name];
+  }
   const machineId = machineIdFromProfile(name);
   if (machineId) {
     const machine = machines.find((m) => m.machineId === machineId);

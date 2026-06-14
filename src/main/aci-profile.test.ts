@@ -42,16 +42,17 @@ describe('buildAciProfile', () => {
   });
 
   it('omits the file share when storage credentials are absent', () => {
-    const p = JSON.parse(
-      buildAciProfile({ OMNI_AZURE_SUBSCRIPTION_ID: 'sub-1' } as NodeJS.ProcessEnv)!
-    );
+    const p = JSON.parse(buildAciProfile({ OMNI_AZURE_SUBSCRIPTION_ID: 'sub-1' } as NodeJS.ProcessEnv)!);
     expect(p.client.file_share).toBeUndefined();
     expect(p.client.resource_group).toBe('omni-launcher-rg'); // default
   });
 
   it('fast profile (default): no services, no exposed ports, thin image', () => {
     const p = JSON.parse(
-      buildAciProfile({ OMNI_AZURE_SUBSCRIPTION_ID: 'sub-1', OMNI_AZURE_IMAGE: 'acr/omni-launcher-devbox-min:latest' } as NodeJS.ProcessEnv)!
+      buildAciProfile({
+        OMNI_AZURE_SUBSCRIPTION_ID: 'sub-1',
+        OMNI_AZURE_IMAGE: 'acr/omni-launcher-devbox-min:latest',
+      } as NodeJS.ProcessEnv)!
     );
     expect(p.services).toBeUndefined();
     expect(p.options.exposed_ports).toBeUndefined();
@@ -61,7 +62,10 @@ describe('buildAciProfile', () => {
   it('desktop profile: services + ports + full devbox image (derived)', () => {
     const p = JSON.parse(
       buildAciProfile(
-        { OMNI_AZURE_SUBSCRIPTION_ID: 'sub-1', OMNI_AZURE_IMAGE: 'acr/omni-launcher-devbox-min:latest' } as NodeJS.ProcessEnv,
+        {
+          OMNI_AZURE_SUBSCRIPTION_ID: 'sub-1',
+          OMNI_AZURE_IMAGE: 'acr/omni-launcher-devbox-min:latest',
+        } as NodeJS.ProcessEnv,
         true
       )!
     );
@@ -91,7 +95,10 @@ describe('buildAciProfile', () => {
         OMNI_AZURE_ACR_PASSWORD: 'acr-pw',
       } as NodeJS.ProcessEnv)!
     );
-    expect(p.client.registry).toEqual({ server: 'acr.azurecr.io', identity: '/subscriptions/s/.../userAssignedIdentities/mi' });
+    expect(p.client.registry).toEqual({
+      server: 'acr.azurecr.io',
+      identity: '/subscriptions/s/.../userAssignedIdentities/mi',
+    });
   });
 
   it('subnet_id flows into both profiles (both join the VNet)', () => {

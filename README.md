@@ -58,6 +58,7 @@ npm run dev
 ```
 
 `npm install` automatically:
+
 1. Rebuilds native modules (`node-pty`)
 2. Downloads the `uv` binary for your platform
 3. Builds `omni-sandbox` from `sandbox-cli/` (requires Rust)
@@ -79,13 +80,13 @@ npm run package     # Package into installers (dist/)
 
 ### Useful Commands
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Run in development with hot reload |
-| `npm run build:sandbox` | Rebuild the sandbox binary |
-| `npm run lint` | Run all checks (ESLint, Prettier, TypeScript, knip, dpdm) |
-| `npm run fix` | Auto-fix lint + format |
-| `npm test` | Run unit tests |
+| Command                 | Description                                               |
+| ----------------------- | --------------------------------------------------------- |
+| `npm run dev`           | Run in development with hot reload                        |
+| `npm run build:sandbox` | Rebuild the sandbox binary                                |
+| `npm run lint`          | Run all checks (ESLint, Prettier, TypeScript, knip, dpdm) |
+| `npm run fix`           | Auto-fix lint + format                                    |
+| `npm test`              | Run unit tests                                            |
 
 ### Code Signing
 

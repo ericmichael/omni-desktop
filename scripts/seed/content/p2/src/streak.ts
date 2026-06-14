@@ -14,15 +14,22 @@ function daysBetween(a: string, b: string): number {
  */
 export function currentStreak(checkIns: CheckIn[], today: string): number {
   const dates = [...new Set(checkIns.map((c) => c.date))].sort().reverse();
-  if (dates.length === 0) return 0;
+  if (dates.length === 0) {
+    return 0;
+  }
 
   const gapToFirst = daysBetween(dates[0]!, today);
-  if (gapToFirst > 1) return 0;
+  if (gapToFirst > 1) {
+    return 0;
+  }
 
   let streak = 1;
   for (let i = 1; i < dates.length; i++) {
-    if (daysBetween(dates[i]!, dates[i - 1]!) === 1) streak += 1;
-    else break;
+    if (daysBetween(dates[i]!, dates[i - 1]!) === 1) {
+      streak += 1;
+    } else {
+      break;
+    }
   }
   return streak;
 }

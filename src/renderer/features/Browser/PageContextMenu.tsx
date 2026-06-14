@@ -88,18 +88,18 @@ export const PageContextMenu = memo(
       const el = ref.current;
       const parent = el?.offsetParent as HTMLElement | null;
       if (!el || !parent) {
-return;
-}
+        return;
+      }
       const pr = parent.getBoundingClientRect();
       const rect = el.getBoundingClientRect();
       let left = params.x;
       let top = params.y;
       if (left + rect.width > pr.width - 8) {
-left = Math.max(8, pr.width - rect.width - 8);
-}
+        left = Math.max(8, pr.width - rect.width - 8);
+      }
       if (top + rect.height > pr.height - 8) {
-top = Math.max(8, pr.height - rect.height - 8);
-}
+        top = Math.max(8, pr.height - rect.height - 8);
+      }
       setPos({ left, top });
     }, [params.x, params.y]);
 
@@ -107,16 +107,16 @@ top = Math.max(8, pr.height - rect.height - 8);
     useEffect(() => {
       const onDocDown = (e: MouseEvent) => {
         if (!ref.current) {
-return;
-}
+          return;
+        }
         if (!ref.current.contains(e.target as Node)) {
-onClose();
-}
+          onClose();
+        }
       };
       const onKey = (e: KeyboardEvent) => {
         if (e.key === 'Escape') {
-onClose();
-}
+          onClose();
+        }
       };
       document.addEventListener('mousedown', onDocDown, true);
       document.addEventListener('keydown', onKey);

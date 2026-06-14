@@ -117,7 +117,14 @@ describe('materializeAgentConfig — refs', () => {
   });
 
   it('produces stable refs across re-materialization (identical file bytes)', () => {
-    const opts = { configDir: dir, models: models(), mcp: mcp(), network: NET, mode: 'refs' as const, managedMcpEntry: HTTP };
+    const opts = {
+      configDir: dir,
+      models: models(),
+      mcp: mcp(),
+      network: NET,
+      mode: 'refs' as const,
+      managedMcpEntry: HTTP,
+    };
     materializeAgentConfig(opts);
     const first = readFileSync(join(dir, 'models.json'), 'utf-8');
     materializeAgentConfig(opts);

@@ -44,7 +44,9 @@ function encrypt(key: Buffer, plaintext: string): string {
 
 function decrypt(key: Buffer, blob: string): string | undefined {
   const [ivB64, tagB64, ctB64] = blob.split('.');
-  if (!ivB64 || !tagB64 || !ctB64) return undefined;
+  if (!ivB64 || !tagB64 || !ctB64) {
+    return undefined;
+  }
   try {
     const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64'));
     decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
@@ -145,7 +147,9 @@ export class PgSecretStore {
 
   async getUserCodexTokens(principalId: string): Promise<Record<string, unknown> | undefined> {
     const blob = await this.getUserGitToken(principalId, PgSecretStore.CODEX_CRED_ID);
-    if (!blob) return undefined;
+    if (!blob) {
+      return undefined;
+    }
     try {
       const parsed = JSON.parse(blob);
       return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : undefined;

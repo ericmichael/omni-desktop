@@ -1,11 +1,30 @@
-import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { buildCodexConfig, probeForProvider } from '@/lib/provider-config';
-import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, Button, Caption1, Card, Checkbox, FormField, FormSkeleton, IconButton, Input, Radio, RadioGroup, SaveBar, SectionLabel, Select, Spinner } from '@/renderer/ds';
+import {
+  Accordion,
+  AccordionHeader,
+  AccordionItem,
+  AccordionPanel,
+  Button,
+  Caption1,
+  Card,
+  Checkbox,
+  FormField,
+  FormSkeleton,
+  IconButton,
+  Input,
+  Radio,
+  RadioGroup,
+  SaveBar,
+  SectionLabel,
+  Select,
+  Spinner,
+} from '@/renderer/ds';
 import { SettingsModalConnectionCards } from '@/renderer/features/SettingsModal/SettingsModalConnectionCards';
 import { agentConfigApi } from '@/renderer/services/config';
 import { emitter, ipc } from '@/renderer/services/ipc';
@@ -499,16 +518,20 @@ export const SettingsModalAiTab = memo(() => {
           <AccordionHeader>
             <div className={styles.headerContent}>
               <div className={styles.headerName}>Providers and models</div>
-              <div className={styles.headerSummary}>
-                Raw configuration — endpoints, token limits, reasoning effort
-              </div>
+              <div className={styles.headerSummary}>Raw configuration — endpoints, token limits, reasoning effort</div>
             </div>
           </AccordionHeader>
           <AccordionPanel>
-            <Accordion collapsible onToggle={(_e, data) => {
-              setExpandedProvider(data.openItems.length > 0 ? String(data.openItems[data.openItems.length - 1]) : null);
-              setEditingModel(null);
-            }} openItems={expandedProvider ? [expandedProvider] : []}>
+            <Accordion
+              collapsible
+              onToggle={(_e, data) => {
+                setExpandedProvider(
+                  data.openItems.length > 0 ? String(data.openItems[data.openItems.length - 1]) : null
+                );
+                setEditingModel(null);
+              }}
+              openItems={expandedProvider ? [expandedProvider] : []}
+            >
               {Object.entries(config.providers).map(([name, provider]) => {
                 const prefix = `${name}/`;
                 const discoveredModels = runtimeModelNames
@@ -576,7 +599,10 @@ const CodexSignInCard = memo(({ onSignedIn }: { onSignedIn: () => Promise<string
   const [deviceCode, setDeviceCode] = useState<CodexDeviceCode | null>(null);
 
   useEffect(() => {
-    emitter.invoke('codex:status').then(setStatus).catch(() => setStatus({ signedIn: false }));
+    emitter
+      .invoke('codex:status')
+      .then(setStatus)
+      .catch(() => setStatus({ signedIn: false }));
   }, []);
 
   // Main pushes the user code mid-flow; show it while we poll.
@@ -630,7 +656,7 @@ const CodexSignInCard = memo(({ onSignedIn }: { onSignedIn: () => Promise<string
                 ? activeModel
                   ? `Using ${activeModel} — switch models any time below or with /model in chat`
                   : 'ChatGPT models are available — switch with /model in chat or set a default below'
-                : error ?? 'Drive the agent through ChatGPT Plus/Pro/Team via the Codex Responses API.'}
+                : (error ?? 'Drive the agent through ChatGPT Plus/Pro/Team via the Codex Responses API.')}
             </div>
           </div>
           {status?.signedIn ? (
@@ -964,7 +990,7 @@ const ModelRow = memo(
               <Input
                 size="sm"
                 type="number"
-                value={model.max_input_tokens ?? ''}
+                value={model.max_input_tokens?.toString() ?? ''}
                 onChange={onChangeMaxInput}
                 className={styles.flex1}
               />
@@ -973,7 +999,7 @@ const ModelRow = memo(
               <Input
                 size="sm"
                 type="number"
-                value={model.max_output_tokens ?? ''}
+                value={model.max_output_tokens?.toString() ?? ''}
                 onChange={onChangeMaxOutput}
                 className={styles.flex1}
               />
@@ -989,7 +1015,11 @@ const ModelRow = memo(
             </FormField>
             <Checkbox checked={model.realtime ?? false} onCheckedChange={onChangeRealtime} label="Realtime model" />
             <Checkbox checked={!storeValue} onCheckedChange={onChangeStore} label="Disable storage (store: false)" />
-            <Checkbox checked={hasEncryptedReasoning} onCheckedChange={onChangeEncryptedReasoning} label="Include encrypted reasoning content" />
+            <Checkbox
+              checked={hasEncryptedReasoning}
+              onCheckedChange={onChangeEncryptedReasoning}
+              label="Include encrypted reasoning content"
+            />
           </div>
         )}
       </div>

@@ -1,15 +1,15 @@
-import React from 'react'
+import React from 'react';
 
 export type EscalationInfo = {
-  request_id: string
-  message: string
-  session_id?: string
-  run_id?: string
-}
+  request_id: string;
+  message: string;
+  session_id?: string;
+  run_id?: string;
+};
 
 type Props = {
-  escalation: EscalationInfo | null
-}
+  escalation: EscalationInfo | null;
+};
 
 // Banner shown when the agent calls the ``escalate`` builtin (a
 // blocking client-function tool). The agent's tool call is paused on
@@ -18,7 +18,7 @@ type Props = {
 // Renders nothing when no escalation is pending.
 export function EscalationBanner({ escalation }: Props) {
   if (!escalation) {
-    return null
+    return null;
   }
 
   return (
@@ -27,10 +27,8 @@ export function EscalationBanner({ escalation }: Props) {
         <div className="text-xs text-warningOrange font-medium">
           Agent escalated — your next message will be sent back as the reply.
         </div>
-        <div className="mt-1 text-sm text-textPrimary">
-          {escalation.message}
-        </div>
+        <div className="mt-1 text-sm text-textPrimary">{escalation.message}</div>
       </div>
     </div>
-  )
+  );
 }

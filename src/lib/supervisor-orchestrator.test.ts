@@ -20,8 +20,14 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { makePm, orch, seedMachine, TEST_PIPELINE, type MockMachine, type PmCtx } from '@/lib/project-manager-test-helpers';
-import type { ProjectManager } from '@/main/project-manager';
+import {
+  makePm,
+  type MockMachine,
+  orch,
+  type PmCtx,
+  seedMachine,
+  TEST_PIPELINE,
+} from '@/lib/project-manager-test-helpers';
 import type { TicketPhase } from '@/shared/ticket-phase';
 import type { AgentProcessStatus, Pipeline, Ticket, TicketId, WithTimestamp } from '@/shared/types';
 
@@ -108,7 +114,6 @@ describe('SupervisorOrchestrator integration', () => {
       const { pm, machines } = ctx;
 
       const mock = seedMachine(ctx, 't1');
-
 
       mock.phase = 'running';
 
@@ -331,7 +336,6 @@ describe('SupervisorOrchestrator integration', () => {
         expect(run.endedAt).toBeGreaterThan(run.startedAt);
       });
     });
-
   });
 
   // -------------------------------------------------------------------------
@@ -524,10 +528,7 @@ describe('SupervisorOrchestrator integration', () => {
       const ctx = makePm({
         source: LOCAL_SOURCE,
         wipLimit: 1,
-        tickets: [
-          { id: 't1' },
-          { id: 't-active' },
-        ],
+        tickets: [{ id: 't1' }, { id: 't-active' }],
       });
       const { pm } = ctx;
       const active = seedMachine(ctx, 't-active');
@@ -561,9 +562,7 @@ describe('SupervisorOrchestrator integration', () => {
         tickets: [{ id: 't1' }],
       });
       await orch(ctx.pm).ensureColumn('t1' as TicketId);
-      expect(ctx.bridge.ensureColumn).toHaveBeenCalledWith(
-        expect.objectContaining({ ticketId: 't1' })
-      );
+      expect(ctx.bridge.ensureColumn).toHaveBeenCalledWith(expect.objectContaining({ ticketId: 't1' }));
     });
 
     it('forwards a one-off profile to the bridge', async () => {
@@ -661,7 +660,9 @@ describe('SupervisorOrchestrator integration', () => {
       expect(additionalInstructions).toContain('move_ticket');
       expect(additionalInstructions).toContain('spawn_worker');
       expect(additionalInstructions).not.toContain('Title: Split autopilot prompt channels');
-      expect(additionalInstructions).not.toContain('Send the ticket goal separately from durable runtime instructions.');
+      expect(additionalInstructions).not.toContain(
+        'Send the ticket goal separately from durable runtime instructions.'
+      );
       expect(additionalInstructions).not.toContain('Edited Implementation DoD reaches the agent goal text');
       expect(additionalInstructions).not.toBe(startGoalArg.prompt);
     });

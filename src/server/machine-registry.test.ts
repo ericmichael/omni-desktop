@@ -1,12 +1,10 @@
+import type { MachineRow, MachinesRepo } from 'omni-projects-db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebSocket } from 'ws';
 
-import type { MachineRow, MachinesRepo } from 'omni-projects-db';
-
 import { MachineRegistry } from '@/server/machine-registry';
 
-const stubWs = (): WebSocket =>
-  ({ readyState: 1 }) as unknown as WebSocket;
+const stubWs = (): WebSocket => ({ readyState: 1 }) as unknown as WebSocket;
 
 /** Mock repo backed by an in-memory map keyed by `${principalId}::${machineId}`. */
 class MockRepo {
@@ -25,7 +23,9 @@ class MockRepo {
   });
   touch = vi.fn(async (principal: string, machineId: string) => {
     const row = this.rows.get(`${principal}::${machineId}`);
-    if (row) row.last_seen_at = new Date().toISOString();
+    if (row) {
+      row.last_seen_at = new Date().toISOString();
+    }
   });
   list = vi.fn(async (principal: string) => {
     return [...this.rows.values()].filter((r) => r.principal_id === principal);
@@ -35,7 +35,9 @@ class MockRepo {
   });
   rename = vi.fn(async (principal: string, machineId: string, label: string) => {
     const row = this.rows.get(`${principal}::${machineId}`);
-    if (row) row.label = label;
+    if (row) {
+      row.label = label;
+    }
   });
   delete = vi.fn(async (principal: string, machineId: string) => {
     this.rows.delete(`${principal}::${machineId}`);

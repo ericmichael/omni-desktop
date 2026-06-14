@@ -187,7 +187,8 @@ export function validateUserPath(filePath: string, opts: { checkDepth?: boolean 
   }
   if (opts.checkDepth) {
     const resolved = path.resolve(filePath);
-    const segments = resolved.split(path.sep).filter(Boolean);
+    const root = path.parse(resolved).root;
+    const segments = resolved.slice(root.length).split(path.sep).filter(Boolean);
     if (segments.length > MAX_USER_PATH_DEPTH) {
       throw new Error(`Invalid path: exceeds maximum depth of ${MAX_USER_PATH_DEPTH} segments`);
     }

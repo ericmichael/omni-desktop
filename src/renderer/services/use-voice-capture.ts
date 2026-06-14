@@ -96,8 +96,9 @@ export function useVoiceCapture(): VoiceCapture {
       },
     });
     streamRef.current = stream;
-    const ctx = new (window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const ctx = new (
+      window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+    )();
     ctxRef.current = ctx;
     const source = ctx.createMediaStreamSource(stream);
 

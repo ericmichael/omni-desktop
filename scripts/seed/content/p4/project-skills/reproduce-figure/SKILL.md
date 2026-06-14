@@ -19,6 +19,7 @@ Re-run the paper reproduction harness and update the notebook.
 ## Scope
 
 Specific to `paper-reproducibility`. Knows:
+
 - Benchmarks are `mmlu`, `arc_challenge`, `hellaswag`.
 - Batch size 8, seed 42, bf16 — these are our repro parameters, not the paper's.
 - Deltas > 1% from the paper's reported numbers are worth flagging in `methodology.md`.

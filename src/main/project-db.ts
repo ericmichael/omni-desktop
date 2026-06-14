@@ -7,8 +7,15 @@
  */
 import type { DatabaseSync } from 'node:sqlite';
 
-import { closeDatabase, getDefaultDbPath, getDefaultPagesDir, openDatabase, ProjectsRepo, SqliteProjectsRepo } from 'omni-projects-db';
 import type { IProjectsRepo } from 'omni-projects-db';
+import {
+  closeDatabase,
+  getDefaultDbPath,
+  getDefaultPagesDir,
+  openDatabase,
+  ProjectsRepo,
+  SqliteProjectsRepo,
+} from 'omni-projects-db';
 
 let _db: DatabaseSync | undefined;
 let _repo: ProjectsRepo | undefined;

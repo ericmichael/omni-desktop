@@ -98,7 +98,7 @@ describe('InboxManager: add + queries', () => {
     const b = mgr.manager.add({ title: 'b' });
     mgr.manager.defer(b.id);
     expect(mgr.manager.getActive()).toHaveLength(1);
-    expect(mgr.manager.getActive()[0].id).toBe(a.id);
+    expect(mgr.manager.getActive()[0]!.id).toBe(a.id);
   });
 
   it('getLater returns only deferred items', () => {
@@ -119,7 +119,7 @@ describe('InboxManager: update + remove', () => {
     const item = manager.add({ title: 't' });
     tick(1000);
     manager.update(item.id, { title: 'renamed', note: 'detail' });
-    const after = store.inboxItems[0];
+    const after = store.inboxItems[0]!;
     expect(after.title).toBe('renamed');
     expect(after.note).toBe('detail');
     expect(after.updatedAt).toBe(NOW + 1000);
@@ -129,7 +129,7 @@ describe('InboxManager: update + remove', () => {
     const { manager, store } = makeManager();
     const item = manager.add({ title: 't', note: 'x' });
     manager.update(item.id, { note: '  ' });
-    expect(store.inboxItems[0].note).toBeUndefined();
+    expect(store.inboxItems[0]!.note).toBeUndefined();
   });
 
   it('remove drops the item', () => {
@@ -155,7 +155,7 @@ describe('InboxManager: defer + reactivate', () => {
     const item = manager.add({ title: 't' });
     tick(500);
     manager.defer(item.id);
-    const after = store.inboxItems[0];
+    const after = store.inboxItems[0]!;
     expect(after.status).toBe('later');
     expect(after.laterAt).toBe(NOW + 500);
     expect(after.updatedAt).toBe(NOW + 500);
@@ -166,14 +166,14 @@ describe('InboxManager: defer + reactivate', () => {
     const item = manager.add({ title: 't' });
     manager.defer(item.id);
     manager.reactivate(item.id);
-    const after = store.inboxItems[0];
+    const after = store.inboxItems[0]!;
     expect(after.status).toBe('new');
     expect(after.laterAt).toBeUndefined();
   });
 
   it('refuses to defer/reactivate a promoted item', () => {
     const { manager, store } = makeManager();
-    store.projects = [{ id: 'p1', label: 'P', slug: 'p', createdAt: NOW }];
+    store.projects = [{ id: 'p1', label: 'P', slug: 'p', createdAt: NOW, sources: [] }];
     const item = manager.add({ title: 't' });
     manager.promoteToTicket(item.id, { projectId: 'p1' });
     expect(() => manager.defer(item.id)).toThrow(InboxPromotionError);
@@ -192,7 +192,7 @@ describe('InboxManager: promoteToTicket', () => {
       label: 'Main',
       slug: 'main',
       createdAt: NOW,
-      ...(source ? { source: { kind: 'local' as const, workspaceDir: '/tmp/x' } } : {}),
+      sources: source ? [{ id: 'src-1', mountName: 'main', kind: 'local', workspaceDir: '/tmp/x' }] : [],
     };
     store.projects = [p];
     return p;
@@ -210,7 +210,7 @@ describe('InboxManager: promoteToTicket', () => {
     expect(ticket.description).toBe('Auth flake');
     expect(ticket.columnId).toBe('backlog');
 
-    const stamped = store.inboxItems[0];
+    const stamped = store.inboxItems[0]!;
     expect(stamped.promotedTo).toEqual({ kind: 'ticket', id: ticket.id, at: NOW + 5000 });
   });
 
@@ -234,9 +234,7 @@ describe('InboxManager: promoteToTicket', () => {
   it('throws when the project does not exist', () => {
     const { manager } = makeManager();
     const item = manager.add({ title: 't' });
-    expect(() => manager.promoteToTicket(item.id, { projectId: 'nope' })).toThrow(
-      InboxPromotionError
-    );
+    expect(() => manager.promoteToTicket(item.id, { projectId: 'nope' })).toThrow(InboxPromotionError);
   });
 
   it('refuses to re-promote an already-promoted item', () => {
@@ -244,9 +242,7 @@ describe('InboxManager: promoteToTicket', () => {
     seedProject(store);
     const item = manager.add({ title: 't' });
     manager.promoteToTicket(item.id, { projectId: 'p1' });
-    expect(() => manager.promoteToTicket(item.id, { projectId: 'p1' })).toThrow(
-      InboxPromotionError
-    );
+    expect(() => manager.promoteToTicket(item.id, { projectId: 'p1' })).toThrow(InboxPromotionError);
   });
 });
 
@@ -258,7 +254,7 @@ describe('InboxManager: promoteToProject', () => {
     expect(project.label).toBe('New Cool Thing!');
     expect(project.slug).toBe('new-cool-thing');
     expect(store.projects).toHaveLength(1);
-    expect(store.inboxItems[0].promotedTo).toEqual({
+    expect(store.inboxItems[0]!.promotedTo).toEqual({
       kind: 'project',
       id: project.id,
       at: NOW,
@@ -281,6 +277,7 @@ describe('InboxManager: promoteToProject', () => {
       label: 'Sentinel',
       slug: 'sentinel',
       createdAt: NOW,
+      sources: [],
     };
     const manager = new InboxManager({
       store: store as unknown as InboxManagerStore,
@@ -300,7 +297,7 @@ describe('InboxManager: promoteToProject', () => {
     expect(createCalls).toEqual([{ label: 'Promote me!', slug: 'promote-me' }]);
     expect(project).toBe(sentinel);
     // Promotion tombstone still gets stamped using whatever id the host returned.
-    expect(store.inboxItems[0].promotedTo).toEqual({
+    expect(store.inboxItems[0]!.promotedTo).toEqual({
       kind: 'project',
       id: 'sentinel-id',
       at: NOW,
@@ -319,7 +316,7 @@ describe('InboxManager: sweepExpired', () => {
     setClock(NOW + 8 * 24 * 60 * 60 * 1000);
     const changed = manager.sweepExpired();
     expect(changed).toBe(1);
-    expect(store.inboxItems[0].status).toBe('later');
+    expect(store.inboxItems[0]!.status).toBe('later');
   });
 
   it('is a no-op when nothing is expired', () => {
@@ -332,7 +329,7 @@ describe('InboxManager: sweepExpired', () => {
 describe('InboxManager: gcPromoted', () => {
   it('removes promoted tombstones older than 30 days', () => {
     const { manager, store, setClock } = makeManager();
-    store.projects = [{ id: 'p1', label: 'P', slug: 'p', createdAt: NOW }];
+    store.projects = [{ id: 'p1', label: 'P', slug: 'p', createdAt: NOW, sources: [] }];
     const keep = manager.add({ title: 'keep' });
     const drop = manager.add({ title: 'drop' });
     manager.promoteToTicket(drop.id, { projectId: 'p1' });
@@ -351,12 +348,12 @@ describe('InboxManager: gcPromoted', () => {
     const removed = manager.gcPromoted();
     expect(removed).toBe(1);
     expect(store.inboxItems).toHaveLength(1);
-    expect(store.inboxItems[0].id).toBe(keep.id);
+    expect(store.inboxItems[0]!.id).toBe(keep.id);
   });
 
   it('is a no-op when nothing is old enough', () => {
     const { manager, store } = makeManager();
-    store.projects = [{ id: 'p1', label: 'P', slug: 'p', createdAt: NOW }];
+    store.projects = [{ id: 'p1', label: 'P', slug: 'p', createdAt: NOW, sources: [] }];
     const item = manager.add({ title: 't' });
     manager.promoteToTicket(item.id, { projectId: 'p1' });
     expect(manager.gcPromoted()).toBe(0);

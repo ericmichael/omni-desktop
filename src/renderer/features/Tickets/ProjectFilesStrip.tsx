@@ -65,11 +65,11 @@ const useStyles = makeStyles({
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) {
-return `${bytes} B`;
-}
+    return `${bytes} B`;
+  }
   if (bytes < 1024 * 1024) {
-return `${(bytes / 1024).toFixed(0)} KB`;
-}
+    return `${(bytes / 1024).toFixed(0)} KB`;
+  }
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
@@ -87,9 +87,7 @@ export const ProjectFilesStrip = memo(({ projectId }: { projectId: ProjectId }) 
   if (files.length === 0) {
     return (
       <div className={styles.root}>
-        <span className={styles.emptyHint}>
-          Add files to ~/Omni/Workspace/Projects/{slug}/
-        </span>
+        <span className={styles.emptyHint}>Add files to ~/Omni/Workspace/Projects/{slug}/</span>
       </div>
     );
   }
@@ -109,9 +107,7 @@ export const ProjectFilesStrip = memo(({ projectId }: { projectId: ProjectId }) 
             <Document20Regular style={{ width: 20, height: 20 }} />
           )}
           <Caption1 className={styles.fileName}>{entry.name}</Caption1>
-          {!entry.isDirectory && (
-            <Caption1 className={styles.size}>{formatSize(entry.size)}</Caption1>
-          )}
+          {!entry.isDirectory && <Caption1 className={styles.size}>{formatSize(entry.size)}</Caption1>}
         </button>
       ))}
     </div>

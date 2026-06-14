@@ -71,10 +71,9 @@ export class ControlPlaneRepo {
   }
 
   async getUser(id: string): Promise<UserRow | undefined> {
-    const { rows } = await this.pool.query<UserRow>(
-      'SELECT id, email, display_name, idp FROM users WHERE id = $1',
-      [id]
-    );
+    const { rows } = await this.pool.query<UserRow>('SELECT id, email, display_name, idp FROM users WHERE id = $1', [
+      id,
+    ]);
     return rows[0];
   }
 
@@ -91,10 +90,9 @@ export class ControlPlaneRepo {
   }
 
   async getTeam(id: string): Promise<TeamRow | undefined> {
-    const { rows } = await this.pool.query<TeamRow>(
-      'SELECT id, label, kind, created_by FROM teams WHERE id = $1',
-      [id]
-    );
+    const { rows } = await this.pool.query<TeamRow>('SELECT id, label, kind, created_by FROM teams WHERE id = $1', [
+      id,
+    ]);
     return rows[0];
   }
 
@@ -137,7 +135,9 @@ export class ControlPlaneRepo {
     return rows[0]?.role;
   }
 
-  async listMembers(teamId: string): Promise<Array<TeamMembershipRow & { email: string | null; display_name: string | null }>> {
+  async listMembers(
+    teamId: string
+  ): Promise<Array<TeamMembershipRow & { email: string | null; display_name: string | null }>> {
     const { rows } = await this.pool.query(
       `SELECT m.team_id, m.user_id, m.role, u.email, u.display_name
          FROM team_members m JOIN users u ON u.id = m.user_id
@@ -206,7 +206,9 @@ export class ControlPlaneRepo {
   /** Accept a pending invitation: add membership + mark accepted. */
   async acceptInvitation(token: string, userId: string): Promise<TeamRow | undefined> {
     const inv = await this.getPendingInvitationByToken(token);
-    if (!inv) return undefined;
+    if (!inv) {
+      return undefined;
+    }
     await this.addMember(inv.team_id, userId, inv.role);
     await this.pool.query(
       `UPDATE invitations SET status = 'accepted',

@@ -63,9 +63,7 @@ export function parseGitRepoUrl(url: string): { host: string; repo: string } | n
   // ssh://git@github.com/owner/repo(.git)?
   // https://github.com/owner/repo(.git)?
   // http://...
-  const protocol = /^(?:[a-z][a-z0-9+\-.]*:\/\/)([^@/]+@)?([^/]+)\/(.+?)(?:\.git)?\/?$/i.exec(
-    trimmed
-  );
+  const protocol = /^(?:[a-z][a-z0-9+\-.]*:\/\/)([^@/]+@)?([^/]+)\/(.+?)(?:\.git)?\/?$/i.exec(trimmed);
   if (protocol) {
     return { host: protocol[2]!, repo: protocol[3]! };
   }
@@ -174,10 +172,7 @@ function buildRuntime(_project: Project, defaults: ProjectConfigDefaults): Runti
  * server scoped to its own project id — this replaces the global
  * `mcp.json` entry that `syncMcpConfig` writes today.
  */
-function buildMcpServers(
-  project: Project,
-  defaults: ProjectConfigDefaults
-): McpServerConfig[] {
+function buildMcpServers(project: Project, defaults: ProjectConfigDefaults): McpServerConfig[] {
   const omniProjects: McpServerConfig = {
     type: 'stdio',
     name: 'omni-projects',
@@ -203,10 +198,7 @@ function buildMcpServers(
  *   - global skills dir                   → `Skills` capability
  *   - `project.pipeline`                  → not in ProjectConfig (stays in DB)
  */
-export function projectToConfig(
-  project: Project,
-  defaults: ProjectConfigDefaults
-): ProjectConfig {
+export function projectToConfig(project: Project, defaults: ProjectConfigDefaults): ProjectConfig {
   return {
     manifest: buildManifest(project, defaults),
     capabilities: buildCapabilities(defaults),

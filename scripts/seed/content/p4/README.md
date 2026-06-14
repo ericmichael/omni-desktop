@@ -1,6 +1,6 @@
 # paper-reproducibility
 
-Reproduction study for *"Sparse Mixture-of-Experts at 1T Parameters"* (NeurIPS 2024).
+Reproduction study for _"Sparse Mixture-of-Experts at 1T Parameters"_ (NeurIPS 2024).
 
 ## Goal
 

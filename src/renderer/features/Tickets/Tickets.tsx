@@ -16,7 +16,13 @@ import { MilestoneDetail } from './MilestoneDetail';
 import { ProjectActions, ProjectPage } from './ProjectPage';
 import { ProjectsDashboard } from './ProjectsDashboard';
 import { TicketsSidebar } from './Sidebar';
-import { $activeWipTickets, $ticketsView, $wipDialogPendingProfileName, $wipDialogPendingTicket, ticketApi } from './state';
+import {
+  $activeWipTickets,
+  $ticketsView,
+  $wipDialogPendingProfileName,
+  $wipDialogPendingTicket,
+  ticketApi,
+} from './state';
 import { TicketAutopilotLaunchDialog } from './TicketAutopilotLaunchDialog';
 import { TicketDetail } from './TicketDetail';
 import { WipLimitDialog } from './WipLimitDialog';

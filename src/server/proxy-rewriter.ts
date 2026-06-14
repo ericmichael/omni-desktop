@@ -1,7 +1,9 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { Readable } from 'node:stream';
+
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { WebSocket as WsWebSocket } from 'ws';
 
+import { uuidv4 } from '@/lib/uuid';
 import type { WsHandler } from '@/server/ws-handler';
 
 const DYNAMIC_PROXY_TTL_MS = 30 * 60 * 1000;
@@ -46,7 +48,9 @@ const upstreamMap = new Map<string, ProxyEntry>();
 
 /** Default allowlist when none is supplied: loopback only. */
 const defaultIsTrusted = (addr: string): boolean => {
-  if (!addr) return false;
+  if (!addr) {
+    return false;
+  }
   const normalized = addr.startsWith('::ffff:') ? addr.slice(7) : addr;
   return normalized === '127.0.0.1' || normalized === '::1';
 };
@@ -106,7 +110,7 @@ const ownerKeyForRequest = (request: FastifyRequest): string | null => {
   return typeof principalId === 'string' && principalId.trim() ? `principal:${principalId.trim()}` : null;
 };
 
-const mintDynamicProxyName = (): string => `dyn-${crypto.randomUUID().replace(/-/g, '')}`;
+const mintDynamicProxyName = (): string => `dyn-${uuidv4().replace(/-/g, '')}`;
 
 const parseHttpUpstream = (upstream: string | undefined): URL | null => {
   if (!upstream || upstream.length > 4096) {
@@ -463,8 +467,7 @@ export function rewriteProxyRuntimeUrl(
     // URLs derived from the page's location (e.g. noVNC's ws://host:port/
     // websockify) and they'd bypass the proxy.
     const launcherHostRuntimeUrl =
-      runtimeUrl.host === locationUrl.host &&
-      equivalentWebRuntimeProtocol(runtimeUrl.protocol, locationUrl.protocol);
+      runtimeUrl.host === locationUrl.host && equivalentWebRuntimeProtocol(runtimeUrl.protocol, locationUrl.protocol);
 
     const alreadyActiveProxy =
       launcherHostRuntimeUrl &&

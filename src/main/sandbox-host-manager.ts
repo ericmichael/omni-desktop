@@ -121,7 +121,9 @@ export class SandboxHostManager {
         buf += d.toString();
         for (const line of buf.split(/\r?\n/)) {
           const t = line.trim();
-          if (!t.startsWith('{')) continue;
+          if (!t.startsWith('{')) {
+            continue;
+          }
           try {
             const parsed = JSON.parse(t) as { exec_port?: number };
             if (typeof parsed.exec_port === 'number') {
@@ -150,7 +152,9 @@ export class SandboxHostManager {
 
   stop(sessionId: string): void {
     const proc = this.procs.get(sessionId);
-    if (!proc) return;
+    if (!proc) {
+      return;
+    }
     this.procs.delete(sessionId);
     try {
       proc.child.kill('SIGTERM');

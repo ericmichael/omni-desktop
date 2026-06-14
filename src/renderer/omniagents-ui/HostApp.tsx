@@ -25,7 +25,18 @@ type OmniAgentsHostAppProps = {
 };
 
 export const OmniAgentsHostApp = memo(
-  ({ state, variables, onClientToolCall, sessionId, onSessionChange, onReady, headerActionsTargetId, headerActionsCompact, pendingPlan, onPlanDecision }: OmniAgentsHostAppProps) => {
+  ({
+    state,
+    variables,
+    onClientToolCall,
+    sessionId,
+    onSessionChange,
+    onReady,
+    headerActionsTargetId,
+    headerActionsCompact,
+    pendingPlan,
+    onPlanDecision,
+  }: OmniAgentsHostAppProps) => {
     const [greeting] = useState(getGreeting);
     const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([]);
     const pendingRef = useRef(pendingMessages);
@@ -67,12 +78,12 @@ export const OmniAgentsHostApp = memo(
 
     const shellPhase =
       state.type === 'loading'
-        ? 'loading' as const
+        ? ('loading' as const)
         : state.type === 'error'
-          ? 'error' as const
+          ? ('error' as const)
           : state.type === 'idle'
-            ? 'idle' as const
-            : 'loading' as const;
+            ? ('idle' as const)
+            : ('loading' as const);
 
     return (
       <div className="w-full h-full relative">

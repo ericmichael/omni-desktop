@@ -5,8 +5,8 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Input, Select, Switch, Textarea } from '@/renderer/ds';
 import { $milestones } from '@/renderer/features/Initiatives/state';
 import { persistedStoreApi } from '@/renderer/services/store';
-import { firstSource } from '@/shared/types';
 import type { GitRepoInfo, MilestoneId, ProjectId, TicketPriority } from '@/shared/types';
+import { firstSource } from '@/shared/types';
 
 import { $activeMilestoneId, $tickets, ticketApi } from './state';
 

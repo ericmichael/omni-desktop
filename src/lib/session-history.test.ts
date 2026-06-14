@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseSessionHistoryRows, type HistoryRow } from './session-history';
+import { type HistoryRow, parseSessionHistoryRows } from './session-history';
 
 const row = (id: number, msg: unknown, createdAt = '2026-01-01T00:00:00Z'): HistoryRow => ({
   id,

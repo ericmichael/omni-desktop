@@ -103,7 +103,10 @@ export type ModelChoice = CatalogModel & {
  * - `openai-compatible` / `ollama`: no catalog — every live id becomes a
  *   choice with the id as its label, first entry recommended.
  */
-export function resolveModelChoices(kind: 'openai' | 'anthropic' | 'openai-compatible' | 'ollama', liveIds: string[]): ModelChoice[] {
+export function resolveModelChoices(
+  kind: 'openai' | 'anthropic' | 'openai-compatible' | 'ollama',
+  liveIds: string[]
+): ModelChoice[] {
   if (kind === 'openai' || kind === 'anthropic') {
     const curated = CATALOG[kind];
     if (liveIds.length === 0) {

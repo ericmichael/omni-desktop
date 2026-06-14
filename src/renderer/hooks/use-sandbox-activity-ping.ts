@@ -18,7 +18,9 @@ export function useSandboxActivityPing(processId: string, throttleMs = DEFAULT_T
 
   const ping = useCallback(() => {
     const now = Date.now();
-    if (now - lastPingRef.current < throttleMs) return;
+    if (now - lastPingRef.current < throttleMs) {
+      return;
+    }
     lastPingRef.current = now;
     agentProcessApi.notifyActivity(processId);
   }, [processId, throttleMs]);

@@ -12,10 +12,7 @@ import type { IpcRendererEvents, StoreData } from '@/shared/types';
 // IWindowSender — sends IPC events to the renderer
 // ---------------------------------------------------------------------------
 
-export type IWindowSender = <T extends keyof IpcRendererEvents>(
-  channel: T,
-  ...args: IpcRendererEvents[T]
-) => void;
+export type IWindowSender = <T extends keyof IpcRendererEvents>(channel: T, ...args: IpcRendererEvents[T]) => void;
 
 // ---------------------------------------------------------------------------
 // IStore — ticket/project store abstraction

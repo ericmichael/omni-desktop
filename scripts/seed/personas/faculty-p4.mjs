@@ -32,10 +32,7 @@ export async function seedFacultyP4(store, manifest) {
   await setupProjectRepo({
     projectDir,
     contentDir: P4_CONTENT,
-    commitMessages: [
-      'chore: scaffold repro harness skeleton',
-      'docs: methodology notes from paper read-through',
-    ],
+    commitMessages: ['chore: scaffold repro harness skeleton', 'docs: methodology notes from paper read-through'],
     branches: ['repro-table-2'],
     manifest,
   });

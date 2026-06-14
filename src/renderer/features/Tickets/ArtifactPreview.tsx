@@ -1,4 +1,4 @@
-import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { Open20Regular } from '@fluentui/react-icons';
 import { memo, useCallback, useEffect, useState } from 'react';
 
@@ -182,10 +182,7 @@ export const ArtifactPreview = memo(({ ticketId, selectedFile }: ArtifactPreview
     return null;
   }
 
-  const encodedPath = selectedFile.relativePath
-    .split('/')
-    .map(encodeURIComponent)
-    .join('/');
+  const encodedPath = selectedFile.relativePath.split('/').map(encodeURIComponent).join('/');
   const artifactUrl = `artifact://file/${ticketId}/${encodedPath}`;
 
   // Image preview
@@ -266,12 +263,7 @@ const PreviewHeader = memo(({ name, onOpenExternal }: { name: string; onOpenExte
   return (
     <div className={styles.header}>
       <span className={styles.headerName}>{name}</span>
-      <button
-        type="button"
-        onClick={onOpenExternal}
-        className={styles.headerBtn}
-        title="Open externally"
-      >
+      <button type="button" onClick={onOpenExternal} className={styles.headerBtn} title="Open externally">
         <Open20Regular style={{ width: 14, height: 14 }} />
       </button>
     </div>

@@ -97,26 +97,17 @@ export type DatabaseViewProps = {
 };
 
 export const DatabaseView = memo(
-  ({
-    pages,
-    onOpen,
-    onCreate,
-    createPlaceholder = 'New page…',
-    emptyState = 'No pages yet.',
-  }: DatabaseViewProps) => {
+  ({ pages, onOpen, onCreate, createPlaceholder = 'New page…', emptyState = 'No pages yet.' }: DatabaseViewProps) => {
     const styles = useStyles();
     const [draft, setDraft] = useState('');
 
-    const sorted = useMemo(
-      () => [...pages].sort((a, b) => b.updatedAt - a.updatedAt),
-      [pages]
-    );
+    const sorted = useMemo(() => [...pages].sort((a, b) => b.updatedAt - a.updatedAt), [pages]);
 
     const submit = useCallback(async () => {
       const title = draft.trim();
       if (!title || !onCreate) {
-return;
-}
+        return;
+      }
       await onCreate({ title });
       setDraft('');
     }, [draft, onCreate]);
@@ -127,12 +118,7 @@ return;
           <div className={styles.empty}>{emptyState}</div>
         ) : (
           sorted.map((page) => (
-            <button
-              key={page.id}
-              type="button"
-              className={styles.row}
-              onClick={() => onOpen?.(page.id)}
-            >
+            <button key={page.id} type="button" className={styles.row} onClick={() => onOpen?.(page.id)}>
               <span className={styles.icon}>{page.icon ?? '📄'}</span>
               <span className={styles.title}>{page.title || 'Untitled'}</span>
               <span className={styles.time}>{formatRelative(page.updatedAt)}</span>
@@ -170,13 +156,13 @@ function formatRelative(ms: number): string {
   const hour = 60 * minute;
   const day = 24 * hour;
   if (delta < minute) {
-return 'just now';
-}
+    return 'just now';
+  }
   if (delta < hour) {
-return `${Math.floor(delta / minute)}m`;
-}
+    return `${Math.floor(delta / minute)}m`;
+  }
   if (delta < day) {
-return `${Math.floor(delta / hour)}h`;
-}
+    return `${Math.floor(delta / hour)}h`;
+  }
   return `${Math.floor(delta / day)}d`;
 }

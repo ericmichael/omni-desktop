@@ -88,7 +88,7 @@ export const AnimatedDialog = ({
 
   return (
     <FluentDialog open={open} onOpenChange={handleOpenChange} modalType="modal">
-      {open && children}
+      <>{open ? children : null}</>
     </FluentDialog>
   );
 };

@@ -20,31 +20,45 @@ type SessionStartupShellProps = {
   contentClassName?: string;
 };
 
-export const SessionStartupShell = memo(({ eyebrow, title, description, children, tone = 'default', className, contentClassName }: SessionStartupShellProps) => {
-  const toneClasses = tone === 'danger' ? 'border-red-400/20 bg-red-400/5' : 'border-transparent bg-transparent';
+export const SessionStartupShell = memo(
+  ({
+    eyebrow,
+    title,
+    description,
+    children,
+    tone = 'default',
+    className,
+    contentClassName,
+  }: SessionStartupShellProps) => {
+    const toneClasses = tone === 'danger' ? 'border-red-400/20 bg-red-400/5' : 'border-transparent bg-transparent';
 
-  return (
-    <BodyContainer className="p-6">
-      <BodyContent className="justify-center items-center">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={`${tone}-${title}-${description}`}
-            variants={fadeVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            className={cn('flex w-full max-w-3xl flex-col gap-6 rounded-2xl border px-6 py-6', toneClasses, className)}
-          >
-            <div className="flex flex-col items-center gap-2 text-center">
-              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-fg-subtle">{eyebrow}</span>
-              <Heading size="md">{title}</Heading>
-              <p className="max-w-xl text-sm text-fg-muted text-center">{description}</p>
-            </div>
-            <div className={cn('w-full', contentClassName)}>{children}</div>
-          </motion.div>
-        </AnimatePresence>
-      </BodyContent>
-    </BodyContainer>
-  );
-});
+    return (
+      <BodyContainer className="p-6">
+        <BodyContent className="justify-center items-center">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={`${tone}-${title}-${description}`}
+              variants={fadeVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              className={cn(
+                'flex w-full max-w-3xl flex-col gap-6 rounded-2xl border px-6 py-6',
+                toneClasses,
+                className
+              )}
+            >
+              <div className="flex flex-col items-center gap-2 text-center">
+                <span className="text-xs font-semibold uppercase tracking-[0.18em] text-fg-subtle">{eyebrow}</span>
+                <Heading size="md">{title}</Heading>
+                <p className="max-w-xl text-sm text-fg-muted text-center">{description}</p>
+              </div>
+              <div className={cn('w-full', contentClassName)}>{children}</div>
+            </motion.div>
+          </AnimatePresence>
+        </BodyContent>
+      </BodyContainer>
+    );
+  }
+);
 SessionStartupShell.displayName = 'SessionStartupShell';

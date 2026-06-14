@@ -1,10 +1,17 @@
 import { useDraggable } from '@dnd-kit/core';
-import { makeStyles, mergeClasses, shorthands,tokens, Tooltip } from '@fluentui/react-components';
-import { ArrowSync20Regular, BranchFork16Regular, LockClosed16Regular,Open20Regular, Play20Filled,ReOrderDotsVertical20Regular } from '@fluentui/react-icons';
+import { makeStyles, mergeClasses, shorthands, tokens, Tooltip } from '@fluentui/react-components';
+import {
+  ArrowSync20Regular,
+  BranchFork16Regular,
+  LockClosed16Regular,
+  Open20Regular,
+  Play20Filled,
+  ReOrderDotsVertical20Regular,
+} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo } from 'react';
 
-import { Badge, Body1, IconButton } from '@/renderer/ds';
+import { Badge, IconButton } from '@/renderer/ds';
 import { openTicketInCode } from '@/renderer/services/navigation';
 import { isActivePhase } from '@/shared/ticket-phase';
 import type { Ticket, TicketPhase } from '@/shared/types';
@@ -98,112 +105,100 @@ const useStyles = makeStyles({
   },
 });
 
-export const KanbanCard = memo(
-  ({ ticket, isOverlay }: { ticket: Ticket; isOverlay?: boolean }) => {
-    const styles = useStyles();
-    const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-      id: ticket.id,
-      disabled: isOverlay,
-    });
+export const KanbanCard = memo(({ ticket, isOverlay }: { ticket: Ticket; isOverlay?: boolean }) => {
+  const styles = useStyles();
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: ticket.id,
+    disabled: isOverlay,
+  });
 
-    const allTickets = useStore($tickets);
-    const unresolvedBlockers = useMemo(
-      () => ticket.blockedBy.filter((id) => allTickets[id] && !allTickets[id]!.resolution).length,
-      [ticket.blockedBy, allTickets]
-    );
+  const allTickets = useStore($tickets);
+  const unresolvedBlockers = useMemo(
+    () => ticket.blockedBy.filter((id) => allTickets[id] && !allTickets[id]!.resolution).length,
+    [ticket.blockedBy, allTickets]
+  );
 
-    const handleClick = useCallback(() => {
-      ticketApi.goToTicket(ticket.id);
-    }, [ticket.id]);
+  const handleClick = useCallback(() => {
+    ticketApi.goToTicket(ticket.id);
+  }, [ticket.id]);
 
-    const handleStart = useCallback(
-      (e: React.MouseEvent) => {
-        e.stopPropagation();
-        ticketApi.requestStartSupervisor(ticket.id);
-      },
-      [ticket.id]
-    );
+  const handleStart = useCallback(() => {
+    ticketApi.requestStartSupervisor(ticket.id);
+  }, [ticket.id]);
 
-    const handleOpen = useCallback(
-      (e: React.MouseEvent) => {
-        e.stopPropagation();
-        ticketApi.ensureSupervisorInfra(ticket.id);
-        openTicketInCode(ticket.id);
-      },
-      [ticket.id]
-    );
+  const handleOpen = useCallback(() => {
+    ticketApi.ensureSupervisorInfra(ticket.id);
+    openTicketInCode(ticket.id);
+  }, [ticket.id]);
 
-    const phase = ticket.phase;
-    const titleText = ticket.title?.trim() ? ticket.title : 'Untitled';
-    const hasTitle = Boolean(ticket.title?.trim());
-    const branch = ticket.branch?.trim();
+  const phase = ticket.phase;
+  const titleText = ticket.title?.trim() ? ticket.title : 'Untitled';
+  const hasTitle = Boolean(ticket.title?.trim());
+  const branch = ticket.branch?.trim();
 
-    return (
-      <div
-        ref={isOverlay ? undefined : setNodeRef}
-        className={mergeClasses(
-          styles.card,
-          isOverlay && styles.overlay,
-          isDragging && !isOverlay && styles.dragging
-        )}
-      >
-        <div className={styles.titleRow}>
-          {!isOverlay && (
-            <div {...listeners} {...attributes} className={styles.dragHandle}>
-              <ReOrderDotsVertical20Regular style={{ width: 16, height: 16 }} />
-            </div>
-          )}
-          {hasTitle ? (
-            <Tooltip content={titleText} relationship="label" withArrow>
-              <Body1 as="button" onClick={handleClick} className={styles.titleBtn}>
-                {titleText}
-              </Body1>
-            </Tooltip>
-          ) : (
-            <Body1 as="button" onClick={handleClick} className={styles.titleBtn}>
-              {titleText}
-            </Body1>
-          )}
-        </div>
-
-        <div className={styles.badgeRow}>
-          <div className={styles.badges}>
-            <Badge color={TICKET_PRIORITY_COLORS[ticket.priority]}>
-              {TICKET_PRIORITY_LABELS[ticket.priority]}
-            </Badge>
-            {/* Resolution badge omitted — column placement already conveys resolved status. */}
-            {phase && phase !== 'idle' && !ticket.resolution && (
-              <Badge color={PHASE_COLORS[phase] ?? 'default'}>
-                {isActivePhase(phase) && <ArrowSync20Regular style={{ width: 16, height: 16 }} />}
-                {PHASE_LABELS[phase]}
-              </Badge>
-            )}
-            {branch && (
-              <Tooltip content={branch} relationship="label" withArrow>
-                <span className={styles.branchBadge}>
-                  <BranchFork16Regular />
-                  <span className={styles.branchLabel}>{branch}</span>
-                </span>
-              </Tooltip>
-            )}
-            {unresolvedBlockers > 0 && (
-              <Tooltip content={`Blocked by ${unresolvedBlockers} ticket${unresolvedBlockers === 1 ? '' : 's'}`} relationship="label" withArrow>
-                <span className={styles.blockedBadge} aria-label={`Blocked by ${unresolvedBlockers}`}>
-                  <LockClosed16Regular />
-                  {unresolvedBlockers}
-                </span>
-              </Tooltip>
-            )}
+  return (
+    <div
+      ref={isOverlay ? undefined : setNodeRef}
+      className={mergeClasses(styles.card, isOverlay && styles.overlay, isDragging && !isOverlay && styles.dragging)}
+    >
+      <div className={styles.titleRow}>
+        {!isOverlay && (
+          <div {...listeners} {...attributes} className={styles.dragHandle}>
+            <ReOrderDotsVertical20Regular style={{ width: 16, height: 16 }} />
           </div>
-          {canStart(phase) && (
-            <div className={styles.actions}>
-              <IconButton icon={<Open20Regular />} size="sm" onClick={handleOpen} aria-label="Chat" />
-              <IconButton icon={<Play20Filled />} size="sm" onClick={handleStart} aria-label="Autopilot" />
-            </div>
+        )}
+        {hasTitle ? (
+          <Tooltip content={titleText} relationship="label" withArrow>
+            <button type="button" onClick={handleClick} className={styles.titleBtn}>
+              {titleText}
+            </button>
+          </Tooltip>
+        ) : (
+          <button type="button" onClick={handleClick} className={styles.titleBtn}>
+            {titleText}
+          </button>
+        )}
+      </div>
+
+      <div className={styles.badgeRow}>
+        <div className={styles.badges}>
+          <Badge color={TICKET_PRIORITY_COLORS[ticket.priority]}>{TICKET_PRIORITY_LABELS[ticket.priority]}</Badge>
+          {/* Resolution badge omitted — column placement already conveys resolved status. */}
+          {phase && phase !== 'idle' && !ticket.resolution && (
+            <Badge color={PHASE_COLORS[phase] ?? 'default'}>
+              {isActivePhase(phase) && <ArrowSync20Regular style={{ width: 16, height: 16 }} />}
+              {PHASE_LABELS[phase]}
+            </Badge>
+          )}
+          {branch && (
+            <Tooltip content={branch} relationship="label" withArrow>
+              <span className={styles.branchBadge}>
+                <BranchFork16Regular />
+                <span className={styles.branchLabel}>{branch}</span>
+              </span>
+            </Tooltip>
+          )}
+          {unresolvedBlockers > 0 && (
+            <Tooltip
+              content={`Blocked by ${unresolvedBlockers} ticket${unresolvedBlockers === 1 ? '' : 's'}`}
+              relationship="label"
+              withArrow
+            >
+              <span className={styles.blockedBadge} aria-label={`Blocked by ${unresolvedBlockers}`}>
+                <LockClosed16Regular />
+                {unresolvedBlockers}
+              </span>
+            </Tooltip>
           )}
         </div>
+        {canStart(phase) && (
+          <div className={styles.actions}>
+            <IconButton icon={<Open20Regular />} size="sm" onClick={handleOpen} aria-label="Chat" />
+            <IconButton icon={<Play20Filled />} size="sm" onClick={handleStart} aria-label="Autopilot" />
+          </div>
+        )}
       </div>
-    );
-  }
-);
+    </div>
+  );
+});
 KanbanCard.displayName = 'KanbanCard';

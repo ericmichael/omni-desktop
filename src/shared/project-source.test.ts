@@ -16,8 +16,18 @@ import {
 } from '@/shared/project-source';
 import type { Project, ProjectSource } from '@/shared/types';
 
-const localSource: ProjectSource = { id: 'local', mountName: 'my-app', kind: 'local', workspaceDir: '/home/user/projects/my-app' };
-const gitSource: ProjectSource = { id: 'git', mountName: 'repo', kind: 'git-remote', repoUrl: 'https://github.com/org/repo.git' };
+const localSource: ProjectSource = {
+  id: 'local',
+  mountName: 'my-app',
+  kind: 'local',
+  workspaceDir: '/home/user/projects/my-app',
+};
+const gitSource: ProjectSource = {
+  id: 'git',
+  mountName: 'repo',
+  kind: 'git-remote',
+  repoUrl: 'https://github.com/org/repo.git',
+};
 
 describe('getLocalWorkspaceDir', () => {
   it('returns workspaceDir for local source', () => {
@@ -87,9 +97,14 @@ describe('source identity', () => {
   it('normalizes common Git URL spellings to the same identity', () => {
     expect(normalizeGitRemoteUrl('https://github.com/Owner/Repo.git/')).toBe('github.com/owner/repo');
     expect(normalizeGitRemoteUrl('git@github.com:owner/repo.git')).toBe('github.com/owner/repo');
-    expect(sourceIdentityKey({ id: 's1', mountName: 'repo', kind: 'git-remote', repoUrl: 'ssh://git@github.com/owner/repo.git' })).toBe(
-      'git-remote:github.com/owner/repo'
-    );
+    expect(
+      sourceIdentityKey({
+        id: 's1',
+        mountName: 'repo',
+        kind: 'git-remote',
+        repoUrl: 'ssh://git@github.com/owner/repo.git',
+      })
+    ).toBe('git-remote:github.com/owner/repo');
   });
 
   it('detects duplicate local source identities with different mount names', () => {

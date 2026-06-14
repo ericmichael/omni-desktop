@@ -104,177 +104,177 @@ const useStyles = makeStyles({
   warn: { padding: '8px 12px', color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 },
 });
 
-export const StorageTab = memo(
-  ({ handleId, activeOrigin }: { handleId: AppHandleId; activeOrigin: string | null }) => {
-    const styles = useStyles();
-    const [cookies, setCookies] = useState<Cookie[]>([]);
-    const [local, setLocal] = useState<Record<string, string>>({});
-    const [session, setSession] = useState<Record<string, string>>({});
+export const StorageTab = memo(({ handleId, activeOrigin }: { handleId: AppHandleId; activeOrigin: string | null }) => {
+  const styles = useStyles();
+  const [cookies, setCookies] = useState<Cookie[]>([]);
+  const [local, setLocal] = useState<Record<string, string>>({});
+  const [session, setSession] = useState<Record<string, string>>({});
 
-    const refresh = useCallback(async () => {
-      try {
-        const filter = activeOrigin ? { url: activeOrigin } : {};
-        const [c, l, s] = await Promise.all([
-          emitter.invoke('app:cookies-get', handleId, filter) as Promise<Cookie[]>,
-          emitter.invoke('app:storage-get', handleId, 'local'),
-          emitter.invoke('app:storage-get', handleId, 'session'),
-        ]);
-        setCookies(c ?? []);
-        setLocal(l ?? {});
-        setSession(s ?? {});
-      } catch {
-        // webview not ready — next refresh
-      }
-    }, [handleId, activeOrigin]);
-
-    useEffect(() => {
-      void refresh();
-    }, [refresh]);
-
-    const deleteCookie = useCallback(
-      async (c: Cookie) => {
-        const url = activeOrigin ?? `https://${(c.domain ?? '').replace(/^\./, '')}${c.path ?? '/'}`;
-        try {
-          await emitter.invoke('app:cookies-clear', handleId, { url, name: c.name });
-          await refresh();
-        } catch {
-          // ignore
-        }
-      },
-      [activeOrigin, handleId, refresh]
-    );
-
-    const clearCookies = useCallback(async () => {
-      if (!window.confirm('Delete all cookies for this origin?')) return;
+  const refresh = useCallback(async () => {
+    try {
       const filter = activeOrigin ? { url: activeOrigin } : {};
+      const [c, l, s] = await Promise.all([
+        emitter.invoke('app:cookies-get', handleId, filter) as Promise<Cookie[]>,
+        emitter.invoke('app:storage-get', handleId, 'local'),
+        emitter.invoke('app:storage-get', handleId, 'session'),
+      ]);
+      setCookies(c ?? []);
+      setLocal(l ?? {});
+      setSession(s ?? {});
+    } catch {
+      // webview not ready — next refresh
+    }
+  }, [handleId, activeOrigin]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const deleteCookie = useCallback(
+    async (c: Cookie) => {
+      const url = activeOrigin ?? `https://${(c.domain ?? '').replace(/^\./, '')}${c.path ?? '/'}`;
       try {
-        await emitter.invoke('app:cookies-clear', handleId, filter);
+        await emitter.invoke('app:cookies-clear', handleId, { url, name: c.name });
         await refresh();
       } catch {
         // ignore
       }
-    }, [activeOrigin, handleId, refresh]);
+    },
+    [activeOrigin, handleId, refresh]
+  );
 
-    const clearStorage = useCallback(
-      async (which: 'local' | 'session') => {
-        if (!window.confirm(`Clear all ${which}Storage keys?`)) return;
-        try {
-          await emitter.invoke('app:storage-clear', handleId, which);
-          await refresh();
-        } catch {
-          // ignore
-        }
-      },
-      [handleId, refresh]
-    );
+  const clearCookies = useCallback(async () => {
+    if (!window.confirm('Delete all cookies for this origin?')) {
+      return;
+    }
+    const filter = activeOrigin ? { url: activeOrigin } : {};
+    try {
+      await emitter.invoke('app:cookies-clear', handleId, filter);
+      await refresh();
+    } catch {
+      // ignore
+    }
+  }, [activeOrigin, handleId, refresh]);
 
-    const renderKVTable = (rows: Record<string, string>, onClear: () => void, label: string) => {
-      const keys = Object.keys(rows);
-      return (
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>
-            <span className={styles.sectionTitle}>{label}</span>
-            <span className={styles.counter}>{keys.length}</span>
-            <div className={styles.spacer} />
-            <button type="button" className={styles.iconBtn} onClick={onClear} title={`Clear ${label}`}>
-              <Delete16Regular />
-            </button>
-          </div>
-          {keys.length === 0 ? (
-            <div className={styles.empty}>No keys.</div>
-          ) : (
-            <table className={styles.table}>
-              <thead>
-                <tr>
-                  <th className={styles.th}>Key</th>
-                  <th className={styles.th}>Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                {keys.map((k) => (
-                  <tr key={k}>
-                    <td className={styles.td} title={k}>
-                      {k}
-                    </td>
-                    <td className={`${styles.td} ${styles.tdValue}`} title={rows[k]}>
-                      {rows[k]}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      );
-    };
+  const clearStorage = useCallback(
+    async (which: 'local' | 'session') => {
+      if (!window.confirm(`Clear all ${which}Storage keys?`)) {
+        return;
+      }
+      try {
+        await emitter.invoke('app:storage-clear', handleId, which);
+        await refresh();
+      } catch {
+        // ignore
+      }
+    },
+    [handleId, refresh]
+  );
 
+  const renderKVTable = (rows: Record<string, string>, onClear: () => void, label: string) => {
+    const keys = Object.keys(rows);
     return (
-      <div className={styles.root}>
-        {!activeOrigin && (
-          <div className={styles.warn}>Navigate to a page to see its storage.</div>
-        )}
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>
-            <span className={styles.sectionTitle}>Cookies</span>
-            <span className={styles.counter}>{cookies.length}</span>
-            <span className={styles.counter}>{activeOrigin ? `— ${activeOrigin}` : ''}</span>
-            <div className={styles.spacer} />
-            <button type="button" className={styles.iconBtn} onClick={() => void refresh()} title="Refresh">
-              <ArrowClockwise16Regular />
-            </button>
-            <button type="button" className={styles.iconBtn} onClick={() => void clearCookies()} title="Clear cookies">
-              <Delete16Regular />
-            </button>
-          </div>
-          {cookies.length === 0 ? (
-            <div className={styles.empty}>No cookies.</div>
-          ) : (
-            <table className={styles.table}>
-              <thead>
-                <tr>
-                  <th className={styles.th}>Name</th>
-                  <th className={styles.th}>Value</th>
-                  <th className={styles.th}>Domain</th>
-                  <th className={styles.th}>Path</th>
-                  <th className={styles.th}>Flags</th>
-                  <th className={styles.th} />
-                </tr>
-              </thead>
-              <tbody>
-                {cookies.map((c, i) => (
-                  <tr key={`${c.domain ?? ''}-${c.path ?? ''}-${c.name}-${i}`}>
-                    <td className={styles.td} title={c.name}>
-                      {c.name}
-                    </td>
-                    <td className={`${styles.td} ${styles.tdValue}`} title={c.value}>
-                      {c.value}
-                    </td>
-                    <td className={styles.td}>{c.domain ?? ''}</td>
-                    <td className={styles.td}>{c.path ?? ''}</td>
-                    <td className={styles.td}>
-                      {[c.secure && 'Secure', c.httpOnly && 'HttpOnly', c.sameSite].filter(Boolean).join(' · ')}
-                    </td>
-                    <td className={styles.tdAction}>
-                      <button
-                        type="button"
-                        className={styles.rowBtn}
-                        onClick={() => void deleteCookie(c)}
-                        aria-label={`Delete cookie ${c.name}`}
-                        title="Delete cookie"
-                      >
-                        <Delete16Regular style={{ width: 12, height: 12 }} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+      <div className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <span className={styles.sectionTitle}>{label}</span>
+          <span className={styles.counter}>{keys.length}</span>
+          <div className={styles.spacer} />
+          <button type="button" className={styles.iconBtn} onClick={onClear} title={`Clear ${label}`}>
+            <Delete16Regular />
+          </button>
         </div>
-        {renderKVTable(local, () => void clearStorage('local'), 'Local storage')}
-        {renderKVTable(session, () => void clearStorage('session'), 'Session storage')}
+        {keys.length === 0 ? (
+          <div className={styles.empty}>No keys.</div>
+        ) : (
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th className={styles.th}>Key</th>
+                <th className={styles.th}>Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {keys.map((k) => (
+                <tr key={k}>
+                  <td className={styles.td} title={k}>
+                    {k}
+                  </td>
+                  <td className={`${styles.td} ${styles.tdValue}`} title={rows[k]}>
+                    {rows[k]}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     );
-  }
-);
+  };
+
+  return (
+    <div className={styles.root}>
+      {!activeOrigin && <div className={styles.warn}>Navigate to a page to see its storage.</div>}
+      <div className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <span className={styles.sectionTitle}>Cookies</span>
+          <span className={styles.counter}>{cookies.length}</span>
+          <span className={styles.counter}>{activeOrigin ? `— ${activeOrigin}` : ''}</span>
+          <div className={styles.spacer} />
+          <button type="button" className={styles.iconBtn} onClick={() => void refresh()} title="Refresh">
+            <ArrowClockwise16Regular />
+          </button>
+          <button type="button" className={styles.iconBtn} onClick={() => void clearCookies()} title="Clear cookies">
+            <Delete16Regular />
+          </button>
+        </div>
+        {cookies.length === 0 ? (
+          <div className={styles.empty}>No cookies.</div>
+        ) : (
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th className={styles.th}>Name</th>
+                <th className={styles.th}>Value</th>
+                <th className={styles.th}>Domain</th>
+                <th className={styles.th}>Path</th>
+                <th className={styles.th}>Flags</th>
+                <th className={styles.th} />
+              </tr>
+            </thead>
+            <tbody>
+              {cookies.map((c, i) => (
+                <tr key={`${c.domain ?? ''}-${c.path ?? ''}-${c.name}-${i}`}>
+                  <td className={styles.td} title={c.name}>
+                    {c.name}
+                  </td>
+                  <td className={`${styles.td} ${styles.tdValue}`} title={c.value}>
+                    {c.value}
+                  </td>
+                  <td className={styles.td}>{c.domain ?? ''}</td>
+                  <td className={styles.td}>{c.path ?? ''}</td>
+                  <td className={styles.td}>
+                    {[c.secure && 'Secure', c.httpOnly && 'HttpOnly', c.sameSite].filter(Boolean).join(' · ')}
+                  </td>
+                  <td className={styles.tdAction}>
+                    <button
+                      type="button"
+                      className={styles.rowBtn}
+                      onClick={() => void deleteCookie(c)}
+                      aria-label={`Delete cookie ${c.name}`}
+                      title="Delete cookie"
+                    >
+                      <Delete16Regular style={{ width: 12, height: 12 }} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      {renderKVTable(local, () => void clearStorage('local'), 'Local storage')}
+      {renderKVTable(session, () => void clearStorage('session'), 'Session storage')}
+    </div>
+  );
+});
 StorageTab.displayName = 'StorageTab';

@@ -22,8 +22,8 @@ import { slugifyUnique } from '@/lib/slugify-unique';
 import { type ArtifactStore, DockerArtifactStore, HostFsArtifactStore } from '@/main/artifact-store';
 import { DbChangeWatcher } from '@/main/db-change-watcher';
 import {
-  commentToRow,
   columnToRow,
+  commentToRow,
   inboxItemToRow,
   milestoneToRow,
   pageToRow,
@@ -79,7 +79,7 @@ import type {
   TicketId,
   TicketPriority,
 } from '@/shared/types';
-import { CHAT_TAB_ID, firstSource } from '@/shared/types';
+import { CHAT_TAB_ID } from '@/shared/types';
 
 const DEFAULT_BRIEF_TEMPLATE = `## Problem
 
@@ -1332,11 +1332,13 @@ export class ProjectManager {
 
   getCodeTabFilesChanged = async (tabId: CodeTabId, sourceId: string): Promise<DiffResponse> => {
     const empty: DiffResponse = { totalFiles: 0, totalAdditions: 0, totalDeletions: 0, hasChanges: false, files: [] };
-    const tab = ((this.store.get('codeTabs') ?? []) as Array<{
-      id: string;
-      projectId: ProjectId | null;
-      workspaceDir?: string;
-    }>).find((t) => t.id === tabId);
+    const tab = (
+      (this.store.get('codeTabs') ?? []) as Array<{
+        id: string;
+        projectId: ProjectId | null;
+        workspaceDir?: string;
+      }>
+    ).find((t) => t.id === tabId);
     if (!tab) {
       return empty;
     }
@@ -1361,10 +1363,12 @@ export class ProjectManager {
   };
 
   applyCodeTabSourceChanges = async (tabId: CodeTabId, sourceId: string): Promise<PrMergeResult> => {
-    const tab = ((this.store.get('codeTabs') ?? []) as Array<{
-      id: string;
-      projectId: ProjectId | null;
-    }>).find((t) => t.id === tabId);
+    const tab = (
+      (this.store.get('codeTabs') ?? []) as Array<{
+        id: string;
+        projectId: ProjectId | null;
+      }>
+    ).find((t) => t.id === tabId);
     if (!tab?.projectId) {
       return { ok: false, error: 'Code tab is not attached to a project' };
     }
@@ -1394,14 +1398,22 @@ export class ProjectManager {
   };
 
   /** Resolve a code tab's project + running container, or null if unavailable. */
-  private codeTabPrContext = (tabId: CodeTabId): { project: Project; containerId: string; tab: { id: string; projectId: ProjectId | null; ticketId?: TicketId; sessionId?: string; workspaceDir?: string } } | null => {
-    const tab = ((this.store.get('codeTabs') ?? []) as Array<{
-      id: string;
-      projectId: ProjectId | null;
-      ticketId?: TicketId;
-      sessionId?: string;
-      workspaceDir?: string;
-    }>).find((t) => t.id === tabId);
+  private codeTabPrContext = (
+    tabId: CodeTabId
+  ): {
+    project: Project;
+    containerId: string;
+    tab: { id: string; projectId: ProjectId | null; ticketId?: TicketId; sessionId?: string; workspaceDir?: string };
+  } | null => {
+    const tab = (
+      (this.store.get('codeTabs') ?? []) as Array<{
+        id: string;
+        projectId: ProjectId | null;
+        ticketId?: TicketId;
+        sessionId?: string;
+        workspaceDir?: string;
+      }>
+    ).find((t) => t.id === tabId);
     if (!tab?.projectId) {
       return null;
     }
@@ -1565,10 +1577,7 @@ export class ProjectManager {
    * container. Mirror of {@link detectPullRequest} for the code-tab surface
    * (per-source — used by the Files Changed view). Best-effort → null.
    */
-  detectCodeTabPullRequest = async (
-    tabId: CodeTabId,
-    sourceId: string
-  ): Promise<ContainerPullRequest | null> => {
+  detectCodeTabPullRequest = async (tabId: CodeTabId, sourceId: string): Promise<ContainerPullRequest | null> => {
     const ctx = this.codeTabPrContext(tabId);
     const source = ctx?.project.sources.find((s) => s.id === sourceId);
     if (!ctx || !source) {
@@ -1704,10 +1713,7 @@ export class ProjectManager {
    * running container, no PR, or the source can't have one (plain directory /
    * no remote). Best-effort — never throws.
    */
-  detectPullRequest = async (
-    ticketId: TicketId,
-    sourceId: string
-  ): Promise<ContainerPullRequest | null> => {
+  detectPullRequest = async (ticketId: TicketId, sourceId: string): Promise<ContainerPullRequest | null> => {
     const ticket = this.getTicketById(ticketId);
     if (!ticket) {
       return null;

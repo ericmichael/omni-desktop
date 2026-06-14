@@ -48,6 +48,7 @@ function makeProject(overrides: Partial<Project> & { id: string }): Project {
     label: `Project ${overrides.id}`,
     slug: overrides.id,
     createdAt: NOW - 60 * DAY_MS,
+    sources: [],
     ...overrides,
   };
 }
@@ -108,9 +109,7 @@ describe('projectOpenTicketCount', () => {
       makeTicket({ id: 't3', projectId: 'p1', columnId: 'done' }),
       makeTicket({ id: 't4', projectId: 'p2' }),
     ];
-    expect(
-      projectOpenTicketCount({ project: p, tickets, terminalColumnIds: new Set(['done']) })
-    ).toBe(1);
+    expect(projectOpenTicketCount({ project: p, tickets, terminalColumnIds: new Set(['done']) })).toBe(1);
   });
 });
 
@@ -127,9 +126,7 @@ describe('rankFocusForMilestone', () => {
       makeTicket({ id: 'inside', milestoneId: 'm1', priority: 'low' }),
       makeTicket({ id: 'outside', milestoneId: 'm2', priority: 'critical' }),
     ];
-    expect(rankFocusForMilestone({ milestone: m, tickets, milestones: { m1: m }, now: NOW })?.ticket.id).toBe(
-      'inside'
-    );
+    expect(rankFocusForMilestone({ milestone: m, tickets, milestones: { m1: m }, now: NOW })?.ticket.id).toBe('inside');
   });
 
   it('picks the highest-priority open ticket', () => {
@@ -138,9 +135,7 @@ describe('rankFocusForMilestone', () => {
       makeTicket({ id: 'low', milestoneId: 'm1', priority: 'low' }),
       makeTicket({ id: 'high', milestoneId: 'm1', priority: 'high' }),
     ];
-    expect(rankFocusForMilestone({ milestone: m, tickets, milestones: { m1: m }, now: NOW })?.ticket.id).toBe(
-      'high'
-    );
+    expect(rankFocusForMilestone({ milestone: m, tickets, milestones: { m1: m }, now: NOW })?.ticket.id).toBe('high');
   });
 });
 
@@ -152,9 +147,7 @@ describe('rankFocusForProject', () => {
       makeTicket({ id: 'loose', projectId: 'p1', priority: 'high' }),
       makeTicket({ id: 'other-project', projectId: 'p2', priority: 'critical' }),
     ];
-    expect(rankFocusForProject({ project: p, tickets, milestones: {}, now: NOW })?.ticket.id).toBe(
-      'loose'
-    );
+    expect(rankFocusForProject({ project: p, tickets, milestones: {}, now: NOW })?.ticket.id).toBe('loose');
   });
 
   it('returns null when the project has no open tickets', () => {

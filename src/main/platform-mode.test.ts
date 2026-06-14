@@ -11,12 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import {
-  createPlatformClient,
-  isEnterpriseBuild,
-  isPlatformAuthenticated,
-  PLATFORM_URL,
-} from '@/main/platform-mode';
+import { createPlatformClient, isEnterpriseBuild, isPlatformAuthenticated, PLATFORM_URL } from '@/main/platform-mode';
 
 // ---------------------------------------------------------------------------
 // isPlatformAuthenticated

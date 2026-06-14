@@ -60,7 +60,7 @@ vi.mock('node:child_process', async () => {
 // ---------------------------------------------------------------------------
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 

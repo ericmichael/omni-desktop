@@ -8,15 +8,16 @@
 import { describe, expect, it } from 'vitest';
 
 import { MilestoneManager, type MilestoneManagerStore } from '@/main/milestone-manager';
-import type { Milestone, MilestoneId, Ticket } from '@/shared/types';
+import type { Milestone, Ticket } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeStore(
-  initial?: { milestones?: Milestone[]; tickets?: Ticket[] }
-): MilestoneManagerStore & { milestones: Milestone[]; tickets: Ticket[] } {
+function makeStore(initial?: {
+  milestones?: Milestone[];
+  tickets?: Ticket[];
+}): MilestoneManagerStore & { milestones: Milestone[]; tickets: Ticket[] } {
   const store = {
     milestones: initial?.milestones ?? [],
     tickets: initial?.tickets ?? [],

@@ -5,9 +5,29 @@ import { useEffect, useRef } from 'react';
 
 import { useUiConfig } from '@/renderer/omniagents-ui/ui-config';
 
-export default function Orb({ hue = 0, hoverIntensity = 0.2, rotateOnHover = true, forceHoverState = false, animationSpeed = 1.0, noiseScale = 0.65, noiseAmplitude = 1.0, innerRadius = 0.6 }) {
-  const { debug } = useUiConfig()
-  const ctnDom = useRef(null);
+type OrbProps = {
+  hue?: number;
+  hoverIntensity?: number;
+  rotateOnHover?: boolean;
+  forceHoverState?: boolean;
+  animationSpeed?: number;
+  noiseScale?: number;
+  noiseAmplitude?: number;
+  innerRadius?: number;
+};
+
+export default function Orb({
+  hue = 0,
+  hoverIntensity = 0.2,
+  rotateOnHover = true,
+  forceHoverState = false,
+  animationSpeed = 1.0,
+  noiseScale = 0.65,
+  noiseAmplitude = 1.0,
+  innerRadius = 0.6,
+}: OrbProps) {
+  const { debug } = useUiConfig();
+  const ctnDom = useRef<HTMLDivElement | null>(null);
   const hueRef = useRef(hue);
   const hoverIntensityRef = useRef(hoverIntensity);
   const animationSpeedRef = useRef(animationSpeed);
@@ -26,7 +46,7 @@ export default function Orb({ hue = 0, hoverIntensity = 0.2, rotateOnHover = tru
       noiseScale: noiseScale.toFixed(2),
       noiseAmplitude: noiseAmplitude.toFixed(3),
       innerRadius: innerRadius.toFixed(3),
-    })
+    });
   }
 
   // Update refs when props change
@@ -201,8 +221,8 @@ export default function Orb({ hue = 0, hoverIntensity = 0.2, rotateOnHover = tru
   useEffect(() => {
     const container = ctnDom.current;
     if (!container) {
-return;
-}
+      return;
+    }
 
     const renderer = new Renderer({ alpha: true, premultipliedAlpha: false });
     const gl = renderer.gl;
@@ -216,7 +236,7 @@ return;
       uniforms: {
         iTime: { value: 0 },
         iResolution: {
-          value: new Vec3(gl.canvas.width, gl.canvas.height, gl.canvas.width / gl.canvas.height)
+          value: new Vec3(gl.canvas.width, gl.canvas.height, gl.canvas.width / gl.canvas.height),
         },
         hue: { value: hueRef.current },
         hover: { value: 0 },
@@ -225,22 +245,22 @@ return;
         animationSpeed: { value: animationSpeedRef.current },
         noiseScale: { value: noiseScaleRef.current },
         noiseAmplitude: { value: noiseAmplitudeRef.current },
-        innerRadius: { value: innerRadiusRef.current }
-      }
+        innerRadius: { value: innerRadiusRef.current },
+      },
     });
 
     const mesh = new Mesh(gl, { geometry, program });
 
     function resize() {
       if (!container) {
-return;
-}
+        return;
+      }
       const dpr = window.devicePixelRatio || 1;
       const width = container.clientWidth;
       const height = container.clientHeight;
       renderer.setSize(width * dpr, height * dpr);
-      gl.canvas.style.width = `${width  }px`;
-      gl.canvas.style.height = `${height  }px`;
+      gl.canvas.style.width = `${width}px`;
+      gl.canvas.style.height = `${height}px`;
       program.uniforms.iResolution.value.set(gl.canvas.width, gl.canvas.height, gl.canvas.width / gl.canvas.height);
     }
     window.addEventListener('resize', resize);
@@ -251,7 +271,7 @@ return;
     let currentRot = 0;
     const rotationSpeed = 0.3;
 
-    const handleMouseMove = e => {
+    const handleMouseMove = (e: MouseEvent) => {
       const rect = container.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
@@ -277,8 +297,8 @@ return;
     container.addEventListener('mousemove', handleMouseMove);
     container.addEventListener('mouseleave', handleMouseLeave);
 
-    let rafId;
-    const update = t => {
+    let rafId: number;
+    const update = (t: number) => {
       rafId = requestAnimationFrame(update);
       const dt = (t - lastTime) * 0.001;
       lastTime = t;
@@ -310,7 +330,6 @@ return;
       container.removeChild(gl.canvas);
       gl.getExtension('WEBGL_lose_context')?.loseContext();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rotateOnHover, forceHoverState]);
 
   return <div ref={ctnDom} className="orb-container" />;

@@ -63,27 +63,27 @@ describe('sweepInbox', () => {
   it('flips expired new items to later and stamps laterAt', () => {
     const input = [item({ id: 'a', createdAt: 0 })];
     const out = sweepInbox(input, INBOX_EXPIRY_MS);
-    expect(out[0].status).toBe('later');
-    expect(out[0].laterAt).toBe(INBOX_EXPIRY_MS);
-    expect(out[0].updatedAt).toBe(INBOX_EXPIRY_MS);
+    expect(out[0]!.status).toBe('later');
+    expect(out[0]!.laterAt).toBe(INBOX_EXPIRY_MS);
+    expect(out[0]!.updatedAt).toBe(INBOX_EXPIRY_MS);
   });
 
   it('leaves fresh new items untouched and returns them by reference', () => {
     const fresh = item({ id: 'a', createdAt: 100 });
     const out = sweepInbox([fresh], 200);
-    expect(out[0]).toBe(fresh);
+    expect(out[0]!).toBe(fresh);
   });
 
   it('never touches later items', () => {
     const later = item({ id: 'a', status: 'later', laterAt: 10, createdAt: 0 });
     const out = sweepInbox([later], INBOX_EXPIRY_MS * 2);
-    expect(out[0]).toBe(later);
+    expect(out[0]!).toBe(later);
   });
 
   it('respects custom expiry window', () => {
     const oneDay = 24 * 60 * 60 * 1000;
     const input = [item({ id: 'a', createdAt: 0 })];
     const out = sweepInbox(input, oneDay, oneDay);
-    expect(out[0].status).toBe('later');
+    expect(out[0]!.status).toBe('later');
   });
 });

@@ -44,4 +44,3 @@ export const isActivePhase = (phase: TicketPhase): boolean => {
 export const isStreamingPhase = (phase: TicketPhase): boolean => {
   return phase === 'running';
 };
-

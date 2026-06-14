@@ -52,7 +52,9 @@ export function mergeEnvVars(teamStr: string, userStr: string, lockedKeys: reado
   const userMap = parseEnvVars(userStr || '');
   const merged: Record<string, string> = { ...teamMap, ...userMap };
   for (const k of lockedKeys) {
-    if (k in teamMap) merged[k] = teamMap[k]!;
+    if (k in teamMap) {
+      merged[k] = teamMap[k]!;
+    }
   }
   return serializeEnvVars(merged);
 }
@@ -62,7 +64,9 @@ export function mergeEnvVars(teamStr: string, userStr: string, lockedKeys: reado
  * When there is no floor, the team policy passes through unchanged.
  */
 export function mergeNetworkConfig(floor: NetworkConfig | undefined, team: NetworkConfig): NetworkConfig {
-  if (!floor) return team;
+  if (!floor) {
+    return team;
+  }
   const intersect = (a: string[], b: string[]): string[] => a.filter((x) => b.includes(x));
   const union = (a: string[], b: string[]): string[] => Array.from(new Set([...a, ...b]));
   return {
@@ -91,7 +95,11 @@ export function mergeRecord<V>(
 /** Union of two id-keyed arrays; user entries shadow team entries by `id`. */
 export function mergeById<T extends { id: string }>(team: T[] | undefined, user: T[] | undefined): T[] {
   const byId = new Map<string, T>();
-  for (const item of team ?? []) byId.set(item.id, item);
-  for (const item of user ?? []) byId.set(item.id, item);
+  for (const item of team ?? []) {
+    byId.set(item.id, item);
+  }
+  for (const item of user ?? []) {
+    byId.set(item.id, item);
+  }
   return Array.from(byId.values());
 }

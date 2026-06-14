@@ -3,7 +3,20 @@ import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, Button, FormField, FormSkeleton, IconButton, Input, SaveBar, SectionLabel, Select } from '@/renderer/ds';
+import {
+  Accordion,
+  AccordionHeader,
+  AccordionItem,
+  AccordionPanel,
+  Button,
+  FormField,
+  FormSkeleton,
+  IconButton,
+  Input,
+  SaveBar,
+  SectionLabel,
+  Select,
+} from '@/renderer/ds';
 import { agentConfigApi } from '@/renderer/services/config';
 import type { McpConfig, McpServerEntry } from '@/shared/types';
 
@@ -170,17 +183,15 @@ export const SettingsModalMcpTab = memo(() => {
   return (
     <div className={styles.root}>
       <SectionLabel>MCP Servers</SectionLabel>
-      <Accordion collapsible onToggle={(_e, data) => {
-        setExpandedServer(data.openItems.length > 0 ? String(data.openItems[data.openItems.length - 1]) : null);
-      }} openItems={expandedServer ? [expandedServer] : []}>
+      <Accordion
+        collapsible
+        onToggle={(_e, data) => {
+          setExpandedServer(data.openItems.length > 0 ? String(data.openItems[data.openItems.length - 1]) : null);
+        }}
+        openItems={expandedServer ? [expandedServer] : []}
+      >
         {Object.entries(config.mcpServers).map(([name, server]) => (
-          <McpServerRow
-            key={name}
-            name={name}
-            server={server}
-            onRemove={removeServer}
-            onUpdate={updateServer}
-          />
+          <McpServerRow key={name} name={name} server={server} onRemove={removeServer} onUpdate={updateServer} />
         ))}
       </Accordion>
       <div className={styles.addRow}>

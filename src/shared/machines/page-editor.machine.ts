@@ -122,8 +122,7 @@ export const pageEditorMachine = setup({
       diskContent: '',
     }),
     setError: assign({
-      error: ({ event }) =>
-        (event as Extract<PageEditorEvent, { type: 'LOAD_FAILED' | 'SAVE_ERROR' }>).error,
+      error: ({ event }) => (event as Extract<PageEditorEvent, { type: 'LOAD_FAILED' | 'SAVE_ERROR' }>).error,
     }),
     clearError: assign({ error: null }),
   },

@@ -1,10 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { AddressInfo } from 'node:net';
-
-import { WebSocketServer } from 'ws';
+import type { AddressInfo } from 'node:net';
 
 import { expect, test } from 'tests/e2e/fixtures/test';
 import { openCode } from 'tests/e2e/support/app';
+import { WebSocketServer } from 'ws';
 
 type TestUpstream = {
   origin: string;

@@ -183,9 +183,7 @@ export const ProjectCardsGrid = memo(() => {
               {project.isPersonal && <Star20Filled className={styles.personalStar} />}
               <Subtitle2>{project.label}</Subtitle2>
             </div>
-            {preview.trim() && (
-              <Caption1 className={styles.preview}>{preview.trim()}</Caption1>
-            )}
+            {preview.trim() && <Caption1 className={styles.preview}>{preview.trim()}</Caption1>}
             <Caption1 className={styles.counts}>{countLabel}</Caption1>
           </button>
         );

@@ -60,10 +60,7 @@ const emptySummary = (): MigrationSummary => ({
   contextFilesCreated: 0,
 });
 
-export async function migrateStoreV13(
-  input: MigrationInput,
-  options: MigrationOptions
-): Promise<MigrationSummary> {
+export async function migrateStoreV13(input: MigrationInput, options: MigrationOptions): Promise<MigrationSummary> {
   const summary = emptySummary();
   for (const project of input.projects) {
     const dir = options.resolveProjectDir(project);
@@ -101,11 +98,7 @@ async function writeProjectFiles(
 
   const projectTickets = input.tickets.filter((t) => t.projectId === project.id);
   for (const ticket of projectTickets) {
-    await writeFile(
-      path.join(ticketsDir, `${ticket.id}.md`),
-      serializeTicketFile(ticket),
-      'utf-8'
-    );
+    await writeFile(path.join(ticketsDir, `${ticket.id}.md`), serializeTicketFile(ticket), 'utf-8');
     summary.ticketsWritten++;
 
     if (ticket.comments && ticket.comments.length > 0) {

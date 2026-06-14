@@ -29,7 +29,12 @@ const store = JSON.parse(readFileSync(STORE_PATH, 'utf-8'));
 const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA foreign_keys = ON;');
 
-const projectIds = new Set(db.prepare('SELECT id FROM projects').all().map((r) => r.id));
+const projectIds = new Set(
+  db
+    .prepare('SELECT id FROM projects')
+    .all()
+    .map((r) => r.id)
+);
 
 const inserted = { tickets: 0, comments: 0, milestones: 0, pages: 0, inbox_items: 0, tasks: 0 };
 const skipped = { tickets: 0, milestones: 0, pages: 0, tasks: 0 };
@@ -47,9 +52,17 @@ try {
       continue;
     }
     const res = upsertMilestone.run(
-      m.id, m.projectId, m.title, m.description, m.branch ?? null, m.brief ?? null,
-      m.status, m.dueDate ? toIso(m.dueDate) : null, m.completedAt ? toIso(m.completedAt) : null,
-      toIso(m.createdAt), toIso(m.updatedAt)
+      m.id,
+      m.projectId,
+      m.title,
+      m.description,
+      m.branch ?? null,
+      m.brief ?? null,
+      m.status,
+      m.dueDate ? toIso(m.dueDate) : null,
+      m.completedAt ? toIso(m.completedAt) : null,
+      toIso(m.createdAt),
+      toIso(m.updatedAt)
     );
     if (res.changes > 0) inserted.milestones++;
   }
@@ -83,24 +96,40 @@ try {
     }
     const resolvedColumnId = colMap.get(`${t.projectId}:${t.columnId}`) ?? t.columnId;
     const res = upsertTicket.run(
-      t.id, t.projectId, t.milestoneId ?? null, resolvedColumnId,
-      t.title, t.description, t.priority, t.branch ?? null,
-      JSON.stringify(t.blockedBy ?? []), jsonStr(t.shaping),
-      t.resolution ?? null, t.resolvedAt ? toIso(t.resolvedAt) : null,
+      t.id,
+      t.projectId,
+      t.milestoneId ?? null,
+      resolvedColumnId,
+      t.title,
+      t.description,
+      t.priority,
+      t.branch ?? null,
+      JSON.stringify(t.blockedBy ?? []),
+      jsonStr(t.shaping),
+      t.resolution ?? null,
+      t.resolvedAt ? toIso(t.resolvedAt) : null,
       t.archivedAt ? toIso(t.archivedAt) : null,
       t.columnChangedAt ? toIso(t.columnChangedAt) : null,
-      t.useWorktree ? 1 : 0, t.worktreePath ?? null, t.worktreeName ?? null,
-      t.supervisorSessionId ?? null, t.phase ?? null,
+      t.useWorktree ? 1 : 0,
+      t.worktreePath ?? null,
+      t.worktreeName ?? null,
+      t.supervisorSessionId ?? null,
+      t.phase ?? null,
       t.phaseChangedAt ? toIso(t.phaseChangedAt) : null,
-      t.supervisorTaskId ?? null, jsonStr(t.tokenUsage),
+      t.supervisorTaskId ?? null,
+      jsonStr(t.tokenUsage),
       JSON.stringify(t.runs ?? []),
-      toIso(t.createdAt), toIso(t.updatedAt)
+      toIso(t.createdAt),
+      toIso(t.updatedAt)
     );
     if (res.changes > 0) inserted.tickets++;
     for (const c of t.comments ?? []) {
       const cres = upsertComment.run(
         c.id || `cmt_${t.id}_${c.createdAt}`,
-        t.id, c.author, c.content, toIso(c.createdAt)
+        t.id,
+        c.author,
+        c.content,
+        toIso(c.createdAt)
       );
       if (cres.changes > 0) inserted.comments++;
     }
@@ -119,9 +148,17 @@ try {
       continue;
     }
     const res = upsertPage.run(
-      p.id, p.projectId, p.parentId ?? null, p.title, p.icon ?? null,
-      p.sortOrder, p.isRoot ? 1 : 0, p.kind ?? 'doc',
-      jsonStr(p.properties), toIso(p.createdAt), toIso(p.updatedAt)
+      p.id,
+      p.projectId,
+      p.parentId ?? null,
+      p.title,
+      p.icon ?? null,
+      p.sortOrder,
+      p.isRoot ? 1 : 0,
+      p.kind ?? 'doc',
+      jsonStr(p.properties),
+      toIso(p.createdAt),
+      toIso(p.updatedAt)
     );
     if (res.changes > 0) inserted.pages++;
   }
@@ -135,11 +172,16 @@ try {
   );
   for (const item of store.inboxItems ?? []) {
     const res = upsertInbox.run(
-      item.id, item.title, item.note ?? null, item.projectId ?? null,
-      item.status, jsonStr(item.shaping),
+      item.id,
+      item.title,
+      item.note ?? null,
+      item.projectId ?? null,
+      item.status,
+      jsonStr(item.shaping),
       item.laterAt ? toIso(item.laterAt) : null,
       jsonStr(item.promotedTo),
-      toIso(item.createdAt), toIso(item.updatedAt)
+      toIso(item.createdAt),
+      toIso(item.updatedAt)
     );
     if (res.changes > 0) inserted.inbox_items++;
   }
@@ -157,10 +199,17 @@ try {
       continue;
     }
     const res = upsertTask.run(
-      t.id, t.projectId, t.taskDescription ?? '', jsonStr(t.status) ?? '{}',
-      toIso(t.createdAt), t.branch ?? null,
-      t.worktreePath ?? null, t.worktreeName ?? null, t.sessionId ?? null,
-      t.ticketId ?? null, jsonStr(t.lastUrls)
+      t.id,
+      t.projectId,
+      t.taskDescription ?? '',
+      jsonStr(t.status) ?? '{}',
+      toIso(t.createdAt),
+      t.branch ?? null,
+      t.worktreePath ?? null,
+      t.worktreeName ?? null,
+      t.sessionId ?? null,
+      t.ticketId ?? null,
+      jsonStr(t.lastUrls)
     );
     if (res.changes > 0) inserted.tasks++;
   }
@@ -175,15 +224,17 @@ try {
 console.log('Inserted:', inserted);
 console.log('Skipped (FK violations):', skipped);
 
-const counts = db.prepare(
-  `SELECT 'projects' AS table_name, COUNT(*) AS n FROM projects
+const counts = db
+  .prepare(
+    `SELECT 'projects' AS table_name, COUNT(*) AS n FROM projects
    UNION ALL SELECT 'tickets', COUNT(*) FROM tickets
    UNION ALL SELECT 'pages', COUNT(*) FROM pages
    UNION ALL SELECT 'milestones', COUNT(*) FROM milestones
    UNION ALL SELECT 'inbox_items', COUNT(*) FROM inbox_items
    UNION ALL SELECT 'tasks', COUNT(*) FROM tasks
    UNION ALL SELECT 'ticket_comments', COUNT(*) FROM ticket_comments`
-).all();
+  )
+  .all();
 console.log('\nPost-recovery counts:');
 for (const row of counts) {
   console.log(`  ${row.table_name}: ${row.n}`);

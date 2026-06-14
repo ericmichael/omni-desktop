@@ -40,7 +40,7 @@ drives a remote container; `omni serve` never moves.
 4. Readiness payload: `ws_url = ws://{host}:{port}/ws` is **omni-serve's own
    port** (`serve_cli.py:1179`); `services` = `ctx.service_urls`
    (`serve_cli.py:822`). The renderer connects to **cloud omni-serve** via the
-   normal `/proxy/code-<id>-*` rewrite — *not* to the ACI container.
+   normal `/proxy/code-<id>-*` rewrite — _not_ to the ACI container.
 
 **Laptop is identical except `client.type: host_bridge` and the sandbox backend
 is the user's laptop.** Renderer→cloud-omni-serve is unchanged. No agent tunnel.
@@ -102,7 +102,7 @@ per-port routing extension.
   `create()`+`start()` an `ExtendedUnixLocalSandboxClient` session with the
   (serialized) manifest + options. **Manifest application happens on the laptop**
   — this is mandatory because seed entries are `PermissiveLocalDir(src=Path(path))`
-  read from the *session host's* filesystem (`serve_cli.py:301-305`), and those
+  read from the _session host's_ filesystem (`serve_cli.py:301-305`), and those
   paths exist on the laptop, not the cloud.
 - `_exec_internal`, `read`, `write`, `pty_*`, `_resolve_exposed_port` → forward
   to the laptop session, return results.

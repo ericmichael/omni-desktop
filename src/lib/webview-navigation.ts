@@ -12,7 +12,11 @@ export function isAbortError(error: unknown): boolean {
     return false;
   }
   const value = error as { errno?: unknown; code?: unknown; message?: unknown };
-  return value.errno === WEBVIEW_ERR_ABORTED || value.code === 'ERR_ABORTED' || String(value.message ?? '').includes('ERR_ABORTED');
+  return (
+    value.errno === WEBVIEW_ERR_ABORTED ||
+    value.code === 'ERR_ABORTED' ||
+    String(value.message ?? '').includes('ERR_ABORTED')
+  );
 }
 
 export function shouldRetryInitialLoad(args: {

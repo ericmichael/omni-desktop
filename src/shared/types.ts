@@ -1185,7 +1185,7 @@ export type OmniRuntimeInfo =
       version: string;
       expectedVersion: string;
       isOutdated: boolean;
-      pythonVersion: string;
+      pythonVersion?: string;
       omniPath: string;
     };
 
@@ -1855,7 +1855,7 @@ type VoiceIpcEvents = Namespaced<
     'import-sample': (
       personaId: string,
       filename: string,
-      dataBase64: string,
+      dataBase64: string
     ) => { file: string; embeddingFile: string };
   }
 >;

@@ -1184,8 +1184,7 @@ const CodeSessionHeader = memo(
     // repo-source projects. Plain-folder projects have one output concept —
     // the folder itself — so the menu item never appears for them.
     const store = useStore(persistedStoreApi.$atom);
-    const showArtifacts =
-      Boolean(ticketId) && projectHasRepoSource(store.projects.find((p) => p.id === projectId));
+    const showArtifacts = Boolean(ticketId) && projectHasRepoSource(store.projects.find((p) => p.id === projectId));
 
     const styles = useStyles();
     return (
@@ -2682,278 +2681,279 @@ export const CodeDeck = memo(() => {
         </span>
       );
     },
-    [projectMap, store.milestones, store.tickets]
+    [projectMap, store.milestones, store.tickets, styles.metaBadge]
   );
 
   return (
     <LayoutGroup>
-    <div className={styles.root}>
-      <CodeDeckHeader
-        layoutMode={layoutMode}
-        onLayoutMode={handleLayoutMode}
-        onNewSession={handleNewSession}
-        onOpenApps={handleOpenApps}
-        isGlass={isGlass}
-      />
-      {layoutMode === 'tile' && (
-        <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-          <SortableContext items={tabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
-            <div ref={deckScrollRef} className={styles.deckScroll}>
-              <div className={styles.deckInner}>
-                {tabs.map((tab) => {
-                  const isLauncher = tab.customAppId === APP_LAUNCHER_ID;
-                  const appEntry =
-                    tab.customAppId && !isLauncher ? customApps.find((a) => a.id === tab.customAppId) : undefined;
-                  const activeAppId = activeApps[tab.id] ?? 'chat';
-                  // The currently-displayed sidecar app (if any).
-                  const sidecarApp =
-                    !isLauncher && !appEntry && activeAppId !== 'chat'
-                      ? appRegistry.find((a) => a.id === activeAppId)
-                      : undefined;
-                  // The sidecar app to keep MOUNTED (may be hidden). Preserves
-                  // state across minimize/restore — hidden when activeApp is
-                  // 'chat' but the tab has opened a sidecar before.
-                  const mountedSidecarApp =
-                    sidecarApp ??
-                    (!isLauncher && !appEntry && lastSidecarAppByTab[tab.id]
-                      ? appRegistry.find((a) => a.id === lastSidecarAppByTab[tab.id])
-                      : undefined);
-                  const sidecarHidden = !sidecarApp;
-                  const tabStatus = statuses[tab.id];
-                  const tabSandboxUrls =
-                    tabStatus && (tabStatus.type === 'running' || tabStatus.type === 'connecting')
-                      ? tabStatus.data
-                      : undefined;
-                  return (
-                    <Fragment key={tab.id}>
-                      <div
-                        style={{ width: getTabColumnWidth(tab) }}
-                        className={styles.deckColumnWrap}
-                        data-deck-column={tab.id}
-                      >
-                        {isLauncher ? (
-                          <AppLauncherColumn
-                            tab={tab}
-                            customApps={customApps}
-                            onClose={handleClose}
-                            isExpanded={expandedTabIds.has(tab.id)}
-                            onToggleExpand={handleToggleExpand}
-                            isGlass={isGlass}
-                          />
-                        ) : appEntry?.id === BROWSER_APP_ID ? (
-                          <BrowserColumn
-                            tab={tab}
-                            onClose={handleClose}
-                            isExpanded={expandedTabIds.has(tab.id)}
-                            onToggleExpand={handleToggleExpand}
-                            isGlass={isGlass}
-                          />
-                        ) : appEntry ? (
-                          <AppColumn
-                            tab={tab}
-                            app={appEntry}
-                            onClose={handleClose}
-                            isExpanded={expandedTabIds.has(tab.id)}
-                            onToggleExpand={handleToggleExpand}
-                            isGlass={isGlass}
-                          />
-                        ) : (
-                          <DeckColumn
-                            tab={tab}
-                            label={resolveLabel(tab)}
-                            ticketTitle={resolveTicketTitle(tab)}
-                            ticketColumnBadge={renderTicketColumnBadge(tab)}
-                            ticketMetaBadge={renderTicketMetaBadge(tab)}
-                            ticketActions={renderTicketBannerActions(tab)}
-                            actions={renderSessionActions(tab)}
-                            onClose={handleClose}
-                            isExpanded={expandedTabIds.has(tab.id)}
-                            onToggleExpand={handleToggleExpand}
-                            headerActionsSlot={<div id={`code-deck-header-actions-${tab.id}`} />}
-                            isGlass={isGlass}
-                            hasSidecar={!!sidecarApp}
-                          >
-                            <TabContentSlot host={getContentHost(tab.id)} />
-                          </DeckColumn>
-                        )}
-                        {/* The launch column is transient — no resize until it becomes a session. */}
-                        {(tab.projectId || tab.customAppId) && (
-                          <ColumnResizeHandle tabId={tab.id} label={resolveLabel(tab)} onCommit={handleResizeCommit} />
-                        )}
-                      </div>
-                      {mountedSidecarApp && (
-                        <div
-                          style={{
-                            width: getColumnWidth(`sidecar:${tab.id}`),
-                            ...(sidecarHidden ? { display: 'none' } : {}),
-                          }}
-                          className={styles.deckColumnWrap}
-                        >
-                          <SidecarColumn
-                            originTab={tab}
-                            app={mountedSidecarApp}
-                            sandboxUrls={tabSandboxUrls}
-                            previewUrl={previewUrls[tab.id]}
-                            onPreviewUrlChange={(url) => handlePreviewUrlChange(tab.id, url)}
-                            onClose={() => handleActiveAppChange(tab.id, 'chat')}
-                            isGlass={isGlass}
-                            isExpanded={expandedTabIds.has(`sidecar:${tab.id}`)}
-                            onToggleExpand={() => handleToggleExpand(`sidecar:${tab.id}`)}
-                          />
-                        </div>
-                      )}
-                    </Fragment>
-                  );
-                })}
-              </div>
-            </div>
-          </SortableContext>
-        </DndContext>
-      )}
-      {layoutMode === 'tile' && (
-        <DeckMap tabs={tabs} currentTabId={pagerTabId} resolveLabel={resolveLabel} onSelect={scrollToColumn} />
-      )}
-      {layoutMode === 'focus' && (
-        <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-          <SortableContext items={tabs.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-            <div className={styles.focusLayout}>
-              <div className={mergeClasses(styles.focusSidebar, isGlass && styles.glassFocusSidebar)}>
-                <div
-                  className={mergeClasses(
-                    styles.focusSidebarHeader,
-                    isGlass && styles.glassFocusSidebarHeader
-                  )}
-                >
-                  <span className={styles.focusSidebarTitle}>Sessions</span>
-                  {tabs.length > 0 && <span className={styles.focusSidebarCount}>{tabs.length}</span>}
-                </div>
-                <div className={styles.focusSidebarList}>
-                  {tabs.map((tab) => (
-                    <FocusListItem
-                      key={tab.id}
-                      tab={tab}
-                      label={resolveLabel(tab)}
-                      subLabel={resolveTicketTitle(tab)}
-                      isActive={tab.id === activeTab?.id}
-                      onSelect={handleSelect}
-                      onClose={handleClose}
-                    />
-                  ))}
-                </div>
-              </div>
-              <div className={styles.focusContent}>
-                {tabs.map((tab) => {
-                  const isLauncher = tab.customAppId === APP_LAUNCHER_ID;
-                  const appEntry =
-                    tab.customAppId && !isLauncher ? customApps.find((a) => a.id === tab.customAppId) : undefined;
-                  if (isLauncher) {
+      <div className={styles.root}>
+        <CodeDeckHeader
+          layoutMode={layoutMode}
+          onLayoutMode={handleLayoutMode}
+          onNewSession={handleNewSession}
+          onOpenApps={handleOpenApps}
+          isGlass={isGlass}
+        />
+        {layoutMode === 'tile' && (
+          <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+            <SortableContext items={tabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
+              <div ref={deckScrollRef} className={styles.deckScroll}>
+                <div className={styles.deckInner}>
+                  {tabs.map((tab) => {
+                    const isLauncher = tab.customAppId === APP_LAUNCHER_ID;
+                    const appEntry =
+                      tab.customAppId && !isLauncher ? customApps.find((a) => a.id === tab.customAppId) : undefined;
+                    const activeAppId = activeApps[tab.id] ?? 'chat';
+                    // The currently-displayed sidecar app (if any).
+                    const sidecarApp =
+                      !isLauncher && !appEntry && activeAppId !== 'chat'
+                        ? appRegistry.find((a) => a.id === activeAppId)
+                        : undefined;
+                    // The sidecar app to keep MOUNTED (may be hidden). Preserves
+                    // state across minimize/restore — hidden when activeApp is
+                    // 'chat' but the tab has opened a sidecar before.
+                    const mountedSidecarApp =
+                      sidecarApp ??
+                      (!isLauncher && !appEntry && lastSidecarAppByTab[tab.id]
+                        ? appRegistry.find((a) => a.id === lastSidecarAppByTab[tab.id])
+                        : undefined);
+                    const sidecarHidden = !sidecarApp;
+                    const tabStatus = statuses[tab.id];
+                    const tabSandboxUrls =
+                      tabStatus && (tabStatus.type === 'running' || tabStatus.type === 'connecting')
+                        ? tabStatus.data
+                        : undefined;
                     return (
-                      <div
-                        key={tab.id}
-                        style={{
-                          width: '100%',
-                          height: '100%',
-                          display: tab.id === activeTab?.id ? 'flex' : 'none',
-                          flexDirection: 'column',
-                        }}
-                      >
+                      <Fragment key={tab.id}>
                         <div
-                          className={mergeClasses(styles.launcherBody, isGlass && styles.launcherBodyGlass)}
+                          style={{ width: getTabColumnWidth(tab) }}
+                          className={styles.deckColumnWrap}
+                          data-deck-column={tab.id}
                         >
-                          {customApps.length === 0 ? (
-                            <div className={styles.launcherEmpty}>No apps installed. Add apps in Settings.</div>
-                          ) : (
-                            <AppLauncherGrid
-                              apps={customApps}
-                              onPick={(appId) => codeApi.setTabAppId(tab.id, appId)}
+                          {isLauncher ? (
+                            <AppLauncherColumn
+                              tab={tab}
+                              customApps={customApps}
+                              onClose={handleClose}
+                              isExpanded={expandedTabIds.has(tab.id)}
+                              onToggleExpand={handleToggleExpand}
                               isGlass={isGlass}
+                            />
+                          ) : appEntry?.id === BROWSER_APP_ID ? (
+                            <BrowserColumn
+                              tab={tab}
+                              onClose={handleClose}
+                              isExpanded={expandedTabIds.has(tab.id)}
+                              onToggleExpand={handleToggleExpand}
+                              isGlass={isGlass}
+                            />
+                          ) : appEntry ? (
+                            <AppColumn
+                              tab={tab}
+                              app={appEntry}
+                              onClose={handleClose}
+                              isExpanded={expandedTabIds.has(tab.id)}
+                              onToggleExpand={handleToggleExpand}
+                              isGlass={isGlass}
+                            />
+                          ) : (
+                            <DeckColumn
+                              tab={tab}
+                              label={resolveLabel(tab)}
+                              ticketTitle={resolveTicketTitle(tab)}
+                              ticketColumnBadge={renderTicketColumnBadge(tab)}
+                              ticketMetaBadge={renderTicketMetaBadge(tab)}
+                              ticketActions={renderTicketBannerActions(tab)}
+                              actions={renderSessionActions(tab)}
+                              onClose={handleClose}
+                              isExpanded={expandedTabIds.has(tab.id)}
+                              onToggleExpand={handleToggleExpand}
+                              headerActionsSlot={<div id={`code-deck-header-actions-${tab.id}`} />}
+                              isGlass={isGlass}
+                              hasSidecar={!!sidecarApp}
+                            >
+                              <TabContentSlot host={getContentHost(tab.id)} />
+                            </DeckColumn>
+                          )}
+                          {/* The launch column is transient — no resize until it becomes a session. */}
+                          {(tab.projectId || tab.customAppId) && (
+                            <ColumnResizeHandle
+                              tabId={tab.id}
+                              label={resolveLabel(tab)}
+                              onCommit={handleResizeCommit}
                             />
                           )}
                         </div>
-                      </div>
+                        {mountedSidecarApp && (
+                          <div
+                            style={{
+                              width: getColumnWidth(`sidecar:${tab.id}`),
+                              ...(sidecarHidden ? { display: 'none' } : {}),
+                            }}
+                            className={styles.deckColumnWrap}
+                          >
+                            <SidecarColumn
+                              originTab={tab}
+                              app={mountedSidecarApp}
+                              sandboxUrls={tabSandboxUrls}
+                              previewUrl={previewUrls[tab.id]}
+                              onPreviewUrlChange={(url) => handlePreviewUrlChange(tab.id, url)}
+                              onClose={() => handleActiveAppChange(tab.id, 'chat')}
+                              isGlass={isGlass}
+                              isExpanded={expandedTabIds.has(`sidecar:${tab.id}`)}
+                              onToggleExpand={() => handleToggleExpand(`sidecar:${tab.id}`)}
+                            />
+                          </div>
+                        )}
+                      </Fragment>
                     );
-                  }
-                  if (appEntry?.id === BROWSER_APP_ID) {
-                    return (
-                      <div
-                        key={tab.id}
-                        style={{
-                          width: '100%',
-                          height: '100%',
-                          display: tab.id === activeTab?.id ? 'flex' : 'none',
-                          flexDirection: 'column',
-                        }}
-                      >
-                        <BrowserView tabsetId={`col:${tab.id}`} isGlass={isGlass} />
-                      </div>
-                    );
-                  }
-                  if (appEntry) {
-                    const scope: AppHandleScope = appEntry.columnScoped ? 'column' : 'global';
-                    return (
-                      <div
-                        key={tab.id}
-                        style={{ width: '100%', height: '100%', display: tab.id === activeTab?.id ? 'block' : 'none' }}
-                      >
-                        <Webview
-                          src={appEntry.url}
-                          showUnavailable={false}
-                          registry={{
-                            handleId: makeAppHandleId(scope, appEntry.id, scope === 'column' ? tab.id : undefined),
-                            appId: appEntry.id,
-                            kind: 'webview',
-                            scope,
-                            ...(scope === 'column' ? { tabId: tab.id } : {}),
-                            label: appEntry.label,
-                          }}
-                        />
-                      </div>
-                    );
-                  }
-                  return (
-                    <CodeSessionPane
-                      key={tab.id}
-                      tab={tab}
-                      label={resolveLabel(tab)}
-                      ticketTitle={resolveTicketTitle(tab)}
-                      ticketColumnBadge={renderTicketColumnBadge(tab)}
-                      ticketMetaBadge={renderTicketMetaBadge(tab)}
-                      ticketActions={renderTicketBannerActions(tab)}
-                      actions={renderSessionActions(tab)}
-                      onClose={handleClose}
-                      isVisible={tab.id === activeTab?.id}
-                      content={<TabContentSlot host={getContentHost(tab.id)} />}
-                      isGlass={isGlass}
-                    />
-                  );
-                })}
+                  })}
+                </div>
               </div>
-            </div>
-          </SortableContext>
-        </DndContext>
-      )}
-      {sessionTabs.map((tab) => {
-        const tile = layoutMode === 'tile';
-        return createPortal(
-          <CodeTabContent
-            tab={tab}
-            isVisible={tile || tab.id === activeTab?.id}
-            activeApp={activeApps[tab.id] ?? 'chat'}
-            onActiveAppChange={(app) => handleActiveAppChange(tab.id, app)}
-            uiMinimal
-            headerActionsTargetId={tile ? `code-deck-header-actions-${tab.id}` : undefined}
-            headerActionsCompact
-            previewUrl={previewUrls[tab.id]}
-            onPreviewUrlChange={(url) => handlePreviewUrlChange(tab.id, url)}
-            dockTargetId={tile ? `code-deck-dock-target-${tab.id}` : undefined}
-            isGlass={isGlass}
-            sidecarMode={tile}
-          />,
-          getContentHost(tab.id),
-          `tab-content-${tab.id}`
-        );
-      })}
-    </div>
+            </SortableContext>
+          </DndContext>
+        )}
+        {layoutMode === 'tile' && (
+          <DeckMap tabs={tabs} currentTabId={pagerTabId} resolveLabel={resolveLabel} onSelect={scrollToColumn} />
+        )}
+        {layoutMode === 'focus' && (
+          <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+            <SortableContext items={tabs.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+              <div className={styles.focusLayout}>
+                <div className={mergeClasses(styles.focusSidebar, isGlass && styles.glassFocusSidebar)}>
+                  <div className={mergeClasses(styles.focusSidebarHeader, isGlass && styles.glassFocusSidebarHeader)}>
+                    <span className={styles.focusSidebarTitle}>Sessions</span>
+                    {tabs.length > 0 && <span className={styles.focusSidebarCount}>{tabs.length}</span>}
+                  </div>
+                  <div className={styles.focusSidebarList}>
+                    {tabs.map((tab) => (
+                      <FocusListItem
+                        key={tab.id}
+                        tab={tab}
+                        label={resolveLabel(tab)}
+                        subLabel={resolveTicketTitle(tab)}
+                        isActive={tab.id === activeTab?.id}
+                        onSelect={handleSelect}
+                        onClose={handleClose}
+                      />
+                    ))}
+                  </div>
+                </div>
+                <div className={styles.focusContent}>
+                  {tabs.map((tab) => {
+                    const isLauncher = tab.customAppId === APP_LAUNCHER_ID;
+                    const appEntry =
+                      tab.customAppId && !isLauncher ? customApps.find((a) => a.id === tab.customAppId) : undefined;
+                    if (isLauncher) {
+                      return (
+                        <div
+                          key={tab.id}
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            display: tab.id === activeTab?.id ? 'flex' : 'none',
+                            flexDirection: 'column',
+                          }}
+                        >
+                          <div className={mergeClasses(styles.launcherBody, isGlass && styles.launcherBodyGlass)}>
+                            {customApps.length === 0 ? (
+                              <div className={styles.launcherEmpty}>No apps installed. Add apps in Settings.</div>
+                            ) : (
+                              <AppLauncherGrid
+                                apps={customApps}
+                                onPick={(appId) => codeApi.setTabAppId(tab.id, appId)}
+                                isGlass={isGlass}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }
+                    if (appEntry?.id === BROWSER_APP_ID) {
+                      return (
+                        <div
+                          key={tab.id}
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            display: tab.id === activeTab?.id ? 'flex' : 'none',
+                            flexDirection: 'column',
+                          }}
+                        >
+                          <BrowserView tabsetId={`col:${tab.id}`} isGlass={isGlass} />
+                        </div>
+                      );
+                    }
+                    if (appEntry) {
+                      const scope: AppHandleScope = appEntry.columnScoped ? 'column' : 'global';
+                      return (
+                        <div
+                          key={tab.id}
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            display: tab.id === activeTab?.id ? 'block' : 'none',
+                          }}
+                        >
+                          <Webview
+                            src={appEntry.url}
+                            showUnavailable={false}
+                            registry={{
+                              handleId: makeAppHandleId(scope, appEntry.id, scope === 'column' ? tab.id : undefined),
+                              appId: appEntry.id,
+                              kind: 'webview',
+                              scope,
+                              ...(scope === 'column' ? { tabId: tab.id } : {}),
+                              label: appEntry.label,
+                            }}
+                          />
+                        </div>
+                      );
+                    }
+                    return (
+                      <CodeSessionPane
+                        key={tab.id}
+                        tab={tab}
+                        label={resolveLabel(tab)}
+                        ticketTitle={resolveTicketTitle(tab)}
+                        ticketColumnBadge={renderTicketColumnBadge(tab)}
+                        ticketMetaBadge={renderTicketMetaBadge(tab)}
+                        ticketActions={renderTicketBannerActions(tab)}
+                        actions={renderSessionActions(tab)}
+                        onClose={handleClose}
+                        isVisible={tab.id === activeTab?.id}
+                        content={<TabContentSlot host={getContentHost(tab.id)} />}
+                        isGlass={isGlass}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            </SortableContext>
+          </DndContext>
+        )}
+        {sessionTabs.map((tab) => {
+          const tile = layoutMode === 'tile';
+          return createPortal(
+            <CodeTabContent
+              tab={tab}
+              isVisible={tile || tab.id === activeTab?.id}
+              activeApp={activeApps[tab.id] ?? 'chat'}
+              onActiveAppChange={(app) => handleActiveAppChange(tab.id, app)}
+              uiMinimal
+              headerActionsTargetId={tile ? `code-deck-header-actions-${tab.id}` : undefined}
+              headerActionsCompact
+              previewUrl={previewUrls[tab.id]}
+              onPreviewUrlChange={(url) => handlePreviewUrlChange(tab.id, url)}
+              dockTargetId={tile ? `code-deck-dock-target-${tab.id}` : undefined}
+              isGlass={isGlass}
+              sidecarMode={tile}
+            />,
+            getContentHost(tab.id),
+            `tab-content-${tab.id}`
+          );
+        })}
+      </div>
     </LayoutGroup>
   );
 });

@@ -2,7 +2,7 @@ import { makeStyles, tokens } from '@fluentui/react-components';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback } from 'react';
 
-import { Body1, Button, Caption1, Input } from '@/renderer/ds';
+import { Body1Strong, Button, Caption1, Input } from '@/renderer/ds';
 import type { ProviderEntry } from '@/shared/types';
 
 type Props = {
@@ -48,7 +48,7 @@ export const OnboardingModelStep = memo(
     return (
       <div className={styles.root}>
         <div className={styles.header}>
-          <Body1 weight="semibold">Add a model</Body1>
+          <Body1Strong>Add a model</Body1Strong>
           <Caption1>Enter the model identifier and an optional display name.</Caption1>
         </div>
 

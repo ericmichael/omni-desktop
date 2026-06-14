@@ -11,33 +11,16 @@ import { vi } from 'vitest';
 import type { IStore, ProjectManagerDeps } from '@/lib/project-manager-deps';
 import { ProjectManager } from '@/main/project-manager';
 import type { SupervisorBridge } from '@/main/supervisor-bridge';
-import type {
-  SupervisorEntry,
-  SupervisorOrchestrator,
-} from '@/main/supervisor-orchestrator';
+import type { SupervisorEntry, SupervisorOrchestrator } from '@/main/supervisor-orchestrator';
 import { SupervisorState } from '@/main/supervisor-state';
 import type { TicketPhase } from '@/shared/ticket-phase';
-import type {
-  CodeTabId,
-  Pipeline,
-  Project,
-  StoreData,
-  SupervisorBridgeEvent,
-  Ticket,
-  TicketId,
-} from '@/shared/types';
+import type { CodeTabId, Pipeline, Project, StoreData, SupervisorBridgeEvent, Ticket, TicketId } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
 // Phase classifier mirrors (must stay in sync with shared/ticket-phase)
 // ---------------------------------------------------------------------------
 
-export const ACTIVE_PHASES: TicketPhase[] = [
-  'provisioning',
-  'connecting',
-  'session_creating',
-  'ready',
-  'running',
-];
+export const ACTIVE_PHASES: TicketPhase[] = ['provisioning', 'connecting', 'session_creating', 'ready', 'running'];
 export const STREAMING_PHASES: TicketPhase[] = ['running'];
 
 // ---------------------------------------------------------------------------
@@ -119,8 +102,8 @@ export const makeMockBridge = (): MockBridge => {
   const handlers = new Set<(event: SupervisorBridgeEvent) => void>();
   const eventsReceived: SupervisorBridgeEvent[] = [];
   const ensureColumn = vi.fn(() => Promise.resolve());
-  const run = vi.fn((arg: { ticketId: TicketId }): Promise<{ runId: string }> =>
-    Promise.resolve({ runId: `run-${arg.ticketId}` })
+  const run = vi.fn(
+    (arg: { ticketId: TicketId }): Promise<{ runId: string }> => Promise.resolve({ runId: `run-${arg.ticketId}` })
   );
   const startGoal = vi.fn(() => Promise.resolve());
   const stopGoal = vi.fn(() => Promise.resolve());
@@ -209,7 +192,9 @@ export const seedMachine = (ctx: { pm: ProjectManager; bridge: MockBridge }, tic
       // Mirror the orchestrator's real callback so phase updates reach the store
       // and IPC just like production. Safe because we installed the state under
       // `machines.set` below; the orchestrator's own createState hook isn't used.
-      (orchestrator as unknown as { deps: { host: { updateTicket: (id: TicketId, patch: Partial<Ticket>) => void } } }).deps.host.updateTicket(tid, {
+      (
+        orchestrator as unknown as { deps: { host: { updateTicket: (id: TicketId, patch: Partial<Ticket>) => void } } }
+      ).deps.host.updateTicket(tid, {
         phase,
         phaseChangedAt: Date.now(),
       });
@@ -296,7 +281,8 @@ export type SeedArgs = {
 export const seedStore = (args: SeedArgs = {}): IStore => {
   const projectId = args.projectId ?? 'proj-1';
   const pipeline = args.pipeline ?? TEST_PIPELINE;
-  const sourcesArg = args.sources ?? (args.source !== undefined ? [{ id: 's1', mountName: 'work', ...args.source }] : []);
+  const sourcesArg =
+    args.sources ?? (args.source !== undefined ? [{ id: 's1', mountName: 'work', ...args.source }] : []);
   const project: Project = {
     id: projectId,
     label: 'Test Project',

@@ -1,5 +1,10 @@
-import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
-import { BranchRequest20Regular, Dismiss20Regular,DocumentMultiple20Regular, Info20Regular } from '@fluentui/react-icons';
+import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
+import {
+  BranchRequest20Regular,
+  Dismiss20Regular,
+  DocumentMultiple20Regular,
+  Info20Regular,
+} from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { memo } from 'react';
@@ -90,30 +95,42 @@ const useStyles = makeStyles({
   },
 });
 
-const PanelContent = memo(({ panel, ticketId, tabId }: { panel: TicketPanel; ticketId?: TicketId; tabId: CodeTabId }) => {
-  const styles = useStyles();
-  const tickets = useStore($tickets);
-  const ticket = ticketId ? tickets[ticketId] : undefined;
+const PanelContent = memo(
+  ({ panel, ticketId, tabId }: { panel: TicketPanel; ticketId?: TicketId; tabId: CodeTabId }) => {
+    const styles = useStyles();
+    const tickets = useStore($tickets);
+    const ticket = ticketId ? tickets[ticketId] : undefined;
 
-  if (panel === 'overview') {
-    if (!ticket) {
-return null;
-}
-    return (
-      <div className={styles.overviewScroll}>
-        <TicketOverviewTab ticket={ticket} />
-      </div>
-    );
+    if (panel === 'overview') {
+      if (!ticket) {
+        return null;
+      }
+      return (
+        <div className={styles.overviewScroll}>
+          <TicketOverviewTab ticket={ticket} />
+        </div>
+      );
+    }
+    if (panel === 'pr') {
+      return ticketId ? <TicketPRTab ticketId={ticketId} /> : <ChangesTab tabId={tabId} />;
+    }
+    return ticketId ? <TicketArtifactsTab ticketId={ticketId} /> : null;
   }
-  if (panel === 'pr') {
-    return ticketId ? <TicketPRTab ticketId={ticketId} /> : <ChangesTab tabId={tabId} />;
-  }
-  return ticketId ? <TicketArtifactsTab ticketId={ticketId} /> : null;
-});
+);
 PanelContent.displayName = 'PanelContent';
 
 export const TicketPanelOverlay = memo(
-  ({ panel, ticketId, tabId, onClose }: { panel: TicketPanel | null; ticketId?: TicketId; tabId: CodeTabId; onClose: () => void }) => {
+  ({
+    panel,
+    ticketId,
+    tabId,
+    onClose,
+  }: {
+    panel: TicketPanel | null;
+    ticketId?: TicketId;
+    tabId: CodeTabId;
+    onClose: () => void;
+  }) => {
     const styles = useStyles();
     return (
       <AnimatePresence>
@@ -145,12 +162,7 @@ export const TicketPanelOverlay = memo(
                     })()}
                     <span>{PANEL_META[panel].label}</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={onClose}
-                    className={styles.closeBtn}
-                    aria-label="Close panel"
-                  >
+                  <button type="button" onClick={onClose} className={styles.closeBtn} aria-label="Close panel">
                     <Dismiss20Regular style={{ width: 14, height: 14 }} />
                   </button>
                 </div>

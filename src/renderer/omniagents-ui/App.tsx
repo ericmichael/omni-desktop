@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { waitFor } from 'xstate';
 
+import { clearColumnActivity, publishColumnActivity } from '@/renderer/services/column-activity';
 import {
   createCursorAssigner,
   fullEntry,
@@ -10,7 +11,6 @@ import {
   type SessionController,
   transcriptPage,
 } from '@/renderer/services/session-control';
-import { clearColumnActivity, publishColumnActivity } from '@/renderer/services/column-activity';
 import { persistedStoreApi } from '@/renderer/services/store';
 import { forwardEvent, registerColumnActor } from '@/renderer/services/supervisor-bridge';
 import { VoiceScopeContext } from '@/renderer/services/voice-recording';
@@ -19,21 +19,21 @@ import type { TicketId } from '@/shared/types';
 import type { PendingMessage } from './ChatShell';
 import { type ArtifactItem, ArtifactsPanel } from './components/ArtifactsPanel';
 import { BashJobs, type BashJobsKillResult, type BashJobsTailResult, type BashJobSummary } from './components/BashJobs';
+import { EscalationBanner, type EscalationInfo } from './components/EscalationBanner';
+import { GoalPanel, type GoalSnapshot } from './components/GoalPanel';
 import { Header } from './components/Header';
 import { Input } from './components/Input';
-import { ArtifactPortalProvider, type Attachment, MessageList } from './components/MessageList';
-import { QueuedMessages } from './components/QueuedMessages';
-import { GoalPanel, type GoalSnapshot } from './components/GoalPanel';
-import { WakeupPanel, type WakeupSnapshot } from './components/WakeupPanel';
 import { LoopPanel, type LoopTaskSnapshot } from './components/LoopPanel';
-import { WorkersPanel, type WorkerSummary, type WorkersKillResult } from './components/WorkersPanel';
+import { ArtifactPortalProvider, type Attachment, MessageList } from './components/MessageList';
+import { type NotificationInfo, Notifications } from './components/Notifications';
+import { QueuedMessages } from './components/QueuedMessages';
+import { type RecapInfo, RecapPanel } from './components/RecapPanel';
 import { ResizableDivider } from './components/ResizableDivider';
 import { type SessionItem, SessionList } from './components/SessionList';
 import { Sidebar } from './components/Sidebar';
 import { Tasks, type TaskSummary } from './components/Tasks';
-import { Notifications, type NotificationInfo } from './components/Notifications';
-import { RecapPanel, type RecapInfo } from './components/RecapPanel';
-import { EscalationBanner, type EscalationInfo } from './components/EscalationBanner';
+import { WakeupPanel, type WakeupSnapshot } from './components/WakeupPanel';
+import { type WorkersKillResult, WorkersPanel, type WorkerSummary } from './components/WorkersPanel';
 import { WorkspacePicker } from './components/WorkspacePicker';
 import { OmniAgentsHeaderActionsPortal, OmniAgentsHeaderActionsProvider } from './header-actions';
 import { useChatBoot } from './hooks/use-chat-boot';
@@ -123,7 +123,7 @@ export function App({
     s = s.replace(/\s+/g, ' ');
     return s
       .split(' ')
-      .map((w) => (w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : ''))
+      .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : ''))
       .join(' ')
       .trim();
   }, []);
@@ -825,7 +825,9 @@ export function App({
       setDismissedWorkerIds((prev) => {
         const next = new Set(prev);
         for (const w of workers) {
-          if (w.status === 'completed') next.add(w.worker_id);
+          if (w.status === 'completed') {
+            next.add(w.worker_id);
+          }
         }
         return next;
       });
@@ -833,14 +835,18 @@ export function App({
         const next = new Set(prev);
         const source = liveBashJobs ?? derivedBashJobs;
         for (const j of source) {
-          if (!j.running && j.exit_code === 0) next.add(j.job_id);
+          if (!j.running && j.exit_code === 0) {
+            next.add(j.job_id);
+          }
         }
         return next;
       });
       setDismissedTaskIds((prev) => {
         const next = new Set(prev);
         for (const t of rawTasks) {
-          if (t.status === 'completed') next.add(t.id);
+          if (t.status === 'completed') {
+            next.add(t.id);
+          }
         }
         return next;
       });
@@ -868,8 +874,9 @@ export function App({
       // Slash commands
       if (text.startsWith('/')) {
         const parts = text.trim().split(/\s+/);
-        const name = parts[0].slice(1);
-        const argText = text.slice(parts[0].length).trim();
+        const command = parts[0] ?? '';
+        const name = command.slice(1);
+        const argText = text.slice(command.length).trim();
         try {
           // Anchor the session's workspace_root before dispatching the
           // server function. Slash commands like ``/goal`` trigger
@@ -998,7 +1005,7 @@ export function App({
                       const bytes = new Uint8Array(buf);
                       let binary = '';
                       for (let i = 0; i < bytes.length; i++) {
-                        binary += String.fromCharCode(bytes[i]);
+                        binary += String.fromCharCode(bytes[i]!);
                       }
                       resolve(btoa(binary));
                     } catch {
@@ -1728,7 +1735,9 @@ export function App({
           "Switching to Host will apply the agent's container workspace back to your host files. " +
             'Any uncommitted local changes in your host workspace may be overwritten. Continue?'
         );
-        if (!ok) return;
+        if (!ok) {
+          return;
+        }
       }
       onSandboxChange?.(value);
     },

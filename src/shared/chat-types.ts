@@ -44,7 +44,7 @@ export type ToolItem = {
   input?: string;
   output?: string;
   status: 'called' | 'result';
-  metadata?: any;
+  metadata?: ChatItemMetadata;
   runId?: string;
 };
 
@@ -57,13 +57,21 @@ export type ApprovalItem = {
   request_id: string;
   tool: string;
   argumentsText?: string;
-  metadata?: any;
+  metadata?: ChatItemMetadata;
   session_id?: string;
   // Discriminator. Defaults to 'function' for back-compat with existing
   // approval items already in items[] when this field was introduced.
   kind?: 'function' | 'mcp';
   // Set for ``kind: 'mcp'`` to identify the hosted MCP server.
   server_label?: string;
+};
+
+export type ChatItemMetadata = {
+  hidden?: boolean;
+  summary?: string;
+  display_type?: string;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
 };
 
 export type PlanStep = {

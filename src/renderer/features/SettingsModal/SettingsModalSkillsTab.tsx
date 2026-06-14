@@ -18,12 +18,7 @@ import {
   Switch,
 } from '@/renderer/ds';
 import { emitter, isElectron } from '@/renderer/services/ipc';
-import type {
-  BundleUpdateInfo,
-  MarketplaceManifest,
-  MarketplacePlugin,
-  SkillEntry,
-} from '@/shared/types';
+import type { BundleUpdateInfo, MarketplaceManifest, MarketplacePlugin, SkillEntry } from '@/shared/types';
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalL },
@@ -207,8 +202,8 @@ export const SettingsModalSkillsTab = memo(() => {
       const reports = await emitter.invoke('skills:check-bundle-updates');
       const map: Record<string, BundleUpdateInfo> = {};
       for (const r of reports) {
-map[r.bundleKey] = r;
-}
+        map[r.bundleKey] = r;
+      }
       setUpdates(map);
     } catch {
       // Network failures shouldn't block the tab — the per-bundle UI already
@@ -238,8 +233,8 @@ map[r.bundleKey] = r;
     setError(null);
     const filePath = await emitter.invoke('util:select-file', undefined, SKILL_FILE_FILTERS);
     if (!filePath) {
-return;
-}
+      return;
+    }
     try {
       await emitter.invoke('skills:install', filePath);
       await load();
@@ -261,8 +256,7 @@ return;
       setError(null);
       setInstallingFeatured(plugin);
       try {
-        const channel =
-          mode === 'update' ? 'skills:update-marketplace-plugin' : 'skills:install-marketplace-plugin';
+        const channel = mode === 'update' ? 'skills:update-marketplace-plugin' : 'skills:install-marketplace-plugin';
         await emitter.invoke(channel, repo, plugin);
         await load();
       } catch (e) {
@@ -276,8 +270,8 @@ return;
 
   const confirmUninstall = useCallback(async () => {
     if (!uninstallTarget) {
-return;
-}
+      return;
+    }
     setError(null);
     try {
       await emitter.invoke('skills:uninstall', uninstallTarget.name);
@@ -289,8 +283,8 @@ return;
   }, [uninstallTarget, load]);
 
   if (loading) {
-return <FormSkeleton fields={4} />;
-}
+    return <FormSkeleton fields={4} />;
+  }
 
   return (
     <div className={styles.root}>
@@ -324,12 +318,7 @@ return <FormSkeleton fields={4} />;
         <div className={styles.installedSection}>
           <SectionLabel>Installed</SectionLabel>
           {skills.map((skill) => (
-            <SkillCard
-              key={skill.name}
-              skill={skill}
-              onToggle={onToggle}
-              onUninstall={setUninstallTarget}
-            />
+            <SkillCard key={skill.name} skill={skill} onToggle={onToggle} onUninstall={setUninstallTarget} />
           ))}
         </div>
       )}
@@ -344,11 +333,7 @@ return <FormSkeleton fields={4} />;
         destructive
       />
 
-      <MarketplaceDialog
-        open={marketplaceOpen}
-        onClose={() => setMarketplaceOpen(false)}
-        onInstalled={load}
-      />
+      <MarketplaceDialog open={marketplaceOpen} onClose={() => setMarketplaceOpen(false)} onInstalled={load} />
     </div>
   );
 });
@@ -367,29 +352,25 @@ type FeaturedBundlesProps = {
 
 /** True if any installed skill came from this marketplace bundle. */
 function isBundleInstalled(skills: SkillEntry[], repo: string, plugin: string): boolean {
-  return skills.some(
-    (s) => s.source.kind === 'marketplace' && s.source.repo === repo && s.source.plugin === plugin
-  );
+  return skills.some((s) => s.source.kind === 'marketplace' && s.source.repo === repo && s.source.plugin === plugin);
 }
 
-const FeaturedBundles = memo(
-  ({ skills, updates, installingPlugin, onInstall }: FeaturedBundlesProps) => {
-    return (
-      <>
-        {FEATURED_MARKETPLACES.map((marketplace) => (
-          <FeaturedMarketplaceSection
-            key={marketplace.label}
-            marketplace={marketplace}
-            skills={skills}
-            updates={updates}
-            installingPlugin={installingPlugin}
-            onInstall={onInstall}
-          />
-        ))}
-      </>
-    );
-  }
-);
+const FeaturedBundles = memo(({ skills, updates, installingPlugin, onInstall }: FeaturedBundlesProps) => {
+  return (
+    <>
+      {FEATURED_MARKETPLACES.map((marketplace) => (
+        <FeaturedMarketplaceSection
+          key={marketplace.label}
+          marketplace={marketplace}
+          skills={skills}
+          updates={updates}
+          installingPlugin={installingPlugin}
+          onInstall={onInstall}
+        />
+      ))}
+    </>
+  );
+});
 FeaturedBundles.displayName = 'FeaturedBundles';
 
 type FeaturedMarketplaceSectionProps = {
@@ -414,13 +395,13 @@ const FeaturedMarketplaceSection = memo(
         .invoke('skills:fetch-marketplace', marketplace.repo)
         .then((result) => {
           if (!cancelled) {
-setManifest(result);
-}
+            setManifest(result);
+          }
         })
         .catch(() => {
           if (!cancelled) {
-setFailed(true);
-}
+            setFailed(true);
+          }
         });
       return () => {
         cancelled = true;
@@ -430,8 +411,8 @@ setFailed(true);
     // Hide the section entirely on fetch failure — the marketplace dialog is
     // still available for users who want to retry manually.
     if (failed) {
-return null;
-}
+      return null;
+    }
 
     return (
       <div className={styles.featuredSection}>
@@ -442,48 +423,44 @@ return null;
           </div>
         ) : (
           manifest.plugins.map((plugin) => {
-              const installed = isBundleInstalled(skills, marketplace.repo, plugin.name);
-              const installing = installingPlugin === plugin.name;
-              const otherInstalling = installingPlugin !== null && !installing;
-              const update = updates[`${marketplace.repo}:${plugin.name}`];
-              const hasUpdate = installed && update?.status === 'update-available';
+            const installed = isBundleInstalled(skills, marketplace.repo, plugin.name);
+            const installing = installingPlugin === plugin.name;
+            const otherInstalling = installingPlugin !== null && !installing;
+            const update = updates[`${marketplace.repo}:${plugin.name}`];
+            const hasUpdate = installed && update?.status === 'update-available';
 
-              const mode: 'install' | 'update' = installed ? 'update' : 'install';
-              let label: string;
-              if (installing) {
-label = mode === 'update' ? 'Updating…' : 'Installing…';
-} else if (hasUpdate) {
-label = 'Update';
-} else if (installed) {
-label = 'Installed';
-} else {
-label = 'Install';
-}
+            const mode: 'install' | 'update' = installed ? 'update' : 'install';
+            let label: string;
+            if (installing) {
+              label = mode === 'update' ? 'Updating…' : 'Installing…';
+            } else if (hasUpdate) {
+              label = 'Update';
+            } else if (installed) {
+              label = 'Installed';
+            } else {
+              label = 'Install';
+            }
 
-              const disabled = otherInstalling || (installed && !hasUpdate);
+            const disabled = otherInstalling || (installed && !hasUpdate);
 
-              return (
-                <div key={plugin.name} className={styles.featuredCard}>
-                  <div className={styles.featuredText}>
-                    <span className={styles.featuredLabel}>{formatPluginName(plugin.name)}</span>
-                    <span className={styles.featuredDescription}>{plugin.description}</span>
-                    {hasUpdate && (
-                      <span className={styles.updateBadge}>
-                        {formatUpdateSummary(update)}
-                      </span>
-                    )}
-                  </div>
-                  <Button
-                    size="sm"
-                    variant={installed && !hasUpdate ? 'ghost' : 'primary'}
-                    onClick={() => onInstall(marketplace.repo, plugin.name, mode)}
-                    isDisabled={disabled}
-                  >
-                    {installing ? <Spinner size="sm" /> : label}
-                  </Button>
+            return (
+              <div key={plugin.name} className={styles.featuredCard}>
+                <div className={styles.featuredText}>
+                  <span className={styles.featuredLabel}>{formatPluginName(plugin.name)}</span>
+                  <span className={styles.featuredDescription}>{plugin.description}</span>
+                  {hasUpdate && <span className={styles.updateBadge}>{formatUpdateSummary(update)}</span>}
                 </div>
-              );
-            })
+                <Button
+                  size="sm"
+                  variant={installed && !hasUpdate ? 'ghost' : 'primary'}
+                  onClick={() => onInstall(marketplace.repo, plugin.name, mode)}
+                  isDisabled={disabled}
+                >
+                  {installing ? <Spinner size="sm" /> : label}
+                </Button>
+              </div>
+            );
+          })
         )}
       </div>
     );
@@ -498,11 +475,11 @@ function formatUpdateSummary(info: BundleUpdateInfo): string {
     parts.push(`v${info.installedVersion ?? '?'} → v${info.liveVersion}`);
   }
   if (info.addedSkills.length > 0) {
-parts.push(`+${info.addedSkills.length} skill${info.addedSkills.length === 1 ? '' : 's'}`);
-}
+    parts.push(`+${info.addedSkills.length} skill${info.addedSkills.length === 1 ? '' : 's'}`);
+  }
   if (info.removedSkills.length > 0) {
-parts.push(`-${info.removedSkills.length} removed`);
-}
+    parts.push(`-${info.removedSkills.length} removed`);
+  }
   return parts.length > 0 ? `Update available · ${parts.join(' · ')}` : 'Update available';
 }
 
@@ -519,8 +496,8 @@ type SkillCardProps = {
 function formatSource(skill: SkillEntry): string {
   const parts: string[] = [];
   if (skill.version) {
-parts.push(`v${skill.version}`);
-}
+    parts.push(`v${skill.version}`);
+  }
   if (skill.source.kind === 'file') {
     parts.push(`Installed from ${skill.source.filename}`);
   } else if (skill.source.kind === 'marketplace') {
@@ -534,10 +511,7 @@ parts.push(`v${skill.version}`);
 const SkillCard = memo(({ skill, onToggle, onUninstall }: SkillCardProps) => {
   const styles = useStyles();
 
-  const handleToggle = useCallback(
-    (checked: boolean) => onToggle(skill.name, checked),
-    [skill.name, onToggle]
-  );
+  const handleToggle = useCallback((checked: boolean) => onToggle(skill.name, checked), [skill.name, onToggle]);
 
   const handleUninstall = useCallback(() => onUninstall(skill), [skill, onUninstall]);
 
@@ -545,12 +519,7 @@ const SkillCard = memo(({ skill, onToggle, onUninstall }: SkillCardProps) => {
     <div className={styles.card}>
       <div className={styles.cardHeader}>
         <span className={styles.cardTitle}>{skill.name}</span>
-        <IconButton
-          aria-label="Uninstall skill"
-          icon={<Delete20Regular />}
-          size="sm"
-          onClick={handleUninstall}
-        />
+        <IconButton aria-label="Uninstall skill" icon={<Delete20Regular />} size="sm" onClick={handleUninstall} />
         <Switch checked={skill.enabled} onCheckedChange={handleToggle} />
       </div>
       <div className={styles.cardDescription}>{skill.description}</div>
@@ -610,8 +579,7 @@ const MarketplaceDialog = memo(({ open, onClose, onInstalled }: MarketplaceDialo
       setError(null);
       setInstallingPlugin(plugin.name);
       try {
-        const channel =
-          mode === 'update' ? 'skills:update-marketplace-plugin' : 'skills:install-marketplace-plugin';
+        const channel = mode === 'update' ? 'skills:update-marketplace-plugin' : 'skills:install-marketplace-plugin';
         await emitter.invoke(channel, repo, plugin.name);
         onInstalled();
       } catch (e) {

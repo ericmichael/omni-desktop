@@ -69,7 +69,10 @@ export const MilestoneDetail = memo(({ milestoneId, projectId, hideChrome }: Mil
   const milestones = useStore($milestones);
   const store = useStore(persistedStoreApi.$atom);
   const milestone = milestones[milestoneId];
-  const project = useMemo(() => store.projects.find((entry) => entry.id === projectId) ?? null, [store.projects, projectId]);
+  const project = useMemo(
+    () => store.projects.find((entry) => entry.id === projectId) ?? null,
+    [store.projects, projectId]
+  );
 
   const [editOpen, setEditOpen] = useState(false);
   const openEdit = useCallback(() => setEditOpen(true), []);
@@ -102,8 +105,8 @@ export const MilestoneDetail = memo(({ milestoneId, projectId, hideChrome }: Mil
   }, [milestoneId, projectId]);
 
   if (!milestone) {
-return null;
-}
+    return null;
+  }
 
   const dueLabel = (() => {
     if (milestone.dueDate === undefined) {

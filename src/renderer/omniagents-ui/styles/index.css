@@ -2,126 +2,126 @@
   /* Default dark theme — indigo brand on zinc neutrals. Matches the Fluent
      `default` theme overrides in fluent-themes.ts so components using the
      --omni-* tokens paint on the same palette as Fluent's colorNeutral*. */
-  --omni-brand: 99 102 241;         /* #6366f1  indigo (Fluent brand) */
-  --omni-bgMain: 9 9 11;            /* #09090b  zinc-950 (bg1) */
-  --omni-bgColumn: 24 24 27;        /* #18181b  zinc-900 (bg2) */
-  --omni-bgCard: 24 24 27;          /* #18181b  zinc-900 (bg2) */
-  --omni-bgCardAlt: 39 39 42;       /* #27272a  zinc-800 (bg3) */
-  --omni-textSubtle: 113 113 122;   /* #71717a  zinc-500 (fg3) */
-  --omni-successGreen: 74 222 128;  /* #4ade80  green-400 */
+  --omni-brand: 99 102 241; /* #6366f1  indigo (Fluent brand) */
+  --omni-bgMain: 9 9 11; /* #09090b  zinc-950 (bg1) */
+  --omni-bgColumn: 24 24 27; /* #18181b  zinc-900 (bg2) */
+  --omni-bgCard: 24 24 27; /* #18181b  zinc-900 (bg2) */
+  --omni-bgCardAlt: 39 39 42; /* #27272a  zinc-800 (bg3) */
+  --omni-textSubtle: 113 113 122; /* #71717a  zinc-500 (fg3) */
+  --omni-successGreen: 74 222 128; /* #4ade80  green-400 */
   --omni-warningOrange: 251 191 36; /* #fbbf24  amber-400 */
-  --omni-errorRed: 248 113 113;     /* #f87171  red-400 */
-  --omni-textPrimary: 250 250 250;  /* #fafafa  zinc-50 (fg1) */
-  --omni-textHeading: 250 250 250;  /* #fafafa  zinc-50 */
-  --omni-textSecondary: 161 161 170;/* #a1a1aa  zinc-400 (fg2) */
+  --omni-errorRed: 248 113 113; /* #f87171  red-400 */
+  --omni-textPrimary: 250 250 250; /* #fafafa  zinc-50 (fg1) */
+  --omni-textHeading: 250 250 250; /* #fafafa  zinc-50 */
+  --omni-textSecondary: 161 161 170; /* #a1a1aa  zinc-400 (fg2) */
 }
 
-[data-theme="teams-light"] {
-  --omni-brand: 0 120 212;          /* #0078D4  M365 brand blue */
-  --omni-bgMain: 255 255 255;           /* #FFFFFF  page background */
-  --omni-bgColumn: 250 250 250;         /* #FAFAFA  sidebar */
-  --omni-bgCard: 245 245 245;           /* #F5F5F5  card surface */
-  --omni-bgCardAlt: 235 235 235;        /* #EBEBEB  input / alt surface */
-  --omni-textSubtle: 97 97 97;          /* #616161  placeholder */
-  --omni-successGreen: 14 122 13;       /* #0E7A0D  Teams green */
-  --omni-warningOrange: 138 116 0;      /* #8A7400  Teams warning */
-  --omni-errorRed: 196 49 75;           /* #C4314B  Teams red */
-  --omni-textPrimary: 66 66 66;         /* #424242  body text */
-  --omni-textHeading: 36 36 36;         /* #242424  heading text */
-  --omni-textSecondary: 97 97 97;       /* #616161  secondary text */
+[data-theme='teams-light'] {
+  --omni-brand: 0 120 212; /* #0078D4  M365 brand blue */
+  --omni-bgMain: 255 255 255; /* #FFFFFF  page background */
+  --omni-bgColumn: 250 250 250; /* #FAFAFA  sidebar */
+  --omni-bgCard: 245 245 245; /* #F5F5F5  card surface */
+  --omni-bgCardAlt: 235 235 235; /* #EBEBEB  input / alt surface */
+  --omni-textSubtle: 97 97 97; /* #616161  placeholder */
+  --omni-successGreen: 14 122 13; /* #0E7A0D  Teams green */
+  --omni-warningOrange: 138 116 0; /* #8A7400  Teams warning */
+  --omni-errorRed: 196 49 75; /* #C4314B  Teams red */
+  --omni-textPrimary: 66 66 66; /* #424242  body text */
+  --omni-textHeading: 36 36 36; /* #242424  heading text */
+  --omni-textSecondary: 97 97 97; /* #616161  secondary text */
 }
 
-[data-theme="teams-dark"] {
-  --omni-brand: 58 159 232;         /* #3A9FE8  M365 brand blue (dark) */
-  --omni-bgMain: 31 31 31;              /* #1F1F1F  page background */
-  --omni-bgColumn: 43 43 43;            /* #2B2B2B  sidebar */
-  --omni-bgCard: 51 51 51;              /* #333333  card surface */
-  --omni-bgCardAlt: 64 64 64;           /* #404040  input / alt surface */
-  --omni-textSubtle: 158 158 158;       /* #9E9E9E  placeholder */
-  --omni-successGreen: 19 161 14;       /* #13A10E  Teams green (dark) */
-  --omni-warningOrange: 252 225 0;      /* #FCE100  Teams warning (dark) */
-  --omni-errorRed: 231 72 86;           /* #E74856  Teams red (dark) */
-  --omni-textPrimary: 200 200 200;      /* #C8C8C8  body text */
-  --omni-textHeading: 224 224 224;      /* #E0E0E0  heading text */
-  --omni-textSecondary: 158 158 158;    /* #9E9E9E  secondary text */
+[data-theme='teams-dark'] {
+  --omni-brand: 58 159 232; /* #3A9FE8  M365 brand blue (dark) */
+  --omni-bgMain: 31 31 31; /* #1F1F1F  page background */
+  --omni-bgColumn: 43 43 43; /* #2B2B2B  sidebar */
+  --omni-bgCard: 51 51 51; /* #333333  card surface */
+  --omni-bgCardAlt: 64 64 64; /* #404040  input / alt surface */
+  --omni-textSubtle: 158 158 158; /* #9E9E9E  placeholder */
+  --omni-successGreen: 19 161 14; /* #13A10E  Teams green (dark) */
+  --omni-warningOrange: 252 225 0; /* #FCE100  Teams warning (dark) */
+  --omni-errorRed: 231 72 86; /* #E74856  Teams red (dark) */
+  --omni-textPrimary: 200 200 200; /* #C8C8C8  body text */
+  --omni-textHeading: 224 224 224; /* #E0E0E0  heading text */
+  --omni-textSecondary: 158 158 158; /* #9E9E9E  secondary text */
 }
 
-[data-theme="tokyo-night"] {
-  --omni-brand: 61 89 161;       /* #3d59a1  button.background */
-  --omni-bgMain: 26 27 38;           /* #1a1b26  editor.background */
-  --omni-bgColumn: 22 22 30;         /* #16161e  sideBar.background */
-  --omni-bgCard: 28 29 41;           /* #1c1d29  list.inactiveSelectionBackground */
-  --omni-bgCardAlt: 41 46 66;        /* #292e42  bg_highlight */
-  --omni-textSubtle: 84 92 126;      /* #545c7e  disabledForeground */
-  --omni-successGreen: 158 206 106;  /* #9ece6a  green */
+[data-theme='tokyo-night'] {
+  --omni-brand: 61 89 161; /* #3d59a1  button.background */
+  --omni-bgMain: 26 27 38; /* #1a1b26  editor.background */
+  --omni-bgColumn: 22 22 30; /* #16161e  sideBar.background */
+  --omni-bgCard: 28 29 41; /* #1c1d29  list.inactiveSelectionBackground */
+  --omni-bgCardAlt: 41 46 66; /* #292e42  bg_highlight */
+  --omni-textSubtle: 84 92 126; /* #545c7e  disabledForeground */
+  --omni-successGreen: 158 206 106; /* #9ece6a  green */
   --omni-warningOrange: 224 175 104; /* #e0af68  yellow */
-  --omni-errorRed: 247 118 142;      /* #f7768e  terminal.ansiRed */
-  --omni-textPrimary: 169 177 214;   /* #a9b1d6  foreground */
-  --omni-textHeading: 192 202 245;   /* #c0caf5  editor.foreground */
+  --omni-errorRed: 247 118 142; /* #f7768e  terminal.ansiRed */
+  --omni-textPrimary: 169 177 214; /* #a9b1d6  foreground */
+  --omni-textHeading: 192 202 245; /* #c0caf5  editor.foreground */
   --omni-textSecondary: 120 124 153; /* #787c99  comment */
 }
 
-[data-theme="vscode-dark"] {
-  --omni-brand: 0 120 212;       /* #0078D4  button.background */
-  --omni-bgMain: 31 31 31;           /* #1F1F1F  editor.background */
-  --omni-bgColumn: 24 24 24;         /* #181818  sideBar.background */
-  --omni-bgCard: 43 43 43;           /* #2B2B2B  panel.border */
-  --omni-bgCardAlt: 49 49 49;        /* #313131  input.background */
-  --omni-textSubtle: 157 157 157;    /* #9D9D9D  descriptionForeground */
-  --omni-successGreen: 13 188 121;   /* #0DBC79  terminal.ansiGreen */
-  --omni-warningOrange: 204 167 0;   /* #CCA700  list.warningForeground */
-  --omni-errorRed: 248 81 73;        /* #F85149  errorForeground */
+[data-theme='vscode-dark'] {
+  --omni-brand: 0 120 212; /* #0078D4  button.background */
+  --omni-bgMain: 31 31 31; /* #1F1F1F  editor.background */
+  --omni-bgColumn: 24 24 24; /* #181818  sideBar.background */
+  --omni-bgCard: 43 43 43; /* #2B2B2B  panel.border */
+  --omni-bgCardAlt: 49 49 49; /* #313131  input.background */
+  --omni-textSubtle: 157 157 157; /* #9D9D9D  descriptionForeground */
+  --omni-successGreen: 13 188 121; /* #0DBC79  terminal.ansiGreen */
+  --omni-warningOrange: 204 167 0; /* #CCA700  list.warningForeground */
+  --omni-errorRed: 248 81 73; /* #F85149  errorForeground */
 }
 
-[data-theme="vscode-light"] {
-  --omni-brand: 0 95 184;        /* #005FB8  button.background */
-  --omni-bgMain: 255 255 255;        /* #FFFFFF  editor.background */
-  --omni-bgColumn: 248 248 248;      /* #F8F8F8  sideBar.background */
-  --omni-bgCard: 243 243 243;        /* #F3F3F3  welcomePage.tileBackground */
-  --omni-bgCardAlt: 229 229 229;     /* #E5E5E5  sideBar.border */
-  --omni-textSubtle: 118 118 118;    /* #767676  input.placeholderForeground */
-  --omni-successGreen: 46 160 67;    /* #2EA043  editorGutter.addedBackground */
-  --omni-warningOrange: 204 167 0;   /* #CCA700  list.warningForeground */
-  --omni-errorRed: 248 81 73;        /* #F85149  errorForeground */
-  --omni-textPrimary: 59 59 59;      /* #3B3B3B  editor.foreground */
-  --omni-textHeading: 31 31 31;      /* #1F1F1F  foreground */
-  --omni-textSecondary: 97 97 97;    /* #616161  descriptionForeground */
+[data-theme='vscode-light'] {
+  --omni-brand: 0 95 184; /* #005FB8  button.background */
+  --omni-bgMain: 255 255 255; /* #FFFFFF  editor.background */
+  --omni-bgColumn: 248 248 248; /* #F8F8F8  sideBar.background */
+  --omni-bgCard: 243 243 243; /* #F3F3F3  welcomePage.tileBackground */
+  --omni-bgCardAlt: 229 229 229; /* #E5E5E5  sideBar.border */
+  --omni-textSubtle: 118 118 118; /* #767676  input.placeholderForeground */
+  --omni-successGreen: 46 160 67; /* #2EA043  editorGutter.addedBackground */
+  --omni-warningOrange: 204 167 0; /* #CCA700  list.warningForeground */
+  --omni-errorRed: 248 81 73; /* #F85149  errorForeground */
+  --omni-textPrimary: 59 59 59; /* #3B3B3B  editor.foreground */
+  --omni-textHeading: 31 31 31; /* #1F1F1F  foreground */
+  --omni-textSecondary: 97 97 97; /* #616161  descriptionForeground */
 }
 
-[data-theme="utrgv"] {
-  --omni-brand: 240 80 35;         /* #F05023  UTRGV brand orange */
-  --omni-bgMain: 247 247 248;          /* #F7F7F8  soft off-white page */
-  --omni-bgColumn: 241 241 243;        /* #F1F1F3  sidebar */
-  --omni-bgCard: 255 255 255;          /* #FFFFFF  white cards */
-  --omni-bgCardAlt: 255 255 255;       /* #FFFFFF  white input/surfaces */
-  --omni-textSubtle: 142 142 147;      /* #8E8E93  subtle/placeholder text */
-  --omni-successGreen: 26 127 55;      /* #1A7F37  green */
-  --omni-warningOrange: 180 120 0;     /* #B47800  warm amber warning */
-  --omni-errorRed: 200 30 30;          /* #C81E1E  strong red */
-  --omni-textPrimary: 36 36 40;        /* #242428  body text */
-  --omni-textHeading: 26 26 30;        /* #1A1A1E  heading text */
-  --omni-textSecondary: 100 100 105;   /* #646469  UTRGV gray */
+[data-theme='utrgv'] {
+  --omni-brand: 240 80 35; /* #F05023  UTRGV brand orange */
+  --omni-bgMain: 247 247 248; /* #F7F7F8  soft off-white page */
+  --omni-bgColumn: 241 241 243; /* #F1F1F3  sidebar */
+  --omni-bgCard: 255 255 255; /* #FFFFFF  white cards */
+  --omni-bgCardAlt: 255 255 255; /* #FFFFFF  white input/surfaces */
+  --omni-textSubtle: 142 142 147; /* #8E8E93  subtle/placeholder text */
+  --omni-successGreen: 26 127 55; /* #1A7F37  green */
+  --omni-warningOrange: 180 120 0; /* #B47800  warm amber warning */
+  --omni-errorRed: 200 30 30; /* #C81E1E  strong red */
+  --omni-textPrimary: 36 36 40; /* #242428  body text */
+  --omni-textHeading: 26 26 30; /* #1A1A1E  heading text */
+  --omni-textSecondary: 100 100 105; /* #646469  UTRGV gray */
 }
 
 /* UTRGV: give the input container a visible border on the off-white page */
-[data-theme="utrgv"] .border-bgCardAlt {
+[data-theme='utrgv'] .border-bgCardAlt {
   border-color: rgb(210 210 215) !important;
 }
 
 /* UTRGV: fix white icons/text on white input — except on colored button backgrounds */
-[data-theme="utrgv"] .bg-bgCardAlt .text-white {
+[data-theme='utrgv'] .bg-bgCardAlt .text-white {
   color: rgb(var(--omni-textSecondary)) !important;
 }
-[data-theme="utrgv"] .bg-bgCardAlt .bg-brand.text-white,
-[data-theme="utrgv"] .bg-bgCardAlt .bg-errorRed.text-white {
+[data-theme='utrgv'] .bg-bgCardAlt .bg-brand.text-white,
+[data-theme='utrgv'] .bg-bgCardAlt .bg-errorRed.text-white {
   color: #ffffff !important;
 }
-[data-theme="utrgv"] .bg-bgCardAlt button:disabled {
+[data-theme='utrgv'] .bg-bgCardAlt button:disabled {
   background-color: rgb(230 230 233) !important;
   color: rgb(160 160 168) !important;
 }
 
-[data-theme="utrgv"] .prose-invert {
+[data-theme='utrgv'] .prose-invert {
   --tw-prose-body: rgb(var(--omni-textPrimary));
   --tw-prose-headings: rgb(var(--omni-textHeading));
   --tw-prose-bold: rgb(var(--omni-textHeading));
@@ -138,7 +138,7 @@
   --tw-prose-td-borders: rgb(var(--omni-bgCardAlt));
 }
 
-[data-theme="teams-light"] .prose-invert {
+[data-theme='teams-light'] .prose-invert {
   --tw-prose-body: rgb(var(--omni-textPrimary));
   --tw-prose-headings: rgb(var(--omni-textHeading));
   --tw-prose-bold: rgb(var(--omni-textHeading));
@@ -155,7 +155,7 @@
   --tw-prose-td-borders: rgb(var(--omni-bgCardAlt));
 }
 
-[data-theme="vscode-light"] .prose-invert {
+[data-theme='vscode-light'] .prose-invert {
   --tw-prose-body: rgb(var(--omni-textPrimary));
   --tw-prose-headings: rgb(var(--omni-textHeading));
   --tw-prose-bold: rgb(var(--omni-textHeading));
@@ -216,7 +216,7 @@
   --radius: 0.5rem;
 }
 
-[data-theme="teams-light"] {
+[data-theme='teams-light'] {
   --background: 0 0% 100%;
   --foreground: 0 0% 25.9%;
   --card: 0 0% 96.1%;
@@ -240,7 +240,7 @@
   --sidebar-foreground: 0 0% 25.9%;
 }
 
-[data-theme="teams-dark"] {
+[data-theme='teams-dark'] {
   --background: 0 0% 12.2%;
   --foreground: 0 0% 78.4%;
   --card: 0 0% 20%;
@@ -264,7 +264,7 @@
   --sidebar-foreground: 0 0% 78.4%;
 }
 
-[data-theme="tokyo-night"] {
+[data-theme='tokyo-night'] {
   --background: 235 18.8% 12.5%;
   --foreground: 229 35.4% 75.1%;
   --card: 235 18.8% 13.5%;
@@ -288,7 +288,7 @@
   --sidebar-foreground: 229 35.4% 75.1%;
 }
 
-[data-theme="vscode-dark"] {
+[data-theme='vscode-dark'] {
   --background: 0 0% 12.2%;
   --foreground: 0 0% 80%;
   --card: 0 0% 16.9%;
@@ -312,7 +312,7 @@
   --sidebar-foreground: 0 0% 80%;
 }
 
-[data-theme="vscode-light"] {
+[data-theme='vscode-light'] {
   --background: 0 0% 100%;
   --foreground: 0 0% 23.1%;
   --card: 0 0% 95.3%;
@@ -336,7 +336,7 @@
   --sidebar-foreground: 0 0% 23.1%;
 }
 
-[data-theme="utrgv"] {
+[data-theme='utrgv'] {
   --background: 240 6.7% 97.1%;
   --foreground: 240 7.1% 11%;
   --card: 0 0% 100%;
@@ -368,23 +368,37 @@
 }
 
 /* Basic layout */
-html, body, #root { height: 100%; overflow: hidden; }
-.app { height: 100%; display: flex; }
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+.app {
+  height: 100%;
+  display: flex;
+}
 
-.container-chat { width: 100%; margin-left: auto; margin-right: auto; }
+.container-chat {
+  width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+}
 
 body.resizing {
   cursor: col-resize !important;
   user-select: none !important;
 }
 
-.prose pre code { background: transparent; }
+.prose pre code {
+  background: transparent;
+}
 
 /* Streamdown wraps code blocks in a bordered card (data-streamdown="code-block")
    whose inner <pre> (data-streamdown="code-block-body") also carries its own
    border, producing a double outline. The outer card is the container; drop
    the inner border so the content reads as one surface. */
-[data-streamdown="code-block-body"] {
+[data-streamdown='code-block-body'] {
   border: none !important;
 }
 
@@ -395,16 +409,20 @@ body.resizing {
    already has span.ml-1 (4px), so we need 12px of inline-start padding to reach
    24px. The actions pill sits flush against outer-p-2, so 16px of inline-end
    margin pushes it to 24px from the right. */
-[data-streamdown="code-block-header"] {
+[data-streamdown='code-block-header'] {
   padding-inline-start: 12px;
 }
-[data-streamdown="code-block-actions"] {
+[data-streamdown='code-block-actions'] {
   margin-inline-end: 16px;
 }
 
 @keyframes shimmer-text {
-  0% { background-position: 200% 50%; }
-  100% { background-position: 0% 50%; }
+  0% {
+    background-position: 200% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
 }
 
 .text-shimmer {
@@ -417,7 +435,9 @@ body.resizing {
 }
 
 /* Force prose content to inherit wrapper color (for orange preamble) */
-.prose-warning { color: rgb(var(--omni-warningOrange)); }
+.prose-warning {
+  color: rgb(var(--omni-warningOrange));
+}
 .prose-warning {
   --tw-prose-body: currentColor;
   --tw-prose-headings: currentColor;

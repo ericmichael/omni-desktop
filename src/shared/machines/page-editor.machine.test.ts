@@ -25,7 +25,7 @@ function makeMachine(stubs: StubActors = {}) {
     actors: {
       loadPage: fromPromise<string, { pageId: PageId }>(async ({ input }) => load(input.pageId)),
       saveContent: fromPromise<void, { pageId: PageId; content: string }>(async ({ input }) =>
-        save(input.pageId, input.content),
+        save(input.pageId, input.content)
       ),
       watchExternal: fromCallback<PageEditorEvent, { pageId: PageId }>(({ input, sendBack }) => {
         return watch(input.pageId, sendBack as (ev: unknown) => void);

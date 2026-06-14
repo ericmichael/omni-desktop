@@ -24,6 +24,7 @@ import type {
 } from 'omni-projects-db';
 import { fromIso, toIso } from 'omni-projects-db';
 
+import type { TicketPhase } from '@/shared/ticket-phase';
 import type {
   Column,
   ColumnId,
@@ -50,12 +51,13 @@ import type {
   TicketResolution,
   TokenUsage,
 } from '@/shared/types';
-import type { TicketPhase } from '@/shared/ticket-phase';
 
 // ---- JSON helpers ----
 
 function parseJsonOr<T>(s: string | null, fallback: T): T {
-  if (!s) return fallback;
+  if (!s) {
+    return fallback;
+  }
   try {
     return JSON.parse(s) as T;
   } catch {
@@ -90,7 +92,9 @@ function parseWorkflow(s: string | null): ColumnWorkflowContract | undefined {
     workflow.recommendedSkills = input.recommendedSkills.filter((v): v is string => typeof v === 'string');
   }
   if (Array.isArray(input.allowedTransitions)) {
-    workflow.allowedTransitions = input.allowedTransitions.filter((v): v is ColumnId => typeof v === 'string') as ColumnId[];
+    workflow.allowedTransitions = input.allowedTransitions.filter(
+      (v): v is ColumnId => typeof v === 'string'
+    ) as ColumnId[];
   }
   if (typeof input.autoDispatch === 'boolean') {
     workflow.autoDispatch = input.autoDispatch;
@@ -108,7 +112,9 @@ export function rowToProject(row: ProjectRow): Project {
   let sources: ProjectSource[] = [];
   try {
     const parsed = JSON.parse(row.sources) as unknown;
-    if (Array.isArray(parsed)) sources = parsed as ProjectSource[];
+    if (Array.isArray(parsed)) {
+      sources = parsed as ProjectSource[];
+    }
   } catch {
     // Malformed JSON — treat as no sources rather than crash.
   }
@@ -120,11 +126,21 @@ export function rowToProject(row: ProjectRow): Project {
     sources,
     createdAt: fromIso(row.created_at),
   };
-  if (row.is_personal) project.isPersonal = true;
-  if (row.auto_dispatch) project.autoDispatch = true;
-  if (row.sandbox_profile) project.sandboxProfile = row.sandbox_profile;
-  if (row.due_date) project.dueDate = fromIso(row.due_date);
-  if (row.pinned_at) project.pinnedAt = fromIso(row.pinned_at);
+  if (row.is_personal) {
+    project.isPersonal = true;
+  }
+  if (row.auto_dispatch) {
+    project.autoDispatch = true;
+  }
+  if (row.sandbox_profile) {
+    project.sandboxProfile = row.sandbox_profile;
+  }
+  if (row.due_date) {
+    project.dueDate = fromIso(row.due_date);
+  }
+  if (row.pinned_at) {
+    project.pinnedAt = fromIso(row.pinned_at);
+  }
 
   return project;
 }
@@ -134,11 +150,19 @@ export function rowToColumn(row: ColumnRow): Column {
     id: row.id as ColumnId,
     label: row.label,
   };
-  if (row.description) col.description = row.description;
-  if (row.max_concurrent) col.maxConcurrent = row.max_concurrent;
-  if (row.gate) col.gate = true;
+  if (row.description) {
+    col.description = row.description;
+  }
+  if (row.max_concurrent) {
+    col.maxConcurrent = row.max_concurrent;
+  }
+  if (row.gate) {
+    col.gate = true;
+  }
   const workflow = parseWorkflow(row.workflow);
-  if (workflow) col.workflow = workflow;
+  if (workflow) {
+    col.workflow = workflow;
+  }
   return col;
 }
 
@@ -158,28 +182,58 @@ export function rowToTicket(row: TicketRow, comments?: CommentRow[]): Ticket {
     createdAt: fromIso(row.created_at),
     updatedAt: fromIso(row.updated_at),
   };
-  if (row.milestone_id) ticket.milestoneId = row.milestone_id as MilestoneId;
-  if (row.branch) ticket.branch = row.branch;
-  if (row.resolution) ticket.resolution = row.resolution as TicketResolution;
-  if (row.resolved_at) ticket.resolvedAt = fromIso(row.resolved_at);
-  if (row.archived_at) ticket.archivedAt = fromIso(row.archived_at);
-  if (row.column_changed_at) ticket.columnChangedAt = fromIso(row.column_changed_at);
-  if (row.use_worktree) ticket.useWorktree = true;
-  if (row.worktree_path) ticket.worktreePath = row.worktree_path;
-  if (row.worktree_name) ticket.worktreeName = row.worktree_name;
+  if (row.milestone_id) {
+    ticket.milestoneId = row.milestone_id as MilestoneId;
+  }
+  if (row.branch) {
+    ticket.branch = row.branch;
+  }
+  if (row.resolution) {
+    ticket.resolution = row.resolution as TicketResolution;
+  }
+  if (row.resolved_at) {
+    ticket.resolvedAt = fromIso(row.resolved_at);
+  }
+  if (row.archived_at) {
+    ticket.archivedAt = fromIso(row.archived_at);
+  }
+  if (row.column_changed_at) {
+    ticket.columnChangedAt = fromIso(row.column_changed_at);
+  }
+  if (row.use_worktree) {
+    ticket.useWorktree = true;
+  }
+  if (row.worktree_path) {
+    ticket.worktreePath = row.worktree_path;
+  }
+  if (row.worktree_name) {
+    ticket.worktreeName = row.worktree_name;
+  }
   // supervisor_session_id column is retained in SQLite for old rows but is
   // no longer surfaced on the Ticket model — the renderer Code column owns
   // the session id now, not the ticket record.
-  if (row.phase) ticket.phase = row.phase as TicketPhase;
-  if (row.phase_changed_at) ticket.phaseChangedAt = fromIso(row.phase_changed_at);
-  if (row.supervisor_task_id) ticket.supervisorTaskId = row.supervisor_task_id as TaskId;
-  if (row.token_usage) ticket.tokenUsage = JSON.parse(row.token_usage) as TokenUsage;
+  if (row.phase) {
+    ticket.phase = row.phase as TicketPhase;
+  }
+  if (row.phase_changed_at) {
+    ticket.phaseChangedAt = fromIso(row.phase_changed_at);
+  }
+  if (row.supervisor_task_id) {
+    ticket.supervisorTaskId = row.supervisor_task_id as TaskId;
+  }
+  if (row.token_usage) {
+    ticket.tokenUsage = JSON.parse(row.token_usage) as TokenUsage;
+  }
 
   const runs = parseJsonOr<unknown[]>(row.runs, []);
-  if (runs.length > 0) ticket.runs = runs as Ticket['runs'];
+  if (runs.length > 0) {
+    ticket.runs = runs as Ticket['runs'];
+  }
 
   const pullRequests = parseJsonOr<PullRequestLink[]>(row.pr_review, []);
-  if (Array.isArray(pullRequests) && pullRequests.length > 0) ticket.pullRequests = pullRequests;
+  if (Array.isArray(pullRequests) && pullRequests.length > 0) {
+    ticket.pullRequests = pullRequests;
+  }
 
   if (row.pr_merged_at) {
     try {
@@ -187,16 +241,22 @@ export function rowToTicket(row: TicketRow, comments?: CommentRow[]): Ticket {
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         const out: Record<string, number> = {};
         for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-          if (typeof v === 'number') out[k] = v;
+          if (typeof v === 'number') {
+            out[k] = v;
+          }
         }
-        if (Object.keys(out).length > 0) ticket.prMergedAt = out;
+        if (Object.keys(out).length > 0) {
+          ticket.prMergedAt = out;
+        }
       }
     } catch {
       // Malformed — treat as not merged.
     }
   }
 
-  if (row.assignee) ticket.assignee = row.assignee;
+  if (row.assignee) {
+    ticket.assignee = row.assignee;
+  }
 
   if (comments && comments.length > 0) {
     ticket.comments = comments.map(rowToComment);
@@ -223,11 +283,21 @@ export function rowToMilestone(row: MilestoneRow): Milestone {
     createdAt: fromIso(row.created_at),
     updatedAt: fromIso(row.updated_at),
   };
-  if (row.branch) milestone.branch = row.branch;
-  if (row.brief) milestone.brief = row.brief;
-  if (row.due_date) milestone.dueDate = fromIso(row.due_date);
-  if (row.completed_at) milestone.completedAt = fromIso(row.completed_at);
-  if (row.pinned_at) milestone.pinnedAt = fromIso(row.pinned_at);
+  if (row.branch) {
+    milestone.branch = row.branch;
+  }
+  if (row.brief) {
+    milestone.brief = row.brief;
+  }
+  if (row.due_date) {
+    milestone.dueDate = fromIso(row.due_date);
+  }
+  if (row.completed_at) {
+    milestone.completedAt = fromIso(row.completed_at);
+  }
+  if (row.pinned_at) {
+    milestone.pinnedAt = fromIso(row.pinned_at);
+  }
   return milestone;
 }
 
@@ -235,16 +305,24 @@ export function rowToPage(row: PageRow): Page {
   const page: Page = {
     id: row.id as PageId,
     projectId: row.project_id as ProjectId,
-    parentId: (row.parent_id as PageId | null),
+    parentId: row.parent_id as PageId | null,
     title: row.title,
     sortOrder: row.sort_order,
     createdAt: fromIso(row.created_at),
     updatedAt: fromIso(row.updated_at),
   };
-  if (row.icon) page.icon = row.icon;
-  if (row.is_root) page.isRoot = true;
-  if (row.kind && row.kind !== 'doc') page.kind = row.kind as Page['kind'];
-  if (row.properties) page.properties = JSON.parse(row.properties);
+  if (row.icon) {
+    page.icon = row.icon;
+  }
+  if (row.is_root) {
+    page.isRoot = true;
+  }
+  if (row.kind && row.kind !== 'doc') {
+    page.kind = row.kind as Page['kind'];
+  }
+  if (row.properties) {
+    page.properties = JSON.parse(row.properties);
+  }
   return page;
 }
 
@@ -256,10 +334,18 @@ export function rowToInboxItem(row: InboxRow): InboxItem {
     createdAt: fromIso(row.created_at),
     updatedAt: fromIso(row.updated_at),
   };
-  if (row.note) item.note = row.note;
-  if (row.project_id) item.projectId = row.project_id as ProjectId;
-  if (row.later_at) item.laterAt = fromIso(row.later_at);
-  if (row.promoted_to) item.promotedTo = JSON.parse(row.promoted_to) as InboxPromotion;
+  if (row.note) {
+    item.note = row.note;
+  }
+  if (row.project_id) {
+    item.projectId = row.project_id as ProjectId;
+  }
+  if (row.later_at) {
+    item.laterAt = fromIso(row.later_at);
+  }
+  if (row.promoted_to) {
+    item.promotedTo = JSON.parse(row.promoted_to) as InboxPromotion;
+  }
   return item;
 }
 
@@ -271,12 +357,24 @@ export function rowToTask(row: TaskRow): Task {
     status: JSON.parse(row.status),
     createdAt: fromIso(row.created_at),
   };
-  if (row.branch) task.branch = row.branch;
-  if (row.worktree_path) task.worktreePath = row.worktree_path;
-  if (row.worktree_name) task.worktreeName = row.worktree_name;
-  if (row.session_id) task.sessionId = row.session_id;
-  if (row.ticket_id) task.ticketId = row.ticket_id as TicketId;
-  if (row.last_urls) task.lastUrls = JSON.parse(row.last_urls);
+  if (row.branch) {
+    task.branch = row.branch;
+  }
+  if (row.worktree_path) {
+    task.worktreePath = row.worktree_path;
+  }
+  if (row.worktree_name) {
+    task.worktreeName = row.worktree_name;
+  }
+  if (row.session_id) {
+    task.sessionId = row.session_id;
+  }
+  if (row.ticket_id) {
+    task.ticketId = row.ticket_id as TicketId;
+  }
+  if (row.last_urls) {
+    task.lastUrls = JSON.parse(row.last_urls);
+  }
   return task;
 }
 
@@ -442,10 +540,7 @@ type StoreLike = { store: StoreData };
  * with non-project data from the host store (electron-store or ServerStore).
  * This is what gets broadcast to the renderer via `store:changed`.
  */
-export function buildStoreSnapshot(
-  repo: ProjectsRepo,
-  hostStore: StoreLike
-): StoreData {
+export function buildStoreSnapshot(repo: ProjectsRepo, hostStore: StoreLike): StoreData {
   // Read all project data from SQLite and convert to launcher models
   const projects = repo.listProjects().map(rowToProject);
   const tickets = repo.listAllTickets().map((row) => {

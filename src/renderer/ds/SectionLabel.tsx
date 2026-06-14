@@ -14,7 +14,5 @@ const useStyles = makeStyles({
 
 export const SectionLabel = ({ className, children }: PropsWithChildren<SectionLabelProps>) => {
   const styles = useStyles();
-  return (
-    <Caption1Strong className={mergeClasses(styles.root, className)}>{children}</Caption1Strong>
-  );
+  return <Caption1Strong className={mergeClasses(styles.root, className)}>{children}</Caption1Strong>;
 };

@@ -35,8 +35,7 @@ import { join } from 'node:path';
 const SNAPSHOT_SUFFIX = '.tar';
 
 const blobName = (sessionId: string): string => `${sessionId}${SNAPSHOT_SUFFIX}`;
-const localPath = (snapshotDir: string, sessionId: string): string =>
-  join(snapshotDir, blobName(sessionId));
+const localPath = (snapshotDir: string, sessionId: string): string => join(snapshotDir, blobName(sessionId));
 
 export interface SnapshotStore {
   pull(sessionId: string, snapshotDir: string): Promise<boolean>;
@@ -68,31 +67,27 @@ type AzureContainerClient = {
 };
 type AzureBlobSdk = {
   StorageSharedKeyCredential: new (account: string, key: string) => unknown;
-  BlobServiceClient: new (url: string, cred: unknown) => {
+  BlobServiceClient: new (
+    url: string,
+    cred: unknown
+  ) => {
     getContainerClient: (name: string) => AzureContainerClient;
   };
 };
 
 export class AzureBlobSnapshotStore implements SnapshotStore {
-  constructor(
-    private readonly cfg: { account: string; key: string; container: string },
-  ) {}
+  constructor(private readonly cfg: { account: string; key: string; container: string }) {}
 
   private async container(): Promise<AzureContainerClient> {
     const specifier = '@azure/storage-blob';
     let sdk: AzureBlobSdk;
     try {
       sdk = (await import(/* @vite-ignore */ specifier)) as unknown as AzureBlobSdk;
-    } catch (err) {
-      throw new Error(
-        '[snapshot-blob] @azure/storage-blob is required for cloud snapshot sync',
-      );
+    } catch {
+      throw new Error('[snapshot-blob] @azure/storage-blob is required for cloud snapshot sync');
     }
     const cred = new sdk.StorageSharedKeyCredential(this.cfg.account, this.cfg.key);
-    const svc = new sdk.BlobServiceClient(
-      `https://${this.cfg.account}.blob.core.windows.net`,
-      cred,
-    );
+    const svc = new sdk.BlobServiceClient(`https://${this.cfg.account}.blob.core.windows.net`, cred);
     const container = svc.getContainerClient(this.cfg.container);
     // Idempotent — succeeds whether or not the container already exists. The
     // bicep creates it at deploy, but local-dev / self-hosted-cloud may not.
@@ -106,15 +101,21 @@ export class AzureBlobSnapshotStore implements SnapshotStore {
   }
 
   async pull(sessionId: string, snapshotDir: string): Promise<boolean> {
-    if (!sessionId) return false;
+    if (!sessionId) {
+      return false;
+    }
     const dest = localPath(snapshotDir, sessionId);
     // If a local copy already exists, trust it — the launcher writes locally
     // on snapshot-end and the local path is the canonical input to omni
     // serve. Re-downloading would race with omni serve's own writes.
-    if (existsSync(dest)) return false;
+    if (existsSync(dest)) {
+      return false;
+    }
     try {
       const client = (await this.container()).getBlockBlobClient(blobName(sessionId));
-      if (!(await client.exists())) return false;
+      if (!(await client.exists())) {
+        return false;
+      }
       const buf = await client.downloadToBuffer();
       await writeFile(dest, buf);
       return true;
@@ -125,14 +126,20 @@ export class AzureBlobSnapshotStore implements SnapshotStore {
   }
 
   async push(sessionId: string, snapshotDir: string): Promise<void> {
-    if (!sessionId) return;
+    if (!sessionId) {
+      return;
+    }
     const src = localPath(snapshotDir, sessionId);
-    if (!existsSync(src)) return;
+    if (!existsSync(src)) {
+      return;
+    }
     // Guard against zero-byte tars (omni serve crashed mid-write); a zero
     // byte upload would clobber a usable prior copy.
     try {
       const stat = statSync(src);
-      if (stat.size === 0) return;
+      if (stat.size === 0) {
+        return;
+      }
     } catch {
       return;
     }
@@ -146,7 +153,9 @@ export class AzureBlobSnapshotStore implements SnapshotStore {
   }
 
   async remove(sessionId: string): Promise<void> {
-    if (!sessionId) return;
+    if (!sessionId) {
+      return;
+    }
     try {
       const client = (await this.container()).getBlockBlobClient(blobName(sessionId));
       await client.deleteIfExists();
@@ -154,20 +163,20 @@ export class AzureBlobSnapshotStore implements SnapshotStore {
       console.error(`[snapshot-blob] remove failed for ${sessionId}:`, err);
     }
   }
-
 }
 
 let _store: SnapshotStore | undefined;
 
 /** Lazily-resolved global. Cached so the SDK pool is shared across spawns. */
 export function getSnapshotStore(env: NodeJS.ProcessEnv = process.env): SnapshotStore {
-  if (_store) return _store;
+  if (_store) {
+    return _store;
+  }
   const account = env['AZURE_STORAGE_ACCOUNT_NAME'];
   const key = env['AZURE_STORAGE_ACCOUNT_KEY'];
   const container = env['OMNI_AZURE_SNAPSHOT_CONTAINER'];
-  _store = account && key && container
-    ? new AzureBlobSnapshotStore({ account, key, container })
-    : new NullSnapshotStore();
+  _store =
+    account && key && container ? new AzureBlobSnapshotStore({ account, key, container }) : new NullSnapshotStore();
   return _store;
 }
 

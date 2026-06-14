@@ -7,6 +7,7 @@ First-year introduction to computer science. Python, basic data structures, and 
 ## Learning outcomes
 
 By the end of this course, students will be able to:
+
 1. Read and write small Python programs using functions, conditionals, loops, and lists.
 2. Decompose a problem into procedural steps.
 3. Reason about time and space using informal Big-O language.

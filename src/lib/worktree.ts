@@ -54,9 +54,7 @@ export const decideWorktreeAction = (
  * that collide would write to the same directory / git index concurrently,
  * so the second one must be rejected at preflight.
  */
-export type WorkspaceClaim =
-  | { kind: 'direct'; path: string }
-  | { kind: 'worktree'; path: string };
+export type WorkspaceClaim = { kind: 'direct'; path: string } | { kind: 'worktree'; path: string };
 
 /**
  * Resolve the workspace a ticket will occupy when its supervisor is running.

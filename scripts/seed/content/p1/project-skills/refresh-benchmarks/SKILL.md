@@ -18,6 +18,7 @@ Re-run the heap benchmarks and update the notebook.
 ## Scope
 
 Specific to `cs-homework-dsa`. Knows:
+
 - Benchmark binary is `bench`, defined in `Cargo.toml` at `src/bench.rs`.
 - Output format is a JSON array of `{ impl, n, elapsed_ns }` rows.
 - Only run with `--release` — debug builds give misleading numbers.

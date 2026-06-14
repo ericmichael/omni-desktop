@@ -18,7 +18,11 @@ const OPTIONS: IdentityOption[] = [
   { value: 'chatgpt', label: 'ChatGPT', description: 'Sign in with your ChatGPT account — Plus, Pro, or Team' },
   { value: 'openai', label: 'OpenAI', description: 'Connect with an API key from platform.openai.com' },
   { value: 'anthropic', label: 'Claude', description: 'Connect with an API key from console.anthropic.com' },
-  { value: 'local', label: 'On this computer', description: 'Ollama and other local models — private, no account needed' },
+  {
+    value: 'local',
+    label: 'On this computer',
+    description: 'Ollama and other local models — private, no account needed',
+  },
   { value: 'advanced', label: 'Something else', description: 'Azure, LiteLLM, or any custom setup' },
 ];
 

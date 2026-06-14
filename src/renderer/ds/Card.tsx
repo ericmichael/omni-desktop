@@ -9,9 +9,7 @@ type CardProps = {
 const useStyles = makeStyles({
   root: {
     backgroundColor: tokens.colorNeutralBackground2,
-    borderColor: tokens.colorNeutralStroke1,
-    borderWidth: '1px',
-    borderStyle: 'solid',
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
     borderRadius: '8px',
     padding: '16px',
     display: 'flex',

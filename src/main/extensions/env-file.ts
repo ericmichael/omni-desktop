@@ -14,16 +14,16 @@ export const parseEnvFile = (content: string): Record<string, string> => {
   for (const raw of content.split('\n')) {
     const trimmed = raw.trim();
     if (trimmed === '' || trimmed.startsWith('#')) {
-continue;
-}
+      continue;
+    }
     const eqIdx = raw.indexOf('=');
     if (eqIdx === -1) {
-continue;
-}
+      continue;
+    }
     const key = raw.slice(0, eqIdx).trim();
     if (!key) {
-continue;
-}
+      continue;
+    }
     result[key] = raw.slice(eqIdx + 1).replace(/\r$/, '');
   }
   return result;

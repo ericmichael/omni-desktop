@@ -1,11 +1,12 @@
 import { Badge as FluentBadge, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import type { PropsWithChildren } from 'react';
+import type { CSSProperties, PropsWithChildren } from 'react';
 
 type ColorScheme = 'default' | 'blue' | 'green' | 'purple' | 'red' | 'yellow' | 'sky' | 'orange';
 
 type BadgeProps = {
   color?: ColorScheme;
   className?: string;
+  style?: CSSProperties;
   /**
    * When true, constrain the badge to `maxWidth` (default 220px) and truncate
    * its text content with an ellipsis. Use for badges that carry user-generated
@@ -16,7 +17,10 @@ type BadgeProps = {
   maxWidth?: number | string;
 };
 
-const fluentColorMap: Record<ColorScheme, 'informative' | 'brand' | 'success' | 'important' | 'warning' | 'severe' | 'subtle'> = {
+const fluentColorMap: Record<
+  ColorScheme,
+  'informative' | 'brand' | 'success' | 'important' | 'warning' | 'severe' | 'subtle'
+> = {
   default: 'subtle',
   blue: 'informative',
   green: 'success',
@@ -57,6 +61,7 @@ const useStyles = makeStyles({
 export const Badge = ({
   color = 'default',
   className,
+  style,
   truncate,
   maxWidth = 220,
   children,
@@ -68,7 +73,7 @@ export const Badge = ({
       color={fluentColorMap[color]}
       shape="rounded"
       className={mergeClasses(styles.root, truncate && styles.truncateRoot, className)}
-      style={truncate ? { maxWidth: typeof maxWidth === 'number' ? `${maxWidth}px` : maxWidth } : undefined}
+      style={{ ...style, ...(truncate ? { maxWidth: typeof maxWidth === 'number' ? `${maxWidth}px` : maxWidth } : {}) }}
     >
       {truncate ? <span className={styles.truncateText}>{children}</span> : children}
     </FluentBadge>

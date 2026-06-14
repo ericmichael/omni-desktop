@@ -12,13 +12,13 @@
  *   4. Conflict resolution — last-writer-wins by mtime
  */
 
-import { mkdir, readdir, readFile, stat, unlink,writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, posix } from 'node:path';
 
 import chokidar, { type FSWatcher } from 'chokidar';
 
 import type { PlatformClient } from '@/main/platform-client';
-import { decryptFile,encryptFile } from '@/main/workspace-crypto';
+import { decryptFile, encryptFile } from '@/main/workspace-crypto';
 import {
   deleteRemoteFile,
   downloadRemoteFile,
@@ -145,9 +145,7 @@ export class WorkspaceSyncManager {
     const existingOwner = this.activeDirs.get(workspaceDir);
     if (existingOwner && existingOwner !== projectId) {
       this.refCounts.set(projectId, 0);
-      throw new Error(
-        `Workspace directory "${workspaceDir}" is already being synced by project ${existingOwner}`
-      );
+      throw new Error(`Workspace directory "${workspaceDir}" is already being synced by project ${existingOwner}`);
     }
 
     if (!this.platformClient) {
@@ -218,8 +216,8 @@ export class WorkspaceSyncManager {
   async stopSync(projectId: string): Promise<void> {
     const session = this.sessions.get(projectId);
     if (!session) {
-return;
-}
+      return;
+    }
 
     // Decrement ref count — only tear down when no consumers remain
     const refs = Math.max(0, (this.refCounts.get(projectId) ?? 1) - 1);
@@ -279,7 +277,11 @@ return;
 
   // --- Progress tracking ---
 
-  private startProgress(session: SyncSession, phase: 'uploading' | 'downloading' | 'reconciling', totalFiles: number): void {
+  private startProgress(
+    session: SyncSession,
+    phase: 'uploading' | 'downloading' | 'reconciling',
+    totalFiles: number
+  ): void {
     session.progress = {
       phase,
       totalFiles,
@@ -293,8 +295,8 @@ return;
 
   private tickProgress(session: SyncSession, bytes: number): void {
     if (!session.progress) {
-return;
-}
+      return;
+    }
     session.progress.completedFiles++;
     const elapsed = (Date.now() - session.progress.startedAt) / 1000;
     if (elapsed > 0.5) {
@@ -307,9 +309,8 @@ return;
       if (bytes > 0) {
         // Exponential moving average for bytes/sec
         const instantRate = bytes / Math.max(secsPerFile, 0.01);
-        session.progress.bytesPerSecond = session.progress.bytesPerSecond > 0
-          ? session.progress.bytesPerSecond * 0.7 + instantRate * 0.3
-          : instantRate;
+        session.progress.bytesPerSecond =
+          session.progress.bytesPerSecond > 0 ? session.progress.bytesPerSecond * 0.7 + instantRate * 0.3 : instantRate;
       }
     }
     this.emitStatus(session);
@@ -324,27 +325,22 @@ return;
   /** Encrypt contents before upload. Throws if no key — never upload plaintext. */
   private encrypt(session: SyncSession, contents: Buffer): Buffer {
     if (!session.encryptionKey) {
-throw new Error('Cannot sync without encryption key');
-}
+      throw new Error('Cannot sync without encryption key');
+    }
     return encryptFile(contents, session.encryptionKey);
   }
 
   /** Decrypt contents after download. Throws if no key — never write unverified data. */
   private decrypt(session: SyncSession, contents: Buffer): Buffer {
     if (!session.encryptionKey) {
-throw new Error('Cannot sync without encryption key');
-}
+      throw new Error('Cannot sync without encryption key');
+    }
     return decryptFile(contents, session.encryptionKey);
   }
 
   // --- Audit logging ---
 
-  private recordAudit(
-    session: SyncSession,
-    action: AuditEvent['action'],
-    filePath: string,
-    fileSize: number
-  ): void {
+  private recordAudit(session: SyncSession, action: AuditEvent['action'], filePath: string, fileSize: number): void {
     session.auditBuffer.push({
       action,
       share_name: session.shareName,
@@ -359,8 +355,8 @@ throw new Error('Cannot sync without encryption key');
 
   private async flushAudit(session: SyncSession): Promise<void> {
     if (session.auditBuffer.length === 0 || !this.platformClient) {
-return;
-}
+      return;
+    }
     const events = session.auditBuffer.splice(0);
     try {
       await this.platformClient.reportWorkspaceAuditEvents(events);
@@ -375,16 +371,16 @@ return;
 
   private manifestPath(projectId: string): string | null {
     if (!this.manifestDir) {
-return null;
-}
+      return null;
+    }
     return join(this.manifestDir, 'sync-manifests', `${projectId}.json`);
   }
 
   private async loadManifest(session: SyncSession): Promise<void> {
     const path = this.manifestPath(session.projectId);
     if (!path) {
-return;
-}
+      return;
+    }
     try {
       const raw = await readFile(path, 'utf-8');
       const entries = JSON.parse(raw) as Array<[string, ManifestEntry]>;
@@ -398,8 +394,8 @@ return;
   private async saveManifest(session: SyncSession): Promise<void> {
     const path = this.manifestPath(session.projectId);
     if (!path) {
-return;
-}
+      return;
+    }
     try {
       await mkdir(dirname(path), { recursive: true });
       const entries = [...session.manifest.entries()];
@@ -413,12 +409,12 @@ return;
 
   private async ensureSas(session: SyncSession): Promise<void> {
     if (session.sasExpiresAt - Date.now() > SAS_REFRESH_MARGIN_MS) {
-return;
-}
+      return;
+    }
 
     if (!this.platformClient) {
-throw new Error('Platform client not available');
-}
+      throw new Error('Platform client not available');
+    }
 
     const result = await this.platformClient.getProjectWorkspace(session.projectId);
     session.shareName = result.shareName;
@@ -518,8 +514,8 @@ throw new Error('Platform client not available');
       const pushTasks = toPush.map((path) => async () => {
         const local = localMap.get(path);
         if (!local) {
-return;
-}
+          return;
+        }
         const plaintext = await readFile(local.absolutePath);
         const contents = this.encrypt(session, plaintext);
         await this.ensureSas(session);
@@ -567,15 +563,19 @@ return;
 
       watcher.on('all', (_event, filePath) => {
         if (!filePath || session.suppressWatcher) {
-return;
-}
+          return;
+        }
         // chokidar gives absolute paths — compute relative path
         const relative = filePath.startsWith(session.workspaceDir)
-          ? filePath.slice(session.workspaceDir.length).replace(/^[\\/]/, '').split('\\').join('/')
+          ? filePath
+              .slice(session.workspaceDir.length)
+              .replace(/^[\\/]/, '')
+              .split('\\')
+              .join('/')
           : filePath;
         if (this.shouldIgnore(relative)) {
-return;
-}
+          return;
+        }
         session.pendingChanges.add(relative);
         this.debouncePush(session);
       });
@@ -588,8 +588,8 @@ return;
 
   private debouncePush(session: SyncSession): void {
     if (session.debounceTimer) {
-clearTimeout(session.debounceTimer);
-}
+      clearTimeout(session.debounceTimer);
+    }
     session.debounceTimer = setTimeout(() => {
       void this.pushPending(session);
     }, DEBOUNCE_MS);
@@ -597,8 +597,8 @@ clearTimeout(session.debounceTimer);
 
   private async pushPending(session: SyncSession): Promise<void> {
     if (session.pendingChanges.size === 0) {
-return;
-}
+      return;
+    }
     const paths = [...session.pendingChanges];
     session.pendingChanges.clear();
 
@@ -680,8 +680,10 @@ return;
           const localPath = join(session.workspaceDir, ...path.split('/'));
           session.suppressWatcher = true;
           try {
- await unlink(localPath); 
-} catch { /* ignore */ }
+            await unlink(localPath);
+          } catch {
+            /* ignore */
+          }
           session.suppressWatcher = false;
           session.manifest.delete(path);
         }
@@ -726,17 +728,19 @@ return;
     const parts = relativePath.split('/');
     for (const part of parts) {
       if (IGNORE_DIRS.has(part)) {
-return true;
-}
+        return true;
+      }
     }
     const filename = parts[parts.length - 1];
     if (filename && IGNORE_FILES.has(filename)) {
-return true;
-}
+      return true;
+    }
     return false;
   }
 
-  private async walkLocal(dir: string): Promise<Array<{ relativePath: string; absolutePath: string; mtime: number; size: number }>> {
+  private async walkLocal(
+    dir: string
+  ): Promise<Array<{ relativePath: string; absolutePath: string; mtime: number; size: number }>> {
     const results: Array<{ relativePath: string; absolutePath: string; mtime: number; size: number }> = [];
 
     const walk = async (currentDir: string, relBase: string): Promise<void> => {
@@ -748,13 +752,13 @@ return true;
 
         if (entry.isDirectory()) {
           if (IGNORE_DIRS.has(name)) {
-continue;
-}
+            continue;
+          }
           await walk(absPath, relPath);
         } else if (entry.isFile()) {
           if (IGNORE_FILES.has(name)) {
-continue;
-}
+            continue;
+          }
           const info = await stat(absPath);
           results.push({ relativePath: relPath, absolutePath: absPath, mtime: info.mtimeMs, size: info.size });
         }
@@ -798,8 +802,8 @@ async function runConcurrent(tasks: (() => Promise<void>)[], limit: number): Pro
       const currentIdx = idx++;
       const task = tasks[currentIdx];
       if (task) {
-await task();
-}
+        await task();
+      }
     }
   }
   const workers: Promise<void>[] = [];

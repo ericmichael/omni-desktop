@@ -12,74 +12,74 @@ export type ToolState =
   | 'approval-responded'
   | 'output-available'
   | 'output-error'
-  | 'output-denied'
+  | 'output-denied';
 
 // ── Chat status ─────────────────────────────────────────────────────
 
-export type ChatStatus = 'submitted' | 'streaming' | 'ready' | 'error'
+export type ChatStatus = 'submitted' | 'streaming' | 'ready' | 'error';
 
 // ── Message parts ───────────────────────────────────────────────────
 
 export interface TextUIPart {
-  type: 'text'
-  text: string
+  type: 'text';
+  text: string;
 }
 
 export interface ReasoningUIPart {
-  type: 'reasoning'
-  reasoning: string
-  details: Array<{ type: 'text'; text: string } | { type: 'redacted' }>
+  type: 'reasoning';
+  reasoning: string;
+  details: Array<{ type: 'text'; text: string } | { type: 'redacted' }>;
 }
 
 export interface ToolUIPart {
-  type: `tool-${string}`
-  toolCallId: string
-  state: ToolState
-  input: unknown
-  output?: unknown
-  errorText?: string
-  approval?: { state: 'requested' | 'approved' | 'denied'; message?: string }
+  type: `tool-${string}`;
+  toolCallId: string;
+  state: ToolState;
+  input: unknown;
+  output?: unknown;
+  errorText?: string;
+  approval?: { state: 'requested' | 'approved' | 'denied'; message?: string };
 }
 
 export interface DynamicToolUIPart {
-  type: 'dynamic-tool'
-  toolName: string
-  toolCallId: string
-  state: ToolState
-  input: unknown
-  output?: unknown
-  errorText?: string
-  approval?: { state: 'requested' | 'approved' | 'denied'; message?: string }
+  type: 'dynamic-tool';
+  toolName: string;
+  toolCallId: string;
+  state: ToolState;
+  input: unknown;
+  output?: unknown;
+  errorText?: string;
+  approval?: { state: 'requested' | 'approved' | 'denied'; message?: string };
 }
 
 export interface FileUIPart {
-  type: 'file'
-  mediaType: string
-  filename?: string
-  url: string
+  type: 'file';
+  mediaType: string;
+  filename?: string;
+  url: string;
 }
 
 export interface SourceDocumentUIPart {
-  type: 'source-document'
-  sourceId: string
-  mediaType: string
-  title: string
-  filename?: string
+  type: 'source-document';
+  sourceId: string;
+  mediaType: string;
+  title: string;
+  filename?: string;
 }
 
 export interface SourceUIPart {
-  type: 'source'
+  type: 'source';
   source: {
-    sourceType: 'url'
-    id: string
-    url: string
-    title?: string
-    providerMetadata?: Record<string, unknown>
-  }
+    sourceType: 'url';
+    id: string;
+    url: string;
+    title?: string;
+    providerMetadata?: Record<string, unknown>;
+  };
 }
 
 export interface StepStartUIPart {
-  type: 'step-start'
+  type: 'step-start';
 }
 
 // ── Union of all message part types ─────────────────────────────────
@@ -92,30 +92,30 @@ export type UIMessagePart =
   | FileUIPart
   | SourceDocumentUIPart
   | SourceUIPart
-  | StepStartUIPart
+  | StepStartUIPart;
 
 // ── Message ─────────────────────────────────────────────────────────
 
 export interface UIMessage {
-  id: string
-  role: 'system' | 'user' | 'assistant'
-  parts: UIMessagePart[]
-  metadata?: unknown
+  id: string;
+  role: 'system' | 'user' | 'assistant';
+  parts: UIMessagePart[];
+  metadata?: unknown;
 }
 
 // ── Usage ───────────────────────────────────────────────────────────
 
 export interface LanguageModelUsage {
-  inputTokens?: number
-  outputTokens?: number
-  reasoningTokens?: number
-  cachedInputTokens?: number
-  totalTokens?: number
+  inputTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  cachedInputTokens?: number;
+  totalTokens?: number;
 }
 
 // ── Tool definition ─────────────────────────────────────────────────
 
 export interface Tool {
-  description?: string
-  inputSchema?: Record<string, unknown>
+  description?: string;
+  inputSchema?: Record<string, unknown>;
 }

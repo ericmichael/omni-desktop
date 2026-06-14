@@ -67,10 +67,11 @@ export function buildStdioMcpEntry(binPath: string): StdioMcpEntry {
  * @param url Externally reachable URL of the server's MCP route (…/mcp/projects).
  */
 export function buildHttpMcpEntry(url: string): HttpMcpEntry {
+  const runtimeTokenEnv = 'OMNI_RUNTIME_TOKEN';
   return {
     type: 'streamable_http',
     url,
-    headers: { Authorization: 'Bearer ${OMNI_RUNTIME_TOKEN}' },
+    headers: { Authorization: `Bearer \${${runtimeTokenEnv}}` },
     cache_tools_list: true,
     _managed: MCP_MANAGED_MARKER,
   };

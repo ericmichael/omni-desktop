@@ -1,5 +1,5 @@
 import { useSelector } from '@xstate/react';
-import { createContext, type ReactNode,useContext, useEffect, useMemo } from 'react';
+import { createContext, type ReactNode, useContext, useEffect, useMemo } from 'react';
 
 import type { RPCClientActor } from '@/shared/machines/rpc-client.machine';
 
@@ -33,10 +33,7 @@ export const RPCClientProvider = ({ children }: { children: ReactNode }) => {
     return () => client.disconnect();
   }, [client]);
 
-  const value = useMemo<RPCClientContextValue>(
-    () => ({ client, actor: client.actor }),
-    [client],
-  );
+  const value = useMemo<RPCClientContextValue>(() => ({ client, actor: client.actor }), [client]);
 
   return <RPCClientContext.Provider value={value}>{children}</RPCClientContext.Provider>;
 };
@@ -49,8 +46,8 @@ export const RPCClientProvider = ({ children }: { children: ReactNode }) => {
 export const useRPCClient = (): RPCClient => {
   const ctx = useContext(RPCClientContext);
   if (!ctx) {
-throw new Error('RPCClientProvider is missing');
-}
+    throw new Error('RPCClientProvider is missing');
+  }
   return ctx.client;
 };
 
@@ -58,8 +55,8 @@ throw new Error('RPCClientProvider is missing');
 export const useRPCConnected = (): boolean => {
   const ctx = useContext(RPCClientContext);
   if (!ctx) {
-throw new Error('RPCClientProvider is missing');
-}
+    throw new Error('RPCClientProvider is missing');
+  }
   return useSelector(ctx.actor, (snap) => snap.value === 'connected');
 };
 
@@ -67,7 +64,7 @@ throw new Error('RPCClientProvider is missing');
 export const useRPCConnectionState = (): 'disconnected' | 'connecting' | 'connected' | 'reconnecting' => {
   const ctx = useContext(RPCClientContext);
   if (!ctx) {
-throw new Error('RPCClientProvider is missing');
-}
+    throw new Error('RPCClientProvider is missing');
+  }
   return useSelector(ctx.actor, (snap) => snap.value as 'disconnected' | 'connecting' | 'connected' | 'reconnecting');
 };

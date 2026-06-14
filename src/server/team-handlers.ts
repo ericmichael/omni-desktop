@@ -21,13 +21,17 @@ export function registerTeamHandlers(ipc: IIpcListener, controlPlane: ControlPla
   const cp = controlPlane;
 
   const listTeams = async (principal: string): Promise<TeamSummary[]> => {
-    if (!cp) return [];
+    if (!cp) {
+      return [];
+    }
     const rows = await cp.listTeamsForPrincipal(principal);
     return rows.map((r) => ({ id: r.id, label: r.label, kind: r.kind, role: r.role }));
   };
 
   const listMembers = async (teamId: string): Promise<TeamMember[]> => {
-    if (!cp) return [];
+    if (!cp) {
+      return [];
+    }
     const rows = await cp.listMembers(teamId);
     return rows.map((r) => ({
       userId: r.user_id,
@@ -38,7 +42,9 @@ export function registerTeamHandlers(ipc: IIpcListener, controlPlane: ControlPla
   };
 
   const listInvites = async (teamId: string): Promise<TeamInvitation[]> => {
-    if (!cp) return [];
+    if (!cp) {
+      return [];
+    }
     const rows = await cp.listInvitations(teamId);
     return rows.map((r) => ({ id: r.id, email: r.email, role: r.role, token: r.token }));
   };
@@ -46,12 +52,16 @@ export function registerTeamHandlers(ipc: IIpcListener, controlPlane: ControlPla
   ipc.handle('team:list', (ctx) => listTeams(ctx.principalId));
 
   ipc.handle('team:get-my-role', async (ctx) => {
-    if (!cp) return null;
+    if (!cp) {
+      return null;
+    }
     return (await cp.getMembershipRole(ctx.tenantId, ctx.principalId)) ?? null;
   });
 
   ipc.handle('team:create', async (ctx, label) => {
-    if (!cp) return listTeams(ctx.principalId);
+    if (!cp) {
+      return listTeams(ctx.principalId);
+    }
     await cp.createTeam({
       id: randomUUID(),
       label: String(label).trim() || 'New Team',
@@ -62,7 +72,9 @@ export function registerTeamHandlers(ipc: IIpcListener, controlPlane: ControlPla
   });
 
   ipc.handle('team:invite', async (ctx, email, role) => {
-    if (!cp) return [];
+    if (!cp) {
+      return [];
+    }
     await requireRole(cp, ctx.tenantId, ctx.principalId, 'admin');
     await cp.createInvitation({
       id: randomUUID(),
@@ -76,33 +88,43 @@ export function registerTeamHandlers(ipc: IIpcListener, controlPlane: ControlPla
   });
 
   ipc.handle('team:accept-invite', async (ctx, token) => {
-    if (!cp) return listTeams(ctx.principalId);
+    if (!cp) {
+      return listTeams(ctx.principalId);
+    }
     await cp.acceptInvitation(String(token), ctx.principalId);
     return listTeams(ctx.principalId);
   });
 
   ipc.handle('team:revoke-invite', async (ctx, id) => {
-    if (!cp) return [];
+    if (!cp) {
+      return [];
+    }
     await requireRole(cp, ctx.tenantId, ctx.principalId, 'admin');
     await cp.revokeInvitation(String(id), ctx.tenantId);
     return listInvites(ctx.tenantId);
   });
 
   ipc.handle('team:list-invites', async (ctx) => {
-    if (!cp) return [];
+    if (!cp) {
+      return [];
+    }
     await requireRole(cp, ctx.tenantId, ctx.principalId, 'admin');
     return listInvites(ctx.tenantId);
   });
 
   ipc.handle('team:list-members', async (ctx) => {
-    if (!cp) return [];
+    if (!cp) {
+      return [];
+    }
     // Any member may see the roster.
     await requireRole(cp, ctx.tenantId, ctx.principalId, 'member');
     return listMembers(ctx.tenantId);
   });
 
   ipc.handle('team:remove-member', async (ctx, userId) => {
-    if (!cp) return [];
+    if (!cp) {
+      return [];
+    }
     await requireRole(cp, ctx.tenantId, ctx.principalId, 'admin');
     const target = String(userId);
     const targetRole = await cp.getMembershipRole(ctx.tenantId, target);
@@ -114,7 +136,9 @@ export function registerTeamHandlers(ipc: IIpcListener, controlPlane: ControlPla
   });
 
   ipc.handle('team:set-role', async (ctx, userId, role) => {
-    if (!cp) return [];
+    if (!cp) {
+      return [];
+    }
     const next = role as TeamRole;
     // Promoting/demoting to or from owner is owner-only; other role changes are admin.
     const target = String(userId);

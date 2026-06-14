@@ -30,9 +30,7 @@ const versionIdx = args.indexOf('--version');
 const requestedVersion = versionIdx !== -1 ? args[versionIdx + 1] : null;
 
 if (existsSync(sandboxPath) && !force) {
-  console.log(
-    `omni-sandbox already exists at assets/bin/, skipping download. Use --force to re-download.`,
-  );
+  console.log(`omni-sandbox already exists at assets/bin/, skipping download. Use --force to re-download.`);
   process.exit(0);
 }
 
@@ -48,9 +46,7 @@ const key = `${process.platform}-${process.arch}`;
 const assetName = assetMap[key];
 
 if (!assetName) {
-  console.warn(
-    `\x1b[33mWARNING: No pre-built omni-sandbox binary for ${key} — skipping download.\x1b[0m`,
-  );
+  console.warn(`\x1b[33mWARNING: No pre-built omni-sandbox binary for ${key} — skipping download.\x1b[0m`);
   console.warn(`You can build it manually: cd ../omni-code && ./scripts/build-sandbox.sh`);
   process.exit(0);
 }
@@ -93,9 +89,7 @@ async function download() {
       }).trim();
       tag = output;
     } catch {
-      console.warn(
-        `\x1b[33mWARNING: No release found in ${REPO} — skipping omni-sandbox download.\x1b[0m`,
-      );
+      console.warn(`\x1b[33mWARNING: No release found in ${REPO} — skipping omni-sandbox download.\x1b[0m`);
       process.exit(0);
     }
   }
@@ -128,7 +122,7 @@ async function download() {
         }
       } catch {
         console.warn(
-          `\x1b[33mWARNING: bwrap not found on PATH. Linux sandbox will require system-installed bubblewrap.\x1b[0m`,
+          `\x1b[33mWARNING: bwrap not found on PATH. Linux sandbox will require system-installed bubblewrap.\x1b[0m`
         );
       }
     }

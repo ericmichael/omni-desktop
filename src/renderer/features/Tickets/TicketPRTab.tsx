@@ -1,4 +1,4 @@
-import { makeStyles, mergeClasses, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-components';
 import { ArrowSync20Regular, BranchCompare20Regular, Document24Regular } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -7,7 +7,15 @@ import { getMimeType } from '@/lib/mime-types';
 import type { SelectTabData } from '@/renderer/ds';
 import { Button, IconButton, ListSkeleton, Tab, TabList } from '@/renderer/ds';
 import { persistedStoreApi } from '@/renderer/services/store';
-import type { CodeTabId, ContainerPullRequest, DiffGroup,DiffResponse, FileDiff, ProjectSource, TicketId } from '@/shared/types';
+import type {
+  CodeTabId,
+  ContainerPullRequest,
+  DiffGroup,
+  DiffResponse,
+  FileDiff,
+  ProjectSource,
+  TicketId,
+} from '@/shared/types';
 
 import { PullRequestBadge } from './PullRequestBadge';
 import { $tickets, ticketApi } from './state';
@@ -432,10 +440,15 @@ const DiffViewer = memo(({ file }: { file: FileDiff }) => {
           );
         }
 
-        const bgClass = row.type === 'addition' ? styles.additionBg : row.type === 'deletion' ? styles.deletionBg : undefined;
+        const bgClass =
+          row.type === 'addition' ? styles.additionBg : row.type === 'deletion' ? styles.deletionBg : undefined;
 
         const textClass =
-          row.type === 'addition' ? styles.additionText : row.type === 'deletion' ? styles.deletionText : styles.contextText;
+          row.type === 'addition'
+            ? styles.additionText
+            : row.type === 'deletion'
+              ? styles.deletionText
+              : styles.contextText;
 
         const prefix = row.type === 'addition' ? '+' : row.type === 'deletion' ? '-' : ' ';
         const oldNum = row.type === 'addition' ? '' : 'oldLine' in row ? row.oldLine : '';
@@ -474,18 +487,9 @@ const FileListItem = memo(
     return (
       <button
         onClick={handleClick}
-        className={mergeClasses(
-          styles.fileListBtn,
-          isSelected ? styles.fileListSelected : styles.fileListUnselected
-        )}
+        className={mergeClasses(styles.fileListBtn, isSelected ? styles.fileListSelected : styles.fileListUnselected)}
       >
-        <span
-          className={mergeClasses(
-            styles.statusBadge,
-            STATUS_COLORS[file.status],
-            STATUS_BG_COLORS[file.status]
-          )}
-        >
+        <span className={mergeClasses(styles.statusBadge, STATUS_COLORS[file.status], STATUS_BG_COLORS[file.status])}>
           {STATUS_LABELS[file.status]}
         </span>
         <span className={styles.fileNameWrapper}>
@@ -510,8 +514,7 @@ FileListItem.displayName = 'FileListItem';
  * subdir against its ``omni/seed`` baseline. The parent component
  * (FilesChangedPane) picks which source is active.
  */
-const FilesChangedContent = memo(
-  ({ scope, sourceId }: { scope: ChangesScope; sourceId: string }) => {
+const FilesChangedContent = memo(({ scope, sourceId }: { scope: ChangesScope; sourceId: string }) => {
   const styles = useStyles();
   const [data, setData] = useState<DiffResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -623,9 +626,7 @@ const FilesChangedContent = memo(
   const selectedFile = data?.files.find((f) => fileKey(f) === selectedKey) ?? null;
 
   if (loading && !data) {
-    return (
-      <ListSkeleton rows={6} />
-    );
+    return <ListSkeleton rows={6} />;
   }
 
   if (!data?.hasChanges) {
@@ -663,10 +664,7 @@ const FilesChangedContent = memo(
         {isDragging && <div className={styles.dragOverlay} />}
 
         {/* File list, grouped by source */}
-        <div
-          className={styles.fileListPane}
-          style={{ width: `${listWidthPercent}%` }}
-        >
+        <div className={styles.fileListPane} style={{ width: `${listWidthPercent}%` }}>
           {GROUP_ORDER.map((group, groupIdx) => {
             const groupFiles = data.files.filter((f) => f.group === group);
             if (groupFiles.length === 0) {
@@ -676,9 +674,7 @@ const FilesChangedContent = memo(
             const dels = groupFiles.reduce((n, f) => n + f.deletions, 0);
             return (
               <div key={group}>
-                <div
-                  className={mergeClasses(styles.groupHeader, groupIdx === 0 && styles.groupHeaderFirst)}
-                >
+                <div className={mergeClasses(styles.groupHeader, groupIdx === 0 && styles.groupHeaderFirst)}>
                   <span>{GROUP_LABELS[group]}</span>
                   <span className={styles.groupHeaderCount}>{groupFiles.length}</span>
                   {(adds > 0 || dels > 0) && (
@@ -691,12 +687,7 @@ const FilesChangedContent = memo(
                 {groupFiles.map((file) => {
                   const key = fileKey(file);
                   return (
-                    <FileListItem
-                      key={key}
-                      file={file}
-                      isSelected={key === selectedKey}
-                      onSelect={handleSelectFile}
-                    />
+                    <FileListItem key={key} file={file} isSelected={key === selectedKey} onSelect={handleSelectFile} />
                   );
                 })}
               </div>
@@ -705,19 +696,14 @@ const FilesChangedContent = memo(
         </div>
 
         {/* Draggable divider */}
-        <div
-          className={styles.divider}
-          onMouseDown={handleDividerMouseDown}
-        />
+        <div className={styles.divider} onMouseDown={handleDividerMouseDown} />
 
         {/* Diff pane */}
         <div className={styles.diffPane}>
           {selectedFile ? (
             <DiffViewer file={selectedFile} />
           ) : (
-            <div className={styles.centerMessage}>
-              Select a file to view its diff
-            </div>
+            <div className={styles.centerMessage}>Select a file to view its diff</div>
           )}
         </div>
       </div>
@@ -734,7 +720,9 @@ const useSourcesForChanges = (scope: ChangesScope): ProjectSource[] => {
   return useMemo(() => {
     if (scope.kind === 'ticket') {
       const ticket = tickets[scope.ticketId];
-      if (!ticket) return [];
+      if (!ticket) {
+        return [];
+      }
       const project = store.projects.find((p) => p.id === ticket.projectId);
       return project?.sources ?? [];
     }
@@ -765,9 +753,9 @@ const FilesChangedPane = memo(({ scope }: { scope: ChangesScope }) => {
     if (!activeSourceId || !sources.some((s) => s.id === activeSourceId)) {
       setActiveSourceId(sources[0]!.id);
     }
-  // activeSourceId intentionally omitted: we only want to flip it when
-  // the sources set itself changes.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // activeSourceId intentionally omitted: we only want to flip it when
+    // the sources set itself changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sig]);
 
   const handleSourceTabSelect = useCallback((_e: unknown, data: SelectTabData) => {
@@ -791,7 +779,9 @@ const FilesChangedPane = memo(({ scope }: { scope: ChangesScope }) => {
         <div className={styles.tabBar}>
           <TabList size="small" selectedValue={activeSourceId} onTabSelect={handleSourceTabSelect}>
             {sources.map((s) => (
-              <Tab key={s.id} value={s.id}>{s.mountName}</Tab>
+              <Tab key={s.id} value={s.id}>
+                {s.mountName}
+              </Tab>
             ))}
           </TabList>
         </div>

@@ -84,8 +84,8 @@ export const FindBar = memo(
       (text: string, findNext = false) => {
         const handle = webviewRef.current;
         if (!handle) {
-return;
-}
+          return;
+        }
         if (!text) {
           handle.stopFindInPage('clearSelection');
           return;
@@ -108,8 +108,8 @@ return;
       (forward: boolean) => {
         const handle = webviewRef.current;
         if (!handle || !query) {
-return;
-}
+          return;
+        }
         handle.findInPage(query, { findNext: true, forward });
       },
       [query, webviewRef]

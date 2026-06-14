@@ -413,11 +413,7 @@ const WipGauge = memo(({ used, limit }: { used: number; limit: number }) => {
             key={i}
             className={mergeClasses(
               styles.wipSlot,
-              filled
-                ? used >= limit
-                  ? styles.wipSlotFull
-                  : styles.wipSlotFilled
-                : styles.wipSlotEmpty
+              filled ? (used >= limit ? styles.wipSlotFull : styles.wipSlotFilled) : styles.wipSlotEmpty
             )}
           />
         ))}
@@ -458,48 +454,46 @@ Section.displayName = 'Section';
 
 /* ---------- Risk strip ---------- */
 
-const RiskStrip = memo(
-  ({ signals, hasInFlight }: { signals: RiskSignal[]; hasInFlight: boolean }) => {
-    const styles = useStyles();
+const RiskStrip = memo(({ signals, hasInFlight }: { signals: RiskSignal[]; hasInFlight: boolean }) => {
+  const styles = useStyles();
 
-    let stalled = 0;
-    for (const s of signals) {
-      if (s.kind === 'stalled_ticket') {
-        stalled++;
-      }
+  let stalled = 0;
+  for (const s of signals) {
+    if (s.kind === 'stalled_ticket') {
+      stalled++;
     }
-
-    if (!hasInFlight && stalled === 0) {
-      return null;
-    }
-
-    return (
-      <div className={styles.riskStrip}>
-        {hasInFlight && (
-          <Badge color="green">
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <span
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: '50%',
-                  backgroundColor: tokens.colorPaletteGreenForeground1,
-                }}
-              />
-              in flight
-            </span>
-          </Badge>
-        )}
-        {stalled > 0 && (
-          <Badge color="yellow">
-            <ErrorCircle16Regular style={{ width: 12, height: 12, marginRight: 4 }} />
-            {stalled} stalled
-          </Badge>
-        )}
-      </div>
-    );
   }
-);
+
+  if (!hasInFlight && stalled === 0) {
+    return null;
+  }
+
+  return (
+    <div className={styles.riskStrip}>
+      {hasInFlight && (
+        <Badge color="green">
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                backgroundColor: tokens.colorPaletteGreenForeground1,
+              }}
+            />
+            in flight
+          </span>
+        </Badge>
+      )}
+      {stalled > 0 && (
+        <Badge color="yellow">
+          <ErrorCircle16Regular style={{ width: 12, height: 12, marginRight: 4 }} />
+          {stalled} stalled
+        </Badge>
+      )}
+    </div>
+  );
+});
 RiskStrip.displayName = 'RiskStrip';
 
 /* ---------- Pinned milestone card ---------- */
@@ -524,8 +518,7 @@ const MilestoneCard = memo(
     const progress = useMemo(() => milestoneProgress(milestone, tickets), [milestone, tickets]);
     const pct = Math.round(progress.pct * 100);
     const now = Date.now();
-    const dueDays =
-      milestone.dueDate !== undefined ? Math.ceil((milestone.dueDate - now) / DAY_MS) : null;
+    const dueDays = milestone.dueDate !== undefined ? Math.ceil((milestone.dueDate - now) / DAY_MS) : null;
     const deadlineLabel =
       dueDays === null
         ? null
@@ -575,11 +568,7 @@ const MilestoneCard = memo(
           <IconButton aria-label="Unpin milestone" icon={<Pin20Filled />} size="sm" onClick={handleUnpin} />
         </div>
 
-        <ProgressBar
-          value={progress.pct}
-          color={pct === 100 ? 'success' : 'brand'}
-          className={styles.progress}
-        />
+        <ProgressBar value={progress.pct} color={pct === 100 ? 'success' : 'brand'} className={styles.progress} />
 
         {nextUp ? (
           <div className={styles.nextUp}>
@@ -626,8 +615,7 @@ const ProjectCard = memo(
   }) => {
     const styles = useStyles();
     const now = Date.now();
-    const dueDays =
-      project.dueDate !== undefined ? Math.ceil((project.dueDate - now) / DAY_MS) : null;
+    const dueDays = project.dueDate !== undefined ? Math.ceil((project.dueDate - now) / DAY_MS) : null;
     const deadlineLabel =
       dueDays === null
         ? null
@@ -720,10 +708,7 @@ const InboxStripRow = memo(({ signal }: { signal: RiskSignal }) => {
       {signal.detail && (
         <Caption1
           style={{
-            color:
-              signal.severity === 'high'
-                ? tokens.colorPaletteYellowForeground1
-                : tokens.colorNeutralForeground3,
+            color: signal.severity === 'high' ? tokens.colorPaletteYellowForeground1 : tokens.colorNeutralForeground3,
           }}
         >
           {signal.detail}
@@ -736,47 +721,43 @@ InboxStripRow.displayName = 'InboxStripRow';
 
 /* ---------- Shipped row ---------- */
 
-const ShippedRow = memo(
-  ({ item, projectLabel }: { item: ShippedItem; projectLabel?: string }) => {
-    const styles = useStyles();
+const ShippedRow = memo(({ item, projectLabel }: { item: ShippedItem; projectLabel?: string }) => {
+  const styles = useStyles();
 
-    const handleClick = useCallback(() => {
-      if (item.kind === 'ticket') {
-        ticketApi.goToTicket(item.ticket.id);
-      } else {
-        ticketApi.goToMilestone(item.milestone.id, item.milestone.projectId);
-      }
-    }, [item]);
+  const handleClick = useCallback(() => {
+    if (item.kind === 'ticket') {
+      ticketApi.goToTicket(item.ticket.id);
+    } else {
+      ticketApi.goToMilestone(item.milestone.id, item.milestone.projectId);
+    }
+  }, [item]);
 
-    const title = item.kind === 'ticket' ? item.ticket.title : item.milestone.title;
-    const subtitle = item.kind === 'ticket' ? 'Ticket shipped' : 'Milestone completed';
+  const title = item.kind === 'ticket' ? item.ticket.title : item.milestone.title;
+  const subtitle = item.kind === 'ticket' ? 'Ticket shipped' : 'Milestone completed';
 
-    return (
-      <button type="button" className={styles.shippedRow} onClick={handleClick}>
-        <CheckmarkCircle20Regular style={{ width: 16, height: 16 }} />
-        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: '1 1 0' }}>
-          <Body1
-            style={{
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {title}
-          </Body1>
-          <Caption1>
-            {projectLabel && (
-              <span style={{ color: tokens.colorNeutralForeground2, marginRight: 6 }}>
-                {projectLabel} ·
-              </span>
-            )}
-            {subtitle}
-          </Caption1>
-        </div>
-      </button>
-    );
-  }
-);
+  return (
+    <button type="button" className={styles.shippedRow} onClick={handleClick}>
+      <CheckmarkCircle20Regular style={{ width: 16, height: 16 }} />
+      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: '1 1 0' }}>
+        <Body1
+          style={{
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {title}
+        </Body1>
+        <Caption1>
+          {projectLabel && (
+            <span style={{ color: tokens.colorNeutralForeground2, marginRight: 6 }}>{projectLabel} ·</span>
+          )}
+          {subtitle}
+        </Caption1>
+      </div>
+    </button>
+  );
+});
 ShippedRow.displayName = 'ShippedRow';
 
 /* ---------- Main dashboard ---------- */
@@ -797,10 +778,7 @@ export const ProjectsDashboard = memo(() => {
 
   const wipLimit = store.wipLimit ?? 3;
 
-  const tickets = useMemo(
-    () => store.tickets.filter((ticket) => !ticket.archivedAt),
-    [store.tickets]
-  );
+  const tickets = useMemo(() => store.tickets.filter((ticket) => !ticket.archivedAt), [store.tickets]);
 
   const milestones = useMemo(() => Object.values(milestonesMap), [milestonesMap]);
 
@@ -849,10 +827,7 @@ export const ProjectsDashboard = memo(() => {
     [tickets, milestones, activeInbox, store.projects, terminalColumnIds, wipLimit, now]
   );
 
-  const grouped = useMemo(
-    () => groupRiskSignalsForHome({ signals: risks, tickets }),
-    [risks, tickets]
-  );
+  const grouped = useMemo(() => groupRiskSignalsForHome({ signals: risks, tickets }), [risks, tickets]);
 
   const milestoneMapById = useMemo(() => {
     const m: Record<string, Milestone> = {};
@@ -870,10 +845,7 @@ export const ProjectsDashboard = memo(() => {
     return map;
   }, [store.projects]);
 
-  const pinnedProjects = useMemo(
-    () => store.projects.filter((p) => isProjectPinned(p)),
-    [store.projects]
-  );
+  const pinnedProjects = useMemo(() => store.projects.filter((p) => isProjectPinned(p)), [store.projects]);
 
   const pinnedMilestones = useMemo(
     () => milestones.filter((m) => isMilestonePinned(m) && m.status === 'active'),
@@ -884,8 +856,7 @@ export const ProjectsDashboard = memo(() => {
 
   // Empty-state candidates: unpinned projects with the most open work first.
   const pinCandidates = useMemo(() => {
-    const openCount = (p: Project) =>
-      tickets.filter((t) => t.projectId === p.id && !t.resolution).length;
+    const openCount = (p: Project) => tickets.filter((t) => t.projectId === p.id && !t.resolution).length;
     return store.projects
       .filter((p) => !isProjectPinned(p))
       .map((p) => ({ project: p, open: openCount(p) }))
@@ -961,8 +932,7 @@ export const ProjectsDashboard = memo(() => {
     });
   }, [tickets, milestones, now]);
 
-  const hasAnyContent =
-    tickets.length > 0 || activeInbox.length > 0 || store.projects.length > 0;
+  const hasAnyContent = tickets.length > 0 || activeInbox.length > 0 || store.projects.length > 0;
 
   if (!hasAnyContent) {
     return (
@@ -995,12 +965,7 @@ export const ProjectsDashboard = memo(() => {
               <Title3>Home</Title3>
               <Caption1>What you&apos;re focused on this week.</Caption1>
             </div>
-            <Button
-              size="sm"
-              variant="ghost"
-              leftIcon={<CalendarCheckmark20Regular />}
-              onClick={openReview}
-            >
+            <Button size="sm" variant="ghost" leftIcon={<CalendarCheckmark20Regular />} onClick={openReview}>
               Plan week
             </Button>
           </div>
@@ -1013,9 +978,7 @@ export const ProjectsDashboard = memo(() => {
             <button type="button" onClick={openReview} className={styles.reviewBanner}>
               <CalendarCheckmark20Regular className={styles.reviewIcon} />
               <div className={styles.reviewText}>
-                <Subtitle2>
-                  It&apos;s {dayName(store.weeklyReviewDay ?? 1)} — plan your week
-                </Subtitle2>
+                <Subtitle2>It&apos;s {dayName(store.weeklyReviewDay ?? 1)} — plan your week</Subtitle2>
                 <Caption1>
                   Recap what you shipped and pin the projects or milestones you&apos;re committing to.
                 </Caption1>
@@ -1027,11 +990,7 @@ export const ProjectsDashboard = memo(() => {
           )}
 
           {/* THIS WEEK */}
-          <Section
-            icon={<Pin20Filled style={{ width: 16, height: 16 }} />}
-            title="This week"
-            count={totalPinned}
-          >
+          <Section icon={<Pin20Filled style={{ width: 16, height: 16 }} />} title="This week" count={totalPinned}>
             {totalPinned === 0 ? (
               pinCandidates.length > 0 ? (
                 <div className={styles.pinSuggestions}>
@@ -1041,11 +1000,7 @@ export const ProjectsDashboard = memo(() => {
                   {pinCandidates.map(({ project, open }) => (
                     <div key={project.id} className={styles.pinSuggestionRow}>
                       <span className={styles.pinSuggestionLabel}>{project.label}</span>
-                      {open > 0 && (
-                        <span className={styles.pinSuggestionMeta}>
-                          {open} open
-                        </span>
-                      )}
+                      {open > 0 && <span className={styles.pinSuggestionMeta}>{open} open</span>}
                       <Button
                         size="sm"
                         variant="ghost"
@@ -1106,11 +1061,7 @@ export const ProjectsDashboard = memo(() => {
                 <InboxStripRow key={signal.id} signal={signal} />
               ))}
               {grouped.inbox.length > 3 && (
-                <button
-                  type="button"
-                  className={styles.showAllToggle}
-                  onClick={goToInbox}
-                >
+                <button type="button" className={styles.showAllToggle} onClick={goToInbox}>
                   <ChevronRight16Regular />
                   Show all in Inbox
                 </button>
@@ -1119,10 +1070,7 @@ export const ProjectsDashboard = memo(() => {
           )}
 
           {/* Shipped */}
-          <Section
-            icon={<ArchiveRegular style={{ width: 16, height: 16 }} />}
-            title="Shipped"
-          >
+          <Section icon={<ArchiveRegular style={{ width: 16, height: 16 }} />} title="Shipped">
             <div className={styles.shippedCounts}>
               <span>
                 <Caption1Strong>{shipped.today.ticketCount + shipped.today.milestoneCount}</Caption1Strong>{' '}
@@ -1137,27 +1085,19 @@ export const ProjectsDashboard = memo(() => {
               <div className={styles.sectionEmpty}>Nothing shipped yet this week.</div>
             ) : (
               <>
-                <button
-                  type="button"
-                  className={styles.shippedToggle}
-                  onClick={toggleShipped}
-                >
+                <button type="button" className={styles.shippedToggle} onClick={toggleShipped}>
                   {shippedExpanded ? <ChevronDown16Regular /> : <ChevronRight16Regular />}
                   <span>{shippedExpanded ? 'Hide details' : 'Show details'}</span>
                 </button>
                 {shippedExpanded &&
                   shipped.week.items.map((item) => {
                     const key = item.kind === 'ticket' ? `t:${item.ticket.id}` : `m:${item.milestone.id}`;
-                    const projectId =
-                      item.kind === 'ticket' ? item.ticket.projectId : item.milestone.projectId;
-                    return (
-                      <ShippedRow key={key} item={item} projectLabel={projectLabels[projectId]} />
-                    );
+                    const projectId = item.kind === 'ticket' ? item.ticket.projectId : item.milestone.projectId;
+                    return <ShippedRow key={key} item={item} projectLabel={projectLabels[projectId]} />;
                   })}
               </>
             )}
           </Section>
-
         </div>
       </div>
       <WeekPlanDialog open={reviewOpen} onClose={closeReview} />
@@ -1165,4 +1105,3 @@ export const ProjectsDashboard = memo(() => {
   );
 });
 ProjectsDashboard.displayName = 'ProjectsDashboard';
-

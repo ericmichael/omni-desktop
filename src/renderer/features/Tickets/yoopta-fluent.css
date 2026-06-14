@@ -172,7 +172,9 @@
 }
 
 .yoopta-ui-floating-action-button:focus-visible {
-  box-shadow: 0 0 0 2px var(--colorNeutralBackground1), 0 0 0 4px var(--colorBrandStroke1);
+  box-shadow:
+    0 0 0 2px var(--colorNeutralBackground1),
+    0 0 0 4px var(--colorBrandStroke1);
 }
 
 /* -- Glass mode ------------------------------------------------------------ */
@@ -220,7 +222,9 @@ body:has(.omni-glass) [class*='yoopta-ui-action-menu-list-content'],
 body:has(.omni-glass) .yoopta-ui-floating-block-actions {
   background-color: var(--yoopta-glass-panel) !important;
   border-color: var(--yoopta-glass-border) !important;
-  box-shadow: 0 1px 0 rgb(255 255 255 / 0.08) inset, var(--shadow16);
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 0.08) inset,
+    var(--shadow16);
   backdrop-filter: var(--glass-blur-light);
   -webkit-backdrop-filter: var(--glass-blur-light);
 }

@@ -72,11 +72,7 @@ export class MachineRegistry {
    * *principalId*. Upserts the persistent row + bumps `last_seen_at`.
    * Returns the durable row for the caller to broadcast.
    */
-  async bindFromWs(
-    ws: WebSocket,
-    principalId: string,
-    info: MachineIdentity
-  ): Promise<MachineRow> {
+  async bindFromWs(ws: WebSocket, principalId: string, info: MachineIdentity): Promise<MachineRow> {
     await this.repo.register(principalId, info);
     const prior = this.active.get(info.machineId);
     // If we already had a different WS for this machine, release the
@@ -120,7 +116,9 @@ export class MachineRegistry {
     ws: WebSocket
   ): { machineId: string; principalId: string; label: string; sessionsAnchored: string[] } | null {
     const machineId = this.byWs.get(ws);
-    if (!machineId) return null;
+    if (!machineId) {
+      return null;
+    }
     this.byWs.delete(ws);
     const entry = this.active.get(machineId);
     // Only delete the active entry if this WS is still the current one.

@@ -33,8 +33,12 @@ vi.mock('@/main/util', () => ({
 vi.mock('@/main/profile-resolver', () => ({
   HOST_PROFILE_NAME: 'host',
   resolveProfile: vi.fn((name: string) => {
-    if (name === 'host') return { kind: 'builtin-default' };
-    if (name === 'missing') return { kind: 'missing', expected: '/fake/config/sandbox/missing.yml' };
+    if (name === 'host') {
+      return { kind: 'builtin-default' };
+    }
+    if (name === 'missing') {
+      return { kind: 'missing', expected: '/fake/config/sandbox/missing.yml' };
+    }
     return { kind: 'file', path: `/fake/config/sandbox/${name}.yml` };
   }),
 }));
@@ -72,6 +76,7 @@ vi.mock('ws', async () => {
 // ---------------------------------------------------------------------------
 
 import { EventEmitter } from 'node:events';
+import path from 'node:path';
 
 import { AgentProcess, type AgentProcessStartArg } from '@/main/agent-process';
 import type { AgentProcessStatus, WithTimestamp } from '@/shared/types';
@@ -176,13 +181,11 @@ describe('AgentProcess (serve mode)', () => {
     kind: 'local-git',
     workspaceDir,
   });
-  const remoteSource = (
-    repoUrl = 'https://github.com/foo/bar.git',
-    mountName = 'bar',
-    ref?: string
-  ): Source => {
+  const remoteSource = (repoUrl = 'https://github.com/foo/bar.git', mountName = 'bar', ref?: string): Source => {
     const s: Source = { mountName, kind: 'git-remote', repoUrl };
-    if (ref) s.ref = ref;
+    if (ref) {
+      s.ref = ref;
+    }
     return s;
   };
 
@@ -215,9 +218,7 @@ describe('AgentProcess (serve mode)', () => {
     expect(args).toContain('json');
     expect(args).toContain('--workspace');
     expect(args[args.indexOf('--workspace') + 1]).toBe('/test/workspace');
-    expect(sourceDescriptors(args)).toEqual([
-      { kind: 'local-git', mountName: 'launcher', path: '/test/workspace' },
-    ]);
+    expect(sourceDescriptors(args)).toEqual([{ kind: 'local-git', mountName: 'launcher', path: '/test/workspace' }]);
   });
 
   it('emits multiple --source descriptors for a multi-source project', async () => {
@@ -272,7 +273,7 @@ describe('AgentProcess (serve mode)', () => {
     expect(args).toContain('--project');
     expect(args).toContain('proj_abc');
     expect(args).toContain('--snapshot-dir');
-    expect(args).toContain('/fake/config/snapshots');
+    expect(args).toContain(path.join('/fake/config', 'snapshots'));
   });
 
   it('always passes --snapshot-dir; --session-id only when caller supplies one', async () => {
@@ -374,7 +375,7 @@ describe('AgentProcess (serve mode)', () => {
 
   it('errors when workspace dir does not exist (local sources only)', async () => {
     const utilMock = await import('@/main/util');
-    (utilMock.isDirectory as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false);
+    (utilMock.isDirectory as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false).mockResolvedValueOnce(false);
 
     const h = makeHarness();
     await h.proc.start({ profileName: 'host', sources: [localSource('/missing')] });

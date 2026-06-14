@@ -20,7 +20,10 @@ export const isElectron = typeof window !== 'undefined' && 'electron' in window;
  */
 type OmniBootstrap = { cloudMode: CloudMode | null };
 const bootstrap: OmniBootstrap = ((): OmniBootstrap => {
-  const fromWindow = (typeof window !== 'undefined' ? (window as unknown as { __omniBootstrap?: OmniBootstrap }).__omniBootstrap : undefined) ?? null;
+  const fromWindow =
+    (typeof window !== 'undefined'
+      ? (window as unknown as { __omniBootstrap?: OmniBootstrap }).__omniBootstrap
+      : undefined) ?? null;
   return fromWindow ?? { cloudMode: null };
 })();
 

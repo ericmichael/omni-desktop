@@ -21,9 +21,7 @@ export type TerminalState =
       exitCode: number;
     });
 
-export type TerminalCreateError =
-  | { kind: 'process_not_ready' }
-  | { kind: 'backend_unavailable'; message: string };
+export type TerminalCreateError = { kind: 'process_not_ready' } | { kind: 'backend_unavailable'; message: string };
 
 export const $terminalsByTab = atom<Record<string, TerminalState[]>>({});
 export const $activeTerminalIdByTab = atom<Record<string, string | null>>({});
@@ -35,8 +33,7 @@ export const $activeTerminalIdByTab = atom<Record<string, string | null>>({});
 export const $terminalCreateErrorByTab = atom<Record<string, TerminalCreateError | null>>({});
 
 export const terminalsForTab = (tabId: string) => computed($terminalsByTab, (map) => map[tabId] ?? []);
-export const activeTerminalIdForTab = (tabId: string) =>
-  computed($activeTerminalIdByTab, (map) => map[tabId] ?? null);
+export const activeTerminalIdForTab = (tabId: string) => computed($activeTerminalIdByTab, (map) => map[tabId] ?? null);
 
 // Track hydration per tab so we don't double-fetch if multiple components
 // mount for the same column.
@@ -56,12 +53,12 @@ const pendingHydrations = new Map<string, Promise<void>>();
  */
 export const hydrateTerminalsForTab = async (tabId: string): Promise<void> => {
   if (hydratedTabs.has(tabId)) {
-return;
-}
+    return;
+  }
   const pending = pendingHydrations.get(tabId);
   if (pending) {
-return pending;
-}
+    return pending;
+  }
 
   const promise = (async () => {
     const ids = await emitter.invoke('terminal:list', tabId);
@@ -102,8 +99,8 @@ export const ensureTerminalForTab = async (tabId: string): Promise<void> => {
   const firstVisit = !hydratedTabs.has(tabId) && !pendingHydrations.has(tabId);
   await hydrateTerminalsForTab(tabId);
   if (!firstVisit) {
-return;
-}
+    return;
+  }
   const list = $terminalsByTab.get()[tabId] ?? [];
   if (list.length === 0) {
     try {
@@ -133,7 +130,9 @@ export const createTerminal = async (tabId: string): Promise<string> => {
 const classifyCreateError = (err: unknown): TerminalCreateError => {
   const message = err instanceof Error ? err.message : String(err);
   // Main process tags errors as `[<kind>] <message>` — see console-manager.ts.
-  if (message.includes('[process_not_ready]')) return { kind: 'process_not_ready' };
+  if (message.includes('[process_not_ready]')) {
+    return { kind: 'process_not_ready' };
+  }
   return { kind: 'backend_unavailable', message };
 };
 
@@ -143,7 +142,9 @@ const setTerminalCreateError = (tabId: string, error: TerminalCreateError): void
 
 const clearTerminalCreateError = (tabId: string): void => {
   const current = $terminalCreateErrorByTab.get();
-  if (!(tabId in current)) return;
+  if (!(tabId in current)) {
+    return;
+  }
   const next = { ...current };
   delete next[tabId];
   $terminalCreateErrorByTab.set(next);
@@ -152,14 +153,14 @@ const clearTerminalCreateError = (tabId: string): void => {
 export const destroyTerminal = async (tabId: string, id?: string): Promise<void> => {
   const targetId = id ?? $activeTerminalIdByTab.get()[tabId] ?? null;
   if (!targetId) {
-return;
-}
+    return;
+  }
 
   const list = $terminalsByTab.get()[tabId] ?? [];
   const target = list.find((t) => t.id === targetId);
   if (!target) {
-return;
-}
+    return;
+  }
 
   await emitter.invoke('terminal:dispose', targetId);
   target.xterm.dispose();
@@ -198,8 +199,8 @@ export const destroyAllTerminalsForTab = async (tabId: string): Promise<void> =>
 export const setActiveTerminal = (tabId: string, id: string | null): void => {
   const current = $activeTerminalIdByTab.get();
   if (current[tabId] === id) {
-return;
-}
+    return;
+  }
   $activeTerminalIdByTab.set({ ...current, [tabId]: id });
 };
 
@@ -246,8 +247,8 @@ const updateTerminal = (
 ipc.on('terminal:exited', (tabId, id, exitCode) => {
   const terminal = findTerminal(tabId, id);
   if (!terminal) {
-return;
-}
+    return;
+  }
   terminal.xterm.options.disableStdin = true;
   updateTerminal(tabId, id, { isRunning: false, exitCode });
 });
@@ -255,7 +256,7 @@ return;
 ipc.on('terminal:output', (tabId, id, data) => {
   const terminal = findTerminal(tabId, id);
   if (!terminal) {
-return;
-}
+    return;
+  }
   terminal.xterm.write(data);
 });

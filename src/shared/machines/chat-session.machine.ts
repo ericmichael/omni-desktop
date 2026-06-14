@@ -7,13 +7,14 @@
  * Pure definition — no React, no IPC, no DOM imports.
  * Session filtering reuses the pure guards from `@/lib/session-filter`.
  */
-import { type ActorRefFrom, assign, setup,type SnapshotFrom } from 'xstate';
+import { type ActorRefFrom, assign, setup, type SnapshotFrom } from 'xstate';
 
 import { acceptLooseEvent, acceptStrictEvent } from '@/lib/session-filter';
 import type {
   ApprovalItem,
   ArtifactItem,
   Attachment,
+  ChatItemMetadata,
   ChatMessage,
   MessageItem,
   PreambleChunk,
@@ -105,7 +106,7 @@ export type ChatSessionEvent =
       call_id: string;
       tool: string;
       output: string;
-      metadata?: unknown;
+      metadata?: ChatItemMetadata;
       run_id?: string;
       session_id?: string;
     }
@@ -116,7 +117,7 @@ export type ChatSessionEvent =
       request_id: string;
       tool: string;
       argumentsText?: string;
-      metadata?: unknown;
+      metadata?: ChatItemMetadata;
       session_id?: string;
       // Discriminator for the two interruption flows in omniagents
       // 0.16+: function-tool approvals (default) vs hosted-MCP
@@ -195,21 +196,21 @@ export const chatSessionMachine = setup({
     acceptStrict: ({ context, event }) =>
       acceptStrictEvent(
         { currentSessionId: context.sessionId, startingRun: false },
-        sessionId(event as { session_id?: string }),
+        sessionId(event as { session_id?: string })
       ),
 
     /** Strict filter — but startingRun = true (used in the `starting` state). */
     acceptStrictOrStarting: ({ context, event }) =>
       acceptStrictEvent(
         { currentSessionId: context.sessionId, startingRun: true },
-        sessionId(event as { session_id?: string }),
+        sessionId(event as { session_id?: string })
       ),
 
     /** Loose filter — only rejects when both sides have IDs that disagree. */
     acceptLoose: ({ context, event }) =>
       acceptLooseEvent(
         { currentSessionId: context.sessionId, startingRun: false },
-        sessionId(event as { session_id?: string }),
+        sessionId(event as { session_id?: string })
       ),
 
     /** True when more than one approval is pending (so removing one still leaves queue non-empty). */
@@ -274,16 +275,12 @@ export const chatSessionMachine = setup({
         return { items: context.items };
       }
       const role: ChatMessage['role'] =
-        e.prompt_role === 'assistant' || e.prompt_role === 'system'
-          ? e.prompt_role
-          : 'user';
+        e.prompt_role === 'assistant' || e.prompt_role === 'system' ? e.prompt_role : 'user';
       // Idempotency: scan items for a matching same-role chat message
       // already present. Reconnect / history-replay can deliver the same
       // RUN_STARTED twice; the rehydrate path may also have written the
       // turn to items already if reload races the live event.
-      const dup = context.items.some(
-        (it) => it.type === 'chat' && it.role === role && it.content === text,
-      );
+      const dup = context.items.some((it) => it.type === 'chat' && it.role === role && it.content === text);
       if (dup) {
         return { items: context.items };
       }
@@ -294,10 +291,7 @@ export const chatSessionMachine = setup({
     bufferPreamble: assign(({ context, event }) => {
       const e = event as Extract<ChatSessionEvent, { type: 'MESSAGE_OUTPUT' }>;
       return {
-        preambleBuffer: [
-          ...context.preambleBuffer,
-          { content: e.content, timestamp: Date.now(), superseded: false },
-        ],
+        preambleBuffer: [...context.preambleBuffer, { content: e.content, timestamp: Date.now(), superseded: false }],
         preamble: e.content,
         status: undefined,
         statusItalic: false,
@@ -322,9 +316,7 @@ export const chatSessionMachine = setup({
 
     updateToolResult: assign(({ context, event }) => {
       const e = event as Extract<ChatSessionEvent, { type: 'TOOL_RESULT' }>;
-      const idx = context.items.findIndex(
-        (it) => it.type === 'tool' && (it as ToolItem).call_id === e.call_id,
-      );
+      const idx = context.items.findIndex((it) => it.type === 'tool' && (it as ToolItem).call_id === e.call_id);
       const next = context.items.slice();
       if (idx >= 0) {
         next[idx] = {
@@ -355,9 +347,7 @@ export const chatSessionMachine = setup({
       const flushed = nonSuperseded.length
         ? [
             ...context.items,
-            ...nonSuperseded.map(
-              (m): ChatMessage => ({ type: 'chat', role: 'assistant', content: m.content }),
-            ),
+            ...nonSuperseded.map((m): ChatMessage => ({ type: 'chat', role: 'assistant', content: m.content })),
           ]
         : context.items;
       return {
@@ -401,22 +391,19 @@ export const chatSessionMachine = setup({
       newPending.set(e.request_id, item);
       // Remove any existing approval with same request_id, then append
       const filtered = context.items.filter(
-        (it) => !(it.type === 'approval' && (it as ApprovalItem).request_id === e.request_id),
+        (it) => !(it.type === 'approval' && (it as ApprovalItem).request_id === e.request_id)
       );
       return { pendingApprovals: newPending, items: [...filtered, item] };
     }),
 
     removeApproval: assign(({ context, event }) => {
-      const e = event as Extract<
-        ChatSessionEvent,
-        { type: 'APPROVAL_DECIDED' | 'APPROVAL_RESOLVED' }
-      >;
+      const e = event as Extract<ChatSessionEvent, { type: 'APPROVAL_DECIDED' | 'APPROVAL_RESOLVED' }>;
       const newPending = new Map(context.pendingApprovals);
       newPending.delete(e.request_id);
       return {
         pendingApprovals: newPending,
         items: context.items.filter(
-          (it) => !(it.type === 'approval' && (it as ApprovalItem).request_id === e.request_id),
+          (it) => !(it.type === 'approval' && (it as ApprovalItem).request_id === e.request_id)
         ),
       };
     }),
@@ -454,13 +441,10 @@ export const chatSessionMachine = setup({
         const e = event as Extract<ChatSessionEvent, { type: 'HISTORY_LOADED' }>;
         // Merge any pending approvals that arrived during history loading
         if (context.pendingApprovals.size === 0) {
-return e.items;
-}
+          return e.items;
+        }
         const approvalItems = [...context.pendingApprovals.values()].filter(
-          (a) =>
-            !e.items.some(
-              (it) => it.type === 'approval' && (it as ApprovalItem).request_id === a.request_id,
-            ),
+          (a) => !e.items.some((it) => it.type === 'approval' && (it as ApprovalItem).request_id === a.request_id)
         );
         return approvalItems.length ? [...e.items, ...approvalItems] : e.items;
       },
@@ -469,10 +453,7 @@ return e.items;
     setSubmitError: assign(({ context, event }) => {
       const e = event as Extract<ChatSessionEvent, { type: 'SUBMIT_ERROR' }>;
       return {
-        items: [
-          ...context.items,
-          { type: 'chat' as const, role: 'assistant' as const, content: `Error: ${e.error}` },
-        ],
+        items: [...context.items, { type: 'chat' as const, role: 'assistant' as const, content: `Error: ${e.error}` }],
       };
     }),
 
@@ -484,10 +465,7 @@ return e.items;
     appendResponse: assign({
       items: ({ context, event }) => {
         const e = event as Extract<ChatSessionEvent, { type: 'APPEND_RESPONSE' }>;
-        return [
-          ...context.items,
-          { type: 'chat' as const, role: 'assistant' as const, content: e.content },
-        ];
+        return [...context.items, { type: 'chat' as const, role: 'assistant' as const, content: e.content }];
       },
     }),
 
@@ -506,11 +484,7 @@ return e.items;
       const next = context.items.slice();
       // If artifact_id exists, update in-place; otherwise append
       const idx = e.artifact_id
-        ? next.findIndex(
-            (it) =>
-              it.type === 'artifact' &&
-              (it as ArtifactItem).artifact_id === e.artifact_id,
-          )
+        ? next.findIndex((it) => it.type === 'artifact' && (it as ArtifactItem).artifact_id === e.artifact_id)
         : -1;
       if (idx >= 0) {
         next[idx] = entry;
@@ -521,8 +495,7 @@ return e.items;
     }),
 
     setSessionIdOnly: assign({
-      sessionId: ({ event }) =>
-        (event as Extract<ChatSessionEvent, { type: 'SET_SESSION_ID' }>).sessionId,
+      sessionId: ({ event }) => (event as Extract<ChatSessionEvent, { type: 'SET_SESSION_ID' }>).sessionId,
     }),
 
     stageContext: assign(({ context, event }) => {

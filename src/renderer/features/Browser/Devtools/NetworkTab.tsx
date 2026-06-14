@@ -119,29 +119,55 @@ const useStyles = makeStyles({
 type Filter = 'all' | 'xhr' | 'doc' | 'css' | 'js' | 'img' | 'err';
 
 function matchesFilter(e: NetworkLogEntry, filter: Filter): boolean {
-  if (filter === 'all') return true;
-  if (filter === 'err') return (e.status ?? 0) >= 400 || !!e.errorText;
+  if (filter === 'all') {
+    return true;
+  }
+  if (filter === 'err') {
+    return (e.status ?? 0) >= 400 || !!e.errorText;
+  }
   const rt = (e.resourceType ?? '').toLowerCase();
-  if (filter === 'xhr') return rt === 'xhr' || rt === 'fetch';
-  if (filter === 'doc') return rt === 'document';
-  if (filter === 'css') return rt === 'stylesheet';
-  if (filter === 'js') return rt === 'script';
-  if (filter === 'img') return rt === 'image' || rt === 'media' || rt === 'font';
+  if (filter === 'xhr') {
+    return rt === 'xhr' || rt === 'fetch';
+  }
+  if (filter === 'doc') {
+    return rt === 'document';
+  }
+  if (filter === 'css') {
+    return rt === 'stylesheet';
+  }
+  if (filter === 'js') {
+    return rt === 'script';
+  }
+  if (filter === 'img') {
+    return rt === 'image' || rt === 'media' || rt === 'font';
+  }
   return true;
 }
 
 function formatDuration(e: NetworkLogEntry): string {
-  if (e.endedAt === undefined) return '…';
+  if (e.endedAt === undefined) {
+    return '…';
+  }
   const ms = Math.max(0, (e.endedAt - e.startedAt) * 1000);
-  if (ms < 10) return `${ms.toFixed(1)} ms`;
-  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 10) {
+    return `${ms.toFixed(1)} ms`;
+  }
+  if (ms < 1000) {
+    return `${Math.round(ms)} ms`;
+  }
   return `${(ms / 1000).toFixed(2)} s`;
 }
 
 function formatSize(bytes?: number): string {
-  if (bytes === undefined) return '';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes === undefined) {
+    return '';
+  }
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
@@ -166,7 +192,9 @@ export const NetworkTab = memo(({ handleId }: { handleId: AppHandleId }) => {
     void refresh();
     timerRef.current = setInterval(() => void refresh(), 1000);
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
     };
   }, [refresh]);
 
@@ -181,13 +209,17 @@ export const NetworkTab = memo(({ handleId }: { handleId: AppHandleId }) => {
   }, [handleId]);
 
   const filtered = entries.filter((e) => {
-    if (!matchesFilter(e, filter)) return false;
-    if (!query) return true;
+    if (!matchesFilter(e, filter)) {
+      return false;
+    }
+    if (!query) {
+      return true;
+    }
     const q = query.toLowerCase();
     return e.url.toLowerCase().includes(q) || e.method.toLowerCase().includes(q);
   });
 
-  const selected = selectedId ? entries.find((e) => e.requestId === selectedId) ?? null : null;
+  const selected = selectedId ? (entries.find((e) => e.requestId === selectedId) ?? null) : null;
 
   const FILTERS: { id: Filter; label: string }[] = [
     { id: 'all', label: 'All' },
@@ -243,11 +275,12 @@ export const NetworkTab = memo(({ handleId }: { handleId: AppHandleId }) => {
             <div className={styles.empty}>No requests yet.</div>
           ) : (
             filtered.map((e) => {
-              const statusClass = e.errorText || (e.status ?? 0) >= 500
-                ? styles.rowErr
-                : (e.status ?? 0) >= 400
-                  ? styles.rowWarn
-                  : undefined;
+              const statusClass =
+                e.errorText || (e.status ?? 0) >= 500
+                  ? styles.rowErr
+                  : (e.status ?? 0) >= 400
+                    ? styles.rowWarn
+                    : undefined;
               return (
                 <div
                   key={e.requestId}
@@ -256,7 +289,7 @@ export const NetworkTab = memo(({ handleId }: { handleId: AppHandleId }) => {
                   role="row"
                 >
                   <span className={styles.cell}>{e.method}</span>
-                  <span className={styles.cell}>{e.errorText ? '—' : e.status ?? '…'}</span>
+                  <span className={styles.cell}>{e.errorText ? '—' : (e.status ?? '…')}</span>
                   <span className={`${styles.cell} ${styles.url}`} title={e.url}>
                     {e.url}
                   </span>

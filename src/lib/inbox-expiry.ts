@@ -30,18 +30,14 @@ export function daysRemaining(createdAt: number, nowMs: number, expiryMs: number
  * Returns a new array — callers are responsible for persisting it. Items
  * that don't change are returned by reference so equality checks stay cheap.
  */
-export function sweepInbox(
-  items: InboxItem[],
-  nowMs: number,
-  expiryMs: number = INBOX_EXPIRY_MS
-): InboxItem[] {
+export function sweepInbox(items: InboxItem[], nowMs: number, expiryMs: number = INBOX_EXPIRY_MS): InboxItem[] {
   return items.map((item) => {
     if (item.status !== 'new') {
-return item;
-}
+      return item;
+    }
     if (!hasExpired(item.createdAt, nowMs, expiryMs)) {
-return item;
-}
+      return item;
+    }
     return { ...item, status: 'later', laterAt: nowMs, updatedAt: nowMs };
   });
 }

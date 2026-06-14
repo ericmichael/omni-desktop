@@ -1,198 +1,261 @@
-import { ArrowUpIcon, CheckIcon, FolderIcon, Loader2Icon, LockIcon, MicIcon, MonitorIcon, PaperclipIcon, SquareIcon, Volume2Icon, VolumeXIcon, XIcon } from 'lucide-react'
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useStore } from '@nanostores/react';
+import {
+  ArrowUpIcon,
+  CheckIcon,
+  FolderIcon,
+  Loader2Icon,
+  LockIcon,
+  MicIcon,
+  MonitorIcon,
+  PaperclipIcon,
+  SquareIcon,
+  Volume2Icon,
+  VolumeXIcon,
+  XIcon,
+} from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { PromptInput, PromptInputActions,PromptInputTextarea } from './promptkit/PromptInput'
-import { useStore } from '@nanostores/react'
+import { persistedStoreApi } from '@/renderer/services/store';
+import { isLocalVoiceCapable } from '@/renderer/services/voice-client';
 
-import { VoiceModal } from './VoiceModal'
-import { LocalVoiceButton } from './LocalVoiceButton'
-import { isLocalVoiceCapable } from '@/renderer/services/voice-client'
-import { persistedStoreApi } from '@/renderer/services/store'
+import { LocalVoiceButton } from './LocalVoiceButton';
+import { PromptInput, PromptInputActions, PromptInputTextarea } from './promptkit/PromptInput';
+import { VoiceModal } from './VoiceModal';
 
 /** Trailing path segment, tolerant of both `/` and `\` separators and trailing slashes. Falls back to the input when nothing would be left. */
 function basename(p: string): string {
-  const trimmed = p.replace(/[\\/]+$/, '')
-  const idx = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'))
-  const tail = idx === -1 ? trimmed : trimmed.slice(idx + 1)
-  return tail || p
+  const trimmed = p.replace(/[\\/]+$/, '');
+  const idx = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  const tail = idx === -1 ? trimmed : trimmed.slice(idx + 1);
+  return tail || p;
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Human label for the workspace chip. Session workspaces live in UUID-named
  *  directories; a raw UUID in the composer reads as a bug, so fall back to a
  *  generic label (the full path stays available via the title attribute). */
 function workspaceLabel(p: string): string {
-  const tail = basename(p)
-  return UUID_RE.test(tail) ? 'Workspace' : tail
+  const tail = basename(p);
+  return UUID_RE.test(tail) ? 'Workspace' : tail;
 }
 
-export function Input({ disabled, thinking, onStop, onSubmit, onVoiceSubmit, voiceEnabled, speakRepliesEnabled, onSpeakRepliesChange, workspacePath, workspaceLocked, onWorkspaceClick, sandboxLabel, sandboxLocked, sandboxLoading, sandboxOptions, currentSandboxProfile, onSandboxChange, sessionId, onVoiceSessionCreated, onVoiceClose }:
-  { disabled?: boolean; thinking?: boolean; onStop?: () => void; onSubmit: (text: string, files?: File[]) => void; onVoiceSubmit?: (text: string) => void; voiceEnabled?: boolean; speakRepliesEnabled?: boolean; onSpeakRepliesChange?: (enabled: boolean) => void; workspacePath?: string | null; workspaceLocked?: boolean; onWorkspaceClick?: () => void; sandboxLabel?: string; sandboxLocked?: boolean; sandboxLoading?: boolean; sandboxOptions?: { value: string; label: string }[]; currentSandboxProfile?: string; onSandboxChange?: (value: string) => void; sessionId?: string; onVoiceSessionCreated?: (id: string) => void; onVoiceClose?: () => void }) {
-  const [text, setText] = useState('')
-  const [files, setFiles] = useState<File[]>([])
-  const [history, setHistory] = useState<string[]>([])
-  const [historyIndex, setHistoryIndex] = useState(0)
-  const [historyDraft, setHistoryDraft] = useState('')
-  const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false)
+export function Input({
+  disabled,
+  thinking,
+  onStop,
+  onSubmit,
+  onVoiceSubmit,
+  voiceEnabled,
+  speakRepliesEnabled,
+  onSpeakRepliesChange,
+  workspacePath,
+  workspaceLocked,
+  onWorkspaceClick,
+  sandboxLabel,
+  sandboxLocked,
+  sandboxLoading,
+  sandboxOptions,
+  currentSandboxProfile,
+  onSandboxChange,
+  sessionId,
+  onVoiceSessionCreated,
+  onVoiceClose,
+}: {
+  disabled?: boolean;
+  thinking?: boolean;
+  onStop?: () => void;
+  onSubmit: (text: string, files?: File[]) => void;
+  onVoiceSubmit?: (text: string) => void;
+  voiceEnabled?: boolean;
+  speakRepliesEnabled?: boolean;
+  onSpeakRepliesChange?: (enabled: boolean) => void;
+  workspacePath?: string | null;
+  workspaceLocked?: boolean;
+  onWorkspaceClick?: () => void;
+  sandboxLabel?: string;
+  sandboxLocked?: boolean;
+  sandboxLoading?: boolean;
+  sandboxOptions?: { value: string; label: string }[];
+  currentSandboxProfile?: string;
+  onSandboxChange?: (value: string) => void;
+  sessionId?: string;
+  onVoiceSessionCreated?: (id: string) => void;
+  onVoiceClose?: () => void;
+}) {
+  const [text, setText] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  const [historyDraft, setHistoryDraft] = useState('');
+  const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
   // Local voice (Option A): shown when the user picked it in Settings → Models
   // → Voice and the deployment can run it. Takes precedence over the realtime
   // VoiceModal mic button.
-  const localVoiceEnabled = useStore(persistedStoreApi.$atom).localVoiceEnabled
-  const localVoiceSupported = localVoiceEnabled && isLocalVoiceCapable()
-  const speakerToggleLabel = speakRepliesEnabled ? 'Spoken replies on' : 'Spoken replies off'
-  const [sandboxMenuOpen, setSandboxMenuOpen] = useState(false)
-  const taRef = useRef<HTMLTextAreaElement | null>(null)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const sandboxMenuRef = useRef<HTMLDivElement | null>(null)
+  const localVoiceEnabled = useStore(persistedStoreApi.$atom).localVoiceEnabled;
+  const localVoiceSupported = localVoiceEnabled && isLocalVoiceCapable();
+  const speakerToggleLabel = speakRepliesEnabled ? 'Spoken replies on' : 'Spoken replies off';
+  const [sandboxMenuOpen, setSandboxMenuOpen] = useState(false);
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const sandboxMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Close the sandbox dropdown when the user clicks anywhere outside it.
   useEffect(() => {
     if (!sandboxMenuOpen) {
-      return
+      return;
     }
     const onDown = (e: MouseEvent) => {
       if (sandboxMenuRef.current && !sandboxMenuRef.current.contains(e.target as Node)) {
-        setSandboxMenuOpen(false)
+        setSandboxMenuOpen(false);
       }
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [sandboxMenuOpen])
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [sandboxMenuOpen]);
 
-  const sandboxInteractive = !!sandboxOptions && sandboxOptions.length > 0 && !!onSandboxChange && !sandboxLocked
+  const sandboxInteractive = !!sandboxOptions && sandboxOptions.length > 0 && !!onSandboxChange && !sandboxLocked;
 
   const toggleSandboxMenu = useCallback(() => {
-    setSandboxMenuOpen((v) => !v)
-  }, [])
+    setSandboxMenuOpen((v) => !v);
+  }, []);
 
-  const handleSandboxSelect = useCallback((value: string) => {
-    setSandboxMenuOpen(false)
-    if (value !== currentSandboxProfile) {
-      onSandboxChange?.(value)
-    }
-  }, [currentSandboxProfile, onSandboxChange])
+  const handleSandboxSelect = useCallback(
+    (value: string) => {
+      setSandboxMenuOpen(false);
+      if (value !== currentSandboxProfile) {
+        onSandboxChange?.(value);
+      }
+    },
+    [currentSandboxProfile, onSandboxChange]
+  );
 
-  const canSend = useMemo(() => !disabled && (text.trim().length > 0 || files.length > 0), [disabled, text, files])
+  const canSend = useMemo(() => !disabled && (text.trim().length > 0 || files.length > 0), [disabled, text, files]);
 
-  const insertNewlineAtCursor = useCallback((el?: HTMLTextAreaElement) => {
-    const target = el ?? taRef.current
-    if (!target) {
-return
-}
-    const start = target.selectionStart ?? text.length
-    const end = target.selectionEnd ?? text.length
-    const next = `${text.slice(0, start)  }\n${  text.slice(end)}`
-    setText(next)
-    const pos = start + 1
-    requestAnimationFrame(() => {
-      try {
- target.setSelectionRange(pos, pos) 
-} catch {}
-    })
-  }, [text])
+  const insertNewlineAtCursor = useCallback(
+    (el?: HTMLTextAreaElement) => {
+      const target = el ?? taRef.current;
+      if (!target) {
+        return;
+      }
+      const start = target.selectionStart ?? text.length;
+      const end = target.selectionEnd ?? text.length;
+      const next = `${text.slice(0, start)}\n${text.slice(end)}`;
+      setText(next);
+      const pos = start + 1;
+      requestAnimationFrame(() => {
+        try {
+          target.setSelectionRange(pos, pos);
+        } catch {}
+      });
+    },
+    [text]
+  );
 
   const handleSubmit = useCallback(() => {
-    const t = text.trim()
+    const t = text.trim();
     if (!t && files.length === 0) {
-return
-}
-    onSubmit(t, files)
-    setHistory(h => h.length && h[h.length - 1] === t ? h : [...h, t])
-    setHistoryIndex(0)
-    setHistoryDraft('')
-    setText('')
-    setFiles([])
-  }, [text, files, onSubmit])
+      return;
+    }
+    onSubmit(t, files);
+    setHistory((h) => (h.length && h[h.length - 1] === t ? h : [...h, t]));
+    setHistoryIndex(0);
+    setHistoryDraft('');
+    setText('');
+    setFiles([]);
+  }, [text, files, onSubmit]);
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      if (thinking && onStop) {
-        onStop()
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (thinking && onStop) {
+          onStop();
+        }
+        return;
       }
-      return
-    }
-    if (e.key === 'Enter') {
-      if (e.shiftKey || e.altKey) {
-        e.preventDefault()
-        insertNewlineAtCursor(e.currentTarget)
-        return
+      if (e.key === 'Enter') {
+        if (e.shiftKey || e.altKey) {
+          e.preventDefault();
+          insertNewlineAtCursor(e.currentTarget);
+          return;
+        }
       }
-    }
-    if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'j')) {
-      e.preventDefault()
-      insertNewlineAtCursor(e.currentTarget)
-      return
-    }
-    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-      const el = e.currentTarget
-      const caretAtStart = (el.selectionStart ?? 0) === 0 && (el.selectionEnd ?? 0) === 0
-      const caretAtEnd = (el.selectionStart ?? 0) === text.length && (el.selectionEnd ?? 0) === text.length
-      if (e.key === 'ArrowUp' && caretAtStart) {
-        e.preventDefault()
-        if (historyIndex === 0) {
-setHistoryDraft(text)
-}
-        const nextIndex = Math.min(history.length, historyIndex + 1)
-        setHistoryIndex(nextIndex)
-        const replacement = nextIndex > 0 ? history[history.length - nextIndex] : historyDraft
-        if (replacement != null) {
-setText(replacement)
-}
-        requestAnimationFrame(() => {
-          try {
- el.setSelectionRange(0, 0) 
-} catch {}
-        })
-      } else if (e.key === 'ArrowDown' && caretAtEnd && historyIndex > 0) {
-        e.preventDefault()
-        const nextIndex = Math.max(0, historyIndex - 1)
-        setHistoryIndex(nextIndex)
-        const replacement = nextIndex > 0 ? history[history.length - nextIndex] : historyDraft
-        if (replacement != null) {
-setText(replacement)
-}
-        requestAnimationFrame(() => {
-          const pos = (replacement ?? '').length
-          try {
- el.setSelectionRange(pos, pos) 
-} catch {}
-        })
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j') {
+        e.preventDefault();
+        insertNewlineAtCursor(e.currentTarget);
+        return;
       }
-    }
-  }, [text, history, historyIndex, historyDraft, handleSubmit, insertNewlineAtCursor, thinking, onStop])
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        const el = e.currentTarget;
+        const caretAtStart = (el.selectionStart ?? 0) === 0 && (el.selectionEnd ?? 0) === 0;
+        const caretAtEnd = (el.selectionStart ?? 0) === text.length && (el.selectionEnd ?? 0) === text.length;
+        if (e.key === 'ArrowUp' && caretAtStart) {
+          e.preventDefault();
+          if (historyIndex === 0) {
+            setHistoryDraft(text);
+          }
+          const nextIndex = Math.min(history.length, historyIndex + 1);
+          setHistoryIndex(nextIndex);
+          const replacement = nextIndex > 0 ? history[history.length - nextIndex] : historyDraft;
+          if (replacement != null) {
+            setText(replacement);
+          }
+          requestAnimationFrame(() => {
+            try {
+              el.setSelectionRange(0, 0);
+            } catch {}
+          });
+        } else if (e.key === 'ArrowDown' && caretAtEnd && historyIndex > 0) {
+          e.preventDefault();
+          const nextIndex = Math.max(0, historyIndex - 1);
+          setHistoryIndex(nextIndex);
+          const replacement = nextIndex > 0 ? history[history.length - nextIndex] : historyDraft;
+          if (replacement != null) {
+            setText(replacement);
+          }
+          requestAnimationFrame(() => {
+            const pos = (replacement ?? '').length;
+            try {
+              el.setSelectionRange(pos, pos);
+            } catch {}
+          });
+        }
+      }
+    },
+    [text, history, historyIndex, historyDraft, handleSubmit, insertNewlineAtCursor, thinking, onStop]
+  );
 
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const items = e.clipboardData?.items
+    const items = e.clipboardData?.items;
     if (!items) {
-return
-}
-    const imageFiles: File[] = []
+      return;
+    }
+    const imageFiles: File[] = [];
     for (const item of items) {
       if (item.type.startsWith('image/')) {
-        const file = item.getAsFile()
+        const file = item.getAsFile();
         if (file) {
-          const ext = file.type.split('/')[1] || 'png'
-          const named = new File([file], `paste-${Date.now()}.${ext}`, { type: file.type })
-          imageFiles.push(named)
+          const ext = file.type.split('/')[1] || 'png';
+          const named = new File([file], `paste-${Date.now()}.${ext}`, { type: file.type });
+          imageFiles.push(named);
         }
       }
     }
     if (imageFiles.length > 0) {
-      e.preventDefault()
-      setFiles(prev => [...prev, ...imageFiles])
+      e.preventDefault();
+      setFiles((prev) => [...prev, ...imageFiles]);
     }
-  }, [])
+  }, []);
 
   const openFilePicker = useCallback(() => {
-    fileInputRef.current?.click()
-  }, [])
+    fileInputRef.current?.click();
+  }, []);
 
   const handleFilesSelected = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const list = e.target.files ? Array.from(e.target.files) : []
-    setFiles(list)
-  }, [])
+    const list = e.target.files ? Array.from(e.target.files) : [];
+    setFiles(list);
+  }, []);
 
   return (
     <div className="chat-input-footer">
@@ -207,34 +270,46 @@ return
         >
           {files.length > 0 && (
             <div className="flex flex-wrap gap-2 pb-2 px-2" onClick={(e) => e.stopPropagation()}>
-              {files.map((f, i) => (
+              {files.map((f, i) =>
                 f.type.startsWith('image/') ? (
                   <div key={i} className="relative group">
-                    <img src={URL.createObjectURL(f)} alt="" className="h-20 w-20 rounded-lg object-cover border border-border" />
-                    <button onClick={() => {
-                      setFiles(prev => prev.filter((_, idx) => idx !== i))
-                      if (fileInputRef.current) {
-fileInputRef.current.value = ''
-}
-                    }} className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-card border border-border text-muted-foreground hover:text-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <img
+                      src={URL.createObjectURL(f)}
+                      alt=""
+                      className="h-20 w-20 rounded-lg object-cover border border-border"
+                    />
+                    <button
+                      onClick={() => {
+                        setFiles((prev) => prev.filter((_, idx) => idx !== i));
+                        if (fileInputRef.current) {
+                          fileInputRef.current.value = '';
+                        }
+                      }}
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-card border border-border text-muted-foreground hover:text-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
                       <XIcon size={12} />
                     </button>
                   </div>
                 ) : (
                   <div key={i} className="bg-card flex items-center gap-2 rounded-lg px-3 py-2 text-sm">
                     <PaperclipIcon size={16} className="text-foreground" />
-                    <span className="max-w-[120px] truncate text-foreground" title={f.name}>{f.name}</span>
-                    <button onClick={() => {
-                      setFiles(prev => prev.filter((_, idx) => idx !== i))
-                      if (fileInputRef.current) {
-fileInputRef.current.value = ''
-}
-                    }} className="hover:bg-accent rounded-full p-1">
+                    <span className="max-w-[120px] truncate text-foreground" title={f.name}>
+                      {f.name}
+                    </span>
+                    <button
+                      onClick={() => {
+                        setFiles((prev) => prev.filter((_, idx) => idx !== i));
+                        if (fileInputRef.current) {
+                          fileInputRef.current.value = '';
+                        }
+                      }}
+                      className="hover:bg-accent rounded-full p-1"
+                    >
                       <XIcon size={16} className="text-foreground" />
                     </button>
                   </div>
                 )
-              ))}
+              )}
             </div>
           )}
 
@@ -276,13 +351,14 @@ fileInputRef.current.value = ''
                   }`}
                   title={workspacePath || 'Select workspace'}
                 >
-                  <FolderIcon size={14} className={`shrink-0 ${workspaceLocked ? 'text-muted-foreground' : 'text-primary'}`} />
+                  <FolderIcon
+                    size={14}
+                    className={`shrink-0 ${workspaceLocked ? 'text-muted-foreground' : 'text-primary'}`}
+                  />
                   <span className="max-w-[96px] sm:max-w-[200px] truncate">
                     {workspacePath ? workspaceLabel(workspacePath) : 'Select workspace'}
                   </span>
-                  {workspaceLocked && (
-                    <LockIcon size={10} className="text-muted-foreground flex-shrink-0" />
-                  )}
+                  {workspaceLocked && <LockIcon size={10} className="text-muted-foreground flex-shrink-0" />}
                 </button>
               )}
 
@@ -292,7 +368,9 @@ fileInputRef.current.value = ''
                     type="button"
                     onClick={sandboxInteractive ? toggleSandboxMenu : undefined}
                     disabled={!sandboxInteractive}
-                    title={sandboxLocked ? `Sandbox: ${sandboxLabel} (locked once a run starts)` : `Sandbox: ${sandboxLabel}`}
+                    title={
+                      sandboxLocked ? `Sandbox: ${sandboxLabel} (locked once a run starts)` : `Sandbox: ${sandboxLabel}`
+                    }
                     className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors min-w-0 ${
                       sandboxInteractive
                         ? 'text-secondary-foreground hover:bg-accent/50 cursor-pointer'
@@ -302,11 +380,12 @@ fileInputRef.current.value = ''
                     {sandboxLoading ? (
                       <Loader2Icon size={14} className="text-muted-foreground animate-spin shrink-0" />
                     ) : null}
-                    <MonitorIcon size={14} className={`shrink-0 ${sandboxInteractive ? 'text-primary' : 'text-secondary-foreground'}`} />
+                    <MonitorIcon
+                      size={14}
+                      className={`shrink-0 ${sandboxInteractive ? 'text-primary' : 'text-secondary-foreground'}`}
+                    />
                     <span className="max-w-[96px] sm:max-w-[200px] truncate">{sandboxLabel}</span>
-                    {sandboxLocked && (
-                      <LockIcon size={10} className="text-muted-foreground flex-shrink-0" />
-                    )}
+                    {sandboxLocked && <LockIcon size={10} className="text-muted-foreground flex-shrink-0" />}
                   </button>
                   {sandboxMenuOpen && sandboxOptions && (
                     <div
@@ -314,7 +393,7 @@ fileInputRef.current.value = ''
                       className="absolute bottom-full left-0 mb-1 z-50 min-w-[180px] rounded-md border border-border bg-card p-1 shadow-md"
                     >
                       {sandboxOptions.map((opt) => {
-                        const selected = opt.value === currentSandboxProfile
+                        const selected = opt.value === currentSandboxProfile;
                         return (
                           <button
                             key={opt.value}
@@ -329,7 +408,7 @@ fileInputRef.current.value = ''
                             </span>
                             <span className="flex-1 truncate">{opt.label}</span>
                           </button>
-                        )
+                        );
                       })}
                     </div>
                   )}
@@ -344,7 +423,9 @@ fileInputRef.current.value = ''
                     type="button"
                     onClick={() => onSpeakRepliesChange?.(!speakRepliesEnabled)}
                     className={`flex h-8 w-8 items-center justify-center rounded-2xl transition-colors ${
-                      speakRepliesEnabled ? 'bg-primary/15 text-primary hover:bg-primary/20' : 'hover:bg-accent/50 text-muted-foreground hover:text-foreground'
+                      speakRepliesEnabled
+                        ? 'bg-primary/15 text-primary hover:bg-primary/20'
+                        : 'hover:bg-accent/50 text-muted-foreground hover:text-foreground'
                     }`}
                     aria-label={speakerToggleLabel}
                     aria-pressed={!!speakRepliesEnabled}
@@ -366,26 +447,26 @@ fileInputRef.current.value = ''
               ) : null}
 
               {!thinking ? (
-              <button
-                type="button"
-                disabled={!canSend}
-                onClick={handleSubmit}
-                className="h-8 w-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center disabled:bg-secondary disabled:text-muted-foreground hover:brightness-110 focus:outline-none shadow-sm"
-                aria-label="Send"
-                title="Send (Enter)"
-              >
-                <ArrowUpIcon size={20} className="pointer-events-none" />
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={onStop}
-                className="h-8 w-8 rounded-full bg-destructive text-primary-foreground flex items-center justify-center hover:brightness-110 focus:outline-none shadow-sm"
-                aria-label="Stop"
-                title="Stop"
-              >
-                <SquareIcon size={20} className="pointer-events-none" />
-              </button>
+                <button
+                  type="button"
+                  disabled={!canSend}
+                  onClick={handleSubmit}
+                  className="h-8 w-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center disabled:bg-secondary disabled:text-muted-foreground hover:brightness-110 focus:outline-none shadow-sm"
+                  aria-label="Send"
+                  title="Send (Enter)"
+                >
+                  <ArrowUpIcon size={20} className="pointer-events-none" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onStop}
+                  className="h-8 w-8 rounded-full bg-destructive text-primary-foreground flex items-center justify-center hover:brightness-110 focus:outline-none shadow-sm"
+                  aria-label="Stop"
+                  title="Stop"
+                >
+                  <SquareIcon size={20} className="pointer-events-none" />
+                </button>
               )}
             </div>
           </PromptInputActions>
@@ -398,10 +479,11 @@ fileInputRef.current.value = ''
           sessionId={sessionId}
           onSessionCreated={onVoiceSessionCreated}
           onClose={() => {
- setIsVoiceModalOpen(false); onVoiceClose?.(); 
-}}
+            setIsVoiceModalOpen(false);
+            onVoiceClose?.();
+          }}
         />
       )}
     </div>
-  )
+  );
 }

@@ -215,9 +215,7 @@ describe('ExtensionManager', () => {
       const transitions = sendCalls.filter((c) => c.channel === 'extension:status-changed');
       expect(transitions.length).toBeGreaterThanOrEqual(2);
       const lastTransition = transitions[transitions.length - 1]!;
-      expect(lastTransition.args[2]).toEqual(
-        expect.objectContaining({ state: 'running', port: 9999 })
-      );
+      expect(lastTransition.args[2]).toEqual(expect.objectContaining({ state: 'running', port: 9999 }));
     });
 
     it('returns cached result for already-running instance', async () => {

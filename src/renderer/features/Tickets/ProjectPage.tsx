@@ -94,7 +94,10 @@ export const ProjectPage = memo(({ projectId }: { projectId: ProjectId }) => {
 
   return (
     <div className={styles.root}>
-      <div className={mergeClasses(styles.desktopHeader, isGlass && styles.desktopHeaderGlass)} data-slot="project-page-header">
+      <div
+        className={mergeClasses(styles.desktopHeader, isGlass && styles.desktopHeaderGlass)}
+        data-slot="project-page-header"
+      >
         <IconButton aria-label="Back to Home" icon={<ArrowLeft20Regular />} size="sm" onClick={handleBack} />
         <div className={styles.headerTitle}>
           <Caption1>Projects</Caption1>

@@ -16,9 +16,13 @@ import { ElectronTransportListener } from '@/renderer/transport/electron-transpo
 let initialized = false;
 
 export const initTunnelBridge = (): void => {
-  if (initialized) return;
+  if (initialized) {
+    return;
+  }
   initialized = true;
-  if (!isElectron || !isCloudLinked) return;
+  if (!isElectron || !isCloudLinked) {
+    return;
+  }
   // `tunnel:emit-incoming` is pushed by LOCAL Electron main (`sendToWindow`), so
   // it arrives over Electron IPC — NOT the cloud WS. In cloud-linked mode the
   // shared `ipc` listener IS the cloud WS, which never sees these frames (that

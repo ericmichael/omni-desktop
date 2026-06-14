@@ -184,7 +184,9 @@ export const wireTunnelReverseHandlers = (
   );
 
   return () => {
-    for (const fn of cleanups) fn();
+    for (const fn of cleanups) {
+      fn();
+    }
     for (const s of sockets.values()) {
       try {
         s.close();

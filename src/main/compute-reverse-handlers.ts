@@ -56,7 +56,9 @@ export const wireComputeReverseHandlers = (): (() => void) => {
   app.on('before-quit', onQuit);
 
   return () => {
-    for (const fn of cleanups) fn();
+    for (const fn of cleanups) {
+      fn();
+    }
     app.removeListener('before-quit', onQuit);
     hosts.stopAll();
   };

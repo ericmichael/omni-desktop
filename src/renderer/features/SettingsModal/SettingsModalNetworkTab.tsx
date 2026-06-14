@@ -1,9 +1,20 @@
-import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Button, Card, Checkbox, FormField, FormSkeleton, IconButton, Input, SaveBar, SectionLabel, Switch } from '@/renderer/ds';
+import {
+  Button,
+  Card,
+  Checkbox,
+  FormField,
+  FormSkeleton,
+  IconButton,
+  Input,
+  SaveBar,
+  SectionLabel,
+  Switch,
+} from '@/renderer/ds';
 import { agentConfigApi } from '@/renderer/services/config';
 import type { NetworkConfig } from '@/shared/types';
 
@@ -448,9 +459,7 @@ const HostRow = memo(
 
     return (
       <div className={styles.rowGap2}>
-        <span className={styles.hostChip}>
-          {host}
-        </span>
+        <span className={styles.hostChip}>{host}</span>
         <IconButton aria-label="Remove host" icon={<Delete20Regular />} size="sm" onClick={onClickRemove} />
       </div>
     );

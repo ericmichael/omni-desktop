@@ -7,7 +7,6 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { MARIMO_GLASS_CSS_FILENAME, MARIMO_GLASS_CSS_OFF, MARIMO_GLASS_CSS_ON } from '@/lib/marimo-glass-css';

@@ -21,6 +21,7 @@ When you're paged for `pg-primary-down` or sustained `pg-lag > 10s`.
 ```
 
 The script:
+
 1. Stops writes at the proxy (30s drain).
 2. Promotes pg-1 to primary.
 3. Updates service endpoints.

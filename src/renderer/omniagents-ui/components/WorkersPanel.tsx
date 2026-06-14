@@ -1,73 +1,83 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react';
 
 // Server payload from omni-code's ``workers.list`` / ``ui.workers.update``.
 // Matches ``worker_state_dict`` in ``tools/worker_tools.py``.
 export type WorkerSummary = {
-  worker_id: string
-  status: 'running' | 'completed' | 'cancelled' | 'error'
-  task: string
-  parent_session_id: string | null
-  session_id: string
-  run_id: string
-  result: string | null
-  error: string | null
-  isolation: string | null
-  started_at: number | null
-  finished_at: number | null
-  wall_time_ms: number | null
-}
+  worker_id: string;
+  status: 'running' | 'completed' | 'cancelled' | 'error';
+  task: string;
+  parent_session_id: string | null;
+  session_id: string;
+  run_id: string;
+  result: string | null;
+  error: string | null;
+  isolation: string | null;
+  started_at: number | null;
+  finished_at: number | null;
+  wall_time_ms: number | null;
+};
 
 export type WorkersKillResult = {
-  ok: boolean
-  worker?: WorkerSummary
-  status?: string
-  snapshot?: WorkerSummary[]
-  error?: string
-  message?: string
-}
+  ok: boolean;
+  worker?: WorkerSummary;
+  status?: string;
+  snapshot?: WorkerSummary[];
+  error?: string;
+  message?: string;
+};
 
-const MAX_VISIBLE = 5
-const TASK_TRUNCATE = 80
+const MAX_VISIBLE = 5;
+const TASK_TRUNCATE = 80;
 
 function shortTask(task: string): string {
-  const oneLine = task.replace(/\s+/g, ' ').trim()
-  if (oneLine.length <= TASK_TRUNCATE) return oneLine
-  return oneLine.slice(0, TASK_TRUNCATE - 1) + '…'
+  const oneLine = task.replace(/\s+/g, ' ').trim();
+  if (oneLine.length <= TASK_TRUNCATE) {
+    return oneLine;
+  }
+  return `${oneLine.slice(0, TASK_TRUNCATE - 1)}…`;
 }
 
 function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${ms}ms`
-  const seconds = ms / 1000
-  if (seconds < 60) return `${seconds.toFixed(1)}s`
-  const minutes = Math.floor(seconds / 60)
-  const rem = Math.floor(seconds - minutes * 60)
-  return `${minutes}m${rem.toString().padStart(2, '0')}s`
+  if (ms < 1000) {
+    return `${ms}ms`;
+  }
+  const seconds = ms / 1000;
+  if (seconds < 60) {
+    return `${seconds.toFixed(1)}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const rem = Math.floor(seconds - minutes * 60);
+  return `${minutes}m${rem.toString().padStart(2, '0')}s`;
 }
 
 function liveElapsedMs(worker: WorkerSummary, nowMs: number): number {
   if (worker.status === 'running' && worker.started_at) {
-    return Math.max(nowMs - worker.started_at * 1000, worker.wall_time_ms ?? 0)
+    return Math.max(nowMs - worker.started_at * 1000, worker.wall_time_ms ?? 0);
   }
-  return worker.wall_time_ms ?? 0
+  return worker.wall_time_ms ?? 0;
 }
 
 function dotClass(worker: WorkerSummary): string {
-  if (worker.status === 'running') return 'bg-primary animate-pulse'
-  if (worker.status === 'completed') return 'bg-successGreen'
-  return 'bg-errorRed'
+  if (worker.status === 'running') {
+    return 'bg-primary animate-pulse';
+  }
+  if (worker.status === 'completed') {
+    return 'bg-successGreen';
+  }
+  return 'bg-errorRed';
 }
 
 type RowProps = {
-  worker: WorkerSummary
-  nowMs: number
-  isKilling: boolean
-  onKill?: (worker_id: string) => void
-  onDismiss?: (worker_id: string) => void
-}
+  worker: WorkerSummary;
+  nowMs: number;
+  isKilling: boolean;
+  onKill?: (worker_id: string) => void;
+  onDismiss?: (worker_id: string) => void;
+};
 
 function WorkerRow({ worker, nowMs, isKilling, onKill, onDismiss }: RowProps) {
-  const elapsed = formatElapsed(liveElapsedMs(worker, nowMs))
-  const tail = worker.status === 'running' ? elapsed : `${worker.status} · ${elapsed}`
+  const elapsed = formatElapsed(liveElapsedMs(worker, nowMs));
+  const tail = worker.status === 'running' ? elapsed : `${worker.status} · ${elapsed}`;
   return (
     <li className="flex items-center gap-2 text-xs leading-5">
       <span
@@ -106,68 +116,76 @@ function WorkerRow({ worker, nowMs, isKilling, onKill, onDismiss }: RowProps) {
         </button>
       ) : null}
     </li>
-  )
+  );
 }
 
 type Props = {
-  workers: WorkerSummary[]
-  onKill?: (worker_id: string) => Promise<WorkersKillResult>
-  onDismiss?: (worker_id: string) => void
-}
+  workers: WorkerSummary[];
+  onKill?: (worker_id: string) => Promise<WorkersKillResult>;
+  onDismiss?: (worker_id: string) => void;
+};
 
 // Docked workers panel. Mirrors BashJobs structurally so the two stack
 // as a single visual unit. Renders nothing when there are no workers.
 export function WorkersPanel({ workers, onKill, onDismiss }: Props) {
-  const [, setNowTick] = useState(0)
-  const anyRunning = workers.some(w => w.status === 'running')
+  const [, setNowTick] = useState(0);
+  const anyRunning = workers.some((w) => w.status === 'running');
   useEffect(() => {
-    if (!anyRunning) return
-    const id = window.setInterval(() => setNowTick(n => n + 1), 1000)
-    return () => window.clearInterval(id)
-  }, [anyRunning])
-
-  const [killing, setKilling] = useState<Set<string>>(new Set())
-  const [killError, setKillError] = useState<string | null>(null)
-
-  const handleKill = useCallback(async (worker_id: string) => {
-    if (!onKill) return
-    if (!window.confirm(`Stop worker ${worker_id}?`)) return
-    setKillError(null)
-    setKilling(prev => {
-      const next = new Set(prev)
-      next.add(worker_id)
-      return next
-    })
-    try {
-      const res = await onKill(worker_id)
-      if (!res.ok) {
-        setKillError(`Failed to stop ${worker_id}: ${res.error ?? 'unknown error'}`)
-      }
-    } catch (e) {
-      setKillError(`Failed to stop ${worker_id}: ${(e as Error).message ?? String(e)}`)
-    } finally {
-      setKilling(prev => {
-        const next = new Set(prev)
-        next.delete(worker_id)
-        return next
-      })
+    if (!anyRunning) {
+      return;
     }
-  }, [onKill])
+    const id = window.setInterval(() => setNowTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [anyRunning]);
 
-  if (!workers || workers.length === 0) return null
+  const [killing, setKilling] = useState<Set<string>>(new Set());
+  const [killError, setKillError] = useState<string | null>(null);
 
-  const running = workers.filter(w => w.status === 'running')
-  const exited = workers.filter(w => w.status !== 'running')
-  const succeeded = exited.filter(w => w.status === 'completed').length
-  const failed = exited.length - succeeded
+  const handleKill = useCallback(
+    async (worker_id: string) => {
+      if (!onKill) {
+        return;
+      }
+      if (!window.confirm(`Stop worker ${worker_id}?`)) {
+        return;
+      }
+      setKillError(null);
+      setKilling((prev) => {
+        const next = new Set(prev);
+        next.add(worker_id);
+        return next;
+      });
+      try {
+        const res = await onKill(worker_id);
+        if (!res.ok) {
+          setKillError(`Failed to stop ${worker_id}: ${res.error ?? 'unknown error'}`);
+        }
+      } catch (e) {
+        setKillError(`Failed to stop ${worker_id}: ${(e as Error).message ?? String(e)}`);
+      } finally {
+        setKilling((prev) => {
+          const next = new Set(prev);
+          next.delete(worker_id);
+          return next;
+        });
+      }
+    },
+    [onKill]
+  );
 
-  const ordered = [
-    ...running,
-    ...exited.slice().sort((a, b) => (b.started_at ?? 0) - (a.started_at ?? 0)),
-  ]
-  const visible = ordered.slice(0, MAX_VISIBLE)
-  const overflow = ordered.length - visible.length
-  const nowMs = Date.now()
+  if (!workers || workers.length === 0) {
+    return null;
+  }
+
+  const running = workers.filter((w) => w.status === 'running');
+  const exited = workers.filter((w) => w.status !== 'running');
+  const succeeded = exited.filter((w) => w.status === 'completed').length;
+  const failed = exited.length - succeeded;
+
+  const ordered = [...running, ...exited.slice().sort((a, b) => (b.started_at ?? 0) - (a.started_at ?? 0))];
+  const visible = ordered.slice(0, MAX_VISIBLE);
+  const overflow = ordered.length - visible.length;
+  const nowMs = Date.now();
 
   return (
     <div className="px-3 pt-2">
@@ -175,19 +193,25 @@ export function WorkersPanel({ workers, onKill, onDismiss }: Props) {
         <div className="flex items-center gap-2 text-xs text-textSubtle">
           <span className="font-medium text-textPrimary">Workers</span>
           <span aria-hidden>·</span>
-          <span><span className="text-brand">{running.length}</span> running</span>
+          <span>
+            <span className="text-brand">{running.length}</span> running
+          </span>
           <span aria-hidden>·</span>
-          <span><span className="text-successGreen">{succeeded}</span> done</span>
+          <span>
+            <span className="text-successGreen">{succeeded}</span> done
+          </span>
           {failed > 0 ? (
             <>
               <span aria-hidden>·</span>
-              <span><span className="text-errorRed">{failed}</span> failed</span>
+              <span>
+                <span className="text-errorRed">{failed}</span> failed
+              </span>
             </>
           ) : null}
         </div>
         {killError ? <div className="mt-1 text-[11px] text-errorRed">{killError}</div> : null}
         <ul className="mt-1.5 space-y-1">
-          {visible.map(w => (
+          {visible.map((w) => (
             <WorkerRow
               key={w.worker_id}
               worker={w}
@@ -198,10 +222,8 @@ export function WorkersPanel({ workers, onKill, onDismiss }: Props) {
             />
           ))}
         </ul>
-        {overflow > 0 ? (
-          <div className="mt-1 text-[11px] text-textSubtle">… +{overflow} more</div>
-        ) : null}
+        {overflow > 0 ? <div className="mt-1 text-[11px] text-textSubtle">… +{overflow} more</div> : null}
       </div>
     </div>
-  )
+  );
 }

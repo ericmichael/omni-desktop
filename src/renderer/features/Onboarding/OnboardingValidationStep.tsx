@@ -1,7 +1,7 @@
 import { makeStyles } from '@fluentui/react-components';
 import { memo, useCallback, useState } from 'react';
 
-import { Body1, Button, Caption1, MessageBar, MessageBarBody, Spinner } from '@/renderer/ds';
+import { Body1Strong, Button, Caption1, MessageBar, MessageBarBody, Spinner } from '@/renderer/ds';
 import { emitter } from '@/renderer/services/ipc';
 
 type Props = {
@@ -37,7 +37,7 @@ export const OnboardingValidationStep = memo(({ onBack, onFinish }: Props) => {
   return (
     <div className={styles.root}>
       <div className={styles.header}>
-        <Body1 weight="semibold">Almost there</Body1>
+        <Body1Strong>Almost there</Body1Strong>
         <Caption1>Your setup is saved. You can give it a quick test before you start.</Caption1>
       </div>
 

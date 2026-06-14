@@ -23,8 +23,8 @@ Must be complete before signing with any vendor.
 
 ## Status
 
-| Vendor    | DPA | SOC2 | Contract |
-|-----------|-----|------|----------|
-| Relic     | ✅  | ✅   | 🟡 (legal has red-lines) |
-| Foresight | ✅  | ✅   | 🟡 (open-core licensing questions) |
+| Vendor    | DPA | SOC2 | Contract                                   |
+| --------- | --- | ---- | ------------------------------------------ |
+| Relic     | ✅  | ✅   | 🟡 (legal has red-lines)                   |
+| Foresight | ✅  | ✅   | 🟡 (open-core licensing questions)         |
 | Quasar    | ⚠️  | ❌   | Blocked on SOC2 — they don't have one yet. |

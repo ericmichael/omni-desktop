@@ -77,7 +77,12 @@ describe('omni-projects MCP tools (async IProjectsRepo, SQLite)', () => {
   it('creates and lists a project with seeded pipeline + root page', async () => {
     const sources = [
       { kind: 'local', mountName: 'local-app', workspaceDir: '/tmp/local-app', gitDetected: true },
-      { kind: 'git-remote', mountName: 'remote-app', repoUrl: 'https://github.com/acme/remote-app.git', defaultBranch: 'main' },
+      {
+        kind: 'git-remote',
+        mountName: 'remote-app',
+        repoUrl: 'https://github.com/acme/remote-app.git',
+        defaultBranch: 'main',
+      },
     ];
     const created = await call('create_project', {
       label: 'Test Project',
@@ -87,10 +92,7 @@ describe('omni-projects MCP tools (async IProjectsRepo, SQLite)', () => {
     });
     expect(created._isError).toBe(false);
     expect(created.id).toMatch(/^proj_/);
-    expect(created.sources).toEqual([
-      expect.objectContaining(sources[0]),
-      expect.objectContaining(sources[1]),
-    ]);
+    expect(created.sources).toEqual([expect.objectContaining(sources[0]), expect.objectContaining(sources[1])]);
     expect(created.sources[0].id).toBeTruthy();
     expect(created.auto_dispatch).toBe(true);
     expect(created.sandbox_profile).toBe('devbox');
@@ -147,7 +149,12 @@ describe('omni-projects MCP tools (async IProjectsRepo, SQLite)', () => {
       project_id: projectId,
       columns: [
         { id: 'backlog', label: 'Backlog', workflow: { purpose: 'Collect work' } },
-        { id: 'implementation', label: 'Implementation', maxConcurrent: 2, workflow: { definitionOfDone: ['changed'] } },
+        {
+          id: 'implementation',
+          label: 'Implementation',
+          maxConcurrent: 2,
+          workflow: { definitionOfDone: ['changed'] },
+        },
         { id: 'review', label: 'Review', gate: true },
         { id: 'completed', label: 'Completed' },
       ],

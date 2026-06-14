@@ -12,12 +12,12 @@ import { makeStyles, tokens } from '@fluentui/react-components';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
 
+import { $currentPrincipal } from '@/renderer/features/Teams/state';
 import type { Column, ColumnId, ProjectId, Ticket, TicketId } from '@/shared/types';
 
+import { AssigneeFilter } from './AssigneeFilter';
 import { KanbanCard } from './KanbanCard';
 import { KanbanColumn } from './KanbanColumn';
-import { $currentPrincipal } from '@/renderer/features/Teams/state';
-import { AssigneeFilter } from './AssigneeFilter';
 import { $activeMilestoneId, $assigneeFilter, $pipeline, $tickets, ticketApi } from './state';
 
 type VisibilityFilter = 'active' | 'archived' | 'all';
@@ -59,27 +59,27 @@ const useStyles = makeStyles({
   },
 });
 
-export const KanbanBoard = memo(({ projectId, visibilityFilter = 'active' }: { projectId: ProjectId; visibilityFilter?: VisibilityFilter }) => {
-  const styles = useStyles();
-  const pipeline = useStore($pipeline);
-  const tickets = useStore($tickets);
-  const activeMilestoneId = useStore($activeMilestoneId);
-  const assigneeFilter = useStore($assigneeFilter);
-  const currentPrincipal = useStore($currentPrincipal);
+export const KanbanBoard = memo(
+  ({ projectId, visibilityFilter = 'active' }: { projectId: ProjectId; visibilityFilter?: VisibilityFilter }) => {
+    const styles = useStyles();
+    const pipeline = useStore($pipeline);
+    const tickets = useStore($tickets);
+    const activeMilestoneId = useStore($activeMilestoneId);
+    const assigneeFilter = useStore($assigneeFilter);
+    const currentPrincipal = useStore($currentPrincipal);
 
-  const [activeTicket, setActiveTicket] = useState<{ ticket: Ticket; column: Column } | null>(null);
+    const [activeTicket, setActiveTicket] = useState<{ ticket: Ticket; column: Column } | null>(null);
 
-  // Mouse drags on small movement; touch drags on long-press so a swipe on a
-  // card still scrolls the board instead of picking the card up.
-  const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } })
-  );
+    // Mouse drags on small movement; touch drags on long-press so a swipe on a
+    // card still scrolls the board instead of picking the card up.
+    const sensors = useSensors(
+      useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+      useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } })
+    );
 
-  const projectTickets = useMemo(
-    () =>
-      Object.values(tickets).filter(
-        (t) => {
+    const projectTickets = useMemo(
+      () =>
+        Object.values(tickets).filter((t) => {
           if (t.projectId !== projectId) {
             return false;
           }
@@ -89,11 +89,17 @@ export const KanbanBoard = memo(({ projectId, visibilityFilter = 'active' }: { p
           // Assignee filter (teams): 'all' = everyone, 'me' = current principal,
           // 'unassigned' = no assignee, else a specific member's principal id.
           if (assigneeFilter === 'me') {
-            if (t.assignee !== currentPrincipal) return false;
+            if (t.assignee !== currentPrincipal) {
+              return false;
+            }
           } else if (assigneeFilter === 'unassigned') {
-            if (t.assignee) return false;
+            if (t.assignee) {
+              return false;
+            }
           } else if (assigneeFilter !== 'all') {
-            if (t.assignee !== assigneeFilter) return false;
+            if (t.assignee !== assigneeFilter) {
+              return false;
+            }
           }
           if (visibilityFilter === 'active') {
             return !t.archivedAt;
@@ -102,126 +108,126 @@ export const KanbanBoard = memo(({ projectId, visibilityFilter = 'active' }: { p
             return !!t.archivedAt;
           }
           return true;
+        }),
+      [tickets, projectId, activeMilestoneId, assigneeFilter, currentPrincipal, visibilityFilter]
+    );
+
+    const ticketsByColumn = useMemo(() => {
+      const map: Record<string, Ticket[]> = {};
+      if (!pipeline) {
+        return map;
+      }
+      for (const col of pipeline.columns) {
+        map[col.id] = [];
+      }
+      const firstColumnId = pipeline.columns[0]?.id;
+      for (const ticket of projectTickets) {
+        const colId = ticket.columnId ?? firstColumnId;
+        if (colId && map[colId]) {
+          map[colId].push(ticket);
         }
-      ),
-    [tickets, projectId, activeMilestoneId, assigneeFilter, currentPrincipal, visibilityFilter]
-  );
-
-  const ticketsByColumn = useMemo(() => {
-    const map: Record<string, Ticket[]> = {};
-    if (!pipeline) {
+      }
+      // Sort tickets within each column by createdAt
+      for (const colId of Object.keys(map)) {
+        map[colId]?.sort((a, b) => a.createdAt - b.createdAt);
+      }
       return map;
-    }
-    for (const col of pipeline.columns) {
-      map[col.id] = [];
-    }
-    const firstColumnId = pipeline.columns[0]?.id;
-    for (const ticket of projectTickets) {
-      const colId = ticket.columnId ?? firstColumnId;
-      if (colId && map[colId]) {
-        map[colId].push(ticket);
-      }
-    }
-    // Sort tickets within each column by createdAt
-    for (const colId of Object.keys(map)) {
-      map[colId]?.sort((a, b) => a.createdAt - b.createdAt);
-    }
-    return map;
-  }, [pipeline, projectTickets]);
+    }, [pipeline, projectTickets]);
 
-  const handleDragStart = useCallback(
-    (event: DragStartEvent) => {
-      const ticketId = event.active.id as TicketId;
-      const ticket = tickets[ticketId];
-      if (!ticket || !pipeline) {
-        return;
-      }
-      const colId = ticket.columnId ?? pipeline.columns[0]?.id;
-      const column = pipeline.columns.find((c) => c.id === colId);
-      if (column) {
-        setActiveTicket({ ticket, column });
-      }
-    },
-    [tickets, pipeline]
-  );
+    const handleDragStart = useCallback(
+      (event: DragStartEvent) => {
+        const ticketId = event.active.id as TicketId;
+        const ticket = tickets[ticketId];
+        if (!ticket || !pipeline) {
+          return;
+        }
+        const colId = ticket.columnId ?? pipeline.columns[0]?.id;
+        const column = pipeline.columns.find((c) => c.id === colId);
+        if (column) {
+          setActiveTicket({ ticket, column });
+        }
+      },
+      [tickets, pipeline]
+    );
 
-  const handleDragEnd = useCallback(
-    (event: DragEndEvent) => {
+    const handleDragEnd = useCallback(
+      (event: DragEndEvent) => {
+        setActiveTicket(null);
+        const { active, over } = event;
+        if (!over) {
+          return;
+        }
+        const ticketId = active.id as TicketId;
+        const newColumnId = over.id as string;
+        const ticket = tickets[ticketId];
+        if (!ticket) {
+          return;
+        }
+        const currentColumnId = ticket.columnId ?? pipeline?.columns[0]?.id;
+        if (currentColumnId !== newColumnId) {
+          ticketApi.moveTicketToColumn(ticketId, newColumnId);
+        }
+      },
+      [tickets, pipeline]
+    );
+
+    const handleDragCancel = useCallback(() => {
       setActiveTicket(null);
-      const { active, over } = event;
-      if (!over) {
-        return;
-      }
-      const ticketId = active.id as TicketId;
-      const newColumnId = over.id as string;
-      const ticket = tickets[ticketId];
-      if (!ticket) {
-        return;
-      }
-      const currentColumnId = ticket.columnId ?? pipeline?.columns[0]?.id;
-      if (currentColumnId !== newColumnId) {
-        ticketApi.moveTicketToColumn(ticketId, newColumnId);
-      }
-    },
-    [tickets, pipeline]
-  );
+    }, []);
 
-  const handleDragCancel = useCallback(() => {
-    setActiveTicket(null);
-  }, []);
+    const handleNewTicket = useCallback(
+      async (columnId: ColumnId) => {
+        const ticket = await ticketApi.addTicket({
+          projectId,
+          milestoneId: activeMilestoneId !== 'all' ? activeMilestoneId : undefined,
+          title: 'Untitled',
+          description: '',
+          priority: 'medium',
+          blockedBy: [],
+        });
+        // Place in the target column
+        if (columnId !== pipeline?.columns[0]?.id) {
+          void ticketApi.moveTicketToColumn(ticket.id, columnId);
+        }
+        // Navigate to the ticket detail so user can fill in details
+        ticketApi.goToTicket(ticket.id);
+      },
+      [projectId, activeMilestoneId, pipeline]
+    );
 
-  const handleNewTicket = useCallback(
-    async (columnId: ColumnId) => {
-      const ticket = await ticketApi.addTicket({
-        projectId,
-        milestoneId: activeMilestoneId !== 'all' ? activeMilestoneId : undefined,
-        title: 'Untitled',
-        description: '',
-        priority: 'medium',
-        blockedBy: [],
-      });
-      // Place in the target column
-      if (columnId !== pipeline?.columns[0]?.id) {
-        void ticketApi.moveTicketToColumn(ticket.id, columnId);
-      }
-      // Navigate to the ticket detail so user can fill in details
-      ticketApi.goToTicket(ticket.id);
-    },
-    [projectId, activeMilestoneId, pipeline]
-  );
+    if (!pipeline) {
+      return (
+        <div className={styles.loading}>
+          <p className={styles.loadingText}>Loading pipeline...</p>
+        </div>
+      );
+    }
 
-  if (!pipeline) {
     return (
-      <div className={styles.loading}>
-        <p className={styles.loadingText}>Loading pipeline...</p>
-      </div>
+      <DndContext
+        sensors={sensors}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
+      >
+        <div className={styles.toolbar}>
+          <AssigneeFilter />
+        </div>
+        <div className={styles.board}>
+          {pipeline.columns.map((column) => (
+            <KanbanColumn
+              key={column.id}
+              column={column}
+              tickets={ticketsByColumn[column.id] ?? []}
+              onNewTicket={handleNewTicket}
+            />
+          ))}
+        </div>
+        <DragOverlay dropAnimation={null}>
+          {activeTicket && <KanbanCard ticket={activeTicket.ticket} isOverlay />}
+        </DragOverlay>
+      </DndContext>
     );
   }
-
-  return (
-    <DndContext
-      sensors={sensors}
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
-      onDragCancel={handleDragCancel}
-    >
-      <div className={styles.toolbar}>
-        <AssigneeFilter />
-      </div>
-      <div className={styles.board}>
-        {pipeline.columns.map((column) => (
-          <KanbanColumn
-            key={column.id}
-            column={column}
-            tickets={ticketsByColumn[column.id] ?? []}
-            onNewTicket={handleNewTicket}
-          />
-        ))}
-      </div>
-      <DragOverlay dropAnimation={null}>
-        {activeTicket && <KanbanCard ticket={activeTicket.ticket} isOverlay />}
-      </DragOverlay>
-    </DndContext>
-  );
-});
+);
 KanbanBoard.displayName = 'KanbanBoard';

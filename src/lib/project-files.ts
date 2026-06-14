@@ -34,7 +34,6 @@ import type {
   TicketRun,
   TokenUsage,
 } from '@/shared/types';
-import { firstSource } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
 // Constants shared by parsers and tests
@@ -64,8 +63,8 @@ const TICKET_PHASES = [
 const isoToMs = (iso: string): number => {
   const t = Date.parse(iso);
   if (Number.isNaN(t)) {
-throw new Error(`invalid ISO timestamp: ${iso}`);
-}
+    throw new Error(`invalid ISO timestamp: ${iso}`);
+  }
   return t;
 };
 
@@ -79,8 +78,8 @@ const msToIso = (ms: number): string => new Date(ms).toISOString().replace(/\.\d
  */
 const Timestamp = z.union([z.string(), z.number()]).transform((v, ctx) => {
   if (typeof v === 'number') {
-return v;
-}
+    return v;
+  }
   try {
     return isoToMs(v);
   } catch (e) {
@@ -142,8 +141,8 @@ export function joinFrontmatter(meta: Record<string, unknown>, body: string): st
  */
 export function parseFrontmatterYaml(text: string | null): Ok<Record<string, unknown>> | Err<Error> {
   if (text === null || text.trim() === '') {
-return new Ok({});
-}
+    return new Ok({});
+  }
   let parsed: unknown;
   try {
     parsed = yaml.parse(text);
@@ -151,8 +150,8 @@ return new Ok({});
     return new Err(new Error(`frontmatter YAML parse failed: ${(e as Error).message}`));
   }
   if (parsed === null || parsed === undefined) {
-return new Ok({});
-}
+    return new Ok({});
+  }
   if (typeof parsed !== 'object' || Array.isArray(parsed)) {
     return new Err(new Error(`frontmatter must be a YAML mapping, got ${typeof parsed}`));
   }
@@ -188,15 +187,17 @@ const ColumnSchema = z.object({
   description: z.string().optional(),
   maxConcurrent: z.number().int().positive().optional(),
   gate: z.boolean().optional(),
-  workflow: z.object({
-    purpose: z.string().optional(),
-    entryCriteria: z.array(z.string()).optional(),
-    definitionOfDone: z.array(z.string()).optional(),
-    agentInstructions: z.string().optional(),
-    recommendedSkills: z.array(z.string()).optional(),
-    allowedTransitions: z.array(z.string()).optional(),
-    autoDispatch: z.boolean().optional(),
-  }).optional(),
+  workflow: z
+    .object({
+      purpose: z.string().optional(),
+      entryCriteria: z.array(z.string()).optional(),
+      definitionOfDone: z.array(z.string()).optional(),
+      agentInstructions: z.string().optional(),
+      recommendedSkills: z.array(z.string()).optional(),
+      allowedTransitions: z.array(z.string()).optional(),
+      autoDispatch: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 const PipelineSchema: z.ZodType<Pipeline> = z.object({
@@ -320,10 +321,7 @@ export class ProjectFileError extends Error {
 
 const fail = (message: string, path?: string) => new Err(new ProjectFileError(message, path));
 
-const parseWith = <T>(
-  schema: z.ZodType<T>,
-  meta: Record<string, unknown>
-): Ok<T> | Err<ProjectFileError> => {
+const parseWith = <T>(schema: z.ZodType<T>, meta: Record<string, unknown>): Ok<T> | Err<ProjectFileError> => {
   const result = schema.safeParse(meta);
   if (!result.success) {
     const issue = result.error.issues[0];
@@ -337,20 +335,16 @@ const parseWith = <T>(
  * Parse a ticket file. Comments and runs come from sidecar JSONL and are
  * populated as empty arrays here — the caller merges them separately.
  */
-export function parseTicketFile(
-  text: string,
-  id: TicketId,
-  projectId: ProjectId
-): Ok<Ticket> | Err<ProjectFileError> {
+export function parseTicketFile(text: string, id: TicketId, projectId: ProjectId): Ok<Ticket> | Err<ProjectFileError> {
   const { meta, body } = splitFrontmatter(text);
   const yamlResult = parseFrontmatterYaml(meta);
   if (yamlResult.isErr()) {
-return fail(yamlResult.error.message);
-}
+    return fail(yamlResult.error.message);
+  }
   const parsed = parseWith(TicketMetaSchema, yamlResult.value);
   if (parsed.isErr()) {
-return parsed;
-}
+    return parsed;
+  }
   const m = parsed.value;
   let description = body.replace(/^\n+/, '').replace(/\n+$/, '');
   // Pre-v25 files carry a structured shaping block; fold it into the
@@ -400,12 +394,12 @@ export function parseMilestoneFile(
   const { meta, body } = splitFrontmatter(text);
   const yamlResult = parseFrontmatterYaml(meta);
   if (yamlResult.isErr()) {
-return fail(yamlResult.error.message);
-}
+    return fail(yamlResult.error.message);
+  }
   const parsed = parseWith(MilestoneMetaSchema, yamlResult.value);
   if (parsed.isErr()) {
-return parsed;
-}
+    return parsed;
+  }
   const m = parsed.value;
   const brief = body.replace(/^\n+/, '').replace(/\n+$/, '');
   return new Ok({
@@ -429,18 +423,16 @@ export function parsePageFile(
   const { meta, body } = splitFrontmatter(text);
   const yamlResult = parseFrontmatterYaml(meta);
   if (yamlResult.isErr()) {
-return fail(yamlResult.error.message);
-}
+    return fail(yamlResult.error.message);
+  }
   const parsed = parseWith(PageMetaSchema, yamlResult.value);
   if (parsed.isErr()) {
-return parsed;
-}
+    return parsed;
+  }
   const m = parsed.value;
   // Only include properties if defined and has at least one non-undefined value.
   const rawProps = m.properties;
-  const hasProps =
-    rawProps !== undefined &&
-    Object.values(rawProps).some((v) => v !== undefined);
+  const hasProps = rawProps !== undefined && Object.values(rawProps).some((v) => v !== undefined);
   const page: Page = {
     id,
     projectId,
@@ -468,19 +460,17 @@ export function parseProjectConfig(text: string): Ok<Project> | Err<ProjectFileE
   }
   const parsed = parseWith(ProjectConfigSchema, raw as Record<string, unknown>);
   if (parsed.isErr()) {
-return parsed;
-}
+    return parsed;
+  }
   const c = parsed.value;
   return new Ok({
     id: c.id as ProjectId,
     label: c.label,
     slug: c.slug,
     ...(c.isPersonal !== undefined ? { isPersonal: c.isPersonal } : {}),
-    ...(c.sources && c.sources.length > 0 ? { sources: c.sources } : {}),
+    sources: c.sources ?? [],
     ...(c.pipeline !== undefined ? { pipeline: c.pipeline } : {}),
-    ...(c.sandboxProfile !== undefined && c.sandboxProfile !== null
-      ? { sandboxProfile: c.sandboxProfile }
-      : {}),
+    ...(c.sandboxProfile !== undefined && c.sandboxProfile !== null ? { sandboxProfile: c.sandboxProfile } : {}),
     ...(c.autoDispatch !== undefined ? { autoDispatch: c.autoDispatch } : {}),
     createdAt: c.createdAt,
   });
@@ -501,8 +491,8 @@ export function parseJsonl<T>(
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i]!;
     if (raw.trim() === '') {
-continue;
-}
+      continue;
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
@@ -536,8 +526,8 @@ const compact = <T extends Record<string, unknown>>(obj: T): Partial<T> => {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(obj)) {
     if (v !== undefined) {
-out[k] = v;
-}
+      out[k] = v;
+    }
   }
   return out as Partial<T>;
 };
@@ -578,9 +568,7 @@ export function serializeMilestoneFile(milestone: Milestone): string {
 export function serializePageFile(page: Page, body: string): string {
   // Only include properties when defined and has at least one non-undefined value.
   const rawProps = page.properties;
-  const hasProps =
-    rawProps !== undefined &&
-    Object.values(rawProps).some((v) => v !== undefined);
+  const hasProps = rawProps !== undefined && Object.values(rawProps).some((v) => v !== undefined);
   const meta = compact({
     title: page.title,
     parentId: page.parentId,
@@ -609,7 +597,7 @@ export function serializeProjectConfig(project: Project): string {
   return yaml.stringify(meta, { lineWidth: 0 });
 }
 
-const jsonlLine = (obj: Record<string, unknown>): string => `${JSON.stringify(obj)  }\n`;
+const jsonlLine = (obj: Record<string, unknown>): string => `${JSON.stringify(obj)}\n`;
 
 export const serializeTicketComment = (c: TicketComment): string =>
   jsonlLine({

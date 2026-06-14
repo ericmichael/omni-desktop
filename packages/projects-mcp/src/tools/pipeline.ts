@@ -3,7 +3,10 @@ import type { IProjectsRepo } from 'omni-projects-db';
 import { z } from 'zod';
 
 const json = (data: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data) }] });
-const err = (message: string) => ({ content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }], isError: true as const });
+const err = (message: string) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }],
+  isError: true as const,
+});
 
 const parseWorkflow = (raw: string | null): unknown | undefined => {
   if (!raw) {
@@ -83,16 +86,22 @@ export function registerPipelineTools(server: McpServer, repo: IProjectsRepo): v
     },
     async ({ project_id, columns }) => {
       const exists = await repo.getProject(project_id);
-      if (!exists) return err(`Project not found: ${project_id}`);
+      if (!exists) {
+        return err(`Project not found: ${project_id}`);
+      }
 
       const labels = new Set<string>();
       const logicalIds = new Set<string>();
       for (const column of columns) {
         const labelKey = column.label.toLowerCase();
-        if (labels.has(labelKey)) return err(`Duplicate column label: ${column.label}`);
+        if (labels.has(labelKey)) {
+          return err(`Duplicate column label: ${column.label}`);
+        }
         labels.add(labelKey);
         const logicalId = column.id ?? logicalIdFor(column.label);
-        if (logicalIds.has(logicalId)) return err(`Duplicate column id: ${logicalId}`);
+        if (logicalIds.has(logicalId)) {
+          return err(`Duplicate column id: ${logicalId}`);
+        }
         logicalIds.add(logicalId);
       }
 

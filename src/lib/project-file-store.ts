@@ -23,7 +23,7 @@
  */
 
 import chokidar, { type FSWatcher } from 'chokidar';
-import { mkdir, readdir, readFile, stat,unlink, writeFile } from 'fs/promises';
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'fs/promises';
 import path from 'path';
 
 import {
@@ -141,11 +141,11 @@ type FileKind =
 
 const classifyFile = (filePath: string, layout: Layout): FileKind => {
   if (filePath === layout.projectFile) {
-return { kind: 'project-config' };
-}
+    return { kind: 'project-config' };
+  }
   if (filePath === layout.contextFile) {
-return { kind: 'context' };
-}
+    return { kind: 'context' };
+  }
   const inDir = (dir: string) => filePath.startsWith(dir + path.sep);
   if (inDir(layout.ticketsDir)) {
     const name = path.basename(filePath);
@@ -244,8 +244,8 @@ export class ProjectFileStore {
    */
   async open(): Promise<void> {
     if (this.opened || this.closed) {
-return;
-}
+      return;
+    }
     this.opened = true;
 
     await this.ensureDirectories();
@@ -261,8 +261,8 @@ return;
   /** Stop watching and release resources. Safe to call multiple times. */
   async close(): Promise<void> {
     if (this.closed) {
-return;
-}
+      return;
+    }
     this.closed = true;
     if (this.watcher) {
       await this.watcher.close();
@@ -364,8 +364,8 @@ return;
 
   async appendTicketComment(ticketId: TicketId, comment: TicketComment): Promise<void> {
     if (!this.tickets.has(ticketId)) {
-throw new Error(`unknown ticket: ${ticketId}`);
-}
+      throw new Error(`unknown ticket: ${ticketId}`);
+    }
     const current = this.comments.get(ticketId) ?? [];
     const next = [...current, comment];
     const text = next.map(serializeTicketComment).join('');
@@ -375,8 +375,8 @@ throw new Error(`unknown ticket: ${ticketId}`);
 
   async appendTicketRun(ticketId: TicketId, run: TicketRun): Promise<void> {
     if (!this.tickets.has(ticketId)) {
-throw new Error(`unknown ticket: ${ticketId}`);
-}
+      throw new Error(`unknown ticket: ${ticketId}`);
+    }
     const current = this.runs.get(ticketId) ?? [];
     const next = [...current, run];
     const text = next.map(serializeTicketRun).join('');
@@ -455,8 +455,8 @@ throw new Error(`unknown ticket: ${ticketId}`);
   private async scanProjectConfig(): Promise<void> {
     const text = await readIfExists(this.layout.projectFile);
     if (text === null) {
-return;
-}
+      return;
+    }
     const parsed = parseProjectConfig(text);
     if (parsed.isErr()) {
       this.emitParseError(this.layout.projectFile, parsed.error);
@@ -490,8 +490,8 @@ return;
   private async loadTicket(id: TicketId, filePath: string): Promise<void> {
     const text = await readIfExists(filePath);
     if (text === null) {
-return;
-}
+      return;
+    }
     const parsed = parseTicketFile(text, id, this.projectId);
     if (parsed.isErr()) {
       this.emitParseError(filePath, parsed.error);
@@ -504,8 +504,8 @@ return;
   private async loadTicketComments(id: TicketId, filePath: string): Promise<void> {
     const text = await readIfExists(filePath);
     if (text === null) {
-return;
-}
+      return;
+    }
     const { items, errors } = parseTicketComments(text);
     this.comments.set(id, items);
     for (const e of errors) {
@@ -516,8 +516,8 @@ return;
   private async loadTicketRuns(id: TicketId, filePath: string): Promise<void> {
     const text = await readIfExists(filePath);
     if (text === null) {
-return;
-}
+      return;
+    }
     const { items, errors } = parseTicketRuns(text);
     this.runs.set(id, items);
     for (const e of errors) {
@@ -529,14 +529,14 @@ return;
     const entries = await listDir(this.layout.milestonesDir);
     for (const name of entries) {
       if (!name.endsWith(TICKET_MD_SUFFIX)) {
-continue;
-}
+        continue;
+      }
       const id = name.slice(0, -TICKET_MD_SUFFIX.length) as MilestoneId;
       const full = path.join(this.layout.milestonesDir, name);
       const text = await readIfExists(full);
       if (text === null) {
-continue;
-}
+        continue;
+      }
       const parsed = parseMilestoneFile(text, id, this.projectId);
       if (parsed.isErr()) {
         this.emitParseError(full, parsed.error);
@@ -550,14 +550,14 @@ continue;
     const entries = await listDir(this.layout.pagesDir);
     for (const name of entries) {
       if (!name.endsWith(TICKET_MD_SUFFIX)) {
-continue;
-}
+        continue;
+      }
       const id = name.slice(0, -TICKET_MD_SUFFIX.length) as PageId;
       const full = path.join(this.layout.pagesDir, name);
       const text = await readIfExists(full);
       if (text === null) {
-continue;
-}
+        continue;
+      }
       const parsed = parsePageFile(text, id, this.projectId);
       if (parsed.isErr()) {
         this.emitParseError(full, parsed.error);
@@ -597,8 +597,8 @@ continue;
       let settled = false;
       const done = () => {
         if (settled) {
-return;
-}
+          return;
+        }
         settled = true;
         resolve();
       };
@@ -611,12 +611,12 @@ return;
 
   private async handleAddOrChange(filePath: string): Promise<void> {
     if (this.closed) {
-return;
-}
+      return;
+    }
     const text = await readIfExists(filePath);
     if (text === null) {
-return;
-}
+      return;
+    }
     if (this.pendingWrites.get(filePath) === text) {
       this.pendingWrites.delete(filePath);
       this.stats.echoesSuppressed++;
@@ -630,8 +630,8 @@ return;
       case 'project-config': {
         const parsed = parseProjectConfig(text);
         if (parsed.isErr()) {
-return this.emitParseError(filePath, parsed.error);
-}
+          return this.emitParseError(filePath, parsed.error);
+        }
         this.project = { ...parsed.value, id: this.projectId };
         this.events.onProjectChanged(this.project);
         return;
@@ -644,8 +644,8 @@ return this.emitParseError(filePath, parsed.error);
       case 'ticket': {
         const parsed = parseTicketFile(text, kind.id, this.projectId);
         if (parsed.isErr()) {
-return this.emitParseError(filePath, parsed.error);
-}
+          return this.emitParseError(filePath, parsed.error);
+        }
         this.tickets.set(kind.id, this.stripAssembled(parsed.value));
         this.ticketBodies.set(kind.id, parsed.value.description ?? '');
         this.events.onTicketChanged(this.assembleTicket(parsed.value));
@@ -659,8 +659,8 @@ return this.emitParseError(filePath, parsed.error);
         }
         const base = this.tickets.get(kind.id);
         if (base) {
-this.events.onTicketChanged(this.assembleTicket(base));
-}
+          this.events.onTicketChanged(this.assembleTicket(base));
+        }
         return;
       }
       case 'ticket-runs': {
@@ -671,15 +671,15 @@ this.events.onTicketChanged(this.assembleTicket(base));
         }
         const base = this.tickets.get(kind.id);
         if (base) {
-this.events.onTicketChanged(this.assembleTicket(base));
-}
+          this.events.onTicketChanged(this.assembleTicket(base));
+        }
         return;
       }
       case 'milestone': {
         const parsed = parseMilestoneFile(text, kind.id, this.projectId);
         if (parsed.isErr()) {
-return this.emitParseError(filePath, parsed.error);
-}
+          return this.emitParseError(filePath, parsed.error);
+        }
         this.milestones.set(kind.id, parsed.value);
         this.events.onMilestoneChanged(parsed.value);
         return;
@@ -687,8 +687,8 @@ return this.emitParseError(filePath, parsed.error);
       case 'page': {
         const parsed = parsePageFile(text, kind.id, this.projectId);
         if (parsed.isErr()) {
-return this.emitParseError(filePath, parsed.error);
-}
+          return this.emitParseError(filePath, parsed.error);
+        }
         this.pages.set(kind.id, parsed.value.page);
         this.pageBodies.set(kind.id, parsed.value.body);
         this.events.onPageChanged(parsed.value.page, parsed.value.body);
@@ -701,8 +701,8 @@ return this.emitParseError(filePath, parsed.error);
 
   private handleUnlink(filePath: string): void {
     if (this.closed) {
-return;
-}
+      return;
+    }
     this.pendingWrites.delete(filePath);
     this.stats.externalDeletes++;
     const kind = classifyFile(filePath, this.layout);
@@ -716,16 +716,16 @@ return;
         this.comments.delete(kind.id);
         const base = this.tickets.get(kind.id);
         if (base) {
-this.events.onTicketChanged(this.assembleTicket(base));
-}
+          this.events.onTicketChanged(this.assembleTicket(base));
+        }
         return;
       }
       case 'ticket-runs': {
         this.runs.delete(kind.id);
         const base = this.tickets.get(kind.id);
         if (base) {
-this.events.onTicketChanged(this.assembleTicket(base));
-}
+          this.events.onTicketChanged(this.assembleTicket(base));
+        }
         return;
       }
       case 'milestone':
@@ -760,8 +760,8 @@ this.events.onTicketChanged(this.assembleTicket(base));
       await unlink(filePath);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-return;
-}
+        return;
+      }
       throw err;
     }
   }
@@ -774,10 +774,10 @@ return;
 
   private log(event: string, fields: Record<string, unknown> = {}): void {
     if (!this.debug) {
-return;
-}
+      return;
+    }
     const parts = Object.entries(fields).map(([k, v]) => `${k}=${JSON.stringify(v)}`);
-    console.log(`[ProjectFileStore:${this.projectId}] ${event}${parts.length ? ` ${  parts.join(' ')}` : ''}`);
+    console.log(`[ProjectFileStore:${this.projectId}] ${event}${parts.length ? ` ${parts.join(' ')}` : ''}`);
   }
 }
 
@@ -790,8 +790,8 @@ async function readIfExists(filePath: string): Promise<string | null> {
     return await readFile(filePath, 'utf-8');
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-return null;
-}
+      return null;
+    }
     throw err;
   }
 }
@@ -801,8 +801,8 @@ async function listDir(dirPath: string): Promise<string[]> {
     return await readdir(dirPath);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-return [];
-}
+      return [];
+    }
     throw err;
   }
 }

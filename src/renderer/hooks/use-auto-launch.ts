@@ -78,136 +78,151 @@ export const useAutoLaunch = (opts: UseAutoLaunchOptions) => {
   const storeRef = useRef(store);
   storeRef.current = store;
 
-  const actors = useMemo(() => ({
-    checkRuntime: fromCallback<AutoLaunchEvent>(({ sendBack }) => {
-      const check = (val: OmniRuntimeReadiness) => {
-        if (val.status === 'ready') {
- sendBack({ type: 'RUNTIME_READY' }); return true; 
-}
-        if (val.status === 'installing') {
- sendBack({ type: 'RUNTIME_OUTDATED' }); return true; 
-}
-        if (val.status === 'error') {
- sendBack({ type: 'RUNTIME_CHECK_FAILED', error: val.error }); return true; 
-}
-        return false;
-      };
-
-      const current = $omniRuntimeReadiness.get();
-      if (current.status === 'idle') {
-ensureRuntimeReady();
-} else if (current.status === 'error') {
-retryRuntimeCheck();
-}
-
-      if (check($omniRuntimeReadiness.get())) {
-return () => {};
-}
-      const unsub = $omniRuntimeReadiness.subscribe((val) => check(val));
-      return unsub;
-    }),
-
-    watchInstallStatus: fromCallback<AutoLaunchEvent>(({ sendBack }) => {
-      const unsub = $omniRuntimeReadiness.subscribe((val) => {
-        if (val.status === 'ready') {
-sendBack({ type: 'INSTALL_COMPLETED' });
-} else if (val.status === 'error') {
-sendBack({ type: 'INSTALL_FAILED', error: val.error });
-} else if (val.status === 'idle') {
-sendBack({ type: 'INSTALL_CANCELLED' });
-}
-      });
-      return unsub;
-    }),
-
-    checkConfigAndStart: fromCallback<AutoLaunchEvent>(({ sendBack }) => {
-      const wd = workspaceDirRef.current;
-      if (!wd) {
-        sendBack({ type: 'CONFIG_MISSING' });
-        return;
-      }
-      let cancelled = false;
-      (async () => {
-        try {
-          const modelsConfig = await emitter.invoke('settings:get-models-config');
-          const hasProviders = Object.keys(modelsConfig.providers).length > 0;
-          if (cancelled) {
-return;
-}
-          if (!hasProviders) {
-            await persistedStoreApi.setKey('onboardingComplete', false);
-            sendBack({ type: 'CONFIG_MISSING' });
-            return;
+  const actors = useMemo(
+    () => ({
+      checkRuntime: fromCallback<AutoLaunchEvent>(({ sendBack }) => {
+        const check = (val: OmniRuntimeReadiness) => {
+          if (val.status === 'ready') {
+            sendBack({ type: 'RUNTIME_READY' });
+            return true;
           }
-        } catch {
-          if (cancelled) {
-return;
-}
-        }
-        if (cancelled) {
-return;
-}
+          if (val.status === 'installing') {
+            sendBack({ type: 'RUNTIME_OUTDATED' });
+            return true;
+          }
+          if (val.status === 'error') {
+            sendBack({ type: 'RUNTIME_CHECK_FAILED', error: val.error });
+            return true;
+          }
+          return false;
+        };
 
-        const existing = $agentStatuses.get()[processIdRef.current];
-        if (existing && (existing.type === 'running' || existing.type === 'connecting' || existing.type === 'starting')) {
-          sendBack({ type: 'CONFIG_OK' });
+        const current = $omniRuntimeReadiness.get();
+        if (current.status === 'idle') {
+          ensureRuntimeReady();
+        } else if (current.status === 'error') {
+          retryRuntimeCheck();
+        }
+
+        if (check($omniRuntimeReadiness.get())) {
+          return () => {};
+        }
+        const unsub = $omniRuntimeReadiness.subscribe((val) => check(val));
+        return unsub;
+      }),
+
+      watchInstallStatus: fromCallback<AutoLaunchEvent>(({ sendBack }) => {
+        const unsub = $omniRuntimeReadiness.subscribe((val) => {
+          if (val.status === 'ready') {
+            sendBack({ type: 'INSTALL_COMPLETED' });
+          } else if (val.status === 'error') {
+            sendBack({ type: 'INSTALL_FAILED', error: val.error });
+          } else if (val.status === 'idle') {
+            sendBack({ type: 'INSTALL_CANCELLED' });
+          }
+        });
+        return unsub;
+      }),
+
+      checkConfigAndStart: fromCallback<AutoLaunchEvent>(({ sendBack }) => {
+        const wd = workspaceDirRef.current;
+        if (!wd) {
+          sendBack({ type: 'CONFIG_MISSING' });
           return;
         }
+        let cancelled = false;
+        (async () => {
+          try {
+            const modelsConfig = await emitter.invoke('settings:get-models-config');
+            const hasProviders = Object.keys(modelsConfig.providers).length > 0;
+            if (cancelled) {
+              return;
+            }
+            if (!hasProviders) {
+              await persistedStoreApi.setKey('onboardingComplete', false);
+              sendBack({ type: 'CONFIG_MISSING' });
+              return;
+            }
+          } catch {
+            if (cancelled) {
+              return;
+            }
+          }
+          if (cancelled) {
+            return;
+          }
 
-        agentProcessApi.start(processIdRef.current, {
-          workspaceDir: wd,
-          ...(projectIdRef.current ? { projectId: projectIdRef.current } : {}),
-          ...(profileNameOverrideRef.current
-            ? { profileNameOverride: profileNameOverrideRef.current }
-            : {}),
-          ...(sessionIdRef.current ? { sessionId: sessionIdRef.current } : {}),
-          ...(containerIdRef.current ? { containerId: containerIdRef.current } : {}),
+          const existing = $agentStatuses.get()[processIdRef.current];
+          if (
+            existing &&
+            (existing.type === 'running' || existing.type === 'connecting' || existing.type === 'starting')
+          ) {
+            sendBack({ type: 'CONFIG_OK' });
+            return;
+          }
+
+          agentProcessApi.start(processIdRef.current, {
+            workspaceDir: wd,
+            ...(projectIdRef.current ? { projectId: projectIdRef.current } : {}),
+            ...(profileNameOverrideRef.current ? { profileNameOverride: profileNameOverrideRef.current } : {}),
+            ...(sessionIdRef.current ? { sessionId: sessionIdRef.current } : {}),
+            ...(containerIdRef.current ? { containerId: containerIdRef.current } : {}),
+          });
+          sendBack({ type: 'CONFIG_OK' });
+        })();
+        return () => {
+          cancelled = true;
+        };
+      }),
+
+      watchProcessStatus: fromCallback<AutoLaunchEvent>(({ sendBack }) => {
+        let cancelled = false;
+        let lastSentType: string | null = null;
+
+        // Seed with current server-side status
+        emitter
+          .invoke('agent-process:get-status', processIdRef.current)
+          .then((status) => {
+            if (cancelled || !status || status.type === 'uninitialized') {
+              return;
+            }
+            $agentStatuses.setKey(processIdRef.current, status);
+          })
+          .catch(() => {});
+
+        const unsub = $agentStatuses.subscribe((allStatuses) => {
+          const status = allStatuses[processIdRef.current];
+          if (!status) {
+            return;
+          }
+          if (status.type === lastSentType) {
+            return;
+          }
+          lastSentType = status.type;
+          if (status.type === 'running' || status.type === 'connecting') {
+            sendBack({ type: 'SANDBOX_RUNNING' });
+          } else if (status.type === 'error') {
+            sendBack({ type: 'SANDBOX_ERROR', error: status.error.message });
+          } else if (status.type === 'exited') {
+            sendBack({ type: 'SANDBOX_EXITED' });
+          }
         });
-        sendBack({ type: 'CONFIG_OK' });
-      })();
-      return () => {
- cancelled = true; 
-};
+        return () => {
+          cancelled = true;
+          unsub();
+        };
+      }),
     }),
+    []
+  );
 
-    watchProcessStatus: fromCallback<AutoLaunchEvent>(({ sendBack }) => {
-      let cancelled = false;
-      let lastSentType: string | null = null;
-
-      // Seed with current server-side status
-      emitter.invoke('agent-process:get-status', processIdRef.current).then((status) => {
-        if (cancelled || !status || status.type === 'uninitialized') {
-return;
-}
-        $agentStatuses.setKey(processIdRef.current, status);
-      }).catch(() => {});
-
-      const unsub = $agentStatuses.subscribe((allStatuses) => {
-        const status = allStatuses[processIdRef.current];
-        if (!status) {
-return;
-}
-        if (status.type === lastSentType) {
-return;
-}
-        lastSentType = status.type;
-        if (status.type === 'running' || status.type === 'connecting') {
-sendBack({ type: 'SANDBOX_RUNNING' });
-} else if (status.type === 'error') {
-sendBack({ type: 'SANDBOX_ERROR', error: status.error.message });
-} else if (status.type === 'exited') {
-sendBack({ type: 'SANDBOX_EXITED' });
-}
-      });
-      return () => {
- cancelled = true; unsub(); 
-};
-    }),
-  }), []);  
-
-  const inspect = useMemo(() => createMachineLogger(logLabel ?? `autoLaunch:${processId}`, {
-    tags: { sandbox: store.defaultProfileName ?? 'none' },
-  }), [processId, logLabel, store.defaultProfileName]);
+  const inspect = useMemo(
+    () =>
+      createMachineLogger(logLabel ?? `autoLaunch:${processId}`, {
+        tags: { sandbox: store.defaultProfileName ?? 'none' },
+      }),
+    [processId, logLabel, store.defaultProfileName]
+  );
 
   const machine = useMemo(() => autoLaunchMachine.provide({ actors }), [actors]);
   const actor = useActorRef(machine, { inspect });
@@ -229,8 +244,8 @@ sendBack({ type: 'SANDBOX_EXITED' });
   // Trigger: send LAUNCH when initialized + workspace available
   useEffect(() => {
     if (!initialized || !opts.workspaceDir) {
-return;
-}
+      return;
+    }
     const snap = actor.getSnapshot();
     if (snap.value === 'idle' && !snap.context.hasLaunched) {
       actor.send({ type: 'LAUNCH' });
@@ -249,12 +264,12 @@ return;
     let cancelled = false;
     void (async () => {
       if (cancelled) {
-return;
-}
+        return;
+      }
       await agentProcessApi.stop(processIdRef.current);
       if (cancelled) {
-return;
-}
+        return;
+      }
       actor.send({ type: 'RESET' });
       // Drive the relaunch explicitly: the auto-launch effect's deps don't
       // change on RESET, so without this a workspace switch (new chat
@@ -263,8 +278,8 @@ return;
     })();
 
     return () => {
- cancelled = true;
-};
+      cancelled = true;
+    };
   }, [initialized, opts.workspaceDir, actor]);
 
   // React to a per-launch sandbox profile override change (written by the
@@ -342,8 +357,8 @@ return;
 
   const launch = useCallback(() => {
     if (!opts.workspaceDir) {
-return;
-}
+      return;
+    }
     actor.send({ type: 'RELAUNCH' });
   }, [opts.workspaceDir, actor]);
 

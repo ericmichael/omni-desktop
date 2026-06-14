@@ -29,8 +29,8 @@ export function registerPlatformIpc(arg: {
 
   ipc.handle('platform:get-auth', () => {
     if (!isEnterpriseBuild()) {
-return null;
-}
+      return null;
+    }
     return store.get('platform') ?? null;
   });
 
@@ -66,15 +66,18 @@ return null;
   ipc.handle('platform:get-dashboards', async () => {
     const creds = store.get('platform');
     if (!creds?.accessToken || !isEnterpriseBuild()) {
-return [];
-}
+      return [];
+    }
 
     try {
-      const client = new PlatformClient({
-        url: PLATFORM_URL,
-        accessToken: creds.accessToken,
-        refreshToken: creds.refreshToken ?? '',
-      }, fetchFn);
+      const client = new PlatformClient(
+        {
+          url: PLATFORM_URL,
+          accessToken: creds.accessToken,
+          refreshToken: creds.refreshToken ?? '',
+        },
+        fetchFn
+      );
 
       client.onTokenRefresh = (newToken) => {
         const current = store.get('platform');
@@ -123,7 +126,9 @@ return [];
     const maxAttempts = Math.floor(expiresIn / interval);
 
     for (let i = 0; i < maxAttempts; i++) {
-      await new Promise<void>((r) => setTimeout(r, interval * 1000));
+      await new Promise<void>((r) => {
+        setTimeout(r, interval * 1000);
+      });
 
       try {
         const result = await PlatformClient.pollForToken(PLATFORM_URL, deviceCode, fetchFn);

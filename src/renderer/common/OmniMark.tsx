@@ -40,14 +40,7 @@ export const OmniMark = memo(({ size = 28, className }: { size?: number; classNa
       <path d={RING_BACK} transform={RING_TILT} fill="none" stroke="#3e3da8" strokeWidth="2.1" />
       <circle cx="14" cy="14" r="7.2" fill={`url(#${sphereId})`} />
       <g clipPath={`url(#${clipId})`}>
-        <path
-          d={RING_SHADOW}
-          transform={RING_TILT}
-          fill="none"
-          stroke="#15143f"
-          strokeWidth="4.4"
-          opacity="0.5"
-        />
+        <path d={RING_SHADOW} transform={RING_TILT} fill="none" stroke="#15143f" strokeWidth="4.4" opacity="0.5" />
       </g>
       <path
         d={RING_FRONT}

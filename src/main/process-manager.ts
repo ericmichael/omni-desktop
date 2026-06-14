@@ -63,7 +63,9 @@ const AUTO_MIRROR_INTERVAL_MS = 15_000;
  * machine id. `null` for non-local profiles.
  */
 export const parseLocalProfile = (profileName: string): string | null => {
-  if (!profileName.startsWith('local:')) return null;
+  if (!profileName.startsWith('local:')) {
+    return null;
+  }
   const id = profileName.slice('local:'.length).trim();
   return id.length > 0 ? id : null;
 };
@@ -208,7 +210,9 @@ export class ProcessManager {
     // (computer-as-sandbox) — spawns `omni serve` here; `local:` differs only
     // in that it runs with a `host_bridge` profile pointing the sandbox at the
     // user's laptop.
-    if (profileName === 'platform') return 'compute';
+    if (profileName === 'platform') {
+      return 'compute';
+    }
     return 'serve';
   }
 
@@ -218,7 +222,9 @@ export class ProcessManager {
    * (omni-platform delegation) uses a compute client.
    */
   resolveComputeClient(profileName: string): IComputeClient | null {
-    if (profileName === 'platform') return this.platformClient;
+    if (profileName === 'platform') {
+      return this.platformClient;
+    }
     return null;
   }
 
@@ -525,7 +531,9 @@ export class ProcessManager {
     workspaceDir: string | undefined
   ): Promise<string | null> {
     const machineId = parseLocalProfile(profileName);
-    if (!machineId) return null;
+    if (!machineId) {
+      return null;
+    }
     if (!this.hostBridge) {
       throw new Error(`local sandbox needs a host bridge (machine ${machineId}) — not available`);
     }
@@ -639,9 +647,13 @@ export class ProcessManager {
    */
   broadcastHostOffline = (machineId: string): void => {
     for (const [processId, mid] of this.localSandboxKeys.entries()) {
-      if (mid !== machineId) continue;
+      if (mid !== machineId) {
+        continue;
+      }
       const proc = this.processes.get(processId);
-      if (!proc) continue;
+      if (!proc) {
+        continue;
+      }
       const overlaid = this.withHostOfflineOverlay(processId, proc.getStatus());
       if (overlaid.type === 'running' && overlaid.data.hostOffline) {
         this.sendToWindow('agent-process:status', processId, overlaid);
@@ -666,9 +678,13 @@ export class ProcessManager {
       // Skip if a (re)start is already in flight — guards against WS-reconnect
       // flapping triggering overlapping rebuilds.
       const st = this.processes.get(processId)?.getStatus().type;
-      if (st === 'starting' || st === 'connecting') continue;
+      if (st === 'starting' || st === 'connecting') {
+        continue;
+      }
       const opts = this.lastStartArgs.get(processId);
-      if (!opts) continue;
+      if (!opts) {
+        continue;
+      }
       try {
         await this.rebuild(processId, opts);
       } catch (err) {

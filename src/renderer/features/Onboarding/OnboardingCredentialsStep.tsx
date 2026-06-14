@@ -67,9 +67,7 @@ export const OnboardingCredentialsStep = memo(
         <div className={styles.fields}>
           {showBaseUrl && (
             <div className={styles.field}>
-              <Caption1>
-                Base URL {baseUrlRequired && <span className={styles.required}>*</span>}
-              </Caption1>
+              <Caption1>Base URL {baseUrlRequired && <span className={styles.required}>*</span>}</Caption1>
               <Input
                 value={baseUrl}
                 onChange={handleBaseUrlChange}
@@ -81,9 +79,7 @@ export const OnboardingCredentialsStep = memo(
           )}
 
           <div className={styles.field}>
-            <Caption1>
-              API Key {apiKeyRequired && <span className={styles.required}>*</span>}
-            </Caption1>
+            <Caption1>API Key {apiKeyRequired && <span className={styles.required}>*</span>}</Caption1>
             <Input
               type="password"
               value={apiKey}

@@ -23,7 +23,7 @@ The validated shape is:
   renderer goes to the cloud `ProcessManager`, which dispatches to an
   `IComputeClient`. For a local-anchored session, the implementation of
   `IComputeClient` is a new `RemoteElectronComputeClient` that issues
-  *reverse RPCs* over the existing WS to the named Electron. Session
+  _reverse RPCs_ over the existing WS to the named Electron. Session
   metadata, chat history (omniagents `PgSessionStorage`), agent message
   persistence — all remain in cloud Postgres. This is the inversion of
   `PlatformClient`.
@@ -34,7 +34,7 @@ The validated shape is:
   opens its sandbox WS (the one that today carries `terminal:*`,
   `sandbox.notify_activity`, `sandbox.pause`, etc.) through this URL. When
   the renderer happens to be on the same laptop, it's same-host TCP. When
-  the renderer is on a *different* device (web UI from a phone), the URL
+  the renderer is on a _different_ device (web UI from a phone), the URL
   points to a cloud-relayed path that forwards to the laptop's WS. One
   renderer code path; both physical topologies work.
 
@@ -47,7 +47,7 @@ Why this is the right call:
    noticeable typing lag, and Codex token streaming would visibly slug.
 2. **Cloud is still source of truth.** The cloud `ProcessManager` knows
    every session that exists, who it's anchored to, and its status. The
-   cloud writes session metadata to PG. The agent's *workspace files* are
+   cloud writes session metadata to PG. The agent's _workspace files_ are
    local-only by design — that's the whole point of the feature. The cloud
    doesn't need to see every Codex token.
 3. **One renderer code path.** The renderer's sandbox WS attaches to
@@ -65,7 +65,7 @@ Why this is the right call:
 
 The renderer never opens a second control-plane WS. The Electron-as-host
 opens a control-plane WS to the cloud (the SAME WS the renderer in that
-Electron already opens — they multiplex), and the cloud uses *reverse RPC*
+Electron already opens — they multiplex), and the cloud uses _reverse RPC_
 over it to drive lifecycle.
 
 ## Open questions: decisions
@@ -93,7 +93,7 @@ materialized** env bundle (the same bundle today's `getExtraEnv` produces
 for ACI spawns — including `OMNI_RUNTIME_TOKEN`, model API keys, Codex JSON
 contents, `XDG_CONFIG_HOME` redirect target, `.env`). The laptop's local
 Electron's own settings (the standalone-Electron persisted config) are
-*ignored* for cloud-linked sessions. Two reasons: (a) consistency with
+_ignored_ for cloud-linked sessions. Two reasons: (a) consistency with
 cloud-ACI — same agent behavior regardless of compute backend; (b)
 eliminates "why did my OpenAI key change when I switched compute?"
 surprises. The laptop's main process writes the materialized config to an
@@ -150,11 +150,11 @@ they reconnect with the same id.
 ### 6. Auth on reverse-RPC
 
 The cloud-side checks (before sending a `compute:start-session`): (a)
-session's `compute_location` resolves to a machine the *same principal*
+session's `compute_location` resolves to a machine the _same principal_
 owns; (b) the target machine WS's authenticated principal equals the
 session's principal; (c) the operation is permitted for the session's state
 (no `start` if `running`, etc.). The Electron-side check (before honoring
-an incoming reverse-call): (a) the WS it received it on is the one *it*
+an incoming reverse-call): (a) the WS it received it on is the one _it_
 dialed, with its own token (intrinsic — no impersonation possible); (b) the
 operation is in a known allowlist (`compute:start-session`,
 `compute:stop-session`, `compute:adopt-session`, `compute:get-status`); (c)
@@ -173,7 +173,7 @@ terminal sessions / shells / dev servers. Out of scope for v1.
 The "Promote to cloud" affordance is implemented as: (1) `sandbox.snapshot.tar`
 produced via existing snapshot machinery on the laptop; (2) uploaded via SAS
 URL the cloud mints (same path `prepareWorkspace` uses today, but inverted —
-the cloud is the *destination* here, not source); (3) cloud's
+the cloud is the _destination_ here, not source); (3) cloud's
 `ProcessManager` starts a fresh `aci` session, restores the snapshot via the
 existing `--snapshot-dir` path, captures the new `sessionId`. The renderer
 treats the old (laptop) session as `archived` and the new (cloud) session as
@@ -331,7 +331,7 @@ dispatch yet.
   - `IpcEvents['machine:rename']: (machineId, label) => Promise<void>`
   - `IpcEvents['machine:remove']: (machineId) => Promise<void>`
   - `IpcEvents['machine:set-label']: (label) => Promise<void>` (the local
-    Electron's *own* label override)
+    Electron's _own_ label override)
   - `MachineSummary` type: `{ machineId, label, platform, online, isSelf, registeredAt, lastSeenAt }`
 - `src/main/index.ts` — on app boot when `cloudMode != null`, call
   `getOrCreateMachineIdentity` and once cloud WS opens, invoke
@@ -453,7 +453,7 @@ sandbox WS resolves correctly.
   keep `IComputeClient` as-is and select the right impl in PM construction).
   Cleaner: leave `IComputeClient` unchanged and treat
   `RemoteElectronComputeClient` as just another impl.
-- `src/main/process-manager.ts` — extend so a single PM can have *multiple*
+- `src/main/process-manager.ts` — extend so a single PM can have _multiple_
   compute clients keyed by machine location, not just one `platformClient`.
   Replace `platformClient: IComputeClient | null` with
   `computeClients: Map<string, IComputeClient>` and a method
@@ -667,18 +667,18 @@ restart; cloud picks them back up.
 
 ## Risk register
 
-| Risk | Mitigation |
-|---|---|
-| **Reverse-RPC adds a new failure mode (cloud reachable but laptop WS hung).** Cloud waits 30s on every `start`, user-visible latency. | Heartbeat ping on the cloud↔laptop WS every 10s; mark machine offline after 2 missed pings (~20s) BEFORE attempting a reverse-RPC, surface "host offline" instantly. |
-| **WS multiplexing under load (tunnel + control + per-session WS frames on one socket) creates head-of-line blocking.** | Use `ws`'s built-in `binaryType` + small message frames; cap per-tunnel buffer; if a single tunnel saturates we fall back to direct WS connections via `compute:tunnel-direct-url` (laptop opens an inbound port and the cloud relays via that). Tracked as a v2 follow-up; for v1 the tunnel is fine for typical chat/terminal traffic. |
-| **Settings drift between laptop's standalone-Electron settings and cloud-shipped env.** | Cloud-linked Electron's standalone-Electron settings are *invisible* in cloud-linked mode (existing pattern — see `cloudMode` check in many places). Local-compute spawns use the cloud-shipped env exclusively. Documented in the Settings card. |
-| **PG `machines` table grows unboundedly (every laptop the user ever signed in from).** | Settings → Machines lists them with last-seen; user can remove. Auto-cleanup after 180 days untouched (cron in Phase 7, low priority). |
-| **Cross-machine token leak: cloud sends materialized env (Codex JSON, model keys) to laptop. If laptop is compromised, those leak.** | This is the user's own laptop; they already trust it with the cloud WS. The materialized env is no different from what cloud-ACI sees today. Document explicitly in DEPLOY.md and the Settings card: "Local compute means your laptop holds your model keys for the duration of the session, materialized to a scratch dir under `~/.omni/cloud-sessions/`." |
-| **Existing per-PM single `platformClient` field is widely consumed.** | The PM refactor to `computeClients: Map` is the breaking-API change with the widest blast radius. Mitigate: keep `platformClient` as a derived getter (`computeClients.get('platform') ?? null`) for the transition; remove in a follow-up. |
-| **Renderer can't reach LAN IP of laptop when running on a phone over LTE.** | Always-relay path (`/proxy/local/...`) handles this. The LAN-direct optimization is opportunistic — when same-network, fast; when not, the relay path is the floor. |
-| **Snapshot tar is large; promote-to-cloud takes minutes.** | Stream the upload (use SAS Block Blob `uploadStream`), show progress in the UI banner. If it fails mid-stream, the old laptop session is intact (we don't stop until upload succeeds). |
-| **The WS-into-main consolidation (Phase 2) touches every renderer transport call.** | Behind a feature flag during dev (`OMNI_MAIN_WS=1`); cut over once the WS-handler.reverse.test passes; remove the flag in the same PR. |
-| **`MachineRegistry` is an in-process map; cloud has multiple replicas.** | First version pins machines to the replica they connect to; reverse-RPCs that arrive at the wrong replica reply `wrong-replica`, the cloud's `ProcessManager` re-resolves. If a session was started on replica A and replica B handles the next invoke, replica B looks up the machine in PG, finds no active WS locally, returns `host-offline`. Renderer shows the banner; the user's next WS reconnect lands on a replica that has the machine. Acceptable for v1 (most cloud deployments are single-replica). PG-NOTIFY-based cross-replica routing is a v2 follow-up. |
+| Risk                                                                                                                                  | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Reverse-RPC adds a new failure mode (cloud reachable but laptop WS hung).** Cloud waits 30s on every `start`, user-visible latency. | Heartbeat ping on the cloud↔laptop WS every 10s; mark machine offline after 2 missed pings (~20s) BEFORE attempting a reverse-RPC, surface "host offline" instantly.                                                                                                                                                                                                                                                                                                                                                                                                       |
+| **WS multiplexing under load (tunnel + control + per-session WS frames on one socket) creates head-of-line blocking.**                | Use `ws`'s built-in `binaryType` + small message frames; cap per-tunnel buffer; if a single tunnel saturates we fall back to direct WS connections via `compute:tunnel-direct-url` (laptop opens an inbound port and the cloud relays via that). Tracked as a v2 follow-up; for v1 the tunnel is fine for typical chat/terminal traffic.                                                                                                                                                                                                                                   |
+| **Settings drift between laptop's standalone-Electron settings and cloud-shipped env.**                                               | Cloud-linked Electron's standalone-Electron settings are _invisible_ in cloud-linked mode (existing pattern — see `cloudMode` check in many places). Local-compute spawns use the cloud-shipped env exclusively. Documented in the Settings card.                                                                                                                                                                                                                                                                                                                          |
+| **PG `machines` table grows unboundedly (every laptop the user ever signed in from).**                                                | Settings → Machines lists them with last-seen; user can remove. Auto-cleanup after 180 days untouched (cron in Phase 7, low priority).                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| **Cross-machine token leak: cloud sends materialized env (Codex JSON, model keys) to laptop. If laptop is compromised, those leak.**  | This is the user's own laptop; they already trust it with the cloud WS. The materialized env is no different from what cloud-ACI sees today. Document explicitly in DEPLOY.md and the Settings card: "Local compute means your laptop holds your model keys for the duration of the session, materialized to a scratch dir under `~/.omni/cloud-sessions/`."                                                                                                                                                                                                               |
+| **Existing per-PM single `platformClient` field is widely consumed.**                                                                 | The PM refactor to `computeClients: Map` is the breaking-API change with the widest blast radius. Mitigate: keep `platformClient` as a derived getter (`computeClients.get('platform') ?? null`) for the transition; remove in a follow-up.                                                                                                                                                                                                                                                                                                                                |
+| **Renderer can't reach LAN IP of laptop when running on a phone over LTE.**                                                           | Always-relay path (`/proxy/local/...`) handles this. The LAN-direct optimization is opportunistic — when same-network, fast; when not, the relay path is the floor.                                                                                                                                                                                                                                                                                                                                                                                                        |
+| **Snapshot tar is large; promote-to-cloud takes minutes.**                                                                            | Stream the upload (use SAS Block Blob `uploadStream`), show progress in the UI banner. If it fails mid-stream, the old laptop session is intact (we don't stop until upload succeeds).                                                                                                                                                                                                                                                                                                                                                                                     |
+| **The WS-into-main consolidation (Phase 2) touches every renderer transport call.**                                                   | Behind a feature flag during dev (`OMNI_MAIN_WS=1`); cut over once the WS-handler.reverse.test passes; remove the flag in the same PR.                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| **`MachineRegistry` is an in-process map; cloud has multiple replicas.**                                                              | First version pins machines to the replica they connect to; reverse-RPCs that arrive at the wrong replica reply `wrong-replica`, the cloud's `ProcessManager` re-resolves. If a session was started on replica A and replica B handles the next invoke, replica B looks up the machine in PG, finds no active WS locally, returns `host-offline`. Renderer shows the banner; the user's next WS reconnect lands on a replica that has the machine. Acceptable for v1 (most cloud deployments are single-replica). PG-NOTIFY-based cross-replica routing is a v2 follow-up. |
 
 ## Ship gates
 
@@ -716,9 +716,9 @@ the documented error.
 ## Out of scope (for v1)
 
 - **Cross-machine workspace migration** (`local:macA` → `local:macB`). Stop
-  + start fresh; if user wants files moved, they git-push or use Promote-to-cloud
-  as intermediate. Reason: no clean UX for "shipping ~5GB across user's
-  two devices over WAN," would need its own design.
+  - start fresh; if user wants files moved, they git-push or use Promote-to-cloud
+    as intermediate. Reason: no clean UX for "shipping ~5GB across user's
+    two devices over WAN," would need its own design.
 - **Cloud → laptop migration** (cloud-ACI to local). The reverse of Promote.
   Reason: solves a niche problem (user changed their mind mid-session);
   user can stop + start fresh; not enough demand to justify another snapshot

@@ -39,10 +39,7 @@ function createMockStore(initial: Partial<StoreData> = {}): SkillStore {
 }
 
 /** Build a github-style repo zip: top-level dir is `<repo>-<ref>/`. */
-async function buildRepoZip(
-  outputPath: string,
-  files: Record<string, string>
-): Promise<void> {
+async function buildRepoZip(outputPath: string, files: Record<string, string>): Promise<void> {
   return new Promise((resolve, reject) => {
     const output = createWriteStream(outputPath);
     const archive = archiver('zip', { zlib: { level: 9 } });
@@ -335,9 +332,7 @@ describe('installMarketplacePlugin', () => {
     stubFetchToZip(zipPath);
     const store = createMockStore();
 
-    await expect(
-      installMarketplacePlugin(configDir, REPO_SPEC, 'nonexistent', store)
-    ).rejects.toThrow(/not found/);
+    await expect(installMarketplacePlugin(configDir, REPO_SPEC, 'nonexistent', store)).rejects.toThrow(/not found/);
   });
 
   it('throws when a listed skill has no SKILL.md', async () => {
@@ -350,9 +345,9 @@ describe('installMarketplacePlugin', () => {
     });
     stubFetchToZip(zipPath);
 
-    await expect(
-      installMarketplacePlugin(configDir, REPO_SPEC, 'broken', createMockStore())
-    ).rejects.toThrow(/missing or has invalid SKILL\.md/);
+    await expect(installMarketplacePlugin(configDir, REPO_SPEC, 'broken', createMockStore())).rejects.toThrow(
+      /missing or has invalid SKILL\.md/
+    );
   });
 
   it('throws when a listed skill has malformed frontmatter', async () => {
@@ -366,9 +361,9 @@ describe('installMarketplacePlugin', () => {
     });
     stubFetchToZip(zipPath);
 
-    await expect(
-      installMarketplacePlugin(configDir, REPO_SPEC, 'broken', createMockStore())
-    ).rejects.toThrow(/missing or has invalid SKILL\.md/);
+    await expect(installMarketplacePlugin(configDir, REPO_SPEC, 'broken', createMockStore())).rejects.toThrow(
+      /missing or has invalid SKILL\.md/
+    );
   });
 
   it('records an InstalledBundle entry with version + skill names', async () => {
@@ -412,9 +407,7 @@ describe('updateMarketplacePlugin', () => {
     const v1Manifest: MarketplaceManifest = {
       name: 'm',
       metadata: { version: '1.0.0' },
-      plugins: [
-        { name: 'document-skills', description: 'd', source: './', skills: ['./skills/pdf', './skills/docx'] },
-      ],
+      plugins: [{ name: 'document-skills', description: 'd', source: './', skills: ['./skills/pdf', './skills/docx'] }],
     };
     const v1Zip = await buildRepo({
       '.claude-plugin/marketplace.json': JSON.stringify(v1Manifest),
@@ -431,9 +424,7 @@ describe('updateMarketplacePlugin', () => {
     const v2Manifest: MarketplaceManifest = {
       name: 'm',
       metadata: { version: '2.0.0' },
-      plugins: [
-        { name: 'document-skills', description: 'd', source: './', skills: ['./skills/pdf'] },
-      ],
+      plugins: [{ name: 'document-skills', description: 'd', source: './', skills: ['./skills/pdf'] }],
     };
     const v2Zip = await buildRepo({
       '.claude-plugin/marketplace.json': JSON.stringify(v2Manifest),
@@ -447,9 +438,7 @@ describe('updateMarketplacePlugin', () => {
     expect(store.get('skillSources')['docx']).toBeUndefined();
     expect(store.get('skillSources')['pdf']).toBeDefined();
 
-    const docxOnDisk = await readFile(join(configDir, 'skills', 'docx', 'SKILL.md'), 'utf-8').catch(
-      () => null
-    );
+    const docxOnDisk = await readFile(join(configDir, 'skills', 'docx', 'SKILL.md'), 'utf-8').catch(() => null);
     expect(docxOnDisk).toBeNull();
 
     const bundle = store.get('installedBundles')[bundleKey('anthropics/skills', 'document-skills')];
@@ -461,9 +450,7 @@ describe('updateMarketplacePlugin', () => {
     const v1Manifest: MarketplaceManifest = {
       name: 'm',
       metadata: { version: '1.0.0' },
-      plugins: [
-        { name: 'document-skills', description: 'd', source: './', skills: ['./skills/pdf'] },
-      ],
+      plugins: [{ name: 'document-skills', description: 'd', source: './', skills: ['./skills/pdf'] }],
     };
     stubFetchToZip(
       await buildRepo({
@@ -529,16 +516,12 @@ describe('updateMarketplacePlugin', () => {
       name: 'a',
       plugins: [{ name: 'plug-a', description: 'd', source: './', skills: [] }],
     };
-    stubFetchToZip(
-      await buildRepo({ '.claude-plugin/marketplace.json': JSON.stringify(aV2) })
-    );
+    stubFetchToZip(await buildRepo({ '.claude-plugin/marketplace.json': JSON.stringify(aV2) }));
     await updateMarketplacePlugin(configDir, REPO_SPEC, 'plug-a', store);
 
     // pdf survived because its source no longer claims plug-a
     expect(store.get('skillSources')['pdf']?.kind).toBe('marketplace');
-    const stillThere = await readFile(join(configDir, 'skills', 'pdf', 'SKILL.md'), 'utf-8').catch(
-      () => null
-    );
+    const stillThere = await readFile(join(configDir, 'skills', 'pdf', 'SKILL.md'), 'utf-8').catch(() => null);
     expect(stillThere).not.toBeNull();
   });
 
@@ -611,9 +594,7 @@ describe('checkBundleUpdates', () => {
     const v2: MarketplaceManifest = {
       name: 'm',
       metadata: { version: '2.0.0' },
-      plugins: [
-        { name: 'plug', description: 'd', source: './', skills: ['./skills/pdf', './skills/docx'] },
-      ],
+      plugins: [{ name: 'plug', description: 'd', source: './', skills: ['./skills/pdf', './skills/docx'] }],
     };
     zipPath = join(tmpRoot, 'v2.zip');
     await buildRepoZip(zipPath, {

@@ -10,10 +10,7 @@
 import type { MilestoneManager } from '@/main/milestone-manager';
 import type { IIpcListener } from '@/shared/ipc-listener';
 
-export function registerMilestoneHandlers(
-  ipc: IIpcListener,
-  resolve: (event: unknown) => MilestoneManager
-): string[] {
+export function registerMilestoneHandlers(ipc: IIpcListener, resolve: (event: unknown) => MilestoneManager): string[] {
   const channels: string[] = [];
   const h = (ch: string, fn: (m: MilestoneManager, ...args: any[]) => unknown): void => {
     ipc.handle(ch, (event: unknown, ...args: any[]) => fn(resolve(event), ...args));

@@ -1,13 +1,6 @@
 import { type FocusItem, rankFocus } from '@/lib/focus-ranker';
 import type { RiskSignal } from '@/lib/risk-signals';
-import type {
-  ColumnId,
-  Milestone,
-  MilestoneId,
-  Project,
-  ProjectId,
-  Ticket,
-} from '@/shared/types';
+import type { ColumnId, Milestone, MilestoneId, Project, ProjectId, Ticket } from '@/shared/types';
 
 /**
  * Pure rollup helpers for the Home view. Home is a list of pinned things
@@ -88,10 +81,7 @@ export function rankFocusForProject(args: {
  * route only to `byProject`. WIP overflow and other unscoped signals are
  * dropped — Home renders the WIP gauge separately.
  */
-export function groupRiskSignalsForHome(args: {
-  signals: RiskSignal[];
-  tickets: Ticket[];
-}): {
+export function groupRiskSignalsForHome(args: { signals: RiskSignal[]; tickets: Ticket[] }): {
   byProject: Map<ProjectId, RiskSignal[]>;
   byMilestone: Map<MilestoneId, RiskSignal[]>;
   inbox: RiskSignal[];

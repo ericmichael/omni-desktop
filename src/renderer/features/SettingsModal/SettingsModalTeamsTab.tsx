@@ -68,7 +68,13 @@ const TeamRow = memo(function TeamRow({
       <div>
         <Body1Strong>{team.label}</Body1Strong> <Caption1>· {team.role}</Caption1>
       </div>
-      {active ? <Caption1>Active</Caption1> : <Button size="sm" onClick={handle}>Switch</Button>}
+      {active ? (
+        <Caption1>Active</Caption1>
+      ) : (
+        <Button size="sm" onClick={handle}>
+          Switch
+        </Button>
+      )}
     </div>
   );
 });
@@ -96,10 +102,14 @@ const MemberRow = memo(function MemberRow({
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
         {isOwner && member.role !== 'owner' ? (
-          <Button size="sm" variant="ghost" onClick={handleTransfer}>Make owner</Button>
+          <Button size="sm" variant="ghost" onClick={handleTransfer}>
+            Make owner
+          </Button>
         ) : null}
         {canManage && member.role !== 'owner' ? (
-          <Button size="sm" onClick={handleRemove}>Remove</Button>
+          <Button size="sm" onClick={handleRemove}>
+            Remove
+          </Button>
         ) : null}
       </div>
     </div>
@@ -160,8 +170,14 @@ export const SettingsModalTeamsTab = memo(function SettingsModalTeamsTab() {
     }
   }, [inviteEmail]);
   const handleNewTeamChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => setNewTeam(e.target.value), []);
-  const handleRenameChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => setRenameValue(e.target.value), []);
-  const handleAcceptChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => setAcceptToken(e.target.value), []);
+  const handleRenameChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => setRenameValue(e.target.value),
+    []
+  );
+  const handleAcceptChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => setAcceptToken(e.target.value),
+    []
+  );
   const handleInviteChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => setInviteEmail(e.target.value),
     []
@@ -183,12 +199,7 @@ export const SettingsModalTeamsTab = memo(function SettingsModalTeamsTab() {
           <TeamRow key={t.id} team={t} active={t.id === activeTeamId} onSwitch={handleSwitch} />
         ))}
         <div className={styles.inviteForm}>
-          <input
-            className={styles.input}
-            placeholder="New team name"
-            value={newTeam}
-            onChange={handleNewTeamChange}
-          />
+          <input className={styles.input} placeholder="New team name" value={newTeam} onChange={handleNewTeamChange} />
           <Button onClick={handleCreate}>Create team</Button>
         </div>
         <div className={styles.inviteForm}>
@@ -232,10 +243,14 @@ export const SettingsModalTeamsTab = memo(function SettingsModalTeamsTab() {
           ) : null}
           <div className={styles.inviteForm}>
             {activeTeam.kind !== 'personal' && myRole !== 'owner' ? (
-              <Button variant="ghost" onClick={handleLeave}>Leave team</Button>
+              <Button variant="ghost" onClick={handleLeave}>
+                Leave team
+              </Button>
             ) : null}
             {canDelete ? (
-              <Button variant="ghost" onClick={handleDelete}>Delete team</Button>
+              <Button variant="ghost" onClick={handleDelete}>
+                Delete team
+              </Button>
             ) : null}
           </div>
         </div>
@@ -270,7 +285,9 @@ export const SettingsModalTeamsTab = memo(function SettingsModalTeamsTab() {
           </Caption1>
           <div className={styles.inviteForm}>
             <Button onClick={handlePublishDefaults}>Publish my config as team default</Button>
-            <Button variant="ghost" onClick={handleClearDefaults}>Clear</Button>
+            <Button variant="ghost" onClick={handleClearDefaults}>
+              Clear
+            </Button>
           </div>
         </div>
       ) : null}
@@ -286,8 +303,12 @@ const InviteRow = memo(function InviteRow({ email, id, token }: { email: string;
     <div className={styles.row}>
       <Caption1>{email} · pending</Caption1>
       <div style={{ display: 'flex', gap: 6 }}>
-        <Button size="sm" variant="ghost" onClick={handleCopy}>Copy invite code</Button>
-        <Button size="sm" onClick={handleRevoke}>Revoke</Button>
+        <Button size="sm" variant="ghost" onClick={handleCopy}>
+          Copy invite code
+        </Button>
+        <Button size="sm" onClick={handleRevoke}>
+          Revoke
+        </Button>
       </div>
     </div>
   );

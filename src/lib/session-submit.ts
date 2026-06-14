@@ -9,7 +9,7 @@
  */
 export function ensureSessionId(
   currentSessionId: string | undefined,
-  generateId: () => string,
+  generateId: () => string
 ): { sessionId: string; generated: boolean } {
   if (currentSessionId) {
     return { sessionId: currentSessionId, generated: false };

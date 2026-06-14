@@ -10,14 +10,7 @@
  */
 import { upgradeLegacyInbox } from '@/lib/inbox-migration';
 import { uuidv4 } from '@/lib/uuid';
-import type {
-  ColumnId,
-  InboxItem,
-  Milestone,
-  StoreData,
-  TicketId,
-  TicketPriority,
-} from '@/shared/types';
+import type { ColumnId, InboxItem, Milestone, StoreData, TicketId, TicketPriority } from '@/shared/types';
 import { CHAT_TAB_ID } from '@/shared/types';
 
 // ---------------------------------------------------------------------------
@@ -523,8 +516,11 @@ export function runMigrations(store: IMigrationStore, deps: MigrationDeps): void
   if (version === 21 || (store.get('schemaVersion', 0) as number) === 21) {
     const legacyBackend = store.get('sandboxBackend') as string | undefined;
     let profileName = 'host';
-    if (legacyBackend === 'docker') profileName = 'devbox';
-    else if (legacyBackend === 'platform') profileName = 'platform';
+    if (legacyBackend === 'docker') {
+      profileName = 'devbox';
+    } else if (legacyBackend === 'platform') {
+      profileName = 'platform';
+    }
     store.set('defaultProfileName', profileName);
 
     store.delete('sandboxBackend');
@@ -573,7 +569,9 @@ export function runMigrations(store: IMigrationStore, deps: MigrationDeps): void
     const codeTabs = (store.get('codeTabs', []) as Array<Record<string, unknown>>) ?? [];
     if (codeTabs.length > 0) {
       const migrated = codeTabs.map((tab) => {
-        if (typeof tab.profileName === 'string') return tab;
+        if (typeof tab.profileName === 'string') {
+          return tab;
+        }
         const projectId = tab.projectId as string | null | undefined;
         const inherited = projectId ? projectProfile.get(projectId) : undefined;
         return { ...tab, profileName: inherited ?? defaultProfile };
@@ -594,8 +592,7 @@ export function runMigrations(store: IMigrationStore, deps: MigrationDeps): void
   if (version === 23 || (store.get('schemaVersion', 0) as number) === 23) {
     const newSessionId = deps.newSessionId ?? uuidv4;
     const isUuid = (v: unknown): boolean =>
-      typeof v === 'string' &&
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+      typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
     const chatSessionId = store.get('chatSessionId');
     if (chatSessionId !== undefined && !isUuid(chatSessionId)) {
@@ -604,9 +601,7 @@ export function runMigrations(store: IMigrationStore, deps: MigrationDeps): void
 
     const codeTabs = (store.get('codeTabs', []) as Array<Record<string, unknown>>) ?? [];
     if (codeTabs.length > 0) {
-      const migrated = codeTabs.map((tab) =>
-        isUuid(tab.sessionId) ? tab : { ...tab, sessionId: newSessionId() }
-      );
+      const migrated = codeTabs.map((tab) => (isUuid(tab.sessionId) ? tab : { ...tab, sessionId: newSessionId() }));
       store.set('codeTabs', migrated as never);
     }
 

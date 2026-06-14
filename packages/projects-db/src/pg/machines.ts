@@ -27,10 +27,7 @@ export class MachinesRepo {
    * sights refresh `label`/`platform` (a user can rename their machine in
    * Settings and we want the latest value to win) and bump `last_seen_at`.
    */
-  async register(
-    principalId: string,
-    info: { machineId: string; label: string; platform: string }
-  ): Promise<void> {
+  async register(principalId: string, info: { machineId: string; label: string; platform: string }): Promise<void> {
     await this.pool.query(
       `INSERT INTO machines (machine_id, principal_id, label, platform) VALUES ($1, $2, $3, $4)
        ON CONFLICT (machine_id) DO UPDATE SET
@@ -72,10 +69,11 @@ export class MachinesRepo {
   }
 
   async rename(principalId: string, machineId: string, label: string): Promise<void> {
-    await this.pool.query(
-      `UPDATE machines SET label = $3 WHERE machine_id = $1 AND principal_id = $2`,
-      [machineId, principalId, label]
-    );
+    await this.pool.query(`UPDATE machines SET label = $3 WHERE machine_id = $1 AND principal_id = $2`, [
+      machineId,
+      principalId,
+      label,
+    ]);
   }
 
   /**
@@ -84,9 +82,6 @@ export class MachinesRepo {
    * doesn't silently re-establish trust.
    */
   async delete(principalId: string, machineId: string): Promise<void> {
-    await this.pool.query(
-      `DELETE FROM machines WHERE machine_id = $1 AND principal_id = $2`,
-      [machineId, principalId]
-    );
+    await this.pool.query(`DELETE FROM machines WHERE machine_id = $1 AND principal_id = $2`, [machineId, principalId]);
   }
 }

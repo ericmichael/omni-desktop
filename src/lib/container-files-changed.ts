@@ -52,11 +52,7 @@ export interface ContainerFilesChangedInput {
 }
 
 /** Run ``git`` inside one source's mounted subdirectory and return stdout. */
-const runContainerGit = async (
-  containerId: string,
-  mountName: string,
-  args: string[]
-): Promise<string> => {
+const runContainerGit = async (containerId: string, mountName: string, args: string[]): Promise<string> => {
   const { stdout } = await execFileAsync(
     'docker',
     ['exec', '-u', EXEC_USER, containerId, 'git', '-C', mountPath(mountName), ...args],
@@ -67,12 +63,18 @@ const runContainerGit = async (
 
 const charToStatus = (ch: string): FileDiff['status'] => {
   switch (ch) {
-    case 'A': return 'added';
-    case 'M': return 'modified';
-    case 'D': return 'deleted';
-    case 'R': return 'renamed';
-    case 'C': return 'copied';
-    default: return 'modified';
+    case 'A':
+      return 'added';
+    case 'M':
+      return 'modified';
+    case 'D':
+      return 'deleted';
+    case 'R':
+      return 'renamed';
+    case 'C':
+      return 'copied';
+    default:
+      return 'modified';
   }
 };
 
@@ -82,7 +84,9 @@ const parseNameStatus = (output: string, group: DiffGroup): FileDiff[] => {
   const parts = output.split('\0');
   for (let i = 0; i < parts.length; i++) {
     const statusField = parts[i];
-    if (!statusField) continue;
+    if (!statusField) {
+      continue;
+    }
     const statusChar = statusField.charAt(0);
     if (statusChar === 'R' || statusChar === 'C') {
       const oldPath = parts[++i] ?? '';
@@ -99,7 +103,9 @@ const parseNameStatus = (output: string, group: DiffGroup): FileDiff[] => {
       continue;
     }
     const filePath = parts[++i] ?? '';
-    if (!filePath) continue;
+    if (!filePath) {
+      continue;
+    }
     files.push({
       path: filePath,
       status: charToStatus(statusChar),
@@ -115,7 +121,13 @@ const parseNameStatus = (output: string, group: DiffGroup): FileDiff[] => {
 const listSeedDiffFiles = async (containerId: string, mountName: string): Promise<FileDiff[]> => {
   // Everything between the seed tag and HEAD (work the agent committed)
   const out = await runContainerGit(containerId, mountName, [
-    'diff', '--name-status', '-M', '-C', '-z', SEED_REF, 'HEAD',
+    'diff',
+    '--name-status',
+    '-M',
+    '-C',
+    '-z',
+    SEED_REF,
+    'HEAD',
   ]).catch(() => '');
   return parseNameStatus(out, 'committed');
 };
@@ -123,27 +135,34 @@ const listSeedDiffFiles = async (containerId: string, mountName: string): Promis
 const listStagedFiles = async (containerId: string, mountName: string): Promise<FileDiff[]> => {
   // index vs HEAD — what `git add` has staged but not committed
   const out = await runContainerGit(containerId, mountName, [
-    'diff', '--name-status', '-M', '-C', '-z', '--cached',
+    'diff',
+    '--name-status',
+    '-M',
+    '-C',
+    '-z',
+    '--cached',
   ]).catch(() => '');
   return parseNameStatus(out, 'staged');
 };
 
 const listUnstagedFiles = async (containerId: string, mountName: string): Promise<FileDiff[]> => {
   // Working tree vs index — edits not yet `git add`'d
-  const out = await runContainerGit(containerId, mountName, [
-    'diff', '--name-status', '-M', '-C', '-z',
-  ]).catch(() => '');
+  const out = await runContainerGit(containerId, mountName, ['diff', '--name-status', '-M', '-C', '-z']).catch(
+    () => ''
+  );
   return parseNameStatus(out, 'unstaged');
 };
 
 const listUntrackedFiles = async (containerId: string, mountName: string): Promise<FileDiff[]> => {
   // New files not tracked by git (and not gitignored)
-  const out = await runContainerGit(containerId, mountName, [
-    'ls-files', '--others', '--exclude-standard', '-z',
-  ]).catch(() => '');
+  const out = await runContainerGit(containerId, mountName, ['ls-files', '--others', '--exclude-standard', '-z']).catch(
+    () => ''
+  );
   const files: FileDiff[] = [];
   for (const filePath of out.split('\0')) {
-    if (!filePath) continue;
+    if (!filePath) {
+      continue;
+    }
     files.push({
       path: filePath,
       status: 'untracked',
@@ -195,16 +214,16 @@ const buildUntrackedPatch = async (containerId: string, mountName: string, file:
   const lines = content.split('\n');
   // Strip trailing empty line if file ended with \n
   const last = lines[lines.length - 1];
-  if (last === '') lines.pop();
+  if (last === '') {
+    lines.pop();
+  }
   const additions = lines.map((l) => `+${l}`).join('\n');
   file.patch =
     `diff --git a/${file.path} b/${file.path}\n` +
     `new file mode 100644\n` +
     `--- /dev/null\n` +
     `+++ b/${file.path}\n` +
-    `@@ -0,0 +1,${lines.length} @@\n` +
-    additions +
-    (additions ? '\n' : '');
+    `@@ -0,0 +1,${lines.length} @@\n${additions}${additions ? '\n' : ''}`;
   file.additions = lines.length;
 };
 
@@ -213,11 +232,11 @@ const buildUntrackedPatch = async (containerId: string, mountName: string, file:
  * ``omni/seed`` baseline. Errors collapse to ``EMPTY`` (UI shows
  * "no changes" rather than a crash).
  */
-export async function getContainerFilesChanged(
-  input: ContainerFilesChangedInput
-): Promise<DiffResponse> {
+export async function getContainerFilesChanged(input: ContainerFilesChangedInput): Promise<DiffResponse> {
   const { containerId, mountName } = input;
-  if (!containerId || !mountName) return EMPTY;
+  if (!containerId || !mountName) {
+    return EMPTY;
+  }
 
   try {
     // Verify the container is running + the seed ref exists in this
@@ -243,7 +262,9 @@ export async function getContainerFilesChanged(
 
     for (let fi = 0; fi < files.length; fi++) {
       const file = files[fi]!;
-      if (fi >= MAX_PATCH_FILES) break;
+      if (fi >= MAX_PATCH_FILES) {
+        break;
+      }
 
       try {
         if (file.group === 'untracked') {
@@ -297,25 +318,26 @@ export async function getContainerFilesChanged(
  * We compose three diffs and append synthetic patches for untracked
  * paths.
  */
-export async function buildContainerSeedPatch(
-  containerId: string,
-  mountName: string
-): Promise<string> {
-  if (!containerId || !mountName) return '';
+export async function buildContainerSeedPatch(containerId: string, mountName: string): Promise<string> {
+  if (!containerId || !mountName) {
+    return '';
+  }
 
   // diff: HEAD vs working tree (combined committed + staged + unstaged).
   // Using SEED_REF as the base captures every modification since seeding,
   // regardless of whether the agent committed.
-  const wt = await runContainerGit(containerId, mountName, [
-    'diff', '--no-color', '--binary', SEED_REF,
-  ]).catch(() => '');
+  const wt = await runContainerGit(containerId, mountName, ['diff', '--no-color', '--binary', SEED_REF]).catch(
+    () => ''
+  );
 
   // Untracked files: synthesize an "added" patch for each.
   const untracked = await listUntrackedFiles(containerId, mountName);
   const untrackedPatches: string[] = [];
   for (const file of untracked) {
     await buildUntrackedPatch(containerId, mountName, file);
-    if (file.patch) untrackedPatches.push(file.patch);
+    if (file.patch) {
+      untrackedPatches.push(file.patch);
+    }
   }
 
   return [wt, ...untrackedPatches].filter((p) => p).join('\n');

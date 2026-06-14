@@ -1,12 +1,12 @@
-import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
-import { Dismiss20Regular,Edit20Regular, Warning20Filled } from '@fluentui/react-icons';
+import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
+import { Dismiss20Regular, Edit20Regular, Warning20Filled } from '@fluentui/react-icons';
 import { useStore } from '@nanostores/react';
 import { memo, useCallback, useMemo, useState } from 'react';
 import Markdown from 'react-markdown';
 
 import { Badge, Button, IconButton, SectionLabel, Select, Textarea } from '@/renderer/ds';
 import { $milestones } from '@/renderer/features/Initiatives/state';
-import type { Ticket, TicketPriority, TicketResolution } from '@/shared/types';
+import type { Ticket, TicketPriority } from '@/shared/types';
 
 import { $pipeline, $tickets, ticketApi } from './state';
 import { getColumnColors, PHASE_LABELS, RESOLUTION_COLORS, RESOLUTION_LABELS } from './ticket-constants';
@@ -160,8 +160,8 @@ export const TicketOverviewTab = memo(({ ticket }: TicketOverviewTabProps) => {
 
   const currentColumn = useMemo(() => {
     if (!ticket.columnId || !pipeline) {
-return undefined;
-}
+      return undefined;
+    }
     return pipeline.columns.find((c) => c.id === ticket.columnId);
   }, [ticket, pipeline]);
 
@@ -176,25 +176,15 @@ return undefined;
 
   const availableBlockers = useMemo(() => {
     const blocked = new Set(ticket.blockedBy);
-    return Object.values(tickets).filter((t) => t.id !== ticket.id && t.projectId === ticket.projectId && !blocked.has(t.id));
+    return Object.values(tickets).filter(
+      (t) => t.id !== ticket.id && t.projectId === ticket.projectId && !blocked.has(t.id)
+    );
   }, [ticket, tickets]);
 
   const handleColumnChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       if (e.target.value) {
         void ticketApi.moveTicketToColumn(ticket.id, e.target.value);
-      }
-    },
-    [ticket.id]
-  );
-
-  const handleResolve = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const val = e.target.value;
-      if (val === '__clear__') {
-        void ticketApi.updateTicket(ticket.id, { resolution: undefined });
-      } else if (val) {
-        void ticketApi.resolveTicket(ticket.id, val as TicketResolution);
       }
     },
     [ticket.id]
@@ -211,8 +201,8 @@ return undefined;
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       const blockerId = e.target.value;
       if (!blockerId) {
-return;
-}
+        return;
+      }
       void ticketApi.updateTicket(ticket.id, { blockedBy: [...ticket.blockedBy, blockerId] });
     },
     [ticket.id, ticket.blockedBy]
@@ -275,8 +265,8 @@ return;
             Worktree has uncommitted changes — cleanup deferred
           </div>
           <div className={styles.cleanupBannerBody}>
-            This ticket is resolved, but its worktree still has unsaved work. Commit or discard the
-            changes, then click below to remove the worktree.
+            This ticket is resolved, but its worktree still has unsaved work. Commit or discard the changes, then click
+            below to remove the worktree.
           </div>
           <div className={styles.cleanupBannerPath}>{ticket.worktreePath}</div>
           {cleanupError && (
@@ -299,7 +289,9 @@ return;
           {pipeline && (
             <Select size="sm" value={ticket.columnId ?? ''} onChange={handleColumnChange} className="w-40">
               {pipeline.columns.map((col) => (
-                <option key={col.id} value={col.id}>{col.label}</option>
+                <option key={col.id} value={col.id}>
+                  {col.label}
+                </option>
               ))}
             </Select>
           )}
@@ -309,7 +301,9 @@ return;
             <Badge color={RESOLUTION_COLORS[ticket.resolution]}>{RESOLUTION_LABELS[ticket.resolution]}</Badge>
           )}
           {milestone && (
-            <Badge color="purple" truncate>{milestone.title}</Badge>
+            <Badge color="purple" truncate>
+              {milestone.title}
+            </Badge>
           )}
         </div>
       </div>

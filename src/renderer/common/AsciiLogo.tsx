@@ -72,7 +72,9 @@ export const AsciiLogo = memo(({ text = 'OMNI', className }: { text?: string; cl
     return (
       <div className={cn('flex items-center gap-3 select-none', className)}>
         <img src={utrgvLogo} alt="UTHealth RGV" className="h-8" />
-        <pre role="img" aria-label={text} className="leading-none text-[8px] font-mono text-white/70 translate-y-px">{lines.join('\n')}</pre>
+        <pre role="img" aria-label={text} className="leading-none text-[8px] font-mono text-white/70 translate-y-px">
+          {lines.join('\n')}
+        </pre>
       </div>
     );
   }
@@ -116,6 +118,5 @@ OmniLogo.displayName = 'OmniLogo';
 
 /** Boot-time console easter egg — the old ASCII wordmark's retirement home. */
 export function logAsciiWordmark(): void {
-   
   console.log(`%c${OMNI_LINES.join('\n')}`, 'color:#5ac8fa; font-family:monospace; line-height:1.2');
 }

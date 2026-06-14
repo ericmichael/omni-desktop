@@ -6,7 +6,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { open, readFile, stat, unlink, writeFile } from 'node:fs/promises';
+import { open, stat, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 import { promisify } from 'node:util';
@@ -84,41 +84,11 @@ export function fileUrl(parsed: ParsedSasUrl, relativePath: string, extraParams?
 }
 
 // ---------------------------------------------------------------------------
-// Concurrency helper
-// ---------------------------------------------------------------------------
-
-async function runWithConcurrency<T>(tasks: (() => Promise<T>)[], limit: number): Promise<T[]> {
-  const results: T[] = [];
-  let idx = 0;
-
-  async function worker(): Promise<void> {
-    while (idx < tasks.length) {
-      const currentIdx = idx++;
-      const task = tasks[currentIdx];
-      if (task) {
-results[currentIdx] = await task();
-}
-    }
-  }
-
-  const workers: Promise<void>[] = [];
-  for (let i = 0; i < Math.min(limit, tasks.length); i++) {
-    workers.push(worker());
-  }
-  await Promise.all(workers);
-  return results;
-}
-
-// ---------------------------------------------------------------------------
 // Azure Files REST operations — single file
 // ---------------------------------------------------------------------------
 
 /** Create a directory (and all parents) on the Azure Files share. */
-export async function createRemoteDir(
-  parsed: ParsedSasUrl,
-  dirPath: string,
-  fetchFn: FetchFn
-): Promise<void> {
+export async function createRemoteDir(parsed: ParsedSasUrl, dirPath: string, fetchFn: FetchFn): Promise<void> {
   // Create each segment from root down
   const segments = dirPath.split('/').filter(Boolean);
   let current = '';
@@ -227,7 +197,9 @@ export async function uploadRemoteFileFromPath(
     throw new Error(`Failed to create file "${relativePath}": ${createRes.status}`);
   }
 
-  if (fileSize === 0) return;
+  if (fileSize === 0) {
+    return;
+  }
 
   const totalChunks = Math.ceil(fileSize / RANGE_CHUNK_SIZE);
   let bytesUploaded = 0;
@@ -315,7 +287,7 @@ export async function downloadRemoteFileToPath(
           method: 'GET',
           headers: {
             'x-ms-version': API_VERSION,
-            'Range': `bytes=${start}-${end}`,
+            Range: `bytes=${start}-${end}`,
           },
         });
         if (!res.ok && res.status !== 206) {
@@ -358,11 +330,7 @@ export async function downloadRemoteFile(
 }
 
 /** Delete a single file from the Azure Files share. */
-export async function deleteRemoteFile(
-  parsed: ParsedSasUrl,
-  relativePath: string,
-  fetchFn: FetchFn
-): Promise<void> {
+export async function deleteRemoteFile(parsed: ParsedSasUrl, relativePath: string, fetchFn: FetchFn): Promise<void> {
   const url = fileUrl(parsed, relativePath);
   const res = await fetchFn(url, {
     method: 'DELETE',
@@ -391,11 +359,12 @@ function parseListXml(xml: string): RawListEntry[] {
   let match: RegExpExecArray | null;
   while ((match = dirRegex.exec(xml)) !== null) {
     if (match[1]) {
-entries.push({ type: 'directory', name: match[1] });
-}
+      entries.push({ type: 'directory', name: match[1] });
+    }
   }
 
-  const fileRegex = /<File><Name>(.*?)<\/Name><Properties>(?:.*?<Content-Length>(\d+)<\/Content-Length>)?(?:.*?<Last-Modified>(.*?)<\/Last-Modified>)?.*?<\/Properties><\/File>/gs;
+  const fileRegex =
+    /<File><Name>(.*?)<\/Name><Properties>(?:.*?<Content-Length>(\d+)<\/Content-Length>)?(?:.*?<Last-Modified>(.*?)<\/Last-Modified>)?.*?<\/Properties><\/File>/gs;
   while ((match = fileRegex.exec(xml)) !== null) {
     if (match[1]) {
       entries.push({
@@ -410,11 +379,7 @@ entries.push({ type: 'directory', name: match[1] });
   return entries;
 }
 
-async function listRemoteDir(
-  parsed: ParsedSasUrl,
-  dirPath: string,
-  fetchFn: FetchFn
-): Promise<RawListEntry[]> {
+async function listRemoteDir(parsed: ParsedSasUrl, dirPath: string, fetchFn: FetchFn): Promise<RawListEntry[]> {
   const url = fileUrl(parsed, dirPath, 'restype=directory&comp=list');
   const res = await fetchFn(url, {
     method: 'GET',
@@ -428,10 +393,7 @@ async function listRemoteDir(
 }
 
 /** Recursively list all files on the remote share. */
-export async function listRemoteFiles(
-  parsed: ParsedSasUrl,
-  fetchFn: FetchFn
-): Promise<RemoteFileEntry[]> {
+export async function listRemoteFiles(parsed: ParsedSasUrl, fetchFn: FetchFn): Promise<RemoteFileEntry[]> {
   const files: RemoteFileEntry[] = [];
 
   async function recurse(dirPath: string): Promise<void> {
@@ -440,13 +402,13 @@ export async function listRemoteFiles(
       const relativePath = dirPath ? posix.join(dirPath, entry.name) : entry.name;
       if (entry.type === 'directory') {
         if (IGNORE_DIRS.has(entry.name)) {
-continue;
-}
+          continue;
+        }
         await recurse(relativePath);
       } else {
         if (IGNORE_FILES.has(entry.name) || entry.name === ARCHIVE_NAME) {
-continue;
-}
+          continue;
+        }
         files.push({
           relativePath,
           size: entry.size ?? 0,
@@ -480,8 +442,11 @@ async function compressWithProgress(
     new Promise<void>((resolve, reject) => {
       let fileCount = 0;
       const proc = execFile('tar', args, { timeout: 300_000 }, (err) => {
-        if (err) reject(err);
-        else resolve();
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
       });
       proc.stderr?.on('data', (data: Buffer | string) => {
         // Each dot from --checkpoint-action=dot represents 500 files
@@ -497,7 +462,11 @@ async function compressWithProgress(
     await run(['-I', 'zstd -3', '-cf', tarPath, ...checkpoint, ...excludes, '-C', workspaceDir, '.']);
   } catch {
     // Fallback to gzip if zstd not available
-    try { await unlink(tarPath); } catch { /* ignore */ }
+    try {
+      await unlink(tarPath);
+    } catch {
+      /* ignore */
+    }
     await run(['czf', tarPath, ...checkpoint, ...excludes, '-C', workspaceDir, '.']);
   }
 }
@@ -533,8 +502,10 @@ export async function uploadWorkspace(
     onProgress?.(`Upload complete: ${sizeMB} MB`);
   } finally {
     try {
- await unlink(tarPath);
-} catch { /* ignore */ }
+      await unlink(tarPath);
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -596,7 +567,9 @@ export async function downloadWorkspace(
     onProgress?.(`Download complete: ${sizeMB} MB`);
   } finally {
     try {
- await unlink(tarPath);
-} catch { /* ignore */ }
+      await unlink(tarPath);
+    } catch {
+      /* ignore */
+    }
   }
 }

@@ -1,4 +1,4 @@
-import { makeStyles, shorthands,tokens } from '@fluentui/react-components';
+import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { Stop20Filled } from '@fluentui/react-icons';
 import { memo, useCallback } from 'react';
 
@@ -68,59 +68,54 @@ type WipLimitDialogProps = {
   onCancel: () => void;
 };
 
-export const WipLimitDialog = memo(
-  ({ pendingTicket, activeTickets, onDrop, onCancel }: WipLimitDialogProps) => {
-    const styles = useStyles();
-    const wipLimit = persistedStoreApi.$atom.get().wipLimit ?? 3;
+export const WipLimitDialog = memo(({ pendingTicket, activeTickets, onDrop, onCancel }: WipLimitDialogProps) => {
+  const styles = useStyles();
+  const wipLimit = persistedStoreApi.$atom.get().wipLimit ?? 3;
 
-    const handleDrop = useCallback(
-      (ticketId: TicketId) => {
-        void ticketApi.stopSupervisor(ticketId);
-        onDrop(ticketId);
-      },
-      [onDrop]
-    );
+  const handleDrop = useCallback(
+    (ticketId: TicketId) => {
+      void ticketApi.stopSupervisor(ticketId);
+      onDrop(ticketId);
+    },
+    [onDrop]
+  );
 
-    return (
-      <AnimatedDialog open onClose={onCancel}>
-        <DialogContent>
-          <DialogHeader>
-            WIP limit reached ({wipLimit} of {wipLimit})
-          </DialogHeader>
-          <DialogBody>
-            <p className={styles.description}>
-              To start <span className={styles.pendingName}>{pendingTicket.title}</span>,
-              stop one of your active items.
-            </p>
-            <div className={styles.ticketList}>
-              {activeTickets.map((ticket) => (
-                <div key={ticket.id} className={styles.ticketCard}>
-                  <div className={styles.ticketInfo}>
-                    <span className={styles.ticketTitle}>{ticket.title}</span>
-                    <div className={styles.badgeRow}>
-                      {ticket.phase && ticket.phase !== 'idle' && PHASE_LABELS[ticket.phase] && (
-                        <Badge color={PHASE_COLORS[ticket.phase] ?? 'default'}>
-                          {PHASE_LABELS[ticket.phase]}
-                        </Badge>
-                      )}
-                    </div>
+  return (
+    <AnimatedDialog open onClose={onCancel}>
+      <DialogContent>
+        <DialogHeader>
+          WIP limit reached ({wipLimit} of {wipLimit})
+        </DialogHeader>
+        <DialogBody>
+          <p className={styles.description}>
+            To start <span className={styles.pendingName}>{pendingTicket.title}</span>, stop one of your active items.
+          </p>
+          <div className={styles.ticketList}>
+            {activeTickets.map((ticket) => (
+              <div key={ticket.id} className={styles.ticketCard}>
+                <div className={styles.ticketInfo}>
+                  <span className={styles.ticketTitle}>{ticket.title}</span>
+                  <div className={styles.badgeRow}>
+                    {ticket.phase && ticket.phase !== 'idle' && PHASE_LABELS[ticket.phase] && (
+                      <Badge color={PHASE_COLORS[ticket.phase] ?? 'default'}>{PHASE_LABELS[ticket.phase]}</Badge>
+                    )}
                   </div>
-                  <Button size="sm" variant="destructive" onClick={() => handleDrop(ticket.id)}>
-                    <Stop20Filled style={{ width: 12, height: 12 }} className={styles.stopIcon} />
-                    Stop
-                  </Button>
                 </div>
-              ))}
-            </div>
-          </DialogBody>
-          <DialogFooter>
-            <Button size="sm" variant="ghost" onClick={onCancel}>
-              Never mind
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </AnimatedDialog>
-    );
-  }
-);
+                <Button size="sm" variant="destructive" onClick={() => handleDrop(ticket.id)}>
+                  <Stop20Filled style={{ width: 12, height: 12 }} className={styles.stopIcon} />
+                  Stop
+                </Button>
+              </div>
+            ))}
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <Button size="sm" variant="ghost" onClick={onCancel}>
+            Never mind
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </AnimatedDialog>
+  );
+});
 WipLimitDialog.displayName = 'WipLimitDialog';

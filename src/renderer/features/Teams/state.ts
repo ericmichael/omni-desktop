@@ -31,16 +31,15 @@ export const teamsAvailable = (): boolean => $teams.get().some((t) => t.kind ===
 
 export async function loadTeams(): Promise<void> {
   try {
-    const [teams, role] = await Promise.all([
-      emitter.invoke('team:list'),
-      emitter.invoke('team:get-my-role'),
-    ]);
+    const [teams, role] = await Promise.all([emitter.invoke('team:list'), emitter.invoke('team:get-my-role')]);
     $teams.set(teams);
     $myRole.set(role);
     // Default the active team to the personal team if none is set.
     if (!$activeTeamId.get() && teams.length > 0) {
       const personal = teams.find((t) => t.kind === 'personal') ?? teams[0];
-      if (personal) $activeTeamId.set(personal.id);
+      if (personal) {
+        $activeTeamId.set(personal.id);
+      }
     }
   } catch {
     // Single-user/local mode — no teams. Leave defaults.
@@ -64,14 +63,18 @@ export async function leaveTeam(): Promise<void> {
   $teams.set(remaining);
   // Drop into a remaining team (personal first) so the app stays scoped somewhere.
   const next = remaining.find((t) => t.kind === 'personal') ?? remaining[0];
-  if (next) switchTeam(next.id);
+  if (next) {
+    switchTeam(next.id);
+  }
 }
 
 export async function deleteTeam(): Promise<void> {
   const remaining = await emitter.invoke('team:delete');
   $teams.set(remaining);
   const next = remaining.find((t) => t.kind === 'personal') ?? remaining[0];
-  if (next) switchTeam(next.id);
+  if (next) {
+    switchTeam(next.id);
+  }
 }
 
 export async function transferOwnership(userId: string): Promise<void> {

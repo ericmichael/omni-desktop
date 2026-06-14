@@ -6,14 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type {
-  Capability,
-  Manifest,
-  ManifestEntry,
-  McpServerConfig,
-  ProjectConfig,
-  RuntimeConfig,
-} from './manifest';
+import type { Capability, Manifest, ManifestEntry, McpServerConfig, ProjectConfig, RuntimeConfig } from './manifest';
 import { DEFAULT_CAPABILITIES, EMPTY_MANIFEST } from './manifest';
 
 describe('manifest types', () => {

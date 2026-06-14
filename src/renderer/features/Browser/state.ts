@@ -51,14 +51,12 @@ export const browserApi = {
   setTabsetProfile: (id: BrowserTabsetId, profileId: BrowserProfileId) =>
     emitter.invoke('browser:tabset-set-profile', id, profileId),
 
-  addProfile: (input: { label: string; incognito?: boolean }) =>
-    emitter.invoke('browser:profile-add', input),
+  addProfile: (input: { label: string; incognito?: boolean }) => emitter.invoke('browser:profile-add', input),
   removeProfile: (id: BrowserProfileId) => emitter.invoke('browser:profile-remove', id),
 
   createTab: (tabsetId: BrowserTabsetId, opts?: { url?: string; activate?: boolean; profileId?: BrowserProfileId }) =>
     emitter.invoke('browser:tab-create', tabsetId, opts),
-  closeTab: (tabsetId: BrowserTabsetId, tabId: BrowserTabId) =>
-    emitter.invoke('browser:tab-close', tabsetId, tabId),
+  closeTab: (tabsetId: BrowserTabsetId, tabId: BrowserTabId) => emitter.invoke('browser:tab-close', tabsetId, tabId),
   activateTab: (tabsetId: BrowserTabsetId, tabId: BrowserTabId) =>
     emitter.invoke('browser:tab-activate', tabsetId, tabId),
   navigateTab: (tabsetId: BrowserTabsetId, tabId: BrowserTabId, url: string) =>
@@ -74,13 +72,15 @@ export const browserApi = {
     emitter.invoke('browser:tab-pin', tabsetId, tabId, pinned),
   duplicateTab: (tabsetId: BrowserTabsetId, tabId: BrowserTabId): Promise<BrowserTab> =>
     emitter.invoke('browser:tab-duplicate', tabsetId, tabId),
-  reopenTab: (tabsetId: BrowserTabsetId): Promise<BrowserTab | null> =>
-    emitter.invoke('browser:tab-reopen', tabsetId),
+  reopenTab: (tabsetId: BrowserTabsetId): Promise<BrowserTab | null> => emitter.invoke('browser:tab-reopen', tabsetId),
 
   recordHistory: (entry: { url: string; title?: string; profileId: BrowserProfileId }) =>
     emitter.invoke('browser:history-record', entry),
-  listHistory: (opts?: { query?: string; limit?: number; profileId?: BrowserProfileId }): Promise<BrowserHistoryEntry[]> =>
-    emitter.invoke('browser:history-list', opts),
+  listHistory: (opts?: {
+    query?: string;
+    limit?: number;
+    profileId?: BrowserProfileId;
+  }): Promise<BrowserHistoryEntry[]> => emitter.invoke('browser:history-list', opts),
   clearHistory: (opts?: { profileId?: BrowserProfileId }) => emitter.invoke('browser:history-clear', opts),
 
   addBookmark: (input: { url: string; title: string; folder?: string }) =>
@@ -97,13 +97,13 @@ export const browserApi = {
  */
 export function getActiveTab(ts: BrowserTabset | undefined): BrowserTab | null {
   if (!ts) {
-return null;
-}
+    return null;
+  }
   if (ts.activeTabId) {
     const t = ts.tabs.find((x) => x.id === ts.activeTabId);
     if (t) {
-return t;
-}
+      return t;
+    }
   }
   return ts.tabs[0] ?? null;
 }

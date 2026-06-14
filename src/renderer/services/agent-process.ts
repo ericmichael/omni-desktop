@@ -4,7 +4,13 @@ import { map } from 'nanostores';
 
 import { DEFAULT_XTERM_OPTIONS } from '@/renderer/constants';
 import { emitter, ipc } from '@/renderer/services/ipc';
-import type { AgentProcessStartOptions, AgentProcessStatus, SandboxPauseResult, SandboxSwitchResult, WithTimestamp } from '@/shared/types';
+import type {
+  AgentProcessStartOptions,
+  AgentProcessStatus,
+  SandboxPauseResult,
+  SandboxSwitchResult,
+  WithTimestamp,
+} from '@/shared/types';
 
 /** Statuses for all agent processes, keyed by processId. */
 export const $agentStatuses = map<Record<string, WithTimestamp<AgentProcessStatus>>>({});
@@ -12,14 +18,13 @@ export const $agentStatuses = map<Record<string, WithTimestamp<AgentProcessStatu
 /** Terminal instances for all agent processes, keyed by processId. */
 export const $agentXTerms = map<Record<string, Terminal>>({});
 
-
 const xtermSubscriptions = new Map<string, Set<() => void>>();
 
 export const initializeTerminal = (processId: string): Terminal => {
   const existing = $agentXTerms.get()[processId];
   if (existing) {
-return existing;
-}
+    return existing;
+  }
 
   const xterm = new Terminal({ ...DEFAULT_XTERM_OPTIONS, disableStdin: true });
   const subs = new Set<() => void>();
@@ -110,6 +115,7 @@ const listen = () => {
   // Log raw output to console in dev mode for debugging
   if (import.meta.env.MODE === 'development') {
     ipc.on('agent-process:raw-output', (processId, data) => {
+      // eslint-disable-next-line no-control-regex -- Strips ANSI escape sequences from process output.
       const line = data.replace(/\x1b\[[0-9;]*m/g, '').trim();
       if (line) {
         console.debug(`[agent:${processId}]`, line);
@@ -135,13 +141,13 @@ listen();
 export const pollProcessStatus = async (processId: string): Promise<void> => {
   const current = $agentStatuses.get()[processId];
   if (current?.type === 'running') {
-return;
-}
+    return;
+  }
   try {
     const status = await emitter.invoke('agent-process:get-status', processId);
     if (!status || status.type === 'uninitialized') {
-return;
-}
+      return;
+    }
     const old = $agentStatuses.get()[processId];
     if (!objectEquals(old, status)) {
       $agentStatuses.setKey(processId, status);

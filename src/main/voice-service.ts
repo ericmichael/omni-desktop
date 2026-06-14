@@ -86,11 +86,11 @@ export class VoiceService {
   /** Provision the venv (idempotent) then spawn the sidecar. Safe to call repeatedly. */
   async start(): Promise<void> {
     if (this.status.state === 'ready') {
-return;
-}
+      return;
+    }
     if (this.starting) {
-return this.starting;
-}
+      return this.starting;
+    }
     this.starting = this._start().finally(() => {
       this.starting = null;
     });
@@ -126,10 +126,7 @@ return this.starting;
             reject(err);
           },
         };
-        const t = setTimeout(
-          () => waiter.reject(new Error('voice sidecar did not become ready in 120s')),
-          120_000,
-        );
+        const t = setTimeout(() => waiter.reject(new Error('voice sidecar did not become ready in 120s')), 120_000);
         this.readyWaiters.push(waiter);
       });
     } catch (err) {
@@ -141,19 +138,18 @@ return this.starting;
   /** Create the venv + install ONNX deps with the bundled uv if missing. */
   async ensureProvisioned(): Promise<void> {
     if (fs.existsSync(voiceVenvPython())) {
-return;
-}
+      return;
+    }
     this.status = { ...this.status, state: 'provisioning' };
     const uv = getUVExecutablePath();
     const venv = voiceVenvDir();
     fs.mkdirSync(path.dirname(venv), { recursive: true });
     console.log('[voice] provisioning voice venv at', venv);
     await execFileAsync(uv, ['venv', venv, '--python', PYTHON_VERSION], { env: process.env });
-    await execFileAsync(
-      uv,
-      ['pip', 'install', '--python', voiceVenvPython(), ...VOICE_DEPS],
-      { env: { ...process.env, VIRTUAL_ENV: venv }, maxBuffer: 64 * 1024 * 1024 },
-    );
+    await execFileAsync(uv, ['pip', 'install', '--python', voiceVenvPython(), ...VOICE_DEPS], {
+      env: { ...process.env, VIRTUAL_ENV: venv },
+      maxBuffer: 64 * 1024 * 1024,
+    });
     console.log('[voice] voice venv ready');
   }
 
@@ -170,11 +166,7 @@ return;
    * Synthesize `text` and stream PCM16LE chunks to `onAudio`. Resolves when the
    * full utterance has been emitted.
    */
-  async speak(
-    text: string,
-    onAudio: (pcmBase64: string, sampleRate: number) => void,
-    voice?: string,
-  ): Promise<void> {
+  async speak(text: string, onAudio: (pcmBase64: string, sampleRate: number) => void, voice?: string): Promise<void> {
     await this.start();
     await this.request({ op: 'tts', text, voice: this.resolveVoice(voice) }, onAudio);
   }
@@ -187,16 +179,16 @@ return;
    */
   private resolveVoice(voice?: string): string {
     if (!voice) {
-return this.voice;
-}
+      return this.voice;
+    }
     if (!voice.startsWith('builtin:')) {
-return voice;
-}
+      return voice;
+    }
     const id = voice.slice('builtin:'.length);
     const npy = path.join(bundledVoicesDir(), `${id}.emb.npy`);
     if (fs.existsSync(npy)) {
-return npy;
-}
+      return npy;
+    }
     const fallback = BUILTIN_VOICE_FALLBACKS[id];
     if (fallback) {
       console.warn(`[voice] bundled embedding for '${id}' missing; falling back to '${fallback}'`);
@@ -213,7 +205,7 @@ return npy;
   async importSample(
     personaId: string,
     filename: string,
-    dataBase64: string,
+    dataBase64: string
   ): Promise<{ file: string; embeddingFile: string }> {
     await this.start();
     const dir = voiceSamplesDir();
@@ -228,15 +220,12 @@ return npy;
     return { file, embeddingFile: res.embedding_file ?? cache };
   }
 
-  private request(
-    payload: Record<string, unknown>,
-    onAudio?: Pending['onAudio'],
-  ): Promise<unknown> {
+  private request(payload: Record<string, unknown>, onAudio?: Pending['onAudio']): Promise<unknown> {
     if (!this.proc || !this.proc.stdin) {
       return Promise.reject(new Error('voice sidecar not running'));
     }
     const id = String(++this.seq);
-    const line = `${JSON.stringify({ id, ...payload })  }\n`;
+    const line = `${JSON.stringify({ id, ...payload })}\n`;
     return new Promise<unknown>((resolve, reject) => {
       this.pending.set(id, { resolve, reject, onAudio });
       this.proc!.stdin!.write(line, (err) => {
@@ -255,8 +244,8 @@ return npy;
       const line = this.stdoutBuf.slice(0, nl).trim();
       this.stdoutBuf = this.stdoutBuf.slice(nl + 1);
       if (!line) {
-continue;
-}
+        continue;
+      }
       let msg: Record<string, unknown>;
       try {
         msg = JSON.parse(line);
@@ -281,12 +270,12 @@ continue;
     }
     const id = msg.id != null ? String(msg.id) : null;
     if (!id) {
-return;
-}
+      return;
+    }
     const p = this.pending.get(id);
     if (!p) {
-return;
-}
+      return;
+    }
 
     if (msg.event === 'audio' && typeof msg.pcm === 'string') {
       p.onAudio?.(msg.pcm, typeof msg.sample_rate === 'number' ? msg.sample_rate : 24000);
@@ -331,7 +320,7 @@ return;
 let _instance: VoiceService | null = null;
 export const getVoiceService = (): VoiceService => {
   if (!_instance) {
-_instance = new VoiceService();
-}
+    _instance = new VoiceService();
+  }
   return _instance;
 };

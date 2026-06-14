@@ -28,8 +28,8 @@ export const SettingsModalWeeklyReviewDay = memo(() => {
     <div className={styles.root}>
       <SectionLabel>Weekly Review</SectionLabel>
       <p className={styles.hint}>
-        Pick the day you want to be prompted for a weekly review. The review helps you reflect on
-        completed work, triage your inbox, and set intentions.
+        Pick the day you want to be prompted for a weekly review. The review helps you reflect on completed work, triage
+        your inbox, and set intentions.
       </p>
       <Select value={String(reviewDay)} onChange={handleChange} className={styles.select}>
         {DAY_OPTIONS.map((opt) => (

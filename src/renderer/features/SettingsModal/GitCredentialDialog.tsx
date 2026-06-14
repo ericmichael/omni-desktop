@@ -14,7 +14,16 @@ import { makeStyles, tokens } from '@fluentui/react-components';
 import { Open16Regular } from '@fluentui/react-icons';
 import { memo, useCallback, useEffect, useState } from 'react';
 
-import { AnimatedDialog, Button, DialogBody, DialogContent, DialogFooter, DialogHeader, Input, Select } from '@/renderer/ds';
+import {
+  AnimatedDialog,
+  Button,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  Input,
+  Select,
+} from '@/renderer/ds';
 import { emitter } from '@/renderer/services/ipc';
 import { defaultUsernameForHost } from '@/shared/git-credentials';
 
@@ -40,7 +49,8 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'GitHub (PAT)',
     host: 'github.com',
     username: 'x-access-token',
-    scopeHint: 'Needs scopes: repo, read:org. Prefer the "Connect GitHub" card above for github.com — this PAT path is for GHES or when OAuth is unavailable.',
+    scopeHint:
+      'Needs scopes: repo, read:org. Prefer the "Connect GitHub" card above for github.com — this PAT path is for GHES or when OAuth is unavailable.',
     patUrl: 'https://github.com/settings/tokens/new?scopes=repo,read:org&description=Omni',
   },
   {

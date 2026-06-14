@@ -1,8 +1,7 @@
+import type { ColumnRow } from 'omni-projects-db';
 import { describe, expect, it } from 'vitest';
 
 import { columnToRow, rowToColumn } from '@/main/db-store-bridge';
-
-import type { ColumnRow } from 'omni-projects-db';
 
 describe('pipeline column row mapping', () => {
   const baseRow: ColumnRow = {

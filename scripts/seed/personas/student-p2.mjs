@@ -153,7 +153,8 @@ Medium — three weekends.
     {
       seedKeySuffix: 'done-habit-model',
       title: 'Define Habit + CheckIn types',
-      description: 'Minimal schema. `Habit` = id, name, frequency, createdAt. `CheckIn` = id, habitId, date, createdAt.',
+      description:
+        'Minimal schema. `Habit` = id, name, frequency, createdAt. `CheckIn` = id, habitId, date, createdAt.',
       columnId: 'completed',
       priority: 'high',
       resolution: 'completed',
@@ -165,7 +166,7 @@ Medium — three weekends.
     {
       seedKeySuffix: 'pr-list-view',
       title: 'Habit list with one-tap check-off',
-      description: 'Render habits; tap toggles today\'s check-in; optimistic localStorage write.',
+      description: "Render habits; tap toggles today's check-in; optimistic localStorage write.",
       columnId: 'pr',
       priority: 'high',
       createdAgo: 10 * day,
@@ -183,7 +184,8 @@ Medium — three weekends.
     {
       seedKeySuffix: 'impl-streaks',
       title: 'Streak calculation',
-      description: 'Current streak = longest run of consecutive daily check-ins ending today or yesterday (missing today is forgiven until tomorrow).',
+      description:
+        'Current streak = longest run of consecutive daily check-ins ending today or yesterday (missing today is forgiven until tomorrow).',
       columnId: 'implementation',
       priority: 'high',
       createdAgo: 6 * day,
@@ -192,7 +194,8 @@ Medium — three weekends.
     {
       seedKeySuffix: 'spec-reflection',
       title: 'Sunday reflection prompt',
-      description: 'When it\'s Sunday and the user opens the app, prompt "what went well?" → saves a weekly reflection entry.',
+      description:
+        'When it\'s Sunday and the user opens the app, prompt "what went well?" → saves a weekly reflection entry.',
       columnId: 'spec',
       priority: 'medium',
       createdAgo: 4 * day,

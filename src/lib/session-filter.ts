@@ -24,10 +24,7 @@ export type SessionFilterState = {
  * Strict events carry content that mutates the conversation (tools, messages,
  * run lifecycle).  They must be tightly scoped to the active session.
  */
-export function acceptStrictEvent(
-  state: SessionFilterState,
-  eventSessionId: string | undefined,
-): boolean {
+export function acceptStrictEvent(state: SessionFilterState, eventSessionId: string | undefined): boolean {
   // If we know our session and the event's session, they must match.
   if (state.currentSessionId && eventSessionId && state.currentSessionId !== eventSessionId) {
     return false;
@@ -52,10 +49,7 @@ export function acceptStrictEvent(
  * Loose events are status/metadata updates.  They're rejected only when
  * both the UI and the event carry session IDs that disagree.
  */
-export function acceptLooseEvent(
-  state: SessionFilterState,
-  eventSessionId: string | undefined,
-): boolean {
+export function acceptLooseEvent(state: SessionFilterState, eventSessionId: string | undefined): boolean {
   if (eventSessionId && state.currentSessionId && state.currentSessionId !== eventSessionId) {
     return false;
   }

@@ -54,19 +54,12 @@ export type FocusInput = {
   limit?: number;
 };
 
-export function rankFocus({
-  tickets,
-  milestones,
-  terminalColumnIds,
-  now,
-  limit = 5,
-}: FocusInput): FocusItem[] {
+export function rankFocus({ tickets, milestones, terminalColumnIds, now, limit = 5 }: FocusInput): FocusItem[] {
   const inFlight: FocusItem[] = [];
   const selfBlocked: FocusItem[] = [];
   const nextUp: FocusItem[] = [];
 
-  const isDone = (t: Ticket): boolean =>
-    t.resolution !== undefined || (terminalColumnIds?.has(t.columnId) ?? false);
+  const isDone = (t: Ticket): boolean => t.resolution !== undefined || (terminalColumnIds?.has(t.columnId) ?? false);
 
   // Unblocked = every blocker is "done". Tickets in terminal columns count
   // as unblocking even without a resolution, mirroring project-manager's
@@ -75,8 +68,8 @@ export function rankFocus({
 
   for (const ticket of tickets) {
     if (isDone(ticket)) {
-continue;
-}
+      continue;
+    }
 
     const phase = ticket.phase;
 
@@ -152,13 +145,13 @@ continue;
   // columnChangedAt (closer to "sitting still"), then oldest createdAt.
   const byScoreThenAge = (a: FocusItem, b: FocusItem): number => {
     if (b.score !== a.score) {
-return b.score - a.score;
-}
+      return b.score - a.score;
+    }
     const aAge = a.ticket.columnChangedAt ?? a.ticket.updatedAt;
     const bAge = b.ticket.columnChangedAt ?? b.ticket.updatedAt;
     if (aAge !== bAge) {
-return aAge - bAge;
-}
+      return aAge - bAge;
+    }
     return a.ticket.createdAt - b.ticket.createdAt;
   };
 
@@ -200,13 +193,13 @@ export function focusHeader(args: {
 }): FocusHeader {
   const { ranked, wipUsed, wipLimit, shapedInboxCount } = args;
   if (wipUsed > 0) {
-return { kind: 'in_flight', activeCount: wipUsed };
-}
+    return { kind: 'in_flight', activeCount: wipUsed };
+  }
   if (ranked.length > 0) {
-return { kind: 'start', openSlots: Math.max(0, wipLimit - wipUsed) };
-}
+    return { kind: 'start', openSlots: Math.max(0, wipLimit - wipUsed) };
+  }
   if (shapedInboxCount > 0) {
-return { kind: 'shape_inbox', shapedCount: shapedInboxCount };
-}
+    return { kind: 'shape_inbox', shapedCount: shapedInboxCount };
+  }
   return { kind: 'empty' };
 }

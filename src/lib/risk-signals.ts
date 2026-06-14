@@ -66,15 +66,14 @@ export function detectRisks(input: RiskInput): RiskSignal[] {
   const { tickets, milestones, inboxItems, projects, terminalColumnIds, wipLimit, now } = input;
   const out: RiskSignal[] = [];
 
-  const isDone = (t: Ticket): boolean =>
-    t.resolution !== undefined || (terminalColumnIds?.has(t.columnId) ?? false);
+  const isDone = (t: Ticket): boolean => t.resolution !== undefined || (terminalColumnIds?.has(t.columnId) ?? false);
 
   // --- Per-ticket signals ---
   let activeCount = 0;
   for (const ticket of tickets) {
     if (isDone(ticket)) {
-continue;
-}
+      continue;
+    }
 
     const phase = ticket.phase;
     if (phase !== undefined && phase !== 'idle' && phase !== 'error' && phase !== 'completed') {
@@ -84,11 +83,7 @@ continue;
     // Stalled — unresolved, no phase change (or column change) in N days.
     // Skip if actively running (already counted above).
     if (phase === undefined || phase === 'idle' || phase === 'error') {
-      const lastMoved = Math.max(
-        ticket.phaseChangedAt ?? 0,
-        ticket.columnChangedAt ?? 0,
-        ticket.updatedAt
-      );
+      const lastMoved = Math.max(ticket.phaseChangedAt ?? 0, ticket.columnChangedAt ?? 0, ticket.updatedAt);
       const ageDays = (now - lastMoved) / DAY_MS;
       if (ageDays >= RISK_THRESHOLDS.stalledTicketDays) {
         out.push({
@@ -120,8 +115,8 @@ continue;
   const ticketsByMilestone = new Map<string, Ticket[]>();
   for (const t of tickets) {
     if (!t.milestoneId) {
-continue;
-}
+      continue;
+    }
     const arr = ticketsByMilestone.get(t.milestoneId) ?? [];
     arr.push(t);
     ticketsByMilestone.set(t.milestoneId, arr);
@@ -129,8 +124,8 @@ continue;
 
   for (const milestone of milestones) {
     if (milestone.status !== 'active') {
-continue;
-}
+      continue;
+    }
 
     const msTickets = ticketsByMilestone.get(milestone.id) ?? [];
     const resolvedCount = msTickets.filter((t) => t.resolution !== undefined).length;
@@ -194,11 +189,11 @@ continue;
   // --- Inbox signals ---
   for (const item of inboxItems) {
     if (item.status !== 'new') {
-continue;
-}
+      continue;
+    }
     if (item.promotedTo !== undefined) {
-continue;
-}
+      continue;
+    }
 
     const daysLeft = inboxDaysRemaining(item.createdAt, now);
     if (daysLeft <= RISK_THRESHOLDS.inboxUrgentDaysLeft) {
@@ -296,8 +291,8 @@ continue;
   out.sort((a, b) => {
     const sev = SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity];
     if (sev !== 0) {
-return sev;
-}
+      return sev;
+    }
     return a.id.localeCompare(b.id);
   });
 

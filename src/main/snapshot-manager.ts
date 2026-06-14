@@ -40,7 +40,9 @@ const snapshotsDir = (): string => path.join(getOmniConfigDir(), 'snapshots');
  * Returns true if a file was deleted, false otherwise.
  */
 export async function deleteSnapshot(sessionId: string): Promise<boolean> {
-  if (!sessionId) return false;
+  if (!sessionId) {
+    return false;
+  }
   const filename = `${sessionId}${SNAPSHOT_SUFFIX}`;
   // Reject anything that escapes the snapshots dir — sessionId is
   // caller-controlled (renderer-supplied) and we don't want a stray
@@ -53,7 +55,9 @@ export async function deleteSnapshot(sessionId: string): Promise<boolean> {
     await fs.unlink(path.join(snapshotsDir(), filename));
     unlinked = true;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw err;
+    }
   }
   // Cascade to blob — the cloud copy is the durable one; leaving it after a
   // local delete defeats the cascade-on-tab-close semantics. Best-effort.
@@ -68,16 +72,15 @@ export async function deleteSnapshot(sessionId: string): Promise<boolean> {
  * older than *ttlMs* ago. Files in *keep* are never deleted regardless
  * of age. Returns the list of deleted session ids.
  */
-export async function gcStaleSnapshots(opts: {
-  keep: Set<string>;
-  ttlMs: number;
-}): Promise<string[]> {
+export async function gcStaleSnapshots(opts: { keep: Set<string>; ttlMs: number }): Promise<string[]> {
   const dir = snapshotsDir();
   let entries: string[];
   try {
     entries = await fs.readdir(dir);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
     throw err;
   }
 
@@ -85,9 +88,13 @@ export async function gcStaleSnapshots(opts: {
   const deleted: string[] = [];
 
   for (const entry of entries) {
-    if (!entry.endsWith(SNAPSHOT_SUFFIX)) continue;
+    if (!entry.endsWith(SNAPSHOT_SUFFIX)) {
+      continue;
+    }
     const sessionId = entry.slice(0, -SNAPSHOT_SUFFIX.length);
-    if (opts.keep.has(sessionId)) continue;
+    if (opts.keep.has(sessionId)) {
+      continue;
+    }
 
     const fullPath = path.join(dir, entry);
     let stat;
@@ -96,7 +103,9 @@ export async function gcStaleSnapshots(opts: {
     } catch {
       continue;
     }
-    if (stat.mtimeMs > cutoff) continue;
+    if (stat.mtimeMs > cutoff) {
+      continue;
+    }
 
     try {
       await fs.unlink(fullPath);

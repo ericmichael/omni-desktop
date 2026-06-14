@@ -7,9 +7,18 @@ const STORAGE_KEY = 'habit-tracker.v1';
 
 type Store = { habits: Habit[]; checkIns: CheckIn[] };
 
+function newId(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
 function load(): Store {
   const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return { habits: [], checkIns: [] };
+  if (!raw) {
+    return { habits: [], checkIns: [] };
+  }
   try {
     return JSON.parse(raw) as Store;
   } catch {
@@ -43,22 +52,18 @@ export function App() {
     } else {
       setStore((s) => ({
         ...s,
-        checkIns: [
-          ...s.checkIns,
-          { id: crypto.randomUUID(), habitId, date: today, createdAt: Date.now() },
-        ],
+        checkIns: [...s.checkIns, { id: newId(), habitId, date: today, createdAt: Date.now() }],
       }));
     }
   }
 
   function addHabit(name: string): void {
-    if (!name.trim()) return;
+    if (!name.trim()) {
+      return;
+    }
     setStore((s) => ({
       ...s,
-      habits: [
-        ...s.habits,
-        { id: crypto.randomUUID(), name: name.trim(), frequency: 'daily', createdAt: Date.now() },
-      ],
+      habits: [...s.habits, { id: newId(), name: name.trim(), frequency: 'daily', createdAt: Date.now() }],
     }));
   }
 
@@ -89,9 +94,7 @@ export function App() {
                   <small style={{ color: '#777', marginRight: 12 }}>
                     {currentStreak(habitCheckIns, today)} day streak
                   </small>
-                  <button onClick={() => toggleToday(h.id)}>
-                    {checkedToday.has(h.id) ? '✓ done' : 'check off'}
-                  </button>
+                  <button onClick={() => toggleToday(h.id)}>{checkedToday.has(h.id) ? '✓ done' : 'check off'}</button>
                 </span>
               </li>
             );

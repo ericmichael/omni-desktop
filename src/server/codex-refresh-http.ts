@@ -52,11 +52,7 @@ export function registerCodexRefreshRoute(fastify: FastifyInstance, deps: CodexR
       return;
     }
     const body = (request.body ?? {}) as RefreshBody;
-    if (
-      typeof body.refresh !== 'string' ||
-      typeof body.access !== 'string' ||
-      typeof body.expires !== 'number'
-    ) {
+    if (typeof body.refresh !== 'string' || typeof body.access !== 'string' || typeof body.expires !== 'number') {
       reply.code(400).send({ error: 'Invalid body: expected { refresh, access, expires (ms), account_id? }' });
       return;
     }

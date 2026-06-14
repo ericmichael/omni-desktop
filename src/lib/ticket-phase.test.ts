@@ -77,13 +77,7 @@ describe('isActivePhase', () => {
   });
 
   it('returns true for all other phases', () => {
-    const active: TicketPhase[] = [
-      'provisioning',
-      'connecting',
-      'session_creating',
-      'ready',
-      'running',
-    ];
+    const active: TicketPhase[] = ['provisioning', 'connecting', 'session_creating', 'ready', 'running'];
     for (const phase of active) {
       expect(isActivePhase(phase)).toBe(true);
     }

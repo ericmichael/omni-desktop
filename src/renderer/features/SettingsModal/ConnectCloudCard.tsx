@@ -118,9 +118,7 @@ export const ConnectCloudCard = memo(() => {
         <div className={styles.row}>
           <div className={styles.main}>
             <Body1>
-              {cloudMode
-                ? `Connected to ${cloudMode.url}`
-                : 'Connect this desktop app to a cloud launcher'}
+              {cloudMode ? `Connected to ${cloudMode.url}` : 'Connect this desktop app to a cloud launcher'}
             </Body1>
             <Caption1 className={error ? styles.error : styles.summary}>
               {error ??
@@ -181,9 +179,7 @@ export const ConnectCloudCard = memo(() => {
           </div>
         )}
 
-        {restarting && (
-          <Caption1 className={styles.ok}>Restarting Omni Code…</Caption1>
-        )}
+        {restarting && <Caption1 className={styles.ok}>Restarting Omni Code…</Caption1>}
       </div>
     </Card>
   );

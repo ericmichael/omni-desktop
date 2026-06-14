@@ -3,7 +3,10 @@ import { type IProjectsRepo, milestoneId, nowTimestamp } from 'omni-projects-db'
 import { z } from 'zod';
 
 const json = (data: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data) }] });
-const err = (message: string) => ({ content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }], isError: true as const });
+const err = (message: string) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }],
+  isError: true as const,
+});
 
 export function registerMilestoneTools(server: McpServer, repo: IProjectsRepo): void {
   server.tool(
@@ -12,7 +15,9 @@ export function registerMilestoneTools(server: McpServer, repo: IProjectsRepo): 
     { project_id: z.string().describe('The project ID to list milestones for') },
     async ({ project_id }) => {
       const exists = await repo.getProject(project_id);
-      if (!exists) return err(`Project not found: ${project_id}`);
+      if (!exists) {
+        return err(`Project not found: ${project_id}`);
+      }
 
       const milestones = await repo.listMilestonesByProject(project_id);
 
@@ -46,11 +51,15 @@ export function registerMilestoneTools(server: McpServer, repo: IProjectsRepo): 
     },
     async ({ project_id, title, description, branch, due_date, pinned }) => {
       const exists = await repo.getProject(project_id);
-      if (!exists) return err(`Project not found: ${project_id}`);
+      if (!exists) {
+        return err(`Project not found: ${project_id}`);
+      }
 
       if (due_date) {
         const parsed = Date.parse(due_date);
-        if (Number.isNaN(parsed)) return err('Invalid due_date. Use an ISO date like 2026-04-30.');
+        if (Number.isNaN(parsed)) {
+          return err('Invalid due_date. Use an ISO date like 2026-04-30.');
+        }
       }
 
       const id = milestoneId();
@@ -89,13 +98,23 @@ export function registerMilestoneTools(server: McpServer, repo: IProjectsRepo): 
     },
     async ({ milestone_id, title, description, branch, status, brief, due_date, pinned }) => {
       const existing = await repo.getMilestone(milestone_id);
-      if (!existing) return err(`Milestone not found: ${milestone_id}`);
+      if (!existing) {
+        return err(`Milestone not found: ${milestone_id}`);
+      }
 
       const next = { ...existing };
-      if (title !== undefined) next.title = title;
-      if (description !== undefined) next.description = description;
-      if (branch !== undefined) next.branch = branch || null;
-      if (brief !== undefined) next.brief = brief;
+      if (title !== undefined) {
+        next.title = title;
+      }
+      if (description !== undefined) {
+        next.description = description;
+      }
+      if (branch !== undefined) {
+        next.branch = branch || null;
+      }
+      if (brief !== undefined) {
+        next.brief = brief;
+      }
 
       if (status !== undefined) {
         next.status = status;
@@ -112,7 +131,9 @@ export function registerMilestoneTools(server: McpServer, repo: IProjectsRepo): 
           next.due_date = null;
         } else {
           const parsed = Date.parse(due_date);
-          if (Number.isNaN(parsed)) return err('Invalid due_date. Use an ISO date like 2026-04-30.');
+          if (Number.isNaN(parsed)) {
+            return err('Invalid due_date. Use an ISO date like 2026-04-30.');
+          }
           next.due_date = due_date;
         }
       }
@@ -134,7 +155,9 @@ export function registerMilestoneTools(server: McpServer, repo: IProjectsRepo): 
     { milestone_id: z.string().describe('The milestone ID to read the brief for') },
     async ({ milestone_id }) => {
       const existing = await repo.getMilestone(milestone_id);
-      if (!existing) return err(`Milestone not found: ${milestone_id}`);
+      if (!existing) {
+        return err(`Milestone not found: ${milestone_id}`);
+      }
 
       return json({ brief: existing.brief ?? '' });
     }

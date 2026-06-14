@@ -93,9 +93,7 @@ describe('fileUrl', () => {
 
   it('encodes special characters in path segments', () => {
     const result = fileUrl(parsed, 'my folder/my file (1).txt');
-    expect(result).toBe(
-      'https://storage.blob.core.windows.net/share/my%20folder/my%20file%20(1).txt?sv=2024&sig=abc'
-    );
+    expect(result).toBe('https://storage.blob.core.windows.net/share/my%20folder/my%20file%20(1).txt?sv=2024&sig=abc');
   });
 
   it('handles empty relativePath', () => {
@@ -105,9 +103,7 @@ describe('fileUrl', () => {
 
   it('prepends extraParams before SAS params', () => {
     const result = fileUrl(parsed, 'file.txt', 'comp=range');
-    expect(result).toBe(
-      'https://storage.blob.core.windows.net/share/file.txt?comp=range&sv=2024&sig=abc'
-    );
+    expect(result).toBe('https://storage.blob.core.windows.net/share/file.txt?comp=range&sv=2024&sig=abc');
   });
 
   it('handles empty sasParams', () => {
