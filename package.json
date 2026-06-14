@@ -34,7 +34,7 @@
     "lint:dpdm": "dpdm --no-warning --no-tree --transform --exit-code circular:1 src/main/index.ts src/renderer/index.ts src/preload/index.ts",
     "lint:eslint": "eslint --max-warnings=0 .",
     "lint:prettier": "prettier --check .",
-    "lint:tsc": "tsc --noEmit",
+    "lint:tsc": "npm run build:packages && tsc --noEmit",
     "lint": "concurrently -g -c red,green,yellow,blue,magenta npm:lint:*",
     "fix": "eslint --fix . && prettier --log-level warn --write .",
     "test": "npm run build:packages && npm rebuild node-pty && vitest",
